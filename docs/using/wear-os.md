@@ -135,12 +135,15 @@ afterwards.
 - `tap` opens the card, then taps `tapActionLabel` (or the card's title or body) in the expanded
   view. If that text is not a single clickable target there, it fails rather than guessing:
   `observe` the expanded notification and retry with an explicit `tapActionLabel`.
-- `dismiss` swipes the card sideways and reports `dismissal_unconfirmed` if it is still shown.
+- `dismiss` swipes the card sideways and reports `dismissal_unconfirmed` unless one fewer such
+  card is shown afterwards; of two identical cards, removing one counts as a dismissal.
 - `clearAll` taps the stream's **Clear all** only when every active notification belongs to
   `appId`; otherwise, or when `title` or `body` narrows it, it dismisses matching cards one by
   one.
 
 A tap target whose centre falls outside the round display is refused; scroll it into view.
+Every action captures the configured action screenshot or accessibility audit from the final
+screen, as on a phone.
 
 ## Ambient power state
 

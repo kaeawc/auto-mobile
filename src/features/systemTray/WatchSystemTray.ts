@@ -49,14 +49,26 @@ const listedCard = (card: WatchNotification, appId?: string) => ({
 });
 const cardIdentity = (card: WatchNotification) =>
   JSON.stringify([card.appLabel, card.title, card.body]);
-const pageSignature = (observation: ObserveResult) =>
+/**
+ * Scroll position of the visible stream page. Built from card bounds and the immutable app label
+ * only: an ongoing card may rewrite its title or body between reads without the stream moving.
+ */
+const scrollPosition = (observation: ObserveResult) =>
   JSON.stringify([
     watchNotifications(observation.viewHierarchy).map((card) => [
-      cardIdentity(card),
+      card.appLabel,
       card.element.bounds,
     ]),
     watchClearAll(observation.viewHierarchy)?.bounds,
   ]);
+const identityCount = (cards: WatchNotification[], card: WatchNotification) =>
+  cards.filter((other) => cardIdentity(other) === cardIdentity(card)).length;
+
+/** A watch action's outcome plus the observation terminal evidence is captured from. */
+export interface WatchSystemTrayResult {
+  outcome: SystemTrayOutcome;
+  observation: ObserveResult | undefined;
+}
 
 interface WatchScope {
   criteria: SystemTrayNotificationArgs;
@@ -138,7 +150,7 @@ export class WatchSystemTray {
     return resolveUniqueTrayAppLabel(this.device, criteria.appId, appIds, { signal: this.signal });
   }
 
-  async execute(args: SystemTrayArgs): Promise<SystemTrayOutcome> {
+  async execute(args: SystemTrayArgs): Promise<WatchSystemTrayResult> {
     const timeout = resolveSystemTrayAwaitTimeout(args.awaitTimeout);
     if (args.action === "open" || args.action === "close") {
       return this.toggle(args.action, timeout);
@@ -151,6 +163,7 @@ export class WatchSystemTray {
     const initial = await this.read();
     const initiallyOpen = !!watchStreamRoot(initial.viewHierarchy);
     let result: SystemTrayOutcome | undefined;
+    let restored: ObserveResult | undefined;
     try {
       const opened = await ensureSystemTrayOpen(this.device, timeout, {
         signal: this.signal,
@@ -168,37 +181,37 @@ export class WatchSystemTray {
         observation = await this.rewind(observation, deadline);
       }
       result = await this.run(args, { criteria, label, deadline, dismissedCount: 0 }, observation);
-      return result;
     } finally {
       const controller = new AbortController();
-      const restored = await raceWithDeadline(
-        () => this.restore(initiallyOpen, controller.signal),
-        {
-          timer: getSystemTrayDependencies().timer,
-          timeoutMs: timeout,
-          label: "Watch notification stream restoration",
-          onTimeout: () => controller.abort(),
-        },
-      );
+      restored = await raceWithDeadline(() => this.restore(initiallyOpen, controller.signal), {
+        timer: getSystemTrayDependencies().timer,
+        timeoutMs: timeout,
+        label: "Watch notification stream restoration",
+        onTimeout: () => controller.abort(),
+      });
       if (result) {
         result.payload.observation = restored;
       }
     }
+    return { outcome: result, observation: restored };
   }
 
-  private async toggle(action: "open" | "close", timeout: number): Promise<SystemTrayOutcome> {
+  private async toggle(action: "open" | "close", timeout: number): Promise<WatchSystemTrayResult> {
     const result =
       action === "open"
         ? await ensureSystemTrayOpen(this.device, timeout, { signal: this.signal })
         : await ensureSystemTrayClosed(this.device, timeout, undefined, this.signal);
     const success = result.skipped || ("opened" in result ? result.opened : result.closed);
-    return outcome(
-      {
-        message: `${action === "open" ? "Opened" : "Closed"} watch notification stream`,
-        ...result,
-      },
-      success,
-    );
+    return {
+      outcome: outcome(
+        {
+          message: `${action === "open" ? "Opened" : "Closed"} watch notification stream`,
+          ...result,
+        },
+        success,
+      ),
+      observation: result.observation,
+    };
   }
 
   private async restore(initiallyOpen: boolean, signal: AbortSignal): Promise<ObserveResult> {
@@ -264,11 +277,10 @@ export class WatchSystemTray {
       if (args.action !== "list" && matching[0]) {
         return this.act(args, matching[0], observation, scope);
       }
-      const signature = JSON.stringify(
-        visible.map((card) => [cardIdentity(card), card.element.bounds]),
-      );
+      const signature = scrollPosition(observation);
       // Preserve identical cards within a page. Cross-page overlap is deliberately conservative:
       // without captured stable IDs, keep duplicates rather than silently lose notifications.
+      // An unmoved page whose ongoing card rewrote its text is still the same page.
       if (signature !== previousPage) {
         cards = [...cards, ...matching];
       }
@@ -353,9 +365,9 @@ export class WatchSystemTray {
     );
   }
 
-  /** Scroll toward the top until the visible page stops changing. */
+  /** Scroll toward the top until the visible cards stop moving. */
   private async rewind(observation: ObserveResult, deadline: number): Promise<ObserveResult> {
-    let previous = pageSignature(observation);
+    let previous = scrollPosition(observation);
     for (let page = 0; page < MAX_STREAM_PAGES; page++) {
       if (getSystemTrayDependencies().timer.now() >= deadline) {
         break;
@@ -369,7 +381,7 @@ export class WatchSystemTray {
         this.signal,
       );
       observation = await this.read();
-      const signature = pageSignature(observation);
+      const signature = scrollPosition(observation);
       if (signature === previous) {
         break;
       }
@@ -450,15 +462,15 @@ export class WatchSystemTray {
     const next = await this.read();
     const sameCard = (other: WatchNotification) =>
       other.appLabel === card.appLabel && other.title === card.title;
-    const before = watchNotifications(observation.viewHierarchy).filter(sameCard).length;
+    const visibleBefore = watchNotifications(observation.viewHierarchy);
+    const visibleAfter = watchNotifications(next.viewHierarchy);
     if (
       !watchStreamRoot(next.viewHierarchy) ||
-      watchNotifications(next.viewHierarchy).some(
-        (remaining) => cardIdentity(remaining) === cardIdentity(card),
-      ) ||
+      // Identical duplicates are legal: one identical card must disappear, not all of them.
+      identityCount(visibleAfter, card) >= identityCount(visibleBefore, card) ||
       // An ongoing card that refuses the swipe may still rewrite its body (progress, position),
       // so a surviving same-app/title card is not a removal.
-      watchNotifications(next.viewHierarchy).filter(sameCard).length >= before
+      visibleAfter.filter(sameCard).length >= visibleBefore.filter(sameCard).length
     ) {
       return outcome(
         {

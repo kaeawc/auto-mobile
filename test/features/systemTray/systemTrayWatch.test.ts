@@ -1,5 +1,10 @@
-import { afterEach, beforeAll, describe, expect, test } from "bun:test";
-import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import type {
+  BootedDevice,
+  ObserveResult,
+  ViewHierarchyNode,
+  ViewHierarchyResult,
+} from "../../../src/models";
 import { ActionableError } from "../../../src/models";
 import { SystemTray } from "../../../src/features/systemTray/SystemTray";
 import { AndroidNotificationUIDetector } from "../../../src/features/systemTray/AndroidNotificationUIDetector";
@@ -21,6 +26,7 @@ import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { createExecResult } from "../../../src/utils/execResult";
 import { systemTrayResultSchema } from "../../../src/server/interactionToolOutputSchemas";
+import { serverConfig } from "../../../src/utils/ServerConfig";
 
 // Fake service inventory, not a captured expanded-notification hierarchy.
 const shellInventory = [
@@ -92,7 +98,7 @@ function setup(read: (commands: string[]) => ObserveResult = () => stream) {
       }),
     }),
   });
-  return { adb, timer, tray: new SystemTray(watch) };
+  return { adb, observer, timer, tray: new SystemTray(watch) };
 }
 
 describe("Wear notification stream capture", () => {
@@ -395,5 +401,206 @@ describe("Wear notification stream capture", () => {
       expect(JSON.stringify(actual)).toBe(expected);
     }
     expect(adb.getExecutedCommands()).toEqual([]);
+  });
+});
+
+// Scrolls a dismissed first card off the fake stream (a horizontal swipe across its centre).
+const DISMISS_SWIPE = "shell input swipe 192 176 364 176 300";
+const CAPTURED_CARD_BOUNDS = "[19,92][365,260]";
+const mixedInventory = shellInventory.replace(
+  "  Snoozed notifications:",
+  "    NotificationRecord(0x2: pkg=com.other user=UserHandle{0} id=2 tag=null key=0|com.other|2|null|2001: Notification(channel=other flags=0))\n  Snoozed notifications:",
+);
+
+function streamNodes(view: ViewHierarchyResult | undefined): ViewHierarchyNode[] {
+  const root = watchStreamRoot(view);
+  if (!root) {
+    throw new Error("Captured watch stream root is missing");
+  }
+  return watchNodes(root);
+}
+
+const childNodes = (node: ViewHierarchyNode): ViewHierarchyNode[] => node.node ?? [];
+
+function shiftBounds(bounds: string, dy: number): string {
+  return bounds.replace(
+    /\[(\d+),(\d+)\]/g,
+    (_, x: string, y: string) => `[${x},${Number(y) + dy}]`,
+  );
+}
+
+// Models a second, identical notification below the captured card; not a second device capture.
+function withDuplicateCard(): ObserveResult {
+  const edited = structuredClone(hierarchy);
+  const parent = streamNodes(edited).find((node) =>
+    childNodes(node).some((child) => child.$?.bounds === CAPTURED_CARD_BOUNDS),
+  );
+  if (!parent) {
+    throw new Error("Captured watch card wrapper is missing");
+  }
+  const wrapper = childNodes(parent).find((child) => child.$?.bounds === CAPTURED_CARD_BOUNDS);
+  const copy = structuredClone(wrapper);
+  for (const node of copy ? watchNodes(copy) : []) {
+    const bounds = node.$?.bounds;
+    if (node.$ && typeof bounds === "string") {
+      node.$.bounds = shiftBounds(bounds, 180);
+    }
+  }
+  if (copy) {
+    parent.node = [...childNodes(parent), copy];
+  }
+  return { ...closed, viewHierarchy: edited };
+}
+
+// Models the stream with the Clear all footer pruned, as when it is scrolled out of view.
+function withoutFooter(view: ObserveResult): ObserveResult {
+  const edited = structuredClone(view.viewHierarchy);
+  for (const node of streamNodes(edited)) {
+    node.node = childNodes(node).filter(
+      (child) => !childNodes(child).some((grandchild) => grandchild.$?.text === "Clear all"),
+    );
+  }
+  return { ...closed, viewHierarchy: edited };
+}
+
+// Rewrites the captured body on every read, like an ongoing progress notification.
+function withChangingBody(base: () => ObserveResult = () => stream): () => ObserveResult {
+  let reads = 0;
+  return () => {
+    reads++;
+    const edited = structuredClone(base().viewHierarchy);
+    for (const node of streamNodes(edited)) {
+      if (node.$?.text === "-i") {
+        node.$.text = `${reads}%`;
+      }
+    }
+    return { ...closed, viewHierarchy: edited };
+  };
+}
+
+const dismissSwipes = (commands: string[]) =>
+  commands.filter((command) => command === DISMISS_SWIPE).length;
+
+describe("Wear duplicate-card dismissal", () => {
+  test("the modelled stream holds two identical cards", () => {
+    const cards = watchNotifications(withDuplicateCard().viewHierarchy);
+    expect(cards.map((card) => [card.appLabel, card.title, card.body])).toEqual([
+      ["Shell", "Wear", "-i"],
+      ["Shell", "Wear", "-i"],
+    ]);
+  });
+
+  test("confirms dismissing one of two identical cards when the other survives", async () => {
+    const duplicates = withDuplicateCard();
+    const { tray } = setup((commands) => (dismissSwipes(commands) === 0 ? duplicates : stream));
+    expect(
+      await tray.execute({ action: "dismiss", notification: { title: "Wear" }, awaitTimeout: 500 }),
+    ).toMatchObject({ isError: false, payload: { dismissedCount: 1, success: true } });
+  });
+
+  test("still refuses a dismissal when both identical cards remain", async () => {
+    const duplicates = withDuplicateCard();
+    const { tray } = setup(() => duplicates);
+    expect(
+      await tray.execute({ action: "dismiss", notification: { title: "Wear" }, awaitTimeout: 500 }),
+    ).toMatchObject({ isError: true, payload: { code: "dismissal_unconfirmed" } });
+  });
+
+  test("a mixed-app clearAll dismisses both identical cards one by one", async () => {
+    const duplicates = withDuplicateCard();
+    const { tray, adb } = setup(
+      (commands) => [duplicates, stream][dismissSwipes(commands)] ?? emptyStream,
+    );
+    adb.setCommandResponse(
+      "shell dumpsys notification --noredact",
+      createExecResult(mixedInventory, ""),
+    );
+    const result = await tray.execute({
+      action: "clearAll",
+      notification: { appId: "com.android.shell" },
+      awaitTimeout: 2000,
+    });
+    expect(result).toMatchObject({ isError: false, payload: { dismissedCount: 2, success: true } });
+    expect(dismissSwipes(adb.getExecutedCommands())).toBe(2);
+    expect(adb.getExecutedCommands()).not.toContain("shell input tap 192 335");
+  });
+});
+
+describe("Wear stream scroll progress with changing text", () => {
+  test("rewinding stops once card positions stop moving although the body keeps updating", async () => {
+    const { tray, adb, timer } = setup(withChangingBody());
+    const result = await tray.execute({
+      action: "find",
+      notification: { appId: "com.android.shell" },
+      awaitTimeout: 500,
+    });
+    expect(result.isError).toBe(false);
+    expect(adb.getExecutedCommands()).toEqual([REWIND_SWIPE]);
+    expect(timer.getSleepHistory()).toEqual([250]);
+  });
+
+  test("a footerless list ends once positions repeat although the body keeps updating", async () => {
+    const footerless = withoutFooter(stream);
+    const { tray, adb } = setup(withChangingBody(() => footerless));
+    const result = await tray.execute({
+      action: "list",
+      notification: { appId: "com.android.shell" },
+      awaitTimeout: 500,
+    });
+    expect(result).toMatchObject({ isError: false, payload: { success: true } });
+    expect(result.payload.notifications).toHaveLength(1);
+    expect(adb.getExecutedCommands().filter((command) => command !== REWIND_SWIPE)).toEqual([
+      "shell input swipe 192 288 192 96 500",
+    ]);
+  });
+});
+
+describe("Wear terminal evidence", () => {
+  let originalActionScreenshotPolicy: string | undefined;
+  beforeEach(() => {
+    originalActionScreenshotPolicy = process.env.AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT;
+  });
+  afterEach(() => {
+    if (originalActionScreenshotPolicy === undefined) {
+      delete process.env.AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT;
+    } else {
+      process.env.AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT = originalActionScreenshotPolicy;
+    }
+    serverConfig.setAccessibilityAuditConfig(null);
+  });
+
+  test("captures the configured screenshot from the restored final observation", async () => {
+    process.env.AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT = "false";
+    const { tray, observer } = setup();
+    const result = await tray.execute({
+      action: "find",
+      notification: { title: "Wear" },
+      awaitTimeout: 500,
+    });
+    expect(result.isError).toBe(false);
+    expect(observer.getCaptureScreenshotCallCount()).toBe(1);
+    expect(observer.getCapturedScreenshotObservations()).toEqual([
+      result.payload.observation as ObserveResult,
+    ]);
+    expect(observer.getAccessibilityAuditCallCount()).toBe(0);
+  });
+
+  test("runs the terminal accessibility audit when screenshots are skipped", async () => {
+    delete process.env.AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT;
+    const { tray, observer } = setup();
+    await tray.execute({
+      action: "list",
+      notification: { appId: "com.android.shell" },
+      awaitTimeout: 500,
+    });
+    expect(observer.getCaptureScreenshotCallCount()).toBe(0);
+    expect(observer.getAccessibilityAuditCallCount()).toBe(1);
+  });
+
+  test("captures evidence for open and close as well", async () => {
+    delete process.env.AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT;
+    const { tray, observer } = setup();
+    await tray.execute({ action: "open", awaitTimeout: 500 });
+    expect(observer.getAccessibilityAuditCallCount()).toBe(1);
   });
 });

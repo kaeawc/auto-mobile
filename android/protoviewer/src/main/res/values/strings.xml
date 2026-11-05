@@ -61,6 +61,8 @@
   <string name="import_interrupted">Import interrupted; open the file again</string>
   <!-- Import screen error when the import service is unavailable. -->
   <string name="import_unavailable">Import unavailable</string>
+  <!-- Import screen error when the user previously hid this prototype or blocked its link host. -->
+  <string name="import_hidden">Not imported: this prototype is hidden on this device</string>
   <!-- Library row and screen title that opens the bundled third-party license list. -->
   <string name="open_source_licenses">Open-source licenses</string>
   <!-- Licenses screen error when the bundled license list cannot be read. -->
@@ -76,13 +78,13 @@
   <!-- Title of the hide confirmation dialog. -->
   <string name="hide_title">Hide this prototype?</string>
   <!-- Explanation in the hide confirmation dialog. -->
-  <string name="hide_body">This prototype and any identical copy you receive later stay hidden on this device.</string>
+  <string name="hide_body">Permanently delete this prototype, every identical copy you received, and their saved values? Identical copies you receive later are not imported.</string>
   <!-- Library menu action and confirmation button that blocks a link host; %1$s is the host name. -->
   <string name="block_host">Block %1$s</string>
   <!-- Title of the block confirmation dialog; %1$s is the host name. -->
   <string name="block_title">Block %1$s?</string>
   <!-- Explanation in the block confirmation dialog. -->
-  <string name="block_body">Every prototype received from this host, now and later, stays hidden on this device.</string>
+  <string name="block_body">Permanently delete every prototype received from this host and their saved values? Prototypes from this host are not imported later.</string>
   <!-- Email subject of a report about a received prototype. -->
   <string name="report_subject">ProtoViewer content report</string>
   <!-- Email body before the technical details of a reported prototype; %1$s is those details. -->

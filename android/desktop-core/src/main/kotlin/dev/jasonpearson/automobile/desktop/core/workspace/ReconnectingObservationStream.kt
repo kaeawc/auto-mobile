@@ -74,10 +74,16 @@ fun rememberReconnectingObservationState(
 
     val active = observationState.stream
     val onSuperseded by rememberUpdatedState(LocalDeviceSessionSupersededHandler.current)
+    val onEnded by rememberUpdatedState(LocalDeviceSessionEndedHandler.current)
     LaunchedEffect(active, deviceId) {
       active?.deviceEvents?.collect { event ->
-        if (event is DeviceStreamEvent.DeviceSessionSuperseded && event.deviceId == deviceId) {
-          onSuperseded(event)
+        when {
+          event is DeviceStreamEvent.DeviceSessionSuperseded && event.deviceId == deviceId ->
+            onSuperseded(event)
+          // Forwarded for any device: an all-device stream (the focused pane's control stream)
+          // may be the only one that hears another pane's device leave. The handler checks the
+          // target column and its epoch.
+          event is DeviceStreamEvent.DeviceSessionEnded -> onEnded(event)
         }
       }
     }

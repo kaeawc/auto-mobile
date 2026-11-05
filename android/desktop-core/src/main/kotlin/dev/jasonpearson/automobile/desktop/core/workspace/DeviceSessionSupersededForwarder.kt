@@ -22,7 +22,17 @@ class DeviceSessionSupersededForwarder(
       ),
     )
   }
+
+  /** Forwards a no-successor end only while the workspace still observes the retired epoch. */
+  fun onEnded(event: DeviceStreamEvent.DeviceSessionEnded) {
+    val column = columns().firstOrNull { it.deviceId == event.deviceId } ?: return
+    if (column.deviceSessionUuid != event.retiredUuid) return
+    dispatch(WorkspaceAction.EndDeviceSession(event.deviceId, event.retiredUuid))
+  }
 }
 
 val LocalDeviceSessionSupersededHandler =
   staticCompositionLocalOf<(DeviceStreamEvent.DeviceSessionSuperseded) -> Unit> { {} }
+
+val LocalDeviceSessionEndedHandler =
+  staticCompositionLocalOf<(DeviceStreamEvent.DeviceSessionEnded) -> Unit> { {} }

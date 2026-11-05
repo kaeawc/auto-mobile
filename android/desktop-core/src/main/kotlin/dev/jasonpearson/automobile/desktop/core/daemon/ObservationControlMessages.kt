@@ -41,16 +41,18 @@ internal suspend fun ObservationStreamClient.handleDeviceSessionEnded(response: 
   val deviceId = response.deviceId
   val retiredUuid = response.deviceSessionUuid
   val successorUuid = response.successorSessionUuid
-  if (!deviceId.isNullOrBlank() && !retiredUuid.isNullOrBlank() && !successorUuid.isNullOrBlank()) {
-    _deviceEvents.emit(
-      DeviceStreamEvent.DeviceSessionSuperseded(
-        deviceId = deviceId,
-        retiredUuid = retiredUuid,
-        successorUuid = successorUuid,
-        timestamp = response.timestamp ?: System.currentTimeMillis(),
-      ),
-    )
-  }
+  if (deviceId.isNullOrBlank() || retiredUuid.isNullOrBlank()) return
+  val timestamp = response.timestamp ?: System.currentTimeMillis()
+  val event =
+    when {
+      // An absent successor means the device left for good; a present-but-blank one is malformed.
+      successorUuid == null ->
+        DeviceStreamEvent.DeviceSessionEnded(deviceId, retiredUuid, timestamp)
+      successorUuid.isBlank() -> return
+      else ->
+        DeviceStreamEvent.DeviceSessionSuperseded(deviceId, retiredUuid, successorUuid, timestamp)
+    }
+  _deviceEvents.emit(event)
 }
 
 internal fun ObservationStreamClient.handlePing(response: StreamResponse) {

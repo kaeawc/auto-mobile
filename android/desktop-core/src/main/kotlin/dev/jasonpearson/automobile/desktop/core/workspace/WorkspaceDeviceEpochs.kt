@@ -12,8 +12,13 @@ internal fun WorkspaceViewModel.applyDeviceState(action: WorkspaceAction) {
   }
 }
 
-/** Replace the column observing [action]'s retired epoch with a fresh column for its successor. */
+/**
+ * Replace the column observing [action]'s retired epoch with a fresh column for its successor, or
+ * mark it ended when the daemon minted none.
+ */
 internal fun WorkspaceViewModel.endDeviceSession(action: WorkspaceAction.EndDeviceSession) {
+  val successorUuid =
+    action.successorUuid ?: return markDeviceSessionEnded(action.deviceId, action.retiredUuid)
   val existing = columnFor(action.deviceId) ?: return
   if (existing.deviceSessionUuid != action.retiredUuid) return
   val successor =
@@ -22,7 +27,7 @@ internal fun WorkspaceViewModel.endDeviceSession(action: WorkspaceAction.EndDevi
       name = existing.name,
       platform = existing.platform,
       isVirtual = existing.isVirtual,
-      deviceSessionUuid = action.successorUuid,
+      deviceSessionUuid = successorUuid,
     )
   replaceEpoch(existing, existing.nextEpoch(successor))
 }

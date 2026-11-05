@@ -55,6 +55,8 @@ export interface PlanStepTools<TTool extends PlanStepTool> {
       targetDevice?: BootedDevice;
       /** The geometry a replayed tapAt step resolves against (#15663). */
       tapAtPlanContext?: TapAtPlanContext;
+      /** The lock namespace a barrier or criticalSection step scopes its lock under (#15663). */
+      planLockNamespace?: string;
     },
   ): Promise<unknown>;
 }
@@ -159,6 +161,22 @@ function skippedOptionalResult(step: PlanStep, error: string): StepExecutionResu
     error,
     details: { params: redactToolSecrets(step.tool, step.params), error, optional: true },
   };
+}
+
+/**
+ * The tool's own payload when it reports a timed-out `waitFor` and no other failure.
+ * A direct call marks that envelope `isError` (#16889, #16902), which `classifyToolResult`
+ * turns into a generic `success: false`; reading the envelope's payload keeps the step on
+ * the timeout path with its diagnostics.
+ */
+function waitTimedOutPayload(response: unknown): Record<string, unknown> | undefined {
+  if (!response || typeof response !== "object") {
+    return undefined;
+  }
+  const payload = getStructuredPayload<Record<string, unknown>>(response);
+  return payload && payload.success !== false && waitForTimeoutError(payload, "") !== null
+    ? payload
+    : undefined;
 }
 
 /**
@@ -474,16 +492,17 @@ export class DefaultPlanStepExecutor<
 
     this.injectDeviceRoutingParams(enhancedParams, step.tool, { platform, deviceId, sessionUuid });
 
-    // Scope the shared CriticalSectionCoordinator by the plan's base session UUID
-    // (identical across every device track of one plan, distinct across plans),
-    // so two concurrent plans reusing a lock name get isolated barriers. Strict
-    // schemas reject unknown keys, so only explicitly opted-in coordination tools
-    // may receive the internal namespace.
-    if (tool.acceptsPlanLockNamespace && sessionUuid && !enhancedParams.__lockNamespace) {
-      enhancedParams.__lockNamespace = sessionUuid;
-    }
-
     return enhancedParams;
+  }
+
+  /**
+   * Scope the shared CriticalSectionCoordinator by the plan's base session UUID (identical across
+   * every device track of one plan, distinct across plans), so two concurrent plans reusing a lock
+   * name get isolated barriers. It travels as call context for this one step (#15663), and only to
+   * the coordination tools that opted in.
+   */
+  private planLockNamespace(tool: TTool, sessionUuid: string | undefined): string | undefined {
+    return tool.requiresDevice && tool.acceptsPlanLockNamespace ? sessionUuid : undefined;
   }
 
   private injectDeviceRoutingParams(
@@ -591,10 +610,12 @@ export class DefaultPlanStepExecutor<
       logger.info(`${context.logPrefix} Calling ${step.tool} with params: ${paramsPreview}`);
     }
 
+    const planLockNamespace = this.planLockNamespace(tool, context.sessionUuid);
     return this.tools.callInternal(tool, parsedParams, {
       signal: context.signal,
       forPlan: true,
       sessionUuid: context.sessionUuid,
+      ...(planLockNamespace ? { planLockNamespace } : {}),
       ...(context.targetDevice ? { targetDevice: context.targetDevice } : {}),
       ...(step.tool === "tapAt" && step.geometry
         ? { tapAtPlanContext: { geometry: step.geometry } }
@@ -620,7 +641,9 @@ export class DefaultPlanStepExecutor<
     toolResult: Record<string, unknown> | undefined,
   ): Promise<StepExecutionResult> {
     const checkResult = toolResult ?? response;
+    const timedOutPayload = waitTimedOutPayload(response);
     if (
+      !timedOutPayload &&
       checkResult &&
       typeof checkResult === "object" &&
       "success" in checkResult &&
@@ -629,7 +652,7 @@ export class DefaultPlanStepExecutor<
       const error = this.returnedFailureMessage(checkResult, context);
       return this.resultFromToolFailure(step, context, { response, toolResult, error });
     }
-    const payload = getStructuredPayload(toolResult) ?? toolResult;
+    const payload = timedOutPayload ?? getStructuredPayload(toolResult) ?? toolResult;
     const error = waitForTimeoutError(payload, step.tool) ?? unsupportedToolResultError(payload);
     if (error) {
       // A waitFor timeout or unsupported result is a failed step like any other: it gets the same

@@ -11,9 +11,12 @@ import {
   type PrototypeWebPageInput,
 } from "../../../../src/features/prototype/web/webPage";
 import {
+  prototypeWebClockDelay,
+  prototypeWebClockText,
   prototypeWebFitScale,
   prototypeWebRotation,
   prototypeWebScreenView,
+  prototypeWebStartClock,
   prototypeWebWheelFactor,
   prototypeWebZoomScale,
 } from "../../../../src/features/prototype/web/webPageRuntime";
@@ -102,14 +105,75 @@ describe("prototype web page (#16346)", () => {
     }
   });
 
+  test("the clock reads local time in the stills' fixed 9:41 form (#16585)", () => {
+    expect(prototypeWebClockText(new Date(2026, 0, 1, 9, 41))).toBe("9:41");
+    expect(prototypeWebClockText(new Date(2026, 0, 1, 0, 5))).toBe("12:05");
+    expect(prototypeWebClockText(new Date(2026, 0, 1, 12, 0))).toBe("12:00");
+    expect(prototypeWebClockText(new Date(2026, 0, 1, 21, 9))).toBe("9:09");
+  });
+
+  test("the clock re-arms at the next minute boundary (#16585)", () => {
+    expect(prototypeWebClockDelay(0)).toBe(60_000);
+    expect(prototypeWebClockDelay(59_999)).toBe(1);
+    expect(prototypeWebClockDelay(125_000)).toBe(55_000);
+  });
+
+  test("the clock writes every mark now and again at each minute boundary (#16585)", () => {
+    let nowMs = new Date(2026, 0, 1, 13, 7, 30).getTime();
+    const pending: { run: () => void; ms: number }[] = [];
+    const clock = {
+      now: () => nowMs,
+      schedule: (run: () => void, ms: number) => void pending.push({ run, ms }),
+    };
+    const marks = [{ textContent: "9:41" as string | null }, { textContent: "9:41" }];
+    const format = { clockText: prototypeWebClockText, clockDelay: prototypeWebClockDelay };
+    prototypeWebStartClock(
+      { querySelectorAll: (selector) => (selector === '[data-status="clock"]' ? marks : []) },
+      clock,
+      format,
+    );
+    expect(marks.map((mark) => mark.textContent)).toEqual(["1:07", "1:07"]);
+    expect(pending.map((entry) => entry.ms)).toEqual([30_000]);
+    nowMs += 30_000;
+    pending.shift()!.run();
+    expect(marks.map((mark) => mark.textContent)).toEqual(["1:08", "1:08"]);
+    expect(pending.map((entry) => entry.ms)).toEqual([60_000]);
+  });
+
+  test("the clock schedules nothing for a page without clock marks", () => {
+    const pending: number[] = [];
+    const clock = {
+      now: () => 0,
+      schedule: (_run: () => void, ms: number) => void pending.push(ms),
+    };
+    prototypeWebStartClock({ querySelectorAll: () => [] }, clock, {
+      clockText: prototypeWebClockText,
+      clockDelay: prototypeWebClockDelay,
+    });
+    expect(pending).toEqual([]);
+  });
+
+  test("the inlined runtime carries the clock rules and updates the status bar clock", () => {
+    for (const rule of [
+      "prototypeWebClockText",
+      "prototypeWebClockDelay",
+      "prototypeWebStartClock",
+      "prototypeWebBrowserClock",
+    ]) {
+      expect(PROTOTYPE_WEB_RUNTIME).toContain(`function ${rule}(`);
+    }
+    expect(PROTOTYPE_WEB_RUNTIME).toContain('[data-status="clock"]');
+  });
+
   test("keeps the runtime within its budget", () => {
     expect(Buffer.byteLength(PROTOTYPE_WEB_RUNTIME)).toBeLessThanOrEqual(
       MAX_PROTOTYPE_WEB_RUNTIME_BYTES,
     );
   });
 
-  test("offers only rotate, zoom and pan, a variant switcher and revision history", () => {
+  test("offers only rotate, zoom and pan, the 3D toggle, a variant switcher and revision history", () => {
     expect(controls(page.html)).toEqual([
+      "3d",
       "revisions",
       "rotate",
       "screen",
@@ -146,7 +210,7 @@ describe("prototype web page (#16346)", () => {
   });
 
   test("reports the unsupported nodes of the view shown first", () => {
-    expect(page.unsupportedNodes.map((node) => node.type)).toEqual(["radioGroup"]);
+    expect(page.unsupportedNodes.map((node) => node.type)).toEqual(["menu"]);
   });
 
   test("drops older revisions to stay within the budget, keeping each variant's latest", () => {

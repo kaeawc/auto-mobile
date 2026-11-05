@@ -45,14 +45,42 @@ enum SimulatorDisplayGeometry {
         }
     }
 
-    static func find(deviceName: String) throws -> SimulatorOverlayTarget {
-        let matches = targets().filter { simulatorWindowTitle($0.title, namesDevice: deviceName) }
-        guard matches.count == 1 else {
-            throw OverlayError(
-                "Expected one visible Simulator or Device Hub window named \(deviceName), found \(matches.count). Open that device window and close duplicate windows."
-            )
+    static func find(deviceName: String, sourceSize: CGSize? = nil) throws -> SimulatorOverlayTarget {
+        try find(
+            deviceName: deviceName,
+            sourceSize: sourceSize,
+            candidates: targets(),
+            displayFrame: displayFrame(window:)
+        )
+    }
+
+    static func find(
+        deviceName: String,
+        sourceSize: CGSize? = nil,
+        candidates: [SimulatorOverlayTarget],
+        displayFrame: (SimulatorOverlayTarget) -> CGRect?
+    )
+        throws -> SimulatorOverlayTarget
+    {
+        let matches = candidates.filter { simulatorWindowTitle($0.title, namesDevice: deviceName) }
+        if matches.count == 1 { return matches[0] }
+        if matches.count > 1, let sourceSize,
+           sourceSize.width.isFinite, sourceSize.height.isFinite,
+           sourceSize.width > 0, sourceSize.height > 0
+        {
+            let sourceAspect = sourceSize.width / sourceSize.height
+            let panelMatches = matches.filter { window in
+                guard let frame = displayFrame(window),
+                      frame.width.isFinite, frame.height.isFinite,
+                      frame.width > 0, frame.height > 0 else { return false }
+                // Allow minor rounding differences when the host window is scaled.
+                return abs(frame.width / frame.height / sourceAspect - 1) <= 0.02
+            }
+            if panelMatches.count == 1 { return panelMatches[0] }
         }
-        return matches[0]
+        throw OverlayError(
+            "Expected one visible Simulator or Device Hub window named \(deviceName), found \(matches.count). Open that device window and close duplicate windows. A foldable device such as the Duo has one window per panel; if several match, the display size could not pick one."
+        )
     }
 
     static func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
@@ -228,7 +256,14 @@ final class SimulatorHighlightHost {
         self.now = now
         self.replySink = replySink
         self.makeOverlay = makeOverlay ?? { request in
-            let window = try SimulatorDisplayGeometry.find(deviceName: deviceName)
+            let bounds = request.shape.bounds
+            let sourceSize: CGSize?
+            if let width = bounds.sourceWidth, let height = bounds.sourceHeight {
+                sourceSize = CGSize(width: width, height: height)
+            } else {
+                sourceSize = nil
+            }
+            let window = try SimulatorDisplayGeometry.find(deviceName: deviceName, sourceSize: sourceSize)
             return try SimulatorHighlightOverlay(window: window, request: request)
         }
     }

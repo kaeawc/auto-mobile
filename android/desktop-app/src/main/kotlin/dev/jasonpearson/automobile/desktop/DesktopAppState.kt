@@ -9,6 +9,7 @@ import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.CoalescingRecoveryLauncher
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonBootstrapState
+import dev.jasonpearson.automobile.desktop.core.daemon.DaemonStreamHub
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionBinding
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionState
 import dev.jasonpearson.automobile.desktop.core.di.AutoMobileGraphProvider
@@ -19,6 +20,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.DesktopOverlayState
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceSessionSupersededForwarder
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceUiState
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceViewModel
+import dev.jasonpearson.automobile.desktop.core.workspace.picker.DeviceObservedRecord
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerUiState
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerViewModel
 import kotlinx.coroutines.CoroutineScope
@@ -36,6 +38,8 @@ internal class DesktopAppUiState(settings: SettingsProvider) {
 
   var captureRequest by mutableStateOf<Pair<String, Int>?>(null)
   var showOnboarding by mutableStateOf(!settings.hasSeenOnboarding)
+  var showBasicsChecklist by mutableStateOf(!settings.hasDismissedBasicsChecklist)
+  val deviceObserved = DeviceObservedRecord(settings)
 }
 
 internal data class AppDaemonSession(
@@ -70,6 +74,7 @@ internal data class DesktopAppRuntime(
   val workspace: AppWorkspaceServices,
   val picker: AppPickerServices,
   val recoveryLauncher: CoalescingRecoveryLauncher,
+  val streamHub: DaemonStreamHub,
 ) {
   val desktopSessionState
     get() = session.state

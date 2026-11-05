@@ -57,6 +57,7 @@ import {
   prototypePlatformCallEventOf,
   prototypePlatformDeliveredEventOf,
 } from "../../prototype/prototypePlatformEvent";
+import { redactPrototypeLocationEvent } from "../../prototype/prototypeLocationPrivacy";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { sendCommand, type SendCommandOptions } from "../DeviceServiceUtils";
 import type { DelegateContext } from "./types";
@@ -303,7 +304,7 @@ export function decodePrototypeEvent(
 ): PrototypeEvent | undefined {
   const decoded = prototypeEventSchema.safeParse(frame);
   if (decoded.success) {
-    return decoded.data;
+    return redactPrototypeLocationEvent(decoded.data);
   }
   const envelope = prototypeEventEnvelopeSchema.safeParse(frame);
   if (!envelope.success || isKnownPrototypeEventKind(envelope.data.kind)) {

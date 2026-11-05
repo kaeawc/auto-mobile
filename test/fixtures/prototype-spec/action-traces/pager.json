@@ -1,0 +1,37 @@
+[
+  {
+    "name": "setPage moves and clamps the pager",
+    "spec": {
+      "id": "trace-pager",
+      "window": { "placement": { "type": "fullscreen" } },
+      "root": {
+        "type": "pager",
+        "id": "pages",
+        "children": [
+          { "type": "text", "text": "One" },
+          { "type": "text", "text": "Two" },
+          { "type": "text", "text": "Three" }
+        ]
+      }
+    },
+    "steps": [
+      { "actions": [], "expect": { "pages": { "pages": 0 } } },
+      {
+        "actions": [{ "type": "setPage", "pager": "pages", "page": "next" }],
+        "expect": { "pages": { "pages": 1 } }
+      },
+      {
+        "actions": [{ "type": "setPage", "pager": "pages", "page": 2 }],
+        "expect": { "pages": { "pages": 2 } }
+      },
+      {
+        "actions": [{ "type": "setPage", "pager": "pages", "page": "next" }],
+        "expect": { "pages": { "pages": 2 } }
+      },
+      {
+        "actions": [{ "type": "setPage", "pager": "pages", "page": "prev" }],
+        "expect": { "pages": { "pages": 1 } }
+      }
+    ]
+  }
+]

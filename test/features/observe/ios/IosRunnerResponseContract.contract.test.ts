@@ -251,6 +251,26 @@ const typedResults: Record<string, Record<string, unknown>> = {
   location_result: { success: true, totalTimeMs: 17 },
   siri_result: { success: true, totalTimeMs: 17 },
 };
+const multiSceneResults: Record<string, Record<string, unknown>> = {
+  sdk_observation_multi_scene: {
+    success: false,
+    available: true,
+    failure: "multi_scene",
+    scenes: ["scene-a", "scene-b"],
+    error:
+      "The app has 2 connected scenes (scene-a, scene-b). SDK observation needs one scene; XCTest does not stand in for this result.",
+    totalTimeMs: 17,
+  },
+  sdk_action_multi_scene: {
+    success: false,
+    available: true,
+    failure: "multi_scene",
+    scenes: ["scene-a", "scene-b"],
+    error:
+      "The app has 2 connected scenes (scene-a, scene-b). SDK observation needs one scene; XCTest does not stand in for this result.",
+    totalTimeMs: 17,
+  },
+};
 const genericTypes = new Set([
   "tap_coordinates_result",
   "swipe_result",
@@ -415,7 +435,9 @@ describe("Swift runner production response encoders → host decoder", () => {
         }
         expect(decoded?.result).toEqual(wire); // Passthrough retains the full wire envelope.
       } else {
-        const expected = genericTypes.has(name) ? expectedGeneric(name) : typedResults[name];
+        const expected = genericTypes.has(name)
+          ? expectedGeneric(name)
+          : (typedResults[name] ?? multiSceneResults[name]);
         expect(expected).toBeDefined();
         expect(decoded?.result).toMatchObject(expected);
         if (name === "hierarchy_update") {

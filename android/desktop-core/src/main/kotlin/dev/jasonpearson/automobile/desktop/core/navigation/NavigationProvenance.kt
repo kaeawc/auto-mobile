@@ -5,9 +5,11 @@ package dev.jasonpearson.automobile.desktop.core.navigation
  * graph (nav (app,build) Phase 2, #4985).
  *
  * A node/edge reached in the pane's [NavigationActiveContext] renders at [ACTIVE_ALPHA]; one
- * reached only historically / by another build or device renders at [FADED_ALPHA] (active wins when
- * both). The same state is surfaced as a deterministic `contentDescription` string so it is a
- * testable, accessible signal, mirroring the fog / read-only badge pattern.
+ * reached only historically / by another build or device fades (active wins when both). The faded
+ * alpha follows the newest `lastSeen` of its records ([ProvenanceRecency], #16952): [FADED_ALPHA]
+ * for something seen within a day, down to [ProvenanceRecency.OLDEST_FADED_ALPHA] for months ago.
+ * The same state is surfaced as a deterministic `contentDescription` string so it is a testable,
+ * accessible signal, mirroring the fog / read-only badge pattern.
  *
  * Active-context matching (design point 1): a record is active when its device matches the pane's
  * device and its build's package matches the pane's app. When the context also carries a concrete
@@ -41,18 +43,28 @@ object ProvenanceOpacity {
     return record.buildKey == activeBuild
   }
 
-  /** Opacity for a node/edge given its [provenance] and the pane's active [context]. */
-  fun alphaFor(provenance: List<ScreenProvenance>, context: NavigationActiveContext?): Float {
-    // Offline / no active context: nothing to contrast against — show the union at full opacity.
-    if (context == null) return ACTIVE_ALPHA
-    // Legacy nodes with no recorded observations cannot be classified historical; keep them opaque.
-    if (provenance.isEmpty()) return ACTIVE_ALPHA
-    return if (provenance.any { isActiveRecord(it, context) }) ACTIVE_ALPHA else FADED_ALPHA
+  /**
+   * Opacity for a node/edge given its [provenance] and the pane's active [context], as of [nowMs]
+   * (from an injected clock). Faded records are graded by recency via [ProvenanceRecency].
+   */
+  fun alphaFor(
+    provenance: List<ScreenProvenance>,
+    context: NavigationActiveContext?,
+    nowMs: Long,
+  ): Float {
+    if (!isFaded(provenance, context)) return ACTIVE_ALPHA
+    // Faded means no record is active, so every record is a non-active one.
+    return ProvenanceRecency.fadedAlphaFor(provenance, nowMs)
   }
 
   /** True when the node/edge is faded (reached only historically / by another build or device). */
-  fun isFaded(provenance: List<ScreenProvenance>, context: NavigationActiveContext?): Boolean =
-    alphaFor(provenance, context) == FADED_ALPHA
+  fun isFaded(provenance: List<ScreenProvenance>, context: NavigationActiveContext?): Boolean {
+    // Offline / no active context: nothing to contrast against — show the union at full opacity.
+    if (context == null) return false
+    // Legacy nodes with no recorded observations cannot be classified historical; keep them opaque.
+    if (provenance.isEmpty()) return false
+    return provenance.none { isActiveRecord(it, context) }
+  }
 
   /**
    * Accessible/testable provenance description for a node (or edge) labeled [label]. Encodes the

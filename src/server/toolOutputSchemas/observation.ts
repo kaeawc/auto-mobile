@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { carAppTemplatesSchema } from "../../models/CarAppTemplates";
 import { IMPORTED_PROTOTYPE_CONTENT } from "../../features/observe/importedPrototypeContent";
 import {
   observationIdSchema,
@@ -448,6 +449,26 @@ export const observeResultSchema = z
     ...observationScreenshotOutputFields,
     crop: observeCropResultSchema.optional(),
     screenSize: screenSizeSchema.optional(),
+    automotive: z
+      .object({
+        drivingState: z.enum(["parked", "idling", "moving"]).optional(),
+        uxRestrictions: z
+          .object({
+            requiresDistractionOptimization: z.boolean(),
+            activeRestrictions: z.number().int().nonnegative(),
+          })
+          .optional(),
+        foregroundActivity: z.object({ distractionOptimized: z.boolean() }).optional(),
+        blocked: z
+          .boolean()
+          .describe(
+            "True when DO is required and the known foreground activity is not distraction optimized.",
+          ),
+      })
+      .optional()
+      .describe(
+        "Automotive devices only. Unavailable CarService reads omit the corresponding fields.",
+      ),
     isScreenRound: z
       .boolean()
       .optional()
@@ -475,6 +496,13 @@ export const observeResultSchema = z
       .optional()
       .describe(
         "Device-level environment conditions. audio_input_unavailable: recordings on this device will contain no audio because the host or emulator has no audio input; do not retry.",
+      ),
+    carAppTemplates: carAppTemplatesSchema
+      .optional()
+      .describe(
+        "Android apps that integrate the AutoMobile SDK and enabled its Car App Library template route: " +
+          "each ScreenManager stack (root first) with the last template every screen returned from onGetTemplate. " +
+          "This is what the app built, not what the car host rendered.",
       ),
     layoutWarnings: z
       .object({

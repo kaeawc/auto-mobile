@@ -7,7 +7,7 @@ import { FakeIosSdkTriggerSender } from "../../fakes/FakeIosSdkTriggerSender";
 import { FakeDeviceTraits, androidDeviceTraits } from "../../fakes/FakeDeviceTraits";
 
 const iosDevice = {
-  deviceId: "00008101-001C711E0EE0001E",
+  deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
   platform: "ios",
   name: "iPhone",
 } as BootedDevice;
@@ -195,6 +195,50 @@ describe("Telephony", () => {
         consoleFactory: () => consoleClient,
         iosSdkTriggers: () => sender,
       });
+    });
+
+    test("physical iOS phoneCall is unsupported without sending an SDK trigger", async () => {
+      const physicalDevice = {
+        ...iosDevice,
+        deviceId: "00008101-001C711E0EE0001E",
+      };
+      telephony = new Telephony(physicalDevice, { iosSdkTriggers: () => sender });
+
+      const result = await telephony.phoneCall({ action: "call", phoneNumber: "5551234567" });
+
+      expect(result).toMatchObject({
+        success: false,
+        supported: false,
+        action: "call",
+        phoneNumber: "5551234567",
+      });
+      expect(result.error).toContain("needs the app's AutoMobile SDK on the iOS Simulator");
+      expect(result.error).toContain(
+        "a physical iOS device has no public API for call or SMS simulation",
+      );
+      expect(sender.requests).toEqual([]);
+    });
+
+    test("physical iOS sendSms is unsupported without sending an SDK trigger", async () => {
+      const physicalDevice = {
+        ...iosDevice,
+        deviceId: "00008101-001C711E0EE0001E",
+      };
+      telephony = new Telephony(physicalDevice, { iosSdkTriggers: () => sender });
+
+      const result = await telephony.sendSms({ phoneNumber: "5551234567", message: "hello" });
+
+      expect(result).toMatchObject({
+        success: false,
+        supported: false,
+        phoneNumber: "5551234567",
+        messageLength: 5,
+      });
+      expect(result.error).toContain("needs the app's AutoMobile SDK on the iOS Simulator");
+      expect(result.error).toContain(
+        "a physical iOS device has no public API for call or SMS simulation",
+      );
+      expect(sender.requests).toEqual([]);
     });
 
     test("each phoneCall action maps to the callkit trigger of the same name", async () => {

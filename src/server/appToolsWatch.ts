@@ -25,6 +25,11 @@ import type { LaunchAppExecutor } from "./appToolsLaunch";
 
 /** Builds the app manager for a watch or Apple TV; tests pass a factory over a fake simctl. */
 export type WatchAppManagerFactory = (device: BootedDevice) => WatchAppManager;
+export type WatchRunnerRetarget = (
+  deviceId: string,
+  bundleId: string,
+  signal?: AbortSignal,
+) => Promise<string | undefined>;
 
 const defaultWatchAppManager: WatchAppManagerFactory = (device) => new WatchAppManager(device);
 
@@ -60,12 +65,26 @@ export function createPlatformUninstallApp(
 export function createPlatformLaunchApp(
   device: BootedDevice,
   watchApps: WatchAppManagerFactory = defaultWatchAppManager,
+  retarget: WatchRunnerRetarget = async () => undefined,
 ): LaunchAppExecutor {
   if (!isSimctlAppPlatform(device.platform)) {
     return new LaunchApp(device);
   }
   const manager = watchApps(device);
-  return { execute: (appId, call) => manager.launch(appId, call) };
+  return {
+    execute: async (appId, call) => {
+      const result = await manager.launch(appId, call);
+      if (result.success && device.platform === "watchos") {
+        const reason = await retarget(device.deviceId, appId, call?.signal);
+        if (reason !== undefined) {
+          throw new ActionableError(
+            `launchApp started the app ${appId}, but the watch runner could not retarget to it: ${reason}`,
+          );
+        }
+      }
+      return result;
+    },
+  };
 }
 
 /** terminateApp's executor: a watch or Apple TV goes to simctl, every other device keeps TerminateApp. */

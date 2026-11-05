@@ -66,6 +66,32 @@ The provider and its discovery/deletion calls are absent from release builds.
 Package-data reset remains a separate operation. On iOS Simulator,
 `resetKeychain` still requires `confirm: true` and clears every app's Keychain.
 
+## Fault injection
+
+In a debug app, call `injectFault` on `content://<appId>.automobile.keystore`
+with extras `scope` and/or `alias`, and `kind`: `KEY_STORE_EXCEPTION`,
+`PROVIDER_EXCEPTION`, `USER_NOT_AUTHENTICATED`, or `DELAY`. Use exact declared
+aliases; a scope selects all its aliases. For `DELAY`, supply a long integer
+`delayMs` from 1 through 10000. The delay runs before each selected alias's
+metadata lookup or deletion operation. Other kinds simulate the named failure.
+Setting a fault replaces the previous fault for each selected alias. These calls
+require the same app opt-in, caller authorization, and mutation policy as deletion.
+
+Call `clearFaults` with `alias` to clear one fault, or `scope` to clear all faults
+for that scope. Empty selectors are refused for both calls. Faults persist across
+calls; observing disabled or reset test state clears all faults. Disabled test
+state never applies faults.
+
+The `result` JSON contains `schemaVersion`, `capability: "storage.keystore"`,
+`bridgeAvailable`, `outcome`, and any supplied `requestedScope`, `requestedAlias`,
+and `requestedKind`. Success returns `ok`. Refusals add `reason`: `disabled` /
+`DISABLED`, `authorization_denied` / `MUTATION_NOT_ALLOWED`, `scope_not_declared` /
+`SCOPE_NOT_DECLARED`, or `invalid_selector` / `EMPTY_SELECTOR` or `INVALID_FAULT`.
+Correct the selector, kind, delay, or app authorization before retrying. Faulted
+metadata can report `authentication_required` or `unavailable`; deletion retains
+its per-alias failure outcomes. Responses never include exception text or key
+material. Fault injection is available through these debug app calls only.
+
 ## iOS Keychain item deletion
 
 `deleteKeychainItem` deletes one app-owned generic-password item through the debug

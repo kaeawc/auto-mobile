@@ -37,7 +37,9 @@ jobs:
   # The full desktop-core suite stays off the merge path (consistently >1 minute, not required for
   # release/docs publishing), but the desktop wire-contract replay runs on every merge (#10983):
   # the daemon-side desktopWireContract test writes test/fixtures/desktop-wire/, and this replay
-  # is the only thing that proves the Kotlin client still composes against it.
+  # is the only thing that proves the Kotlin client still composes against it. The filter covers
+  # the whole desktop.core.daemon package plus RememberDeviceControlSessionUiTest, so the narrow
+  # allocation killers (mutants n/K2 and K3) run at merge alongside the replay (#11443).
   desktop-core-unit-tests:
     name: "Run Desktop Wire Replay"
     runs-on: ubuntu-latest
@@ -55,7 +57,7 @@ jobs:
       - uses: ./.github/actions/gradle-task-run
         with:
           gradle-tasks: ":desktop-core:test"
-          gradle-flags: '["--tests", "*DesktopWireFixtureCompositionTest"]'
+          gradle-flags: '["--tests", "dev.jasonpearson.automobile.desktop.core.daemon.*", "--tests", "*RememberDeviceControlSessionUiTest"]'
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true
@@ -453,6 +455,10 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          # Key the cache on the only uv lockfile. The default glob walks the
+          # whole workspace, including node_modules/ while bun install churns
+          # its .bun-tmp-* dirs, and fails with ENOENT (#17068).
+          cache-dependency-glob: scripts/github/uv.lock
 
       - name: "Validate docs/ GitHub Markdown"
         shell: "bash"
@@ -501,6 +507,10 @@ jobs:
         id: setup-uv
         with:
           enable-cache: true
+          # Key the cache on the only uv lockfile. The default glob walks the
+          # whole workspace, including node_modules/ while bun install churns
+          # its .bun-tmp-* dirs, and fails with ENOENT (#17068).
+          cache-dependency-glob: scripts/github/uv.lock
 
       - name: "Install Lychee"
         shell: "bash"
@@ -1081,23 +1091,28 @@ jobs:
   # TypeScript Code Coverage
   # =============================================================================
 
-  ts-code-coverage:
-    name: "TypeScript Code Coverage"
-    # The per-merge README badge and Ubuntu unit gate share this one run (#13569).
-    # PRs retain their separate required, uninstrumented build-and-test check.
+  ts-coverage-part:
+    name: "TypeScript Code Coverage (${{ matrix.part }}/2)"
+    # The instrumented lane runs as two interleaved parts of two shards each
+    # (#16377): one 4-core runner is CPU-bound at two coverage shards, so the
+    # split halves wall time instead of crowding more shards onto one host.
+    # ts-code-coverage joins the parts for the badge and the Ubuntu unit gate.
     permissions:
       actions: write
       contents: read
     runs-on: ubuntu-latest
-    # 1560s lane + 600s rechecks + 480s for setup/build/global install,
-    # post-lane probes, report merging and badge upload < 2700s.
-    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2]
+    # 1560s lane + 480s for setup/build/global install, post-lane probes,
+    # chunk merging and artifact upload < 2100s.
+    timeout-minutes: 35
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
-          fetch-depth: 2
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
@@ -1107,43 +1122,33 @@ jobs:
           AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720"
           # One infra retry; the shared unit supervisor bounds both attempts.
           AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS: "1560"
+          AUTOMOBILE_COVERAGE_PART: ${{ matrix.part }}
+          AUTOMOBILE_COVERAGE_PARTS: "2"
         run: bash scripts/ci/run-ts-coverage.sh
 
       - name: "Recover Coverage if needed"
         run: bash scripts/ci/verify-ts-coverage-output.sh
 
-      - name: "Generate Coverage Badge"
-        run: bash scripts/coverage/generate-badge.sh coverage/lcov.info coverage/ts-coverage-badge.json "TS coverage" "3178C6"
-
-      - name: "Upload Coverage Badge"
+      - name: "Upload Coverage Part"
         uses: actions/upload-artifact@v6
         with:
-          name: ts-coverage-badge
-          path: coverage/ts-coverage-badge.json
-          retention-days: 90
-
-      # Coverage JUnit selects provisional offenders only. The validator measures
-      # their uninstrumented isolated medians, so instrumentation cannot fail 100ms.
-      - name: "Enforce 100ms budget for merged unit tests"
-        shell: bash
-        env:
-          AUTOMOBILE_TEST_MODE: "true"
-          BUN_TEST_TIMING_BASE_REF: HEAD^
-          BUN_TEST_TIMING_REPORT_DIR: coverage/shards
-          BUN_TEST_TIMING_REPORTS_INSTRUMENTED: "true"
-          # The 45-minute job also reserves setup and post-lane headroom.
-          BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS: "600"
-        run: bash scripts/validate-bun-test-timings.sh
+          name: ts-coverage-part-${{ matrix.part }}
+          path: |
+            coverage/lcov.info
+            coverage/junit.xml
+            coverage/shards/*.xml
+            coverage/shards/calibration-*.tsv
+          if-no-files-found: error
+          retention-days: 1
 
       - name: "Upload TypeScript Coverage Diagnostics"
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: ts-coverage-diagnostics
+          name: ts-coverage-diagnostics-part-${{ matrix.part }}
           path: |
             ci-logs/ts-coverage.log
             coverage/shards/**
-            scratch/bun-test-report.recheck.d/**
             scratch/watchdog-snapshot-*.txt
           if-no-files-found: ignore
           retention-days: 7
@@ -1164,6 +1169,70 @@ jobs:
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: bash scripts/ci/rerun-contended-runner.sh dispatch "$GITHUB_STEP_SUMMARY" "$RUN_ID" "$RUN_ATTEMPT"
 
+  ts-code-coverage:
+    name: "TypeScript Code Coverage"
+    # The per-merge README badge and Ubuntu unit gate share the coverage parts'
+    # run (#13569, #16377). PRs retain their separate required, uninstrumented
+    # build-and-test check.
+    needs: ts-coverage-part
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    # 600s rechecks + 480s for setup/build/global install, part download,
+    # report merging and badge upload < 1200s.
+    timeout-minutes: 20
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          fetch-depth: 2
+
+      - uses: ./.github/actions/setup-auto-mobile-npm-package
+
+      - name: "Download Coverage Parts"
+        uses: actions/download-artifact@v7
+        with:
+          pattern: ts-coverage-part-*
+          path: coverage-parts
+
+      - name: "Merge Coverage Parts"
+        run: bash scripts/ci/merge-ts-coverage-parts.sh 2 coverage-parts coverage
+
+      - name: "Generate Coverage Badge"
+        run: bash scripts/coverage/generate-badge.sh coverage/lcov.info coverage/ts-coverage-badge.json "TS coverage" "3178C6"
+
+      - name: "Upload Coverage Badge"
+        uses: actions/upload-artifact@v6
+        with:
+          name: ts-coverage-badge
+          path: coverage/ts-coverage-badge.json
+          retention-days: 90
+
+      # Coverage JUnit selects provisional offenders only. The validator measures
+      # their uninstrumented isolated medians, so instrumentation cannot fail 100ms.
+      - name: "Enforce 100ms budget for merged unit tests"
+        shell: bash
+        env:
+          AUTOMOBILE_TEST_MODE: "true"
+          BUN_TEST_TIMING_BASE_REF: HEAD^
+          BUN_TEST_TIMING_REPORT_DIR: coverage/shards
+          BUN_TEST_TIMING_REPORTS_INSTRUMENTED: "true"
+          # The 20-minute job also reserves setup and merge headroom.
+          BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS: "600"
+        run: bash scripts/validate-bun-test-timings.sh
+
+      - name: "Upload TypeScript Coverage Diagnostics"
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ts-coverage-diagnostics
+          path: |
+            coverage/shards/**
+            scratch/bun-test-report.recheck.d/**
+          if-no-files-found: ignore
+          retention-days: 7
+
   # =============================================================================
   # Kotlin Code Coverage
   # =============================================================================
@@ -1180,13 +1249,10 @@ jobs:
 
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":junit-runner:test :junit-runner:jacocoTestReport :control-proxy:testDebugUnitTest :control-proxy:createDebugUnitTestCoverageReport :prototype-compose:testDebugUnitTest :prototype-compose:createDebugUnitTestCoverageReport :prototype-saved:testDebugUnitTest :prototype-saved:createDebugUnitTestCoverageReport :protoviewer:testDebugUnitTest :protoviewer:createDebugUnitTestCoverageReport :protoviewer:verifyProtoViewerDependencies :auto-mobile-sdk:testDebugUnitTest :auto-mobile-sdk:createDebugUnitTestCoverageReport :test-plan-validation:test :test-plan-validation:jacocoTestReport :protocol:test :protocol:jacocoTestReport :video-server:test"
+          gradle-tasks: ":junit-runner:test :junit-runner:jacocoTestReport :control-proxy:testDebugUnitTest :control-proxy:createDebugUnitTestCoverageReport :automotive-fixture:testDebugUnitTest :wear-fixture:testDebugUnitTest :prototype-compose:testDebugUnitTest :prototype-compose:createDebugUnitTestCoverageReport :prototype-saved:testDebugUnitTest :prototype-saved:createDebugUnitTestCoverageReport :protoviewer:testDebugUnitTest :protoviewer:createDebugUnitTestCoverageReport :protoviewer:verifyProtoViewerDependencies :auto-mobile-sdk:testDebugUnitTest :auto-mobile-sdk:createDebugUnitTestCoverageReport :test-plan-validation:test :test-plan-validation:jacocoTestReport :protocol:test :protocol:jacocoTestReport :video-server:test"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true
-          # Runs every Robolectric module, so it is the one job that saves the
-          # shared android-all jar cache the PR jobs restore (#16396).
-          robolectric-jar-cache: "save"
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
       - name: "Upload Kotlin Unit Test Reports on Failure"

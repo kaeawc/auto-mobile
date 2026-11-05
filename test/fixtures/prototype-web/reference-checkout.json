@@ -1,7 +1,7 @@
 {
   "id": "checkout",
   "window": { "placement": { "type": "fullscreen" } },
-  "state": { "name": "Ada", "agree": true, "showPromo": false, "plan": "once" },
+  "state": { "name": "Ada", "agree": true, "showPromo": false },
   "derive": {
     "totalText": {
       "of": { "value": 42.5 },
@@ -56,12 +56,14 @@
             "style": { "textSize": 20, "fontWeight": 600, "color": "primary" }
           },
           {
-            "type": "radioGroup",
+            "type": "menu",
             "id": "spend",
-            "stateKey": "plan",
-            "options": [
-              { "value": "once", "label": "Once" },
-              { "value": "monthly", "label": "Monthly" }
+            "openWhen": { "key": "showPromo", "equals": true },
+            "items": [
+              {
+                "label": "Split",
+                "onTap": [{ "type": "setState", "key": "agree", "value": false }]
+              }
             ]
           },
           {

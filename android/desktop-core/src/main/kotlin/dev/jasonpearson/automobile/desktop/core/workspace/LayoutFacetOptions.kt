@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 import androidx.compose.runtime.getValue
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
+import dev.jasonpearson.automobile.desktop.core.daemon.reconnectBackoffMs
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamClient
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamQuality
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamSource

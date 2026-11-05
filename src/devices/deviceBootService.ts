@@ -256,7 +256,10 @@ export class DeviceBootService {
     if (!image) {
       throw new ActionableError(
         `Device '${request.deviceId}' not found. Available booted: ${booted.map((device) => device.deviceId).join(", ") || "none"}. ` +
-          `Available images: ${images.map((device) => device.name).join(", ") || "none"}.`,
+          `Available images: ${images.map((device) => device.name).join(", ") || "none"}.` +
+          (request.platform === "ios"
+            ? ' To create a simulator, enable provisionDevice (enableTools) and call it with device {"platform":"ios","name":"<name>","spec":{"runtime":"<runtime identifier>","deviceType":"<device type identifier>","displayCutout":"any"}}; remove it with deleteDevice.'
+            : ""),
       );
     }
     if (hasExplicitConstraints && !matchesDeviceCriteria(image, criteria)) {

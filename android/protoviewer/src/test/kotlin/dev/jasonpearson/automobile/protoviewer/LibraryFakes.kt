@@ -99,7 +99,10 @@ internal class FakePrototypeStorage : PrototypeStorage {
 internal class FakeSavedStore : SavedPrototypeStore {
   val results = mutableMapOf<String, SavedPrototypeLoadResult>()
 
-  override fun list() = emptyList<SavedPrototypeSummary>()
+  override fun list() =
+    results.values.filterIsInstance<SavedPrototypeLoadResult.Loaded>().map {
+      SavedPrototypeSummary(it.id, it.label, it.slug, it.savedAt)
+    }
 
   override fun load(id: String) = results[id] ?: SavedPrototypeLoadResult.NotFound
 
@@ -154,6 +157,8 @@ internal class FakeLibraryRepository : LibraryRepository {
     resets += libraryId
     return LibraryResult.Success(Unit)
   }
+
+  override fun sweepOrphans(): LibraryResult<Int> = LibraryResult.Success(0)
 }
 
 internal class FakeContentBlocklist : ContentBlocklist {

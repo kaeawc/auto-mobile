@@ -81,6 +81,12 @@ interface LibraryRepository {
   fun resetStorage(libraryId: String): LibraryResult<Unit>
 
   fun delete(libraryId: String): LibraryResult<Unit>
+
+  /**
+   * Delete saved bundles that have no metadata directory and return how many were removed. A
+   * metadata listing failure returns a typed failure and deletes nothing.
+   */
+  fun sweepOrphans(): LibraryResult<Int>
 }
 
 /** Only app-owned importing code constructs source/metadata; never deserialize it from a bundle. */
@@ -172,6 +178,33 @@ class DirectoryLibraryRepository(
       files.delete(libraryId)
       storage.reset(libraryId)
       check(store.delete(libraryId)) { "Cannot delete saved prototype" }
+    }
+  }
+
+  /**
+   * Finishes deletes that failed after metadata removal and saves interrupted before the metadata
+   * commit (#16653). Only a saved id with no metadata directory at all is swept: unreadable or
+   * corrupt metadata still keeps its bundle. Runs under the repository lock so it cannot race
+   * [add].
+   */
+  @Synchronized
+  override fun sweepOrphans(): LibraryResult<Int> {
+    // Throws, and so aborts the whole sweep, when the metadata tree cannot be listed.
+    val committed = storageResult { files.ids().toSet() }
+    if (committed is LibraryResult.Failure) return committed
+    val known = (committed as LibraryResult.Success).value
+    return storageResult {
+      store
+        .list()
+        .map { it.id }
+        .filter { validLibraryId(it) && it !in known }
+        .count { id ->
+          val swept = storageResult {
+            storage.reset(id)
+            store.delete(id)
+          }
+          swept is LibraryResult.Success && swept.value
+        }
     }
   }
 

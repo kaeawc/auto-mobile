@@ -34,6 +34,8 @@ import {
   type SessionReleaseStage,
 } from "../sessionManager";
 import { SessionSlots } from "../sessionSlots";
+import type { EndedLabelBase } from "../planLabelRegistry";
+import { PLAN_LABEL_SESSION_SOURCE } from "./sessionConstants";
 import { type TerminalReleaseIntent } from "../terminalReleaseJournal";
 export function releaseSuperseded(shouldCommit: ReleaseCommitFence | undefined): boolean {
   return shouldCommit !== undefined && shouldCommit() === false;
@@ -378,4 +380,93 @@ export function managedExecutionReleaseMarker(
   return session.livenessPolicy === MANAGED_EXECUTION_LIVENESS_POLICY
     ? { livenessPolicy: MANAGED_EXECUTION_LIVENESS_POLICY }
     : {};
+}
+
+/**
+ * The CLI idle window of a session on the `cli-idle` policy (#16940): its heartbeat timeout,
+ * which `adoptCliLivenessPolicy` sets to the clamped window. Undefined for any other policy, so a
+ * heartbeat lease is never reported as an idle window.
+ */
+export function cliIdleWindowMs(
+  session: Pick<Session, "livenessPolicy" | "heartbeatTimeoutMs">,
+): number | undefined {
+  return session.livenessPolicy === "cli-idle" ? session.heartbeatTimeoutMs : undefined;
+}
+
+/** {@link cliIdleWindowMs} as a release snapshot field, absent when the session has none. */
+export function cliIdleWindowReleaseMarker(
+  session: Pick<Session, "livenessPolicy" | "heartbeatTimeoutMs">,
+): Pick<SessionReleaseSnapshot, "cliIdleTimeoutMs"> {
+  return cliIdleWindowMarker(cliIdleWindowMs(session));
+}
+
+/**
+ * The CLI idle window a release of `session` with `releaseReason` reports. A plan label the
+ * cascade ends with its base's end reports the window retained with that end (#16971), present
+ * only when the base ended with `cli-idle-timeout`; any other release reports the session's own,
+ * present only on the `cli-idle` policy (#16940).
+ */
+export function cliIdleWindowOfRelease(
+  session: Pick<Session, "livenessPolicy" | "heartbeatTimeoutMs">,
+  releaseReason: string,
+  endedBase: Pick<EndedLabelBase, "releaseReason" | "cliIdleTimeoutMs"> | undefined,
+): Pick<SessionReleaseSnapshot, "cliIdleTimeoutMs"> {
+  return endedBase?.releaseReason === releaseReason
+    ? cliIdleWindowMarker(endedBase.cliIdleTimeoutMs)
+    : cliIdleWindowReleaseMarker(session);
+}
+
+/**
+ * The window a plan label's row inherited from its base's `cli-idle-timeout` (#16971), read from
+ * the base's row: the label's row records only the reason. The nearest `${base}` prefix whose row
+ * ended with `cli-idle-timeout` on the `cli-idle` policy is the base that expired; an intermediate
+ * label inherited the same end and has no window of its own. Undefined for any other row.
+ */
+export async function persistedInheritedCliIdleWindowMs(
+  sessionId: string,
+  persisted: Pick<DeviceSession, "source" | "release_reason">,
+  readPersistedSession: (sessionId: string) => Promise<DeviceSession | undefined>,
+): Promise<number | undefined> {
+  if (
+    persisted.source !== PLAN_LABEL_SESSION_SOURCE ||
+    persisted.release_reason !== "cli-idle-timeout"
+  ) {
+    return undefined;
+  }
+  for (
+    let separator = sessionId.lastIndexOf(":");
+    separator > 0;
+    separator = sessionId.lastIndexOf(":", separator - 1)
+  ) {
+    const base = await readPersistedSession(sessionId.slice(0, separator));
+    const window =
+      base?.release_reason === "cli-idle-timeout" ? persistedCliIdleWindowMs(base) : undefined;
+    if (window !== undefined) {
+      return window;
+    }
+  }
+  return undefined;
+}
+
+/** A CLI idle window as a release snapshot field, absent when there is none. */
+export function cliIdleWindowMarker(
+  cliIdleTimeoutMs: number | undefined,
+): Pick<SessionReleaseSnapshot, "cliIdleTimeoutMs"> {
+  return cliIdleTimeoutMs === undefined ? {} : { cliIdleTimeoutMs };
+}
+
+/** {@link cliIdleWindowMs} of a persisted row, read from its stored liveness policy. */
+export function persistedCliIdleWindowMs(
+  persisted: Pick<DeviceSession, "liveness_policy" | "heartbeat_timeout_ms">,
+): number | undefined {
+  return persistedLivenessPolicy(persisted.liveness_policy) === "cli-idle"
+    ? persisted.heartbeat_timeout_ms
+    : undefined;
+}
+
+/** {@link persistedCliIdleWindowMs} as a release snapshot field, absent when the row has none. */
+export function persistedCliIdleWindowMarker(
+  persisted: Pick<DeviceSession, "liveness_policy" | "heartbeat_timeout_ms">,
+): Pick<SessionReleaseSnapshot, "cliIdleTimeoutMs"> {
+  return cliIdleWindowMarker(persistedCliIdleWindowMs(persisted));
 }

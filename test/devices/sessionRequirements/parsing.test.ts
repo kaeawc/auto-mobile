@@ -127,7 +127,7 @@ describe("deviceProfile selector (#14058)", () => {
   });
 
   test.each<[unknown, string | undefined]>([
-    [{ manufacturerProfile: "huawei-emui" }, "deviceProfile.manufacturerProfile"],
+    [{ manufacturerProfile: "unknown-oem-fixture" }, "deviceProfile.manufacturerProfile"],
     [{ manufacturerProfile: "samsung-oneui", requires: ["dex"] }, "deviceProfile.requires"],
     [{ manufacturerProfile: "samsung-oneui", skin: "galaxy" }, undefined],
     ["samsung-oneui", "deviceProfile"],

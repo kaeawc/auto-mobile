@@ -17,6 +17,8 @@ import { executionTracker } from "./executionTracker";
 /** The slice of the session manager the cascade needs. */
 export interface DerivedLabelSessionSource extends SessionReleaseManager {
   getSession(sessionId: string): { assignedDevice: string } | null;
+  /** The base's fenced terminal release, which holds its CLI idle window (#16971). */
+  getTerminalReleaseSnapshot(sessionId: string): { cliIdleTimeoutMs?: number } | undefined;
   takeDerivedLabelSessions(baseSessionId: string, releaseReason?: string): string[];
   onSessionRelease(callback: SessionReleaseCallback): void;
 }
@@ -37,7 +39,8 @@ export interface DerivedLabelSessionReleaseCascade {
  * gets the terminal refusal naming the label. A base released for a reason that leaves its UUID
  * usable (a handoff, a plan's own cleanup) releases its labels with the plan auto-release reason,
  * as before. Plan auto-release frees the derived sessions first, so by the time it releases the
- * base there is nothing left here.
+ * base there is nothing left here. A label ended by its base's `cli-idle-timeout` reports the
+ * base's CLI idle window, on its cut calls and on its own release (#16971).
  */
 export function registerDerivedLabelSessionReleaseCascade(
   manager: DerivedLabelSessionSource,
@@ -48,13 +51,17 @@ export function registerDerivedLabelSessionReleaseCascade(
 
   /** End a label with its base's terminal reason: cut its calls typed, then free its device. */
   const endWithBase = async (
-    cut: SessionReleaseCut & { deviceId: string },
+    cut: SessionReleaseCut & { deviceId: string; baseSessionId: string },
     reason: SessionReleaseReason,
   ): Promise<void> => {
+    const baseWindowMs =
+      reason === "cli-idle-timeout"
+        ? manager.getTerminalReleaseSnapshot(cut.baseSessionId)?.cliIdleTimeoutMs
+        : undefined;
     cancelExecutionsCutBySessionRelease(
       executions,
       cut,
-      new SessionReleasedDuringCallError(cut.sessionId, reason),
+      new SessionReleasedDuringCallError(cut.sessionId, reason, baseWindowMs),
     ).catch((error: unknown) => {
       logger.warn(`[DeviceLabelMap] Failed to cancel executions of ${cut.sessionId}`, error);
     });

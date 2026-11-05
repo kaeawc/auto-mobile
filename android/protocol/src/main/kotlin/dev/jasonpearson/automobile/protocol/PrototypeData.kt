@@ -196,6 +196,10 @@ internal class PrototypeRepeatData(private val data: JsonObject?) {
 internal object PrototypeDataText {
   private data class Placeholder(val start: Int, val end: Int, val pointer: String)
 
+  /** The runtime scanner's recognized reads, shared with the R2 sink policy. */
+  fun pointers(text: String, namespace: String): List<String> =
+    placeholders(text, namespace).map { it.pointer }
+
   private fun placeholders(text: String, namespace: String = "data"): List<Placeholder> {
     val found = mutableListOf<Placeholder>()
     var cursor = 0

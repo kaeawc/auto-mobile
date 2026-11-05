@@ -790,6 +790,14 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
         '{"type":"reset_keystore","requestId":"kr-1","packageName":"com.x","scope":"login","alias":"token"}',
     },
     {
+      builder: "exportAttestation",
+      name: "temporary public attestation chain export",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.exportAttestation({ requestId: "att-1" }),
+      ),
+      expected: '{"type":"export_attestation","requestId":"att-1"}',
+    },
+    {
       builder: "discoverKeystore",
       name: "app-owned metadata capability discovery",
       actual: serializeCtrlProxyRequest(
@@ -1115,9 +1123,9 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
   // total builder count is pinned. Ship builder #45 without a row and this fails — not a silently
   // uncovered send site. `request_two_finger_swipe` has no builder here by design (it goes through
   // the shared sendCommand path, asserted in CtrlProxyGestures.test.ts), so it is not a builder key.
-  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 56", () => {
+  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 57", () => {
     const builderNames = Object.keys(ctrlProxyRequests);
-    expect(builderNames.length).toBe(56);
+    expect(builderNames.length).toBe(57);
     const covered = new Set(cases.map((row) => row.builder));
     expect<unknown>([...covered].sort()).toEqual([...builderNames].sort());
   });

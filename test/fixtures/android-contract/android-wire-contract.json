@@ -144,6 +144,17 @@
       ]
     },
     {
+      "serialName": "export_attestation",
+      "fields": [
+        {
+          "name": "requestId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        }
+      ]
+    },
+    {
       "serialName": "get_current_focus",
       "fields": [
         {
@@ -1979,6 +1990,29 @@
         {
           "name": "event",
           "type": "object:dev.jasonpearson.automobile.protocol.AnrData",
+          "nullable": false,
+          "hasDefault": false
+        }
+      ]
+    },
+    {
+      "serialName": "attestation_chain",
+      "fields": [
+        {
+          "name": "timestamp",
+          "type": "long",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "requestId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "certificateChainBase64",
+          "type": "list",
           "nullable": false,
           "hasDefault": false
         }

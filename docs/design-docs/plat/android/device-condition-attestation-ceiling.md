@@ -39,3 +39,36 @@ The decision (hard refusal over best-effort with a warning) avoids silent false
 passes: a fixture whose test result is meaningless is worse than a failed call.
 If a legitimate best-effort caller appears, add an explicit opt-in field rather
 than loosening the default. iOS uses the same pattern (#14073).
+
+## Emulator attestation fields
+
+The captured chain from an Android 15 (API 35) `google_apis` arm64 userdebug
+emulator has these leaf certificate fields:
+
+| Field                                                  | Captured value                          |
+| ------------------------------------------------------ | --------------------------------------- |
+| `attestationSecurityLevel`                             | Software (0)                            |
+| `keymasterSecurityLevel`                               | Software (0)                            |
+| `deviceLocked`                                         | `false`                                 |
+| `verifiedBootState`                                    | Unverified (2)                          |
+| `attestationApplicationId.packageInfos[0].packageName` | `dev.jasonpearson.automobile.ctrlproxy` |
+
+`attestationApplicationId` identifies the package that generated the key.
+The tool therefore returns CtrlProxy's package, not the app under test.
+The root is the last certificate in the chain.
+
+## Play Integrity tester responses
+
+In Play Console, **Protected with Play** (older pages: **App integrity**) >
+**Play Integrity API** > **Manage** > **Testing** lets you create a test for
+specified tester emails. Testers need access to the release through the internal
+or intended test track. Tests return the chosen verdicts or error code with
+`testingDetails.isTestingResponse` set to `true` in the decrypted payload.
+See [Play Console testing instructions](https://support.google.com/googleplay/android-developer/answer/11395166?hl=en)
+and [Play Integrity testing tools](https://developer.android.com/google/play/integrity/additional-tools).
+
+Emulators fail device integrity by default, as described in the
+[verdicts reference](https://developer.android.com/google/play/integrity/verdicts).
+It is not confirmed whether any test can force `MEETS_DEVICE_INTEGRITY` or
+`MEETS_STRONG_INTEGRITY` onto an emulator, which verdicts are selectable, or
+whether sideloaded builds receive forced verdicts.

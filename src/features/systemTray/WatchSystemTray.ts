@@ -56,12 +56,8 @@ const visibleCards = (observation: ObserveResult, key: (card: WatchNotification)
   ]);
 /** Every visible card's full identity; the forward scan never drops a distinct card. */
 const pageSignature = (observation: ObserveResult) => visibleCards(observation, cardIdentity);
-/**
- * Rewind progress ignores the body, which an ongoing card rewrites in place (progress, position)
- * while the stream stands still. App and title still tell a replacement card at the same snapped
- * bounds from an unmoved one.
- */
-const rewindPosition = (observation: ObserveResult) =>
+/** Card layout without bodies, which an ongoing card rewrites in place (progress, position). */
+const cardPositions = (observation: ObserveResult) =>
   visibleCards(observation, (card) => [card.appLabel, card.title]);
 const identityCount = (cards: WatchNotification[], card: WatchNotification) =>
   cards.filter((other) => cardIdentity(other) === cardIdentity(card)).length;
@@ -263,7 +259,7 @@ export class WatchSystemTray {
   ): Promise<SystemTrayOutcome> {
     const { criteria, label, deadline } = scope;
     let cards: WatchNotification[] = [];
-    let previousPage = "";
+    let previous: ObserveResult | undefined;
     for (let page = 0; page < MAX_STREAM_PAGES; page++) {
       if (!watchStreamRoot(observation.viewHierarchy)) {
         throw new ActionableError("Watch notification stream is not readable.");
@@ -279,20 +275,20 @@ export class WatchSystemTray {
       if (args.action !== "list" && matching[0]) {
         return this.act(args, matching[0], observation, scope);
       }
-      const signature = pageSignature(observation);
+      const unmoved = previous ? await this.unmoved(previous, observation, deadline) : false;
       // Preserve identical cards within a page. Cross-page overlap is deliberately conservative:
       // without captured stable IDs, keep duplicates rather than silently lose notifications.
-      if (signature !== previousPage) {
+      if (!unmoved) {
         cards = [...cards, ...matching];
       }
-      const atEnd = signature === previousPage || !!watchClearAll(observation.viewHierarchy);
+      const atEnd = unmoved || !!watchClearAll(observation.viewHierarchy);
       if (atEnd && ["list", "clearAll"].includes(args.action)) {
         return this.scanResult(args, scope, cards, observation);
       }
       if (getSystemTrayDependencies().timer.now() >= deadline) {
         break;
       }
-      previousPage = signature;
+      previous = observation;
       observation = await this.nextPage(observation, atEnd, deadline);
     }
     return outcome(
@@ -366,9 +362,36 @@ export class WatchSystemTray {
     );
   }
 
+  /**
+   * Whether `after` shows the stream where `before` left it. When only a body differs, re-read
+   * without scrolling: a body that keeps changing on its own is an ongoing card updating in place,
+   * while a stable one is a different card from the same app and title at the same snapped bounds.
+   */
+  private async unmoved(
+    before: ObserveResult,
+    after: ObserveResult,
+    deadline: number,
+  ): Promise<boolean> {
+    if (pageSignature(before) === pageSignature(after)) {
+      return true;
+    }
+    if (cardPositions(before) !== cardPositions(after)) {
+      return false;
+    }
+    await sleep(
+      Math.min(POLL_MS, Math.max(0, deadline - getSystemTrayDependencies().timer.now())),
+      this.signal,
+    );
+    const settled = await this.read();
+    return (
+      cardPositions(settled) === cardPositions(after) &&
+      pageSignature(settled) !== pageSignature(after)
+    );
+  }
+
   /** Scroll toward the top until the visible cards stop moving. */
   private async rewind(observation: ObserveResult, deadline: number): Promise<ObserveResult> {
-    let previous = rewindPosition(observation);
+    let previous = observation;
     for (let page = 0; page < MAX_STREAM_PAGES; page++) {
       if (getSystemTrayDependencies().timer.now() >= deadline) {
         break;
@@ -382,11 +405,10 @@ export class WatchSystemTray {
         this.signal,
       );
       observation = await this.read();
-      const signature = rewindPosition(observation);
-      if (signature === previous) {
+      if (await this.unmoved(previous, observation, deadline)) {
         break;
       }
-      previous = signature;
+      previous = observation;
     }
     return observation;
   }

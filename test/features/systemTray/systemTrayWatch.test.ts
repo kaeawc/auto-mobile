@@ -478,6 +478,17 @@ function withChangingBody(base: () => ObserveResult = () => stream): () => Obser
   };
 }
 
+// Rewrites the captured body, modelling a different notification with the same app and title.
+function withBody(body: string): ObserveResult {
+  const edited = structuredClone(hierarchy);
+  for (const node of streamNodes(edited)) {
+    if (node.$?.text === "-i") {
+      node.$.text = body;
+    }
+  }
+  return { ...closed, viewHierarchy: edited };
+}
+
 // Retitles the captured card, modelling a different notification from the same app.
 function retitled(title: string): ObserveResult {
   const edited = structuredClone(hierarchy);
@@ -551,7 +562,38 @@ describe("Wear stream scroll progress with changing text", () => {
     });
     expect(result.isError).toBe(false);
     expect(adb.getExecutedCommands()).toEqual([REWIND_SWIPE]);
-    expect(timer.getSleepHistory()).toEqual([250]);
+    // One settle after the swipe, one re-read without scrolling that sees the body still changing.
+    expect(timer.getSleepHistory()).toEqual([250, 250]);
+  });
+
+  test("rewinding passes same-app, same-title cards whose bodies differ at snapped bounds", async () => {
+    const [top, middle, bottom] = ["A", "B", "C"].map(withBody);
+    const { tray, adb } = setup(
+      (commands) =>
+        [bottom, middle][commands.filter((command) => command === REWIND_SWIPE).length] ?? top,
+    );
+    const result = await tray.execute({
+      action: "find",
+      notification: { title: "Wear", body: "A" },
+      awaitTimeout: 2000,
+    });
+    expect(result).toMatchObject({ isError: false, payload: { body: "A" } });
+    expect(adb.getExecutedCommands()).toEqual([REWIND_SWIPE, REWIND_SWIPE, REWIND_SWIPE]);
+  });
+
+  test("a footerless list ends on a page whose ongoing body keeps updating in place", async () => {
+    const footerless = withoutFooter(stream);
+    const { tray, adb } = setup(withChangingBody(() => footerless));
+    const result = await tray.execute({
+      action: "list",
+      notification: { appId: "com.android.shell" },
+      awaitTimeout: 2000,
+    });
+    expect(result).toMatchObject({ isError: false, payload: { success: true } });
+    expect(result.payload.notifications).toHaveLength(1);
+    expect(adb.getExecutedCommands().filter((command) => command !== REWIND_SWIPE)).toEqual([
+      "shell input swipe 192 288 192 96 500",
+    ]);
   });
 
   test("a forward list keeps distinct same-app cards snapped to identical bounds", async () => {
@@ -604,17 +646,24 @@ describe("Wear terminal evidence", () => {
 
   test("captures the configured screenshot from the restored final observation", async () => {
     process.env.AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT = "false";
-    const { tray, observer } = setup();
+    // Distinct from the initial closed screen and the opened stream.
+    const restoredScreen = { ...closed, updatedAt: 99 };
+    const { tray, observer } = setup((commands) =>
+      commands.includes("shell input keyevent 4")
+        ? restoredScreen
+        : commands.some((command) => command.startsWith("shell input swipe"))
+          ? stream
+          : closed,
+    );
     const result = await tray.execute({
       action: "find",
       notification: { title: "Wear" },
       awaitTimeout: 500,
     });
     expect(result.isError).toBe(false);
+    expect(result.payload.observation).toBe(restoredScreen);
     expect(observer.getCaptureScreenshotCallCount()).toBe(1);
-    expect(observer.getCapturedScreenshotObservations()).toEqual([
-      result.payload.observation as ObserveResult,
-    ]);
+    expect(observer.getCapturedScreenshotObservations()).toEqual([restoredScreen]);
     expect(observer.getAccessibilityAuditCallCount()).toBe(0);
   });
 
@@ -630,10 +679,20 @@ describe("Wear terminal evidence", () => {
     expect(observer.getAccessibilityAuditCallCount()).toBe(1);
   });
 
-  test("captures evidence for open and close as well", async () => {
+  test("captures evidence for open", async () => {
     delete process.env.AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT;
     const { tray, observer } = setup();
     await tray.execute({ action: "open", awaitTimeout: 500 });
     expect(observer.getAccessibilityAuditCallCount()).toBe(1);
+  });
+
+  test("captures evidence for close from its closed observation", async () => {
+    process.env.AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT = "false";
+    const { tray, observer } = setup((commands) =>
+      commands.includes("shell input keyevent 4") ? closed : stream,
+    );
+    const result = await tray.execute({ action: "close", awaitTimeout: 500 });
+    expect(result.isError).toBe(false);
+    expect(observer.getCapturedScreenshotObservations()).toEqual([closed]);
   });
 });

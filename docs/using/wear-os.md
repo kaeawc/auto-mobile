@@ -133,8 +133,8 @@ afterwards.
 - `list` returns each card's app label, `title`, `body`, `texts` and `bounds`; `id` is `null`
   and `actions` is empty.
 - `tap` opens the card, then taps `tapActionLabel` (or the card's title or body) in the expanded
-  view. If that text is not a single clickable target there, it fails rather than guessing:
-  `observe` the expanded notification and retry with an explicit `tapActionLabel`.
+  view. If that text is not a single clickable target there, it fails rather than guessing and
+  goes back to the stream; retry with an explicit `tapActionLabel`.
 - `dismiss` swipes the card sideways and reports `dismissal_unconfirmed` unless one fewer such
   card is shown afterwards; of two identical cards, removing one counts as a dismissal.
 - `clearAll` taps the stream's **Clear all** only when every active notification belongs to

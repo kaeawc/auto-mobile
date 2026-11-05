@@ -338,6 +338,16 @@ export const prototypeOutputSchema = z.object({
     .describe(
       "save and open on Android or an iOS simulator with ProtoViewer installed: the ProtoViewer library entry. The entry is imported: ProtoViewer sets its source, keeps its network off until the user allows it, and it is not attached to this host.",
     ),
+  update: z
+    .object({
+      missingCapabilities: z.array(z.string()),
+      installedVersion: z.string().optional(),
+      url: z.string().optional().describe("Where to get a newer ProtoViewer."),
+    })
+    .optional()
+    .describe(
+      "save with errorCode unsupported_capability: the installed ProtoViewer lacks capabilities the spec needs, so nothing was pushed. Update ProtoViewer and save again.",
+    ),
   savedPrototypes: z
     .array(
       z.object({

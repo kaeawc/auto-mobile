@@ -133,31 +133,81 @@ describe("kill profiles (#14051)", () => {
     ]);
   });
 
+  const grantRecord = {
+    key: `notificationPermission:${APP}`,
+    appId: APP,
+    command: `shell pm grant ${Q} android.permission.POST_NOTIFICATIONS`,
+  };
+
+  test("notifications-off drops a new record when read-back is still granted", async () => {
+    adb.setCommandResponseSequence(`shell dumpsys package ${Q}`, [
+      createExecResult(grantedNotifications, ""),
+      createExecResult(grantedNotifications, ""),
+    ]);
+    await expect(applyKillProfile(emulator, APP, "notifications-off", deps())).rejects.toThrow(
+      "POST_NOTIFICATIONS still granted after pm revoke",
+    );
+    expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([]);
+  });
+
   test.each([
-    {
-      name: "still granted",
-      readback: grantedNotifications,
-      reason: "POST_NOTIFICATIONS still granted after pm revoke",
-    },
-    { name: "unreadable", readback: "", reason: "Could not read POST_NOTIFICATIONS" },
-    {
-      name: "shell read failure",
-      readback: "Exception: read refused",
-      reason: "Could not read POST_NOTIFICATIONS",
-    },
+    { name: "unreadable", readback: "" },
+    { name: "a shell read failure", readback: "Exception: read refused" },
   ])(
-    "notifications-off drops a new record when read-back is $name",
-    async ({ readback, reason }) => {
+    "notifications-off keeps the record when read-back is $name, since revoke may have landed",
+    async ({ readback }) => {
       adb.setCommandResponseSequence(`shell dumpsys package ${Q}`, [
         createExecResult(grantedNotifications, ""),
         createExecResult(readback, ""),
       ]);
       await expect(applyKillProfile(emulator, APP, "notifications-off", deps())).rejects.toThrow(
-        reason,
+        "Could not read POST_NOTIFICATIONS",
       );
-      expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([]);
+      expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([grantRecord]);
     },
   );
+
+  test("notifications-off keeps the record when read-back throws after revoke", async () => {
+    adb.setCommandResponse(
+      `shell dumpsys package ${Q}`,
+      createExecResult(grantedNotifications, ""),
+    );
+    const shell = new (class extends FakeAdbExecutor {
+      override async executeCommand(
+        command: string,
+        options?: Parameters<FakeAdbExecutor["executeCommand"]>[1],
+      ) {
+        const result = await adb.executeCommand(command, options);
+        if (command.includes("pm revoke")) {
+          adb.setCommandError(`shell dumpsys package ${Q}`, new Error("adb connection closed"));
+        }
+        return result;
+      }
+    })();
+    await expect(
+      applyKillProfile(emulator, APP, "notifications-off", { shell, registry }),
+    ).rejects.toThrow("adb connection closed");
+    expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([grantRecord]);
+
+    adb.clearHistory();
+    const reset = await resetKillProfile(emulator, APP, {}, deps());
+    expect(reset).toMatchObject({ source: "recorded", status: "applied" });
+    expect(writes()).toEqual([grantRecord.command]);
+  });
+
+  test("notifications-off reads a package whose name contains a failure keyword", async () => {
+    const appId = "com.example.exception";
+    const quoted = `'${appId}'`;
+    adb.setCommandResponseSequence(`shell dumpsys package ${quoted}`, [
+      createExecResult(notificationDump("granted", appId), ""),
+      createExecResult(notificationDump("revoked", appId), ""),
+    ]);
+    const result = await applyKillProfile(emulator, appId, "notifications-off", deps());
+    expect(result.status).toBe("applied");
+    expect(result.restore?.commands).toEqual([
+      `shell pm grant ${quoted} android.permission.POST_NOTIFICATIONS`,
+    ]);
+  });
 
   test("notifications-off drops a new record when revoke fails", async () => {
     adb.setCommandResponse(
@@ -177,7 +227,7 @@ describe("kill profiles (#14051)", () => {
     ).toHaveLength(1);
   });
 
-  test("notifications-off drops a new record when revoke throws", async () => {
+  test("notifications-off keeps the record when the revoke transport throws", async () => {
     adb.setCommandResponse(
       `shell dumpsys package ${Q}`,
       createExecResult(grantedNotifications, ""),
@@ -186,7 +236,7 @@ describe("kill profiles (#14051)", () => {
     await expect(applyKillProfile(emulator, APP, "notifications-off", deps())).rejects.toThrow(
       "revoke transport failed",
     );
-    expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([]);
+    expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([grantRecord]);
   });
 
   test("a failed repeated revoke preserves the original restore record", async () => {

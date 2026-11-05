@@ -229,16 +229,16 @@ function appOpPlan(context: Context, op: KillProfileAppOp, mode: "ignore" | "den
 }
 
 async function readNotificationPermission(context: Context): Promise<"granted" | "denied"> {
-  const { stdout, stderr } = await run(
+  const { stdout } = await run(
     context,
     `shell dumpsys package ${context.quoted}`,
     DUMPSYS_MAX_BUFFER,
   );
-  const state = outputLooksLikeShellFailure(stdout, stderr)
-    ? undefined
-    : parseAndroidRuntimePermissions(stdout, context.appId)?.runtimePermissions.get(
-        "android.permission.POST_NOTIFICATIONS",
-      )?.state;
+  // No failure-keyword heuristic: the dump names the package, which may contain "exception".
+  // A failed dump has no `Package [...]` entry, so it still yields no state.
+  const state = parseAndroidRuntimePermissions(stdout, context.appId)?.runtimePermissions.get(
+    "android.permission.POST_NOTIFICATIONS",
+  )?.state;
   if (state !== "granted" && state !== "denied") {
     throw new ActionableError("Could not read POST_NOTIFICATIONS runtime permission");
   }
@@ -316,40 +316,51 @@ function outputFailure(
   return undefined;
 }
 
+type StepFailure = Pick<KillProfileStepResult, "status" | "reason">;
+
+/**
+ * `indeterminate` means the write may have landed (the transport failed mid-write, or
+ * the read-back could not be taken), so the restore record must stay for reset and release.
+ */
+interface WriteOutcome {
+  failure?: StepFailure;
+  indeterminate?: boolean;
+}
+
+function indeterminateFailure(error: unknown): WriteOutcome {
+  logger.warn(`Kill profile permission step failed: ${errorMessage(error)}`, error);
+  return { failure: { status: "failed", reason: errorMessage(error) }, indeterminate: true };
+}
+
 /** Write a step and, when required, verify the resulting permission state. */
-async function writeStep(
-  context: Context,
-  plan: StepPlan,
-): Promise<Pick<KillProfileStepResult, "status" | "reason"> | undefined> {
-  let failure;
+async function writeStep(context: Context, plan: StepPlan): Promise<WriteOutcome> {
+  let output;
   try {
-    const output = await run(context, plan.command);
-    failure = outputFailure(plan, output);
-    if (!failure && plan.verify) {
-      const reason = await plan.verify();
-      if (reason) {
-        failure = { status: "failed" as const, reason };
-      }
-    }
+    output = await run(context, plan.command);
   } catch (error) {
     if (plan.verify) {
-      logger.warn(`Kill profile permission step failed: ${errorMessage(error)}`, error);
-      failure = { status: "failed" as const, reason: errorMessage(error) };
-    } else {
-      // The write may still have landed, so the record stays for reset and release.
-      throw toActionableError(
-        error,
-        `Failed to run '${plan.command}' on ${context.device.deviceId}`,
-      );
+      return indeterminateFailure(error);
     }
+    // The write may still have landed, so the record stays for reset and release.
+    throw toActionableError(error, `Failed to run '${plan.command}' on ${context.device.deviceId}`);
   }
-  return failure;
+  const failure = outputFailure(plan, output);
+  if (failure || !plan.verify) {
+    return { failure };
+  }
+  try {
+    const reason = await plan.verify();
+    return reason ? { failure: { status: "failed", reason } } : {};
+  } catch (error) {
+    return indeterminateFailure(error);
+  }
 }
 
 /**
  * Run one step: gate on API level, record what it changes BEFORE writing (so a
  * release racing the write still restores it), then write. A write the device
- * refuses changed nothing, so the record it made is dropped again.
+ * definitively refuses changed nothing, so the record it made is dropped again;
+ * an indeterminate failure keeps it.
  */
 async function applyStep(
   context: Context,
@@ -365,8 +376,8 @@ async function applyStep(
   const action = plan.capture ? await plan.capture() : undefined;
   const recordedNow =
     action !== undefined && registry.record(context.device, action, context.deps.owner);
-  const failure = await writeStep(context, plan);
-  if (failure && recordedNow && action) {
+  const { failure, indeterminate } = await writeStep(context, plan);
+  if (failure && !indeterminate && recordedNow && action) {
     registry.forget(context.device.deviceId, action.key);
   }
   return failure ? { ...base, ...failure } : { ...base, status: "applied" };

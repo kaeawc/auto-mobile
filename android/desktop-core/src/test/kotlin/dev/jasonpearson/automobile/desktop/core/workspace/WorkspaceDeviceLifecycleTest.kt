@@ -149,7 +149,13 @@ class WorkspaceDeviceLifecycleTest {
       waitForIdle()
 
       assertEquals(
-        listOf(WorkspaceAction.RefreshDeviceSessionUuids(mapOf(phoneA.deviceId to "epoch-a2"))),
+        listOf(
+          WorkspaceAction.EndDeviceSession(
+            deviceId = phoneA.deviceId,
+            retiredUuid = "epoch-a",
+            successorUuid = "epoch-a2",
+          ),
+        ),
         h.actions.toList(),
       )
       assertEquals("epoch-a2", h.columns().single().deviceSessionUuid)

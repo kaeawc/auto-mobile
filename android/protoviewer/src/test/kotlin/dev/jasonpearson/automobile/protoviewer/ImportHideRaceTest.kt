@@ -63,6 +63,30 @@ class ImportHideRaceTest {
   }
 
   @Test
+  fun hostBlockDuringStagingEndsWithNothingStored() {
+    var result: LibraryResult<LibraryEntry>? = null
+    val importer = Thread {
+      result = commit.commit(bundle, LibrarySource.share, null, "example.com")
+    }
+    importer.start()
+    assertTrue(staging.entered.await(5, TimeUnit.SECONDS))
+
+    // The importer's early check already passed; the host Block and its purge land mid-import.
+    blocklist.block("example.com")
+    assertEquals(
+      emptyList<LibraryEntry>(),
+      (repository.purgeBlocked() as LibraryResult.Success).value,
+    )
+    staging.release.countDown()
+    importer.join(5_000)
+
+    assertEquals(LibraryResult.Failure(LibraryError.Hidden), result)
+    assertTrue(metadata.documents.isEmpty())
+    assertTrue(store.results.isEmpty())
+    assertEquals(emptyList<LibraryEntry>(), (library.list() as LibraryResult.Success).value)
+  }
+
+  @Test
   fun hiddenImportIsStillRejectedBeforeStaging() {
     blocklist.hide(specSha256)
     staging.release.countDown()

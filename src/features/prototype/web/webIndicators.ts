@@ -109,7 +109,11 @@ function circularProgress(fraction: number, scope: WebRenderScope): WebChild[] {
   return [
     el(
       "svg",
-      { attrs: { viewbox: "0 0 40 40", width: "40", height: "40", "aria-hidden": "true" } },
+      {
+        // The view box keeps the ring's geometry; the SVG fills the node's (possibly authored) box.
+        attrs: { viewbox: "0 0 40 40", width: "100%", height: "100%", "aria-hidden": "true" },
+        style: { display: "block" },
+      },
       [ring(role("secondaryContainer", scope), 1, "track"), ...arcs],
     ),
   ];

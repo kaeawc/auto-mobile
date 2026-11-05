@@ -107,6 +107,20 @@ describe("progress", () => {
     expect(byAttr(ring, "data-part", "track")).toHaveLength(1);
   });
 
+  test("a circular indicator's SVG fills an authored size", () => {
+    const ring = progress(
+      {
+        variant: "circular",
+        stateKey: "v",
+        style: { width: { dp: 80 }, height: { dp: 80 } },
+      },
+      { v: 0.5 },
+    );
+    expect(ring.style).toMatchObject({ width: "80px", height: "80px" });
+    const svg = byAttr(ring, "viewbox")[0]!;
+    expect(svg.attrs).toMatchObject({ width: "100%", height: "100%", viewbox: "0 0 40 40" });
+  });
+
   test("a circular indicator at zero draws only its track", () => {
     const ring = progress({ variant: "circular", stateKey: "v" }, { v: 0 });
     expect(byAttr(ring, "data-part", "indicator")).toEqual([]);

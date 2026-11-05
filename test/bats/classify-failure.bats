@@ -172,6 +172,23 @@ JSON
   done
 }
 
+@test "the BATS lane budget and bounded FFmpeg install annotations classify as rerun (#17131)" {
+  fixture="$BATS_TEST_TMPDIR/issue-17131-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"main","jobs":[{"databaseId":65,"name":"BATS Shell Tests (ubuntu-latest)","conclusion":"failure","steps":[{"name":"Run BATS Unit Tests","conclusion":"failure"}]}]}
+JSON
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='BATS unit lane took 440s, exceeding 420s (serial pass 167s); no test failed' bash "$SCRIPT" 605
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — slow-runner lane wall budget"* ]]
+
+  cat > "$fixture" <<'JSON'
+{"headBranch":"main","jobs":[{"databaseId":64,"name":"WebRTC Publisher Integration (MediaMTX)","conclusion":"failure","steps":[{"name":"Run ./.github/actions/ci-webrtc-publisher-integration","conclusion":"failure"}]}]}
+JSON
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='could not install ffmpeg: the default mirror and http://archive.ubuntu.com/ubuntu both failed or stalled (see the timed attempts above); rerun the job' bash "$SCRIPT" 606
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — Ubuntu mirror stalled"* ]]
+}
+
 @test "does not treat signal evidence as diagnosis when status is ordinary failure" {
   fixture="$BATS_TEST_TMPDIR/ordinary-exit-run.json"
   cat > "$fixture" <<'JSON'

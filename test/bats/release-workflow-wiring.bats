@@ -1115,3 +1115,52 @@ load yq-helpers
   grep -Fq "name: audio-loopback-helper" "$builder"
   grep -Fq "path: /tmp/audio-loopback-helper-macos-universal.zip" "$builder"
 }
+
+@test "finalize-release records artifact capabilities in the same commit that pins the version (#17109)" {
+  require_mikefarah_yq
+  local workflow=".github/workflows/prepare-release.yml"
+  local job='.jobs."finalize-release"'
+
+  # The version is pinned in src/constants/release.ts by generate-release-constants.sh;
+  # the capability guard fails on main for any pinned version without a manifest entry.
+  local record_step
+  record_step="$(yq -r "$job"'.steps[] | select(.name == "Record artifact capabilities") | .run' "$workflow")"
+  [ -n "$record_step" ]
+  [ "$record_step" != "null" ]
+  [[ "$record_step" == *'check-artifact-capabilities.ts --record "$VERSION" --ref "$BUILT_REF"'* ]]
+  run yq -r "$job"'.steps[] | select(.name == "Record artifact capabilities") | .env.VERSION' "$workflow"
+  [ "$output" = '${{ inputs.version }}' ]
+  # Record from the commit the artifacts were built from.
+  run yq -r "$job"'.steps[] | select(.name == "Record artifact capabilities") | .env.BUILT_REF' "$workflow"
+  [ "$output" = '${{ needs.prepare-version.outputs.release_commit }}' ]
+  # Fail closed: the pinned-release check must pass after recording.
+  printf '%s\n' "$record_step" | grep -qxE '[[:space:]]*bun scripts/release/check-artifact-capabilities\.ts[[:space:]]*'
+
+  # Ordering: pin, toolchain, record, format, then commit, all in one job.
+  local names pin install record format commit
+  names="$(yq -r "$job"'.steps[].name // ""' "$workflow")"
+  pin="$(printf '%s\n' "$names" | grep -nxF 'Update release constants' | cut -d: -f1)"
+  install="$(printf '%s\n' "$names" | grep -nxF 'Install Bun dependencies' | cut -d: -f1)"
+  record="$(printf '%s\n' "$names" | grep -nxF 'Record artifact capabilities' | cut -d: -f1)"
+  format="$(printf '%s\n' "$names" | grep -nxF 'Format generated files' | cut -d: -f1)"
+  commit="$(printf '%s\n' "$names" | grep -nxF 'Commit release constants to staging ref' | cut -d: -f1)"
+  [ -n "$pin" ] && [ -n "$install" ] && [ -n "$record" ] && [ -n "$format" ] && [ -n "$commit" ]
+  [ "$pin" -lt "$record" ]
+  [ "$install" -lt "$record" ]
+  [ "$record" -lt "$format" ]
+  [ "$format" -lt "$commit" ]
+
+  # The pin step really writes release.ts, and the commit step allows both files.
+  run yq -r "$job"'.steps[] | select(.name == "Update release constants") | .run' "$workflow"
+  [ "$output" = "bash scripts/generate-release-constants.sh" ]
+  grep -q 'src/constants/release.ts' scripts/generate-release-constants.sh
+  local commit_step
+  commit_step="$(yq -r "$job"'.steps[] | select(.id == "commit") | .run' "$workflow")"
+  [[ "$commit_step" == *'src/constants/release.ts)'* ]]
+  [[ "$commit_step" == *'scripts/release/artifact-capabilities.json | \'* ]]
+  [[ "$commit_step" == *'git add -- "${changed_files[@]}"'* ]]
+  [[ "$commit_step" == *'chore: bump versions to v$VERSION [skip ci]'* ]]
+
+  # No other job pins a release in release.ts without recording it.
+  [ "$(grep -c 'generate-release-constants\.sh' "$workflow")" -eq 1 ]
+}

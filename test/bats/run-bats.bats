@@ -426,6 +426,7 @@ fixture_list_file() {
   AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS=420 run enforce_unit_budget 468 "$FIXTURES/durations.tsv"
   [ "$status" -eq 1 ]
   [[ "$output" == *"BATS unit lane took 468s, exceeding 420s"* ]]
+  printf '%s\n' "$output" | grep -qx -- '::error title=BATS unit lane budget::BATS unit lane took 468s, exceeding 420s; a test also failed, see its not ok line'
   report="$(printf '%s\n' "$output" | sed -n '/^Slowest/,$p')"
   [ "$(printf '%s\n' "$report" | sed -n '1p')" = "Slowest 10 BATS files (seconds):" ]
   [ "$(printf '%s\n' "$report" | sed -n '2p')" = "  91s test/bats/serial-slow.bats" ]
@@ -434,6 +435,21 @@ fixture_list_file() {
   [ "$(printf '%s\n' "$report" | wc -l | tr -d ' ')" -eq 11 ]
   [[ "$report" != *"check-no-new-direct-security.bats"* ]]
   [[ "$report" != *"ctrl-proxy-xcodegen-drift.bats"* ]]
+}
+
+@test "a budget breach annotates the lane total and serial pass for classify-failure" {
+  source "$SCRIPT"
+  AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS=420 run enforce_unit_budget 440 "$FIXTURES/absent-durations.tsv" 167 true
+  [ "$status" -eq 1 ]
+  printf '%s\n' "$output" | grep -qx -- '::error title=BATS unit lane budget::BATS unit lane took 440s, exceeding 420s (serial pass 167s); no test failed'
+}
+
+@test "a budget breach with a failing test never claims no test failed" {
+  source "$SCRIPT"
+  AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS=420 run enforce_unit_budget 440 "$FIXTURES/absent-durations.tsv" 167 false
+  [ "$status" -eq 1 ]
+  printf '%s\n' "$output" | grep -qx -- '::error title=BATS unit lane budget::BATS unit lane took 440s, exceeding 420s (serial pass 167s); a test also failed, see its not ok line'
+  [[ "$output" != *"no test failed"* ]]
 }
 
 @test "no budget breach prints nothing extra" {

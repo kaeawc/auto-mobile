@@ -9231,7 +9231,7 @@
       "type": "object",
       "properties": {
         "recordingId": {
-          "description": "Recording ID",
+          "description": "recordDeviceGestures recordingId; defaults to the active recording. For recordToolCalls plans use recordToolCalls action=end",
           "type": "string"
         },
         "planName": {
@@ -46098,12 +46098,13 @@
       "destructiveHint": false,
       "openWorldHint": false
     },
-    "description": "Record MCP tool calls to YAML. begin/end require tool-call-recording; status always works.",
+    "description": "Record MCP tool calls to a YAML plan: action begin, end (returns the plan), or status.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "action": {
+          "description": "begin starts recording this connection's tool calls; end stops and returns the YAML plan; status reports state",
           "type": "string",
           "enum": ["begin", "end", "status"]
         },

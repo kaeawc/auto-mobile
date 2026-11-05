@@ -12,21 +12,13 @@ internal fun ObservationStreamClient.enqueueStorageUpdate(update: StorageStreamU
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 internal suspend fun ObservationStreamClient.emitDeviceEvent(response: StreamResponse) {
-  val deviceId = response.deviceId ?: return
-  val error = response.error ?: return
-  if (error != DEVICE_CONNECTION_LOST_ERROR) return
+  val event = response.toConnectionLost() ?: return
 
   _hierarchyUpdates.resetReplayCache()
   _screenshotUpdates.resetReplayCache()
   _performanceUpdates.resetReplayCache()
-  _deviceEvents.emit(
-    DeviceStreamEvent.DeviceConnectionLost(
-      deviceId = deviceId,
-      timestamp = response.timestamp ?: System.currentTimeMillis(),
-      error = error,
-    ),
-  )
-  log.info("Emitted device connection lost event for $deviceId")
+  _deviceEvents.emit(event)
+  log.info("Emitted device connection lost event for ${event.deviceId}")
 }
 
 internal fun ObservationStreamClient.driveStorageSubscription(key: StorageSubscriptionKey) {

@@ -53,12 +53,22 @@ fallback), instead of opening their own socket:
   a different session registers, a retry or a new subscription connects again
   and subscribes every live device. A facet mounted on a live subscription first
   receives its device's recent events.
-- Observation (Layout, Performance, Navigation) also uses one connection per
-  device, shared by every facet on it. The hub owns that connection's
-  reconnects, so a facet on a hub stream runs no reconnect loop of its own and
-  only refreshes when the shared connection comes back. Cadence requests are
-  merged per stream by taking the fastest interval any facet asked for, and
-  recomputed when a facet leaves. Storage keeps its own per-pane stream, because
+- Observation (Layout, Performance, Navigation) uses one stream per device,
+  shared by every facet on it, and every device's stream shares one socket and
+  one reader thread. Each device sends its own `subscribe` with its own cadence;
+  data frames are routed by `subscriptionId`, and replies to a device's
+  `request_navigation_graph` or `request_observation` by the request id (both
+  requests name the device's `deviceSessionUuid`). A refused or daemon-ended
+  subscription takes down only its own device. A refused desktop session takes
+  down every device until the last lease is released. The hub owns each device's
+  reconnects: when the socket drops, every device reports disconnected and its
+  supervision reconnects it, reopening the shared socket once. A facet on a hub
+  stream runs no reconnect loop of its own and only refreshes when its device
+  comes back. Cadence requests are merged per device by taking the fastest
+  interval any facet asked for, sent as `update_cadence` on that device's
+  subscription, and recomputed when a facet leaves. One device's slow collector
+  never holds back another: the per-device flows keep the latest frame and drop
+  the oldest buffered one. Storage keeps its own per-pane stream, because
   its updates and subscription acknowledgements are unicast to one pane.
 - Leases are ref-counted per device and stream kind; `subscriptions` and
   `observationSubscriptions` expose the live counts, and

@@ -132,6 +132,12 @@ data class DeviceColumn(
   /** Daemon-minted identity for this live device epoch; nullable for older resource payloads. */
   val deviceSessionUuid: String? = null,
   /**
+   * The daemon ended this column's epoch with no successor (the device disconnected for good). The
+   * pane shows a disconnected state instead of its stream and facets, so nothing stays attached to
+   * the dead epoch; observing the device again or a fresh epoch for it clears the flag.
+   */
+  val sessionEnded: Boolean = false,
+  /**
    * How many times this column's device epoch has been replaced (a reboot, or reobserving it with a
    * new epoch). The pane's composition is keyed on it, so a replaced epoch remembers nothing. A
    * daemon restart re-mints [deviceSessionUuid] without bumping it: the device did not reboot, so
@@ -158,6 +164,6 @@ internal fun DeviceColumn.nextEpoch(incoming: DeviceColumn): DeviceColumn =
 /** Whether [incoming] is a different daemon-minted epoch of this column's device. */
 internal fun DeviceColumn.isNewEpoch(incoming: DeviceColumn): Boolean =
   deviceId == incoming.deviceId &&
-    deviceSessionUuid != null &&
     incoming.deviceSessionUuid != null &&
-    deviceSessionUuid != incoming.deviceSessionUuid
+    // A disconnected column dropped its epoch, so any epoch the device returns with is new.
+    (sessionEnded || (deviceSessionUuid != null && deviceSessionUuid != incoming.deviceSessionUuid))

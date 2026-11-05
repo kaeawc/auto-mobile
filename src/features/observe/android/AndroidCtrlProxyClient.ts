@@ -57,6 +57,7 @@ import {
   defaultAdbClientFactory,
 } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { notifyAdbTransportRecovered } from "../../../utils/android-cmdline-tools/adbTransportRecoveredSignal";
 import { logger } from "../../../utils/logger";
 
 import {
@@ -614,6 +615,9 @@ export class AndroidCtrlProxyClient
     // Unix stream remains connected. The stream server retains the pane-owned subscriptions and
     // replays them on this new CtrlProxy connection.
     void getDeviceDataStreamServer()?.reapplyStorageSubscriptionsForDevice(this.device.deviceId);
+    // A websocket reconnect often follows an adb transport blip that also dropped `adb reverse`
+    // mappings; listeners re-apply them in the background (#17168).
+    notifyAdbTransportRecovered(this.device.deviceId, "ctrl_proxy_reconnect");
     // Resume the screenshot keepalive after a (re)connect. onConnectionClosed()
     // cancels it; without restarting here, a transient drop on a STATIC screen
     // leaves the live view frozen forever (no UI change to retrigger a capture).

@@ -37,14 +37,19 @@ The app owns one `DaemonStreamHub` per process. Facets lease a device's stream
 from the hub, keyed by `deviceSessionUuid` (with `deviceId` as label and
 fallback), instead of opening their own socket:
 
-- Telemetry uses one connection per observed device, shared by every facet on
-  that device. It subscribes with the device's `deviceSessionUuid`, so the
-  daemon backfills that device's own history; an all-devices subscription would
-  backfill only the newest rows across every device. The hub also routes on the
+- Telemetry for every observed device shares one socket and one reader thread.
+  Each device gets its own `subscribe` naming its `deviceSessionUuid`, so the
+  daemon backfills that device's own history under its own `subscriptionId`; an
+  all-devices subscription would backfill only the newest rows across every
+  device. Pushes are routed by `subscriptionId`, and the hub also checks the
   `deviceSessionUuid` stamped on each event, so a rebooted device that reuses
-  its serial never receives the old epoch's events. A device's connection opens
-  with its first lease and closes with its last; a facet mounted on an open
-  connection first receives its device's recent events.
+  its serial never receives the old epoch's events. A device subscribes with its
+  first lease and unsubscribes with its last, and the socket closes when no
+  device remains. After a reconnect every live device subscribes again. A
+  refused subscription, such as a device that is not live yet, retries on its
+  own backoff without affecting other devices; a refused desktop session fails
+  them all. A facet mounted on a live subscription first receives its device's
+  recent events.
 - Observation (Layout, Performance, Navigation) also uses one connection per
   device, shared by every facet on it. The hub owns that connection's
   reconnects, so a facet on a hub stream runs no reconnect loop of its own and

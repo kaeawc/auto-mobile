@@ -16,7 +16,11 @@ export const KILL_PROFILE_EVIDENCE_STATUSES = [
 export type KillProfileEvidenceStatus = (typeof KILL_PROFILE_EVIDENCE_STATUSES)[number];
 
 /** App ops a recipe may change. Package-mode ops are set per package, uid-mode per uid. */
-export type KillProfileAppOp = "RUN_ANY_IN_BACKGROUND" | "SCHEDULE_EXACT_ALARM" | "WAKE_LOCK";
+export type KillProfileAppOp =
+  | "RUN_ANY_IN_BACKGROUND"
+  | "SCHEDULE_EXACT_ALARM"
+  | "WAKE_LOCK"
+  | "POST_NOTIFICATION";
 
 /** One device command of a recipe, in the order it runs. */
 export type KillProfileStep =
@@ -26,6 +30,8 @@ export type KillProfileStep =
   | { kind: "standbyBucket"; bucket: "restricted" | "rare" }
   /** `appops set [--uid] <pkg> <op> <mode>`. Restored to the mode read before the first change. */
   | { kind: "appOp"; op: KillProfileAppOp; mode: "ignore" | "deny" }
+  /** App hibernation, restored to the state read before the first change. */
+  | { kind: "hibernation" }
   /** `dumpsys deviceidle force-idle`: force deep Doze. Restored by `dumpsys deviceidle unforce`. */
   | { kind: "forceIdle" }
   /** `input keyevent KEYCODE_HOME`: background the app first, as a recents swipe does. */
@@ -36,6 +42,7 @@ export type KillProfileStep =
 export const KILL_PROFILE_IDS = [
   "samsung-sleeping",
   "samsung-deep-sleeping",
+  "samsung-auto-disable",
   "xiaomi-autostart-off",
   "oneplus-deep-optimization",
   "recents-swipe-kill",
@@ -44,6 +51,7 @@ export const KILL_PROFILE_IDS = [
   "motorola-adaptive",
   "user-restricted",
   "exact-alarm-denied",
+  "notifications-off",
 ] as const;
 
 export type KillProfileId = (typeof KILL_PROFILE_IDS)[number];
@@ -97,6 +105,18 @@ export const KILL_PROFILES: Readonly<Record<KillProfileId, KillProfile>> = {
       FORCE_STOP_AND_RESTRICT_NOTE +
       " WAKE_LOCK ignore simulates Samsung's foreground-service wake-lock denial on Android 11; " +
       "this is inferred, not a vendor-documented capture.",
+    source: SAMSUNG_APP_MANAGEMENT,
+  },
+  "samsung-auto-disable": {
+    id: "samsung-auto-disable",
+    version: 1,
+    description: "Samsung auto-disable of unused apps: app hibernation.",
+    steps: [{ kind: "hibernation" }],
+    evidenceStatus: "inferred",
+    evidenceNote:
+      "Approximated by AOSP app hibernation, which Samsung's auto-disable of unused apps uses. " +
+      "Restores the hibernation state read before the first change; the unused-for-N-days trigger " +
+      "is not reproduced.",
     source: SAMSUNG_APP_MANAGEMENT,
   },
   "xiaomi-autostart-off": {
@@ -180,6 +200,17 @@ export const KILL_PROFILES: Readonly<Record<KillProfileId, KillProfile>> = {
       "AOSP behaviour when the user turns off 'Alarms & reminders' (API 31+). Apps that declare " +
       "USE_EXACT_ALARM keep the permission.",
     source: ANDROID_EXACT_ALARMS,
+  },
+  "notifications-off": {
+    id: "notifications-off",
+    version: 1,
+    description: "Notifications off: POST_NOTIFICATION ignored (Android 13+).",
+    steps: [{ kind: "appOp", op: "POST_NOTIFICATION", mode: "ignore" }],
+    evidenceStatus: "inferred",
+    evidenceNote:
+      "Approximated by the POST_NOTIFICATION app op that the notification permission toggle maps to; " +
+      "several OEMs ship with notifications off by default. Restored to the mode read before the " +
+      "first change. Android 13+ only.",
   },
 };
 

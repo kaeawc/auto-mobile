@@ -966,6 +966,10 @@ jobs:
         id: setup-uv-lock
         with:
           enable-cache: true
+          # Key the cache on the only uv lockfile. The default glob walks the
+          # whole workspace, including node_modules/ while bun install churns
+          # its .bun-tmp-* dirs, and fails with ENOENT (#17068).
+          cache-dependency-glob: scripts/github/uv.lock
 
       # Pulls a Docker image and consumes nothing this job produces, so start
       # it up front and let the whole job overlap the pull. It has no consumer,
@@ -1121,6 +1125,10 @@ jobs:
         id: install-uv
         with:
           enable-cache: true
+          # Key the cache on the only uv lockfile. The default glob walks the
+          # whole workspace, including node_modules/ while bun install churns
+          # its .bun-tmp-* dirs, and fails with ENOENT (#17068).
+          cache-dependency-glob: scripts/github/uv.lock
 
       # Foreground: it appends node_modules/.bin to $GITHUB_PATH, and the
       # selector resolves TypeScript check dependencies with bun.

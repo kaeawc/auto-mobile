@@ -67,3 +67,24 @@ export function rethrowDeviceTransportUnavailable(error: unknown): void {
     throw transport;
   }
 }
+
+/**
+ * Preserve a transport failure from a read-only probe that runs before the operation's own
+ * device command. The probe's `"unknown"` dispatch belongs to the read, not the operation,
+ * which never ran, so the surfaced error reports `dispatched: false`.
+ */
+export function rethrowProbeTransportUnavailable(error: unknown): void {
+  const transport = findDeviceTransportUnavailable(error);
+  if (!transport) {
+    return;
+  }
+  if (transport.dispatched === false) {
+    throw transport;
+  }
+  throw new AdbDeviceTransportUnavailableError(
+    transport.deviceId,
+    transport.cause,
+    transport.retryAfterMs,
+    false,
+  );
+}

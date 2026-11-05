@@ -227,9 +227,10 @@ class DirectoryLibraryRepository(
     sourceHost: String? = null,
   ): LibraryResult<LibraryEntry> {
     val specSha256 = sha256Hex(request.specJson.toByteArray())
-    rejectedEntry(request, source, specSha256, requires, admission)?.let {
-      return LibraryResult.Failure(it)
-    }
+    rejectedEntry(request, requires) { admission.admits(source, specSha256, sourceHost) }
+      ?.let {
+        return LibraryResult.Failure(it)
+      }
     val listed = list()
     if (listed is LibraryResult.Failure) return listed
     if ((listed as LibraryResult.Success).value.size >= MAX_LIBRARY_PROTOTYPES)
@@ -344,14 +345,12 @@ private fun validLibrarySpec(spec: String): Boolean =
  */
 private fun rejectedEntry(
   request: SavedPrototypeSaveRequest,
-  source: LibrarySource,
-  specSha256: String,
   requires: List<String>,
-  admission: LibraryAdmission,
+  admitted: () -> Boolean,
 ): LibraryError? =
   when {
     !validLibrarySpec(request.specJson) ||
       !AutoMobilePrototype.capabilities.containsAll(requires) -> LibraryError.Invalid
-    !admission.admits(source, specSha256, null) -> LibraryError.Hidden
+    !admitted() -> LibraryError.Hidden
     else -> null
   }

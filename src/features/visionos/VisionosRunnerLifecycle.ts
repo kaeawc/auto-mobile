@@ -125,11 +125,13 @@ export class VisionosRunnerLifecycle {
     }
   }
 
-  /** A runner this lifecycle started keeps its window app, so a newly launched app needs a fresh one. */
+  /**
+   * A runner this lifecycle started keeps its window app for its lifetime, so any change of
+   * target restarts it, including losing the target when that app is terminated.
+   */
   needsRestart(deviceId: string): boolean {
     const entry = this.runners.get(deviceId);
-    const current = this.dependencies.targetBundleId?.(deviceId);
-    return entry !== undefined && current !== undefined && entry.bundleId !== current;
+    return entry !== undefined && entry.bundleId !== this.dependencies.targetBundleId?.(deviceId);
   }
 
   /** Transfer only lifecycle-owned runners to the newly bound session. */

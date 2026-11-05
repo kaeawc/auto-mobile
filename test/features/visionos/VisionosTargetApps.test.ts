@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { WatchAppManager } from "../../../src/features/action/watch/WatchAppManager";
-import { VisionosRunnerLifecycle } from "../../../src/features/visionos/VisionosRunnerLifecycle";
+import {
+  VisionosRunnerLifecycle,
+  requireVisionosRunner,
+} from "../../../src/features/visionos/VisionosRunnerLifecycle";
 import { InMemoryVisionosTargetApps } from "../../../src/features/visionos/VisionosTargetApps";
 import type { BootedDevice } from "../../../src/models";
 import { FakeVisionosRunnerLauncher } from "../../fakes/FakeVisionosRunnerLauncher";
@@ -97,6 +100,20 @@ describe("VisionosRunnerLifecycle target bundle id", () => {
     const { owner, launcher } = fixture();
     await owner.start({ deviceId: DEVICE });
     expect(launcher.launches.map((launch) => launch.bundleId)).toEqual([undefined]);
+    expect(owner.needsRestart(DEVICE)).toBe(false);
+  });
+
+  test("terminating the target app restarts the runner on the fallback target", async () => {
+    const { owner, launcher, targetApps } = fixture();
+    targetApps.launched(DEVICE, A);
+    await requireVisionosRunner(DEVICE, undefined, owner);
+    expect(launcher.launches.map((launch) => launch.bundleId)).toEqual([A]);
+
+    targetApps.terminated(DEVICE, A);
+    expect(owner.needsRestart(DEVICE)).toBe(true);
+    await requireVisionosRunner(DEVICE, undefined, owner);
+    expect(launcher.launches.map((launch) => launch.bundleId)).toEqual([A, undefined]);
+    expect(launcher.stops).toBe(1);
     expect(owner.needsRestart(DEVICE)).toBe(false);
   });
 });

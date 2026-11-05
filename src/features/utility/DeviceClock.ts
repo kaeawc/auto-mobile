@@ -205,7 +205,10 @@ export interface DeviceClockDependencies {
   hostClock: Pick<Timer, "now" | "sleep">;
   invalidate(deviceId: string): void;
   restoreRegistry?: DeviceClockRestoreRegistry;
-  /** Supplied only while the registry's device critical section is held. */
+  /**
+   * Supplied only while the caller owns the device's clock mutation (the registry's critical
+   * section, or a lifecycle restore). A restore stops its settle read-backs once it aborts.
+   */
   mutationSignal?: AbortSignal;
 }
 export interface PreparedDeviceClock {

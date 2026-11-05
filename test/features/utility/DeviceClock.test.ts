@@ -17,6 +17,7 @@ import {
   MIN_DEVICE_CLOCK_INSTANT_MS,
   MAX_DEVICE_CLOCK_INSTANT_MS,
   DEVICE_CLOCK_RESTORE_READ_BACK_ATTEMPTS,
+  restoreDeviceClock,
   writeDeviceClock,
   type DeviceClockRestoreSlot,
   type DeviceClockRestoreState,
@@ -215,6 +216,30 @@ describe("device clock", () => {
     expect(adapter.calls.filter((call) => call === "readInstant")).toHaveLength(3);
     expect(h.slot.get()).toBeUndefined();
     expect(adapter.calls.at(-1)).toBe("unroot");
+  });
+  test("an aborted restore stops its settle read-backs after the current wait", async () => {
+    const h = harness();
+    h.timer.enableAutoAdvance();
+    const controller = new AbortController();
+    class AbortOnFirstRead extends FakeDeviceClockAdapter {
+      override async readInstantMs() {
+        controller.abort();
+        return super.readInstantMs();
+      }
+    }
+    const adapter = new AbortOnFirstRead();
+    adapter.readOffsetMs = 60_000;
+    await expect(
+      restoreDeviceClock(
+        android,
+        adapter,
+        { initialAutomaticTime: 1, clockChangedByUs: true, rootedByUs: true },
+        { ...h.dependencies, mutationSignal: controller.signal },
+      ),
+    ).rejects.toThrow();
+    expect(h.timer.getSleepHistory()).toEqual([250]);
+    expect(adapter.calls.filter((call) => call === "readInstant")).toHaveLength(1);
+    expect(adapter.calls).not.toContain("unroot");
   });
   test("restore reports pending only after every bounded read-back mismatches", async () => {
     const h = harness();

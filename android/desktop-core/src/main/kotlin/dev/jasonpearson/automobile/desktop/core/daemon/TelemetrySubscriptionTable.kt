@@ -133,6 +133,20 @@ internal class TelemetrySubscriptionTable(
   fun end(subscriptionId: String?): MuxSubscription? =
     subscriptionId?.let(bySubscriptionId::remove)?.also { it.subscriptionId = null }
 
+  /**
+   * Take the connection off the table, returning its job and socket to shut down outside [lock].
+   * Its in-flight `subscribe` requests are dropped too: the socket is closing, so their
+   * acknowledgements can never arrive, and a released subscription must not stay reachable.
+   */
+  fun detach(): Pair<Job?, TelemetrySocket?> {
+    val detached = connection to socket
+    connection = null
+    socket = null
+    byRequestId.values.forEach { it.requestId = null }
+    byRequestId.clear()
+    return detached
+  }
+
   /** Forget every daemon-side subscription: the socket carrying them is gone. */
   fun resetSubscriptions() {
     bySubscriptionId.clear()

@@ -626,6 +626,15 @@ EOF
   grep -Fqx -- '--only codex-skills,claude-plugin' "${FAST_LOG}"
 }
 
+@test "a changed plugin package file selects the Claude plugin check" {
+  commit_change "plugins/auto-mobile/hooks.json" '{"hooks": {}}'
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only codex-skills,claude-plugin' "${FAST_LOG}"
+}
+
 @test "a changed BATS file runs without a fast validation selection" {
   commit_change "test/bats/only-this.bats" '@test "fails" { false; }'
 

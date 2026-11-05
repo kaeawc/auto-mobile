@@ -11,7 +11,10 @@ import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosInstalledApp";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { rethrowDeviceTransportUnavailable } from "../../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
+import {
+  rethrowDeviceTransportUnavailable,
+  rethrowProbeTransportUnavailable,
+} from "../../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { logger } from "../../utils/logger";
 import { runWithNestedPerfTracker } from "../../utils/PerfContext";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
@@ -588,6 +591,11 @@ export class LaunchApp extends BaseVisualChange {
         userId: targetUserId,
         signal,
         timer: this.timer,
+        deviceId: this.device.deviceId,
+      }).catch((error: unknown) => {
+        // The probe runs before the launch, so a transport loss here never dispatched it.
+        rethrowProbeTransportUnavailable(error);
+        throw error;
       });
       logger.info(
         `[LaunchApp] App running: ${result.isRunning} (processes: ${JSON.stringify(result.processes)})`,
@@ -629,6 +637,7 @@ export class LaunchApp extends BaseVisualChange {
       return this.createAndroidColdBoot(this.device).execute(packageName, {
         skipObservation: true,
         userId: targetUserId,
+        signal,
       });
     });
     this.assertLaunchNotAborted(signal);

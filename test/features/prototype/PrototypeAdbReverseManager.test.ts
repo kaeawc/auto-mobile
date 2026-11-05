@@ -181,7 +181,7 @@ describe("createPrototypeReverseAdb", () => {
     await adapter.removeReverse(8080);
     expect(commands).toEqual([
       "reverse --list",
-      "reverse tcp:8080 tcp:8080",
+      "reverse --no-rebind tcp:8080 tcp:8080",
       "reverse --remove tcp:8080",
     ]);
   });

@@ -113,6 +113,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🗑️ <code>deleteDevice</code>                | Stop and permanently delete a device, with verified platform-inventory absence          |
 | 💾 <code>deviceSnapshot</code>              | Capture or restore device snapshot                                                      |
 | 🔃 <code>rotate</code>                      | Rotate device orientation                                                               |
+| 🔁 <code>portReverse</code>                 | Android: own `adb reverse` so the device reaches a host server at `localhost:<port>`    |
 | 📐 <code>setPosture</code>                  | Set foldable / Duo posture                                                              |
 | 📶 <code>statusBar</code>                   | Pin status-bar time, battery, and signal for clean screenshots                          |
 | 🪟 <code>windowMode</code>                  | Fullscreen, PiP, or split-screen an Android task                                        |

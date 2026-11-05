@@ -84,7 +84,8 @@ jobs:
           GH_TOKEN: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
         run: scripts/changelog/update_changelog_from_issues.sh
 
-      # The bump and changelog steps write .claude-plugin/{marketplace,plugin}.json
+      # The bump and changelog steps write .claude-plugin/marketplace.json,
+      # plugins/auto-mobile/.claude-plugin/plugin.json
       # and CHANGELOG.md, and the commit below carries [skip ci] so the Check
       # Formatting gate never runs on it. Format the tree here so those generated
       # files land oxfmt-clean on main instead of reddening the next PR (#5817).
@@ -394,7 +395,7 @@ jobs:
             for path in "${changed_files[@]}"; do
               case "$path" in
                 .claude-plugin/marketplace.json | \
-                .claude-plugin/plugin.json | \
+                plugins/auto-mobile/.claude-plugin/plugin.json | \
                 CHANGELOG.md | \
                 android/gradle.properties | \
                 android/*/build.gradle.kts | \

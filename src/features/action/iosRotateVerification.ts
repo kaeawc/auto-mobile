@@ -85,8 +85,8 @@ function isUnverifiedIosRotationSize(
 ): boolean {
   const { previous, current } = observed;
   return (
-    (result.success &&
-      result.rotationPerformed &&
+    (((result.success && result.rotationPerformed) ||
+      (!result.success && previous !== "unknown" && current === requested)) &&
       previous !== requested &&
       (current === requested || current === "unknown") &&
       knownPositiveSize(previousObservation) &&

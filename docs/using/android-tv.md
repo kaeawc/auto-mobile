@@ -98,7 +98,20 @@ appears in `listDevices` and can be asked for in a device `requires` clause or a
 
 TV apps are driven by focus, not touch. Use `focusNavigate` to move D-pad focus to an element and
 `sendKeys` with `enter` to activate the focused item.
-`pressButton` handles back and home.
+`pressButton` handles back, home and the remote's keys:
+
+| Button                                                   | Sends                                  |
+| -------------------------------------------------------- | -------------------------------------- |
+| `up`, `down`, `left`, `right`, `select`                  | D-pad directions and D-pad center      |
+| `playPause`, `fastForward`, `rewind`, `next`, `previous` | Media keys to the current media player |
+
+The names match the Apple TV remote buttons; `fastForward`, `rewind`, `next` and `previous`
+work only on Android.
+
+For a long press of D-pad center, for example to open a context menu, pass `durationMs` with
+`select`: `pressButton { button: "select", durationMs: 1000 }` holds the key for one second.
+`durationMs` takes 100 to 10000, works only with `select`, and needs API 33 or newer; otherwise the
+call fails with `unsupported_button` and sends no key.
 
 `focusNavigate` matches a target on the focused element or on a node inside its bounds, so a label
 on a child view of the focused row counts. A large focused container that holds the target also

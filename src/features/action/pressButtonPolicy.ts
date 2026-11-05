@@ -25,6 +25,11 @@ const IN_PLACE_PRESS_BUTTONS = new Set([
   "left",
   "right",
   "playpause",
+  // Media transport keys act on the current playback session in place (#16734).
+  "fastforward",
+  "rewind",
+  "next",
+  "previous",
   // Rotary rotation and nudges move focus only.
   "rotary_rotate_cw",
   "rotary_rotate_ccw",
@@ -58,7 +63,29 @@ const ANDROID_KEY_CODES: Record<string, number> = Object.assign(Object.create(nu
   volume_up: 24,
   volume_down: 25,
   recent: 187,
+  // D-pad and media transport keys for Android TV remotes (#16734); names match the tvOS remote.
+  up: 19,
+  down: 20,
+  left: 21,
+  right: 22,
+  select: 23,
+  playpause: 85,
+  next: 87,
+  previous: 88,
+  rewind: 89,
+  fastforward: 90,
 });
+
+/** Buttons that accept a hold `durationMs`: D-pad center, for TV context menus (#16734). */
+export const HOLDABLE_PRESS_BUTTONS: ReadonlySet<string> = new Set(["select"]);
+export const PRESS_HOLD_MIN_MS = 100;
+export const PRESS_HOLD_MAX_MS = 10_000;
+/** `input keyevent --duration` exists from Android 13 (API 33). */
+export const ANDROID_KEY_HOLD_MIN_API_LEVEL = 33;
+
+export function isHoldablePressButton(button: unknown): boolean {
+  return typeof button === "string" && HOLDABLE_PRESS_BUTTONS.has(button.toLowerCase());
+}
 
 /**
  * Resolve an Android keyevent code for a button name, or `undefined` when the

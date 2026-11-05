@@ -12,10 +12,9 @@ import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
 import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import {
-  PressButton,
-  acceptAndroidHomeAlreadyOnLauncher,
-} from "../../../src/features/action/PressButton";
+import { PressButton } from "../../../src/features/action/PressButton";
+import { acceptAndroidHomeAlreadyOnLauncher } from "../../../src/features/action/pressButtonOutcomes";
+import { rejectUnsupportedHold } from "../../../src/features/action/androidKeyHold";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -240,6 +239,70 @@ describe("PressButton Android keycode dispatch", () => {
 
     expect(result).toEqual({ success: true, button: "MENU", keyCode: 82 });
     expect(fakeAdb.getExecutedCommands()).toEqual(["shell input keyevent 82"]);
+  });
+
+  // Android TV remote D-pad and media keys (#16734).
+  test.each<[string, number]>([
+    ["up", 19],
+    ["down", 20],
+    ["left", 21],
+    ["right", 22],
+    ["playPause", 85],
+    ["next", 87],
+    ["previous", 88],
+    ["rewind", 89],
+    ["fastForward", 90],
+  ])("dispatches TV remote %s as keyevent %i", async (button, keyCode) => {
+    const result = await press(button);
+
+    expect(result).toEqual({ success: true, button, keyCode });
+    expect(fakeAdb.getExecutedArgv()).toEqual([["shell", "input", "keyevent", String(keyCode)]]);
+  });
+
+  const holdSelect = (durationMs: number, timeoutMs?: number, button = "select") =>
+    dispatch(new PressButton(androidDevice, fakeAdb, fakeTimer), button, {
+      durationMs,
+      timeoutMs,
+    });
+
+  test("holds D-pad center for durationMs on API 33+", async () => {
+    fakeAdb.setAndroidApiLevel(34);
+
+    const result = await holdSelect(1500);
+
+    expect(result).toEqual({ success: true, button: "select", keyCode: 23, durationMs: 1500 });
+    expect(fakeAdb.getExecutedArgv()).toEqual([
+      ["shell", "input", "keyevent", "--duration", "1500", "23"],
+    ]);
+  });
+
+  test.each([31, null])("refuses a hold on API %p without dispatching", async (level) => {
+    fakeAdb.setAndroidApiLevel(level);
+
+    const result = await holdSelect(1000);
+
+    expect(result).toMatchObject({ success: false, code: "unsupported_button", keyCode: -1 });
+    expect(result.error).toContain("API 33");
+    expect(fakeAdb.getExecutedArgv()).toEqual([]);
+  });
+
+  test("refuses a hold on a button other than select", async () => {
+    fakeAdb.setAndroidApiLevel(34);
+
+    const result = await holdSelect(1000, undefined, "playPause");
+
+    expect(result).toMatchObject({ success: false, code: "unsupported_button" });
+    expect(fakeAdb.getExecutedArgv()).toEqual([]);
+  });
+
+  test("refuses a hold that would outlast the press deadline", async () => {
+    fakeAdb.setAndroidApiLevel(34);
+
+    const result = await holdSelect(2000, 1500);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("shorter than the 2000ms hold");
+    expect(fakeAdb.getExecutedArgv()).toEqual([]);
   });
 
   test("rejects an unknown button without dispatching a keyevent", async () => {
@@ -903,5 +966,20 @@ describe("acceptAndroidHomeAlreadyOnLauncher (#15028)", () => {
     const changed = { success: true };
     acceptAndroidHomeAlreadyOnLauncher(changed, context);
     expect(changed).toEqual({ success: true });
+  });
+});
+
+describe("rejectUnsupportedHold (#16734)", () => {
+  test("allows a plain press anywhere and a hold of select on Android", () => {
+    expect(() => rejectUnsupportedHold("ios", "home", undefined)).not.toThrow();
+    expect(() => rejectUnsupportedHold("android", "SELECT", 800)).not.toThrow();
+  });
+
+  test.each([
+    ["android", "playPause", "select (D-pad center) only"],
+    ["tvos", "select", "Android only"],
+    ["ios", "select", "Android only"],
+  ])("refuses a hold on %s %s", (platform, button, message) => {
+    expect(() => rejectUnsupportedHold(platform, button, 800)).toThrow(message);
   });
 });

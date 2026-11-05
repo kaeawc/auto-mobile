@@ -1,5 +1,6 @@
 import { z } from "zod/v4";
 import { MAX_ROTARY_STEPS, ROTARY_BUTTONS } from "../../features/action/RotaryInput";
+import { PRESS_HOLD_MAX_MS, PRESS_HOLD_MIN_MS } from "../../features/action/pressButtonPolicy";
 import { KEYBOARD_PROFILE_IDS } from "../../features/action/keyboardProfiles";
 import { HINGE_ANGLE_MAX_DEGREES, HINGE_ANGLE_MIN_DEGREES } from "../../features/device/SetPosture";
 import { hierarchyLayerSchema } from "../../models/elementSelectorSchemas";
@@ -106,6 +107,11 @@ export const pressButtonInput = z.object({
     "right",
     "select",
     "playPause",
+    // Media transport keys (#16734); Android only, tvOS refuses them.
+    "fastForward",
+    "rewind",
+    "next",
+    "previous",
     "home",
     "back",
     "menu",
@@ -132,6 +138,15 @@ export const pressButtonInput = z.object({
     .max(MAX_ROTARY_STEPS)
     .optional()
     .describe("Detents for rotary_rotate_cw / rotary_rotate_ccw (default 1)."),
+  durationMs: z
+    .number()
+    .int()
+    .min(PRESS_HOLD_MIN_MS)
+    .max(PRESS_HOLD_MAX_MS)
+    .optional()
+    .describe(
+      `Hold select (D-pad center) down this long in ms (${PRESS_HOLD_MIN_MS}-${PRESS_HOLD_MAX_MS}) for a long press; Android API 33+ only.`,
+    ),
   // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
   // not required — a device handle from getAndroid/getApple is sufficient on
   // its own.

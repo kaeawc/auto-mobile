@@ -56,11 +56,11 @@ export interface PortReverseLifecycle {
 /** Releases a session's mappings when it ends and a device's when it goes away. */
 export function subscribePortReverseCleanup(
   lifecycle: PortReverseLifecycle,
-  manager: Pick<PortReverseManager, "releaseOwner" | "releaseDevice">,
+  manager: Pick<PortReverseManager, "releaseOwner" | "releaseDeviceMappings">,
 ): () => void {
   const cleanups = [
     lifecycle.subscribeSessionRelease((sessionUuid) => void manager.releaseOwner(sessionUuid)),
-    lifecycle.subscribeDeviceRemoval((deviceId) => void manager.releaseDevice(deviceId)),
+    lifecycle.subscribeDeviceRemoval((deviceId) => void manager.releaseDeviceMappings(deviceId)),
   ];
   return () => cleanups.forEach((cleanup) => cleanup());
 }
@@ -214,7 +214,7 @@ export function registerPortReverseTools(deps?: PortReverseToolDependencies): vo
   portReverseTool.register(
     undefined,
     createPortReverseHandler(
-      deps ?? { manager: daemonManager(), policy: portReversePolicyFromEnv(process.env) },
+      deps ?? { manager: daemonManager(), policy: portReversePolicyFromEnv() },
     ),
   );
 }

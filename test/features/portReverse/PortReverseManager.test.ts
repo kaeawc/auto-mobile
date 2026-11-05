@@ -130,7 +130,7 @@ describe("PortReverseManager", () => {
     await manager.ensure(target("s2"), [{ devicePort: 6000, hostPort: 6000 }]);
     await manager.releaseOwner("s1");
     expect([...adb.mappings.keys()].sort()).toEqual([3000, 6000]);
-    await manager.releaseDevice("emulator-5554");
+    await manager.releaseDeviceMappings("emulator-5554");
     expect([...adb.mappings.keys()]).toEqual([3000]);
     expect(adb.calls).not.toContain("remove 3000");
   });

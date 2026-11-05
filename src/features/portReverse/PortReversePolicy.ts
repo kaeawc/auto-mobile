@@ -1,3 +1,4 @@
+import { ENV, readEnvTrimmed } from "../../config/env";
 import { PortReverseError } from "./PortReverseError";
 
 /** Ports below this are privileged and always refused. */
@@ -14,7 +15,7 @@ export interface PortReversePolicy {
   allowed?: readonly PortRange[];
 }
 
-export const PORT_REVERSE_ALLOWED_PORTS_ENV = "AUTOMOBILE_PORT_REVERSE_ALLOWED_PORTS";
+export const PORT_REVERSE_ALLOWED_PORTS_ENV = ENV.PORT_REVERSE_ALLOWED_PORTS.name;
 
 function parseRange(token: string): PortRange | undefined {
   const match = /^(\d+)(?:-(\d+))?$/.exec(token);
@@ -31,10 +32,8 @@ function parseRange(token: string): PortRange | undefined {
  * inclusive ranges (`3000-3999,8080`). Unset or blank allows every unprivileged port. A value with
  * any invalid entry allows nothing, so a typo fails closed instead of widening the allowlist.
  */
-export function portReversePolicyFromEnv(
-  env: Readonly<Record<string, string | undefined>>,
-): PortReversePolicy {
-  const raw = env[PORT_REVERSE_ALLOWED_PORTS_ENV]?.trim();
+export function portReversePolicyFromEnv(env: NodeJS.ProcessEnv = process.env): PortReversePolicy {
+  const raw = readEnvTrimmed(ENV.PORT_REVERSE_ALLOWED_PORTS, env);
   if (!raw) {
     return {};
   }

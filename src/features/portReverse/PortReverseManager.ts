@@ -213,7 +213,7 @@ export class PortReverseManager {
   }
 
   /** The device went away or was unbound: remove every mapping this manager owns on it. */
-  async releaseDevice(deviceId: string): Promise<void> {
+  async releaseDeviceMappings(deviceId: string): Promise<void> {
     const state = this.devices.get(deviceId);
     if (state === undefined) {
       return;
@@ -227,7 +227,7 @@ export class PortReverseManager {
   }
 
   async dispose(): Promise<void> {
-    await Promise.all([...this.devices.keys()].map((id) => this.releaseDevice(id)));
+    await Promise.all([...this.devices.keys()].map((id) => this.releaseDeviceMappings(id)));
   }
 
   /** Device ports AutoMobile owns on a device, ascending. */

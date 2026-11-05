@@ -123,7 +123,7 @@ describe("portReverse tool", () => {
     };
     const unsubscribe = subscribePortReverseCleanup(lifecycle, {
       releaseOwner: async (owner) => void released.push(`owner ${owner}`),
-      releaseDevice: async (deviceId) => void released.push(`device ${deviceId}`),
+      releaseDeviceMappings: async (deviceId) => void released.push(`device ${deviceId}`),
     });
     onRelease("s1");
     onRemoval("emulator-5554");

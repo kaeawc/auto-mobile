@@ -20,6 +20,8 @@ import { IOSCtrlProxyClient } from "../../observe/ios";
 import type { IosLockStateInvalidator } from "../../observe/ios/CachedIosLockStateProbe";
 import { ListInstalledApps } from "../../observe/ListInstalledApps";
 import { RealObserveScreen } from "../../observe/ObserveScreen";
+import { createProductionDevicectlPanelScreenshotSource } from "../../../utils/ios-cmdline-tools/DevicectlPanelScreenshotSource";
+import type { DevicectlDisplayInfoSource } from "../../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
 import type { TapCoordinatesRequest } from "../../observe/shared/SharedGestureDelegate";
 import type { SwipeRequest } from "../../observe/shared/types";
 import { SearchableHierarchy } from "../../utility/SearchableNode";
@@ -81,6 +83,11 @@ const defaultSystemTrayBackoff = exponentialBackoff({
 
 let systemTrayDependencies: SystemTrayDependencies | null = null;
 
+export const createSystemTrayObserveScreen = (
+  device: BootedDevice,
+  iosDisplayInfoSource: DevicectlDisplayInfoSource = createProductionDevicectlPanelScreenshotSource(),
+): SystemTrayObserver => new RealObserveScreen(device, undefined, { iosDisplayInfoSource });
+
 // Keep the dispatch markers so a sent-but-unanswered gesture stays distinguishable from a refusal.
 const toIosGestureResult = (result: IosGestureResult): IosGestureResult => ({
   success: result.success,
@@ -119,7 +126,7 @@ const defaultIosClientFactory: (device: BootedDevice) => SystemTrayIosClient = (
 export const getSystemTrayDependencies = (): SystemTrayDependencies => {
   if (!systemTrayDependencies) {
     systemTrayDependencies = {
-      observeScreenFactory: (device) => new RealObserveScreen(device),
+      observeScreenFactory: (device) => createSystemTrayObserveScreen(device),
       adbFactory: (device) => defaultAdbClientFactory.create(device),
       iosClientFactory: defaultIosClientFactory,
       pressButtonFactory: (device) => new PressButton(device),

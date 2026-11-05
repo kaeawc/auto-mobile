@@ -25561,6 +25561,19 @@
             "values": ["googleCast", "airplay"]
           }
         },
+        "protocols": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "array",
+            "item": {
+              "kind": "enum",
+              "values": ["googleCast", "airplay"]
+            },
+            "min": 0,
+            "max": 2,
+            "unique": true
+          }
+        },
         "player": {
           "platforms": ["android", "ios"],
           "value": {

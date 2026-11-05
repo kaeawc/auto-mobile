@@ -87,9 +87,13 @@ export class StreamCadence {
    * routing (`matchesFilter`, on `deviceSessionUuid`): the cadence machinery is
    * inherently serial-addressed, and `filter.deviceId` is the serial resolved for
    * exactly this purpose. Only a `null` `deviceSessionUuid` means all devices;
-   * a non-null UUID with a null `deviceId` schedules none.
+   * a non-null UUID with a null `deviceId` schedules none, and so does a
+   * lifecycle-only subscription, which wants no frames.
    */
   private subscriberWantsDevice(filter: DeviceDataFilter, deviceId: string): boolean {
+    if (filter.lifecycleOnly) {
+      return false;
+    }
     return (
       filter.deviceSessionUuid === null ||
       (filter.deviceId === deviceId &&
@@ -243,6 +247,10 @@ export class StreamCadence {
   }
 
   notifyCadenceChangedForFilter(filter: DeviceDataFilter): void {
+    // A lifecycle-only subscription never contributes to cadence, so removing it changes nothing.
+    if (filter.lifecycleOnly) {
+      return;
+    }
     if (filter.deviceSessionUuid !== null && filter.deviceId === null) {
       return;
     }

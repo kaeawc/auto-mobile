@@ -66,6 +66,7 @@ test/daemon/sessionBroker/registry/bindingRegistryBusyBound.integration.test.ts 
 test/daemon/sessionBroker/registry/sqliteBindingRegistry.integration.test.ts | unsafe | Bun.spawn of a registry child process L134
 test/daemon/sessionBroker/registry/staleRegistryHandleWriteRefusal.integration.test.ts | safe | two SQLite registry handles over a private mkdtemp file with FakeTimer, closed and removed afterwards
 test/daemon/sessionBroker/sqliteStore.integration.test.ts | unsafe | Bun.spawn of competing admission children with owned process cancellation
+test/daemon/setFeatureFlagCommandSocket.integration.test.ts | safe | mkdtemp socket dir with fake bind lock, SafeDaemonManager fake spawner/signaler, in-memory flag repository; namespaceEnv injected, process.env untouched
 test/daemon/socketRequestCancel.integration.test.ts | safe | tmpdir sockets L55, UnixSocketServer with fake timer
 test/daemon/socketServer/BaseSocketServerBindGuard.integration.test.ts | safe | mkdtemp socket dirs L52 and L96
 test/daemon/socketServer/BaseSocketServerOwnership.integration.test.ts | safe | tmpdir uuid sockets L61
@@ -195,6 +196,7 @@ test/features/observe/android/storageChangedWireToDb.integration.test.ts | safe 
 test/features/observe/cache/FileSystemObserveCacheStore.integration.test.ts | safe | cache store rooted in mkdtemp tmpdir L32
 test/features/observe/ios/IOSCtrlProxyClient.stream.integration.test.ts | safe | FakeWebSocket/FakeSocket; fake sock path never bound L43
 test/features/observe/ios/ctrlProxyWireParity.integration.test.ts | safe | read-only scan of repo sources L21/L28
+test/features/observe/ios/sdkMultiScene.integration.test.ts | safe | fixture replay with fake WebSocket, FakeTimer and fake observation data sources; no sockets or devices
 test/features/prototype/PrototypeChannelExecutor.integration.test.ts | safe | ws server and Bun.serve on 127.0.0.1 port 0; loopback only
 test/features/prototype/PrototypeHttpExecutor.integration.test.ts | safe | Bun.serve on 127.0.0.1 port 0 L4; loopback only
 test/features/prototype/prototypeBundleFuzz.integration.test.ts | safe | seeded pure-function fuzz of the bundle reader over in-memory buffers; no I/O, ports or shared paths
@@ -223,7 +225,7 @@ test/lint/avdManagerExecutionBoundary.integration.test.ts | safe | source scan v
 test/lint/devicectlExecutionBoundary.integration.test.ts | safe | source scan via readFileSync; devicectl calls are string literals L132
 test/lint/hostDefaultsExecutionBoundary.integration.test.ts | safe | source scan via readFileSync; spawn text is string literals L63
 test/lint/macOsOnlyTestClassification.integration.test.ts | safe | parses test and src files via readFileSync and the TypeScript API; spawns nothing L15
-test/lint/oxlintConfigScoping.integration.test.ts | unsafe | Bun.spawnSync runs oxlint L55
+test/lint/oxlintConfigScoping.integration.test.ts | unsafe | Bun.spawnSync runs one real oxlint over fixtures in the shared repo scratch/ tree (skipped on win32) L67
 test/lint/sdkManagerExecutionBoundary.integration.test.ts | safe | source scan via readFileSync; sdkmanager calls are string literals L174
 test/lint/turboTestInputsCoverNativeSources.integration.test.ts | safe | reads turbo.json and repo sources via readFileSync L90
 test/lint/webpExecutionBoundary.integration.test.ts | safe | source scan via readFileSync; spawn text is string literals L69

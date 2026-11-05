@@ -67,7 +67,13 @@ import {
   type SqliteBindingRegistry,
 } from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import type { McpClientFactory } from "../../src/daemon/socketServer";
-import { toolErrorResult, type WireFixture } from "../daemon/helpers/desktopWireHarness";
+import {
+  AGENT_KEEPER_CONNECTION,
+  relativeEnvelope,
+  toolErrorResult,
+  wireConnection,
+  type WireFixture,
+} from "../daemon/helpers/desktopWireFixture";
 import {
   IN_MEMORY_DATA_DIR,
   InMemoryControlSocket,
@@ -1301,21 +1307,22 @@ export class LivenessScenario {
     let keptSession: string | undefined;
     let nextKeepAliveAt = Infinity;
     for (const exchange of fixture.exchanges) {
-      // desktopWireContract.test.ts:532 restarts after "heartbeat", before "heartbeat-lapse".
-      // Keep the real database: capture's fresh fake persistence is a potential wire divergence.
-      if (fixture.scenario === "daemon-restart" && exchange.label === "heartbeat-lapse") {
-        await this.daemonRestart();
+      // The capture restarted its daemon right after the previous frame (DesktopWireHarness
+      // restartDaemon): the replay's daemon is down for the same downtime over the same kept
+      // database, then the frame is driven at its recorded time.
+      if (exchange.daemonRestartDowntimeMs !== undefined) {
+        await this.daemonRestart({ downtimeMs: exchange.daemonRestartDowntimeMs });
       }
       for (let beat = 0; beat < (exchange.repeat ?? 1); beat++) {
         const dueAt = startedAt + exchange.atMs + beat * (exchange.everyMs ?? 0);
-        // Contract lines 96-102, 240-243 and desktopWireHarness.ts:353-365: unrecorded agent
-        // beats every 2 s, after timers settle, on a separate connection, until agent-release.
+        // As DesktopWireHarness's keepAlive: unrecorded agent beats every 2 s, after timers
+        // settle, on a separate connection, until agent-release.
         while (keptSession && nextKeepAliveAt <= dueAt) {
           await this.idle(nextKeepAliveAt - this.timer.now());
           const keeper = await this.daemonMethod(
             "daemon/heartbeat",
             { sessionId: keptSession },
-            "scenario-agent-keeper",
+            AGENT_KEEPER_CONNECTION,
           );
           if (!keeper.success) {
             throw new Error(`captured agent keeper refused: ${JSON.stringify(keeper)}`);
@@ -1330,7 +1337,7 @@ export class LivenessScenario {
           method === "tools/call" ? (params.arguments as Record<string, unknown>) : params;
         const deviceId = typeof args.deviceId === "string" ? args.deviceId : undefined;
         const heldBefore = deviceId ? this.poolState(deviceId).sessionId : null;
-        const response = await this.daemonMethod(method, params, `scenario-${exchange.actor}`);
+        const response = await this.daemonMethod(method, params, wireConnection(exchange.actor));
         drivenFrames++;
         const label = `${exchange.label}#${beat}`;
         if (
@@ -1347,32 +1354,7 @@ export class LivenessScenario {
             unclaimedControls.push(label);
           }
         }
-        const actual = JSON.parse(JSON.stringify(response)) as Record<string, unknown>;
-        const result = actual.result as Record<string, unknown> | undefined;
-        // These fields are absolute fake-clock readings, including sessionInfo and activeSessions.
-        const rebase = (value: Record<string, unknown>) => {
-          for (const key of [
-            "expiresAtMs",
-            "createdAt",
-            "lastUsedAt",
-            "expiresAt",
-            "lastToolActivityAt",
-            "lastOwnerHeartbeatAt",
-            "idleReleaseAt",
-          ]) {
-            if (typeof value[key] === "number") {
-              value[key] -= startedAt;
-            }
-          }
-        };
-        if (result) {
-          rebase(result);
-          if (Array.isArray(result.sessions)) {
-            for (const session of result.sessions) {
-              rebase(session);
-            }
-          }
-        }
+        const actual = relativeEnvelope(response, startedAt);
         if (JSON.stringify(actual) !== JSON.stringify(exchange.response)) {
           mismatches.push(`${label}: ${JSON.stringify(actual)}`);
         }
@@ -1608,13 +1590,19 @@ export class LivenessScenario {
    * the dead process's rows, rehydrates them awaiting their owners, and opens their owner
    * windows. A proxy that is still running sees its connection drop and reconnects.
    *
+   * `downtimeMs` is how long no daemon runs between the two: the dead process's timers do not fire
+   * and nothing answers, while the persisted rows age.
+   *
    * `startupMs` makes it a slow start: that much time passes between the new process's session
    * rehydration and its control socket accepting connections, with no daemon to reach meanwhile.
    * A device claim slower than the startup deadline ({@link deviceClaimDelayMs}) is a slow start
    * too: rehydration waits the deadline out, then the daemon starts without the late session.
    */
-  async daemonRestart(options: { startupMs?: number } = {}): Promise<void> {
+  async daemonRestart(options: { startupMs?: number; downtimeMs?: number } = {}): Promise<void> {
     this.killDaemonSide(this.daemon);
+    if (options.downtimeMs !== undefined && options.downtimeMs > 0) {
+      await this.idle(options.downtimeMs);
+    }
     const startupMs = options.startupMs ?? 0;
     const rehydrationMs =
       this.deviceClaimDelayMs > SESSION_REHYDRATION_DEADLINE_MS

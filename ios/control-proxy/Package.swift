@@ -14,11 +14,32 @@ let package = Package(
             name: "CtrlProxy",
             targets: ["CtrlProxy"]
         ),
+        .executable(
+            name: "AXBridge",
+            targets: ["AXBridge"]
+        ),
     ],
     dependencies: [
         .package(path: "../sdk-wire"),
     ],
     targets: [
+        .target(
+            name: "AXBridgeCore",
+            path: "Sources/AXBridgeCore",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .executableTarget(
+            name: "AXBridge",
+            dependencies: ["AXBridgeCore"],
+            path: "Sources/AXBridge",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
+            name: "AXBridgeCoreTests",
+            dependencies: ["AXBridgeCore"],
+            path: "Tests/AXBridgeCoreTests",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
         .target(
             name: "ObjCExceptionCatcher",
             path: "Sources/ObjCExceptionCatcher",

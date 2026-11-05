@@ -2520,8 +2520,10 @@ app) and `cast.setVolume` (`volume` 0-1, the remote device volume); play, pause 
 `unsupported`. Events are `cast.routesChanged`, `sessionStarting`, `sessionStarted`, `sessionEnded`,
 `sessionFailed` (data `reason`: `media_not_castable`, `play_services_unavailable`, `network` or
 `receiver`) and `remoteVolume`. `/platform/cast/state` is `unavailable`, `noDevices`, `notConnected`,
-`connecting` or `connected`, with `deviceName`, `protocol` (`googleCast` or `airplay`), `player` (the
-cast `media` player id) and `volume`. CtrlProxy never advertises the module.
+`connecting` or `connected`, with `deviceName`, `protocol` (`googleCast` or `airplay`), `protocols`
+(the unique protocols the device supports, read whole as `{platform:/cast/protocols}`; an iOS agent
+reports `["airplay"]`), `player` (the cast `media` player id) and `volume`. CtrlProxy never advertises
+the module.
 
 The `castButton` node is the system route picker that starts a session; there is no start call. Its
 required `player` names a declared `media.players` id or an inline `videoPlayer` id, and optional

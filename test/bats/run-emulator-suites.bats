@@ -14,7 +14,7 @@ setup() {
 
   # Each fake records its argv plus the tool restriction it saw, and exits with
   # the status named by FAIL_<NAME> (default 0).
-  for name in gradle reset permission navgraph smoke; do
+  for name in gradle reset permission navgraph navgraph-e2e smoke; do
     cat > "${TEST_DIR}/${name}" <<EOF
 #!/usr/bin/env bash
 printf '%s %s tools=%s\n' "${name}" "\$*" "\${AUTOMOBILE_ENABLED_TOOLS:-unset}" >> "\$CALLS"
@@ -22,6 +22,8 @@ case "${name} \$*" in
   "gradle :junit-runner:testClasses"*) exit "\${FAIL_PREBUILD:-0}" ;;
   "gradle :junit-runner:test"*) printf '%s\\n' "\${JUNIT_OUTPUT:-}"; exit "\${FAIL_JUNIT:-0}" ;;
   "gradle :playground:app:test"*) exit "\${FAIL_PLAYGROUND:-0}" ;;
+  "navgraph "*) exit "\${FAIL_NAV_GRAPH:-0}" ;;
+  "navgraph-e2e "*) exit "\${FAIL_NAV_GRAPH_E2E:-0}" ;;
   "permission"*) exit "\${FAIL_PERMISSION:-0}" ;;
 esac
 exit 0
@@ -57,6 +59,7 @@ run_suites() {
     RESET_DAEMON_CMD="${TEST_DIR}/reset" \
     PERMISSION_CMD="${TEST_DIR}/permission" \
     NAV_GRAPH_CMD="${TEST_DIR}/navgraph" \
+    NAV_GRAPH_E2E_CMD="${TEST_DIR}/navgraph-e2e" \
     SAVED_PROTOTYPE_SMOKE_CMD="${TEST_DIR}/smoke" \
     RESET_COUNT_FILE="$RESET_COUNT_FILE" \
     "$@" bash "$SCRIPT_ABS" control-proxy.apk
@@ -69,6 +72,7 @@ run_suites() {
 reset 1 tools=unset
 permission control-proxy.apk tools=navigateTo,getNavigationGraph,explore
 navgraph  tools=navigateTo,getNavigationGraph,explore
+navgraph-e2e  tools=navigateTo,getNavigationGraph,explore
 gradle :playground:app:test --stacktrace --info tools=navigateTo,getNavigationGraph,explore
 reset 2 tools=unset
 smoke  tools=unset"
@@ -162,4 +166,19 @@ EOF
   [ "$status" -eq 1 ]
   grep -q '^smoke ' "$CALLS"
   [[ "$output" == *'Playground Automobile emulator suite exit status: 5'* ]]
+}
+
+@test "navigation graph E2E failure stops Playground Gradle and fails the suite" {
+  run_suites FAIL_NAV_GRAPH_E2E=6
+  [ "$status" -eq 1 ]
+  grep -q '^navgraph-e2e ' "$CALLS"
+  ! grep -q '^gradle :playground:app:test' "$CALLS"
+  [[ "$output" == *"Playground Automobile emulator suite exit status: 6"* ]]
+}
+
+@test "SDK graph failure skips navigation graph E2E" {
+  run_suites FAIL_NAV_GRAPH=7
+  [ "$status" -eq 1 ]
+  ! grep -q '^navgraph-e2e ' "$CALLS"
+  ! grep -q '^gradle :playground:app:test' "$CALLS"
 }

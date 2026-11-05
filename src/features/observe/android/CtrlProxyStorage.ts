@@ -6,6 +6,7 @@
  */
 
 import WebSocket from "ws";
+import { z } from "zod";
 import { keystoreResetSchema, type KeystoreReset } from "../../storage/keystoreReset";
 import { toActionableError } from "../../../models/ActionableError";
 import {
@@ -51,6 +52,14 @@ export function isCtrlProxyStorageUnavailableError(error: unknown): boolean {
     message === WEBSOCKET_NOT_CONNECTED_MESSAGE
   );
 }
+
+/** First CtrlProxy release that implements `export_attestation`. */
+export const EXPORT_ATTESTATION_MIN_CTRL_PROXY_VERSION = "0.0.90";
+
+export const EXPORT_ATTESTATION_UNSUPPORTED_MESSAGE =
+  "The installed CtrlProxy is too old to export key attestation: export_attestation " +
+  `requires CtrlProxy ${EXPORT_ATTESTATION_MIN_CTRL_PROXY_VERSION} or newer. ` +
+  `Install CtrlProxy ${EXPORT_ATTESTATION_MIN_CTRL_PROXY_VERSION}+ and retry.`;
 
 /**
  * Delegate class for handling SharedPreferences operations.
@@ -198,6 +207,49 @@ export class CtrlProxyStorage {
     } catch (error) {
       logger.warn("[CTRL_PROXY] Keystore reset unavailable", error);
       return refusal("unavailable", "BRIDGE_UNAVAILABLE");
+    }
+  }
+
+  /** Export public certificates from a temporary key in CtrlProxy's own AndroidKeyStore. */
+  async exportAttestation(timeoutMs = 15000): Promise<string[]> {
+    try {
+      if (!(await this.context.ensureConnected())) {
+        throw new Error("Failed to connect to accessibility service");
+      }
+      const commands = await this.context.getSupportedCommands?.();
+      if (commands?.includes("export_attestation") !== true) {
+        throw new Error(EXPORT_ATTESTATION_UNSUPPORTED_MESSAGE);
+      }
+      const result = await this.sendStorageCommand<{
+        certificateChainBase64: unknown;
+        error?: string;
+      }>(
+        "export_attestation",
+        {},
+        {
+          timeoutMs,
+          connected: true,
+          managerId: true,
+          unsupportedCommandError: () => ({
+            certificateChainBase64: undefined,
+            error: EXPORT_ATTESTATION_UNSUPPORTED_MESSAGE,
+          }),
+          timeoutError: () => ({
+            certificateChainBase64: undefined,
+            error: "Attestation export timed out",
+          }),
+        },
+      );
+      if (result.error) {
+        throw new Error(result.error);
+      }
+      return z
+        .array(z.string().min(1).max(175000))
+        .min(2)
+        .max(16)
+        .parse(result.certificateChainBase64);
+    } catch (error) {
+      throw toActionableError(error, "Failed to export Android key attestation");
     }
   }
 

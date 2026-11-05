@@ -81,6 +81,8 @@ export interface DaemonStateAccess {
     getExpiredReleaseSnapshot?(sessionId: string): Promise<SessionReleaseSnapshot | undefined>;
     /** Why a session this daemon released was released; undefined for a never-issued UUID. */
     getReleasedSessionReason?(sessionId: string): Promise<string | undefined>;
+    /** The CLI idle window a `cli-idle-timeout`-released session had (#16937), when known. */
+    getReleasedSessionIdleTimeoutMs?(sessionId: string): Promise<number | undefined>;
     recordHeartbeat?(sessionId: string): void;
     creditOwnerHeartbeatDuringRelease?(sessionId: string, ownerToken: string): void;
     /** Claim the token permitted to refresh this session's liveness. */
@@ -192,6 +194,8 @@ export type DaemonMethodResult = {
   daemonInstance?: string;
   /** With `releaseReason`: an idle-window release (#10832). */
   idle?: true;
+  /** With a `cli-idle-timeout` `releaseReason`: the session's CLI idle window (#16937). */
+  idleTimeoutMs?: number;
   /** With a typed refusal `code`: whether retrying the same request can succeed. */
   retryable?: boolean;
   /** Minimum backoff before retrying a transient refusal. */

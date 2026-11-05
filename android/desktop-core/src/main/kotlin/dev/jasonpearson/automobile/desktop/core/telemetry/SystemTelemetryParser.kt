@@ -9,6 +9,8 @@ import kotlinx.serialization.json.jsonObject
 internal fun TelemetryEventReader.parseLog(): TelemetryDisplayEvent {
   return TelemetryDisplayEvent.Log(
     timestamp = envelope.timestamp,
+    deviceId = envelope.deviceId,
+    deviceSessionUuid = envelope.deviceSessionUuid,
     level = d.primitiveOrNull("level")?.intOrNull ?: 4, // default INFO
     tag = d.stringOrDefault("tag", ""),
     message = d.stringOrDefault("message", ""),
@@ -34,6 +36,8 @@ internal fun TelemetryEventReader.parseCustom(): TelemetryDisplayEvent {
     } else ""
   return TelemetryDisplayEvent.Log(
     timestamp = envelope.timestamp,
+    deviceId = envelope.deviceId,
+    deviceSessionUuid = envelope.deviceSessionUuid,
     level = 4, // INFO
     tag = "CustomEvent",
     message = "$name$propsStr",
@@ -53,6 +57,8 @@ internal fun TelemetryEventReader.parseOs(): TelemetryDisplayEvent {
   }
   return TelemetryDisplayEvent.Os(
     timestamp = envelope.timestamp,
+    deviceId = envelope.deviceId,
+    deviceSessionUuid = envelope.deviceSessionUuid,
     category = d.stringOrDefault("category", "unknown"),
     kind = d.stringOrDefault("kind", "unknown"),
     details = details.ifEmpty { null },
@@ -81,6 +87,8 @@ internal fun TelemetryEventReader.parseCrash(): TelemetryDisplayEvent {
     }
   return TelemetryDisplayEvent.Failure(
     timestamp = envelope.timestamp,
+    deviceId = envelope.deviceId,
+    deviceSessionUuid = envelope.deviceSessionUuid,
     type = envelope.category,
     occurrenceId = d.stringOrDefault("occurrenceId", ""),
     severity = d.stringOrDefault("severity", "medium"),

@@ -12,7 +12,7 @@ import type {
 } from "../models/DeviceMatchCriteria";
 import { CTRL_PROXY_APK_MIN_SDK, parseAndroidApiLevelBound } from "./androidVersionBounds";
 import { defaultRandom, type Random } from "./Random";
-import { androidSystemImageTagsFor } from "../models/formFactor";
+import { androidSystemImageTagsFor, wearProfileScreenRound } from "../models/formFactor";
 
 export type DisplayInventoryClassification = "multi" | "single" | "unavailable";
 
@@ -241,6 +241,7 @@ export function matchesDeviceCriteria(
     screenHeight?: number;
     isRunning?: boolean;
     runtimeId?: string;
+    deviceType?: string;
   },
   criteria: DeviceMatchCriteria,
 ): boolean {
@@ -248,6 +249,7 @@ export function matchesDeviceCriteria(
     matchesPlatform(item, criteria) &&
     matchesPlayStore(item, criteria) &&
     matchesVehicleMotion(item, criteria) &&
+    matchesScreenRound(item, criteria) &&
     matchesVersionRange(item, criteria) &&
     matchesName(item, criteria) &&
     matchesFormFactor(item, criteria) &&
@@ -282,6 +284,15 @@ function matchesVehicleMotion(
   }
   const tag = item.runtimeId ? parseAndroidSystemImageRuntime(item.runtimeId)?.tag : undefined;
   return tag !== undefined && isMotionCapableAutomotiveTag(tag);
+}
+
+/**
+ * `requires.screenRound` holds only for a Wear profile whose id names that shape, booted or not, so
+ * a square request never reuses a round watch. A device whose profile is unknown cannot show it.
+ */
+function matchesScreenRound(item: { deviceType?: string }, criteria: DeviceMatchCriteria): boolean {
+  const wanted = criteria.requires?.screenRound;
+  return wanted === undefined || wearProfileScreenRound(item.deviceType) === wanted;
 }
 
 /** A car image whose `userdebug` build can simulate driving state: automotive and not Play Store. */
@@ -591,7 +602,8 @@ export class DefaultDeviceMatcher implements DeviceMatcher {
 /**
  * Requirements no new device can satisfy: display capabilities (unknown until a device exists),
  * `requires.playStore` off Android, where a created simulator would still not match (#14302), and
- * `requires.vehicle` outside an automotive Android request (#16742).
+ * `requires.vehicle` outside an automotive Android request (#16742), and `requires.screenRound`
+ * outside a Wear OS Android request.
  */
 export function assertCreatableRequirements(
   criteria: DeviceMatchCriteria,
@@ -606,6 +618,15 @@ export function assertCreatableRequirements(
     );
   }
   assertCreatableVehicleRequirement(criteria);
+  if (
+    criteria.requires?.screenRound !== undefined &&
+    (criteria.platform !== "android" || criteria.formFactor !== "watch")
+  ) {
+    throw new ActionableError(
+      "requires.screenRound applies to Wear OS emulators only: no device was created. " +
+        "Pass platform 'android' and formFactor 'watch', or remove requires.screenRound.",
+    );
+  }
 }
 
 function assertCreatableVehicleRequirement(criteria: DeviceMatchCriteria): void {

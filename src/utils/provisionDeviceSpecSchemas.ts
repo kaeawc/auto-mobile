@@ -41,6 +41,83 @@ const androidDeviceTypeSchema = z
   .string()
   .min(1)
   .describe("Android avdmanager device profile identifier");
+/**
+ * Where an Apple platform's exact identifiers are listed, and an example pair, so a refusal of a
+ * missing or malformed spec names what to pass instead of only the expected type (#17090).
+ */
+export interface AppleProvisionSpecGuidance {
+  /** The provisionDevice `platform` value. */
+  platform: string;
+  /** Where the caller reads the host's runtime and device-type identifiers. */
+  catalog: string;
+  example: { runtime: string; deviceType: string };
+}
+
+export const APPLE_PROVISION_SPEC_GUIDANCE = {
+  ios: {
+    platform: "ios",
+    catalog: "automobile:devices/images/ios",
+    example: {
+      runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-5",
+      deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
+    },
+  },
+  watchos: {
+    platform: "watchos",
+    catalog: "automobile:devices/images/watchos",
+    example: {
+      runtime: "com.apple.CoreSimulator.SimRuntime.watchOS-11-0",
+      deviceType: "com.apple.CoreSimulator.SimDeviceType.Apple-Watch-Series-10-46mm",
+    },
+  },
+  tvos: {
+    platform: "tvos",
+    catalog: "automobile:devices/images/tvos",
+    example: {
+      runtime: "com.apple.CoreSimulator.SimRuntime.tvOS-26-5",
+      deviceType: "com.apple.CoreSimulator.SimDeviceType.Apple-TV-4K-3rd-generation-4K",
+    },
+  },
+} as const satisfies Record<string, AppleProvisionSpecGuidance>;
+
+/** "runtime and deviceType ..., e.g. {...}; list them with ..." for an Apple spec refusal. */
+export function appleSpecShapeHint(guidance: AppleProvisionSpecGuidance): string {
+  return (
+    `pass spec { runtime, deviceType } with exact CoreSimulator identifiers, e.g. ` +
+    `${JSON.stringify(guidance.example)}; list the host's identifiers with ${guidance.catalog}`
+  );
+}
+
+/** Replace zod's "expected X, received undefined" for an omitted required value. */
+function whenMissing(message: string): (issue: { input?: unknown }) => string | undefined {
+  return (issue) => (issue.input === undefined ? message : undefined);
+}
+
+/** A required Apple spec field whose omission names the expected identifier and an example. */
+function appleSpecField(
+  field: "runtime" | "deviceType",
+  guidance: AppleProvisionSpecGuidance,
+  description: string,
+): z.ZodString {
+  return z
+    .string({
+      error: whenMissing(
+        `is required: a CoreSimulator ${field === "runtime" ? "runtime" : "device-type"} ` +
+          `identifier such as '${guidance.example[field]}'; list the host's identifiers with ` +
+          guidance.catalog,
+      ),
+    })
+    .min(1)
+    .describe(description);
+}
+
+/** The object-level error for an omitted Apple spec. */
+function appleSpecObjectError(guidance: AppleProvisionSpecGuidance) {
+  return {
+    error: whenMissing(`is required for ${guidance.platform}: ${appleSpecShapeHint(guidance)}`),
+  };
+}
+
 const iosRuntimeSchema = z.string().min(1).describe("CoreSimulator runtime identifier");
 const iosDeviceTypeSchema = z.string().min(1).describe("CoreSimulator device-type identifier");
 const displayCutoutSchema = z
@@ -100,9 +177,14 @@ function refineIosSpec(
     spec.deviceType !== undefined &&
     !spec.deviceType.startsWith(CORE_SIMULATOR_IDENTIFIER_PREFIX)
   ) {
+    const ios = APPLE_PROVISION_SPEC_GUIDANCE.ios;
     context.addIssue({
       code: "custom",
-      message: "iOS deviceType must be a CoreSimulator device-type identifier",
+      message:
+        `iOS deviceType must be a full CoreSimulator device-type identifier ` +
+        `(${CORE_SIMULATOR_IDENTIFIER_PREFIX}SimDeviceType.${spec.deviceType}, not ` +
+        `'${spec.deviceType}'), e.g. '${ios.example.deviceType}'; list the host's identifiers ` +
+        `with ${ios.catalog}`,
       path: ["deviceType"],
     });
   }
@@ -117,11 +199,22 @@ export const androidProvisionDeviceSpecFields = {
 };
 
 export const iosProvisionDeviceSpecSchema = z
-  .object({
-    runtime: iosRuntimeSchema,
-    deviceType: iosDeviceTypeSchema,
-    displayCutout: displayCutoutSchema,
-  })
+  .object(
+    {
+      runtime: appleSpecField(
+        "runtime",
+        APPLE_PROVISION_SPEC_GUIDANCE.ios,
+        "CoreSimulator runtime identifier",
+      ),
+      deviceType: appleSpecField(
+        "deviceType",
+        APPLE_PROVISION_SPEC_GUIDANCE.ios,
+        "CoreSimulator device-type identifier",
+      ),
+      displayCutout: displayCutoutSchema,
+    },
+    appleSpecObjectError(APPLE_PROVISION_SPEC_GUIDANCE.ios),
+  )
   .strict()
   .superRefine(refineIosSpec);
 
@@ -159,10 +252,21 @@ export const iosBindingSpecSchema = z
  * no cutout preference.
  */
 export const watchProvisionDeviceSpecSchema = z
-  .object({
-    runtime: z.string().min(1).describe("watchOS CoreSimulator runtime identifier"),
-    deviceType: z.string().min(1).describe("Apple Watch CoreSimulator device-type identifier"),
-  })
+  .object(
+    {
+      runtime: appleSpecField(
+        "runtime",
+        APPLE_PROVISION_SPEC_GUIDANCE.watchos,
+        "watchOS CoreSimulator runtime identifier",
+      ),
+      deviceType: appleSpecField(
+        "deviceType",
+        APPLE_PROVISION_SPEC_GUIDANCE.watchos,
+        "Apple Watch CoreSimulator device-type identifier",
+      ),
+    },
+    appleSpecObjectError(APPLE_PROVISION_SPEC_GUIDANCE.watchos),
+  )
   .strict();
 
 /** A broker binding's requested Apple Watch spec: exactly the provisionDevice watch spec. */
@@ -172,8 +276,27 @@ export type WatchBindingSpec = z.output<typeof watchBindingSpecSchema>;
 
 /** Exact identifiers from the host's Apple TV catalog. */
 export const appleTvProvisionDeviceSpecSchema = z
+  .object(
+    {
+      runtime: appleSpecField(
+        "runtime",
+        APPLE_PROVISION_SPEC_GUIDANCE.tvos,
+        "tvOS CoreSimulator runtime identifier",
+      ),
+      deviceType: appleSpecField(
+        "deviceType",
+        APPLE_PROVISION_SPEC_GUIDANCE.tvos,
+        "Apple TV CoreSimulator device-type identifier",
+      ),
+    },
+    appleSpecObjectError(APPLE_PROVISION_SPEC_GUIDANCE.tvos),
+  )
+  .strict();
+
+/** Exact identifiers from the host's Apple Vision Pro catalog. */
+export const appleVisionProvisionDeviceSpecSchema = z
   .object({
-    runtime: z.string().min(1).describe("tvOS CoreSimulator runtime identifier"),
-    deviceType: z.string().min(1).describe("Apple TV CoreSimulator device-type identifier"),
+    runtime: z.string().min(1).describe("visionOS CoreSimulator runtime identifier"),
+    deviceType: z.string().min(1).describe("Apple Vision Pro CoreSimulator device-type identifier"),
   })
   .strict();

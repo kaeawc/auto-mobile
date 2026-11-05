@@ -69,6 +69,8 @@ export async function evictTeardownManagers(
     (context.dependencies.watchRunnerLifecycleFactory ?? getWatchRunnerLifecycle)().stop(
       runtimeId ?? stableId,
     );
+  } else if (platform === "visionos") {
+    // Vision Pro lifecycle uses simctl only; there is no automation runner to stop.
   } else if (platform === "tvos") {
     (context.dependencies.tvosRunnerLifecycleFactory ?? getTvosRunnerLifecycle)().stop(
       runtimeId ?? stableId,

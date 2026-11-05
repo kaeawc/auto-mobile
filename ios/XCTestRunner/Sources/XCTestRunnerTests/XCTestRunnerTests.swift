@@ -451,6 +451,55 @@ final class XCTestRunnerTests: XCTestCase {
         })
     }
 
+    /// A plan step whose tool succeeded but whose `expectations` did not hold fails `executePlan`
+    /// (#16817). The reply is the real TypeScript executor's response, pinned by
+    /// test/server/executePlanToolResultsCapture.test.ts.
+    func testFailedExpectationFailsThePlanAndNamesWhatWasObserved() async throws {
+        let url = try XCTUnwrap(
+            Bundle.module.url(forResource: "execute-plan-failed-expectation", withExtension: "json")
+        )
+        let envelope = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
+        )
+        let content = try XCTUnwrap(envelope["content"] as? [[String: Any]])
+        let reply = try XCTUnwrap(content.first?["text"] as? String)
+        let mcpClient = FakeMCPClient()
+        mcpClient.queueRawResponse(reply)
+
+        let config = try AutoMobilePlanExecutor.Configuration(
+            transport: .streamableHttp(url: XCTUnwrap(URL(string: "http://localhost:9000/auto-mobile/streamable"))),
+            planPath: "counter-increments.yaml",
+            retryCount: 0,
+            timeoutSeconds: 5,
+            retryDelaySeconds: 0,
+            startStep: 0,
+            parameters: [:],
+            cleanup: nil,
+            planBundle: nil
+        )
+        let executor = AutoMobilePlanExecutor(
+            configuration: config,
+            planLoader: FakePlanLoader(content: "name: counter-increments\nsteps:\n  - tool: tapOn\n    text: Item"),
+            mcpClient: mcpClient,
+            timer: FakeTimer(),
+            logger: NullLogger(),
+            recoveryModelConfig: nil,
+            daemonEnsurer: HermeticDaemonEnsurer(),
+            deadlineScheduler: VirtualDeadlineScheduler()
+        )
+
+        await assertAsyncThrowsError({ try await executor.execute(testMetadata: nil) }, verify: { error in
+            let description = String(describing: error)
+            XCTAssertTrue(
+                description.contains(
+                    "Expectation 1/1 (textEquals testTag=\"counter\" text=\"1\") failed: not satisfied after 5000ms"
+                ),
+                description
+            )
+            XCTAssertTrue(description.contains("observed texts: \"Count: 0\""), description)
+        })
+    }
+
     func testDaemonStartupResultReadyIsTheOnlyReadyCase() {
         XCTAssertTrue(DaemonStartupResult.ready.isReady)
         for result: DaemonStartupResult in [
@@ -721,6 +770,10 @@ private final class FakeMCPClient: AutoMobileMCPClient, @unchecked Sendable {
         }
         let data = try? JSONSerialization.data(withJSONObject: payload, options: [])
         let text = String(data: data ?? Data(), encoding: .utf8) ?? "{}"
+        queuedResults.append(.success(MCPToolResponse(text: text)))
+    }
+
+    func queueRawResponse(_ text: String) {
         queuedResults.append(.success(MCPToolResponse(text: text)))
     }
 

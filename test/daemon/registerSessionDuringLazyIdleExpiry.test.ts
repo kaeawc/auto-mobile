@@ -379,6 +379,8 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
         ...bareNotFound,
         releaseReason: "cli-idle-timeout",
         idle: true,
+        // The CLI session's own idle window, before and after the fence (#16937).
+        idleTimeoutMs: IDLE_MS,
       } satisfies DaemonMethodResult;
       expect(await manager.getReleasedSessionReason(SESSION)).toBe("cli-idle-timeout");
       expect(await heartbeat()).toEqual(released);

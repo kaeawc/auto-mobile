@@ -21,11 +21,11 @@ function fingerprint(schema: z.ZodType): string {
 
 describe("device tool schemas", () => {
   test.each([
-    ["listDeviceImagesSchema", listDeviceImagesSchema, "82e3009fc71448de"],
-    ["listDevicesSchema", listDevicesSchema, "599853357f687c5f"],
+    ["listDeviceImagesSchema", listDeviceImagesSchema, "2e53503895b7d8fd"],
+    ["listDevicesSchema", listDevicesSchema, "925bd8b2750d047f"],
     ["listDevicesOutputSchema", listDevicesOutputSchema, "17cce0493f18f8c2"],
-    ["killDeviceSchema", killDeviceSchema, "496e3b3b4185e167"],
-    ["teardownDeviceSchema", teardownDeviceSchema, "6339d8cad2d9749c"],
+    ["killDeviceSchema", killDeviceSchema, "38ea51a687408052"],
+    ["teardownDeviceSchema", teardownDeviceSchema, "66eef42ef74e612b"],
   ])("%s keeps its JSON schema", (_name, schema, expected) => {
     expect(fingerprint(schema)).toBe(expected);
   });

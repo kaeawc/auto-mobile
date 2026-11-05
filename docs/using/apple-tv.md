@@ -69,6 +69,8 @@ runtime and device type identifiers from `automobile:devices/images/tvos`:
 - An exact match is adopted; otherwise a simulator is created. Creation must be allowed; see
   `AUTOMOBILE_ALLOW_DEVICE_CREATE` in [Environment variables](environment-variables.md).
 - A name clash, a `deviceId` that names no Apple TV, or an incompatible runtime and model is refused.
+  A missing `spec` or field, or an identifier the host does not list, is refused with an example
+  and the accepted identifiers; a short form such as `Apple-TV-4K-3rd-generation-4K` names the full one.
 - With `boot` (the default) the simulator boots and a session binds at readiness `booted`. A
   simulator the call created is deleted again if booting or binding fails; if that deletion fails,
   the error says so and tells you to delete it with `deleteDevice`.

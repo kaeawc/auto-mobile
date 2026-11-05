@@ -325,10 +325,10 @@ internal class ObservationStreamClientTest : ObservationStreamClientFixture() {
     val factory = RecordingTransportFactory(blocking = true)
     val client =
       ObservationStreamClient(
-        transportFactory = factory,
-        socketPathProvider = { tempSocket.toString() },
-        lifecycleOnly = true,
-      )
+          transportFactory = factory,
+          socketPathProvider = { tempSocket.toString() },
+        )
+        .apply { lifecycleOnly = true }
     try {
       client.connect("emulator-5554", "epoch-a")
       val transport = factory.opened.single()

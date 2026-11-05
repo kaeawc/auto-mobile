@@ -87,4 +87,4 @@ internal fun WorkspaceShellDeviceLifecycle(
 fun createWorkspaceLifecycleObservationClient(
   sessionUuidProvider: () -> String?,
 ): ObservationStream =
-  ObservationStreamClient(sessionUuidProvider = sessionUuidProvider, lifecycleOnly = true)
+  ObservationStreamClient(sessionUuidProvider = sessionUuidProvider).apply { lifecycleOnly = true }

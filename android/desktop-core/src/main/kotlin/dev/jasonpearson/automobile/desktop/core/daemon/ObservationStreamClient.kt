@@ -98,13 +98,14 @@ class ObservationStreamClient(
   internal val beforeStorageRequestSend: () -> Unit = {},
   internal val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher =
     kotlinx.coroutines.Dispatchers.IO,
+) : ObservationStream {
   /**
    * Subscribe for device lifecycle frames only (#17061): the daemon sends this subscription its
    * epoch's `device_session_started`/`device_session_ended` frames and nothing else, and does not
-   * count it when deciding whether, or how fast, to poll the device.
+   * count it when deciding whether, or how fast, to poll the device. Set before [connect].
    */
-  internal val lifecycleOnly: Boolean = false,
-) : ObservationStream {
+  internal var lifecycleOnly: Boolean = false
+
   // Where the blocking readLine() parks: a dedicated thread per connection rather than a shared
   // Dispatchers.IO slot, so dozens of open streams cannot exhaust that pool (#5262). Test seam.
   internal var readerThreads: StreamReaderDispatcherFactory = DedicatedStreamReaderThreads

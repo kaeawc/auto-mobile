@@ -65,6 +65,7 @@ class WorkspaceDeviceLifecycleTest {
         state = state,
         options =
           WorkspaceShellOptions(
+            onOpenPicker = {},
             onDeviceSessionSuperseded = h.forwarder::onSuperseded,
             onDeviceSessionEnded = h.forwarder::onEnded,
             lifecycleStreamFactory = { FakeObservationStream().also { h.streams.add(it) } },
@@ -152,7 +153,7 @@ class WorkspaceDeviceLifecycleTest {
     h.vm.onAction(WorkspaceAction.ObserveDevice(phoneB))
     setContent {
       val state by h.vm.state.collectAsState()
-      WorkspaceShellDeviceLifecycle(state, WorkspaceShellOptions())
+      WorkspaceShellDeviceLifecycle(state, WorkspaceShellOptions(onOpenPicker = {}))
     }
     waitForIdle()
     assertTrue(h.streams.isEmpty())

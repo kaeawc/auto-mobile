@@ -1,3 +1,22 @@
+import {
+  ALIGN_ITEMS,
+  ARIA_LABEL,
+  BACKGROUND_COLOR,
+  BORDER_BOX,
+  BORDER_RADIUS,
+  BOX_SIZING,
+  CENTER,
+  COLUMN,
+  FLEX,
+  FLEX_DIRECTION,
+  FLEX_SHRINK,
+  INLINE_FLEX,
+  JUSTIFY_CONTENT,
+  MAX_HEIGHT,
+  MIN_HEIGHT,
+  MIN_WIDTH,
+  WHITE_SPACE,
+} from "./webCss";
 import { record, type Raw } from "../prototypeTemplate";
 import { el, type WebChild, type WebElement } from "./webNodes";
 import type { NodeRenderer, WebRenderKit, WebRenderScope } from "./webRender";
@@ -79,20 +98,20 @@ function inputChrome(node: Raw, error: boolean, scope: WebRenderScope): Css {
   if (!drawsChrome(node)) {
     return {
       padding: "6px 7px",
-      "border-radius": "5px",
+      [BORDER_RADIUS]: "5px",
       border: `0.5px solid ${separator(scope)}`,
-      "background-color": system(scope, "rgba(255,255,255,1)", "rgba(0,0,0,1)"),
+      [BACKGROUND_COLOR]: system(scope, "rgba(255,255,255,1)", "rgba(0,0,0,1)"),
     };
   }
   const stroke = error ? systemRed(scope) : iosRole("outline", separator(scope), scope);
   if (node.variant === "outlined") {
-    return { padding: "12px", "border-radius": "4px", border: `1px solid ${stroke}` };
+    return { padding: "12px", [BORDER_RADIUS]: "4px", border: `1px solid ${stroke}` };
   }
   return {
     padding: "12px",
-    "border-radius": "4px 4px 0 0",
+    [BORDER_RADIUS]: "4px 4px 0 0",
     "border-bottom": `1px solid ${stroke}`,
-    "background-color": iosRole("surfaceContainerHighest", "rgba(120,120,128,0.2)", scope),
+    [BACKGROUND_COLOR]: iosRole("surfaceContainerHighest", "rgba(120,120,128,0.2)", scope),
   };
 }
 
@@ -103,8 +122,8 @@ function inputChrome(node: Raw, error: boolean, scope: WebRenderScope): Css {
 function lineBounds(node: Raw): Css {
   if (node.multiline !== true) {
     return {
-      "min-height": "22px",
-      "white-space": "nowrap",
+      [MIN_HEIGHT]: "22px",
+      [WHITE_SPACE]: "nowrap",
       overflow: "hidden",
       "text-overflow": "ellipsis",
     };
@@ -112,9 +131,9 @@ function lineBounds(node: Raw): Css {
   const lines = typeof node.minLines === "number" ? Math.max(node.minLines, 1) : 1;
   const max: Css =
     typeof node.maxLines === "number"
-      ? { "max-height": `${node.maxLines * 22}px`, overflow: "hidden" }
+      ? { [MAX_HEIGHT]: `${node.maxLines * 22}px`, overflow: "hidden" }
       : {};
-  return { "white-space": "pre-wrap", "min-height": `${lines * 22}px`, ...max };
+  return { [WHITE_SPACE]: "pre-wrap", [MIN_HEIGHT]: `${lines * 22}px`, ...max };
 }
 
 function input(node: Raw, text: IosFieldText, error: boolean, scope: WebRenderScope): WebElement {
@@ -124,15 +143,15 @@ function input(node: Raw, text: IosFieldText, error: boolean, scope: WebRenderSc
     {
       attrs: { role: "textbox", ...(error ? { "aria-invalid": "true" } : {}) },
       style: {
-        display: "flex",
-        "box-sizing": "border-box",
+        display: FLEX,
+        [BOX_SIZING]: BORDER_BOX,
         ...iosText("body", scope),
         ...inputChrome(node, error, scope),
         ...(text.empty ? { color: placeholder } : {}),
       },
     },
     [
-      el("span", { style: { flex: "1 1 auto", "min-width": "0", ...lineBounds(node) } }, [
+      el("span", { style: { flex: "1 1 auto", [MIN_WIDTH]: "0", ...lineBounds(node) } }, [
         text.shown,
       ]),
     ],
@@ -140,7 +159,7 @@ function input(node: Raw, text: IosFieldText, error: boolean, scope: WebRenderSc
 }
 
 function captionRow(scope: WebRenderScope): Css {
-  return { display: "flex", gap: "8px", ...iosText("caption", scope) };
+  return { display: FLEX, gap: "8px", ...iosText("caption", scope) };
 }
 
 /**
@@ -197,15 +216,15 @@ function fieldIcon(slot: unknown, scope: WebRenderScope, kit: WebRenderKit): Web
     return [];
   }
   const button = Array.isArray(entry.onTap) && entry.onTap.length > 0;
-  const size: Css = button ? { width: "48px", height: "48px", "justify-content": "center" } : {};
+  const size: Css = button ? { width: "48px", height: "48px", [JUSTIFY_CONTENT]: CENTER } : {};
   const label: Css =
-    typeof entry.label === "string" ? { "aria-label": kit.bound(entry.label, scope) } : {};
+    typeof entry.label === "string" ? { [ARIA_LABEL]: kit.bound(entry.label, scope) } : {};
   return [
     el(
       "span",
       {
         attrs: button ? { role: "button", ...label } : {},
-        style: { display: "inline-flex", "align-items": "center", "flex-shrink": "0", ...size },
+        style: { display: INLINE_FLEX, [ALIGN_ITEMS]: CENTER, [FLEX_SHRINK]: "0", ...size },
       },
       [glyph(entry.icon, scope, kit)],
     ),
@@ -245,8 +264,8 @@ export const iosTextFieldRenderer =
     const error = kit.fieldErrored(node, scope);
     const disabled = kit.disabledState(node, scope);
     const { attrs, style } = kit.base(node, scope, {
-      display: "flex",
-      "flex-direction": "column",
+      display: FLEX,
+      [FLEX_DIRECTION]: COLUMN,
       gap: "4px",
       ...disabled.css,
     });
@@ -257,14 +276,14 @@ export const iosTextFieldRenderer =
       leading.length + trailing.length === 0
         ? field
         : [
-            el("div", { style: { display: "flex", "align-items": "center", gap: "4px" } }, [
+            el("div", { style: { display: FLEX, [ALIGN_ITEMS]: CENTER, gap: "4px" } }, [
               ...leading,
               el(
                 "div",
                 {
                   style: {
-                    display: "flex",
-                    "flex-direction": "column",
+                    display: FLEX,
+                    [FLEX_DIRECTION]: COLUMN,
                     gap: "4px",
                     flex: "1 1 auto",
                   },

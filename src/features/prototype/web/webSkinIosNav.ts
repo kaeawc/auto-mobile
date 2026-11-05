@@ -1,3 +1,24 @@
+import {
+  ALIGN_ITEMS,
+  ARIA_SELECTED,
+  BACKGROUND_COLOR,
+  BORDER_BOX,
+  BORDER_RADIUS,
+  BOX_SIZING,
+  CENTER,
+  COLUMN,
+  DATA_PART,
+  FLEX,
+  FLEX_DIRECTION,
+  JUSTIFY_CONTENT,
+  MAX_WIDTH,
+  MIN_HEIGHT,
+  MIN_WIDTH,
+  PADDING_BOTTOM,
+  PADDING_INLINE,
+  PADDING_TOP,
+  WHITE_SPACE,
+} from "./webCss";
 import type { Raw } from "../prototypeTemplate";
 import {
   barBase,
@@ -27,7 +48,7 @@ function navForeground(selected: boolean, scope: WebRenderScope): string {
 /** The selected item's capsule: `secondaryContainer`, else none. */
 function indicator(selected: boolean, scope: WebRenderScope): Css {
   return selected
-    ? { "background-color": iosRole("secondaryContainer", "transparent", scope) }
+    ? { [BACKGROUND_COLOR]: iosRole("secondaryContainer", "transparent", scope) }
     : {};
 }
 
@@ -39,14 +60,14 @@ function bottomNavItem(item: NavItem, selected: boolean, scope: WebRenderScope, 
   const pill = el(
     "span",
     {
-      attrs: { "data-part": "indicator" },
+      attrs: { [DATA_PART]: "indicator" },
       style: {
-        display: "flex",
-        "align-items": "center",
-        "justify-content": "center",
+        display: FLEX,
+        [ALIGN_ITEMS]: CENTER,
+        [JUSTIFY_CONTENT]: CENTER,
         width: "64px",
         height: "32px",
-        "border-radius": "16px",
+        [BORDER_RADIUS]: "16px",
         ...indicator(selected, scope),
       },
     },
@@ -57,10 +78,10 @@ function bottomNavItem(item: NavItem, selected: boolean, scope: WebRenderScope, 
     {
       style: {
         ...iosText("caption", scope, selected ? 600 : 500),
-        "white-space": "nowrap",
+        [WHITE_SPACE]: "nowrap",
         overflow: "hidden",
         "text-overflow": "ellipsis",
-        "max-width": "100%",
+        [MAX_WIDTH]: "100%",
       },
     },
     [item.label],
@@ -68,16 +89,16 @@ function bottomNavItem(item: NavItem, selected: boolean, scope: WebRenderScope, 
   return el(
     "div",
     {
-      attrs: { role: "tab", "aria-selected": String(selected) },
+      attrs: { role: "tab", [ARIA_SELECTED]: String(selected) },
       style: {
-        display: "flex",
-        "flex-direction": "column",
-        "align-items": "center",
-        "justify-content": "center",
+        display: FLEX,
+        [FLEX_DIRECTION]: COLUMN,
+        [ALIGN_ITEMS]: CENTER,
+        [JUSTIFY_CONTENT]: CENTER,
         gap: "4px",
         flex: "1 1 0",
-        "min-width": "0",
-        "min-height": "64px",
+        [MIN_WIDTH]: "0",
+        [MIN_HEIGHT]: "64px",
         color: navForeground(selected, scope),
       },
     },
@@ -97,13 +118,13 @@ export const iosBottomNavRenderer =
     const selected = navSelection(node, items.length, scope, kit);
     const dark = scope.style.mode === "dark";
     const { attrs, style: barStyle } = barBase(node, scope, kit, {
-      "min-height": "80px",
+      [MIN_HEIGHT]: "80px",
       gap: "8px",
-      "padding-inline": "8px",
-      "padding-top": "12px",
-      "padding-bottom": "4px",
-      "box-sizing": "border-box",
-      "background-color": iosRole(
+      [PADDING_INLINE]: "8px",
+      [PADDING_TOP]: "12px",
+      [PADDING_BOTTOM]: "4px",
+      [BOX_SIZING]: BORDER_BOX,
+      [BACKGROUND_COLOR]: iosRole(
         "surfaceContainer",
         dark ? "rgba(28,28,30,1)" : "rgba(242,242,247,1)",
         scope,
@@ -129,17 +150,17 @@ function tab(item: NavItem, selected: boolean, { minHeight, scope, kit }: TabLay
   return el(
     "div",
     {
-      attrs: { role: "tab", "aria-selected": String(selected) },
+      attrs: { role: "tab", [ARIA_SELECTED]: String(selected) },
       style: {
-        display: "flex",
-        "flex-direction": "column",
-        "align-items": "center",
-        "justify-content": "center",
+        display: FLEX,
+        [FLEX_DIRECTION]: COLUMN,
+        [ALIGN_ITEMS]: CENTER,
+        [JUSTIFY_CONTENT]: CENTER,
         gap: "2px",
         flex: "1 1 0",
-        "min-width": "0",
-        "min-height": minHeight,
-        "border-radius": "9999px",
+        [MIN_WIDTH]: "0",
+        [MIN_HEIGHT]: minHeight,
+        [BORDER_RADIUS]: "9999px",
         ...iosText("caption", scope),
         color: navForeground(selected, scope),
         ...indicator(selected, scope),

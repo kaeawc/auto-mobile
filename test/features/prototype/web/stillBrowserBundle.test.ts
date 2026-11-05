@@ -3,9 +3,10 @@ import { builtinModules } from "node:module";
 import { fileURLToPath } from "node:url";
 
 /** Budgets from docs/design-docs/prototype-web-library.md for the core entry. */
-// The badge/progress/fab/flow/list/chart/adaptive/swipe component set accounts for the growth past 120 KB / 40 KB.
-const MAX_MINIFIED_BYTES = 136_000;
-const MAX_GZIP_BYTES = 46_000;
+// The badge/progress/fab/flow/list/chart/adaptive/swipe component set accounts for the growth past
+// 120 KB / 40 KB, and the iOS skin's textField, bottomNav, tabBar and sheet for that past 136 KB / 46 KB.
+const MAX_MINIFIED_BYTES = 142_000;
+const MAX_GZIP_BYTES = 47_000;
 
 /** Server-only modules the renderer once reached; any of them back in the closure is a regression. */
 const FORBIDDEN_INPUTS = [

@@ -189,7 +189,11 @@ async function destroyUnderLease(
     deadlineMs,
     signal,
     steps,
-  }: { deadlineMs: number; signal: AbortSignal; steps: Pick<AppleVisionDeleteSteps, "assertCaller"> },
+  }: {
+    deadlineMs: number;
+    signal: AbortSignal;
+    steps: Pick<AppleVisionDeleteSteps, "assertCaller">;
+  },
 ): Promise<void> {
   const deps = getDeviceToolsDependencies();
   const lease = await deps.lifecycleCoordinator.reserve(

@@ -4,6 +4,7 @@ import {
   type AcquisitionReceipt,
 } from "../../src/daemon/acquisitionReceipt";
 import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
+import { holderOf } from "../../src/daemon/deviceBinding";
 import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { startDeviceOutputSchema } from "../../src/server/toolOutputSchemas";
 import { provisionAppleVisionDevice } from "../../src/server/deviceToolsAppleVisionProvision";
@@ -42,6 +43,8 @@ import {
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import type { AppleDevice } from "../../src/utils/ios-cmdline-tools/SimCtlSupport";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
+import { DeviceOwnedByOtherDaemonError } from "../../src/models/deviceAcquisitionRefusals";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
@@ -60,6 +63,22 @@ const NAME = "AutoMobile Vision";
 const SPEC = { deviceType: VISION_DEVICE_TYPE.identifier, runtime: VISION_RUNTIME_ID };
 const headset = { platform: "visionos", name: NAME, spec: SPEC };
 const sessionSchema = z.object({ sessionId: z.string() });
+
+/** Another daemon's Vision claims: `claimed` decides, per read, which UDIDs it holds. */
+class FakeVisionClaims implements ForeignDeviceOwnership {
+  readonly reads: string[] = [];
+  constructor(private readonly claimed: (udid: string) => boolean) {}
+  async refresh(ids: readonly string[]): Promise<void> {
+    this.reads.push(...ids);
+  }
+  foreignOwnerPid(udid: string): number | undefined {
+    return this.claimed(udid) ? 4242 : undefined;
+  }
+  async claim(): Promise<boolean> {
+    return true;
+  }
+  release(): void {}
+}
 
 describe("provisionDevice on an Apple Vision Pro simulator", () => {
   const env: Record<string, string | undefined> = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "0" };
@@ -85,7 +104,12 @@ describe("provisionDevice on an Apple Vision Pro simulator", () => {
     {
       autolock = "0",
       admission,
-    }: { autolock?: "0" | "1"; admission?: AppleVisionBootAdmission } = {},
+      ownership,
+    }: {
+      autolock?: "0" | "1";
+      admission?: AppleVisionBootAdmission;
+      ownership?: ForeignDeviceOwnership;
+    } = {},
   ) {
     env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = autolock;
     restoreEnv = ToolRegistry.setPipelineOverridesForTesting({ env });
@@ -114,6 +138,7 @@ describe("provisionDevice on an Apple Vision Pro simulator", () => {
         env,
         timer,
         deviceManager: deviceUtils,
+        ...(ownership ? { visionForeignDeviceOwnership: ownership } : {}),
       }),
     );
     await pool.initializeWithDevices(await deviceUtils.getBootedDevices("visionos"));
@@ -855,6 +880,140 @@ describe("provisionDevice on an Apple Vision Pro simulator", () => {
     expect(String(error)).toContain("CoreSimulator timed out");
     expect(simctl.commands.some((command) => command.startsWith("delete"))).toBe(false);
   });
+
+  test("startDevice refuses a headset another daemon claims before booting it", async () => {
+    const existing = visionDevice({ name: NAME });
+    const claims = new FakeVisionClaims((udid) => udid === existing.udid);
+    const { simctl, sessions } = await arrange([existing], { ownership: claims });
+
+    const error = await failure(
+      call("startDevice", {
+        platform: "visionos",
+        deviceId: existing.udid,
+        __mcpSessionId: "client-a",
+      }),
+    );
+
+    expect(error).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
+    expect(claims.reads).toContain(existing.udid);
+    expect(simctl.commands).toEqual([]);
+    expect(sessions.getAllSessions()).toEqual([]);
+  });
+
+  test("provisionDevice refuses to boot an adopted headset another daemon claims", async () => {
+    const existing = visionDevice({ name: NAME });
+    const { simctl } = await arrange([existing], {
+      ownership: new FakeVisionClaims((udid) => udid === existing.udid),
+    });
+
+    const error = await failure(provision({ device: headset }));
+
+    expect(String(error)).toContain("another AutoMobile");
+    expect(simctl.commands).toEqual([]);
+  });
+
+  test("a created headset another daemon claimed after a failed boot is left in place", async () => {
+    let simctlRef: FakeAppleVisionProvisionSimctl | undefined;
+    const { simctl } = await arrange([], {
+      // The peer claims the new headset only once this call has tried to boot it.
+      ownership: new FakeVisionClaims(
+        () => simctlRef?.commands.some((command) => command.startsWith("boot ")) === true,
+      ),
+    });
+    simctlRef = simctl;
+    simctl.bootError = new Error("Unable to boot: CoreSimulator timed out");
+
+    const error = await failure(provision({ device: headset }));
+
+    expect(String(error)).toContain("delete it with deleteDevice");
+    expect(simctl.commands.map((command) => command.split(" ")[0])).toEqual(["create", "boot"]);
+    expect(Object.values(simctl.listing.devices).flat()).toHaveLength(1);
+  });
+
+  test("startDevice cancelled between boot and bind stops the headset it cold-booted", async () => {
+    const existing = visionDevice({ name: NAME });
+    const { simctl, sessions, pool } = await arrange([existing]);
+    const request = new AbortController();
+    const boot = simctl.waitForSimulatorReady.bind(simctl);
+    simctl.waitForSimulatorReady = async (udid, timeoutMs) => {
+      const booted = await boot(udid, timeoutMs);
+      request.abort(new Error("client cancelled"));
+      return booted;
+    };
+
+    const error = await failure(
+      call(
+        "startDevice",
+        { platform: "visionos", deviceId: existing.udid, __mcpSessionId: "client-a" },
+        undefined,
+        request.signal,
+      ),
+    );
+
+    expect(error).toBeDefined();
+    expect(simctl.commands).toEqual([`boot ${existing.udid} 360000`, `shutdown ${existing.udid}`]);
+    expect(sessions.getAllSessions()).toEqual([]);
+    expect(holderOf(pool.getDevice(existing.udid)) ?? null).toBeNull();
+  });
+
+  for (const state of ["Shutdown", "Booted"] as const) {
+    test(`a failed bind stops only a headset this call cold-booted (${state})`, async () => {
+      const existing = visionDevice({ name: NAME, state });
+      const { simctl } = await arrange([existing]);
+
+      const error = await failure(
+        provisionVisionDirect({ __mcpSessionId: "client-a", device: headset }, async () => {
+          throw new Error("session bind failed");
+        }),
+      );
+
+      expect(String(error)).toContain("session bind failed");
+      expect(simctl.commands).toEqual(
+        state === "Shutdown" ? [`boot ${existing.udid} 480000`, `shutdown ${existing.udid}`] : [],
+      );
+      expect(Object.values(simctl.listing.devices).flat()).toHaveLength(1);
+    });
+  }
+
+  test("a boot refused for capacity is refused before simctl create", async () => {
+    const { simctl } = await arrange();
+    const checked: string[] = [];
+    setDeviceToolsDependencies({
+      checkBootCapacity: async (platform) => {
+        checked.push(platform);
+        throw new ActionableError("simulator boot capacity exhausted");
+      },
+    });
+
+    const error = await failure(provision({ device: headset }));
+
+    expect(String(error)).toContain("simulator boot capacity exhausted");
+    expect(checked).toEqual(["visionos"]);
+    expect(simctl.commands).toEqual([]);
+  });
+
+  for (const scenario of ["boot false", "adopt"] as const) {
+    test(`no pre-create capacity check runs when nothing would be created and booted (${scenario})`, async () => {
+      const { simctl } = await arrange(
+        scenario === "adopt" ? [visionDevice({ name: NAME, state: "Booted" })] : [],
+      );
+      const checked: string[] = [];
+      setDeviceToolsDependencies({
+        checkBootCapacity: async (platform) => {
+          checked.push(platform);
+          throw new ActionableError("simulator boot capacity exhausted");
+        },
+      });
+
+      const result = toolJson(
+        await provision({ device: headset, ...(scenario === "boot false" ? { boot: false } : {}) }),
+      );
+
+      expect(checked).toEqual([]);
+      expect(result).toMatchObject({ created: scenario === "boot false" });
+      expect(simctl.commands.filter((command) => command.startsWith("boot "))).toEqual([]);
+    });
+  }
 
   test("Android and iOS keep their readiness default; the registered schema gives a headset none", () => {
     const ios = provisionDeviceSchema.parse({

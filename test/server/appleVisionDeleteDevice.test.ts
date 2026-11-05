@@ -439,7 +439,13 @@ describe("deleteDevice on an Apple Vision Pro simulator", () => {
     const neverSettles = Promise.withResolvers<void>();
 
     const result = await deleteAppleVisionDevice(
-      { ...target(headset.udid), mode: "destroy", verifyAbsence: true, force: false, timeoutMs: 10 },
+      {
+        target: { platform: "visionos", isVirtual: true, stableId: headset.udid },
+        mode: "destroy",
+        verifyAbsence: true,
+        force: false,
+        timeoutMs: 10,
+      },
       {
         assertCaller: async () => {
           timer.advanceTime(50);
@@ -460,12 +466,19 @@ describe("deleteDevice on an Apple Vision Pro simulator", () => {
   test("a peer daemon claim published before the teardown lease stops the delete", async () => {
     const headset = visionDevice({ name: NAME });
     const { simctl } = await arrange([headset]);
-    const refusal = new ActionableError("deleteDevice: another AutoMobile daemon holds this headset");
+    const refusal = new ActionableError(
+      "deleteDevice: another AutoMobile daemon holds this headset",
+    );
     let checks = 0;
 
     const error = await failure(
       deleteAppleVisionDevice(
-        { ...target(headset.udid), mode: "destroy", verifyAbsence: true, force: false },
+        {
+          target: { platform: "visionos", isVirtual: true, stableId: headset.udid },
+          mode: "destroy",
+          verifyAbsence: true,
+          force: false,
+        },
         {
           assertCaller: async () => {
             checks += 1;

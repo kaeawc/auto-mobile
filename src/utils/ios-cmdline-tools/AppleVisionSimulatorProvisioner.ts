@@ -29,6 +29,11 @@ export interface AppleVisionProvisionRequest {
 export interface AppleVisionProvisionOptions {
   /** The device creation gate's verdict; a headset that does not exist is created only when true. */
   allowCreate: boolean;
+  /**
+   * Refuses the create when the boot that follows would be refused for capacity, so a headset is
+   * never created only to be deleted again. Adopting an existing headset never runs it.
+   */
+  assertCapacityBeforeCreate?: (signal?: AbortSignal) => Promise<void>;
   /** Runs immediately before `simctl create`, after every check passed. */
   onBeforeCreate?: () => void;
   /** Lifecycle-fenced cleanup when the listing cannot confirm the newly created headset. */
@@ -86,6 +91,8 @@ export class AppleVisionSimulatorProvisioner {
         `Device creation is disabled; cannot provision exact visionos device '${request.name}'.`,
       );
     }
+    options.signal?.throwIfAborted();
+    await options.assertCapacityBeforeCreate?.(options.signal);
     options.signal?.throwIfAborted();
     options.onBeforeCreate?.();
     return { headset: await this.create(request, options), created: true };

@@ -10,12 +10,7 @@ import { DEFAULT_START_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { describeDevice, projectBootedDevice } from "../daemon/deviceDescription";
 import { runWithAcquisitionDeadline } from "./deviceToolsAcquisition";
-import { bindBootedSimulatorSession } from "./deviceToolsSimulatorSession";
-import {
-  assertVisionUnclaimed,
-  defaultAppleVisionBoot,
-  reusableVisionSessionId,
-} from "./deviceToolsAppleVisionProvision";
+import { bootAndBindHeadset } from "./deviceToolsAppleVisionProvision";
 import type { BindBootedSession } from "./deviceToolsWatchOs";
 import { stripInternalToolParams } from "./internalToolParams";
 import { z } from "zod/v4";
@@ -86,25 +81,12 @@ export async function startAppleVisionDevice(
                 "Apple Vision Pro simulator identity changed; retry with deviceId",
               );
             }
-            const reusableSessionId = reusableVisionSessionId(headset.deviceId, deps);
-            assertVisionUnclaimed(headset.deviceId, deps, lease, reusableSessionId);
-            lifecycleSignal.throwIfAborted();
-            stage.current = "booting the Apple Vision Pro simulator";
-            const boot = await (
-              deps.appleVisionSimulatorBootFactory ?? defaultAppleVisionBoot
-            )().boot(fresh, {
-              timeoutMs: Math.max(1, deadlineMs - deps.timer.now()),
-              signal: lifecycleSignal,
-            });
-            lifecycleSignal.throwIfAborted();
-            stage.current = "binding the device session";
-            const sessionId = await bindBootedSimulatorSession(
-              { device: fresh, boot, rawArgs, operation: "startDevice" },
-              bindSession,
-              deps.timer,
-              { deadlineMs, signal: lifecycleSignal },
+            const { boot, sessionId } = await bootAndBindHeadset(
+              { headset: fresh, rawArgs, lease, bindSession, operation: "startDevice" },
+              deps,
+              deadlineMs,
+              { signal: lifecycleSignal, stage },
             );
-            lifecycleSignal.throwIfAborted();
             return createStructuredToolResponse({
               message: `visionos '${boot.device.name}' is booted`,
               ...projectBootedDevice(

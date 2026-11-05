@@ -17,6 +17,11 @@ internal class ObservationMuxStorage(
   private val wire: ObservationMuxWire,
   private val log: Logger,
 ) {
+  // Orders storage commands on the wire: held from deciding a command to writing it, and around a
+  // released device's owed unsubscribes, so a subscribe decided before a release cannot reach the
+  // socket after that release's unsubscribe (#17117). Taken before [ObservationMuxTable.lock].
+  private val writeOrder = Any()
+
   fun subscribe(channel: MuxObservationChannel, key: StorageSubscriptionKey) {
     if (synchronized(table.lock) { channel.storage.want(key) }) drive(channel, key)
   }
@@ -48,16 +53,25 @@ internal class ObservationMuxStorage(
     return owed
   }
 
+  /** Write the `unsubscribe_storage` commands a released device owes, after any decided command. */
+  fun writeOwed(open: TelemetrySocket, owed: List<StreamRequest>) {
+    if (owed.isEmpty()) return
+    synchronized(writeOrder) { owed.forEach { wire.write(open, it) } }
+  }
+
   /** Record a storage command's answer; false when [id] is not a storage command. */
   fun resolve(id: String, success: Boolean, error: String?): Boolean {
-    val (channel, resolution) =
+    val (channel, resolution, connection) =
       synchronized(table.lock) {
         val channel = table.storageRequests.take(id) ?: return false
-        channel to channel.storage.resolve(id, success)
+        Triple(channel, channel.storage.resolve(id, success), channel.storage.connection)
       }
     val command = resolution?.command ?: return true
     channel.flows.storageResponses.trySend(
-      StorageSubscriptionResponse(id, command.key, command.subscribe, success, error),
+      StampedStorageResponse(
+        connection,
+        StorageSubscriptionResponse(id, command.key, command.subscribe, success, error),
+      ),
     )
     if (resolution.redrive) drive(channel, command.key)
     return true
@@ -81,6 +95,11 @@ internal class ObservationMuxStorage(
 
   /** Send the one command that moves [key]'s daemon-side observer toward [channel]'s intent. */
   private fun drive(channel: MuxObservationChannel, key: StorageSubscriptionKey) {
+    synchronized(writeOrder) { driveInOrder(channel, key) }
+  }
+
+  // Called holding [writeOrder].
+  private fun driveInOrder(channel: MuxObservationChannel, key: StorageSubscriptionKey) {
     val step =
       synchronized(table.lock) {
         if (!channel.live || !channel.isConnected()) return
@@ -105,6 +124,9 @@ internal class ObservationMuxStorage(
       channel.storage.sent(command, sent)
       if (!sent) table.storageRequests.take(command.requestId)
     }
+    // The key stays desired, and nothing would drive it again while the socket stays open: close
+    // it, so every device reconnects and re-registers its files (#17117).
+    if (!sent) wire.closeQuietly(open)
   }
 
   private fun resolveLocally(channel: MuxObservationChannel, command: PendingStorageSubscription) {

@@ -16,6 +16,10 @@ internal class StorageSubscriptionLedger {
   private val intentVersions = LinkedHashMap<StorageSubscriptionKey, Long>()
   private val forcedReconciliations = LinkedHashSet<StorageSubscriptionKey>()
 
+  /** Bumped by every [connectionReset], so an answer can name the connection that produced it. */
+  var connection = 0L
+    private set
+
   /** Every file the UI currently wants observed. */
   val desiredKeys: List<StorageSubscriptionKey>
     get() = desired.toList()
@@ -97,6 +101,7 @@ internal class StorageSubscriptionLedger {
   fun connectionReset() {
     confirmed.clear()
     pending.clear()
+    connection++
   }
 
   private fun bump(key: StorageSubscriptionKey) {

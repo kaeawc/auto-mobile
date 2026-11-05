@@ -1,13 +1,16 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.domain.KeyValueType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -49,6 +52,12 @@ class SharedDaemonStreamHubStorageTest {
   private fun TestScope.harness() =
     Harness(
       CoroutineScope(backgroundScope.coroutineContext + UnconfinedTestDispatcher(testScheduler)),
+    )
+
+  /** A hub whose coroutines run only on [runCurrent], so connection states can be conflated. */
+  private fun TestScope.queuedHarness() =
+    Harness(
+      CoroutineScope(backgroundScope.coroutineContext + StandardTestDispatcher(testScheduler)),
     )
 
   private fun TestScope.pane(h: Harness): Pane {
@@ -213,4 +222,48 @@ class SharedDaemonStreamHubStorageTest {
     assertEquals(listOf(ack("req-2", prefs)), b.responses)
     assertEquals(listOf(refused, ack("req-2", prefs)), a.responses)
   }
+
+  @Test
+  fun `a reconnect whose drop the hub never saw still forgets confirmations`() = runTest {
+    val h = queuedHarness()
+    val a = pane(h)
+    a.stream.subscribeStorage(prefs.packageName, prefs.fileName)
+    runCurrent()
+    h.shared.emitStorageSubscriptionResponse(ack("req-1", prefs))
+    runCurrent()
+
+    // The drop and the reconnect land before the hub collects either state: only the conflated
+    // Connected is seen, so the reconnect call itself must forget the old registration.
+    h.shared.emitConnectionState(ConnectionState.Disconnected("x"))
+    a.stream.connect()
+    runCurrent()
+    assertEquals(2, h.shared.connectCallCount)
+
+    val b = pane(h)
+    b.stream.subscribeStorage(prefs.packageName, prefs.fileName)
+    runCurrent()
+    assertTrue(b.responses.isEmpty())
+    h.shared.emitStorageSubscriptionResponse(ack("req-2", prefs))
+    runCurrent()
+    assertEquals(listOf(ack("req-2", prefs)), b.responses)
+  }
+
+  @Test
+  fun `a pane joining while the stream is down waits instead of taking a stale confirmation`() =
+    runTest {
+      val h = queuedHarness()
+      val a = pane(h)
+      a.stream.subscribeStorage(prefs.packageName, prefs.fileName)
+      runCurrent()
+      h.shared.emitStorageSubscriptionResponse(ack("req-1", prefs))
+      runCurrent()
+
+      // Down, but the hub has not collected the drop yet.
+      h.shared.emitConnectionState(ConnectionState.Disconnected("x"))
+      val b = pane(h)
+      b.stream.subscribeStorage(prefs.packageName, prefs.fileName)
+      runCurrent()
+
+      assertTrue(b.responses.isEmpty())
+    }
 }

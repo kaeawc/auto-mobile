@@ -78,11 +78,16 @@ fallback), instead of opening their own socket:
   subscription for that device, including files only another client observes;
   the stream drops those on arrival, so a device with no local Storage lease
   retains none of them. A lease that joins a file the device already
-  observes is acknowledged at once, so it reconciles its snapshot. A dropped
-  connection forgets every confirmation until the re-registration after the
-  reconnect acknowledges the holders again. The daemon owns an observer per
+  observes on a connected stream is acknowledged at once, so it reconciles its
+  snapshot. A dropped connection, and every reconnect the hub makes (a
+  conflated connection state can hide the drop), forgets every confirmation;
+  an acknowledgement still queued from the old connection is dropped, and the
+  re-registration after the reconnect acknowledges the holders again. A
+  storage command that cannot be written closes the socket, so every device
+  reconnects and re-registers its files. The daemon owns an observer per
   socket, so a device that leaves a socket other devices keep open sends
-  `unsubscribe_storage` for its files.
+  `unsubscribe_storage` for its files, written after any storage command it
+  decided before leaving.
 - One-shot captures (a saved screenshot, the foreground-app lookup) lease the
   device's shared stream and take the first frame captured after their request.
   A lease joined onto a live subscription replays the stream's latest frame,

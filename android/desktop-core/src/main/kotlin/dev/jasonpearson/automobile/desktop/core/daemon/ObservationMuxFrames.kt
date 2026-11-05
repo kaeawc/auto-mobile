@@ -96,11 +96,13 @@ internal class ObservationMuxFrames(
 
   private fun refuse(response: StreamResponse) {
     val error = response.error
-    if (response.id?.let { storage.resolve(it, success = false, error = error) } == true) return
+    // Checked first: a refused session fails every device, whichever request the refusal answers,
+    // including a storage command (#17117).
     if (isStreamSessionRejection(error)) {
       rejectSession(error)
       return
     }
+    if (response.id?.let { storage.resolve(it, success = false, error = error) } == true) return
     val id = response.id
     val refused =
       synchronized(table.lock) {

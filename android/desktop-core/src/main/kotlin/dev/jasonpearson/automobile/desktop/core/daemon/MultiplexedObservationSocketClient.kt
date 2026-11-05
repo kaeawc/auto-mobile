@@ -134,10 +134,17 @@ internal class MultiplexedObservationSocketClient(
     release ?: return
     release.socket?.let { open ->
       release.subscriptionId?.let { wire.write(open, wire.unsubscribe(it)) }
-      release.storage.forEach { wire.write(open, it) }
+      storage.writeOwed(open, release.storage)
     }
     release.detached?.let(connection::shutDown)
   }
+
+  /**
+   * False once [channel]'s storage connection has reset since [connection]: an answer from it is
+   * stale.
+   */
+  fun isCurrentStorageConnection(channel: MuxObservationChannel, connection: Long): Boolean =
+    synchronized(table.lock) { channel.storage.connection == connection }
 
   fun subscribeStorage(channel: MuxObservationChannel, key: StorageSubscriptionKey) =
     storage.subscribe(channel, key)

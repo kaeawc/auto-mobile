@@ -75,6 +75,8 @@ internal class HubObservationStreams(
     fun connect(key: DeviceStreamKey, reconnect: Boolean) =
       synchronized(connectLock) {
         if (retired) return@synchronized
+        // The drop may never be collected (StateFlow conflates): forget confirmations here too.
+        if (reconnect) storage.connectionReset()
         stream.connect(deviceId = key.deviceId, deviceSessionUuid = key.deviceSessionUuid)
         if (reconnect) reconnects.update { it + 1 }
       }

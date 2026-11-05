@@ -2124,7 +2124,15 @@ window's brightness, `orientation` (`portrait`, `landscape` or `unlocked`) reque
 `statusBar` (`light`, `dark` or `auto`) picks the status bar content style. Each applies only while the
 prototype is shown and is restored on dismiss; none writes a system setting. `orientation` over an overlay
 and `statusBar` where the runtime does not own the status bar (an Android overlay, the injected iOS agent) are
-best effort, and the iOS Simulator ignores `brightness`. No production runtime advertises the capability yet.
+best effort, and the iOS Simulator ignores `brightness`. CtrlProxy advertises the capability and applies
+`FLAG_KEEP_SCREEN_ON`, window-local `screenBrightness` (`system` uses `BRIGHTNESS_OVERRIDE_NONE`) and
+`screenOrientation`; `unlocked` and omission use `SCREEN_ORIENTATION_UNSPECIFIED`. Replacement rebuilds
+these values from the new spec; removal releases them, and an animated exit resets them before waiting
+for removal. Failed replacements restore the previous params. Inspect entries add `orientation` for the
+requested orientation and `statusBar: "unsupported"` for an authored status bar style. Hierarchy window
+entries add the same values as `prototypeOrientation` and `prototypeStatusBar`; omitted controls omit
+these fields. Orientation reports a request, not proof that the device rotated. Embedded Android does
+not advertise these overlay controls.
 
 **Prototype layout direction.** Optional `window.layoutDirection: "ltr" | "rtl"` requires
 `prototype_layout_direction_v1`. Omission inherits the host direction. The iOS renderer overrides
@@ -2134,8 +2142,10 @@ Android does not advertise this capability, so the host refuses specs that set i
 **Keyboard dismiss (#14320).** The `{type: "hideKeyboard"}` action, which takes no fields, needs
 `prototype_hide_keyboard_v1`. It is a plain UI action like `dismiss`, not a platform module, and touches only the
 prototype's own window: it hides the soft keyboard and clears text focus (Android `WindowInsetsControllerCompat`
-`hide(ime())`; iOS `endEditing(true)`). With no keyboard up it does nothing. No production runtime advertises
-the capability yet.
+`hide(ime())`; iOS `endEditing(true)`). CtrlProxy advertises the capability and dispatches the action to
+the owning surface's host on main, hiding the IME before clearing its view focus. Without a shown
+window it does nothing; navigation focusability is retained. The embedded Android renderer does not
+advertise it.
 
 **Settings deep links (#14320).** The `settings` module (`prototype_platform_settings_v1`) has one call,
 `settings.open` with `page` one of `app`, `notifications`, `location`, `wifi`, `bluetooth` or `display`. The
@@ -2373,7 +2383,13 @@ importance, description?, showBadge?}]}`: 1-8 channels with unique key-shaped id
 most 64), `importance` one of `min`, `low`, `default` or `high`, and an optional `description` (at most
 256). The block needs `notifications` in `requires.platform`. A literal `channel` on `notifications.post`
 must name a declared channel, a literal `actions` list needs unique ids, and `notifications.cancel` takes
-exactly one of `id`, `group` or `all`; bound values are checked by the runtime.
+exactly one of `id`, `group` or `all`; bound values are checked by the runtime. The bounds are named
+contract limits (`MAX_PROTOTYPE_NOTIFICATION_*`, `MAX_PROTOTYPE_NOTIFICATIONS_ACTIVE`) that the call, state
+and channel rules repeat. The runtime enforces the ones that apply after placeholders resolve: a reply of
+at most 1 KiB, a resolved notification of at most 4 KiB, and at most 4 updates per second per notification,
+coalesced to the latest. Title and body limits count characters, while the 4 KiB total counts UTF-8 bytes of
+the resolved record and is checked on its own: ASCII text at every per-field limit fits, but multibyte text
+at those limits can exceed it.
 `notifications.schedule` takes the `post` arguments plus `delaySeconds` (a whole number, 1 to 604800)
 and needs `prototype_platform_notifications_scheduled_v1` as well; the same channel and action-id rules
 apply, and `notifications.scheduledFired` reports a scheduled notification that fired (#14283).

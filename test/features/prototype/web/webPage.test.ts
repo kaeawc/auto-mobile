@@ -210,7 +210,7 @@ describe("prototype web page (#16346)", () => {
   });
 
   test("reports the unsupported nodes of the view shown first", () => {
-    expect(page.unsupportedNodes.map((node) => node.type)).toEqual(["progress"]);
+    expect(page.unsupportedNodes.map((node) => node.type)).toEqual(["menu"]);
   });
 
   test("drops older revisions to stay within the budget, keeping each variant's latest", () => {

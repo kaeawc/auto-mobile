@@ -158,7 +158,10 @@ Use this object as the spec's `window`. The option changes only the prototype's 
 not change the device locale or translate text. It is supported on iOS and requires
 `prototype_layout_direction_v1`. Android refuses specs that set it; remove the option to show there.
 Other optional window controls are `keepScreenOn`, `brightness`, `orientation` and `statusBar`;
-these require `prototype_platform_window_controls_v1` and are refused when unsupported.
+these require `prototype_platform_window_controls_v1` and are refused when unsupported. On Android,
+these controls and the `hideKeyboard` action are available through CtrlProxy overlays, not the embedded
+renderer. Overlay orientation is best effort; inspect reports the requested `orientation` and reports
+`statusBar: "unsupported"` when a status bar style was requested.
 
 ## Capability errors
 

@@ -68,6 +68,18 @@ const lastResultSchema = z.object({
     .describe(
       "Android: the prototype exists but is not visible, and why; absent when visible, when suspended, or with an older CtrlProxy",
     ),
+  orientation: z
+    .enum(["portrait", "landscape", "unlocked"])
+    .optional()
+    .describe(
+      "Inspect: the orientation the prototype's window.orientation requested; the overlay may not honor it. Absent when none was requested or the device lacks prototype_platform_window_controls_v1",
+    ),
+  statusBar: z
+    .enum(["unsupported"])
+    .optional()
+    .describe(
+      "Inspect: unsupported when window.statusBar was requested but the overlay cannot restyle the status bar. Absent when none was requested or the device lacks prototype_platform_window_controls_v1",
+    ),
   suspended: z
     .literal(true)
     .optional()

@@ -143,6 +143,36 @@ describe("ADB pre-dispatch transport recovery", () => {
     }
   });
 
+  test("a setDevice during path resolution: recovery reports the device the command targeted", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const targets: string[] = [];
+    const client = new AdbClient(
+      device,
+      async (command: string) => {
+        const target = /-s (\S+)/.exec(command)?.[1] ?? "";
+        targets.push(target);
+        if (targets.length === 1) {
+          throw new Error(`adb: device '${target}' not found`);
+        }
+        return createExecResult("recovered", "");
+      },
+      { timer, retryExecutor: new DefaultRetryExecutor(timer) },
+    );
+    const recovered: string[] = [];
+    const stop = adbTransportRecoveredSignal.subscribe((deviceId) => recovered.push(deviceId));
+    try {
+      const pending = client.executeCommand("reverse --list", { noRetry: true });
+      client.setDevice({ deviceId: "emulator-5556", platform: "android", name: "Pixel 2" });
+      expect((await pending).stdout).toBe("recovered");
+      expect(targets).toHaveLength(2);
+      expect(recovered).toEqual([targets[0]]);
+    } finally {
+      stop();
+      timer.reset();
+    }
+  });
+
   test("offline refusal recovers even for a non-idempotent command", async () => {
     const h = harness(1, new Error("error: device offline"));
     expect((await h.client.executeCommand("shell input tap 1 2")).stdout).toBe("recovered");

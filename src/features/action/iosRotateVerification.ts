@@ -74,15 +74,20 @@ function knownPositiveSize(observation: ObserveResult | undefined): boolean {
   return (observation?.screenSize.width ?? 0) > 0 && (observation?.screenSize.height ?? 0) > 0;
 }
 
+// Only a cross-axis rotation must change the screen size. A same-axis repair
+// (the app already showed the requested axis but XCUIDevice still remembered
+// the other one) legitimately keeps its dimensions and must stay a success.
 function isUnverifiedIosRotationSize(
   result: RotateResult,
   requested: "portrait" | "landscape",
-  current: Orientation,
+  observed: { previous: Orientation; current: Orientation },
   previousObservation: ObserveResult | undefined,
 ): boolean {
+  const { previous, current } = observed;
   return (
     (result.success &&
       result.rotationPerformed &&
+      previous !== requested &&
       (current === requested || current === "unknown") &&
       knownPositiveSize(previousObservation) &&
       knownPositiveSize(result.observation) &&
@@ -112,7 +117,7 @@ export function verifyIosRotation(
     currentOrientation:
       current === "unknown" ? normalizeIosOrientation(result.currentOrientation) : current,
   };
-  if (isUnverifiedIosRotationSize(result, requested, current, previousObservation)) {
+  if (isUnverifiedIosRotationSize(result, requested, { previous, current }, previousObservation)) {
     return {
       ...normalized,
       success: false,

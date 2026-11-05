@@ -96,22 +96,32 @@ describe("iOS rotation verification screen-size checks (#17047)", () => {
     expect(result.message).toBe("Failed to rotate to landscape; the screen size did not change.");
   });
 
-  test("rejects an unchanged-size portrait rotation too", () => {
+  test("accepts a same-axis portrait repair whose size is legitimately unchanged", () => {
     const result = verifyIosRotation(
       {
-        ...duoRotation(),
+        success: true,
         orientation: "portrait",
+        value: 0,
+        previousOrientation: "landscape",
         currentOrientation: "portrait",
-        observation: observation(0, 951, 669),
+        rotationPerformed: true,
+        observation: observation(0, 402, 874),
       },
       "portrait",
-      duoPrevious(),
+      observation(0, 402, 874),
     );
-    expect(result.success).toBe(false);
-    expect(result.rotationPerformed).toBe(false);
-    expect(result.error).toBe(
-      "Rotation is not supported on this display (the screen size did not change). The runner reported a rotation but the screen size is unchanged.",
-    );
+    expect(result.success).toBe(true);
+    expect(result.rotationPerformed).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.previousOrientation).toBe("portrait");
+    expect(result.currentOrientation).toBe("portrait");
+  });
+
+  test("accepts a same-axis landscape repair on the Duo inner panel", () => {
+    const result = verifyIosRotation(duoRotation(), "landscape", observation(1, 951, 669));
+    expect(result.success).toBe(true);
+    expect(result.rotationPerformed).toBe(true);
+    expect(result.error).toBeUndefined();
   });
 
   test("accepts an iPhone rotation when its dimensions change", () => {

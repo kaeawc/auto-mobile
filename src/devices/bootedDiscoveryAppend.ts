@@ -74,16 +74,19 @@ export function appendIosBootedDiscovery(
 /** Which sweeps a booted-device read runs. "Either" is Android and iOS unless the caller opts in. */
 export function bootedSweepsFor(
   platform: SomePlatform,
-  options: Pick<BootedDeviceDiscoveryOptions, "includeWatchOs">,
+  options: Pick<BootedDeviceDiscoveryOptions, "includeWatchOs" | "includeAppleSimulatorPlatforms">,
 ): Record<Platform, boolean> {
   const either = platform === "either";
+  const optedIn = (family: "tvos" | "visionos") =>
+    either && (options.includeAppleSimulatorPlatforms?.includes(family) ?? false);
   return {
     android: either || platform === "android",
     ios: either || platform === "ios",
     // Only the pool's own readers ask an "either" read for watches (#14908).
     watchos: platform === "watchos" || (either && options.includeWatchOs === true),
-    tvos: platform === "tvos",
-    visionos: platform === "visionos",
+    // The pool's readers ask for these only while it tracks a device of the family.
+    tvos: platform === "tvos" || optedIn("tvos"),
+    visionos: platform === "visionos" || optedIn("visionos"),
   };
 }
 

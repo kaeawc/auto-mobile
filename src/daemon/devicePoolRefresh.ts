@@ -1,10 +1,12 @@
 import { truncateBodyText } from "../utils/truncateBodyText";
 import { logger } from "../utils/logger";
+import { appleSimulatorSweepsFor } from "../devices/deviceDiscoveryContracts";
 import { AMBIENT_ENV, readEnvRaw } from "../config/env";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { BootedDevice, Platform } from "../models";
 import type {
   BootedDeviceDiscovery,
+  BootedDeviceDiscoveryOptions,
   DeviceDiscoveryError,
   PlatformDeviceManager,
 } from "../devices/deviceUtils";
@@ -170,6 +172,24 @@ export class DevicePoolRefresh {
     return (await this.refreshDevicesInternal(false)).addedCount;
   }
 
+  /**
+   * The pool is the one "either" reader that also tracks Apple Watch simulators (#14908), and the
+   * Apple TV and Vision Pro families it holds rows for, so their loss is observed too.
+   */
+  private refreshDiscoveryOptions(): BootedDeviceDiscoveryOptions {
+    const companionFamilies = appleSimulatorSweepsFor(
+      [...this.pool.getDevices().values()].map((device) => device.platform),
+    );
+    return {
+      bypassAndroidDeviceListCache: true,
+      bypassIosDeviceListCache: true,
+      includeWatchOs: true,
+      ...(companionFamilies.length > 0
+        ? { includeAppleSimulatorPlatforms: companionFamilies }
+        : {}),
+    };
+  }
+
   async refreshDevicesInternal(assignmentLockHeld: boolean): Promise<DevicePoolRefreshResult> {
     const startTime = this.pool.getTimer().now();
     const perf = createGlobalPerformanceTracker();
@@ -183,12 +203,9 @@ export class DevicePoolRefresh {
       this.logDiscoveryEnvironment();
 
       perf.startOperation("deviceDiscovery");
-      // The pool is the one "either" reader that also tracks Apple Watch simulators (#14908).
-      const discovery = await this.pool.getDeviceManager().getBootedDevicesDetailed("either", {
-        bypassAndroidDeviceListCache: true,
-        bypassIosDeviceListCache: true,
-        includeWatchOs: true,
-      });
+      const discovery = await this.pool
+        .getDeviceManager()
+        .getBootedDevicesDetailed("either", this.refreshDiscoveryOptions());
       perf.endOperation("deviceDiscovery");
       const bootedDevices = this.discoveryNeedsTransportNormalization(discovery.devices)
         ? await this.pool.normalizeAndroidDiscovery!(

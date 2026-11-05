@@ -246,6 +246,51 @@ describe("Wear notification stream capture", () => {
     expect(timer.getSleepHistory()).toEqual([250, 250]);
   });
 
+  // Rewrites one captured card text to model an ongoing card that updates in place.
+  function withText(from: string, to: string): ObserveResult {
+    const edited = structuredClone(hierarchy);
+    const root = watchStreamRoot(edited);
+    for (const node of root ? watchNodes(root) : []) {
+      if (node.$?.text === from) {
+        node.$.text = to;
+        node.$["content-desc"] = node.$["content-desc"] ? to : "";
+      }
+    }
+    return { ...closed, viewHierarchy: edited };
+  }
+
+  test("does not treat an updated body on a card that refused the swipe as removal", async () => {
+    const progress = withText("-i", "50%");
+    const { tray } = setup((commands) =>
+      commands.includes("shell input swipe 192 176 364 176 300") ? progress : stream,
+    );
+    expect(
+      await tray.execute({ action: "dismiss", notification: { title: "Wear" }, awaitTimeout: 500 }),
+    ).toMatchObject({ isError: true, payload: { code: "dismissal_unconfirmed" } });
+  });
+
+  test("counts individually dismissed cards together with the footer clear", async () => {
+    const other = withText("Wear", "Other");
+    const { tray, adb } = setup((commands) =>
+      commands.includes("shell input swipe 192 176 364 176 300") ? other : stream,
+    );
+    const mixed = shellInventory.replace(
+      "  Snoozed notifications:",
+      "    NotificationRecord(0x2: pkg=com.other user=UserHandle{0} id=2 tag=null key=0|com.other|2|null|2001: Notification(channel=other flags=0))\n  Snoozed notifications:",
+    );
+    adb.setCommandResponseSequence("shell dumpsys notification --noredact", [
+      createExecResult(mixed, ""),
+      createExecResult(shellInventory, ""),
+      createExecResult(emptyInventory, ""),
+    ]);
+    const result = await tray.execute({
+      action: "clearAll",
+      notification: { appId: "com.android.shell" },
+      awaitTimeout: 2000,
+    });
+    expect(result).toMatchObject({ isError: false, payload: { dismissedCount: 2, success: true } });
+  });
+
   test("does not claim Clear all succeeded when the active inventory remains", async () => {
     const { tray, adb } = setup();
     adb.setCommandResponse(

@@ -258,7 +258,8 @@ export class WatchSystemTray {
       const clear = await this.globalClearTarget(args, observation);
       if (clear) {
         await this.tap(clear.element, observation);
-        return this.verifyClearAll(deadline, clear.appId, clear.count);
+        // Cards dismissed one by one earlier already left the inventory `clear.count` reads.
+        return this.verifyClearAll(deadline, clear.appId, clear.count + scope.dismissedCount);
       }
       if (args.action !== "list" && matching[0]) {
         return this.act(args, matching[0], observation, scope);
@@ -411,7 +412,7 @@ export class WatchSystemTray {
     if (args.action === "tap") {
       return this.tapNotification(args, card, observation);
     }
-    return this.dismissNotification(args, card, scope);
+    return this.dismissNotification(args, card, observation, scope);
   }
 
   private async tapNotification(
@@ -437,6 +438,7 @@ export class WatchSystemTray {
   private async dismissNotification(
     args: SystemTrayArgs,
     card: WatchNotification,
+    observation: ObserveResult,
     scope: WatchScope,
   ): Promise<SystemTrayOutcome> {
     const { left, top, right, bottom } = card.element.bounds;
@@ -446,11 +448,17 @@ export class WatchSystemTray {
     );
     await sleep(POLL_MS, this.signal);
     const next = await this.read();
+    const sameCard = (other: WatchNotification) =>
+      other.appLabel === card.appLabel && other.title === card.title;
+    const before = watchNotifications(observation.viewHierarchy).filter(sameCard).length;
     if (
       !watchStreamRoot(next.viewHierarchy) ||
       watchNotifications(next.viewHierarchy).some(
         (remaining) => cardIdentity(remaining) === cardIdentity(card),
-      )
+      ) ||
+      // An ongoing card that refuses the swipe may still rewrite its body (progress, position),
+      // so a surviving same-app/title card is not a removal.
+      watchNotifications(next.viewHierarchy).filter(sameCard).length >= before
     ) {
       return outcome(
         {

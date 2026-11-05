@@ -1,4 +1,5 @@
 import contract from "../../../../schemas/prototype-spec-contract.json";
+import { prototypeSpecForDevice } from "../prototypeComponents";
 import { iconNames } from "../prototypePresentationSchemas";
 import type { ShownSpecJson } from "../PrototypeShownSpecs";
 import { prototypeIconVariant, type PrototypeIconGlyphSource } from "./webIconGlyphs";
@@ -147,7 +148,8 @@ function reachableNames(value: unknown, names: Set<string>): void {
  */
 export function prototypeGlyphKeys(spec: ShownSpecJson): string[] {
   const found: Collected = { keys: new Set(), variants: new Set(["filled"]) };
-  walk(spec, definitions.spec!, found);
+  // The contract has no `components` or `use`: walk the spec a device is sent, as the still does.
+  walk(prototypeSpecForDevice(spec), definitions.spec!, found);
   const names = new Set<string>();
   reachableNames(spec.state, names);
   reachableNames(spec.data, names);

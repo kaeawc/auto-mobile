@@ -81,6 +81,17 @@ describe("prototype embed glyph keys (#16609)", () => {
     expect(prototypeGlyphKeys(fixture)).toContain("filled/check");
   });
 
+  test("icons inside a reusable component are collected from the expanded spec", () => {
+    const keys = prototypeGlyphKeys({
+      id: "components",
+      components: {
+        tile: { root: { type: "icon", name: "home", variant: "outlined" } },
+      },
+      root: { type: "column", children: [{ type: "use", component: "tile" }] },
+    });
+    expect(keys).toEqual(["outlined/home"]);
+  });
+
   test("a spec without icons names no glyph", () => {
     expect(prototypeGlyphKeys({ id: "t", root: { type: "text", text: "home" } })).toEqual([]);
   });

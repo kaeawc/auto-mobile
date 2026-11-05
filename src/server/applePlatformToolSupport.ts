@@ -44,8 +44,7 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "setActiveDevice",
     "killDevice",
   ]),
-  // Device lifecycle only (owner decision on #16848). Input schemas do not name `visionos` until
-  // the simctl lifecycle lands (#16849); every other tool joins once verified on a Vision Pro.
+  // simctl lifecycle only; every other tool joins once verified on a Vision Pro.
   visionos: new Set<string>([
     "listDevices",
     "listDeviceImages",
@@ -134,7 +133,9 @@ export function assertRequestNotTvos(toolName: string, args: object): void {
     record.platform,
     ...NESTED_PLATFORM_KEYS.map((key) => nestedPlatform(record[key])),
   ];
-  if (named.includes("tvos") && !APPLE_PLATFORM_SUPPORTED_TOOLS.tvos.has(toolName)) {
-    throw new ActionableError(unsupportedPlatformToolMessage(toolName, "tvos"));
+  for (const platform of ["tvos", "visionos"] as const) {
+    if (named.includes(platform) && !APPLE_PLATFORM_SUPPORTED_TOOLS[platform].has(toolName)) {
+      throw new ActionableError(unsupportedPlatformToolMessage(toolName, platform));
+    }
   }
 }

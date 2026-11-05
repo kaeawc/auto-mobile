@@ -1,6 +1,9 @@
 import { truncateBodyText } from "../utils/truncateBodyText";
 import { logger } from "../utils/logger";
-import { appleSimulatorSweepsFor } from "../devices/deviceDiscoveryContracts";
+import {
+  appleSimulatorSweepsFor,
+  type AppleSimulatorSweepPlatform,
+} from "../devices/deviceDiscoveryContracts";
 import { AMBIENT_ENV, readEnvRaw } from "../config/env";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { BootedDevice, Platform } from "../models";
@@ -176,10 +179,13 @@ export class DevicePoolRefresh {
    * The pool is the one "either" reader that also tracks Apple Watch simulators (#14908), and the
    * Apple TV and Vision Pro families it holds rows for, so their loss is observed too.
    */
-  private refreshDiscoveryOptions(): BootedDeviceDiscoveryOptions {
-    const companionFamilies = appleSimulatorSweepsFor(
-      [...this.pool.getDevices().values()].map((device) => device.platform),
-    );
+  private refreshDiscoveryOptions(
+    requestedFamilies: readonly AppleSimulatorSweepPlatform[],
+  ): BootedDeviceDiscoveryOptions {
+    const companionFamilies = appleSimulatorSweepsFor([
+      ...[...this.pool.getDevices().values()].map((device) => device.platform),
+      ...requestedFamilies,
+    ]);
     return {
       bypassAndroidDeviceListCache: true,
       bypassIosDeviceListCache: true,
@@ -190,7 +196,14 @@ export class DevicePoolRefresh {
     };
   }
 
-  async refreshDevicesInternal(assignmentLockHeld: boolean): Promise<DevicePoolRefreshResult> {
+  /**
+   * `requestedFamilies` adds Apple TV or Vision Pro sweeps a caller needs although the pool has
+   * no row of that family yet (an explicit selection of an unpooled simulator).
+   */
+  async refreshDevicesInternal(
+    assignmentLockHeld: boolean,
+    requestedFamilies: readonly AppleSimulatorSweepPlatform[] = [],
+  ): Promise<DevicePoolRefreshResult> {
     const startTime = this.pool.getTimer().now();
     const perf = createGlobalPerformanceTracker();
     const refreshGeneration = ++this.refreshGeneration;
@@ -205,7 +218,7 @@ export class DevicePoolRefresh {
       perf.startOperation("deviceDiscovery");
       const discovery = await this.pool
         .getDeviceManager()
-        .getBootedDevicesDetailed("either", this.refreshDiscoveryOptions());
+        .getBootedDevicesDetailed("either", this.refreshDiscoveryOptions(requestedFamilies));
       perf.endOperation("deviceDiscovery");
       const bootedDevices = this.discoveryNeedsTransportNormalization(discovery.devices)
         ? await this.pool.normalizeAndroidDiscovery!(

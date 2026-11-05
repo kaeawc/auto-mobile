@@ -453,6 +453,27 @@ describe("provisionDevice on an Apple Vision Pro simulator", () => {
     expect(timer.getSleepHistory()).toEqual([]);
   });
 
+  test("setActiveDevice selects a running headset the pool has not tracked yet", async () => {
+    const headset = visionDevice({ name: NAME, state: "Shutdown" });
+    const { pool, sessions, simctl } = await arrange([headset]);
+    headset.state = "Booted";
+    simctl.onStateChange?.();
+    expect(pool.getDevice(headset.udid)).toBeNull();
+    const handler = createSetActiveDeviceHandler({
+      resumeCtrlProxy: async () => {
+        throw new Error("a headset must not resume CtrlProxy");
+      },
+    });
+
+    await handler({ deviceId: headset.udid, platform: "visionos", sessionUuid: "unpooled" });
+
+    expect(pool.getDevice(headset.udid)).toMatchObject({
+      platform: "visionos",
+      sessionId: "unpooled",
+    });
+    expect(sessions.getSession("unpooled")?.platform).toBe("visionos");
+  });
+
   test("creates a missing headset, boots it and binds a visionOS session without a runner", async () => {
     const { simctl, pool, sessions, runnerCalls } = await arrange();
 

@@ -1,3 +1,4 @@
+import { AndroidDisplayReadError } from "./AndroidDisplayReadError";
 import { normalizeTvosHierarchy } from "../tvos/TvosHierarchy";
 import { tvosRunners } from "../tvos/TvosRunnerRegistry";
 import { normalizeWatchHierarchy } from "../watch/WatchHierarchy";
@@ -15,7 +16,10 @@ import {
   defaultAdbClientFactory,
   type AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import { supplementAndroidHierarchy } from "../action/AndroidHierarchyFallback";
+import {
+  readAndroidDisplayHierarchy,
+  supplementAndroidHierarchy,
+} from "../action/AndroidHierarchyFallback";
 import { AndroidCtrlProxyClient } from "./android";
 import { IOSCtrlProxyClient } from "./ios";
 import { iosHierarchyAcquisition, type IosHierarchyAcquisition } from "./ios/types";
@@ -71,7 +75,11 @@ export interface HierarchySyncClient {
     perf: PerformanceTracker,
     disableAllFiltering: boolean,
     signal: AbortSignal | undefined,
-    options: { timeoutMs: number; display?: number | ObserverHierarchyRequestOptions },
+    options: {
+      timeoutMs: number;
+      diagnostics?: HierarchySyncDiagnostics;
+      display?: number | ObserverHierarchyRequestOptions;
+    },
   ): Promise<SyncedHierarchy | null>;
 }
 
@@ -124,6 +132,7 @@ async function requestSyncHierarchy(
     }
     synced = await client.requestHierarchySyncForObserver(...args, {
       timeoutMs,
+      ...(request.displayId !== undefined && request.displayId !== 0 ? { diagnostics } : {}),
       display: request.preserveDisplayState
         ? { displayId: request.displayId, preserveDisplayState: true }
         : request.displayId,
@@ -136,16 +145,27 @@ async function requestSyncHierarchy(
     });
   }
   if (!synced) {
-    const detail =
-      diagnostics.failureReason ??
-      (diagnostics.runnerError ? `runner error: ${diagnostics.runnerError}` : undefined);
-    const message =
-      !request.observerMode || options.owned
-        ? `Device ${options.deviceId} hierarchy service did not answer`
-        : `Device ${options.deviceId} has no reachable hierarchy service`;
-    throw new ActionableError(detail ? `${message}: ${detail}` : message);
+    throwSyncHierarchyFailure(request, options, diagnostics);
   }
   return synced;
+}
+
+function throwSyncHierarchyFailure(
+  request: HierarchyCaptureRequest,
+  options: { deviceId: string; owned: boolean },
+  diagnostics: HierarchySyncDiagnostics,
+): never {
+  if (request.displayId !== undefined && request.displayId !== 0 && diagnostics.runnerError) {
+    throw new AndroidDisplayReadError(diagnostics.runnerError);
+  }
+  const detail =
+    diagnostics.failureReason ??
+    (diagnostics.runnerError ? `runner error: ${diagnostics.runnerError}` : undefined);
+  const message =
+    !request.observerMode || options.owned
+      ? `Device ${options.deviceId} hierarchy service did not answer`
+      : `Device ${options.deviceId} has no reachable hierarchy service`;
+  throw new ActionableError(detail ? `${message}: ${detail}` : message);
 }
 
 /** The Android client lookups a capture uses; `AndroidCtrlProxyClient`'s statics satisfy it. */
@@ -376,6 +396,46 @@ async function normalizeSyncedHierarchy(options: {
   return supplemented;
 }
 
+async function readAndNormalizeHierarchy(
+  read: () => Promise<SyncedHierarchy>,
+  options: Omit<Parameters<typeof normalizeSyncedHierarchy>[0], "synced">,
+): Promise<ViewHierarchyResult> {
+  try {
+    return await normalizeSyncedHierarchy({ ...options, synced: await read() });
+  } catch (error) {
+    const { device, dependencies, request, timer, deadline } = options;
+    request.signal?.throwIfAborted();
+    if (
+      device.platform !== "android" ||
+      request.displayId === undefined ||
+      request.displayId === 0 ||
+      !(error instanceof AndroidDisplayReadError) ||
+      !error.message.includes(`Display ${request.displayId} exposes no accessibility windows`)
+    ) {
+      throw error;
+    }
+    try {
+      return await readAndroidDisplayHierarchy(
+        request.displayId,
+        {
+          adb: (dependencies.adbFactory ?? defaultAdbClientFactory).create(device),
+          timer,
+          idGenerator: dependencies.ids,
+        },
+        deadline,
+        request.signal,
+      );
+    } catch (fallbackError) {
+      request.signal?.throwIfAborted();
+      logger.warn(
+        "[HierarchyCapture] Untracked-display UIAutomator fallback failed",
+        fallbackError,
+      );
+      throw error;
+    }
+  }
+}
+
 /** One capture policy for action tools; a fresh request always bypasses client TTL caches. */
 export function createDeviceHierarchyCapture(
   device: BootedDevice,
@@ -443,24 +503,18 @@ export function createDeviceHierarchyCapture(
             deviceId: device.deviceId,
             owned,
           });
-        const synced = request.observerMode
-          ? await raceWithDeadline(read, {
-              timer,
-              timeoutMs: remaining,
-              signal: request.signal,
-              label: `Device ${device.deviceId} hierarchy read`,
-            })
-          : await read();
-        const hierarchy = await normalizeSyncedHierarchy({
-          device,
-          dependencies,
-          syncClient,
-          synced,
-          deadline,
-          timer,
-          request,
-          owned,
-        });
+        const hierarchy = await readAndNormalizeHierarchy(
+          () =>
+            request.observerMode
+              ? raceWithDeadline(read, {
+                  timer,
+                  timeoutMs: remaining,
+                  signal: request.signal,
+                  label: `Device ${device.deviceId} hierarchy read`,
+                })
+              : read(),
+          { device, dependencies, syncClient, deadline, timer, request, owned },
+        );
         // Action captures may carry native timestamp provenance in a WeakMap.
         // Only observer captures need call-scoped start metadata.
         if (!request.observerMode) {

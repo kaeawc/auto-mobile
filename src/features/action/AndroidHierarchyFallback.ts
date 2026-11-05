@@ -1,3 +1,4 @@
+import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import { parseStringPromise } from "xml2js";
 import type { ViewHierarchyNode, ViewHierarchyResult, HierarchySource } from "../../models";
@@ -40,7 +41,7 @@ function nodeKey(attributes: Record<string, unknown>, bounds: unknown): string {
 function missingXmlNodes(
   nodes: XmlNode[],
   nativeKeys: Set<string>,
-  packageName: string,
+  packageName?: string,
 ): ViewHierarchyNode[] {
   return nodes.flatMap((node) => {
     const children = missingXmlNodes(node.node ?? [], nativeKeys, packageName);
@@ -48,7 +49,7 @@ function missingXmlNodes(
     const bounds = parseBounds(attributes?.bounds);
     if (
       !attributes ||
-      attributes.package !== packageName ||
+      (packageName !== undefined && attributes.package !== packageName) ||
       !bounds ||
       bounds.right <= bounds.left ||
       bounds.bottom <= bounds.top
@@ -120,19 +121,7 @@ export async function supplementAndroidHierarchy(
     return original;
   }
   const path = dumpPath(deps.idGenerator);
-  const execute = async (args: string[]) => {
-    throwIfAborted(signal);
-    const remaining = deadline - deps.timer.now();
-    if (remaining <= 0) {
-      throw new Error("Hierarchy fallback deadline exhausted");
-    }
-    return deps.adb.execute(args, {
-      timeoutMs: remaining,
-      signal,
-      noRetry: true,
-      maxBuffer: 4 * 1024 * 1024,
-    });
-  };
+  const execute = boundedDumpExecutor(deps, { deadline, signal });
   try {
     const foreground = await deps.adb.getForegroundApp(signal, deadline - deps.timer.now());
     if (!foreground) {
@@ -234,4 +223,57 @@ async function verifyAndMergeDump(
     return original;
   }
   return mergeMissingNodes(original, nodes, foreground.packageName);
+}
+
+function boundedDumpExecutor(
+  deps: Pick<AndroidHierarchyFallbackDeps, "adb" | "timer">,
+  { deadline, signal }: DumpBound,
+) {
+  return async (args: string[]) => {
+    throwIfAborted(signal);
+    const remaining = deadline - deps.timer.now();
+    if (remaining <= 0) {
+      throw new Error("Hierarchy fallback deadline exhausted");
+    }
+    return deps.adb.execute(args, {
+      timeoutMs: remaining,
+      signal,
+      noRetry: true,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+  };
+}
+
+/** Read an untracked non-default display without borrowing the default display's foreground app. */
+export async function readAndroidDisplayHierarchy(
+  displayId: number,
+  deps: AndroidHierarchyFallbackDeps,
+  deadline: number,
+  signal?: AbortSignal,
+): Promise<ViewHierarchyResult> {
+  const path = dumpPath(deps.idGenerator);
+  const execute = boundedDumpExecutor(deps, { deadline, signal });
+  try {
+    await execute(["shell", "uiautomator", "dump", "--display", String(displayId), path]);
+    const result = await execute(["shell", "cat", path]);
+    const parsed: { hierarchy?: XmlNode } = await parseStringPromise(result.stdout, {
+      explicitArray: true,
+    });
+    throwIfAborted(signal);
+    const nodes = missingXmlNodes(parsed.hierarchy?.node ?? [], new Set());
+    if (!nodes.length || deps.timer.now() >= deadline) {
+      throw new ActionableError(`UIAutomator returned no hierarchy for display ${displayId}`);
+    }
+    return {
+      hierarchy: { node: nodes.length === 1 ? nodes[0] : { $: {}, node: nodes } },
+      displayId,
+      sources: ["uiautomator"],
+      fresh: false,
+    };
+  } catch (error) {
+    throwIfAborted(signal);
+    throw toActionableError(error, `Failed to read display ${displayId} with UIAutomator`);
+  } finally {
+    await removeDump(deps, path, deadline, signal);
+  }
 }

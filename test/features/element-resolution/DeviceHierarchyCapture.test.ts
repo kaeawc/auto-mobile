@@ -1,3 +1,9 @@
+import {
+  selectedDisplayHarness,
+  resetSelectedDisplayHarness,
+  readOptions,
+} from "../../helpers/selectedDisplayRead";
+import { readFileSync } from "node:fs";
 import { tvosRunners } from "../../../src/features/tvos/TvosRunnerRegistry";
 import { FakeTvosRunnerClient } from "../../fakes/FakeTvosRunnerClient";
 import { findFocusedElement } from "../../../src/features/observe/HierarchyFocus";
@@ -485,3 +491,145 @@ test("tvOS capture uses its runner and preserves remote focus", async () => {
     unregister();
   }
 });
+
+const overlayRefusal =
+  "Display 2 exposes no accessibility windows on this device: the accessibility service does not track this display (overlay displays are not tracked). Use the default display or a display tracked by accessibility.";
+const overlayXml = readFileSync(
+  new URL("../../fixtures/uiautomator/overlay-display-2.xml", import.meta.url),
+  "utf8",
+);
+
+function overlayCapture(observerMode: boolean, displayId = 2, refusal = overlayRefusal) {
+  const adb = new FakeAdbClient();
+  const timer = new FakeTimer();
+  adb.setCommandResult("shell cat /data/local/tmp/automobile-hierarchy-overlay.xml", overlayXml);
+  const refuse: HierarchySyncClient["requestHierarchySync"] = async (
+    _perf,
+    _raw,
+    _signal,
+    options,
+  ) => {
+    if (options.diagnostics) {
+      options.diagnostics.runnerError = refusal;
+    }
+    return null;
+  };
+  const capture = createDeviceHierarchyCapture(
+    { platform: "android", deviceId: "overlay-fake", name: "fake" },
+    {
+      timer,
+      ids: new FakeIdGenerator(["overlay", "capture"]),
+      adbFactory: { create: () => adb },
+      syncClientFactory: () => ({
+        requestHierarchySync: refuse,
+        requestHierarchySyncForObserver: (_perf, _raw, _signal, options) =>
+          refuse(_perf, _raw, _signal, { ...options, displayId }),
+        convertToViewHierarchyResult: () => ({ hierarchy: {} }),
+      }),
+    },
+  );
+  return {
+    adb,
+    timer,
+    read: () => capture.capture({ freshness: "fresh", observerMode, displayId }),
+  };
+}
+
+test.each([false, true])(
+  "untracked display dump returns Settings nodes (observer=%s)",
+  async (observer) => {
+    const { read, adb, timer } = overlayCapture(observer);
+    const result = await read();
+    expect(result.hierarchy.displayId).toBe(2);
+    expect(result.hierarchy.sources).toEqual(["uiautomator"]);
+    // Match supplementation: the captured zero-area avatar is not a coordinate candidate.
+    expect(result.nodes).toHaveLength(37);
+    expect(result.nodes.every((node) => node.properties.package === "com.android.settings")).toBe(
+      true,
+    );
+    expect(
+      result.nodes.every((node) => node.properties["hierarchy-source"] === "uiautomator"),
+    ).toBe(true);
+    expect(adb.getCommandCalls()[0]?.command).toBe(
+      "shell uiautomator dump --display 2 /data/local/tmp/automobile-hierarchy-overlay.xml",
+    );
+    expect(timer.getSleepHistory()).toEqual([]);
+  },
+);
+
+test.each([false, true])(
+  "failed display dump preserves runner refusal (observer=%s)",
+  async (observer) => {
+    const { read, adb } = overlayCapture(observer);
+    adb.setCommandError(
+      "shell uiautomator dump --display 2 /data/local/tmp/automobile-hierarchy-overlay.xml",
+      new Error("dump failed"),
+    );
+    await expect(read()).rejects.toThrow(overlayRefusal);
+    expect(
+      adb.getCommandCalls().some((call) => call.command.includes("uiautomator dump --display 2")),
+    ).toBe(true);
+  },
+);
+
+test.each([false, true])(
+  "default display refusal never starts a dump (observer=%s)",
+  async (observer) => {
+    const { read, adb, timer } = overlayCapture(observer, 0);
+    await expect(read()).rejects.toThrow(
+      observer
+        ? "Device overlay-fake has no reachable hierarchy service"
+        : "Device overlay-fake hierarchy service did not answer",
+    );
+    expect(adb.getCommandCalls()).toEqual([]);
+    expect(timer.getSleepHistory()).toEqual([]);
+  },
+);
+
+test.each([false, true])(
+  "observe caller receives runner refusal when display dump fails (observer=%s)",
+  async (observer) => {
+    const { read, adb } = overlayCapture(observer);
+    adb.setCommandError(
+      "shell uiautomator dump --display 2 /data/local/tmp/automobile-hierarchy-overlay.xml",
+      new Error("dump failed"),
+    );
+    const h = selectedDisplayHarness({ read: async () => (await read()).hierarchy });
+    try {
+      await expect(
+        h.screen.execute({ ...readOptions, display: "inner", observerMode: observer }),
+      ).rejects.toThrow(overlayRefusal);
+    } finally {
+      resetSelectedDisplayHarness();
+    }
+  },
+);
+
+test.each([false, true])(
+  "unrelated display refusal never starts a dump (observer=%s)",
+  async (observer) => {
+    const { read, adb } = overlayCapture(observer, 2, "selected panel extraction failed");
+    await expect(read()).rejects.toThrow("selected panel extraction failed");
+    expect(adb.getCommandCalls()).toEqual([]);
+  },
+);
+
+test.each([false, true])(
+  "observe caller receives the display-scoped Settings dump (observer=%s)",
+  async (observer) => {
+    const { read } = overlayCapture(observer);
+    const h = selectedDisplayHarness({ read: async () => (await read()).hierarchy });
+    try {
+      const result = await h.screen.execute({
+        ...readOptions,
+        display: "inner",
+        observerMode: observer,
+      });
+      expect(result.viewHierarchy?.displayId).toBe(2);
+      expect(result.viewHierarchy?.sources).toEqual(["uiautomator"]);
+      expect(result.viewHierarchy?.hierarchy.node?.$?.package).toBe("com.android.settings");
+    } finally {
+      resetSelectedDisplayHarness();
+    }
+  },
+);

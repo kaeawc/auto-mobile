@@ -146,7 +146,70 @@ describe("iOS rotation verification vocabulary (#8778)", () => {
   });
 });
 
+describe("iOS runner rotation refusal display guidance", () => {
+  const runnerError = "Rotation is not supported on this display (the screen size did not change)";
+  const coverError =
+    "Rotation is not supported on the cover panel (the screen size did not change). Open the device to its inner panel (unfold the hinge) and retry there, or keep the current orientation.";
+  const runnerFailure = (): RotateResult => ({
+    ...duoRotation(),
+    success: false,
+    rotationPerformed: false,
+    error: runnerError,
+    message: "Runner refusal message",
+    observation: observation(0),
+  });
+
+  test("uses cover guidance only for a cover observation", () => {
+    const previous = observation(0);
+    const cover = {
+      ...previous,
+      display: { ...previous.display, role: "cover" as const },
+    };
+    const inner = {
+      ...previous,
+      display: { ...previous.display, role: "inner" as const },
+    };
+
+    const coverResult = verifyIosRotation(runnerFailure(), "landscape", cover);
+    expect(coverResult).toMatchObject({
+      success: false,
+      rotationPerformed: false,
+      error: coverError,
+      message: "Runner refusal message",
+    });
+    expect(verifyIosRotation(runnerFailure(), "landscape", inner).error).toBe(runnerError);
+    expect(verifyIosRotation(runnerFailure(), "landscape", undefined).error).toBe(runnerError);
+  });
+});
+
 describe("iOS rotation verification screen-size checks (#17047)", () => {
+  test("gives cover-panel guidance only for a cover observation", () => {
+    const previous = {
+      ...duoPrevious(),
+      display: { ...duoPrevious().display, role: "cover" as const },
+    };
+    const innerPrevious = { ...previous, display: { ...previous.display, role: "inner" as const } };
+    const unknownPrevious = {
+      ...previous,
+      display: { ...previous.display, role: "unknown" as const },
+    };
+    const coverError =
+      "Rotation is not supported on the cover panel (the screen size did not change). Open the device to its inner panel (unfold the hinge) and retry there, or keep the current orientation.";
+    const genericError =
+      "Rotation is not supported on this display (the screen size did not change). The runner reported a rotation but the screen size is unchanged.";
+
+    const coverResult = verifyIosRotation(duoRotation(), "landscape", previous);
+    expect(coverResult.error).toBe(coverError);
+    expect(coverResult.message).toBe(
+      "Failed to rotate to landscape; the screen size did not change.",
+    );
+    expect(coverResult.success).toBe(false);
+    expect(coverResult.rotationPerformed).toBe(false);
+
+    expect(verifyIosRotation(duoRotation(), "landscape", innerPrevious).error).toBe(genericError);
+    expect(verifyIosRotation(duoRotation(), "landscape", unknownPrevious).error).toBe(genericError);
+  });
+
   test("rejects a Duo landscape rotation when the panel size is unchanged", () => {
     const result = verifyIosRotation(duoRotation(), "landscape", duoPrevious());
     expect(result.success).toBe(false);

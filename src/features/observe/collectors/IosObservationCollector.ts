@@ -1,4 +1,8 @@
-import type { DevicectlDisplayInfoSource } from "../../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
+import type {
+  DevicectlDisplayInfo,
+  DevicectlDisplayInfoSource,
+} from "../../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
+import type { DisplayPanel } from "../../../models/DisplayPanel";
 import { sizeMatchesPanel } from "../../device/postureCommands";
 import { ObservedAndroidDisplayCache } from "../ObservationDisplay";
 import { errorMessage } from "../../../utils/describeUnknownError";
@@ -36,6 +40,16 @@ export interface IosObservationCollectorDeps {
   sdkBridge?: () => IosSdkBridgeReader;
   /** The app's opted-in WKWebView bridges (#5162); defaults to the device's runner client. */
   sdkWeb?: () => IosSdkWebReader;
+}
+
+function activeLivePanel(
+  displays: DevicectlDisplayInfo[],
+  panels: DisplayPanel[],
+): DisplayPanel | undefined {
+  const active = displays.filter((display) => display.active === true);
+  const size = active.length === 1 ? (active[0].nativeSize ?? active[0].bounds?.size) : undefined;
+  const matches = size ? panels.filter((panel) => sizeMatchesPanel(size, panel)) : [];
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 export class DefaultIosObservationCollector implements IosObservationCollector {
@@ -148,12 +162,9 @@ export class DefaultIosObservationCollector implements IosObservationCollector {
         signal,
       });
       signal?.throwIfAborted();
-      const active = displays.filter((display) => display.active === true);
-      const size =
-        active.length === 1 ? (active[0].nativeSize ?? active[0].bounds?.size) : undefined;
-      const matches = size ? panels.filter((panel) => sizeMatchesPanel(size, panel)) : [];
-      if (matches.length === 1) {
-        ObservedAndroidDisplayCache.rememberLiveIosPanel(device.deviceId, matches[0]);
+      const panel = activeLivePanel(displays, panels);
+      if (panel) {
+        ObservedAndroidDisplayCache.rememberLiveIosPanel(device.deviceId, panel);
       } else {
         logger.debug("[iOS] No unique active CoreDevice panel; using runner size");
       }

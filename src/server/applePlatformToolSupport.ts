@@ -30,6 +30,7 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
   tvos: new Set<string>([
     "sendKeys",
     "tapOn",
+    "focusNavigate",
     "pressButton",
     "observe",
     "installApp",

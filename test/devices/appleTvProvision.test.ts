@@ -232,7 +232,7 @@ describe("AppleTvSimulatorProvisioner", () => {
     expect(String(type)).toContain(
       `Unknown Apple TV device type '${shortType}'. Pass the full CoreSimulator identifier '${TV_DEVICE_TYPE.identifier}'.`,
     );
-    expect(String(type)).toContain('listDeviceImages { platform: "tvos" }');
+    expect(String(type)).toContain("automobile:devices/images/tvos");
     expect(String(runtime)).toContain(`Pass the full CoreSimulator identifier '${TV_RUNTIME_ID}'.`);
     expect(simctl.commands).toEqual([]);
   });

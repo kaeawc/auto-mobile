@@ -56,7 +56,7 @@ export interface AppleProvisionSpecGuidance {
 export const APPLE_PROVISION_SPEC_GUIDANCE = {
   ios: {
     platform: "ios",
-    catalog: 'listDeviceImages { platform: "ios" }',
+    catalog: "automobile:devices/images/ios",
     example: {
       runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-5",
       deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
@@ -72,7 +72,7 @@ export const APPLE_PROVISION_SPEC_GUIDANCE = {
   },
   tvos: {
     platform: "tvos",
-    catalog: 'listDeviceImages { platform: "tvos" }',
+    catalog: "automobile:devices/images/tvos",
     example: {
       runtime: "com.apple.CoreSimulator.SimRuntime.tvOS-26-5",
       deviceType: "com.apple.CoreSimulator.SimDeviceType.Apple-TV-4K-3rd-generation-4K",

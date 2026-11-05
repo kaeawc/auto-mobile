@@ -2566,9 +2566,20 @@ Cast on Android and AirPlay on iOS with one vocabulary. Its calls are the remote
 `cast.disconnect` (end the session and resume locally), `cast.stop` (end it and stop the receiver
 app) and `cast.setVolume` (`volume` 0-1, the remote device volume); play, pause and seek stay on the
 `media.*` calls. A platform that cannot do an op (AirPlay `disconnect` or `setVolume`) fails with
-`unsupported`. Events are `cast.routesChanged`, `sessionStarting`, `sessionStarted`, `sessionEnded`,
-`sessionFailed` (data `reason`: `media_not_castable`, `play_services_unavailable`, `network` or
-`receiver`) and `remoteVolume`. `/platform/cast/state` is `unavailable`, `noDevices`, `notConnected`,
+`unsupported`. Event data is a closed object (unknown keys are refused):
+
+| event             | data                                                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `routesChanged`   | `state` (as `/platform/cast/state`), `routeCount` (integer >= 0)                                                   |
+| `sessionStarting` | `player` (1-64 chars), `protocol`, `deviceName` (0-256 chars)                                                      |
+| `sessionStarted`  | as `sessionStarting`, plus `positionMs` (integer >= 0, the remote position)                                        |
+| `sessionEnded`    | as `sessionStarted`; `positionMs` is where local playback resumes                                                  |
+| `sessionFailed`   | `player`, `reason` (`media_not_castable`, `play_services_unavailable`, `network`, `receiver`), optional `protocol` |
+| `remoteVolume`    | `volume` (0-1)                                                                                                     |
+
+The host decodes them with `prototypeCastEventOf` (truncated data does not decode); Kotlin
+`PrototypeCastEvents` and Swift `PrototypeCastEvents` are the twins, and all three replay
+`test/fixtures/prototype-spec/cast/events.json`. `/platform/cast/state` is `unavailable`, `noDevices`, `notConnected`,
 `connecting` or `connected`, with `deviceName`, `protocol` (`googleCast` or `airplay`), `protocols`
 (the unique protocols the device supports, read whole as `{platform:/cast/protocols}`; an iOS agent
 reports `["airplay"]`), `player` (the cast `media` player id) and `volume`. CtrlProxy never advertises

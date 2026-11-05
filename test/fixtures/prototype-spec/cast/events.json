@@ -1,0 +1,184 @@
+{
+  "events": [
+    "routesChanged",
+    "sessionStarting",
+    "sessionStarted",
+    "sessionEnded",
+    "sessionFailed",
+    "remoteVolume"
+  ],
+  "failureReasons": ["media_not_castable", "play_services_unavailable", "network", "receiver"],
+  "cases": [
+    {
+      "name": "routesChanged reports the route state and count",
+      "event": "cast.routesChanged",
+      "data": { "state": "notConnected", "routeCount": 2 },
+      "valid": true
+    },
+    {
+      "name": "routesChanged reports no devices",
+      "event": "cast.routesChanged",
+      "data": { "state": "noDevices", "routeCount": 0 },
+      "valid": true
+    },
+    {
+      "name": "routesChanged refuses an unknown state",
+      "event": "cast.routesChanged",
+      "data": { "state": "pairing", "routeCount": 1 },
+      "valid": false
+    },
+    {
+      "name": "routesChanged refuses a fractional route count",
+      "event": "cast.routesChanged",
+      "data": { "state": "notConnected", "routeCount": 1.5 },
+      "valid": false
+    },
+    {
+      "name": "routesChanged refuses a negative route count",
+      "event": "cast.routesChanged",
+      "data": { "state": "notConnected", "routeCount": -1 },
+      "valid": false
+    },
+    {
+      "name": "sessionStarting names the route and player",
+      "event": "cast.sessionStarting",
+      "data": { "player": "mainVideo", "protocol": "googleCast", "deviceName": "Living Room TV" },
+      "valid": true
+    },
+    {
+      "name": "sessionStarting accepts an empty device name",
+      "event": "cast.sessionStarting",
+      "data": { "player": "mainVideo", "protocol": "airplay", "deviceName": "" },
+      "valid": true
+    },
+    {
+      "name": "sessionStarting refuses an unknown protocol",
+      "event": "cast.sessionStarting",
+      "data": { "player": "mainVideo", "protocol": "dlna", "deviceName": "TV" },
+      "valid": false
+    },
+    {
+      "name": "sessionStarting refuses an empty player",
+      "event": "cast.sessionStarting",
+      "data": { "player": "", "protocol": "googleCast", "deviceName": "TV" },
+      "valid": false
+    },
+    {
+      "name": "sessionStarted carries the remote position",
+      "event": "cast.sessionStarted",
+      "data": {
+        "player": "mainVideo",
+        "protocol": "googleCast",
+        "deviceName": "Living Room TV",
+        "positionMs": 12000
+      },
+      "valid": true
+    },
+    {
+      "name": "sessionStarted refuses a missing position",
+      "event": "cast.sessionStarted",
+      "data": { "player": "mainVideo", "protocol": "googleCast", "deviceName": "TV" },
+      "valid": false
+    },
+    {
+      "name": "sessionStarted refuses a position given as a string",
+      "event": "cast.sessionStarted",
+      "data": {
+        "player": "mainVideo",
+        "protocol": "googleCast",
+        "deviceName": "TV",
+        "positionMs": "0"
+      },
+      "valid": false
+    },
+    {
+      "name": "sessionEnded carries the position to resume locally from",
+      "event": "cast.sessionEnded",
+      "data": {
+        "player": "mainVideo",
+        "protocol": "airplay",
+        "deviceName": "Bedroom",
+        "positionMs": 0
+      },
+      "valid": true
+    },
+    {
+      "name": "sessionEnded refuses an unknown key",
+      "event": "cast.sessionEnded",
+      "data": {
+        "player": "mainVideo",
+        "protocol": "airplay",
+        "deviceName": "Bedroom",
+        "positionMs": 0,
+        "receiverAppId": "CC1AD845"
+      },
+      "valid": false
+    },
+    {
+      "name": "sessionFailed names the reason and player",
+      "event": "cast.sessionFailed",
+      "data": { "player": "mainVideo", "reason": "media_not_castable" },
+      "valid": true
+    },
+    {
+      "name": "sessionFailed may name the protocol",
+      "event": "cast.sessionFailed",
+      "data": { "player": "mainVideo", "reason": "network", "protocol": "googleCast" },
+      "valid": true
+    },
+    {
+      "name": "sessionFailed refuses an unknown reason",
+      "event": "cast.sessionFailed",
+      "data": { "player": "mainVideo", "reason": "timeout" },
+      "valid": false
+    },
+    {
+      "name": "sessionFailed refuses a missing reason",
+      "event": "cast.sessionFailed",
+      "data": { "player": "mainVideo" },
+      "valid": false
+    },
+    {
+      "name": "remoteVolume reports a fraction",
+      "event": "cast.remoteVolume",
+      "data": { "volume": 0.35 },
+      "valid": true
+    },
+    {
+      "name": "remoteVolume accepts both bounds",
+      "event": "cast.remoteVolume",
+      "data": { "volume": 1 },
+      "valid": true
+    },
+    {
+      "name": "remoteVolume refuses a volume over 1",
+      "event": "cast.remoteVolume",
+      "data": { "volume": 1.2 },
+      "valid": false
+    },
+    {
+      "name": "remoteVolume refuses a boolean volume",
+      "event": "cast.remoteVolume",
+      "data": { "volume": true },
+      "valid": false
+    },
+    {
+      "name": "data must be an object",
+      "event": "cast.remoteVolume",
+      "data": [0.5],
+      "valid": false
+    },
+    {
+      "name": "an unknown cast event is refused",
+      "event": "cast.sessionResumed",
+      "data": {},
+      "valid": false
+    },
+    {
+      "name": "another module's event is refused",
+      "event": "media.ended",
+      "data": {},
+      "valid": false
+    }
+  ]
+}

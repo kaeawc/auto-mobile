@@ -117,6 +117,7 @@ type AssignmentState = Pick<
   | "iosForeignDeviceOwnership"
   | "watchForeignDeviceOwnership"
   | "tvForeignDeviceOwnership"
+  | "visionForeignDeviceOwnership"
   | "bindingExclusion"
 >;
 export type AssignmentCallbacks = Pick<
@@ -445,6 +446,7 @@ export class DevicePoolAssignment {
       this.state.iosForeignDeviceOwnership?.refresh(idle("ios")),
       this.state.watchForeignDeviceOwnership?.refresh(idle("watchos")),
       this.state.tvForeignDeviceOwnership?.refresh(idle("tvos")),
+      this.state.visionForeignDeviceOwnership?.refresh(idle("visionos")),
       this.state.bindingExclusion
         ? requireCurrent
           ? refreshAllocationBindingExclusion(this.state.bindingExclusion)

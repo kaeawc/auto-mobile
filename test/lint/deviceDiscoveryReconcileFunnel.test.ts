@@ -260,6 +260,12 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "tvOS-only readiness (#15890) lists booted Apple TVs to resolve a call naming tvOS; " +
         "it never lists Android or iOS and never consults pooled identity.",
     },
+    "src/daemon/readiness/appleVisionReadiness.ts": {
+      calls: 1,
+      reason:
+        "visionOS-only readiness (#16849) lists booted Vision Pro simulators to resolve a call naming " +
+        "visionos; it never lists Android or iOS and never consults pooled identity.",
+    },
     "src/devices/deviceBootRevalidation.ts": {
       calls: 1,
       reason:

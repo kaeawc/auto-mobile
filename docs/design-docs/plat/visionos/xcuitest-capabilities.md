@@ -4,6 +4,13 @@ An XCUITest runner can drive a window app on the Apple Vision Pro simulator. Thi
 page records what the runner can observe and act on, what it cannot, and the
 decision for the visionOS runner in #16852 (Part of #16851).
 
+AutoMobile models Vision Pro simulators as platform `visionos`, form factor
+`xr-headset`, with independent discovery and ownership claims. Only `listDevices`,
+`listDeviceImages`, `provisionDevice`, `deleteDevice`, `startDevice`, `setActiveDevice`
+and `killDevice` are enabled. Lifecycle operations use `simctl`; boot binds a session
+at `booted` readiness without starting an automation runner. iOS inventories exclude
+xrOS runtimes. Runner capability evidence below does not enable additional tools.
+
 ## Environment
 
 Xcode 26.6, visionOS 26.5 runtime (`xrOS-26-5`), device type

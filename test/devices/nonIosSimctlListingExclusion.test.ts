@@ -1,3 +1,4 @@
+import visionCapture from "../fixtures/ios-simctl/list-all-visionos-26-5.json";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -64,6 +65,31 @@ function simctlFor(devices: CapturedList["devices"]): Simctl {
 describe("iOS simulator listing excludes Apple TV and Vision Pro simulators", () => {
   beforeEach(() => Simctl.invalidateDeviceListCache());
   afterEach(() => Simctl.invalidateDeviceListCache());
+
+  test("captured xrOS devices never enter booted, configured, transitional or lookup iOS paths", async () => {
+    const devices = structuredClone(visionCapture.devices);
+    const visionRuntime = "com.apple.CoreSimulator.SimRuntime.xrOS-26-5";
+    const [vision] = devices[visionRuntime];
+    const client = simctlFor(devices);
+    const iosIds = Object.entries(devices)
+      .filter(([runtime]) => isIosSimulatorRuntime(runtime))
+      .flatMap(([, rows]) => rows.map((row) => row.udid))
+      .sort();
+    expect((await client.listSimulatorImages()).map((device) => device.deviceId).sort()).toEqual(
+      iosIds,
+    );
+    expect(await client.getDeviceInfo(vision.udid)).toBeNull();
+    vision.state = "Booted";
+    Simctl.invalidateDeviceListCache();
+    const booted = await simctlFor(devices).getBootedSimulatorsChecked();
+    expect(
+      booted.some((device) => devices[visionRuntime].some((row) => row.udid === device.deviceId)),
+    ).toBe(false);
+    vision.state = "Booting";
+    Simctl.invalidateDeviceListCache();
+    const listing = await simctlFor(devices).getSimulatorListingChecked();
+    expect(listing.transitional.some((entry) => entry.device.deviceId === vision.udid)).toBe(false);
+  });
 
   test("only the iPhone of a booted mixed host is a booted iOS simulator", async () => {
     const booted = await simctlFor(mixedHost("Booted")).getBootedSimulatorsChecked();

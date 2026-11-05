@@ -22,6 +22,7 @@ import {
   refineAndroidSpec,
   watchProvisionDeviceSpecSchema,
   appleTvProvisionDeviceSpecSchema,
+  appleVisionProvisionDeviceSpecSchema,
 } from "../../../utils/provisionDeviceSpecSchemas";
 import { NON_EMULATABLE_CAPABILITY_IDS, OEM_PERSONA_IDS } from "../../utility/OemPersonas";
 
@@ -277,7 +278,7 @@ export type WatchStartDeviceArgs = z.output<typeof watchStartDeviceParametersSch
 export const startDeviceRegistrationSchema = z.preprocess(
   mergeLegacyStartDevicePayload,
   startDeviceParametersSchema
-    .extend({ platform: z.enum(["android", "ios", "watchos", "tvos"]) })
+    .extend({ platform: z.enum(["android", "ios", "watchos", "tvos", "visionos"]) })
     .superRefine(refineStartDeviceParameters),
 );
 
@@ -475,6 +476,22 @@ const appleTvProvisionDevice = z
   })
   .strict();
 
+/** An exact Apple Vision Pro simulator: adopted when it matches, else created with simctl. */
+const appleVisionProvisionDevice = z
+  .object({
+    platform: z.literal("visionos"),
+    name: z.string().min(1).describe("Exact Apple Vision Pro simulator name"),
+    deviceId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Exact Apple Vision Pro simulator UDID; a UDID that names no Apple Vision Pro is refused, not created",
+      ),
+    spec: appleVisionProvisionDeviceSpecSchema,
+  })
+  .strict();
+
 const provisionDeviceResourcesField = deviceResourceConfigurationSchema
   .optional()
   .describe(
@@ -594,7 +611,7 @@ function refineAppleTvProvisionOptions(
   args: ProvisionDeviceRefinable,
   context: z.RefinementCtx,
 ): void {
-  if (args.device.platform !== "tvos") {
+  if (args.device.platform !== "tvos" && args.device.platform !== "visionos") {
     return;
   }
   for (const field of ["resources", "enableTools"] as const) {
@@ -602,7 +619,7 @@ function refineAppleTvProvisionOptions(
       context.addIssue({
         code: "custom",
         path: [field],
-        message: `${field} is not supported on tvOS.`,
+        message: `${field} is not supported on ${args.device.platform === "visionos" ? "visionOS" : "tvOS"}.`,
       });
     }
   }
@@ -611,15 +628,17 @@ function refineAppleTvProvisionOptions(
       code: "custom",
       path: ["readiness"],
       message:
-        'tvOS provisioning accepts only readiness "none"; call startDevice afterward to prepare automation.',
+        args.device.platform === "visionos"
+          ? 'visionOS has no automation runner; pass readiness "none" or omit it.'
+          : 'tvOS provisioning accepts only readiness "none"; call startDevice afterward to prepare automation.',
     });
   }
 }
 
 /**
- * provisionDevice as registered: the Android and iOS request, or an exact Apple Watch or Apple TV
+ * provisionDevice as registered: the Android and iOS request, or an exact Apple Watch, Apple TV or Vision Pro
  * simulator. It stays a plain object so the ingress can see which keys it declares. Its
- * `readiness` has no default, so a watchOS or tvOS request that omits it means "none"; the Android and iOS
+ * `readiness` has no default, so a watchOS, tvOS or visionOS request that omits it means "none"; the Android and iOS
  * handler re-parses its request with {@link provisionDeviceSchema}, which applies "automation".
  */
 export const provisionDeviceRegistrationSchema = z
@@ -631,6 +650,7 @@ export const provisionDeviceRegistrationSchema = z
         iosProvisionDevice,
         watchProvisionDevice,
         appleTvProvisionDevice,
+        appleVisionProvisionDevice,
       ]),
     ),
     ...provisionDeviceOptionFields,
@@ -638,7 +658,7 @@ export const provisionDeviceRegistrationSchema = z
       .enum(["automation", "none"])
       .optional()
       .describe(
-        'Whether to wait for the AutoMobile automation runner after device boot (default "automation"); watchOS and tvOS provisioning take only "none" (their default); startDevice prepares their runners',
+        'Whether to wait for the AutoMobile automation runner after device boot (default "automation"); watchOS and tvOS provisioning take only "none" (their default); visionOS also takes only "none" and has no runner; startDevice prepares watchOS/tvOS runners',
       ),
   })
   .strict()
@@ -654,4 +674,11 @@ export type WatchProvisionDeviceRequest = z.output<typeof provisionDeviceRegistr
 /** A registered provisionDevice request naming an Apple TV simulator. */
 export type AppleTvProvisionDeviceRequest = z.output<typeof provisionDeviceRegistrationSchema> & {
   device: z.output<typeof appleTvProvisionDevice>;
+};
+
+/** A registered provisionDevice request naming an Apple Vision Pro simulator. */
+export type AppleVisionProvisionDeviceRequest = z.output<
+  typeof provisionDeviceRegistrationSchema
+> & {
+  device: z.output<typeof appleVisionProvisionDevice>;
 };

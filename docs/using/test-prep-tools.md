@@ -72,6 +72,39 @@ iOS URIs have no user query.
 - `postNotification` creates a notification for notification-flow tests.
 - `clipboard` sets, reads, pastes, or clears clipboard content.
 
+## Reaching a host server from the device
+
+When an app or browser on an Android device must reach a server on your
+machine at exactly `http://localhost:<port>` (an OAuth redirect URI, a local
+mock backend), use `portReverse` instead of running `adb reverse` yourself:
+
+- `ensure` with `ports: [{ devicePort, hostPort? }]` adds each mapping
+  (`hostPort` defaults to `devicePort`). Calling it again is a no-op.
+- `list` returns every reverse on the device; `owned: true` marks the ones
+  your session created.
+- `verify` reports whether ports (default: all of yours) are mapped now.
+- `remove` deletes mappings your session created.
+
+AutoMobile owns the mappings it creates for your session. If one disappears
+(an adb server restart, `adb reconnect`, `adb root`/`unroot`, an emulator
+restart), the next `ensure`, `list` or `verify` call re-adds it and lists it in
+`restored`; a mapping it could not re-add is listed in `restoreFailures` and
+retried on the next call. Your mappings are removed when your session is
+released or leaves the device. Mappings made without a session stay until the
+device disconnects; AutoMobile stops tracking them then, and a device that stays
+connected keeps them until you run `adb reverse --remove`.
+
+Errors come back with `errorCode`:
+
+| `errorCode`                 | Meaning and what to do                                                                                                                        |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `port_reverse_conflict`     | The device port is already mapped by someone else or to another host port. Nothing changed; pick another port or remove the existing mapping. |
+| `port_reverse_not_owned`    | `remove` named a port your session did not create. Nothing was removed.                                                                       |
+| `port_reverse_port_refused` | A port is below 1024 or outside `AUTOMOBILE_PORT_REVERSE_ALLOWED_PORTS`, or `ports` was missing.                                              |
+
+On iOS the tool returns `status: "not_applicable"`: a simulator shares the
+host's network, so `localhost:<port>` already reaches your machine.
+
 For a clean app start, use `launchApp` with `clearAppData: true` where the
 platform supports it. Use `observe` after preparation to confirm the expected
 state before continuing.

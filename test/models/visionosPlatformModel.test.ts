@@ -9,7 +9,7 @@ import {
 } from "../../src/models/Platform";
 import { sourcesForPlatform } from "../../src/utils/discoverySource";
 
-/** A Vision Pro is modelled but not discovered yet: every platform decision fails closed (#16848). */
+/** Vision Pro lifecycle is discovered independently; Android/iOS-only behavior stays closed. */
 describe("visionOS platform model (#16848)", () => {
   test("Android/iOS-only code refuses a Vision Pro, naming the operation and platform", () => {
     expect(() => requireAndroidOrIosPlatform("visionos", "Video recording")).toThrow(
@@ -26,9 +26,9 @@ describe("visionOS platform model (#16848)", () => {
     expect(matchesPlatformSelector("visionos", "visionos")).toBe(true);
   });
 
-  test("no sweep lists Vision Pro simulators until their inventory exists", () => {
-    expect(sourcesForPlatform("visionos")).toEqual([]);
-    expect(bootedSweepsFor("visionos", {}).visionos).toBe(false);
+  test("only an explicit visionos sweep lists Vision Pro simulators", () => {
+    expect(sourcesForPlatform("visionos")).toEqual(["visionos-simulator"]);
+    expect(bootedSweepsFor("visionos", {}).visionos).toBe(true);
     expect(bootedSweepsFor("visionos", {}).ios).toBe(false);
     expect(bootedSweepsFor("either", { includeWatchOs: true }).visionos).toBe(false);
   });

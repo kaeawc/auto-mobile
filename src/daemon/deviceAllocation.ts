@@ -651,10 +651,9 @@ export class DeviceAllocation {
     candidates: PooledDevice[],
     signal?: AbortSignal,
   ): Promise<AllocationDiscoverySnapshots> {
-    // Only entries idle before discovery may be judged by this pass. A newly
-    // released, added or replaced entry needs its own fresh snapshot.
+    // Judge only entries idle before discovery; newer entries need a fresh snapshot.
     const capturedEntries = new Set(candidates.filter((device) => isIdle(device)));
-    const [iosLiveness, androidPresence, tvosLiveness] = await raceWithDeadline(
+    const [iosLiveness, androidPresence, tvosLiveness, visionosLiveness] = await raceWithDeadline(
       () =>
         Promise.all([
           candidates.some((device) => isIdle(device) && device.platform === "ios")
@@ -668,18 +667,25 @@ export class DeviceAllocation {
           candidates.some((device) => isIdle(device) && device.platform === "tvos")
             ? this.port.idleDeviceReaper.getIosLivenessSnapshot({ platform: "tvos" })
             : undefined,
+          candidates.some((device) => isIdle(device) && device.platform === "visionos")
+            ? this.port.idleDeviceReaper.getIosLivenessSnapshot({ platform: "visionos" })
+            : undefined,
         ]),
       { timer: this.port.timer, signal, label: "Device allocation discovery" },
     );
-    if (iosLiveness && tvosLiveness) {
-      iosLiveness.tvosDiscoverySucceeded = tvosLiveness.tvosDiscoverySucceeded;
-      for (const id of tvosLiveness.bootedDeviceIds) {
-        iosLiveness.bootedDeviceIds.add(id);
+    const appleLiveness = iosLiveness ?? tvosLiveness ?? visionosLiveness;
+    for (const snapshot of [tvosLiveness, visionosLiveness]) {
+      if (appleLiveness && snapshot) {
+        appleLiveness.tvosDiscoverySucceeded ||= snapshot.tvosDiscoverySucceeded;
+        appleLiveness.visionosDiscoverySucceeded ||= snapshot.visionosDiscoverySucceeded;
+        for (const id of snapshot.bootedDeviceIds) {
+          appleLiveness.bootedDeviceIds.add(id);
+        }
       }
     }
     return {
       capturedEntries,
-      iosLiveness: iosLiveness ?? tvosLiveness,
+      iosLiveness: appleLiveness,
       androidPresence,
     };
   }

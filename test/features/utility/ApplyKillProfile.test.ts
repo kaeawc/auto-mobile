@@ -1,7 +1,9 @@
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
   applyKillProfile,
   parseAppOpMode,
+  parseHibernationState,
   parseStandbyBucket,
   resetKillProfile,
 } from "../../../src/features/utility/ApplyKillProfile";
@@ -13,6 +15,17 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 
 const emulator: BootedDevice = { name: "emu", platform: "android", deviceId: "emulator-5554" };
 const APP = "com.example.app";
+// Captures contain only the runtime section; supply the package/user context dumpsys normally has.
+const notificationDump = (state: "granted" | "revoked", appId = APP) =>
+  `Packages:\n  Package [${appId}] (test):\n    User 0: installed=true\n${readFileSync(
+    new URL(
+      `../../fixtures/android-notification-enabled/api35-deskclock-${state}-dumpsys-package.txt`,
+      import.meta.url,
+    ),
+    "utf8",
+  )}`;
+const grantedNotifications = notificationDump("granted");
+const revokedNotifications = notificationDump("revoked");
 const Q = `'${APP}'`;
 
 describe("kill profiles (#14051)", () => {
@@ -37,7 +50,10 @@ describe("kill profiles (#14051)", () => {
     adb
       .getExecutedCommands()
       .filter(
-        (command) => !/pm path|appops get|get-standby-bucket|^shell dumpsys battery$/.test(command),
+        (command) =>
+          !/pm path|dumpsys package|appops get|app_hibernation get-state|get-standby-bucket|^shell dumpsys battery$/.test(
+            command,
+          ),
       );
 
   test("every catalog entry is versioned and evidenced", () => {
@@ -64,6 +80,260 @@ describe("kill profiles (#14051)", () => {
       },
     });
     expect(writes()).toEqual([`shell appops set ${Q} RUN_ANY_IN_BACKGROUND ignore`]);
+  });
+
+  test.each(["granted", "revoked"] as const)(
+    "notifications-off restores the original %s grant on reset",
+    async (original) => {
+      adb.setCommandResponseSequence(`shell dumpsys package ${Q}`, [
+        createExecResult(original === "granted" ? grantedNotifications : revokedNotifications, ""),
+        createExecResult(revokedNotifications, ""),
+      ]);
+      const result = await applyKillProfile(emulator, APP, "notifications-off", deps());
+      expect(result.status).toBe("applied");
+      expect(result.profile.version).toBe(2);
+      expect(writes()).toEqual([`shell pm revoke ${Q} android.permission.POST_NOTIFICATIONS`]);
+      const commands = adb.getExecutedCommands();
+      expect(commands.indexOf(`shell dumpsys package ${Q}`)).toBeLessThan(
+        commands.indexOf(`shell pm revoke ${Q} android.permission.POST_NOTIFICATIONS`),
+      );
+      expect(commands.filter((command) => command === `shell dumpsys package ${Q}`)).toHaveLength(
+        2,
+      );
+      const restoreCommand =
+        original === "granted" ? `shell pm grant ${Q} android.permission.POST_NOTIFICATIONS` : null;
+      expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([
+        {
+          key: `notificationPermission:${APP}`,
+          appId: APP,
+          command: restoreCommand,
+        },
+      ]);
+      expect(result.restore?.commands).toEqual(restoreCommand ? [restoreCommand] : undefined);
+
+      adb.clearHistory();
+      const reset = await resetKillProfile(emulator, APP, {}, deps());
+      expect(reset).toMatchObject({ source: "recorded", status: "applied" });
+      expect(writes()).toEqual(restoreCommand ? [restoreCommand] : []);
+      expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([]);
+    },
+  );
+
+  test("notifications-off keeps the first grant across repeated applies", async () => {
+    adb.setCommandResponseSequence(`shell dumpsys package ${Q}`, [
+      createExecResult(grantedNotifications, ""),
+      createExecResult(revokedNotifications, ""),
+      createExecResult(revokedNotifications, ""),
+      createExecResult(revokedNotifications, ""),
+    ]);
+    await applyKillProfile(emulator, APP, "notifications-off", deps());
+    const again = await applyKillProfile(emulator, APP, "notifications-off", deps());
+    expect(again.restore?.commands).toEqual([
+      `shell pm grant ${Q} android.permission.POST_NOTIFICATIONS`,
+    ]);
+  });
+
+  const grantRecord = {
+    key: `notificationPermission:${APP}`,
+    appId: APP,
+    command: `shell pm grant ${Q} android.permission.POST_NOTIFICATIONS`,
+  };
+
+  test("notifications-off drops a new record when read-back is still granted", async () => {
+    adb.setCommandResponseSequence(`shell dumpsys package ${Q}`, [
+      createExecResult(grantedNotifications, ""),
+      createExecResult(grantedNotifications, ""),
+    ]);
+    await expect(applyKillProfile(emulator, APP, "notifications-off", deps())).rejects.toThrow(
+      "POST_NOTIFICATIONS still granted after pm revoke",
+    );
+    expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([]);
+  });
+
+  test.each([
+    { name: "unreadable", readback: "" },
+    { name: "a shell read failure", readback: "Exception: read refused" },
+  ])(
+    "notifications-off keeps the record when read-back is $name, since revoke may have landed",
+    async ({ readback }) => {
+      adb.setCommandResponseSequence(`shell dumpsys package ${Q}`, [
+        createExecResult(grantedNotifications, ""),
+        createExecResult(readback, ""),
+      ]);
+      await expect(applyKillProfile(emulator, APP, "notifications-off", deps())).rejects.toThrow(
+        "Could not read POST_NOTIFICATIONS",
+      );
+      expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([grantRecord]);
+    },
+  );
+
+  test("notifications-off keeps the record when read-back throws after revoke", async () => {
+    adb.setCommandResponse(
+      `shell dumpsys package ${Q}`,
+      createExecResult(grantedNotifications, ""),
+    );
+    const shell = new (class extends FakeAdbExecutor {
+      override async executeCommand(
+        command: string,
+        options?: Parameters<FakeAdbExecutor["executeCommand"]>[1],
+      ) {
+        const result = await adb.executeCommand(command, options);
+        if (command.includes("pm revoke")) {
+          adb.setCommandError(`shell dumpsys package ${Q}`, new Error("adb connection closed"));
+        }
+        return result;
+      }
+    })();
+    await expect(
+      applyKillProfile(emulator, APP, "notifications-off", { shell, registry }),
+    ).rejects.toThrow("adb connection closed");
+    expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([grantRecord]);
+
+    adb.clearHistory();
+    const reset = await resetKillProfile(emulator, APP, {}, deps());
+    expect(reset).toMatchObject({ source: "recorded", status: "applied" });
+    expect(writes()).toEqual([grantRecord.command]);
+  });
+
+  test("notifications-off reads a package whose name contains a failure keyword", async () => {
+    const appId = "com.example.exception";
+    const quoted = `'${appId}'`;
+    adb.setCommandResponseSequence(`shell dumpsys package ${quoted}`, [
+      createExecResult(notificationDump("granted", appId), ""),
+      createExecResult(notificationDump("revoked", appId), ""),
+    ]);
+    const result = await applyKillProfile(emulator, appId, "notifications-off", deps());
+    expect(result.status).toBe("applied");
+    expect(result.restore?.commands).toEqual([
+      `shell pm grant ${quoted} android.permission.POST_NOTIFICATIONS`,
+    ]);
+  });
+
+  test("notifications-off drops a new record when revoke fails", async () => {
+    adb.setCommandResponse(
+      `shell dumpsys package ${Q}`,
+      createExecResult(grantedNotifications, ""),
+    );
+    adb.setCommandResponse(
+      `shell pm revoke ${Q}`,
+      createExecResult("", "Exception: revoke refused"),
+    );
+    await expect(applyKillProfile(emulator, APP, "notifications-off", deps())).rejects.toThrow(
+      "revoke refused",
+    );
+    expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([]);
+    expect(
+      adb.getExecutedCommands().filter((command) => command === `shell dumpsys package ${Q}`),
+    ).toHaveLength(1);
+  });
+
+  test("notifications-off keeps the record when the revoke transport throws", async () => {
+    adb.setCommandResponse(
+      `shell dumpsys package ${Q}`,
+      createExecResult(grantedNotifications, ""),
+    );
+    adb.setCommandError(`shell pm revoke ${Q}`, new Error("revoke transport failed"));
+    await expect(applyKillProfile(emulator, APP, "notifications-off", deps())).rejects.toThrow(
+      "revoke transport failed",
+    );
+    expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([grantRecord]);
+  });
+
+  test("a failed repeated revoke preserves the original restore record", async () => {
+    adb.setCommandResponseSequence(`shell dumpsys package ${Q}`, [
+      createExecResult(grantedNotifications, ""),
+      createExecResult(revokedNotifications, ""),
+      createExecResult(grantedNotifications, ""),
+      createExecResult(grantedNotifications, ""),
+    ]);
+    await applyKillProfile(emulator, APP, "notifications-off", deps());
+    await expect(applyKillProfile(emulator, APP, "notifications-off", deps())).rejects.toThrow(
+      "POST_NOTIFICATIONS still granted after pm revoke",
+    );
+    expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([
+      {
+        key: `notificationPermission:${APP}`,
+        appId: APP,
+        command: `shell pm grant ${Q} android.permission.POST_NOTIFICATIONS`,
+      },
+    ]);
+  });
+
+  test("notifications-off refuses an unreadable original grant before writing", async () => {
+    adb.setCommandResponse(`shell dumpsys package ${Q}`, createExecResult("", ""));
+    await expect(applyKillProfile(emulator, APP, "notifications-off", deps())).rejects.toThrow(
+      "Could not read POST_NOTIFICATIONS",
+    );
+    expect(writes()).toEqual([]);
+    expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([]);
+  });
+
+  test.each(["false", "true"])(
+    "Samsung auto-disable restores captured hibernation %s",
+    async (original) => {
+      adb.setCommandResponse(
+        `shell cmd app_hibernation get-state --user 0 ${Q}`,
+        createExecResult(`${original}\n`, ""),
+      );
+      const result = await applyKillProfile(emulator, APP, "samsung-auto-disable", deps());
+      expect(result).toMatchObject({
+        status: "applied",
+        steps: [{ step: "app hibernation", status: "applied" }],
+      });
+      expect(writes()).toEqual([`shell cmd app_hibernation set-state --user 0 ${Q} true`]);
+      const commands = adb.getExecutedCommands();
+      const captureIndex = commands.indexOf(`shell cmd app_hibernation get-state --user 0 ${Q}`);
+      expect(captureIndex).toBeGreaterThanOrEqual(0);
+      expect(captureIndex).toBeLessThan(
+        commands.indexOf(`shell cmd app_hibernation set-state --user 0 ${Q} true`),
+      );
+      expect(result.restore?.commands).toEqual([
+        `shell cmd app_hibernation set-state --user 0 ${Q} ${original}`,
+      ]);
+      expect(registry.has(emulator.deviceId, `hibernation:${APP}`)).toBe(true);
+
+      adb.clearHistory();
+      const reset = await resetKillProfile(emulator, APP, {}, deps());
+      expect(reset).toMatchObject({ source: "recorded", status: "applied" });
+      expect(writes()).toEqual([`shell cmd app_hibernation set-state --user 0 ${Q} ${original}`]);
+      expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([]);
+    },
+  );
+
+  test.each([
+    ["notifications-off", 32, 33],
+    ["samsung-auto-disable", 30, 31],
+  ] as const)("%s is unsupported on API %s", async (profile, api, minimum) => {
+    adb.setAndroidApiLevel(api);
+    const result = await applyKillProfile(emulator, APP, profile, deps());
+    expect(result.status).toBe("unsupported");
+    expect(result.steps[0].reason).toBe(`needs API ${minimum}+, device is API ${api}`);
+    expect(result.restore).toBeUndefined();
+    expect(writes()).toEqual([]);
+    expect(
+      adb
+        .getExecutedCommands()
+        .some((command) => /dumpsys package|appops get|app_hibernation get-state/.test(command)),
+    ).toBe(false);
+    expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([]);
+  });
+
+  const cases: [string, "true" | "false"][] = [
+    ["true", "true"],
+    ["false", "false"],
+    ["true\n", "true"],
+    ["garbage", "false"],
+    ["", "false"],
+  ];
+  test.each(cases)("parseHibernationState parses %j as %s", (stdout, expected) => {
+    expect(parseHibernationState(stdout)).toBe(expected);
+  });
+
+  test("baseline reset includes notification and hibernation defaults on supported APIs", async () => {
+    const result = await resetKillProfile(emulator, APP, { baseline: true }, deps());
+    expect(result).toMatchObject({ source: "baseline", status: "applied" });
+    expect(writes()).toContain(`shell appops set ${Q} POST_NOTIFICATION default`);
+    expect(writes()).toContain(`shell cmd app_hibernation set-state --user 0 ${Q} false`);
   });
 
   test("Samsung deep sleeping denies wake locks after capturing the mode and resets it", async () => {

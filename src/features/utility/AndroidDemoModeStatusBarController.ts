@@ -1,9 +1,10 @@
 import type { ExecResult } from "../../models";
-import { ActionableError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { defaultDemoAllowedReceipts, type DemoAllowedReceipts } from "./DemoAllowedReceipts";
 import {
   STATUS_BAR_COMMAND_TIMEOUT_MS,
+  StatusBarRequestRejectedError,
+  requestedStatusBarFields,
   throwOnExecError,
   type StatusBarApplyOutcome,
   type StatusBarController,
@@ -68,13 +69,17 @@ export class AndroidDemoModeStatusBarController implements StatusBarController {
   ): Promise<StatusBarApplyOutcome> {
     const clock = overrides.time === undefined ? undefined : androidDemoClock(overrides.time);
     if (clock === null) {
-      throw new ActionableError(
+      throw new StatusBarRequestRejectedError(
         `Android demo mode needs time as H:MM or HH:MM (24-hour), got "${overrides.time}".`,
       );
     }
     const applied: StatusBarField[] = [];
     const unsupported: StatusBarField[] =
       overrides.operatorName === undefined ? [] : ["operatorName"];
+    if (requestedStatusBarFields(overrides).length === unsupported.length) {
+      // Nothing demo mode can set: leave the device (and demo mode) untouched.
+      return { applied, unsupported };
+    }
     if (!this.receipts.has(this.deviceId)) {
       this.receipts.save(this.deviceId, await this.readDemoAllowed(signal));
     }

@@ -32,6 +32,7 @@ import { resolveMissingForegroundWindow } from "../observe/ObserveScreen";
 import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosInstalledApp";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { readAndroidPackageProcesses } from "../../utils/android-cmdline-tools/androidProcessState";
+import { rethrowProbeTransportUnavailable } from "../../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { registerDeviceIncarnationListener } from "../../utils/deviceIncarnation";
 import { sequenceBackoff } from "../../utils/Backoff";
 
@@ -193,7 +194,9 @@ export class TerminateApp extends BaseVisualChange {
           perf
             .fork()
             .track("checkInstalled", () => this.checkInstalled(packageName, targetUserId, signal)),
-          perf.fork().track("checkRunning", () => this.readRunningPids(packageName, targetUserId)),
+          perf
+            .fork()
+            .track("checkRunning", () => this.readRunningPids(packageName, targetUserId, signal)),
           perf.fork().track("checkForeground", async () => {
             // The resolver already ran this dumpsys when it chose the user; reuse it.
             const foregroundApp =
@@ -327,6 +330,8 @@ export class TerminateApp extends BaseVisualChange {
         throw error;
       }
       logger.warn("[TerminateApp] Android install check failed", error);
+      // The probe runs before force-stop, so a transport loss here never dispatched the stop.
+      rethrowProbeTransportUnavailable(error);
       throw toActionableError(
         error,
         `Could not determine whether ${packageName} is installed for Android user ${targetUserId}`,
@@ -339,18 +344,28 @@ export class TerminateApp extends BaseVisualChange {
    * selected user's process state is read before changing it. A package running in another
    * profile must not make this operation report that the selected profile was running.
    */
-  private async readRunningPids(packageName: string, targetUserId: number): Promise<Set<number>> {
+  private async readRunningPids(
+    packageName: string,
+    targetUserId: number,
+    signal?: AbortSignal,
+  ): Promise<Set<number>> {
     try {
       const result = await readAndroidPackageProcesses(this.adb, packageName, {
         userId: targetUserId,
         timer: this.timer,
+        signal,
+        deviceId: this.device.deviceId,
       });
       const processes = result.processes.filter((p) => p.userId === targetUserId);
       return new Set(processes.map((p) => p.pid));
     } catch (error) {
+      throwIfAborted(signal);
       logger.warn(`[TerminateApp] Running-state check failed for user ${targetUserId}`, error);
+      // The probe runs before force-stop, so a transport loss here never dispatched the stop.
+      rethrowProbeTransportUnavailable(error);
       throw new ActionableError(
         `Could not determine whether ${packageName} is running for Android user ${targetUserId}: ${errorMessage(error)}`,
+        { cause: error },
       );
     }
   }

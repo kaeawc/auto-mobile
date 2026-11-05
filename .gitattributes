@@ -57,6 +57,7 @@ test/fixtures/android-touch-node/*.txt text eol=lf
 test/fixtures/android-uinput-pen/*.txt text eol=lf
 test/fixtures/android-window-policy/*.txt text eol=lf
 test/fixtures/ios-devicectl/*.json text eol=lf
+test/fixtures/ios-rotate/*.json text eol=lf
 test/fixtures/observe-output/ios-overlay-window/*.json text eol=lf
 test/fixtures/observe-output/ios-prototype-sheet/*.json text eol=lf
 test/fixtures/network-filter-controller/*.json text eol=lf
@@ -150,6 +151,8 @@ docs/img/favicon.ico -filter -diff -merge -text
 android/playground/app/src/main/res/mipmap-*/ic_launcher*.png -filter -diff -merge -text
 ios/Playground/Sources/Assets.xcassets/AppIcon.appiconset/AppIcon.png -filter -diff -merge -text
 android/desktop-app/src/main/resources/icons/app-icon.png -filter -diff -merge -text
+# Read from a marketplace clone, which does not fetch LFS objects.
+plugins/auto-mobile/assets/icon.png -filter -diff -merge -text
 android/desktop-app/src/main/resources/icons/app-icon.ico -filter -diff -merge -text
 # Menu-bar truck mask read from the runtime classpath by SystemTray.kt via ImageIO — a
 # checked-out LFS pointer would decode to null and drop the tray to its fallback dot.

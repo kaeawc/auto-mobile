@@ -187,4 +187,30 @@ class SharedDaemonStreamHubStorageTest {
       assertEquals(listOf(ack("req-1", prefs), ack("req-2", prefs)), a.responses)
       assertEquals(listOf(ack("req-2", prefs)), b.responses)
     }
+
+  @Test
+  fun `a pane joining a file whose registration failed registers it again`() = runTest {
+    val h = harness()
+    val a = pane(h)
+    a.stream.subscribeStorage(prefs.packageName, prefs.fileName)
+    val refused =
+      StorageSubscriptionResponse("req-1", prefs, subscribe = true, success = false, error = "busy")
+    h.shared.emitStorageSubscriptionResponse(refused)
+    assertEquals(listOf(refused), a.responses)
+
+    val b = pane(h)
+    b.stream.subscribeStorage(prefs.packageName, prefs.fileName)
+
+    assertEquals(
+      listOf(
+        "subscribe_storage" to prefs,
+        "unsubscribe_storage" to prefs,
+        "subscribe_storage" to prefs,
+      ),
+      h.shared.storageSubscriptionCalls,
+    )
+    h.shared.emitStorageSubscriptionResponse(ack("req-2", prefs))
+    assertEquals(listOf(ack("req-2", prefs)), b.responses)
+    assertEquals(listOf(refused, ack("req-2", prefs)), a.responses)
+  }
 }

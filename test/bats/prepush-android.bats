@@ -769,3 +769,103 @@ SCRIPT
     false
   fi
 }
+
+# Builds a one-module fixture whose Kotlin source changed after base_sha.
+# $1 is the stub gradlew body appended after the invocation recorder.
+setup_scoped_detekt_fixture() {
+  fixture_repo="$(cd "$(mktemp -d)" && pwd -P)"
+  invocations_file="$(mktemp)"
+  export GIT_CONFIG_GLOBAL=/dev/null
+  export GIT_CONFIG_SYSTEM=/dev/null
+
+  mkdir -p "${fixture_repo}/android/desktop-app/src/main/kotlin"
+  copy_prepush_fixture
+  cat > "${fixture_repo}/scripts/ktfmt/validate_ktfmt.sh" <<'SCRIPT'
+#!/usr/bin/env bash
+exit 0
+SCRIPT
+  {
+    printf '%s\n' '#!/usr/bin/env bash' 'printf '"'"'%s\n'"'"' "$@" >> "${GRADLEW_INVOCATIONS_FILE}"'
+    printf '%s\n' "${1:-}"
+  } > "${fixture_repo}/android/gradlew"
+  chmod +x "${fixture_repo}/android/gradlew"
+  printf '%s\n' 'plugins {}' > "${fixture_repo}/android/desktop-app/build.gradle.kts"
+  printf '%s\n' 'class Surface' > "${fixture_repo}/android/desktop-app/src/main/kotlin/Surface.kt"
+
+  cd "${fixture_repo}"
+  git init -q
+  git add -A
+  git commit -qm "initial module"
+  base_sha="$(git rev-parse HEAD)"
+  printf '%s\n' '// changed' >> android/desktop-app/src/main/kotlin/Surface.kt
+  git add android/desktop-app/src/main/kotlin/Surface.kt
+  git commit -qm "change Kotlin source"
+}
+
+@test "scoped Detekt runs the type-resolved detektMain and detektTest tasks CI runs" {
+  setup_scoped_detekt_fixture
+
+  run env ANDROID_PREPUSH_BASE_REF="${base_sha}" GRADLEW_INVOCATIONS_FILE="${invocations_file}" bash "${fixture_repo}/${SCRIPT}"
+
+  [ "$status" -eq 0 ]
+  grep -qx ':desktop-app:detektMain' "${invocations_file}"
+  grep -qx ':desktop-app:detektTest' "${invocations_file}"
+  if grep -qx ':desktop-app:detekt' "${invocations_file}"; then
+    false
+  fi
+}
+
+@test "scoped Detekt fails the lane when Gradle reports a Detekt task SKIPPED" {
+  # shellcheck disable=SC2016 # expanded by the stub gradlew, not here
+  setup_scoped_detekt_fixture 'if [[ " $* " == *" :desktop-app:detektMain "* ]]; then echo "> Task :desktop-app:detektMain SKIPPED"; fi'
+
+  run env ANDROID_PREPUSH_BASE_REF="${base_sha}" GRADLEW_INVOCATIONS_FILE="${invocations_file}" bash "${fixture_repo}/${SCRIPT}"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Detekt tasks were SKIPPED"* ]]
+  [[ "$output" == *"> Task :desktop-app:detektMain SKIPPED"* ]]
+  if grep -qx ':desktop-app:compileKotlin' "${invocations_file}"; then
+    false
+  fi
+}
+
+@test "scoped Detekt passes when Detekt tasks report NO-SOURCE or UP-TO-DATE" {
+  # shellcheck disable=SC2016 # expanded by the stub gradlew, not here
+  setup_scoped_detekt_fixture 'if [[ " $* " == *" :desktop-app:detektMain "* ]]; then echo "> Task :desktop-app:detektMain UP-TO-DATE"; echo "> Task :desktop-app:detektTest NO-SOURCE"; echo "> Task :desktop-app:lintDebug SKIPPED"; fi'
+
+  run env ANDROID_PREPUSH_BASE_REF="${base_sha}" GRADLEW_INVOCATIONS_FILE="${invocations_file}" bash "${fixture_repo}/${SCRIPT}"
+
+  [ "$status" -eq 0 ]
+  grep -qx ':desktop-app:compileKotlin' "${invocations_file}"
+}
+
+@test "full-scope Detekt fails the lane when Gradle reports a Detekt task SKIPPED" {
+  fixture_repo="$(cd "$(mktemp -d)" && pwd -P)"
+  invocations_file="$(mktemp)"
+  export GIT_CONFIG_GLOBAL=/dev/null
+  export GIT_CONFIG_SYSTEM=/dev/null
+
+  mkdir -p "${fixture_repo}/android/config/detekt"
+  copy_prepush_fixture
+  cat > "${fixture_repo}/android/gradlew" <<'SCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >> "${GRADLEW_INVOCATIONS_FILE}"
+if [[ " $* " == *" detektMain "* ]]; then echo "> Task :desktop-core:detektMain SKIPPED"; fi
+SCRIPT
+  chmod +x "${fixture_repo}/android/gradlew"
+  printf '%s\n' 'config: initial' > "${fixture_repo}/android/config/detekt/detekt.yml"
+
+  cd "${fixture_repo}"
+  git init -q
+  git add -A
+  git commit -qm "initial Detekt config"
+  base_sha="$(git rev-parse HEAD)"
+  printf '%s\n' 'config: changed' > android/config/detekt/detekt.yml
+  git add android/config/detekt/detekt.yml
+  git commit -qm "change Detekt config"
+
+  run env ANDROID_PREPUSH_BASE_REF="${base_sha}" GRADLEW_INVOCATIONS_FILE="${invocations_file}" bash "${fixture_repo}/${SCRIPT}"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Detekt tasks were SKIPPED"* ]]
+}

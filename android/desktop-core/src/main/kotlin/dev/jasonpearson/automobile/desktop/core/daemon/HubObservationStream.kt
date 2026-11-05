@@ -81,15 +81,16 @@ internal class HubObservationStream(
     get() = current()?.deviceEvents ?: idleFlow()
 
   override val storageUpdates: Flow<StorageStreamUpdate>
-    get() = heldLease()?.storageUpdates?.receiveAsFlow() ?: emptyFlow()
+    get() = held?.storage?.updates?.receiveAsFlow() ?: emptyFlow()
 
   override val storageSubscriptionResponses: Flow<StorageSubscriptionResponse>
-    get() = heldLease()?.storageResponses?.receiveAsFlow() ?: emptyFlow()
+    get() = held?.storage?.responses?.receiveAsFlow() ?: emptyFlow()
 
   override val storageReconciliationRequests: Flow<StorageSubscriptionKey>
-    get() = heldLease()?.storageReconciliations?.receiveAsFlow() ?: emptyFlow()
+    get() = held?.storage?.reconciliations?.receiveAsFlow() ?: emptyFlow()
 
-  private fun heldLease(): HubObservationStreams.Lease? = synchronized(lock) { lease }
+  private val held: HubObservationStreams.Lease?
+    get() = synchronized(lock) { lease }
 
   override val connectionState: StateFlow<ConnectionState> = streams.observationConnectionState(key)
 
@@ -149,13 +150,17 @@ internal class HubObservationStream(
   }
 
   override fun subscribeStorage(packageName: String, fileName: String) {
-    val held = heldLease() ?: return
-    streams.subscribeStorage(held, StorageSubscriptionKey(packageName, fileName))
+    val lease = held ?: return
+    streams
+      .storageFor(lease)
+      ?.subscribe(lease.storage, StorageSubscriptionKey(packageName, fileName))
   }
 
   override fun unsubscribeStorage(packageName: String, fileName: String) {
-    val held = heldLease() ?: return
-    streams.unsubscribeStorage(held, StorageSubscriptionKey(packageName, fileName))
+    val lease = held ?: return
+    streams
+      .storageFor(lease)
+      ?.unsubscribe(lease.storage, StorageSubscriptionKey(packageName, fileName))
   }
 
   private companion object {

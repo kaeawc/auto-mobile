@@ -9,11 +9,11 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.staticCompositionLocalOf
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonStreamHub
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamKey
+import dev.jasonpearson.automobile.desktop.core.daemon.MultiplexedTelemetrySocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationHubConfig
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.SharedDaemonStreamHub
-import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushSocketClient
 
 /**
  * The process-wide [DaemonStreamHub] facets draw device streams from. Null (the default, e.g. the
@@ -31,9 +31,8 @@ fun rememberDaemonStreamHub(sessionUuidProvider: () -> String?): DaemonStreamHub
   val latestSessionUuidProvider by rememberUpdatedState(sessionUuidProvider)
   val hub = remember {
     SharedDaemonStreamHub(
-      telemetryClientFactory = {
-        TelemetryPushSocketClient(sessionUuidProvider = { latestSessionUuidProvider() })
-      },
+      // Every observed device's telemetry over one socket and one reader thread (#16968).
+      telemetry = MultiplexedTelemetrySocketClient.create({ latestSessionUuidProvider() }),
       observation =
         ObservationHubConfig(
           streamFactory = {

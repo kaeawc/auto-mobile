@@ -37,14 +37,22 @@ The app owns one `DaemonStreamHub` per process. Facets lease a device's stream
 from the hub, keyed by `deviceSessionUuid` (with `deviceId` as label and
 fallback), instead of opening their own socket:
 
-- Telemetry uses one connection per observed device, shared by every facet on
-  that device. It subscribes with the device's `deviceSessionUuid`, so the
-  daemon backfills that device's own history; an all-devices subscription would
-  backfill only the newest rows across every device. The hub also routes on the
+- Telemetry for every observed device shares one socket and one reader thread.
+  Each device gets its own `subscribe` naming its `deviceSessionUuid`, so the
+  daemon backfills that device's own history under its own `subscriptionId`; an
+  all-devices subscription would backfill only the newest rows across every
+  device. Pushes are routed by `subscriptionId`, and the hub also checks the
   `deviceSessionUuid` stamped on each event, so a rebooted device that reuses
-  its serial never receives the old epoch's events. A device's connection opens
-  with its first lease and closes with its last; a facet mounted on an open
-  connection first receives its device's recent events.
+  its serial never receives the old epoch's events. A device subscribes with its
+  first lease and unsubscribes with its last, and the socket closes when no
+  device remains. After a reconnect every live device subscribes again. A
+  refused subscription, such as a device that is not live yet, retries on its
+  own backoff without affecting other devices; a refused desktop session fails
+  them all, and a device subscribing while that session is still current gets
+  the refusal at once. The refusal holds only for the refused session UUID: once
+  a different session registers, a retry or a new subscription connects again
+  and subscribes every live device. A facet mounted on a live subscription first
+  receives its device's recent events.
 - Observation (Layout, Performance, Navigation) also uses one connection per
   device, shared by every facet on it. The hub owns that connection's
   reconnects, so a facet on a hub stream runs no reconnect loop of its own and
@@ -64,3 +72,14 @@ fallback), instead of opening their own socket:
 
 Storage, failures and video streams still connect per pane, as do observation
 streams in hosts without a hub (the IDE plugin).
+
+A pane is keyed on its device epoch. When the daemon ends that epoch with a
+successor, the pane re-keys onto the successor. When it ends with no successor
+(the device disconnected for good), the pane drops the epoch and shows "Device
+disconnected" in place of its stream and facets, which releases their leases.
+The pane is marked rather than closed so the user sees why the device went away;
+it stays until closed, and observing the device again or a fresh epoch for it
+(including one reported after a daemon restart) restores the live pane as a new
+epoch, so nothing observed from the retired epoch carries over. A daemon
+restart that re-mints a live pane's epoch is not a new epoch: that pane keeps
+its remembered state. An end for an epoch the pane is not on is ignored.

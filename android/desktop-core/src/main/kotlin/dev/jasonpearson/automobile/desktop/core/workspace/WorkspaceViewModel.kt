@@ -71,14 +71,15 @@ sealed interface WorkspaceAction {
   data class RefreshDeviceSessionUuids(val sessionUuids: Map<String, String>) : WorkspaceAction
 
   /**
-   * The daemon ended [deviceId]'s epoch [retiredUuid] and minted [successorUuid] for the same
-   * device (`device_session_ended`, e.g. a reboot that reused the serial). The column observing the
-   * retired epoch becomes a fresh column for the successor; any other column is untouched.
+   * The daemon ended [deviceId]'s epoch [retiredUuid] (`device_session_ended`). With a
+   * [successorUuid] (e.g. a reboot that reused the serial) the column observing the retired epoch
+   * becomes a fresh column for the successor; with none the device left for good and that column is
+   * marked ended. A column on any other epoch is untouched.
    */
   data class EndDeviceSession(
     val deviceId: String,
     val retiredUuid: String,
-    val successorUuid: String,
+    val successorUuid: String? = null,
   ) : WorkspaceAction
 
   /** Open [tool] on every observed pane for like-for-like comparison (the facet ⧉ Diff control). */

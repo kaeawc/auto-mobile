@@ -78,16 +78,21 @@ fi
 
 "$adb" shell "kill $pid 2>/dev/null; true" > /dev/null
 # SIGTERM is asynchronous: give the payload time to exit before judging it.
-stopped=""
+# Only an explicit "gone" from a successful adb round trip counts as stopped;
+# an adb transport failure (device offline) is retried, never read as an exit.
+state=""
 for ((attempt = 0; attempt < exit_attempts; attempt++)); do
-  if ! "$adb" shell "test -d /proc/$pid" > /dev/null 2>&1; then
-    stopped="yes"
+  if state="$("$adb" shell "if [ -d /proc/$pid ]; then echo running; else echo gone; fi" 2>&1 | tr -d '\r')" \
+    && [ "$state" = "gone" ]; then
     break
   fi
   sleep "$poll_seconds"
 done
-if [ -z "$stopped" ]; then
+if [ "$state" = "running" ]; then
   echo "FAIL: payload $pid is still running after kill" >&2
+  exit 1
+elif [ "$state" != "gone" ]; then
+  echo "FAIL: could not confirm payload $pid exited; last adb probe: ${state:-<empty>}" >&2
   exit 1
 fi
 pid=""

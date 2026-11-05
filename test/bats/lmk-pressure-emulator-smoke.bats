@@ -12,7 +12,7 @@ setup() {
   printf 'payload' > "$BIN_DIR/x86_64/lmk_pressure"
   export FAKE_STATE="$BATS_TEST_TMPDIR/device"
   mkdir -p "$FAKE_STATE"
-  export FAKE_ABI="x86_64" FAKE_READY="READY 64" FAKE_UID="2000" FAKE_EXIT_CHECKS=0
+  export FAKE_ABI="x86_64" FAKE_READY="READY 64" FAKE_UID="2000" FAKE_EXIT_CHECKS=0 FAKE_OFFLINE_PROBES=0
   export ADB_LOG="$BATS_TEST_TMPDIR/adb.log"
   export ADB="$BATS_TEST_TMPDIR/adb"
   cat > "$ADB" <<'EOF'
@@ -31,14 +31,18 @@ case "$cmd" in
   "cat /data/local/tmp/automobile-lmk-pressure-smoke.out"*) [ -f "$FAKE_STATE/running" ] && echo "$FAKE_READY" ;;
   "grep Uid /proc/4242/status"*) [ -f "$FAKE_STATE/running" ] && printf 'Uid:\t%s\t%s\t%s\t%s\n' "$FAKE_UID" "$FAKE_UID" "$FAKE_UID" "$FAKE_UID" ;;
   "kill 4242"*) touch "$FAKE_STATE/killed" ;;
-  "test -d /proc/4242"*)
+  "if [ -d /proc/4242 ]"*)
+    # The first FAKE_OFFLINE_PROBES probes hit a disconnected transport.
+    offline=$(($(cat "$FAKE_STATE/offline-probes" 2>/dev/null || echo 0) + 1))
+    echo "$offline" > "$FAKE_STATE/offline-probes"
+    if [ "$offline" -le "$FAKE_OFFLINE_PROBES" ]; then echo "adb: device offline" >&2; exit 1; fi
     # A killed process lingers for FAKE_EXIT_CHECKS checks before it is gone.
     if [ -f "$FAKE_STATE/killed" ]; then
       checks=$(($(cat "$FAKE_STATE/exit-checks" 2>/dev/null || echo 0) + 1))
       echo "$checks" > "$FAKE_STATE/exit-checks"
       if [ "$checks" -gt "$FAKE_EXIT_CHECKS" ]; then rm -f "$FAKE_STATE/running"; fi
     fi
-    [ -f "$FAKE_STATE/running" ] ;;
+    if [ -f "$FAKE_STATE/running" ]; then echo running; else echo gone; fi ;;
   "rm -f"*) rm -f "$FAKE_STATE/pushed" ;;
   *) ;;
 esac
@@ -66,6 +70,19 @@ EOF
   FAKE_EXIT_CHECKS=99 run bash "$SCRIPT" "$BIN_DIR"
   [ "$status" -ne 0 ]
   [[ "$output" == *"payload 4242 is still running after kill"* ]]
+}
+
+@test "retries a post-kill probe that hits an adb transport failure" {
+  FAKE_OFFLINE_PROBES=2 run bash "$SCRIPT" "$BIN_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PASS: x86_64 lmk-pressure payload reached READY 64"* ]]
+}
+
+@test "does not treat an adb transport failure as the payload having exited" {
+  FAKE_OFFLINE_PROBES=99 run bash "$SCRIPT" "$BIN_DIR"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"could not confirm payload 4242 exited; last adb probe: adb: device offline"* ]]
+  [[ "$output" != *"PASS"* ]]
 }
 
 @test "refuses a device that is not x86_64" {

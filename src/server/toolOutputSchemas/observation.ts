@@ -482,8 +482,8 @@ export const observeResultSchema = z
       })
       .optional()
       .describe(
-        "Apple Watch and Apple TV simulators: this observation is a screenshot with screenSize; the view " +
-          "hierarchy is not available without a connected watchOS or tvOS runner. viewHierarchy, skeleton, context, elements " +
+        "Apple Watch, Apple TV and Apple Vision Pro simulators: this observation is a screenshot with screenSize; the view " +
+          "hierarchy is not available without a connected watchOS, tvOS or visionOS window-app runner. viewHierarchy, skeleton, context, elements " +
           "and the other element fields are absent, not empty: their absence does not mean an empty screen.",
       ),
     systemInsets: systemInsetsSchema.optional(),

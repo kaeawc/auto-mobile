@@ -478,6 +478,21 @@ function withChangingBody(base: () => ObserveResult = () => stream): () => Obser
   };
 }
 
+// Retitles the captured card, modelling a different notification from the same app.
+function retitled(title: string): ObserveResult {
+  const edited = structuredClone(hierarchy);
+  for (const node of streamNodes(edited)) {
+    if (node.$?.text === "Wear") {
+      node.$.text = title;
+      node.$["content-desc"] = title;
+    }
+  }
+  return { ...closed, viewHierarchy: edited };
+}
+
+const forwardSwipes = (commands: string[]) =>
+  commands.filter((command) => command === "shell input swipe 192 288 192 96 500").length;
+
 const dismissSwipes = (commands: string[]) =>
   commands.filter((command) => command === DISMISS_SWIPE).length;
 
@@ -539,19 +554,37 @@ describe("Wear stream scroll progress with changing text", () => {
     expect(timer.getSleepHistory()).toEqual([250]);
   });
 
-  test("a footerless list ends once positions repeat although the body keeps updating", async () => {
-    const footerless = withoutFooter(stream);
-    const { tray, adb } = setup(withChangingBody(() => footerless));
+  test("a forward list keeps distinct same-app cards snapped to identical bounds", async () => {
+    const pages = [withoutFooter(retitled("First")), withoutFooter(retitled("Second")), stream];
+    const { tray } = setup((commands) =>
+      commands.includes("shell input keyevent 4") ||
+      !commands.some((command) => command.startsWith("shell input swipe 192 370"))
+        ? closed
+        : (pages[forwardSwipes(commands)] ?? stream),
+    );
     const result = await tray.execute({
       action: "list",
       notification: { appId: "com.android.shell" },
+      awaitTimeout: 2000,
+    });
+    expect(result.isError).toBe(false);
+    expect(result.payload.notifications).toMatchObject([
+      { title: "First" },
+      { title: "Second" },
+      { title: "Wear" },
+    ]);
+  });
+
+  test("rewinding keeps going past a different card at the same snapped bounds", async () => {
+    const lower = retitled("Lower");
+    const { tray, adb } = setup((commands) => (commands.includes(REWIND_SWIPE) ? stream : lower));
+    const result = await tray.execute({
+      action: "find",
+      notification: { title: "Wear" },
       awaitTimeout: 500,
     });
-    expect(result).toMatchObject({ isError: false, payload: { success: true } });
-    expect(result.payload.notifications).toHaveLength(1);
-    expect(adb.getExecutedCommands().filter((command) => command !== REWIND_SWIPE)).toEqual([
-      "shell input swipe 192 288 192 96 500",
-    ]);
+    expect(result.isError).toBe(false);
+    expect(adb.getExecutedCommands().filter((command) => command === REWIND_SWIPE)).toHaveLength(2);
   });
 });
 

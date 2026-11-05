@@ -49,18 +49,20 @@ const listedCard = (card: WatchNotification, appId?: string) => ({
 });
 const cardIdentity = (card: WatchNotification) =>
   JSON.stringify([card.appLabel, card.title, card.body]);
-/**
- * Scroll position of the visible stream page. Built from card bounds and the immutable app label
- * only: an ongoing card may rewrite its title or body between reads without the stream moving.
- */
-const scrollPosition = (observation: ObserveResult) =>
+const visibleCards = (observation: ObserveResult, key: (card: WatchNotification) => unknown) =>
   JSON.stringify([
-    watchNotifications(observation.viewHierarchy).map((card) => [
-      card.appLabel,
-      card.element.bounds,
-    ]),
+    watchNotifications(observation.viewHierarchy).map((card) => [key(card), card.element.bounds]),
     watchClearAll(observation.viewHierarchy)?.bounds,
   ]);
+/** Every visible card's full identity; the forward scan never drops a distinct card. */
+const pageSignature = (observation: ObserveResult) => visibleCards(observation, cardIdentity);
+/**
+ * Rewind progress ignores the body, which an ongoing card rewrites in place (progress, position)
+ * while the stream stands still. App and title still tell a replacement card at the same snapped
+ * bounds from an unmoved one.
+ */
+const rewindPosition = (observation: ObserveResult) =>
+  visibleCards(observation, (card) => [card.appLabel, card.title]);
 const identityCount = (cards: WatchNotification[], card: WatchNotification) =>
   cards.filter((other) => cardIdentity(other) === cardIdentity(card)).length;
 
@@ -277,10 +279,9 @@ export class WatchSystemTray {
       if (args.action !== "list" && matching[0]) {
         return this.act(args, matching[0], observation, scope);
       }
-      const signature = scrollPosition(observation);
+      const signature = pageSignature(observation);
       // Preserve identical cards within a page. Cross-page overlap is deliberately conservative:
       // without captured stable IDs, keep duplicates rather than silently lose notifications.
-      // An unmoved page whose ongoing card rewrote its text is still the same page.
       if (signature !== previousPage) {
         cards = [...cards, ...matching];
       }
@@ -367,7 +368,7 @@ export class WatchSystemTray {
 
   /** Scroll toward the top until the visible cards stop moving. */
   private async rewind(observation: ObserveResult, deadline: number): Promise<ObserveResult> {
-    let previous = scrollPosition(observation);
+    let previous = rewindPosition(observation);
     for (let page = 0; page < MAX_STREAM_PAGES; page++) {
       if (getSystemTrayDependencies().timer.now() >= deadline) {
         break;
@@ -381,7 +382,7 @@ export class WatchSystemTray {
         this.signal,
       );
       observation = await this.read();
-      const signature = scrollPosition(observation);
+      const signature = rewindPosition(observation);
       if (signature === previous) {
         break;
       }

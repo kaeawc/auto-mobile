@@ -63,127 +63,65 @@
   },
   "skeleton": [
     {
-      "bounds": [
-        52,
-        414,
-        138,
-        488
-      ],
-      "affordances": [
-        "tap"
-      ],
+      "bounds": [52, 414, 138, 488],
+      "affordances": ["tap"],
       "elementId": "CtrlProxy",
       "label": "CtrlProxy"
     },
     {
-      "bounds": [
-        347,
-        15,
-        411,
-        79
-      ],
-      "affordances": [
-        "tap"
-      ],
+      "bounds": [347, 15, 411, 79],
+      "affordances": ["tap"],
       "elementId": "Safari",
       "label": "Safari",
       "index": 1
     },
     {
-      "bounds": [
-        386,
-        352,
-        450,
-        416
-      ],
-      "affordances": [
-        "tap"
-      ],
+      "bounds": [386, 352, 450, 416],
+      "affordances": ["tap"],
       "elementId": "Safari",
       "label": "Safari",
       "index": 0
     },
     {
-      "bounds": [
-        394,
-        606,
-        442,
-        654
-      ],
-      "affordances": [
-        "tap"
-      ],
+      "bounds": [394, 606, 442, 654],
+      "affordances": ["tap"],
       "elementId": "spotlight-search-button",
       "label": "Options"
     },
     {
-      "bounds": [
-        70,
-        38,
-        84,
-        57
-      ],
-      "affordances": [
-        "tap"
-      ],
+      "bounds": [70, 38, 84, 57],
+      "affordances": ["tap"],
       "elementId": "s2-d1452c15b9d67022-1",
       "label": "wifi_68_status_bar_C2"
     },
     {
-      "bounds": [
-        409,
-        123,
-        427,
-        136
-      ],
-      "affordances": [
-        "tap"
-      ],
+      "bounds": [409, 123, 427, 136],
+      "affordances": ["tap"],
       "elementId": "s2-d1452c15b9d67022-2",
       "label": "wifi_68_status_bar_C2"
     }
   ],
   "context": [
     {
-      "bounds": [
-        355,
-        23,
-        403,
-        71
-      ],
+      "bounds": [355, 23, 403, 71],
       "affordances": [],
       "elementId": "user icon list view",
       "label": "Dock"
     },
     {
-      "bounds": [
-        394,
-        360,
-        442,
-        408
-      ],
+      "bounds": [394, 360, 442, 408],
       "affordances": [],
       "elementId": "user icon list view",
       "label": "Dock"
     },
     {
-      "bounds": [
-        30,
-        29,
-        49,
-        66
-      ],
+      "bounds": [30, 29, 49, 66],
       "affordances": [],
       "elementId": "s2-53705f1842826c24-1",
       "label": "6:39 AM"
     },
     {
-      "bounds": [
-        399,
-        83,
-        436,
-        102
-      ],
+      "bounds": [399, 83, 436, 102],
       "affordances": [],
       "elementId": "s2-53705f1842826c24-2",
       "label": "6:39 AM"

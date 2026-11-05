@@ -12,6 +12,8 @@ export class FakeAdbReverseCommands implements AdbReverseCommands {
   failRemove = new Set<number>();
   /** Runs before an add is applied or refused, to simulate another tool acting meanwhile. */
   beforeAdd?: (devicePort: number) => void;
+  /** While set, an add is recorded in `calls` but waits for this promise before it is applied. */
+  addGate?: Promise<void>;
 
   async list(): Promise<AdbReverseEntry[]> {
     this.calls.push("list");
@@ -26,6 +28,7 @@ export class FakeAdbReverseCommands implements AdbReverseCommands {
 
   async add(devicePort: number, hostPort: number, options?: { noRebind?: boolean }) {
     this.calls.push(`add ${devicePort} ${hostPort}${options?.noRebind ? " no-rebind" : ""}`);
+    await this.addGate;
     this.beforeAdd?.(devicePort);
     if (this.failAdd.has(devicePort)) {
       throw new Error("adb: error: cannot bind");

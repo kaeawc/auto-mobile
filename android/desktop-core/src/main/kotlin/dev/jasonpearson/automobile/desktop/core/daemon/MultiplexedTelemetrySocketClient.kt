@@ -50,7 +50,9 @@ internal class TelemetryTransport(
  * After the socket drops, it reconnects with jittered backoff and subscribes every live device
  * again. A subscription the daemon refuses (e.g. a device that is not live yet) is retried on its
  * own backoff without touching the other devices' subscriptions; only a refused desktop session,
- * which no device can recover from, fails them all.
+ * which no device can recover from, fails them all. That refusal holds for the refused session UUID
+ * only: once a different session registers, a [TelemetrySubscription.retry] or a new [subscribe]
+ * connects again (#17018).
  */
 internal class MultiplexedTelemetrySocketClient(
   private val transport: TelemetryTransport,
@@ -62,8 +64,8 @@ internal class MultiplexedTelemetrySocketClient(
   // A child of [parentScope], so closing this client never cancels its caller's scope.
   private val job = SupervisorJob(parentScope.coroutineContext[Job])
   private val scope = parentScope + job
-  private val table = TelemetrySubscriptionTable()
   private val wire = TelemetryWire(log, newRequestId, options.sessionUuidProvider)
+  private val table = TelemetrySubscriptionTable(wire::sessionUuid)
   private val frames = TelemetryFrameHandler(table, wire, log, ::resubscribeLater)
 
   override fun subscribe(
@@ -75,6 +77,12 @@ internal class MultiplexedTelemetrySocketClient(
       synchronized(table.lock) {
         check(!table.closed) { "Telemetry multiplexer is closed" }
         table.add(entry)
+        val refusal = table.activeRefusal
+        if (refusal != null) {
+          // The session is still refused: tell this device now rather than leave it Connecting.
+          entry.mutableState.value = ConnectionState.Error(refusal.error)
+          return entry
+        }
         ensureConnection()
         prepare(entry)
       }
@@ -110,7 +118,7 @@ internal class MultiplexedTelemetrySocketClient(
   private fun retryEntry(entry: MuxSubscription) {
     val pending =
       synchronized(table.lock) {
-        if (entry.released || table.sessionRejected) return
+        if (entry.released || table.activeRefusal != null) return
         if (table.connection?.isActive != true) {
           ensureConnection()
           return
@@ -139,13 +147,16 @@ internal class MultiplexedTelemetrySocketClient(
 
   // Called under the table lock. The socket and request to subscribe [entry] on, if it needs one.
   private fun prepare(entry: MuxSubscription): Pair<TelemetrySocket, TelemetryPushRequest>? {
+    // A refused session's socket is ending; its devices subscribe again on the next connection.
+    if (table.activeRefusal != null) return null
     val open = table.socket ?: return null
     val requestId = wire.newId()
-    if (!table.begin(entry, requestId)) return null
+    val sessionUuid = wire.sessionUuid()
+    if (!table.begin(entry, requestId, sessionUuid)) return null
     if (entry.state.value !is ConnectionState.Error) {
       entry.mutableState.value = ConnectionState.Connecting
     }
-    return open to wire.subscribe(entry.key, requestId)
+    return open to wire.subscribe(entry.key, requestId, sessionUuid)
   }
 
   // Called under the table lock.
@@ -156,10 +167,8 @@ internal class MultiplexedTelemetrySocketClient(
 
   // Called under the table lock: hands the connection over to be shut down outside it.
   private fun detachConnection(): DetachedConnection {
-    val detached = DetachedConnection(table.connection, table.socket, wire)
-    table.connection = null
-    table.socket = null
-    return detached
+    val (connection, socket) = table.detach()
+    return DetachedConnection(connection, socket, wire)
   }
 
   private suspend fun connectWithRetry() {
@@ -167,8 +176,15 @@ internal class MultiplexedTelemetrySocketClient(
     while (true) {
       if (options.sessionUuidProvider != null && options.sessionUuidProvider.invoke() == null) {
         // Subscribing before the desktop session registers would be refused for good; a retry
-        // reconnects once it has.
-        synchronized(table.lock) { table.snapshot() }.publish(ConnectionState.Disconnected(null))
+        // reconnects once it has. Step aside before reporting, so a retry that sees the report
+        // starts a new connection instead of finding this one still active.
+        val self = currentCoroutineContext()[Job]
+        val waiting =
+          synchronized(table.lock) {
+            if (table.connection === self) table.connection = null
+            table.snapshot()
+          }
+        waiting.publish(ConnectionState.Disconnected(null))
         return
       }
       runConnection { attempt = 0 }
@@ -230,8 +246,8 @@ internal class MultiplexedTelemetrySocketClient(
     while (true) {
       val line = runInterruptible(readerThread) { open.readLine() } ?: return
       currentCoroutineContext().ensureActive()
-      if (line.isNotBlank()) frames.handle(open, line, onHealthy)
-      if (synchronized(table.lock) { table.sessionRejected }) return
+      // A refused session ends this socket; a later session connects afresh.
+      if (line.isNotBlank() && !frames.handle(open, line, onHealthy)) return
     }
   }
 

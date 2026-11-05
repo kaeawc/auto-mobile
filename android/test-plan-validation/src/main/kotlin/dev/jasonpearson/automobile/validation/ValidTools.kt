@@ -62,6 +62,7 @@ object ValidTools {
         "observe",
         "openLink",
         "pinchOn",
+        "portReverse",
         "postNotification",
         "pressButton",
         "provisionDevice",

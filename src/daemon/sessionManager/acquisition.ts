@@ -76,7 +76,7 @@ export interface SessionAcquisitionHost {
   refusePlanLabelSessionOutsideItsRun(
     sessionId: string,
     persisted: DeviceSession | undefined,
-  ): void;
+  ): Promise<void>;
   recoverPersistedSession(
     sessionId: string,
     devicePool: SessionDeviceAssigner,
@@ -391,7 +391,7 @@ export class SessionAcquisition {
     }: { requireIssuedSession: boolean; shared: SharedSessionAssignment },
   ): Promise<Session> {
     let persisted = await this.host.readPersistedSession(sessionId);
-    this.host.refusePlanLabelSessionOutsideItsRun(sessionId, persisted);
+    await this.host.refusePlanLabelSessionOutsideItsRun(sessionId, persisted);
     const persistedTerminalRelease = persisted
       ? this.host.terminalReleaseFromPersisted(sessionId, persisted)
       : undefined;

@@ -1,3 +1,7 @@
+import {
+  isAppleVisionProvisionRequest,
+  provisionAppleVisionDevice,
+} from "./deviceToolsAppleVisionProvision";
 import { isAppleTvProvisionRequest, provisionAppleTvDevice } from "./deviceToolsAppleTvProvision";
 import "./deviceLifecycleHost";
 import { startDeviceOutputSchema } from "./toolOutputSchemas";
@@ -154,12 +158,16 @@ export function registerDeviceTools() {
           ? acquireUndoneIfUndelivered(signal, () =>
               provisionWatchDevice(args, bindBootedDeviceSession, signal),
             )
-          : isAppleTvProvisionRequest(args)
+          : isAppleVisionProvisionRequest(args)
             ? acquireUndoneIfUndelivered(signal, () =>
-                provisionAppleTvDevice(args, bindBootedDeviceSession, signal),
+                provisionAppleVisionDevice(args, bindBootedDeviceSession, signal),
               )
-            : // The Android/iOS handler re-parses its own request with provisionDeviceSchema.
-              provisionDeviceHandler(args as Partial<ProvisionDeviceArgs>, progress, signal),
+            : isAppleTvProvisionRequest(args)
+              ? acquireUndoneIfUndelivered(signal, () =>
+                  provisionAppleTvDevice(args, bindBootedDeviceSession, signal),
+                )
+              : // The Android/iOS handler re-parses its own request with provisionDeviceSchema.
+                provisionDeviceHandler(args as Partial<ProvisionDeviceArgs>, progress, signal),
       defaultEnabled: false,
       outputSchema: provisionDeviceOutputSchema,
       transportRecovery: "connect",

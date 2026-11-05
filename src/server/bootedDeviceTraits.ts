@@ -77,6 +77,27 @@ async function readTraits(
   }
 }
 
+/**
+ * The form factor the build announces (`ro.build.characteristics`): null when it announces none
+ * (a phone or tablet), undefined when the traits could not be read. `caller` labels the warning.
+ */
+export async function readTraitFormFactor(
+  reader: DeviceTraits,
+  adbFactory: AdbClientFactory,
+  device: BootedDevice,
+  caller: string,
+): Promise<TraitFormFactor | null | undefined> {
+  try {
+    const traits = await reader.read(adbFactory.create(device), device.deviceId, {
+      timeoutMs: DEVICE_TRAITS_TIMEOUT_MS,
+    });
+    return traits.formFactor;
+  } catch (error) {
+    logger.warn(`${caller} could not read device traits: ${errorMessage(error)}`, error);
+    return undefined;
+  }
+}
+
 /** Resolve Android form factor before constructing a device-specific app lister. */
 export async function resolveFormFactor(
   device: BootedDevice,

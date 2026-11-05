@@ -105,6 +105,22 @@ export interface ReleaseChecksumEntry {
  */
 export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
   {
+    version: "0.0.90",
+    apkSha256: "032cc4970687965b83bb03326670cdef29a6464d9c42ba4174017bd032127e95",
+    ipaSha256: "b9e0e0c40565698d9b6235fe6f2b384361f19e5084c0c5f5b06bd1b3155e7355",
+    protoViewerApkSha256: "b170d0aed782d4848695a33f237047f7dc63410c287b5492360d1d997d33134c",
+    runnerSha256: "4d505b343150b1da2421770a033ad2526e64239970b55cb50b99d4dae00bc6c8",
+    runnerSha256Target: "xctest",
+    videoJarSha256: "092ad380e2cc80e763f1d91944113a79e343d8514178439bb2016bf52d9b5e92",
+    screenCaptureHelperSha256: "cd41ee407a685da9ece4f9daa34b9b2cbac4f7a27051cfc91d9c505b0d4be67f",
+    audioLoopbackHelperSha256: "b4ac9632e5666a360dc484a600778198b0109bf09bd603ef78ff287796c6d845",
+    prototypeAgentSha256: "6abb179f012d43471011f9fbb9f811ad669364df16fac5b5f27f475771938cf9",
+    prototypeViewerSha256: "45aec520f9e5f72b93a38dab31a88cc30384c20e94a803c5b00db2d3577a7dda",
+    networkFilterSha256: "d9ef285c5ec950aa1c85402bc58a2bf326d9a45481f9b78a150515564e9eb4f4",
+    lmkPressureArm64Sha256: "0de62ea4977e1b1be2f7fe2b646319c7988a7df89398a56caa90a0febb7a681c",
+    lmkPressureX8664Sha256: "37a5194393e58b4e715382ff1a81d7e47ad4311307c8a2ea4e6ed76f9f1210fa",
+  },
+  {
     version: "0.0.89",
     apkSha256: "b36316762569410a88e9dad7b23ee037e8379b9f9ecaabddd912db1f68646e06",
     ipaSha256: "d3ca14a76f26f8021de74e0ef3a4417e18d36d61a181ca7779c35250dd15b4b1",
@@ -688,11 +704,11 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
  */
 export const NIGHTLY_CHECKSUM_ENTRY: ReleaseChecksumEntry = {
   version: "nightly",
-  apkSha256: "7393974f5c6205590909922b7b45673e982e2722804aa189b4d5120010106bb3",
-  ipaSha256: "5739bd2ecec689779e3c22ebaaae14f7a6cc5d0ca085d536cb50a9ac3d776f23",
+  apkSha256: "dc372929bff2713e9cccb2c0f261078cee2ed31adaa0e4d1512323371e8aeeb2",
+  ipaSha256: "ae624a10ed5321b8b5bc7300c780c5dd8ba36694dda079ae7771763b1c7e7fd1",
   runnerSha256Target: "xctest",
   videoJarSha256: "092ad380e2cc80e763f1d91944113a79e343d8514178439bb2016bf52d9b5e92",
-  runnerSha256: "bc55a1c9ebd5a53a217857da1f2cd8cedf75248548465a7a0503d3bcfdc0436b",
+  runnerSha256: "d7ee8cfab2b61b6abe5f28c92e3ae2883ab610c497e5854e7d522cb104c86418",
 };
 
 /**

@@ -22,6 +22,8 @@ import {
   type PerformanceTraceTemplate,
 } from "./performanceTraceTemplates";
 import { XctraceTemplateUnavailableError } from "./XctraceTemplateUnavailableError";
+import { findBrokenXctraceCombination, type XctraceEnvironment } from "./xctraceCompatibility";
+import { XctraceUnsupportedEnvironmentError } from "./XctraceUnsupportedEnvironmentError";
 import {
   parseXctraceTable,
   parseXctraceToc,
@@ -47,6 +49,8 @@ export interface XctraceRecorderDependencies {
   host: XctraceHost;
   resolvePid: IosAppPidResolver;
   timer: Timer;
+  /** Host Xcode and simulator versions, checked against known-broken pairs; omitted skips the check. */
+  environment?: XctraceEnvironment;
   /** How long `xctrace record` may take to report that recording started. */
   startTimeoutMs?: number;
   /** Inactivity window while finalizing after SIGINT (default 60 seconds). */
@@ -82,6 +86,7 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
   constructor(private readonly deps: XctraceRecorderDependencies) {}
 
   async start(request: StartPerformanceTraceRequest): Promise<RecordingPerformanceTrace> {
+    await this.assertSupportedEnvironment(request.device, request.signal);
     await this.assertTemplateInstalled(request.template, request.signal);
     const warnings: string[] = [];
     const target = await this.resolveTarget(request, warnings);
@@ -112,6 +117,25 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
       );
     }
     return this.recording(child, exited, artifactPath, { template: request.template, warnings });
+  }
+
+  /** Refuse up front on an Xcode and simulator pair where xctrace cannot finalise (#16999). */
+  private async assertSupportedEnvironment(
+    device: BootedDevice,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const environment = this.deps.environment;
+    if (!environment) {
+      return;
+    }
+    const simulatorRuntime = await environment.simulatorRuntime(device, signal);
+    if (!simulatorRuntime) {
+      return;
+    }
+    const xcodeVersion = await environment.xcodeVersion(signal);
+    if (xcodeVersion && findBrokenXctraceCombination(xcodeVersion, simulatorRuntime)) {
+      throw new XctraceUnsupportedEnvironmentError(xcodeVersion, simulatorRuntime, device.deviceId);
+    }
   }
 
   /** Refuse up front when the installed Xcode lacks the Instruments template (#16970). */

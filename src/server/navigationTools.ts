@@ -272,7 +272,7 @@ export function registerNavigationTools({
   // Register with the tool registry
   ToolRegistry.registerDeviceAware(
     "navigateTo",
-    "Navigate to a learned screen by replaying recorded transitions from the navigation graph; on Android TV taps replay as D-pad focus moves and select",
+    "Navigate to a learned screen by replaying recorded transitions from the navigation graph; on Android TV a plain tapOn by element id or text replays as D-pad focus moves and select; other recorded actions replay unchanged",
     navigateToSchema,
     {
       handler: createNavigateToHandler({ navigateToFactory, navigationManagerFactory }),

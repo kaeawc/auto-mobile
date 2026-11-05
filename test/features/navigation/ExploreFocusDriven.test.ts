@@ -103,7 +103,8 @@ class FakeTvApp extends FakeObserveScreen {
       status: next !== undefined ? ("focused" as const) : ("stuck" as const),
       steps: 1,
       path: [],
-      ...(next !== undefined ? { selected: true } : { message: "Focus did not move" }),
+      selected: next !== undefined,
+      ...(next !== undefined ? {} : { message: "Focus did not move" }),
     };
   }
 }
@@ -148,6 +149,19 @@ describe("Explore on a focus-driven TV app", () => {
     expect(edge?.to).toBe(tv.screen);
     expect(edge?.interaction?.toolName).toBe("focusNavigate");
     expect(edge?.interaction?.args).toEqual({ until: selection.until, select: true });
+  });
+
+  test("settles after a successful select while the record is still live", async () => {
+    const explore = exploreWith("dpad");
+    const element: Element = {
+      bounds: { left: 0, top: 0, right: 400, bottom: 100 },
+      text: "Movies",
+      "resource-id": "app:id/movies",
+      clickable: true,
+    };
+    const before = timer.now();
+    expect(await explore.performInteraction(element, observationOf("Home"))).toBe(true);
+    expect(timer.now() - before).toBeGreaterThanOrEqual(1000);
   });
 
   test("a failed focus walk is not an interaction and records no transition", async () => {

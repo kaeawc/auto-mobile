@@ -83,8 +83,8 @@ export interface FocusNavigateResult {
   /** Focused elements in the order observed; consecutive repeats are collapsed. */
   path: FocusPathEntry[];
   focusedElement?: FocusPathEntry;
-  /** True when `select` was requested and the select key was sent to the focused target. */
-  selected?: boolean;
+  /** True only when `select` was requested and the select key was sent to the focused target. */
+  selected: boolean;
   message?: string;
 }
 
@@ -340,7 +340,7 @@ export class FocusNavigate {
   ): FocusNavigateResult | undefined {
     const { steps, stuck, maxSteps, path } = progress;
     if (matches) {
-      return { success: true, status: "focused", steps, path, focusedElement };
+      return { success: true, status: "focused", steps, path, focusedElement, selected: false };
     }
     if (stuck > 0) {
       return this.stopped("stuck", steps, path, {
@@ -409,6 +409,7 @@ export class FocusNavigate {
       status,
       steps,
       path,
+      selected: false,
       ...(focusedElement ? { focusedElement } : {}),
       message: `${message}; the target was not focused. Observe before retrying.`,
     };

@@ -14,8 +14,13 @@ import { InputKey } from "../action/InputKey";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { isTruthy } from "../../models";
+import { beginPostActionCaptureAction } from "../../utils/PostActionCaptureContext";
+import { awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import { publicTapOnArgs, tapCoordinatesFor, tapSelectorFor } from "./ExploreElementExtraction";
 import { focusSelectArgs, focusTargetForElement } from "./focusDrivenInput";
+
+/** How long explore waits after a D-pad select for the screen to change, like a tap's settle. */
+const FOCUS_SELECT_SETTLE_MS = 1000;
 
 /** The D-pad focus walk explore drives on a TV. */
 export type FocusSelectNavigator = Pick<FocusNavigate, "execute">;
@@ -140,6 +145,8 @@ export class ExploreElementActions {
       return null;
     }
     const args = focusSelectArgs(until);
+    // The walk bypasses BaseVisualChange's action boundary, which flushes earlier evidence.
+    await beginPostActionCaptureAction();
     const result = await this.context.runRecorded("focusNavigate", args, observation, () =>
       this.context.focusNavigator().execute({ ...args, ...(signal ? { signal } : {}) }),
     );
@@ -147,7 +154,11 @@ export class ExploreElementActions {
       logger.info(
         `[Explore] D-pad focus did not reach ${JSON.stringify(until)}: ${result.message}`,
       );
+      return false;
     }
-    return result.success;
+    // A tap waits for the UI to change; the select key does not. Settle while the record is
+    // still live, so the navigation it causes is attributed to it before explore moves on.
+    await awaitWhileRequestIsLive(this.context.timer.sleep(FOCUS_SELECT_SETTLE_MS), signal);
+    return true;
   }
 }

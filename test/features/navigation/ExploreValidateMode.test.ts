@@ -563,6 +563,22 @@ describe("ExploreValidateMode", () => {
       });
     });
 
+    test("matches a focusNavigate contentDesc target on the content-desc, not the text", () => {
+      const sameText = createMockElement({ text: "Search", "resource-id": "app:id/title" });
+      const icon = createMockElement({
+        text: "",
+        "content-desc": "Search",
+        "resource-id": "app:id/search",
+      });
+      const edge = interactionEdge("focusNavigate", {
+        until: { contentDesc: "Search" },
+        select: true,
+      });
+
+      expect(findElementMatchingEdge([sameText, icon], edge)?.element).toBe(icon);
+      expect(findElementMatchingEdge([sameText], edge)).toBeNull();
+    });
+
     test("requires every field of a multi-field focusNavigate target on one element", () => {
       const first = createMockElement({ text: "First", "resource-id": "app:id/tile" });
       const second = createMockElement({ text: "Second", "resource-id": "app:id/tile" });

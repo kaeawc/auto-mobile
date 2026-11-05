@@ -324,13 +324,6 @@ function interactionSelector(
     // Public tapOn nests the target in `selector`; Explore's own recording is flat.
     return asRecord(args.selector) ?? args;
   }
-  if (toolName === "focusNavigate") {
-    // Explore's D-pad select on a TV (#16737) names its target in `until`.
-    const until = asRecord(args.until);
-    return until
-      ? { text: until.text ?? until.label ?? until.contentDesc, elementId: until.resourceId }
-      : undefined;
-  }
   return toolName === "swipeOn" ? innermostContainer(args) : undefined;
 }
 
@@ -345,6 +338,9 @@ function describeInteractionTarget(edge: NavigationEdge): TargetDescriptors {
     return { reason: "no interaction was recorded for the edge, so there is no action to replay" };
   }
   const { toolName } = interaction;
+  if (toolName === "focusNavigate") {
+    return focusTargetDescriptors(interaction);
+  }
   const selector = interactionSelector(toolName, interaction.args ?? {});
   if (!selector) {
     return {
@@ -358,6 +354,25 @@ function describeInteractionTarget(edge: NavigationEdge): TargetDescriptors {
     };
   }
   return { descriptors };
+}
+
+/**
+ * A recorded D-pad select (#16737) keeps `focusNavigate`'s matching: `text` matches only the
+ * text, `contentDesc` only the content-desc, and `label` either one.
+ */
+function focusTargetDescriptors(interaction: ToolCallInteraction): TargetDescriptors {
+  const until = recordedFocusTarget(interaction);
+  if (!until) {
+    return {
+      reason: 'recorded "focusNavigate" interaction has no until target to match on screen',
+    };
+  }
+  const descriptor: TargetDescriptor = {
+    ...(until.text || until.label ? { text: until.text ?? until.label } : {}),
+    ...(until.contentDesc || until.label ? { contentDesc: until.contentDesc ?? until.label } : {}),
+    ...(until.resourceId ? { resourceId: until.resourceId } : {}),
+  };
+  return { descriptors: [descriptor] };
 }
 
 /** An edge recorded as a Back press (`pressButton { button: "back" }`). */

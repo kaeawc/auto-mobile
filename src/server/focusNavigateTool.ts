@@ -66,7 +66,8 @@ export const focusNavigateResultSchema = z
     steps: z.number(),
     path: z.array(z.record(z.string(), z.unknown())),
     focusedElement: z.record(z.string(), z.unknown()).optional(),
-    selected: z.boolean().optional(),
+    // Required, so a spilled response keeps it inline beside success and status.
+    selected: z.boolean(),
     message: z.string().optional(),
   })
   .passthrough();
@@ -79,7 +80,7 @@ function createKeyPresser(device: BootedDevice): FocusKeyPresser {
 export const focusNavigateTool = defineDeviceTool({
   name: "focusNavigate",
   description:
-    "Move D-pad focus to an element on a focus-driven UI such as Android TV. Observes, and until the focused element matches `until` (text, contentDesc, label or resourceId) presses the D-pad arrow that moves toward the nearest match, or `direction` when given. When a press leaves focus unchanged, the next arrow toward the match is tried. Returns the path of focused elements and a status: focused, max_steps (default 30) or stuck (every arrow toward the match left focus unchanged; two unchanged presses with `direction`). With `select`, presses enter once focused and reports `selected`; otherwise activate the result with sendKeys key enter.",
+    "Move D-pad focus to an element on a focus-driven UI such as Android TV. Observes, and until the focused element matches `until` (text, contentDesc, label or resourceId) presses the D-pad arrow that moves toward the nearest match, or `direction` when given. When a press leaves focus unchanged, the next arrow toward the match is tried. Returns the path of focused elements and a status: focused, max_steps (default 30) or stuck (every arrow toward the match left focus unchanged; two unchanged presses with `direction`). With `select`, presses enter once focused (`selected` reports whether it did); otherwise activate the result with sendKeys key enter.",
   input: focusNavigateInput,
   handler: async (device, args, _progress, signal) => {
     if (device.platform !== "android") {

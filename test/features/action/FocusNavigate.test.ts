@@ -124,7 +124,7 @@ describe("FocusNavigate", () => {
     grid.blocked = new Set([1, 3]);
     const result = await navigator(grid).execute({ until: { text: "Search" }, select: true });
     expect(result.success).toBe(false);
-    expect(result.selected).toBeUndefined();
+    expect(result.selected).toBe(false);
     expect(grid.presses).not.toContain("enter");
   });
 
@@ -397,6 +397,7 @@ describe("FocusNavigate blocked directions", () => {
       steps: 4,
       path: [grid.elements[0], grid.elements[1], grid.elements[0], grid.elements[1]],
       focusedElement: grid.elements[1],
+      selected: false,
       message: "Reached maxSteps (4); the target was not focused. Observe before retrying.",
     });
   });

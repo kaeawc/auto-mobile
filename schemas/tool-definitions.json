@@ -27520,6 +27520,11 @@
   },
   {
     "name": "portReverse",
+    "title": "Manage Port Reverse",
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true
+    },
     "description": "Android: manage adb reverse mappings so the app or browser on the device reaches a host server at localhost:<port>. ensure adds mappings this session owns; list, verify and remove manage them. Owned mappings lost to an adb or device restart are restored on the next call and removed when the session ends. Ports below 1024 are refused. iOS returns not_applicable.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

@@ -26,12 +26,15 @@ class ProtoViewerApplication : Application() {
     val storage = LibraryStorage(PrototypeStorage.fileBacked(app))
     val root = File(app.filesDir, "library")
     val ids = IdGenerator { UUID.randomUUID().toString() }
+    val blocklist =
+      SharedPreferencesContentBlocklist(app.getSharedPreferences("blocklist", MODE_PRIVATE))
     val repository =
       DirectoryLibraryRepository(
         SavedPrototypeDirectoryStore(File(root, "prototypes"), limits = libraryLimits),
         DirectoryLibraryFiles(File(root, "metadata")),
         storage,
         ids,
+        admission = blocklist.admission(),
       )
     val staging =
       File(app.cacheDir, "import").apply {
@@ -39,8 +42,6 @@ class ProtoViewerApplication : Application() {
         // A crash mid-commit leaves staging directories behind; nothing else cleans them.
         listFiles()?.forEach { it.deleteRecursively() }
       }
-    val blocklist =
-      SharedPreferencesContentBlocklist(app.getSharedPreferences("blocklist", MODE_PRIVATE))
     val sharer =
       CanonicalLibrarySharer(repository, DirectoryLibraryExports(File(app.cacheDir, "export")), ids)
     val importer =

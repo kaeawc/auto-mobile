@@ -1,3 +1,4 @@
+import { createAdbReverseCommands } from "../../utils/android-cmdline-tools/adbReverse";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -13,38 +14,17 @@ export interface PrototypeReverseAdb {
   removeReverse(port: number): Promise<void>;
 }
 
-const REVERSE_TIMEOUT_MS = 5000;
-const TCP_PREFIX = "tcp:";
-
-/** `adb reverse --list` lines are whitespace-separated; the first `tcp:` token is the device side. */
-function devicePortsFromList(stdout: string): Set<number> {
-  const ports = new Set<number>();
-  for (const line of stdout.split("\n")) {
-    const device = line.split(/\s+/).find((token) => token.startsWith(TCP_PREFIX));
-    const port = device === undefined ? NaN : Number(device.slice(TCP_PREFIX.length));
-    if (Number.isInteger(port)) {
-      ports.add(port);
-    }
-  }
-  return ports;
-}
-
+/** Adapts the shared adb reverse commands (one parser, one command builder) to the prototype view. */
 export function createPrototypeReverseAdb(
   adb: Pick<AdbExecutor, "executeCommand">,
 ): PrototypeReverseAdb {
+  const commands = createAdbReverseCommands(adb);
   return {
     async listReversedPorts() {
-      const result = await adb.executeCommand("reverse --list", { timeoutMs: REVERSE_TIMEOUT_MS });
-      return devicePortsFromList(result.stdout);
+      return new Set((await commands.list()).map((entry) => entry.devicePort));
     },
-    async addReverse(port) {
-      await adb.executeCommand(`reverse tcp:${port} tcp:${port}`, {
-        timeoutMs: REVERSE_TIMEOUT_MS,
-      });
-    },
-    async removeReverse(port) {
-      await adb.executeCommand(`reverse --remove tcp:${port}`, { timeoutMs: REVERSE_TIMEOUT_MS });
-    },
+    addReverse: (port) => commands.add(port, port),
+    removeReverse: (port) => commands.remove(port),
   };
 }
 

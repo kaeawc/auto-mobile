@@ -9578,6 +9578,7 @@
               "performanceTrace",
               "phoneCall",
               "pinchOn",
+              "portReverse",
               "postNotification",
               "pressButton",
               "prototype",
@@ -9741,6 +9742,7 @@
               "performanceTrace",
               "phoneCall",
               "pinchOn",
+              "portReverse",
               "postNotification",
               "pressButton",
               "prototype",
@@ -27517,6 +27519,156 @@
     }
   },
   {
+    "name": "portReverse",
+    "description": "Android: manage adb reverse mappings so the app or browser on the device reaches a host server at localhost:<port>. ensure adds mappings this session owns; list, verify and remove manage them. Owned mappings lost to an adb or device restart are restored on the next call and removed when the session ends. Ports below 1024 are refused. iOS returns not_applicable.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "ensure: add missing mappings (idempotent). list: every reverse on the device. verify: whether ports are mapped now. remove: delete mappings this session created",
+          "type": "string",
+          "enum": ["ensure", "list", "verify", "remove"]
+        },
+        "ports": {
+          "description": "Required for ensure and remove; verify defaults to this session's ports",
+          "minItems": 1,
+          "maxItems": 32,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "devicePort": {
+                "description": "Device-side localhost port",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "hostPort": {
+                "description": "Host loopback port; default devicePort",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              }
+            },
+            "required": ["devicePort"],
+            "additionalProperties": false
+          }
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios", "tvos"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ok", "failed", "not_applicable"]
+        },
+        "action": {
+          "type": "string",
+          "enum": ["ensure", "list", "verify", "remove"]
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "mappings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "devicePort": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "hostPort": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "host": {
+                "type": "string"
+              },
+              "owned": {
+                "type": "boolean"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["added", "present", "restored", "missing", "removed", "gone", "foreign"]
+              }
+            },
+            "required": ["devicePort", "host", "owned", "status"],
+            "additionalProperties": false
+          }
+        },
+        "restored": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "restoreFailures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "devicePort": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": ["devicePort", "error"],
+            "additionalProperties": false
+          }
+        },
+        "errorCode": {
+          "type": "string",
+          "enum": ["port_reverse_conflict", "port_reverse_not_owned", "port_reverse_port_refused"]
+        },
+        "ports": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        }
+      },
+      "required": ["message", "success", "status", "action", "deviceId"],
+      "additionalProperties": {}
+    }
+  },
+  {
     "name": "postNotification",
     "title": "Post Notification",
     "annotations": {
@@ -42132,6 +42284,7 @@
               "performanceTrace",
               "phoneCall",
               "pinchOn",
+              "portReverse",
               "postNotification",
               "pressButton",
               "prototype",
@@ -54951,6 +55104,7 @@
             "performanceTrace",
             "phoneCall",
             "pinchOn",
+            "portReverse",
             "postNotification",
             "pressButton",
             "prototype",
@@ -55076,6 +55230,7 @@
               "performanceTrace",
               "phoneCall",
               "pinchOn",
+              "portReverse",
               "postNotification",
               "pressButton",
               "prototype",

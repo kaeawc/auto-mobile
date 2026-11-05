@@ -131,7 +131,16 @@ async function readStatusBar(call: StatusBarCall) {
 }
 
 async function clearStatusBar(call: StatusBarCall) {
-  await call.controller.clear(call.signal);
+  // Under the caller's session like an override, so a clear that waited in the device queue while
+  // its session released or rebound is refused instead of clearing the next owner's override.
+  await runSessionStatusBarMutation({
+    sessionManager: call.sessionManager,
+    sessionUuid: call.args.sessionUuid,
+    deviceId: call.device.deviceId,
+    // A clear records nothing, so a rejection has nothing to undo.
+    record: () => () => undefined,
+    mutation: () => call.controller.clear(call.signal),
+  });
   call.registry.forget(call.device.deviceId);
   return createStructuredToolResponse({
     message: "Cleared the status bar override",
@@ -168,8 +177,8 @@ function restoreRecord(
  * per-device queue already does this, but direct stdio mode runs tool calls concurrently, and an
  * override's finalization restores the record it saw before its device command, so a concurrent
  * override or clear on the same device must not interleave with it. Queued outside the session's
- * tracked setup, so a release drains only the running mutation and a queued one re-checks
- * admission when it starts. A rejected mutation does not block the next.
+ * tracked setup, so a release drains only the running mutation, and a queued override or clear
+ * re-checks its session's admission when it starts. A rejected mutation does not block the next.
  */
 function createDeviceSerializer(): <T>(deviceId: string, task: () => Promise<T>) => Promise<T> {
   const tails = new Map<string, Promise<void>>();

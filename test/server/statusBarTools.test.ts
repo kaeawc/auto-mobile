@@ -294,6 +294,20 @@ describe("statusBar tool (#14105)", () => {
       expect(registry.get(ANDROID.deviceId)).toBeNull();
     });
 
+    test("a clear queued while its session releases is refused before any device command", async () => {
+      await manager.createSession("session-1", ANDROID.deviceId, "android");
+      const releaseA = holdNextOverride();
+      const a = call(ANDROID, { action: "override", time: "9:41" });
+      await overrideCalls(1);
+      const cleared = call(ANDROID, { action: "clear", sessionUuid: "session-1" });
+      await manager.releaseSession("session-1");
+      releaseA();
+      await a;
+      await expect(cleared).rejects.toThrow("session is released");
+      expect(controller.clears).toBe(0);
+      expect(registry.get(ANDROID.deviceId)?.overrides).toEqual({ time: "9:41" });
+    });
+
     test("finalization leaves a record replaced outside the handler alone", async () => {
       const releaseA = holdNextOverride();
       const a = call(ANDROID, { action: "override", time: "9:41" });

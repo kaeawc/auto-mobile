@@ -116,6 +116,7 @@ export function prototypeSensitiveSinkErrors(spec: unknown): PrototypeValidation
   const nodes: { value: Record<string, unknown>; path: string }[] = [];
   walkPrototypeNodes(spec, (value, path) => nodes.push({ value, path }));
   const { requests, fields, dataWrites } = libraryFields(spec, nodes, true);
+  requests.push(...webViewPaths(nodes));
   if (propagateDataTaint(tainted, platformTainted, dataWrites) === undefined) {
     return [{ path: "$", message: SECURE_COPY_CHECK_MESSAGE }];
   }
@@ -350,6 +351,11 @@ function pointersOverlap(taint: string, pointer: string, pointerIndexWildcard: b
   );
 }
 
+/** A web view loads its url from the page host, so its url is a request sink (#16573, #17194). */
+function webViewPaths(nodes: readonly Located[]): string[] {
+  return nodes.filter(({ value }) => value.type === "webView").map(({ path }) => path);
+}
+
 /** Request and channel members a value reaches on the wire: url, headers, query and body. */
 function requestSinkPath(path: string, requests: readonly string[]): boolean {
   return requests.some(
@@ -414,8 +420,7 @@ function secureLibraryError(spec: unknown): PrototypeValidationError | undefined
     return undefined;
   }
   const { requests, fields } = libraryFields(spec, nodes);
-  // A web view loads its url from the page host, so the url is a request sink (#16573).
-  requests.push(...nodes.filter(({ value }) => value.type === "webView").map(({ path }) => path));
+  requests.push(...webViewPaths(nodes));
   const sharePaths = shareLibraryFields(spec, fields);
   fields.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const inRequest = (path: string) =>

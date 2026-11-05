@@ -8,7 +8,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamKey
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
-import dev.jasonpearson.automobile.desktop.core.daemon.FakeTelemetryPushClient
+import dev.jasonpearson.automobile.desktop.core.daemon.FakeTelemetryMultiplexer
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationHubConfig
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationReconnectPolicy
 import dev.jasonpearson.automobile.desktop.core.daemon.ScreenshotStreamUpdate
@@ -90,7 +90,7 @@ internal class WorkspaceScreenshotHubUiTest {
 
   private fun hub(scope: CoroutineScope, streams: MutableList<FakeObservationStream>) =
     SharedDaemonStreamHub(
-      telemetryClientFactory = { FakeTelemetryPushClient() },
+      telemetry = FakeTelemetryMultiplexer(),
       scope = scope,
       observation =
         ObservationHubConfig(

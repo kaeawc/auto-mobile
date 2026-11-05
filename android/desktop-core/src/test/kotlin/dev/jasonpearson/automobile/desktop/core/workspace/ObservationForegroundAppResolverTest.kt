@@ -2,7 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamKey
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
-import dev.jasonpearson.automobile.desktop.core.daemon.FakeTelemetryPushClient
+import dev.jasonpearson.automobile.desktop.core.daemon.FakeTelemetryMultiplexer
 import dev.jasonpearson.automobile.desktop.core.daemon.HierarchyStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationHubConfig
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationReconnectPolicy
@@ -33,7 +33,7 @@ class ObservationForegroundAppResolverTest {
     val streams = mutableListOf<FakeObservationStream>()
     val hub =
       SharedDaemonStreamHub(
-        telemetryClientFactory = { FakeTelemetryPushClient() },
+        telemetry = FakeTelemetryMultiplexer(),
         scope =
           CoroutineScope(
             backgroundScope.coroutineContext + UnconfinedTestDispatcher(testScheduler),

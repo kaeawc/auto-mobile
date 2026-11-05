@@ -65,13 +65,21 @@ the harness requires API 33+.
 | user-restricted           | ran                  | ran                 | never        | ran         | never         | delayed            | ran           | ran            |
 | exact-alarm-denied        | ran                  | delayed             | delayed      | never       | delayed       | never              | ran           | ran            |
 | notifications-off         | ran                  | ran                 | delayed      | ran         | delayed       | ran                | ran           | ran            |
+| huawei-powergenie         | ran                  | ran                 | never        | ran         | never         | delayed            | ran           | ran            |
+| vivo-autostart            | ran                  | ran                 | never        | ran         | never         | delayed            | ran           | ran            |
+| realme-power-saver        | ran                  | ran                 | never        | ran         | never         | delayed            | ran           | ran            |
+| meizu-flyme-background    | ran                  | ran                 | never        | ran         | never         | delayed            | ran           | ran            |
+| asus-power-master         | ran                  | ran                 | never        | ran         | never         | delayed            | ran           | ran            |
+| sony-stamina              | never                | never               | never        | never       | never         | never              | ran           | ran            |
+| tecno-app-halt            | ran                  | ran                 | never        | ran         | never         | delayed            | ran           | ran            |
 
 The measurements use an Android 15 (API 35) google_apis arm64 emulator. A real reboot is not
-exercised; `BOOT_COMPLETED` is delivered by adb broadcast. The standby bucket `restricted` and
-`SCHEDULE_EXACT_ALARM` deny did not read back on API 35 emulators, so scores of profiles that depend
-on them reflect emulator behavior, not confirmed profile effects. `user-restricted`'s
-workmanager-periodic is `ran` on API 35 and `never` on Android 14 (API 34), so OEM behavior is not
-established by this table.
+exercised; `BOOT_COMPLETED` is delivered by adb broadcast. On this emulator the standby bucket
+`restricted` reads back as bucket 45 and `SCHEDULE_EXACT_ALARM` deny reads back as `deny`; the
+harness requires every step of a profile to report `applied` before it scores it. Profiles that
+depend on those steps still reflect emulator behavior, not confirmed OEM effects.
+`user-restricted`'s workmanager-periodic is `ran` on API 35 and `never` on Android 14 (API 34), so
+OEM behavior is not established by this table.
 
 ## Attribution
 

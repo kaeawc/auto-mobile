@@ -422,6 +422,68 @@ describe("deleteDevice on an Apple Vision Pro simulator", () => {
     expect(listed(simctl)).toContain(headset.udid);
   });
 
+  test("a headset with a template-format name is deleted, not reported already absent", async () => {
+    const headset = visionDevice({ name: "automobile-template-0123abcd" });
+    const { simctl } = await arrange([headset]);
+
+    const result = toolJson(await remove(target(headset.udid)));
+
+    expect(result).toMatchObject({ state: "destroyed", command: { destroy: "accepted" } });
+    expect(simctl.commands).toEqual([`delete ${headset.udid}`]);
+    expect(listed(simctl)).not.toContain(headset.udid);
+  });
+
+  test("a caller check slower than timeoutMs returns the deadline response", async () => {
+    const headset = visionDevice({ name: NAME });
+    const { simctl, timer } = await arrange([headset]);
+    const neverSettles = Promise.withResolvers<void>();
+
+    const result = await deleteAppleVisionDevice(
+      { ...target(headset.udid), mode: "destroy", verifyAbsence: true, force: false, timeoutMs: 10 },
+      {
+        assertCaller: async () => {
+          timer.advanceTime(50);
+          await neverSettles.promise;
+        },
+        stop: async () => {},
+      },
+    );
+
+    expect(toolJson(result)).toMatchObject({
+      state: "failed",
+      failure: { code: "teardown_deadline_exceeded" },
+    });
+    expect(simctl.commands).toEqual([]);
+    expect(listed(simctl)).toContain(headset.udid);
+  });
+
+  test("a peer daemon claim published before the teardown lease stops the delete", async () => {
+    const headset = visionDevice({ name: NAME });
+    const { simctl } = await arrange([headset]);
+    const refusal = new ActionableError("deleteDevice: another AutoMobile daemon holds this headset");
+    let checks = 0;
+
+    const error = await failure(
+      deleteAppleVisionDevice(
+        { ...target(headset.udid), mode: "destroy", verifyAbsence: true, force: false },
+        {
+          assertCaller: async () => {
+            checks += 1;
+            if (checks === 2) {
+              throw refusal;
+            }
+          },
+          stop: async () => {},
+        },
+      ),
+    );
+
+    expect(error).toBe(refusal);
+    expect(checks).toBe(2);
+    expect(simctl.commands).toEqual([]);
+    expect(listed(simctl)).toContain(headset.udid);
+  });
+
   test("a headset still listed after simctl delete is a failed delete", async () => {
     const headset = visionDevice({ name: NAME });
     const { simctl } = await arrange([headset]);

@@ -16,6 +16,7 @@ import {
   MAX_DEVICE_CLOCK_ADVANCE_MS,
   MIN_DEVICE_CLOCK_INSTANT_MS,
   MAX_DEVICE_CLOCK_INSTANT_MS,
+  DEVICE_CLOCK_RESTORE_READ_BACK_ATTEMPTS,
   writeDeviceClock,
   type DeviceClockRestoreSlot,
   type DeviceClockRestoreState,
@@ -185,6 +186,52 @@ describe("device clock", () => {
     expect(h.invalidations).toEqual([android.deviceId]);
   });
 
+  test("restore read-back waits for a clock that settles after auto_time re-enables (#17136)", async () => {
+    const h = harness();
+    h.timer.enableAutoAdvance();
+    await h.write({ mode: "set", instant });
+    // The first two read-backs still see the pre-restore offset; the third has settled.
+    let unsettledReads = 2;
+    class SettlingAdapter extends FakeDeviceClockAdapter {
+      override async readInstantMs() {
+        const instantMs = await super.readInstantMs();
+        return this.automaticTime === 1 && unsettledReads-- > 0 ? instantMs + 60_000 : instantMs;
+      }
+    }
+    const adapter = new SettlingAdapter();
+    Object.assign(adapter, {
+      instantMs: h.adapter.instantMs,
+      automaticTime: h.adapter.automaticTime,
+    });
+    const result = await writeDeviceClock(
+      android,
+      adapter,
+      { mode: "reset" },
+      { slot: h.slot, dependencies: h.dependencies },
+    );
+    expect(result.verified).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(h.timer.getSleepHistory()).toEqual([250, 500]);
+    expect(adapter.calls.filter((call) => call === "readInstant")).toHaveLength(3);
+    expect(h.slot.get()).toBeUndefined();
+    expect(adapter.calls.at(-1)).toBe("unroot");
+  });
+  test("restore reports pending only after every bounded read-back mismatches", async () => {
+    const h = harness();
+    h.timer.enableAutoAdvance();
+    await h.write({ mode: "set", instant });
+    h.adapter.readOffsetMs = 60_000;
+    h.adapter.calls.length = 0;
+    const result = await h.write({ mode: "reset" });
+    expect(result.verified).toBe(false);
+    expect(result.error).toContain("restore remains pending");
+    expect(h.timer.getSleepHistory()).toEqual([250, 500, 1000, 1000, 1000]);
+    expect(h.adapter.calls.filter((call) => call === "readInstant")).toHaveLength(
+      DEVICE_CLOCK_RESTORE_READ_BACK_ATTEMPTS,
+    );
+    expect(h.adapter.calls).not.toContain("unroot");
+    expect(h.slot.get()).toBeDefined();
+  });
   test("set records restoration ownership before clock mutation, and invalidates caches", async () => {
     const h = harness();
     const result = await h.write({ mode: "set", instant });

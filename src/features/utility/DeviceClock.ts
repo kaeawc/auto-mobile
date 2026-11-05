@@ -2,6 +2,7 @@ import { Mutex } from "async-mutex";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { delayForAttempt, exponentialBackoff } from "../../utils/Backoff";
 import { z } from "zod/v4";
 import type { BootedDevice } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
@@ -16,6 +17,17 @@ export { MIN_DEVICE_CLOCK_INSTANT_MS, MAX_DEVICE_CLOCK_INSTANT_MS } from "../../
 export const MAX_DEVICE_CLOCK_ADVANCE_MS = 10 * 365 * 24 * 60 * 60 * 1000;
 /** Epoch-second commands lose at most 999ms; allow one additional second of execution. */
 export const DEVICE_CLOCK_TOLERANCE_MS = 2000;
+/**
+ * Re-enabling auto_time lets the device re-sync its clock, so the first restore read-back can
+ * land before the clock settles (#17136). Read back up to this many times before declaring the
+ * restore unverified, waiting {@link DEVICE_CLOCK_RESTORE_SETTLE_BACKOFF} between reads.
+ */
+export const DEVICE_CLOCK_RESTORE_READ_BACK_ATTEMPTS = 6;
+/** 250, 500, then 1000ms per wait: at most 3750ms of settling across all read-backs. */
+export const DEVICE_CLOCK_RESTORE_SETTLE_BACKOFF = exponentialBackoff({
+  initialDelayMs: 250,
+  maxDelayMs: 1000,
+});
 export const deviceClockInputSchema = z.union([
   z
     .object({
@@ -189,7 +201,8 @@ export class DeviceClockRestoreRegistry {
 export const defaultDeviceClockRestoreRegistry = new DeviceClockRestoreRegistry();
 
 export interface DeviceClockDependencies {
-  hostClock: Pick<Timer, "now">;
+  /** `now` is the host time a restore targets; `sleep` paces restore read-back retries. */
+  hostClock: Pick<Timer, "now" | "sleep">;
   invalidate(deviceId: string): void;
   restoreRegistry?: DeviceClockRestoreRegistry;
   /** Supplied only while the registry's device critical section is held. */
@@ -555,6 +568,38 @@ async function unrootBestEffort(adapter: DeviceClockAdapter, deviceId: string): 
     logger.warn(`Clock restored but failed to unroot ${deviceId}`, error);
   }
 }
+function restoredClockMatches(
+  result: DeviceClockState,
+  state: DeviceClockRestoreState,
+  hostClock: Pick<Timer, "now">,
+): boolean {
+  return (
+    result.automaticTime === (state.initialAutomaticTime === 1) &&
+    result.instant !== undefined &&
+    Math.abs(Date.parse(result.instant) - hostClock.now()) <= DEVICE_CLOCK_TOLERANCE_MS
+  );
+}
+/** Bounded read-back: only a mismatch that outlasts every settle wait is unverified. */
+async function readBackRestoredClock(
+  device: BootedDevice,
+  adapter: DeviceClockAdapter,
+  state: DeviceClockRestoreState,
+  dependencies: DeviceClockDependencies,
+): Promise<{ result: DeviceClockState; verified: boolean }> {
+  for (let attempt = 1; ; attempt++) {
+    const result = await readDeviceClock(device, adapter);
+    const verified = restoredClockMatches(result, state, dependencies.hostClock);
+    if (verified || attempt >= DEVICE_CLOCK_RESTORE_READ_BACK_ATTEMPTS) {
+      return { result, verified };
+    }
+    const delayMs = delayForAttempt(DEVICE_CLOCK_RESTORE_SETTLE_BACKOFF, attempt);
+    logger.info(
+      `Restored clock on ${device.deviceId} has not settled (read-back ${attempt}/${DEVICE_CLOCK_RESTORE_READ_BACK_ATTEMPTS}); retrying in ${delayMs}ms`,
+    );
+    await dependencies.hostClock.sleep(delayMs);
+    dependencies.mutationSignal?.throwIfAborted();
+  }
+}
 /** Restore real host time even when the original automatic time was disabled. */
 export async function restoreDeviceClock(
   device: BootedDevice,
@@ -570,12 +615,7 @@ export async function restoreDeviceClock(
     dependencies.invalidate(device.deviceId);
   }
   await adapter.setAutomaticTime(state.initialAutomaticTime);
-  const result = await readDeviceClock(device, adapter);
-  const verified =
-    result.automaticTime === (state.initialAutomaticTime === 1) &&
-    result.instant !== undefined &&
-    Math.abs(Date.parse(result.instant) - dependencies.hostClock.now()) <=
-      DEVICE_CLOCK_TOLERANCE_MS;
+  const { result, verified } = await readBackRestoredClock(device, adapter, state, dependencies);
   if (verified && state.rootedByUs) {
     await unrootBestEffort(adapter, device.deviceId);
   }
@@ -587,8 +627,7 @@ export async function restoreDeviceClock(
     toleranceMs: DEVICE_CLOCK_TOLERANCE_MS,
     ...(!verified
       ? {
-          error:
-            "Host time and original auto_time restoration did not verify; restore remains pending.",
+          error: `Host time and original auto_time restoration did not verify after ${DEVICE_CLOCK_RESTORE_READ_BACK_ATTEMPTS} read-backs; restore remains pending.`,
         }
       : {}),
   };

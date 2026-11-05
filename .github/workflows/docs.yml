@@ -87,6 +87,10 @@ jobs:
         id: setup-uv
         with:
           enable-cache: true
+          # Key the cache on the only uv lockfile. The default glob walks the
+          # whole workspace, including node_modules/ while bun install churns
+          # its .bun-tmp-* dirs, and fails with ENOENT (#17068).
+          cache-dependency-glob: scripts/github/uv.lock
 
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
@@ -167,6 +171,10 @@ jobs:
         id: setup-uv
         with:
           enable-cache: true
+          # Key the cache on the only uv lockfile. The default glob walks the
+          # whole workspace, including node_modules/ while bun install churns
+          # its .bun-tmp-* dirs, and fails with ENOENT (#17068).
+          cache-dependency-glob: scripts/github/uv.lock
 
       - wait: [setup-python, setup-uv]
 

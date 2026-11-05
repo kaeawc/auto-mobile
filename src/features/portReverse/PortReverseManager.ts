@@ -562,22 +562,52 @@ export class PortReverseManager {
         }
         continue;
       }
-      try {
-        await state.adb.add(devicePort, mapping.hostPort, { noRebind: true });
-        view.set(devicePort, entryFor({ devicePort, hostPort: mapping.hostPort }));
-        report.restored.push(devicePort);
-        this.audit(
-          `restore ${tcp(devicePort)} -> ${tcp(mapping.hostPort)} device=${deviceId} session=${mapping.owner}`,
-        );
-      } catch (error) {
-        // Kept owned so the next call retries; the failure is reported in that call's result.
-        logger.warn(
-          `[portReverse] restoring ${tcp(devicePort)} on ${deviceId} failed: ${errorMessage(error)}`,
-        );
-        report.restoreFailures.push({ devicePort, error: errorMessage(error) });
+      // Fence: forgetDevice (another device now on this serial) may have run while an earlier add
+      // of this loop was in flight; never restore a mapping that is no longer owned.
+      if (state.owned.get(devicePort) === mapping) {
+        await this.restoreOne({ deviceId, state, view, report }, devicePort, mapping);
       }
     }
     return report;
+  }
+
+  /** Re-adds one lost owned mapping, recording the outcome in `report`. */
+  private async restoreOne(
+    pass: {
+      deviceId: string;
+      state: DeviceState;
+      view: DeviceView;
+      report: PortReverseRestoreReport;
+    },
+    devicePort: number,
+    mapping: OwnedMapping,
+  ): Promise<void> {
+    const { deviceId, state, view, report } = pass;
+    try {
+      await state.adb.add(devicePort, mapping.hostPort, { noRebind: true });
+    } catch (error) {
+      // Kept owned so the next call retries; the failure is reported in that call's result.
+      logger.warn(
+        `[portReverse] restoring ${tcp(devicePort)} on ${deviceId} failed: ${errorMessage(error)}`,
+      );
+      report.restoreFailures.push({ devicePort, error: errorMessage(error) });
+      return;
+    }
+    if (state.owned.get(devicePort) !== mapping) {
+      // The device was forgotten while this add was in flight: the mapping may now sit on a
+      // replacement device that no cleanup would remove, so undo it here.
+      await state.adb.remove(devicePort).catch((error: unknown) => {
+        logger.warn(
+          `[portReverse] undoing ${tcp(devicePort)} restored on ${deviceId} after it was forgotten failed: ${errorMessage(error)}`,
+        );
+      });
+      return;
+    }
+    view.set(devicePort, entryFor({ devicePort, hostPort: mapping.hostPort }));
+    report.restored.push(devicePort);
+    this.audit(
+      `restore ${tcp(devicePort)} -> ${tcp(mapping.hostPort)} device=${deviceId} session=${mapping.owner}`,
+    );
   }
 
   private assertNoConflicts(

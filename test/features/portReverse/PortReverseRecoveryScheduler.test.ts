@@ -199,6 +199,7 @@ describe("PortReverseRecoveryScheduler", () => {
     await manager.ensure(target(), [{ devicePort: 8080, hostPort: 8080 }]);
     adb.dropAll();
     adb.failList = true;
+    const list = adb.list;
     adb.list = new Proxy(adb.list, {
       apply: (fn, self, args) => {
         // The device answers again while the failing attempt runs, and says so.
@@ -212,6 +213,13 @@ describe("PortReverseRecoveryScheduler", () => {
     await advance(PORT_REVERSE_RECOVERY_SETTLE_MS);
     expect(outcomes).toEqual([]);
     expect(scheduler.pendingDevices()).toEqual([DEVICE]);
+
+    // The device is back for good: the deferred reconcile restores the mapping.
+    adb.list = list;
+    adb.failList = false;
+    await advance(0);
+    expect(adb.mappings.get(8080)).toBe("tcp:8080");
+    expect(outcomes.map((o) => o.kind)).toEqual(["restored"]);
   });
 
   test("identity replacement cancels the episode and forgets the old device's mappings", async () => {
@@ -238,5 +246,28 @@ describe("PortReverseRecoveryScheduler", () => {
     expect(adds()).toEqual(["add 8080 8080 no-rebind"]);
     expect(adb.mappings.has(8080)).toBe(false);
     stop();
+  });
+
+  test("forgetting the device mid-reconcile stops further adds and undoes the in-flight one", async () => {
+    const { adb, manager, adds } = setup();
+    await manager.ensure({ deviceId: DEVICE, owner: "s1", adb }, [
+      { devicePort: 8080, hostPort: 8080 },
+      { devicePort: 9090, hostPort: 9090 },
+    ]);
+    adb.dropAll();
+    const gate = Promise.withResolvers<void>();
+    adb.addGate = gate.promise;
+
+    const reconciling = manager.reconcile(DEVICE);
+    await drainMicrotasks(20);
+    expect(adds().slice(2)).toEqual(["add 8080 8080 no-rebind"]);
+    manager.forgetDevice(DEVICE);
+    gate.resolve();
+    const report = await reconciling;
+
+    expect(adds().slice(2)).toEqual(["add 8080 8080 no-rebind"]);
+    expect(adb.calls).toContain("remove 8080");
+    expect([...adb.mappings]).toEqual([]);
+    expect(report.restored).toEqual([]);
   });
 });

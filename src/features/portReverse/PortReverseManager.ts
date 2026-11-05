@@ -369,21 +369,38 @@ export class PortReverseManager {
     );
   }
 
-  /** Undoes this call's adds after a later one failed, so ensure is all-or-nothing. */
+  /**
+   * Undoes this call's adds after a later one failed, so ensure is all-or-nothing. It re-reads
+   * `--list` first, like `remove`, so a port someone re-pointed meanwhile is left alone. A port
+   * whose removal cannot be confirmed stays owned, so release still cleans it up.
+   */
   private async rollback(deviceId: string, state: DeviceState, added: readonly number[]) {
+    if (added.length === 0) {
+      return;
+    }
+    let view: DeviceView;
+    try {
+      view = await this.view(deviceId, state);
+    } catch (error) {
+      logger.warn(
+        `[portReverse] rollback on ${deviceId} could not read --list; keeping ${added.map(tcp).join(", ")} owned: ${errorMessage(error)}`,
+      );
+      return;
+    }
     for (const devicePort of added) {
-      state.owned.delete(devicePort);
-      try {
-        await state.adb.remove(devicePort);
-      } catch (error) {
+      await this.removeOwned(deviceId, state, devicePort, view).catch((error: unknown) => {
         logger.warn(
           `[portReverse] rolling back ${tcp(devicePort)} on ${deviceId} failed: ${errorMessage(error)}`,
         );
-      }
+      });
     }
   }
 
-  /** Drops ownership and removes the port only while it still maps where AutoMobile pointed it. */
+  /**
+   * Removes the port only while it still maps where AutoMobile pointed it. Ownership is dropped
+   * once the mapping is confirmed absent or foreign, or after the removal succeeds; a failed removal
+   * keeps it, so the caller can retry and release can still clean it up.
+   */
   private async removeOwned(
     deviceId: string,
     state: DeviceState,
@@ -391,12 +408,13 @@ export class PortReverseManager {
     view: DeviceView,
   ): Promise<PortReverseMapping> {
     const mapping = state.owned.get(devicePort);
-    state.owned.delete(devicePort);
     const current = view.get(devicePort);
     if (mapping === undefined || current === undefined) {
+      state.owned.delete(devicePort);
       return { devicePort, host: "", owned: false, status: "gone" };
     }
     if (current.hostPort !== mapping.hostPort) {
+      state.owned.delete(devicePort);
       return { ...current, owned: false, status: "foreign" };
     }
     try {
@@ -408,6 +426,7 @@ export class PortReverseManager {
         `adb reverse --remove ${tcp(devicePort)} failed on ${deviceId}`,
       );
     }
+    state.owned.delete(devicePort);
     this.audit(
       `remove ${tcp(devicePort)} -> ${tcp(mapping.hostPort)} device=${deviceId} session=${mapping.owner}`,
     );
@@ -435,7 +454,9 @@ export class PortReverseManager {
     }
     for (const port of ports) {
       await this.removeOwned(deviceId, state, port, view).catch((error: unknown) => {
-        // Same as above: removal on a device that is going away is expected to fail.
+        // Same as above: removal on a device that is going away is expected to fail. The owner is
+        // released, so ownership is dropped rather than kept for a later restore to re-add.
+        state.owned.delete(port);
         logger.debug(`[portReverse] release ${tcp(port)} on ${deviceId}: ${errorMessage(error)}`);
       });
     }

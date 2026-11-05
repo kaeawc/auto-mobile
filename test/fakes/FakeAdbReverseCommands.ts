@@ -9,6 +9,9 @@ export class FakeAdbReverseCommands implements AdbReverseCommands {
   readonly calls: string[] = [];
   failList = false;
   failAdd = new Set<number>();
+  failRemove = new Set<number>();
+  /** Runs before an add is applied or refused, to simulate another tool acting meanwhile. */
+  beforeAdd?: (devicePort: number) => void;
 
   async list(): Promise<AdbReverseEntry[]> {
     this.calls.push("list");
@@ -23,6 +26,7 @@ export class FakeAdbReverseCommands implements AdbReverseCommands {
 
   async add(devicePort: number, hostPort: number, options?: { noRebind?: boolean }) {
     this.calls.push(`add ${devicePort} ${hostPort}${options?.noRebind ? " no-rebind" : ""}`);
+    this.beforeAdd?.(devicePort);
     if (this.failAdd.has(devicePort)) {
       throw new Error("adb: error: cannot bind");
     }
@@ -34,6 +38,9 @@ export class FakeAdbReverseCommands implements AdbReverseCommands {
 
   async remove(devicePort: number) {
     this.calls.push(`remove ${devicePort}`);
+    if (this.failRemove.has(devicePort)) {
+      throw new Error("adb: error: transport busy");
+    }
     this.mappings.delete(devicePort);
   }
 

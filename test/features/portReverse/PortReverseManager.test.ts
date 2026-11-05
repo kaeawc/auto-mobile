@@ -156,6 +156,45 @@ describe("PortReverseManager", () => {
     expect(manager.ownedPorts("emulator-5554")).toEqual([]);
   });
 
+  test("rollback re-checks --list and leaves a port re-pointed during the call alone", async () => {
+    const { adb, manager, target } = setup();
+    adb.failAdd.add(6000);
+    adb.beforeAdd = (port) => {
+      if (port === 6000) {
+        adb.mappings.set(5000, "tcp:7777");
+      }
+    };
+    await expect(
+      manager.ensure(target(), [
+        { devicePort: 5000, hostPort: 5000 },
+        { devicePort: 6000, hostPort: 6000 },
+      ]),
+    ).rejects.toThrow("cannot bind");
+    expect(adb.mappings.get(5000)).toBe("tcp:7777");
+    expect(adb.calls).not.toContain("remove 5000");
+    expect(manager.ownedPorts("emulator-5554")).toEqual([]);
+  });
+
+  test("a failed removal keeps ownership so remove can be retried", async () => {
+    const { adb, manager, target } = setup();
+    await manager.ensure(target(), [{ devicePort: 5000, hostPort: 5000 }]);
+    adb.failRemove.add(5000);
+    await expect(manager.remove(target(), [5000])).rejects.toThrow("transport busy");
+    expect(manager.ownedPorts("emulator-5554")).toEqual([5000]);
+    adb.failRemove.clear();
+    const result = await manager.remove(target(), [5000]);
+    expect(result.mappings[0]?.status).toBe("removed");
+    expect(adb.mappings.size).toBe(0);
+  });
+
+  test("session release drops ownership even when removal fails", async () => {
+    const { adb, manager, target } = setup();
+    await manager.ensure(target(), [{ devicePort: 5000, hostPort: 5000 }]);
+    adb.failRemove.add(5000);
+    await manager.releaseOwner("s1");
+    expect(manager.ownedPorts("emulator-5554")).toEqual([]);
+  });
+
   test("one device port requested for two host ports is a conflict", async () => {
     const { manager, target } = setup();
     const error = await rejection(

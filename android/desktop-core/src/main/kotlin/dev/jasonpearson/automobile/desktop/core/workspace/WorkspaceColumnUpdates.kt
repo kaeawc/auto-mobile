@@ -31,21 +31,12 @@ internal fun WorkspaceViewModel.refreshDeviceSessionUuids(sessionUuids: Map<Stri
   }
 }
 
-/** Apply a device-epoch change: a refreshed epoch or one that ended with no successor. */
-internal fun WorkspaceViewModel.applyEpochAction(action: WorkspaceAction) {
-  when (action) {
-    is WorkspaceAction.RefreshDeviceSessionUuids -> refreshDeviceSessionUuids(action.sessionUuids)
-    is WorkspaceAction.EndDeviceSession -> endDeviceSession(action.deviceId, action.retiredUuid)
-    else -> Unit
-  }
-}
-
 /**
  * Mark [deviceId]'s column ended when it still observes [retiredUuid]: drop its epoch so no
  * UUID-scoped stream can re-attach to it. The pane then renders its disconnected state, which
  * disposes its stream and facets. The column stays open so the user sees why the device went away.
  */
-internal fun WorkspaceViewModel.endDeviceSession(deviceId: String, retiredUuid: String) {
+internal fun WorkspaceViewModel.markDeviceSessionEnded(deviceId: String, retiredUuid: String) {
   mutate(deviceId) { column ->
     if (column.deviceSessionUuid != retiredUuid) column
     else column.copy(deviceSessionUuid = null, sessionEnded = true)

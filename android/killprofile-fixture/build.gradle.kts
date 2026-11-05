@@ -4,7 +4,7 @@ android {
   namespace = "dev.jasonpearson.automobile.killprofilefixture"
   defaultConfig {
     applicationId = "dev.jasonpearson.automobile.killprofilefixture"
-    minSdk = 29
+    minSdk = 31
     versionCode = 1
   }
   buildTypes { getByName("debug") { isDebuggable = true } }

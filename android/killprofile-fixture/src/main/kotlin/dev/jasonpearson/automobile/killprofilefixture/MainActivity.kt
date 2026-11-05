@@ -11,10 +11,13 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.Button
 import androidx.work.Data
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequest
 import androidx.work.PeriodicWorkRequest
 import androidx.work.WorkManager
 import java.io.File
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 
 class MainActivity : Activity() {
@@ -34,12 +37,22 @@ class MainActivity : Activity() {
     Thread {
       try {
         schedule()
-      } catch (error: Exception) {
-        Log.e("SurvivalFixture", "Scheduling failed", error)
-        File(filesDir, "survival-error").writeText(error.toString())
+      } catch (error: ExecutionException) {
+        recordScheduleFailure(error)
+      } catch (error: InterruptedException) {
+        recordScheduleFailure(error)
+      } catch (error: SecurityException) {
+        recordScheduleFailure(error)
+      } catch (error: IllegalStateException) {
+        recordScheduleFailure(error)
       }
     }
       .start()
+  }
+
+  private fun recordScheduleFailure(error: Throwable) {
+    Log.e("SurvivalFixture", "Scheduling failed", error)
+    File(filesDir, "survival-error").writeText(error.toString())
   }
 
   private fun schedule() {
@@ -57,7 +70,11 @@ class MainActivity : Activity() {
         .setInitialDelay(1, TimeUnit.MINUTES)
         .setInputData(eventData(SurvivalEventId.WORKMANAGER_ONESHOT))
         .build()
-    manager.enqueue(listOf(periodic, oneshot)).result.get()
+    manager
+      .enqueueUniquePeriodicWork("survival-periodic", ExistingPeriodicWorkPolicy.UPDATE, periodic)
+      .result
+      .get()
+    manager.enqueueUniqueWork("survival-oneshot", ExistingWorkPolicy.REPLACE, oneshot).result.get()
     val job =
       JobInfo.Builder(1, ComponentName(this, SurvivalJobService::class.java))
         .setMinimumLatency(FIRST_WORK_MS)
@@ -65,6 +82,7 @@ class MainActivity : Activity() {
         .build()
     check(getSystemService(JobScheduler::class.java).schedule(job) == JobScheduler.RESULT_SUCCESS)
     val alarms = getSystemService(AlarmManager::class.java)
+    check(alarms.canScheduleExactAlarms()) { "SCHEDULE_EXACT_ALARM not granted" }
     alarms.setExactAndAllowWhileIdle(
       AlarmManager.RTC_WAKEUP,
       start + FIRST_WORK_MS,

@@ -184,12 +184,9 @@ async function measure(
     score,
     expectedScore,
     mismatches: SURVIVAL_EVENT_IDS.filter(
-      (id) =>
-        expectedScore[id] !== "TODO_MEASURE" && expectedScore[id] !== score[id],
+      (id) => expectedScore[id] !== "TODO_MEASURE" && expectedScore[id] !== score[id],
     ),
-    pendingMeasurement: SURVIVAL_EVENT_IDS.filter(
-      (id) => expectedScore[id] === "TODO_MEASURE",
-    ),
+    pendingMeasurement: SURVIVAL_EVENT_IDS.filter((id) => expectedScore[id] === "TODO_MEASURE"),
   };
 }
 

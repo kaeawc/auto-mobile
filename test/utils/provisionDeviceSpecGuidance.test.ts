@@ -23,6 +23,7 @@ const APPLE_PLATFORMS = [
   { platform: "ios", options: {} },
   { platform: "watchos", options: { readiness: "none" } },
   { platform: "tvos", options: { readiness: "none" } },
+  { platform: "visionos", options: { readiness: "none" } },
 ] as const;
 
 describe("provisionDevice Apple spec guidance", () => {

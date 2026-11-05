@@ -194,6 +194,32 @@ describe("AppleVisionSimulatorProvisioner", () => {
     expect(simctl.commands).toEqual([]);
   });
 
+  test("a short device type or runtime names the full identifier and where they are listed", async () => {
+    const { simctl, provisioner } = arrange([]);
+    const shortType = VISION_DEVICE_TYPE.identifier.split(".").at(-1)!;
+    const shortRuntime = VISION_RUNTIME_ID.split(".").at(-1)!;
+
+    const type = await rejection(
+      provisioner.provision(request({ spec: { ...SPEC, deviceType: shortType } }), {
+        allowCreate: true,
+      }),
+    );
+    const runtime = await rejection(
+      provisioner.provision(request({ spec: { ...SPEC, runtime: shortRuntime } }), {
+        allowCreate: true,
+      }),
+    );
+
+    expect(String(type)).toContain(
+      `Unknown Apple Vision Pro device type '${shortType}'. Pass the full CoreSimulator identifier '${VISION_DEVICE_TYPE.identifier}'.`,
+    );
+    expect(String(type)).toContain("automobile:devices/images/visionos");
+    expect(String(runtime)).toContain(
+      `Pass the full CoreSimulator identifier '${VISION_RUNTIME_ID}'.`,
+    );
+    expect(simctl.commands).toEqual([]);
+  });
+
   test("a UDID that names no headset is refused, never created under a new UDID", async () => {
     const { simctl, provisioner } = arrange([]);
 

@@ -20,6 +20,7 @@ import { assertAllDisplayObserveSupported } from "../features/observe/DisplaySel
 import { type DeviceObservationAccess } from "./deviceObservationAccess";
 import { ActionableError } from "../models/ActionableError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
+import { createProductionDevicectlPanelScreenshotSource } from "../utils/ios-cmdline-tools/DevicectlPanelScreenshotSource";
 import {
   snapshotReferences,
   type SnapshotReferenceStore,
@@ -202,6 +203,7 @@ export function screenForObserve(
     return dependencies.createScreen(device, args.display);
   }
   return new RealObserveScreen(device, undefined, {
+    iosDisplayInfoSource: createProductionDevicectlPanelScreenshotSource(),
     display: args.display,
     deviceReadOnly: getToolSelectionContext()?.explicitObserveDeviceRead === true,
     onAvailabilityLost:

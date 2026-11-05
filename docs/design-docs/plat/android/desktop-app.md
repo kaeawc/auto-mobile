@@ -70,6 +70,12 @@ fallback), instead of opening their own socket:
   never holds back another: the per-device flows keep the latest frame and drop
   the oldest buffered one. Layout, Performance, Navigation, Storage, the compare
   view and the device-control stream all lease this one stream.
+- The latest hierarchy and screenshot are the shared stream's replay, so a lease
+  never clears them while the stream is connected: a lease joining a live stream
+  makes no new daemon subscription and gets no initial frames, so it arms from
+  that replay, or requests a fresh observation when there is none. A stream that
+  is not connected, or that the hub reconnects, drops its pre-outage layout for
+  every lease.
 - Storage intent is per lease. The hub counts each `(package, file)` across a
   device's leases. The first lease that asks sends `subscribe_storage` on the
   shared stream, and the last one to let go sends `unsubscribe_storage`. Updates,

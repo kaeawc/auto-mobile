@@ -3,6 +3,7 @@ test/fixtures/wear/systemtray/*.xml text eol=lf
 test/fixtures/crashReports/* text eol=lf
 test/fixtures/android-display-config/*.txt text eol=lf
 test/fixtures/android-power/*.txt text eol=lf
+test/fixtures/port-reverse-probe/*.txt text eol=lf
 test/fixtures/android-oem/**/*.txt text eol=lf
 test/fixtures/android-display-geometry/*.txt text eol=lf
 test/fixtures/macos-profiles/*.txt text eol=lf

@@ -1,12 +1,21 @@
 import type {
   AdbReverseCommands,
   AdbReverseEntry,
+  PortProbeOutcome,
 } from "../../utils/android-cmdline-tools/adbReverse";
 import { rethrowDeviceTransportUnavailable } from "../../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
+import { DeviceLostError } from "../../models/DeviceLostError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { toActionableError } from "../../models/ActionableError";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { PortReverseError } from "./PortReverseError";
+
+/** Per-port bound on a verify probe; ports are probed concurrently, so this bounds the whole call. */
+export const PORT_PROBE_TIMEOUT_MS = 2500;
+/** A peer that closes at once is asked again once: the first connect after a host restart can race. */
+const PORT_PROBE_ATTEMPTS = 2;
 
 /** One device port to reverse to a host loopback port. */
 export interface PortReverseRequest {
@@ -18,7 +27,10 @@ export interface PortReverseRequest {
  * `added`/`present`/`restored`: the mapping is on the device. `missing`: an owned mapping is gone
  * and could not be restored, or a mapping that was asked about does not exist. `removed`: this call
  * removed it. `gone`: it had already disappeared. `foreign`: the device port now maps somewhere this
- * session did not create, so it was left in place.
+ * session did not create, so it was left in place. Only `verify` with `probe` reports the last three
+ * for a mapping that is on the device: `reachable` (a device-side connect reached a host server
+ * that kept it open), `unreachable` (see `probeReason`), `probe_unsupported` (the device shell
+ * cannot run the connect, so nothing is guessed).
  */
 export type PortReverseStatus =
   | "added"
@@ -27,7 +39,17 @@ export type PortReverseStatus =
   | "missing"
   | "removed"
   | "gone"
-  | "foreign";
+  | "foreign"
+  | "reachable"
+  | "unreachable"
+  | "probe_unsupported";
+
+/**
+ * Why a probe was `unreachable` or `probe_unsupported`. `closed`: the reverse accepted the connect
+ * but the host side is not listening. `refused`: nothing listens on the device port. `timeout`: the
+ * device did not answer the probe in time.
+ */
+export type PortProbeReason = "closed" | "refused" | "timeout" | "unsupported";
 
 export interface PortReverseMapping {
   devicePort: number;
@@ -38,6 +60,10 @@ export interface PortReverseMapping {
   /** This session created the mapping and will remove it on release. */
   owned: boolean;
   status: PortReverseStatus;
+  /** Set with `unreachable` and `probe_unsupported`. */
+  probeReason?: PortProbeReason;
+  /** Device output that made the probe unsupported. */
+  probeDetail?: string;
 }
 
 export interface PortReverseRestoreFailure {
@@ -109,7 +135,10 @@ const defaultAudit: PortReverseAudit = (event) => logger.info(`[portReverse] ${e
 export class PortReverseManager {
   private readonly devices = new Map<string, DeviceState>();
 
-  constructor(private readonly audit: PortReverseAudit = defaultAudit) {}
+  constructor(
+    private readonly audit: PortReverseAudit = defaultAudit,
+    private readonly timer: Timer = defaultTimer,
+  ) {}
 
   /** Idempotently adds each mapping; throws `port_reverse_conflict` and changes nothing on a clash. */
   ensure(target: PortReverseTarget, requests: readonly PortReverseRequest[]) {
@@ -163,8 +192,12 @@ export class PortReverseManager {
     });
   }
 
-  /** Whether each port (default: every port this session owns) is mapped on the device now. */
-  verify(target: PortReverseTarget, ports?: readonly number[]) {
+  /**
+   * Whether each port (default: every port this session owns) is mapped on the device now. With
+   * `probe`, each mapping that is on the device is then connected to from the device, so it
+   * reports `reachable`, `unreachable` or `probe_unsupported`; `missing` ports are not probed.
+   */
+  verify(target: PortReverseTarget, ports?: readonly number[], options?: { probe?: boolean }) {
     const state = this.stateFor(target);
     return this.enqueue(state, async (): Promise<PortReverseResult> => {
       const { view, report } = await this.reconciled(target, state);
@@ -183,8 +216,65 @@ export class PortReverseManager {
           status: "missing" as const,
         };
       });
+      if (options?.probe === true) {
+        const probed = await Promise.all(
+          mappings.map((mapping) => this.probeMapping(target, mapping)),
+        );
+        return { mappings: probed, ...report };
+      }
       return { mappings, ...report };
     });
+  }
+
+  /** One mapping's probe result; a mapping that is not on the device is returned as it is. */
+  private async probeMapping(
+    target: PortReverseTarget,
+    mapping: PortReverseMapping,
+  ): Promise<PortReverseMapping> {
+    if (mapping.status === "missing") {
+      return mapping;
+    }
+    const verdict = (
+      status: PortReverseStatus,
+      probeReason?: PortProbeReason,
+      probeDetail?: string,
+    ) => ({
+      ...mapping,
+      status,
+      ...(probeReason === undefined ? {} : { probeReason }),
+      ...(probeDetail === undefined ? {} : { probeDetail }),
+    });
+    for (let attempt = 1; attempt <= PORT_PROBE_ATTEMPTS; attempt++) {
+      let outcome: PortProbeOutcome;
+      try {
+        outcome = await raceWithDeadline(() => target.adb.probe(mapping.devicePort), {
+          timer: this.timer,
+          timeoutMs: PORT_PROBE_TIMEOUT_MS,
+          label: `portReverse probe tcp:${mapping.devicePort}`,
+          unref: true,
+        });
+      } catch (error) {
+        if (error instanceof DeviceLostError) {
+          throw error;
+        }
+        rethrowDeviceTransportUnavailable(error);
+        // A probe that hangs or fails says nothing about the mapping beyond "no answer".
+        logger.warn(
+          `[portReverse] probe of ${tcp(mapping.devicePort)} on ${target.deviceId} failed: ${errorMessage(error)}`,
+        );
+        return verdict("unreachable", "timeout");
+      }
+      if (outcome.kind === "held") {
+        return verdict("reachable");
+      }
+      if (outcome.kind === "refused") {
+        return verdict("unreachable", "refused");
+      }
+      if (outcome.kind === "unsupported") {
+        return verdict("probe_unsupported", "unsupported", outcome.detail);
+      }
+    }
+    return verdict("unreachable", "closed");
   }
 
   /** Removes mappings this session owns; throws `port_reverse_not_owned` and changes nothing otherwise. */

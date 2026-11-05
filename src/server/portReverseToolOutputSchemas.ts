@@ -5,7 +5,20 @@ const mappingSchema = z.object({
   hostPort: z.number().int().optional(),
   host: z.string(),
   owned: z.boolean(),
-  status: z.enum(["added", "present", "restored", "missing", "removed", "gone", "foreign"]),
+  status: z.enum([
+    "added",
+    "present",
+    "restored",
+    "missing",
+    "removed",
+    "gone",
+    "foreign",
+    "reachable",
+    "unreachable",
+    "probe_unsupported",
+  ]),
+  probeReason: z.enum(["closed", "refused", "timeout", "unsupported"]).optional(),
+  probeDetail: z.string().optional(),
 });
 
 /** Every portReverse outcome; `failed` is returned with `isError`. */

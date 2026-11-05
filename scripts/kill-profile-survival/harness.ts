@@ -13,7 +13,7 @@ import {
   type SurvivalEventId,
 } from "../../src/features/utility/KillProfileExpectedScores";
 import { KillProfileRestoreRegistry } from "../../src/features/utility/KillProfileRestore";
-import type { KillProfile } from "../../src/features/utility/KillProfiles";
+import type { KillProfile, KillProfileId } from "../../src/features/utility/KillProfiles";
 import type { AdbCommandRunner } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { readAndroidDeviceApiLevel } from "../../src/utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import {
@@ -276,7 +276,7 @@ async function runProfile(
 }
 
 export async function runHarness(
-  options: { serial: string; avd: string; apk: string },
+  options: { serial: string; avd: string; apk: string; profiles?: readonly KillProfileId[] },
   deps: HarnessDeps,
 ): Promise<SurvivalReport> {
   const report: SurvivalReport = {
@@ -310,7 +310,9 @@ export async function runHarness(
     if (/mForceIdle=true/.test(idle)) {
       throw new Error("Device already has forced Doze; release it before running the harness");
     }
-    for (const profile of SURVIVAL_MATRIX) {
+    for (const profile of SURVIVAL_MATRIX.filter(
+      (profile) => !options.profiles || options.profiles.includes(profile.id),
+    )) {
       deps.signal?.throwIfAborted();
       report.results.push(await runProfile(device, profile, options.apk, deps));
     }

@@ -42,7 +42,7 @@ function access(listings: Partial<Record<ReadListingScope, BootedResourceReadLis
 
 const either = (devices: BootedDevice[]): BootedResourceReadListing => ({
   devices,
-  scanned: { android: true, ios: true, watchos: false, tvos: false },
+  scanned: { android: true, ios: true, watchos: false, tvos: false, visionos: false },
 });
 
 async function failure(promise: Promise<unknown>): Promise<unknown> {
@@ -58,7 +58,7 @@ describe("observation read listing scope", () => {
       either: either([IPHONE]),
       watchos: {
         devices: [WATCH],
-        scanned: { android: false, ios: false, watchos: true, tvos: false },
+        scanned: { android: false, ios: false, watchos: true, tvos: false, visionos: false },
       },
     });
 
@@ -88,7 +88,7 @@ describe("observation read listing scope", () => {
       either: either([IPHONE]),
       watchos: {
         devices: [],
-        scanned: { android: false, ios: false, watchos: false, tvos: false },
+        scanned: { android: false, ios: false, watchos: false, tvos: false, visionos: false },
         discoveryErrors: { watchos: { code: "unavailable", message: "simctl missing" } },
       },
     });
@@ -108,7 +108,10 @@ test("a tvOS read lists Apple TVs and resolves the named device", async () => {
   const tv: BootedDevice = { ...WATCH, platform: "tvos", name: "Apple TV" };
   const { read, scopes } = access({
     either: either([IPHONE]),
-    tvos: { devices: [tv], scanned: { android: false, ios: false, watchos: false, tvos: true } },
+    tvos: {
+      devices: [tv],
+      scanned: { android: false, ios: false, watchos: false, tvos: true, visionos: false },
+    },
   });
   expect(
     await resolveDeviceForObservationRead(tv.deviceId, undefined, {
@@ -131,7 +134,7 @@ test("failed tvOS discovery is incomplete rather than not-found", async () => {
   const { read } = access({
     tvos: {
       devices: [],
-      scanned: { android: false, ios: false, watchos: false, tvos: false },
+      scanned: { android: false, ios: false, watchos: false, tvos: false, visionos: false },
       discoveryErrors: { tvos: { code: "unavailable", message: "simctl missing" } },
     },
   });

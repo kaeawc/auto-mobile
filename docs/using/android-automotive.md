@@ -96,6 +96,14 @@ Behaviour on the cluster and passenger displays is unchecked. The full pass/fail
 including which car-service commands each image accepts, is in
 [Android form factors](../design-docs/plat/android/form-factors.md#automotive-baseline-on-an-emulator).
 
+On automotive devices, `observe.automotive` reports `drivingState` (`parked`, `idling`, or `moving`),
+`uxRestrictions.requiresDistractionOptimization`, the numeric `uxRestrictions.activeRestrictions`
+bitmask for the observed display, and `foregroundActivity.distractionOptimized` when the foreground
+activity and its DO status are known. `blocked` is true when distraction optimization is required and
+the known foreground activity is not distraction optimized. Unavailable service reads omit the affected
+fields; `blocked: false` alone does not establish that the app is usable. Other device types omit the
+entire `automotive` block.
+
 ## Headless system user
 
 Most AAOS images run a headless system user (user 0 has no UI) and the driver is a secondary user,
@@ -163,19 +171,10 @@ unverified.
 
 ## Car App Library templates in `observe`
 
-An app built on the Car App Library (`androidx.car.app`) that integrates the AutoMobile Android SDK can
-report its template stack to `observe`, on a phone emulator or on AAOS, without a head unit. Turn it on
-in a debug build and pass each template through `record` as `onGetTemplate` returns it:
-
-```kotlin
-// Once, e.g. in your CarAppService or Session.
-AutoMobileCarAppTemplates.enable(context)
-
-override fun onGetTemplate(): Template =
-  AutoMobileCarAppTemplates.record(this, ListTemplate.Builder() /* ... */.build())
-```
-
-`enable` returns `false` and does nothing in a non-debuggable build. While the foreground app has the
+An app built on the Car App Library (`androidx.car.app`) can report its template stack to `observe`, on a
+phone emulator or on AAOS, without a head unit. The block appears only for a debug build of an app that
+enabled the AutoMobile SDK template route; the app-side setup is in the
+[design doc](../design-docs/plat/android/car-app-templates.md#app-setup). While the foreground app has the
 route on, `observe` carries a `carAppTemplates` block:
 
 - `sessions[]`: one per screen stack, with `screens[]` listed root first; the top screen has `top: true`.

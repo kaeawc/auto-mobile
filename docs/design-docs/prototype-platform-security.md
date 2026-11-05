@@ -41,11 +41,14 @@ Relaxing this is an owner decision
 **R2: sensitive results cannot reach a network or storage sink.** A `/data` path written by a
 `sensitive` call's `into`, and `sensitive` `/platform` state, may not be bound into a `request`
 URL, header, query or body, a channel URL or header, or `storage.keys`. The TypeScript, Kotlin and
-Swift strict validators refuse sensitive `/data` bindings into request or channel fields when
-`library: true`, as they do for `secure` text fields, and share the
-`test/fixtures/prototype-spec/library-sensitive` corpus. Successful MCP-direct shows include a
-warning for those bindings. No host path imports specs yet. Sensitive `/platform` state and
-`storage.keys` checks are not applied (tracked in #15635).
+Swift validators refuse these bindings when `library: true`, reporting the sink path, as they do
+for `secure` text fields. Pointer overlap includes parents, children and repeat `{index}` segments;
+literal value bindings stay opaque. A `setData`, `appendData`, `prependData` or `upsertData` whose
+`value` is `{data}` or `{platform}` read of tainted state taints its `/data` destination, so
+copies and copies of copies are refused too. Copies routed through `setState` are not tracked. The contract marks location fixes and auth user IDs as
+sensitive state. Successful MCP-direct shows include a warning for each sink, unless the expanded
+sink scan exceeds 4194304 bytes. Then they include one warning that the sinks are unchecked. No
+host path imports specs yet.
 
 **R3: side effects need a user gesture.** The TypeScript validator permits `share.open` and
 `notifications.post|schedule|setBadge` only in `onTap`, `onLongPress`, `onDoubleTap`, `onSubmit`

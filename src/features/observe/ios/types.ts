@@ -211,6 +211,7 @@ export interface WebSocketMessage {
   observation?: unknown;
   result?: unknown;
   failure?: string;
+  scenes?: unknown;
   /** sdk_web_snapshot_result (#5162): the relayed web snapshot, its web view and the registered web views. */
   snapshot?: unknown;
   webViewId?: string;
@@ -568,6 +569,7 @@ export interface CtrlProxySdkObservationResult extends BaseResult {
   available: boolean;
   observation?: IosSdkObservation;
   failure?: IosSdkBridgeFailure;
+  scenes?: string[];
   unsupported?: boolean;
 }
 
@@ -580,6 +582,7 @@ export interface CtrlProxySdkActionResult extends BaseResult {
   available: boolean;
   result?: IosSdkActionResult;
   failure?: IosSdkBridgeFailure;
+  scenes?: string[];
   unsupported?: boolean;
 }
 
@@ -592,6 +595,7 @@ export interface CtrlProxySdkWebSnapshotResult extends BaseResult {
   /** The app's registered web views, when the runner read its SDK's `/health`. */
   webViews?: IosSdkWebViewEntry[];
   failure?: IosSdkWebFailure;
+  scenes?: string[];
   unsupported?: boolean;
 }
 
@@ -604,6 +608,7 @@ export interface CtrlProxySdkWebActionResult extends BaseResult {
   available: boolean;
   result?: IosSdkWebActionResult;
   failure?: IosSdkWebFailure;
+  scenes?: string[];
   unsupported?: boolean;
 }
 

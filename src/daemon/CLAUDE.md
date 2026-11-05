@@ -284,10 +284,12 @@ platform-only control and read-only calls use the connection's unique held sessi
 Desktop input is use. The desktop and IDE clients register an observer session
 that allocates nothing, allocate a device with `setActiveDevice` on the first
 `input/*` to it, and send input under that session, so each input restarts the
-idle window. After an idle release, a daemon restart, or an expiry, the client
+idle window. A restarted daemon rehydrates the persisted session, so a restart
+inside the idle window is invisible to the client; one that outlasts it expires
+the session. After an idle release, such a restart, or an expiry, the client
 rotates to a fresh observer session and does not re-send the bind; the next
 input allocates the device again. `test/fixtures/desktop-wire/` records these
-exchanges against the real handlers.
+exchanges against a real `Daemon` started through `startOn()`.
 
 Viewer stream rule (owner decision 2026-10-09, #8902): a video-relay or WebRTC/WHEP
 subscription keeps streaming when device ownership changes (another session acquires,

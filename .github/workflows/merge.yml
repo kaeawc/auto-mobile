@@ -37,7 +37,9 @@ jobs:
   # The full desktop-core suite stays off the merge path (consistently >1 minute, not required for
   # release/docs publishing), but the desktop wire-contract replay runs on every merge (#10983):
   # the daemon-side desktopWireContract test writes test/fixtures/desktop-wire/, and this replay
-  # is the only thing that proves the Kotlin client still composes against it.
+  # is the only thing that proves the Kotlin client still composes against it. The filter covers
+  # the whole desktop.core.daemon package plus RememberDeviceControlSessionUiTest, so the narrow
+  # allocation killers (mutants n/K2 and K3) run at merge alongside the replay (#11443).
   desktop-core-unit-tests:
     name: "Run Desktop Wire Replay"
     runs-on: ubuntu-latest
@@ -55,7 +57,7 @@ jobs:
       - uses: ./.github/actions/gradle-task-run
         with:
           gradle-tasks: ":desktop-core:test"
-          gradle-flags: '["--tests", "*DesktopWireFixtureCompositionTest"]'
+          gradle-flags: '["--tests", "dev.jasonpearson.automobile.desktop.core.daemon.*", "--tests", "*RememberDeviceControlSessionUiTest"]'
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true
@@ -453,6 +455,10 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          # Key the cache on the only uv lockfile. The default glob walks the
+          # whole workspace, including node_modules/ while bun install churns
+          # its .bun-tmp-* dirs, and fails with ENOENT (#17068).
+          cache-dependency-glob: scripts/github/uv.lock
 
       - name: "Validate docs/ GitHub Markdown"
         shell: "bash"
@@ -501,6 +507,10 @@ jobs:
         id: setup-uv
         with:
           enable-cache: true
+          # Key the cache on the only uv lockfile. The default glob walks the
+          # whole workspace, including node_modules/ while bun install churns
+          # its .bun-tmp-* dirs, and fails with ENOENT (#17068).
+          cache-dependency-glob: scripts/github/uv.lock
 
       - name: "Install Lychee"
         shell: "bash"
@@ -1239,13 +1249,10 @@ jobs:
 
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":junit-runner:test :junit-runner:jacocoTestReport :control-proxy:testDebugUnitTest :control-proxy:createDebugUnitTestCoverageReport :automotive-fixture:testDebugUnitTest :prototype-compose:testDebugUnitTest :prototype-compose:createDebugUnitTestCoverageReport :prototype-saved:testDebugUnitTest :prototype-saved:createDebugUnitTestCoverageReport :protoviewer:testDebugUnitTest :protoviewer:createDebugUnitTestCoverageReport :protoviewer:verifyProtoViewerDependencies :auto-mobile-sdk:testDebugUnitTest :auto-mobile-sdk:createDebugUnitTestCoverageReport :test-plan-validation:test :test-plan-validation:jacocoTestReport :protocol:test :protocol:jacocoTestReport :video-server:test"
+          gradle-tasks: ":junit-runner:test :junit-runner:jacocoTestReport :control-proxy:testDebugUnitTest :control-proxy:createDebugUnitTestCoverageReport :automotive-fixture:testDebugUnitTest :wear-fixture:testDebugUnitTest :prototype-compose:testDebugUnitTest :prototype-compose:createDebugUnitTestCoverageReport :prototype-saved:testDebugUnitTest :prototype-saved:createDebugUnitTestCoverageReport :protoviewer:testDebugUnitTest :protoviewer:createDebugUnitTestCoverageReport :protoviewer:verifyProtoViewerDependencies :auto-mobile-sdk:testDebugUnitTest :auto-mobile-sdk:createDebugUnitTestCoverageReport :test-plan-validation:test :test-plan-validation:jacocoTestReport :protocol:test :protocol:jacocoTestReport :video-server:test"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true
-          # Runs every Robolectric module, so it is the one job that saves the
-          # shared android-all jar cache the PR jobs restore (#16396).
-          robolectric-jar-cache: "save"
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
       - name: "Upload Kotlin Unit Test Reports on Failure"

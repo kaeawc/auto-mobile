@@ -15,10 +15,13 @@ import type {
 } from "./PerformanceTraceRecorder";
 import type { PerformanceTraceSummary } from "./PerformanceTraceSummary";
 import {
+  parseXctraceTemplateList,
   TEMPLATES_REQUIRING_APP,
+  XCTRACE_TEMPLATE_NAMES,
   xctraceRecordArgs,
   type PerformanceTraceTemplate,
 } from "./performanceTraceTemplates";
+import { XctraceTemplateUnavailableError } from "./XctraceTemplateUnavailableError";
 import {
   parseXctraceTable,
   parseXctraceToc,
@@ -58,6 +61,7 @@ const DEFAULT_START_TIMEOUT_MS = 60_000;
 const DEFAULT_STOP_TIMEOUT_MS = 60_000;
 const DEFAULT_STOP_MAX_MS = 180_000;
 const EXPORT_TIMEOUT_MS = 120_000;
+const LIST_TEMPLATES_TIMEOUT_MS = 30_000;
 const EXPORT_MAX_BUFFER = 64 * 1024 * 1024;
 /** `xctrace record` prints this once the recorder is capturing. */
 const RECORDING_STARTED = /Ctrl-C to stop the recording|Starting recording/i;
@@ -72,9 +76,13 @@ interface RecordTarget {
  * physical device (#14102), stopped by SIGINT so xctrace finalizes the file.
  */
 export class XctraceRecorder implements PerformanceTraceRecorder {
+  /** `xctrace list templates`, cached once read: the installed Xcode does not change under a daemon. */
+  private installedTemplates?: ReadonlySet<string>;
+
   constructor(private readonly deps: XctraceRecorderDependencies) {}
 
   async start(request: StartPerformanceTraceRequest): Promise<RecordingPerformanceTrace> {
+    await this.assertTemplateInstalled(request.template, request.signal);
     const warnings: string[] = [];
     const target = await this.resolveTarget(request, warnings);
     const artifactPath = join(request.artifactDir, `${request.traceId}.trace`);
@@ -104,6 +112,52 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
       );
     }
     return this.recording(child, exited, artifactPath, { template: request.template, warnings });
+  }
+
+  /** Refuse up front when the installed Xcode lacks the Instruments template (#16970). */
+  private async assertTemplateInstalled(
+    template: PerformanceTraceTemplate,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const installed = await this.listInstalledTemplates(signal);
+    if (installed && !installed.has(XCTRACE_TEMPLATE_NAMES[template])) {
+      throw new XctraceTemplateUnavailableError(template, installed);
+    }
+  }
+
+  private async listInstalledTemplates(
+    signal?: AbortSignal,
+  ): Promise<ReadonlySet<string> | undefined> {
+    if (this.installedTemplates) {
+      return this.installedTemplates;
+    }
+    try {
+      const { stdout } = await this.deps.host.executeCommand(
+        "xcrun",
+        ["xctrace", "list", "templates"],
+        {
+          timeoutMs: LIST_TEMPLATES_TIMEOUT_MS,
+          signal,
+        },
+      );
+      const installed = parseXctraceTemplateList(stdout);
+      if (installed.size > 0) {
+        this.installedTemplates = installed;
+        return installed;
+      }
+      logger.warn(
+        "[performanceTrace] xctrace list templates printed no templates; not prechecking",
+      );
+      return undefined;
+    } catch (error) {
+      signal?.throwIfAborted();
+      // Best effort: `xctrace record` still reports a missing template itself, just later.
+      logger.warn(
+        `[performanceTrace] xctrace list templates failed: ${errorMessage(error)}`,
+        error,
+      );
+      return undefined;
+    }
   }
 
   private async resolveTarget(

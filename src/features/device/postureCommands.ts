@@ -1,3 +1,7 @@
+import type {
+  DevicectlDisplayInfo,
+  DevicectlDisplayInfoSource,
+} from "../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { BootedDevice, DisplayRef, Posture } from "../../models";
@@ -79,6 +83,7 @@ export interface SetPostureDependencies {
   adbFactory?: AdbClientFactory;
   androidHingeAngleConsole?: AndroidHingeAngleConsole;
   observeFactory?: (device: BootedDevice) => ObserveScreen;
+  iosDisplayInfoSource?: DevicectlDisplayInfoSource;
   iosClientProvider?: (device: BootedDevice) => IosCtrlProxy;
   simctl?: Pick<SimCtl, "getDeviceInfo">;
   timer?: Timer;
@@ -161,11 +166,38 @@ export function classifyIosPostureObservation(
   return matchesPanel(old) ? "old" : "indeterminate";
 }
 
+/** Require one active display and an unambiguous panel match; names are a size-less fallback. */
+export function devicectlConfirmsIosPanel(
+  displays: DevicectlDisplayInfo[],
+  panels: DisplayPanel[] | undefined,
+  expectedRole: "cover" | "inner",
+): boolean {
+  const active = displays.filter((display) => display.active === true);
+  if (active.length !== 1) {
+    return false;
+  }
+  const display = active[0];
+  const size = display.nativeSize ?? display.bounds?.size;
+  if (size) {
+    const matches = panels?.filter((panel) => sizeMatchesPanel(size, panel));
+    return matches?.length === 1 && matches[0].role === expectedRole;
+  }
+  return display.name === (expectedRole === "cover" ? "LCD" : "LCD-1");
+}
+
 export async function observeIosPosture(
   observe: () => Promise<Awaited<ReturnType<ObserveScreen["execute"]>>>,
   panels: DisplayPanel[] | undefined,
   expectedRole: "cover" | "inner",
-  { timer, operation }: { timer: Timer; operation: PostureOperation },
+  {
+    timer,
+    operation,
+    confirmActivePanel,
+  }: {
+    timer: Timer;
+    operation: PostureOperation;
+    confirmActivePanel?: (expectedRole: "cover" | "inner") => Promise<boolean>;
+  },
 ): Promise<Awaited<ReturnType<ObserveScreen["execute"]>>> {
   const { signal, assertCurrent } = operation;
   assertCurrent();
@@ -190,6 +222,15 @@ export async function observeIosPosture(
     observation = await awaitWhileRequestIsLive(observe(), signal);
     assertCurrent();
     match = classifyIosPostureObservation(observation, panels, expectedRole);
+  }
+  if (match === "old" && confirmActivePanel) {
+    throwIfAborted(signal);
+    const confirmed = await awaitWhileRequestIsLive(confirmActivePanel(expectedRole), signal);
+    assertCurrent();
+    throwIfAborted(signal);
+    if (confirmed) {
+      return observation;
+    }
   }
   if (match === "old") {
     const oldRole = expectedRole === "cover" ? "inner" : "cover";

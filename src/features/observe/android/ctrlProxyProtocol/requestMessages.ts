@@ -478,6 +478,11 @@ export interface ResetKeystoreMessage {
   alias?: string;
 }
 
+export interface ExportAttestationMessage {
+  type: "export_attestation";
+  requestId: string;
+}
+
 export interface DiscoverKeystoreMessage {
   type: "discover_keystore";
   requestId: string;
@@ -758,6 +763,7 @@ export type CtrlProxyRequest =
   | AddHighlightMessage
   | ListPreferenceFilesMessage
   | GetPreferencesMessage
+  | ExportAttestationMessage
   | DiscoverKeystoreMessage
   | ResetKeystoreMessage
   | GetSdkCapabilitiesMessage

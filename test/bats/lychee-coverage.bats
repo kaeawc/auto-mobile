@@ -25,24 +25,17 @@ CONFIG=".lycherc.toml"
 SCRIPT="scripts/lychee/validate_lychee.sh"
 MERGE_WORKFLOW=".github/workflows/merge.yml"
 
-requires_yq() {
-  command -v yq >/dev/null 2>&1 && return 0
-  if [[ -n "${CI:-}" ]]; then
-    echo "yq is required in CI to verify lychee coverage" >&2
-    return 1
-  fi
-  skip "yq not installed"
-}
+load yq-helpers
 
 @test "lychee checks links inside verbatim blocks (MkDocs content tabs)" {
-  requires_yq
+  require_mikefarah_yq
   run yq -p toml -o json '.include_verbatim' "$CONFIG"
   [ "$status" -eq 0 ]
   [ "$output" = "true" ]
 }
 
 @test "include_fragments is passed as a CLI flag, not a version-specific config key" {
-  requires_yq
+  require_mikefarah_yq
   # The key is a bool in lychee 0.22 (CI pin) and an enum string in 0.24+, so
   # any value in the config fails to load under one of them.
   run yq -p toml -o json 'has("include_fragments")' "$CONFIG"
@@ -52,7 +45,7 @@ requires_yq() {
 }
 
 @test "every exclude_path regex is anchored" {
-  requires_yq
+  require_mikefarah_yq
   run yq -p toml -oy '.exclude_path[]' "$CONFIG"
   [ "$status" -eq 0 ]
   [ -n "$output" ]
@@ -74,7 +67,7 @@ requires_yq() {
 }
 
 @test "merge workflow requires the built-site pass and drops the empty contributing stub" {
-  requires_yq
+  require_mikefarah_yq
   run yq -r '.jobs["validate-documentation-links"].steps[] | select(.name == "Validate Links") | .env.LYCHEE_REQUIRE_SITE' "$MERGE_WORKFLOW"
   [ "$status" -eq 0 ]
   [ "$output" = "true" ]
@@ -116,7 +109,7 @@ requires_yq() {
 }
 
 @test "pull_request.yml runs lychee-offline in its own step, not fanned out with the docs-globbing checks" {
-  requires_yq
+  require_mikefarah_yq
   local workflow=".github/workflows/pull_request.yml"
   run yq -r '.jobs["fast-validation"].steps[] | select(.name == "Run offline lychee link check") | .run' "$workflow"
   [ "$status" -eq 0 ]
@@ -178,7 +171,7 @@ own_repo_fixture() {
 }
 
 @test "own-repo links: .lycherc.toml excludes the shape and validate_lychee.sh runs the script" {
-  requires_yq
+  require_mikefarah_yq
   run yq -p toml -oy '.exclude[] | select(test("kaeawc/auto-mobile/") and test("blob"))' "$CONFIG"
   [ "$status" -eq 0 ]
   [[ "$OWN_P/blob/main/a/b.kt#L3" =~ $output ]]
@@ -188,7 +181,7 @@ own_repo_fixture() {
 }
 
 @test "504 Gateway Timeout is accepted for external links" {
-  requires_yq
+  require_mikefarah_yq
   run yq -p toml -oy '.accept[] | select(. == "504")' "$CONFIG"
   [ "$status" -eq 0 ]
   [ "$output" = "504" ]

@@ -33,7 +33,7 @@ private const val MAX_LABEL_LENGTH = 120
  * copy. Generous so a slow import is never swept under its own request.
  */
 const val MCP_ORPHAN_MAX_AGE_MS = 10 * 60 * 1000L
-private val REQUEST_ID = Regex("[A-Za-z0-9_-]{1,64}")
+internal val REQUEST_ID = Regex("[A-Za-z0-9_-]{1,64}")
 private val logger: Logger = Logger.getLogger("ProtoViewerMcp")
 
 sealed interface McpCommand {

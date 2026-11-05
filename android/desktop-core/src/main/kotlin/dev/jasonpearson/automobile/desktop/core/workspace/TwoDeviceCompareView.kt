@@ -35,6 +35,7 @@ import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
+import dev.jasonpearson.automobile.desktop.core.daemon.reconnectBackoffMs
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.layout.DiffKeyMode
 import dev.jasonpearson.automobile.desktop.core.layout.HierarchyDiff
@@ -194,7 +195,8 @@ private fun CompareSide(
     LaunchedEffect(activeStream) {
       activeStream.deviceEvents.collect { event ->
         when (event) {
-          is DeviceStreamEvent.DeviceSessionSuperseded -> Unit
+          is DeviceStreamEvent.DeviceSessionSuperseded,
+          is DeviceStreamEvent.DeviceSessionEnded -> Unit
           // Device unplugged/offline: retire the snapshot so the diff shows "waiting" until a fresh
           // frame arrives, rather than diffing the live device against a dead one's stale tree.
           is DeviceStreamEvent.DeviceConnectionLost -> clearHierarchy()

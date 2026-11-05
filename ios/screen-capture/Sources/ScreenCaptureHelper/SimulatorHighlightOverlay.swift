@@ -21,6 +21,24 @@ struct SimulatorOverlayTarget {
 }
 
 enum SimulatorDisplayGeometry {
+    static func orientedBounds(_ bounds: CircleBounds, targetSize: CGSize) -> CircleBounds {
+        guard let sourceWidth = bounds.sourceWidth, let sourceHeight = bounds.sourceHeight,
+              sourceWidth > 0, sourceHeight > 0,
+              targetSize.width.isFinite, targetSize.height.isFinite,
+              targetSize.width > 0, targetSize.height > 0,
+              (sourceWidth > sourceHeight) != (targetSize.width > targetSize.height) else { return bounds }
+
+        // Clockwise matches observed rotation 1; this direction is not yet confirmed on screen.
+        return CircleBounds(
+            x: sourceHeight - (bounds.y + bounds.height),
+            y: bounds.x,
+            width: bounds.height,
+            height: bounds.width,
+            sourceWidth: sourceHeight,
+            sourceHeight: sourceWidth
+        )
+    }
+
     static func targets() -> [SimulatorOverlayTarget] {
         let simulatorPIDs = Set(
             NSWorkspace.shared.runningApplications
@@ -45,14 +63,46 @@ enum SimulatorDisplayGeometry {
         }
     }
 
-    static func find(deviceName: String) throws -> SimulatorOverlayTarget {
-        let matches = targets().filter { simulatorWindowTitle($0.title, namesDevice: deviceName) }
-        guard matches.count == 1 else {
-            throw OverlayError(
-                "Expected one visible Simulator or Device Hub window named \(deviceName), found \(matches.count). Open that device window and close duplicate windows."
-            )
+    static func find(deviceName: String, sourceSize: CGSize? = nil) throws -> SimulatorOverlayTarget {
+        try find(
+            deviceName: deviceName,
+            sourceSize: sourceSize,
+            candidates: targets(),
+            displayFrame: displayFrame(window:)
+        )
+    }
+
+    static func find(
+        deviceName: String,
+        sourceSize: CGSize? = nil,
+        candidates: [SimulatorOverlayTarget],
+        displayFrame: (SimulatorOverlayTarget) -> CGRect?
+    )
+        throws -> SimulatorOverlayTarget
+    {
+        let matches = candidates.filter { simulatorWindowTitle($0.title, namesDevice: deviceName) }
+        if matches.count == 1 { return matches[0] }
+        if matches.count > 1, let sourceSize,
+           sourceSize.width.isFinite, sourceSize.height.isFinite,
+           sourceSize.width > 0, sourceSize.height > 0
+        {
+            let sourceAspect = longShortRatio(sourceSize)
+            let panelMatches = matches.filter { window in
+                guard let frame = displayFrame(window),
+                      frame.width.isFinite, frame.height.isFinite,
+                      frame.width > 0, frame.height > 0 else { return false }
+                // Allow minor rounding differences when the host window is scaled.
+                return abs(longShortRatio(frame.size) / sourceAspect - 1) <= 0.02
+            }
+            if panelMatches.count == 1 { return panelMatches[0] }
         }
-        return matches[0]
+        throw OverlayError(
+            "Expected one visible Simulator or Device Hub window named \(deviceName), found \(matches.count). Open that device window and close duplicate windows. A foldable device such as the Duo has one window per panel; if several match, the display size could not pick one."
+        )
+    }
+
+    private static func longShortRatio(_ size: CGSize) -> CGFloat {
+        max(size.width, size.height) / min(size.width, size.height)
     }
 
     static func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
@@ -125,7 +175,8 @@ final class SimulatorHighlightOverlay: SimulatorOverlay {
     init(window: SimulatorOverlayTarget, request: SimulatorHighlightRequest) throws {
         guard !request.id.isEmpty, AXIsProcessTrusted(),
               let frame = SimulatorDisplayGeometry.displayFrame(window: window),
-              request.shape.bounds.scaled(to: frame.size) != nil
+              SimulatorDisplayGeometry.orientedBounds(request.shape.bounds, targetSize: frame.size)
+              .scaled(to: frame.size) != nil
         else {
             throw OverlayError(
                 "Cannot locate Simulator display or invalid highlight coordinates. Grant Accessibility access to the capture helper and provide bounds.sourceWidth/sourceHeight."
@@ -179,10 +230,11 @@ final class SimulatorHighlightOverlay: SimulatorOverlay {
         if previousFrame != frame {
             panel.setFrame(rect, display: true)
         }
-        if previousFrame?.size != frame.size, let bounds = shape.bounds.scaled(to: frame.size) {
+        let orientedBounds = SimulatorDisplayGeometry.orientedBounds(shape.bounds, targetSize: frame.size)
+        if previousFrame?.size != frame.size, let bounds = orientedBounds.scaled(to: frame.size) {
             layer.bounds = CGRect(origin: .zero, size: frame.size)
             layer.position = CGPoint(x: frame.width / 2, y: frame.height / 2)
-            layer.configure(rect: bounds, strokeScale: bounds.width / CGFloat(shape.bounds.width))
+            layer.configure(rect: bounds, strokeScale: bounds.width / CGFloat(orientedBounds.width))
             layer.setAffineTransform(CGAffineTransform(scaleX: 1, y: -1))
         }
         previousFrame = frame
@@ -228,7 +280,14 @@ final class SimulatorHighlightHost {
         self.now = now
         self.replySink = replySink
         self.makeOverlay = makeOverlay ?? { request in
-            let window = try SimulatorDisplayGeometry.find(deviceName: deviceName)
+            let bounds = request.shape.bounds
+            let sourceSize: CGSize?
+            if let width = bounds.sourceWidth, let height = bounds.sourceHeight {
+                sourceSize = CGSize(width: width, height: height)
+            } else {
+                sourceSize = nil
+            }
+            let window = try SimulatorDisplayGeometry.find(deviceName: deviceName, sourceSize: sourceSize)
             return try SimulatorHighlightOverlay(window: window, request: request)
         }
     }

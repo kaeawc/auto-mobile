@@ -98,6 +98,8 @@ export interface TransitionalHeldSimulator {
  * length of the transition (#11573). Only simulators the pool assigns to a session are returned;
  * an unheld one stays unlisted as before. Reads the sweep's own listing: no extra simctl call.
  */
+const SIMULATOR_TRANSITION_PLATFORMS: ReadonlySet<string> = new Set(["ios", "tvos", "visionos"]);
+
 export function transitionalHeldSimulators(input: {
   transitional: readonly TransitionalSimulator[] | undefined;
   discovered: readonly BootedDevice[];
@@ -111,7 +113,8 @@ export function transitionalHeldSimulators(input: {
   const heldIds = new Set(
     devicePool
       .getAssignedDevices()
-      .filter((pooled) => pooled.platform === "ios")
+      // Only simctl-listed families report transitional rows: iOS, tvOS and visionOS.
+      .filter((pooled) => SIMULATOR_TRANSITION_PLATFORMS.has(pooled.platform))
       .map((pooled) => pooled.id),
   );
   return transitional

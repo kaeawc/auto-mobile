@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "p1",
+    "window": { "placement": { "type": "fullscreen" } },
+    "state": { "requestStatus": "" },
+    "requires": {
+      "platform": ["permissions"],
+      "permissions": [{ "name": "camera", "purpose": "Scan a receipt." }]
+    },
+    "root": {
+      "type": "button",
+      "label": "Allow",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "permissions.request",
+          "args": { "names": { "value": ["camera", "camera"] } },
+          "statusKey": "requestStatus"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].args.names.value[1]"
+}

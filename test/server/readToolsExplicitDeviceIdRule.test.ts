@@ -208,6 +208,7 @@ function harness(
       ios: !incomplete || platform !== "ios",
       watchos: false,
       tvos: false,
+      visionos: false,
     },
   };
   const originalDetect = manager.detectConnectedPlatformsWithStatus;
@@ -317,7 +318,10 @@ const access = {
   listBootedWithStatus: async () =>
     statusListing
       ? statusListing()
-      : { devices: h!.devices, scanned: { android: true, ios: true, watchos: false, tvos: false } },
+      : {
+          devices: h!.devices,
+          scanned: { android: true, ios: true, watchos: false, tvos: false, visionos: false },
+        },
   isAuthorized: () => true,
 };
 
@@ -743,6 +747,7 @@ for (const platform of ["android", "ios"] as const) {
               ios: platform === "ios",
               watchos: false,
               tvos: false,
+              visionos: false,
             };
             h.detect.mockImplementation(async () => ({ devices: h!.devices, scanned }));
             statusListing = async () => {
@@ -765,6 +770,7 @@ for (const platform of ["android", "ios"] as const) {
                   ios: !failedOwn || platform !== "ios",
                   watchos: false,
                   tvos: false,
+                  visionos: false,
                 },
                 ...(failedOwn
                   ? {
@@ -1189,7 +1195,7 @@ test("a probed serial missing from the memoized raw scan is refreshed before rea
   let scans = 0;
   h.detect.mockImplementation(async () => ({
     devices: ++scans === 1 ? [] : h!.devices,
-    scanned: { android: true, ios: true, watchos: false, tvos: false },
+    scanned: { android: true, ios: true, watchos: false, tvos: false, visionos: false },
   }));
   await ToolRegistry.getTool("listApps")!.handler({ platform: "android", deviceId: h.device.name });
   expect(h.runs).toEqual([
@@ -1217,14 +1223,14 @@ test("a serial acquired during discovery is rechecked before readiness", async (
     listings++;
     return {
       devices: [listedDevice],
-      scanned: { android: true, ios: true, watchos: false, tvos: false },
+      scanned: { android: true, ios: true, watchos: false, tvos: false, visionos: false },
     };
   };
   h.detect.mockImplementation(async () => {
     acquired = true;
     return {
       devices: h!.devices,
-      scanned: { android: true, ios: true, watchos: false, tvos: false },
+      scanned: { android: true, ios: true, watchos: false, tvos: false, visionos: false },
     };
   });
   const original = slotOwner.sessions.getSessionForDevice;
@@ -1337,7 +1343,7 @@ for (const platform of ["android", "ios"] as const) {
             claim();
             return {
               devices: h!.devices,
-              scanned: { android: true, ios: true, watchos: false, tvos: false },
+              scanned: { android: true, ios: true, watchos: false, tvos: false, visionos: false },
             };
           });
         } else if (platform === "android") {
@@ -1441,6 +1447,7 @@ for (const platform of ["android", "ios"] as const) {
             ios: platform === "ios" ? healthy : scenario !== "healthy-other",
             watchos: false,
             tvos: false,
+            visionos: false,
           },
         };
       };
@@ -1621,6 +1628,7 @@ async function onePlatformDecision(
     ios: platform === "ios",
     watchos: false,
     tvos: false,
+    visionos: false,
   };
   h.detect.mockImplementation(async () => ({ devices: h!.devices, scanned }));
   let listings = 0;
@@ -1756,7 +1764,7 @@ for (const platform of ["android", "ios"] as const) {
         listings++;
         return {
           devices: [],
-          scanned: { android: false, ios: false, watchos: false, tvos: false },
+          scanned: { android: false, ios: false, watchos: false, tvos: false, visionos: false },
           discoveryErrors: { [platform]: { code: "failed", message: "listing blipped" } },
         };
       };
@@ -1784,7 +1792,7 @@ for (const platform of ["android", "ios"] as const) {
       listings++;
       return {
         devices: [],
-        scanned: { android: false, ios: false, watchos: false, tvos: false },
+        scanned: { android: false, ios: false, watchos: false, tvos: false, visionos: false },
         discoveryErrors: { [platform]: { code: "unavailable", message: "tooling absent" } },
       };
     };
@@ -1807,7 +1815,10 @@ for (const platform of ["android", "ios"] as const) {
     let listings = 0;
     statusListing = async () => {
       listings++;
-      return { devices: [], scanned: { android: false, ios: false, watchos: false, tvos: false } };
+      return {
+        devices: [],
+        scanned: { android: false, ios: false, watchos: false, tvos: false, visionos: false },
+      };
     };
     const controller = new AbortController();
     const outcome = runWithToolSelectionContext({ explicitObserveDeviceRead: true }, () =>
@@ -1847,6 +1858,7 @@ for (const platform of ["android", "ios"] as const) {
             ios: platform === "ios",
             watchos: false,
             tvos: false,
+            visionos: false,
           },
           discoveryErrors: { [other]: { code: "failed" as const, message: "other failed" } },
         }));
@@ -1887,7 +1899,7 @@ for (const platform of ["android", "ios"] as const) {
     const timer = new FakeTimer();
     const list = mock(async () => ({
       devices: [{ ...deviceFor(platform), deviceId: id }],
-      scanned: { android: true, ios: true, watchos: false, tvos: false },
+      scanned: { android: true, ios: true, watchos: false, tvos: false, visionos: false },
     }));
     const access = {
       listBooted: async () => [],

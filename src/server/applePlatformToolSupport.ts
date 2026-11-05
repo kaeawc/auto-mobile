@@ -14,6 +14,7 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
   Record<NonIosApplePlatform, ReadonlySet<string>>
 > = {
   watchos: new Set<string>([
+    "postNotification",
     "rotateCrown",
     "tapOn",
     "tapAt",
@@ -44,6 +45,24 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "setActiveDevice",
     "killDevice",
   ]),
+  // simctl lifecycle and app management; observe, tapOn and sendKeys go through the window-app XCUITest runner.
+  visionos: new Set<string>([
+    "installApp",
+    "uninstallApp",
+    "launchApp",
+    "terminateApp",
+    "listApps",
+    "observe",
+    "tapOn",
+    "sendKeys",
+    "listDevices",
+    "listDeviceImages",
+    "provisionDevice",
+    "deleteDevice",
+    "startDevice",
+    "setActiveDevice",
+    "killDevice",
+  ]),
 };
 
 export function unsupportedPlatformToolMessage(
@@ -62,7 +81,7 @@ export function unsupportedPlatformToolMessage(
   );
 }
 
-/** Throws an ActionableError when `device` is a watch or an Apple TV and `toolName` has not opted in. */
+/** Throws an ActionableError when `device` is a non-iOS Apple device and `toolName` has not opted in. */
 export function assertToolSupportsDevicePlatform(
   toolName: string,
   device: Pick<BootedDevice, "platform">,
@@ -123,7 +142,9 @@ export function assertRequestNotTvos(toolName: string, args: object): void {
     record.platform,
     ...NESTED_PLATFORM_KEYS.map((key) => nestedPlatform(record[key])),
   ];
-  if (named.includes("tvos") && !APPLE_PLATFORM_SUPPORTED_TOOLS.tvos.has(toolName)) {
-    throw new ActionableError(unsupportedPlatformToolMessage(toolName, "tvos"));
+  for (const platform of ["tvos", "visionos"] as const) {
+    if (named.includes(platform) && !APPLE_PLATFORM_SUPPORTED_TOOLS[platform].has(toolName)) {
+      throw new ActionableError(unsupportedPlatformToolMessage(toolName, platform));
+    }
   }
 }

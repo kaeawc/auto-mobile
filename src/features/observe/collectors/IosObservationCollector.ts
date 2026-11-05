@@ -1,3 +1,11 @@
+import type {
+  DevicectlDisplayInfo,
+  DevicectlDisplayInfoSource,
+} from "../../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
+import type { DisplayPanel } from "../../../models/DisplayPanel";
+import { sizeMatchesPanel } from "../../device/postureCommands";
+import { liveIosPanelFor, rememberLiveIosPanel } from "../ObservationDisplay";
+import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import type { BootedDevice, ObserveResult, ScreenIdentity } from "../../../models";
 import type { ViewHierarchy as ViewHierarchyInterface } from "../interfaces/ViewHierarchy";
@@ -27,10 +35,21 @@ export interface IosObservationCollectorDeps {
   hierarchyCollector: () => HierarchyCollectorPort;
   viewHierarchy: () => ViewHierarchyInterface;
   device: () => BootedDevice;
+  iosDisplayInfoSource?: DevicectlDisplayInfoSource;
   /** The app's SDK observation bridge (#5159); defaults to the device's runner client. */
   sdkBridge?: () => IosSdkBridgeReader;
   /** The app's opted-in WKWebView bridges (#5162); defaults to the device's runner client. */
   sdkWeb?: () => IosSdkWebReader;
+}
+
+function activeLivePanel(
+  displays: DevicectlDisplayInfo[],
+  panels: DisplayPanel[],
+): DisplayPanel | undefined {
+  const active = displays.filter((display) => display.active === true);
+  const size = active.length === 1 ? (active[0].nativeSize ?? active[0].bounds?.size) : undefined;
+  const matches = size ? panels.filter((panel) => sizeMatchesPanel(size, panel)) : [];
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 export class DefaultIosObservationCollector implements IosObservationCollector {
@@ -59,7 +78,9 @@ export class DefaultIosObservationCollector implements IosObservationCollector {
       readOptions,
     });
 
+    rememberLiveIosPanel(result, await this.readLiveIosPanel(signal));
     this.applyIosScreenMetadata(result);
+    this.applyLiveIosPanelSize(result);
     this.applyIosInsetsAndRotation(result);
     this.projectIosObservationHierarchy(result);
     await this.mergeSdkBridgeObservation(result, signal);
@@ -122,6 +143,55 @@ export class DefaultIosObservationCollector implements IosObservationCollector {
     if (merged && !result.backend) {
       result.backend = "sdk";
     }
+  }
+
+  /** Read this observation's live panel; the caller keeps it on this observation only. */
+  private async readLiveIosPanel(signal?: AbortSignal): Promise<DisplayPanel | undefined> {
+    const device = this.deps.device();
+    const panels = device.displays?.panels ?? [];
+    if (panels.length < 2) {
+      return undefined;
+    }
+    if (!this.deps.iosDisplayInfoSource) {
+      logger.debug("[iOS] Live panel source unavailable; using runner size");
+      return undefined;
+    }
+    try {
+      const displays = await this.deps.iosDisplayInfoSource.readDisplays({
+        deviceId: device.deviceId,
+        signal,
+      });
+      signal?.throwIfAborted();
+      const panel = activeLivePanel(displays, panels);
+      if (!panel) {
+        logger.debug("[iOS] No unique active CoreDevice panel; using runner size");
+      }
+      return panel;
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      logger.warn(`[iOS] Live panel read failed; using runner size: ${errorMessage(error)}`, error);
+      return undefined;
+    }
+  }
+
+  private applyLiveIosPanelSize(result: ObserveResult): void {
+    const panel = liveIosPanelFor(result);
+    if (!panel?.scale || panel.scale <= 0) {
+      return;
+    }
+    const width = panel.sizePx.width / panel.scale;
+    const height = panel.sizePx.height / panel.scale;
+    const runner = result.screenSize;
+    if (
+      (runner.width === width && runner.height === height) ||
+      (runner.width === height && runner.height === width)
+    ) {
+      return;
+    }
+    const landscape = result.viewHierarchy?.rotation === 1 || result.viewHierarchy?.rotation === 3;
+    result.screenSize = landscape ? { width: height, height: width } : { width, height };
   }
 
   private applyIosScreenMetadata(result: ObserveResult): void {

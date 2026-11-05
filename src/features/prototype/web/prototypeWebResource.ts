@@ -1,6 +1,7 @@
 import { ActionableError } from "../../../models";
 import type { PrototypeSpecRevision, PrototypeSpecRevisionSource } from "../prototypeSpecRevisions";
 import { defaultDeviceFrameId, deviceFrameOrThrow } from "./deviceFrames";
+import { withActionableWebInputAsync } from "./prototypeWebInputActionable";
 import { type PrototypeWebVariant } from "./webPage";
 import {
   buildPrototypeWebPageWithImages,
@@ -110,6 +111,17 @@ export async function readPrototypeWebResource(
   query: PrototypeWebResourceQuery,
   rendererVersion: string,
   images: PrototypeWebImageSources = NO_PROTOTYPE_WEB_IMAGES,
+): Promise<PrototypeWebResource> {
+  return withActionableWebInputAsync(() =>
+    buildWebResource(source, query, rendererVersion, images),
+  );
+}
+
+async function buildWebResource(
+  source: PrototypeSpecRevisionSource,
+  query: PrototypeWebResourceQuery,
+  rendererVersion: string,
+  images: PrototypeWebImageSources,
 ): Promise<PrototypeWebResource> {
   const variantIds = prototypeVariantIds(source, query.id);
   const shown = shownRevision(source, query, variantIds);

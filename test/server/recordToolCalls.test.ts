@@ -1,3 +1,4 @@
+import { z } from "zod/v4";
 import { recordPlanCall } from "../helpers/recordPlanCall";
 import {
   afterAll,
@@ -12,6 +13,7 @@ import {
 import { createMcpServer } from "../../src/server/index";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerPlanTools } from "../../src/server/planTools";
+import { TOOL_CALL_RECORDING_DISABLED_ERROR } from "../../src/server/toolCallRecordingTools";
 import { getRemovedToolHint } from "../../src/utils/removedTools";
 import {
   getToolCallRecorder,
@@ -19,6 +21,7 @@ import {
   startToolCallRecording,
 } from "../../src/daemon/toolCallRecordingManager";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import { FEATURE_FLAG_DEFINITIONS } from "../../src/features/featureFlags/FeatureFlagDefinitions";
 import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
@@ -91,6 +94,31 @@ describe("recordToolCalls connection scope and direct transport teardown", () =>
     expect(getRemovedToolHint("recordSteps")).toContain("recordToolCalls");
   });
 
+  test("recording is on by default so an MCP-only client can begin once the tool is enabled", () => {
+    const flag = FEATURE_FLAG_DEFINITIONS.find(({ key }) => key === "tool-call-recording");
+    expect(flag?.defaultValue).toBe(true);
+    const disabledError = TOOL_CALL_RECORDING_DISABLED_ERROR;
+    expect(disabledError).toContain("--tool-call-recording");
+    expect(disabledError).toContain("IDE plugin");
+  });
+
+  test("argument values are discoverable from the published schemas", () => {
+    const fieldSchema = (toolName: string, field: string): z.ZodType => {
+      const schema = ToolRegistry.getTool(toolName)!.schema;
+      if (!(schema instanceof z.ZodObject)) {
+        throw new Error(`${toolName} schema is not an object`);
+      }
+      return schema.shape[field];
+    };
+    const action = fieldSchema("recordToolCalls", "action");
+    expect(action.description).toContain("begin starts");
+    expect(action.description).toContain("end stops");
+    expect(action.safeParse("start").success).toBe(false);
+    const exportPlan = fieldSchema("exportPlan", "recordingId");
+    expect(exportPlan.description).toContain("recordDeviceGestures");
+    expect(exportPlan.description).toContain("recordToolCalls action=end");
+  });
+
   test("recordToolCalls begin, status, and end use the injected connection identity", async () => {
     serverConfig.setToolCallRecordingEnabled(true);
     const tool = ToolRegistry.getTool("recordToolCalls")!;
@@ -118,11 +146,7 @@ describe("recordToolCalls connection scope and direct transport teardown", () =>
     serverConfig.setToolCallRecordingEnabled(false);
     for (const action of ["begin", "end"]) {
       const response = await tool.handler({ action });
-      const payload = {
-        success: false,
-        error:
-          "Tool call recording is disabled. Enable the 'tool-call-recording' feature flag first.",
-      };
+      const payload = { success: false, error: TOOL_CALL_RECORDING_DISABLED_ERROR };
       expect(toolIsError(response)).toBe(true);
       expect(toolStructured(response)).toEqual(payload);
       expect(toolJson(response)).toEqual(payload);

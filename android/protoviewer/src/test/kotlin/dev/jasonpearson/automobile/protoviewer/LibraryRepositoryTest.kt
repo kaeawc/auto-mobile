@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.protoviewer
 
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeLoadResult
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeSaveRequest
+import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeStore
 import dev.jasonpearson.automobile.protocol.PrototypeStoredValues
 import java.io.IOException
 import kotlinx.serialization.json.JsonPrimitive
@@ -110,6 +111,72 @@ class LibraryRepositoryTest {
     assertNull(storage.namespace(FIRST).load("same-spec-id"))
     assertEquals(listOf(SECOND), success(repository.list()).map { it.libraryId })
     assertEquals(LibraryResult.Failure(LibraryError.NotFound), repository.delete("../escape"))
+  }
+
+  @Test
+  fun sweepFinishesDeleteWhoseResetFailedAfterMetadataRemoval() {
+    var failReset = true
+    val flaky =
+      object : dev.jasonpearson.automobile.prototype.PrototypeStorage by diskStorage {
+        override fun delete(id: String) {
+          if (failReset) throw IOException("Cannot delete") else diskStorage.delete(id)
+        }
+      }
+    val target = DirectoryLibraryRepository(store, files, LibraryStorage(flaky))
+    diskStorage.save(FIRST, VALUES)
+    assertEquals(LibraryResult.Failure(LibraryError.Storage), target.delete(FIRST))
+    assertFalse(files.documents.containsKey(FIRST))
+    assertTrue(store.results.containsKey(FIRST))
+    failReset = false
+    assertEquals(LibraryResult.Success(1), target.sweepOrphans())
+    assertEquals(SavedPrototypeLoadResult.NotFound, store.load(FIRST))
+    assertNull(diskStorage.load(FIRST))
+    assertEquals(LibraryResult.Success(0), target.sweepOrphans())
+  }
+
+  @Test
+  fun sweepFinishesDeleteWhoseStoreDeleteFailedAndKeepsCommittedEntries() {
+    files.put(Fixtures.entry(SECOND))
+    store.results[SECOND] = Fixtures.loaded(SECOND)
+    var failDelete = true
+    val flaky =
+      object : SavedPrototypeStore by store {
+        override fun delete(id: String) = !failDelete && store.delete(id)
+      }
+    val target = DirectoryLibraryRepository(flaky, files, storage)
+    assertEquals(LibraryResult.Failure(LibraryError.Storage), target.delete(FIRST))
+    assertEquals(LibraryResult.Success(0), target.sweepOrphans())
+    assertTrue(store.results.containsKey(FIRST))
+    failDelete = false
+    assertEquals(LibraryResult.Success(1), target.sweepOrphans())
+    assertEquals(SavedPrototypeLoadResult.NotFound, store.load(FIRST))
+    assertEquals(listOf(SECOND), success(target.list()).map { it.libraryId })
+  }
+
+  @Test
+  fun sweepKeepsBundlesWhoseMetadataIsUnreadableOrNotALibraryId() {
+    files.unreadable += FIRST
+    store.results["not-a-library-id"] = Fixtures.loaded("not-a-library-id")
+    assertEquals(LibraryResult.Success(0), repository.sweepOrphans())
+    assertTrue(store.results.containsKey(FIRST))
+    assertTrue(store.results.containsKey("not-a-library-id"))
+  }
+
+  @Test
+  fun metadataListingFailureNeverDeletesSavedBundles() {
+    store.results[SECOND] = Fixtures.loaded(SECOND)
+    diskStorage.save(FIRST, VALUES)
+    files.fail = true
+    assertEquals(LibraryResult.Failure(LibraryError.Storage), repository.sweepOrphans())
+    assertEquals(setOf(FIRST, SECOND), store.results.keys)
+    assertEquals(VALUES, diskStorage.load(FIRST))
+  }
+
+  @Test
+  fun sweepRemovesBundleLeftByInterruptedAddCommit() {
+    store.results[SECOND] = Fixtures.loaded(SECOND)
+    assertEquals(LibraryResult.Success(1), repository.sweepOrphans())
+    assertEquals(setOf(FIRST), store.results.keys)
   }
 
   @Test

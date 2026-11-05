@@ -17,6 +17,12 @@ import { combineAbortSignals, getAbortSignal } from "../AbortContext";
 import { DEFAULT_RUNNER_READINESS_TIMEOUT_MS } from "../runnerReadinessConfig";
 import { trackProcess, waitForExit, waitForSpawn } from "../ChildProcessTracker";
 
+/** The dotted Xcode version (e.g. `"26.6"`) from `xcodebuild -version` output, or `null`. */
+export function parseXcodeVersion(output: string): string | null {
+  const match = output.match(/Xcode\s+([0-9]+(?:\.[0-9]+)*)/);
+  return match ? match[1] : null;
+}
+
 export interface XcodebuildCommandOptions {
   timeoutMs?: number;
   maxBuffer?: number;

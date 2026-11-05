@@ -1,0 +1,69 @@
+{
+  "spec": {
+    "id": "np",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "messages": []
+    },
+    "requires": {
+      "platform": ["notifications"],
+      "permissions": [
+        {
+          "name": "notifications",
+          "purpose": "Tell you about new messages"
+        }
+      ]
+    },
+    "notifications": {
+      "channels": [
+        {
+          "id": "chat",
+          "name": "Chat",
+          "importance": "high"
+        }
+      ]
+    },
+    "platform": {
+      "on": {
+        "notifications.push": [
+          {
+            "type": "appendData",
+            "path": "/data/messages",
+            "value": {
+              "event": "/data"
+            }
+          },
+          {
+            "type": "setState",
+            "key": "lastSender",
+            "value": {
+              "event": "/data/sender"
+            }
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Messages"
+    },
+    "state": {
+      "lastSender": ""
+    }
+  },
+  "options": {
+    "supportedCapabilities": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_platform_notifications_v1",
+      "prototype_platform_realtime_v1",
+      "prototype_platform_v1"
+    ]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_platform_push_v1"
+}

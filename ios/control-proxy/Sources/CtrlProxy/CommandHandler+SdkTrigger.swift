@@ -114,7 +114,13 @@ extension CommandHandler {
         case 200: return .success(reply.body)
         case 403: return .failure(.disallowedOrigin)
         case 404: return .failure(.noSnapshot)
-        case 409: return .failure(.appNotActive)
+        case 409:
+            if let failure = try? JSONDecoder().decode(SdkMultiSceneError.self, from: reply.body),
+               failure.error == "multi_scene", failure.scenes.count > 1
+            {
+                return .failure(.multiScene(failure.scenes))
+            }
+            return .failure(.appNotActive)
         case 410: return .failure(.webProcessUnavailable)
         case 413: return .failure(.messageTooLarge)
         case 503: return .failure(.bridgeUnavailable)

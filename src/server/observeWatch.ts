@@ -1,4 +1,6 @@
-/** Apple simulator observation: a retained screenshot, plus a connected watchOS or tvOS runner's hierarchy. */
+import { normalizeVisionosHierarchy } from "../features/visionos/VisionosHierarchy";
+import { requireVisionosRunner } from "../features/visionos/VisionosRunnerLifecycle";
+/** Apple simulator observation: a retained screenshot and platform-specific runner hierarchy. */
 import { findFocusedElement } from "../features/observe/HierarchyFocus";
 import { normalizeTvosHierarchy } from "../features/tvos/TvosHierarchy";
 import { tvosRunners } from "../features/tvos/TvosRunnerRegistry";
@@ -9,11 +11,13 @@ import { WatchRunnerError } from "../features/watch/WatchRunnerError";
 import { watchRunners } from "../features/watch/WatchRunnerRegistry";
 import { normalizeWatchHierarchy } from "../features/watch/WatchHierarchy";
 import path from "path";
+import { NON_IOS_APPLE_PLATFORM_LABELS } from "../models/Platform";
 import type { DisplayRef } from "../models/DisplayPanel";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import {
   WATCH_HIERARCHY_UNAVAILABLE_MESSAGE,
   TVOS_HIERARCHY_UNAVAILABLE_MESSAGE,
+  VISIONOS_HIERARCHY_UNAVAILABLE_MESSAGE,
   type AppleScreenshotOnlyPlatform,
   type WatchObservation,
 } from "../models/WatchObservation";
@@ -69,6 +73,7 @@ const SINGLE_PANEL_DISPLAY_KEY = "0";
 const HIERARCHY_UNAVAILABLE_MESSAGES: Record<AppleScreenshotOnlyPlatform, string> = {
   watchos: WATCH_HIERARCHY_UNAVAILABLE_MESSAGE,
   tvos: TVOS_HIERARCHY_UNAVAILABLE_MESSAGE,
+  visionos: VISIONOS_HIERARCHY_UNAVAILABLE_MESSAGE,
 };
 
 type OptionCheck = readonly [name: string, isSet: (args: ObserveArgs) => boolean];
@@ -88,6 +93,10 @@ const WATCH_UNSUPPORTED_OPTIONS: readonly OptionCheck[] = [
   ['screenshot: "none"', (args) => args.screenshot === "none"],
 ];
 
+function screenshotOnlyPlatform(device: BootedDevice): AppleScreenshotOnlyPlatform {
+  return device.platform === "tvos" || device.platform === "visionos" ? device.platform : "watchos";
+}
+
 function watchDisplay(device: BootedDevice): { ref: DisplayRef; captureKey: string | undefined } {
   const panel = device.displays?.panels[0];
   return {
@@ -97,7 +106,10 @@ function watchDisplay(device: BootedDevice): { ref: DisplayRef; captureKey: stri
       posture: "unknown",
       generation: 0,
     },
-    captureKey: device.platform === "tvos" ? undefined : (panel?.key ?? SIMCTL_DEFAULT_DISPLAY),
+    captureKey:
+      screenshotOnlyPlatform(device) === "watchos"
+        ? (panel?.key ?? SIMCTL_DEFAULT_DISPLAY)
+        : undefined,
   };
 }
 
@@ -118,8 +130,8 @@ export function assertWatchObserveOptions(
   if (refused.length > 0) {
     throw new ActionableError(
       (hasRunnerHierarchy
-        ? `observe with the ${platform === "tvos" ? "tvOS" : "watchOS"} runner `
-        : `observe on ${platform === "tvos" ? "tvOS" : "watchOS"} returns only a screenshot (the view hierarchy is not available yet) `) +
+        ? `observe with the ${NON_IOS_APPLE_PLATFORM_LABELS[platform]} runner `
+        : `observe on ${NON_IOS_APPLE_PLATFORM_LABELS[platform]} returns only a screenshot (the view hierarchy is not available yet) `) +
         `and does not support: ${refused.join(", ")}. Remove these options and observe again.`,
     );
   }
@@ -137,13 +149,13 @@ async function captureWatchPng(
   } catch (error) {
     throw toActionableError(
       error,
-      `Failed to capture a screenshot of ${device.platform === "tvos" ? "tvOS" : "watch"} simulator ${device.deviceId} with simctl`,
+      `Failed to capture a screenshot of ${device.platform === "watchos" ? "watch" : NON_IOS_APPLE_PLATFORM_LABELS[screenshotOnlyPlatform(device)]} simulator ${device.deviceId} with simctl`,
     );
   }
   const size = detectImageMimeType(png) === "image/png" ? readImageHeaderDimensions(png) : null;
   if (!size) {
     throw new ActionableError(
-      `simctl returned no readable PNG for ${device.platform === "tvos" ? "tvOS" : "watch"} simulator ${device.deviceId}; observe again.`,
+      `simctl returned no readable PNG for ${device.platform === "watchos" ? "watch" : NON_IOS_APPLE_PLATFORM_LABELS[screenshotOnlyPlatform(device)]} simulator ${device.deviceId}; observe again.`,
     );
   }
   return { png, ...size };
@@ -155,7 +167,12 @@ async function watchHierarchyForObserve(
   signal: AbortSignal | undefined,
   injectedRunner?: WatchRunnerClient,
 ): Promise<ViewHierarchyResult | undefined> {
-  const platform = device.platform === "tvos" ? "tvos" : "watchos";
+  const platform = screenshotOnlyPlatform(device);
+  if (platform === "visionos") {
+    assertWatchObserveOptions(args, watchDisplay(device).ref.key, platform, true);
+    const runner = await requireVisionosRunner(device.deviceId, signal);
+    return normalizeVisionosHierarchy(await runner.hierarchy(signal));
+  }
   if (platform === "tvos") {
     const runner = tvosRunners.get(device.deviceId);
     assertWatchObserveOptions(args, watchDisplay(device).ref.key, platform, runner !== undefined);
@@ -176,14 +193,14 @@ async function watchHierarchyForObserve(
   }
 }
 
-/** Capture an Apple simulator screenshot, adding hierarchy for a connected watchOS or tvOS runner. */
+/** Capture an Apple simulator screenshot, adding the platform runner hierarchy. */
 export async function observeWatch(
   device: BootedDevice,
   args: ObserveArgs,
   signal: AbortSignal | undefined,
   dependencies: WatchObserveDependencies = {},
 ): Promise<ObserveResponse<WatchObservation | ObserveResult>> {
-  const platform = device.platform === "tvos" ? "tvos" : "watchos";
+  const platform = screenshotOnlyPlatform(device);
   const display = watchDisplay(device);
   const viewHierarchy = await watchHierarchyForObserve(device, args, signal, dependencies.runner);
   const timer = dependencies.timer ?? defaultTimer;
@@ -214,7 +231,7 @@ export async function observeWatch(
   } catch (error) {
     throw toActionableError(
       error,
-      `Failed to store the ${platform === "tvos" ? "tvOS" : "watch"} simulator screenshot`,
+      `Failed to store the ${platform === "watchos" ? "watch" : NON_IOS_APPLE_PLATFORM_LABELS[platform]} simulator screenshot`,
     );
   }
   const capture: Omit<WatchObservation, "hierarchyUnavailable"> = {
@@ -245,6 +262,9 @@ function watchObservationPayload(
   viewHierarchy?: ViewHierarchyResult,
 ): WatchObservation | ObserveResult {
   if (!viewHierarchy) {
+    if (platform === "visionos") {
+      throw new ActionableError("visionOS observe requires the window-app runner hierarchy.");
+    }
     return {
       ...capture,
       hierarchyUnavailable: { platform, message: HIERARCHY_UNAVAILABLE_MESSAGES[platform] },
@@ -253,7 +273,7 @@ function watchObservationPayload(
   return {
     ...capture,
     viewHierarchy,
-    ...(platform === "tvos"
+    ...(platform === "tvos" || platform === "visionos"
       ? { focusedElement: findFocusedElement(viewHierarchy) ?? undefined }
       : {}),
     elements: new ObserveElementsBuilder().build(viewHierarchy, "ios"),

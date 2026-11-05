@@ -687,6 +687,7 @@ export class InputDeviceGating {
         const dispatchedRelease = new SessionReleasedDuringCallError(
           released.sessionUuid,
           released.releaseReason,
+          released.details.idleTimeoutMs,
         );
         const request =
           execution.toolName === "input/typeText" || error instanceof InputTypeTextAppendError

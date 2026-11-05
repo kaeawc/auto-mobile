@@ -42,6 +42,7 @@ class ViewerDiagnosticsTest {
         UnconfinedTestDispatcher(),
         LibraryClock { 42 },
         settings = FakeSettingsStore(),
+        blocklist = FakeContentBlocklist(),
       )
     }
   }

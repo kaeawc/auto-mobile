@@ -68,6 +68,18 @@ const lastResultSchema = z.object({
     .describe(
       "Android: the prototype exists but is not visible, and why; absent when visible, when suspended, or with an older CtrlProxy",
     ),
+  orientation: z
+    .enum(["portrait", "landscape", "unlocked"])
+    .optional()
+    .describe(
+      "Inspect: the orientation the prototype's window.orientation requested; the overlay may not honor it. Absent when none was requested or the device lacks prototype_platform_window_controls_v1",
+    ),
+  statusBar: z
+    .enum(["unsupported"])
+    .optional()
+    .describe(
+      "Inspect: unsupported when window.statusBar was requested but the overlay cannot restyle the status bar. Absent when none was requested or the device lacks prototype_platform_window_controls_v1",
+    ),
   suspended: z
     .literal(true)
     .optional()
@@ -306,7 +318,16 @@ export const prototypeOutputSchema = z.object({
       display: z
         .object({
           key: z.string(),
-          role: z.enum(["inner", "cover", "rear", "external", "overlay", "unknown"]),
+          role: z.enum([
+            "inner",
+            "cover",
+            "rear",
+            "external",
+            "cluster",
+            "overlay",
+            "virtual",
+            "unknown",
+          ]),
         })
         .optional()
         .describe(
@@ -316,6 +337,16 @@ export const prototypeOutputSchema = z.object({
     .optional()
     .describe(
       "save and open on Android or an iOS simulator with ProtoViewer installed: the ProtoViewer library entry. The entry is imported: ProtoViewer sets its source, keeps its network off until the user allows it, and it is not attached to this host.",
+    ),
+  update: z
+    .object({
+      missingCapabilities: z.array(z.string()),
+      installedVersion: z.string().optional(),
+      url: z.string().optional().describe("Where to get a newer ProtoViewer."),
+    })
+    .optional()
+    .describe(
+      "save with errorCode unsupported_capability: the installed ProtoViewer lacks capabilities the spec needs, so nothing was pushed. Update ProtoViewer and save again.",
     ),
   savedPrototypes: z
     .array(

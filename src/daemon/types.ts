@@ -1,6 +1,7 @@
 import type { AuxiliarySocketWarning } from "./auxiliarySocketAvailability";
 import { z } from "zod";
 import {
+  cliIdleTimeoutField,
   idleReleaseField,
   isIdleReleaseReason,
   isRecoverableDaemonReleaseReason,
@@ -108,6 +109,8 @@ export interface DaemonResponse {
   daemonInstance?: string;
   /** With `releaseReason`: the session was released by its idle window (#10832). Additive. */
   idle?: true;
+  /** With a `cli-idle-timeout` `releaseReason`: the session's CLI idle window (#16937). Additive. */
+  idleTimeoutMs?: number;
   /** Rejected before any device operation was admitted. */
   handshakeFailure?: DaemonHandshakeFailure;
   /**
@@ -270,15 +273,37 @@ export { isIdleReleaseReason };
 /**
  * The release fields of a session-not-found answer: the recorded `releaseReason` and, for an
  * idle-window release, `idle: true` so a client can tell "reacquire" from a restart or loss (#10832).
+ * A `cli-idle-timeout` release also carries the session's `idleTimeoutMs` when known (#16937).
  */
-export function releasedSessionNotFoundFields(releaseReason: string | undefined): {
+export function releasedSessionNotFoundFields(
+  releaseReason: string | undefined,
+  idleTimeoutMs?: number,
+): {
   releaseReason?: string;
   idle?: true;
+  idleTimeoutMs?: number;
 } {
   if (!releaseReason) {
     return {};
   }
-  return { releaseReason, ...idleReleaseField(releaseReason) };
+  return {
+    releaseReason,
+    ...idleReleaseField(releaseReason),
+    ...cliIdleTimeoutField(releaseReason, idleTimeoutMs),
+  };
+}
+
+/** The `idleTimeoutMs` a session-not-found error carried (#16937), when it is a usable window. */
+export function idleTimeoutMsFromError(error: unknown): number | undefined {
+  if (error === null || typeof error !== "object" || !("idleTimeoutMs" in error)) {
+    return undefined;
+  }
+  const { idleTimeoutMs } = error;
+  return typeof idleTimeoutMs === "number" &&
+    Number.isSafeInteger(idleTimeoutMs) &&
+    idleTimeoutMs > 0
+    ? idleTimeoutMs
+    : undefined;
 }
 
 const OWNER_DISCONNECTED_LOSS_REASON = "owner-disconnected";
@@ -369,6 +394,12 @@ function sanitizeSessionReleaseSnapshot(
     terminal: record.terminal,
     ...(typeof record.ownerPid === "number" && Number.isInteger(record.ownerPid)
       ? { ownerPid: record.ownerPid }
+      : {}),
+    // The CLI idle window a cli-idle-timeout refusal reports (#16940); dropped when unusable.
+    ...(typeof record.cliIdleTimeoutMs === "number" &&
+    Number.isSafeInteger(record.cliIdleTimeoutMs) &&
+    record.cliIdleTimeoutMs > 0
+      ? { cliIdleTimeoutMs: record.cliIdleTimeoutMs }
       : {}),
     heartbeat: record.heartbeat,
   };

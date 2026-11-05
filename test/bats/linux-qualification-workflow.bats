@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
+load yq-helpers
 setup() {
   workflow="$BATS_TEST_DIRNAME/../../.github/workflows/linux-qualification.yml"
-  command -v yq >/dev/null || skip "yq required"
+  require_mikefarah_yq
 }
 @test "manual-only Linux workflow with read-only permissions and independent capture job" {
   [ "$(yq -r '.on | keys | join(",")' "$workflow")" = workflow_dispatch ]

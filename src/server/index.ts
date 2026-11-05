@@ -1,3 +1,4 @@
+import { registerVisionosRunnerBuilder } from "../features/visionos/VisionosRunnerLifecycle";
 import { IosCtrlProxyBuilder } from "../ctrlProxy/IosCtrlProxyBuilder";
 import { registerTvosRunnerBuilder } from "../features/tvos/TvosRunnerLifecycle";
 import { registerWatchRunnerBuilder } from "../features/watch/WatchRunnerLifecycle";
@@ -102,8 +103,14 @@ import { registerHostToolchainResources } from "./hostToolchainResources";
 import { registerToolCatalogResources } from "./toolCatalogResource";
 import { registerNetworkResources } from "./networkResources";
 import { registerEmulatorLossIncidentResources } from "./emulatorLossIncidentResources";
-import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
-import { registerDeviceConditionFeatureFlags } from "./deviceConditionTool";
+import {
+  FeatureFlagService,
+  type FeatureFlagReader,
+} from "../features/featureFlags/FeatureFlagService";
+import {
+  registerDeviceConditionFeatureFlags,
+  registerDeviceConditionAttestationSource,
+} from "./deviceConditionTool";
 import { startupBenchmark } from "../utils/startupBenchmark";
 import {
   type SessionToolSelectionService,
@@ -209,6 +216,7 @@ let lastToolRegistration: { daemonMode: boolean; removalEpoch: number } | undefi
 export function registerMcpTools(daemonMode: boolean): void {
   registerWatchRunnerBuilder(() => IosCtrlProxyBuilder.getInstance());
   registerTvosRunnerBuilder(() => IosCtrlProxyBuilder.getInstance());
+  registerVisionosRunnerBuilder(() => IosCtrlProxyBuilder.getInstance());
   installDefaultProvisionedDeviceTransportFence();
   // Re-registering rebuilds every definition and drops the tool-schema cache, which a
   // stateless endpoint (one createMcpServer per request) would pay on every tools/list.
@@ -395,6 +403,11 @@ function modernRequestState(options: McpServerOptions) {
     : undefined;
 }
 
+function registerDeviceConditionSeams(featureFlags: FeatureFlagReader): void {
+  registerDeviceConditionFeatureFlags(featureFlags);
+  registerDeviceConditionAttestationSource((device) => AndroidCtrlProxyClient.getInstance(device));
+}
+
 export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   ToolRegistry.setMutationRecording(
     createRecording(defaultDaemonContext, {
@@ -420,7 +433,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   const daemonMode = options.daemonMode ?? false;
   const toolSelectionProfileRegistry =
     options.toolSelectionProfileRegistry ?? defaultToolSelectionProfileRegistry;
-  registerDeviceConditionFeatureFlags(FeatureFlagService.getInstance());
+  registerDeviceConditionSeams(FeatureFlagService.getInstance());
   void FeatureFlagService.getInstance()
     .initialize()
     .catch((error) => {

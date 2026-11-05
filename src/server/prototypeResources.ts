@@ -14,11 +14,14 @@ import {
   type NativePrototypeSources,
 } from "../features/prototype/nativePrototype";
 import {
+  PROTOTYPE_EJECT_TEMPLATE,
+  PROTOTYPE_EJECT_URI,
   PROTOTYPE_NATIVE_ASSET_TEMPLATE,
   PROTOTYPE_NATIVE_ASSET_URI,
   PROTOTYPE_NATIVE_TEMPLATE,
   PROTOTYPE_NATIVE_URI,
 } from "../features/prototype/nativePrototypeUris";
+import { readPrototypeEject } from "../features/prototype/prototypeEject";
 import { defaultSavedPrototypeMirror } from "../features/prototype/savedPrototypeMirror";
 import { getMcpServerVersion, releaseVersion } from "../utils/mcpVersion";
 import {
@@ -397,8 +400,8 @@ export function prototypeWebNotificationsSettled(): Promise<void> {
 
 /**
  * Registers the `prototype` authoring guide, its icon lookup (#11052), the native-code
- * resources (#13729), the per-prototype web page and Compose/SwiftUI files (#16345) and the
- * per-prototype embed envelope (#16452).
+ * resources (#13729), the eject scaffold (#14129), the per-prototype web page and
+ * Compose/SwiftUI files (#16345) and the per-prototype embed envelope (#16452).
  */
 export function registerPrototypeResources(
   nativeSources: NativePrototypeSources = defaultNativePrototypeSources(),
@@ -441,6 +444,21 @@ export function registerPrototypeResources(
         uri: query ? `${PROTOTYPE_NATIVE_URI}?${query}` : PROTOTYPE_NATIVE_URI,
         mimeType: "application/json",
         text: JSON.stringify(native, null, 2),
+      };
+    },
+  });
+
+  ResourceRegistry.registerTemplate(PROTOTYPE_EJECT_TEMPLATE, "Prototype ejected to app code", {
+    description:
+      "A one-shot Jetpack Compose or SwiftUI scaffold of the prototype that the app owns, with no renderer dependency: layout, text, buttons, fields, lists and stack navigation, TODO stubs for the rest",
+    mimeType: "application/json",
+    handler: async (params: Record<string, string>) => {
+      const ejected = await readPrototypeEject(params, nativeSources);
+      const query = new URLSearchParams(params).toString();
+      return {
+        uri: query ? `${PROTOTYPE_EJECT_URI}?${query}` : PROTOTYPE_EJECT_URI,
+        mimeType: "application/json",
+        text: JSON.stringify(ejected, null, 2),
       };
     },
   });

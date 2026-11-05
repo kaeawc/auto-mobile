@@ -211,21 +211,27 @@ function getDefaultBuilder(): VisionosRunnerBuilder {
   return defaultBuilderFactory();
 }
 
+type VisionosArtifactBuilder = ConstructorParameters<typeof VisionosRunnerArtifacts>[0]["builder"];
+/** Lazily adapts the registered process builder for artifact resolution, forwarding every argument. */
+export function createVisionosArtifactBuilder(
+  getBuilder: () => VisionosArtifactBuilder,
+): VisionosArtifactBuilder {
+  return {
+    getXctestrunPath: (platform, options) => getBuilder().getXctestrunPath(platform, options),
+    getConfig: () => getBuilder().getConfig(),
+    runExclusiveOnDerivedData: (task) => {
+      const builder = getBuilder();
+      return builder.runExclusiveOnDerivedData ? builder.runExclusiveOnDerivedData(task) : task();
+    },
+  };
+}
+
 let defaultLifecycle: VisionosRunnerLifecycle | undefined;
 export function getVisionosRunnerLifecycle(): VisionosRunnerLifecycle {
   if (!defaultLifecycle) {
     defaultLifecycle = new VisionosRunnerLifecycle({
       artifacts: new VisionosRunnerArtifacts({
-        builder: {
-          getXctestrunPath: (platform) => getDefaultBuilder().getXctestrunPath(platform),
-          getConfig: () => getDefaultBuilder().getConfig(),
-          runExclusiveOnDerivedData: (task) => {
-            const builder = getDefaultBuilder();
-            return builder.runExclusiveOnDerivedData
-              ? builder.runExclusiveOnDerivedData(task)
-              : task();
-          },
-        },
+        builder: createVisionosArtifactBuilder(getDefaultBuilder),
       }),
       launcher: new XcodebuildVisionosRunnerLauncher({
         writeRunnerEnvironment: (file, env, deviceId) =>

@@ -4,6 +4,112 @@ import ScreenCaptureCore
 import XCTest
 
 final class SimulatorHighlightTests: XCTestCase {
+    private func target(_ id: UInt32, title: String = "mt-duo-0090b") -> SimulatorOverlayTarget {
+        SimulatorOverlayTarget(windowID: id, processID: 1, frame: .zero, title: title)
+    }
+
+    func testSelectsDuoPanelBySourceAspectRatio() throws {
+        // Panel dimensions are from issue #17048, not a live capture.
+        let cover = CGSize(width: 466, height: 678)
+        let inner = CGSize(width: 951, height: 669)
+        let candidates = [target(1), target(2), target(3, title: "another device")]
+        for (source, expectedID) in [(cover, UInt32(1)), (inner, UInt32(2))] {
+            let selected = try SimulatorDisplayGeometry.find(
+                deviceName: "mt-duo-0090b",
+                sourceSize: source,
+                candidates: candidates,
+                displayFrame: { window in
+                    XCTAssertNotEqual(window.windowID, 3)
+                    return CGRect(origin: .zero, size: window.windowID == 1 ? cover : inner)
+                }
+            )
+            XCTAssertEqual(selected.windowID, expectedID)
+        }
+    }
+
+    func testMultipleWindowsWithoutSourceSizeRemainAmbiguous() {
+        XCTAssertThrowsError(try SimulatorDisplayGeometry.find(
+            deviceName: "mt-duo-0090b",
+            candidates: [target(1), target(2)],
+            displayFrame: { _ in
+                XCTFail("Missing source size must not query display geometry")
+                return nil
+            }
+        )) { error in
+            XCTAssertTrue(error is OverlayError)
+            XCTAssertTrue(String(describing: error).contains("found 2"))
+            XCTAssertTrue(String(describing: error).contains("Duo"))
+        }
+    }
+
+    func testMultipleWindowsMatchingSourceAspectRemainAmbiguous() {
+        XCTAssertThrowsError(try SimulatorDisplayGeometry.find(
+            deviceName: "mt-duo-0090b",
+            sourceSize: CGSize(width: 466, height: 678),
+            candidates: [target(1), target(2)],
+            displayFrame: { _ in CGRect(x: 0, y: 0, width: 233, height: 339) }
+        )) { error in
+            XCTAssertTrue(String(describing: error).contains("found 2"))
+        }
+    }
+
+    func testNoMatchingWindowThrows() {
+        for candidates in [[], [target(1, title: "another device")]] {
+            XCTAssertThrowsError(try SimulatorDisplayGeometry.find(
+                deviceName: "mt-duo-0090b",
+                sourceSize: CGSize(width: 466, height: 678),
+                candidates: candidates,
+                displayFrame: { _ in
+                    XCTFail("Unmatched windows must not query display geometry")
+                    return nil
+                }
+            )) { error in
+                XCTAssertTrue(String(describing: error).contains("found 0"))
+            }
+        }
+    }
+
+    func testSingleMatchingWindowIgnoresSourceSize() throws {
+        let sizes: [CGSize?] = [nil, .zero, CGSize(width: 951, height: 669)]
+        for size in sizes {
+            let selected = try SimulatorDisplayGeometry.find(
+                deviceName: "mt-duo-0090b",
+                sourceSize: size,
+                candidates: [target(1), target(2, title: "another device")],
+                displayFrame: { _ in
+                    XCTFail("Single match must not query display geometry")
+                    return nil
+                }
+            )
+            XCTAssertEqual(selected.windowID, 1)
+        }
+    }
+
+    func testAspectMatchingAllowsSmallRoundingDifferences() throws {
+        let selected = try SimulatorDisplayGeometry.find(
+            deviceName: "mt-duo-0090b",
+            sourceSize: CGSize(width: 466, height: 678),
+            candidates: [target(1), target(2)],
+            displayFrame: { window in
+                CGRect(x: 0, y: 0, width: window.windowID == 1 ? 466 * 1.01 : 466 * 1.03, height: 678)
+            }
+        )
+        XCTAssertEqual(selected.windowID, 1)
+    }
+
+    func testUnavailableOrMismatchedDisplayFramesDoNotSelectAWindow() {
+        for frame: CGRect? in [nil, .zero, CGRect(x: 0, y: 0, width: 951, height: 669)] {
+            XCTAssertThrowsError(try SimulatorDisplayGeometry.find(
+                deviceName: "mt-duo-0090b",
+                sourceSize: CGSize(width: 466, height: 678),
+                candidates: [target(1), target(2)],
+                displayFrame: { _ in frame }
+            )) { error in
+                XCTAssertTrue(String(describing: error).contains("found 2"))
+            }
+        }
+    }
+
     func testSimulatorNameDoesNotMatchAnotherModel() {
         XCTAssertTrue(simulatorWindowTitle("iPhone 17 Pro Max – iOS 26.2", namesDevice: "iPhone 17 Pro Max"))
         XCTAssertFalse(simulatorWindowTitle("iPhone 17 Pro Max – iOS 26.2", namesDevice: "iPhone 17 Pro"))

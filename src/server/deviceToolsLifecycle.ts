@@ -1,3 +1,4 @@
+import { deleteAppleVisionDevice } from "./deviceToolsAppleVisionDelete";
 import { deleteAppleTvDevice } from "./deviceToolsAppleTvDelete";
 import { flushPendingImeRestoreBeforeTool } from "./pipeline/deviceCallDispatch";
 import { pendingImeRestores } from "../features/action/sendkeys/PendingImeRestore";
@@ -942,9 +943,18 @@ export function createLifecycleHandlers(options: { iosDeleteGate?: BootConcurren
     _progress?: ProgressCallback,
     abortSignal?: AbortSignal,
   ) => {
-    if (args.target.platform === "tvos" || isWatchTeardownRequest(args)) {
+    if (
+      args.target.platform === "visionos" ||
+      args.target.platform === "tvos" ||
+      isWatchTeardownRequest(args)
+    ) {
       const force = args.force ?? false;
-      const remove = args.target.platform === "tvos" ? deleteAppleTvDevice : deleteWatchDevice;
+      const remove =
+        args.target.platform === "visionos"
+          ? deleteAppleVisionDevice
+          : args.target.platform === "tvos"
+            ? deleteAppleTvDevice
+            : deleteWatchDevice;
       return await remove(
         args,
         {

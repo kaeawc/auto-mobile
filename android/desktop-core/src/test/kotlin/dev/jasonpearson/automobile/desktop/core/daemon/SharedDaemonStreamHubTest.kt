@@ -4,6 +4,7 @@ import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDisplayEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
@@ -12,6 +13,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -172,5 +174,45 @@ class SharedDaemonStreamHubTest {
     assertTrue(pane.isConnected())
     pane.dispose()
     assertEquals(ConnectionState.Disconnected(null), h.hub.telemetryConnectionState(phoneA).value)
+  }
+
+  /** Refuses its first subscribe, as a closed multiplexer would, then accepts. */
+  private class RefusingOnceMultiplexer : TelemetryMultiplexer {
+    var subscribes = 0
+
+    override fun subscribe(
+      key: DeviceStreamKey,
+      sink: (TelemetryDisplayEvent) -> Unit,
+    ): TelemetrySubscription {
+      check(++subscribes > 1) { "Telemetry multiplexer is closed" }
+      return object : TelemetrySubscription {
+        override val state = MutableStateFlow<ConnectionState>(ConnectionState.Connecting)
+
+        override fun retry() = Unit
+
+        override fun close() = Unit
+      }
+    }
+
+    override fun close() = Unit
+  }
+
+  @Test
+  fun `a refused subscribe leaves no half-built device behind`() = runTest {
+    val telemetry = RefusingOnceMultiplexer()
+    val hub =
+      SharedDaemonStreamHub(
+        telemetry,
+        CoroutineScope(backgroundScope.coroutineContext + UnconfinedTestDispatcher(testScheduler)),
+      )
+
+    assertThrows(IllegalStateException::class.java) { hub.subscribeTelemetry(phoneA) {} }
+    hub.retry(phoneA)
+    val lease = hub.subscribeTelemetry(phoneA) {}
+
+    // The next lease subscribes afresh instead of joining the device that never subscribed.
+    assertEquals(2, telemetry.subscribes)
+    lease.close()
+    hub.close()
   }
 }

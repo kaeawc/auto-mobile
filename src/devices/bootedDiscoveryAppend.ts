@@ -1,3 +1,4 @@
+import type { AppleVisionSimulatorInventory } from "../utils/ios-cmdline-tools/AppleVisionSimulatorInventory";
 import type { BootedDevice, Platform, SomePlatform } from "../models";
 import type { DeviceDiscoveryError } from "../models/DeviceDiscoveryError";
 import type { TransitionalSimulator } from "../models/TransitionalSimulator";
@@ -10,6 +11,7 @@ import {
   type BootedDeviceDiscovery,
   type BootedDeviceDiscoveryOptions,
   iosSucceededSources,
+  presentBootedDevices,
 } from "./deviceDiscoveryContracts";
 
 /** The mutable result one booted-device sweep assembles, source by source. */
@@ -81,8 +83,7 @@ export function bootedSweepsFor(
     // Only the pool's own readers ask an "either" read for watches (#14908).
     watchos: platform === "watchos" || (either && options.includeWatchOs === true),
     tvos: platform === "tvos",
-    // No Vision Pro inventory exists yet (#16849), so nothing sweeps for one.
-    visionos: false,
+    visionos: platform === "visionos",
   };
 }
 
@@ -171,9 +172,12 @@ export async function discoverBootedAppleTvs(
 }
 
 export function appendTvOsBootedDiscovery(
-  tv: { devices: BootedDevice[]; error?: DeviceDiscoveryError },
+  tv: { devices: BootedDevice[]; error?: DeviceDiscoveryError } | undefined,
   result: BootedDiscoveryAccumulator,
 ): void {
+  if (!tv) {
+    return;
+  }
   if (tv.error) {
     result.discoveryErrors.tvos = tv.error;
     return;
@@ -184,4 +188,116 @@ export function appendTvOsBootedDiscovery(
   for (const device of tv.devices) {
     result.freshDeviceIds.add(device.deviceId);
   }
+}
+
+/** Booted Apple Vision Pro simulators, or the typed reason the visionOS sweep has no answer. */
+export async function discoverBootedAppleVisions(
+  appleVisions: Pick<AppleVisionSimulatorInventory, "listAppleVisionSimulators"> | undefined,
+  signal: AbortSignal | undefined,
+): Promise<{ devices: BootedDevice[]; error?: DeviceDiscoveryError }> {
+  signal?.throwIfAborted();
+  if (!appleVisions) {
+    return {
+      devices: [],
+      error: { code: "unavailable", message: "visionOS simulator discovery is unavailable." },
+    };
+  }
+  try {
+    const listed = await appleVisions.listAppleVisionSimulators(signal);
+    signal?.throwIfAborted();
+    return {
+      devices: listed.flatMap((tv) =>
+        tv.isRunning && tv.deviceId
+          ? [{ name: tv.name, platform: "visionos" as const, deviceId: tv.deviceId }]
+          : [],
+      ),
+    };
+  } catch (error) {
+    signal?.throwIfAborted();
+    logger.warn(`visionOS simulator discovery failed: ${errorMessage(error)}`, error);
+    return {
+      devices: [],
+      error: {
+        code: "failed",
+        message: `visionOS simulator discovery failed: ${errorMessage(error)}`,
+      },
+    };
+  }
+}
+
+export function appendVisionOsBootedDiscovery(
+  tv: { devices: BootedDevice[]; error?: DeviceDiscoveryError } | undefined,
+  result: BootedDiscoveryAccumulator,
+): void {
+  if (!tv) {
+    return;
+  }
+  if (tv.error) {
+    result.discoveryErrors.visionos = tv.error;
+    return;
+  }
+  result.devices.push(...tv.devices);
+  result.succeededPlatforms.add("visionos");
+  result.succeededSources.add("visionos-simulator");
+  for (const device of tv.devices) {
+    result.freshDeviceIds.add(device.deviceId);
+  }
+}
+
+/** Assemble independent booted-device reads with source-level completeness and freshness. */
+export async function collectBootedDiscovery(
+  reads: {
+    android: Promise<Parameters<typeof appendAndroidBootedDiscovery>[0]> | undefined;
+    ios: Promise<IosBootedSweep> | undefined;
+    watch: ReturnType<typeof discoverBootedWatches> | undefined;
+    tv: ReturnType<typeof discoverBootedAppleTvs> | undefined;
+    vision: ReturnType<typeof discoverBootedAppleVisions> | undefined;
+  },
+  options: Pick<BootedDeviceDiscoveryOptions, "presentationOrder">,
+): Promise<BootedDeviceDiscovery> {
+  const devices: BootedDevice[] = [];
+  const succeededPlatforms = new Set<Platform>();
+  const succeededSources = new Set<DiscoverySource>();
+  const freshDeviceIds = new Set<string>();
+  const sourceErrors: Partial<Record<DiscoverySource, DeviceDiscoveryError>> = {};
+  const discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>> = {};
+  const transitional: { simulators?: TransitionalSimulator[] } = {};
+
+  const [android, ios, watch, tv, vision] = await Promise.all([
+    reads.android,
+    reads.ios,
+    reads.watch,
+    reads.tv,
+    reads.vision,
+  ]);
+  const result = {
+    devices,
+    succeededPlatforms,
+    succeededSources,
+    freshDeviceIds,
+    discoveryErrors,
+    sourceErrors,
+  };
+  if (android) {
+    appendAndroidBootedDiscovery(android, result);
+  }
+  if (ios) {
+    transitional.simulators = ios.transitionalSimulators;
+    appendIosBootedDiscovery(ios, result);
+  }
+  appendTvOsBootedDiscovery(tv, result);
+  appendVisionOsBootedDiscovery(vision, result);
+  if (watch) {
+    appendWatchBootedDiscovery(watch, result);
+  }
+
+  return {
+    devices: presentBootedDevices(devices, options.presentationOrder),
+    succeededPlatforms,
+    succeededSources,
+    freshDeviceIds,
+    discoveryErrors,
+    ...(Object.keys(sourceErrors).length > 0 ? { sourceErrors } : {}),
+    ...(transitional.simulators ? { transitionalSimulators: transitional.simulators } : {}),
+  };
 }

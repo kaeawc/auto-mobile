@@ -43,6 +43,29 @@ class HierarchyExtractErrorFramesTest {
     )
   }
 
+  @Test
+  fun `missing accessibility windows emits display-specific correlated error`() {
+    val frame = HierarchyExtractErrorFrames.nullResultFrame(UUID, MissingAccessibilityWindows(2))
+
+    assertEquals(UUID, frame!!.requestId)
+    assertEquals(
+      "Display 2 exposes no accessibility windows on this device: " +
+        "the accessibility service does not track this display (overlay displays are not tracked). " +
+        "Use the default display or a display tracked by accessibility.",
+      frame.error,
+    )
+  }
+
+  @Test
+  fun `unknown null reason preserves generic error`() {
+    assertEquals(
+      HierarchyExtractErrorFrames.NULL_HIERARCHY_ERROR,
+      HierarchyExtractErrorFrames.nullResultFrame(UUID, null)!!.error,
+    )
+    assertNull(HierarchyExtractErrorFrames.nullResultFrame(null, MissingAccessibilityWindows(2)))
+    assertNull(HierarchyExtractErrorFrames.nullResultFrame(" ", MissingAccessibilityWindows(2)))
+  }
+
   // extractHierarchy throws → frame with error containing the cause, requestId = uuid.
   @Test
   fun `thrown extraction emits correlated frame carrying the cause`() {

@@ -14,12 +14,15 @@ internal class TelemetryWire(
 
   fun newId(): String = newRequestId()
 
+  /** The desktop session UUID a `subscribe` is sent under now; null before it registers. */
+  fun sessionUuid(): String? = sessionUuidProvider?.invoke()
+
   /** A device-scoped `subscribe`, so the daemon backfills that device's own history. */
-  fun subscribe(key: DeviceStreamKey, requestId: String) =
+  fun subscribe(key: DeviceStreamKey, requestId: String, sessionUuid: String?) =
     TelemetryPushRequest(
       id = requestId,
       command = "subscribe",
-      sessionUuid = sessionUuidProvider?.invoke(),
+      sessionUuid = sessionUuid,
       deviceId = key.deviceId,
       deviceSessionUuid = key.deviceSessionUuid,
     )

@@ -147,7 +147,7 @@ class MultiplexedObservationSocketClientTest {
     val hubScope = CoroutineScope(SupervisorJob() + clientThreads)
     val hub =
       SharedDaemonStreamHub(
-        telemetryClientFactory = { FakeTelemetryPushClient() },
+        telemetry = FakeTelemetryMultiplexer(),
         scope = hubScope,
         observation =
           ObservationHubConfig(

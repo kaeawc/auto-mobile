@@ -33,7 +33,7 @@ class SharedDaemonStreamHubObservationTest {
     var socketAvailable = true
     val hub =
       SharedDaemonStreamHub(
-        telemetryClientFactory = { FakeTelemetryPushClient() },
+        telemetry = FakeTelemetryMultiplexer(),
         scope = scope,
         observation =
           ObservationHubConfig(
@@ -271,7 +271,7 @@ class SharedDaemonStreamHubObservationTest {
     val reconnectThread = Executors.newSingleThreadExecutor()
     val hub =
       SharedDaemonStreamHub(
-        telemetryClientFactory = { FakeTelemetryPushClient() },
+        telemetry = FakeTelemetryMultiplexer(),
         scope = CoroutineScope(SupervisorJob() + reconnectThread.asCoroutineDispatcher()),
         observation =
           ObservationHubConfig(

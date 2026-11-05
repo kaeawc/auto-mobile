@@ -41,13 +41,6 @@ private constructor(
     observation: ObservationHubConfig = ObservationHubConfig(),
   ) : this(telemetry, scope, HubObservationStreams(observation, scope))
 
-  /** A hub with one [TelemetryPushClient] connection per device, from [telemetryClientFactory]. */
-  constructor(
-    telemetryClientFactory: () -> TelemetryPushClient,
-    scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-    observation: ObservationHubConfig = ObservationHubConfig(),
-  ) : this(PerConnectionTelemetryMultiplexer(telemetryClientFactory, scope), scope, observation)
-
   private class Subscriber(val key: DeviceStreamKey, val sink: (TelemetryDisplayEvent) -> Unit)
 
   private class DeviceTelemetry {

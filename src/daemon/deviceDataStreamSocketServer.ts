@@ -826,8 +826,13 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     // intentional all-device subscription; an unresolvable UUID schedules no
     // device and must not be treated as that all-device case. A lifecycle-only
     // subscription never contributes to cadence, so it owes no notification
-    // (the hierarchy callback can reconnect an idle iOS CtrlProxy client).
-    if (request.lifecycleOnly === true) {
+    // (the hierarchy callback can reconnect an idle iOS CtrlProxy client). Any
+    // other non-false lifecycleOnly was rejected and created no subscription.
+    if (
+      request.lifecycleOnly !== undefined &&
+      request.lifecycleOnly !== null &&
+      request.lifecycleOnly !== false
+    ) {
       return;
     }
     if (deviceSessionUuid === null || subscribedDeviceId !== null) {

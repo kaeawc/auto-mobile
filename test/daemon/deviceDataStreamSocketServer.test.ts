@@ -3489,6 +3489,14 @@ describe("DeviceDataStreamSocketServer", () => {
             expect(hierarchyChanges).toEqual([]);
           });
 
+          it("a rejected non-boolean lifecycleOnly fires neither cadence callback", async () => {
+            await subscribeLifecycleOnly("yes");
+
+            expect(server.getSubscriberCount()).toBe(0);
+            expect(screenshotChanges).toEqual([]);
+            expect(hierarchyChanges).toEqual([]);
+          });
+
           it("a normal subscription still notifies on subscribe and unsubscribe", async () => {
             const socket = await subscribeLifecycleOnly(false);
             await server.processLineForTest(

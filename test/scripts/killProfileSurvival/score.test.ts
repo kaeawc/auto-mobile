@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { SURVIVAL_EVENT_IDS } from "../../../src/features/utility/KillProfileExpectedScores";
 import { FIXTURE_PACKAGE, scoringWindow } from "../../../scripts/kill-profile-survival/matrix";
 import { runHarness, type HarnessDeps } from "../../../scripts/kill-profile-survival/harness";
@@ -158,13 +159,17 @@ function harnessFakes() {
   shell.setCommandResponse("shell dumpsys battery", createExecResult("AC powered: true", ""));
   shell.setCommandResponse("shell am get-standby-bucket", createExecResult("10", ""));
   shell.setCommandResponse("shell appops get", createExecResult("No operations.", ""));
-  // notifications-off reads POST_NOTIFICATIONS back from the package dump on API 33+ (#17106).
+  // notifications-off reads the runtime grant (#17106); the captured dump shows it already revoked.
   shell.setCommandResponse(
     "shell dumpsys package",
     createExecResult(
-      `Packages:\n  Package [${FIXTURE_PACKAGE}] (test):\n    User 0: installed=true\n` +
-        "      runtime permissions:\n" +
-        "        android.permission.POST_NOTIFICATIONS: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]\n",
+      `Packages:\n  Package [${FIXTURE_PACKAGE}] (test):\n    User 0: installed=true\n${readFileSync(
+        new URL(
+          "../../fixtures/android-notification-enabled/api35-deskclock-revoked-dumpsys-package.txt",
+          import.meta.url,
+        ),
+        "utf8",
+      )}`,
       "",
     ),
   );

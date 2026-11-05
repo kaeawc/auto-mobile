@@ -3,6 +3,7 @@ import type { AppleDeviceType } from "./SimCtlSupport";
 
 const IOS_RUNTIME_PREFIX = "com.apple.CoreSimulator.SimRuntime.iOS-";
 const WATCH_OS_RUNTIME_PREFIX = "com.apple.CoreSimulator.SimRuntime.watchOS-";
+const VISION_OS_RUNTIME_PREFIX = "com.apple.CoreSimulator.SimRuntime.xrOS-";
 const TV_OS_RUNTIME_PREFIX = "com.apple.CoreSimulator.SimRuntime.tvOS-";
 const APPLE_TV_PRODUCT_FAMILY = "Apple TV";
 const APPLE_WATCH_PRODUCT_FAMILY = "Apple Watch";
@@ -70,4 +71,25 @@ export function tvOsVersionFromRuntimeId(runtimeId: string): string | undefined 
 /** Whether a `simctl list devicetypes` entry is an Apple TV model. */
 export function isAppleTvDeviceType(deviceType: Pick<AppleDeviceType, "productFamily">): boolean {
   return deviceType.productFamily === APPLE_TV_PRODUCT_FAMILY;
+}
+
+/** Whether a CoreSimulator runtime identifier is a visionOS runtime. */
+export function isVisionOsSimulatorRuntime(runtimeId: string): boolean {
+  return runtimeId.startsWith(VISION_OS_RUNTIME_PREFIX);
+}
+
+/** The visionOS version in a runtime identifier: `...SimRuntime.xrOS-26-5` is `26.5`. */
+export function visionOsVersionFromRuntimeId(runtimeId: string): string | undefined {
+  if (!isVisionOsSimulatorRuntime(runtimeId)) {
+    return undefined;
+  }
+  const version = runtimeId.slice(VISION_OS_RUNTIME_PREFIX.length);
+  return /^\d+(?:-\d+)*$/.test(version) ? version.replace(/-/g, ".") : undefined;
+}
+
+/** Whether a `simctl list devicetypes` entry is an Apple Vision Pro model. */
+export function isAppleVisionDeviceType(
+  deviceType: Pick<AppleDeviceType, "productFamily">,
+): boolean {
+  return deviceType.productFamily === "Apple Vision";
 }

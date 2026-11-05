@@ -1150,6 +1150,10 @@ public enum Status: String, Codable, Sendable
   public let durationMs: Double
   public let nextObservationIdentity: UInt64?
   public init(status: Status, reason: String? = nil, durationMs: Double = 0, nextObservationIdentity: UInt64? = nil)
+public struct SdkMultiSceneError: Codable, Equatable, Sendable
+  public let error: String
+  public let scenes: [String]
+  public init(scenes: [String])
 
 // sdk-wire/SdkBounds.swift
 public enum BoundsArithmetic

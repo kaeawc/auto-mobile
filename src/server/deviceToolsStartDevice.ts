@@ -1,3 +1,4 @@
+import { isAppleVisionStartRequest, startAppleVisionDevice } from "./deviceToolsAppleVisionStart";
 import {
   currentAutolockMcpSessionId,
   currentOneShotCli,
@@ -945,6 +946,9 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
+    if (isAppleVisionStartRequest(rawArgs)) {
+      return await startAppleVisionDevice(rawArgs, bindBootedDeviceSession, signal);
+    }
     if (isAppleTvStartRequest(rawArgs)) {
       return await startAppleTvDevice(rawArgs, bindBootedDeviceSession, signal);
     }

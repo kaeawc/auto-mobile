@@ -1,4 +1,11 @@
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../daemon/inputDeviceOwnership";
+import { AMBIGUOUS_DEVICE_TARGET_CODE } from "../daemon/ambiguousDeviceTargetRefusal";
+import { SESSION_OWNERSHIP_LOST_CODE } from "../daemon/sessionReleasedDuringCall";
+import { ENV } from "../config/env";
+import {
+  DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
+  MAX_CLI_SESSION_IDLE_TIMEOUT_MS,
+} from "../daemon/wire/constants";
 import { isDeviceSessionAcquisitionTool } from "../daemon/deviceSessionResult";
 import { staticToolDeclaresInput } from "../daemon/staticToolDefinitions";
 import {
@@ -28,6 +35,121 @@ function refusalCode(payload: unknown): unknown {
   );
 }
 
+function payloadRecord(payload: unknown): Record<string, unknown> | undefined {
+  return payload && typeof payload === "object" ? (payload as Record<string, unknown>) : undefined;
+}
+
+/** The release reason of an ownership-loss payload, which nests it under `error`. */
+function ownershipLossReason(payload: unknown): unknown {
+  return payloadRecord(payloadRecord(payload)?.error)?.reason;
+}
+
+function formatMinutes(ms: number): string {
+  if (ms < 60_000) {
+    // A session's own window can be under a minute; minutes would round it to 0 (#16908).
+    const seconds = Math.round((ms / 1000) * 10) / 10;
+    return `${seconds} ${seconds === 1 ? "second" : "seconds"}`;
+  }
+  const minutes = Math.round((ms / 60_000) * 10) / 10;
+  return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+}
+
+/** The idle window an ownership-loss payload reports for a `cli-idle-timeout` release (#16908). */
+function ownershipLossIdleTimeoutMs(payload: unknown): number | undefined {
+  const idleTimeoutMs = payloadRecord(payloadRecord(payload)?.error)?.idleTimeoutMs;
+  return typeof idleTimeoutMs === "number" && Number.isFinite(idleTimeoutMs) && idleTimeoutMs > 0
+    ? idleTimeoutMs
+    : undefined;
+}
+
+const CLI_IDLE_TIMEOUT_REMEDY =
+  "(reads do not count), so its session UUID cannot be used again. Acquire a new session with " +
+  "getAndroid, getApple or startDevice. To keep a session across longer gaps, set " +
+  `${ENV.CLI_SESSION_IDLE_TIMEOUT_MS.name} (milliseconds, at most ` +
+  `${formatMinutes(MAX_CLI_SESSION_IDLE_TIMEOUT_MS)}) in the environment of every --cli call.`;
+
+/**
+ * A `--cli` session idle-released between invocations (#16882): name its idle window and the
+ * variable that lengthens it. The window was set by the last --cli call that used the session,
+ * possibly under another environment, and capped by the daemon, so only the refusal can say what
+ * it was (#16908); an older daemon that does not report it gets the default instead.
+ */
+function cliIdleTimeoutHint(payload: unknown): string {
+  const idleTimeoutMs = ownershipLossIdleTimeoutMs(payload);
+  const window =
+    idleTimeoutMs === undefined
+      ? `its idle timeout (${formatMinutes(DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS)} by default)`
+      : `its idle timeout of ${formatMinutes(idleTimeoutMs)} (${idleTimeoutMs} ms)`;
+  return `Hint: this --cli session went longer than ${window} without a control call ${CLI_IDLE_TIMEOUT_REMEDY}`;
+}
+
+/** Each candidate as `deviceId (platform)`, skipping malformed entries. */
+function candidateList(payload: unknown): string[] {
+  const candidates = payloadRecord(payload)?.candidates;
+  if (!Array.isArray(candidates)) {
+    return [];
+  }
+  return candidates.flatMap((candidate) => {
+    const record = payloadRecord(candidate);
+    if (typeof record?.deviceId !== "string") {
+      return [];
+    }
+    return [
+      typeof record.platform === "string"
+        ? `${record.deviceId} (${record.platform})`
+        : record.deviceId,
+    ];
+  });
+}
+
+/**
+ * A sessionless call that matched several devices (#16882): `--platform` cannot pick between two
+ * devices of one platform, so name the device ids the caller can pass.
+ */
+function ambiguousDeviceTargetHint(payload: unknown): string {
+  const candidates = candidateList(payload);
+  const listed = candidates.length > 0 ? ` Candidates: ${candidates.join(", ")}.` : "";
+  return (
+    "Hint: more than one device matches this call. Re-run with --deviceId <id> to pick one, or " +
+    `with --session-uuid <uuid> to use a device your session holds.${listed}`
+  );
+}
+
+/** Refusals whose CLI remedy does not depend on the payload or the tool. */
+const FIXED_REFUSAL_HINTS: ReadonlyMap<string, string> = new Map([
+  [
+    DEVICE_CLEANUP_IN_PROGRESS_CODE,
+    "Hint: the device's previous session is still finishing its cleanup. Re-run the command " +
+      "after the retryAfterMs in the error has passed; nothing else needs to change.",
+  ],
+  [
+    DEVICE_SHUTTING_DOWN_CODE,
+    "Hint: the device is being shut down. Re-run the command after the retryAfterMs in the " +
+      "error has passed, once the shutdown has finished.",
+  ],
+  [
+    SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
+    "Hint: this session is being released because its device is being shut down, so its " +
+      "session UUID cannot be used again. Retrying with the same --session-uuid will not " +
+      "succeed; acquire the device again under a new session instead.",
+  ],
+  [
+    SESSION_REBINDING_CODE,
+    "Hint: the device's session is moving to another device. Re-run the command after the " +
+      "retryAfterMs in the error has passed, once the rebind has settled.",
+  ],
+  [
+    SESSION_NO_LONGER_OWNS_DEVICE_CODE,
+    "Hint: the session no longer holds this device; it was rebound or released. Check who " +
+      "holds the device now with --daemon active-sessions before re-running the command.",
+  ],
+  [
+    DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+    "Hint: another AutoMobile daemon on this host is using the device. Re-run after it " +
+      "releases the device, or pass another deviceId.",
+  ],
+]);
+
 /**
  * A `--cli` invocation is a separate process, so a call without `--session-uuid` is sessionless
  * and the daemon refuses it on a device another session holds (#10743, #10783, #10785). The
@@ -36,42 +158,15 @@ function refusalCode(payload: unknown): unknown {
  */
 export function cliDeviceOwnershipHint(payload: unknown, toolName: string): string | undefined {
   const code = refusalCode(payload);
-  if (code === DEVICE_CLEANUP_IN_PROGRESS_CODE) {
-    return (
-      "Hint: the device's previous session is still finishing its cleanup. Re-run the command " +
-      "after the retryAfterMs in the error has passed; nothing else needs to change."
-    );
+  if (code === SESSION_OWNERSHIP_LOST_CODE && ownershipLossReason(payload) === "cli-idle-timeout") {
+    return cliIdleTimeoutHint(payload);
   }
-  if (code === DEVICE_SHUTTING_DOWN_CODE) {
-    return (
-      "Hint: the device is being shut down. Re-run the command after the retryAfterMs in the " +
-      "error has passed, once the shutdown has finished."
-    );
+  if (code === AMBIGUOUS_DEVICE_TARGET_CODE) {
+    return ambiguousDeviceTargetHint(payload);
   }
-  if (code === SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE) {
-    return (
-      "Hint: this session is being released because its device is being shut down, so its " +
-      "session UUID cannot be used again. Retrying with the same --session-uuid will not " +
-      "succeed; acquire the device again under a new session instead."
-    );
-  }
-  if (code === SESSION_REBINDING_CODE) {
-    return (
-      "Hint: the device's session is moving to another device. Re-run the command after the " +
-      "retryAfterMs in the error has passed, once the rebind has settled."
-    );
-  }
-  if (code === SESSION_NO_LONGER_OWNS_DEVICE_CODE) {
-    return (
-      "Hint: the session no longer holds this device; it was rebound or released. Check who " +
-      "holds the device now with --daemon active-sessions before re-running the command."
-    );
-  }
-  if (code === DEVICE_OWNED_BY_OTHER_DAEMON_CODE) {
-    return (
-      "Hint: another AutoMobile daemon on this host is using the device. Re-run after it " +
-      "releases the device, or pass another deviceId."
-    );
+  const fixedHint = typeof code === "string" ? FIXED_REFUSAL_HINTS.get(code) : undefined;
+  if (fixedHint !== undefined) {
+    return fixedHint;
   }
   if (code !== DEVICE_OWNED_BY_OTHER_SESSION_CODE) {
     return undefined;

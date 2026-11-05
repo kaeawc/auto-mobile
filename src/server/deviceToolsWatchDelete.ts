@@ -1,3 +1,4 @@
+import { notifyAppleSimulatorInventoryChanged } from "./appleSimulatorInventoryNotify";
 import {
   getDeviceToolsDependencies,
   initializedDevicePool,
@@ -113,6 +114,7 @@ async function runWatchDelete(
   }
   signal.throwIfAborted();
   await destroyUnderLease(provisioner, device, deadlineMs, signal);
+  notifyAppleSimulatorInventoryChanged(`deleting watchOS simulator ${udid}`);
   return createTeardownResponse(
     args,
     "destroyed",

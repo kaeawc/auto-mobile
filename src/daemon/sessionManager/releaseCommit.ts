@@ -23,7 +23,9 @@ import type { TerminalIntentDurability } from "./releaseWrite";
 import { releaseSuperseded, type ReleaseReasonState } from "../sessionManager/internalContracts";
 import { type SessionRowWriter } from "../sessionRowWriter";
 import type { SupersededRowReasserts } from "../supersededRowReasserts";
+import type { PlanLabelRegistry } from "../planLabelRegistry";
 import {
+  cliIdleWindowOfRelease,
   managedExecutionReleaseMarker,
   setReleaseStage,
   type SessionLifecycleSlots,
@@ -37,6 +39,7 @@ export interface CommittedReleaseSnapshots {
 
 export interface SessionReleaseCommitHost {
   readonly stateRestore: SessionDeviceStateRestore;
+  readonly planLabels: Pick<PlanLabelRegistry, "retainedEndedBase">;
   revokeSupersededIdentityReplacement(operation?: SessionReleaseOperation): boolean;
   abandonSupersededRelease(
     sessionId: string,
@@ -353,6 +356,11 @@ export class SessionReleaseCommit {
       releasedAtMs,
       terminal: isTerminalReleaseReason(releaseReason),
       ...managedExecutionReleaseMarker(session),
+      ...cliIdleWindowOfRelease(
+        session,
+        releaseReason,
+        this.host.planLabels.retainedEndedBase(session.sessionId),
+      ),
       heartbeat: {
         lastHeartbeatMs: session.lastHeartbeat,
         hasReceivedHeartbeat: session.hasReceivedHeartbeat,

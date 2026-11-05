@@ -194,7 +194,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         {
           deviceId: device.deviceId,
           verifySafeImeRecovery: (snapshot, signal) => this.verifySafeImeRecovery(snapshot, signal),
-          restoreIme: (prior, wasEnabled, subtype) => this.restoreIme(prior, wasEnabled, subtype),
+          restoreIme: (...args) => this.restoreIme(...args),
           getPinnedUser: () => this.session.imeUserId,
           setPinnedUser: (userId) => {
             this.session.imeUserId = userId;
@@ -952,8 +952,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     priorImeId: string | null,
     wasEnabled: boolean,
     subtype: ImeSubtypeSnapshot,
+    fence?: AbortSignal,
   ): Promise<void> {
-    return this.imeRestore.restoreIme(priorImeId, wasEnabled, subtype);
+    return this.imeRestore.restoreIme(priorImeId, wasEnabled, subtype, fence);
   }
   private get commitImeId(): string {
     return this.imeRestore.commitImeId;

@@ -5,7 +5,8 @@
  *   bun scripts/store-listing/validate-store-listing.ts
  *
  * Checks the fastlane metadata tree against the Play and App Store limits and required fields, and
- * that the icon source layers parse and share the adaptive-icon canvas. Reads files only; renders
+ * that the icon source layers parse and share the adaptive-icon canvas, and that the privacy and
+ * support URLs are pages the docs site builds (#14144). Reads files only; renders
  * nothing and needs no native tooling.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -13,7 +14,13 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ICON_SOURCE_DIR } from "./iconTargets";
 import { validateIconSvg } from "./iconSourceCheck";
-import { type Finding, type ListingFiles, validateListing } from "./storeListing";
+import { loadMkdocsConfig } from "../validate-mkdocs-nav";
+import {
+  checkDocsSiteUrls,
+  type Finding,
+  type ListingFiles,
+  validateListing,
+} from "./storeListing";
 
 export const METADATA_DIR = "fastlane/metadata";
 
@@ -48,7 +55,18 @@ export function formatFindings(findings: readonly Finding[]): string {
 export async function main(): Promise<number> {
   const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
   const files = readListingTree(join(repoRoot, METADATA_DIR));
-  const findings = validateListing(files);
+  const siteUrl = (await loadMkdocsConfig(join(repoRoot, "mkdocs.yml"))).site_url;
+  if (typeof siteUrl !== "string") {
+    console.error("mkdocs.yml has no site_url; the store privacy and support URLs live there.");
+    return 1;
+  }
+  const findings = [
+    ...validateListing(files),
+    ...checkDocsSiteUrls(files, {
+      url: siteUrl,
+      hasPage: (page) => existsSync(join(repoRoot, "docs", page)),
+    }),
+  ];
   const readLayer = (name: string): string | undefined => {
     const path = join(repoRoot, ICON_SOURCE_DIR, name);
     return existsSync(path) ? readFileSync(path, "utf8") : undefined;

@@ -437,6 +437,11 @@ export class AndroidInboundResponseHandlers {
     keystore_reset: (message) =>
       this.ctx.resolvePendingResponse(message, (message) => ({ state: message.state })),
 
+    attestation_chain: (message) =>
+      this.ctx.resolvePendingResponse(message, (message) => ({
+        certificateChainBase64: message.certificateChainBase64,
+      })),
+
     keystore_discovery: (message) =>
       this.ctx.resolvePendingResponse(message, (message) => ({ state: message.state })),
 
@@ -561,6 +566,7 @@ export class AndroidInboundResponseHandlers {
     | "global_action_result"
     | "frame_context_validation_result"
     | "device_info_result"
+    | "attestation_chain"
     | "keystore_discovery"
     | "keystore_reset"
     | "sdk_capabilities"

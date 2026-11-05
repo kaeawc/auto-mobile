@@ -114,6 +114,30 @@ describe("platform vocabulary through the registered prototype tool (#14294)", (
     expect(client.getPrototypeHistory()).toHaveLength(1);
   });
 
+  test("a patch introducing settings.open wifi is accepted on Android", async () => {
+    client.setSupportedCommands([...capabilities, "prototype_platform_settings_v1"]);
+    const button = { type: "button", id: "settings", label: "Settings" };
+    const shown = {
+      id: "settings-patch",
+      window: { placement: { type: "fullscreen" } },
+      requires: { platform: ["settings"] },
+      root: { type: "column", children: [button] },
+    };
+    expect((await call({ action: "show", spec: shown })).success).toBe(true);
+    const ops = [
+      {
+        op: "replaceNode" as const,
+        id: button.id,
+        node: {
+          ...button,
+          onTap: [{ type: "platform", call: "settings.open", args: { page: { value: "wifi" } } }],
+        },
+      },
+    ];
+    expect((await call({ action: "patch", id: shown.id, ops })).success).toBe(true);
+    expect(client.patchRequests).toEqual([{ id: shown.id, ops }]);
+  });
+
   test("awaitEvent returns a finished call under the reserved emit name", async () => {
     expect((await call({ action: "show", spec: fixture })).success).toBe(true);
     const payload = { callId: "c-1", call: "test.echo", outcome: "success", durationMs: 3 };

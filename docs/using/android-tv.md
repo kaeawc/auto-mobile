@@ -107,8 +107,9 @@ counts as focused.
 `tapOn` and `swipeOn` need a device that reports a touchscreen; on a TV without one, navigate with
 `focusNavigate` and `sendKeys` instead.
 
-Prototype overlays can be shown and dismissed, but their buttons are not reachable with D-pad
-focus. Use `prototype` with `dismiss` to close the overlay.
+Prototype overlay buttons support D-pad navigation and show a visible outline when focused.
+Use `focusNavigate` to reach a button and `sendKeys` with `enter` to activate it.
+Use `prototype` with `dismiss` to close the overlay.
 
 ## Out of scope
 

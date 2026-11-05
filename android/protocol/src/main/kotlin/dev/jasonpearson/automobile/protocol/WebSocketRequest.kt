@@ -606,6 +606,11 @@ data class ResetKeystore(
   val alias: String? = null,
 ) : WebSocketRequest()
 
+/** Generates a temporary CtrlProxy-owned attested key and exports only its public certificates. */
+@Serializable
+@SerialName("export_attestation")
+data class ExportAttestation(override val requestId: String? = null) : WebSocketRequest()
+
 /** Discovers the app-owned read-only Keystore metadata bridge. */
 @Serializable
 @SerialName("discover_keystore")

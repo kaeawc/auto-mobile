@@ -39,6 +39,7 @@ class ShareImportActivityTest {
           UnconfinedTestDispatcher(),
           importer = contentImporter,
           settings = settings,
+          blocklist = FakeContentBlocklist(),
         )
         .also { services ->
           services.shareImporter =

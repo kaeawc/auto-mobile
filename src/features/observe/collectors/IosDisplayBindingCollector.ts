@@ -10,7 +10,7 @@ import {
 } from "./DisplayBindingCollector";
 import { displayTransitions } from "../DisplayTransition";
 import { DisplaySelectionError, resolveTargetDisplay } from "../DisplaySelection";
-import { observedIosDisplay } from "../ObservationDisplay";
+import { liveIosPanelFor, observedIosDisplay } from "../ObservationDisplay";
 
 export class IosDisplayBindingCollector implements DisplayBindingCollector {
   constructor(private readonly deps: DisplayBindingCollectorDeps) {}
@@ -34,7 +34,7 @@ export class IosDisplayBindingCollector implements DisplayBindingCollector {
       context;
     let recordProvenance = context.recordProvenance;
     const device = this.deps.device();
-    result.display = observedIosDisplay(device, result.viewHierarchy);
+    result.display = observedIosDisplay(device, result.viewHierarchy, liveIosPanelFor(result));
     if (
       !observerMode &&
       !preserveDisplayState &&

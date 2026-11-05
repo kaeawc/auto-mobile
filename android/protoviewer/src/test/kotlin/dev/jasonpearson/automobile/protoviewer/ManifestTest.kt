@@ -87,6 +87,12 @@ class ManifestTest {
     assertEquals(1, cachePaths)
     val mcp =
       context.packageManager.getActivityInfo(ComponentName(context, McpActivity::class.java), 0)
+    val mcpProvider =
+      context.packageManager.resolveContentProvider("${context.packageName}.mcp", 0)!!
+    assertEquals(McpProvider::class.java.name, mcpProvider.name)
+    assertTrue(mcpProvider.exported)
+    assertEquals("android.permission.DUMP", mcpProvider.readPermission)
+    assertEquals("android.permission.DUMP", mcpProvider.writePermission)
     // Only the adb shell holds DUMP, so no app can start the MCP entry; its actions resolve
     // nowhere.
     assertTrue(mcp.exported)

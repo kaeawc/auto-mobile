@@ -166,3 +166,17 @@ describe("createIosSdkBridgeTapper (#5159)", () => {
     ).rejects.toThrow("Timeout");
   });
 });
+
+test("multi_scene rejects without an XCTest fallback", async () => {
+  const message =
+    "The app has 2 connected scenes (scene-a, scene-b). SDK observation needs one scene; XCTest does not stand in for this result.";
+  const reply: CtrlProxySdkActionResult = {
+    success: false,
+    available: true,
+    failure: "multi_scene",
+    scenes: ["scene-a", "scene-b"],
+    totalTimeMs: 0,
+  };
+  const { tapper: route } = tapper(reply);
+  await expect(route.tap({ action: "tap", element: bridgeElement })).rejects.toThrow(message);
+});

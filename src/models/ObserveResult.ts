@@ -275,6 +275,18 @@ export type ObserveResult = {
    */
   isScreenRound?: boolean;
 
+  /** CarService state, present only on automotive devices. Unavailable reads omit their fields. */
+  automotive?: {
+    drivingState?: "parked" | "idling" | "moving";
+    uxRestrictions?: {
+      requiresDistractionOptimization: boolean;
+      activeRestrictions: number;
+    };
+    foregroundActivity?: { distractionOptimized: boolean };
+    /** DO is required and a known foreground activity is not distraction optimized. */
+    blocked: boolean;
+  };
+
   /** System UI insets */
   systemInsets: SystemInsets;
 

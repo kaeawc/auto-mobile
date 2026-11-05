@@ -369,9 +369,17 @@ report_slowest_files() {
   return 0
 }
 
+# A breach also prints a ::error:: annotation so scripts/ci/classify-failure.sh
+# can match it (its known-flakes context is the job's annotations, and the
+# step's own annotation is only "exit code 1"). The serial-pass seconds, when
+# given, separate a slow runner (every pass slower) from one slow file. Only a
+# lane whose tests all passed (tests_passed=true) is annotated "no test failed",
+# which is what the known-flakes rerun signature keys on.
 enforce_unit_budget() {
   local elapsed="$1"
   local durations_file="${2:-}"
+  local serial_seconds="${3:-}"
+  local tests_passed="${4:-false}"
   local budget="${AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS:-}"
   if [[ -z "$budget" ]]; then
     return 0
@@ -382,6 +390,15 @@ enforce_unit_budget() {
   fi
   if [[ "$elapsed" -gt "$budget" ]]; then
     log "ERROR: BATS unit lane took ${elapsed}s, exceeding ${budget}s"
+    local split=""
+    if [[ -n "$serial_seconds" ]]; then
+      split=" (serial pass ${serial_seconds}s)"
+    fi
+    local outcome="; a test also failed, see its not ok line"
+    if [[ "$tests_passed" == "true" ]]; then
+      outcome="; no test failed"
+    fi
+    echo "::error title=BATS unit lane budget::BATS unit lane took ${elapsed}s, exceeding ${budget}s${split}${outcome}"
     if [[ -n "$durations_file" ]]; then
       report_slowest_files "$durations_file" 10
     fi
@@ -493,16 +510,22 @@ main() {
   fi
 
   log "Serial ${lane} pass: files tagged serial (or all files without GNU parallel)"
+  local serial_started="$SECONDS"
   run_serial_files "$serial_list" "$file_budget" "$durations_file" || rc=1
+  local serial_elapsed=$((SECONDS - serial_started))
 
   local elapsed=$((SECONDS - started))
+  local tests_passed=false
+  if [[ "$rc" -eq 0 ]]; then
+    tests_passed=true
+  fi
   log "BATS ${lane} lane completed in ${elapsed}s (job log: ${joblog})"
   if [[ "$lane" == "unit" ]]; then
     if [[ -n "$file_budget" ]]; then
       enforce_parallel_file_budget "$joblog" "$file_budget" "$parallel_list" || rc=1
       enforce_parallel_file_budget "$within_joblog" "$file_budget" "$within_list" || rc=1
     fi
-    enforce_unit_budget "$elapsed" "$durations_file" || rc=1
+    enforce_unit_budget "$elapsed" "$durations_file" "$serial_elapsed" "$tests_passed" || rc=1
   fi
 
   rm -rf "$temp_dir"

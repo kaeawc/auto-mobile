@@ -208,6 +208,8 @@ interface CtrlProxyActions {
 
   suspend fun resetKeystore(requestId: String?, packageName: String, scope: String?, alias: String?)
 
+  suspend fun exportAttestation(requestId: String?)
+
   suspend fun discoverKeystore(requestId: String?, packageName: String)
 
   suspend fun getSdkCapabilities(requestId: String?, packageName: String, userId: Int?)

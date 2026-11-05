@@ -146,6 +146,55 @@ test("retarget to the current bundle does not restart the runner", async () => {
   expect(f.client.closed).toBe(false);
 });
 
+test("retarget to the current bundle restarts a runner whose socket disconnected", async () => {
+  const socket = new FakeWatchSocket();
+  const disconnected = new WebSocketWatchRunnerClient("ws://127.0.0.1:8765/ws", {
+    factory: () => socket,
+    timer: new FakeTimer(),
+  });
+  const replacement = new FakeWatchRunnerClient();
+  const f = fixture([disconnected, replacement]);
+  socket.connected();
+  const request = { deviceId: f.request.deviceId, bundleId: "com.example.workout" };
+  await f.owner.start(request);
+  f.owner.attach(f.request);
+  socket.disconnect();
+
+  expect(await f.owner.retarget(request)).toBeUndefined();
+
+  expect(f.launcher.launches.map((launch) => launch.bundleId)).toEqual([
+    "com.example.workout",
+    "com.example.workout",
+  ]);
+  expect(f.launcher.calls).toEqual(["launch", "stop", "launch"]);
+  expect(socket.closed).toBe(true);
+  expect(watchRunners.get(f.request.deviceId)).toBe(replacement);
+  expect(f.released).toEqual([f.request.deviceId]);
+  // The owner session still owns the restarted runner and stops it on release.
+  f.sessions.releases[0]!(f.request.ownerSession);
+  expect(f.launcher.stops).toBe(2);
+  expect(replacement.closed).toBe(true);
+});
+
+test("a repeated same-bundle retarget restarts a replacement that has since failed", async () => {
+  const first = new FakeWatchRunnerClient();
+  const replacement = new FakeWatchRunnerClient();
+  const third = new FakeWatchRunnerClient();
+  const f = fixture([first, replacement, third]);
+  await f.owner.start({ ...f.request, bundleId: "com.example.first" });
+  f.owner.attach(f.request);
+  const request = { deviceId: f.request.deviceId, bundleId: "com.example.second" };
+  expect(await f.owner.retarget(request)).toBeUndefined();
+  replacement.failure = new Error("runner socket disconnected");
+
+  expect(await f.owner.retarget(request)).toBeUndefined();
+
+  expect(f.launcher.launches).toHaveLength(3);
+  expect(f.launcher.launches[2]?.bundleId).toBe("com.example.second");
+  expect(replacement.closed).toBe(true);
+  expect(watchRunners.get(f.request.deviceId)).toBe(third);
+});
+
 test.each(["absent", "connected", "disconnected"])(
   "retarget leaves a runner it does not own alone (%s)",
   async (state) => {

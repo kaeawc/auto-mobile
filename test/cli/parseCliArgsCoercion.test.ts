@@ -1,7 +1,10 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { z } from "zod/v4";
 import { parseCliArgs } from "../../src/cli";
+import { getDeclaredParamTypes } from "../../src/cli/cliValueCoercion";
 import { YamlPlanSerializer } from "../../src/utils/plan/PlanSerializer";
-import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { ToolRegistry } from "../../src/server/toolRegistry";
+import { isolateToolRegistry, unregisterTemporaryTools } from "../helpers/withTemporaryTool";
 
 isolateToolRegistry();
 
@@ -241,34 +244,26 @@ describe("parseCliArgs coercion sees through schema wrappers (#4241 review)", ()
     expect(typeof params.startStep).toBe("number");
   });
 
-  test("a nullable string keeps a numeric-looking value as a string", async () => {
-    // setKeyValue is embeddedSdkOnly, so it is only visible to the registry --
-    // and only callable at all -- in embedded-SDK mode.
-    const { serverConfig } = await import("../../src/utils/ServerConfig");
-    const previous = serverConfig.isEmbeddedSdkEnabled();
-    serverConfig.setEmbeddedSdkEnabled(true);
-    try {
-      const { params } = parseCliArgs([
-        "setKeyValue",
-        "--platform",
-        "android",
-        "--appId",
-        "com.example",
-        "--name",
-        "prefs",
-        "--key",
-        "pin",
-        "--type",
-        "STRING",
-        "--value",
-        "12345",
-      ]);
+  test("a nullable string keeps a numeric-looking value as a string", () => {
+    // setKeyValue is embeddedSdkOnly; coercion reads its schema without that gate (#17052).
+    const { params } = parseCliArgs([
+      "setKeyValue",
+      "--platform",
+      "android",
+      "--appId",
+      "com.example",
+      "--name",
+      "prefs",
+      "--key",
+      "pin",
+      "--type",
+      "STRING",
+      "--value",
+      "12345",
+    ]);
 
-      expect(params.value).toBe("12345");
-      expect(typeof params.value).toBe("string");
-    } finally {
-      serverConfig.setEmbeddedSdkEnabled(previous);
-    }
+    expect(params.value).toBe("12345");
+    expect(typeof params.value).toBe("string");
   });
 });
 
@@ -315,17 +310,6 @@ describe("parseCliArgs preserves JSON-encoded scalars and rejects bad numbers (#
 });
 
 describe("parseCliArgs preserves JSON null for nullable params (#4241 review)", () => {
-  async function withEmbeddedSdk<T>(run: () => T): Promise<T> {
-    const { serverConfig } = await import("../../src/utils/ServerConfig");
-    const previous = serverConfig.isEmbeddedSdkEnabled();
-    serverConfig.setEmbeddedSdkEnabled(true);
-    try {
-      return run();
-    } finally {
-      serverConfig.setEmbeddedSdkEnabled(previous);
-    }
-  }
-
   const setKeyValue = (value: string) => [
     "setKeyValue",
     "--platform",
@@ -342,22 +326,22 @@ describe("parseCliArgs preserves JSON null for nullable params (#4241 review)", 
     value,
   ];
 
-  test("an explicit null reaches a nullable param as null", async () => {
+  test("an explicit null reaches a nullable param as null", () => {
     // storageTools removes the key only when value === null; the literal string
     // "null" would overwrite it instead.
-    const params = await withEmbeddedSdk(() => parseCliArgs(setKeyValue("null")).params);
+    const { params } = parseCliArgs(setKeyValue("null"));
 
     expect(params.value).toBeNull();
   });
 
-  test("a nullable param still keeps other numeric-looking strings as strings", async () => {
-    const params = await withEmbeddedSdk(() => parseCliArgs(setKeyValue("12345")).params);
+  test("a nullable param still keeps other numeric-looking strings as strings", () => {
+    const { params } = parseCliArgs(setKeyValue("12345"));
 
     expect(params.value).toBe("12345");
   });
 
-  test("a value merely containing 'null' is untouched", async () => {
-    const params = await withEmbeddedSdk(() => parseCliArgs(setKeyValue("null-ish")).params);
+  test("a value merely containing 'null' is untouched", () => {
+    const { params } = parseCliArgs(setKeyValue("null-ish"));
 
     expect(params.value).toBe("null-ish");
   });
@@ -366,5 +350,80 @@ describe("parseCliArgs preserves JSON null for nullable params (#4241 review)", 
     const { params } = parseCliArgs(["setActiveDevice", "--deviceId", "null"]);
 
     expect(params.deviceId).toBe("null");
+  });
+});
+
+// The CLI read declared types through the availability-gated ToolRegistry.getTool, so a tool
+// gated on the daemon's --embedded-sdk (mockNetwork) had no schema in the CLI process and every
+// value was JSON-parsed: a JSON response body arrived as an object and was rejected (#17052).
+describe("parseCliArgs coerces availability-gated tools from their schema (#17052)", () => {
+  const gatedTool = "cliCoercionGatedProbe";
+  let unresolvedTools: string[] = [];
+
+  beforeAll(() => {
+    ToolRegistry.registerDeviceAware(
+      gatedTool,
+      "Embedded-SDK-gated coercion probe",
+      z.object({
+        body: z.string(),
+        headers: z.record(z.string(), z.string()),
+        tags: z.array(z.string()),
+      }),
+      { handler: async () => ({ content: [] }), embeddedSdkOnly: true },
+    );
+    // Each lookup re-runs CLI tool registration, so sweep once outside the timed tests.
+    unresolvedTools = ToolRegistry.getEveryRegisteredTool()
+      .map((tool) => tool.name)
+      .filter((name) => getDeclaredParamTypes(name) === null);
+  });
+  afterAll(() => unregisterTemporaryTools(gatedTool));
+
+  test("the probe tool is gated in this process", () => {
+    expect(ToolRegistry.getTool(gatedTool)).toBeUndefined();
+  });
+
+  test("every registered tool exposes its declared param types, gated or not", () => {
+    expect(unresolvedTools).toEqual([]);
+  });
+
+  test("keeps a JSON-looking value as a string for a string param", () => {
+    const { params } = parseCliArgs([gatedTool, "--body", '{"ok":1}']);
+
+    expect(params.body).toBe('{"ok":1}');
+  });
+
+  test("parses JSON for an object (record) param", () => {
+    const { params } = parseCliArgs([gatedTool, "--headers", '{"x-a":"1"}']);
+
+    expect(params.headers).toEqual({ "x-a": "1" });
+  });
+
+  test("parses JSON for an array param", () => {
+    const { params } = parseCliArgs([gatedTool, "--tags", '["a","1"]']);
+
+    expect(params.tags).toEqual(["a", "1"]);
+  });
+
+  test("mockNetwork responseBody stays a string and responseHeaders parse as an object", () => {
+    const { params } = parseCliArgs([
+      "mockNetwork",
+      "--host",
+      ".*example.com",
+      "--path",
+      ".*",
+      "--responseBody",
+      '{"ok":1}',
+      "--responseHeaders",
+      '{"x-a":"1"}',
+    ]);
+
+    expect(params.responseBody).toBe('{"ok":1}');
+    expect(params.responseHeaders).toEqual({ "x-a": "1" });
+  });
+
+  test("a JSON-array-looking value stays a string for mockNetwork responseBody", () => {
+    const { params } = parseCliArgs(["mockNetwork", "--responseBody", "[1,2]"]);
+
+    expect(params.responseBody).toBe("[1,2]");
   });
 });

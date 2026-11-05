@@ -78,6 +78,7 @@ Besides the device management above, these tools accept a watch:
 - `swipeOn`
 - `pressButton`
 - `rotateCrown`
+- `postNotification`
 - `installApp`
 - `uninstallApp`
 - `listApps`

@@ -10,7 +10,9 @@
 import type { CtrlProxyPerfTiming, WebSocketMessage } from "./types";
 import { rewriteUnknownCommandError as rewritePlatformUnknownCommandError } from "../shared/rewriteUnknownCommandError";
 import type { KeyValueEntry } from "../../storage/storageTypes";
-import type { ZodTypeAny } from "zod";
+import { z, type ZodTypeAny } from "zod";
+
+const sceneIdentifiersSchema = z.array(z.string());
 import {
   iosSdkActionResultSchema,
   iosSdkBridgeFailure,
@@ -533,12 +535,14 @@ function decodeSdkBridgeResult(
   key: "observation" | "result",
   schema: typeof iosSdkObservationSchema | typeof iosSdkActionResultSchema,
 ): unknown {
+  const scenes = sceneIdentifiersSchema.safeParse(message.scenes);
   const raw = message[key];
   const parsed = raw === undefined ? undefined : schema.safeParse(raw);
   const invalid = parsed !== undefined && !parsed.success;
   return {
     success: invalid ? false : (message.success ?? false),
     available: message.available ?? false,
+    ...(scenes.success ? { scenes: scenes.data } : {}),
     [key]: parsed?.success ? parsed.data : undefined,
     failure: invalid ? "bad_reply" : iosSdkBridgeFailure(message.failure),
     error: invalid ? `The runner relayed a malformed SDK ${key}.` : message.error,
@@ -572,12 +576,14 @@ function decodeSdkWebResult(
   key: "snapshot" | "result",
   schema: typeof iosSdkWebSnapshotSchema | typeof iosSdkWebActionResultSchema,
 ): unknown {
+  const scenes = sceneIdentifiersSchema.safeParse(message.scenes);
   const value = parseRelayed(message[key], schema);
   const webViews = parseRelayed(message.webViews, iosSdkWebViewsSchema);
   const invalid = value.invalid || webViews.invalid;
   return {
     success: invalid ? false : (message.success ?? false),
     available: message.available ?? false,
+    ...(scenes.success ? { scenes: scenes.data } : {}),
     [key]: value.value,
     ...(key === "snapshot" ? webSnapshotFields(message, webViews.value) : {}),
     failure: invalid ? "bad_reply" : iosSdkWebFailure(message.failure),

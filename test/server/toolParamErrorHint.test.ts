@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { formatToolParamError } from "../../src/server/index";
-import { swipeOnSchema, tapOnSchema } from "../../src/server/interactionTools";
+import { sendKeysSchema, swipeOnSchema, tapOnSchema } from "../../src/server/interactionTools";
 import { listDeviceImagesSchema } from "../../src/server/deviceTools";
 import { observeSchema, waitForSchema } from "../../src/server/observeTools";
 import { setPreferenceSchema } from "../../src/server/preferenceTools";
@@ -446,5 +446,64 @@ describe("formatToolParamError top-level hint through preprocess (#6867 follow-u
     const message = formatToolParamError("observe", result.error, input, observeSchema);
     expect(message).toContain('waitFor Unrecognized key: "settled"');
     expect(message).toContain('did you mean the top-level "settled" parameter?');
+  });
+});
+
+// #16893: a command field sent at the top level (`text: "Hi"`) or a malformed
+// command list names the `commands` shape instead of leaving the agent to find it.
+describe("formatToolParamError sendKeys commands shape hint (#16893)", () => {
+  const SHAPE = 'Hint: sendKeys takes commands: [{ "action": "type", "text": "<text>" }]';
+
+  function sendKeysMessage(input: Record<string, unknown>): string {
+    const result = sendKeysSchema.safeParse(input);
+    if (result.success) {
+      throw new Error("expected invalid sendKeys input");
+    }
+    return formatToolParamError("sendKeys", result.error, input, sendKeysSchema);
+  }
+
+  test.each([
+    {
+      name: "top-level text without commands",
+      input: { platform: "ios", deviceId: "x", text: "Hi" },
+    },
+    {
+      name: "top-level text beside valid commands",
+      input: { platform: "ios", text: "Hi", commands: [{ action: "type", text: "a" }] },
+    },
+    { name: "top-level key", input: { platform: "android", key: "enter" } },
+    { name: "missing commands", input: { platform: "ios" } },
+    { name: "command without action", input: { platform: "ios", commands: [{ text: "a" }] } },
+  ])("names the commands shape for $name", ({ input }) => {
+    const message = sendKeysMessage(input);
+    expect(message).toContain(SHAPE);
+    expect(message).toContain('{ "action": "key", "key": "<key>" }');
+  });
+
+  test("keeps the unrecognized-key diagnostic ahead of the hint", () => {
+    const message = sendKeysMessage({ platform: "ios", deviceId: "x", text: "Hi" });
+    expect(message.indexOf('Unrecognized key: "text"')).toBeGreaterThanOrEqual(0);
+    expect(message.indexOf('Unrecognized key: "text"')).toBeLessThan(message.indexOf(SHAPE));
+  });
+
+  test("omits the hint for an unrelated unrecognized key", () => {
+    const message = sendKeysMessage({
+      platform: "ios",
+      commands: [{ action: "type", text: "a" }],
+      bogus: 1,
+    });
+    expect(message).toContain('Unrecognized key: "bogus"');
+    expect(message).not.toContain("Hint:");
+  });
+
+  test("omits the hint for other tools", () => {
+    const input = { platform: "ios", text: "Hi" };
+    const result = tapOnSchema.safeParse(input);
+    if (result.success) {
+      throw new Error("expected invalid tapOn input");
+    }
+    expect(formatToolParamError("tapOn", result.error, input, tapOnSchema)).not.toContain(
+      "sendKeys takes commands",
+    );
   });
 });

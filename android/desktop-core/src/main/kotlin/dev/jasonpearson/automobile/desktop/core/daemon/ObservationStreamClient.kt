@@ -99,6 +99,17 @@ class ObservationStreamClient(
   internal val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher =
     kotlinx.coroutines.Dispatchers.IO,
 ) : ObservationStream {
+  /**
+   * Subscribe for device lifecycle frames only (#17061): the daemon sends this subscription its
+   * epoch's `device_session_started`/`device_session_ended` frames and nothing else, and does not
+   * count it when deciding whether, or how fast, to poll the device. Set before [connect].
+   */
+  internal var lifecycleOnly: Boolean = false
+
+  // Where the blocking readLine() parks: a dedicated thread per connection rather than a shared
+  // Dispatchers.IO slot, so dozens of open streams cannot exhaust that pool (#5262). Test seam.
+  internal var readerThreads: StreamReaderDispatcherFactory = DedicatedStreamReaderThreads
+
   internal fun authenticatedSessionUuid(): String? = sessionUuidProvider?.invoke()
 
   companion object {
@@ -496,6 +507,7 @@ data class StreamRequest(
   val hierarchyIntervalMs: Long? = null,
   val packageName: String? = null,
   val fileName: String? = null,
+  val lifecycleOnly: Boolean? = null,
 )
 
 /**
@@ -756,6 +768,13 @@ sealed class DeviceStreamEvent {
     val deviceId: String,
     val retiredUuid: String,
     val successorUuid: String,
+    val timestamp: Long,
+  ) : DeviceStreamEvent()
+
+  /** The daemon retired [retiredUuid] for [deviceId] with no successor: the device is gone. */
+  data class DeviceSessionEnded(
+    val deviceId: String,
+    val retiredUuid: String,
     val timestamp: Long,
   ) : DeviceStreamEvent()
 

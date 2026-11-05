@@ -1,3 +1,8 @@
+import { devicectlConfirmsIosPanel } from "../../../src/features/device/postureCommands";
+import type { DevicectlDisplayInfo } from "../../../src/utils/ios-cmdline-tools/DevicectlDisplayInfo";
+import { FakeDevicectlDisplayInfoSource } from "../../fakes/FakeDevicectlDisplayInfoSource";
+import { loadDevicectlListFixture } from "../../helpers/devicectlListFixtures";
+import { parseDevicectlDisplayInfo } from "../../../src/utils/ios-cmdline-tools/DevicectlDisplayInfo";
 import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
 import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
@@ -828,6 +833,7 @@ describe("SetPosture", () => {
   function makeIosFeature(
     device: BootedDevice = duo,
     observations: ObserveResult[] = [observation],
+    iosDisplayInfoSource = new FakeDevicectlDisplayInfoSource(),
   ) {
     const client = new FakeIOSCtrlProxy();
     const simctl = new FakeSimctl();
@@ -850,6 +856,7 @@ describe("SetPosture", () => {
     let observeCount = 0;
     const feature = new SetPosture(device, {
       iosClientProvider: () => client,
+      iosDisplayInfoSource,
       simctl,
       observeFactory: () =>
         ({
@@ -1930,6 +1937,42 @@ describe("SetPosture", () => {
     expect(getObserveCount()).toBe(3);
   });
 
+  test.each([
+    ["info-displays-duo-inner-active.json", true],
+    ["info-displays-duo-cover-active.json", false],
+  ])(
+    "stale cover observation with %s preserves the independent active-panel verdict",
+    async (fixture, succeeds) => {
+      const source = new FakeDevicectlDisplayInfoSource();
+      const listing = parseDevicectlDisplayInfo(loadDevicectlListFixture(fixture));
+      if (listing.kind !== "ok") {
+        throw new Error("Expected captured display listing");
+      }
+      source.displays = listing.displays;
+      const cover: ObserveResult = {
+        ...observation,
+        display: { ...display, key: "primary", role: "cover", posture: "closed" },
+        screenSize: { width: 466, height: 678 },
+      };
+      const h = makeIosFeature(duo, [cover], source);
+      if (succeeds) {
+        expect(await h.feature.execute("opened")).toEqual({
+          posture: "opened",
+          display: { key: "primary-1", role: "inner", posture: "opened", generation: 2 },
+          locked: true,
+        });
+        expect(cover.display.role).toBe("cover");
+      } else {
+        await expect(h.feature.execute("opened")).rejects.toThrow(
+          "hinge event was accepted, but the active display is still the cover panel after 3000 ms",
+        );
+      }
+      expect(source.requests).toEqual([{ deviceId: duo.deviceId, signal: undefined }]);
+      expect(h.getObserveCount()).toBe(13);
+      expect(h.timer.getSleepHistory()).toEqual(Array(12).fill(250));
+    },
+  );
+
   test("opened accepts either orientation of the inner panel geometry", async () => {
     const cover = {
       ...observation,
@@ -2056,6 +2099,38 @@ describe("SetPosture", () => {
     expect(getObserveCount()).toBe(13);
     expect(timer.now()).toBe(3000);
     expect(timer.getSleepHistory()).toEqual(Array(12).fill(250));
+  });
+
+  test("CoreDevice confirmation requires one active panel and prioritizes size over name", () => {
+    const active: DevicectlDisplayInfo = {
+      uniqueId: "inner",
+      displayId: 2,
+      active: true,
+      name: "LCD-1",
+    };
+    const confirms = (displays: DevicectlDisplayInfo[]) =>
+      devicectlConfirmsIosPanel(displays, duo.displays?.panels, "inner");
+    expect(confirms([active])).toBe(true);
+    expect(confirms([{ ...active, active: false }])).toBe(false);
+    expect(confirms([{ ...active, active: undefined }])).toBe(false);
+    expect(confirms([active, { ...active, uniqueId: "second" }])).toBe(false);
+    expect(confirms([{ ...active, nativeSize: { width: 1398, height: 2034 } }])).toBe(false);
+    expect(confirms([{ ...active, nativeSize: { width: 999, height: 999 } }])).toBe(false);
+    expect(confirms([{ ...active, name: "LCD", nativeSize: { width: 2853, height: 2007 } }])).toBe(
+      true,
+    );
+    expect(
+      confirms([
+        {
+          ...active,
+          name: "other",
+          bounds: { origin: { x: 0, y: 0 }, size: { width: 2007, height: 2853 } },
+        },
+      ]),
+    ).toBe(true);
+    expect(
+      devicectlConfirmsIosPanel([{ ...active, name: "LCD" }], duo.displays?.panels, "cover"),
+    ).toBe(true);
   });
 
   test("classifies Duo panels in either orientation and derives point scale when available", () => {
@@ -2214,6 +2289,7 @@ for (const platform of ["android", "ios"] as const) {
         adbFactory: { create: () => adb },
         observeFactory: () => observe,
         iosClientProvider: () => client,
+        iosDisplayInfoSource: new FakeDevicectlDisplayInfoSource(),
         timer,
         transitionSink: sink,
       });

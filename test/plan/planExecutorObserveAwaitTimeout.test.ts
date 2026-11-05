@@ -3,7 +3,7 @@ import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory"
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { z } from "zod/v4";
-import { createStructuredToolResponse } from "../../src/utils/toolUtils";
+import { createStructuredToolResponse, withIsErrorOnFailure } from "../../src/utils/toolUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
@@ -46,6 +46,7 @@ describe("PlanExecutor — observe waitFor timeout", () => {
   afterEach(() => {
     ToolRegistry.unregister("observe");
     ToolRegistry.unregister("openLink");
+    ToolRegistry.unregister("mediaSession");
     ToolRegistry.unregister("observeAwaitTimeoutChainNoop");
   });
 
@@ -126,6 +127,66 @@ describe("PlanExecutor — observe waitFor timeout", () => {
       details: { error: `${tool} waitFor timed out after 5000ms`, optional: true },
     });
     expect(nextStep).toHaveBeenCalledTimes(1);
+  });
+
+  describe("an isError timeout envelope (#16889, #16902)", () => {
+    const timedOutEnvelope = (payload: Record<string, unknown>) =>
+      withIsErrorOnFailure(
+        createStructuredToolResponse({
+          awaitTimeout: true,
+          awaitDuration: 5000,
+          timedOut: true,
+          matched: false,
+          timeoutReason: "no element matched text 'Pay'",
+          candidates: [{ text: "Pa" }],
+          ...payload,
+        }),
+        false,
+      );
+
+    test.each([
+      ["observe", {}],
+      ["openLink", { success: true, message: "Opened link myapp://x" }],
+      ["mediaSession", { success: true, message: "No media session reported playing" }],
+    ] as const)("fails %s through the timeout path with its diagnostics", async (tool, payload) => {
+      ToolRegistry.unregister(tool);
+      ToolRegistry.register(tool, "isError timeout", z.object({}).passthrough(), async () =>
+        timedOutEnvelope(payload),
+      );
+      const result = await planExecutor.executePlan(
+        {
+          name: "isError timeout",
+          steps: [
+            { tool, params: { waitFor: { text: "Pay" } } },
+            { tool: "observeAwaitTimeoutChainNoop", params: {} },
+          ],
+        },
+        0,
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.failedStep?.error).toBe(`${tool} waitFor timed out after 5000ms`);
+      expect(result.debug?.steps[0].details).toMatchObject({
+        waitForTimeout: {
+          awaitDuration: 5000,
+          timeoutReason: "no element matched text 'Pay'",
+          candidates: [{ text: "Pa" }],
+        },
+      });
+      expect(nextStep).not.toHaveBeenCalled();
+    });
+
+    test("an openLink that failed to open reports the open error, not the wait", async () => {
+      ToolRegistry.register("openLink", "failed open", z.object({}).passthrough(), async () =>
+        timedOutEnvelope({ success: false, error: "no handler for myapp://x" }),
+      );
+      const result = await planExecutor.executePlan(
+        { name: "failed open", steps: [{ tool: "openLink", params: { url: "myapp://x" } }] },
+        0,
+      );
+
+      expect(result.failedStep?.error).toBe("no handler for myapp://x");
+    });
   });
 
   describe("failed-step record (#10024)", () => {

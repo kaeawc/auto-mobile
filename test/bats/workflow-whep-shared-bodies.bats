@@ -8,13 +8,10 @@
 PR_WF=".github/workflows/pull_request.yml"
 MERGE_WF=".github/workflows/merge.yml"
 
+load yq-helpers
+
 setup() {
-  command -v yq >/dev/null 2>&1 && return 0
-  if [[ -n "${CI:-}" ]]; then
-    echo "yq is required in CI to verify the shared job wiring" >&2
-    return 1
-  fi
-  skip "yq not installed"
+  require_mikefarah_yq
 }
 
 # job-id|composite action|job name

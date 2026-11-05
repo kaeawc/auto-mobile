@@ -122,8 +122,10 @@ Every other tool refuses a watch before doing anything, with:
 ## Limits
 
 - No physical Apple Watch and no paired iPhone (see above).
-- The automation runner reads the view hierarchy of its own bundled watch app only, and its target
-  cannot be changed yet. For any other app, including yours, `observe` is screenshot-only and
+- The automation runner reads the view hierarchy of one target app at a time. It starts on its own
+  bundled watch app; `launchApp` restarts it targeting the launched app, and fails with the reason
+  if that restart fails even though the app itself launched. A runner AutoMobile did not start
+  keeps its target. For any app other than the runner's target, `observe` is screenshot-only and
   `tapOn` and `swipeOn` with `lookFor` cannot match elements.
 - No text input, pinch, multi-touch or drag.
 - Prototypes do not run on a watch. To mock up a watch screen, use a watch-sized prototype spec on a

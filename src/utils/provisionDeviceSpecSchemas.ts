@@ -177,3 +177,11 @@ export const appleTvProvisionDeviceSpecSchema = z
     deviceType: z.string().min(1).describe("Apple TV CoreSimulator device-type identifier"),
   })
   .strict();
+
+/** Exact identifiers from the host's Apple Vision Pro catalog. */
+export const appleVisionProvisionDeviceSpecSchema = z
+  .object({
+    runtime: z.string().min(1).describe("visionOS CoreSimulator runtime identifier"),
+    deviceType: z.string().min(1).describe("Apple Vision Pro CoreSimulator device-type identifier"),
+  })
+  .strict();

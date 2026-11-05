@@ -146,8 +146,14 @@ describe("notification tools", () => {
     const schema = parseJsonSchemaNode(toolDefinition!.inputSchema);
     // #6154: platform is optional wherever deviceId/session resolves it.
     expect(schema.required).toEqual(["title", "body"]);
-    // Watch-aware schemas advertise watchOS alongside the shared platforms.
-    expect(schema.properties?.platform?.enum).toEqual(["android", "ios", "watchos", "tvos"]);
+    // Watch-aware schemas advertise watchOS alongside the shared platforms (including visionos).
+    expect(schema.properties?.platform?.enum).toEqual([
+      "android",
+      "ios",
+      "watchos",
+      "tvos",
+      "visionos",
+    ]);
     expect(schema.properties?.appId?.description).toContain(
       "Android defaults to the live foreground app",
     );

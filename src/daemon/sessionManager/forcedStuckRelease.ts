@@ -15,6 +15,8 @@ import {
   type SessionReleaseOptions,
 } from "../sessionManager";
 import type { SessionSlots } from "../sessionSlots";
+import { cliIdleWindowOfRelease } from "./internalContracts";
+import type { EndedLabelBase } from "../planLabelRegistry";
 import type { TerminalReleaseJournal } from "../terminalReleaseJournal";
 import type { SessionRowWriter } from "../sessionRowWriter";
 
@@ -63,6 +65,8 @@ export interface ForcedStuckReleasePort {
   volatileTerminalReleaseIntents(): Pick<Map<string, string>, "get" | "delete">;
   terminalReleaseJournal(): Pick<TerminalReleaseJournal, "resolve">;
   rowWriter(): Pick<SessionRowWriter, "cancel" | "liftTerminal">;
+  /** The base end the cascade retained for a plan label it is ending (#16971). */
+  retainedEndedBase(labelSessionId: string): EndedLabelBase | undefined;
   timer: Timer;
   sessionNow(): number;
 }
@@ -166,6 +170,7 @@ export class ForcedStuckRelease {
       releaseReason,
       releasedAtMs,
       terminal: isTerminalReleaseReason(releaseReason),
+      ...cliIdleWindowOfRelease(session, releaseReason, this.port.retainedEndedBase(sessionId)),
       heartbeat: {
         lastHeartbeatMs: session.lastHeartbeat,
         hasReceivedHeartbeat: session.hasReceivedHeartbeat,

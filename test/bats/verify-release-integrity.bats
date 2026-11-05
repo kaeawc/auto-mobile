@@ -17,7 +17,7 @@ FILTER_SHA="fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
 setup() {
   TEST_ROOT="$(mktemp -d)"
   SCRIPT_ABS="$(cd "$(dirname "$SCRIPT_SRC")" && pwd)/$(basename "$SCRIPT_SRC")"
-  mkdir -p "${TEST_ROOT}/.claude-plugin" \
+  mkdir -p "${TEST_ROOT}/.claude-plugin" "${TEST_ROOT}/plugins/auto-mobile/.claude-plugin" \
     "${TEST_ROOT}/android" \
     "${TEST_ROOT}/src/constants"
   write_fixtures "$VERSION" "$VERSION-SNAPSHOT" "$VERSION" "$RUNNER_SHA"
@@ -51,7 +51,7 @@ write_fixtures() {
 { "name": "@kaeawc/auto-mobile", "version": "${ver}" }
 EOF
 
-  cat > "${TEST_ROOT}/.claude-plugin/plugin.json" <<EOF
+  cat > "${TEST_ROOT}/plugins/auto-mobile/.claude-plugin/plugin.json" <<EOF
 { "name": "auto-mobile", "version": "${ver}" }
 EOF
 
@@ -178,7 +178,7 @@ PY
 }
 
 @test "fails when plugin.json version diverges" {
-  python3 - "${TEST_ROOT}/.claude-plugin/plugin.json" <<'PY'
+  python3 - "${TEST_ROOT}/plugins/auto-mobile/.claude-plugin/plugin.json" <<'PY'
 import json,sys
 p=sys.argv[1]; d=json.load(open(p)); d["version"]="0.0.99"
 json.dump(d,open(p,"w"))

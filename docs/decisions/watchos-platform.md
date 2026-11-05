@@ -1,7 +1,8 @@
 # watchOS as its own platform, fail-closed per tool
 
 Status: accepted for #14899 (part of the Apple Watch simulator epic #14895); extended to every
-non-iOS Apple platform for #15886 (Apple TV epic #15884).
+non-iOS Apple platform for #15886 (Apple TV epic #15884) and to Apple Vision Pro for #16848
+(visionOS epic #16857).
 
 ## Decision
 
@@ -29,6 +30,14 @@ release, shutdown and deletion follow the watch lifecycle. Connected observation
 screenshots, while observations without a runner retain the simctl screenshot-only fallback. A broker binding
 never reuses a TV. Unlike watchOS,
 `tvos` is advertised in tool input schemas ahead of support (see the schema rule below).
+
+An Apple Vision Pro simulator is `platform: "visionos"` (owner decision 2026-11-04, #16848), under
+the same fail-closed rules. Its allowlist starts with the device lifecycle tools only
+(`listDevices`, `listDeviceImages`, `provisionDevice`, `deleteDevice`, `startDevice`,
+`setActiveDevice`, `killDevice`); every other tool joins once verified on a Vision Pro simulator.
+No input schema names `visionos` and no inventory discovers one until the simctl lifecycle lands
+(#16849): sweeps, discovery sources and the device-image catalog report it unscanned or
+unavailable, and a broker binding never reuses one.
 
 - **Fail closed at the tool boundary.** Every device-aware tool rejects a watch or an Apple TV with
   an `ActionableError` naming the platform (`<tool> does not support watchOS yet`, `<tool> does

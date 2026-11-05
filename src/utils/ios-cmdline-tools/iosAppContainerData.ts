@@ -15,6 +15,8 @@ import { logger } from "../logger";
  */
 export const IOS_APP_DATA_FOLDERS = ["Documents", "Library", "tmp"];
 
+export const IOS_LIBRARY_STANDARD_FOLDERS = ["Caches", "Preferences"];
+
 // NOTE: there is deliberately no `quoteSimctlArg` helper here any more. Building a
 // simctl command line by quoting values into a string and re-splitting it back into
 // argv loses empty values and mangles escapes (issue #4196). Pass an argument array

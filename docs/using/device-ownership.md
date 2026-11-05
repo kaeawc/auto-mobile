@@ -234,8 +234,13 @@ the windows with the variables in
 - **Terminal releases.** A released session UUID is never revived. A later call
   naming it is refused with `session_ownership_lost`, `retryable: false` and
   `nextAction: "acquire_new_session"`. After an idle release the refusal also
-  carries `idle: true`. A call still running when its session is released is cut
-  with the same refusal.
+  carries `idle: true`. After a `cli-idle-timeout` release it also carries
+  `idleTimeoutMs`, the idle window the session had: the
+  `AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS` of the last `--cli` call that used it,
+  capped at 1 hour. A plan's derived label session that ends with its base's
+  `cli-idle-timeout` carries the base's `idleTimeoutMs`, the window that
+  expired. A call still running when its session is released is cut with the same
+  refusal.
 - **Daemon restart.** A daemon restart is not terminal: the owner reclaims the
   session under the same UUID. While the daemon reclaims the binding, calls may
   receive the retryable `binding_ownership_unconfirmed`; wait `retryAfterMs`.
@@ -274,7 +279,7 @@ the windows with the variables in
 | ------------------------------------------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `explicit-release`                                                                                      | Yes        | `session_ownership_lost`; acquire a new session.                                                                                                                                                                                                                    |
 | `cleanup-expired` (legacy: `lazy-expiry`)                                                               | Yes (idle) | `session_ownership_lost` refusals and session-not-found answers (heartbeat, `daemon/sessionInfo`) carry `idle: true`. Acquire a new session.                                                                                                                        |
-| `cli-idle-timeout`                                                                                      | Yes (idle) | `session_ownership_lost` refusals and session-not-found answers (heartbeat, `daemon/sessionInfo`) carry `idle: true` for a one-shot CLI session.                                                                                                                    |
+| `cli-idle-timeout`                                                                                      | Yes (idle) | `session_ownership_lost` refusals (including the `daemon/registerSession` refusal) and session-not-found answers (heartbeat, `daemon/sessionInfo`) carry `idle: true` and `idleTimeoutMs` for a one-shot CLI session.                                               |
 | `heartbeat-timeout`, `missing-first-heartbeat`                                                          | Yes        | `session_ownership_lost`, with the heartbeat age and limit in the message.                                                                                                                                                                                          |
 | `rehydration-owner-timeout`                                                                             | Yes        | `session_ownership_lost`: a rehydrated session's owner never reclaimed it.                                                                                                                                                                                          |
 | `owner-disconnected`                                                                                    | Yes        | `session_ownership_lost`: the owning connection closed and no other client owns the session.                                                                                                                                                                        |

@@ -252,6 +252,76 @@ describe("automobile:prototype/eject result", () => {
     );
   });
 
+  test("reports nested action lists, such as text spans and swipe actions, by spec path", async () => {
+    const spec = {
+      id: "nested",
+      root: {
+        type: "row",
+        swipeActions: { end: [{ label: "Delete", onTap: [{ type: "emit", name: "del" }] }] },
+        children: [
+          {
+            type: "text",
+            spans: [{ text: "Read " }, { text: "terms", onTap: [{ type: "emit", name: "t" }] }],
+          },
+        ],
+      },
+    };
+    for (const platform of ["android", "ios"] as const) {
+      const result = await eject(platform, spec);
+      expect(result.remaining).toEqual([
+        { path: "root.children[0].spans[1].onTap[0]", kind: "action", type: "emit" },
+        { path: "root.swipeActions.end[0].onTap[0]", kind: "action", type: "emit" },
+      ]);
+      expect(result.files[0].content).toContain(
+        "// TODO(eject): spans[1].onTap actions at root.children[0] are not translated.",
+      );
+    }
+  });
+
+  test("does not descend into child nodes or nested action lists of an action", async () => {
+    const spec = {
+      id: "deep",
+      root: {
+        type: "dialog",
+        confirm: {
+          label: "OK",
+          onTap: [{ type: "request", url: "/x", onSuccess: [{ type: "emit", name: "ok" }] }],
+        },
+        child: { type: "text", text: "Body", onAppear: [{ type: "emit", name: "seen" }] },
+      },
+    };
+    const remaining = (await eject("android", spec)).remaining.filter(
+      (item) => item.kind === "action",
+    );
+    // A node writes its children before its own TODOs.
+    expect(remaining.map((item) => item.path)).toEqual([
+      "root.child.onAppear[0]",
+      "root.confirm.onTap[0]",
+    ]);
+  });
+
+  test("reports repeat on a non-list layout instead of writing its children once silently", async () => {
+    const spec = {
+      id: "repeat",
+      root: {
+        type: "row",
+        repeat: { items: [{ name: "a" }, { name: "b" }], as: "item" },
+        children: [{ type: "text", text: "chip" }],
+      },
+    };
+    for (const platform of ["android", "ios"] as const) {
+      const result = await eject(platform, spec);
+      expect(result.remaining).toEqual([{ path: "root.repeat", kind: "binding", type: "repeat" }]);
+      expect(result.files[0].content).toContain(
+        "// TODO(eject): repeat at root is not translated; its children are written once.",
+      );
+    }
+    const pointer = { ...spec, root: { ...spec.root, repeat: { items: { path: "/x" }, as: "i" } } };
+    expect((await eject("android", pointer)).remaining).toEqual([
+      { path: "root.repeat", kind: "binding", type: "/x" },
+    ]);
+  });
+
   test("reads eight-digit theme colors as alpha-first ARGB", async () => {
     const spec = { id: "argb", theme: { colors: { primary: "#80FF0000" } }, root: shop.root };
     expect((await eject("android", spec)).files[0].content).toContain(

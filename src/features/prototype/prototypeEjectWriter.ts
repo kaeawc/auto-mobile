@@ -1,4 +1,4 @@
-import contract from "../../../schemas/prototype-spec-contract.json";
+import { untranslatedActionLists } from "./prototypeEjectActions";
 import { isEjectScaffoldType, type EjectScaffoldType } from "./prototypeEjectMapping";
 import { prototypeNodeChildren } from "./prototypeNodeChildren";
 import { record, type Raw } from "./prototypeTemplate";
@@ -65,25 +65,6 @@ function pascal(value: string): string {
   return /^[A-Za-z]/.test(name) ? name : `S${name}`;
 }
 
-/**
- * Action-list fields of any node in the contract. The dialects translate `onTap` only; the rest
- * are reported so the scaffold never drops an action silently.
- */
-const UNTRANSLATED_ACTION_FIELDS: readonly string[] = [
-  ...new Set(
-    Object.values(contract.definitions.node.variants).flatMap((variant) =>
-      Object.entries(variant.fields)
-        .filter(([, field]) => {
-          const rule: { kind?: string; item?: { name?: string } } = field.rule;
-          return rule.kind === "array" && rule.item?.name === "action";
-        })
-        .map(([name]) => name),
-    ),
-  ),
-]
-  .filter((name) => name !== "onTap")
-  .sort();
-
 /** Collects screens, TODOs and stack starts while a dialect writes one prototype. */
 export class EjectWriter {
   readonly todos: EjectTodo[] = [];
@@ -108,31 +89,55 @@ export class EjectWriter {
     if (isEjectScaffoldType(type)) {
       this.scaffolded.add(type);
       const lines = this.dialect.emitters[type](raw, scope);
-      return [...this.untranslatedActions(raw, path), ...lines];
+      return [...this.untranslated(raw, path), ...lines];
     }
     this.todos.push({ path, kind: "node", type: String(type) });
     // Every contract child slot (children, child, screens, adaptive panes), so nested tags survive.
     const children = prototypeNodeChildren(raw).flatMap(({ value, suffix }) =>
       this.emit(value, `${path}${suffix}`, index),
     );
-    return [...this.untranslatedActions(raw, path), ...this.dialect.todoStub(raw, scope, children)];
+    return [...this.untranslated(raw, path), ...this.dialect.todoStub(raw, scope, children)];
   }
 
-  /** Reports each action outside `onTap` and leaves one comment line naming the fields. */
+  /** TODO lines for everything on the node itself that no dialect translates. */
+  private untranslated(node: Raw, path: string): string[] {
+    return [...this.untranslatedActions(node, path), ...this.untranslatedRepeat(node, path)];
+  }
+
+  /** Reports each action outside the node's own `onTap`, nested ones included, by spec path. */
   private untranslatedActions(node: Raw, path: string): string[] {
-    const fields = UNTRANSLATED_ACTION_FIELDS.filter((field) => Array.isArray(node[field]));
+    const lists = untranslatedActionLists(node, path);
     this.todos.push(
-      ...fields.flatMap((field) =>
-        (node[field] as unknown[]).map((action, i) => ({
-          path: `${path}.${field}[${i}]`,
+      ...lists.flatMap((list) =>
+        list.actions.map((action, i) => ({
+          path: `${list.path}[${i}]`,
           kind: "action" as const,
           type: String(record(action)?.type),
         })),
       ),
     );
+    const fields = lists.map((list) => list.path.slice(path.length + 1));
     return fields.length === 0
       ? []
       : [`// TODO(eject): ${fields.join(", ")} actions at ${path} are not translated.`];
+  }
+
+  /**
+   * `list` scaffolds its `repeat`; on any other node the children are written once, so the
+   * repetition (and its `{index}`) is a binding the app author still owns.
+   */
+  private untranslatedRepeat(node: Raw, path: string): string[] {
+    const repeat = record(node.repeat);
+    if (!repeat || node.type === "list") {
+      return [];
+    }
+    const pointer = record(repeat.items)?.path;
+    this.todos.push({
+      path: `${path}.repeat`,
+      kind: "binding",
+      type: typeof pointer === "string" ? pointer : "repeat",
+    });
+    return [`// TODO(eject): repeat at ${path} is not translated; its children are written once.`];
   }
 
   /** Writes a stack screen once and returns the function/view name that draws it. */

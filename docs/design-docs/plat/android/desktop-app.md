@@ -79,4 +79,7 @@ successor, the pane re-keys onto the successor. When it ends with no successor
 disconnected" in place of its stream and facets, which releases their leases.
 The pane is marked rather than closed so the user sees why the device went away;
 it stays until closed, and observing the device again or a fresh epoch for it
-restores the live pane. An end for an epoch the pane is not on is ignored.
+(including one reported after a daemon restart) restores the live pane as a new
+epoch, so nothing observed from the retired epoch carries over. A daemon
+restart that re-mints a live pane's epoch is not a new epoch: that pane keeps
+its remembered state. An end for an epoch the pane is not on is ignored.

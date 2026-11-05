@@ -304,6 +304,13 @@ export const CTRL_PROXY_RESPONSE_FIELDS: {
     timestamp: "optional",
     error: "optional",
   },
+  attestation_chain: {
+    type: "required",
+    timestamp: "optional",
+    requestId: "optional",
+    certificateChainBase64: "required",
+    error: "optional",
+  },
   keystore_discovery: {
     type: "required",
     requestId: "optional",

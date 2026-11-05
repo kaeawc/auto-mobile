@@ -1,10 +1,20 @@
 /**
  * A stable screen identity, independent of the current logical display. Every role names a
- * physical panel except `overlay`: an Android overlay display (`overlay_display_devices`), which
- * is addressable for targeting but never counts as a panel, joins `display: "all"`, or serves as a
- * posture default.
+ * physical panel except `overlay` (an Android overlay display, `overlay_display_devices`) and
+ * `virtual` (an app-created Android virtual display): those are addressable for targeting but
+ * never count as a panel, join `display: "all"`, or serve as a posture default. `cluster` is a
+ * secondary built-in panel of an Android Automotive device (the instrument cluster): a car has no
+ * posture, so the panel is never reached through one.
  */
-export type PanelRole = "inner" | "cover" | "rear" | "external" | "overlay" | "unknown";
+export type PanelRole =
+  | "inner"
+  | "cover"
+  | "rear"
+  | "external"
+  | "cluster"
+  | "overlay"
+  | "virtual"
+  | "unknown";
 
 /** A device state; a panel itself has no posture. */
 export type Posture =
@@ -49,9 +59,9 @@ export interface DeviceDisplays {
   postures: Posture[];
 }
 
-/** Whether an inventory entry is a physical panel rather than an addressable overlay display. */
+/** Whether an inventory entry is a physical panel rather than an addressable overlay or virtual display. */
 export function isPhysicalPanel(panel: Pick<DisplayPanel, "role">): boolean {
-  return panel.role !== "overlay";
+  return panel.role !== "overlay" && panel.role !== "virtual";
 }
 
 /** Shared targeting inventory, including the ordinary single-display fallback. */
@@ -71,7 +81,8 @@ export interface DisconnectedPanelContext {
 /**
  * Guidance for a known panel whose logical display is absent in this posture.
  *
- * @param options.hasPostures - Whether the device reports postures, adding a setPosture remedy.
+ * @param options.hasPostures - Whether the device reports postures, adding a setPosture remedy. A
+ *   `cluster` panel never gets one: a car has no posture that connects it.
  * @param options.pinned - Whether a session display pin selected the panel, adding a clear-pin remedy.
  */
 export function buildDisconnectedPanelMessage(
@@ -83,13 +94,18 @@ export function buildDisconnectedPanelMessage(
   const { hasPostures, pinned } = options;
   const choices = connected.map(({ key, role }) => (role ? `${key} (${role})` : key)).join(", ");
   const posture = POSTURE_PANEL_ROLES.find(([, role]) => role === panelRole)?.[0];
-  const postureRemedy = hasPostures
-    ? `; to make this panel available, change the device posture with ${posture ? `setPosture {posture: "${posture}"}` : "setPosture using a supported posture"}`
-    : "";
+  const postureRemedy =
+    hasPostures && panelRole !== "cluster"
+      ? `; to make this panel available, change the device posture with ${posture ? `setPosture {posture: "${posture}"}` : "setPosture using a supported posture"}`
+      : "";
   const pinRemedy = pinned
     ? " Clear the pin with setActiveDevice {display: null} (include deviceId and sessionUuid), or select another display explicitly."
     : "";
-  return `Display "${panelKey}" (${panelRole}) is not connected in the current posture. Connected panels: ${choices}. Target a connected panel, omit display, or use display: "active"${postureRemedy}.${pinRemedy}`;
+  const state =
+    panelRole === "cluster"
+      ? "is not currently connected"
+      : "is not connected in the current posture";
+  return `Display "${panelKey}" (${panelRole}) ${state}. Connected panels: ${choices}. Target a connected panel, omit display, or use display: "active"${postureRemedy}.${pinRemedy}`;
 }
 
 /** Native Android panel size; dimensions are in natural orientation. */

@@ -116,7 +116,7 @@ jobs:
 
             // Tests under test/lint read these contracts.
             // Doc-only edits must still run Node tests.
-            const testGuardedDocs = ["docs/using/screen-control.md"];
+            const testGuardedDocs = ["docs/using/screen-control.md", "docs/using/apple-tv.md", "docs/using/apple-watch.md"];
 
             // Check if a file matches any documentation pattern
             const isDocFile = (filename) => {
@@ -229,7 +229,7 @@ jobs:
               /^\.lycherc\.toml$/
             ];
             // Keep auto-chore consistent with docs_only for test-guarded docs.
-            const testGuardedDocs = ["docs/using/screen-control.md"];
+            const testGuardedDocs = ["docs/using/screen-control.md", "docs/using/apple-tv.md", "docs/using/apple-watch.md"];
             const isDocFile = (filename) =>
               !testGuardedDocs.includes(filename) &&
               docPatterns.some(pattern => pattern.test(filename));
@@ -530,6 +530,7 @@ jobs:
               - '.githooks/**'
               - '.agents/**'
               - '.claude-plugin/**'
+              - 'plugins/**'
               - 'commands/**'
               - 'skills/**'
               - 'oxlint-plugins/**'
@@ -980,6 +981,10 @@ jobs:
         id: setup-uv-lock
         with:
           enable-cache: true
+          # Key the cache on the only uv lockfile. The default glob walks the
+          # whole workspace, including node_modules/ while bun install churns
+          # its .bun-tmp-* dirs, and fails with ENOENT (#17068).
+          cache-dependency-glob: scripts/github/uv.lock
 
       # Pulls a Docker image and consumes nothing this job produces, so start
       # it up front and let the whole job overlap the pull. It has no consumer,
@@ -1042,6 +1047,12 @@ jobs:
 
       - wait: [setup-python-lock, setup-uv-lock]
 
+      # The claude-plugin check fails in CI without the Claude CLI (#16963).
+      - name: "Install pinned Claude Code"
+        shell: bash
+        timeout-minutes: 10
+        run: scripts/ci/install-claude-code.sh
+
       - name: "Run fast validation checks"
         shell: bash
         env:
@@ -1052,7 +1063,7 @@ jobs:
           KTFMT_ONLY_TOUCHED_FILES: "false"
         run: |
           scripts/all_fast_validate_checks.sh \
-            --only yaml,lfs-pointers,scripts-referenced,schema-copy-drift,tool-definitions,prototype-spec-models,protoviewer-notices,privacy-manifests,store-listing,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,shared-process-allowlist,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock,debug-tags,datetime-now-literal,markdown-bash \
+            --only yaml,lfs-pointers,scripts-referenced,schema-copy-drift,tool-definitions,prototype-spec-models,protoviewer-notices,privacy-manifests,store-listing,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,android-parity-budgets,shared-process-allowlist,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock,debug-tags,datetime-now-literal,markdown-bash \
             --max-parallel 4
 
       - name: "Run offline lychee link check"
@@ -1135,6 +1146,10 @@ jobs:
         id: install-uv
         with:
           enable-cache: true
+          # Key the cache on the only uv lockfile. The default glob walks the
+          # whole workspace, including node_modules/ while bun install churns
+          # its .bun-tmp-* dirs, and fails with ENOENT (#17068).
+          cache-dependency-glob: scripts/github/uv.lock
 
       # Foreground: it appends node_modules/.bin to $GITHUB_PATH, and the
       # selector resolves TypeScript check dependencies with bun.
@@ -1142,13 +1157,24 @@ jobs:
         shell: bash
         run: scripts/ci/install-bun-deps.sh
 
+      # The selector adds `claude-plugin` for plugin changes, and that check fails
+      # in CI without the Claude CLI (#16963). Foreground: it appends to $GITHUB_PATH.
+      - name: "Install pinned Claude Code"
+        shell: bash
+        timeout-minutes: 10
+        run: scripts/ci/install-claude-code.sh
+
       - wait: [install-bats, install-uv]
 
+      # Diff against the PR's base commit, not origin/<base_ref>: a stacked PR's
+      # base branch may be missing from the clone or already deleted (#16972).
       - name: "Run changed-file shell checks"
         shell: bash
         env:
-          BASE_REF: ${{ github.base_ref }}
-        run: scripts/prepush-shell.sh --base "origin/${BASE_REF}"
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          base="$(scripts/ci/resolve-pr-base.sh "${BASE_SHA}")"
+          scripts/prepush-shell.sh --base "${base}"
 
   # Detekt used to be a step inside Fast Validation, where its ~7 minutes of
   # cold Gradle work dominated an otherwise ~1 minute job. It is its own job so
@@ -1226,11 +1252,12 @@ jobs:
       - name: "Check Android lint baselines only shrink"
         if: success() || failure()
         env:
-          BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          # Fetch the actual target explicitly, including for stacked PRs.
-          git fetch origin "${BASE_REF}" "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
-          bash scripts/android/check-lint-baseline-shrink.sh --base-ref "origin/${BASE_REF}"
+          # The PR's base commit, which still resolves for a stacked PR whose
+          # base branch was deleted when the PR below it merged (#16972).
+          base="$(scripts/ci/resolve-pr-base.sh "${BASE_SHA}")"
+          bash scripts/android/check-lint-baseline-shrink.sh --base-ref "${base}"
 
       - name: "Upload Android Lint Reports"
         if: failure()
@@ -2495,13 +2522,10 @@ jobs:
       # tested here.
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":control-proxy:testDebugUnitTest :control-proxy:createDebugUnitTestCoverageReport :prototype-compose:testDebugUnitTest :prototype-compose:createDebugUnitTestCoverageReport :prototype-saved:testDebugUnitTest :prototype-saved:createDebugUnitTestCoverageReport :protoviewer:testDebugUnitTest :protoviewer:createDebugUnitTestCoverageReport :protoviewer:verifyProtoViewerDependencies :auto-mobile-sdk:testDebugUnitTest :auto-mobile-sdk:createDebugUnitTestCoverageReport :test-plan-validation:test :test-plan-validation:jacocoTestReport :protocol:test :protocol:jacocoTestReport :video-server:test :video-server:d8Dex"
+          gradle-tasks: ":control-proxy:testDebugUnitTest :control-proxy:createDebugUnitTestCoverageReport :automotive-fixture:testDebugUnitTest :wear-fixture:testDebugUnitTest :prototype-compose:testDebugUnitTest :prototype-compose:createDebugUnitTestCoverageReport :prototype-saved:testDebugUnitTest :prototype-saved:createDebugUnitTestCoverageReport :protoviewer:testDebugUnitTest :protoviewer:createDebugUnitTestCoverageReport :protoviewer:verifyProtoViewerDependencies :auto-mobile-sdk:testDebugUnitTest :auto-mobile-sdk:createDebugUnitTestCoverageReport :test-plan-validation:test :test-plan-validation:jacocoTestReport :protocol:test :protocol:jacocoTestReport :video-server:test :video-server:d8Dex"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true
-          # Restore the android-all jars merge.yml's coverage job saves, so
-          # Robolectric does not download them at test time (#16396).
-          robolectric-jar-cache: "restore"
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
       - name: "Generate Kotlin Coverage Badge"

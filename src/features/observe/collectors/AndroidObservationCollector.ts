@@ -122,6 +122,9 @@ export class DefaultAndroidObservationCollector implements AndroidObservationCol
     // the activity belongs to the captured hierarchy's app.
     scopeActiveWindowToBackStack(result);
     await this.applyAndroidScreenIdentity(result);
+    if (this.deps.device().formFactor === "automotive") {
+      await this.deps.deviceStateCollector().collectAutomotive(result, signal, context.displayId);
+    }
 
     if (result.notificationPermissionDetected && result.activeWindow) {
       result.activeWindow.type = "notification_permission_dialog";

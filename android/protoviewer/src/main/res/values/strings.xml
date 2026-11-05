@@ -69,4 +69,26 @@
   <string name="security_policy">Security policy</string>
   <!-- Viewer overlay summarizing reduced effects; %1$d is the unsupported count and %2$d the count frozen over the frame budget. -->
   <string name="effects_degraded">Effects reduced: %1$s unsupported, %2$s over frame budget</string>
+  <!-- Library menu action that emails a report about a received prototype to the published contact. -->
+  <string name="report">Report</string>
+  <!-- Library menu action and confirmation button that hides one received prototype on this device. -->
+  <string name="hide">Hide</string>
+  <!-- Title of the hide confirmation dialog. -->
+  <string name="hide_title">Hide this prototype?</string>
+  <!-- Explanation in the hide confirmation dialog. -->
+  <string name="hide_body">This prototype and any identical copy you receive later stay hidden on this device.</string>
+  <!-- Library menu action and confirmation button that blocks a link host; %1$s is the host name. -->
+  <string name="block_host">Block %1$s</string>
+  <!-- Title of the block confirmation dialog; %1$s is the host name. -->
+  <string name="block_title">Block %1$s?</string>
+  <!-- Explanation in the block confirmation dialog. -->
+  <string name="block_body">Every prototype received from this host, now and later, stays hidden on this device.</string>
+  <!-- Email subject of a report about a received prototype. -->
+  <string name="report_subject">ProtoViewer content report</string>
+  <!-- Email body before the technical details of a reported prototype; %1$s is those details. -->
+  <string name="report_body">Describe the problem here.\n\nReported prototype:\n%1$s</string>
+  <!-- Library row that emails the published contact for reports and support. -->
+  <string name="contact">Report a problem or contact us</string>
+  <!-- Email subject of a general support or abuse message. -->
+  <string name="contact_subject">ProtoViewer feedback</string>
 </resources>

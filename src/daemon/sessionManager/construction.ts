@@ -197,6 +197,7 @@ export class SessionManagerConstruction {
       volatileTerminalReleaseIntents: () => this.host.volatileTerminalReleaseIntents,
       terminalReleaseJournal: () => this.host.terminalReleaseJournal,
       rowWriter: () => this.host.rowWriter,
+      retainedEndedBase: (labelSessionId) => this.host.planLabels.retainedEndedBase(labelSessionId),
       timer,
       sessionNow: () => this.host.sessionNow(),
     });

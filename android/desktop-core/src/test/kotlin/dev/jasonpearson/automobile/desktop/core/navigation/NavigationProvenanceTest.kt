@@ -10,6 +10,9 @@ import org.junit.Test
  * active-wins-when-both rule, the offline (null-context) behavior, and the accessible provenance
  * descriptions.
  */
+/** Fresh relative to every fixture `lastSeen`, so faded records read at the newest alpha. */
+private const val NOW = 1_000L
+
 class NavigationProvenanceTest {
 
   private val activeContext =
@@ -39,7 +42,7 @@ class NavigationProvenanceTest {
     val provenance = listOf(record(RecordSpec(deviceId = "emulator-5554")))
     assertEquals(
       ProvenanceOpacity.ACTIVE_ALPHA,
-      ProvenanceOpacity.alphaFor(provenance, activeContext),
+      ProvenanceOpacity.alphaFor(provenance, activeContext, NOW),
     )
     assertFalse(ProvenanceOpacity.isFaded(provenance, activeContext))
   }
@@ -49,7 +52,7 @@ class NavigationProvenanceTest {
     val provenance = listOf(record(RecordSpec(deviceId = "emulator-9999")))
     assertEquals(
       ProvenanceOpacity.FADED_ALPHA,
-      ProvenanceOpacity.alphaFor(provenance, activeContext),
+      ProvenanceOpacity.alphaFor(provenance, activeContext, NOW),
     )
     assertTrue(ProvenanceOpacity.isFaded(provenance, activeContext))
   }
@@ -63,7 +66,7 @@ class NavigationProvenanceTest {
       )
     assertEquals(
       ProvenanceOpacity.ACTIVE_ALPHA,
-      ProvenanceOpacity.alphaFor(provenance, activeContext),
+      ProvenanceOpacity.alphaFor(provenance, activeContext, NOW),
     )
     assertEquals(
       "Home — active in current context",
@@ -81,11 +84,14 @@ class NavigationProvenanceTest {
     val provenance = listOf(record(RecordSpec(versionCode = 1, contentHash = "hashA")))
     assertEquals(
       ProvenanceOpacity.FADED_ALPHA,
-      ProvenanceOpacity.alphaFor(provenance, ctxWithBuild),
+      ProvenanceOpacity.alphaFor(provenance, ctxWithBuild, NOW),
     )
     // A matching build on the active device → active.
     val matching = listOf(record(RecordSpec(versionCode = 2, contentHash = "hashB")))
-    assertEquals(ProvenanceOpacity.ACTIVE_ALPHA, ProvenanceOpacity.alphaFor(matching, ctxWithBuild))
+    assertEquals(
+      ProvenanceOpacity.ACTIVE_ALPHA,
+      ProvenanceOpacity.alphaFor(matching, ctxWithBuild, NOW),
+    )
   }
 
   @Test
@@ -120,7 +126,7 @@ class NavigationProvenanceTest {
   @Test
   fun `null context renders union at full opacity (offline)`() {
     val provenance = listOf(record(RecordSpec(deviceId = "emulator-9999")))
-    assertEquals(ProvenanceOpacity.ACTIVE_ALPHA, ProvenanceOpacity.alphaFor(provenance, null))
+    assertEquals(ProvenanceOpacity.ACTIVE_ALPHA, ProvenanceOpacity.alphaFor(provenance, null, NOW))
     assertEquals(
       "Home — union view (no active context)",
       ProvenanceOpacity.contentDescription("Home", provenance, null),
@@ -131,7 +137,7 @@ class NavigationProvenanceTest {
   fun `empty provenance is opaque and labeled`() {
     assertEquals(
       ProvenanceOpacity.ACTIVE_ALPHA,
-      ProvenanceOpacity.alphaFor(emptyList(), activeContext),
+      ProvenanceOpacity.alphaFor(emptyList(), activeContext, NOW),
     )
     assertEquals(
       "Home — no recorded provenance",
@@ -197,7 +203,7 @@ class NavigationProvenanceTest {
       )
     assertEquals(
       ProvenanceOpacity.ACTIVE_ALPHA,
-      ProvenanceOpacity.alphaFor(provenance, activeContext),
+      ProvenanceOpacity.alphaFor(provenance, activeContext, NOW),
     )
     assertFalse(ProvenanceOpacity.isFaded(provenance, activeContext))
     assertEquals(
@@ -213,7 +219,7 @@ class NavigationProvenanceTest {
     val otherDevice = listOf(record(RecordSpec(deviceId = "emulator-9999")))
     assertEquals(
       ProvenanceOpacity.FADED_ALPHA,
-      ProvenanceOpacity.alphaFor(otherDevice, activeContext),
+      ProvenanceOpacity.alphaFor(otherDevice, activeContext, NOW),
     )
     assertTrue(ProvenanceOpacity.isFaded(otherDevice, activeContext))
   }

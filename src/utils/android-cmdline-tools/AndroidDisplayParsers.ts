@@ -55,15 +55,36 @@ export function parseAndroidDisplayInfos(output: string): AndroidDisplayInfo[] {
 }
 
 /**
+ * The `virtual:<package>:<name>` key of an app-created virtual display, or undefined when the
+ * uniqueId is not one. DisplayManager writes `virtual:<package>,<uid>,<name>,<index>` for an
+ * ordinary virtual display, dropped here to package and name because the uid and index are not
+ * stable across reinstalls and recreations, and `virtual:<package>:<id>` when the app supplied
+ * its own unique id, which is already stable and kept whole.
+ */
+export function virtualDisplayKey(uniqueId: string): string | undefined {
+  const generated = /^virtual:([^,:]+),\d+,(.+),\d+$/.exec(uniqueId);
+  if (generated) {
+    return `virtual:${generated[1]}:${generated[2]}`;
+  }
+  return /^virtual:[^,:]+:.+$/.test(uniqueId) ? uniqueId : undefined;
+}
+
+/** The owning package named by a `virtual:<package>:<name>` key. */
+export function virtualDisplayOwnerPackage(key: string): string | undefined {
+  return /^virtual:([^,:]+):/.exec(key)?.[1];
+}
+
+/**
  * The inventory key for a display-service uniqueId. Physical panels drop the `local:`/`external:`
- * prefix (their key is the bare physical id); overlay displays keep the whole `overlay:<n>` id so
- * the key can never collide with a physical id or be mistaken for a logical display id.
+ * prefix (their key is the bare physical id); overlay displays keep the whole `overlay:<n>` id and
+ * app-created virtual displays use `virtual:<package>:<name>`, so neither can collide with a
+ * physical id or be mistaken for a logical display id.
  */
 export function panelKeyForUniqueId(uniqueId: string): string {
   if (uniqueId.startsWith("overlay:") || !uniqueId.includes(":")) {
     return uniqueId;
   }
-  return uniqueId.slice(uniqueId.indexOf(":") + 1);
+  return virtualDisplayKey(uniqueId) ?? uniqueId.slice(uniqueId.indexOf(":") + 1);
 }
 
 /** Map an inventory panel key back to Android's current logical display id. */

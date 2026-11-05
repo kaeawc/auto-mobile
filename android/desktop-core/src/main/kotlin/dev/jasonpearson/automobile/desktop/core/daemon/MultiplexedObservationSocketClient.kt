@@ -58,7 +58,8 @@ internal class MultiplexedObservationSocketClient(
       log,
     )
 
-  override fun stream(): ObservationStream = MuxObservationChannel(this)
+  override fun stream(): ObservationStream =
+    MuxObservationChannel(this, storage::isCurrentConnection)
 
   override fun close() {
     val (all, detached) =
@@ -138,13 +139,6 @@ internal class MultiplexedObservationSocketClient(
     }
     release.detached?.let(connection::shutDown)
   }
-
-  /**
-   * False once [channel]'s storage connection has reset since [connection]: an answer from it is
-   * stale.
-   */
-  fun isCurrentStorageConnection(channel: MuxObservationChannel, connection: Long): Boolean =
-    synchronized(table.lock) { channel.storage.connection == connection }
 
   fun subscribeStorage(channel: MuxObservationChannel, key: StorageSubscriptionKey) =
     storage.subscribe(channel, key)

@@ -59,6 +59,12 @@ internal class ObservationMuxStorage(
     synchronized(writeOrder) { owed.forEach { wire.write(open, it) } }
   }
 
+  /**
+   * False once [channel]'s storage connection has reset since [connection]: its answer is stale.
+   */
+  fun isCurrentConnection(channel: MuxObservationChannel, connection: Long): Boolean =
+    synchronized(table.lock) { channel.storage.connection == connection }
+
   /** Record a storage command's answer; false when [id] is not a storage command. */
   fun resolve(id: String, success: Boolean, error: String?): Boolean {
     val (channel, resolution, connection) =
@@ -116,7 +122,9 @@ internal class ObservationMuxStorage(
       }
     val (open, command) = step
     if (open == null) {
-      resolveLocally(channel, command)
+      // Settled locally: answer it as the daemon would have.
+      synchronized(table.lock) { table.storageRequests.put(command.requestId, channel) }
+      resolve(command.requestId, success = true, error = null)
       return
     }
     val sent = wire.write(open, wire.storage(channel, key, command.subscribe, command.requestId))
@@ -127,13 +135,6 @@ internal class ObservationMuxStorage(
     // The key stays desired, and nothing would drive it again while the socket stays open: close
     // it, so every device reconnects and re-registers its files (#17117).
     if (!sent) wire.closeQuietly(open)
-  }
-
-  private fun resolveLocally(channel: MuxObservationChannel, command: PendingStorageSubscription) {
-    synchronized(table.lock) {
-      table.storageRequests.put(command.requestId, channel)
-    }
-    resolve(command.requestId, success = true, error = null)
   }
 
   // Called under the table lock.

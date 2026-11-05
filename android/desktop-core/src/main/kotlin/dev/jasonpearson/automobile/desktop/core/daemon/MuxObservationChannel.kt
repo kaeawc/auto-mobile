@@ -28,8 +28,10 @@ import kotlinx.coroutines.flow.receiveAsFlow
  * queued when the connection that produced it resets is dropped on delivery: its observer went with
  * that connection, and the re-registration answers again (#17117).
  */
-internal class MuxObservationChannel(private val mux: MultiplexedObservationSocketClient) :
-  ObservationStream {
+internal class MuxObservationChannel(
+  private val mux: MultiplexedObservationSocketClient,
+  private val isCurrentStorageConnection: (MuxObservationChannel, Long) -> Boolean,
+) : ObservationStream {
   val flows = MuxChannelFlows()
 
   override val hierarchyUpdates: SharedFlow<HierarchyStreamUpdate> = flows.hierarchy.asSharedFlow()
@@ -47,7 +49,7 @@ internal class MuxObservationChannel(private val mux: MultiplexedObservationSock
   override val storageSubscriptionResponses: Flow<StorageSubscriptionResponse> =
     flows.storageResponses
       .receiveAsFlow()
-      .filter { mux.isCurrentStorageConnection(this, it.connection) }
+      .filter { isCurrentStorageConnection(this, it.connection) }
       .map { it.response }
   override val storageReconciliationRequests: Flow<StorageSubscriptionKey> =
     flows.storageReconciliations.receiveAsFlow()

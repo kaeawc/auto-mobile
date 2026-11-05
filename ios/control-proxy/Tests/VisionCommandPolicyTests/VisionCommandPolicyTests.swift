@@ -10,7 +10,17 @@ final class VisionCommandPolicyTests: XCTestCase {
         for command in VisionCommandPolicy.supportedCommands {
             XCTAssertTrue(VisionCommandPolicy.supports(command))
         }
-        for command in ["", "request_screenshot", "request_press_button", "request_tap_coordinates", "request_set_text", "request_focus", "request_open_immersive_space", "request_move_window", "request_pinch"] {
+        for command in [
+            "",
+            "request_screenshot",
+            "request_press_button",
+            "request_tap_coordinates",
+            "request_set_text",
+            "request_focus",
+            "request_open_immersive_space",
+            "request_move_window",
+            "request_pinch",
+        ] {
             XCTAssertFalse(VisionCommandPolicy.supports(command), command)
         }
     }

@@ -5,7 +5,9 @@ final class CtrlProxyVisionUITests: XCTestCase {
     func testRunService() throws {
         let environment = ProcessInfo.processInfo.environment
         guard let value = environment["AM_PORT"] else {
-            throw XCTSkip("AM_PORT is not set; run testRunService with TEST_RUNNER_AM_PORT to start the visionOS runner.")
+            throw XCTSkip(
+                "AM_PORT is not set; run testRunService with TEST_RUNNER_AM_PORT to start the visionOS runner."
+            )
         }
         guard let port = UInt16(value), port > 0 else {
             throw CommandError.invalidParameter("AM_PORT", value)

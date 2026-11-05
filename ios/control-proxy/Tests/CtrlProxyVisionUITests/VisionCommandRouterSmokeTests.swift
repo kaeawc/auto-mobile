@@ -25,7 +25,10 @@ final class VisionCommandRouterSmokeTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(initial.data?.hierarchy?.node).contains { $0.resourceId == "orn" })
 
         for identifier in ["B01", "orn", "field"] {
-            let tapped = try reply("{\"type\":\"request_tap_element\",\"identifier\":\"\(identifier)\"}", router: router)
+            let tapped = try reply(
+                "{\"type\":\"request_tap_element\",\"identifier\":\"\(identifier)\"}",
+                router: router
+            )
             XCTAssertEqual(tapped.type, "tap_element_result")
             XCTAssertEqual(tapped.success, true)
             if identifier != "field" {
@@ -33,7 +36,10 @@ final class VisionCommandRouterSmokeTests: XCTestCase {
             }
         }
         let focused = try reply(#"{"type":"request_hierarchy"}"#, router: router)
-        XCTAssertTrue(try XCTUnwrap(focused.data?.hierarchy?.node).contains { $0.resourceId == "field" && $0.focused == "true" })
+        XCTAssertTrue(
+            try XCTUnwrap(focused.data?.hierarchy?.node)
+                .contains { $0.resourceId == "field" && $0.focused == "true" }
+        )
         let typed = try reply(#"{"type":"request_append_text","text":"hello"}"#, router: router)
         XCTAssertEqual(typed.type, "append_text_result")
         XCTAssertEqual(typed.success, true)

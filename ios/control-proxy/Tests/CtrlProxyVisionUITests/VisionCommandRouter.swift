@@ -49,18 +49,30 @@ final class VisionCommandRouter {
                     data: ViewHierarchy(
                         packageName: snapshot.identifier,
                         hierarchy: root,
-                        screenWidth: ElementBounds.clampedInt(descendants.reduce(snapshot.frame.width) { max($0, $1.frame.maxX) }),
-                        screenHeight: ElementBounds.clampedInt(descendants.reduce(snapshot.frame.height) { max($0, $1.frame.maxY) })
+                        screenWidth: ElementBounds.clampedInt(descendants.reduce(snapshot.frame.width) { max(
+                            $0,
+                            $1.frame.maxX
+                        ) }),
+                        screenHeight: ElementBounds.clampedInt(descendants.reduce(snapshot.frame.height) { max(
+                            $0,
+                            $1.frame.maxY
+                        ) })
                     )
                 ))
             case "request_tap_element":
                 let request = try decoder.decode(TapRequest.self, from: data)
                 guard !request.identifier.isEmpty, request.frameContext == nil else {
-                    throw CommandError.invalidParameter("identifier", "supply a unique accessibility identifier; frame taps are unsupported")
+                    throw CommandError.invalidParameter(
+                        "identifier",
+                        "supply a unique accessibility identifier; frame taps are unsupported"
+                    )
                 }
                 let matches = application.descendants(matching: .any).matching(identifier: request.identifier)
                 guard matches.count == 1, matches.firstMatch.isEnabled else {
-                    throw CommandError.invalidParameter("identifier", "element missing, ambiguous or disabled; observe again")
+                    throw CommandError.invalidParameter(
+                        "identifier",
+                        "element missing, ambiguous or disabled; observe again"
+                    )
                 }
                 // Never translate an ornament frame to a coordinate.
                 matches.firstMatch.tap()
@@ -81,7 +93,10 @@ final class VisionCommandRouter {
                     }
                 }
                 guard focusedFields.count == 1 else {
-                    throw CommandError.invalidParameter("text", "no unique focused text input; focus it with tapOn first")
+                    throw CommandError.invalidParameter(
+                        "text",
+                        "no unique focused text input; focus it with tapOn first"
+                    )
                 }
                 focusedFields[0].typeText(request.text)
                 return try JSONEncoder().encode(WebSocketResponse.success(

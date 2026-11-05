@@ -96,15 +96,35 @@ describe("assertToolSupportsDevicePlatform", () => {
     );
   });
 
-  test("visionOS admits exactly lifecycle and the window-app tool subset", () => {
+  test("visionOS allows lifecycle, app tools, observe and window-app input", () => {
     expect([...APPLE_PLATFORM_SUPPORTED_TOOLS.visionos].sort()).toEqual(
-      [...DEVICE_LIFECYCLE_TOOLS, "observe", "tapOn", "sendKeys"].sort(),
+      [
+        ...DEVICE_LIFECYCLE_TOOLS,
+        "installApp",
+        "uninstallApp",
+        "launchApp",
+        "terminateApp",
+        "listApps",
+        "observe",
+        "tapOn",
+        "sendKeys",
+      ].sort(),
     );
-    for (const tool of [...DEVICE_LIFECYCLE_TOOLS, "observe", "tapOn", "sendKeys"]) {
+    for (const tool of [
+      ...DEVICE_LIFECYCLE_TOOLS,
+      "installApp",
+      "uninstallApp",
+      "launchApp",
+      "terminateApp",
+      "listApps",
+      "observe",
+      "tapOn",
+      "sendKeys",
+    ]) {
       expect(() => assertToolSupportsDevicePlatform(tool, visionPro)).not.toThrow();
       expect(() => assertRequestedPlatformSupported(tool, { platform: "visionos" })).not.toThrow();
     }
-    for (const tool of ["installApp", "launchApp", "pressButton", "tapAt", "swipeOn", "pinchOn"]) {
+    for (const tool of ["pressButton", "tapAt", "swipeOn", "pinchOn", "tapAny"]) {
       expect(() => assertToolSupportsDevicePlatform(tool, visionPro)).toThrow(
         new ActionableError(unsupportedPlatformToolMessage(tool, "visionos")),
       );
@@ -202,8 +222,8 @@ describe("assertRequestedPlatformSupported", () => {
     expect(() => assertRequestedPlatformSupported("pinchOn", { platform: "watchos" })).toThrow(
       new ActionableError(unsupportedPlatformToolMessage("pinchOn", "watchos")),
     );
-    expect(() => assertRequestedPlatformSupported("launchApp", { platform: "visionos" })).toThrow(
-      new ActionableError(unsupportedPlatformToolMessage("launchApp", "visionos")),
+    expect(() => assertRequestedPlatformSupported("pressButton", { platform: "visionos" })).toThrow(
+      new ActionableError(unsupportedPlatformToolMessage("pressButton", "visionos")),
     );
   });
 

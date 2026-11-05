@@ -74,7 +74,12 @@ let package = Package(
         .target(
             name: "VisionCommandPolicy",
             path: "Tests/CtrlProxyVisionUITests",
-            exclude: ["CtrlProxyVisionUITests.swift", "VisionCommandRouter.swift", "VisionWebSocketServer.swift", "VisionCommandRouterSmokeTests.swift"],
+            exclude: [
+                "CtrlProxyVisionUITests.swift",
+                "VisionCommandRouter.swift",
+                "VisionWebSocketServer.swift",
+                "VisionCommandRouterSmokeTests.swift",
+            ],
             sources: ["VisionCommandPolicy.swift", "ConnectedEvent.swift"],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),

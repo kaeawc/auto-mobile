@@ -44,8 +44,13 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "setActiveDevice",
     "killDevice",
   ]),
-  // Window-app XCUITest subset; screenshots stay on simctl.
+  // simctl lifecycle and app management; observe, tapOn and sendKeys go through the window-app XCUITest runner.
   visionos: new Set<string>([
+    "installApp",
+    "uninstallApp",
+    "launchApp",
+    "terminateApp",
+    "listApps",
     "observe",
     "tapOn",
     "sendKeys",

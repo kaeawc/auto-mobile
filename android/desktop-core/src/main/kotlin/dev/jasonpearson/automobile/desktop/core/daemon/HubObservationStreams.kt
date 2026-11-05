@@ -34,37 +34,20 @@ internal data class ObservationCadence(
 )
 
 /**
- * The cadence of a shared stream held only by lifecycle leases: the longest interval the daemon
- * accepts for both streams, so a connection kept open to hear epoch lifecycle frames does not make
- * the daemon poll the device for screenshots and hierarchies nobody is showing.
- */
-internal val LIFECYCLE_ONLY_CADENCE =
-  ObservationCadence(
-    screenshotIntervalMs = Int.MAX_VALUE.toLong(),
-    hierarchyIntervalMs = Int.MAX_VALUE.toLong(),
-  )
-
-/**
  * The observation half of [SharedDaemonStreamHub]: one [ObservationStream] per [DeviceStreamKey],
  * shared by every lease on that device, opened by the first lease and disposed with the last. The
  * hub owns reconnection, and merges the leases' cadence requests by taking the fastest (smallest)
- * interval requested for each stream. A lifecycle lease ([Lease.lifecycleOnly]) asks for no
- * cadence: it is ignored by the merge, and a stream held only by lifecycle leases runs at
- * [LIFECYCLE_ONLY_CADENCE].
+ * interval requested for each stream.
  */
 internal class HubObservationStreams(
   private val config: ObservationHubConfig,
   private val scope: CoroutineScope,
 ) : ObservationStreamHub {
-  /**
-   * A held lease on [key]'s shared [stream]; [reconnects] counts the hub's reconnects of it. A
-   * [lifecycleOnly] lease only listens for device events and never asks for frames.
-   */
+  /** A held lease on [key]'s shared [stream]; [reconnects] counts the hub's reconnects of it. */
   class Lease(
     val key: DeviceStreamKey,
     val stream: ObservationStream,
     val reconnects: StateFlow<Int>,
-    val lifecycleOnly: Boolean = false,
   ) {
     // Guarded by the owning hub's lock.
     var cadence = ObservationCadence()
@@ -107,26 +90,23 @@ internal class HubObservationStreams(
   override val observationSubscriptions: StateFlow<Map<DeviceStreamKey, Int>> =
     _subscriptions.asStateFlow()
 
-  override fun observationStream(
-    key: DeviceStreamKey,
-    lifecycleOnly: Boolean,
-  ): HubManagedObservationStream = HubObservationStream(this, key, lifecycleOnly)
+  override fun observationStream(key: DeviceStreamKey): HubManagedObservationStream =
+    HubObservationStream(this, key)
 
   /** Take a lease on [key]'s shared stream, opening and connecting it for the first lease. */
-  fun acquire(key: DeviceStreamKey, lifecycleOnly: Boolean = false): Lease {
+  fun acquire(key: DeviceStreamKey): Lease {
     var opened: Device? = null
     val lease =
       synchronized(lock) {
         check(!closed) { "DaemonStreamHub is closed" }
         val device = devices.getOrPut(key) { Device(config.streamFactory()).also { opened = it } }
-        Lease(key, device.stream, device.reconnects.asStateFlow(), lifecycleOnly).also {
+        Lease(key, device.stream, device.reconnects.asStateFlow()).also {
           leases.add(it)
           publishSubscriptions()
         }
       }
-    // Connect outside the lock: the real client opens its socket synchronously. A lease joining an
-    // open stream may end its lifecycle-only cadence.
-    opened?.let { start(key, it) } ?: applyCadence(key)
+    // Connect outside the lock: the real client opens its socket synchronously.
+    opened?.let { start(key, it) }
     return lease
   }
 
@@ -143,7 +123,7 @@ internal class HubObservationStreams(
 
   fun setCadence(lease: Lease, cadence: ObservationCadence) {
     synchronized(lock) {
-      if (lease !in leases || lease.lifecycleOnly) return
+      if (lease !in leases) return
       lease.cadence = cadence
     }
     applyCadence(lease.key)
@@ -174,8 +154,6 @@ internal class HubObservationStreams(
 
   private fun start(key: DeviceStreamKey, device: Device) {
     val stream = device.stream
-    // Before connecting, so the subscribe request already carries a lifecycle-only cadence.
-    applyCadence(key)
     device.connect(key, reconnect = false)
     synchronized(lock) {
       // The last lease may have been released while the socket was opening.
@@ -199,14 +177,12 @@ internal class HubObservationStreams(
     val (device, merged) =
       synchronized(lock) {
         val device = devices[key] ?: return
-        val requested = leases.filter { it.key == key && !it.lifecycleOnly }.map { it.cadence }
+        val requested = leases.filter { it.key == key }.map { it.cadence }
         val merged =
-          if (requested.isEmpty()) LIFECYCLE_ONLY_CADENCE
-          else
-            ObservationCadence(
-              screenshotIntervalMs = requested.mapNotNull { it.screenshotIntervalMs }.minOrNull(),
-              hierarchyIntervalMs = requested.mapNotNull { it.hierarchyIntervalMs }.minOrNull(),
-            )
+          ObservationCadence(
+            screenshotIntervalMs = requested.mapNotNull { it.screenshotIntervalMs }.minOrNull(),
+            hierarchyIntervalMs = requested.mapNotNull { it.hierarchyIntervalMs }.minOrNull(),
+          )
         if (merged == device.appliedCadence) return
         device.appliedCadence = merged
         device to merged

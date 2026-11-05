@@ -73,16 +73,8 @@ interface ObservationStreamHub {
    * `disconnect`/`dispose` release it, and one connection serves every facet on the device. The hub
    * reconnects a dropped connection itself, and runs it at the fastest cadence any lease requested.
    * Storage traffic is not carried; the Storage facet keeps its own stream.
-   *
-   * A [lifecycleOnly] view (#17061) is for listening to that epoch's `deviceEvents` (superseded,
-   * ended) without asking for frames: its cadence requests are ignored and it leaves other leases'
-   * cadence alone, and while only lifecycle leases hold the key the hub asks the daemon for the
-   * longest cadence it accepts.
    */
-  fun observationStream(
-    key: DeviceStreamKey,
-    lifecycleOnly: Boolean = false,
-  ): HubManagedObservationStream
+  fun observationStream(key: DeviceStreamKey): HubManagedObservationStream
 
   /** State of [key]'s shared observation connection; Disconnected while no lease holds it. */
   fun observationConnectionState(key: DeviceStreamKey): StateFlow<ConnectionState>

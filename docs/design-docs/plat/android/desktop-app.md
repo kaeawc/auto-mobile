@@ -74,12 +74,13 @@ it stays until closed, and observing the device again or a fresh epoch for it
 restores the live pane. An end for an epoch the pane is not on is ignored.
 
 The workspace hears these lifecycle frames itself, not through its panes: while
-a column observes a live epoch, the workspace holds one lifecycle-only lease on
-the hub's shared stream for that epoch. The daemon sends an epoch's lifecycle
-frames to that epoch's subscribers, so each frame is handled once, whatever
-facets are open and whichever pane has focus. A lifecycle lease shares the
-connection with the column's facets and does not affect their cadence; while
-only lifecycle leases hold a stream, the hub asks the daemon for the longest
-screenshot and hierarchy interval it accepts, so an idle pane does not make the
-daemon poll the device. Ending the focused pane's epoch leaves focus where it
-is: moving it would arm input on a device the user did not pick.
+a column observes a live epoch, the workspace holds one lifecycle-only
+observation subscription for that epoch (`lifecycleOnly: true` on `subscribe`).
+The daemon sends such a subscription only `device_session_started` and
+`device_session_ended` frames, and never counts it when deciding whether or how
+fast to poll a device or whether the device is in use, so an idle pane neither
+starts polling nor changes another client's cadence. The daemon sends an
+epoch's lifecycle frames to that epoch's subscribers, so each frame is handled
+once, whatever facets are open and whichever pane has focus. Ending the focused
+pane's epoch leaves focus where it is: moving it would arm input on a device the
+user did not pick.

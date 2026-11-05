@@ -40,6 +40,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceShell
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceShellOptions
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceUiState
 import dev.jasonpearson.automobile.desktop.core.workspace.buildWorkspaceCommands
+import dev.jasonpearson.automobile.desktop.core.workspace.createWorkspaceLifecycleObservationClient
 import dev.jasonpearson.automobile.desktop.core.workspace.isolatedBehindOverlay
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.BasicsChecklistOptions
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePicker
@@ -307,6 +308,11 @@ internal fun DesktopWorkspaceShell(
           WorkspaceShellOptions(
             onDeviceSessionSuperseded = supersededForwarder::onSuperseded,
             onDeviceSessionEnded = supersededForwarder::onEnded,
+            lifecycleStreamFactory = { _ ->
+              createWorkspaceLifecycleObservationClient(
+                desktopDaemonSession?.sessionUuidProvider ?: { null },
+              )
+            },
             onOpenPicker = workspaceViewModel::openPicker,
             onOpenPalette = { paletteOpen = true },
             externalCaptureRequest = captureRequest,

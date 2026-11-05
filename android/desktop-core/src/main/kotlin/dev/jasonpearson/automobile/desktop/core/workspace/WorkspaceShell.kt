@@ -94,7 +94,7 @@ fun WorkspaceShell(
       // the exact render conditions below so isolation tracks the overlays one-for-one.
       val overlayActive =
         showHealthSheet || (showCompare && comparePair != null) || showOfflineBrowse
-      WorkspaceHubDeviceLifecycle(state, options)
+      WorkspaceShellDeviceLifecycle(state, options)
       Box(modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().isolatedBehindOverlay(overlayActive)) {
           TopBar(
@@ -276,6 +276,11 @@ data class WorkspaceShellOptions(
   val onOpenPalette: () -> Unit = {},
   val onDeviceSessionSuperseded: (DeviceStreamEvent.DeviceSessionSuperseded) -> Unit = {},
   val onDeviceSessionEnded: (DeviceStreamEvent.DeviceSessionEnded) -> Unit = {},
+  /**
+   * Opens a lifecycle-only stream for a column's epoch (see [WorkspaceDeviceLifecycle]); null
+   * forwards no lifecycle events.
+   */
+  val lifecycleStreamFactory: ((DeviceColumn) -> ObservationStream)? = null,
   val externalCaptureRequest: Pair<String, Int>? = null,
   val facetContent: @Composable (DeviceColumn, Tool) -> Unit = { _, tool ->
     WorkspaceFacetPlaceholder(tool)

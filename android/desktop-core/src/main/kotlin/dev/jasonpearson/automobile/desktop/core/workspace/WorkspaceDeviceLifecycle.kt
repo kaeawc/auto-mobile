@@ -6,8 +6,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.rememberUpdatedState
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
-import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamKey
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
+import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 
 /** Where the workspace sends an observed column's device epoch lifecycle events. */
 data class WorkspaceDeviceLifecycleHandlers(
@@ -19,12 +19,13 @@ data class WorkspaceDeviceLifecycleHandlers(
  * Hears device epoch lifecycle frames for every observed column at workspace scope (#17061), so
  * whether they arrive no longer depends on which facets are open or which pane has focus.
  *
- * Each column observing a live epoch holds one stream from [lifecycleStreamFor] (in the desktop
- * app, a lifecycle-only lease on the hub's shared stream for that epoch, which asks the daemon for
- * no frames) while it is in the workspace. The daemon sends an epoch's `device_session_ended` to
- * that epoch's subscribers, so each event reaches exactly one column's stream and is dispatched
- * once. A column whose epoch ended, or that has no epoch yet, holds none; a new epoch takes a new
- * stream.
+ * Each column observing a live epoch holds one stream from [lifecycleStreamFor] while it is in the
+ * workspace: in the desktop app, a lifecycle-only subscription to that epoch, which the daemon
+ * sends only lifecycle frames and does not count when deciding whether, or how fast, to poll the
+ * device. The daemon sends an epoch's lifecycle frames to that epoch's subscribers, so each event
+ * reaches exactly one column's stream and is dispatched once. A column whose epoch ended, or that
+ * has no epoch yet, holds none; a new epoch takes a new stream, which reconnects on its own after a
+ * drop.
  */
 @Composable
 internal fun WorkspaceDeviceLifecycle(
@@ -60,21 +61,20 @@ internal fun WorkspaceDeviceLifecycle(
 }
 
 /**
- * Holds the workspace-scope device lifecycle streams on the app's [LocalDaemonStreamHub]. Without a
- * hub (the IDE plugin) no lifecycle events are forwarded, as before.
+ * Runs [WorkspaceDeviceLifecycle] for [state]'s columns when the host supplies
+ * [WorkspaceShellOptions.lifecycleStreamFactory]. Without one (the IDE plugin) no lifecycle events
+ * are forwarded, as before.
  */
 @Composable
-internal fun WorkspaceHubDeviceLifecycle(state: WorkspaceUiState, options: WorkspaceShellOptions) {
-  val streamHub = LocalDaemonStreamHub.current ?: return
+internal fun WorkspaceShellDeviceLifecycle(
+  state: WorkspaceUiState,
+  options: WorkspaceShellOptions,
+) {
+  val streamFactory = options.lifecycleStreamFactory ?: return
   val content = state as? WorkspaceUiState.Content ?: return
   WorkspaceDeviceLifecycle(
     columns = content.columns,
-    lifecycleStreamFor = { column ->
-      streamHub.observationStream(
-        DeviceStreamKey(column.deviceId, column.deviceSessionUuid),
-        lifecycleOnly = true,
-      )
-    },
+    lifecycleStreamFor = streamFactory,
     handlers =
       WorkspaceDeviceLifecycleHandlers(
         onSuperseded = options.onDeviceSessionSuperseded,
@@ -82,3 +82,9 @@ internal fun WorkspaceHubDeviceLifecycle(state: WorkspaceUiState, options: Works
       ),
   )
 }
+
+/** A lifecycle-only observation client for one column's epoch, authenticated as the desktop. */
+fun createWorkspaceLifecycleObservationClient(
+  sessionUuidProvider: () -> String?,
+): ObservationStream =
+  ObservationStreamClient(sessionUuidProvider = sessionUuidProvider, lifecycleOnly = true)

@@ -340,3 +340,36 @@ test("controller forwards per-signal outcomes without changing the top-level con
   expect(result.active).toEqual([]);
   expect(result.success).toBe(true);
 });
+
+test("restore verifies an outcome's own isClean instead of the injector-wide one", async () => {
+  const injector: DeviceConditionInjector = {
+    key: "faults.lockScreen",
+    apply: async () => ({
+      status: "applied",
+      reset: async () => {},
+      isClean: async () => true,
+    }),
+    isClean: async () => false,
+  };
+  const controller = new DeviceConditionController(() => injector, new FakeLogger());
+  await controller.apply({ faults: { lockScreen: "pin" } });
+  expect(await controller.restore()).toEqual({
+    restored: ["faults.lockScreen"],
+    failures: [],
+    verifiedClean: true,
+  });
+});
+
+test("restore verifies an owed reset with the isClean its OwedResetError carries", async () => {
+  const injector: DeviceConditionInjector = {
+    key: "faults.lockScreen",
+    apply: () =>
+      Promise.reject(
+        new OwedResetError("half applied", async () => {}, { isClean: async () => true }),
+      ),
+    isClean: async () => false,
+  };
+  const controller = new DeviceConditionController(() => injector, new FakeLogger());
+  await controller.apply({ faults: { lockScreen: "pin" } });
+  expect((await controller.restore()).verifiedClean).toBe(true);
+});

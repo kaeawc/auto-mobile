@@ -172,32 +172,6 @@ function restoreRecord(
   return true;
 }
 
-/**
- * Runs status-bar mutations one at a time per device, in call order (#17079). The daemon's
- * per-device queue already does this, but direct stdio mode runs tool calls concurrently, and an
- * override's finalization restores the record it saw before its device command, so a concurrent
- * override or clear on the same device must not interleave with it. Queued outside the session's
- * tracked setup, so a release drains only the running mutation, and a queued override or clear
- * re-checks its session's admission when it starts. A rejected mutation does not block the next.
- */
-function createDeviceSerializer(): <T>(deviceId: string, task: () => Promise<T>) => Promise<T> {
-  const tails = new Map<string, Promise<void>>();
-  return <T>(deviceId: string, task: () => Promise<T>): Promise<T> => {
-    const run = (tails.get(deviceId) ?? Promise.resolve()).then(task);
-    const tail = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    tails.set(deviceId, tail);
-    void tail.then(() => {
-      if (tails.get(deviceId) === tail) {
-        tails.delete(deviceId);
-      }
-    });
-    return run;
-  };
-}
-
 /** The requested values of the fields the platform applied. */
 function appliedOverrides(
   requested: StatusBarOverrides,
@@ -259,7 +233,6 @@ export function createStatusBarHandler(deps: StatusBarToolDependencies = {}) {
   const controllerFor = deps.controllerFor ?? defaultStatusBarControllerFactory;
   const registry = deps.registry ?? defaultStatusBarOverrideRegistry;
   const sessionManager = deps.sessionManager ?? (() => defaultDaemonContext.sessionManager());
-  const serializeOnDevice = createDeviceSerializer();
   return async (
     device: BootedDevice,
     args: StatusBarArgs,
@@ -286,8 +259,14 @@ export function createStatusBarHandler(deps: StatusBarToolDependencies = {}) {
     if (args.action === "get") {
       return readStatusBar(call);
     }
+    // One at a time per device, in call order (#17079): the daemon's per-device queue already
+    // does this, but direct stdio mode runs tool calls concurrently, and an override's
+    // finalization restores the record it saw before its device command. The registry owns the
+    // queue so the daemon's release-time clear is ordered against these calls too (#17084).
+    // Queued outside the session's tracked setup, so a release drains only the running mutation,
+    // and a queued override or clear re-checks its session's admission when it starts.
     const queued = <T>(mutation: () => Promise<T>): Promise<T> =>
-      serializeOnDevice(device.deviceId, () => {
+      registry.runOnDevice(device.deviceId, () => {
         // A call aborted while it waited for the device must not start its device command.
         signal?.throwIfAborted();
         return mutation();

@@ -48,8 +48,11 @@ fallback), instead of opening their own socket:
   device remains. After a reconnect every live device subscribes again. A
   refused subscription, such as a device that is not live yet, retries on its
   own backoff without affecting other devices; a refused desktop session fails
-  them all. A facet mounted on a live subscription first receives its device's
-  recent events.
+  them all, and a device subscribing while that session is still current gets
+  the refusal at once. The refusal holds only for the refused session UUID: once
+  a different session registers, a retry or a new subscription connects again
+  and subscribes every live device. A facet mounted on a live subscription first
+  receives its device's recent events.
 - Observation (Layout, Performance, Navigation) also uses one connection per
   device, shared by every facet on it. The hub owns that connection's
   reconnects, so a facet on a hub stream runs no reconnect loop of its own and

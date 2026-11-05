@@ -18,6 +18,8 @@ import {
 } from "../../../src/features/performanceTrace/XctraceRecorder";
 import { traceArtifactBytes } from "../../../src/features/performanceTrace/xctraceFinalization";
 import { XctraceTemplateUnavailableError } from "../../../src/features/performanceTrace/XctraceTemplateUnavailableError";
+import { XctraceUnsupportedEnvironmentError } from "../../../src/features/performanceTrace/XctraceUnsupportedEnvironmentError";
+import type { XctraceEnvironment } from "../../../src/features/performanceTrace/xctraceCompatibility";
 import { parseXctraceTemplateList } from "../../../src/features/performanceTrace/performanceTraceTemplates";
 import { PerformanceTraceStopTimeoutError } from "../../../src/features/performanceTrace/PerformanceTraceStopTimeoutError";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
@@ -552,5 +554,67 @@ describe("trace artifact byte measurement", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+class FakeXctraceEnvironment implements XctraceEnvironment {
+  readonly calls: string[] = [];
+  constructor(private readonly versions: { xcode?: string; runtime?: string }) {}
+  async xcodeVersion(): Promise<string | undefined> {
+    this.calls.push("xcodeVersion");
+    return this.versions.xcode;
+  }
+  async simulatorRuntime(): Promise<string | undefined> {
+    this.calls.push("simulatorRuntime");
+    return this.versions.runtime;
+  }
+}
+
+describe("xctrace known-broken Xcode and simulator pairs (#16999)", () => {
+  test("refuses Xcode 26.6 with an iOS 26.5 simulator before running xctrace", async () => {
+    const environment = new FakeXctraceEnvironment({ xcode: "26.6", runtime: "26.5" });
+    const { host, recorder } = xctrace(4321, { environment });
+    const error = await recorder.start(iosRequest).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(XctraceUnsupportedEnvironmentError);
+    expect(error).toBeInstanceOf(ActionableError);
+    const unsupported = error as XctraceUnsupportedEnvironmentError;
+    expect(unsupported.xcodeVersion).toBe("26.6");
+    expect(unsupported.simulatorRuntime).toBe("26.5");
+    expect(unsupported.message).toContain("Xcode 27.x");
+    expect(unsupported.message).toContain("DEVELOPER_DIR");
+    expect(host.spawned).toEqual([]);
+    expect(host.templateListCalls).toBe(0);
+  });
+
+  test("refuses a 26.6.x point release on a 26.5.x runtime", async () => {
+    const environment = new FakeXctraceEnvironment({ xcode: "26.6.1", runtime: "26.5.1" });
+    const { host, recorder } = xctrace(4321, { environment });
+    await expect(recorder.start(iosRequest)).rejects.toBeInstanceOf(
+      XctraceUnsupportedEnvironmentError,
+    );
+    expect(host.spawned).toEqual([]);
+  });
+
+  test.each([
+    ["Xcode 27 on iOS 26.5", { xcode: "27.1", runtime: "26.5" }],
+    ["Xcode 26.6 on iOS 27.0", { xcode: "26.6", runtime: "27.0" }],
+    ["Xcode 26.6 on iOS 26.4", { xcode: "26.6", runtime: "26.4" }],
+    ["an unknown Xcode", { runtime: "26.5" }],
+    ["an unknown simulator runtime (or a physical device)", { xcode: "26.6" }],
+  ])("records with %s", async (_label, versions) => {
+    const environment = new FakeXctraceEnvironment(versions);
+    const { host, recorder } = xctrace(4321, { environment });
+    const recording = await recorder.start(iosRequest);
+    expect(host.spawned).toHaveLength(1);
+    await recording.stop();
+    expect(host.spawned[0]!.child.signalCode).toBe("SIGINT");
+  });
+
+  test("does not read the Xcode version when the device has no simulator runtime", async () => {
+    const environment = new FakeXctraceEnvironment({ xcode: "26.6" });
+    const { recorder } = xctrace(4321, { environment });
+    await recorder.start(iosRequest);
+    expect(environment.calls).toEqual(["simulatorRuntime"]);
   });
 });

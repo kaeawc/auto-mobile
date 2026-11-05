@@ -21,7 +21,8 @@ import kotlinx.coroutines.flow.receiveAsFlow
  *
  * Storage traffic is lossless and unicast, as on the per-device client: updates, acknowledgements
  * and reconciliation requests queue without bound until this stream's one collector (the hub) takes
- * them.
+ * them. Only updates for a file this stream wants enter that queue: the daemon also pushes files
+ * other clients observe on the device, and those are dropped on arrival.
  */
 internal class MuxObservationChannel(private val mux: MultiplexedObservationSocketClient) :
   ObservationStream {

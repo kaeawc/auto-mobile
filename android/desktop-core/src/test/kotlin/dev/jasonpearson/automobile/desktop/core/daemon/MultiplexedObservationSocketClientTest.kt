@@ -415,6 +415,60 @@ class MultiplexedObservationSocketClientTest {
       mux.close()
     }
 
+  private fun storageUpdate(subscriptionId: String, fileName: String, sequence: Int) =
+    """{"type":"storage_update","subscriptionId":"$subscriptionId","deviceId":"emulator-0","storageEvent":{"packageName":"com.example","fileName":"$fileName","key":"k","value":"v","sequenceNumber":$sequence}}"""
+
+  /** Every storage update [stream] has queued, without waiting for more. */
+  private fun retainedStorageUpdates(stream: ObservationStream): List<StorageStreamUpdate> {
+    val queue = (stream as MuxObservationChannel).flows.storageUpdates
+    return generateSequence { queue.tryReceive().getOrNull() }.toList()
+  }
+
+  @Test
+  fun `storage updates for a file no local lease wants are not retained`() = runBlocking {
+    val daemon = Daemon()
+    val mux = client(daemon)
+    val (a) = connectDevices(mux, 1)
+    val socket = daemon.nextSocket()
+    val (subA) = subscribeAll(socket, listOf(a))
+    a.connectionState.awaitFirst { it is ConnectionState.Connected }
+
+    // Another client observes this file on the device; the daemon pushes to every subscription.
+    repeat(UNSOLICITED_UPDATES) { socket.send(storageUpdate(subA, "theirs.xml", it)) }
+    // Frames are handled in order, so once this one arrives every storage frame has been handled.
+    socket.send(hierarchy(subA, "emulator-0", timestamp = 7))
+    a.hierarchyUpdates.awaitFirst { it.timestamp == 7L }
+
+    assertEquals(emptyList<StorageStreamUpdate>(), retainedStorageUpdates(a))
+    mux.close()
+  }
+
+  @Test
+  fun `updates for a wanted file arrive without loss among unsolicited ones`() = runBlocking {
+    val daemon = Daemon()
+    val mux = client(daemon)
+    val (a) = connectDevices(mux, 1)
+    val socket = daemon.nextSocket()
+    val (subA) = subscribeAll(socket, listOf(a))
+    a.connectionState.awaitFirst { it is ConnectionState.Connected }
+    a.subscribeStorage("com.example", "prefs.xml")
+    val command = socket.nextRequest()
+    socket.send("""{"id":"${command["id"]}","type":"subscription_response","success":true}""")
+    a.storageSubscriptionResponses.awaitFirst()
+
+    repeat(UNSOLICITED_UPDATES) {
+      socket.send(storageUpdate(subA, "theirs.xml", it))
+      socket.send(storageUpdate(subA, "prefs.xml", it))
+    }
+    socket.send(hierarchy(subA, "emulator-0", timestamp = 7))
+    a.hierarchyUpdates.awaitFirst { it.timestamp == 7L }
+
+    val retained = retainedStorageUpdates(a)
+    assertEquals(List(UNSOLICITED_UPDATES) { "prefs.xml" }, retained.map { it.fileName })
+    assertEquals((0 until UNSOLICITED_UPDATES).map(Int::toLong), retained.map { it.sequenceNumber })
+    mux.close()
+  }
+
   @Test
   fun `a device leaving an open socket releases its observers, and they come back on reconnect`() =
     runBlocking {
@@ -515,6 +569,7 @@ class MultiplexedObservationSocketClientTest {
 
   companion object {
     private const val TIMEOUT_SECONDS = 5L
+    private const val UNSOLICITED_UPDATES = 200
     private const val CLIENT_THREADS = 4
 
     /**

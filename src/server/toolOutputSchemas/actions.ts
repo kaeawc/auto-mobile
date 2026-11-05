@@ -57,10 +57,18 @@ export const keyboardResultSchema = z
   })
   .passthrough();
 
+/** A command's stable failure code; the envelope repeats the failed command's code. */
+const sendKeysErrorCodeSchema = z
+  .string()
+  .describe(
+    "Stable failure code. NO_FOCUSED_EDITABLE: no editable field has focus; focus the field (tap it, or tapOn with focus), then retry sendKeys without a mode.",
+  );
+
 /** IME fields live on each command result, never on the sendKeys envelope. */
 export const sendKeysResultSchema = z
   .object({
     warnings: z.array(z.string()).optional(),
+    errorCode: sendKeysErrorCodeSchema.optional(),
     pinnedDisplay: pinnedDisplaySchema.optional(),
     displayInventory: displayInventoryUnavailableSchema.optional(),
     staleDisplay: staleDisplaySchema.optional(),
@@ -71,6 +79,7 @@ export const sendKeysResultSchema = z
             pinnedDisplay: pinnedDisplaySchema.optional(),
             displayInventory: displayInventoryUnavailableSchema.optional(),
             staleDisplay: staleDisplaySchema.optional(),
+            errorCode: sendKeysErrorCodeSchema.optional(),
             imeFailure: z
               .object({
                 stage: z.enum([

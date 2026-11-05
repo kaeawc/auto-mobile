@@ -77,6 +77,12 @@ interface DeviceState {
    * is retried on the device's next `--list` while the port still maps to that host port.
    */
   pendingRemoval: Map<number, number>;
+  /**
+   * Owner -> number of its `ensure` calls queued or running. Ownership is recorded only after the
+   * add succeeds, so a release that races an in-flight ensure counts these as mappings to clean up
+   * and queues its removal behind them (#17104).
+   */
+  ensuring: Map<string, number>;
   /** Serialises operations on one device so list-then-add/remove cannot interleave. */
   tail: Promise<unknown>;
   pending: number;
@@ -108,7 +114,9 @@ export class PortReverseManager {
   /** Idempotently adds each mapping; throws `port_reverse_conflict` and changes nothing on a clash. */
   ensure(target: PortReverseTarget, requests: readonly PortReverseRequest[]) {
     const state = this.stateFor(target);
-    return this.enqueue(state, async (): Promise<PortReverseResult> => {
+    const { owner } = target;
+    state.ensuring.set(owner, (state.ensuring.get(owner) ?? 0) + 1);
+    const run = this.enqueue(state, async (): Promise<PortReverseResult> => {
       const wanted = uniqueRequests(requests);
       // Conflicts are judged on the device as it is, before any restore: a refused request changes
       // nothing on the device.
@@ -127,6 +135,14 @@ export class PortReverseManager {
         mappings.push(ownedMapping(request, "added"));
       }
       return { mappings, ...report };
+    });
+    return run.finally(() => {
+      const left = (state.ensuring.get(owner) ?? 1) - 1;
+      if (left === 0) {
+        state.ensuring.delete(owner);
+      } else {
+        state.ensuring.set(owner, left);
+      }
     });
   }
 
@@ -209,9 +225,16 @@ export class PortReverseManager {
     });
   }
 
-  /** Whether `owner` holds any mapping on the device. */
+  /**
+   * Whether `owner` holds any mapping on the device, or has an `ensure` there still in flight that
+   * may yet create one. A release queued now runs after that ensure, so it removes what it adds.
+   */
   hasOwnedMappings(owner: string, deviceId: string): boolean {
-    return [...(this.devices.get(deviceId)?.owned.values() ?? [])].some((m) => m.owner === owner);
+    const state = this.devices.get(deviceId);
+    if (state === undefined) {
+      return false;
+    }
+    return state.ensuring.has(owner) || [...state.owned.values()].some((m) => m.owner === owner);
   }
 
   /** The session ended or left the device: remove the mappings it owns there. */
@@ -295,6 +318,7 @@ export class PortReverseManager {
         adb: target.adb,
         owned: new Map(),
         pendingRemoval: new Map(),
+        ensuring: new Map(),
         tail: Promise.resolve(),
         pending: 0,
       };

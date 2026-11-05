@@ -68,6 +68,54 @@ describe("portReverse session cleanup", () => {
     expect(adb.mappings.size).toBe(0);
   });
 
+  test("a release while the session's first ensure awaits adb add still removes it", async () => {
+    const adb = new FakeAdbReverseCommands();
+    const manager = new PortReverseManager(() => undefined);
+    const hooks = new FakeHooks();
+    registerPortReverseSessionCleanup(hooks, manager);
+    const gate = Promise.withResolvers<void>();
+    adb.addGate = gate.promise;
+    const ensured = manager.ensure({ deviceId: "emulator-5554", owner: "s1", adb }, [
+      { devicePort: 8080, hostPort: 8080 },
+    ]);
+    // Let the ensure's --list run so it is parked on the deferred add.
+    while (!adb.calls.includes("add 8080 8080 no-rebind")) {
+      await Promise.resolve();
+    }
+    hooks.release("s1", "emulator-5554", "released", {});
+    expect(hooks.pending.map((p) => p.name)).toEqual(["remove adb reverse mappings"]);
+    gate.resolve();
+    await ensured;
+    await Promise.all(hooks.pending.map((p) => p.cleanup));
+    expect(adb.mappings.size).toBe(0);
+    expect(manager.ownedPorts("emulator-5554")).toEqual([]);
+    expect(manager.hasOwnedMappings("s1", "emulator-5554")).toBe(false);
+  });
+
+  test("a release racing an ensure whose add fails registers cleanup that finds nothing", async () => {
+    const adb = new FakeAdbReverseCommands();
+    const manager = new PortReverseManager(() => undefined);
+    const hooks = new FakeHooks();
+    registerPortReverseSessionCleanup(hooks, manager);
+    const gate = Promise.withResolvers<void>();
+    adb.addGate = gate.promise;
+    adb.failAdd.add(8080);
+    const ensured = manager
+      .ensure({ deviceId: "emulator-5554", owner: "s1", adb }, [
+        { devicePort: 8080, hostPort: 8080 },
+      ])
+      .then(
+        () => "ok",
+        () => "failed",
+      );
+    hooks.release("s1", "emulator-5554", "released", {});
+    gate.resolve();
+    expect(await ensured).toBe("failed");
+    await Promise.all(hooks.pending.map((p) => p.cleanup));
+    expect(adb.calls.filter((call) => call.startsWith("remove"))).toEqual([]);
+    expect(manager.hasOwnedMappings("s1", "emulator-5554")).toBe(false);
+  });
+
   test("identity replacement forgets the mappings without touching the new device", async () => {
     const { adb, hooks } = await setup();
     adb.calls.length = 0;

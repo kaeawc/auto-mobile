@@ -43,7 +43,11 @@ call.
 ## Release
 
 Session release and device unbind remove that session's mappings on the device,
-registered as pending device cleanup so the next session waits for it. Device
+registered as pending device cleanup so the next session waits for it. Ownership
+is recorded only after `adb reverse` succeeds, so a session with an `ensure` still
+queued or running on the device also counts as owning mappings there: its removal
+is queued behind that `ensure` on the device's serial operation chain and removes
+whatever it added. Device
 removal from the pool forgets `sessionless` ownership without sending a command:
 the event cannot tell a disconnect or relaunch (whose reverses died with the
 transport) from identity replacement (another device on the serial, whose

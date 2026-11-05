@@ -171,7 +171,7 @@ test("the liveness controller's port getSession calls stay within the retained e
 const RETAINED_SERVER_EXPIRY_READERS: Readonly<Record<string, number>> = {
   "deviceLabelMapping.ts#releaseDeviceLabelSessions": 1,
   "deviceToolsAppleTvStart.ts#reusableAnonymousSessionId": 1,
-  "deviceToolsAppleVisionStart.ts#reusableAnonymousSessionId": 1,
+  "deviceToolsAppleVisionProvision.ts#reusableAnonymousSessionId": 1,
   "deviceToolsBootPreparation.ts#callerMayReuse": 1,
   "pipeline/deviceCallDispatch.ts#refuseControlCallBeforeAdmission": 1,
   "pipeline/ingress/executeToolCall.ts#foreignOwnedExplicitSessionUuid": 1,

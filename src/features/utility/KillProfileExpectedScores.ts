@@ -31,6 +31,7 @@ const UNMEASURED: ExpectedSurvivalScore = {
 export const KILL_PROFILE_EXPECTED_SCORES: Record<KillProfileId, ExpectedSurvivalScore> = {
   "samsung-sleeping": { ...UNMEASURED },
   "samsung-deep-sleeping": { ...UNMEASURED },
+  "samsung-auto-disable": { ...UNMEASURED },
   "xiaomi-autostart-off": { ...UNMEASURED },
   "oneplus-deep-optimization": { ...UNMEASURED },
   "recents-swipe-kill": { ...UNMEASURED },
@@ -39,4 +40,5 @@ export const KILL_PROFILE_EXPECTED_SCORES: Record<KillProfileId, ExpectedSurviva
   "motorola-adaptive": { ...UNMEASURED },
   "user-restricted": { ...UNMEASURED },
   "exact-alarm-denied": { ...UNMEASURED },
+  "notifications-off": { ...UNMEASURED },
 };

@@ -282,8 +282,12 @@ describe("survival host safeguards with fakes", () => {
     }
     expect(
       shell.getExecutedCommands().filter((command) => command === `uninstall ${FIXTURE_PACKAGE}`),
-    ).toHaveLength(10);
-    expect(baseClock.calls.filter((call) => call === "unroot")).toHaveLength(10);
-    expect(fakeTimer.getSleepHistory().reduce((sum, ms) => sum + ms, 0)).toBe(10 * 19 * 60_000);
+    ).toHaveLength(KILL_PROFILE_IDS.length);
+    expect(baseClock.calls.filter((call) => call === "unroot")).toHaveLength(
+      KILL_PROFILE_IDS.length,
+    );
+    expect(fakeTimer.getSleepHistory().reduce((sum, ms) => sum + ms, 0)).toBe(
+      KILL_PROFILE_IDS.length * 19 * 60_000,
+    );
   });
 });

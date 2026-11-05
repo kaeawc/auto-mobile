@@ -48,20 +48,28 @@ async function testPinVerifies(adb: AdbExecutor, signal?: AbortSignal): Promise<
 export function createLockScreenFaultInjector(adb: AdbExecutor): DeviceConditionInjector {
   const serialize = createSerializer();
   let ownsPin = false;
+  // Bumped on every install and clear, so a reset from an earlier installation cannot remove a
+  // PIN that a later caller installed.
+  let generation = 0;
 
-  const reset = async (signal?: AbortSignal): Promise<void> =>
-    serialize(async () => {
-      if (ownsPin && (await testPinVerifies(adb, signal))) {
-        await shell(adb, clearPinArgs, signal);
-        if (await hasCredential(adb)) {
-          throw new Error(
-            "Clearing the AutoMobile test PIN did not remove the lock-screen credential",
-          );
+  const resetFor =
+    (installed: number) =>
+    async (signal?: AbortSignal): Promise<void> =>
+      serialize(async () => {
+        if (installed !== generation) {
+          return;
         }
-      }
-      ownsPin = false;
-      return;
-    });
+        if (ownsPin && (await testPinVerifies(adb, signal))) {
+          await shell(adb, clearPinArgs, signal);
+          if (await hasCredential(adb)) {
+            throw new Error(
+              "Clearing the AutoMobile test PIN did not remove the lock-screen credential",
+            );
+          }
+        }
+        ownsPin = false;
+        generation += 1;
+      });
 
   const applyNow = async (
     value: string,
@@ -83,6 +91,8 @@ export function createLockScreenFaultInjector(adb: AdbExecutor): DeviceCondition
         );
       }
       ownsPin = true;
+      generation += 1;
+      const reset = resetFor(generation);
       try {
         await shell(adb, setPinArgs, signal);
       } catch (error) {
@@ -114,6 +124,7 @@ export function createLockScreenFaultInjector(adb: AdbExecutor): DeviceCondition
         );
       }
       ownsPin = false;
+      generation += 1;
       return { status: "applied", detail: "Cleared the AutoMobile test PIN" };
     }
     if (!present) {

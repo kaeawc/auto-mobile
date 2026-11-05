@@ -105,6 +105,20 @@ describe("faults.lockScreen", () => {
     await first.reset?.();
     expect(adb.credential).toBeUndefined();
   });
+  test("a stale reset from an earlier installation cannot clear a later caller's PIN", async () => {
+    const adb = new LockDevice();
+    const injector = pin(adb);
+    const a = await injector.apply("pin");
+    await injector.apply("none");
+    const b = await injector.apply("pin");
+    expect(adb.credential).toBe(LOCK_SCREEN_TEST_PIN);
+    await a.reset?.();
+    expect(adb.credential).toBe(LOCK_SCREEN_TEST_PIN);
+    expect(await injector.isClean?.()).toBe(false);
+    await b.reset?.();
+    expect(adb.credential).toBeUndefined();
+  });
+
   test("a PIN AutoMobile did not install is unchanged with no reset owed", async () => {
     const adb = new LockDevice();
     adb.credential = LOCK_SCREEN_TEST_PIN;

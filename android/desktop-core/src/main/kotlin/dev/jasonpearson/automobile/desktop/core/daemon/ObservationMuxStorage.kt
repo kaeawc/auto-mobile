@@ -34,9 +34,26 @@ internal class ObservationMuxStorage(
     if (synchronized(table.lock) { channel.storage.unwant(key) }) drive(channel, key)
   }
 
-  /** Re-register [channel]'s remembered files after its (re)subscribe. */
+  /**
+   * Re-register [channel]'s remembered files after its (re)subscribe. A file the daemon still holds
+   * for this socket (the device's subscription ended while the socket stayed open) needs no
+   * command, so it is acknowledged again here: its owner forgot the registration on reconnecting
+   * and would otherwise wait for an acknowledgement that never comes.
+   */
   fun reapply(channel: MuxObservationChannel) {
-    synchronized(table.lock) { channel.storage.desiredKeys }.forEach { drive(channel, it) }
+    val (wanted, held, connection) =
+      synchronized(table.lock) {
+        Triple(channel.storage.desiredKeys, channel.storage.heldKeys, channel.storage.connection)
+      }
+    held.forEach {
+      channel.flows.storageResponses.trySend(
+        StampedStorageResponse(
+          connection,
+          StorageSubscriptionResponse(wire.newId(), it, subscribe = true, success = true),
+        ),
+      )
+    }
+    wanted.forEach { drive(channel, it) }
   }
 
   /**

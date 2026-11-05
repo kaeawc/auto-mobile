@@ -24,6 +24,12 @@ internal class StorageSubscriptionLedger {
   val desiredKeys: List<StorageSubscriptionKey>
     get() = desired.toList()
 
+  /** Wanted files the daemon confirmed with no command in flight: registered as wanted. */
+  val heldKeys: List<StorageSubscriptionKey>
+    get() = desired.filter { key ->
+      key in confirmed && key !in forcedReconciliations && pending.values.none { it.key == key }
+    }
+
   fun isDesired(key: StorageSubscriptionKey): Boolean = key in desired
 
   /** Record the wish to observe [key]; false when it was already wanted. */

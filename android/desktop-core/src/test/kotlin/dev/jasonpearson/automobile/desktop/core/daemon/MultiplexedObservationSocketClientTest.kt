@@ -701,6 +701,37 @@ class MultiplexedObservationSocketClientTest {
     }
 
   @Test
+  fun `a device resubscribing on a socket that kept its observers acknowledges them again`() =
+    runBlocking {
+      val daemon = Daemon()
+      val mux = client(daemon)
+      val (a, b) = connectDevices(mux, 2)
+      val socket = daemon.nextSocket()
+      val (subA) = subscribeAll(socket, listOf(a, b))
+      a.connectionState.awaitFirst { it is ConnectionState.Connected }
+      a.subscribeStorage("com.example", "prefs.xml")
+      val command = socket.nextRequest()
+      socket.send("""{"id":"${command["id"]}","type":"subscription_response","success":true}""")
+      assertEquals(command["id"], a.storageSubscriptionResponses.awaitFirst().requestId)
+
+      // The daemon ends only A's subscription; B keeps the socket, so A's observer stays
+      // registered.
+      socket.send(
+        """{"type":"error","success":false,"subscriptionId":"$subA","deviceId":"emulator-0","error":"BACKFILL_QUEUE_OVERFLOW"}""",
+      )
+      a.connectionState.awaitFirst { it is ConnectionState.Disconnected }
+      a.connect(deviceId = "emulator-0", deviceSessionUuid = "uuid-0")
+      assertEquals("subscribe", socket.nextRequest()["command"])
+
+      // Nothing is re-sent, yet A's owner is told the file is registered.
+      val again = a.storageSubscriptionResponses.awaitFirst()
+      assertEquals(StorageSubscriptionKey("com.example", "prefs.xml"), again.key)
+      assertTrue(again.subscribe && again.success)
+      assertNull(socket.fromClient.poll())
+      mux.close()
+    }
+
+  @Test
   fun `a device session that ends or is superseded reaches only its own device`() = runBlocking {
     val daemon = Daemon()
     val mux = client(daemon)

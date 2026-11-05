@@ -88,7 +88,9 @@ fallback), instead of opening their own socket:
   snapshot. A dropped connection, and every reconnect the hub makes (a
   conflated connection state can hide the drop), forgets every confirmation;
   an acknowledgement still queued from the old connection is dropped, and the
-  re-registration after the reconnect acknowledges the holders again. A
+  re-registration after the reconnect acknowledges the holders again. A file the
+  daemon still holds (the device's subscription ended but the socket stayed
+  open) needs no command, so the stream acknowledges it again on resubscribe. A
   storage command that cannot be written closes the socket, so every device
   reconnects and re-registers its files. The daemon owns an observer per
   socket, so a device that leaves a socket other devices keep open sends

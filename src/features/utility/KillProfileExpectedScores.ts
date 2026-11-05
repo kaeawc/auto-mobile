@@ -17,6 +17,9 @@ export type SurvivalOutcome = "ran" | "delayed" | "never";
 /** The twelve original profiles are measured on an API 35 emulator; OEM profiles from #17126 are TODO_MEASURE until measured. */
 export type ExpectedSurvivalScore = Record<SurvivalEventId, SurvivalOutcome | "TODO_MEASURE">;
 
+/** API level the table below was measured on; other levels have no baseline to compare against. */
+export const EXPECTED_SCORES_API_LEVEL = 35;
+
 export const KILL_PROFILE_EXPECTED_SCORES: Record<KillProfileId, ExpectedSurvivalScore> = {
   "samsung-sleeping": {
     "workmanager-periodic": "ran",

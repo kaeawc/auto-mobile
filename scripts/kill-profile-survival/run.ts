@@ -142,6 +142,9 @@ async function main(): Promise<void> {
     mkdirSync(dirname(options.out), { recursive: true });
     writeFileSync(options.out, `${JSON.stringify(report, null, 2)}\n`);
     console.log(`Survival report: ${options.out}`);
+    if (report.noBaseline) {
+      console.log(report.noBaseline);
+    }
     process.exitCode =
       report.aborted || report.results.some((result) => result.mismatches.length) ? 1 : 0;
   } finally {

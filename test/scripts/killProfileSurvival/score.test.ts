@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
+  EXPECTED_SCORES_API_LEVEL,
   KILL_PROFILE_EXPECTED_SCORES,
   SURVIVAL_EVENT_IDS,
 } from "../../../src/features/utility/KillProfileExpectedScores";
@@ -152,8 +153,11 @@ function harnessFakes() {
     },
   };
   const shell = new FakeAdbExecutor();
-  shell.setAndroidApiLevel(37);
-  shell.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("37", ""));
+  shell.setAndroidApiLevel(EXPECTED_SCORES_API_LEVEL);
+  shell.setCommandResponse(
+    "shell getprop ro.build.version.sdk",
+    createExecResult(String(EXPECTED_SCORES_API_LEVEL), ""),
+  );
   shell.setCommandResponse(
     "shell pm path",
     createExecResult("package:/data/app/fixture/base.apk", ""),
@@ -344,6 +348,63 @@ describe("survival host safeguards with fakes", () => {
     expect(report.aborted).toContain("API 33+");
     expect(report.results).toEqual([]);
     expect(baseClock.calls).toEqual([]);
+  });
+
+  test("API 34 scores are reported without comparing to the API 35 baseline", async () => {
+    const { deps, shell } = harnessFakes();
+    shell.setAndroidApiLevel(34);
+    shell.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("34", ""));
+    const report = await runHarness(
+      {
+        serial: "emulator-5556",
+        avd: "Survival",
+        apk: "fixture.apk",
+        profiles: ["user-restricted"],
+      },
+      {
+        ...deps,
+        shell: {
+          async executeCommand(command, options) {
+            if (command.includes("sh -c")) {
+              return createExecResult(String(await deps.clock.readInstantMs()), "");
+            }
+            return shell.executeCommand(command, options);
+          },
+        },
+      },
+    );
+    expect(report.aborted).toBeUndefined();
+    expect(report.noBaseline).toContain("no baseline for API 34");
+    expect(report.results).toHaveLength(1);
+    // user-restricted expects workmanager-periodic "ran" on API 35; API 34 observes "never".
+    expect(report.results[0].score["workmanager-periodic"]).toBe("never");
+    expect(report.results[0].mismatches).toEqual([]);
+    expect(report.results[0].pendingMeasurement).toEqual([...SURVIVAL_EVENT_IDS]);
+  });
+
+  test("the baseline API still compares and reports no missing-baseline note", async () => {
+    const { deps, shell } = harnessFakes();
+    const report = await runHarness(
+      {
+        serial: "emulator-5556",
+        avd: "Survival",
+        apk: "fixture.apk",
+        profiles: ["user-restricted"],
+      },
+      {
+        ...deps,
+        shell: {
+          async executeCommand(command, options) {
+            if (command.includes("sh -c")) {
+              return createExecResult(String(await deps.clock.readInstantMs()), "");
+            }
+            return shell.executeCommand(command, options);
+          },
+        },
+      },
+    );
+    expect(report.noBaseline).toBeUndefined();
+    expect(report.results[0].mismatches).toContain("workmanager-periodic");
   });
 
   test("complete matrix scores every profile and restores between runs using only fake time", async () => {

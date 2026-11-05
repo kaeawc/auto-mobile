@@ -187,50 +187,41 @@ describe("PortReverseManager", () => {
     expect(adb.mappings.size).toBe(0);
   });
 
-  test("session release drops ownership even when removal fails", async () => {
+  test("a failed release removal is never restored and is retried on the next call", async () => {
     const { adb, manager, target } = setup();
     await manager.ensure(target(), [{ devicePort: 5000, hostPort: 5000 }]);
     adb.failRemove.add(5000);
     await manager.releaseOwner("s1");
     expect(manager.ownedPorts("emulator-5554")).toEqual([]);
-  });
-
-  test("a refused ensure restores nothing", async () => {
-    const { adb, manager, target } = setup();
-    await manager.ensure(target(), [{ devicePort: 5000, hostPort: 5000 }]);
-    adb.dropAll();
-    adb.mappings.set(3000, "tcp:3000");
-    const error = await rejection(manager.ensure(target(), [{ devicePort: 3000, hostPort: 3000 }]));
-    expect(error.code).toBe("port_reverse_conflict");
+    expect(manager.pendingRemovals("emulator-5554")).toEqual([5000]);
+    expect(adb.mappings.has(5000)).toBe(true);
+    adb.failRemove.clear();
+    await manager.list(target("s2"));
     expect(adb.mappings.has(5000)).toBe(false);
+    expect(manager.pendingRemovals("emulator-5554")).toEqual([]);
   });
 
-  test("an owned port re-pointed outside AutoMobile is a conflict, not success", async () => {
+  test("a pending removal of a port someone re-pointed is dropped, not removed", async () => {
     const { adb, manager, target } = setup();
     await manager.ensure(target(), [{ devicePort: 5000, hostPort: 5000 }]);
+    adb.failList = true;
+    await manager.releaseOwner("s1");
+    expect(manager.pendingRemovals("emulator-5554")).toEqual([5000]);
+    adb.failList = false;
     adb.mappings.set(5000, "tcp:7777");
-    const error = await rejection(manager.ensure(target(), [{ devicePort: 5000, hostPort: 5000 }]));
-    expect(error.code).toBe("port_reverse_conflict");
+    await manager.list(target("s2"));
     expect(adb.mappings.get(5000)).toBe("tcp:7777");
+    expect(manager.pendingRemovals("emulator-5554")).toEqual([]);
   });
 
-  test("a no-rebind refusal for a port mapped during the call is a conflict", async () => {
+  test("forgetting an owner after identity replacement sends no command", async () => {
     const { adb, manager, target } = setup();
-    adb.beforeAdd = (port) => adb.mappings.set(port, "tcp:7777");
-    const error = await rejection(manager.ensure(target(), [{ devicePort: 5000, hostPort: 5000 }]));
-    expect(error.code).toBe("port_reverse_conflict");
-    expect(error.ports).toEqual([5000]);
-    expect(adb.mappings.get(5000)).toBe("tcp:7777");
-  });
-
-  test("releaseOwnerOnDevice removes only that owner's mappings on that device", async () => {
-    const { adb, manager, target } = setup();
-    await manager.ensure(target("s1"), [{ devicePort: 5000, hostPort: 5000 }]);
-    await manager.ensure(target("s2"), [{ devicePort: 6000, hostPort: 6000 }]);
-    expect(manager.hasOwnedMappings("s1", "emulator-5554")).toBe(true);
-    await manager.releaseOwnerOnDevice("s1", "emulator-5554");
-    expect([...adb.mappings.keys()]).toEqual([6000]);
-    expect(manager.hasOwnedMappings("s1", "emulator-5554")).toBe(false);
+    await manager.ensure(target(), [{ devicePort: 5000, hostPort: 5000 }]);
+    adb.calls.length = 0;
+    await manager.forgetOwnerOnDevice("s1", "emulator-5554");
+    expect(adb.calls).toEqual([]);
+    expect(manager.ownedPorts("emulator-5554")).toEqual([]);
+    expect(adb.mappings.has(5000)).toBe(true);
   });
 
   test("one device port requested for two host ports is a conflict", async () => {

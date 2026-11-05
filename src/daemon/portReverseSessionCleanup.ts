@@ -14,10 +14,16 @@ export interface PortReverseSessionHooks {
       sessionId: string,
       deviceId: string,
       releaseReason: string,
-      notice: { upgradeOnly?: boolean },
+      notice: { upgradeOnly?: boolean; deviceIdentityReplaced?: boolean },
     ) => void,
   ): void;
-  onSessionDeviceUnbound(callback: (sessionId: string, deviceId: string) => void): void;
+  onSessionDeviceUnbound(
+    callback: (
+      sessionId: string,
+      deviceId: string,
+      options?: { deviceIdentityReplaced?: boolean },
+    ) => void,
+  ): void;
   registerPendingDeviceCleanup(
     deviceId: string,
     cleanup: Promise<unknown>,
@@ -29,10 +35,21 @@ export function registerPortReverseSessionCleanup(
   manager: PortReverseSessionHooks,
   reverses: Pick<
     PortReverseManager,
-    "hasOwnedMappings" | "releaseOwnerOnDevice"
+    "hasOwnedMappings" | "releaseOwnerOnDevice" | "forgetOwnerOnDevice"
   > = defaultPortReverseManager,
 ): void {
-  const cleanup = (sessionId: string, deviceId: string, leftover: string): void => {
+  const cleanup = (
+    sessionId: string,
+    deviceId: string,
+    leftover: string,
+    identityReplaced: boolean | undefined,
+  ): void => {
+    if (identityReplaced) {
+      // The serial now names another device: its mappings are not ours, so forget ours without a
+      // command, as the other session cleanups do on identity replacement.
+      void reverses.forgetOwnerOnDevice(sessionId, deviceId);
+      return;
+    }
     if (!reverses.hasOwnedMappings(sessionId, deviceId)) {
       return;
     }
@@ -43,13 +60,23 @@ export function registerPortReverseSessionCleanup(
     );
   };
   // A terminal upgrade of a finished release must not touch the device's next owner (#10825).
-  manager.onSessionRelease((sessionId, deviceId, _reason, releaseOptions) => {
-    if (releaseOptions?.upgradeOnly) {
+  manager.onSessionRelease((sessionId, deviceId, _reason, notice) => {
+    if (notice.upgradeOnly) {
       return;
     }
-    cleanup(sessionId, deviceId, "the released session's adb reverse mappings");
+    cleanup(
+      sessionId,
+      deviceId,
+      "the released session's adb reverse mappings",
+      notice.deviceIdentityReplaced,
+    );
   });
-  manager.onSessionDeviceUnbound((sessionId, deviceId) =>
-    cleanup(sessionId, deviceId, "the unbound session's adb reverse mappings"),
+  manager.onSessionDeviceUnbound((sessionId, deviceId, options) =>
+    cleanup(
+      sessionId,
+      deviceId,
+      "the unbound session's adb reverse mappings",
+      options?.deviceIdentityReplaced,
+    ),
   );
 }

@@ -67,4 +67,15 @@ describe("portReverse session cleanup", () => {
     await Promise.all(hooks.pending.map((p) => p.cleanup));
     expect(adb.mappings.size).toBe(0);
   });
+
+  test("identity replacement forgets the mappings without touching the new device", async () => {
+    const { adb, hooks } = await setup();
+    adb.calls.length = 0;
+    hooks.release("s1", "emulator-5554", "released", { deviceIdentityReplaced: true });
+    hooks.unbound("s1", "emulator-5554", { deviceIdentityReplaced: true });
+    await Promise.resolve();
+    expect(hooks.pending).toEqual([]);
+    expect(adb.calls).toEqual([]);
+    expect(adb.mappings.has(8080)).toBe(true);
+  });
 });

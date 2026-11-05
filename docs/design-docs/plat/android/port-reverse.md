@@ -46,8 +46,13 @@ Session release and device unbind remove that session's mappings on the device,
 registered as pending device cleanup so the next session waits for it. Device
 removal from the pool removes only `sessionless` mappings: Android recovery
 removes and re-adds a device while its session stays bound, and that session's
-mappings are restored on its next call. A device that cannot answer during
-release is assumed gone: ownership is dropped and the failure logged at debug.
+mappings are restored on its next call. A released mapping whose removal fails
+(or whose device cannot answer `--list`) leaves `owned`, so it is never restored,
+and waits in a pending-removal set: the device's next `--list` retries the
+removal while the port still maps to the host port AutoMobile set, and drops it
+once the port is gone or re-pointed. When release reports that another device
+now answers on the serial (identity replacement), the session's ownership and the
+device's pending removals are forgotten without sending any command.
 
 ## Policy
 

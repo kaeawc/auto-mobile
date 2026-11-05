@@ -72,6 +72,11 @@ interface DeviceState {
   adb: AdbReverseCommands;
   /** Device port -> the mapping AutoMobile created there and the session that owns it. */
   owned: Map<number, OwnedMapping>;
+  /**
+   * Device port -> host port of a released mapping whose removal failed. Never restored; the removal
+   * is retried on the device's next `--list` while the port still maps to that host port.
+   */
+  pendingRemoval: Map<number, number>;
   /** Serialises operations on one device so list-then-add/remove cannot interleave. */
   tail: Promise<unknown>;
   pending: number;
@@ -220,6 +225,30 @@ export class PortReverseManager {
     );
   }
 
+  /**
+   * Another device now answers on this serial: forget the owner's mappings there, and any pending
+   * removals, without sending a command, since the replacement's mappings are not ours.
+   */
+  async forgetOwnerOnDevice(owner: string, deviceId: string): Promise<void> {
+    const state = this.devices.get(deviceId);
+    if (state === undefined) {
+      return;
+    }
+    await this.enqueue(state, async () => {
+      for (const [port, mapping] of [...state.owned]) {
+        if (mapping.owner === owner) {
+          state.owned.delete(port);
+        }
+      }
+      state.pendingRemoval.clear();
+    });
+  }
+
+  /** Released mappings on the device whose removal is still pending, ascending. */
+  pendingRemovals(deviceId: string): number[] {
+    return [...(this.devices.get(deviceId)?.pendingRemoval.keys() ?? [])].sort((a, b) => a - b);
+  }
+
   /** The session ended: remove the mappings it owns on every device. */
   async releaseOwner(owner: string): Promise<void> {
     await Promise.all(
@@ -257,7 +286,13 @@ export class PortReverseManager {
   private stateFor(target: PortReverseTarget): DeviceState {
     let state = this.devices.get(target.deviceId);
     if (state === undefined) {
-      state = { adb: target.adb, owned: new Map(), tail: Promise.resolve(), pending: 0 };
+      state = {
+        adb: target.adb,
+        owned: new Map(),
+        pendingRemoval: new Map(),
+        tail: Promise.resolve(),
+        pending: 0,
+      };
       this.devices.set(target.deviceId, state);
     } else {
       state.adb = target.adb;
@@ -284,10 +319,33 @@ export class PortReverseManager {
   private async view(deviceId: string, state: DeviceState): Promise<DeviceView> {
     try {
       const entries = await state.adb.list();
-      return new Map(entries.map((entry) => [entry.devicePort, entry]));
+      const view: DeviceView = new Map(entries.map((entry) => [entry.devicePort, entry]));
+      await this.retryPendingRemovals(deviceId, state, view);
+      return view;
     } catch (error) {
       rethrowDeviceTransportUnavailable(error);
       throw toActionableError(error, `adb reverse --list failed on ${deviceId}`);
+    }
+  }
+
+  /** Retries released mappings whose removal failed, while they still map where AutoMobile set them. */
+  private async retryPendingRemovals(deviceId: string, state: DeviceState, view: DeviceView) {
+    for (const [devicePort, hostPort] of [...state.pendingRemoval]) {
+      if (view.get(devicePort)?.hostPort !== hostPort) {
+        // Gone, or re-pointed by someone else: nothing of ours is left to remove.
+        state.pendingRemoval.delete(devicePort);
+        continue;
+      }
+      try {
+        await state.adb.remove(devicePort);
+        state.pendingRemoval.delete(devicePort);
+        view.delete(devicePort);
+        this.audit(`remove ${tcp(devicePort)} -> ${tcp(hostPort)} device=${deviceId} (retried)`);
+      } catch (error) {
+        logger.warn(
+          `[portReverse] retrying removal of released ${tcp(devicePort)} on ${deviceId} failed: ${errorMessage(error)}`,
+        );
+      }
     }
   }
 
@@ -504,20 +562,30 @@ export class PortReverseManager {
     }
     let view: DeviceView;
     try {
-      view = new Map((await state.adb.list()).map((entry) => [entry.devicePort, entry]));
+      view = await this.view(deviceId, state);
     } catch (error) {
-      // A released or unplugged device cannot answer; its reverses died with its transport.
+      // A released or unplugged device often cannot answer; the removal is kept pending, never
+      // restored, and retried if the device answers again.
       logger.debug(`[portReverse] release on ${deviceId}: --list failed: ${errorMessage(error)}`);
-      ports.forEach((port) => state.owned.delete(port));
+      ports.forEach((port) => this.deferRemoval(state, port));
       return;
     }
     for (const port of ports) {
       await this.removeOwned(deviceId, state, port, view).catch((error: unknown) => {
-        // Same as above: removal on a device that is going away is expected to fail. The owner is
-        // released, so ownership is dropped rather than kept for a later restore to re-add.
-        state.owned.delete(port);
-        logger.debug(`[portReverse] release ${tcp(port)} on ${deviceId}: ${errorMessage(error)}`);
+        logger.warn(
+          `[portReverse] release ${tcp(port)} on ${deviceId} failed; retrying on the next call: ${errorMessage(error)}`,
+        );
+        this.deferRemoval(state, port);
       });
+    }
+  }
+
+  /** The owner is released, so the port leaves `owned` (never restored) and waits for removal. */
+  private deferRemoval(state: DeviceState, port: number): void {
+    const mapping = state.owned.get(port);
+    state.owned.delete(port);
+    if (mapping !== undefined) {
+      state.pendingRemoval.set(port, mapping.hostPort);
     }
   }
 

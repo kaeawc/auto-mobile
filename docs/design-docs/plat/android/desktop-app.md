@@ -48,14 +48,27 @@ fallback), instead of opening their own socket:
   device remains. After a reconnect every live device subscribes again. A
   refused subscription, such as a device that is not live yet, retries on its
   own backoff without affecting other devices; a refused desktop session fails
-  them all. A facet mounted on a live subscription first receives its device's
-  recent events.
-- Observation (Layout, Performance, Navigation) also uses one connection per
-  device, shared by every facet on it. The hub owns that connection's
-  reconnects, so a facet on a hub stream runs no reconnect loop of its own and
-  only refreshes when the shared connection comes back. Cadence requests are
-  merged per stream by taking the fastest interval any facet asked for, and
-  recomputed when a facet leaves. Storage keeps its own per-pane stream, because
+  them all, and a device subscribing while that session is still current gets
+  the refusal at once. The refusal holds only for the refused session UUID: once
+  a different session registers, a retry or a new subscription connects again
+  and subscribes every live device. A facet mounted on a live subscription first
+  receives its device's recent events.
+- Observation (Layout, Performance, Navigation) uses one stream per device,
+  shared by every facet on it, and every device's stream shares one socket and
+  one reader thread. Each device sends its own `subscribe` with its own cadence;
+  data frames are routed by `subscriptionId`, and replies to a device's
+  `request_navigation_graph` or `request_observation` by the request id (both
+  requests name the device's `deviceSessionUuid`). A refused or daemon-ended
+  subscription takes down only its own device. A refused desktop session takes
+  down every device until the last lease is released. The hub owns each device's
+  reconnects: when the socket drops, every device reports disconnected and its
+  supervision reconnects it, reopening the shared socket once. A facet on a hub
+  stream runs no reconnect loop of its own and only refreshes when its device
+  comes back. Cadence requests are merged per device by taking the fastest
+  interval any facet asked for, sent as `update_cadence` on that device's
+  subscription, and recomputed when a facet leaves. One device's slow collector
+  never holds back another: the per-device flows keep the latest frame and drop
+  the oldest buffered one. Storage keeps its own per-pane stream, because
   its updates and subscription acknowledgements are unicast to one pane.
 - Leases are ref-counted per device and stream kind; `subscriptions` and
   `observationSubscriptions` expose the live counts, and
@@ -76,4 +89,19 @@ successor, the pane re-keys onto the successor. When it ends with no successor
 disconnected" in place of its stream and facets, which releases their leases.
 The pane is marked rather than closed so the user sees why the device went away;
 it stays until closed, and observing the device again or a fresh epoch for it
-restores the live pane. An end for an epoch the pane is not on is ignored.
+(including one reported after a daemon restart) restores the live pane as a new
+epoch, so nothing observed from the retired epoch carries over. A daemon
+restart that re-mints a live pane's epoch is not a new epoch: that pane keeps
+its remembered state. An end for an epoch the pane is not on is ignored.
+
+The workspace hears these lifecycle frames itself, not through its panes: while
+a column observes a live epoch, the workspace holds one lifecycle-only
+observation subscription for that epoch (`lifecycleOnly: true` on `subscribe`).
+The daemon sends such a subscription only `device_session_started` and
+`device_session_ended` frames, and never counts it when deciding whether or how
+fast to poll a device or whether the device is in use, so an idle pane neither
+starts polling nor changes another client's cadence. The daemon sends an
+epoch's lifecycle frames to that epoch's subscribers, so each frame is handled
+once, whatever facets are open and whichever pane has focus. Ending the focused
+pane's epoch leaves focus where it is: moving it would arm input on a device the
+user did not pick.

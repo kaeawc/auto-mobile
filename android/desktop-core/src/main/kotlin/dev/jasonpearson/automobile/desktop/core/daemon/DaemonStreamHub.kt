@@ -31,10 +31,10 @@ fun interface StreamLease : AutoCloseable {
 
 /**
  * The desktop's shared, per-process owner of daemon streams (#5262). Facets ask the hub for a
- * device's stream instead of opening their own socket: the hub keeps one long-lived connection per
- * observed device and stream kind (telemetry, observation), shared by every facet showing that
- * device, and ref-counts subscriptions per [DeviceStreamKey] as facets mount and unmount. A
- * device's connection opens on its first subscription and closes when its last one is released.
+ * device's stream instead of opening their own socket: the hub keeps one subscription per observed
+ * device and stream kind (telemetry, observation), shared by every facet showing that device, and
+ * ref-counts subscriptions per [DeviceStreamKey] as facets mount and unmount. A device's
+ * subscription starts with its first lease and ends when its last one is released.
  */
 interface DaemonStreamHub : ObservationStreamHub {
   /**

@@ -18,25 +18,28 @@ internal class TelemetryFrameHandler(
   private val log: Logger,
   private val onRejected: (MuxSubscription) -> Unit,
 ) {
-  fun handle(open: TelemetrySocket, line: String, onHealthy: () -> Unit) {
+  /** Handles [line]; false when the daemon refused the desktop session and the socket must end. */
+  fun handle(open: TelemetrySocket, line: String, onHealthy: () -> Unit): Boolean {
     val response =
       try {
         DaemonJson.decodeFromString(serializer<TelemetryPushResponse>(), line)
       } catch (e: SerializationException) {
         log.warn("Malformed telemetry push message; skipped: ${e.message}")
-        return
+        return true
       } catch (e: IllegalArgumentException) {
         log.warn("Malformed telemetry push message; skipped: ${e.message}")
-        return
+        return true
       }
     when (response.type) {
       "telemetry_push" -> deliver(response)
       "subscription_response" ->
-        if (response.success == true) acknowledge(open, response, onHealthy) else reject(response)
-      "error" -> reject(response)
+        if (response.success == true) acknowledge(open, response, onHealthy)
+        else return reject(response)
+      "error" -> return reject(response)
       "ping" -> wire.write(open, wire.pong())
       else -> log.warn("Unknown telemetry push message type: ${response.type}")
     }
+    return true
   }
 
   private fun deliver(response: TelemetryPushResponse) {
@@ -71,17 +74,15 @@ internal class TelemetryFrameHandler(
     entry.mutableState.value = ConnectionState.Connected(subscribed = true)
   }
 
-  private fun reject(response: TelemetryPushResponse) {
+  // False when the daemon refused the desktop session itself.
+  private fun reject(response: TelemetryPushResponse): Boolean {
     val error = response.error
     if (isStreamSessionRejection(error)) {
       log.warn("Telemetry subscription refused for this session: $error")
-      val all =
-        synchronized(table.lock) {
-          table.sessionRejected = true
-          table.snapshot()
-        }
-      all.publish(ConnectionState.Error(error ?: "Session registration required"))
-      return
+      val message = error ?: "Session registration required"
+      val all = synchronized(table.lock) { table.refuseSession(response.id, message) }
+      all.publish(ConnectionState.Error(message))
+      return false
     }
     // A refused subscribe names its request id; a subscription the daemon later ends on its own
     // (a backfill overflow) names only its subscriptionId, and the socket stays open for the rest.
@@ -89,7 +90,7 @@ internal class TelemetryFrameHandler(
       synchronized(table.lock) { table.reject(response.id) ?: table.end(response.subscriptionId) }
     if (entry == null) {
       log.warn("Telemetry push error: $error")
-      return
+      return true
     }
     log.info("Telemetry subscription for ${entry.key.deviceId} ended; will retry: $error")
     val deviceNotLive = error?.contains(DEVICE_NOT_LIVE_MARKER) == true
@@ -99,6 +100,7 @@ internal class TelemetryFrameHandler(
         else error ?: "Telemetry subscription refused",
       )
     onRejected(entry)
+    return true
   }
 
   private companion object {

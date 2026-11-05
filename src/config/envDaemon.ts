@@ -64,6 +64,12 @@ export const DAEMON_ENV = {
     default: "unset",
     doc: "Number of CtrlProxy host ports.",
   },
+  PORT_REVERSE_ALLOWED_PORTS: {
+    name: "AUTOMOBILE_PORT_REVERSE_ALLOWED_PORTS",
+    kind: "string",
+    default: "unset",
+    doc: "Ports portReverse may map: comma-separated ports or inclusive ranges.",
+  },
   DOCTOR_TIMEOUT_MS: {
     name: "AUTOMOBILE_DOCTOR_TIMEOUT_MS",
     kind: "int",

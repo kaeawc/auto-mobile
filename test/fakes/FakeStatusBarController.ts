@@ -20,6 +20,8 @@ export class FakeStatusBarController implements StatusBarController {
   lastClearSignal: AbortSignal | undefined;
   /** Each queued gate holds one override() call (in call order) until it resolves. */
   overrideGates: Promise<void>[] = [];
+  /** Each queued gate holds one clear() call (in call order) until it resolves. */
+  clearGates: Promise<void>[] = [];
 
   async override(overrides: StatusBarOverrides): Promise<StatusBarApplyOutcome> {
     this.overrides.push(overrides);
@@ -40,6 +42,10 @@ export class FakeStatusBarController implements StatusBarController {
   async clear(signal?: AbortSignal): Promise<void> {
     this.clears++;
     this.lastClearSignal = signal;
+    const gate = this.clearGates.shift();
+    if (gate) {
+      await gate;
+    }
     if (this.hangClear) {
       await new Promise<void>((_resolve, reject) => {
         signal?.addEventListener("abort", () => reject(signal.reason), { once: true });

@@ -2,6 +2,7 @@ import type { AdbClientFactory } from "./AdbClientFactory";
 import type { AdbDeviceState } from "./interfaces/AdbExecutor";
 import type { AndroidEmulatorReadinessOptions } from "./AndroidEmulatorClient";
 import { AndroidOfflineProbeError } from "./AndroidOfflineProbeError";
+import { notifyAdbTransportRecovered } from "./adbTransportRecoveredSignal";
 import { throwIfReadinessAborted } from "./emulatorReadinessEvaluation";
 import { MIN_EMULATOR_POLLING_INTERVAL_MS, type OfflineTracker } from "./EmulatorReadinessPoller";
 import { errorMessage } from "../describeUnknownError";
@@ -54,6 +55,11 @@ interface FreshOfflineEpisode {
 export interface EmulatorOfflineRecoveryHost {
   timer(): Timer;
   adbFactory(): AdbClientFactory;
+  /**
+   * An `adb reconnect` for the serial was dispatched successfully. Defaults to the process
+   * {@link adbTransportRecoveredSignal}, so state adb drops with the transport is re-applied (#17168).
+   */
+  transportRecovered?(deviceId: string): void;
 }
 
 /** ADB-offline detection and bounded `adb reconnect` recovery for emulators. */
@@ -87,6 +93,14 @@ export class DefaultEmulatorOfflineRecovery implements EmulatorOfflineRecovery {
   }
 
   constructor(private readonly host: EmulatorOfflineRecoveryHost) {}
+
+  private reportReconnected(deviceId: string): void {
+    if (this.host.transportRecovered) {
+      this.host.transportRecovered(deviceId);
+    } else {
+      notifyAdbTransportRecovered(deviceId, "adb_reconnect");
+    }
+  }
 
   /**
    * Bounded recovery for a fresh-provision cold boot whose serial is stuck in
@@ -181,6 +195,7 @@ export class DefaultEmulatorOfflineRecovery implements EmulatorOfflineRecovery {
     );
     try {
       await this.issueReconnectOffline(deviceId, commandTimeoutMs, signal);
+      this.reportReconnected(deviceId);
     } catch (error) {
       throwIfReadinessAborted(signal);
       // Best-effort recovery: readiness polling continues through its deadline.
@@ -288,6 +303,7 @@ export class DefaultEmulatorOfflineRecovery implements EmulatorOfflineRecovery {
       [...new Set(deviceIds)].map(async (deviceId) => {
         try {
           await this.issueReconnectOffline(deviceId, timeoutMs, options.signal);
+          this.reportReconnected(deviceId);
         } catch (error) {
           throwIfReadinessAborted(options.signal);
           // Best-effort recovery: other serials and the disconnect sweep continue.

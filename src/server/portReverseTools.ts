@@ -12,11 +12,17 @@ import {
   portReversePolicyFromEnv,
   type PortReversePolicy,
 } from "../features/portReverse/PortReversePolicy";
+import { PortReverseRecoveryScheduler } from "../features/portReverse/PortReverseRecoveryScheduler";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import type { BootedDevice } from "../models";
 import { createAdbReverseCommands } from "../utils/android-cmdline-tools/adbReverse";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  adbTransportRecoveredSignal,
+  type AdbTransportRecoveredSignal,
+} from "../utils/android-cmdline-tools/adbTransportRecoveredSignal";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { defaultTimer } from "../utils/SystemTimer";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { defineDeviceTool, type DeviceToolHandler } from "./defineTool";
 import { portReverseResultSchema } from "./portReverseToolOutputSchemas";
@@ -211,14 +217,35 @@ const portReverseTool = defineDeviceTool({
 
 export const portReverseSchema = portReverseTool.schema;
 
-let deviceRemovalSubscribed = false;
+/**
+ * Re-applies a device's owned mappings when its adb transport recovers (an `adb reconnect`, a
+ * refused command that later succeeded, a CtrlProxy reconnect), without waiting for a client call.
+ */
+export function subscribePortReverseTransportRecovery(
+  signal: Pick<AdbTransportRecoveredSignal, "subscribe">,
+  scheduler: Pick<PortReverseRecoveryScheduler, "deviceRecovered" | "dispose">,
+): () => void {
+  const unsubscribe = signal.subscribe((deviceId, reason) =>
+    scheduler.deviceRecovered(deviceId, reason),
+  );
+  return () => {
+    unsubscribe();
+    scheduler.dispose();
+  };
+}
+
+let daemonSubscribed = false;
 
 function daemonManager(): PortReverseManager {
-  if (!deviceRemovalSubscribed) {
-    deviceRemovalSubscribed = true;
+  if (!daemonSubscribed) {
+    daemonSubscribed = true;
     subscribePortReverseCleanup(
       { subscribeDeviceRemoval: (l) => getDaemonStreamDeviceLifecycleEmitter().onDeviceRemoved(l) },
       defaultPortReverseManager,
+    );
+    subscribePortReverseTransportRecovery(
+      adbTransportRecoveredSignal,
+      new PortReverseRecoveryScheduler({ manager: defaultPortReverseManager, timer: defaultTimer }),
     );
   }
   return defaultPortReverseManager;

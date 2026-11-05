@@ -46,6 +46,7 @@ import {
   executeWithAdbTransportRecovery,
   getAdbAbortError,
 } from "./adbTransportRecovery";
+import { notifyAdbTransportRecovered } from "./adbTransportRecoveredSignal";
 import {
   defaultAdbTransportRestartRegistry,
   isAdbTransportRestartCommand,
@@ -835,6 +836,8 @@ export class AdbClient implements AdbExecutor {
           signal: resolvedSignal,
           onExhausted: (error) =>
             this.notifyMissingDeviceIfNeeded(error, busyAtDispatch, baseArgs[1]),
+          onRecovered: () =>
+            notifyAdbTransportRecovered(this.device?.deviceId, "transport_refusal"),
         },
       );
     let busyAtDispatch = { busy: false, generation: 0 };

@@ -109,6 +109,11 @@ interface DeviceState {
    * and queues its removal behind them (#17104).
    */
   ensuring: Map<string, number>;
+  /**
+   * Owner -> owned device ports a background {@link PortReverseManager.reconcile} re-applied since
+   * that owner's last ensure/list/verify, which reports them as `restored` once and clears them.
+   */
+  backgroundRestored: Map<string, Set<number>>;
   /** Serialises operations on one device so list-then-add/remove cannot interleave. */
   tail: Promise<unknown>;
   pending: number;
@@ -302,7 +307,9 @@ export class PortReverseManager {
 
   /**
    * Re-applies every owned mapping the device lost, for every session on it. A transport-recovery
-   * path calls this after the device is back; failures are logged and retried on the next call.
+   * path calls this after the device is back (`PortReverseRecoveryScheduler`). What it restores is
+   * reported to each owning session as `restored` in its next ensure/list/verify result; a failure
+   * is logged, stays owned, and is retried (and reported in `restoreFailures`) by that next call.
    */
   async reconcile(deviceId: string): Promise<PortReverseRestoreReport> {
     const state = this.devices.get(deviceId);
@@ -311,7 +318,16 @@ export class PortReverseManager {
     }
     return this.enqueue(state, async () => {
       const view = await this.view(deviceId, state);
-      return this.restoreMissing(deviceId, state, view);
+      const report = await this.restoreMissing(deviceId, state, view);
+      for (const devicePort of report.restored) {
+        const owner = state.owned.get(devicePort)?.owner;
+        if (owner !== undefined) {
+          const ports = state.backgroundRestored.get(owner) ?? new Set<number>();
+          ports.add(devicePort);
+          state.backgroundRestored.set(owner, ports);
+        }
+      }
+      return report;
     });
   }
 
@@ -334,7 +350,7 @@ export class PortReverseManager {
       return;
     }
     await this.enqueue(state, () =>
-      this.releaseWhere(deviceId, state, (mapping) => mapping.owner === owner),
+      this.releaseWhere(deviceId, state, (holder) => holder === owner),
     );
   }
 
@@ -354,6 +370,7 @@ export class PortReverseManager {
         }
       }
       state.pendingRemoval.clear();
+      state.backgroundRestored.delete(owner);
     });
   }
 
@@ -366,9 +383,7 @@ export class PortReverseManager {
   async releaseOwner(owner: string): Promise<void> {
     await Promise.all(
       [...this.devices].map(([deviceId, state]) =>
-        this.enqueue(state, () =>
-          this.releaseWhere(deviceId, state, (mapping) => mapping.owner === owner),
-        ),
+        this.enqueue(state, () => this.releaseWhere(deviceId, state, (holder) => holder === owner)),
       ),
     );
   }
@@ -409,6 +424,7 @@ export class PortReverseManager {
         owned: new Map(),
         pendingRemoval: new Map(),
         ensuring: new Map(),
+        backgroundRestored: new Map(),
         tail: Promise.resolve(),
         pending: 0,
       };
@@ -482,8 +498,13 @@ export class PortReverseManager {
   ): Promise<PortReverseRestoreReport> {
     const all = await this.restoreMissing(target.deviceId, state, view);
     const mine = (port: number) => state.owned.get(port)?.owner === target.owner;
+    // Ports a background reconcile restored since this owner's last call, still owned and mapped.
+    const earlier = [...(state.backgroundRestored.get(target.owner) ?? [])].filter(
+      (port) => mine(port) && view.has(port),
+    );
+    state.backgroundRestored.delete(target.owner);
     const report: PortReverseRestoreReport = {
-      restored: all.restored.filter(mine),
+      restored: [...new Set([...earlier, ...all.restored.filter(mine)])].sort((a, b) => a - b),
       restoreFailures: all.restoreFailures.filter((failure) => mine(failure.devicePort)),
     };
     return report;
@@ -673,9 +694,17 @@ export class PortReverseManager {
   private async releaseWhere(
     deviceId: string,
     state: DeviceState,
-    matches: (mapping: OwnedMapping) => boolean,
+    matchesOwner: (owner: string) => boolean,
   ): Promise<void> {
-    const ports = [...state.owned].filter(([, mapping]) => matches(mapping)).map(([port]) => port);
+    const ports = [...state.owned]
+      .filter(([, mapping]) => matchesOwner(mapping.owner))
+      .map(([port]) => port);
+    // A released owner's pending restore notices die with it; no later call of theirs reads them.
+    for (const owner of state.backgroundRestored.keys()) {
+      if (matchesOwner(owner)) {
+        state.backgroundRestored.delete(owner);
+      }
+    }
     if (ports.length === 0) {
       return;
     }

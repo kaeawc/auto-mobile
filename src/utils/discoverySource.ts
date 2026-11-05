@@ -21,7 +21,8 @@ export type DiscoverySource =
   | "ios-simulator"
   | "ios-physical"
   | "watchos-simulator"
-  | "tvos-simulator";
+  | "tvos-simulator"
+  | "visionos-simulator";
 
 /**
  * The source that would have observed this device.
@@ -38,6 +39,9 @@ export function discoverySourceFor(
 ): DiscoverySource {
   if (platform === "android") {
     return "android";
+  }
+  if (platform === "visionos") {
+    return "visionos-simulator";
   }
   if (platform === "tvos") {
     return "tvos-simulator";
@@ -67,8 +71,7 @@ export function sourcesForPlatform(platform: Platform): DiscoverySource[] {
     case "tvos":
       return ["tvos-simulator"];
     case "visionos":
-      // Vision Pro simulators are not discovered yet (#16849).
-      return [];
+      return ["visionos-simulator"];
   }
 }
 
@@ -76,6 +79,8 @@ function platformForSource(source: DiscoverySource): Platform {
   switch (source) {
     case "android":
       return "android";
+    case "visionos-simulator":
+      return "visionos";
     case "tvos-simulator":
       return "tvos";
     case "watchos-simulator":

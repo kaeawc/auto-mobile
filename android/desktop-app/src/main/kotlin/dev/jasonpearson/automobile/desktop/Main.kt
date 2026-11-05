@@ -145,6 +145,9 @@ private fun ApplicationScope.DesktopApplication(graph: AutoMobileGraph) {
   // not a Boolean, so repeat presses each register even while the palette is already open.
   var openPaletteRequest by remember { mutableStateOf(0) }
 
+  // Follows the focused workspace device (windowTitle), reported up by AutoMobileDesktopApp.
+  var windowTitle by remember { mutableStateOf(APP_WINDOW_TITLE) }
+
   // Last-resort handler for uncaught exceptions on the UI thread. Compose Desktop's default
   // shows a bare Swing dialog containing only the throwable's toString() (a NoClassDefFoundError
   // renders as an unreadable slash-form class path) and logs nothing. Ours logs the full stack
@@ -162,8 +165,10 @@ private fun ApplicationScope.DesktopApplication(graph: AutoMobileGraph) {
       openPaletteRequest,
       windowState,
       uiExceptionHandlerFactory,
+      windowTitle,
     ),
     onHide = { isWindowVisible = false },
+    onWindowTitleChange = { windowTitle = it },
     onPaletteRequest = { openPaletteRequest++ },
     onQuit = ::exitApplication,
   )
@@ -178,6 +183,7 @@ private data class DesktopWindowPresentation(
   val openPaletteRequest: Int,
   val windowState: androidx.compose.ui.window.WindowState,
   val uiExceptionHandlerFactory: WindowExceptionHandlerFactory,
+  val title: String,
 )
 
 @OptIn(ExperimentalComposeUiApi::class)
@@ -185,6 +191,7 @@ private data class DesktopWindowPresentation(
 private fun DesktopWindow(
   presentation: DesktopWindowPresentation,
   onHide: () -> Unit,
+  onWindowTitleChange: (String) -> Unit,
   onPaletteRequest: () -> Unit,
   onQuit: () -> Unit,
 ) =
@@ -194,7 +201,7 @@ private fun DesktopWindow(
     ) {
       Window(
         onCloseRequest = { onHide() },
-        title = "AutoMobile",
+        title = title,
         state = windowState,
         visible = isWindowVisible,
         onPreviewKeyEvent = { event ->
@@ -216,6 +223,7 @@ private fun DesktopWindow(
             openPaletteRequest = openPaletteRequest,
             daemonConnectionState = daemonState,
             windowVisible = isWindowVisible,
+            onWindowTitleChange = onWindowTitleChange,
           )
         }
       }

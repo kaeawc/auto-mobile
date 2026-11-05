@@ -8,8 +8,8 @@ export type StatusBarSessionManager = Pick<
 >;
 
 /**
- * Run a status-bar override under the caller's session (#14105). The override is tracked as
- * session setup, so a concurrent release drains it before the release-time clear runs; the
+ * Run a status-bar override or clear under the caller's session (#14105). The mutation is tracked
+ * as session setup, so a concurrent release drains it before the release-time clear runs; the
  * owning session id is recorded before the device command so a release that wins the race still
  * clears whatever the command managed to apply. A sessionless call runs untracked and owns
  * nothing (`null`). `record` returns a rejection handler for its write: when the device command

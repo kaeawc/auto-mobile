@@ -516,6 +516,7 @@ jobs:
               - '.githooks/**'
               - '.agents/**'
               - '.claude-plugin/**'
+              - 'plugins/**'
               - 'commands/**'
               - 'skills/**'
               - 'oxlint-plugins/**'

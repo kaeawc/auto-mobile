@@ -104,7 +104,7 @@ describe("assertToolSupportsDevicePlatform", () => {
       expect(() => assertToolSupportsDevicePlatform(tool, visionPro)).not.toThrow();
       expect(() => assertRequestedPlatformSupported(tool, { platform: "visionos" })).not.toThrow();
     }
-    for (const tool of ["observe", "tapOn", "installApp", "launchApp", "sendKeys"]) {
+    for (const tool of ["observe", "tapOn", "installApp", "launchApp", "sendKeys", "pressButton"]) {
       expect(() => assertToolSupportsDevicePlatform(tool, visionPro)).toThrow(
         new ActionableError(unsupportedPlatformToolMessage(tool, "visionos")),
       );

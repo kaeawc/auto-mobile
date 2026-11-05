@@ -38,21 +38,7 @@ internal suspend fun ObservationStreamClient.handleStorageReconciliationRequired
 
 internal suspend fun ObservationStreamClient.handleDeviceSessionEnded(response: StreamResponse) {
 
-  val deviceId = response.deviceId
-  val retiredUuid = response.deviceSessionUuid
-  val successorUuid = response.successorSessionUuid
-  if (deviceId.isNullOrBlank() || retiredUuid.isNullOrBlank()) return
-  val timestamp = response.timestamp ?: System.currentTimeMillis()
-  val event =
-    when {
-      // An absent successor means the device left for good; a present-but-blank one is malformed.
-      successorUuid == null ->
-        DeviceStreamEvent.DeviceSessionEnded(deviceId, retiredUuid, timestamp)
-      successorUuid.isBlank() -> return
-      else ->
-        DeviceStreamEvent.DeviceSessionSuperseded(deviceId, retiredUuid, successorUuid, timestamp)
-    }
-  _deviceEvents.emit(event)
+  response.toDeviceSessionEvent()?.let { _deviceEvents.emit(it) }
 }
 
 internal fun ObservationStreamClient.handlePing(response: StreamResponse) {

@@ -57,6 +57,7 @@ test/fixtures/android-touch-node/*.txt text eol=lf
 test/fixtures/android-uinput-pen/*.txt text eol=lf
 test/fixtures/android-window-policy/*.txt text eol=lf
 test/fixtures/ios-devicectl/*.json text eol=lf
+test/fixtures/ios-rotate/*.json text eol=lf
 test/fixtures/observe-output/ios-overlay-window/*.json text eol=lf
 test/fixtures/observe-output/ios-prototype-sheet/*.json text eol=lf
 test/fixtures/network-filter-controller/*.json text eol=lf

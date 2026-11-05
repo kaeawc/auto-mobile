@@ -16,8 +16,21 @@ internal fun WorkspaceViewModel.setLockStates(locked: Map<String, Boolean>) {
   }
 }
 
+/**
+ * Apply the daemon's current epoch UUIDs. A live column whose UUID changed was re-minted by a
+ * daemon restart, not a reboot, so it keeps its remembered state. An ended column dropped its
+ * epoch, so any UUID the device returns with is a new epoch and replaces the column through
+ * [replaceEpoch].
+ */
 internal fun WorkspaceViewModel.refreshDeviceSessionUuids(sessionUuids: Map<String, String>) {
   if (sessionUuids.isEmpty()) return
+  val observed = (_state.value as? WorkspaceUiState.Content)?.columns ?: return
+  observed
+    .filter { it.sessionEnded }
+    .forEach { ended ->
+      val successorUuid = sessionUuids[ended.deviceId] ?: return@forEach
+      replaceEpoch(ended, ended.nextEpoch(ended.successorEpoch(successorUuid)))
+    }
   _state.update { current ->
     val content = current as? WorkspaceUiState.Content ?: return@update current
     content.copy(
@@ -25,7 +38,7 @@ internal fun WorkspaceViewModel.refreshDeviceSessionUuids(sessionUuids: Map<Stri
         content.columns.map { column ->
           val refreshed = sessionUuids[column.deviceId] ?: return@map column
           if (refreshed == column.deviceSessionUuid) column
-          else column.copy(deviceSessionUuid = refreshed, sessionEnded = false)
+          else column.copy(deviceSessionUuid = refreshed)
         },
     )
   }

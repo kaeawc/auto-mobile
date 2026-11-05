@@ -512,6 +512,23 @@ describe("deleteDevice on an Apple Vision Pro simulator", () => {
     });
     expect(listed(simctl)).toContain(headset.udid);
   });
+
+  test("a destroyed headset notifies resource subscribers; an absent one does not", async () => {
+    const existing = visionDevice({ name: NAME });
+    await arrange([existing]);
+    let notified = 0;
+    setDeviceToolsDependencies({
+      notifyResourcesChanged: async () => {
+        notified += 1;
+      },
+    });
+
+    expect(toolJson(await remove(target(existing.udid))).state).toBe("destroyed");
+    expect(notified).toBe(1);
+
+    expect(toolJson(await remove(target(existing.udid))).state).toBe("already_absent");
+    expect(notified).toBe(1);
+  });
 });
 
 function createdUdid(simctl: FakeAppleVisionProvisionSimctl): string {

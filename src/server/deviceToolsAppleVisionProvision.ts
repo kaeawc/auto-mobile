@@ -1,3 +1,4 @@
+import { notifyAfterAppleSimulatorProvision } from "./appleSimulatorInventoryNotify";
 import { requestAcquisitionReceipt } from "../daemon/acquisitionReceipt";
 import {
   currentAutolockMcpSessionId,
@@ -152,6 +153,11 @@ export async function provisionAppleVisionDevice(
             }
             const { headset, created } = resolved;
             if (args.boot === false) {
+              notifyAfterAppleSimulatorProvision(
+                `Apple Vision Pro simulator ${headset.deviceId}`,
+                created,
+                undefined,
+              );
               return headsetProvisionResponse(args, headset, created, undefined);
             }
             const booted = await bootAndBind(
@@ -159,6 +165,11 @@ export async function provisionAppleVisionDevice(
               deps,
               deadlineMs,
               { signal: requestSignal, stage },
+            );
+            notifyAfterAppleSimulatorProvision(
+              `Apple Vision Pro simulator ${headset.deviceId}`,
+              created,
+              booted,
             );
             return headsetProvisionResponse(args, headset, created, booted);
           } finally {

@@ -1094,4 +1094,20 @@ describe("provisionDevice on an Apple Vision Pro simulator", () => {
     expect(parsedHeadset).toMatchObject({ boot: true });
     expect(parsedHeadset.readiness).toBeUndefined();
   });
+
+  test("a created headset notifies resource subscribers; adopting it does not", async () => {
+    await arrange();
+    let notified = 0;
+    setDeviceToolsDependencies({
+      notifyResourcesChanged: async () => {
+        notified += 1;
+      },
+    });
+
+    await provision({ device: headset });
+    expect(notified).toBe(1);
+
+    await provision({ device: headset, boot: false });
+    expect(notified).toBe(1);
+  });
 });

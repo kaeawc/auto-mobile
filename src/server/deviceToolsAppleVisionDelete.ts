@@ -1,3 +1,4 @@
+import { notifyAppleSimulatorInventoryChanged } from "./appleSimulatorInventoryNotify";
 import {
   getDeviceToolsDependencies,
   initializedDevicePool,
@@ -137,6 +138,7 @@ async function runAppleVisionDelete(
   }
   signal.throwIfAborted();
   await destroyUnderLease(provisioner, device, { deadlineMs, signal, steps });
+  notifyAppleSimulatorInventoryChanged(`deleting Apple Vision Pro simulator ${udid}`);
   return createTeardownResponse(
     args,
     "destroyed",

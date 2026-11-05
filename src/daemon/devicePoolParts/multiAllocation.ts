@@ -9,7 +9,7 @@ import {
 import { withAllocationCancellationScope } from "../allocationCancellationScope";
 import { logger } from "../../utils/logger";
 import { ActionableError, Platform } from "../../models";
-import { livenessUnknownMessage } from "../deviceAllocation";
+import { livenessUnknownMessage } from "../allocationLiveness";
 import { matchesPlatformSelector } from "../../models/Platform";
 import { assertPoolCapacity } from "../poolCapacityError";
 import { type DevicePoolRefreshResult } from "../devicePoolRefresh";

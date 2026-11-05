@@ -2,8 +2,8 @@ import { holderOf, isBusy, isIdle } from "../deviceBinding";
 import {
   type AllocationDiscoverySnapshots,
   type AssignableIdleDeviceSelection,
-  type LivenessUnknown,
 } from "../deviceAllocation";
+import type { LivenessUnknown } from "../allocationLiveness";
 import {
   DeviceCleanupInProgressError,
   DeviceUnhealthyError,

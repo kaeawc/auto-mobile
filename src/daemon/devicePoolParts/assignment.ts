@@ -3,7 +3,7 @@ import { holderOf } from "../deviceBinding";
 import { type ForeignDeviceOwnership } from "../foreignDeviceOwnership";
 import { type Session, type SessionRecoveryTarget } from "../sessionManager";
 import { ActionableError, Platform } from "../../models";
-import type { LivenessUnknown } from "../deviceAllocation";
+import type { LivenessUnknown } from "../allocationLiveness";
 import {
   SessionRecoveryAssignmentError,
   formatSessionRecoveryIncidentContext,

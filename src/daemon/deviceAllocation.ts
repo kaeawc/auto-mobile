@@ -1,7 +1,8 @@
 import { bindDevice, holderOf, isIdle } from "./deviceBinding";
 import { DevicePoolError } from "./DevicePoolError";
 import type { Mutex } from "async-mutex";
-import { ActionableError, PLATFORM_LABELS, type Platform } from "../models";
+import { ActionableError, type Platform } from "../models";
+import * as liveness from "./allocationLiveness";
 import { runWithAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
 import type { TTLCache } from "../utils/cache/Cache";
 import type { SingleFlight } from "../utils/cache/SingleFlight";
@@ -44,21 +45,9 @@ export interface AllocationDiscoverySnapshots {
   androidPresence?: BootedDeviceDiscovery;
 }
 
-/**
- * Why no idle device could be judged live: `false`, or the platform whose liveness discovery
- * source failed, so the refusal names that platform's inventory.
- */
-export type LivenessUnknown = false | Platform;
-
-/** The refusal for an allocation whose idle candidate's liveness source failed. */
-export function livenessUnknownMessage(sessionId: string, platform: Platform): string {
-  const label = PLATFORM_LABELS[platform];
-  return `Unable to verify ${label} ${platform === "android" ? "device" : "simulator"} liveness for session ${sessionId}; ${label} discovery failed.`;
-}
-
 export interface AssignableIdleDeviceSelection {
   device?: PooledDevice;
-  livenessUnknown: LivenessUnknown;
+  livenessUnknown: liveness.LivenessUnknown;
   snapshotStale: boolean;
 }
 
@@ -246,7 +235,7 @@ export class DeviceAllocation {
         // No device available - check if we should wait or fail
         if (assignResult.livenessUnknown) {
           throw new DevicePoolError(
-            livenessUnknownMessage(sessionId, assignResult.livenessUnknown),
+            liveness.livenessUnknownMessage(sessionId, assignResult.livenessUnknown),
             false,
           );
         }
@@ -458,7 +447,7 @@ export class DeviceAllocation {
     session?: Session;
     shouldWait: boolean;
     totalDevices: number;
-    livenessUnknown?: LivenessUnknown;
+    livenessUnknown?: liveness.LivenessUnknown;
     refreshCompleteness?: DiscoveryCompleteness;
     refreshFailure?: string;
     refreshCompleted?: boolean;
@@ -642,7 +631,7 @@ export class DeviceAllocation {
     session?: Session;
     shouldWait: boolean;
     totalDevices: number;
-    livenessUnknown?: LivenessUnknown;
+    livenessUnknown?: liveness.LivenessUnknown;
     refreshCompleteness?: DiscoveryCompleteness;
     refreshFailure?: string;
     refreshCompleted?: boolean;
@@ -724,13 +713,13 @@ export class DeviceAllocation {
     session?: Session;
     shouldWait: boolean;
     totalDevices: number;
-    livenessUnknown?: LivenessUnknown;
+    livenessUnknown?: liveness.LivenessUnknown;
     refreshCompleteness?: DiscoveryCompleteness;
     refreshFailure?: string;
     refreshCompleted?: boolean;
   }> {
     const { recoveryTarget, settledRecoveryLoss = false, signal } = options;
-    let livenessUnknown: LivenessUnknown = false;
+    let livenessUnknown: liveness.LivenessUnknown = false;
     let refreshCompleteness: DiscoveryCompleteness | undefined;
     let refreshFailure: string | undefined;
     let refreshCompleted = false;
@@ -921,7 +910,7 @@ export class DeviceAllocation {
     forSessionId?: string,
   ): Promise<AssignableIdleDeviceSelection> {
     let device = this.selectIdleDevice(candidates, forSessionId);
-    let livenessUnknown: LivenessUnknown = false;
+    let livenessUnknown: liveness.LivenessUnknown = false;
     let snapshotStale = [...capturedEntries].some(
       (entry) =>
         !this.port.isPooledEntryCurrent(entry) ||
@@ -970,11 +959,7 @@ export class DeviceAllocation {
           snapshotStale = true;
         } else {
           livenessUnknown = device.platform;
-          const label = PLATFORM_LABELS[device.platform];
-          logger.warn(
-            `[DevicePool] Cannot assign idle ${label} ${this.port.idleDeviceReaper.iosDeviceNoun(device.id)} ${device.id}: ` +
-              `its ${label} liveness discovery source failed`,
-          );
+          liveness.logLivenessUnknown(device, this.port.idleDeviceReaper.iosDeviceNoun(device.id));
         }
       }
       candidates = candidates.filter((candidate) => candidate.id !== skippedDeviceId);

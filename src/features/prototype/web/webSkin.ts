@@ -2,6 +2,12 @@ import { record, type Raw } from "../prototypeTemplate";
 import { defaultFillAxes, filling } from "./webCollections";
 import { el, type WebElement } from "./webNodes";
 import type { NodeRenderer, WebRenderKit, WebRenderScope } from "./webRender";
+import {
+  iosChipRenderer,
+  iosListItemRenderer,
+  iosToggleRenderer,
+  iosTopAppBarRenderer,
+} from "./webSkinIos";
 import { cssColor, fontPx, rgbaCss } from "./webStyle";
 
 /**
@@ -216,7 +222,15 @@ export function webSkins(kit: WebRenderKit): Readonly<Record<WebSkinId, WebSkin>
     android: { id: "android", renderers: {} },
     ios: {
       id: "ios",
-      renderers: { button: iosButtonRenderer(kit), slider: iosSliderRenderer(kit) },
+      renderers: {
+        button: iosButtonRenderer(kit),
+        slider: iosSliderRenderer(kit),
+        switch: iosToggleRenderer("switch", kit),
+        checkbox: iosToggleRenderer("checkbox", kit),
+        listItem: iosListItemRenderer(kit),
+        chip: iosChipRenderer(kit),
+        topAppBar: iosTopAppBarRenderer(kit),
+      },
     },
   };
 }

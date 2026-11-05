@@ -1442,7 +1442,9 @@ uncapped path-key identifier grammar; bound state keys are checked by the runtim
 Push and replace accept up to 16 scalar literals or existing state/data/item/index value bindings
 in `params`. All declared params are required; unknown names and incorrectly typed literals are
 rejected at the action. `setStack {stack, path:[{screen,params?}]}` validates each entry the same way
-and requires 1–MAX_PROTOTYPE_STACK_DEPTH entries. A non-forced pop of the owning stack in
+and requires 1–MAX_PROTOTYPE_STACK_DEPTH entries. The device runtimes replace the whole path with
+the entries' screens and report one `screen_changed` when the top screen or depth changes; a path
+naming an unknown screen leaves the stack unchanged. A non-forced pop of the owning stack in
 its screen's onBack list, including nested timer and request follow-ups, is rejected; `force:true`
 bypasses that guard. Pops in dialog actions are independent. An onEnter list cannot push or replace
 its own screen, including through nested action lists. Cross-screen lifecycle cycles, including
@@ -2137,8 +2139,10 @@ the capability yet.
 `settings.open` with `page` one of `app`, `notifications`, `location`, `wifi`, `bluetooth` or `display`. The
 list is closed and the target package is always the prototype's own runtime package; a spec cannot name
 another. The module has no events or `/platform` state. Pages other than `app` and `notifications` are
-Android only; the host validator does not yet know the target platform, so that restriction is reported by the
-runtime. CtrlProxy registers the module on Android and opens each page for its own package with
+Android only. The spec validators are platform-neutral, so the host's iOS show preflight refuses a literal
+Android-only `page` with the action's path; a bound page is left to the runtime. The Kotlin validator needs no
+such check because it runs only on Android, and the Swift agent validator has none yet because the iOS agent
+does not advertise the module, which the host's capability gate refuses. CtrlProxy registers the module on Android and opens each page for its own package with
 `FLAG_ACTIVITY_NEW_TASK`. Below API 26 `notifications` opens the app details page, and below API 29 `wifi` opens
 the full Wi-Fi screen instead of the panel; both report `outcome: "fallback"`. The result is `{outcome, page,
 handler?}`, and no resolving Settings activity is the typed error `unavailable`. The embedded renderer and iOS do
@@ -2256,6 +2260,12 @@ it keeps `/platform/location/current` current while the prototype is shown and r
 write, at most once per `minIntervalMs` (whole milliseconds, 1000 to one hour) and only after moving
 `minDistanceM` (0 to 100 km). Like the call, the block needs `location` in both `requires.platform` and
 `requires.permissions`. No updates are delivered in the background. No production runtime advertises the module.
+The delivered `location.updated` event carries only `{accuracyM, approximate}`, so coordinates reach the host
+only when the spec emits them or writes them into `/data`. `prototypeLocationEventSummary`
+(`prototypeLocationPrivacy.ts`) is the reference the runtimes copy, with shared cases in
+`test/fixtures/prototype-location/event-summary.json`. As a second layer the host's event decoder, shared by
+the Android and iOS transports, reduces any decoded `location.updated` data to those two fields and logs the
+names (never the values) of anything it dropped.
 
 **BLE value codecs (#14266).** The `ble` module's `decode` and `encode` arguments name one of a closed list
 of codecs, with no expressions: `utf8`, `hex` (lowercase out, either case in), `base64` (standard alphabet,
@@ -2364,7 +2374,10 @@ must name a declared channel, a literal `actions` list needs unique ids, and `no
 exactly one of `id`, `group` or `all`; bound values are checked by the runtime.
 `notifications.schedule` takes the `post` arguments plus `delaySeconds` (a whole number, 1 to 604800)
 and needs `prototype_platform_notifications_scheduled_v1` as well; the same channel and action-id rules
-apply, and `notifications.scheduledFired` reports a scheduled notification that fired (#14283). On iOS, `min` and `low`
+apply, and `notifications.scheduledFired` reports a scheduled notification that fired (#14283).
+A `notifications.push` handler receives a simulated push (`{type, data, notification?}`, at most
+4096 bytes of compact JSON, the APNs limit) and needs `prototype_platform_push_v1` on top of the
+module, gated per event rather than per call (#14285). On iOS, `min` and `low`
 map to the passive interruption level and `default` and `high` to active. No production runtime
 advertises the module yet.
 
@@ -2501,8 +2514,10 @@ app) and `cast.setVolume` (`volume` 0-1, the remote device volume); play, pause 
 `unsupported`. Events are `cast.routesChanged`, `sessionStarting`, `sessionStarted`, `sessionEnded`,
 `sessionFailed` (data `reason`: `media_not_castable`, `play_services_unavailable`, `network` or
 `receiver`) and `remoteVolume`. `/platform/cast/state` is `unavailable`, `noDevices`, `notConnected`,
-`connecting` or `connected`, with `deviceName`, `protocol` (`googleCast` or `airplay`), `player` (the
-cast `media` player id) and `volume`. CtrlProxy never advertises the module.
+`connecting` or `connected`, with `deviceName`, `protocol` (`googleCast` or `airplay`), `protocols`
+(the unique protocols the device supports, read whole as `{platform:/cast/protocols}`; an iOS agent
+reports `["airplay"]`), `player` (the cast `media` player id) and `volume`. CtrlProxy never advertises
+the module.
 
 The `castButton` node is the system route picker that starts a session; there is no start call. Its
 required `player` names a declared `media.players` id or an inline `videoPlayer` id, and optional
@@ -2983,7 +2998,9 @@ or appends; the incoming value must contain its valid, nonempty key pointer. A l
 refused statically when that pointer is missing or resolves to null. JSON identity uses
 numeric value, exact strings and member names, and structural array/object equality. maxItems
 is an integer 1..2000; oldest rows are dropped after replacement/append and before final data
-limits. Missing/non-array targets and invalid writes leave input unchanged.
+limits. Missing/non-array targets and invalid writes leave input unchanged. The device runtimes run
+an upsert from any action list through the shared writer and report it as a `change` event
+`{op:"upsert",key,value?,maxItems?,revision}`, which the host replays the same way.
 
 The daemon holds the upstream connection for `via: "host"` channels (see
 [Host channel transport](#host-channel-transport)).
@@ -3967,6 +3984,11 @@ The `map` node (#14309, contract only: no renderer draws it and no runtime adver
   `width` (1 to 16) and `color`.
 - `onMarkerTap` runs with the tapped marker's item bound under `as`. `onCameraIdle.into` is a `/data/<pointer>`
   path that receives the settled camera.
+- Every `emit` a marker tap runs, including those in its nested `onSuccess`, `onError` and `startTimer`
+  actions, reports `markerId` (the tapped marker's resolved `id`) in its event context after the authored
+  entries, under the same byte budget. The contract lists the name in
+  `platformModules.map.events.markerTap.emitContext`. All three validators refuse an authored
+  `context.markerId` inside `onMarkerTap`. Outside it, `markerId` is an ordinary context name.
 - `showUserLocation: true` reads the `location` module, so it also needs `location` in `requires.platform`
   and the `location` permission in `requires.permissions`.
 - The `map` module has no calls or state. Its events `map.markerTap` and `map.cameraIdle` exist so a

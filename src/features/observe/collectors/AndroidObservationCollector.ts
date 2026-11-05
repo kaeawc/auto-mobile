@@ -63,6 +63,23 @@ export function scopeActiveWindowToBackStack(result: ObserveResult): void {
   }
 }
 
+/**
+ * A UIAutomator-only display read names its own app; the legacy window query answers for the
+ * default display, so its activity belongs to another app and must not label this capture.
+ */
+function replaceDisplayReadAppId(result: ObserveResult): boolean {
+  const hierarchy = result.viewHierarchy;
+  const packageName = hierarchy?.packageName;
+  const appId = result.activeWindow?.appId;
+  const uiautomatorOnly =
+    hierarchy?.sources?.length === 1 && hierarchy.sources[0] === "uiautomator";
+  if (!packageName || !appId || appId === packageName || !uiautomatorOnly || !result.activeWindow) {
+    return false;
+  }
+  result.activeWindow = { ...result.activeWindow, appId: packageName, activityName: "" };
+  return true;
+}
+
 export class DefaultAndroidObservationCollector implements AndroidObservationCollector {
   constructor(private readonly deps: AndroidObservationCollectorDeps) {}
 
@@ -122,6 +139,9 @@ export class DefaultAndroidObservationCollector implements AndroidObservationCol
     // the activity belongs to the captured hierarchy's app.
     scopeActiveWindowToBackStack(result);
     await this.applyAndroidScreenIdentity(result);
+    if (this.deps.device().formFactor === "automotive") {
+      await this.deps.deviceStateCollector().collectAutomotive(result, signal, context.displayId);
+    }
 
     if (result.notificationPermissionDetected && result.activeWindow) {
       result.activeWindow.type = "notification_permission_dialog";
@@ -194,6 +214,9 @@ export class DefaultAndroidObservationCollector implements AndroidObservationCol
     // (`Window.getActive`'s catch branch), which would otherwise short-circuit
     // this fallback and leave a readable, package-attributed capture wrongly
     // reporting no foreground window (issue #6220 false-positive).
+    if (replaceDisplayReadAppId(result)) {
+      return;
+    }
     if (result.viewHierarchy?.packageName && !result.activeWindow?.appId) {
       // Backfill ONLY the missing appId. The legacy query's failure sentinel
       // is a truthy object that still carries a real `layoutSeqSum` (summed

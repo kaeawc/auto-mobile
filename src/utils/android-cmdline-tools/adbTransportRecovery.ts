@@ -36,15 +36,11 @@ function isOwnTransportRefusal(error: unknown, deviceId?: string, transportId?: 
   return isAdbMissingDeviceError(text, deviceId, transportId) || isAdbDeviceOfflineError(text);
 }
 
-/** A serial-less diagnostic belongs to this client's selected -s transport. */
-function isOwnPostDispatchTransportFailure(
-  error: unknown,
-  deviceId?: string,
-  transportId?: string,
-): boolean {
-  if (!deviceId || (error instanceof Error && isPreDispatchError(error))) {
-    return false;
-  }
+/**
+ * The first numeric exit code in the cause chain, or `null` when the chain already carries
+ * a typed loss or transport failure that must not be reclassified.
+ */
+function untypedAdbExitCode(error: unknown): number | undefined | null {
   let current = error;
   let exitCode: number | undefined;
   for (let depth = 0; depth < 5 && current instanceof Error; depth++) {
@@ -52,7 +48,7 @@ function isOwnPostDispatchTransportFailure(
       current instanceof DeviceLostError ||
       current instanceof AdbDeviceTransportUnavailableError
     ) {
-      return false;
+      return null;
     }
     const code = (current as Error & { code?: unknown }).code;
     if (typeof code === "number") {
@@ -60,11 +56,40 @@ function isOwnPostDispatchTransportFailure(
     }
     current = current.cause;
   }
+  return exitCode;
+}
+
+/** A serial-less diagnostic belongs to this client's selected -s transport. */
+function isOwnPostDispatchTransportFailure(
+  error: unknown,
+  deviceId?: string,
+  transportId?: string,
+  { stdoutIsData = false }: { stdoutIsData?: boolean } = {},
+): boolean {
+  if (!deviceId || (error instanceof Error && isPreDispatchError(error))) {
+    return false;
+  }
+  const exitCode = untypedAdbExitCode(error);
+  if (exitCode === null) {
+    return false;
+  }
   const { stdout, stderr } = adbFailureOutput(error);
   return isAdbPostDispatchTransportError(stderr, exitCode, deviceId, {
     expectedTransportId: transportId,
-    stdout,
+    stdout: stdoutIsData ? "" : stdout,
   });
+}
+
+/**
+ * Post-dispatch transport loss of a read-only dump (`dumpsys`, `pm list`) whose stdout is
+ * the dump itself, never a remote error report. A bare exit 255 after partial output is a
+ * cut stream there, so it counts as a loss even though stdout is non-empty.
+ */
+export function isReadOnlyDumpTransportLoss(error: unknown, deviceId?: string): boolean {
+  return (
+    !isOwnTransportRefusal(error, deviceId) &&
+    isOwnPostDispatchTransportFailure(error, deviceId, undefined, { stdoutIsData: true })
+  );
 }
 
 interface TransportRecoveryOptions {

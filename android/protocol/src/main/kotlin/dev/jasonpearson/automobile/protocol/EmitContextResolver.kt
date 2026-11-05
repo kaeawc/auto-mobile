@@ -22,11 +22,17 @@ data class ResolvedEmitContext(val context: JsonObject, val contextTruncated: Bo
 
 /** Pure JVM resolver; ordered maps retain arbitrary names, including __proto__. */
 object EmitContextResolver {
+  /**
+   * [handlerContext] holds the names the runtime adds for the handler that ran the emit, such as
+   * `markerId` for a map's `onMarkerTap` (#16492). They follow the authored entries under the same
+   * byte budget; validators refuse an authored entry under one of these names.
+   */
   fun resolve(
     bindings: Map<String, EmitContextBinding>,
     inputs: EmitContextInputs,
+    handlerContext: Map<String, JsonElement> = emptyMap(),
   ): ResolvedEmitContext {
-    val entries = bindings.map { (name, binding) ->
+    val authored = bindings.map { (name, binding) ->
       val value =
         when {
           "state" in binding -> inputs.state(binding.getValue("state").jsonPrimitive.content)
@@ -40,6 +46,7 @@ object EmitContextResolver {
         }
       name to (value ?: JsonNull)
     }
+    val entries = authored + handlerContext.toList()
     val complete = JsonObject(entries.toMap(LinkedHashMap()))
     if (fits(complete)) return ResolvedEmitContext(complete)
     val prefix = linkedMapOf<String, JsonElement>()

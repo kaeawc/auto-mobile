@@ -12,7 +12,7 @@ final class PrototypePlatformGestureTests: XCTestCase {
         let directory = PrototypeSpecFixtures.directory.appendingPathComponent("invalid")
         let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
             .filter { $0.hasPrefix("gesture-") && $0.hasSuffix(".json") }.sorted()
-        XCTAssertEqual(names.count, 12)
+        XCTAssertEqual(names.count, 13)
         for name in names {
             let fixture = try PrototypeSpecFixtures.invalid(String(name.dropLast(5)))
             XCTAssertThrowsError(try fixture.decode(), name) { error in

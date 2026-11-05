@@ -86,6 +86,61 @@ export function prototypeWebRotation(
   };
 }
 
+/**
+ * The status bar clock's text for a moment (#16585): local hours and minutes in the stills' fixed
+ * `9:41` form, so a page whose browser clock is frozen at 9:41 draws the same bytes as the still.
+ */
+export function prototypeWebClockText(now: Date): string {
+  const hours = now.getHours() % 12 || 12;
+  return `${hours}:${String(now.getMinutes()).padStart(2, "0")}`;
+}
+
+/** Milliseconds from `nowMs` to the next minute boundary, when the clock's text next changes. */
+export function prototypeWebClockDelay(nowMs: number): number {
+  return 60_000 - (((nowMs % 60_000) + 60_000) % 60_000);
+}
+
+/** The time source and timer the status bar clock runs on: the browser's in the page, a fake in tests. */
+export interface PrototypeWebClock {
+  now(): number;
+  schedule(run: () => void, ms: number): void;
+}
+
+/** The page's clock: the browser's own time and timers, since the page has no Timer seam to import. */
+export function prototypeWebBrowserClock(): PrototypeWebClock {
+  return {
+    now: () => Date.now(),
+    schedule: (run, ms) => void globalThis.setTimeout(run, ms),
+  };
+}
+
+/**
+ * Keeps every status bar clock (`[data-status="clock"]`) under `root` on the clock's local time:
+ * writes the text now and again at each minute boundary. Nothing is scheduled without a clock.
+ */
+export function prototypeWebStartClock(
+  root: { querySelectorAll(selector: string): Iterable<{ textContent: string | null }> },
+  clock: PrototypeWebClock,
+  format: {
+    readonly clockText: typeof prototypeWebClockText;
+    readonly clockDelay: typeof prototypeWebClockDelay;
+  },
+): void {
+  const marks = Array.from(root.querySelectorAll('[data-status="clock"]'));
+  if (marks.length === 0) {
+    return;
+  }
+  const tick = () => {
+    const now = clock.now();
+    const text = format.clockText(new Date(now));
+    marks.forEach((mark) => {
+      mark.textContent = text;
+    });
+    clock.schedule(tick, format.clockDelay(now));
+  };
+  tick();
+}
+
 /** The elements one turn moves. */
 export interface PrototypeWebTurnTargets {
   readonly from: HTMLElement | undefined;
@@ -132,6 +187,10 @@ export interface PrototypeWebRuntimeRules {
   readonly screenView: typeof prototypeWebScreenView;
   readonly rotation: typeof prototypeWebRotation;
   readonly animateTurn: typeof prototypeWebAnimateTurn;
+  readonly clockText: typeof prototypeWebClockText;
+  readonly clockDelay: typeof prototypeWebClockDelay;
+  readonly startClock: typeof prototypeWebStartClock;
+  readonly browserClock: typeof prototypeWebBrowserClock;
 }
 
 export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
@@ -285,5 +344,7 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
   });
   viewport.addEventListener("dblclick", fitView);
   globalThis.addEventListener("resize", apply);
+  // Every view's status bar clock follows the browser clock (#16585).
+  rules.startClock(doc, rules.browserClock(), rules);
   apply();
 }

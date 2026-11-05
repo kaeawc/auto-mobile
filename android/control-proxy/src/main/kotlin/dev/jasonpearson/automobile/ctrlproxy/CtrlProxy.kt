@@ -704,6 +704,13 @@ class CtrlProxy : AccessibilityService() {
     AppDiscoveryController(
       source =
         object : AppDiscoveryController.Source {
+          override fun exportAttestation() =
+            dev.jasonpearson.automobile.ctrlproxy.storage
+              .KeystoreAttestation(
+                dev.jasonpearson.automobile.ctrlproxy.storage.AndroidAttestationKeyStore(),
+              )
+              .export()
+
           override fun resetKeystore(packageName: String, scope: String?, alias: String?) =
             dev.jasonpearson.automobile.ctrlproxy.storage.resetKeystore(
               this@CtrlProxy,

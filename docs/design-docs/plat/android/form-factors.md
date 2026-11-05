@@ -18,7 +18,8 @@ Android Auto projects a phone's UI to a head unit; Automotive OS is a full Andro
 
 ## What the repo does today (verified)
 
-- **Matching.** The vocabulary is `phone | tablet | foldable | tv | watch | automotive | unknown` (`src/models/DeviceMatchCriteria.ts`); binding `family` takes the same values except `unknown` (`BINDING_DEVICE_FAMILIES`, `src/utils/provisionDeviceSpecSchemas.ts`). `formFactorFrom` (`src/models/formFactor.ts`) classifies `tv`, `watch` and `automotive` from the system-image tag first (`android-tv`, `android-wear`, `android-automotive`), then the avdmanager profile id, then geometry (fold/flip by profile name; diagonal >= 7in is a tablet, else phone), so a TV is never matched as a tablet. iOS accepts only `phone` and `tablet`. `startDevice` `formFactor`, the broker binding `deviceFamily` and the device description accept the new values; `getAndroid` has no `formFactor` input. `startDevice` with `createIfMissing` creates `tv` and `automotive` AVDs but not `watch` ones (those fail with an actionable error). An `automotive` request picks only installed `android-automotive-playstore` / `android-automotive` images (Play first, behind API level and host ABI, with the CtrlProxy minSdk floor), creates the AVD with `automotive_1024p_landscape`, and with no car image installed fails with the exact `sdkmanager` command; a repeated request reuses the AVD because those tags classify it as `automotive`. The tag and profile names are still unconfirmed on real images.
+- **Matching.** The vocabulary is `phone | tablet | foldable | tv | watch | automotive | xr-headset | xr-glasses | unknown` (`src/models/DeviceMatchCriteria.ts`); binding `family` takes the same values except `unknown` (`BINDING_DEVICE_FAMILIES`, `src/utils/provisionDeviceSpecSchemas.ts`). `formFactorFrom` (`src/models/formFactor.ts`) classifies `tv`, `watch` and `automotive` from the system-image tag first (`android-tv`, `android-wear`, `android-automotive`), then the avdmanager profile id, then geometry (fold/flip by profile name; diagonal >= 7in is a tablet, else phone), so a TV is never matched as a tablet. iOS accepts only `phone` and `tablet`. `startDevice` `formFactor`, the broker binding `deviceFamily` and the device description accept the new values; `getAndroid` has no `formFactor` input. `startDevice` with `createIfMissing` creates `tv`, `watch` and `automotive` AVDs. A `watch` request picks only installed `android-wear-signed`, `android-wear` and `android-wear-cn` images (in that order, behind API level and host ABI) and creates the AVD with `wearos_small_round`, or `wearos_square` when `requires.screenRound` is `false`; with no Wear image installed it fails naming the `sdkmanager` command. `requires.screenRound` also restricts matching, stopped or booted, to a Wear profile whose id names that shape (`wearProfileScreenRound`), so a square request never reuses a round watch, and it is refused for creation outside an Android `watch` request. A physical watch has no profile id, so it never satisfies `requires.screenRound`; physical watches stay out of scope. An `automotive` request picks only installed `android-automotive-playstore` / `android-automotive` images (Play first, behind API level and host ABI, with the CtrlProxy minSdk floor), creates the AVD with `automotive_1024p_landscape`, and with no car image installed fails with the exact `sdkmanager` command; a repeated request reuses the AVD because those tags classify it as `automotive`. `requires.vehicle.motion: "supported"` restricts matching and creation to non-Play `android-automotive` images (`isMotionCapableAutomotiveTag`), since Play car images are `user` builds whose car service refuses driving-state injection; a booted automotive device's traits carry `vehicle` derived from `ro.build.type` (then `ro.debuggable`), both `unsupported` unless `ro.kernel.qemu` marks an emulator, read only when `ro.build.characteristics` announces `automotive`, with no probe that changes car state. The tag and profile names are still unconfirmed on real images.
+- **Android XR.** `xr-headset` classifies the `google-xr`, `android-xr-v3-playstore` and `android-xr-preview-playstore` tags and `xr_headset*` profiles; `xr-glasses` classifies the `ai-glasses` tag and `xr_glasses_*` / `ai_glasses_*` profiles. A request for either picks only its own images in that order (behind API level and host ABI) and creates the AVD with `xr_headset_device` or `ai_glasses_device` (the profile `avdmanager list device` tags `ai-glasses`); with none installed it fails naming the `sdkmanager` package and `--channel=3`. `requires.playStore` on a headset picks only the Play variants; glasses have no known Play image. Booted-device traits read `xr` (headset) or `glasses` in `ro.build.characteristics`. The tags, profiles and characteristics tokens are unconfirmed until an XR emulator boots (`sdkmanager --list --channel=3`, `avdmanager list device`).
 - **Provisioning.** `provisionDevice` takes `runtime` as a system-image package id; `parseAndroidSystemImageRuntime` accepts any tag between API level and ABI (only `google_apis_playstore` is special-cased). Default creation (`pickAndroidSystemImage`, `src/devices/deviceProvisioning.ts`) picks an image family from the requested form factor (`androidImageFamilyFor`): handheld tags for phone, tablet, foldable or none (#14900), and only the TV tags for `tv`, ranked `android-tv`, `google-tv`, `google-tv-ps16k` behind API level and host ABI. `android-tv` leads because Play Store builds usually refuse `adb root`; this ordering rationale concerns Play Store images only and does not guarantee root on `android-tv`. The verified `android-tv` user build also refuses `adb root`. A TV AVD gets the `tv_1080p` profile. The tag lists and default profiles live once in `src/models/formFactor.ts` and the broker's family defaults read them. With no TV image in range the error names the `sdkmanager` command; nothing is downloaded.
 - **CtrlProxy.** `minSdk` 24 (`android/gradle/libs.versions.toml`) is not a blocker. The manifest declares no `<uses-feature>` and only a `LAUNCHER` category (no `LEANBACK_LAUNCHER`). The accessibility config requests window content, interactive windows and gesture dispatch.
 - **Input.** `sendKeys` supports arrows (`KEYCODE_DPAD_*`), enter, tab, escape, backspace, delete (`INPUT_KEY_CODE_MAP`, `src/features/action/InputKey.ts`); there is no D-pad centre, menu or media key. `pressButton` sends back/home/recent as global actions with ADB fallback, plus volume/power via ADB.
@@ -121,6 +122,47 @@ Car-service commands: `inject-vhal-event`, `emulate-driving-state` and `get-prop
 non-`user` build; `enable-uxr` is refused from `adb shell` on every build (system signature); restriction
 state is read from `dumpsys car_service --services CarUxRestrictionsManagerService` and
 `CarDrivingStateService`, which work on both builds. Cluster and passenger displays are unchecked.
+
+### Automotive fixture app
+
+`android/automotive-fixture` (`dev.jasonpearson.automobile.automotivefixture`) is the deterministic
+target for automotive checks: no network and no Google services, so it installs on non-Play images.
+All text and ids come from `FixtureCatalog` and `MediaBrowseTree`; changing them is a contract change.
+
+- `DrivingSafeActivity` (launcher "AutoMobile Fixture", declared `distractionOptimized`): a status line
+  (`fixture_status`) and a list (`fixture_rows`) whose first row opens `ParkedOnlyActivity` and whose
+  `Row 01`..`Row 20` set the status to `Selected Row NN`.
+- `ParkedOnlyActivity`: no `distractionOptimized` meta-data, so it is blocked while driving.
+- `FixtureMediaBrowserService`: a framework `MediaBrowserService` serving two albums and a playlist of
+  three tracks each; playing an item only updates the session state.
+- `FixtureCarAppService` (navigation category, launcher "AutoMobile Templates" via `CarAppActivity`):
+  list, grid, pane and place-list navigation templates with fixed rows and four fixed places. It accepts
+  every templates host, so a non-Play image needs a templates host of its own to render it.
+
+### Wear fixture app
+
+`android/wear-fixture` (`dev.jasonpearson.automobile.wearfixture`, launcher "AutoMobile Wear Fixture")
+is the deterministic target for watch checks: Compose for Wear OS, no network and no Google account,
+standalone, so it installs on any Wear image. All text and ids come from `WearFixtureCatalog`; changing
+them is a contract change. Compose test tags are exposed as resource ids.
+
+- Home (`fixture_list`, a `ScalingLazyColumn`): the status line (`fixture_status`, starts `Ready`), six
+  action buttons (`action_picker`, `action_dismiss`, `action_confirm`, `action_notify`,
+  `action_ongoing_start`, `action_ongoing_stop`), then `Item 01`..`Item 30` (`item_01`..`item_30`).
+- Detail (`detail_title`, `detail_text` = `Detail for Item NN`): back or a right swipe returns home.
+- Rotary picker (`picker`, `picker_value`): `Level 0`..`Level 11`, clamped. Only rotary scroll events
+  move it (48 px per step); it has no touch handler. Each step sets the status to `Picked Level N`.
+- Swipe-to-dismiss screen (`dismiss_screen`): a right swipe pops it and sets the status to `Dismissed`.
+  Detail and picker pop the same way.
+- Confirmation dialog: `Confirm` (`confirm_button`) or `Cancel` (`cancel_button`) set the status to
+  `Confirmed` or `Cancelled`.
+- Notification (`Fixture alert`): actions `Reply` and `Archive` reopen the app with the status
+  `Notification action: Reply` / `Archive`. The ongoing activity (`Fixture run`) is an ongoing
+  notification started and stopped from home. Both need `POST_NOTIFICATIONS`; the app asks on first use,
+  and `pm grant` skips the prompt.
+- `FixtureTileService`: one clickable (`tile_open_item`) that opens `Item 07`'s detail.
+- `FixtureComplicationService`: `SHORT_TEXT` (`Item` / `07`) and `RANGED_VALUE` (7 of 0..10, `7/10`);
+  tapping opens `Item 07`'s detail. Values are fixed and never polled.
 
 ## Device selection change
 

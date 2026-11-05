@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 
 /**
@@ -22,10 +24,14 @@ import kotlinx.coroutines.flow.receiveAsFlow
  * Storage traffic is lossless and unicast, as on the per-device client: updates, acknowledgements
  * and reconciliation requests queue without bound until this stream's one collector (the hub) takes
  * them. Only updates for a file this stream wants enter that queue: the daemon also pushes files
- * other clients observe on the device, and those are dropped on arrival.
+ * other clients observe on the device, and those are dropped on arrival. An acknowledgement still
+ * queued when the connection that produced it resets is dropped on delivery: its observer went with
+ * that connection, and the re-registration answers again (#17117).
  */
-internal class MuxObservationChannel(private val mux: MultiplexedObservationSocketClient) :
-  ObservationStream {
+internal class MuxObservationChannel(
+  private val mux: MultiplexedObservationSocketClient,
+  private val isCurrentStorageConnection: (MuxObservationChannel, Long) -> Boolean,
+) : ObservationStream {
   val flows = MuxChannelFlows()
 
   override val hierarchyUpdates: SharedFlow<HierarchyStreamUpdate> = flows.hierarchy.asSharedFlow()
@@ -41,7 +47,10 @@ internal class MuxObservationChannel(private val mux: MultiplexedObservationSock
 
   override val storageUpdates: Flow<StorageStreamUpdate> = flows.storageUpdates.receiveAsFlow()
   override val storageSubscriptionResponses: Flow<StorageSubscriptionResponse> =
-    flows.storageResponses.receiveAsFlow()
+    flows.storageResponses
+      .receiveAsFlow()
+      .filter { isCurrentStorageConnection(this, it.connection) }
+      .map { it.response }
   override val storageReconciliationRequests: Flow<StorageSubscriptionKey> =
     flows.storageReconciliations.receiveAsFlow()
 
@@ -101,7 +110,7 @@ internal class MuxChannelFlows {
   val performance = latestFlow<PerformanceStreamUpdate>()
   val deviceEvents = latestFlow<DeviceStreamEvent>()
   val storageUpdates = Channel<StorageStreamUpdate>(Channel.UNLIMITED)
-  val storageResponses = Channel<StorageSubscriptionResponse>(Channel.UNLIMITED)
+  val storageResponses = Channel<StampedStorageResponse>(Channel.UNLIMITED)
   val storageReconciliations = Channel<StorageSubscriptionKey>(Channel.UNLIMITED)
 
   /** Deliver one frame routed to this device; false when the type is not a device data frame. */
@@ -151,3 +160,9 @@ internal class MuxChannelFlows {
       )
   }
 }
+
+/** A storage acknowledgement and the stream's storage [connection] that produced it. */
+internal class StampedStorageResponse(
+  val connection: Long,
+  val response: StorageSubscriptionResponse,
+)

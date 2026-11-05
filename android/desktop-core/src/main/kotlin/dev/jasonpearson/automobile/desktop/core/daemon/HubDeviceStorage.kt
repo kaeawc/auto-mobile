@@ -33,7 +33,9 @@ internal class LeaseStorage {
  * reconciles its snapshot as it would after its own subscribe; one that joins while the subscribe
  * is in flight gets that acknowledgement too. A file whose registration failed is registered again
  * by the next lease that asks for it. A dropped connection forgets every confirmation and failure:
- * the stream re-registers its files after reconnecting and acknowledges every holder again.
+ * the stream re-registers its files after reconnecting and acknowledges every holder again. They
+ * are forgotten on every reconnect call as well, since a conflated connection state can skip the
+ * drop, and no joining lease is acknowledged from a confirmation while the stream is not connected.
  *
  * Routing starts with the device's first storage subscription, so a device without one pays
  * nothing.
@@ -67,7 +69,7 @@ internal class HubDeviceStorage(
         when {
           fileHolders.size == 1 -> Join.Subscribe
           failed.remove(file) -> Join.Retry
-          file in confirmed -> Join.Acknowledge
+          file in confirmed && stream.isConnected() -> Join.Acknowledge
           else -> Join.Await
         }
       }
@@ -114,7 +116,14 @@ internal class HubDeviceStorage(
 
   /** The shared stream's connection moved to [state]. */
   fun connectionChanged(state: ConnectionState) {
-    if (state is ConnectionState.Connected) return
+    if (state !is ConnectionState.Connected) connectionReset()
+  }
+
+  /**
+   * The shared stream is (re)connecting: its earlier registrations are gone, whether or not a
+   * collected connection state showed the drop.
+   */
+  fun connectionReset() {
     synchronized(lock) {
       confirmed.clear()
       failed.clear()
@@ -151,7 +160,10 @@ internal class HubDeviceStorage(
     val recipients =
       synchronized(lock) {
         when {
-          response.subscribe && response.success -> confirmed.add(file).also { failed.remove(file) }
+          // The stream drops acknowledgements from an earlier connection; one that arrives while
+          // the stream is down still confirms nothing.
+          response.subscribe && response.success ->
+            failed.remove(file).also { if (stream.isConnected()) confirmed.add(file) }
           response.subscribe -> confirmed.remove(file).also { failed.add(file) }
           response.success -> confirmed.remove(file)
         }

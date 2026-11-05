@@ -1,4 +1,6 @@
 import { tvosRunners } from "../../src/features/tvos/TvosRunnerRegistry";
+import { visionosRunners } from "../../src/features/visionos/VisionosRunnerRegistry";
+import { FakeVisionosRunnerClient } from "../fakes/FakeVisionosRunnerClient";
 import { watchRunners } from "../../src/features/watch/WatchRunnerRegistry";
 import { afterAll, afterEach, beforeAll, describe, expect, test, spyOn } from "bun:test";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
@@ -8,10 +10,7 @@ import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { ActionableError, type BootedDevice, type Platform } from "../../src/models";
 import { registerObserveTools } from "../../src/server/observeTools";
-import {
-  VISIONOS_HIERARCHY_UNAVAILABLE_MESSAGE,
-  isWatchObservation,
-} from "../../src/models/WatchObservation";
+
 import type { WatchScreenshotSource } from "../../src/server/observeWatch";
 import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -35,7 +34,7 @@ import { isolateEmptyToolRegistry } from "../helpers/withTemporaryTool";
 isolateEmptyToolRegistry();
 
 // observe reaches an Apple Vision Pro simulator only when the call names it (an Apple Vision Pro session, or
-// platform "visionos"), and then returns a screenshot-only observation.
+// platform "visionos"), and then returns a screenshot with the window-app runner hierarchy.
 
 const visionPro: BootedDevice = {
   name: "Apple Vision Pro 4K",
@@ -85,6 +84,7 @@ describe("observe on an Apple Vision Pro simulator through the registry", () => 
   });
 
   async function arrange() {
+    cleanups.push(visionosRunners.register(visionPro.deviceId, new FakeVisionosRunnerClient()));
     const connected = [iphone];
     const env: Record<string, string | undefined> = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "0" };
     const timer = new FakeTimer();
@@ -174,25 +174,17 @@ describe("observe on an Apple Vision Pro simulator through the registry", () => 
       (error: unknown) => error,
     );
 
-  const expectScreenshotOnly = (result: Record<string, unknown>) => {
+  const expectRunnerObservation = (result: Record<string, unknown>) => {
     expect(result).toMatchObject({
       deviceId: visionPro.deviceId,
-      screenSize: { width: 396, height: 484 },
       screenshotFormat: "png",
-      hierarchyUnavailable: {
-        platform: "visionos",
-        message: VISIONOS_HIERARCHY_UNAVAILABLE_MESSAGE,
-      },
     });
-    expect(isWatchObservation(result)).toBe(true);
+    expect(Object.hasOwn(result, "hierarchyUnavailable")).toBe(false);
     expect(typeof result.screenshotPath).toBe("string");
-    for (const field of ["viewHierarchy", "skeleton", "context", "elements", "systemInsets"]) {
-      expect(Object.hasOwn(result, field)).toBe(false);
-    }
     expect(observeToolResultSchema.safeParse(result).success).toBe(true);
   };
 
-  test("observe on an Apple Vision Pro session returns the screenshot-only observation", async () => {
+  test("observe on an Apple Vision Pro session returns the screenshot and runner hierarchy", async () => {
     const { screenshots, writer, iosScreens } = await arrange();
     await call("setActiveDevice", {
       deviceId: visionPro.deviceId,
@@ -202,7 +194,7 @@ describe("observe on an Apple Vision Pro simulator through the registry", () => 
 
     const result = toolJson(await call("observe", { sessionUuid: VISION_SESSION }));
 
-    expectScreenshotOnly(result);
+    expectRunnerObservation(result);
     expect(screenshots.captures).toEqual([{ deviceId: visionPro.deviceId, display: undefined }]);
     expect(writer.written).toEqual([String(result.screenshotPath)]);
     expect(iosScreens).toEqual([]);
@@ -215,14 +207,14 @@ describe("observe on an Apple Vision Pro simulator through the registry", () => 
       await call("observe", { platform: "visionos", deviceId: visionPro.deviceId }),
     );
 
-    expectScreenshotOnly(result);
+    expectRunnerObservation(result);
     expect(screenshots.captures).toEqual([{ deviceId: visionPro.deviceId, display: undefined }]);
     expect(iosScreens).toEqual([]);
   });
 
   test("an explicit Apple Vision Pro deviceId with platform visionos works in an explicit read context", async () => {
     const { screenshots } = await arrange();
-    expectScreenshotOnly(
+    expectRunnerObservation(
       toolJson(
         await runWithToolSelectionContext({ explicitObserveDeviceRead: true }, () =>
           call("observe", { platform: "visionos", deviceId: visionPro.deviceId }),
@@ -234,21 +226,23 @@ describe("observe on an Apple Vision Pro simulator through the registry", () => 
 
   test("platform visionos alone reaches the Apple Vision Pro", async () => {
     const { screenshots } = await arrange();
-    expectScreenshotOnly(toolJson(await call("observe", { platform: "visionos" })));
+    expectRunnerObservation(toolJson(await call("observe", { platform: "visionos" })));
     expect(screenshots.captures).toEqual([{ deviceId: visionPro.deviceId, display: undefined }]);
   });
 
-  test("a hierarchy option on an Apple Vision Pro observe is refused by name, before any capture", async () => {
+  test("project full on an Apple Vision Pro observe is accepted with the runner hierarchy", async () => {
     const { screenshots } = await arrange();
 
-    const error = await failure(
-      call("observe", { platform: "visionos", deviceId: visionPro.deviceId, project: "full" }),
+    const result = toolJson(
+      await call("observe", {
+        platform: "visionos",
+        deviceId: visionPro.deviceId,
+        project: "full",
+      }),
     );
 
-    expect(error).toBeInstanceOf(ActionableError);
-    expect(String(error)).toContain("observe on visionOS");
-    expect(String(error)).toContain("does not support: project");
-    expect(screenshots.captures).toEqual([]);
+    expectRunnerObservation(result);
+    expect(screenshots.captures).toEqual([{ deviceId: visionPro.deviceId, display: undefined }]);
   });
 
   test.each([
@@ -263,7 +257,7 @@ describe("observe on an Apple Vision Pro simulator through the registry", () => 
       call("observe", { platform: "visionos", deviceId: visionPro.deviceId, ...options }),
     );
     expect(error).toBeInstanceOf(ActionableError);
-    expect(String(error)).toContain("observe on visionOS");
+    expect(String(error)).toContain("observe with the visionOS runner");
     expect(String(error)).toContain(name);
     expect(screenshots.captures).toEqual([]);
   });
@@ -288,7 +282,7 @@ describe("observe on an Apple Vision Pro simulator through the registry", () => 
     const watchLookup = spyOn(watchRunners, "get");
     const tvLookup = spyOn(tvosRunners, "get");
     try {
-      expectScreenshotOnly(
+      expectRunnerObservation(
         toolJson(await call("observe", { platform: "visionos", deviceId: visionPro.deviceId })),
       );
       expect(watchLookup).not.toHaveBeenCalled();

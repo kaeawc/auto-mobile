@@ -75,6 +75,11 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
     reason: "Read-only prebuilt tvOS runner artifact.",
   },
   {
+    name: "AUTOMOBILE_VISIONOS_RUNNER_XCTESTRUN",
+    kind: "input",
+    reason: "Read-only prebuilt visionOS runner artifact.",
+  },
+  {
     name: "AUTOMOBILE_WATCH_RUNNER_XCTESTRUN",
     kind: "input",
     reason: "Read-only prebuilt watchOS runner artifact.",

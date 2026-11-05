@@ -1,4 +1,6 @@
-/** Apple simulator observation: a retained screenshot, plus a connected watchOS or tvOS runner's hierarchy. */
+import { normalizeVisionosHierarchy } from "../features/visionos/VisionosHierarchy";
+import { requireVisionosRunner } from "../features/visionos/VisionosRunnerLifecycle";
+/** Apple simulator observation: a retained screenshot and platform-specific runner hierarchy. */
 import { findFocusedElement } from "../features/observe/HierarchyFocus";
 import { normalizeTvosHierarchy } from "../features/tvos/TvosHierarchy";
 import { tvosRunners } from "../features/tvos/TvosRunnerRegistry";
@@ -167,8 +169,9 @@ async function watchHierarchyForObserve(
 ): Promise<ViewHierarchyResult | undefined> {
   const platform = screenshotOnlyPlatform(device);
   if (platform === "visionos") {
-    assertWatchObserveOptions(args, watchDisplay(device).ref.key, platform);
-    return undefined;
+    assertWatchObserveOptions(args, watchDisplay(device).ref.key, platform, true);
+    const runner = await requireVisionosRunner(device.deviceId, signal);
+    return normalizeVisionosHierarchy(await runner.hierarchy(signal));
   }
   if (platform === "tvos") {
     const runner = tvosRunners.get(device.deviceId);
@@ -190,7 +193,7 @@ async function watchHierarchyForObserve(
   }
 }
 
-/** Capture an Apple simulator screenshot, adding hierarchy for a connected watchOS or tvOS runner. */
+/** Capture an Apple simulator screenshot, adding the platform runner hierarchy. */
 export async function observeWatch(
   device: BootedDevice,
   args: ObserveArgs,
@@ -259,6 +262,9 @@ function watchObservationPayload(
   viewHierarchy?: ViewHierarchyResult,
 ): WatchObservation | ObserveResult {
   if (!viewHierarchy) {
+    if (platform === "visionos") {
+      throw new ActionableError("visionOS observe requires the window-app runner hierarchy.");
+    }
     return {
       ...capture,
       hierarchyUnavailable: { platform, message: HIERARCHY_UNAVAILABLE_MESSAGES[platform] },
@@ -267,7 +273,7 @@ function watchObservationPayload(
   return {
     ...capture,
     viewHierarchy,
-    ...(platform === "tvos"
+    ...(platform === "tvos" || platform === "visionos"
       ? { focusedElement: findFocusedElement(viewHierarchy) ?? undefined }
       : {}),
     elements: new ObserveElementsBuilder().build(viewHierarchy, "ios"),

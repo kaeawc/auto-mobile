@@ -1,5 +1,4 @@
-import { tvosTapOn } from "../tvos/TvosFocusNavigation";
-import { watchTapOn } from "../watch/WatchActions";
+import { tapOnAppleRunner, usesAppleRunnerHierarchy } from "../visionos/AppleRunnerActionDispatch";
 import { androidCtrlProxyClientForPlatform } from "../observe/android/androidCtrlProxyClientFor";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { TapDisplayRouter } from "./TapDisplayRouter";
@@ -489,14 +488,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return (
       options.elementSelector ??
       new ResolverElementSelector(undefined, undefined, {
-        // Watch and TV trees use iOS conventions; runner dispatch stays separate.
-        platform:
-          this.device.platform === "watchos" || this.device.platform === "tvos"
-            ? "ios"
-            : requireAndroidOrIosPlatform(this.device.platform, "tapOn"),
+        // Apple runner trees use iOS conventions; runner dispatch stays separate.
+        platform: usesAppleRunnerHierarchy(this.device.platform)
+          ? "ios"
+          : requireAndroidOrIosPlatform(this.device.platform, "tapOn"),
         iosMultiPanel:
-          this.device.platform !== "watchos" &&
-          this.device.platform !== "tvos" &&
+          !usesAppleRunnerHierarchy(this.device.platform) &&
           this.platformTraits.panelAwareSelection &&
           (this.device.displays?.panels.length ?? 0) > 1,
       })
@@ -849,11 +846,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
    * @returns Result of the command
    */
   async execute(options: TapOnElementOptions, call: TapOnCall = {}): Promise<TapOnFocusResult> {
-    if (this.device.platform === "tvos") {
-      return tvosTapOn(this.device.deviceId, options, call.signal);
-    }
-    if (this.device.platform === "watchos") {
-      return watchTapOn(this.device.deviceId, options, call.signal);
+    const runnerResult = tapOnAppleRunner(this.device, options, call.signal);
+    if (runnerResult) {
+      return runnerResult;
     }
     return withObservationReadScope(() => this.executeWithReadScope(options, call));
   }

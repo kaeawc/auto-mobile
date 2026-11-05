@@ -166,8 +166,14 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
     const wiped: string[] = [];
     const dataWipe = {
       containerOwnership: simulatorOwnership,
-      rm: async (target: unknown) => {
-        wiped.push(String(target));
+      appDataFs: {
+        lstat: async () => ({ isDirectory: () => true }),
+        access: async () => {},
+        readdir: async () => ["data"],
+        mkdir: async () => {},
+        rm: async (target: string) => {
+          wiped.push(target);
+        },
       },
     };
     const retargets: Array<{ deviceId: string; bundleId: string }> = [];
@@ -328,7 +334,7 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
     expect(retargets).toHaveLength(2);
     expect(wiped.sort()).toEqual(
       ["Documents", "Library", "tmp"].map((folder) =>
-        path.join(simulatorDataContainer(watch.deviceId), folder),
+        path.join(simulatorDataContainer(watch.deviceId), folder, "data"),
       ),
     );
 

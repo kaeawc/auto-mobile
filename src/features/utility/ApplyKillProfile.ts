@@ -27,6 +27,8 @@ const API_RUN_ANY_IN_BACKGROUND = 28;
 const API_WAKE_LOCK = 28;
 const API_SCHEDULE_EXACT_ALARM = 31;
 const API_DEVICE_IDLE = 23;
+const API_POST_NOTIFICATION = 33;
+const API_APP_HIBERNATION = 31;
 
 const ACTIVE_BUCKET = "10";
 
@@ -37,6 +39,7 @@ const APP_OP_MIN_API: Readonly<Record<KillProfileAppOp, number>> = {
   RUN_ANY_IN_BACKGROUND: API_RUN_ANY_IN_BACKGROUND,
   SCHEDULE_EXACT_ALARM: API_SCHEDULE_EXACT_ALARM,
   WAKE_LOCK: API_WAKE_LOCK,
+  POST_NOTIFICATION: API_POST_NOTIFICATION,
 };
 
 const APP_OP_MODE = /\b(allow|ignore|deny|default|foreground)\b/;
@@ -142,6 +145,30 @@ export function parseStandbyBucket(stdout: string): string | undefined {
   return stdout.match(/^\s*(\d+)\s*$/m)?.[1];
 }
 
+/** The boolean `app_hibernation get-state` prints, defaulting to not hibernating if unreadable. */
+export function parseHibernationState(stdout: string): "true" | "false" {
+  return stdout.trim() === "true" ? "true" : "false";
+}
+
+function hibernationPlan(context: Context): StepPlan {
+  return {
+    label: "app hibernation",
+    command: `shell cmd app_hibernation set-state --user 0 ${context.quoted} true`,
+    minApi: API_APP_HIBERNATION,
+    capture: async () => {
+      const { stdout } = await run(
+        context,
+        `shell cmd app_hibernation get-state --user 0 ${context.quoted}`,
+      );
+      return {
+        key: `hibernation:${context.appId}`,
+        appId: context.appId,
+        command: `shell cmd app_hibernation set-state --user 0 ${context.quoted} ${parseHibernationState(stdout)}`,
+      };
+    },
+  };
+}
+
 function batteryPlan(context: Context): StepPlan {
   return {
     label: "battery unplug",
@@ -196,6 +223,8 @@ function planStep(context: Context, step: KillProfileStep): StepPlan {
       return batteryPlan(context);
     case "standbyBucket":
       return standbyBucketPlan(context, step.bucket);
+    case "hibernation":
+      return hibernationPlan(context);
     case "appOp":
       return appOpPlan(context, step.op, step.mode);
     case "forceIdle":
@@ -373,6 +402,7 @@ export async function applyKillProfile(
 function baselinePlans(context: Context): StepPlan[] {
   const runAny = appOpCommand(context, "set", "RUN_ANY_IN_BACKGROUND");
   const wakeLock = appOpCommand(context, "set", "WAKE_LOCK");
+  const notification = appOpCommand(context, "set", "POST_NOTIFICATION");
   const exactAlarm = appOpCommand(context, "set", "SCHEDULE_EXACT_ALARM");
   return [
     { label: "battery reset", command: "shell dumpsys battery reset" },
@@ -401,6 +431,17 @@ function baselinePlans(context: Context): StepPlan[] {
       label: "appops SCHEDULE_EXACT_ALARM default",
       command: `${exactAlarm} default`,
       minApi: API_SCHEDULE_EXACT_ALARM,
+    },
+    {
+      label: "appops POST_NOTIFICATION default",
+      command: `${notification} default`,
+      minApi: API_POST_NOTIFICATION,
+      unsupportedOutput: /Unknown operation string/i,
+    },
+    {
+      label: "app hibernation default",
+      command: `shell cmd app_hibernation set-state --user 0 ${context.quoted} false`,
+      minApi: API_APP_HIBERNATION,
     },
   ];
 }

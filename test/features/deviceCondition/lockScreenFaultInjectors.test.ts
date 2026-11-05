@@ -16,12 +16,17 @@ class LockDevice extends FakeAdbExecutor {
   credential: string | undefined;
   failSet = false;
   throwRawNoCredentialVerify = false;
+  failVerifyAfterSet = false;
+  private setCalled = false;
 
   override async execute(args: string[]): Promise<ExecResult> {
     const command = args.join(" ");
     let stdout = "";
-    if (command.endsWith("get-disabled")) {
-      stdout = this.credential ? "false" : "true";
+    if (command.endsWith("dumpsys lock_settings")) {
+      // A swipe-only lock screen reports CredentialType None (and get-disabled=false on device).
+      stdout = `User 0\n  CredentialType: ${this.credential ? "Pin" : "None"}\n`;
+    } else if (this.failVerifyAfterSet && this.setCalled && command.includes("verify --old")) {
+      throw new Error("adb timed out");
     } else if (command.endsWith(`verify --old ${LOCK_SCREEN_TEST_PIN}`)) {
       if (this.credential === LOCK_SCREEN_TEST_PIN) {
         stdout = "Lock credential verified successfully";
@@ -41,6 +46,7 @@ class LockDevice extends FakeAdbExecutor {
       }
     } else if (command.endsWith(`set-pin ${LOCK_SCREEN_TEST_PIN}`)) {
       this.credential = LOCK_SCREEN_TEST_PIN;
+      this.setCalled = true;
       if (this.failSet) {
         return this.result("", "set failed");
       }
@@ -122,6 +128,26 @@ describe("faults.lockScreen", () => {
     }
     expect(owed).toBeDefined();
     await owed?.owedReset();
+    expect(adb.credential).toBeUndefined();
+    expect(await injector.isClean()).toBe(true);
+  });
+  test("swipe-only device (no credential) accepts pin and none", async () => {
+    const adb = new LockDevice();
+    expect((await pin(adb).apply("none")).status).toBe("unchanged");
+    const outcome = await pin(adb).apply("pin");
+    expect(outcome.status).toBe("applied");
+    await outcome.reset?.();
+    expect(adb.credential).toBeUndefined();
+  });
+  test("set then verification timeout still owes a reset that clears the PIN", async () => {
+    const adb = new LockDevice();
+    adb.failVerifyAfterSet = true;
+    const injector = pin(adb);
+    const error = await injector.apply("pin").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(OwedResetError);
+    expect(adb.credential).toBe(LOCK_SCREEN_TEST_PIN);
+    adb.failVerifyAfterSet = false;
+    await (error as OwedResetError).owedReset();
     expect(adb.credential).toBeUndefined();
     expect(await injector.isClean()).toBe(true);
   });

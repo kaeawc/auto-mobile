@@ -2,6 +2,7 @@ import type { BootedDevice } from "../../models";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { AdbLockSettingsClient } from "../utility/screenLock/AndroidLockSettings";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type {
   DeviceConditionApplyOutcome,
@@ -19,18 +20,17 @@ const LOCK_SETTINGS = ["cmd", "lock_settings"] as const;
 const setPinArgs = [...LOCK_SETTINGS, "set-pin", LOCK_SCREEN_TEST_PIN];
 const clearPinArgs = [...LOCK_SETTINGS, "clear", "--old", LOCK_SCREEN_TEST_PIN];
 const verifyPinArgs = [...LOCK_SETTINGS, "verify", "--old", LOCK_SCREEN_TEST_PIN];
-const credentialPresenceArgs = [...LOCK_SETTINGS, "get-disabled"];
 
-async function hasCredential(adb: AdbExecutor, signal?: AbortSignal): Promise<boolean> {
-  const result = await shell(adb, credentialPresenceArgs, signal);
-  // Observed Android 14 outputs: get-disabled is true without a credential and false with one.
-  if (result === "true") {
-    return false;
+// `locksettings get-disabled` only reports a fully disabled lock screen, so a swipe-only device
+// would look credentialed; the dumpsys credential type is the source of truth.
+async function hasCredential(adb: AdbExecutor): Promise<boolean> {
+  const reading = await new AdbLockSettingsClient(adb).read();
+  if (reading.secure !== undefined) {
+    return reading.secure;
   }
-  if (result === "false") {
-    return true;
-  }
-  throw new Error(`Unexpected lock_settings get-disabled result: ${result}`);
+  throw new Error(
+    reading.error ?? "Could not determine whether the lock screen has a credential set",
+  );
 }
 
 async function testPinVerifies(adb: AdbExecutor, signal?: AbortSignal): Promise<boolean> {
@@ -53,7 +53,7 @@ export function createLockScreenFaultInjector(adb: AdbExecutor): DeviceCondition
     serialize(async () => {
       if (ownsPin && (await testPinVerifies(adb, signal))) {
         await shell(adb, clearPinArgs, signal);
-        if (await hasCredential(adb, signal)) {
+        if (await hasCredential(adb)) {
           throw new Error(
             "Clearing the AutoMobile test PIN did not remove the lock-screen credential",
           );
@@ -71,7 +71,7 @@ export function createLockScreenFaultInjector(adb: AdbExecutor): DeviceCondition
       rejectValue(LOCK_SCREEN_FAULT_KEY, value, ["pin", "none"]);
     }
     const verifies = await testPinVerifies(adb, signal);
-    const present = await hasCredential(adb, signal);
+    const present = await hasCredential(adb);
     if (value === "pin") {
       if (verifies) {
         ownsPin = true;
@@ -92,14 +92,23 @@ export function createLockScreenFaultInjector(adb: AdbExecutor): DeviceCondition
           { cause: error },
         );
       }
-      if (!(await testPinVerifies(adb, signal))) {
-        throw new Error("Could not verify the AutoMobile test PIN after setting it");
+      try {
+        if (!(await testPinVerifies(adb, signal))) {
+          throw new Error("Could not verify the AutoMobile test PIN after setting it");
+        }
+      } catch (error) {
+        // The PIN is installed even though verification failed or timed out; keep the reset owed.
+        throw new OwedResetError(
+          "Verifying the AutoMobile test PIN failed; release will verify and restore the lock screen.",
+          reset,
+          { cause: error },
+        );
       }
       return { status: "applied", detail: "Set the AutoMobile test PIN", reset };
     }
     if (verifies) {
       await shell(adb, clearPinArgs, signal);
-      if (await hasCredential(adb, signal)) {
+      if (await hasCredential(adb)) {
         throw new Error(
           "Clearing the AutoMobile test PIN did not remove the lock-screen credential",
         );

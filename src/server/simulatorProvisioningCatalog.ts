@@ -69,7 +69,7 @@ export interface ProvisioningCatalog {
 }
 
 export function buildSimulatorProvisioningCatalogEntries(
-  platform: "ios" | "watchos" | "tvos",
+  platform: "ios" | "watchos" | "tvos" | "visionos",
   runtimes: AppleDeviceRuntime[],
   deviceTypes: AppleDeviceType[],
 ): ProvisioningCatalog {

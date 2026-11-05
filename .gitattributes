@@ -34,6 +34,7 @@ test/fixtures/duo-enumerate.txt text eol=lf
 test/fixtures/ios-duo/*.json text eol=lf
 test/fixtures/ios-simctl/*.json text eol=lf
 test/fixtures/tvos-xcuitest/*.json text eol=lf
+test/fixtures/visionos-xcuitest/*.json text eol=lf
 test/fixtures/watchos-xcuitest/*.json text eol=lf
 test/fixtures/watchos-xcuitest/sdk-hierarchy-live.json text eol=lf
 test/fixtures/ios-simctl/*.plist text eol=lf
@@ -56,7 +57,9 @@ test/fixtures/android-touch-node/*.txt text eol=lf
 test/fixtures/android-uinput-pen/*.txt text eol=lf
 test/fixtures/android-window-policy/*.txt text eol=lf
 test/fixtures/ios-devicectl/*.json text eol=lf
+test/fixtures/ios-rotate/*.json text eol=lf
 test/fixtures/observe-output/ios-overlay-window/*.json text eol=lf
+test/fixtures/observe-output/ios-alert-over-table/*.json text eol=lf
 test/fixtures/observe-output/ios-prototype-sheet/*.json text eol=lf
 test/fixtures/network-filter-controller/*.json text eol=lf
 test/fixtures/network-filter-controller/v4/*.json text eol=lf
@@ -91,10 +94,12 @@ scripts/unit-test-host-spawn-allowlist.txt text eol=lf
 test/fixtures/android-fold-displays/*.txt text eol=lf
 # Captured executePlan response (issue #10090): asserted byte-for-byte by a TS test and parsed by the junit-runner.
 android/junit-runner/src/test/resources/captured/*.json text eol=lf
+ios/XCTestRunner/Sources/XCTestRunnerTests/Resources/Captured/*.json text eol=lf
 test/fixtures/android-focus-multidisplay/*.txt text eol=lf
 test/fixtures/android-focus-multidisplay/*.json text eol=lf
 # Byte-exact `cmd locale` captures: pin to LF so a Windows checkout cannot rewrite them to CRLF.
 test/fixtures/android-locale/*.txt text eol=lf
+test/fixtures/automotive/** text eol=lf
 # Real `am start` / `monkey` failure captures from two emulators (#10192).
 test/fixtures/android-am-start/*.txt text eol=lf
 # Real `adb install` downgrade failure capture from the mt36 emulator run (#10191).
@@ -148,6 +153,8 @@ docs/img/favicon.ico -filter -diff -merge -text
 android/playground/app/src/main/res/mipmap-*/ic_launcher*.png -filter -diff -merge -text
 ios/Playground/Sources/Assets.xcassets/AppIcon.appiconset/AppIcon.png -filter -diff -merge -text
 android/desktop-app/src/main/resources/icons/app-icon.png -filter -diff -merge -text
+# Read from a marketplace clone, which does not fetch LFS objects.
+plugins/auto-mobile/assets/icon.png -filter -diff -merge -text
 android/desktop-app/src/main/resources/icons/app-icon.ico -filter -diff -merge -text
 # Menu-bar truck mask read from the runtime classpath by SystemTray.kt via ImageIO — a
 # checked-out LFS pointer would decode to null and drop the tray to its fallback dot.
@@ -196,6 +203,7 @@ test/fixtures/android-boot-admission/proc-*.bin binary
 test/fixtures/ios-sim-fleet/*.json text eol=lf
 test/fixtures/android-apk-signing/*.b64 text eol=lf
 test/fixtures/android-apk-signing/*.txt text eol=lf
+test/fixtures/attestation/emulator-api35-attestation-chain.json text eol=lf
 test/fixtures/refusal-wire/*.json text eol=lf
 test/fixtures/refusal-wire/surfaces/*.json text eol=lf
 test/fixtures/refusal-wire-hints/*.json text eol=lf
@@ -207,6 +215,7 @@ ios/XCTestRunner/Sources/XCTestRunnerTests/Resources/PlanCorpus/** text eol=lf
 
 # Shared iOS wire contracts are compared across Swift and TypeScript.
 test/fixtures/ios-contract/*.json text eol=lf
+test/fixtures/ios-contract/sdk-multi-scene-http.json text eol=lf
 test/fixtures/ios-contract/runner-0.0.88-sdk-capabilities.json text eol=lf
 test/fixtures/ios-contract/runner-0.0.88-storage-capabilities.json text eol=lf
 test/fixtures/ios-contract/runner-checkout-sdk-capabilities.json text eol=lf
@@ -242,6 +251,7 @@ test/fixtures/android-secure-settings/*.txt text eol=lf
 android/protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeSpecModels.generated.kt text eol=lf
 ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecModels.generated.swift text eol=lf
 test/fixtures/android-sdkmanager/*.txt text eol=lf
+test/fixtures/android-avdmanager/*.txt text eol=lf
 test/fixtures/ios-safari-url-field/*.json text eol=lf
 test/fixtures/ios-system-alert/*.json text eol=lf
 test/fixtures/ios-messages-compose/*.json text eol=lf

@@ -5,6 +5,9 @@ import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import type { ViewHierarchyResult } from "../../../src/models";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { ElementResolver } from "../../../src/features/utility/ElementResolver";
+import { findWaitForElement } from "../../../src/features/observe/wait/WaitElement";
+import { waitForSchema } from "../../../src/features/observe/wait/WaitForSchemas";
 // Prototype nodes captured on emulator-5602 (API 36, Pixel Fold inner panel) while verifying
 // #10433: the prototype's Compose testTags arrive as a bare `resource-id` with no `test-tag`.
 import prototypeCapture from "../../fixtures/android-overlay-testtag/overlay-scroll-emulator-api36.json";
@@ -66,5 +69,34 @@ describe("testTag selector falls back to an untagged node's exact resource-id (#
     expect(
       selector.selectByTestTag(wireCapture(capture), "example.app:id/submit").element?.text,
     ).toBe("Submit form");
+  });
+});
+
+// Plan step expectations check `selector.testTag` through observe.waitFor (#16817), so waitFor
+// matches a test tag the same way tapOn does, including the resource-id fallback.
+describe("observe.waitFor testTag matches like tapOn testTag (#16817)", () => {
+  const hierarchy = () => wireCapture({ hierarchy: { node: [taggedSubmitNode()] } });
+
+  test("finds a node by its test-tag even when its resource-id differs", () => {
+    const element = findWaitForElement(
+      new ElementResolver(),
+      { testTag: "submit-form" },
+      hierarchy(),
+    );
+    expect(element?.text).toBe("Submit form");
+    expect(
+      findWaitForElement(new ElementResolver(), { elementId: "submit-form" }, hierarchy()),
+    ).toBeNull();
+  });
+
+  test("finds the captured prototype node through the resource-id fallback", () => {
+    const element = findWaitForElement(new ElementResolver(), { testTag: "A_pick" }, prototype());
+    expect(element?.["resource-id"]).toBe("A_pick");
+  });
+
+  test("the schema accepts testTag in an element and an absent predicate", () => {
+    expect(waitForSchema.safeParse({ testTag: "submit-form" }).success).toBe(true);
+    expect(waitForSchema.safeParse({ absent: { testTag: "spinner" } }).success).toBe(true);
+    expect(waitForSchema.safeParse({ for: "appear", testTag: "x" }).success).toBe(false);
   });
 });

@@ -19,6 +19,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
@@ -38,9 +41,24 @@ fun PaneToggleToolbar(
       horizontalArrangement = Arrangement.spacedBy(2.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      PaneToggleButton(symbol = "\u25EB", selected = showLeftPane, onClick = onToggleLeft)
-      PaneToggleButton(symbol = "\u2B13", selected = showBottomPane, onClick = onToggleBottom)
-      PaneToggleButton(symbol = "\u25E8", selected = showRightPane, onClick = onToggleRight)
+      PaneToggleButton(
+        symbol = "\u25EB",
+        description = "Toggle left pane",
+        selected = showLeftPane,
+        onClick = onToggleLeft,
+      )
+      PaneToggleButton(
+        symbol = "\u2B13",
+        description = "Toggle bottom pane",
+        selected = showBottomPane,
+        onClick = onToggleBottom,
+      )
+      PaneToggleButton(
+        symbol = "\u25E8",
+        description = "Toggle right pane",
+        selected = showRightPane,
+        onClick = onToggleRight,
+      )
     }
   }
 }
@@ -48,6 +66,7 @@ fun PaneToggleToolbar(
 @Composable
 private fun PaneToggleButton(
   symbol: String,
+  description: String,
   selected: Boolean,
   onClick: () -> Unit,
 ) {
@@ -73,7 +92,11 @@ private fun PaneToggleButton(
           indication = null,
           onClick = onClick,
         )
-        .pointerHoverIcon(PointerIcon.Hand),
+        .pointerHoverIcon(PointerIcon.Hand)
+        .semantics(mergeDescendants = true) {
+          contentDescription = description
+          this.selected = selected
+        },
     contentAlignment = Alignment.Center,
   ) {
     Text(

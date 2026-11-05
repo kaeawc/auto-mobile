@@ -249,6 +249,24 @@ export function idleReleaseField(reason: string | undefined): { idle?: true } {
   return reason && isIdleReleaseReason(reason) ? { idle: true } : {};
 }
 
+/**
+ * The idle window a `cli-idle-timeout` release ran out (#16908), beside the reason it qualifies.
+ * The window is set each time a `--cli` call adopts the CLI liveness policy (that invocation's
+ * value, clamped), so a later invocation cannot rebuild it from its own environment. Absent for
+ * any other reason, and when the window is unknown or not a positive integer.
+ */
+export function cliIdleTimeoutField(
+  reason: string | undefined,
+  idleTimeoutMs: number | undefined,
+): { idleTimeoutMs?: number } {
+  return reason === "cli-idle-timeout" &&
+    idleTimeoutMs !== undefined &&
+    Number.isSafeInteger(idleTimeoutMs) &&
+    idleTimeoutMs > 0
+    ? { idleTimeoutMs }
+    : {};
+}
+
 /** Whether a restarted daemon may rehydrate the session (see {@link SessionReleaseReasonTraits.recoverable}). */
 export function isRecoverableDaemonReleaseReason(reason: string): boolean {
   return sessionReleaseReasonTraits(reason).recoverable;

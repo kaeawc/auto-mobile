@@ -117,21 +117,14 @@ order_tokens() {
   ! grep -q "rebase" "$GIT_LOG"
 }
 
-wiring_requires_yq() {
-  command -v yq >/dev/null 2>&1 && return 0
-  if [[ -n "${CI:-}" ]]; then
-    echo "yq is required in CI to verify workflow wiring" >&2
-    return 1
-  fi
-  skip "yq not installed"
-}
+load yq-helpers
 
 @test "workflow calls the script and drops the fragile rebase loop" {
   # Regression guard for the wiring. Parse the YAML with yq (the repo's canonical
   # workflow parser, see release-workflow-wiring.bats) and assert against the
   # STRUCTURE — the concurrency group + the snapshot job's step run scripts —
   # rather than grepping raw text a comment or another job could satisfy.
-  wiring_requires_yq
+  require_mikefarah_yq
 
   run yq -r '.concurrency.group' "$WORKFLOW"
   [ "$status" -eq 0 ]

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { GetEventReader } from "../../../../src/features/record/android/GetEventReader";
+import { KernelTimeLineMerge } from "../../../../src/features/record/android/KernelTimeLineMerge";
 import { buildScaler } from "../../../../src/features/record/android/AxisRanges";
 import type { GestureEvent } from "../../../../src/features/record/android/types";
 import type { AdbProcess } from "../../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -8,6 +9,10 @@ import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeAdbProcess } from "../../../fakes/FakeAdbProcess";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { buildPenSampleStep } from "../../../../src/features/record/android/penSampleStep";
+import { TouchFrameReconstructor } from "../../../../src/features/record/android/TouchFrameReconstructor";
+import { captureFrames } from "../../../helpers/touchNodeCaptures";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 // Format probes (hand-written, shape defined by TouchFrameReconstructor's regex;
 // not captured device output). Reused from TouchFrameReconstructor.test.ts.
@@ -32,18 +37,25 @@ class ReaderAdb extends FakeAdbExecutor {
   readonly spawn = mock<(args: string[]) => Promise<AdbProcess>>();
 }
 
-function setup() {
+function setup(
+  kernelReorderWindowMs = 0,
+  shared?: { lineMerge: KernelTimeLineMerge; timer: FakeTimer; nodePath?: string },
+) {
   const adb = new ReaderAdb();
   const proc = new FakeAdbProcess();
   adb.spawn.mockResolvedValue(proc);
-  const timer = new FakeTimer();
-  timer.advanceTime(1000);
+  const timer = shared?.timer ?? new FakeTimer();
+  if (!shared) {
+    timer.advanceTime(1000);
+  }
   const reader = new GetEventReader({
     adb,
     timer,
+    kernelReorderWindowMs,
+    lineMerge: shared?.lineMerge,
     density: 1,
     touchNode: {
-      path: "/dev/input/event2",
+      path: shared?.nodePath ?? "/dev/input/event2",
       name: "touch",
       kind: "touch",
       axisXMin: 0,
@@ -80,6 +92,166 @@ function expectCleaned(proc: FakeAdbProcess): void {
 afterEach(() => mock.restore());
 
 describe("GetEventReader", () => {
+  test.each([false, true])(
+    "merges two fake process streams before their separate reconstructors (separate readers: %s)",
+    async (separateReaders) => {
+      const adb = new ReaderAdb();
+      const touch = new FakeAdbProcess();
+      const pen = new FakeAdbProcess();
+      adb.spawn.mockResolvedValueOnce(touch).mockResolvedValueOnce(pen);
+      const timer = new FakeTimer();
+      const node = {
+        path: "/dev/input/event1",
+        name: "touch",
+        kind: "touch" as const,
+        axisXMin: 0,
+        axisXMax: 1000,
+        axisYMin: 0,
+        axisYMax: 1000,
+      };
+      const scaler = { toScreenPoint: (x: number, y: number) => ({ x, y }) };
+      const penNode = { ...node, path: "/dev/input/event12", kind: "pen" as const };
+      const lineMerge = separateReaders ? new KernelTimeLineMerge({ timer }) : undefined;
+      const reader = new GetEventReader({
+        adb,
+        timer,
+        density: 1,
+        touchNode: node,
+        scaler,
+        lineMerge,
+        penNodes: separateReaders ? [] : [{ node: penNode, scaler }],
+      });
+      const penReader = separateReaders
+        ? new GetEventReader({ adb, timer, density: 1, touchNode: penNode, scaler, lineMerge })
+        : undefined;
+      const frames = captureFrames(
+        readFileSync(
+          join(
+            __dirname,
+            "../../../fixtures/android-uinput-pen/stroke-varying-pressure-getevent-lt-emulator-5610.txt",
+          ),
+          "utf8",
+        ),
+      );
+      // Split an unmodified capture between two processes to isolate the merge before parsing.
+      const nodeText = (text: string): string => text.replaceAll("/dev/input/event12: ", "");
+      const earlier = nodeText(frames[0].text);
+      const later = nodeText(frames[1].text);
+      const seen: { owner: TouchFrameReconstructor; line: string; arrivedAt: number }[] = [];
+      const original = TouchFrameReconstructor.prototype.feedLine;
+      spyOn(TouchFrameReconstructor.prototype, "feedLine").mockImplementation(function (
+        this: TouchFrameReconstructor,
+        line: string,
+        arrivedAt: number,
+      ) {
+        seen.push({ owner: this, line, arrivedAt });
+        return original.call(this, line, arrivedAt);
+      });
+      reader.start(() => {});
+      penReader?.start(() => {});
+      await Promise.resolve();
+      data(touch, later);
+      timer.advanceTime(20);
+      data(pen, earlier);
+      expect(seen).toEqual([]);
+      timer.advanceTime(30);
+      const earlierLines = earlier.split("\n").filter(Boolean);
+      expect(seen.map(({ line }) => line)).toEqual([
+        ...earlierLines,
+        ...later.split("\n").filter(Boolean),
+      ]);
+      expect(seen.map(({ arrivedAt }) => arrivedAt)).toEqual([
+        ...earlierLines.map(() => 20),
+        ...later
+          .split("\n")
+          .filter(Boolean)
+          .map(() => 0),
+      ]);
+      expect(seen[0].owner).not.toBe(seen.at(-1)?.owner);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(timer.getSleepHistory()).toEqual([]);
+      reader.stop();
+      penReader?.stop();
+    },
+  );
+
+  test.each(["stop", "error", "exit"] as const)(
+    "a shared reader's %s drops its pending lines without clearing another reader",
+    async (reason) => {
+      const clock = new FakeTimer();
+      const lineMerge = new KernelTimeLineMerge({ timer: clock });
+      const primary = setup(50, { lineMerge, timer: clock });
+      const pen = setup(50, { lineMerge, timer: clock, nodePath: "/dev/input/event12" });
+      const penReader = pen.reader;
+      primary.reader.start(primary.onGesture, primary.onError);
+      penReader.start(pen.onGesture, pen.onError);
+      await Promise.resolve();
+      data(primary.proc, KEY_BACK);
+      data(pen.proc, KEY_BACK);
+      if (reason === "stop") {
+        penReader.stop();
+      } else if (reason === "error") {
+        pen.proc.emit("error", new Error("read failed"));
+      } else {
+        pen.proc.emit("exit", 1, null);
+      }
+      const next = new FakeAdbProcess();
+      pen.adb.spawn.mockResolvedValue(next);
+      penReader.start(pen.onGesture, pen.onError);
+      await Promise.resolve();
+      clock.advanceTime(50);
+      expect(primary.onGesture).toHaveBeenCalledTimes(1);
+      expect(pen.onGesture).not.toHaveBeenCalled();
+      data(pen.proc, KEY_BACK);
+      expect(pen.onGesture).not.toHaveBeenCalled();
+      data(next, KEY_BACK);
+      clock.advanceTime(50);
+      expect(pen.onGesture).toHaveBeenCalledTimes(1);
+      expect(pen.onError).toHaveBeenCalledTimes(reason === "stop" ? 0 : 1);
+      primary.reader.stop();
+      penReader.stop();
+      expect(clock.getPendingTimeoutCount()).toBe(0);
+      expect(clock.getSleepHistory()).toEqual([]);
+    },
+  );
+
+  test.each(["stop", "error", "exit"] as const)(
+    "%s drops pending lines and isolates a restarted generation",
+    async (reason) => {
+      const { adb, proc, timer, reader, onGesture, onError } = setup(50);
+      reader.start(onGesture, onError);
+      await Promise.resolve();
+      data(proc, KEY_BACK);
+      expect(onGesture).not.toHaveBeenCalled();
+      if (reason === "stop") {
+        reader.stop();
+      } else if (reason === "error") {
+        proc.emit("error", new Error("read failed"));
+      } else {
+        proc.emit("exit", 1, null);
+      }
+      timer.advanceTime(100);
+      expect(onGesture).not.toHaveBeenCalled();
+      expect(onError).toHaveBeenCalledTimes(reason === "stop" ? 0 : 1);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      const next = new FakeAdbProcess();
+      adb.spawn.mockResolvedValue(next);
+      reader.start(onGesture, onError);
+      await Promise.resolve();
+      data(next, KEY_BACK);
+      expect(onGesture).not.toHaveBeenCalled();
+      timer.advanceTime(50);
+      expect(onGesture).toHaveBeenCalledTimes(1);
+      expect(onGesture).toHaveBeenCalledWith({
+        type: "pressButton",
+        button: "back",
+        arrivedAt: 1100,
+      });
+      reader.stop();
+      expect(timer.getSleepHistory()).toEqual([]);
+    },
+  );
+
   test.each(["stroke", "hover"] as const)(
     "preserves %s kernel timing through scaling when stdout batches frames",
     async (type) => {
@@ -89,6 +261,7 @@ describe("GetEventReader", () => {
       const reader = new GetEventReader({
         adb,
         timer: new FakeTimer(),
+        kernelReorderWindowMs: 0,
         density: 1,
         touchNode: {
           path: "/dev/input/event5",

@@ -472,6 +472,23 @@ describe("deleteDevice on an Apple TV simulator", () => {
     });
     expect(listed(simctl)).toContain(tv.udid);
   });
+
+  test("a destroyed TV notifies resource subscribers; an absent one does not", async () => {
+    const existing = tvDevice({ name: NAME });
+    await arrange([existing]);
+    let notified = 0;
+    setDeviceToolsDependencies({
+      notifyResourcesChanged: async () => {
+        notified += 1;
+      },
+    });
+
+    expect(toolJson(await remove(target(existing.udid))).state).toBe("destroyed");
+    expect(notified).toBe(1);
+
+    expect(toolJson(await remove(target(existing.udid))).state).toBe("already_absent");
+    expect(notified).toBe(1);
+  });
 });
 
 function createdUdid(simctl: FakeAppleTvProvisionSimctl): string {

@@ -42,6 +42,8 @@ internal class ReceivedContentHandler(
       ?.forEach { ViewerLaunch.close(context, it.libraryId) }
     return withContext(services.io) {
       services.blocklist.change()
+      // Hidden content must not keep holding library quota: delete it, keep only the hash/host.
+      services.repository.purgeBlocked()
       services.repository.list()
     }
   }

@@ -1,9 +1,11 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -37,10 +39,15 @@ class MultiplexedObservationSocketClientTest {
     val toClient = LinkedBlockingQueue<String>()
     val fromClient = LinkedBlockingQueue<String>()
     val closes = LinkedBlockingQueue<Unit>()
+    /** A command whose writes fail, as on a broken socket the reader has not yet seen end. */
+    @Volatile var failingCommand: String? = null
 
     override fun readLine(): String? = toClient.take().takeUnless { it == EOF }
 
     override fun writeLine(line: String) {
+      failingCommand?.let {
+        if (line.contains("\"command\":\"$it\"")) throw java.io.IOException("Broken pipe")
+      }
       fromClient.add(line)
     }
 
@@ -543,6 +550,196 @@ class MultiplexedObservationSocketClientTest {
     }
 
   @Test
+  fun `a refused desktop session answering a storage command fails every device`() = runBlocking {
+    val daemon = Daemon()
+    val mux = client(daemon)
+    val (a, b) = connectDevices(mux, 2)
+    val socket = daemon.nextSocket()
+    subscribeAll(socket, listOf(a, b))
+    a.connectionState.awaitFirst { it is ConnectionState.Connected }
+    a.subscribeStorage("com.example", "prefs.xml")
+    val command = socket.nextRequest()
+    assertEquals("subscribe_storage", command["command"])
+
+    socket.send(
+      """{"id":"${command["id"]}","type":"error","success":false,"error":"Observation stream requires an authenticated daemon session"}""",
+    )
+
+    listOf(a, b).forEach { s ->
+      assertTrue(
+        s.connectionState.awaitFirst { it is ConnectionState.Error } is ConnectionState.Error,
+      )
+    }
+    socket.awaitClosed()
+    mux.close()
+  }
+
+  @Test
+  fun `an acknowledgement queued before the socket dropped is not delivered after it`() =
+    runBlocking {
+      val daemon = Daemon()
+      val mux = client(daemon)
+      val (a) = connectDevices(mux, 1)
+      val first = daemon.nextSocket()
+      val (subA) = subscribeAll(first, listOf(a))
+      a.connectionState.awaitFirst { it is ConnectionState.Connected }
+      a.subscribeStorage("com.example", "prefs.xml")
+      val command = first.nextRequest()
+      // Acknowledged while nobody collects the acknowledgements, so it stays queued.
+      first.send("""{"id":"${command["id"]}","type":"subscription_response","success":true}""")
+      first.send(hierarchy(subA, "emulator-0", timestamp = 7))
+      a.hierarchyUpdates.awaitFirst { it.timestamp == 7L }
+
+      first.drop()
+      a.connectionState.awaitFirst { it is ConnectionState.Disconnected }
+      a.connect(deviceId = "emulator-0", deviceSessionUuid = "uuid-0")
+      val second = daemon.nextSocket()
+      assertEquals("subscribe", second.nextRequest()["command"])
+      val again = second.nextRequest()
+      assertEquals("subscribe_storage", again["command"])
+      second.send("""{"id":"${again["id"]}","type":"subscription_response","success":true}""")
+
+      // The first acknowledgement confirmed an observer that went with the old socket.
+      assertEquals(again["id"], a.storageSubscriptionResponses.awaitFirst().requestId)
+      mux.close()
+    }
+
+  @Test
+  fun `a storage subscribe decided before a release reaches the socket before its unsubscribe`() =
+    runBlocking {
+      val daemon = Daemon()
+      val decided = CountDownLatch(1)
+      val gate = CountDownLatch(1)
+      val mux =
+        MultiplexedObservationSocketClient(
+          daemon.transport(),
+          CoroutineScope(SupervisorJob() + clientThreads),
+          sessionUuidProvider = {
+            // Holds the subscribing thread after its command is decided, before it is written.
+            if (Thread.currentThread().name == STORAGE_WRITER) {
+              decided.countDown()
+              gate.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            }
+            "session-1"
+          },
+          newRequestId = RequestIds()::next,
+        )
+      // B keeps the socket open, so A's release owes the daemon an explicit unsubscribe_storage.
+      val (a, b) = connectDevices(mux, 2)
+      val socket = daemon.nextSocket()
+      subscribeAll(socket, listOf(a, b))
+      a.connectionState.awaitFirst { it is ConnectionState.Connected }
+
+      val subscriber =
+        thread(name = STORAGE_WRITER) { a.subscribeStorage("com.example", "prefs.xml") }
+      assertTrue(decided.await(TIMEOUT_SECONDS, TimeUnit.SECONDS))
+      val releaser = thread { a.dispose() }
+      // The release has either written its frames or is waiting for the write order to decide
+      // them; a release blocked on any other monitor has not reached the ordering point yet.
+      val waitingForWriteOrder = {
+        releaser.state == Thread.State.BLOCKED &&
+          releaser.stackTrace.firstOrNull()?.methodName == "releaseInOrder"
+      }
+      val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(TIMEOUT_SECONDS)
+      while (!waitingForWriteOrder() && releaser.state != Thread.State.TERMINATED) {
+        check(System.nanoTime() < deadline) { "release never reached the socket" }
+        Thread.onSpinWait()
+      }
+      gate.countDown()
+      subscriber.join()
+      releaser.join()
+
+      val storageCommands = generateSequence {
+        socket.fromClient.poll()
+      }
+        .map { Json.parseToJsonElement(it).jsonObject["command"]?.jsonPrimitive?.content }
+        .filter { it == "subscribe_storage" || it == "unsubscribe_storage" }
+        .toList()
+      assertEquals(listOf("subscribe_storage", "unsubscribe_storage"), storageCommands)
+      mux.close()
+    }
+
+  @Test
+  fun `a failed storage write closes the socket so reconnecting registers the file again`() =
+    runBlocking {
+      val daemon = Daemon()
+      val mux = client(daemon)
+      val (a, b) = connectDevices(mux, 2)
+      val first = daemon.nextSocket()
+      subscribeAll(first, listOf(a, b))
+      a.connectionState.awaitFirst { it is ConnectionState.Connected }
+      first.failingCommand = "subscribe_storage"
+
+      a.subscribeStorage("com.example", "prefs.xml")
+
+      first.awaitClosed()
+      listOf(a, b).forEach { s ->
+        s.connectionState.awaitFirst { it is ConnectionState.Disconnected }
+      }
+      a.connect(deviceId = "emulator-0", deviceSessionUuid = "uuid-0")
+      val second = daemon.nextSocket()
+      assertEquals("subscribe", second.nextRequest()["command"])
+      val again = second.nextRequest()
+      assertEquals("subscribe_storage", again["command"])
+      assertEquals("prefs.xml", again["fileName"])
+      mux.close()
+    }
+
+  @Test
+  fun `a failed owed unsubscribe closes the socket so the daemon drops the observer`() =
+    runBlocking {
+      val daemon = Daemon()
+      val mux = client(daemon)
+      val (a, b) = connectDevices(mux, 2)
+      val socket = daemon.nextSocket()
+      subscribeAll(socket, listOf(a, b))
+      a.connectionState.awaitFirst { it is ConnectionState.Connected }
+      a.subscribeStorage("com.example", "prefs.xml")
+      val command = socket.nextRequest()
+      socket.send("""{"id":"${command["id"]}","type":"subscription_response","success":true}""")
+      a.storageSubscriptionResponses.awaitFirst()
+      socket.failingCommand = "unsubscribe_storage"
+
+      // B keeps the socket open, so A owes an explicit unsubscribe_storage, and it cannot be sent.
+      a.dispose()
+
+      socket.awaitClosed()
+      b.connectionState.awaitFirst { it is ConnectionState.Disconnected }
+      mux.close()
+    }
+
+  @Test
+  fun `a device resubscribing on a socket that kept its observers acknowledges them again`() =
+    runBlocking {
+      val daemon = Daemon()
+      val mux = client(daemon)
+      val (a, b) = connectDevices(mux, 2)
+      val socket = daemon.nextSocket()
+      val (subA) = subscribeAll(socket, listOf(a, b))
+      a.connectionState.awaitFirst { it is ConnectionState.Connected }
+      a.subscribeStorage("com.example", "prefs.xml")
+      val command = socket.nextRequest()
+      socket.send("""{"id":"${command["id"]}","type":"subscription_response","success":true}""")
+      assertEquals(command["id"], a.storageSubscriptionResponses.awaitFirst().requestId)
+
+      // The daemon ends only A's subscription; B keeps the socket, so A's observer stays
+      // registered.
+      socket.send(
+        """{"type":"error","success":false,"subscriptionId":"$subA","deviceId":"emulator-0","error":"BACKFILL_QUEUE_OVERFLOW"}""",
+      )
+      a.connectionState.awaitFirst { it is ConnectionState.Disconnected }
+      a.connect(deviceId = "emulator-0", deviceSessionUuid = "uuid-0")
+      assertEquals("subscribe", socket.nextRequest()["command"])
+
+      // Nothing is re-sent, yet A's owner is told the file is registered.
+      val again = a.storageSubscriptionResponses.awaitFirst()
+      assertEquals(StorageSubscriptionKey("com.example", "prefs.xml"), again.key)
+      assertTrue(again.subscribe && again.success)
+      assertNull(socket.fromClient.poll())
+      mux.close()
+    }
+
+  @Test
   fun `a device session that ends or is superseded reaches only its own device`() = runBlocking {
     val daemon = Daemon()
     val mux = client(daemon)
@@ -579,6 +776,7 @@ class MultiplexedObservationSocketClientTest {
     private const val TIMEOUT_SECONDS = 5L
     private const val UNSOLICITED_UPDATES = 200
     private const val CLIENT_THREADS = 4
+    private const val STORAGE_WRITER = "storage-writer"
 
     /**
      * Run one subscribe, frame and release end to end before the tests, so class loading, the

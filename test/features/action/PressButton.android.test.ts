@@ -265,8 +265,8 @@ describe("PressButton Android keycode dispatch", () => {
       timeoutMs,
     });
 
-  test("holds D-pad center for durationMs on API 33+", async () => {
-    fakeAdb.setAndroidApiLevel(34);
+  test("holds D-pad center for durationMs on API 35+", async () => {
+    fakeAdb.setAndroidApiLevel(35);
 
     const result = await holdSelect(1500);
 
@@ -276,18 +276,18 @@ describe("PressButton Android keycode dispatch", () => {
     ]);
   });
 
-  test.each([31, null])("refuses a hold on API %p without dispatching", async (level) => {
+  test.each([34, null])("refuses a hold on API %p without dispatching", async (level) => {
     fakeAdb.setAndroidApiLevel(level);
 
     const result = await holdSelect(1000);
 
     expect(result).toMatchObject({ success: false, code: "unsupported_button", keyCode: -1 });
-    expect(result.error).toContain("API 33");
+    expect(result.error).toContain("API 35");
     expect(fakeAdb.getExecutedArgv()).toEqual([]);
   });
 
   test("refuses a hold on a button other than select", async () => {
-    fakeAdb.setAndroidApiLevel(34);
+    fakeAdb.setAndroidApiLevel(35);
 
     const result = await holdSelect(1000, undefined, "playPause");
 
@@ -296,7 +296,7 @@ describe("PressButton Android keycode dispatch", () => {
   });
 
   test("refuses a hold that would outlast the press deadline", async () => {
-    fakeAdb.setAndroidApiLevel(34);
+    fakeAdb.setAndroidApiLevel(35);
 
     const result = await holdSelect(2000, 1500);
 

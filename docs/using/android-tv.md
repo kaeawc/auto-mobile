@@ -110,7 +110,7 @@ work only on Android.
 
 For a long press of D-pad center, for example to open a context menu, pass `durationMs` with
 `select`: `pressButton { button: "select", durationMs: 1000 }` holds the key for one second.
-`durationMs` takes 100 to 10000, works only with `select`, and needs API 33 or newer; otherwise the
+`durationMs` takes 100 to 10000, works only with `select`, and needs API 35 or newer; otherwise the
 call fails with `unsupported_button` and sends no key.
 
 `focusNavigate` matches a target on the focused element or on a node inside its bounds, so a label

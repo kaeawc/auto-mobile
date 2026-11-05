@@ -145,7 +145,7 @@ export const pressButtonInput = z.object({
     .max(PRESS_HOLD_MAX_MS)
     .optional()
     .describe(
-      `Hold select (D-pad center) down this long in ms (${PRESS_HOLD_MIN_MS}-${PRESS_HOLD_MAX_MS}) for a long press; Android API 33+ only.`,
+      `Hold select (D-pad center) down this long in ms (${PRESS_HOLD_MIN_MS}-${PRESS_HOLD_MAX_MS}) for a long press; Android API 35+ only.`,
     ),
   // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
   // not required — a device handle from getAndroid/getApple is sufficient on

@@ -45,7 +45,7 @@ export interface AndroidKeyHoldContext {
 }
 
 /**
- * The `input keyevent` argv for a press. A key hold needs `--duration` (API 33+) and a budget
+ * The `input keyevent` argv for a press. A key hold needs `--duration` (API 35+) and a budget
  * that outlasts the hold; refuse before dispatch otherwise, since a plain tap would open no
  * context menu (#16734).
  */

@@ -80,8 +80,8 @@ const ANDROID_KEY_CODES: Record<string, number> = Object.assign(Object.create(nu
 export const HOLDABLE_PRESS_BUTTONS: ReadonlySet<string> = new Set(["select"]);
 export const PRESS_HOLD_MIN_MS = 100;
 export const PRESS_HOLD_MAX_MS = 10_000;
-/** `input keyevent --duration` exists from Android 13 (API 33). */
-export const ANDROID_KEY_HOLD_MIN_API_LEVEL = 33;
+/** `input keyevent --duration` exists from Android 15 (API 35); Android 14 parses it as keycodes. */
+export const ANDROID_KEY_HOLD_MIN_API_LEVEL = 35;
 
 export function isHoldablePressButton(button: unknown): boolean {
   return typeof button === "string" && HOLDABLE_PRESS_BUTTONS.has(button.toLowerCase());

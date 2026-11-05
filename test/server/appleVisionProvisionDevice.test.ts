@@ -30,6 +30,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { isAnonymousAcquisitionSession, SessionManager } from "../../src/daemon/sessionManager";
 import { ActionableError, type BootedDevice } from "../../src/models";
+import { getAbortSignal } from "../../src/utils/AbortContext";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { AppleVisionSimulatorInventory } from "../../src/utils/ios-cmdline-tools/AppleVisionSimulatorInventory";
 import {
@@ -713,6 +714,41 @@ describe("provisionDevice on an Apple Vision Pro simulator", () => {
     expect(sessions.getAllSessions()).toEqual([]);
     expect(pool.getDevice(headset.udid)).toBeNull();
     expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("a start preempted after admission aborts the ambient signal its readiness wait reads", async () => {
+    const headset = visionDevice({ name: NAME, state: "Shutdown" });
+    const reachedBoot = Promise.withResolvers<AbortSignal | undefined>();
+    const { lifecycleCoordinator, timer } = await arrange([headset], {
+      admission: {
+        run: async (request, boot) => {
+          // The real simctl readiness wait takes no signal and reads the ambient one.
+          const ambient = getAbortSignal();
+          reachedBoot.resolve(ambient);
+          await new Promise<void>((resolve) => ambient?.addEventListener("abort", () => resolve()));
+          ambient?.throwIfAborted();
+          return await boot(request.timeoutMs);
+        },
+      },
+    });
+    const pending = failure(
+      call("startDevice", {
+        platform: "visionos",
+        deviceId: headset.udid,
+        __mcpSessionId: "client-a",
+      }),
+    );
+    const ambient = await reachedBoot.promise;
+    expect(ambient?.aborted).toBe(false);
+    const teardown = lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "visionos", stableId: headset.udid },
+      { operation: "teardown", deadlineMs: timer.now() + 60_000 },
+    );
+    const error = await pending;
+    (await teardown).release();
+
+    expect(ambient?.aborted).toBe(true);
+    expect(String(error)).toContain("preempted by teardown");
   });
 
   test("a provision preempted while its boot waits for admission neither boots nor binds", async () => {

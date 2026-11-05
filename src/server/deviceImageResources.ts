@@ -27,6 +27,7 @@ import {
 } from "../utils/android-cmdline-tools/avdmanager";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { AppleTvSimulatorInventory } from "../utils/ios-cmdline-tools/AppleTvSimulatorInventory";
+import { AppleVisionSimulatorInventory } from "../utils/ios-cmdline-tools/AppleVisionSimulatorInventory";
 import { WatchSimulatorInventory } from "../utils/ios-cmdline-tools/WatchSimulatorInventory";
 import {
   isIosDeviceType,
@@ -165,6 +166,7 @@ export interface DeviceImagesResourceContent {
   watchosCount?: number;
   /** Present only when the read covers tvOS. */
   tvosCount?: number;
+  visionosCount?: number;
   lastUpdated: string; // ISO 8601
   catalogComplete: boolean;
   catalogObservations: Partial<Record<Platform, ProvisioningCatalogObservation>>;
@@ -188,6 +190,10 @@ interface DeviceImageResourcesDependencies {
   avdManager: DeviceImageAvdManager;
   simctl: Pick<SimCtlClient, "getDeviceTypesChecked" | "getRuntimesChecked">;
   appleTvInventory: Pick<AppleTvSimulatorInventory, "listAppleTvSimulators" | "readCatalog">;
+  appleVisionInventory: Pick<
+    AppleVisionSimulatorInventory,
+    "listAppleVisionSimulators" | "readCatalog"
+  >;
   watchInventory: Pick<WatchSimulatorInventory, "listWatchSimulators" | "readCatalog">;
   timer: Timer;
   androidCatalogBudgetMs: number;
@@ -201,12 +207,14 @@ function simulatorSources(deps: Partial<DeviceImageResourcesDependencies> | unde
   simctl: DeviceImageResourcesDependencies["simctl"] | undefined;
   watchInventory: DeviceImageResourcesDependencies["watchInventory"] | undefined;
   appleTvInventory: DeviceImageResourcesDependencies["appleTvInventory"] | undefined;
+  appleVisionInventory: DeviceImageResourcesDependencies["appleVisionInventory"] | undefined;
 } {
   if (deps) {
     return {
       simctl: deps.simctl,
       watchInventory: deps.watchInventory,
       appleTvInventory: deps.appleTvInventory,
+      appleVisionInventory: deps.appleVisionInventory,
     };
   }
   const simctl = new SimCtlClient();
@@ -214,6 +222,7 @@ function simulatorSources(deps: Partial<DeviceImageResourcesDependencies> | unde
     simctl,
     watchInventory: new WatchSimulatorInventory(simctl),
     appleTvInventory: new AppleTvSimulatorInventory(simctl),
+    appleVisionInventory: new AppleVisionSimulatorInventory(simctl),
   };
 }
 
@@ -277,6 +286,9 @@ export function createDeviceImageResourcesHandler(
       ...(platforms.includes("tvos")
         ? { tvosCount: images.filter((image) => image.platform === "tvos").length }
         : {}),
+      ...(platforms.includes("visionos")
+        ? { visionosCount: images.filter((image) => image.platform === "visionos").length }
+        : {}),
       lastUpdated: new Date().toISOString(),
       catalogComplete: platforms.every(
         (platform) => catalogObservations[platform]?.catalogComplete === true,
@@ -310,14 +322,15 @@ export function createDeviceImageResourcesHandler(
       platform !== "android" &&
       platform !== "ios" &&
       platform !== "watchos" &&
-      platform !== "tvos"
+      platform !== "tvos" &&
+      platform !== "visionos"
     ) {
       return {
         uri: `automobile:devices/images/${platform}`,
         mimeType: "application/json",
         text: JSON.stringify(
           {
-            error: `Invalid platform: ${platform}. Must be 'android', 'ios', 'watchos' or 'tvos'.`,
+            error: `Invalid platform: ${platform}. Must be 'android', 'ios', 'watchos', 'tvos' or 'visionos'.`,
           },
           null,
           2,
@@ -435,14 +448,22 @@ async function buildIosResourceResult(
 function buildSimulatorResourceResult(
   platform: "ios" | NonIosApplePlatform,
   deviceManager: DeviceImageDiscoveryManager,
-  { simctl, watchInventory, appleTvInventory }: ReturnType<typeof simulatorSources>,
+  {
+    simctl,
+    watchInventory,
+    appleTvInventory,
+    appleVisionInventory,
+  }: ReturnType<typeof simulatorSources>,
 ): Promise<PlatformResourceResult> {
   if (platform === "ios") {
     return buildIosResourceResult(deviceManager, simctl);
   }
   if (platform === "visionos") {
-    // No Vision Pro inventory exists yet (#16849): report it unavailable rather than list iOS.
-    return Promise.resolve(unavailableAppleSimulatorResult(platform));
+    return buildAppleSimulatorResourceResult(
+      platform,
+      appleVisionInventory && (() => appleVisionInventory.listAppleVisionSimulators()),
+      appleVisionInventory,
+    );
   }
   const inventory = platform === "watchos" ? watchInventory : appleTvInventory;
   const list =
@@ -468,7 +489,7 @@ function unavailableAppleSimulatorResult(platform: NonIosApplePlatform): Platfor
 
 /** Non-iOS Apple simulators and their catalog are read only by explicit platform requests. */
 async function buildAppleSimulatorResourceResult(
-  platform: "watchos" | "tvos",
+  platform: "watchos" | "tvos" | "visionos",
   list: (() => ReturnType<WatchSimulatorInventory["listWatchSimulators"]>) | undefined,
   inventory: Pick<WatchSimulatorInventory, "readCatalog"> | undefined,
 ): Promise<PlatformResourceResult> {
@@ -901,7 +922,7 @@ export function registerDeviceImageResources(): void {
     "Platform-specific Device Images",
     {
       description:
-        "Configured device inventory and completeness evidence for android, ios, watchos or tvos.",
+        "Configured device inventory and completeness evidence for android, ios, watchos, tvos or visionos.",
       mimeType: "application/json",
       handler: handler.getDeviceImagesByPlatform,
     },
@@ -918,5 +939,6 @@ export async function notifyDeviceImageResourcesUpdated(): Promise<void> {
     `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/ios`,
     `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/watchos`,
     `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/tvos`,
+    `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/visionos`,
   ]);
 }

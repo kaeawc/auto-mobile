@@ -1,3 +1,4 @@
+import type { AppleVisionSimulatorInventory } from "../utils/ios-cmdline-tools/AppleVisionSimulatorInventory";
 import { ActionableError, type BootedDevice, type DeviceInfo } from "../models";
 import { isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import type { AppleTvSimulatorInventory } from "../utils/ios-cmdline-tools/AppleTvSimulatorInventory";
@@ -27,11 +28,14 @@ export async function discoverAppleTvDeviceImages(
   }
 }
 
-/** Keep confirmed iOS UDIDs fast; otherwise resolve Apple TV identity before any shutdown. */
+/** Keep confirmed iOS UDIDs fast; otherwise resolve the simulator family before any shutdown. */
 export async function resolveSimulatorKillTarget(
   device: BootedDevice,
   simctl: Pick<DeviceManagerSimCtl, "listSimulatorImages">,
-  appleTvs: Pick<AppleTvSimulatorInventory, "listAppleTvSimulators"> | undefined,
+  inventories: {
+    tv?: Pick<AppleTvSimulatorInventory, "listAppleTvSimulators">;
+    vision?: Pick<AppleVisionSimulatorInventory, "listAppleVisionSimulators">;
+  },
   signal?: AbortSignal,
 ): Promise<BootedDevice> {
   if (device.platform !== "ios" || isIosPhysicalUdid(device.deviceId)) {
@@ -43,14 +47,7 @@ export async function resolveSimulatorKillTarget(
     if (ios.some((simulator) => simulator.deviceId === device.deviceId)) {
       return device;
     }
-    if (!appleTvs) {
-      throw new ActionableError("Apple TV simulator inventory is unavailable on this host.");
-    }
-    const tvs = await appleTvs.listAppleTvSimulators(signal);
-    signal?.throwIfAborted();
-    return tvs.some((tv) => tv.deviceId === device.deviceId)
-      ? { ...device, platform: "tvos" }
-      : device;
+    return await resolveNonIosSimulatorKillTarget(device, inventories, signal);
   } catch (error) {
     signal?.throwIfAborted();
     throw new ActionableError(
@@ -58,4 +55,26 @@ export async function resolveSimulatorKillTarget(
       { cause: error },
     );
   }
+}
+
+async function resolveNonIosSimulatorKillTarget(
+  device: BootedDevice,
+  inventories: Parameters<typeof resolveSimulatorKillTarget>[2],
+  signal?: AbortSignal,
+): Promise<BootedDevice> {
+  if (inventories.vision) {
+    const headsets = await inventories.vision.listAppleVisionSimulators(signal);
+    signal?.throwIfAborted();
+    if (headsets.some((headset) => headset.deviceId === device.deviceId)) {
+      return { ...device, platform: "visionos" };
+    }
+  }
+  if (!inventories.tv && !inventories.vision) {
+    throw new ActionableError("Apple simulator inventory is unavailable on this host.");
+  }
+  const tvs = (await inventories.tv?.listAppleTvSimulators(signal)) ?? [];
+  signal?.throwIfAborted();
+  return tvs.some((tv) => tv.deviceId === device.deviceId)
+    ? { ...device, platform: "tvos" }
+    : device;
 }

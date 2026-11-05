@@ -128,7 +128,14 @@ private constructor(
     // Registered before subscribing, so routing and state reports from the start are accepted.
     val device = DeviceTelemetry().also { devices[key] = it }
     val state = states.getOrPut(key) { MutableStateFlow(ConnectionState.Disconnected(null)) }
-    device.subscription = telemetry.subscribe(key) { route(key, device, it) }
+    var subscribed = false
+    try {
+      device.subscription = telemetry.subscribe(key) { route(key, device, it) }
+      subscribed = true
+    } finally {
+      // A refused subscribe (e.g. a closed multiplexer) must not leave a device without one.
+      if (!subscribed) devices.remove(key)
+    }
     device.stateWatch = scope.launch {
       device.subscription.state.collect { next ->
         // A subscription being released may still report; only the live one publishes.

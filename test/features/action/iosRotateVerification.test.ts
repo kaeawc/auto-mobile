@@ -35,10 +35,10 @@ const duoPrevious = (): ObserveResult => {
   return fixtureObservation(fixture);
 };
 
-const duoRotation = (): RotateResult => {
-  const fixture = JSON.parse(
-    fixtureText("test/fixtures/ios-rotate/rotate-duo-inner-landscape-unchanged-size.json"),
-  ) as FixtureRotation;
+const duoRotation = (
+  path = "test/fixtures/ios-rotate/rotate-duo-inner-landscape-unchanged-size.json",
+): RotateResult => {
+  const fixture = JSON.parse(fixtureText(path)) as FixtureRotation;
   return {
     ...fixture,
     observation: fixtureObservation(fixture.observation),
@@ -52,6 +52,67 @@ const observation = (rotation?: number, width = 402, height = 874): ObserveResul
   rotation,
   screenSize: { width, height },
   systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+});
+
+describe("iOS runner refusal screen-size checks (#17101)", () => {
+  const runnerRefusal = (): RotateResult => ({
+    ...duoRotation("test/fixtures/ios-rotate/rotate-duo-inner-portrait-unchanged-size-warned.json"),
+    // The capture is the public response after verification promoted the runner refusal.
+    success: false,
+    rotationPerformed: false,
+    error: "Rotation is not supported on this display (the screen size did not change)",
+    warning: undefined,
+    message: undefined,
+  });
+  const previousLandscape = (): ObserveResult => ({ ...duoPrevious(), rotation: 1 });
+
+  test("rejects the captured portrait refusal when only the observed rotation changes", () => {
+    const result = verifyIosRotation(runnerRefusal(), "portrait", previousLandscape());
+    expect(result.success).toBe(false);
+    expect(result.rotationPerformed).toBe(false);
+    expect(result.error).toBe(
+      "Rotation is not supported on this display (the screen size did not change). The runner reported a rotation but the screen size is unchanged.",
+    );
+    expect(result.message).toBe("Failed to rotate to portrait; the screen size did not change.");
+  });
+
+  test("reconciles the same refusal when the observed screen size changes", () => {
+    const refusal = runnerRefusal();
+    const result = verifyIosRotation(
+      {
+        ...refusal,
+        observation: { ...refusal.observation!, screenSize: { width: 669, height: 951 } },
+      },
+      "portrait",
+      previousLandscape(),
+    );
+    expect(result.success).toBe(true);
+    expect(result.rotationPerformed).toBe(true);
+    expect(result.warning).toContain(refusal.error!);
+    expect(result.error).toBeUndefined();
+  });
+
+  test("preserves a cover-panel refusal when the observed rotation does not change", () => {
+    const refusal = runnerRefusal();
+    const result = verifyIosRotation(refusal, "portrait", duoPrevious());
+    expect(result).toEqual({ ...refusal, previousOrientation: "portrait" });
+  });
+
+  test("keeps refusal reconciliation when either observation lacks a positive size", () => {
+    for (const missingBefore of [true, false]) {
+      const refusal = runnerRefusal();
+      const previous = previousLandscape();
+      if (missingBefore) {
+        previous.screenSize.width = 0;
+      } else {
+        refusal.observation!.screenSize.width = 0;
+      }
+      const result = verifyIosRotation(refusal, "portrait", previous);
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(true);
+      expect(result.warning).toContain(refusal.error!);
+    }
+  });
 });
 
 describe("iOS rotation verification vocabulary (#8778)", () => {

@@ -7,6 +7,8 @@
 # holds a fake `claude`, and sha256sum prints a chosen digest, so no case reaches
 # the network or depends on the pinned release bytes.
 
+load yq-helpers
+
 SCRIPT_SRC="scripts/ci/install-claude-code.sh"
 X64_SHA="2a4d5e3bd0f5bd2959bb1955bd99ea97f57af162681991dcae00fee82f9d554f"
 
@@ -177,21 +179,8 @@ teardown() {
 }
 
 # The wiring assertions read the workflows and the action structurally with
-# mikefarah yq v4, so a commented-out or misplaced step does not count. Outside
-# CI a missing or other yq (python-yq reports 0.0.0) skips; in CI it fails.
-require_mikefarah_yq() {
-  local version_line=""
-  read -r version_line < <(yq --version 2>&1) || true
-  if [[ "${version_line}" == *mikefarah* && "${version_line}" =~ version\ v?4\. ]]; then
-    return 0
-  fi
-  if [[ -n "${CI:-}" ]]; then
-    echo "mikefarah yq v4 is required in CI (yq reports: ${version_line:-nothing})" >&2
-    return 1
-  fi
-  skip "requires mikefarah yq v4 (yq reports: ${version_line:-nothing})"
-}
-
+# mikefarah yq v4 (require_mikefarah_yq from yq-helpers.bash), so a
+# commented-out or misplaced step does not count.
 @test "the PR and merge jobs that validate the plugin install through the cached action" {
   require_mikefarah_yq
   local repo pr merge

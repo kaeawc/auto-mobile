@@ -267,7 +267,7 @@ describe("app tools on an Apple TV simulator", () => {
         listBooted: async () => [],
         listBootedWithStatus: async () => ({
           devices: [],
-          scanned: { android: false, ios: false, watchos: false, tvos: false },
+          scanned: { android: false, ios: false, watchos: false, tvos: false, visionos: false },
           discoveryErrors: { tvos: { code: "unavailable", message: "simctl missing" } },
         }),
         isAuthorized: () => true,

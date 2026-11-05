@@ -299,6 +299,15 @@ export const buildOpenLinkPayload = (
   };
 };
 
+/**
+ * An openLink call succeeds only when the link opened and, with a waitFor, the wait matched.
+ * A timed-out wait keeps its diagnostics in the payload but marks the envelope isError (#16902).
+ */
+export const openLinkSucceeded = (
+  openResult: Pick<OpenURLResult, "success">,
+  waitOutcome: Pick<OpenLinkWaitOutcome, "awaitTimeout"> | null,
+): boolean => openResult.success && !waitOutcome?.awaitTimeout;
+
 export function formatClipboardMessage(result: ClipboardResult): string {
   if (!result.success) {
     return `Failed to execute clipboard ${result.action}: ${result.error ?? "unknown error"}`;
@@ -884,7 +893,7 @@ export const createOpenLinkHandler =
     const response = createStructuredToolResponse(
       buildOpenLinkPayload(args.url, effectiveResult, waitOutcome),
     );
-    return withIsErrorOnFailure(response, effectiveResult.success);
+    return withIsErrorOnFailure(response, openLinkSucceeded(effectiveResult, waitOutcome));
   };
 
 export const createShakeHandler =

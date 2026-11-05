@@ -22,7 +22,7 @@ import {
   STRETCH,
 } from "./webCss";
 import { record, type Raw } from "../prototypeTemplate";
-import { defaultFillAxes, filling } from "./webCollections";
+import { defaultFillAxes, filling, type WebAxis } from "./webCollections";
 import { el, type WebChild, type WebElement } from "./webNodes";
 import type { NodeRenderer, WebRenderKit, WebRenderScope } from "./webRender";
 import { webPickerRenderers } from "./webPickers";
@@ -248,11 +248,26 @@ const segmentedButtonRenderer =
   };
 
 /** Whether a search bar's `activeKey` holds `true`, which expands it as on both devices. */
-function searchActive(node: Raw, scope: WebRenderScope, kit: WebRenderKit): boolean {
+function searchActive(node: Raw, scope: WebRenderScope, kit: Pick<WebRenderKit, "bound">): boolean {
   return (
     typeof node.activeKey === "string" &&
     scope.condition.state[kit.bound(node.activeKey, scope)] === true
   );
+}
+
+/**
+ * The unsized axes a search bar fills: its width, plus its height while the full-screen `bar`
+ * variant is expanded (Android's `fillMaxSize()`), so unsized ancestor lines grow too (#16803).
+ */
+export function searchBarFillAxes(
+  node: Raw,
+  scope: WebRenderScope,
+  kit: Pick<WebRenderKit, "bound">,
+): WebAxis[] {
+  const style = record(node.style) ?? {};
+  const axes: WebAxis[] =
+    searchActive(node, scope, kit) && node.variant !== "docked" ? ["width", "height"] : ["width"];
+  return axes.filter((axis) => style[axis] === undefined);
 }
 
 /** The search bar's trailing actions as 48 px icon buttons tagged `<testTag>.actions.<i>`. */
@@ -324,18 +339,13 @@ const searchBarRenderer =
   (kit: WebRenderKit): NodeRenderer =>
   (node, scope, path) => {
     const expanded = searchActive(node, scope, kit);
-    const fills = expanded && node.variant !== "docked";
-    const { attrs, style } = kit.base(
-      filling(node, fills ? ["width", "height"] : ["width"]),
-      scope,
-      {
-        display: FLEX,
-        [FLEX_DIRECTION]: COLUMN,
-        // Android's results Column is start-aligned, so a compact child keeps its own width.
-        [ALIGN_ITEMS]: "flex-start",
-        ...kit.roleCss(scope, "surface", "onSurface"),
-      },
-    );
+    const { attrs, style } = kit.base(filling(node, searchBarFillAxes(node, scope, kit)), scope, {
+      display: FLEX,
+      [FLEX_DIRECTION]: COLUMN,
+      // Android's results Column is start-aligned, so a compact child keeps its own width.
+      [ALIGN_ITEMS]: "flex-start",
+      ...kit.roleCss(scope, "surface", "onSurface"),
+    });
     const results: WebChild[] = [];
     if (expanded && node.child !== undefined) {
       const inner = kit.child(scope, {

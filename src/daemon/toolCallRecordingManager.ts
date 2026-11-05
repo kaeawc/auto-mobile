@@ -118,7 +118,12 @@ export function stopToolCallRecording({
   const connectionKey = connectionId ?? DEFAULT_CONNECTION_KEY;
   const session = activeSessions.get(connectionKey);
   if (!session) {
-    throw new Error("No active tool call recording. Call startToolCallRecording first.");
+    throw new Error(
+      "No active tool call recording on this MCP connection. " +
+        'Call recordToolCalls with action: "begin" first. ' +
+        "Recordings are scoped to the MCP connection that began them, so a separate " +
+        "connection (such as a one-shot CLI call) cannot end another connection's recording.",
+    );
   }
 
   try {

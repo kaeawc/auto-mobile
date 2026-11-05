@@ -43,7 +43,8 @@ enum class PerformanceScreen {
 @Composable
 fun PerformanceDashboard(options: PerformanceDashboardOptions) {
   val initialRun = rememberInitialPerformanceRun(options)
-  val state = remember { PerformanceDashboardState(initialRun) }
+  val state =
+    remember(options.deviceId, options.deviceSessionUuid) { PerformanceDashboardState(initialRun) }
   ResetPerformanceGenerationEffect(options, state)
   CollectPerformanceMetricsEffect(options, state)
   LoadPerformanceRunEffect(options, state)

@@ -46,6 +46,22 @@ class FileSettingsProviderTest {
   }
 
   @Test
+  fun `persists the getting-started checklist dismissal`() {
+    val file = tempSettingsFile()
+    assertFalse(FileSettingsProvider(file).hasDismissedBasicsChecklist)
+    FileSettingsProvider(file).hasDismissedBasicsChecklist = true
+    assertTrue(FileSettingsProvider(file).hasDismissedBasicsChecklist)
+  }
+
+  @Test
+  fun `persists that a device has been observed`() {
+    val file = tempSettingsFile()
+    assertFalse(FileSettingsProvider(file).hasObservedDevice)
+    FileSettingsProvider(file).hasObservedDevice = true
+    assertTrue(FileSettingsProvider(file).hasObservedDevice)
+  }
+
+  @Test
   fun `persists Logs saved views across provider instances`() {
     val file = tempSettingsFile()
     assertEquals("[]", FileSettingsProvider(file).logsSavedViews)

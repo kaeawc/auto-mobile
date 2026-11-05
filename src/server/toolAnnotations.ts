@@ -143,6 +143,8 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   // appLaunch tracing can launch the app; other templates only capture artifacts.
   performanceTrace: entry("Record Trace", destructiveDevice),
   sendBroadcast: entry("Send Broadcast", destructiveDevice),
+  // Removes only mappings the session created; ensure and remove are idempotent.
+  portReverse: entry("Manage Port Reverse", setDevice),
   setAppLinks: entry("Set App Links", destructiveDevice),
   // Stored policies can later tap arbitrary alert buttons during device interaction.
   systemAlerts: entry("Set Alert Policy", destructiveDevice),

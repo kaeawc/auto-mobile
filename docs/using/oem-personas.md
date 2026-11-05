@@ -39,6 +39,15 @@ manufacturer profile.
 | `oneplus-oxygenos` | `gboard`  | `oneplus-deep-optimization` | hole cutout                   |
 | `oppo-coloros`     | `gboard`  | `recents-swipe-force-stop`  | hole cutout                   |
 | `motorola`         | `gboard`  | `motorola-adaptive`         | none                          |
+| `huawei-emui`      | `gboard`  | `huawei-powergenie`         | none                          |
+| `vivo-funtouch`    | `gboard`  | `vivo-autostart`            | none                          |
+| `realme-ui`        | `gboard`  | `realme-power-saver`        | none                          |
+| `meizu-flyme`      | `gboard`  | `meizu-flyme-background`    | none                          |
+| `asus-zenui`       | `gboard`  | `asus-power-master`         | none                          |
+| `sony-xperia`      | `gboard`  | `sony-stamina`              | none                          |
+| `tecno-hios`       | `gboard`  | `tecno-app-halt`            | none                          |
+
+The Huawei, Vivo, realme, Meizu, Asus, Sony and Tecno profiles do not yet model every behaviour listed in their kill profile's note.
 
 The catalog has a `catalogVersion`, and each manufacturer profile a `version` that changes whenever one of
 its facets does, so a result names exactly what it applied.

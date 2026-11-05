@@ -124,6 +124,8 @@ export const integrityStateParamsSchema = () =>
  * collapses the whole parent schema's inference to `unknown`.
  */
 export interface DeviceConditionInput {
+  /** Export a temporary CtrlProxy-owned attestation chain; cannot be mixed with conditions. */
+  exportAttestation?: true;
   version?: typeof DEVICE_CONDITION_SCHEMA_VERSION;
   rootState?: "rooted-detectable" | typeof DEVICE_CONDITION_UNSET;
   integrityState?:
@@ -232,6 +234,12 @@ export const clockSkewParamsSchema = () =>
 
 export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
   .object({
+    exportAttestation: z
+      .literal(true)
+      .optional()
+      .describe(
+        "Export public Android KeyStore attestation certificates and parsed fields for a test backend. Send alone; temporary key is deleted. No trust verdict.",
+      ),
     version: z
       .literal(DEVICE_CONDITION_SCHEMA_VERSION)
       .optional()

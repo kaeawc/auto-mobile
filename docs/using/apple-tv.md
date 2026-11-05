@@ -159,6 +159,8 @@ with `type` commands. Text is appended to the field.
 
 ## Explore an app
 
+`explore` is available when the server runs with `--embedded-sdk`, like the other
+[navigation graph](navigation-graph.md) tools; the Apple TV app itself does not need the SDK.
 Launch the app with `launchApp`, then call `explore` with `platform: "tvos"`. Explore selects
 every item it can focus on a screen, observes after every remote press, records each screen a
 `select` opens in the navigation graph, and presses `menu` to go back.
@@ -168,15 +170,17 @@ every item it can focus on a screen, observes after every remote press, records 
 - With `packageName`, that app must already be in the foreground.
 - It stops at either limit, when the first screen has nothing left to select, or when the app
   cannot be brought back after leaving it (`stopReason`).
-- A recorded transition replays as `tapOn` with the item's text or identifier, or as
-  `pressButton select` when the item has neither; going back replays as `pressButton menu`.
+- A recorded transition replays as `tapOn` with the item's identifier, or its text when it has
+  no identifier, or as `pressButton select` when it has neither; going back replays as
+  `pressButton menu`.
 
 ## Run a plan
 
 `executePlan` with `platform: "tvos"` runs plan steps that use Apple TV tools: `pressButton`,
 `tapOn`, `sendKeys`, `observe` and the app tools. A step whose tool is not in the supported-tools
-table fails the plan with the same error the tool returns on its own. Apple TV plans are not
-video-recorded.
+table fails the plan with the same error the tool returns on its own. A plan may declare
+`platform: tvos`, and a device in its `devices` list may use `platform: tvos`. Apple TV plans are
+not video-recorded.
 
 ## Out of scope
 

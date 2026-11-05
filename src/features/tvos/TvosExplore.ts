@@ -92,13 +92,16 @@ function focusKey(element: Element | undefined): string {
   ]);
 }
 
-/** The replayable public call a select on `focused` stands for. */
+/**
+ * The replayable public call a select on `focused` stands for. The identifier wins over the text:
+ * two controls can share a label but not, in a well-formed app, an identifier.
+ */
 function selectCall(focused: Element | undefined): { tool: string; args: Record<string, unknown> } {
-  if (focused?.text) {
-    return { tool: "tapOn", args: { action: "tap", text: focused.text } };
-  }
   if (focused?.["resource-id"]) {
     return { tool: "tapOn", args: { action: "tap", elementId: focused["resource-id"] } };
+  }
+  if (focused?.text) {
+    return { tool: "tapOn", args: { action: "tap", text: focused.text } };
   }
   return { tool: "pressButton", args: { button: "select" } };
 }

@@ -23,9 +23,10 @@ neither touch nor, in general, the SDK.
   the first move toward it. With nothing left, press `menu` back to the parent; on the first
   screen, stop.
 - **Recording.** Each `select` and `menu` press runs while the navigation graph holds the public
-  call that replays it (`tapOn` by text or identifier, else `pressButton select`; `pressButton
-  menu`), and the screen it reaches is written with `recordNavigationEvent`. A press that reaches
-  no new screen withdraws its call.
+  call that replays it (`tapOn` by identifier, else by text, else `pressButton select`;
+  `pressButton menu`). The identifier wins because two controls can share a
+  label. The screen the press reaches is written with `recordNavigationEvent`; a press that
+  reaches no new screen withdraws its call.
 - **Termination.** Moves need no budget of their own: every move either tries an untried
   direction or follows a known move toward one, and a landing that contradicts a known move
   overwrites it, so known moves cannot cycle without new information. A new focus position is
@@ -35,7 +36,8 @@ neither touch nor, in general, the SDK.
 
 ## Plan replay
 
-`PlanExecutionOrchestrator` admits `tvos`. Steps run through the same tool registry as on other
+`PlanExecutionOrchestrator` admits `tvos`, and the plan schema and `PlanValidator` accept `tvos`
+as the plan's platform hint and as a plan device's platform. Steps run through the same tool registry as on other
 platforms, so each step passes the per-platform tool gate (`applePlatformToolSupport.ts`): a
 step whose tool is not on the tvOS allowlist fails with that tool's refusal. Automatic plan video
 is skipped because no tvOS recorder exists.

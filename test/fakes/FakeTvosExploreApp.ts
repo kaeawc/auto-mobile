@@ -15,6 +15,8 @@ export interface FakeTvItem {
   text?: string;
   col: number;
   row: number;
+  /** True for a control the hierarchy exposes without an identifier. */
+  anonymous?: boolean;
   /** Screen a select opens, or "leave" to put another app in front. */
   opens?: string;
 }
@@ -60,7 +62,7 @@ export class FakeTvosExploreApp implements TvosExploreDevice {
             right: item.col * 100 + 90,
             bottom: item.row * 100 + 90,
           },
-          "resource-id": item.id,
+          ...(item.anonymous ? {} : { "resource-id": item.id }),
           ...(item.text ? { text: item.text } : {}),
           focused: "true",
         }

@@ -24,7 +24,7 @@ function homeApp(): FakeTvosExploreApp {
         { id: "settings", text: "Settings", col: 1, row: 0, opens: "settings" },
       ],
       movies: [{ id: "play", text: "Play", col: 0, row: 0 }],
-      settings: [{ id: "toggle", col: 0, row: 0 }],
+      settings: [{ id: "toggle", text: "Toggle", col: 0, row: 0, anonymous: true }],
     },
     "home",
   );
@@ -49,9 +49,9 @@ describe("TvosExplore", () => {
     ]);
     expect(graph.edgeCalls.map((call) => call && [call.tool, call.args])).toEqual([
       undefined,
-      ["tapOn", { action: "tap", text: "Movies" }],
+      ["tapOn", { action: "tap", elementId: "movies" }],
       ["pressButton", { button: "menu" }],
-      ["tapOn", { action: "tap", text: "Settings" }],
+      ["tapOn", { action: "tap", elementId: "settings" }],
       ["pressButton", { button: "menu" }],
     ]);
     expect(graph.calls.every((call) => call.dispatched)).toBe(true);
@@ -68,12 +68,37 @@ describe("TvosExplore", () => {
     expect(app.reads).toBe(app.presses.length + 1);
   });
 
-  test("an item without text replays as its identifier and a no-op select is withdrawn", async () => {
+  test("an item without an identifier replays by text and a no-op select is withdrawn", async () => {
     const { graph, explore } = arrange();
     await explore.execute({});
-    const toggle = graph.calls.find((call) => call.args.elementId === "toggle");
+    const toggle = graph.calls.find((call) => call.args.text === "Toggle");
     expect(toggle).toMatchObject({ tool: "tapOn", withdrawn: true });
     expect(graph.edgeCalls).not.toContain(toggle);
+  });
+
+  test("controls that share a label replay by their distinct identifiers", async () => {
+    const app = new FakeTvosExploreApp(
+      {
+        home: [
+          { id: "open-movies", text: "Open", col: 0, row: 0, opens: "movies" },
+          { id: "open-shows", text: "Open", col: 1, row: 0, opens: "shows" },
+        ],
+        movies: [],
+        shows: [],
+      },
+      "home",
+    );
+    const { graph, explore } = arrange(app);
+    await explore.execute({});
+    const edges = graph.events.flatMap((event, index) =>
+      graph.edgeCalls[index]?.tool === "tapOn"
+        ? [[event.destination, graph.edgeCalls[index]!.args]]
+        : [],
+    );
+    expect(edges).toEqual([
+      ["tvos-fp-movies", { action: "tap", elementId: "open-movies" }],
+      ["tvos-fp-shows", { action: "tap", elementId: "open-shows" }],
+    ]);
   });
 
   test("stops at maxInteractions", async () => {

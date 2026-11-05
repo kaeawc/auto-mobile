@@ -242,10 +242,12 @@ describe("statusBar tool (#14105)", () => {
 
   describe("concurrent mutations on one device in direct stdio mode (#17079)", () => {
     /** Holds the next override() call until the returned release runs. */
-    const holdNextOverride = (): (() => void) => {
+    const holdNextOverride = (): (() => void) => holdNextOverrideGate().resolve;
+    /** Holds the next override() call; rejecting the gate makes that call reject with it. */
+    const holdNextOverrideGate = () => {
       const gate = Promise.withResolvers<void>();
       controller.overrideGates.push(gate.promise);
-      return () => gate.resolve();
+      return { resolve: () => gate.resolve(), reject: (error: Error) => gate.reject(error) };
     };
     const overrideCalls = (n: number) =>
       drainUntil(() => controller.overrides.length >= n, {
@@ -278,6 +280,18 @@ describe("statusBar tool (#14105)", () => {
       releaseA();
       await Promise.all([a, b]);
       expect(registry.get(ANDROID.deviceId)?.sessionId).toBe("session-1");
+      expect(registry.get(ANDROID.deviceId)?.overrides).toEqual({ batteryLevel: 50 });
+    });
+
+    test("an override queued behind a refused one still runs and is recorded", async () => {
+      const a = holdNextOverrideGate();
+      const refused = call(ANDROID, { action: "override", time: "1234" });
+      await overrideCalls(1);
+      const b = call(ANDROID, { action: "override", batteryLevel: 50 });
+      a.reject(new StatusBarRequestRejectedError("refused"));
+      await expect(refused).rejects.toThrow("refused");
+      await b;
+      expect(controller.overrides).toEqual([{ time: "1234" }, { batteryLevel: 50 }]);
       expect(registry.get(ANDROID.deviceId)?.overrides).toEqual({ batteryLevel: 50 });
     });
 

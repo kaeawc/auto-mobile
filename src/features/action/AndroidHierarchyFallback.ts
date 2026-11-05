@@ -10,6 +10,8 @@ import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { logger } from "../../utils/logger";
 import { rawNodeValue } from "../utility/elementProperties";
 import { DefaultElementParser } from "../utility/ElementParser";
+import { parseAndroidDisplayInfos } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
+import { uiautomatorDumpLock } from "./uiautomatorDumpLock";
 
 const DUMP_CLEANUP_TIMEOUT_MS = 1500;
 
@@ -17,6 +19,13 @@ export interface AndroidHierarchyFallbackDeps {
   adb: Pick<AdbExecutor, "execute" | "getForegroundApp">;
   timer: Timer;
   idGenerator?: IdGenerator;
+  /** Serializes dumps per device when known; see `uiautomatorDumpLock`. */
+  deviceId?: string;
+}
+
+/** Run a dump-and-read under the device's UiAutomation lock when the device is known. */
+function withDumpLock<T>(deps: AndroidHierarchyFallbackDeps, run: () => Promise<T>): Promise<T> {
+  return deps.deviceId === undefined ? run() : uiautomatorDumpLock(deps.deviceId).runExclusive(run);
 }
 
 interface XmlNode {
@@ -133,8 +142,10 @@ export async function supplementAndroidHierarchy(
     logger.warn(
       `[HierarchyFallback] Supplementing incomplete CtrlProxy hierarchy (ctrlProxyIncompleteReason=${original.ctrlProxyIncompleteReason ?? "unknown"})`,
     );
-    await execute(["shell", "uiautomator", "dump", path]);
-    const result = await execute(["shell", "cat", path]);
+    const result = await withDumpLock(deps, async () => {
+      await execute(["shell", "uiautomator", "dump", path]);
+      return execute(["shell", "cat", path]);
+    });
     throwIfAborted(signal);
     return await verifyAndMergeDump(original, result.stdout, foreground, {
       deps,
@@ -244,6 +255,52 @@ function boundedDumpExecutor(
   };
 }
 
+/** The single non-empty package of a dump, or undefined for a mixed or package-less tree. */
+function soleXmlPackage(nodes: readonly ViewHierarchyNode[]): string | undefined {
+  const packages = new Set<string>();
+  const visit = (node: ViewHierarchyNode): void => {
+    const pkg = node.$?.package;
+    if (typeof pkg === "string" && pkg) {
+      packages.add(pkg);
+    }
+    (node.node ?? []).forEach(visit);
+  };
+  nodes.forEach(visit);
+  return packages.size === 1 ? [...packages][0] : undefined;
+}
+
+/** Whether every node of the dump lies inside the requested display's real size. */
+function fitsDisplay(
+  nodes: readonly ViewHierarchyNode[],
+  size: { width: number; height: number },
+): boolean {
+  return nodes.every((node) => {
+    const bounds = node.bounds;
+    return (
+      (!bounds ||
+        (bounds.left >= 0 &&
+          bounds.top >= 0 &&
+          bounds.right <= size.width &&
+          bounds.bottom <= size.height)) &&
+      fitsDisplay(node.node ?? [], size)
+    );
+  });
+}
+
+async function readDisplaySize(
+  displayId: number,
+  execute: ReturnType<typeof boundedDumpExecutor>,
+): Promise<{ width: number; height: number }> {
+  const displays = parseAndroidDisplayInfos(
+    (await execute(["shell", "dumpsys", "display"])).stdout,
+  );
+  const size = displays.find((info) => info.logicalId === String(displayId))?.sizePx;
+  if (!size || size.width <= 0 || size.height <= 0) {
+    throw new ActionableError(`Display ${displayId} has no readable size in dumpsys display`);
+  }
+  return size;
+}
+
 /** Read an untracked non-default display without borrowing the default display's foreground app. */
 export async function readAndroidDisplayHierarchy(
   displayId: number,
@@ -254,8 +311,13 @@ export async function readAndroidDisplayHierarchy(
   const path = dumpPath(deps.idGenerator);
   const execute = boundedDumpExecutor(deps, { deadline, signal });
   try {
-    await execute(["shell", "uiautomator", "dump", "--display", String(displayId), path]);
-    const result = await execute(["shell", "cat", path]);
+    // Some releases ignore `--display` and dump the default display; the display's real size
+    // is what lets the dump be rejected instead of being labelled as this display.
+    const size = await readDisplaySize(displayId, execute);
+    const result = await withDumpLock(deps, async () => {
+      await execute(["shell", "uiautomator", "dump", "--display", String(displayId), path]);
+      return execute(["shell", "cat", path]);
+    });
     const parsed: { hierarchy?: XmlNode } = await parseStringPromise(result.stdout, {
       explicitArray: true,
     });
@@ -264,9 +326,18 @@ export async function readAndroidDisplayHierarchy(
     if (!nodes.length || deps.timer.now() >= deadline) {
       throw new ActionableError(`UIAutomator returned no hierarchy for display ${displayId}`);
     }
+    if (!fitsDisplay(nodes, size)) {
+      throw new ActionableError(
+        `UIAutomator dump does not fit display ${displayId} (${size.width}x${size.height}); this Android release likely ignores --display`,
+      );
+    }
+    const packageName = soleXmlPackage(nodes);
     return {
       hierarchy: { node: nodes.length === 1 ? nodes[0] : { $: {}, node: nodes } },
       displayId,
+      screenWidth: size.width,
+      screenHeight: size.height,
+      ...(packageName ? { packageName } : {}),
       sources: ["uiautomator"],
       fresh: false,
     };

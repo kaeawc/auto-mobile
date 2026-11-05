@@ -499,9 +499,18 @@ const overlayXml = readFileSync(
   "utf8",
 );
 
-function overlayCapture(observerMode: boolean, displayId = 2, refusal = overlayRefusal) {
+const overlayDumpsys = (size = "1080 x 720") =>
+  `Display Devices: size=2\n  Display id 2: DisplayInfo{"Overlay #1", displayId 2, type OVERLAY, uniqueId "overlay:1", real ${size}, rotation 0}`;
+
+function overlayCapture(
+  observerMode: boolean,
+  displayId = 2,
+  refusal = overlayRefusal,
+  owned = false,
+) {
   const adb = new FakeAdbClient();
   const timer = new FakeTimer();
+  adb.setCommandResult("shell dumpsys display", overlayDumpsys());
   adb.setCommandResult("shell cat /data/local/tmp/automobile-hierarchy-overlay.xml", overlayXml);
   const refuse: HierarchySyncClient["requestHierarchySync"] = async (
     _perf,
@@ -514,18 +523,22 @@ function overlayCapture(observerMode: boolean, displayId = 2, refusal = overlayR
     }
     return null;
   };
+  const syncClient: HierarchySyncClient = {
+    requestHierarchySync: refuse,
+    requestHierarchySyncForObserver: (_perf, _raw, _signal, options) =>
+      refuse(_perf, _raw, _signal, { ...options, displayId }),
+    convertToViewHierarchyResult: () => ({ hierarchy: {} }),
+  };
   const capture = createDeviceHierarchyCapture(
     { platform: "android", deviceId: "overlay-fake", name: "fake" },
     {
       timer,
       ids: new FakeIdGenerator(["overlay", "capture"]),
       adbFactory: { create: () => adb },
-      syncClientFactory: () => ({
-        requestHierarchySync: refuse,
-        requestHierarchySyncForObserver: (_perf, _raw, _signal, options) =>
-          refuse(_perf, _raw, _signal, { ...options, displayId }),
-        convertToViewHierarchyResult: () => ({ hierarchy: {} }),
-      }),
+      syncClientFactory: () => syncClient,
+      ...(owned
+        ? { observationClientResolver: () => ({ syncClient, transient: false, owned: true }) }
+        : {}),
     },
   );
   return {
@@ -542,6 +555,9 @@ test.each([false, true])(
     const result = await read();
     expect(result.hierarchy.displayId).toBe(2);
     expect(result.hierarchy.sources).toEqual(["uiautomator"]);
+    expect(result.hierarchy.screenWidth).toBe(1080);
+    expect(result.hierarchy.screenHeight).toBe(720);
+    expect(result.hierarchy.packageName).toBe("com.android.settings");
     // Match supplementation: the captured zero-area avatar is not a coordinate candidate.
     expect(result.nodes).toHaveLength(37);
     expect(result.nodes.every((node) => node.properties.package === "com.android.settings")).toBe(
@@ -550,7 +566,7 @@ test.each([false, true])(
     expect(
       result.nodes.every((node) => node.properties["hierarchy-source"] === "uiautomator"),
     ).toBe(true);
-    expect(adb.getCommandCalls()[0]?.command).toBe(
+    expect(adb.getCommandCalls()[1]?.command).toBe(
       "shell uiautomator dump --display 2 /data/local/tmp/automobile-hierarchy-overlay.xml",
     );
     expect(timer.getSleepHistory()).toEqual([]);
@@ -633,3 +649,32 @@ test.each([false, true])(
     }
   },
 );
+
+test("sessionless read of a session-owned device never dumps an untracked display", async () => {
+  const { read, adb } = overlayCapture(true, 2, overlayRefusal, true);
+  await expect(read()).rejects.toThrow(overlayRefusal);
+  expect(adb.getCommandCalls()).toEqual([]);
+});
+
+test("owner's own read of a session-owned device still dumps an untracked display", async () => {
+  const { read } = overlayCapture(false, 2, overlayRefusal, true);
+  expect((await read()).hierarchy.sources).toEqual(["uiautomator"]);
+});
+
+test("dump larger than the requested display is rejected as a default-display dump", async () => {
+  const { read, adb } = overlayCapture(false);
+  adb.setCommandResult("shell dumpsys display", overlayDumpsys("1080 x 480"));
+  await expect(read()).rejects.toThrow(overlayRefusal);
+  expect(
+    adb.getCommandCalls().some((call) => call.command.includes("uiautomator dump --display 2")),
+  ).toBe(true);
+});
+
+test("display without a readable size never starts a dump", async () => {
+  const { read, adb } = overlayCapture(false);
+  adb.setCommandResult("shell dumpsys display", "");
+  await expect(read()).rejects.toThrow(overlayRefusal);
+  expect(adb.getCommandCalls().some((call) => call.command.includes("uiautomator dump"))).toBe(
+    false,
+  );
+});

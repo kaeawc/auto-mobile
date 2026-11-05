@@ -392,12 +392,35 @@ async function normalizeSyncedHierarchy(options: {
       adb: (dependencies.adbFactory ?? defaultAdbClientFactory).create(device),
       timer,
       idGenerator: dependencies.ids,
+      deviceId: device.deviceId,
     },
     deadline,
     request.signal,
   );
   recordAcquisitionTimestamp(supplemented, hierarchy.updatedAt);
   return supplemented;
+}
+
+/** The display a refused selected-display read may dump with `uiautomator dump --display`. */
+function untrackedDisplayToDump(
+  error: unknown,
+  {
+    device,
+    request,
+    owned,
+  }: { device: BootedDevice; request: HierarchyCaptureRequest; owned: boolean },
+): number | undefined {
+  const displayId = request.displayId;
+  const eligible =
+    // Like supplementation, a dump can restart accessibility services under an owner's action:
+    // a sessionless read of a session-owned device never starts one.
+    !(request.observerMode && owned) &&
+    device.platform === "android" &&
+    displayId !== undefined &&
+    displayId !== 0 &&
+    error instanceof AndroidDisplayReadError &&
+    error.message.includes(`Display ${displayId} exposes no accessibility windows`);
+  return eligible ? displayId : undefined;
 }
 
 async function readAndNormalizeHierarchy(
@@ -409,22 +432,18 @@ async function readAndNormalizeHierarchy(
   } catch (error) {
     const { device, dependencies, request, timer, deadline } = options;
     request.signal?.throwIfAborted();
-    if (
-      device.platform !== "android" ||
-      request.displayId === undefined ||
-      request.displayId === 0 ||
-      !(error instanceof AndroidDisplayReadError) ||
-      !error.message.includes(`Display ${request.displayId} exposes no accessibility windows`)
-    ) {
+    const displayId = untrackedDisplayToDump(error, options);
+    if (displayId === undefined) {
       throw error;
     }
     try {
       return await readAndroidDisplayHierarchy(
-        request.displayId,
+        displayId,
         {
           adb: (dependencies.adbFactory ?? defaultAdbClientFactory).create(device),
           timer,
           idGenerator: dependencies.ids,
+          deviceId: device.deviceId,
         },
         deadline,
         request.signal,

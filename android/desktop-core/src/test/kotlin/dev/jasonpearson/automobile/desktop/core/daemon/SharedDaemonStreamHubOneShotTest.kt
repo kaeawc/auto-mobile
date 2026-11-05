@@ -22,7 +22,7 @@ class SharedDaemonStreamHubOneShotTest {
       val streams = mutableListOf<FakeObservationStream>()
       val hub =
         SharedDaemonStreamHub(
-          telemetryClientFactory = { FakeTelemetryPushClient() },
+          telemetry = FakeTelemetryMultiplexer(),
           scope =
             CoroutineScope(
               backgroundScope.coroutineContext + UnconfinedTestDispatcher(testScheduler),

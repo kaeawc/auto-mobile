@@ -52,6 +52,11 @@ function needsTouch(request: DpadTapOnRequest): boolean {
   if (request.selectionStrategy !== undefined && request.selectionStrategy !== "first") {
     return true;
   }
+  // ensureChecked: false asks for the unchecked state, so only the guarded touch path can skip
+  // a toggle that is already there; enter would flip it.
+  if (request.ensureChecked !== undefined) {
+    return true;
+  }
   return TOUCH_ONLY_OPTIONS.some((key) => {
     const value = request[key];
     return value !== undefined && value !== false;

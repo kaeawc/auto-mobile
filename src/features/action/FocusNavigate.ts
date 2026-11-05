@@ -36,6 +36,8 @@ export interface FocusNavigateTarget {
   resourceId?: string;
   /** Matches an element whose text or content-desc matches, as tapOn's text selector does. */
   label?: string;
+  /** Require `label` to equal the text or content-desc; see {@link exactFirstTarget}. */
+  labelExact?: boolean;
 }
 
 /** One screen read: the focused element (if any) and every element that could match. */
@@ -117,7 +119,7 @@ export function elementMatchesTarget(element: Element, target: FocusNavigateTarg
     return false;
   }
   if (target.label) {
-    const matchesLabel = textMatcher.createTextMatcher(target.label);
+    const matchesLabel = textMatcher.createTextMatcher(target.label, !target.labelExact);
     if (
       !matchesLabel(stringProp(element, "text")) &&
       !matchesLabel(stringProp(element, "content-desc"))
@@ -129,6 +131,22 @@ export function elementMatchesTarget(element: Element, target: FocusNavigateTarg
     !target.resourceId ||
     matchesCtrlProxyResourceId(stringProp(element, "resource-id"), target.resourceId)
   );
+}
+
+/**
+ * Exact matches win over containing ones, as in tapOn's touch resolver: when an element on this
+ * screen has `label` as its whole text or content-desc, a node that merely contains it (`Movies
+ * Plus` for `Movies`) is not the target.
+ */
+export function exactFirstTarget(
+  screen: FocusScreen,
+  target: FocusNavigateTarget,
+): FocusNavigateTarget {
+  if (!target.label || target.labelExact) {
+    return target;
+  }
+  const exact = { ...target, labelExact: true };
+  return screen.elements.some((element) => elementMatchesTarget(element, exact)) ? exact : target;
 }
 
 function center(bounds: ElementBounds): { x: number; y: number } {
@@ -304,14 +322,15 @@ export class FocusNavigate {
       throwIfAborted(signal);
       const screen = await this.observer.read(signal);
       const { focused } = screen;
-      const { focusedElement, matches } = describeFocus(screen, options.until);
+      const until = exactFirstTarget(screen, options.until);
+      const { focusedElement, matches } = describeFocus(screen, until);
       const key = focusKey(focused);
       if (progress.observe(key) && focusedElement) {
         path.push(focusedElement);
       }
       const { unchanged, blocked } = progress;
 
-      const direction = options.direction ?? this.nextDirection(screen, options, blocked);
+      const direction = options.direction ?? this.nextDirection(screen, until, blocked);
       const exhausted = options.direction ? unchanged >= FOCUS_NAVIGATE_STUCK_PRESSES : !direction;
       const done = this.exitFor(focusedElement, matches, {
         steps,
@@ -359,12 +378,10 @@ export class FocusNavigate {
   /** The best direction toward the target that has not already failed to move focus. */
   private nextDirection(
     screen: FocusScreen,
-    options: FocusNavigateOptions,
+    until: FocusNavigateTarget,
     blocked: ReadonlySet<FocusNavigateDirection>,
   ): FocusNavigateDirection | undefined {
-    const matches = screen.elements.filter((element) =>
-      elementMatchesTarget(element, options.until),
-    );
+    const matches = screen.elements.filter((element) => elementMatchesTarget(element, until));
     return directionsToward(screen.focused, matches).find((direction) => !blocked.has(direction));
   }
 

@@ -98,6 +98,21 @@ describe("FocusNavigate", () => {
     expect(result.path).toHaveLength(1);
   });
 
+  test("a label prefers an exact match over a focused node that only contains it", async () => {
+    const grid = new FakeGrid(0);
+    grid.elements[0] = { ...tile(0), text: "Movies Plus" };
+    const result = await navigator(grid).execute({ until: { label: "Movies" } });
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 1 });
+    expect(grid.presses).toEqual(["arrow_right"]);
+    expect(result.focusedElement?.text).toBe("Movies");
+  });
+
+  test("a label still accepts a containing match when no exact one is on screen", async () => {
+    const grid = new FakeGrid(1);
+    const result = await navigator(grid).execute({ until: { label: "Movi" } });
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 0 });
+  });
+
   test("recognises the inline TV Settings child label without pressing keys", async () => {
     const grid = new FakeGrid(0);
     grid.elements = [

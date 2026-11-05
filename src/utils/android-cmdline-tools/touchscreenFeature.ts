@@ -2,6 +2,7 @@ import type { AdbCommandRunner } from "./interfaces/AdbExecutor";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { logger } from "../logger";
 import { errorMessage } from "../describeUnknownError";
+import { adbFailureOutput } from "./adbFailureOutput";
 
 /** The package-manager feature a device declares when it has a touchscreen. */
 export const TOUCHSCREEN_FEATURE = "android.hardware.touchscreen";
@@ -21,6 +22,20 @@ export function parseHasFeature(raw: string): boolean | null {
     return true;
   }
   return value === "false" ? false : null;
+}
+
+/**
+ * Interpret the stdout a rejected `pm has-feature` carried. The same stream can repeat along the
+ * error's cause chain, so every non-empty line must agree.
+ */
+export function parseFailedHasFeature(raw: string): boolean | null {
+  const answers = new Set(
+    raw
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0),
+  );
+  return answers.size === 1 ? parseHasFeature([...answers][0]) : null;
 }
 
 /** Whether an Android device declares a touchscreen. */
@@ -70,11 +85,16 @@ export class CachedTouchscreenFeature implements TouchscreenFeature {
       value = parseHasFeature(result.stdout);
     } catch (error) {
       signal?.throwIfAborted();
-      logger.warn(
-        `[TouchscreenFeature] probe failed for ${deviceId}: ${errorMessage(error)}`,
-        error,
-      );
-      return null;
+      // `pm has-feature` prints `false` and exits 1 for a missing feature, which adb reports as a
+      // failed command; that output is the answer, not a probe failure.
+      value = parseFailedHasFeature(adbFailureOutput(error).stdout);
+      if (value === null) {
+        logger.warn(
+          `[TouchscreenFeature] probe failed for ${deviceId}: ${errorMessage(error)}`,
+          error,
+        );
+        return null;
+      }
     }
     if (value === null) {
       this.cache.delete(deviceId);

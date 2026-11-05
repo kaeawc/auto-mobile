@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   CachedTouchscreenFeature,
+  parseFailedHasFeature,
   parseHasFeature,
   TOUCHSCREEN_FEATURE_CACHE_TTL_MS,
 } from "../../../src/utils/android-cmdline-tools/touchscreenFeature";
@@ -30,6 +31,17 @@ describe("parseHasFeature", () => {
   });
 });
 
+describe("parseFailedHasFeature", () => {
+  test.each([
+    ["false\n", false],
+    ["false\n\nfalse\n", false],
+    ["false\ntrue", null],
+    ["", null],
+  ] as const)("%j -> %p", (raw, expected) => {
+    expect(parseFailedHasFeature(raw)).toBe(expected);
+  });
+});
+
 describe("CachedTouchscreenFeature", () => {
   test("reports a TV that declares no touchscreen and caches the answer within the TTL", async () => {
     const timer = new FakeTimer();
@@ -44,6 +56,17 @@ describe("CachedTouchscreenFeature", () => {
     timer.advanceTime(1);
     expect(await feature.hasTouchscreen(adb, "emulator-5554")).toBe(false);
     expect(probes(adb)).toBe(2);
+  });
+
+  test("reads the false answer pm has-feature prints with exit status 1", async () => {
+    const feature = new CachedTouchscreenFeature(new FakeTimer());
+    const adb = new FakeAdbExecutor();
+    // AdbClient rejects the non-zero exit; the raw execFile error on `cause` keeps the stdout.
+    const exitOne = Object.assign(new Error("Command failed: exit 1"), { stdout: "false\n" });
+    adb.setCommandError(PROBE, new Error("adb command failed", { cause: exitOne }));
+    expect(await feature.hasTouchscreen(adb, "tv")).toBe(false);
+    expect(await feature.hasTouchscreen(adb, "tv")).toBe(false);
+    expect(probes(adb)).toBe(1);
   });
 
   test("reports a phone's touchscreen", async () => {

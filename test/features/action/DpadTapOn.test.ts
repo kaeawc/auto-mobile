@@ -55,7 +55,7 @@ describe("dpadTapOnTarget", () => {
       preTapStability: true,
       retryIfNoChange: false,
       ensureTap: true,
-      ensureChecked: false,
+      sibling: false,
       selectionStrategy: "first",
       sessionUuid: "session-1",
     };
@@ -75,6 +75,7 @@ describe("dpadTapOnTarget", () => {
     { selector: { text: "Movies" }, container: { elementId: "list" } },
     { selector: { text: "Movies" }, display: "secondary" },
     { selector: { text: "Movies" }, ensureChecked: true },
+    { selector: { text: "Movies" }, ensureChecked: false },
     { selector: { text: "Movies" }, selectionStrategy: "random" },
   ] satisfies DpadTapOnRequest[])("leaves %j to the touch path", (request) => {
     expect(dpadTapOnTarget(request)).toBeUndefined();

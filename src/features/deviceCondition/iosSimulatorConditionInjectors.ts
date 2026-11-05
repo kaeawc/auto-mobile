@@ -194,13 +194,13 @@ function privacySnapshotReader(reader: TccPermissionReader, device: BootedDevice
 
 /**
  * The original decisions of one app's service group, shared by every apply that changed the group
- * until one reset restores it. Later applies reuse it instead of capturing their own intermediate
- * state, so retrying an older reset can never reinstate a fixture.
+ * until a reset restores it and reads it back. Later applies reuse it instead of capturing their own
+ * intermediate state, so retrying an older reset can never reinstate a fixture.
  */
 interface PrivacyBaseline {
   decisions: PrivacySnapshot;
-  /** The reset that restored the baseline; set once, after which every other reset is a no-op. */
-  restoredBy?: object;
+  /** Set once a reset restored and read back the baseline; every other reset is then a no-op. */
+  retired?: true;
 }
 
 /** Original privacy baselines still owed, per app and service group. */
@@ -219,13 +219,17 @@ export function createSimulatorPrivacyInjector(
   baselines: PrivacyBaselineStore = new Map(),
 ): DeviceConditionInjector {
   const readPrivacySnapshot = privacySnapshotReader(reader, device);
+  /**
+   * Restore in group order, re-reading before each step because one service's change can move
+   * another, then read the group back. Only a matching read-back retires the baseline; a mismatch
+   * throws so the reset stays owed and a later restore retries it.
+   */
   const restore = async (
     appId: string,
     group: readonly PrivacyService[],
     baseline: PrivacyBaseline,
     signal?: AbortSignal,
   ): Promise<void> => {
-    // Restore in group order, re-reading before each step: one service's change can move another.
     for (const service of group) {
       const wanted = baseline.decisions.get(service);
       const current = await readPrivacySnapshot(appId, [service], signal);
@@ -233,6 +237,16 @@ export function createSimulatorPrivacyInjector(
         await runSimctl(simctl, ["privacy", device.deviceId, wanted, service, appId], signal);
       }
     }
+    const after = await readPrivacySnapshot(appId, group, signal);
+    const mismatched = group.filter(
+      (service) => after.get(service) !== baseline.decisions.get(service),
+    );
+    if (mismatched.length > 0) {
+      throw new ActionableError(
+        `privacy restore for ${appId} did not read back the original '${mismatched.join("', '")}' decision; it will be retried on the next reset or release.`,
+      );
+    }
+    baseline.retired = true;
   };
   return {
     key: "privacy",
@@ -257,34 +271,33 @@ export function createSimulatorPrivacyInjector(
         };
       }
       baselines.set(storeKey, baseline);
-      await runSimctl(
-        simctl,
-        ["privacy", device.deviceId, target.action, target.service, target.appId],
-        signal,
-      );
-      const token = {};
+      try {
+        await runSimctl(
+          simctl,
+          ["privacy", device.deviceId, target.action, target.service, target.appId],
+          signal,
+        );
+      } catch (error) {
+        // No reset owns a baseline this failed apply created; an earlier apply's baseline stays.
+        if (owed === undefined) {
+          baselines.delete(storeKey);
+        }
+        throw error;
+      }
       const original = group.map((service) => `${service}=${baseline.decisions.get(service)}`);
       return {
         status: "applied",
         detail: `${target.action} '${target.service}' for ${target.appId}; reset restores ${original.join(", ")}`,
         reset: async (s) => {
-          if (baseline.restoredBy !== undefined) {
-            return;
+          if (baseline.retired !== true) {
+            await restore(target.appId, group, baseline, s);
           }
-          await restore(target.appId, group, baseline, s);
-          baseline.restoredBy = token;
           if (baselines.get(storeKey) === baseline) {
             baselines.delete(storeKey);
           }
         },
-        isClean: async (s) => {
-          if (baseline.restoredBy !== token) {
-            // Another reset restored this baseline and verified it; this one is superseded.
-            return baseline.restoredBy !== undefined;
-          }
-          const now = await readPrivacySnapshot(target.appId, group, s);
-          return group.every((service) => now.get(service) === baseline.decisions.get(service));
-        },
+        // restore() read the group back before retiring the baseline, for this reset or another.
+        isClean: () => Promise.resolve(baseline.retired === true),
       };
     },
     isClean: () => Promise.resolve(true),

@@ -265,10 +265,53 @@ describe("privacy on the iOS Simulator", () => {
     };
     const restore = await h.controller.restore();
     expect(restore.verifiedClean).toBe(false);
-    expect(restore.failures[0]).toEqual({
-      key: "privacy",
-      error: "reset ran but the device did not read clean",
+    expect(restore.failures[0].key).toBe("privacy");
+    expect(restore.failures[0].error).toContain("did not read back");
+  });
+
+  test("a restore whose read-back failed is retried once the interference stops", async () => {
+    const h = harness();
+    h.tcc.set("com.example.app", "kTCCServicePhotos", 2);
+    await h.controller.apply(revokePhotos);
+    const read = h.tcc.readPermissions.bind(h.tcc);
+    let interfere = true;
+    h.tcc.readPermissions = async (deviceId, appId) => {
+      const rows = await read(deviceId, appId);
+      // Another writer denies Photos again right after the reset grants it.
+      if (interfere && h.tcc.rows.get("com.example.app|kTCCServicePhotos")?.auth_value === 2) {
+        h.tcc.set("com.example.app", "kTCCServicePhotos", 0);
+      }
+      return rows;
+    };
+    const first = await h.controller.restore();
+    expect(first.verifiedClean).toBe(false);
+
+    interfere = false;
+    const callsBefore = h.simctl.calls.length;
+    const second = await h.controller.restore();
+    expect(second.verifiedClean).toBe(true);
+    expect(h.simctl.calls.slice(callsBefore)).toEqual([
+      ["privacy", UDID, "grant", "photos", "com.example.app"],
+    ]);
+    expect(h.tcc.rows.get("com.example.app|kTCCServicePhotos")?.auth_value).toBe(2);
+  });
+
+  test("a failed apply leaves no baseline for a later apply to reuse", async () => {
+    const h = harness();
+    h.tcc.set("com.example.app", "kTCCServicePhotos", 2);
+    h.simctl.failOn = "revoke";
+    const refused = await h.controller.apply(revokePhotos);
+    expect(refused.changes[0]).toMatchObject({ key: "privacy", status: "unsupported" });
+
+    // The user denies Photos; the next fixture must restore that denial, not the stale grant.
+    h.tcc.set("com.example.app", "kTCCServicePhotos", 0);
+    h.simctl.failOn = undefined;
+    await h.controller.apply({
+      privacy: { appId: "com.example.app", service: "photos", action: "grant" },
     });
+    const restore = await h.controller.restore();
+    expect(restore.verifiedClean).toBe(true);
+    expect(h.tcc.rows.get("com.example.app|kTCCServicePhotos")?.auth_value).toBe(0);
   });
 });
 

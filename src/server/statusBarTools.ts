@@ -142,16 +142,51 @@ async function clearStatusBar(call: StatusBarCall) {
   });
 }
 
-/** Puts the store back to `previous` (or nothing) for this device. */
+/**
+ * Puts the store back to `previous` (or nothing) for this device, but only while it still holds
+ * `written`, the record this call wrote: a record another caller has since replaced or removed is
+ * newer than this call's view, so it is left alone (#17079).
+ */
 function restoreRecord(
   registry: StatusBarOverrideStore,
   device: BootedDevice,
+  written: StatusBarOverrideRecord | null,
   previous: StatusBarOverrideRecord | null,
-): void {
+): boolean {
+  if (registry.get(device.deviceId) !== written) {
+    return false;
+  }
   registry.forget(device.deviceId);
   if (previous) {
     registry.record(previous.device, previous.sessionId, previous.overrides);
   }
+  return true;
+}
+
+/**
+ * Runs status-bar mutations one at a time per device, in call order (#17079). The daemon's
+ * per-device queue already does this, but direct stdio mode runs tool calls concurrently, and an
+ * override's finalization restores the record it saw before its device command, so a concurrent
+ * override or clear on the same device must not interleave with it. Queued outside the session's
+ * tracked setup, so a release drains only the running mutation and a queued one re-checks
+ * admission when it starts. A rejected mutation does not block the next.
+ */
+function createDeviceSerializer(): <T>(deviceId: string, task: () => Promise<T>) => Promise<T> {
+  const tails = new Map<string, Promise<void>>();
+  return <T>(deviceId: string, task: () => Promise<T>): Promise<T> => {
+    const run = (tails.get(deviceId) ?? Promise.resolve()).then(task);
+    const tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    tails.set(deviceId, tail);
+    void tail.then(() => {
+      if (tails.get(deviceId) === tail) {
+        tails.delete(deviceId);
+      }
+    });
+    return run;
+  };
 }
 
 /** The requested values of the fields the platform applied. */
@@ -171,6 +206,7 @@ async function overrideStatusBar(call: StatusBarCall, requested: StatusBarOverri
   // override on the device, so the record stays as the release-time cleanup obligation. On
   // success the record narrows to the fields the platform applied (#17054).
   let previous: StatusBarOverrideRecord | null = null;
+  let written: StatusBarOverrideRecord | null = null;
   let owner: string | null = null;
   const outcome = await runSessionStatusBarMutation({
     sessionManager: call.sessionManager,
@@ -180,16 +216,16 @@ async function overrideStatusBar(call: StatusBarCall, requested: StatusBarOverri
       previous = registry.get(device.deviceId);
       owner = sessionId;
       registry.record(device, sessionId, requested);
+      written = registry.get(device.deviceId);
       return (error) => {
         if (error instanceof StatusBarRequestRejectedError) {
-          restoreRecord(registry, device, previous);
+          restoreRecord(registry, device, written, previous);
         }
       };
     },
     mutation: async () => {
       const result = await call.controller.override(requested, call.signal);
-      restoreRecord(registry, device, previous);
-      if (result.applied.length > 0) {
+      if (restoreRecord(registry, device, written, previous) && result.applied.length > 0) {
         registry.record(device, owner, appliedOverrides(requested, result.applied));
       }
       return result;
@@ -214,6 +250,7 @@ export function createStatusBarHandler(deps: StatusBarToolDependencies = {}) {
   const controllerFor = deps.controllerFor ?? defaultStatusBarControllerFactory;
   const registry = deps.registry ?? defaultStatusBarOverrideRegistry;
   const sessionManager = deps.sessionManager ?? (() => defaultDaemonContext.sessionManager());
+  const serializeOnDevice = createDeviceSerializer();
   return async (
     device: BootedDevice,
     args: StatusBarArgs,
@@ -240,7 +277,15 @@ export function createStatusBarHandler(deps: StatusBarToolDependencies = {}) {
     if (args.action === "get") {
       return readStatusBar(call);
     }
-    return args.action === "clear" ? clearStatusBar(call) : overrideStatusBar(call, requested);
+    const queued = <T>(mutation: () => Promise<T>): Promise<T> =>
+      serializeOnDevice(device.deviceId, () => {
+        // A call aborted while it waited for the device must not start its device command.
+        signal?.throwIfAborted();
+        return mutation();
+      });
+    return args.action === "clear"
+      ? queued(() => clearStatusBar(call))
+      : queued(() => overrideStatusBar(call, requested));
   };
 }
 

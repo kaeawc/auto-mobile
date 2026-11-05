@@ -13,6 +13,7 @@ import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeStatusBarController } from "../fakes/FakeStatusBarController";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
 
 const ANDROID: BootedDevice = { name: "Pixel", platform: "android", deviceId: "emulator-5554" };
 const okExec = (): ExecResult => ({
@@ -236,6 +237,104 @@ describe("statusBar tool (#14105)", () => {
       const set = await call(ANDROID, { action: "override", operatorName: "X" });
       expect(set.structuredContent).toMatchObject({ applied: [], override: null });
       expect(registry.get(ANDROID.deviceId)).toBeNull();
+    });
+  });
+
+  describe("concurrent mutations on one device in direct stdio mode (#17079)", () => {
+    /** Holds the next override() call until the returned release runs. */
+    const holdNextOverride = (): (() => void) => {
+      const gate = Promise.withResolvers<void>();
+      controller.overrideGates.push(gate.promise);
+      return () => gate.resolve();
+    };
+    const overrideCalls = (n: number) =>
+      drainUntil(() => controller.overrides.length >= n, {
+        description: `${n} controller override call(s)`,
+      });
+
+    test("an override finishing after a queued one does not drop its fields", async () => {
+      const releaseA = holdNextOverride();
+      const a = call(ANDROID, { action: "override", time: "9:41" });
+      await overrideCalls(1);
+      const b = call(ANDROID, { action: "override", batteryLevel: 50 });
+      await drainMicrotasks(50);
+      expect(controller.overrides).toEqual([{ time: "9:41" }]);
+      releaseA();
+      await Promise.all([a, b]);
+      expect(controller.overrides).toEqual([{ time: "9:41" }, { batteryLevel: 50 }]);
+      const result = await call(ANDROID, { action: "get" });
+      expect(readUnknownStructuredField(result, "override")).toEqual({
+        time: "9:41",
+        batteryLevel: 50,
+      });
+    });
+
+    test("a later override by another owner keeps its cleanup ownership", async () => {
+      await manager.createSession("session-1", ANDROID.deviceId, "android");
+      const releaseA = holdNextOverride();
+      const a = call(ANDROID, { action: "override", time: "9:41" });
+      await overrideCalls(1);
+      const b = call(ANDROID, { action: "override", batteryLevel: 50, sessionUuid: "session-1" });
+      releaseA();
+      await Promise.all([a, b]);
+      expect(registry.get(ANDROID.deviceId)?.sessionId).toBe("session-1");
+      expect(registry.get(ANDROID.deviceId)?.overrides).toEqual({ batteryLevel: 50 });
+    });
+
+    test("a clear queued behind a pending override runs after it and leaves no record", async () => {
+      const releaseA = holdNextOverride();
+      const a = call(ANDROID, { action: "override", time: "9:41" });
+      await overrideCalls(1);
+      const cleared = call(ANDROID, { action: "clear" });
+      await drainMicrotasks(50);
+      expect(controller.clears).toBe(0);
+      releaseA();
+      await Promise.all([a, cleared]);
+      expect(controller.clears).toBe(1);
+      expect(registry.get(ANDROID.deviceId)).toBeNull();
+    });
+
+    test("finalization leaves a record replaced outside the handler alone", async () => {
+      const releaseA = holdNextOverride();
+      const a = call(ANDROID, { action: "override", time: "9:41" });
+      await overrideCalls(1);
+      registry.record(ANDROID, "session-2", { wifiBars: 2 });
+      releaseA();
+      await a;
+      expect(registry.get(ANDROID.deviceId)).toMatchObject({
+        sessionId: "session-2",
+        overrides: { wifiBars: 2 },
+      });
+    });
+
+    test("a call aborted while queued never reaches the controller", async () => {
+      const releaseA = holdNextOverride();
+      const a = call(ANDROID, { action: "override", time: "9:41" });
+      await overrideCalls(1);
+      const abort = new AbortController();
+      const b = handler(
+        ANDROID,
+        { action: "override", batteryLevel: 50 } as StatusBarArgs,
+        undefined,
+        abort.signal,
+      );
+      abort.abort(new Error("cancelled"));
+      releaseA();
+      await a;
+      await expect(b).rejects.toThrow("cancelled");
+      expect(controller.overrides).toEqual([{ time: "9:41" }]);
+      expect(registry.get(ANDROID.deviceId)?.overrides).toEqual({ time: "9:41" });
+    });
+
+    test("other devices are not queued behind a pending override", async () => {
+      const other: BootedDevice = { ...ANDROID, deviceId: "emulator-5556" };
+      const releaseA = holdNextOverride();
+      const a = call(ANDROID, { action: "override", time: "9:41" });
+      await overrideCalls(1);
+      await call(other, { action: "override", batteryLevel: 50 });
+      expect(registry.get(other.deviceId)?.overrides).toEqual({ batteryLevel: 50 });
+      releaseA();
+      await a;
     });
   });
 });

@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { SURVIVAL_EVENT_IDS } from "../../../src/features/utility/KillProfileExpectedScores";
+import {
+  EXPECTED_SCORES_API_LEVEL,
+  KILL_PROFILE_EXPECTED_SCORES,
+  SURVIVAL_EVENT_IDS,
+} from "../../../src/features/utility/KillProfileExpectedScores";
 import { FIXTURE_PACKAGE, scoringWindow } from "../../../scripts/kill-profile-survival/matrix";
 import { runHarness, type HarnessDeps } from "../../../scripts/kill-profile-survival/harness";
 import { AvdGuardedAdb, parseCli } from "../../../scripts/kill-profile-survival/run";
@@ -149,8 +153,11 @@ function harnessFakes() {
     },
   };
   const shell = new FakeAdbExecutor();
-  shell.setAndroidApiLevel(37);
-  shell.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("37", ""));
+  shell.setAndroidApiLevel(EXPECTED_SCORES_API_LEVEL);
+  shell.setCommandResponse(
+    "shell getprop ro.build.version.sdk",
+    createExecResult(String(EXPECTED_SCORES_API_LEVEL), ""),
+  );
   shell.setCommandResponse(
     "shell pm path",
     createExecResult("package:/data/app/fixture/base.apk", ""),
@@ -178,6 +185,38 @@ function harnessFakes() {
 }
 
 describe("survival host safeguards with fakes", () => {
+  test("CLI filters requested profiles in order", () => {
+    const options = parseCli([
+      "--serial",
+      "emulator-5556",
+      "--avd",
+      "Survival",
+      "--out",
+      "scratch/result.json",
+      "--profiles",
+      "samsung-auto-disable,oneplus-deep-optimization",
+    ]);
+    expect(options.profiles).toEqual(["samsung-auto-disable", "oneplus-deep-optimization"]);
+  });
+
+  test("CLI leaves profiles undefined when no filter is given", () => {
+    const options = parseCli([
+      "--serial",
+      "emulator-5556",
+      "--avd",
+      "Survival",
+      "--out",
+      "scratch/result.json",
+    ]);
+    expect(options.profiles).toBeUndefined();
+  });
+
+  test("CLI rejects unknown and empty profile filters", () => {
+    const base = ["--serial", "emulator-5556", "--avd", "Survival", "--out", "scratch/result.json"];
+    expect(() => parseCli([...base, "--profiles", "unknown-profile"])).toThrow("unknown-profile");
+    expect(() => parseCli([...base, "--profiles", ""])).toThrow();
+  });
+
   test("CLI refuses missing targets, reserved serial, iPhone and output outside scratch", () => {
     for (const args of [
       [],
@@ -311,6 +350,63 @@ describe("survival host safeguards with fakes", () => {
     expect(baseClock.calls).toEqual([]);
   });
 
+  test("API 34 scores are reported without comparing to the API 35 baseline", async () => {
+    const { deps, shell } = harnessFakes();
+    shell.setAndroidApiLevel(34);
+    shell.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("34", ""));
+    const report = await runHarness(
+      {
+        serial: "emulator-5556",
+        avd: "Survival",
+        apk: "fixture.apk",
+        profiles: ["user-restricted"],
+      },
+      {
+        ...deps,
+        shell: {
+          async executeCommand(command, options) {
+            if (command.includes("sh -c")) {
+              return createExecResult(String(await deps.clock.readInstantMs()), "");
+            }
+            return shell.executeCommand(command, options);
+          },
+        },
+      },
+    );
+    expect(report.aborted).toBeUndefined();
+    expect(report.noBaseline).toContain("no baseline for API 34");
+    expect(report.results).toHaveLength(1);
+    // user-restricted expects workmanager-periodic "ran" on API 35; API 34 observes "never".
+    expect(report.results[0].score["workmanager-periodic"]).toBe("never");
+    expect(report.results[0].mismatches).toEqual([]);
+    expect(report.results[0].pendingMeasurement).toEqual([...SURVIVAL_EVENT_IDS]);
+  });
+
+  test("the baseline API still compares and reports no missing-baseline note", async () => {
+    const { deps, shell } = harnessFakes();
+    const report = await runHarness(
+      {
+        serial: "emulator-5556",
+        avd: "Survival",
+        apk: "fixture.apk",
+        profiles: ["user-restricted"],
+      },
+      {
+        ...deps,
+        shell: {
+          async executeCommand(command, options) {
+            if (command.includes("sh -c")) {
+              return createExecResult(String(await deps.clock.readInstantMs()), "");
+            }
+            return shell.executeCommand(command, options);
+          },
+        },
+      },
+    );
+    expect(report.noBaseline).toBeUndefined();
+    expect(report.results[0].mismatches).toContain("workmanager-periodic");
+  });
+
   test("complete matrix scores every profile and restores between runs using only fake time", async () => {
     const { deps, shell, baseClock, fakeTimer } = harnessFakes();
     const runningDeps: HarnessDeps = {
@@ -332,8 +428,17 @@ describe("survival host safeguards with fakes", () => {
     expect(report.results.map((result) => result.profileId)).toEqual([...KILL_PROFILE_IDS]);
     for (const result of report.results) {
       expect(Object.values(result.score)).toEqual(SURVIVAL_EVENT_IDS.map(() => "never"));
-      expect(result.pendingMeasurement).toEqual([...SURVIVAL_EVENT_IDS]);
-      expect(result.mismatches).toEqual([]);
+      expect(result.pendingMeasurement).toEqual(
+        SURVIVAL_EVENT_IDS.filter(
+          (id) => KILL_PROFILE_EXPECTED_SCORES[result.profileId][id] === "TODO_MEASURE",
+        ),
+      );
+      expect(result.mismatches).toEqual(
+        SURVIVAL_EVENT_IDS.filter((id) => {
+          const expected = KILL_PROFILE_EXPECTED_SCORES[result.profileId][id];
+          return expected !== "TODO_MEASURE" && expected !== "never";
+        }),
+      );
     }
     expect(
       shell.getExecutedCommands().filter((command) => command === `uninstall ${FIXTURE_PACKAGE}`),

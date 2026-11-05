@@ -494,6 +494,26 @@ class MultiplexedTelemetrySocketClientTest {
       assertEquals(1, daemon.openCount)
       assertTrue(daemon.retryDelays.isEmpty())
     }
+
+  @Test
+  fun `no socket opens before the desktop session registers and a retry opens one after`() =
+    runBlocking {
+      val daemon = Daemon()
+      val session = AtomicReference<String?>(null)
+      val client = client(daemon) { session.get() }
+      val a = client.subscribe(phoneA) {}
+
+      withTimeout(TIMEOUT_SECONDS * 1_000) { a.state.first { it is ConnectionState.Disconnected } }
+      assertEquals(0, daemon.openCount)
+
+      session.set("session-1")
+      a.retry()
+      val subscribe = daemon.nextSocket().nextRequest()
+      assertEquals("uuid-a", subscribe["deviceSessionUuid"])
+      assertEquals("session-1", subscribe["sessionUuid"])
+      assertEquals(1, daemon.openCount)
+      client.close()
+    }
 }
 
 private const val TIMEOUT_SECONDS = 5L

@@ -30,6 +30,8 @@ export type KillProfileStep =
   | { kind: "standbyBucket"; bucket: "restricted" | "rare" }
   /** `appops set [--uid] <pkg> <op> <mode>`. Restored to the mode read before the first change. */
   | { kind: "appOp"; op: KillProfileAppOp; mode: "ignore" | "deny" }
+  /** Revoke POST_NOTIFICATIONS on API 33+, restoring the grant read before the first change. */
+  | { kind: "notificationPermission"; mode: "revoke" }
   /** App hibernation, restored to the state read before the first change. */
   | { kind: "hibernation" }
   /** `dumpsys deviceidle force-idle`: force deep Doze. Restored by `dumpsys deviceidle unforce`. */
@@ -203,14 +205,14 @@ export const KILL_PROFILES: Readonly<Record<KillProfileId, KillProfile>> = {
   },
   "notifications-off": {
     id: "notifications-off",
-    version: 1,
-    description: "Notifications off: POST_NOTIFICATION ignored (Android 13+).",
-    steps: [{ kind: "appOp", op: "POST_NOTIFICATION", mode: "ignore" }],
+    version: 2,
+    description: "Notifications off: POST_NOTIFICATIONS runtime permission revoked (Android 13+).",
+    steps: [{ kind: "notificationPermission", mode: "revoke" }],
     evidenceStatus: "inferred",
     evidenceNote:
-      "Approximated by the POST_NOTIFICATION app op that the notification permission toggle maps to; " +
-      "several OEMs ship with notifications off by default. Restored to the mode read before the " +
-      "first change. Android 13+ only.",
+      "Revokes the POST_NOTIFICATIONS runtime permission, as the Settings notification toggle does " +
+      "on Android 13+. Restored to the grant read before the first change; an already-denied " +
+      "permission stays denied.",
   },
 };
 

@@ -9,10 +9,10 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.staticCompositionLocalOf
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonStreamHub
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamKey
+import dev.jasonpearson.automobile.desktop.core.daemon.MultiplexedObservationSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.MultiplexedTelemetrySocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationHubConfig
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
-import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.SharedDaemonStreamHub
 
 /**
@@ -29,19 +29,23 @@ val LocalDaemonStreamHub = staticCompositionLocalOf<DaemonStreamHub?> { null }
 @Composable
 fun rememberDaemonStreamHub(sessionUuidProvider: () -> String?): DaemonStreamHub {
   val latestSessionUuidProvider by rememberUpdatedState(sessionUuidProvider)
+  val observations = remember {
+    // Every observed device's observation stream over one socket and one reader thread (#17011).
+    MultiplexedObservationSocketClient.create({ latestSessionUuidProvider() })
+  }
   val hub = remember {
     SharedDaemonStreamHub(
       // Every observed device's telemetry over one socket and one reader thread (#16968).
       telemetry = MultiplexedTelemetrySocketClient.create({ latestSessionUuidProvider() }),
-      observation =
-        ObservationHubConfig(
-          streamFactory = {
-            ObservationStreamClient(sessionUuidProvider = { latestSessionUuidProvider() })
-          },
-        ),
+      observation = ObservationHubConfig(streamFactory = observations::stream),
     )
   }
-  DisposableEffect(hub) { onDispose { hub.close() } }
+  DisposableEffect(hub) {
+    onDispose {
+      hub.close()
+      observations.close()
+    }
+  }
   return hub
 }
 

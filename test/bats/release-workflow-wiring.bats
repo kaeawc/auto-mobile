@@ -4,7 +4,7 @@
 # integrity gate, while Release publishes the artifacts from that successful run.
 
 @test "release.yml reads the checksums baked by prepare-release" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local script
   script="$(yq -r '.jobs."verify-and-release".steps[]
     | select(.id == "prepared_checksums") | .run' ".github/workflows/release.yml" \
@@ -61,7 +61,7 @@
 }
 
 @test "release.yml reuses prepare-release artifacts instead of rebuilding them (#4686)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local workflow=".github/workflows/release.yml"
 
   run yq -r '.on.workflow_dispatch.inputs.prepare_run_id.required' "$workflow"
@@ -103,7 +103,7 @@
 }
 
 @test "release CtrlProxy APK is built from the release variant" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local workflow=".github/workflows/build-control-proxy-apk.yml"
 
   run yq -r '.jobs.build.steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks"' "$workflow"
@@ -121,7 +121,7 @@
 }
 
 @test "pull request CtrlProxy debug build and required JVM Consumer Checks compile both variants" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local workflow=".github/workflows/pull_request.yml"
 
   run yq -r '.jobs."build-android-control-proxy".steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks"' "$workflow"
@@ -135,7 +135,7 @@
 }
 
 @test "prepare-release verifies and tags the single prepared artifact set before dispatching release (#4686)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local workflow=".github/workflows/prepare-release.yml"
   local builder
   for builder in build-candidate-ctrl-proxy-ios-ipa build-candidate-control-proxy-apk build-candidate-protoviewer-apk build-candidate-video-server-jar build-candidate-screen-capture-helper build-candidate-prototype-agent build-candidate-prototype-viewer; do
@@ -182,7 +182,7 @@
 }
 
 @test "prepare-release builds the notarized Network Filter probe with both provisioning profiles" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local workflow=".github/workflows/build-network-filter-probe.yml"
 
   run yq -r '.on.workflow_call.secrets | keys[]' "$workflow"
@@ -209,7 +209,7 @@
 }
 
 @test "prepare-release keeps intermediate version commits on a run-scoped staging ref (#4686)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local workflow=".github/workflows/prepare-release.yml"
 
   run yq -r '.jobs."prepare-version".outputs.base_main_commit' "$workflow"
@@ -232,7 +232,7 @@
 }
 
 @test "prepare-release consumes the bump script's managed-path allow-list (#5008)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local commit_step
   commit_step="$(yq -r '.jobs."prepare-version".steps[] | select(.id == "commit") | .run' .github/workflows/prepare-release.yml)"
   # The allow-list is owned by bump-versions.sh, not restated in the workflow.
@@ -248,10 +248,11 @@
 }
 
 @test "prepare-release oxfmt-formats the generated files before committing them (#5817)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local workflow=".github/workflows/prepare-release.yml"
 
-  # The version-bump and changelog steps write .claude-plugin/{marketplace,plugin}.json
+  # The version-bump and changelog steps write .claude-plugin/marketplace.json,
+  # plugins/auto-mobile/.claude-plugin/plugin.json
   # and CHANGELOG.md in a shape that must be oxfmt-clean, but the commit carries
   # [skip ci] so the format gate never runs on it. The durable fix (#5817) runs
   # oxfmt on the tree before committing so those files land clean on main.
@@ -302,7 +303,7 @@
 }
 
 @test "prepared release artifacts survive delayed publication retries (#4686)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local workflow
   for workflow in \
     .github/workflows/build-ctrl-proxy-ios-ipa.yml \
@@ -331,7 +332,7 @@
 }
 
 @test "prepare-release verifies the prepared artifacts on the finalized tree before tagging and can rerun provenance upload (#4686)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local workflow=".github/workflows/prepare-release.yml"
 
   # verify-prepared-release gates tagging on the finalized release tree. Generic
@@ -355,7 +356,7 @@
 }
 
 @test "release.yml requires successful prepared-release provenance before downloading artifacts (#4686)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local workflow=".github/workflows/release.yml"
 
   run yq -r '.jobs."verify-and-release".steps[] | select(.name == "Wait for successful Prepare Release") | .run' "$workflow"
@@ -371,7 +372,7 @@
 }
 
 @test "release.yml builds the package before publishing npm" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local steps build_index publish_index
   steps="$(yq -r '.jobs."verify-and-release".steps[] | (.name // "") + "\t" + (.run // "")' ".github/workflows/release.yml")"
   [[ "$steps" == *$'Build TypeScript package\tbun run build'* ]]
@@ -504,7 +505,7 @@
 }
 
 @test "pull_request.yml lints on Ubuntu with a larger heap and not in the Windows job (#11577)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local workflow=".github/workflows/pull_request.yml"
 
   run yq -r '.jobs."mcp-build-and-test".strategy.matrix.os[]' "$workflow"
@@ -564,7 +565,7 @@
 }
 
 @test "release.yml runs the Maven publication manifest preflight before publishing (#4853)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local workflow=".github/workflows/release.yml"
   # Both steps live in the release job, and the preflight must precede the
   # publish so the manifest reflects what is about to be uploaded.
@@ -580,7 +581,7 @@
 }
 
 @test "release.yml publishes the CtrlProxy release before compatible SDK distributions (#5215)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local workflow=".github/workflows/release.yml"
 
   run yq -r '.jobs."verify-and-release".steps[]
@@ -611,7 +612,7 @@
 # verify-and-release so the npm tarball it hashes has already published, and its
 # own failure turns the workflow red.
 @test "release.yml publishes Homebrew as a dependent job, not inside verify-and-release" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local workflow=".github/workflows/release.yml"
 
   # Not a step in verify-and-release anymore.
@@ -635,7 +636,7 @@
 }
 
 @test "release.yml preflight step calls the extracted preflight script (#4853)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local script
   script="$(yq -r '.jobs."verify-and-release".steps[]
     | select(.name == "Maven Central publication manifest preflight") | .run' \
@@ -655,7 +656,7 @@
 }
 
 @test "release.yml uploads the publication manifest artifact (#4853)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local uses
   uses="$(yq -r '.jobs."verify-and-release".steps[]
     | select(.name == "Upload Maven publication manifest") | .uses' \
@@ -672,26 +673,17 @@
 # Release takes an explicit prepare-run ID. This is the artifact provenance
 # boundary: it consumes the already checked artifacts instead of rebuilding.
 
-# Skipping locally is a convenience; skipping in CI would silently retire every
-# assertion below, which is the same fail-green these guards exist to catch.
-wiring_requires_yq() {
-  command -v yq >/dev/null 2>&1 && return 0
-  if [[ -n "${CI:-}" ]]; then
-    echo "yq is required in CI to verify release workflow wiring" >&2
-    return 1
-  fi
-  skip "yq not installed"
-}
+load yq-helpers
 
 @test "release.yml accepts a workflow_dispatch carrying a tag input (#4157)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   run yq -r '.on.workflow_dispatch.inputs.tag.required' ".github/workflows/release.yml"
   [ "$status" -eq 0 ]
   [ "$output" = "true" ]
 }
 
 @test "release.yml queues a validation run for hand-pushed tags without publishing (#4697)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local workflow=".github/workflows/release.yml"
 
   run yq -r '.on.push.tags[]' "$workflow"
@@ -712,7 +704,7 @@ wiring_requires_yq() {
 }
 
 @test "prepare-release dispatches release.yml on the tag with its run ID (#4686)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   # Pull the one step's run script out of the parsed YAML, so comments elsewhere
   # in the file cannot satisfy these assertions.
   local script
@@ -744,7 +736,7 @@ wiring_requires_yq() {
 # block replaces the workflow-level grant wholesale. This job also creates the
 # tag only after artifact verification, so it needs contents: write.
 @test "prepare-release can dispatch and still push (#4157)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local perms
   perms="$(yq -r '.jobs."verify-prepared-release".permissions' ".github/workflows/prepare-release.yml")"
   [ "$perms" != "null" ]
@@ -759,7 +751,7 @@ wiring_requires_yq() {
 # a tag ref, and that step runs after npm/Homebrew/MCP/Maven/Docker have already
 # published irreversibly. The tag must be explicit, never inferred from the ref.
 @test "release.yml creates the explicitly validated tag through the GitHub Release API (#4157)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   run yq -r '.jobs."verify-and-release".steps[]
     | select(.name == "Create GitHub Release") | .run' ".github/workflows/release.yml"
   [ "$status" -eq 0 ]
@@ -800,7 +792,7 @@ wiring_requires_yq() {
 # GitHub Release are intentionally unguarded: update-brew-formula.sh already
 # no-ops on an unchanged formula, and action-gh-release updates in place.
 @test "release.yml guards every non-idempotent publish (#4157)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local target
   for target in npm mcp maven; do
     local script
@@ -817,7 +809,7 @@ wiring_requires_yq() {
 # does NOT abort, so the inline form would silently downgrade an
 # unreachable-registry error into "not published" and publish anyway.
 @test "release.yml assigns the guard result before testing it (#4157)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local runs
   runs="$(yq -r '.jobs."verify-and-release".steps[] | select(.run != null) | .run' \
     ".github/workflows/release.yml" | grep -v '^[[:space:]]*#')"
@@ -829,7 +821,7 @@ wiring_requires_yq() {
 # defaults to a branch, and docker/metadata-action reads github.ref, so a run
 # dispatched from main ships an image with no version tag while reporting green.
 @test "release.yml requires the dispatch to run on the named tag (#4157)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local script
   script="$(yq -r '.jobs."validate-release-tag".steps[]
     | select(.id == "validate") | .run' ".github/workflows/release.yml" \
@@ -845,7 +837,7 @@ wiring_requires_yq() {
 # backoff first; the workflow's job must bound that wait so a registry that
 # never serves the version cannot hold a runner open.
 @test "release.yml bounds the Homebrew publish job with a timeout" {
-  wiring_requires_yq
+  require_mikefarah_yq
   workflow=".github/workflows/release.yml"
   run yq -r '.jobs."publish-homebrew"."timeout-minutes"' "$workflow"
   [ "$status" -eq 0 ]
@@ -857,7 +849,7 @@ wiring_requires_yq() {
 }
 
 @test "release.yml attaches a SHA-256 file alongside the Linux .deb (#4726)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   run yq -r '.jobs."verify-and-release".steps[]
     | select(.name == "Create GitHub Release") | .run' ".github/workflows/release.yml"
   [ "$status" -eq 0 ]
@@ -933,7 +925,7 @@ wiring_requires_yq() {
 }
 
 @test "ProtoViewer APK builder is release-key signed, fail-closed and uploads protoviewer-apk (#15301)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local workflow=".github/workflows/build-protoviewer-apk.yml"
 
   run yq -r '.jobs.build.steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks"' "$workflow"
@@ -959,7 +951,7 @@ wiring_requires_yq() {
 }
 
 @test "prepare-release builds, pins and checksum-verifies the ProtoViewer APK (#15301)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local workflow=".github/workflows/prepare-release.yml"
   [ "$(yq -r '.jobs."build-candidate-protoviewer-apk".uses' "$workflow")" = "./.github/workflows/build-protoviewer-apk.yml" ]
   grep -Fq 'PROTOVIEWER_APK_SHA256: ${{ needs.build-candidate-protoviewer-apk.outputs.sha256 }}' "$workflow"
@@ -973,7 +965,7 @@ wiring_requires_yq() {
 }
 
 @test "release refuses a ProtoViewer APK that is missing or differs from the prepared checksum, then attaches it with a .sha256 (#15301)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local workflow=".github/workflows/release.yml"
   grep -Fq "protoviewer_apk: entry.protoViewerApkSha256" "$workflow"
   grep -Fq "verify-artifact-sha256.sh /tmp/automobile-protoviewer.apk protoviewerapk" "$workflow"
@@ -995,7 +987,7 @@ wiring_requires_yq() {
 }
 
 @test "prepare-release gates the release on artifact capabilities before any build starts (#15347)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local workflow=".github/workflows/prepare-release.yml"
   local run
   run="$(yq -r '.jobs."prepare-version".steps[]
@@ -1026,7 +1018,7 @@ wiring_requires_yq() {
 }
 
 @test "prepare-release blocks promotion on the ProtoViewer artifact policy gate (#14154)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local prepare=".github/workflows/prepare-release.yml"
   local gate=".github/workflows/verify-protoviewer-artifact-policy.yml"
   [ "$(yq -r '.jobs."build-candidate-protoviewer-artifact-policy".uses' "$prepare")" = \
@@ -1043,7 +1035,7 @@ wiring_requires_yq() {
 }
 
 @test "ProtoViewer APK build feeds the PROTOVIEWER_* signing and version inputs the convention reads (#15301)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local workflow=".github/workflows/build-protoviewer-apk.yml"
   [ "$(yq -r '.jobs.build.env.PROTOVIEWER_RELEASE_VERSION' "$workflow")" = '${{ inputs.release-version }}' ]
   [ "$(yq -r '.jobs.build.env.PROTOVIEWER_KEYSTORE_PATH' "$workflow")" = '${{ github.workspace }}/android/keystore/release.keystore' ]
@@ -1071,7 +1063,7 @@ wiring_requires_yq() {
 }
 
 @test "ProtoViewer release smoke signs and versions its candidate like the APK builder (#15301)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local workflow=".github/workflows/protoviewer-release-smoke.yml"
   [ "$(yq -r '.on.workflow_dispatch.inputs."candidate-version".required' "$workflow")" = "true" ]
   [ "$(yq -r '.jobs.android.env.PROTOVIEWER_REQUIRE_RELEASE_SIGNING' "$workflow")" = "true" ]
@@ -1083,7 +1075,7 @@ wiring_requires_yq() {
 }
 
 @test "ProtoViewer APK build receives the plain release core version, not a prerelease string (#15301)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local workflow=".github/workflows/prepare-release.yml"
 
   run yq -r '.jobs."build-candidate-protoviewer-apk".with."release-version"' "$workflow"
@@ -1122,4 +1114,53 @@ wiring_requires_yq() {
   grep -Fq "build-audio-loopback-helper-release.sh" "$builder"
   grep -Fq "name: audio-loopback-helper" "$builder"
   grep -Fq "path: /tmp/audio-loopback-helper-macos-universal.zip" "$builder"
+}
+
+@test "finalize-release records artifact capabilities in the same commit that pins the version (#17109)" {
+  require_mikefarah_yq
+  local workflow=".github/workflows/prepare-release.yml"
+  local job='.jobs."finalize-release"'
+
+  # The version is pinned in src/constants/release.ts by generate-release-constants.sh;
+  # the capability guard fails on main for any pinned version without a manifest entry.
+  local record_step
+  record_step="$(yq -r "$job"'.steps[] | select(.name == "Record artifact capabilities") | .run' "$workflow")"
+  [ -n "$record_step" ]
+  [ "$record_step" != "null" ]
+  [[ "$record_step" == *'check-artifact-capabilities.ts --record "$VERSION" --ref "$BUILT_REF"'* ]]
+  run yq -r "$job"'.steps[] | select(.name == "Record artifact capabilities") | .env.VERSION' "$workflow"
+  [ "$output" = '${{ inputs.version }}' ]
+  # Record from the commit the artifacts were built from.
+  run yq -r "$job"'.steps[] | select(.name == "Record artifact capabilities") | .env.BUILT_REF' "$workflow"
+  [ "$output" = '${{ needs.prepare-version.outputs.release_commit }}' ]
+  # Fail closed: the pinned-release check must pass after recording.
+  printf '%s\n' "$record_step" | grep -qxE '[[:space:]]*bun scripts/release/check-artifact-capabilities\.ts[[:space:]]*'
+
+  # Ordering: pin, toolchain, record, format, then commit, all in one job.
+  local names pin install record format commit
+  names="$(yq -r "$job"'.steps[].name // ""' "$workflow")"
+  pin="$(printf '%s\n' "$names" | grep -nxF 'Update release constants' | cut -d: -f1)"
+  install="$(printf '%s\n' "$names" | grep -nxF 'Install Bun dependencies' | cut -d: -f1)"
+  record="$(printf '%s\n' "$names" | grep -nxF 'Record artifact capabilities' | cut -d: -f1)"
+  format="$(printf '%s\n' "$names" | grep -nxF 'Format generated files' | cut -d: -f1)"
+  commit="$(printf '%s\n' "$names" | grep -nxF 'Commit release constants to staging ref' | cut -d: -f1)"
+  [ -n "$pin" ] && [ -n "$install" ] && [ -n "$record" ] && [ -n "$format" ] && [ -n "$commit" ]
+  [ "$pin" -lt "$record" ]
+  [ "$install" -lt "$record" ]
+  [ "$record" -lt "$format" ]
+  [ "$format" -lt "$commit" ]
+
+  # The pin step really writes release.ts, and the commit step allows both files.
+  run yq -r "$job"'.steps[] | select(.name == "Update release constants") | .run' "$workflow"
+  [ "$output" = "bash scripts/generate-release-constants.sh" ]
+  grep -q 'src/constants/release.ts' scripts/generate-release-constants.sh
+  local commit_step
+  commit_step="$(yq -r "$job"'.steps[] | select(.id == "commit") | .run' "$workflow")"
+  [[ "$commit_step" == *'src/constants/release.ts)'* ]]
+  [[ "$commit_step" == *'scripts/release/artifact-capabilities.json | \'* ]]
+  [[ "$commit_step" == *'git add -- "${changed_files[@]}"'* ]]
+  [[ "$commit_step" == *'chore: bump versions to v$VERSION [skip ci]'* ]]
+
+  # No other job pins a release in release.ts without recording it.
+  [ "$(grep -c 'generate-release-constants\.sh' "$workflow")" -eq 1 ]
 }

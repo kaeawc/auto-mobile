@@ -8,6 +8,7 @@ import {
   iosDeviceOwnershipFileSource,
   watchDeviceOwnershipFileSource,
   tvDeviceOwnershipFileSource,
+  visionDeviceOwnershipFileSource,
 } from "./foreignDeviceOwnership";
 export * from "./devicePoolParts/contracts";
 export { classifyPoolStatus, type GenericAvailability, type PoolStatusBucket } from "./deviceHold";
@@ -128,11 +129,16 @@ export class DevicePool {
       watchDeviceOwnershipFileSource,
     );
     const tv = new ForwardLeaseForeignDeviceOwnership(process.pid, tvDeviceOwnershipFileSource);
+    const vision = new ForwardLeaseForeignDeviceOwnership(
+      process.pid,
+      visionDeviceOwnershipFileSource,
+    );
     return new DevicePool({
       foreignDeviceOwnership: android,
       iosForeignDeviceOwnership: ios,
       watchForeignDeviceOwnership: watch,
       tvForeignDeviceOwnership: tv,
+      visionForeignDeviceOwnership: vision,
       ...deps,
     });
   }

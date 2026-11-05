@@ -30,7 +30,7 @@
       "children": [
         {
           "type": "text",
-          "text": "{platform:/cast/protocols}"
+          "text": "{platform:/cast/routes}"
         },
         {
           "type": "button",
@@ -67,5 +67,5 @@
     }
   },
   "expectedPath": "root.children[0].text",
-  "expectedMessage": "Unknown platform state /cast/protocols"
+  "expectedMessage": "Unknown platform state /cast/routes"
 }

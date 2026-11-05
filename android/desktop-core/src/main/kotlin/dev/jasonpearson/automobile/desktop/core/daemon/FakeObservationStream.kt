@@ -32,7 +32,12 @@ class FakeObservationStream(private val failConnect: Boolean = false) : FakeObse
     storageReconciliationRequestChannel.close()
   }
 
-  override fun setCadence(screenshotIntervalMs: Long?, hierarchyIntervalMs: Long?) = Unit
+  /** Every [setCadence] request, oldest first, as (screenshot, hierarchy) intervals. */
+  val cadenceCalls = mutableListOf<Pair<Long?, Long?>>()
+
+  override fun setCadence(screenshotIntervalMs: Long?, hierarchyIntervalMs: Long?) {
+    cadenceCalls.add(screenshotIntervalMs to hierarchyIntervalMs)
+  }
 
   // Mirror the real client: drop the buffered layout replay so a resubscribing collector does not
   // immediately receive the last pre-reset screenshot/hierarchy frame (issue #3347).

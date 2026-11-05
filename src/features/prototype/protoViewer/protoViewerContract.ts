@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { shellQuote } from "../../../utils/shellQuote";
 
 /**
  * Host side of the ProtoViewer MCP inbox (#13621). The Android twin is `McpActivity` in
@@ -99,6 +100,39 @@ function truncateWholeCharacters(text: string, maxLength: number): string {
     kept += character;
   }
   return kept;
+}
+
+/** Secondary-user storage is accessed as the app through its DUMP-guarded provider. */
+export function protoViewerProviderUri(
+  appId: ProtoViewerPackage,
+  folder: "inbox" | "results",
+  request: string,
+): string {
+  if (!PROTOVIEWER_REQUEST_ID.test(request)) {
+    throw new Error("Invalid ProtoViewer request id");
+  }
+  const suffix = folder === "inbox" ? PROTOVIEWER_BUNDLE_SUFFIX : ".json";
+  return `content://${appId}.mcp/${folder}/${request}${suffix}`;
+}
+
+export function protoViewerStagingPath(request: string): string {
+  return `/data/local/tmp/${request}${PROTOVIEWER_BUNDLE_SUFFIX}`;
+}
+
+export function protoViewerProviderCommand(
+  operation: "read" | "write" | "delete",
+  userId: number,
+  uri: string,
+): string {
+  return `content ${operation} --user ${userId} --uri ${shellQuote(uri)}`;
+}
+
+export function protoViewerProviderWriteCommand(
+  userId: number,
+  uri: string,
+  staging: string,
+): string {
+  return `${protoViewerProviderCommand("write", userId, uri)} < ${shellQuote(staging)}; rm -f ${shellQuote(staging)}`;
 }
 
 /** `getExternalFilesDir(null)/mcp` for the given Android user, as adb shell sees it. */

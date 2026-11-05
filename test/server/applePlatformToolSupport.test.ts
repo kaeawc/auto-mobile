@@ -28,8 +28,26 @@ const appleTv: BootedDevice = {
   deviceId: "5B7E1C3D-2A4F-4E6B-8C9D-1E2F3A4B5C6D",
   platform: "tvos",
 };
+const visionPro: BootedDevice = {
+  name: "Apple Vision Pro",
+  deviceId: "7C1D2E3F-4A5B-4C6D-8E9F-0A1B2C3D4E5F",
+  platform: "visionos",
+};
 const iphone: BootedDevice = { name: "iPhone 16", deviceId: "IPHONE-UDID", platform: "ios" };
-const DEVICES: Record<NonIosApplePlatform, BootedDevice> = { watchos: watch, tvos: appleTv };
+const DEVICES: Record<NonIosApplePlatform, BootedDevice> = {
+  watchos: watch,
+  tvos: appleTv,
+  visionos: visionPro,
+};
+const DEVICE_LIFECYCLE_TOOLS = [
+  "listDevices",
+  "listDeviceImages",
+  "provisionDevice",
+  "deleteDevice",
+  "startDevice",
+  "setActiveDevice",
+  "killDevice",
+];
 
 describe("assertToolSupportsDevicePlatform", () => {
   test("rejects a watch for a tool that has not opted in, naming the tool and platform", () => {
@@ -49,7 +67,11 @@ describe("assertToolSupportsDevicePlatform", () => {
   });
 
   test("checks each platform against its own allowlist", () => {
-    const supported = { watchos: new Set(["observe"]), tvos: new Set(["launchApp"]) };
+    const supported = {
+      watchos: new Set(["observe"]),
+      tvos: new Set(["launchApp"]),
+      visionos: new Set(["startDevice"]),
+    };
     expect(() => assertToolSupportsDevicePlatform("observe", watch, supported)).not.toThrow();
     expect(() => assertToolSupportsDevicePlatform("launchApp", appleTv, supported)).not.toThrow();
     expect(() => assertToolSupportsDevicePlatform("observe", appleTv, supported)).toThrow(
@@ -58,6 +80,51 @@ describe("assertToolSupportsDevicePlatform", () => {
     expect(() => assertToolSupportsDevicePlatform("launchApp", watch, supported)).toThrow(
       "does not support watchOS yet",
     );
+    expect(() =>
+      assertToolSupportsDevicePlatform("startDevice", visionPro, supported),
+    ).not.toThrow();
+    expect(() => assertToolSupportsDevicePlatform("launchApp", visionPro, supported)).toThrow(
+      "does not support visionOS yet",
+    );
+  });
+
+  test("rejects a Vision Pro for a tool that has not opted in, naming the tool and platform", () => {
+    expect(() => assertToolSupportsDevicePlatform("tapAt", visionPro)).toThrow(
+      new ActionableError(
+        "tapAt does not support visionOS yet. Target an Android or iOS device instead.",
+      ),
+    );
+  });
+
+  test("visionOS allows lifecycle, app tools and screenshot observation", () => {
+    expect([...APPLE_PLATFORM_SUPPORTED_TOOLS.visionos].sort()).toEqual(
+      [
+        ...DEVICE_LIFECYCLE_TOOLS,
+        "installApp",
+        "uninstallApp",
+        "launchApp",
+        "terminateApp",
+        "listApps",
+        "observe",
+      ].sort(),
+    );
+    for (const tool of [
+      ...DEVICE_LIFECYCLE_TOOLS,
+      "installApp",
+      "uninstallApp",
+      "launchApp",
+      "terminateApp",
+      "listApps",
+      "observe",
+    ]) {
+      expect(() => assertToolSupportsDevicePlatform(tool, visionPro)).not.toThrow();
+      expect(() => assertRequestedPlatformSupported(tool, { platform: "visionos" })).not.toThrow();
+    }
+    for (const tool of ["tapOn", "tapAt", "swipeOn", "sendKeys", "pressButton", "tapAny"]) {
+      expect(() => assertToolSupportsDevicePlatform(tool, visionPro)).toThrow(
+        new ActionableError(unsupportedPlatformToolMessage(tool, "visionos")),
+      );
+    }
   });
 
   test("admits tvOS lifecycle tools without enabling watchOS lifecycle tools", () => {
@@ -68,6 +135,19 @@ describe("assertToolSupportsDevicePlatform", () => {
     }
   });
 
+  test("admits postNotification on watchOS while refusing tvOS", () => {
+    expect(() => assertToolSupportsDevicePlatform("postNotification", watch)).not.toThrow();
+    expect(() =>
+      assertRequestedPlatformSupported("postNotification", { platform: "watchos" }),
+    ).not.toThrow();
+    expect(() => assertToolSupportsDevicePlatform("postNotification", appleTv)).toThrow(
+      "does not support tvOS yet",
+    );
+    expect(() =>
+      assertRequestedPlatformSupported("postNotification", { platform: "tvos" }),
+    ).toThrow("does not support tvOS yet");
+  });
+
   test("never rejects an Android or iOS device", () => {
     expect(() => assertToolSupportsDevicePlatform("tapOn", iphone)).not.toThrow();
     expect(() =>
@@ -76,8 +156,8 @@ describe("assertToolSupportsDevicePlatform", () => {
   });
 });
 
-describe.each(["watchos", "tvos"] as const)(
-  "every registered device-aware tool fails closed on %s (#14899, #15886)",
+describe.each(["watchos", "tvos", "visionos"] as const)(
+  "every registered device-aware tool fails closed on %s (#14899, #15886, #16848)",
   (platform) => {
     const device = DEVICES[platform];
     const session = `${platform}-tool-support-session`;
@@ -151,10 +231,17 @@ describe("assertRequestedPlatformSupported", () => {
     expect(() => assertRequestedPlatformSupported("pinchOn", { platform: "watchos" })).toThrow(
       new ActionableError(unsupportedPlatformToolMessage("pinchOn", "watchos")),
     );
+    expect(() => assertRequestedPlatformSupported("tapOn", { platform: "visionos" })).toThrow(
+      new ActionableError(unsupportedPlatformToolMessage("tapOn", "visionos")),
+    );
   });
 
   test("allows Android, iOS, no platform, and a platform the tool opted in to", () => {
-    const supported = { watchos: new Set(["observe"]), tvos: new Set<string>() };
+    const supported = {
+      watchos: new Set(["observe"]),
+      tvos: new Set<string>(),
+      visionos: new Set<string>(),
+    };
     expect(() => assertRequestedPlatformSupported("tapOn", { platform: "ios" })).not.toThrow();
     expect(() => assertRequestedPlatformSupported("tapOn", { platform: "android" })).not.toThrow();
     expect(() => assertRequestedPlatformSupported("tapOn", {})).not.toThrow();

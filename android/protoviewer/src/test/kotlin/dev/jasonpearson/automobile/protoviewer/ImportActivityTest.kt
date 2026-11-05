@@ -41,6 +41,13 @@ class ImportActivityTest {
   }
 
   @Test
+  fun onlyTheLibrarysHiddenRejectionGetsTheHiddenMessage() {
+    assertTrue(LibraryImportResult.Rejected("library", LibraryError.Hidden.name).isHidden)
+    assertFalse(LibraryImportResult.Rejected("library", LibraryError.Limit.name).isHidden)
+    assertFalse(LibraryImportResult.Rejected("spec.json", LibraryError.Hidden.name).isHidden)
+  }
+
+  @Test
   fun viewIntentPassesOnlyUriAndAppChosenAction() {
     val intent =
       Intent(Intent.ACTION_VIEW, Uri.parse("content://external/file"))

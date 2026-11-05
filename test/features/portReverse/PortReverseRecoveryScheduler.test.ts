@@ -9,6 +9,7 @@ import {
   type PortReverseRecoveryOutcome,
 } from "../../../src/features/portReverse/PortReverseRecoveryScheduler";
 import { subscribePortReverseTransportRecovery } from "../../../src/server/portReverseTools";
+import { getAbortSignal, runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { fixedBackoff } from "../../../src/utils/Backoff";
 import { AdbTransportRecoveredSignal } from "../../../src/utils/android-cmdline-tools/adbTransportRecoveredSignal";
 import { FakeAdbReverseCommands } from "../../fakes/FakeAdbReverseCommands";
@@ -168,5 +169,28 @@ describe("PortReverseRecoveryScheduler", () => {
     signal.notify(DEVICE, "ctrl_proxy_reconnect");
     expect(timer.getPendingTimeoutCount()).toBe(0);
     expect(adb.mappings.has(8080)).toBe(false);
+  });
+
+  test("a reconcile triggered inside a cancelled tool request does not inherit its abort", async () => {
+    const { adb, manager, scheduler, outcomes, target, advance } = setup();
+    await manager.ensure(target(), [{ devicePort: 8080, hostPort: 8080 }]);
+    adb.dropAll();
+    const ambient: (boolean | undefined)[] = [];
+    const list = adb.list.bind(adb);
+    adb.list = async () => {
+      ambient.push(getAbortSignal()?.aborted);
+      return list();
+    };
+    const cancelled = new AbortController();
+    cancelled.abort();
+
+    await runWithAbortSignal(cancelled.signal, async () => {
+      scheduler.deviceRecovered(DEVICE, "transport_refusal");
+      await advance(PORT_REVERSE_RECOVERY_SETTLE_MS);
+    });
+
+    expect(ambient).toEqual([undefined]);
+    expect(adb.mappings.get(8080)).toBe("tcp:8080");
+    expect(outcomes.map((o) => o.kind)).toEqual(["restored"]);
   });
 });

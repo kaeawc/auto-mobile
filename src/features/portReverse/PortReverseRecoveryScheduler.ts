@@ -1,4 +1,5 @@
 import type { AdbTransportRecoveryReason } from "../../utils/android-cmdline-tools/adbTransportRecoveredSignal";
+import { runOutsideRequestContext } from "../../utils/AbortContext";
 import { exponentialBackoff, type BackoffPolicy } from "../../utils/Backoff";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -96,11 +97,18 @@ export class PortReverseRecoveryScheduler {
     this.episodes.clear();
   }
 
+  /**
+   * Arms the timer and runs the reconcile outside any request's AbortContext: the triggering event
+   * often comes from an adb command inside a tool call, and this daemon-owned work must not inherit
+   * (and be aborted by) that call's cancellation or deadline.
+   */
   private schedule(deviceId: string, episode: Episode, delayMs: number): void {
-    episode.timeout = this.deps.timer.setTimeout(() => {
-      episode.timeout = null;
-      void this.run(deviceId, episode);
-    }, delayMs);
+    episode.timeout = runOutsideRequestContext(() =>
+      this.deps.timer.setTimeout(() => {
+        episode.timeout = null;
+        void runOutsideRequestContext(() => this.run(deviceId, episode));
+      }, delayMs),
+    );
   }
 
   private async run(deviceId: string, episode: Episode): Promise<void> {

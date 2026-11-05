@@ -1,3 +1,4 @@
+import { loadDevicectlListFixture } from "../../helpers/devicectlListFixtures";
 import { describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -119,6 +120,35 @@ describe("findDevicectlDisplayUniqueId", () => {
 });
 
 describe("DevicectlPanelScreenshotSource", () => {
+  test("reads active displays through the same probe without capturing screenshots", async () => {
+    const h = sourceHarness();
+    const signal = new AbortController().signal;
+    for (const fixture of [
+      "info-displays-duo-cover-active.json",
+      "info-displays-duo-inner-active.json",
+    ]) {
+      const output = loadDevicectlListFixture(fixture);
+      h.commandInvoker.result = { kind: "ok", output };
+      expect(await h.source.readDisplays({ deviceId: "sim-1", signal })).toEqual(
+        displaysOf(output),
+      );
+    }
+    expect(h.commandInvoker.calls).toEqual(
+      Array(2).fill({ deviceId: "sim-1", command: DEVICECTL_DISPLAYS_COMMAND }),
+    );
+    expect(h.capture.calls).toEqual([]);
+  });
+
+  test.each(["unsupported", "invalid-json"])("%s cannot confirm active displays", async (mode) => {
+    const h = sourceHarness();
+    h.commandInvoker.result =
+      mode === "unsupported"
+        ? { kind: "unsupported", capabilityFeatureId: "com.apple.coredevice.feature.displays" }
+        : { kind: "ok", output: "invalid" };
+    expect(await h.source.readDisplays({ deviceId: "sim-1" })).toEqual([]);
+    expect(h.capture.calls).toEqual([]);
+  });
+
   test("supported: probes info displays and captures the panel by its unique ID", async () => {
     const h = sourceHarness();
     const signal = new AbortController().signal;

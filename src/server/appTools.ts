@@ -14,6 +14,7 @@ import type { KeystoreResetBackend } from "../features/storage/keystoreReset";
 import type { TerminateAppCall } from "../features/action/TerminateApp";
 import { type UninstallAppCall, type UninstallGuardOptions } from "../features/action/UninstallApp";
 import { InspectPackageSigning } from "../features/observe/InspectPackageSigning";
+import { getWatchRunnerLifecycle } from "../features/watch/WatchRunnerLifecycle";
 import { IosPackageSigningInspector } from "../features/observe/IosPackageSigningInspector";
 import { iosMutationTokens } from "../features/storage/IosMutationTokens";
 import {
@@ -91,6 +92,7 @@ import {
   createPlatformTerminateApp,
   createPlatformUninstallApp,
   type WatchAppManagerFactory,
+  type WatchRunnerRetarget,
 } from "./appToolsWatch";
 import { launchFailure, redactLaunchMessage } from "./launchAppFailure";
 import { launchAppResultSchema, terminateAppResultSchema } from "./toolOutputSchemas";
@@ -732,6 +734,7 @@ export interface AppToolsDependencies {
   appPermissionsFactory?: AppPermissionsFactory;
   /** The Apple Watch app manager the app tools use for a watch (install through terminate). */
   watchApps?: WatchAppManagerFactory;
+  retargetWatchRunner?: WatchRunnerRetarget;
 }
 
 /** Builds every injectable handler from real defaults overlaid with `dependencies`. */
@@ -742,7 +745,14 @@ function createAppToolHandlers(dependencies: AppToolsDependencies) {
   });
   const launchAppDependencies: LaunchAppToolDependencies = {
     ...createDefaultLaunchAppToolDependencies(),
-    createLaunchApp: (device) => createPlatformLaunchApp(device, dependencies.watchApps),
+    createLaunchApp: (device) =>
+      createPlatformLaunchApp(
+        device,
+        dependencies.watchApps,
+        dependencies.retargetWatchRunner ??
+          ((deviceId, bundleId, signal) =>
+            getWatchRunnerLifecycle().retarget({ deviceId, bundleId, signal })),
+      ),
     ...dependencies.launchApp,
   };
   const launchAppHandler = createLaunchAppHandler(launchAppDependencies);

@@ -3,7 +3,7 @@ import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { defineDeviceTool } from "./defineTool";
 import { mediaSessionResultSchema } from "./mediaSessionToolOutputSchemas";
 import { ActionableError, type BootedDevice } from "../models";
-import { createStructuredToolResponse } from "../utils/toolUtils";
+import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultTimer } from "../utils/SystemTimer";
 import {
@@ -194,7 +194,13 @@ export const createMediaSessionHandler =
     const controller = makeController(device);
     const action = args.action;
     if (action === "get") {
-      return createStructuredToolResponse(await getAction(controller, args, signal));
+      const result = await getAction(controller, args, signal);
+      // A timed-out wait keeps success: true so a plan step fails through waitForTimeoutError
+      // with its diagnostics, but a direct call sees isError (#16902).
+      return withIsErrorOnFailure(
+        createStructuredToolResponse(result),
+        !("awaitTimeout" in result && result.awaitTimeout),
+      );
     }
     if ("dispatch" in action) {
       return createStructuredToolResponse(

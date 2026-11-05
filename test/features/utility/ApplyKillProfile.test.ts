@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import {
   applyKillProfile,
   parseAppOpMode,
+  parseHibernationState,
   parseStandbyBucket,
   resetKillProfile,
 } from "../../../src/features/utility/ApplyKillProfile";
@@ -37,7 +38,10 @@ describe("kill profiles (#14051)", () => {
     adb
       .getExecutedCommands()
       .filter(
-        (command) => !/pm path|appops get|get-standby-bucket|^shell dumpsys battery$/.test(command),
+        (command) =>
+          !/pm path|appops get|app_hibernation get-state|get-standby-bucket|^shell dumpsys battery$/.test(
+            command,
+          ),
       );
 
   test("every catalog entry is versioned and evidenced", () => {
@@ -64,6 +68,184 @@ describe("kill profiles (#14051)", () => {
       },
     });
     expect(writes()).toEqual([`shell appops set ${Q} RUN_ANY_IN_BACKGROUND ignore`]);
+  });
+
+  test.each([
+    ["POST_NOTIFICATION: allow\n", "allow"],
+    ["No operations.\n", "default"],
+  ])("notifications-off captures %s and restores %s", async (stdout, original) => {
+    adb.setCommandResponseSequence(`shell appops get ${Q} POST_NOTIFICATION`, [
+      createExecResult(stdout, ""),
+    ]);
+    const result = await applyKillProfile(emulator, APP, "notifications-off", deps());
+    expect(result.status).toBe("applied");
+    expect(writes()).toEqual([`shell appops set ${Q} POST_NOTIFICATION ignore`]);
+    const commands = adb.getExecutedCommands();
+    const captureIndex = commands.indexOf(`shell appops get ${Q} POST_NOTIFICATION`);
+    expect(captureIndex).toBeGreaterThanOrEqual(0);
+    expect(captureIndex).toBeLessThan(
+      commands.indexOf(`shell appops set ${Q} POST_NOTIFICATION ignore`),
+    );
+    expect(result.restore?.commands).toEqual([
+      `shell appops set ${Q} POST_NOTIFICATION ${original}`,
+    ]);
+
+    adb.clearHistory();
+    const reset = await resetKillProfile(emulator, APP, {}, deps());
+    expect(reset).toMatchObject({ source: "recorded", status: "applied" });
+    expect(writes()).toEqual([`shell appops set ${Q} POST_NOTIFICATION ${original}`]);
+    expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([]);
+  });
+
+  test.each(["false", "true"])(
+    "Samsung auto-disable restores captured hibernation %s",
+    async (original) => {
+      adb.setCommandResponse(
+        `shell cmd app_hibernation get-state --user 0 ${Q}`,
+        createExecResult(`${original}\n`, ""),
+      );
+      const result = await applyKillProfile(emulator, APP, "samsung-auto-disable", deps());
+      expect(result).toMatchObject({
+        status: "applied",
+        steps: [{ step: "app hibernation", status: "applied" }],
+      });
+      expect(writes()).toEqual([`shell cmd app_hibernation set-state --user 0 ${Q} true`]);
+      const commands = adb.getExecutedCommands();
+      const captureIndex = commands.indexOf(`shell cmd app_hibernation get-state --user 0 ${Q}`);
+      expect(captureIndex).toBeGreaterThanOrEqual(0);
+      expect(captureIndex).toBeLessThan(
+        commands.indexOf(`shell cmd app_hibernation set-state --user 0 ${Q} true`),
+      );
+      expect(result.restore?.commands).toEqual([
+        `shell cmd app_hibernation set-state --user 0 ${Q} ${original}`,
+      ]);
+      expect(registry.has(emulator.deviceId, `hibernation:${APP}`)).toBe(true);
+
+      adb.clearHistory();
+      const reset = await resetKillProfile(emulator, APP, {}, deps());
+      expect(reset).toMatchObject({ source: "recorded", status: "applied" });
+      expect(writes()).toEqual([`shell cmd app_hibernation set-state --user 0 ${Q} ${original}`]);
+      expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([]);
+    },
+  );
+
+  test.each([
+    ["notifications-off", 32, 33],
+    ["samsung-auto-disable", 30, 31],
+  ] as const)("%s is unsupported on API %s", async (profile, api, minimum) => {
+    adb.setAndroidApiLevel(api);
+    const result = await applyKillProfile(emulator, APP, profile, deps());
+    expect(result.status).toBe("unsupported");
+    expect(result.steps[0].reason).toBe(`needs API ${minimum}+, device is API ${api}`);
+    expect(result.restore).toBeUndefined();
+    expect(writes()).toEqual([]);
+    expect(
+      adb
+        .getExecutedCommands()
+        .some((command) => /appops get|app_hibernation get-state/.test(command)),
+    ).toBe(false);
+    expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([]);
+  });
+
+  const cases: [string, "true" | "false"][] = [
+    ["true", "true"],
+    ["false", "false"],
+    ["true\n", "true"],
+    ["garbage", "false"],
+    ["", "false"],
+  ];
+  test.each(cases)("parseHibernationState parses %j as %s", (stdout, expected) => {
+    expect(parseHibernationState(stdout)).toBe(expected);
+  });
+
+  test("baseline reset includes notification and hibernation defaults on supported APIs", async () => {
+    const result = await resetKillProfile(emulator, APP, { baseline: true }, deps());
+    expect(result).toMatchObject({ source: "baseline", status: "applied" });
+    expect(writes()).toContain(`shell appops set ${Q} POST_NOTIFICATION default`);
+    expect(writes()).toContain(`shell cmd app_hibernation set-state --user 0 ${Q} false`);
+  });
+
+  test("Samsung deep sleeping denies wake locks after capturing the mode and resets it", async () => {
+    adb.setCommandResponseSequence(`shell appops get ${Q} WAKE_LOCK`, [
+      createExecResult("WAKE_LOCK: allow\n", ""),
+    ]);
+    const result = await applyKillProfile(emulator, APP, "samsung-deep-sleeping", deps());
+    expect(result.status).toBe("applied");
+    expect(result.profile.version).toBe(2);
+    expect(writes()).toEqual([
+      `shell am force-stop ${Q}`,
+      `shell appops set ${Q} RUN_ANY_IN_BACKGROUND ignore`,
+      `shell appops set ${Q} WAKE_LOCK ignore`,
+    ]);
+    const commands = adb.getExecutedCommands();
+    const captureIndex = commands.indexOf(`shell appops get ${Q} WAKE_LOCK`);
+    expect(captureIndex).toBeGreaterThanOrEqual(0);
+    expect(captureIndex).toBeLessThan(commands.indexOf(`shell appops set ${Q} WAKE_LOCK ignore`));
+    expect(result.restore?.commands).toEqual([
+      `shell appops set ${Q} RUN_ANY_IN_BACKGROUND default`,
+      `shell appops set ${Q} WAKE_LOCK allow`,
+    ]);
+    expect(registry.has(emulator.deviceId, `appOp:WAKE_LOCK:${APP}`)).toBe(true);
+
+    adb.clearHistory();
+    const reset = await resetKillProfile(emulator, APP, {}, deps());
+    expect(reset).toMatchObject({ source: "recorded", status: "applied" });
+    expect(writes()).toEqual([
+      `shell appops set ${Q} RUN_ANY_IN_BACKGROUND default`,
+      `shell appops set ${Q} WAKE_LOCK allow`,
+    ]);
+    expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([]);
+  });
+
+  test("an unknown WAKE_LOCK operation is unsupported and its restore record is dropped", async () => {
+    adb.setCommandResponse(
+      `shell appops set ${Q} WAKE_LOCK`,
+      createExecResult("Unknown operation string\n", ""),
+    );
+    const result = await applyKillProfile(emulator, APP, "samsung-deep-sleeping", deps());
+    expect(result.status).toBe("partial");
+    expect(result.steps.map((step) => step.status)).toEqual(["applied", "applied", "unsupported"]);
+    expect(result.steps[2]).toMatchObject({
+      step: "appops WAKE_LOCK ignore",
+      reason: "Unknown operation string",
+    });
+    expect(writes()).toContain(`shell appops set ${Q} WAKE_LOCK ignore`);
+    expect(result.restore?.commands).toEqual([
+      `shell appops set ${Q} RUN_ANY_IN_BACKGROUND default`,
+    ]);
+    expect(registry.has(emulator.deviceId, `appOp:WAKE_LOCK:${APP}`)).toBe(false);
+    expect(registry.pendingFor(emulator.deviceId, APP).map((action) => action.key)).toEqual([
+      `appOp:RUN_ANY_IN_BACKGROUND:${APP}`,
+    ]);
+  });
+
+  test("Samsung deep sleeping below API 28 force-stops but gates both app ops", async () => {
+    adb.setAndroidApiLevel(27);
+    const result = await applyKillProfile(emulator, APP, "samsung-deep-sleeping", deps());
+    expect(result.status).toBe("partial");
+    expect(result.steps.map((step) => step.status)).toEqual([
+      "applied",
+      "unsupported",
+      "unsupported",
+    ]);
+    expect(result.steps[2]).toMatchObject({
+      step: "appops WAKE_LOCK ignore",
+      reason: "needs API 28+, device is API 27",
+    });
+    expect(writes()).toEqual([`shell am force-stop ${Q}`]);
+    expect(adb.getExecutedCommands()).not.toContain(`shell appops get ${Q} WAKE_LOCK`);
+    expect(result.restore).toBeUndefined();
+    expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([]);
+  });
+
+  test("Xiaomi and OnePlus force-stop recipes retain their version and steps", () => {
+    for (const id of ["xiaomi-autostart-off", "oneplus-deep-optimization"] as const) {
+      expect(KILL_PROFILES[id].version).toBe(1);
+      expect(KILL_PROFILES[id].steps).toEqual([
+        { kind: "kill", mode: "hard" },
+        { kind: "appOp", op: "RUN_ANY_IN_BACKGROUND", mode: "ignore" },
+      ]);
+    }
   });
 
   test("apply is idempotent and reset restores the state found before the first apply", async () => {
@@ -186,8 +368,37 @@ describe("kill profiles (#14051)", () => {
       "shell dumpsys deviceidle unforce",
       `shell am set-standby-bucket ${Q} active`,
       `shell appops set ${Q} RUN_ANY_IN_BACKGROUND default`,
+      `shell appops set ${Q} WAKE_LOCK default`,
     ]);
     expect(result.steps.at(-1)).toMatchObject({ status: "unsupported" });
+  });
+
+  test("a baseline reset after a daemon restart restores WAKE_LOCK from Samsung deep sleeping", async () => {
+    await applyKillProfile(emulator, APP, "samsung-deep-sleeping", deps());
+    expect(writes()).toContain(`shell appops set ${Q} WAKE_LOCK ignore`);
+
+    // A restarted daemon starts with an empty restore registry.
+    registry = new KillProfileRestoreRegistry();
+    adb.clearHistory();
+    const reset = await resetKillProfile(emulator, APP, { baseline: true }, deps());
+    expect(reset.source).toBe("baseline");
+    expect(writes()).toContain(`shell appops set ${Q} WAKE_LOCK default`);
+    expect(reset.steps).toContainEqual(
+      expect.objectContaining({ step: "appops WAKE_LOCK default", status: "applied" }),
+    );
+  });
+
+  test("a baseline reset below API 28 gates the WAKE_LOCK default", async () => {
+    adb.setAndroidApiLevel(27);
+    const reset = await resetKillProfile(emulator, APP, { baseline: true }, deps());
+    expect(writes()).not.toContain(`shell appops set ${Q} WAKE_LOCK default`);
+    expect(reset.steps).toContainEqual(
+      expect.objectContaining({
+        step: "appops WAKE_LOCK default",
+        status: "unsupported",
+        reason: "needs API 28+, device is API 27",
+      }),
+    );
   });
 
   test("a restore the device refuses stays recorded for a later reset or release", async () => {
@@ -209,6 +420,7 @@ describe("kill profiles (#14051)", () => {
   });
 
   test("appops and standby-bucket output parse into restorable values", () => {
+    expect(parseAppOpMode("WAKE_LOCK: ignore; time=+1m ago", "WAKE_LOCK")).toBe("ignore");
     expect(parseAppOpMode("No operations.\n", "RUN_ANY_IN_BACKGROUND")).toBe("default");
     expect(
       parseAppOpMode(

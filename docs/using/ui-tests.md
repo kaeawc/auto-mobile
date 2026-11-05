@@ -17,7 +17,7 @@ Add the JUnit runner to the module that owns the tests:
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    testImplementation("dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:0.0.89")
+    testImplementation("dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:0.0.90")
 }
 ```
 
@@ -34,7 +34,7 @@ Add AutoMobile from GitHub in Xcode (**File → Add Package Dependencies…**), 
 For a Swift package manifest, use the released package:
 
 ```swift
-.package(url: "https://github.com/kaeawc/auto-mobile.git", from: "0.0.89")
+.package(url: "https://github.com/kaeawc/auto-mobile.git", from: "0.0.90")
 ```
 
 `from:` resolves the newest compatible AutoMobile release; it is not an exact pin. The package requires Swift 6, macOS 15, and iOS 17.
@@ -152,6 +152,17 @@ Run the test target from Xcode or with `xcodebuild test` against a booted iOS
 Simulator. Keep selectors semantic and add `observe.waitFor` steps at important
 checkpoints so failures explain which state was missing.
 
+By default `observe` lists actionable rows in `skeleton` and static text, such as
+a status label or a validation error, in `context`. Read `context` to verify a
+result. A `waitFor` with only `text` or `textAny`, or `for: "appear"` or
+`for: "textEquals"` with only `text`, also matches text from either array when no
+hierarchy node carries that text (`textEquals` requires the exact, case-sensitive
+value). `for: "clickable"`, `"disappear"` and `"countStable"` check hierarchy nodes
+only. Add `elementId`, `container` or `selectionStrategy` to match a single
+hierarchy node instead; `className` and `contentDescription` do the same for waits
+without `for`. The top-level `layer` argument limits the wait to the `app` or
+`prototype` layer of the hierarchy and also turns off the row match.
+
 </div>
 
 ### Plan parameters and special characters
@@ -265,12 +276,12 @@ Use one release version for the test runner and the AutoMobile CLI. Restart a
 shared daemon so it receives the pin, then check the environment before tests:
 
 ```bash
-export AUTOMOBILE_VERSION=0.0.89
-bunx @kaeawc/auto-mobile@0.0.89 --daemon restart
-bunx @kaeawc/auto-mobile@0.0.89 --cli doctor
+export AUTOMOBILE_VERSION=0.0.90
+bunx @kaeawc/auto-mobile@0.0.90 --daemon restart
+bunx @kaeawc/auto-mobile@0.0.90 --cli doctor
 ```
 
-Replace `0.0.89` with the version used by your test runner dependency.
+Replace `0.0.90` with the version used by your test runner dependency.
 
 `--cli doctor` reports the status of AutoMobile on each booted Android device,
 including whether the accessibility service is installed and up to date. It is

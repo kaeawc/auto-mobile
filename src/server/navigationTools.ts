@@ -40,7 +40,9 @@ import {
 export const navigateToSchema = addDeviceTargetingToSchema(
   z
     .object({
-      targetScreen: z.string().describe("Target screen name"),
+      targetScreen: z
+        .string()
+        .describe("Screen name to reach; use a name from getNavigationGraph's screens"),
       platform: platformSchema.optional(),
     })
     .strict(),
@@ -72,7 +74,9 @@ export const exploreSchema = addDeviceTargetingToSchema(
       strategy: z
         .enum(["breadth-first", "depth-first", "weighted"])
         .optional()
-        .describe("Strategy (default: weighted)"),
+        .describe(
+          "Element choice (default: weighted): breadth-first tries the highest-scoring element on the current screen; depth-first prefers untried elements; weighted scores by navigation, novelty and coverage",
+        ),
       resetToHome: z.boolean().optional().describe("Reset to home periodically (default: false)"),
       resetInterval: z
         .number()
@@ -83,7 +87,9 @@ export const exploreSchema = addDeviceTargetingToSchema(
       mode: z
         .enum(["discover", "validate", "hybrid"])
         .optional()
-        .describe("Mode (default: hybrid)"),
+        .describe(
+          "Goal (default: hybrid): discover favors new elements; validate re-walks known transitions to check they still hold; hybrid balances both",
+        ),
       packageName: z.string().optional().describe("Package to limit exploration"),
       dryRun: z.boolean().optional().describe("Dry run (no interactions)"),
       platform: platformSchema.optional(),
@@ -215,7 +221,7 @@ export function registerNavigationTools({
   installedAppsFactory = (device) =>
     new ListInstalledApps(device, undefined, null, { cacheEnabled: false }),
 }: NavigationToolDependencies = {}) {
-  // Get navigation graph handler (for debugging)
+  // Get navigation graph handler
   const getNavigationGraphHandler = async (device: BootedDevice, args: GetNavigationGraphArgs) => {
     try {
       const manager = navigationManagerFactory(args.sessionUuid);
@@ -264,7 +270,7 @@ export function registerNavigationTools({
   // Register with the tool registry
   ToolRegistry.registerDeviceAware(
     "navigateTo",
-    "Navigate to screen using navigation graph",
+    "Navigate to a learned screen by replaying recorded transitions from the navigation graph",
     navigateToSchema,
     {
       handler: createNavigateToHandler({ navigateToFactory, navigationManagerFactory }),
@@ -277,7 +283,7 @@ export function registerNavigationTools({
 
   ToolRegistry.registerDeviceAware(
     "getNavigationGraph",
-    "Get navigation graph for debugging",
+    "Get the learned navigation graph (screens, transitions, current screen) for the foreground or given app; use before navigateTo to find screen names",
     getNavigationGraphSchema,
     {
       handler: getNavigationGraphHandler,
@@ -361,7 +367,7 @@ export function registerNavigationTools({
 
   ToolRegistry.registerDeviceAware(
     "explore",
-    "Automatically explore app to build navigation graph",
+    "Automatically interact with the app to discover screens and record transitions in the navigation graph",
     exploreSchema,
     {
       handler: exploreHandler,

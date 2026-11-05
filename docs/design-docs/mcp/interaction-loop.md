@@ -39,6 +39,42 @@ value. The marker describes state and does not change `tapOn` selection or
 execution. An enabled-state transition appears in hierarchy diffs and prevents
 the settle comparator from treating the two captures as equal.
 
+The skeleton stays actionable-only; non-actionable rows such as static status
+text go to `context`. A positive `waitFor` whose only element predicate is
+`text` or `textAny` first searches the hierarchy, then the rows of both arrays
+(their `label` and `sublabel`), so any text an agent can read in the default
+output can also be awaited. Compound, `container`- and `layer`-scoped waits,
+`selectionStrategy` and `absent` stay on the hierarchy search, which describes
+one source node. A text that any hierarchy node carries also stays there, so a
+row label hoisted from an off-screen child cannot override that search's
+visibility verdict. A row whose label is composed from several sources is
+skipped when any hierarchy text source inside its bounds that the label or
+sublabel contains has no visible part on screen; rows do not record their
+sources, so contribution is inferred from bounds and text. The condition form
+follows the same rules for
+`for: "appear"` and `for: "textEquals"` with only `text` (`textEquals` keeps its
+exact, case-sensitive comparison against the row). `clickable` needs a tappable
+source node, `disappear` must not pass on a hierarchy miss, and `countStable`
+counts hierarchy nodes, so those stay hierarchy-only.
+
+The hierarchy `appear` and `disappear` predicates ignore a match on a tappable
+row with hoisted descendant text when the selector matches none of the row's text
+that only visible sources back: its own text, its composed label when a visible
+descendant supplies the folded part, and each visible descendant's label. The
+comparison follows the resolver's exact, contains and regex rules, and an unscoped
+wait then takes any other match. Selector resolution for `tapOn` and other actions
+does not apply this check: a row stays tappable while some part of it is on screen
+and not covered, whichever sources built its label. The tap point is picked inside
+that part, away from the keyboard, application windows above the row's window and
+AutoMobile's prototype windows. Controls drawn over the row in its own window are
+avoided as well, for a row inside a scroll container. iOS counts a control outside
+that container, or after the row inside it. Android counts a control outside the
+container that comes after it in capture order, and only in captures with
+per-window trees. When covers leave no exposed point,
+the tap is refused with a `no-visible-tap-area` error that names the cover, and
+observe reports that row `occluded`, with no affordances, from the same check. A row
+with no on-screen part is refused and the error says to scroll it into view.
+
 iOS simulator lock readings are shared per device: unlocked known readings use
 `knownTtlMs` (30 seconds), locked readings use `lockedTtlMs` (2 seconds), and
 unknown readings use `failureTtlMs` (5 seconds). The first known reading after

@@ -53,6 +53,10 @@ data class DevicePickerOptions(
   val bootstrapState: DaemonBootstrapState = DaemonBootstrapState.Inactive,
   val onRecoverDaemon: () -> Unit = {},
   val sessionUuidProvider: () -> String? = { null },
+  /**
+   * First-run basics checklist card; null hides it (dismissed, or a host that doesn't offer it).
+   */
+  val basicsChecklist: BasicsChecklistOptions? = null,
   val thumbnail: @Composable (device: PickerDevice, booting: Boolean) -> Unit = { device, booting ->
     // Width-only sizing: the thumbnail derives its own height from the device's aspect ratio
     // (screenshot ratio once captured, a portrait stand-in until then), which the staggered grid
@@ -64,6 +68,14 @@ data class DevicePickerOptions(
       sessionUuidProvider = sessionUuidProvider,
     )
   },
+)
+
+/**
+ * Host inputs for the picker's [BasicsChecklistCard]; the remaining steps derive from picker state.
+ */
+data class BasicsChecklistOptions(
+  val deviceObserved: Boolean,
+  val onDismiss: () -> Unit,
 )
 
 @Composable
@@ -81,6 +93,13 @@ fun DevicePicker(
   val thumbnail = options.thumbnail
 
   Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    options.basicsChecklist?.let { checklist ->
+      BasicsChecklistCard(
+        items = basicsChecklist(bootstrapState, state, checklist.deviceObserved),
+        onDismiss = checklist.onDismiss,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
+      )
+    }
     when (state) {
       is DevicePickerUiState.Loading -> Centered(loadingMessage(bootstrapState))
       is DevicePickerUiState.Error -> {

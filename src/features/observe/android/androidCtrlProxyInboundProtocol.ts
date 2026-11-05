@@ -352,6 +352,12 @@ export interface WsKeystoreResetMessage extends WsMessageBase {
   state: unknown;
 }
 
+export interface WsAttestationChainMessage extends WsMessageBase {
+  type: "attestation_chain";
+  requestId?: string;
+  certificateChainBase64: string[];
+}
+
 export interface WsKeystoreDiscoveryMessage extends WsMessageBase {
   type: "keystore_discovery";
   requestId?: string | null;
@@ -651,6 +657,7 @@ export type WebSocketMessage =
   | WsHighlightResponseMessage
   | WsGlobalActionResultMessage
   | WsDeviceInfoResultMessage
+  | WsAttestationChainMessage
   | WsKeystoreDiscoveryMessage
   | WsKeystoreResetMessage
   | WsSdkCapabilitiesMessage

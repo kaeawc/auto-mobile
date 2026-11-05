@@ -1,3 +1,4 @@
+import { iosSdkBridgeFailure } from "../../../../src/features/observe/ios/sdkObservationBridge";
 import { describe, expect, test } from "bun:test";
 import {
   requestSdkAction,
@@ -155,3 +156,19 @@ describe("SDK observation bridge commands (#5159)", () => {
 function decoded(message: ReturnType<typeof decodeCtrlProxyMessage>): unknown {
   return message?.result;
 }
+
+test("multi_scene stays typed and both envelopes preserve scene identifiers", () => {
+  expect(iosSdkBridgeFailure("multi_scene")).toBe("multi_scene");
+  for (const type of ["sdk_observation_result", "sdk_action_result"]) {
+    expect(
+      decodeCtrlProxyMessage({
+        type,
+        requestId: "multi-scene",
+        success: false,
+        available: true,
+        failure: "multi_scene",
+        scenes: ["scene-a", "scene-b"],
+      })?.result,
+    ).toMatchObject({ success: false, failure: "multi_scene", scenes: ["scene-a", "scene-b"] });
+  }
+});

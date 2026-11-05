@@ -253,10 +253,11 @@ is a zip, MIME `application/vnd.automobile.prototype+zip`, iOS UTI
   and empty storage. On iOS, a matching spec SHA-256 plus identical image and font resource IDs,
   media types and byte SHA-256 values instead reuses the existing entry, preserving its label,
   provenance and storage. Unreadable candidates are skipped. Replace and keep-both are later work.
-- Not in the first release: user-facing URL import, universal links, compact `?spec=` links, QR. The
-  internal scheme `automobile-proto://` remains for legacy callers (section 7): it imports a
-  host-staged inbox bundle or opens an existing library entry. Simulator hosts use the file inbox
-  instead. The scheme never fetches or carries spec bytes.
+- Android accepts `automobile-proto://import?url=…&sha256=…` links after confirming the host and
+  hash, fetching through the egress policy and verifying the downloaded bytes. Universal links and
+  compact `?spec=` links remain unsupported. The internal scheme `automobile-proto://` also remains
+  for legacy callers (section 7): it imports a host-staged inbox bundle or opens an existing library
+  entry. Simulator hosts use the file inbox instead. The scheme never carries spec bytes.
 - Link sharing (#14128) uses a team-supplied static https host; there is no AutoMobile relay and no
   LAN serving from the daemon. MCP `prototype share` writes the canonical bundle under the data
   directory and, given the https `url` it will be served from, returns

@@ -43,7 +43,7 @@ class ImportHideRaceTest {
   @Test
   fun hideAndPurgeDuringStagingEndWithNothingStored() {
     var result: LibraryResult<LibraryEntry>? = null
-    val importer = Thread { result = commit.commit(bundle, LibrarySource.share, null) }
+    val importer = Thread { result = commit.commit(bundle, LibrarySource.share, null, null) }
     importer.start()
     assertTrue(staging.entered.await(5, TimeUnit.SECONDS))
 
@@ -69,7 +69,7 @@ class ImportHideRaceTest {
 
     assertEquals(
       LibraryResult.Failure(LibraryError.Hidden),
-      commit.commit(bundle, LibrarySource.file, null),
+      commit.commit(bundle, LibrarySource.file, null, null),
     )
     assertEquals(1L, staging.entered.count)
     assertTrue(store.results.isEmpty())
@@ -80,7 +80,7 @@ class ImportHideRaceTest {
     blocklist.hide(specSha256)
     staging.release.countDown()
 
-    assertTrue(commit.commit(bundle, LibrarySource.mcp, null) is LibraryResult.Success)
+    assertTrue(commit.commit(bundle, LibrarySource.mcp, null, null) is LibraryResult.Success)
   }
 
   /** Pauses the importer as staging starts, after its early blocklist check. */

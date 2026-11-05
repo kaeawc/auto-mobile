@@ -308,14 +308,85 @@ describe("prototype tool on an iOS simulator", () => {
     expect(agent.requests).toEqual([]);
   });
 
-  test("an Android-only settings.open page is refused on iOS with its path (#16520)", async () => {
-    const { response, payload } = await call({ action: "show", spec: settingsWifi });
-    expect(toolIsError(response)).toBe(true);
-    expect(payload.error).toBe(
-      'Invalid prototype at spec.root.children[1].onTap[0]: settings.open page "wifi" is Android only; on iOS use "app" or "notifications". Nothing was shown.',
-    );
-    expect(agent.requests).toEqual([]);
-  });
+  test.each(["show", "save"])(
+    "an Android-only settings.open page is refused on iOS for %s with its path (#16520)",
+    async (action) => {
+      const { response, payload } = await call({ action, spec: settingsWifi });
+      expect(toolIsError(response)).toBe(true);
+      expect(payload.error).toBe(
+        'Invalid prototype at spec.root.children[1].onTap[0]: settings.open page "wifi" is Android only; on iOS use "app" or "notifications". Nothing was shown.',
+      );
+      expect(agent.requests).toEqual([]);
+    },
+  );
+
+  test.each(["location", "wifi", "bluetooth", "display"])(
+    "a patch introducing settings.open %s is refused on iOS with its spec path",
+    async (page) => {
+      const capable = new FakePrototypeAgentClient({
+        ...agent.handshake,
+        capabilities: [
+          ...agent.handshake.capabilities,
+          "prototype_patch_v1",
+          "prototype_platform_v1",
+          "prototype_platform_settings_v1",
+        ],
+      });
+      connections.agents.set(simulator.deviceId, capable);
+      const button = { type: "button", id: "settings", label: "Settings" };
+      const shown = {
+        id: "settings-patch",
+        window: { placement: { type: "fullscreen" } },
+        requires: { platform: ["settings"] },
+        root: { type: "column", children: [button] },
+      };
+      expect((await call({ action: "show", spec: shown })).payload.success).toBe(true);
+      const node = {
+        ...button,
+        onTap: [
+          { type: "platform", call: "settings.open", args: { page: { value: page as string } } },
+        ],
+      };
+      const { response, payload } = await call({
+        action: "patch",
+        id: shown.id,
+        ops: [{ op: "replaceNode", id: button.id, node }],
+      });
+      expect(toolIsError(response)).toBe(true);
+      expect(payload.error).toBe(
+        `Invalid patch result at spec.root.children[0].onTap[0]: settings.open page "${page}" is Android only; on iOS use "app" or "notifications"`,
+      );
+      expect(capable.patchRequests).toEqual([]);
+
+      if (page === "wifi") {
+        const settingsIndex = capable.handshake.capabilities.indexOf(
+          "prototype_platform_settings_v1",
+        );
+        capable.handshake.capabilities.splice(settingsIndex, 1);
+        const withoutModule = await call({
+          action: "patch",
+          id: shown.id,
+          ops: [{ op: "replaceNode", id: button.id, node }],
+        });
+        expect(withoutModule.payload.error).toBe(payload.error);
+        expect(capable.patchRequests).toEqual([]);
+        capable.handshake.capabilities.push("prototype_platform_settings_v1");
+      }
+
+      // A refused patch leaves the tracked spec available for the next valid patch.
+      node.onTap[0].args.page.value = "app";
+      expect(
+        (
+          await call({
+            action: "patch",
+            id: shown.id,
+            ops: [{ op: "replaceNode", id: button.id, node }],
+          })
+        ).payload.success,
+      ).toBe(true);
+      expect(capable.patchRequests).toHaveLength(1);
+    },
+  );
 
   test("a host-only screenMap still maps a spec with an Android-only settings page", async () => {
     const { payload } = await call({ action: "screenMap", spec: settingsWifi });

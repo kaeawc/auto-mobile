@@ -36,7 +36,11 @@ const preferenceResult = {
   verified: true,
 };
 
-const iosDevice: BootedDevice = { deviceId: "sim-1", name: "iPhone", platform: "ios" };
+const iosDevice: BootedDevice = {
+  deviceId: "C4115418-CF17-4907-B214-EAC759E48675",
+  name: "iPhone",
+  platform: "ios",
+};
 const makeTelephony = (target: BootedDevice) =>
   new Telephony(target, {
     adbFactoryOrExecutor: new FakeAdbExecutor(),

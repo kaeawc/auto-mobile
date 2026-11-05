@@ -1179,6 +1179,7 @@ describe("cast module contract", () => {
       "state",
       "deviceName",
       "protocol",
+      "protocols",
       "player",
       "volume",
     ]);
@@ -1190,5 +1191,32 @@ describe("cast module contract", () => {
       "connected",
     ]);
     expect(cast.state?.protocol.value.values).toEqual(["googleCast", "airplay"]);
+  });
+
+  test("protocols is a unique list of the protocols castButton.protocols accepts", () => {
+    const castButtonProtocols =
+      contract.definitions.node.variants.castButton.fields.protocols.rule.item;
+    expect(cast.state?.protocols.platforms).toEqual(["android", "ios"]);
+    expect(cast.state?.protocols.value).toEqual({
+      kind: "array",
+      item: castButtonProtocols,
+      min: 0,
+      max: 2,
+      unique: true,
+    });
+  });
+
+  test("a spec reads the whole protocols list and an unknown key is refused", () => {
+    const spec = (text: string) => ({
+      id: "c",
+      window: { placement: { type: "fullscreen" } },
+      requires: { platform: ["cast"] },
+      root: { type: "text", text },
+    });
+    expect(validatePrototypeSpec(spec("{platform:/cast/protocols}")).success).toBe(true);
+    expect(validatePrototypeSpec(spec("{platform:/cast/protocols/0}"))).toMatchObject({
+      success: false,
+      error: { path: "root.text", message: "Unknown platform state /cast/protocols/0" },
+    });
   });
 });

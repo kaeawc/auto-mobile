@@ -120,6 +120,144 @@ describe("pickIosDeviceType", () => {
   });
 });
 
+describe("Wear OS provisioning", () => {
+  // The installed capture is one verbatim row without its section header.
+  const installed = parseSystemImages(
+    "Installed packages:\n" +
+      readFileSync(
+        new URL(
+          "../fixtures/android-avdmanager/sdkmanager-list-installed-wear.txt",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    undefined,
+    "installed",
+  );
+  const catalog = parseSystemImages(
+    readFileSync(
+      new URL("../fixtures/android-sdkmanager/list-system-images-available.txt", import.meta.url),
+      "utf8",
+    ),
+  );
+  const watch = { formFactor: "watch" as const };
+
+  it("selects the newest installed signed image in range on arm64", () => {
+    expect(installed).toHaveLength(1);
+    expect(
+      pickAndroidSystemImage(
+        installed,
+        { ...watch, minOsVersion: "36", maxOsVersion: "37" },
+        "arm64",
+      ).packageName,
+    ).toBe("system-images;android-37.0;android-wear-signed;arm64-v8a");
+    // Captured catalog candidates model other installed SDK versions without inventing rows.
+    expect(
+      pickAndroidSystemImage([...catalog, ...installed], { ...watch, maxOsVersion: "36" }, "arm64")
+        .packageName,
+    ).toBe("system-images;android-36;android-wear-signed;arm64-v8a");
+    expect(pickAndroidSystemImage(catalog, { ...watch, maxOsVersion: "34" }, "arm64").tag).toBe(
+      "android-wear",
+    );
+  });
+
+  it.each([undefined, true, false])(
+    "creates the Wear profile for screenRound=%p",
+    async (screenRound) => {
+      const avd = new FakeAndroidAvdCreator(installed);
+      const provisioner = new DefaultDeviceProvisioner({
+        iosCreator: () => undefined,
+        androidCreator: () => avd,
+        idGenerator: new CountingIdGenerator("uuid"),
+        architecture: "arm64",
+      });
+      const result = await provisioner.provision({
+        platform: "android",
+        ...watch,
+        requires: { screenRound },
+      });
+      const profile = screenRound === false ? "wearos_square" : "wearos_small_round";
+      const profiles = readFileSync(
+        new URL("../fixtures/android-avdmanager/avdmanager-list-device-wear.txt", import.meta.url),
+        "utf8",
+      );
+      expect(profiles).toContain(`or "${profile}"`);
+      expect(avd.createCalls).toEqual([
+        {
+          name: "AutoMobile-android-watch-37-uuid1",
+          package: installed[0].packageName,
+          device: profile,
+        },
+      ]);
+      expect(result.deviceType).toBe(profile);
+    },
+  );
+
+  it("honors a named Wear profile ahead of the screenRound default", async () => {
+    const avd = new FakeAndroidAvdCreator(installed);
+    const provisioner = new DefaultDeviceProvisioner({
+      iosCreator: () => undefined,
+      androidCreator: () => avd,
+      idGenerator: new CountingIdGenerator("uuid"),
+      architecture: "arm64",
+    });
+    await provisioner.provision({
+      platform: "android",
+      ...watch,
+      name: "wearos_large_round",
+      requires: { screenRound: false },
+    });
+    expect(avd.createCalls[0].device).toBe("wearos_large_round");
+  });
+
+  it("classifies a created signed AVD so a repeated watch request finds it", async () => {
+    const avd = new FakeAndroidAvdCreator(installed);
+    const provisioner = new DefaultDeviceProvisioner({
+      iosCreator: () => undefined,
+      androidCreator: () => avd,
+      idGenerator: new CountingIdGenerator("uuid"),
+      architecture: "arm64",
+    });
+    const criteria = { platform: "android" as const, ...watch };
+    const created = await provisioner.provision(criteria);
+    const [listed] = await enrichDeviceInfoList(
+      {
+        readConfig: async () => ({
+          systemImagePackage: avd.createCalls[0].package,
+          // No profile hint: the signed tag alone must classify the rediscovered AVD.
+          apiLevel: 37,
+          osVersion: "17",
+        }),
+      },
+      [{ name: created.name, platform: "android", isRunning: false }],
+    );
+    expect(listed.formFactor).toBe("watch");
+    const matcher = new DefaultDeviceMatcher();
+    expect(matcher.matchDeviceImage(criteria, [listed], "LATEST")?.name).toBe(created.name);
+    expect(
+      matcher.matchDeviceImage({ platform: "android", formFactor: "phone" }, [listed], "LATEST"),
+    ).toBeNull();
+    expect(avd.createCalls).toHaveLength(1);
+  });
+
+  it.each([undefined, "phone", "tablet"] as const)(
+    "keeps %p requests handheld-only",
+    (formFactor) => {
+      expect(() => pickAndroidSystemImage(installed, { formFactor }, "arm64")).toThrow(/handheld/);
+    },
+  );
+
+  it("names the host ABI and sdkmanager command when Wear is missing", () => {
+    expect(() => pickAndroidSystemImage([], watch, "arm64")).toThrow(
+      'sdkmanager "system-images;android-<api>;android-wear-signed;arm64-v8a"',
+    );
+  });
+
+  it("refuses Wear images whose ABI the host cannot run", () => {
+    expect(() => pickAndroidSystemImage(installed, watch, "x64")).toThrow(/sdkmanager/);
+  });
+});
+
 describe("pickAndroidSystemImage tag preference", () => {
   // Play Store images refuse `adb root`, and AutoMobile needs a root shell for the
   // root-backed system-locale path (AndroidSystemConfigurationAdapter). Auto-creating
@@ -1494,12 +1632,12 @@ describe("DefaultDeviceProvisioner", () => {
       });
 
       await expect(provisioner.provision({ platform: "android", formFactor })).rejects.toThrow(
-        new RegExp(`'${formFactor}' AVD is not supported yet`),
+        /No installed Wear OS system image/,
       );
       expect(avd.createCalls).toEqual([]);
       expect(() =>
         pickAndroidSystemImage([systemImage(35, "google_apis", "x86_64")], { formFactor }, "x64"),
-      ).toThrow(/not supported yet/);
+      ).toThrow(/No installed Wear OS system image/);
     },
   );
 });

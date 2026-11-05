@@ -511,29 +511,8 @@ export class WatchSystemTray {
     observation: ObserveResult,
     scope: WatchScope,
   ): Promise<SystemTrayOutcome> {
-    const { left, top, right, bottom } = card.element.bounds;
-    const appId = args.notification?.appId;
-    const keysBefore = appId
-      ? await readActiveNotificationKeysForApp(this.device, appId, this.signal)
-      : undefined;
-    // Wear dismisses a card with a horizontal swipe. This gesture still needs device verification.
-    await this.command(
-      `shell input swipe ${Math.floor((left + right) / 2)} ${Math.floor((top + bottom) / 2)} ${right - 1} ${Math.floor((top + bottom) / 2)} 300`,
-    );
-    await sleep(POLL_MS, this.signal);
-    const next = await this.read();
-    const keysAfter =
-      appId && keysBefore
-        ? await readActiveNotificationKeysForApp(this.device, appId, this.signal)
-        : undefined;
-    if (
-      !watchStreamRoot(next.viewHierarchy) ||
-      !(keysBefore && keysAfter
-        ? // The app's active inventory is the title-independent signal: an identical card
-          // scrolling into view or a refused card rewriting its title cannot fake a removed key.
-          keysBefore.some((key) => !keysAfter.includes(key))
-        : visiblyRemoved(card, observation, next))
-    ) {
+    const { next, removed } = await this.swipeAway(card, observation, args.notification?.appId);
+    if (!removed) {
       return outcome(
         {
           code: "dismissal_unconfirmed",
@@ -560,6 +539,63 @@ export class WatchSystemTray {
       return this.run(args, { ...scope, dismissedCount: scope.dismissedCount + 1 }, next);
     }
     return outcome({ message: "Dismissed notification", dismissedCount: 1, observation: next });
+  }
+
+  /** Swipe `card` away and report whether its removal is confirmed. */
+  private async swipeAway(
+    card: WatchNotification,
+    observation: ObserveResult,
+    appId: string | undefined,
+  ): Promise<{ next: ObserveResult; removed: boolean }> {
+    const { left, top, right, bottom } = card.element.bounds;
+    const before = appId ? await this.inventory(appId, card) : undefined;
+    // Wear dismisses a card with a horizontal swipe. This gesture still needs device verification.
+    await this.command(
+      `shell input swipe ${Math.floor((left + right) / 2)} ${Math.floor((top + bottom) / 2)} ${right - 1} ${Math.floor((top + bottom) / 2)} 300`,
+    );
+    await sleep(POLL_MS, this.signal);
+    const next = await this.read();
+    if (!watchStreamRoot(next.viewHierarchy)) {
+      return { next, removed: false };
+    }
+    const after = appId && before ? await this.inventory(appId, card) : undefined;
+    if (!before || !after || before.titled === 0) {
+      return { next, removed: visiblyRemoved(card, observation, next) };
+    }
+    // An identical card scrolling into view cannot fake a removed key, a refused card that
+    // rewrites its title keeps its key, and another notification of the app expiring meanwhile
+    // removes a key but not one titled like the swiped card.
+    return {
+      next,
+      removed: before.keys.some((key) => !after.keys.includes(key)) && after.titled < before.titled,
+    };
+  }
+
+  /**
+   * The app's active notification keys, and how many of its active records carry the card's
+   * title, or `undefined` when the dump is not trustworthy enough for before/after accounting.
+   */
+  private async inventory(
+    appId: string,
+    card: WatchNotification,
+  ): Promise<{ keys: string[]; titled: number } | undefined> {
+    const { stdout } = await awaitWhileRequestIsLive(
+      getSystemTrayDependencies()
+        .adbFactory(this.device)
+        .executeCommand("shell dumpsys notification --noredact", {
+          maxBuffer: DUMPSYS_MAX_BUFFER,
+          signal: this.signal,
+        }),
+      this.signal,
+    );
+    const keys = parseActiveNotificationKeysForApp(stdout, appId);
+    if (!keys) {
+      return undefined;
+    }
+    const titled = parseDumpsysNotificationRecords(stdout).filter(
+      (record) => record.pkg === appId && card.title !== null && record.titles.includes(card.title),
+    ).length;
+    return { keys, titled };
   }
 
   private async verifyClearAll(

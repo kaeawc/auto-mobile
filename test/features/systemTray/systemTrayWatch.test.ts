@@ -97,8 +97,13 @@ class InventoryAdb extends FakeAdbExecutor {
 }
 
 // Fake service inventories, not captured dumps.
-const record = (pkg: string, id: number) =>
-  `    NotificationRecord(0x${id}: pkg=${pkg} user=UserHandle{0} id=${id} tag=null key=0|${pkg}|${id}|null|${2000 + id}: Notification(channel=c flags=0))`;
+const record = (pkg: string, id: number, title: string) =>
+  [
+    `    NotificationRecord(0x${id}: pkg=${pkg} user=UserHandle{0} id=${id} tag=null key=0|${pkg}|${id}|null|${2000 + id}: Notification(channel=c flags=0))`,
+    "      extras={",
+    `        android.title=String (${title})`,
+    "      }",
+  ].join("\n");
 const inventory = (...records: string[]) =>
   [
     "Current Notification Manager state:",
@@ -106,8 +111,9 @@ const inventory = (...records: string[]) =>
     ...records,
     "  Snoozed notifications:",
   ].join("\n");
-const shell = (id: number) => record("com.android.shell", id);
-const otherApp = record("com.other", 9);
+// Titled like the captured card ("Wear") unless a test models a differently titled notification.
+const shell = (id: number, title = "Wear") => record("com.android.shell", id, title);
+const otherApp = record("com.other", 9, "Ping");
 
 function setup(
   read: (commands: string[]) => ObserveResult = () => stream,
@@ -599,11 +605,28 @@ describe("Wear duplicate-card dismissal", () => {
     ).toMatchObject({ isError: false, payload: { dismissedCount: 1, success: true } });
   });
 
+  test("does not confirm a refused card when another notification of the app expires meanwhile", async () => {
+    const { tray } = setup(
+      () => stream,
+      (commands) =>
+        dismissSwipes(commands) === 0
+          ? inventory(shell(1), shell(2, "Expiring"))
+          : inventory(shell(1)),
+    );
+    expect(
+      await tray.execute({
+        action: "dismiss",
+        notification: { appId: "com.android.shell", title: "Wear" },
+        awaitTimeout: 500,
+      }),
+    ).toMatchObject({ isError: true, payload: { code: "dismissal_unconfirmed" } });
+  });
+
   test("does not confirm a refused card that rewrote its title while the inventory kept it", async () => {
     const renamed = retitled("Renamed");
     const { tray } = setup(
       (commands) => (dismissSwipes(commands) === 0 ? stream : renamed),
-      () => inventory(shell(1)),
+      (commands) => inventory(shell(1, dismissSwipes(commands) === 0 ? "Wear" : "Renamed")),
     );
     expect(
       await tray.execute({

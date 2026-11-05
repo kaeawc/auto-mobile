@@ -137,8 +137,8 @@ afterwards. If the top cannot be reached within `awaitTimeout`, the action fails
   view. If that text is not a single clickable target there, it fails rather than guessing and
   goes back to the stream; retry with an explicit `tapActionLabel`.
 - `dismiss` swipes the card sideways and reports `dismissal_unconfirmed` unless the removal is
-  confirmed: with `appId`, by one of the app's active notifications going away; otherwise by one
-  fewer such card being shown. Of two identical cards, removing one counts as a dismissal.
+  confirmed: with `appId`, by one of the app's active notifications titled like the card going
+  away; otherwise by one fewer such card being shown. Of two identical cards, removing one counts as a dismissal.
 - `clearAll` taps the stream's **Clear all** only when every active notification belongs to
   `appId`; otherwise, or when `title` or `body` narrows it, it dismisses matching cards one by
   one.

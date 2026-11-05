@@ -82,6 +82,12 @@ const castCall = {
   ...label,
   onTap: [{ type: "platform", call: "cast.stop", args: {} }],
 };
+const permissionsCall = {
+  ...label,
+  onTap: [
+    { type: "platform", call: "permissions.request", args: { names: { value: ["camera"] } } },
+  ],
+};
 const contactsCall = {
   ...label,
   onTap: [{ type: "platform", call: "contacts.pick", args: {} }],
@@ -342,6 +348,7 @@ const fixtures: Record<string, Node> = {
   prototype_platform_camera_v1: cameraCaptureCall,
   prototype_platform_audioRecorder_v1: recorderCall,
   prototype_platform_notifications_v1: notificationsCall,
+  prototype_platform_permissions_v1: permissionsCall,
   prototype_platform_notifications_scheduled_v1: scheduleCall,
   prototype_platform_media_v1: mediaCall,
   prototype_platform_camera_capture_v1: cameraCaptureCall,

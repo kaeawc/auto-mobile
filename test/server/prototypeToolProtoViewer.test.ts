@@ -40,6 +40,10 @@ class FakeViewer implements ProtoViewerDevice {
   present = true;
   readonly calls: string[] = [];
   failure?: Error;
+  /** A build without a capabilities report: the app's own import gate decides. */
+  async capabilities(): Promise<undefined> {
+    return undefined;
+  }
   async installed(): Promise<boolean> {
     this.calls.push("installed");
     return this.present;

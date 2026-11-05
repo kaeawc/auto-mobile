@@ -44,7 +44,7 @@ class HiddenContentQuotaTest {
     }
     assertEquals(
       LibraryResult.Failure(LibraryError.Limit),
-      commit.commit(bundle, LibrarySource.share, null),
+      commit.commit(bundle, LibrarySource.share, null, null),
     )
 
     blocklist.hide(Fixtures.entry().specSha256)
@@ -54,7 +54,7 @@ class HiddenContentQuotaTest {
     )
 
     assertTrue(metadata.documents.isEmpty())
-    assertTrue(commit.commit(bundle, LibrarySource.share, null) is LibraryResult.Success)
+    assertTrue(commit.commit(bundle, LibrarySource.share, null, null) is LibraryResult.Success)
     assertEquals(
       listOf(FIRST),
       (repository.list() as LibraryResult.Success).value.map { it.libraryId },
@@ -63,13 +63,13 @@ class HiddenContentQuotaTest {
 
   @Test
   fun reimportingHiddenContentStoresNothing() {
-    commit.commit(bundle, LibrarySource.file, null)
+    commit.commit(bundle, LibrarySource.file, null, null)
     blocklist.hide(sha256Hex(bundle.spec.toString(Charsets.UTF_8).toByteArray()))
     repository.purgeBlocked()
 
     assertEquals(
       LibraryResult.Failure(LibraryError.Hidden),
-      commit.commit(bundle, LibrarySource.file, null),
+      commit.commit(bundle, LibrarySource.file, null, null),
     )
     assertTrue(metadata.documents.isEmpty())
     assertTrue(store.results.isEmpty())

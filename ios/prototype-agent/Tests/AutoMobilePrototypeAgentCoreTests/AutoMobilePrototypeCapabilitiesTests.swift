@@ -3,6 +3,29 @@ import Foundation
 import XCTest
 
 final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
+    func testWindowAndKeyboardAreAdvertisedAtTheMinimumOS() {
+        struct MinimumOS: OSVersionProvider { let majorVersion = 17 }
+        let capabilities = Set(PrototypeAgentProtocol.advertisedCapabilities(os: MinimumOS()))
+        for capability in [
+            "prototype_platform_window_controls_v1",
+            "prototype_hide_keyboard_v1",
+        ] {
+            XCTAssertTrue(capabilities.contains(capability))
+            XCTAssertTrue(AutoMobilePrototypeCapabilities.supported.contains(capability))
+        }
+    }
+
+    func testSettingsIsAdvertisedOnlyThroughItsRegisteredModule() {
+        struct MinimumOS: OSVersionProvider { let majorVersion = 17 }
+        let settings = "prototype_platform_settings_v1"
+        XCTAssertFalse(PrototypeAgentProtocol.advertisedCapabilities(os: MinimumOS()).contains(settings))
+        XCTAssertFalse(AutoMobilePrototypeCapabilities.supported.contains(settings))
+        XCTAssertTrue(
+            PrototypeAgentProtocol.advertisedCapabilities(os: MinimumOS(), registryCapabilities: [settings])
+                .contains(settings)
+        )
+    }
+
     func testLayoutDirectionIsAdvertisedAtTheMinimumOS() {
         struct OS: OSVersionProvider { let majorVersion = 17 }
         XCTAssertTrue(PrototypeAgentProtocol.advertisedCapabilities(os: OS()).contains("prototype_layout_direction_v1"))
@@ -42,10 +65,10 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_connectivity_v1",
             // Contract only; the biometric prompt runtime is owed (#14328).
             "prototype_platform_biometric_v1",
-            // Contract only; the settings launcher runtime is owed (#14320).
-            "prototype_platform_settings_v1",
             // Registered by the agent and Viewer registries (#14238), not the static list.
             "prototype_platform_links_v1",
+            // Registered by the agent and Viewer registries, not the static list.
+            "prototype_platform_settings_v1",
             // Contract only; the system picker runtimes are owed (#14318).
             "prototype_platform_contacts_v1", "prototype_platform_calendar_v1",
             // Contract only; the motion and sensor runtimes are owed (#14327).
@@ -61,10 +84,6 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_mediaLibrary_v1", "prototype_platform_camera_v1",
             // Contract only; the fake store runtime is owed (#14314).
             "prototype_platform_commerce_v1",
-            // Contract only; the window controls runtime is owed (#14320).
-            "prototype_platform_window_controls_v1",
-            // Contract only; the keyboard dismiss runtime is owed (#14320).
-            "prototype_hide_keyboard_v1",
             // Contract only; the cast sender and route runtimes are owed (#14240, #14241, #14242).
             "prototype_platform_cast_v1",
             // Contract only; the media queue runtime is owed (#14249).
@@ -80,6 +99,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_audioRecorder_v1",
             // Contract only; the Viewer notification runtime is owed (#14282).
             "prototype_platform_notifications_v1",
+            // Contract only; the Viewer permission runtime is owed (#14299).
+            "prototype_platform_permissions_v1",
             // Contract only; the scheduled notification runtimes are owed (#14283).
             "prototype_platform_notifications_scheduled_v1",
             // Contract only; push delivery to Viewer apps is owed (#14287).

@@ -222,6 +222,7 @@
     "platform-media-library-query-save.json",
     "platform-media-queue-combining-mark.json",
     "platform-media-queue.json",
+    "platform-permissions-request.json",
     "platform-reads.json",
     "platform-repeat.json",
     "platform-requires.json",
@@ -1274,6 +1275,12 @@
     "path-bracket.json",
     "payload-depth.json",
     "payload-limit.json",
+    "permissions-request-duplicate.json",
+    "permissions-request-empty.json",
+    "permissions-request-undeclared.json",
+    "permissions-request-unknown-name.json",
+    "permissions-undeclared-module.json",
+    "permissions-unknown-state.json",
     "placement-offset-x-over-max.json",
     "placement-offset-y-below-min.json",
     "platform-argument-value.json",
@@ -2039,6 +2046,7 @@
     "strict-gate-prototype_platform_namespace_v1.json",
     "strict-gate-prototype_platform_notifications_scheduled_v1.json",
     "strict-gate-prototype_platform_notifications_v1.json",
+    "strict-gate-prototype_platform_permissions_v1.json",
     "strict-gate-prototype_platform_power_v1.json",
     "strict-gate-prototype_platform_push_v1.json",
     "strict-gate-prototype_platform_realtime_device_v1.json",
@@ -3514,6 +3522,10 @@
       "prototype_platform_map_v1",
       "prototype_platform_v1"
     ],
-    "map-backend-channel-literal.json": ["prototype_platform_realtime_v1", "prototype_platform_v1"]
+    "map-backend-channel-literal.json": ["prototype_platform_realtime_v1", "prototype_platform_v1"],
+    "platform-permissions-request.json": [
+      "prototype_platform_permissions_v1",
+      "prototype_platform_v1"
+    ]
   }
 }

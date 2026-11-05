@@ -8,6 +8,7 @@ import { execFile } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { parseArgs, promisify } from "node:util";
+import { KILL_PROFILE_IDS, type KillProfileId } from "../../src/features/utility/KillProfiles";
 import { AndroidDeviceClockAdapter } from "../../src/features/utility/AndroidDeviceClockAdapter";
 import { parseCommandArgs } from "../../src/utils/android-cmdline-tools/AdbCommandArguments";
 import type {
@@ -72,12 +73,27 @@ export function parseCli(args: string[]) {
       avd: { type: "string" },
       apk: { type: "string" },
       out: { type: "string" },
+      profiles: { type: "string" },
     },
   });
   if (!values.serial || !values.avd || !values.out) {
     throw new Error("--serial, --avd and --out scratch/<file>.json are required");
   }
   validateTarget(values.serial, values.avd);
+  const profiles = values.profiles
+    ?.split(",")
+    .map((id) => id.trim())
+    .filter(Boolean);
+  if (profiles) {
+    if (profiles.length === 0) {
+      throw new Error("--profiles must include at least one kill profile id");
+    }
+    for (const id of profiles) {
+      if (!(KILL_PROFILE_IDS as readonly string[]).includes(id)) {
+        throw new Error(`Unknown kill profile id: ${id}`);
+      }
+    }
+  }
   const out = resolve(values.out);
   const underScratch = relative(resolve("scratch"), out);
   if (
@@ -91,6 +107,7 @@ export function parseCli(args: string[]) {
   return {
     serial: values.serial,
     avd: values.avd,
+    profiles: profiles as KillProfileId[] | undefined,
     apk: resolve(
       values.apk ??
         "android/killprofile-fixture/build/outputs/apk/debug/killprofile-fixture-debug.apk",
@@ -125,6 +142,9 @@ async function main(): Promise<void> {
     mkdirSync(dirname(options.out), { recursive: true });
     writeFileSync(options.out, `${JSON.stringify(report, null, 2)}\n`);
     console.log(`Survival report: ${options.out}`);
+    if (report.noBaseline) {
+      console.log(report.noBaseline);
+    }
     process.exitCode =
       report.aborted || report.results.some((result) => result.mismatches.length) ? 1 : 0;
   } finally {

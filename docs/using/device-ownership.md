@@ -339,10 +339,13 @@ Listing, provisioning, starting, deleting and driving Apple TV simulators are co
 Name `platform: "visionos"` or a Vision Pro session to use `installApp`,
 `uninstallApp`, `launchApp`, `terminateApp` and `listApps` on an Apple Vision Pro
 simulator. Install a `.app` bundle built for the visionOS simulator;
-`launchApp` refuses `prototype: true`. `observe` returns a screenshot-only
-observation with `hierarchyUnavailable`. No visionOS runner exists yet: absent
-hierarchy fields do not mean the screen is empty; read the screenshot.
-Gesture and input tools are not supported.
+`launchApp` refuses `prototype: true`. With the visionOS runner active,
+`observe` returns the window app's accessibility hierarchy, including
+ornaments, `tapOn` taps an element by a unique accessibility identifier, and
+`sendKeys` types into the focused text field. Set `CTRL_PROXY_IOS_BUNDLE_ID` to
+the window app to automate. If the runner is unavailable, `observe` returns a
+screenshot-only observation with `hierarchyUnavailable`; read the screenshot.
+Coordinate gestures and other input tools are not supported.
 
 ## Apple Watch simulators
 

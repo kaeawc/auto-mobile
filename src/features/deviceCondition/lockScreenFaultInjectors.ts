@@ -48,9 +48,19 @@ async function testPinVerifies(adb: AdbExecutor, signal?: AbortSignal): Promise<
 export function createLockScreenFaultInjector(adb: AdbExecutor): DeviceConditionInjector {
   const serialize = createSerializer();
   let ownsPin = false;
-  // Bumped on every install and clear, so a reset from an earlier installation cannot remove a
-  // PIN that a later caller installed.
+  // Bumped on every install and clear, so a reset or cleanup check from an earlier installation
+  // cannot remove, or report as its own leftover, a PIN that a later caller installed.
   let generation = 0;
+
+  const ownedPinPresent = async (signal?: AbortSignal): Promise<boolean> =>
+    ownsPin && (await testPinVerifies(adb, signal));
+
+  // Once a later install, clear, or this installation's own verified reset bumps the generation,
+  // nothing on the device is this installation's to clean up.
+  const isCleanFor =
+    (installed: number) =>
+    async (signal?: AbortSignal): Promise<boolean> =>
+      installed !== generation || !(await ownedPinPresent(signal));
 
   const resetFor =
     (installed: number) =>
@@ -93,13 +103,14 @@ export function createLockScreenFaultInjector(adb: AdbExecutor): DeviceCondition
       ownsPin = true;
       generation += 1;
       const reset = resetFor(generation);
+      const isClean = isCleanFor(generation);
       try {
         await shell(adb, setPinArgs, signal);
       } catch (error) {
         throw new OwedResetError(
           "Setting the AutoMobile test PIN failed; release will verify and restore the lock screen.",
           reset,
-          { cause: error },
+          { cause: error, isClean },
         );
       }
       try {
@@ -111,10 +122,10 @@ export function createLockScreenFaultInjector(adb: AdbExecutor): DeviceCondition
         throw new OwedResetError(
           "Verifying the AutoMobile test PIN failed; release will verify and restore the lock screen.",
           reset,
-          { cause: error },
+          { cause: error, isClean },
         );
       }
-      return { status: "applied", detail: "Set the AutoMobile test PIN", reset };
+      return { status: "applied", detail: "Set the AutoMobile test PIN", reset, isClean };
     }
     if (verifies) {
       await shell(adb, clearPinArgs, signal);
@@ -136,7 +147,7 @@ export function createLockScreenFaultInjector(adb: AdbExecutor): DeviceCondition
   return {
     key: LOCK_SCREEN_FAULT_KEY,
     apply: (value, signal) => serialize(() => applyNow(value, signal)),
-    isClean: async (signal) => !(ownsPin && (await testPinVerifies(adb, signal))),
+    isClean: async (signal) => !(await ownedPinPresent(signal)),
   };
 }
 

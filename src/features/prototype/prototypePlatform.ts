@@ -38,6 +38,7 @@ import { prototypePlatformPlaceholders } from "./prototypeData";
 import { prototypeSpecNodeRoots, walkPrototypeNodes } from "./prototypeNodeChildren";
 import { PROTOTYPE_REQUEST_EVENT_NAME, prototypeIntoError } from "./prototypeRequest";
 import { numberValid, type Rule } from "./prototypeBindingValidation";
+import { prototypePermissionRequestError } from "./prototypePermissionRules";
 import { mapBindableFields, record, type Raw } from "./prototypeTemplate";
 
 /**
@@ -546,7 +547,7 @@ function callError(
   if (args) {
     return args;
   }
-  const crossArgs = crossArgumentsError(action, path);
+  const crossArgs = crossArgumentsError(action, path, context.permissions);
   if (crossArgs) {
     return crossArgs;
   }
@@ -557,18 +558,19 @@ function callError(
 /** Rules that relate one call's arguments to each other, beyond the per-argument contract table. */
 const crossArgumentRules: Record<
   string,
-  (args: Raw, path: string) => PrototypePlatformError | undefined
+  (args: Raw, path: string, permissions: ReadonlySet<string>) => PrototypePlatformError | undefined
 > = {
   "share.open": (args, path) => prototypeShareArgumentsError(args, path),
   "links.open": prototypeLinksArgumentsError,
+  "permissions.request": prototypePermissionRequestError,
 };
 
-function crossArgumentsError(action: Raw, path: string): PrototypePlatformError | undefined {
+function crossArgumentsError(action: Raw, path: string, permissions: ReadonlySet<string>) {
   const rule =
     typeof action.call === "string" && Object.hasOwn(crossArgumentRules, action.call)
       ? crossArgumentRules[action.call]
       : undefined;
-  return rule?.(record(action.args) ?? {}, `${path}.args`);
+  return rule?.(record(action.args) ?? {}, `${path}.args`, permissions);
 }
 
 function intoError(into: string): string | undefined {

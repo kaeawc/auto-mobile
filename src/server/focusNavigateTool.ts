@@ -19,8 +19,10 @@ import {
   type FocusObserver,
 } from "../features/action/FocusNavigate";
 import { findFocusedElement } from "../features/observe/HierarchyFocus";
+import { hasOwnPrototype, scopeHierarchyToLayer } from "../features/observe/hierarchyLayer";
 import { DefaultElementParser } from "../features/utility/ElementParser";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
+import type { ObserveScreen } from "../features/observe/interfaces/ObserveScreen";
 
 const focusNavigateInput = z.object({
   until: z
@@ -66,8 +68,7 @@ export const focusNavigateResultSchema = z
 
 const parser = new DefaultElementParser();
 
-function createObserver(device: BootedDevice): FocusObserver {
-  const screen = new RealObserveScreen(device, defaultAdbClientFactory);
+export function createFocusNavigateObserver(screen: Pick<ObserveScreen, "execute">): FocusObserver {
   return {
     read: async (signal) => {
       const result = await screen.execute({
@@ -80,9 +81,18 @@ function createObserver(device: BootedDevice): FocusObserver {
       if (!result.viewHierarchy) {
         throw new ActionableError(result.error ?? "The hierarchy read returned no view hierarchy");
       }
+      let hierarchy = result.viewHierarchy;
+      let focused = result.focusedElement ?? findFocusedElement(hierarchy, parser);
+      if (hasOwnPrototype(hierarchy)) {
+        // App nodes can retain focus behind the overlay; prefer the prototype's own focus.
+        const prototype = scopeHierarchyToLayer(hierarchy, "prototype");
+        const prototypeFocus = findFocusedElement(prototype, parser);
+        hierarchy = prototypeFocus ? prototype : scopeHierarchyToLayer(hierarchy, "app");
+        focused = prototypeFocus ?? findFocusedElement(hierarchy, parser);
+      }
       return {
-        focused: result.focusedElement ?? findFocusedElement(result.viewHierarchy, parser),
-        elements: parser.flattenViewHierarchy(result.viewHierarchy).map(({ element }) => element),
+        focused,
+        elements: parser.flattenViewHierarchy(hierarchy).map(({ element }) => element),
       };
     },
   };
@@ -103,7 +113,7 @@ export const focusNavigateTool = defineDeviceTool({
       throw new ActionableError("focusNavigate is only supported on Android.");
     }
     const navigate = new FocusNavigate(
-      createObserver(device),
+      createFocusNavigateObserver(new RealObserveScreen(device, defaultAdbClientFactory)),
       createKeyPresser(device),
       defaultTimer,
     );

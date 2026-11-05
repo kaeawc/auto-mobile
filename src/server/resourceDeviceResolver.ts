@@ -54,7 +54,7 @@ async function foldResourceDiscovery(
   const pool = defaultDaemonContext.devicePool();
   const aliases = new AndroidTransportAliases(androidTransportIdentityAdbFactory);
   const devices =
-    platform === "ios" || platform === "watchos" || platform === "tvos"
+    platform === "ios" || platform === "watchos" || platform === "tvos" || platform === "visionos"
       ? rawDevices
       : pool
         ? pool.mapAndroidDiscovery(rawDevices)

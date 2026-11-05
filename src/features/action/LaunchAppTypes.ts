@@ -28,7 +28,7 @@ export interface AndroidClearAppDataAction {
 export interface AndroidColdBootAction {
   execute(
     packageName: string,
-    options?: { skipObservation?: boolean; userId?: number },
+    options?: { skipObservation?: boolean; userId?: number; signal?: AbortSignal },
   ): Promise<TerminateAppResult>;
 }
 

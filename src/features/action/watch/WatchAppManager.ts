@@ -36,7 +36,7 @@ export type WatchAppsSimctl = Pick<
 >;
 
 /** How clearAppData finds and removes the watch app's data container (tests inject both). */
-export type WatchDataWipe = Pick<IosClearDataBackendDeps, "rm" | "containerOwnership">;
+export type WatchDataWipe = Pick<IosClearDataBackendDeps, "appDataFs" | "containerOwnership">;
 
 /** Reads `CFBundleIdentifier` from a `.app` bundle's Info.plist. */
 export type WatchBundleIdReader = Pick<PlistReader, "extractRawFile">;

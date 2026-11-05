@@ -22,6 +22,7 @@ export interface IosLivenessSnapshot {
   physicalDiscoverySucceeded: boolean;
   /** Present when this snapshot includes the independent tvOS simulator sweep. */
   tvosDiscoverySucceeded?: boolean;
+  visionosDiscoverySucceeded?: boolean;
   bootedDeviceIds: Set<string>;
 }
 
@@ -90,7 +91,7 @@ export class IdleDeviceReaper {
   }
 
   async getIosLivenessSnapshot(
-    options: { discovery?: BootedDeviceDiscovery; platform?: "ios" | "tvos" } = {},
+    options: { discovery?: BootedDeviceDiscovery; platform?: "ios" | "tvos" | "visionos" } = {},
   ): Promise<IosLivenessSnapshot> {
     const discovery =
       options.discovery ??
@@ -105,6 +106,9 @@ export class IdleDeviceReaper {
     return {
       discoverySucceeded: sources ? sources.has("ios-simulator") : platformSucceeded,
       physicalDiscoverySucceeded: sources ? sources.has("ios-physical") : platformSucceeded,
+      visionosDiscoverySucceeded: sources
+        ? sources.has("visionos-simulator")
+        : discovery.succeededPlatforms.has("visionos"),
       tvosDiscoverySucceeded: sources
         ? sources.has("tvos-simulator")
         : discovery.succeededPlatforms.has("tvos"),
@@ -154,11 +158,13 @@ export class IdleDeviceReaper {
 
     // Only the source that would have listed this device can call it gone.
     const observingSourceSucceeded =
-      device.platform === "tvos"
-        ? iosLiveness.tvosDiscoverySucceeded
-        : isIosPhysicalUdid(device.id)
-          ? iosLiveness.physicalDiscoverySucceeded
-          : iosLiveness.discoverySucceeded;
+      device.platform === "visionos"
+        ? iosLiveness.visionosDiscoverySucceeded
+        : device.platform === "tvos"
+          ? iosLiveness.tvosDiscoverySucceeded
+          : isIosPhysicalUdid(device.id)
+            ? iosLiveness.physicalDiscoverySucceeded
+            : iosLiveness.discoverySucceeded;
     return observingSourceSucceeded ? "stale" : "unknown";
   }
 }

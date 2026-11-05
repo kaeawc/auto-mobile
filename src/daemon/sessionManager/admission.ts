@@ -33,6 +33,7 @@ import {
   cliIdleWindowMs,
   cliIdleWindowReleaseMarker,
   persistedCliIdleWindowMs,
+  persistedInheritedCliIdleWindowMs,
   type GetOrCreateSessionOptions,
   type ResolvedSessionAcquisition,
   type SessionAcquisitionOptions,
@@ -365,39 +366,10 @@ export class SessionAdmission {
     }
     return (
       persistedCliIdleWindowMs(persisted) ??
-      (await this.persistedInheritedCliIdleWindowMs(sessionId, persisted))
+      (await persistedInheritedCliIdleWindowMs(sessionId, persisted, (id) =>
+        this.host.readPersistedSession(id),
+      ))
     );
-  }
-
-  /**
-   * The window a plan label's row inherited from its base's `cli-idle-timeout` (#16971), read from
-   * the base's row: the label's row records only the reason. The nearest `${base}` prefix whose
-   * row ended with `cli-idle-timeout` on the `cli-idle` policy is the base that expired; an
-   * intermediate label inherited the same end and has no window of its own.
-   */
-  private async persistedInheritedCliIdleWindowMs(
-    sessionId: string,
-    persisted: DeviceSession,
-  ): Promise<number | undefined> {
-    if (
-      persisted.source !== PLAN_LABEL_SESSION_SOURCE ||
-      persisted.release_reason !== "cli-idle-timeout"
-    ) {
-      return undefined;
-    }
-    for (
-      let separator = sessionId.lastIndexOf(":");
-      separator > 0;
-      separator = sessionId.lastIndexOf(":", separator - 1)
-    ) {
-      const base = await this.host.readPersistedSession(sessionId.slice(0, separator));
-      const window =
-        base?.release_reason === "cli-idle-timeout" ? persistedCliIdleWindowMs(base) : undefined;
-      if (window !== undefined) {
-        return window;
-      }
-    }
-    return undefined;
   }
 
   preFenceIdleReleaseReason(

@@ -6,6 +6,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExecutorCoroutineDispatcher
 import kotlinx.coroutines.SupervisorJob
@@ -33,6 +34,7 @@ class MultiplexedTelemetrySocketClientTest {
 
   private val phoneA = DeviceStreamKey("emulator-5554", "uuid-a")
   private val phoneB = DeviceStreamKey("emulator-5556", "uuid-b")
+  private val phoneC = DeviceStreamKey("emulator-5558", "uuid-c")
 
   /**
    * One end of a socket: the client reads [toClient] and writes into [fromClient]. [onWrite] runs
@@ -147,13 +149,43 @@ class MultiplexedTelemetrySocketClientTest {
 
   // The client runs on real threads: the scripted daemon is driven through blocking queues, so
   // every wait ends on a frame or state the test produced, never on elapsed time.
-  private fun client(daemon: Daemon) =
+  private fun client(daemon: Daemon, sessionUuid: (() -> String?)? = null) =
     MultiplexedTelemetrySocketClient(
       daemon.transport(),
       CoroutineScope(SupervisorJob() + clientThreads),
-      TelemetryPushSocketOptions(readerThreads = daemon.readerThreads),
+      TelemetryPushSocketOptions(
+        readerThreads = daemon.readerThreads,
+        sessionUuidProvider = sessionUuid,
+      ),
       newRequestId = RequestIds()::next,
     )
+
+  private fun sessionRefusal(requestId: String?) =
+    """{"id":"$requestId","type":"error","success":false,"error":"$SESSION_REFUSED"}"""
+
+  /**
+   * Two devices subscribed under desktop session `session-1`, refused by the daemon. Returns both
+   * subscriptions once each reports the refusal and the refused socket has closed.
+   */
+  private fun refusedSession(
+    client: MultiplexedTelemetrySocketClient,
+    daemon: Daemon,
+  ): List<TelemetrySubscription> = runBlocking {
+    val subscriptions = listOf(client.subscribe(phoneA) {}, client.subscribe(phoneB) {})
+    val socket = daemon.nextSocket()
+    val subscribes = socket.nextSubscribes(2)
+    assertTrue(subscribes.values.all { it["sessionUuid"] == "session-1" })
+    socket.send(sessionRefusal(subscribes.getValue("uuid-a")["id"]))
+    subscriptions.forEach {
+      assertEquals(
+        ConnectionState.Error(SESSION_REFUSED),
+        withTimeout(TIMEOUT_SECONDS * 1_000) { it.state.first { s -> s is ConnectionState.Error } },
+      )
+    }
+    // The refused connection's own cleanup closes the socket.
+    socket.awaitCloses(1)
+    subscriptions
+  }
 
   private class RequestIds {
     private var next = 0
@@ -405,9 +437,87 @@ class MultiplexedTelemetrySocketClientTest {
       assertEquals(1, daemon.openCount)
       client.close()
     }
+
+  @Test
+  fun `a new desktop session reconnects every live device after a session refusal`() = runBlocking {
+    val daemon = Daemon()
+    val session = AtomicReference<String?>("session-1")
+    val client = client(daemon) { session.get() }
+    val (a, _) = refusedSession(client, daemon)
+
+    // A replacement desktop session registers; a retry reaches the daemon again.
+    session.set("session-2")
+    a.retry()
+    val second = daemon.nextSocket()
+    val resubscribed = second.nextSubscribes(2)
+
+    assertEquals(setOf("uuid-a", "uuid-b"), resubscribed.keys)
+    assertTrue(resubscribed.values.all { it["sessionUuid"] == "session-2" })
+    assertEquals(2, daemon.openCount)
+    client.close()
+  }
+
+  @Test
+  fun `a device subscribing to a new desktop session after a refusal reconnects`() = runBlocking {
+    val daemon = Daemon()
+    val session = AtomicReference<String?>("session-1")
+    val client = client(daemon) { session.get() }
+    refusedSession(client, daemon)
+
+    session.set("session-2")
+    val logsC = Sink()
+    val c = client.subscribe(phoneC) { logsC.events.add(it) }
+    val second = daemon.nextSocket()
+    val resubscribed = second.nextSubscribes(3)
+
+    assertEquals(setOf("uuid-a", "uuid-b", "uuid-c"), resubscribed.keys)
+    second.send(ack(resubscribed.getValue("uuid-c")["id"], "telemetry-3"))
+    second.send(log("telemetry-3", "c1", phoneC))
+    assertEquals("c1", logsC.next())
+    withTimeout(TIMEOUT_SECONDS * 1_000) { c.state.first { it is ConnectionState.Connected } }
+    client.close()
+  }
+
+  @Test
+  fun `while the refused session is current no reconnect is tried and new devices see the refusal`() =
+    runBlocking {
+      val daemon = Daemon()
+      val client = client(daemon) { "session-1" }
+      val (a, _) = refusedSession(client, daemon)
+
+      a.retry()
+      val c = client.subscribe(phoneC) {}
+
+      // Told at once, not left Connecting.
+      assertEquals(ConnectionState.Error(SESSION_REFUSED), c.state.first())
+      client.close()
+      assertEquals(1, daemon.openCount)
+      assertTrue(daemon.retryDelays.isEmpty())
+    }
+
+  @Test
+  fun `no socket opens before the desktop session registers and a retry opens one after`() =
+    runBlocking {
+      val daemon = Daemon()
+      val session = AtomicReference<String?>(null)
+      val client = client(daemon) { session.get() }
+      val a = client.subscribe(phoneA) {}
+
+      withTimeout(TIMEOUT_SECONDS * 1_000) { a.state.first { it is ConnectionState.Disconnected } }
+      assertEquals(0, daemon.openCount)
+
+      session.set("session-1")
+      a.retry()
+      val subscribe = daemon.nextSocket().nextRequest()
+      assertEquals("uuid-a", subscribe["deviceSessionUuid"])
+      assertEquals("session-1", subscribe["sessionUuid"])
+      assertEquals(1, daemon.openCount)
+      client.close()
+    }
 }
 
 private const val TIMEOUT_SECONDS = 5L
+private const val SESSION_REFUSED = "telemetry subscribe requires an authenticated daemon session"
 private const val CLIENT_THREADS = 4
 
 /** Counts reader threads created, handing out real single-thread dispatchers. */

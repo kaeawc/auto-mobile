@@ -32,7 +32,9 @@ function displays(panel: "inner" | "cover"): DevicectlDisplayInfo[] {
     ),
     new FakeLogger(),
   );
-  if (parsed.kind !== "ok") throw new Error("Expected captured displays");
+  if (parsed.kind !== "ok") {
+    throw new Error("Expected captured displays");
+  }
   return parsed.displays;
 }
 const stale: Pick<ObserveResult, "screenSize"> = JSON.parse(
@@ -52,7 +54,9 @@ class FakeDisplaySource implements DevicectlDisplayInfoSource {
   constructor(public value: DevicectlDisplayInfo[] | Error) {}
   async readDisplays(): Promise<DevicectlDisplayInfo[]> {
     this.calls++;
-    if (this.value instanceof Error) throw this.value;
+    if (this.value instanceof Error) {
+      throw this.value;
+    }
     return this.value;
   }
 }

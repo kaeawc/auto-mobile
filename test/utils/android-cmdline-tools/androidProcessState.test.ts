@@ -183,19 +183,32 @@ describe("readAndroidPackageProcesses", () => {
       });
     }
 
-    function failingReads(failure: () => Error, failuresBeforeSuccess = Infinity) {
-      const adb = new FakeAdbExecutor();
-      adb.setCommandResponse(COMMAND, result(PROCESS_LIST));
-      const execute = adb.executeCommand.bind(adb);
-      let attempts = 0;
-      spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
-        attempts += 1;
-        if (attempts <= failuresBeforeSuccess) {
-          throw failure();
+    /** Fails the first `failuresBeforeSuccess` dumps, then serves the complete table. */
+    class FlakyDumpAdb extends FakeAdbExecutor {
+      attempts = 0;
+
+      constructor(
+        private readonly failure: () => Error,
+        private readonly failuresBeforeSuccess = Infinity,
+      ) {
+        super();
+        this.setCommandResponse(COMMAND, result(PROCESS_LIST));
+      }
+
+      override async executeCommand(
+        ...args: Parameters<FakeAdbExecutor["executeCommand"]>
+      ): ReturnType<FakeAdbExecutor["executeCommand"]> {
+        this.attempts += 1;
+        if (this.attempts <= this.failuresBeforeSuccess) {
+          throw this.failure();
         }
-        return execute(...args);
-      });
-      return { adb, attempts: () => attempts };
+        return super.executeCommand(...args);
+      }
+    }
+
+    function failingReads(failure: () => Error, failuresBeforeSuccess = Infinity) {
+      const adb = new FlakyDumpAdb(failure, failuresBeforeSuccess);
+      return { adb, attempts: () => adb.attempts };
     }
 
     test("types a partial-stdout exit 255 once the bounded replay is spent", async () => {

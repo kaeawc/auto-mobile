@@ -107,6 +107,15 @@ describe("FocusNavigate", () => {
     expect(result.focusedElement?.text).toBe("Movies");
   });
 
+  test("a label compares normalized whitespace, as the touch resolver does", async () => {
+    const grid = new FakeGrid(0);
+    grid.elements[0] = { ...tile(0), text: "Movies Plus" };
+    grid.elements[1] = { ...tile(1), text: " Movies " };
+    const result = await navigator(grid).execute({ until: { label: "Movies" } });
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 1 });
+    expect(elementMatchesTarget({ ...tile(2), text: "Sign\nin" }, { label: "sign in" })).toBe(true);
+  });
+
   test("a label still accepts a containing match when no exact one is on screen", async () => {
     const grid = new FakeGrid(1);
     const result = await navigator(grid).execute({ until: { label: "Movi" } });

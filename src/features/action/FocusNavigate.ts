@@ -10,6 +10,7 @@ import { ActionableError } from "../../models/ActionableError";
 import type { Element } from "../../models/Element";
 import type { ElementBounds } from "../../models/ElementBounds";
 import { DefaultTextMatcher } from "../utility/TextMatcher";
+import { normalize } from "../utility/ElementResolverMatching";
 import { matchesCtrlProxyResourceId } from "../utility/SearchableNode";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { boundsEqual, intersectBounds } from "../../utils/bounds";
@@ -120,6 +121,21 @@ function stringProp(
   return typeof value === "string" ? value : "";
 }
 
+/**
+ * Label matching normalized as tapOn's touch resolver does (quotes, trimmed, whitespace collapsed,
+ * case-insensitive), so ` Movies ` equals `Movies` and a wrapped `Sign\nin` matches `Sign in`.
+ */
+function labelMatches(label: string, exact: boolean, fields: readonly string[]): boolean {
+  const query = normalize(label);
+  if (!query) {
+    return false;
+  }
+  return fields.some((field) => {
+    const value = normalize(field);
+    return value.length > 0 && (exact ? value === query : value.includes(query));
+  });
+}
+
 export function elementMatchesTarget(element: Element, target: FocusNavigateTarget): boolean {
   if (target.text && !textMatcher.createTextMatcher(target.text)(stringProp(element, "text"))) {
     return false;
@@ -130,14 +146,14 @@ export function elementMatchesTarget(element: Element, target: FocusNavigateTarg
   ) {
     return false;
   }
-  if (target.label) {
-    const matchesLabel = textMatcher.createTextMatcher(target.label, !target.labelExact);
-    if (
-      !matchesLabel(stringProp(element, "text")) &&
-      !matchesLabel(stringProp(element, "content-desc"))
-    ) {
-      return false;
-    }
+  if (
+    target.label &&
+    !labelMatches(target.label, Boolean(target.labelExact), [
+      stringProp(element, "text"),
+      stringProp(element, "content-desc"),
+    ])
+  ) {
+    return false;
   }
   if (
     target.elementId &&

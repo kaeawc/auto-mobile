@@ -1035,9 +1035,8 @@ jobs:
 
       # The claude-plugin check fails in CI without the Claude CLI (#16963).
       - name: "Install pinned Claude Code"
-        shell: bash
         timeout-minutes: 10
-        run: scripts/ci/install-claude-code.sh
+        uses: ./.github/actions/install-claude-code
 
       - name: "Run fast validation checks"
         shell: bash
@@ -1146,9 +1145,8 @@ jobs:
       # The selector adds `claude-plugin` for plugin changes, and that check fails
       # in CI without the Claude CLI (#16963). Foreground: it appends to $GITHUB_PATH.
       - name: "Install pinned Claude Code"
-        shell: bash
         timeout-minutes: 10
-        run: scripts/ci/install-claude-code.sh
+        uses: ./.github/actions/install-claude-code
 
       - wait: [install-bats, install-uv]
 

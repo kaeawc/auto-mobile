@@ -1,0 +1,6 @@
+<resources>
+  <string name="app_name">Kill profile survival fixture</string>
+  <string name="start_schedules">Start schedules and foreground service</string>
+  <string name="channel_name">Survival benchmark</string>
+  <string name="notification_title">Measuring background survival</string>
+</resources>

@@ -22,6 +22,7 @@ import type { TelemetryEvent } from "../../src/features/telemetry/TelemetryRecor
 import { logger } from "../../src/utils/logger";
 import { BODY_TRUNCATION_LIMIT } from "../../src/utils/truncateBodyText";
 import { telemetryEventPushFrameSchema } from "../helpers/wireMessageSchemas";
+import { z } from "zod/v4";
 
 class AuthTelemetryServer extends TelemetryPushSocketServer {
   private subscribed = 0;
@@ -79,6 +80,38 @@ class BackfillTelemetryServer extends TelemetryPushSocketServer {
     return this.finishBackfill("backfill");
   }
 }
+
+/** Subscribes through the wire protocol and exposes each subscription's backfill run. */
+class MultiplexedTelemetryServer extends TelemetryPushSocketServer {
+  readonly backfillRuns: Promise<void>[] = [];
+  receive(socket: Socket, line: string): Promise<void> {
+    return this.processLine(socket, line);
+  }
+  protected override backfillRecentEvents(
+    subscriptionId: string,
+    filter: TelemetryFilter,
+    socket: Socket,
+  ): Promise<void> {
+    const run = super.backfillRecentEvents(subscriptionId, filter, socket);
+    this.backfillRuns.push(run);
+    return run;
+  }
+}
+
+const subscribeLine = (id: string, deviceSessionUuid: string) =>
+  JSON.stringify({ id, command: "subscribe", deviceSessionUuid });
+
+const muxFrameSchema = z.looseObject({
+  type: z.string(),
+  id: z.string().optional(),
+  subscriptionId: z.string().optional(),
+  data: z
+    .looseObject({
+      deviceId: z.string().nullish(),
+      data: z.looseObject({ message: z.string().optional() }).nullish(),
+    })
+    .optional(),
+});
 
 describe("TelemetryPushSocketServer backfill characterization", () => {
   let db: Awaited<ReturnType<typeof createTestDatabase>>;
@@ -224,6 +257,56 @@ describe("TelemetryPushSocketServer backfill characterization", () => {
     expect(queryOrder).toEqual([]);
     expect(messages()).toEqual([]);
     expect(infoSpy).not.toHaveBeenCalled();
+  });
+
+  test("two device-scoped subscriptions on one socket each backfill their own device's history", async () => {
+    // The desktop multiplexes every device's telemetry onto one socket (#16968): one
+    // device-scoped subscribe per device. A quiet device must still get its own history.
+    const mux = new MultiplexedTelemetryServer("/fake/telemetry-mux.sock", timer, {
+      authenticator: { authorize: () => {} },
+    });
+    mux.setDeviceSessionResolver(
+      new FakeDeviceSessionResolver()
+        .bind("emulator-5554", "uuid-busy")
+        .bind("emulator-5556", "uuid-quiet"),
+    );
+    const logRow = (deviceId: string, message: string, timestamp: number) => ({
+      deviceId,
+      timestamp,
+      applicationId: "com.example",
+      sessionId: null,
+      level: 4,
+      tag: "T",
+      message,
+      filterName: "f",
+    });
+    logSpy.mockImplementation(async ({ deviceId }) => {
+      if (deviceId === "emulator-5554") {
+        return [1, 2, 3].map((n) => logRow(deviceId, `busy-${n}`, 100 + n));
+      }
+      return deviceId === "emulator-5556" ? [logRow(deviceId, "quiet-history", 1)] : [];
+    });
+
+    await mux.receive(socket, subscribeLine("req-busy", "uuid-busy"));
+    await mux.receive(socket, subscribeLine("req-quiet", "uuid-quiet"));
+    await Promise.all(mux.backfillRuns);
+
+    const frames = socket.getWrittenMessages(muxFrameSchema);
+    const subscriptionFor = (requestId: string) =>
+      frames.find((f) => f.type === "subscription_response" && f.id === requestId)?.subscriptionId;
+    const backfilled = (subscriptionId: string | undefined) =>
+      frames
+        .filter((f) => f.type === "telemetry_push" && f.subscriptionId === subscriptionId)
+        .map((f) => `${f.data?.deviceId}:${f.data?.data?.message}`);
+    const busy = subscriptionFor("req-busy");
+    const quiet = subscriptionFor("req-quiet");
+    expect(busy).not.toBe(quiet);
+    expect(backfilled(busy)).toEqual([
+      "emulator-5554:busy-1",
+      "emulator-5554:busy-2",
+      "emulator-5554:busy-3",
+    ]);
+    expect(backfilled(quiet)).toEqual(["emulator-5556:quiet-history"]);
   });
 
   test("a backfilling subscriber is performance demand and receives the push-only event after backfill (#14461)", async () => {

@@ -56,7 +56,7 @@ describe("reverseLifecycle", () => {
     const target = { id: "p" };
     const step = reverseLifecycle(dependencies, device, show, target);
     const report = await step.prepare([undefined, undefined]);
-    expect(adb.commands).toEqual(["reverse --list", "reverse tcp:8080 tcp:8080"]);
+    expect(adb.commands).toEqual(["reverse --list", "reverse --no-rebind tcp:8080 tcp:8080"]);
     expect(step.output(report, true)).toEqual({});
     await step.settle(true, false);
     expect(adb.commands).toHaveLength(2);
@@ -236,7 +236,7 @@ describe("saved and patched prototypes", () => {
   test("save reverses under a saved claim and deleteSaved removes it", async () => {
     const { adb, dependencies } = setup();
     await withSavedReverses(dependencies, device, save("p", 9000), ok);
-    expect(adb.commands).toContain("reverse tcp:9000 tcp:9000");
+    expect(adb.commands).toContain("reverse --no-rebind tcp:9000 tcp:9000");
     await withSavedReverses(dependencies, device, { action: "deleteSaved", id: "p" }, ok);
     expect(adb.commands.at(-1)).toBe("reverse --remove tcp:9000");
   });

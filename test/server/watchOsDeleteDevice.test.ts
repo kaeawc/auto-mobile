@@ -363,6 +363,23 @@ describe("deleteDevice on an Apple Watch simulator", () => {
     });
     expect(listed(simctl)).toContain(watch.udid);
   });
+
+  test("a destroyed watch notifies resource subscribers; an absent one does not", async () => {
+    const existing = watchDevice({ name: NAME });
+    await arrange([existing]);
+    let notified = 0;
+    setDeviceToolsDependencies({
+      notifyResourcesChanged: async () => {
+        notified += 1;
+      },
+    });
+
+    expect(toolJson(await remove(target(existing.udid))).state).toBe("destroyed");
+    expect(notified).toBe(1);
+
+    expect(toolJson(await remove(target(existing.udid))).state).toBe("already_absent");
+    expect(notified).toBe(1);
+  });
 });
 
 function createdUdid(simctl: FakeWatchProvisionSimctl): string {

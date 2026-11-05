@@ -165,15 +165,10 @@ private fun CompareSide(
     // Shared reconnect lifecycle: a side that drops (daemon restart / EOF while the overlay is
     // open)
     // reconnects instead of staying in "waiting" until the user closes and reopens compare.
+    // With the app's stream hub, a lease on the device's shared stream (#17012).
     val stream =
-      rememberReconnectingObservationStream(
-        ReconnectingObservationOptions(
-          deviceId = column.deviceId,
-          streamFactory = observationStreamFactory,
-          backoffDelay = backoffDelay,
-          socketAvailable = socketAvailable,
-        ),
-      )
+      rememberPaneObservationState(column, observationStreamFactory, backoffDelay, socketAvailable)
+        .stream
     val activeStream = stream ?: return
     // Fresh token per stream instance (i.e. per mount / device change). A reconnect reuses the same
     // instance, so the token and these collectors deliberately persist across it; correctness only
@@ -195,7 +190,8 @@ private fun CompareSide(
     LaunchedEffect(activeStream) {
       activeStream.deviceEvents.collect { event ->
         when (event) {
-          is DeviceStreamEvent.DeviceSessionSuperseded -> Unit
+          is DeviceStreamEvent.DeviceSessionSuperseded,
+          is DeviceStreamEvent.DeviceSessionEnded -> Unit
           // Device unplugged/offline: retire the snapshot so the diff shows "waiting" until a fresh
           // frame arrives, rather than diffing the live device against a dead one's stale tree.
           is DeviceStreamEvent.DeviceConnectionLost -> clearHierarchy()

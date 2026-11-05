@@ -1,3 +1,4 @@
+import type { DevicectlDisplayInfoSource } from "../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
 import { IosSdkMultiSceneError } from "./ios/sdkObservationBridge";
 import { AllDisplaysObservation } from "./AllDisplaysObservation";
 import { SingleDisplayCaptureStage } from "./SingleDisplayCaptureStage";
@@ -264,7 +265,9 @@ export class RealObserveScreen implements ObserveScreen {
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    dependencies?: ObserveScreenDependencies,
+    dependencies?: ObserveScreenDependencies & {
+      iosDisplayInfoSource?: DevicectlDisplayInfoSource;
+    },
     {
       timer = defaultTimer,
       idGenerator = defaultIdGenerator,
@@ -364,6 +367,7 @@ export class RealObserveScreen implements ObserveScreen {
         ? new IosDisplayBindingCollector(displayBindingDeps)
         : new AndroidDisplayBindingCollector(displayBindingDeps);
     this.iosCollector = new DefaultIosObservationCollector({
+      iosDisplayInfoSource: dependencies?.iosDisplayInfoSource,
       hierarchyCollector: () => this.hierarchyCollector,
       sdkBridge: dependencies?.sdkBridge,
       viewHierarchy: () => this.viewHierarchy,

@@ -33,7 +33,7 @@ class SharedDaemonStreamHubObservationTest {
     var socketAvailable = true
     val hub =
       SharedDaemonStreamHub(
-        telemetryClientFactory = { FakeTelemetryPushClient() },
+        telemetry = FakeTelemetryMultiplexer(),
         scope = scope,
         observation =
           ObservationHubConfig(
@@ -198,14 +198,19 @@ class SharedDaemonStreamHubObservationTest {
   }
 
   @Test
-  fun `storage stays on its own stream`() = runTest {
+  fun `a view's storage subscriptions ride its lease on the shared stream`() = runTest {
     val h = harness()
-    val view = h.hub.observationStream(phoneA).also { it.connect() }
+    val view = h.hub.observationStream(phoneA)
 
-    val rejected = runCatching { view.subscribeStorage("com.example", "prefs") }
+    // No lease yet: nothing to subscribe on.
+    view.subscribeStorage("com.example", "prefs")
+    view.connect()
+    view.subscribeStorage("com.example", "prefs")
 
-    assertTrue(rejected.exceptionOrNull() is UnsupportedOperationException)
-    assertTrue(h.streamFor(phoneA).storageSubscriptions.isEmpty())
+    assertEquals(
+      setOf(StorageSubscriptionKey("com.example", "prefs")),
+      h.streamFor(phoneA).storageSubscriptions,
+    )
   }
 
   @Test
@@ -266,7 +271,7 @@ class SharedDaemonStreamHubObservationTest {
     val reconnectThread = Executors.newSingleThreadExecutor()
     val hub =
       SharedDaemonStreamHub(
-        telemetryClientFactory = { FakeTelemetryPushClient() },
+        telemetry = FakeTelemetryMultiplexer(),
         scope = CoroutineScope(SupervisorJob() + reconnectThread.asCoroutineDispatcher()),
         observation =
           ObservationHubConfig(

@@ -1,3 +1,4 @@
+import { notifyAfterAppleSimulatorProvision } from "./appleSimulatorInventoryNotify";
 import { describeDevice, projectProvisionedDevice } from "../daemon/deviceDescription";
 import {
   getDeviceToolsDependencies,
@@ -95,6 +96,11 @@ export async function provisionWatchDevice(
             );
             const { watch, created } = resolved;
             if (args.boot === false) {
+              notifyAfterAppleSimulatorProvision(
+                `watchOS simulator ${watch.deviceId}`,
+                created,
+                undefined,
+              );
               return watchProvisionResponse(args, watch, created, undefined);
             }
             const booted = await bootAndBind(
@@ -102,6 +108,11 @@ export async function provisionWatchDevice(
               deps,
               deadlineMs,
               { signal: requestSignal, stage },
+            );
+            notifyAfterAppleSimulatorProvision(
+              `watchOS simulator ${watch.deviceId}`,
+              created,
+              booted,
             );
             return watchProvisionResponse(args, watch, created, booted);
           } finally {

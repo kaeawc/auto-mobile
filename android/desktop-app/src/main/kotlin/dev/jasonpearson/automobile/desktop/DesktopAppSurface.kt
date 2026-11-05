@@ -40,12 +40,12 @@ import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceShell
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceShellOptions
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceUiState
 import dev.jasonpearson.automobile.desktop.core.workspace.buildWorkspaceCommands
+import dev.jasonpearson.automobile.desktop.core.workspace.createWorkspaceLifecycleObservationClient
 import dev.jasonpearson.automobile.desktop.core.workspace.isolatedBehindOverlay
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.BasicsChecklistOptions
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePicker
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerOptions
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.RecordDeviceObserved
-import dev.jasonpearson.automobile.desktop.core.workspace.rememberDaemonStreamHub
 import dev.jasonpearson.automobile.desktop.core.workspace.rememberWorkspaceDeviceControl
 import dev.jasonpearson.automobile.desktop.core.workspace.rememberWorkspaceStatus
 import dev.jasonpearson.automobile.desktop.theme.AutoMobileTheme
@@ -53,12 +53,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 internal fun DesktopAppSurface(presentation: DesktopAppPresentation, ui: DesktopAppUiState) {
-  // One shared stream hub per app (#5262): panes lease device streams from it instead of each
-  // opening its own connection.
-  val streamHub = rememberDaemonStreamHub {
-    presentation.desktopDaemonSession?.sessionUuidProvider?.invoke()
-  }
-  CompositionLocalProvider(LocalDaemonStreamHub provides streamHub) {
+  CompositionLocalProvider(LocalDaemonStreamHub provides presentation.runtime.streamHub) {
     DesktopAppSurfaceContent(presentation, ui)
   }
 }
@@ -306,6 +301,12 @@ internal fun DesktopWorkspaceShell(
         options =
           WorkspaceShellOptions(
             onDeviceSessionSuperseded = supersededForwarder::onSuperseded,
+            onDeviceSessionEnded = supersededForwarder::onEnded,
+            lifecycleStreamFactory = { _ ->
+              createWorkspaceLifecycleObservationClient(
+                desktopDaemonSession?.sessionUuidProvider ?: { null },
+              )
+            },
             onOpenPicker = workspaceViewModel::openPicker,
             onOpenPalette = { paletteOpen = true },
             externalCaptureRequest = captureRequest,

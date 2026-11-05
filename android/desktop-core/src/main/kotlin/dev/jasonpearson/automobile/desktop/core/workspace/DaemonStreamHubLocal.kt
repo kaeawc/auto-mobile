@@ -9,11 +9,11 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.staticCompositionLocalOf
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonStreamHub
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamKey
+import dev.jasonpearson.automobile.desktop.core.daemon.MultiplexedObservationSocketClient
+import dev.jasonpearson.automobile.desktop.core.daemon.MultiplexedTelemetrySocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationHubConfig
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
-import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.SharedDaemonStreamHub
-import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushSocketClient
 
 /**
  * The process-wide [DaemonStreamHub] facets draw device streams from. Null (the default, e.g. the
@@ -29,20 +29,23 @@ val LocalDaemonStreamHub = staticCompositionLocalOf<DaemonStreamHub?> { null }
 @Composable
 fun rememberDaemonStreamHub(sessionUuidProvider: () -> String?): DaemonStreamHub {
   val latestSessionUuidProvider by rememberUpdatedState(sessionUuidProvider)
+  val observations = remember {
+    // Every observed device's observation stream over one socket and one reader thread (#17011).
+    MultiplexedObservationSocketClient.create({ latestSessionUuidProvider() })
+  }
   val hub = remember {
     SharedDaemonStreamHub(
-      telemetryClientFactory = {
-        TelemetryPushSocketClient(sessionUuidProvider = { latestSessionUuidProvider() })
-      },
-      observation =
-        ObservationHubConfig(
-          streamFactory = {
-            ObservationStreamClient(sessionUuidProvider = { latestSessionUuidProvider() })
-          },
-        ),
+      // Every observed device's telemetry over one socket and one reader thread (#16968).
+      telemetry = MultiplexedTelemetrySocketClient.create({ latestSessionUuidProvider() }),
+      observation = ObservationHubConfig(streamFactory = observations::stream),
     )
   }
-  DisposableEffect(hub) { onDispose { hub.close() } }
+  DisposableEffect(hub) {
+    onDispose {
+      hub.close()
+      observations.close()
+    }
+  }
   return hub
 }
 
@@ -62,7 +65,8 @@ internal fun hubObservationFactory(
  * A pane facet's observation stream for [column]: a lease on the app's [LocalDaemonStreamHub]
  * per-device stream when there is one, otherwise [fallback]'s own per-pane stream, with the
  * lifecycle of [rememberReconnectingObservationState]. A new device epoch takes a new lease, keyed
- * by the column's deviceSessionUuid.
+ * by the column's deviceSessionUuid. [requireDeviceSessionUuid] waits for the column's epoch before
+ * connecting, and scopes a fallback stream's subscription to it (the Storage facet).
  */
 @Composable
 internal fun rememberPaneObservationState(
@@ -70,12 +74,16 @@ internal fun rememberPaneObservationState(
   fallback: () -> ObservationStream,
   backoffDelay: suspend (attempt: Int) -> Unit,
   socketAvailable: () -> Boolean,
+  requireDeviceSessionUuid: Boolean = false,
 ): ReconnectingObservationState {
   val hub = LocalDaemonStreamHub.current
   return key(column.deviceSessionUuid) {
     rememberReconnectingObservationState(
       ReconnectingObservationOptions(
         deviceId = column.deviceId,
+        // Only a pane that requires the device epoch scopes its own fallback stream to it.
+        deviceSessionUuid = column.deviceSessionUuid.takeIf { requireDeviceSessionUuid },
+        requireDeviceSessionUuid = requireDeviceSessionUuid,
         streamFactory = hubObservationFactory(hub, column, fallback),
         backoffDelay = backoffDelay,
         socketAvailable = socketAvailable,

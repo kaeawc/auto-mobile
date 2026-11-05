@@ -213,6 +213,30 @@ describe("AppleTvSimulatorProvisioner", () => {
     expect(simctl.commands).toEqual([]);
   });
 
+  test("a short device type or runtime names the full identifier and where they are listed", async () => {
+    const { simctl, provisioner } = arrange([]);
+    const shortType = TV_DEVICE_TYPE.identifier.split(".").at(-1)!;
+    const shortRuntime = TV_RUNTIME_ID.split(".").at(-1)!;
+
+    const type = await rejection(
+      provisioner.provision(request({ spec: { ...SPEC, deviceType: shortType } }), {
+        allowCreate: true,
+      }),
+    );
+    const runtime = await rejection(
+      provisioner.provision(request({ spec: { ...SPEC, runtime: shortRuntime } }), {
+        allowCreate: true,
+      }),
+    );
+
+    expect(String(type)).toContain(
+      `Unknown Apple TV device type '${shortType}'. Pass the full CoreSimulator identifier '${TV_DEVICE_TYPE.identifier}'.`,
+    );
+    expect(String(type)).toContain('listDeviceImages { platform: "tvos" }');
+    expect(String(runtime)).toContain(`Pass the full CoreSimulator identifier '${TV_RUNTIME_ID}'.`);
+    expect(simctl.commands).toEqual([]);
+  });
+
   test("an iPhone device type or iOS runtime is not a TV spec", async () => {
     const { simctl, provisioner } = arrange([]);
     simctl.deviceTypes.push({

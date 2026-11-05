@@ -43,7 +43,9 @@ A watch with that name (and `deviceId`, if given) and the same runtime and devic
 A new watch is created only when no watch has that name, no `deviceId` is given and device
 creation is enabled. Two watches with the same name need `deviceId`. A watch with
 that name but a different runtime or device type is an error: use another name, or delete that
-watch first. `resources`, `enableTools` and `readiness: "automation"` are refused.
+watch first. A missing `spec` or field, or an identifier the host does not list, is refused with
+an example and the accepted identifiers. `resources`, `enableTools` and `readiness: "automation"`
+are refused.
 
 Boot an existing watch and start a session with `startDevice`, naming it by exact UDID or exact
 name. Every other option is refused.

@@ -128,7 +128,8 @@ internal fun StreamResponse.toBuildContextUpdate(): BuildContextStreamUpdate? {
 /**
  * A `device_session_ended` frame as the device event it carries: a successor epoch is
  * [DeviceStreamEvent.DeviceSessionSuperseded]; no successor means the device left for good, so
- * [DeviceStreamEvent.DeviceSessionEnded]. Null when an identity is missing or the successor is blank.
+ * [DeviceStreamEvent.DeviceSessionEnded]. Null when an identity is missing or the successor is
+ * blank.
  */
 internal fun StreamResponse.toDeviceSessionEvent(): DeviceStreamEvent? {
   val deviceId = deviceId
@@ -137,10 +138,10 @@ internal fun StreamResponse.toDeviceSessionEvent(): DeviceStreamEvent? {
   val timestamp = timestamp ?: System.currentTimeMillis()
   val successorUuid = successorSessionUuid
   return when {
-    successorUuid == null ->
-      DeviceStreamEvent.DeviceSessionEnded(deviceId, retiredUuid, timestamp)
+    successorUuid == null -> DeviceStreamEvent.DeviceSessionEnded(deviceId, retiredUuid, timestamp)
     successorUuid.isBlank() -> null
-    else -> DeviceStreamEvent.DeviceSessionSuperseded(deviceId, retiredUuid, successorUuid, timestamp)
+    else ->
+      DeviceStreamEvent.DeviceSessionSuperseded(deviceId, retiredUuid, successorUuid, timestamp)
   }
 }
 

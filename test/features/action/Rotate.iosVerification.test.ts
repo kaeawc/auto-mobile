@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { Rotate } from "../../../src/features/action/Rotate";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import type { CtrlProxyRotateResult } from "../../../src/features/observe/ios";
-import type { BootedDevice, ObserveResult } from "../../../src/models";
+import type { BootedDevice, ObserveResult, RotateResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
@@ -125,6 +126,38 @@ describe("iOS observed rotation verification (#8778)", () => {
     expect(result.previousOrientation).toBe("portrait");
     expect(result.currentOrientation).toBe("portrait");
     expect(result.error).toBeUndefined();
+  });
+
+  test("restores landscape after a refused portrait rotation with unchanged captured size", async () => {
+    const envelope = JSON.parse(
+      readFileSync(
+        "test/fixtures/ios-rotate/rotate-duo-inner-portrait-unchanged-size-warned.json",
+        "utf8",
+      ),
+    ) as { content: Array<{ text: string }> };
+    const captured = JSON.parse(envelope.content[0]!.text) as RotateResult;
+    const after = {
+      ...createObserveResult(captured.observation!.rotation),
+      screenSize: captured.observation!.screenSize,
+    };
+    const spy = spyOn(runner, "requestRotate")
+      .mockResolvedValueOnce(
+        runnerResult({
+          success: false,
+          rotationPerformed: false,
+          error: "Rotation is not supported on this display (the screen size did not change)",
+          value: 0,
+          previousOrientation: "landscape",
+          currentOrientation: "portrait",
+        }),
+      )
+      .mockResolvedValueOnce(runnerResult());
+    observe.setObserveSequence([{ ...after, rotation: 1 }, after]);
+    const result = await rotate.execute("portrait");
+    expect(result.success).toBe(false);
+    expect(result.rotationPerformed).toBe(false);
+    expect(result.message).toBe("Failed to rotate to portrait; the screen size did not change.");
+    expect(spy.mock.calls.map((call) => call[0])).toEqual(["portrait", "landscape"]);
   });
 
   test("surfaces cancellation that arrives during the orientation restore", async () => {

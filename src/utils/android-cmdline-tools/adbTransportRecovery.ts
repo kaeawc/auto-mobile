@@ -41,6 +41,7 @@ function isOwnPostDispatchTransportFailure(
   error: unknown,
   deviceId?: string,
   transportId?: string,
+  { stdoutIsData = false }: { stdoutIsData?: boolean } = {},
 ): boolean {
   if (!deviceId || (error instanceof Error && isPreDispatchError(error))) {
     return false;
@@ -63,8 +64,20 @@ function isOwnPostDispatchTransportFailure(
   const { stdout, stderr } = adbFailureOutput(error);
   return isAdbPostDispatchTransportError(stderr, exitCode, deviceId, {
     expectedTransportId: transportId,
-    stdout,
+    stdout: stdoutIsData ? "" : stdout,
   });
+}
+
+/**
+ * Post-dispatch transport loss of a read-only dump (`dumpsys`, `pm list`) whose stdout is
+ * the dump itself, never a remote error report. A bare exit 255 after partial output is a
+ * cut stream there, so it counts as a loss even though stdout is non-empty.
+ */
+export function isReadOnlyDumpTransportLoss(error: unknown, deviceId?: string): boolean {
+  return (
+    !isOwnTransportRefusal(error, deviceId) &&
+    isOwnPostDispatchTransportFailure(error, deviceId, undefined, { stdoutIsData: true })
+  );
 }
 
 interface TransportRecoveryOptions {

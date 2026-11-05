@@ -99,6 +99,8 @@ class DeviceSessionEndedTest {
       val revived = vm.columns().single()
       assertFalse(revived.sessionEnded)
       assertEquals("successor", revived.deviceSessionUuid)
+      // A returning device is a new epoch: the pane's remembered state is dropped.
+      assertEquals(1, revived.epochGeneration)
     }
 
   @Test

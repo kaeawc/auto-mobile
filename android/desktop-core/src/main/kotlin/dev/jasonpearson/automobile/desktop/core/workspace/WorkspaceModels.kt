@@ -164,6 +164,6 @@ internal fun DeviceColumn.nextEpoch(incoming: DeviceColumn): DeviceColumn =
 /** Whether [incoming] is a different daemon-minted epoch of this column's device. */
 internal fun DeviceColumn.isNewEpoch(incoming: DeviceColumn): Boolean =
   deviceId == incoming.deviceId &&
-    deviceSessionUuid != null &&
     incoming.deviceSessionUuid != null &&
-    deviceSessionUuid != incoming.deviceSessionUuid
+    // A disconnected column dropped its epoch, so any epoch the device returns with is new.
+    (sessionEnded || (deviceSessionUuid != null && deviceSessionUuid != incoming.deviceSessionUuid))

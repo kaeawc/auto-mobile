@@ -34,7 +34,7 @@ registry.
   carries `glyphs` (additive within version 1) and, when any has no glyph, `iconMissing`, built by
   `prototypeEmbedGlyphs` from the same `PrototypeIconGlyphSource` as the still. The keys are
   collected statically from the contract over the component-expanded spec, not from a render: every `iconName` slot in its object's
-  `iconVariant` (else `filled`), a filter chip's implicit `filled/check`, plus every iconName-valid string in `state` or `data` in `filled`
+  `iconVariant` (else `filled`), the glyphs a control draws with no `iconName` slot (filter chip and segment checks, the select arrow, the date picker's month arrows), plus every iconName-valid string in `state` or `data` in `filled`
   and each variant an icon node uses, because a state change can hand that name to any icon. A
   value is the allow-listed shapes as SVG markup. iOS-skin glyphs are not included.
 - **Single-file formats.** `automobile:prototype/{id}/compose{?frame,revision}` (`text/x-kotlin`)

@@ -81,6 +81,17 @@ describe("prototype embed glyph keys (#16609)", () => {
     expect(prototypeGlyphKeys(fixture)).toContain("filled/check");
   });
 
+  test.each([
+    ["select-dropdown", ["filled/expand_more"]],
+    ["data-text-placeholders", ["filled/check"]],
+    ["checks-form", ["filled/arrow_drop_down", "filled/chevron_left", "filled/chevron_right"]],
+  ])("the %s fixture names the glyphs its control draws without an icon field", (name, keys) => {
+    const fixture: Record<string, unknown> = JSON.parse(
+      readFileSync(join(FIXTURES, `${name}.json`), "utf8"),
+    );
+    expect(prototypeGlyphKeys(fixture)).toEqual(expect.arrayContaining(keys));
+  });
+
   test("icons inside a reusable component are collected from the expanded spec", () => {
     const keys = prototypeGlyphKeys({
       id: "components",

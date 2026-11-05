@@ -233,7 +233,7 @@ refuse the spec rather than draw part of it. A `version` other than `1` is a new
 
 `glyphs` is present when the spec names an icon that has a glyph. It maps `<variant>/<name>` to the Material Icons
 glyph's shapes, as SVG markup for a `0 0 24 24` viewBox, so a renderer needs no icon set of its
-own. It covers every icon the spec's icon fields name, in the icon's `variant` (else `filled`), the check a filter chip draws when selected,
+own. It covers every icon the spec's icon fields name, in the icon's `variant` (else `filled`), the glyphs controls draw on their own (a filter chip's or segment's selection check, a select's dropdown arrow and a date picker's month arrows),
 and every icon name that appears as a string in `state` or `data`, in `filled` and in each variant
 the spec's icons use, so an icon whose name changes with state still has its glyph. A variant
 without that glyph carries the `filled` one. `iconMissing` lists the keys with no glyph at all;

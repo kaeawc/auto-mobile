@@ -41,11 +41,16 @@ function walkEntries(entries: readonly unknown[], rule: Rule | undefined, found:
 }
 
 /**
- * Glyphs a renderer draws for a node without an `iconName` slot naming them: a filter chip (one
- * with a `stateKey`) draws a check while selected, and any state change can select it.
+ * Glyphs the web renderer draws for a node without an `iconName` slot naming them. A selection
+ * mark is listed even while nothing is selected, since any state change can select it: a filter
+ * chip (one with a `stateKey`) and a selected segment draw a check, a select its dropdown arrow,
+ * and a date picker its year-menu arrow and month buttons.
  */
 const IMPLICIT_GLYPHS: Readonly<Record<string, (node: Record<string, unknown>) => string[]>> = {
   chip: (node) => (typeof node.stateKey === "string" ? ["filled/check"] : []),
+  segmentedButton: () => ["filled/check"],
+  select: () => ["filled/expand_more"],
+  datePicker: () => ["filled/arrow_drop_down", "filled/chevron_left", "filled/chevron_right"],
 };
 
 type Walker = (value: unknown, rule: Rule, found: Collected) => void;

@@ -48,7 +48,7 @@ internal fun interface TelemetryRetryDelay {
   suspend fun wait(delayMs: Long)
 }
 
-private class ChannelTelemetrySocket(path: String) : TelemetrySocket {
+internal class ChannelTelemetrySocket(path: String) : TelemetrySocket {
   private val channel = SocketChannel.open(UnixDomainSocketAddress.of(path))
   private val reader =
     BufferedReader(InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8))
@@ -133,10 +133,6 @@ internal constructor(
 
   private val _shouldReconnect: Boolean
     get() = _state.value.shouldReconnect
-
-  // Retry configuration
-  private val initialRetryDelayMs = 1000L
-  private val maxRetryDelayMs = 30000L
 
   // Flow for live telemetry events — replay caches recent events for late collectors (e.g. tab
   // re-open)
@@ -248,8 +244,7 @@ internal constructor(
           )
         return
       }
-      val delayMs =
-        calculateTelemetryBackoff(attempt, initialRetryDelayMs, maxRetryDelayMs, options.random)
+      val delayMs = telemetryBackoffMs(attempt, options.random)
       _state.value = ConnectionState.Reconnecting(attempt, delayMs)
       retryDelay.wait(delayMs)
     }
@@ -363,14 +358,16 @@ internal constructor(
     }
 }
 
-private fun calculateTelemetryBackoff(
-  attempt: Int,
-  initialRetryDelayMs: Long,
-  maxRetryDelayMs: Long,
-  random: Random,
-): Long {
-  val exponentialDelay = initialRetryDelayMs * (1L shl min(attempt - 1, 10))
-  val cappedDelay = min(exponentialDelay, maxRetryDelayMs)
+/**
+ * Telemetry reconnect delay for [attempt] (1-based): exponential from 1 s, capped at 30 s, plus up
+ * to 10% jitter.
+ */
+internal fun telemetryBackoffMs(attempt: Int, random: Random): Long {
+  val exponentialDelay = TELEMETRY_INITIAL_RETRY_MS * (1L shl min(attempt - 1, 10))
+  val cappedDelay = min(exponentialDelay, TELEMETRY_MAX_RETRY_MS)
   val jitter = (cappedDelay * 0.1 * random.nextDouble()).toLong()
   return cappedDelay + jitter
 }
+
+private const val TELEMETRY_INITIAL_RETRY_MS = 1_000L
+private const val TELEMETRY_MAX_RETRY_MS = 30_000L

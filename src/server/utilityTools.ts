@@ -107,12 +107,13 @@ export const setActiveDeviceSchema = addSessionUuidToSchema(
         ),
       // #5870: the platform is inferred from the resolved device (or the session),
       // so callers targeting a concrete `deviceId` need not also send `platform`.
-      // A watch is the exception (#14908): it is selected only when "watchos" is named.
+      // Non-iOS Apple simulators are the exception (#14908): each is selected only when its
+      // platform is named.
       platform: z
-        .enum(["android", "ios", "watchos", "tvos"])
+        .enum(["android", "ios", "watchos", "tvos", "visionos"])
         .optional()
         .describe(
-          'Inferred from the device; "watchos" is required to select an Apple Watch simulator',
+          'Inferred from the device; "watchos", "tvos" or "visionos" is required to select an Apple Watch, Apple TV or Apple Vision Pro simulator',
         ),
     })
     .strict(),

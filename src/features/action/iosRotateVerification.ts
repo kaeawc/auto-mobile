@@ -43,13 +43,7 @@ function rotationMismatchError(
   const claim = result.rotationPerformed
     ? `a completed rotation to ${requested}`
     : `the device was already in ${requested} orientation`;
-  const beforeSize = previousObservation?.screenSize;
-  const afterSize = result.observation?.screenSize;
-  const unchangedSize =
-    beforeSize &&
-    afterSize &&
-    beforeSize.width === afterSize.width &&
-    beforeSize.height === afterSize.height;
+  const unchangedSize = iosRotationScreenSizeUnchanged(previousObservation, result);
   const unsupported =
     result.rotationPerformed &&
     normalizeIosOrientation(result.previousOrientation) === "unknown" &&
@@ -58,6 +52,48 @@ function rotationMismatchError(
       : "";
   const error = `${unsupported}The display is still ${current} after the runner reported ${claim} (currentOrientation: ${result.currentOrientation ?? "unknown"}).`;
   return error;
+}
+
+function iosRotationScreenSizeUnchanged(
+  previousObservation: ObserveResult | undefined,
+  result: RotateResult,
+): boolean {
+  const beforeSize = previousObservation?.screenSize;
+  const afterSize = result.observation?.screenSize;
+  return Boolean(
+    beforeSize &&
+    afterSize &&
+    beforeSize.width === afterSize.width &&
+    beforeSize.height === afterSize.height,
+  );
+}
+
+function knownPositiveSize(observation: ObserveResult | undefined): boolean {
+  return (observation?.screenSize.width ?? 0) > 0 && (observation?.screenSize.height ?? 0) > 0;
+}
+
+function isUnverifiedIosRotationSize(
+  result: RotateResult,
+  requested: "portrait" | "landscape",
+  current: Orientation,
+  previousObservation: ObserveResult | undefined,
+): boolean {
+  return (
+    result.success &&
+    result.rotationPerformed &&
+    (current === requested || current === "unknown") &&
+    knownPositiveSize(previousObservation) &&
+    knownPositiveSize(result.observation) &&
+    iosRotationScreenSizeUnchanged(previousObservation, result)
+  );
+}
+
+function isObservedRotationMismatch(
+  result: RotateResult,
+  requested: "portrait" | "landscape",
+  current: Orientation,
+): boolean {
+  return result.success && current !== "unknown" && current !== requested;
 }
 
 export function verifyIosRotation(
@@ -74,7 +110,17 @@ export function verifyIosRotation(
     currentOrientation:
       current === "unknown" ? normalizeIosOrientation(result.currentOrientation) : current,
   };
-  if (result.success && current !== "unknown" && current !== requested) {
+  if (isUnverifiedIosRotationSize(result, requested, current, previousObservation)) {
+    return {
+      ...normalized,
+      success: false,
+      rotationPerformed: false,
+      error:
+        "Rotation is not supported on this display (the screen size did not change). The runner reported a rotation but the screen size is unchanged.",
+      message: `Failed to rotate to ${requested}; the screen size did not change.`,
+    };
+  }
+  if (isObservedRotationMismatch(result, requested, current)) {
     const error = rotationMismatchError(result, requested, current, previousObservation);
     return {
       ...normalized,

@@ -109,7 +109,7 @@ describe("iOS observed rotation verification (#8778)", () => {
     expect(result.warning).toBeUndefined();
   });
 
-  test("accepts the daemon restore request shape after a failed landscape rotate", async () => {
+  test("rejects a performed daemon restore request when screen size is unchanged", async () => {
     spyOn(runner, "requestRotate").mockResolvedValue(
       runnerResult({
         value: 0,
@@ -120,11 +120,11 @@ describe("iOS observed rotation verification (#8778)", () => {
     );
     observe.setObserveSequence([createObserveResult(0), createObserveResult(0)]);
     const result = await rotate.execute("portrait");
-    expect(result.success).toBe(true);
-    expect(result.rotationPerformed).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.rotationPerformed).toBe(false);
+    expect(result.error).toContain("screen size is unchanged");
     expect(result.previousOrientation).toBe("portrait");
     expect(result.currentOrientation).toBe("portrait");
-    expect(result.error).toBeUndefined();
   });
 
   test("surfaces cancellation that arrives during the orientation restore", async () => {
@@ -255,17 +255,16 @@ describe("iOS observed rotation verification (#8778)", () => {
     expect(result.error).toContain("completed rotation to landscape");
   });
 
-  test("accepts observed landscape despite unknown runner previous orientation and unchanged size", async () => {
+  test("rejects observed landscape despite unknown runner previous orientation and unchanged size", async () => {
     spyOn(runner, "requestRotate").mockResolvedValue(
       runnerResult({ previousOrientation: "unknown" }),
     );
     observe.setObserveSequence([createObserveResult(1), createObserveResult(1)]);
     const result = await rotate.execute("landscape");
-    expect(result.success).toBe(true);
-    expect(result.rotationPerformed).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.rotationPerformed).toBe(false);
     expect(result.currentOrientation).toBe("landscape");
     expect(result.previousOrientation).toBe("landscape");
-    expect(result.error).toBeUndefined();
   });
 
   test("normalizes runner orientation vocabulary with unknown observations", async () => {

@@ -268,7 +268,12 @@ export class PortReverseManager {
     }
     await this.enqueue(state, async () => {
       await this.releaseWhere(deviceId, state, () => true);
-      if (state.pending === 1 && this.devices.get(deviceId) === state) {
+      // A failed removal keeps the state so its retry is not lost.
+      if (
+        state.pending === 1 &&
+        state.pendingRemoval.size === 0 &&
+        this.devices.get(deviceId) === state
+      ) {
         this.devices.delete(deviceId);
       }
     });

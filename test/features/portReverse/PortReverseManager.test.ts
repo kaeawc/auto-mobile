@@ -214,6 +214,17 @@ describe("PortReverseManager", () => {
     expect(manager.pendingRemovals("emulator-5554")).toEqual([]);
   });
 
+  test("releasing a device keeps a failed removal pending for the next call", async () => {
+    const { adb, manager, target } = setup();
+    await manager.ensure(target(), [{ devicePort: 5000, hostPort: 5000 }]);
+    adb.failRemove.add(5000);
+    await manager.releaseDeviceMappings("emulator-5554");
+    expect(manager.pendingRemovals("emulator-5554")).toEqual([5000]);
+    adb.failRemove.clear();
+    await manager.list(target("s2"));
+    expect(adb.mappings.has(5000)).toBe(false);
+  });
+
   test("forgetting an owner after identity replacement sends no command", async () => {
     const { adb, manager, target } = setup();
     await manager.ensure(target(), [{ devicePort: 5000, hostPort: 5000 }]);

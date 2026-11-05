@@ -1,10 +1,13 @@
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { prototypeNodeChildren, prototypeSpecNodeRoots } from "./prototypeNodeChildren";
-import contract from "../../../schemas/prototype-spec-contract.json";
+import {
+  PROTOTYPE_REPEAT_ITEMS_MAX,
+  prototypeRenderLimits as limits,
+} from "./prototypeRenderContract.generated";
 import {
   PROTOTYPE_DATA_MODEL_CAPABILITY,
   PROTOTYPE_MENUS_CAPABILITY,
-} from "../observe/android/ctrlProxyProtocol";
+} from "../observe/android/ctrlProxyProtocol/capabilities";
 import { mapBindableFields, record, renderScalar, STATE_KEY, type Raw } from "./prototypeTemplate";
 import { expandPrototypeComponents } from "./prototypeComponents";
 
@@ -13,7 +16,7 @@ export function isPrototypeDataPointer(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value.length > 0 &&
-    value.length <= contract.limits.MAX_PROTOTYPE_DATA_POINTER_LENGTH &&
+    value.length <= limits.MAX_PROTOTYPE_DATA_POINTER_LENGTH &&
     prototypeContractPatterns.pointer.test(value)
   );
 }
@@ -73,7 +76,7 @@ export function* dataPlaceholderSpans(
     }
     const end = Math.min(
       text.length,
-      cursor + 2 + prefix.length + contract.limits.MAX_PROTOTYPE_DATA_POINTER_LENGTH,
+      cursor + 2 + prefix.length + limits.MAX_PROTOTYPE_DATA_POINTER_LENGTH,
     );
     let close = cursor + 1;
     while (close < end && text[close] !== "}") {
@@ -177,7 +180,7 @@ export class PrototypeRepeatData {
     for (const { pointer } of dataPlaceholderSpans(text)) {
       recognized = true;
       length += this.rendered(pointer).length;
-      if (length > contract.limits.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH) {
+      if (length > limits.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH) {
         return undefined;
       }
     }
@@ -199,14 +202,10 @@ export class PrototypeRepeatData {
     const objects = Array.isArray(source)
       ? source.filter((item) => record(item) !== undefined)
       : [];
-    const maximum =
-      contract.definitions.repeat.fields.items.rule.options.find(
-        (option) => option.kind === "array",
-      )?.max ?? Infinity;
     let cells = 0;
     for (const item of objects.slice(
       0,
-      Math.max(maximum, contract.limits.MAX_PROTOTYPE_LIST_ITEMS),
+      Math.max(PROTOTYPE_REPEAT_ITEMS_MAX, limits.MAX_PROTOTYPE_LIST_ITEMS),
     )) {
       let members = 0;
       for (const [key, value] of Object.entries(item)) {

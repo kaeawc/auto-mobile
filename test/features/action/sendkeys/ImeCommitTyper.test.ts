@@ -16,6 +16,7 @@ function harness() {
   const calls: unknown[] = [];
   const span: AndroidImeSpan = {
     safeToRestore: true,
+    editorState: {},
     snapshot: { prior: "keyboard/.Ime", wasEnabled: true, priorSubtype: { id: 7 } },
   };
   const host: ImeCommitTyperHost = {

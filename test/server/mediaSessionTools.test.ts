@@ -104,6 +104,30 @@ describe("mediaSession handler", () => {
     expect(controller.calls[0].request).toMatchObject({ mediaState: "playing", timeoutMs: 3000 });
   });
 
+  test("a matched waitFor is not an error envelope", async () => {
+    const { controller, handler } = setup();
+    controller.waitResult = {
+      matched: true,
+      waitMs: 10,
+      polls: 1,
+      dump: { sessions: [playing], mediaButtonSession: PLAYER },
+    };
+
+    const response = await handler(android, { action: "get", waitFor: { mediaState: "playing" } });
+
+    expect("isError" in response).toBe(false);
+  });
+
+  test("a waitFor timeout marks the envelope isError and keeps success for the plan path", async () => {
+    const { controller, handler } = setup();
+    controller.waitResult = { matched: false, waitMs: 5000, polls: 21, dump: pausedDump };
+
+    const response = await handler(android, { action: "get", waitFor: { mediaState: "playing" } });
+
+    expect(response).toMatchObject({ isError: true, success: true });
+    expect(payload(response)).toMatchObject({ awaitTimeout: true, awaitDuration: 5000 });
+  });
+
   test("a waitFor timeout is reported the way the plan executor fails a step", async () => {
     const { controller, handler } = setup();
     controller.waitResult = { matched: false, waitMs: 5000, polls: 21, dump: pausedDump };

@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { SESSION_RELEASE_TEARDOWN_CAP_MS, SessionManager } from "../../src/daemon/sessionManager";
+import {
+  SESSION_RELEASE_TEARDOWN_CAP_MS,
+  SessionManager,
+  type SessionReleaseOperation,
+} from "../../src/daemon/sessionManager";
+import type { SessionDeviceStateRestore } from "../../src/daemon/sessionDeviceStateRestore";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   getAbortSignal,
@@ -357,4 +362,148 @@ describe("session release teardown is shielded from the caller's signal (#10198)
     expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
     expect(await h.pool.assignDeviceToSession("next", "android")).toBe(device.deviceId);
   });
+});
+
+test("session release skips IME flush when no restore is pending", async () => {
+  const h = await harness();
+  await ownDevice(h, ["network"]);
+  const { pendingImeRestores } =
+    await import("../../src/features/action/sendkeys/PendingImeRestore");
+  const flushIme = spyOn(pendingImeRestores, "flush");
+  try {
+    await h.manager.releaseSession("old", "plan-auto-release");
+    expect(flushIme).not.toHaveBeenCalled();
+    expect(h.fake.reached).toEqual(["network"]);
+  } finally {
+    flushIme.mockRestore();
+  }
+});
+
+test("session release restores a pending typing IME exactly once before handing off the device", async () => {
+  const h = await harness();
+  await ownDevice(h, []);
+  const { pendingImeRestores } =
+    await import("../../src/features/action/sendkeys/PendingImeRestore");
+  const restored: string[] = [];
+  pendingImeRestores.store(
+    device.deviceId,
+    {
+      snapshot: { prior: "keyboard/.Ime", wasEnabled: false, priorSubtype: { id: 7 } },
+      userId: 10,
+      restore: async () => {
+        expect(h.manager.getSessionForDevice(device.deviceId)).toBe("old");
+        restored.push("restore");
+      },
+    },
+    h.timer,
+  );
+  try {
+    await h.manager.releaseSession("old", "plan-auto-release");
+    await h.manager.releaseSession("old", "plan-auto-release");
+    expect(restored).toEqual(["restore"]);
+  } finally {
+    pendingImeRestores.discard(device.deviceId);
+  }
+});
+
+test("a release forced after the restore took the IME lock aborts that restore's fence (#16580)", async () => {
+  const h = await harness();
+  await ownDevice(h, []);
+  const { pendingImeRestores } =
+    await import("../../src/features/action/sendkeys/PendingImeRestore");
+  const started = Promise.withResolvers<AbortSignal | undefined>();
+  const gate = Promise.withResolvers<void>();
+  const writes: string[] = [];
+  pendingImeRestores.store(
+    device.deviceId,
+    {
+      snapshot: { prior: "keyboard/.Ime", wasEnabled: false, priorSubtype: { id: 7 } },
+      userId: 10,
+      restore: async (fence) => {
+        started.resolve(fence);
+        await gate.promise;
+        // Stands in for ImeRestore: every later device write checks the fence first.
+        if (!fence?.aborted) {
+          writes.push("ime disable");
+        }
+      },
+    },
+    h.timer,
+  );
+  const session = h.manager.getSession("old");
+  const stateRestore = Reflect.get(h.manager, "stateRestore") as SessionDeviceStateRestore;
+  const operation: SessionReleaseOperation = {
+    session: session!,
+    promise: Promise.resolve(null),
+    reason: { value: "plan-auto-release" },
+    options: {},
+    startedAtMs: 0,
+    stuckDeadlineMs: 1000,
+    forcedAbort: new AbortController(),
+  };
+  try {
+    const drain = stateRestore.drainReleaseTeardown("old", session!, operation);
+    const fence = await started.promise;
+    expect(fence?.aborted).toBe(false);
+
+    operation.forced = true;
+    operation.forcedAbort!.abort(new Error("forced"));
+    expect(fence?.aborted).toBe(true);
+    gate.resolve();
+    await Promise.all(await drain);
+
+    expect(writes).toEqual([]);
+    expect(pendingImeRestores.hasPending(device.deviceId)).toBe(false);
+  } finally {
+    pendingImeRestores.discard(device.deviceId);
+  }
+});
+
+test("a release forced while it waits for the IME lock discards the pending restore", async () => {
+  const h = await harness();
+  await ownDevice(h, []);
+  const { pendingImeRestores } =
+    await import("../../src/features/action/sendkeys/PendingImeRestore");
+  const { withAndroidImeLock } = await import("../../src/features/action/androidImeLock");
+  const restores: string[] = [];
+  pendingImeRestores.store(
+    device.deviceId,
+    {
+      snapshot: { prior: "keyboard/.Ime", wasEnabled: false, priorSubtype: { id: 7 } },
+      userId: 10,
+      restore: async () => {
+        restores.push("restore");
+      },
+    },
+    h.timer,
+  );
+  const session = h.manager.getSession("old");
+  const stateRestore = Reflect.get(h.manager, "stateRestore") as SessionDeviceStateRestore;
+  const operation: SessionReleaseOperation = {
+    session: session!,
+    promise: Promise.resolve(null),
+    reason: { value: "plan-auto-release" },
+    options: {},
+    startedAtMs: 0,
+    stuckDeadlineMs: 1000,
+    forcedAbort: new AbortController(),
+  };
+  const lockHeld = Promise.withResolvers<void>();
+  const holder = withAndroidImeLock(device.deviceId, () => lockHeld.promise);
+  try {
+    const drain = stateRestore.drainReleaseTeardown("old", session!, operation);
+    await flush();
+    expect(pendingImeRestores.hasPending(device.deviceId)).toBe(true);
+
+    operation.forced = true;
+    operation.forcedAbort!.abort(new Error("forced"));
+    lockHeld.resolve();
+    await holder;
+    await Promise.all(await drain);
+
+    expect(restores).toEqual([]);
+    expect(pendingImeRestores.hasPending(device.deviceId)).toBe(false);
+  } finally {
+    pendingImeRestores.discard(device.deviceId);
+  }
 });

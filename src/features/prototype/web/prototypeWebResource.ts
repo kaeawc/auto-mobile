@@ -1,6 +1,7 @@
 import { ActionableError } from "../../../models";
 import type { PrototypeSpecRevision, PrototypeSpecRevisionSource } from "../prototypeSpecRevisions";
 import { defaultDeviceFrameId, deviceFrameOrThrow } from "./deviceFrames";
+import { withActionableWebInput } from "./prototypeWebInputActionable";
 import { buildPrototypeWebPage, type PrototypeWebVariant } from "./webPage";
 
 /** Query parameters of `automobile:prototype/{id}/web`, the id already decoded. */
@@ -63,9 +64,10 @@ function webVariant(source: PrototypeSpecRevisionSource, id: string): PrototypeW
   };
 }
 
-function shownRevision(
+/** The variant `query` shows first and its requested revision; unknown variants are refused. */
+export function shownRevision(
   source: PrototypeSpecRevisionSource,
-  query: PrototypeWebResourceQuery,
+  query: Pick<PrototypeWebResourceQuery, "id" | "revision" | "variant">,
   variantIds: readonly string[],
 ): { id: string; revision: PrototypeSpecRevision } {
   const id = query.variant ?? query.id;
@@ -83,6 +85,14 @@ function shownRevision(
  * default frame of the platform that showed that revision, else Android's.
  */
 export function readPrototypeWebResource(
+  source: PrototypeSpecRevisionSource,
+  query: PrototypeWebResourceQuery,
+  rendererVersion: string,
+): PrototypeWebResource {
+  return withActionableWebInput(() => buildWebResource(source, query, rendererVersion));
+}
+
+function buildWebResource(
   source: PrototypeSpecRevisionSource,
   query: PrototypeWebResourceQuery,
   rendererVersion: string,

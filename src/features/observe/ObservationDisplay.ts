@@ -1,6 +1,13 @@
-import type { BootedDevice, DisplayPanel, DisplayRef, ViewHierarchyResult } from "../../models";
+import type {
+  BootedDevice,
+  DisplayPanel,
+  DisplayRef,
+  ObserveResult,
+  ViewHierarchyResult,
+} from "../../models";
 import {
   buildDisconnectedPanelMessage,
+  isPhysicalPanel,
   POSTURE_PANEL_ROLES,
   panelKeyForFingerprint,
   type PanelFingerprint,
@@ -14,6 +21,7 @@ import {
 } from "../../utils/android-cmdline-tools/AndroidDisplayInventory";
 import {
   logicalDisplayIdForPanel,
+  panelKeyForUniqueId,
   parseAndroidDisplayInfos,
 } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
 import { selectLiveSimulatorDisplay } from "../../utils/ios-cmdline-tools/SimulatorDisplays";
@@ -91,9 +99,7 @@ const androidDisplayCache = new Map<string, CachedAndroidDisplay>();
 const lastKnownAndroidDisplay = new Map<string, ObservedAndroidDisplay>();
 const androidPostureCache = new Map<string, { inventory: string; at: number; posture: Posture }>();
 
-function physicalPanelKey(uniqueId: string): string {
-  return uniqueId.includes(":") ? uniqueId.split(":").slice(1).join(":") : uniqueId;
-}
+const physicalPanelKey = panelKeyForUniqueId;
 
 function postureForState(current: string, supported: string): Posture {
   const stateId = parseAndroidCommittedStateIdentifier(current);
@@ -253,7 +259,7 @@ export class ObservedAndroidDisplayCache {
     signal?: AbortSignal,
     force = false,
   ): Promise<Posture> {
-    if ((device.displays?.panels.length ?? 0) < 2) {
+    if ((device.displays?.panels.filter(isPhysicalPanel).length ?? 0) < 2) {
       return "unknown";
     }
     const inventory = JSON.stringify(device.displays);
@@ -375,11 +381,8 @@ function displayForAndroidInfos(
   panels: readonly DisplayPanel[],
   infos: ReturnType<typeof parseAndroidDisplayInfos>,
 ): ObservedAndroidDisplay {
-  const physicalKey = infos
-    .find((info) => info.logicalId === "0")
-    ?.uniqueId?.split(":")
-    .slice(1)
-    .join(":");
+  const defaultUniqueId = infos.find((info) => info.logicalId === "0")?.uniqueId;
+  const physicalKey = defaultUniqueId ? panelKeyForUniqueId(defaultUniqueId) : undefined;
   const panel = panels.find((candidate) => candidate.key === physicalKey);
   // Single-panel inventories are omitted by discovery. "0" is the stable
   // logical-display fallback; role and posture stay unknown without evidence.
@@ -416,15 +419,37 @@ function iosPanelPosture(role: DisplayPanel["role"] | undefined): Posture {
   return POSTURE_PANEL_ROLES.find(([, panelRole]) => panelRole === role)?.[0] ?? "unknown";
 }
 
-/** Match the runner's live pixel size against the enumerated physical panels. */
+/**
+ * Live CoreDevice panel evidence, keyed by the observation it was read for. It is never shared
+ * per device: a concurrent observation without a live source cannot clear or replace the panel
+ * an in-flight observation already adopted (#17114).
+ */
+const liveIosPanelEvidence = new WeakMap<ObserveResult, DisplayPanel>();
+
+export function rememberLiveIosPanel(result: ObserveResult, panel: DisplayPanel | undefined): void {
+  if (panel) {
+    liveIosPanelEvidence.set(result, panel);
+  } else {
+    liveIosPanelEvidence.delete(result);
+  }
+}
+
+export function liveIosPanelFor(result: ObserveResult): DisplayPanel | undefined {
+  return liveIosPanelEvidence.get(result);
+}
+
+/** Prefer the observation's live CoreDevice panel, falling back to the runner pixel size. */
 export function observedIosDisplay(
   device: BootedDevice,
   hierarchy:
     | Pick<ViewHierarchyResult, "pixelWidth" | "pixelHeight" | "captureSequence">
     | undefined,
+  livePanel?: DisplayPanel,
 ): DisplayRef {
   const panels = device.displays?.panels ?? [];
-  const panel = liveIosPanel(panels, hierarchy);
+  const panel =
+    (livePanel && panels.find((candidate) => candidate.key === livePanel.key)) ??
+    liveIosPanel(panels, hierarchy);
   return {
     key: panel?.key ?? "0",
     role: panel?.role ?? "unknown",

@@ -338,6 +338,44 @@ describe("prototype web still (#16346)", () => {
     expect(byTag(renderPrototypeStill(ime), "padded")[0]!.style["padding-bottom"]).toBe("8px");
   });
 
+  describe("landscape left inset on an iPhone frame (#16588)", () => {
+    const screens = (reference.root as { screens: Record<string, Record<string, unknown>> })
+      .screens;
+    const landscape = (cart: Record<string, unknown>) =>
+      renderPrototypeStill(
+        { ...reference, root: { ...(reference.root as object), screens: { ...screens, cart } } },
+        { frame: "iphone-16", orientation: "landscape" },
+      ).element;
+    const screenOf = (element: WebElement) =>
+      find(element, (node) => node.attrs["data-chrome"] === "screen")[0]!;
+    const insetUsers = (element: WebElement) =>
+      find(element, (node) => node.attrs["data-chrome"] === undefined).filter((node) =>
+        Object.values(node.style).some((value) => /--safe-(start|left)/.test(value)),
+      );
+
+    test("the screen resolves the start inset to the frame's 59 px landscape left inset", () => {
+      const screen = screenOf(landscape(screens.cart!)).style;
+      expect(screen["--safe-left"]).toBe("59px");
+      expect(screen["--safe-start"]).toBe("var(--safe-left)");
+    });
+
+    test("without safeAreaPadding no content takes the left inset, as both devices draw edge to edge", () => {
+      expect(insetUsers(landscape(screens.cart!))).toEqual([]);
+    });
+
+    test("safeAreaPadding on the screen column insets every row once", () => {
+      const users = insetUsers(
+        landscape({
+          ...screens.cart,
+          testTag: "cart",
+          safeAreaPadding: { edges: ["start", "end"], types: ["systemBars", "cutout"] },
+        }),
+      );
+      expect(users.map((node) => node.attrs["data-testid"])).toEqual(["cart"]);
+      expect(users[0]!.style["padding-inline-start"]).toBe("calc(0px + var(--safe-start))");
+    });
+  });
+
   test("draws a button disabled only when its enabledWhen is decidably false", () => {
     const buttonOf = (enabledWhen?: unknown) =>
       byTag(
@@ -511,6 +549,222 @@ describe("prototype web still (#16346)", () => {
     const wrapper = row.children[0] as WebElement;
     expect(wrapper.style).toMatchObject({ flex: "1 1 0", "flex-direction": "column" });
     expect(byTag({ element: row }, "field")[0]!.style).not.toHaveProperty("flex");
+  });
+
+  test("a row's unsized aspect ratio takes the width its earlier siblings left (#16659)", () => {
+    const root = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          children: [
+            {
+              type: "row",
+              testTag: "line",
+              children: [
+                { type: "text", text: "a", testTag: "before" },
+                { type: "box", testTag: "ratio", style: { aspectRatio: 2 } },
+                { type: "text", text: "b", testTag: "after" },
+              ],
+            },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    // A wrap row grows to its parent, as Compose's Row reaches its max around the ratio.
+    expect(root.style).toMatchObject({ "align-self": "stretch", width: "100%" });
+    const style = (tag: string) => byTag({ element: root }, tag)[0]!.style;
+    expect(style("ratio")).toMatchObject({ "aspect-ratio": "2", flex: "1 1 0", "min-width": "0" });
+    expect(style("before")).not.toHaveProperty("max-width");
+    expect(style("after")["max-width"]).toBe("0px");
+  });
+
+  test("a row's capped aspect ratio takes its cap and the row stays within its parent (#16673)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          children: [
+            {
+              type: "row",
+              testTag: "line",
+              children: [
+                { type: "box", testTag: "ratio", style: { aspectRatio: 2, maxHeight: 30 } },
+                { type: "text", text: "b", testTag: "after" },
+              ],
+            },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    // The row wraps its children but never outgrows its parent, as a Compose Row's max does.
+    expect(row.style["max-width"]).toBe("100%");
+    expect(row.style).not.toHaveProperty("width");
+    const style = (tag: string) => byTag({ element: row }, tag)[0]!.style;
+    expect(style("ratio")).toMatchObject({
+      "aspect-ratio": "2",
+      "flex-basis": "60px",
+      "flex-grow": "0",
+      "min-width": "0",
+      width: "60px",
+    });
+    // The later sibling keeps its width while the cap leaves room, and gives it up first.
+    expect(style("after")).toMatchObject({ "flex-shrink": "1000000000", "min-width": "0" });
+    expect(style("after")).not.toHaveProperty("max-width");
+  });
+
+  test("a later sibling's minWidth gives way to a capped aspect ratio (#16772)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "row",
+          testTag: "line",
+          style: { width: { dp: 100 } },
+          children: [
+            { type: "box", testTag: "ratio", style: { aspectRatio: 1, maxWidth: 100 } },
+            { type: "box", testTag: "after", style: { width: { dp: 40 }, minWidth: 40 } },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    // Folded into its width, the minimum no longer holds against shrinking, as Android's sizeIn.
+    expect(byTag({ element: row }, "after")[0]!.style).toMatchObject({
+      width: "40px",
+      "min-width": "0",
+      "flex-shrink": "1000000000",
+    });
+  });
+
+  test("a content-width later sibling's minWidth holds through a strut, not calc-size (#16794)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "row",
+          testTag: "line",
+          style: { width: { dp: 100 } },
+          children: [
+            { type: "box", testTag: "ratio", style: { aspectRatio: 1, maxWidth: 100 } },
+            { type: "text", testTag: "after", text: "Hi", style: { minWidth: 40 } },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    const cell = row.children.at(-1) as WebElement;
+    // The row's flex item is the wrapping cell, which gives its width up first.
+    expect(cell.style).toMatchObject({
+      display: "grid",
+      "grid-template-columns": "minmax(0, auto)",
+      "min-width": "0",
+      "flex-shrink": "1000000000",
+    });
+    const [node, strut] = cell.children as WebElement[];
+    expect(node!.attrs["data-testid"]).toBe("after");
+    // Stretched explicitly, since grid would not stretch an aspect-ratio or replaced node.
+    expect(node!.style).toMatchObject({
+      "grid-area": "1 / 1",
+      "min-width": "0",
+      "justify-self": "stretch",
+    });
+    expect(node!.style).not.toHaveProperty("flex-shrink");
+    expect(node!.style).not.toHaveProperty("width");
+    expect(strut!.attrs["aria-hidden"]).toBe("true");
+    expect(strut!.style).toEqual({
+      "grid-area": "1 / 1",
+      width: "40px",
+      "max-width": "100%",
+      height: "0",
+    });
+    expect(toHtml(row)).not.toContain("calc-size");
+  });
+
+  test("a wrapped later column keeps its own direction; its maxWidth bounds the cell (#16794)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "row",
+          testTag: "line",
+          style: { width: { dp: 300 } },
+          children: [
+            { type: "box", testTag: "ratio", style: { aspectRatio: 1, maxWidth: 100 } },
+            {
+              type: "column",
+              testTag: "after",
+              style: { width: "fill", minWidth: 40, maxWidth: 100 },
+              children: [
+                { type: "text", text: "A" },
+                { type: "text", text: "B" },
+              ],
+            },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    const cell = row.children.at(-1) as WebElement;
+    const node = byTag({ element: cell }, "after")[0]!;
+    expect(node.style).toMatchObject({ display: "flex", "flex-direction": "column" });
+    expect(cell.style).not.toHaveProperty("flex-direction");
+    expect(cell.style).toMatchObject({ display: "grid", "max-width": "100px", flex: "1 1 auto" });
+    expect(node.style["max-width"]).toBe("100px");
+  });
+
+  test("a wrapped later sibling drops its component's default width to fill the cell (#16794)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "row",
+          testTag: "line",
+          style: { width: { dp: 300 } },
+          children: [
+            { type: "box", testTag: "ratio", style: { aspectRatio: 1, maxWidth: 100 } },
+            { type: "iconButton", testTag: "after", icon: "add", style: { minWidth: 80 } },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    const cell = row.children.at(-1) as WebElement;
+    expect(cell.style.display).toBe("grid");
+    expect(byTag({ element: cell }, "after")[0]!.style).not.toHaveProperty("width");
+  });
+
+  test("a dp-wide column in a horizontal scroll bounds its row to its own width (#16691)", () => {
+    const shown = renderPrototypeStill({
+      ...reference,
+      root: {
+        type: "scroll",
+        axis: "horizontal",
+        child: {
+          type: "row",
+          testTag: "strip",
+          children: [
+            {
+              type: "column",
+              style: { width: { dp: 100 } },
+              children: [
+                {
+                  type: "row",
+                  testTag: "inner",
+                  children: [{ type: "box", style: { aspectRatio: 1, maxWidth: 300 } }],
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    // The scroll's own row stays unbounded; the row beneath the 100 dp column is bounded by it.
+    expect(byTag(shown, "strip")[0]!.style).not.toHaveProperty("max-width");
+    expect(byTag(shown, "inner")[0]!.style["max-width"]).toBe("100%");
   });
 
   test("an explicit wrap-width root keeps its content width in its window", () => {
@@ -1130,12 +1384,33 @@ describe("prototype web still parity (#16382)", () => {
     expect(toHtml(screen)).not.toContain("conic-gradient");
   });
 
-  test("a seed or device scheme paints the Material 3 baseline background for the mode", () => {
+  test("a seed paints its derived background; a device source without one, the baseline", () => {
     const seeded = { ...bare, theme: { colors: { seed: "#336699" } } };
-    expect(screenOf(seeded).style["background-color"]).toBe("rgba(254,247,255,1)");
-    expect(screenOf(seeded, { mode: "dark" }).style["background-color"]).toBe("rgba(20,18,24,1)");
+    expect(screenOf(seeded).style["background-color"]).toBe("rgba(250,250,250,1)");
+    expect(screenOf(seeded, { mode: "dark" }).style["background-color"]).toBe("rgba(17,18,19,1)");
     const device = { ...bare, theme: { colors: { source: "device" } } };
     expect(screenOf(device).style["background-color"]).toBe("rgba(254,247,255,1)");
+  });
+
+  test("seed-derived roles reach node styles, under the theme's explicit overrides (#16611)", () => {
+    const spec = {
+      ...bare,
+      theme: { colors: { seed: "#6750A4", primary: "#B3261E", dark: { primary: "#F2B8B5" } } },
+      root: {
+        type: "column",
+        style: { background: "primaryContainer", border: { width: 1, color: "primary" } },
+        children: [],
+      },
+    };
+    const root = (mode: "light" | "dark") =>
+      find(
+        renderPrototypeStill(spec, { mode }).element,
+        (e) => e.attrs["data-node"] === "column",
+      )[0]!.style;
+    // The seed's dark primaryContainer is hsl(256, 0.34, 0.30), not the baseline's #4F378B.
+    expect(root("dark")["background-color"]).toBe("rgba(65,50,103,1)");
+    expect(root("dark").border).toBe("1px solid rgba(242,184,181,1)");
+    expect(root("light").border).toBe("1px solid rgba(179,38,30,1)");
   });
 
   test("a top app bar without safeAreaPadding takes no status-bar inset, as on the devices", () => {
@@ -1191,15 +1466,19 @@ describe("prototype web still parity (#16382)", () => {
   });
 
   test("an icon placeholder shows its name's initial", () => {
+    // An iOS frame has no glyph set yet (#16526), so every icon draws the placeholder.
     const iconOf = (name?: string) =>
       byTag(
-        renderPrototypeStill({
-          ...bare,
-          root: {
-            type: "column",
-            children: [{ type: "icon", testTag: "i", ...(name === undefined ? {} : { name }) }],
+        renderPrototypeStill(
+          {
+            ...bare,
+            root: {
+              type: "column",
+              children: [{ type: "icon", testTag: "i", ...(name === undefined ? {} : { name }) }],
+            },
           },
-        }),
+          { platform: "ios" },
+        ),
         "i",
       )[0]!;
     expect(textOf(iconOf("search"))).toBe("S");
@@ -1264,5 +1543,42 @@ describe("prototype web still stack screens (#16382)", () => {
   test("a spec without a stack reports none", () => {
     const still = renderPrototypeStill({ id: "bare", root: { type: "column", children: [] } });
     expect(still.stack).toBeUndefined();
+  });
+});
+
+describe("prototype web still platform state (#16448)", () => {
+  const adaptive = {
+    ...reference,
+    root: {
+      type: "column",
+      children: [
+        {
+          type: "text",
+          testTag: "wide",
+          text: "wide",
+          visibleWhen: { platform: "/device/widthClass", equals: "expanded" },
+        },
+        {
+          type: "text",
+          testTag: "label",
+          text: "{platform:/device/os} {platform:/device/widthClass}|{platform:/device/posture}|{platform:/device/idiom}",
+        },
+      ],
+    },
+  };
+
+  test("a widthClass condition resolves per frame and orientation", () => {
+    expect(byTag(renderPrototypeStill(adaptive, { frame: "pixel-9" }), "wide")).toHaveLength(0);
+    expect(
+      byTag(renderPrototypeStill(adaptive, { frame: "pixel-9", orientation: "landscape" }), "wide"),
+    ).toHaveLength(1);
+  });
+
+  test("text binds the platform state the frame decides and leaves other pointers literal", () => {
+    const label = (options: Parameters<typeof renderPrototypeStill>[1]) =>
+      textOf(byTag(renderPrototypeStill(adaptive, options), "label")[0]!);
+    expect(label({ frame: "medium-tablet" })).toBe("android medium||{platform:/device/idiom}");
+    expect(label({ frame: "iphone-16" })).toBe("ios compact||{platform:/device/idiom}");
+    expect(label({ frame: "ipad-10" })).toBe("ios regular||{platform:/device/idiom}");
   });
 });

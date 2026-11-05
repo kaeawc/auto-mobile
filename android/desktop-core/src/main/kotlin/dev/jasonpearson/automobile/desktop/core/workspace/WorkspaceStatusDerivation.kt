@@ -20,11 +20,14 @@ data class WorkspaceStatusResult(
  * [WorkspaceStatus.Red] regardless of device health, because without the daemon nothing else can be
  * trusted. A daemon that is mid-(re)connect is [WorkspaceStatus.Yellow]. Only once the daemon is
  * [ConnectionState.Connected] do per-device streams decide the color: any offline or (re)connecting
- * device stream is [WorkspaceStatus.Yellow]; all-connected is [WorkspaceStatus.Green].
+ * device stream is [WorkspaceStatus.Yellow]. With every stream healthy, [failingDiagnosticChecks]
+ * (system checks in the Error state, e.g. adb missing) keeps the dot [WorkspaceStatus.Yellow];
+ * otherwise it is [WorkspaceStatus.Green].
  */
 fun deriveWorkspaceStatus(
   daemon: ConnectionState,
   devices: List<ConnectionState>,
+  failingDiagnosticChecks: Int = 0,
 ): WorkspaceStatusResult =
   when (daemon) {
     is ConnectionState.Disconnected ->
@@ -35,7 +38,10 @@ fun deriveWorkspaceStatus(
     is ConnectionState.Reconnecting ->
       WorkspaceStatusResult(WorkspaceStatus.Yellow, "Daemon reconnecting")
     // Daemon is up: device streams decide the color.
-    is ConnectionState.Connected -> deriveFromDevices(devices)
+    is ConnectionState.Connected ->
+      deriveFromDevices(devices).takeIf {
+        it.status != WorkspaceStatus.Green || failingDiagnosticChecks <= 0
+      } ?: WorkspaceStatusResult(WorkspaceStatus.Yellow, checksPhrase(failingDiagnosticChecks))
   }
 
 /**
@@ -55,6 +61,10 @@ private fun deriveFromDevices(devices: List<ConnectionState>): WorkspaceStatusRe
     else -> WorkspaceStatusResult(WorkspaceStatus.Green, null)
   }
 }
+
+/** Terse "N diagnostic check(s) failing" line with singular/plural agreement. */
+private fun checksPhrase(count: Int): String =
+  "$count diagnostic check${if (count == 1) "" else "s"} failing"
 
 /** Terse "N device(s) <adjective>" line with singular/plural agreement. */
 private fun devicePhrase(count: Int, adjective: String): String =

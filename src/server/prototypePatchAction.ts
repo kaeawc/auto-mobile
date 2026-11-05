@@ -1,5 +1,6 @@
 import { prototypeDegradedEffectsOutput } from "../features/prototype/prototypeDegradedEffects";
 import { prototypeTimerWarnings } from "../features/prototype/prototypeTimers";
+import { prototypeSettingsPagePlatformError } from "../features/prototype/prototypeSettings";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
 import {
@@ -146,6 +147,10 @@ async function queuedPatch(
   const applied = plannedPatch(deps, deviceId, args, read.spec);
   if (!("spec" in applied)) {
     return applied;
+  }
+  const settingsPage = prototypeSettingsPagePlatformError(applied.spec, deps.platform);
+  if (settingsPage) {
+    return failure(`Invalid patch result at spec.${settingsPage.path}: ${settingsPage.message}`);
   }
   let landed = false;
   try {

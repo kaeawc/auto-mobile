@@ -13,17 +13,35 @@ import {
 const cases = webScreenshotCases();
 
 describe("prototype web screenshot goldens (#16346)", () => {
-  test("every case has a fixture and a viewport-sized golden", () => {
-    expect(cases.length).toBe(14);
+  test("every case has a fixture and viewport-sized portrait and landscape goldens", () => {
+    // Nine specs in two frames, plus the largest text and RTL settings in both (#16552).
+    expect(cases.length).toBe(22);
     for (const entry of cases) {
       expect(existsSync(entry.fixture)).toBe(true);
       expect(pngSize(readFileSync(entry.golden))).toEqual(WEB_SCREENSHOT_VIEWPORT);
+      expect(pngSize(readFileSync(entry.landscapeGolden))).toEqual(WEB_SCREENSHOT_VIEWPORT);
     }
   });
 
   test("the golden directory holds no golden without a case", () => {
-    const expected = cases.map((entry) => basename(entry.golden)).sort();
+    const expected = cases
+      .flatMap((entry) => [basename(entry.golden), basename(entry.landscapeGolden)])
+      .sort();
     expect(readdirSync(WEB_SCREENSHOT_GOLDEN_DIR).sort()).toEqual(expected);
+  });
+
+  test("settings cases name their setting and render at the largest text size or in RTL", () => {
+    const settings = Object.fromEntries(
+      cases.filter((entry) => entry.settings).map((entry) => [entry.name, entry.settings]),
+    );
+    expect(settings).toEqual({
+      "reference-checkout--pixel-9--largest-text": { textSize: { fontScale: 2 } },
+      "reference-checkout--iphone-16--largest-text": {
+        textSize: { contentSize: "accessibility-extra-extra-extra-large" },
+      },
+      "reference-checkout--pixel-9--rtl": { locale: "ar" },
+      "reference-checkout--iphone-16--rtl": { locale: "ar" },
+    });
   });
 
   test("pngSize rejects bytes that are not a PNG", () => {

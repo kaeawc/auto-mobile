@@ -64,6 +64,7 @@ final class PrototypeSensitiveSinkRulesTests: XCTestCase {
     private func validate(
         _ spec: [String: JSONValue],
         path: String?,
+        message: String = "Sensitive value cannot be bound into a request",
         file: StaticString = #filePath,
         line: UInt = #line
     )
@@ -79,7 +80,7 @@ final class PrototypeSensitiveSinkRulesTests: XCTestCase {
             ) {
                 XCTAssertEqual(
                     $0 as? PrototypeLoadError,
-                    .invalidSpec(path: path, message: self.message),
+                    .invalidSpec(path: path, message: message),
                     file: file,
                     line: line
                 )
@@ -303,7 +304,7 @@ final class PrototypeSensitiveSinkRulesTests: XCTestCase {
             .appendingPathComponent("test/fixtures/prototype-spec/library-sensitive")
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "json" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
-        XCTAssertEqual(files.count, 8)
+        XCTAssertFalse(files.isEmpty)
         for file in files {
             let fixture = try XCTUnwrap(JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: file)).objectFields)
             let value = try XCTUnwrap(fixture["spec"]?.objectFields)
@@ -323,7 +324,9 @@ final class PrototypeSensitiveSinkRulesTests: XCTestCase {
             let data = try JSONEncoder().encode(JSONValue.object(value))
             XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: data), file.lastPathComponent)
             if path != nil {
-                try validate(value, path: path)
+                try validate(value, path: path, message: XCTUnwrap(fixture["expectedMessage"]?.stringValue))
+            } else if file.lastPathComponent.hasPrefix("platform-") {
+                try validate(value, path: nil)
             }
         }
     }

@@ -130,7 +130,7 @@ const highlightEntrySchema = z.custom<VideoRecordingHighlightEntry>((value) => {
 
 const panelSchema = z.object({
   key: z.string(),
-  role: z.enum(["inner", "cover", "rear", "external", "unknown"]),
+  role: z.enum(["inner", "cover", "rear", "external", "cluster", "overlay", "virtual", "unknown"]),
 });
 
 const transitionsSchema = z.array(

@@ -16,11 +16,15 @@ export const PERFORMANCE_TRACE_DEFAULT_TIME_LIMIT_MS = 30_000;
 export const PERFORMANCE_TRACE_MAX_TIME_LIMIT_MS = 300_000;
 export const PERFORMANCE_TRACE_MIN_TIME_LIMIT_MS = 1_000;
 
-/** Apple's Instruments template names, as `xctrace list templates` prints them. */
+/**
+ * Apple's Instruments template names, as `xctrace list templates` prints them.
+ * Xcode ships no standalone "Hangs" template (#16970): the Hangs instrument and
+ * its `potential-hangs` table come with the Time Profiler template.
+ */
 export const XCTRACE_TEMPLATE_NAMES: Record<PerformanceTraceTemplate, string> = {
   appLaunch: "App Launch",
   hitches: "Animation Hitches",
-  hangs: "Hangs",
+  hangs: "Time Profiler",
   timeProfiler: "Time Profiler",
   allocations: "Allocations",
 };
@@ -30,6 +34,16 @@ export const TEMPLATES_REQUIRING_APP: ReadonlySet<PerformanceTraceTemplate> = ne
   "appLaunch",
   "allocations",
 ]);
+
+/** Template names from `xctrace list templates`, without its `== Section ==` headings. */
+export function parseXctraceTemplateList(output: string): Set<string> {
+  return new Set(
+    output
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith("==")),
+  );
+}
 
 export interface XctraceRecordOptions {
   template: PerformanceTraceTemplate;

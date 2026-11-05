@@ -1,3 +1,27 @@
+import {
+  ABSOLUTE,
+  ALIGN_ITEMS,
+  ARIA_CHECKED,
+  ARIA_LABEL,
+  ARIA_SELECTED,
+  BACKGROUND_COLOR,
+  BORDER_RADIUS,
+  BOX_SHADOW,
+  CENTER,
+  COLUMN,
+  DATA_PART,
+  FLEX,
+  FLEX_DIRECTION,
+  FLEX_SHRINK,
+  INLINE_FLEX,
+  JUSTIFY_CONTENT,
+  MIN_HEIGHT,
+  MIN_WIDTH,
+  PADDING_BOTTOM,
+  PADDING_INLINE,
+  PADDING_TOP,
+  RELATIVE,
+} from "./webCss";
 import { record, type Raw } from "../prototypeTemplate";
 import { defaultFillAxes, filling, linkedPagerPage } from "./webCollections";
 import { el, type WebElement } from "./webNodes";
@@ -37,12 +61,12 @@ const iconButtonRenderer =
     const disabled = kit.disabledState(node, scope);
     const tint = cssColor(foreground, scope.style);
     const { attrs, style } = kit.base(node, scope, {
-      display: "inline-flex",
-      "align-items": "center",
-      "justify-content": "center",
+      display: INLINE_FLEX,
+      [ALIGN_ITEMS]: CENTER,
+      [JUSTIFY_CONTENT]: CENTER,
       width: "48px",
       height: "48px",
-      "flex-shrink": "0",
+      [FLEX_SHRINK]: "0",
       ...(tint ? { color: tint } : {}),
       ...disabled.css,
     });
@@ -51,24 +75,24 @@ const iconButtonRenderer =
     const container = el(
       "span",
       {
-        attrs: { "data-part": "container" },
+        attrs: { [DATA_PART]: "container" },
         style: {
-          display: "inline-flex",
-          "align-items": "center",
-          "justify-content": "center",
+          display: INLINE_FLEX,
+          [ALIGN_ITEMS]: CENTER,
+          [JUSTIFY_CONTENT]: CENTER,
           width: "40px",
           height: "40px",
-          "border-radius": "50%",
-          ...(fill ? { "background-color": fill } : {}),
+          [BORDER_RADIUS]: "50%",
+          ...(fill ? { [BACKGROUND_COLOR]: fill } : {}),
           ...(variant === "outlined" ? { border: `1px solid ${outline}` } : {}),
         },
       },
       typeof node.icon === "string" ? [kit.icon({ type: "icon", name: node.icon }, scope, "")] : [],
     );
-    const label = attrs["aria-label"] ?? String(node.icon ?? "");
+    const label = attrs[ARIA_LABEL] ?? String(node.icon ?? "");
     return el(
       "span",
-      { attrs: { ...attrs, role: "button", "aria-label": label, ...disabled.attrs }, style },
+      { attrs: { ...attrs, role: "button", [ARIA_LABEL]: label, ...disabled.attrs }, style },
       [container],
     );
   };
@@ -91,14 +115,14 @@ function chipBody(
   return el(
     "span",
     {
-      attrs: { "data-part": "chip" },
+      attrs: { [DATA_PART]: "chip" },
       style: {
-        display: "inline-flex",
-        "align-items": "center",
+        display: INLINE_FLEX,
+        [ALIGN_ITEMS]: CENTER,
         gap: "8px",
         height: "32px",
-        "padding-inline": selected ? "8px 16px" : "16px",
-        "border-radius": "8px",
+        [PADDING_INLINE]: selected ? "8px 16px" : "16px",
+        [BORDER_RADIUS]: "8px",
         ...textCss({ textStyle: "labelLarge" }, scope.style),
         border: selected ? "1px solid transparent" : `1px solid ${outline}`,
         ...roles,
@@ -117,14 +141,14 @@ const chipRenderer =
     const selected = filter && stateAt(node.stateKey, scope, kit) === true;
     const disabled = kit.disabledState(node, scope);
     const { attrs, style } = kit.base(node, scope, {
-      display: "inline-flex",
-      "align-items": "center",
-      "min-height": "48px",
-      "flex-shrink": "0",
+      display: INLINE_FLEX,
+      [ALIGN_ITEMS]: CENTER,
+      [MIN_HEIGHT]: "48px",
+      [FLEX_SHRINK]: "0",
       ...disabled.css,
     });
     const role: Css = filter
-      ? { role: "checkbox", "aria-checked": String(selected) }
+      ? { role: "checkbox", [ARIA_CHECKED]: String(selected) }
       : { role: "button" };
     return el("div", { attrs: { ...attrs, ...role, ...disabled.attrs }, style }, [
       chipBody({ selected, label: kit.bound(node.label, scope), color: style.color }, scope, kit),
@@ -154,15 +178,15 @@ function trackPart(
   color: string | undefined,
 ): WebElement {
   return el("span", {
-    attrs: { "data-part": part },
+    attrs: { [DATA_PART]: part },
     style: {
-      position: "absolute",
+      position: ABSOLUTE,
       top: "14px",
       height: "16px",
       width: `max(0px, calc(${length} - 6px))`,
-      "border-radius": "8px",
+      [BORDER_RADIUS]: "8px",
       [part === "active" ? "inset-inline-start" : "inset-inline-end"]: "0",
-      ...(color ? { "background-color": color } : {}),
+      ...(color ? { [BACKGROUND_COLOR]: color } : {}),
     },
   });
 }
@@ -174,31 +198,31 @@ function trackPart(
 function sliderTrack(fraction: number, scope: WebRenderScope): WebElement {
   const primary = cssColor("primary", scope.style);
   const inactive = cssColor("secondaryContainer", scope.style);
-  const fill: Css = primary ? { "background-color": primary } : {};
-  return el("span", { style: { position: "relative", display: "block", height: "44px" } }, [
+  const fill: Css = primary ? { [BACKGROUND_COLOR]: primary } : {};
+  return el("span", { style: { position: RELATIVE, display: "block", height: "44px" } }, [
     trackPart("active", percent(fraction), primary),
     trackPart("inactive", percent(1 - fraction), inactive),
     el("span", {
-      attrs: { "data-part": "stop" },
+      attrs: { [DATA_PART]: "stop" },
       style: {
-        position: "absolute",
+        position: ABSOLUTE,
         top: "20px",
         "inset-inline-end": "6px",
         width: "4px",
         height: "4px",
-        "border-radius": "50%",
+        [BORDER_RADIUS]: "50%",
         ...fill,
       },
     }),
     el("span", {
-      attrs: { "data-part": "thumb" },
+      attrs: { [DATA_PART]: "thumb" },
       style: {
-        position: "absolute",
+        position: ABSOLUTE,
         top: "0",
         "inset-inline-start": `calc(${percent(fraction)} - 2px)`,
         width: "4px",
         height: "44px",
-        "border-radius": "2px",
+        [BORDER_RADIUS]: "2px",
         ...fill,
       },
     }),
@@ -216,8 +240,8 @@ const sliderRenderer =
     const fraction = max > min ? (value - min) / (max - min) : 0;
     const disabled = kit.disabledState(node, scope);
     const { attrs, style } = kit.base(node, scope, {
-      display: "flex",
-      "flex-direction": "column",
+      display: FLEX,
+      [FLEX_DIRECTION]: COLUMN,
       ...disabled.css,
     });
     const semantics = {
@@ -282,20 +306,20 @@ function navIcon(item: NavItem, scope: WebRenderScope, kit: WebRenderKit): WebEl
   }
   const fill = cssColor("surfaceVariant", scope.style);
   return el("span", {
-    attrs: { "data-part": "placeholder" },
+    attrs: { [DATA_PART]: "placeholder" },
     style: {
       display: "block",
       width: "24px",
       height: "24px",
-      "flex-shrink": "0",
-      ...(fill ? { "background-color": fill } : {}),
+      [FLEX_SHRINK]: "0",
+      ...(fill ? { [BACKGROUND_COLOR]: fill } : {}),
     },
   });
 }
 
 /** The bar's own edges, which an explicit width or height in the spec still overrides. */
 function barBase(node: Raw, scope: WebRenderScope, kit: WebRenderKit, extra: Css) {
-  return kit.base(filling(node, defaultFillAxes(node)), scope, { display: "flex", ...extra });
+  return kit.base(filling(node, defaultFillAxes(node)), scope, { display: FLEX, ...extra });
 }
 
 function bottomNavItem(item: NavItem, selected: boolean, scope: WebRenderScope, kit: WebRenderKit) {
@@ -305,15 +329,15 @@ function bottomNavItem(item: NavItem, selected: boolean, scope: WebRenderScope, 
   const pill = el(
     "span",
     {
-      attrs: { "data-part": "indicator" },
+      attrs: { [DATA_PART]: "indicator" },
       style: {
-        display: "flex",
-        "align-items": "center",
-        "justify-content": "center",
+        display: FLEX,
+        [ALIGN_ITEMS]: CENTER,
+        [JUSTIFY_CONTENT]: CENTER,
         width: "64px",
         height: "32px",
-        "border-radius": "16px",
-        ...(indicator ? { "background-color": indicator } : {}),
+        [BORDER_RADIUS]: "16px",
+        ...(indicator ? { [BACKGROUND_COLOR]: indicator } : {}),
         ...(iconColor ? { color: iconColor } : {}),
       },
     },
@@ -332,16 +356,16 @@ function bottomNavItem(item: NavItem, selected: boolean, scope: WebRenderScope, 
   return el(
     "div",
     {
-      attrs: { role: "tab", "aria-selected": String(selected) },
+      attrs: { role: "tab", [ARIA_SELECTED]: String(selected) },
       style: {
-        display: "flex",
-        "flex-direction": "column",
-        "align-items": "center",
+        display: FLEX,
+        [FLEX_DIRECTION]: COLUMN,
+        [ALIGN_ITEMS]: CENTER,
         gap: "4px",
         flex: "1 1 0",
-        "min-width": "0",
-        "padding-top": "12px",
-        "padding-bottom": "16px",
+        [MIN_WIDTH]: "0",
+        [PADDING_TOP]: "12px",
+        [PADDING_BOTTOM]: "16px",
       },
     },
     [pill, label],
@@ -360,7 +384,7 @@ function withBottomInset(node: Raw, scope: WebRenderScope, kit: WebRenderKit, st
   }
   return {
     ...style,
-    "padding-bottom": `calc(${style["padding-bottom"] ?? "0px"} + var(--safe-bottom))`,
+    [PADDING_BOTTOM]: `calc(${style[PADDING_BOTTOM] ?? "0px"} + var(--safe-bottom))`,
   };
 }
 
@@ -371,9 +395,9 @@ const bottomNavRenderer =
     const items = navItems(node, scope, kit);
     const selected = navSelection(node, items.length, scope, kit);
     const { attrs, style: barStyle } = barBase(node, scope, kit, {
-      "min-height": "80px",
+      [MIN_HEIGHT]: "80px",
       gap: "8px",
-      "padding-inline": "8px",
+      [PADDING_INLINE]: "8px",
       ...kit.roleCss(scope, "surfaceContainer", "onSurface"),
     });
     const style = withBottomInset(node, scope, kit, barStyle);
@@ -399,21 +423,21 @@ function tab(item: NavItem, selected: boolean, layout: TabLayout) {
   return el(
     "div",
     {
-      attrs: { role: "tab", "aria-selected": String(selected) },
+      attrs: { role: "tab", [ARIA_SELECTED]: String(selected) },
       style: {
-        display: "flex",
-        "flex-direction": "column",
-        "align-items": "center",
-        "justify-content": "center",
+        display: FLEX,
+        [FLEX_DIRECTION]: COLUMN,
+        [ALIGN_ITEMS]: CENTER,
+        [JUSTIFY_CONTENT]: CENTER,
         gap: "2px",
-        "min-height": layout.icons ? "72px" : "48px",
-        "padding-inline": "16px",
+        [MIN_HEIGHT]: layout.icons ? "72px" : "48px",
+        [PADDING_INLINE]: "16px",
         ...textCss({ textStyle: "titleSmall" }, scope.style),
         ...(layout.scrollable
-          ? { flex: "0 0 auto", "min-width": "90px" }
-          : { flex: "1 1 0", "min-width": "0" }),
+          ? { flex: "0 0 auto", [MIN_WIDTH]: "90px" }
+          : { flex: "1 1 0", [MIN_WIDTH]: "0" }),
         ...(color ? { color } : {}),
-        ...(selected ? { "box-shadow": `inset 0 -3px 0 0 ${primary}` } : {}),
+        ...(selected ? { [BOX_SHADOW]: `inset 0 -3px 0 0 ${primary}` } : {}),
       },
     },
     [...visual, item.label],
@@ -438,7 +462,7 @@ const tabBarRenderer =
     };
     const divider = cssColor("outlineVariant", scope.style) ?? "currentColor";
     const { attrs, style } = barBase(node, scope, kit, {
-      "min-height": layout.icons ? "72px" : "48px",
+      [MIN_HEIGHT]: layout.icons ? "72px" : "48px",
       "border-bottom": `1px solid ${divider}`,
       ...(layout.scrollable ? { "padding-inline-start": "52px", overflow: "hidden" } : {}),
       ...kit.roleCss(scope, "surface", "onSurface"),

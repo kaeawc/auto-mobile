@@ -29,10 +29,7 @@ export async function brokerAdmissionInput(
   }
   const catalog = await options.catalog(config.device.platform, signal);
   const defaults = options.defaults(config.device.platform);
-  const capabilities = options.capabilities ?? {};
-  const requirement = unwrap(
-    normalizeSessionDeviceRequirement(config.device, defaults, catalog, capabilities),
-  );
+  const requirement = unwrap(normalizeSessionDeviceRequirement(config.device, defaults, catalog));
   assertDeviceProfileEmulatable(requestedDeviceProfile(config));
   return {
     requestId: config.requestId,
@@ -42,7 +39,6 @@ export async function brokerAdmissionInput(
     export: exportIdentity,
     limits: options.limits,
     matches: poolMatcher(requirement, defaults),
-    resolveCreation: () =>
-      unwrap(resolveSessionDeviceProfile(requirement, defaults, catalog, capabilities)),
+    resolveCreation: () => unwrap(resolveSessionDeviceProfile(requirement, defaults, catalog)),
   };
 }

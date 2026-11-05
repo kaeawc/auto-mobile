@@ -89,7 +89,7 @@ import {
   recordObservationBackStack,
   screenForObserve,
   type ObserveResponse,
-  withDeviceDiagnostics,
+  withServedObservationExtras,
   type ObserveToolDependencies,
 } from "./observeResponse";
 
@@ -183,7 +183,9 @@ const observeBaseSchema = withJsonSchemaOverride(
         platform: watchAwarePlatformSchema(),
         waitFor: waitForSchema
           .optional()
-          .describe("Wait for element to appear before returning observation"),
+          .describe(
+            "Wait for element to appear before returning observation. On timeout the last observation is returned with awaitTimeout: true and isError: true.",
+          ),
         settled: settledSchema
           .optional()
           .describe("After waitFor matches, wait for a quiet hierarchy period (requires waitFor)"),
@@ -213,7 +215,7 @@ const observeBaseSchema = withJsonSchemaOverride(
           .string()
           .optional()
           .describe(
-            "Panel key, role (inner, cover, rear, external), active, or opt-in Android all. All adds per-panel displays while retaining the active result; rejects waitFor, raw:true and includeScreenshotImage:true.",
+            "Panel key, role (inner, cover, rear, external, cluster, overlay, virtual), active, or opt-in Android all. All adds per-panel displays (never overlay or virtual displays) while retaining the active result; rejects waitFor, raw:true and includeScreenshotImage:true.",
           ),
         project: z
           .enum(["full", "skeleton"])
@@ -444,10 +446,11 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
         });
       }
 
-      const served = await withDeviceDiagnostics(
+      const served = await withServedObservationExtras(
         layerScopedObserveResult(result, args.layer, platform, !waitOutcome),
         device,
-        dependencies.audioInputDiagnostic,
+        deviceRead,
+        dependencies,
       );
 
       if (waitOutcome) {
@@ -511,10 +514,11 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
   // `--tool-results-no-structured-content`, which suppresses the advertisement.
   ToolRegistry.registerDeviceAware(
     "observe",
-    `Android synthetic s2- element ids are valid only for the observation that returned them; re-observe before using an id after the screen changes. Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. On an Apple Watch simulator (platform: 'watchos' or a watch session), observe keeps the screenshot and returns hierarchy-derived elements in XCTest points when a watch runner is connected (project: 'full' includes viewHierarchy). Without a connected runner it returns screenshot-only with physical screenSize and hierarchyUnavailable; advanced observe options are refused. On an Apple TV simulator (platform: 'tvos' or an Apple TV session), observe returns a screenshot and runner hierarchy with focusedElement when connected (project: 'full' includes viewHierarchy); without a runner it returns screenshot-only with hierarchyUnavailable. Use pressButton for focus navigation; advanced observe options are refused. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Each screenshot path is kept for at least 10 minutes after the response that returned it unless evicted early under capacity pressure, so a returned path is not guaranteed to survive until its expiresAt; expiresAt metadata uses the host clock. Returning cached paths extends their lifetime. At the shared 128 MiB / 4096-file cap, new captures are never refused: the least recently returned screenshots are evicted early, unreferenced ones first and then referenced ones, to admit them. Release and device removal leave files until their guarantees expire. Restart uses a ten-minute process-start grace; other processes can only honor the ten-minute mtime floor. Capacity uses a per-process in-memory inventory reconciled on sweeps and near either cap. Concurrent processes can exceed the aggregate cap before reconciliation; discovered files count against subsequent admission. Expired files are swept at initial inventory, near capacity and every minute while idle. Copy files needed beyond the guarantee.`,
+    `Android synthetic s2- element ids are valid only for the observation that returned them; re-observe before using an id after the screen changes. The default skeleton lists only actionable rows; read static text (status labels, validation errors) from context. Without layer, waitFor text and textAny, and for: appear/textEquals with only text, also match rows in both arrays when no hierarchy node carries the text (textEquals stays exact and case-sensitive). Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. On an Apple Watch simulator (platform: 'watchos' or a watch session), observe keeps the screenshot and returns hierarchy-derived elements in XCTest points when a watch runner is connected (project: 'full' includes viewHierarchy). Without a connected runner it returns screenshot-only with physical screenSize and hierarchyUnavailable; advanced observe options are refused. On an Apple TV simulator (platform: 'tvos' or an Apple TV session), observe returns a screenshot and runner hierarchy with focusedElement when connected (project: 'full' includes viewHierarchy); without a runner it returns screenshot-only with hierarchyUnavailable. Use pressButton for focus navigation; advanced observe options are refused. On an Apple Vision Pro simulator (platform 'visionos'), observe returns a screenshot-only observation with hierarchyUnavailable. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Each screenshot path is kept for at least 10 minutes after the response that returned it unless evicted early under capacity pressure, so a returned path is not guaranteed to survive until its expiresAt; expiresAt metadata uses the host clock. Returning cached paths extends their lifetime. At the shared 128 MiB / 4096-file cap, new captures are never refused: the least recently returned screenshots are evicted early, unreferenced ones first and then referenced ones, to admit them. Release and device removal leave files until their guarantees expire. Restart uses a ten-minute process-start grace; other processes can only honor the ten-minute mtime floor. Capacity uses a per-process in-memory inventory reconciled on sweeps and near either cap. Concurrent processes can exceed the aggregate cap before reconciliation; discovered files count against subsequent admission. Expired files are swept at initial inventory, near capacity and every minute while idle. Copy files needed beyond the guarantee.`,
     observeSchema,
     {
       handler: withWatchObserve(observeHandler, dependencies),
+      keepsImeRestorePending: true,
       ...PLAN_RELEVANT,
       defaultEnabled: true,
       // Watching is allowed on any device, whichever session holds it (#10730).
@@ -586,7 +590,7 @@ function withWatchObserve(handler: ObserveHandler, dependencies: ObserveToolDepe
     progress?: unknown,
     signal?: AbortSignal,
   ): Promise<ObserveResponse | ObserveResponse<WatchObservation | ObserveResult>> =>
-    device.platform === "watchos" || device.platform === "tvos"
+    device.platform === "watchos" || device.platform === "tvos" || device.platform === "visionos"
       ? observeWatch(device, args, signal, watch)
       : handler(device, args, progress, signal);
 }

@@ -1,3 +1,5 @@
+import { isAndroidOrIosPlatform } from "../../models/Platform";
+import { resolveBootedAppleVisionForCall } from "./appleVisionReadiness";
 import { resolveBootedAppleTvForCall } from "./appleTvReadiness";
 import { iosReadNotBootedMessage } from "./readinessLifecycleStart";
 import {
@@ -63,6 +65,7 @@ const BOOTED_SIMULATOR_READINESS: Partial<Record<SomePlatform, typeof resolveBoo
   {
     watchos: resolveBootedWatchForCall,
     tvos: resolveBootedAppleTvForCall,
+    visionos: resolveBootedAppleVisionForCall,
   };
 
 interface ReadinessSelectionDependencies {
@@ -137,6 +140,7 @@ export class ReadinessSelection {
       // Readiness scans never list watches; a watch is resolved only on request (#14908).
       "watchos-simulator": false,
       "tvos-simulator": false,
+      "visionos-simulator": false,
     };
     const perf = createGlobalPerformanceTracker();
 
@@ -186,6 +190,7 @@ export class ReadinessSelection {
         ios: scannedSources["ios-simulator"] || scannedSources["ios-physical"],
         watchos: false,
         tvos: false,
+        visionos: false,
       },
       scannedSources,
     };
@@ -825,8 +830,7 @@ export class ReadinessSelection {
     // With no matching deviceId, fall back to the platform setActiveDevice selected. A watch pin
     // never decides a call that did not name its platform (#14908).
     const pin = this.dependencies.selection.getPin(options?.connectionId);
-    const selectedPlatform =
-      pin?.platform === "watchos" || pin?.platform === "tvos" ? undefined : pin?.platform;
+    const selectedPlatform = pin && isAndroidOrIosPlatform(pin.platform) ? pin.platform : undefined;
     if (selectedPlatform) {
       return {
         platformDevices: selectedPlatform === "android" ? androidDevices : iosDevices,
@@ -924,7 +928,10 @@ export class ReadinessSelection {
     result: BootedDevice[] | ConnectedPlatformScan,
   ): ConnectedPlatformScan {
     return Array.isArray(result)
-      ? { devices: result, scanned: { android: true, ios: true, watchos: false, tvos: false } }
+      ? {
+          devices: result,
+          scanned: { android: true, ios: true, watchos: false, tvos: false, visionos: false },
+        }
       : result;
   }
 }

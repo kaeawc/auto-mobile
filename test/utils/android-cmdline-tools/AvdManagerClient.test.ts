@@ -113,6 +113,39 @@ function createClient(overrides: Partial<ConstructorParameters<typeof AvdManager
 }
 
 describe("AvdManagerClient", () => {
+  test("parses the captured Wear hardware profiles", async () => {
+    const { client, child, timer } = createClient();
+    const pending = client.listDevices();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    child.stdoutText(
+      readFileSync(
+        join(import.meta.dir, "../../fixtures/android-avdmanager/avdmanager-list-device-wear.txt"),
+        "utf8",
+      ),
+    );
+    child.close(0);
+    const profiles = await pending;
+    expect(profiles.map((profile) => profile.id)).toContain("wearos_small_round");
+    expect(profiles.map((profile) => profile.id)).toContain("wearos_square");
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("reads the supplied existing AVD inventory without creating an AVD", async () => {
+    const { client, child, calls } = createClient();
+    const pending = client.listDeviceImages();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    child.stdoutText(
+      readFileSync(
+        join(import.meta.dir, "../../fixtures/android-avdmanager/avdmanager-list-avd.txt"),
+        "utf8",
+      ),
+    );
+    child.close(0);
+    expect((await pending).map((avd) => avd.name)).toContain("am15542a");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args).toEqual(["list", "avd"]);
+  });
+
   const validAvdOutput = `Available Android Virtual Devices:
     Name: Pixel_9
   Device: pixel_9 (Google)

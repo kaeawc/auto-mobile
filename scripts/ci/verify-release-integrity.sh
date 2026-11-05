@@ -37,7 +37,7 @@ EXPECTED="${RAW_VERSION#v}"
 IPA_PATH="${2:-}"
 
 PACKAGE_JSON="package.json"
-PLUGIN_JSON=".claude-plugin/plugin.json"
+PLUGIN_JSON="plugins/auto-mobile/.claude-plugin/plugin.json"
 MARKETPLACE_JSON=".claude-plugin/marketplace.json"
 SERVER_JSON="server.json"
 GRADLE_PROPS="android/gradle.properties"
@@ -87,7 +87,7 @@ pkg_version="$JSON_FIELD_VALUE"
 check "package.json version" "$pkg_version"
 json_field "$PLUGIN_JSON" 'd["version"]'
 plugin_version="$JSON_FIELD_VALUE"
-check ".claude-plugin/plugin.json version" "$plugin_version"
+check "plugins/auto-mobile/.claude-plugin/plugin.json version" "$plugin_version"
 json_field "$MARKETPLACE_JSON" 'd["plugins"][0]["version"]'
 marketplace_version="$JSON_FIELD_VALUE"
 check ".claude-plugin/marketplace.json plugins[0].version" "$marketplace_version"

@@ -265,7 +265,7 @@ class ChromeA11yMatrixTest {
       for (state in states) {
         render(cell, "viewer/$state") {
           Column {
-            ViewerChrome(true, true, false, {}, {})
+            ViewerChrome(true, true, false, {}, {}, {})
             ViewerStatus(state) {}
           }
         }

@@ -184,6 +184,12 @@ const prototypeEventOutputSchema = z.object({
   keys: z.array(z.string()).min(1).max(8).optional(),
   timestamp: z.number(),
 });
+const prototypeDeviceStatusReadingSchema = z.object({
+  values: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
+  timestamp: z.number().describe("Device time of the change event the values came from"),
+  receivedAt: z.number(),
+  simulated: z.literal(true).optional(),
+});
 export const prototypeOutputSchema = z.object({
   screenMap: z
     .object({
@@ -239,26 +245,59 @@ export const prototypeOutputSchema = z.object({
         .describe("defineBackend: item count per collection"),
       routes: z.number().int().nonnegative().optional(),
       faults: z.number().int().nonnegative().optional(),
+      actors: z.number().int().nonnegative().optional(),
+      rooms: z.number().int().nonnegative().optional(),
+      delivered: z
+        .number()
+        .int()
+        .nonnegative()
+        .optional()
+        .describe("publish: how many open connections in the room received the frame"),
       cleared: z.boolean().optional().describe("clearBackend: false when no such backend existed"),
     })
     .optional()
-    .describe("defineBackend and clearBackend: the mock backend acted on"),
+    .describe("defineBackend, clearBackend and publish: the mock backend acted on"),
   backendLog: z
     .array(
-      z.object({
-        seq: z.number().int().positive(),
-        method: z.string(),
-        path: z.string(),
-        query: z.record(z.string(), z.string()),
-        status: z.number().int(),
-        body: z.json().optional(),
-      }),
+      z.union([
+        z.object({
+          seq: z.number().int().positive(),
+          method: z.string(),
+          path: z.string(),
+          query: z.record(z.string(), z.string()),
+          status: z.number().int(),
+          body: z.json().optional(),
+        }),
+        z.object({
+          seq: z.number().int().positive(),
+          room: z.string(),
+          from: z.enum(["client", "publish", "broadcast"]),
+          data: z.string(),
+        }),
+      ]),
     )
     .optional()
-    .describe("backendLog: requests the backend answered, oldest first (latest 200 kept)"),
+    .describe(
+      "backendLog: requests answered and room frames seen ({room, from, data}), oldest first (latest 200 kept)",
+    ),
   report: z.json().optional(),
   markdown: z.string().optional(),
   saved: z.object({ id: z.string(), slug: z.string(), replaced: z.boolean() }).optional(),
+  share: z
+    .object({
+      bundlePath: z.string().describe("The canonical .automobile-proto bundle to upload."),
+      sha256: z.string().describe("SHA-256 of the bundle bytes; ProtoViewer refuses others."),
+      bytes: z.number().int().nonnegative(),
+      url: z.string().optional().describe("Where the bundle must be served, as given."),
+      link: z
+        .string()
+        .optional()
+        .describe("automobile-proto://import?url=…&sha256=… for the QR or a message."),
+      qrPngPath: z.string().optional().describe("The link as a black-on-white QR PNG."),
+      qr: z.string().optional().describe("The link as a QR drawn with block characters."),
+    })
+    .optional()
+    .describe("share only: the bundle written on the host and, with url, its import link and QR."),
   viewer: z
     .object({
       app: z.literal("protoviewer"),
@@ -267,7 +306,16 @@ export const prototypeOutputSchema = z.object({
       display: z
         .object({
           key: z.string(),
-          role: z.enum(["inner", "cover", "rear", "external", "unknown"]),
+          role: z.enum([
+            "inner",
+            "cover",
+            "rear",
+            "external",
+            "cluster",
+            "overlay",
+            "virtual",
+            "unknown",
+          ]),
         })
         .optional()
         .describe(
@@ -315,7 +363,12 @@ export const prototypeOutputSchema = z.object({
     .optional()
     .describe("Android: whether the shortcut was seen on the home screen after a pin or update."),
   errorCode: z
-    .enum([...SAVED_PROTOTYPE_ERROR_CODES, "unsupported_capability", "unsupported_platform"])
+    .enum([
+      ...SAVED_PROTOTYPE_ERROR_CODES,
+      "unsupported_capability",
+      "unsupported_platform",
+      "invalid_url",
+    ])
     .optional(),
   revision: z
     .number()
@@ -382,6 +435,16 @@ export const prototypeOutputSchema = z.object({
     )
     .optional(),
   lastResult: lastResultSchema.optional(),
+  platformStatus: z
+    .object({
+      battery: prototypeDeviceStatusReadingSchema.optional(),
+      power: prototypeDeviceStatusReadingSchema.optional(),
+      audio: prototypeDeviceStatusReadingSchema.optional(),
+    })
+    .optional()
+    .describe(
+      "status and inspect: the last battery, power and audio values the device delivered through <module>.changed; a module is absent until its first change",
+    ),
   screenRound: z
     .boolean()
     .optional()

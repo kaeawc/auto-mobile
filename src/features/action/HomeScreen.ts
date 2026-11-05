@@ -66,6 +66,11 @@ const SPOTLIGHT_BUNDLE_ID = "com.apple.Spotlight";
 /** The runner's one-shot foreground check failure; keep in sync with CommandHandler+TextInput.swift. */
 const RUNNER_HOME_NOT_FOREGROUND_ERROR = "Home press did not bring SpringBoard to the foreground";
 
+interface IosRunnerHomeOutcome {
+  error?: string;
+  unacknowledged: boolean;
+}
+
 /** Named inputs for `HomeScreen.executeIosHomeNavigation`; replaces its positional tail (#11835). */
 export interface IosHomeNavigationOptions {
   perf?: PerformanceTracker;
@@ -435,7 +440,7 @@ export class HomeScreen extends BaseVisualChange {
   private async executePhysicalIosHomeNavigation(options: IosHomeNavigationOptions): Promise<void> {
     const { perf, frameContext, signal, onDispatch, appSwitcherWasOpen } = options;
     const client = this.iosClient();
-    const pressError = await awaitWhileRequestIsLive(
+    const { error: pressError } = await awaitWhileRequestIsLive(
       this.tryIosRunnerHome(client, 5000, { perf, frameContext, signal, onDispatch }),
       signal,
     );
@@ -465,28 +470,30 @@ export class HomeScreen extends BaseVisualChange {
   ): Promise<void> {
     for (let press = 0; press < remainingPresses; press++) {
       const remainingMs = this.iosHomeRemainingMs(deadline);
-      const pressError = await awaitWhileRequestIsLive(
+      const outcome = await awaitWhileRequestIsLive(
         this.tryIosRunnerHome(client, Math.min(5000, remainingMs), { perf, signal, onDispatch }),
         signal,
       );
-      // The runner checks the foreground once, right after the press, and SpringBoard can take
-      // about a second to settle after Spotlight (#14827). That error means "sent, unverified", so
-      // fall through to the polling check instead of failing before it runs.
-      if (pressError && pressError !== RUNNER_HOME_NOT_FOREGROUND_ERROR) {
-        throw new ActionableError(pressError);
-      }
       const isLastPress = press + 1 === remainingPresses;
+      const verificationPolicy = this.iosHomePressVerificationPolicy(
+        isLastPress,
+        deadline,
+        outcome,
+      );
       let hierarchy: CtrlProxyHierarchy;
       try {
         hierarchy = await this.verifyIosHomeForeground(client, {
           perf,
-          ...this.iosHomePressVerificationPolicy(isLastPress, deadline),
+          ...verificationPolicy,
           retryDelaysMs: HomeScreen.IOS_SIMULATOR_RETRY_DELAYS_MS,
           readTimeoutMs: HomeScreen.IOS_SIMULATOR_READ_TIMEOUT_MS,
           pollUntilDeadline: true,
           signal,
         });
       } catch (error) {
+        if (outcome.unacknowledged) {
+          throw error;
+        }
         this.iosHomeRemainingMs(deadline);
         if (!(error instanceof IosHomeNotForegroundError) || isLastPress) {
           throw error;
@@ -507,7 +514,25 @@ export class HomeScreen extends BaseVisualChange {
     }
   }
 
-  private iosHomePressVerificationPolicy(isLastPress: boolean, deadline?: number) {
+  private iosHomePressVerificationPolicy(
+    isLastPress: boolean,
+    deadline: number | undefined,
+    { error, unacknowledged }: IosRunnerHomeOutcome,
+  ) {
+    // The runner checks the foreground once, right after the press, and SpringBoard can take
+    // about a second to settle after Spotlight (#14827). That error means "sent, unverified", so
+    // fall through to polling. A dispatched press without an acknowledgement needs verification too.
+    if (error && !unacknowledged && error !== RUNNER_HOME_NOT_FOREGROUND_ERROR) {
+      throw new ActionableError(error);
+    }
+    // A blocked press can consume the caller budget while preventing hierarchy reads.
+    // Start a fresh verification window once that unacknowledged press returns.
+    if (unacknowledged) {
+      return {
+        timeoutMs: HomeScreen.IOS_HOME_VERIFICATION_TIMEOUT_MS,
+        returnOnNonSpringboard: false,
+      };
+    }
     const boundMs = isLastPress
       ? HomeScreen.IOS_HOME_VERIFICATION_TIMEOUT_MS
       : HomeScreen.IOS_HOME_FIRST_PRESS_VERIFICATION_TIMEOUT_MS;
@@ -578,7 +603,7 @@ export class HomeScreen extends BaseVisualChange {
     client: IosCtrlProxy,
     timeoutMs: number,
     options: Omit<IosHomeNavigationOptions, "timeoutMs"> = {},
-  ): Promise<string | undefined> {
+  ): Promise<IosRunnerHomeOutcome> {
     const { perf, frameContext } = options;
     try {
       const result = await client.requestPressHome(timeoutMs, perf, {
@@ -589,7 +614,10 @@ export class HomeScreen extends BaseVisualChange {
       if (frameContext && result.error?.includes("Stale frame context")) {
         throw new ActionableError(result.error);
       }
-      return result.success ? undefined : (result.error ?? "Runner failed to press Home");
+      return {
+        error: result.success ? undefined : (result.error ?? "Runner failed to press Home"),
+        unacknowledged: result.dispatched === true && result.acknowledged !== true,
+      };
     } catch (error) {
       if (errorMessage(error).includes("Stale frame context")) {
         throw toActionableError(error, "Home press rejected a stale frame context");

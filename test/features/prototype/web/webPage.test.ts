@@ -7,11 +7,16 @@ import {
   largestPinnedView,
   MAX_PROTOTYPE_WEB_RUNTIME_BYTES,
   PROTOTYPE_WEB_RUNTIME,
+  prototypeWebFrameRotates,
   type PrototypeWebPageInput,
 } from "../../../../src/features/prototype/web/webPage";
 import {
+  prototypeWebClockDelay,
+  prototypeWebClockText,
   prototypeWebFitScale,
+  prototypeWebRotation,
   prototypeWebScreenView,
+  prototypeWebStartClock,
   prototypeWebWheelFactor,
   prototypeWebZoomScale,
 } from "../../../../src/features/prototype/web/webPageRuntime";
@@ -100,14 +105,75 @@ describe("prototype web page (#16346)", () => {
     }
   });
 
+  test("the clock reads local time in the stills' fixed 9:41 form (#16585)", () => {
+    expect(prototypeWebClockText(new Date(2026, 0, 1, 9, 41))).toBe("9:41");
+    expect(prototypeWebClockText(new Date(2026, 0, 1, 0, 5))).toBe("12:05");
+    expect(prototypeWebClockText(new Date(2026, 0, 1, 12, 0))).toBe("12:00");
+    expect(prototypeWebClockText(new Date(2026, 0, 1, 21, 9))).toBe("9:09");
+  });
+
+  test("the clock re-arms at the next minute boundary (#16585)", () => {
+    expect(prototypeWebClockDelay(0)).toBe(60_000);
+    expect(prototypeWebClockDelay(59_999)).toBe(1);
+    expect(prototypeWebClockDelay(125_000)).toBe(55_000);
+  });
+
+  test("the clock writes every mark now and again at each minute boundary (#16585)", () => {
+    let nowMs = new Date(2026, 0, 1, 13, 7, 30).getTime();
+    const pending: { run: () => void; ms: number }[] = [];
+    const clock = {
+      now: () => nowMs,
+      schedule: (run: () => void, ms: number) => void pending.push({ run, ms }),
+    };
+    const marks = [{ textContent: "9:41" as string | null }, { textContent: "9:41" }];
+    const format = { clockText: prototypeWebClockText, clockDelay: prototypeWebClockDelay };
+    prototypeWebStartClock(
+      { querySelectorAll: (selector) => (selector === '[data-status="clock"]' ? marks : []) },
+      clock,
+      format,
+    );
+    expect(marks.map((mark) => mark.textContent)).toEqual(["1:07", "1:07"]);
+    expect(pending.map((entry) => entry.ms)).toEqual([30_000]);
+    nowMs += 30_000;
+    pending.shift()!.run();
+    expect(marks.map((mark) => mark.textContent)).toEqual(["1:08", "1:08"]);
+    expect(pending.map((entry) => entry.ms)).toEqual([60_000]);
+  });
+
+  test("the clock schedules nothing for a page without clock marks", () => {
+    const pending: number[] = [];
+    const clock = {
+      now: () => 0,
+      schedule: (_run: () => void, ms: number) => void pending.push(ms),
+    };
+    prototypeWebStartClock({ querySelectorAll: () => [] }, clock, {
+      clockText: prototypeWebClockText,
+      clockDelay: prototypeWebClockDelay,
+    });
+    expect(pending).toEqual([]);
+  });
+
+  test("the inlined runtime carries the clock rules and updates the status bar clock", () => {
+    for (const rule of [
+      "prototypeWebClockText",
+      "prototypeWebClockDelay",
+      "prototypeWebStartClock",
+      "prototypeWebBrowserClock",
+    ]) {
+      expect(PROTOTYPE_WEB_RUNTIME).toContain(`function ${rule}(`);
+    }
+    expect(PROTOTYPE_WEB_RUNTIME).toContain('[data-status="clock"]');
+  });
+
   test("keeps the runtime within its budget", () => {
     expect(Buffer.byteLength(PROTOTYPE_WEB_RUNTIME)).toBeLessThanOrEqual(
       MAX_PROTOTYPE_WEB_RUNTIME_BYTES,
     );
   });
 
-  test("offers only rotate, zoom and pan, a variant switcher and revision history", () => {
+  test("offers only rotate, zoom and pan, the 3D toggle, a variant switcher and revision history", () => {
     expect(controls(page.html)).toEqual([
+      "3d",
       "revisions",
       "rotate",
       "screen",
@@ -128,7 +194,9 @@ describe("prototype web page (#16346)", () => {
     expect(page.inlinedRevisions).toEqual({ a: [2, 1], b: [1] });
     // The reference checkout's stack has two screens, so its revision has two views per orientation.
     expect(page.html.match(/data-view=""/g)).toHaveLength(8);
-    expect(page.html).toContain('<body data-variant="a" data-revision="2">');
+    expect(page.html).toContain(
+      '<body data-variant="a" data-revision="2" data-platform="android">',
+    );
     expect(page.html.match(/data-view="" hidden=""/g)).toHaveLength(7);
   });
 
@@ -168,10 +236,12 @@ describe("prototype web page (#16346)", () => {
       ],
     };
     // More than revision 2's second screen, so revision 2 cannot stay even with its start alone.
-    const maxBytes = Buffer.byteLength(buildPrototypeWebPage(three).html) - 5000;
+    const maxBytes = Buffer.byteLength(buildPrototypeWebPage(three).html) - 8000;
     const pinned = buildPrototypeWebPage({ ...three, revision: 1, maxBytes });
     expect(pinned.inlinedRevisions.a).toEqual([3, 1]);
-    expect(pinned.html).toContain('<body data-variant="a" data-revision="1">');
+    expect(pinned.html).toContain(
+      '<body data-variant="a" data-revision="1" data-platform="android">',
+    );
     expect(Buffer.byteLength(pinned.html)).toBeLessThanOrEqual(maxBytes);
   });
 
@@ -433,5 +503,80 @@ describe("prototype web page screen picker (#16382)", () => {
     const plain = view();
     expect(prototypeWebScreenView([plain], "b")).toBe(plain);
     expect(prototypeWebScreenView([], "a")).toBeUndefined();
+  });
+});
+
+describe("prototype web page rotation (#16545)", () => {
+  const transforms = (frames: Keyframe[]) => frames.map((frame) => frame.transform);
+  const opacities = (frames: Keyframe[]) => frames.map((frame) => frame.opacity);
+
+  test("turns the frame a quarter counterclockwise into landscape, both views tracking one frame", () => {
+    const turn = prototypeWebRotation("android", "landscape");
+    expect(transforms(turn.outgoing)).toEqual([
+      "translate(-50%, -50%) rotate(0deg)",
+      "translate(-50%, -50%) rotate(-90deg)",
+    ]);
+    expect(transforms(turn.incoming)).toEqual([
+      "translate(-50%, -50%) rotate(90deg)",
+      "translate(-50%, -50%) rotate(0deg)",
+    ]);
+  });
+
+  test("turns back clockwise into portrait", () => {
+    const turn = prototypeWebRotation("android", "portrait");
+    expect(turn.outgoing.at(-1)?.transform).toBe("translate(-50%, -50%) rotate(90deg)");
+    expect(turn.incoming[0]?.transform).toBe("translate(-50%, -50%) rotate(-90deg)");
+  });
+
+  test("Android cross-fades the content over the whole turn", () => {
+    const turn = prototypeWebRotation("android", "landscape");
+    expect(turn.durationMs).toBe(500);
+    expect(opacities(turn.outgoing)).toEqual([1, 0]);
+    expect(opacities(turn.incoming)).toEqual([0, 1]);
+  });
+
+  test("iOS hands over to the new layout in the first quarter of the turn", () => {
+    const turn = prototypeWebRotation("ios", "landscape");
+    expect(turn.durationMs).toBe(400);
+    expect(turn.incoming.map((frame) => [frame.offset, frame.opacity])).toEqual([
+      [0, 0],
+      [0.25, 1],
+      [1, 1],
+    ]);
+    expect(turn.outgoing[1]).toEqual({
+      transform: "translate(-50%, -50%) rotate(-22.5deg)",
+      opacity: 0,
+      offset: 0.25,
+    });
+  });
+
+  test("ends every turn upright, so the end state is the plain landscape view", () => {
+    for (const platform of ["android", "ios"]) {
+      for (const to of ["portrait", "landscape"] as const) {
+        expect(prototypeWebRotation(platform, to).incoming.at(-1)).toMatchObject({
+          transform: "translate(-50%, -50%) rotate(0deg)",
+          opacity: 1,
+        });
+      }
+    }
+  });
+
+  test("watches and TVs never rotate", () => {
+    expect(["phone", "tablet", "foldable", "automotive"].map(prototypeWebFrameRotates)).toEqual([
+      true,
+      true,
+      true,
+      true,
+    ]);
+    expect(prototypeWebFrameRotates("watch")).toBe(false);
+    expect(prototypeWebFrameRotates("tv")).toBe(false);
+  });
+
+  test("tells the runtime the frame's platform and inlines the rotation rule", () => {
+    const ios = buildPrototypeWebPage({ ...input, frame: "iphone-16" });
+    expect(ios.html).toContain('data-platform="ios"');
+    expect(buildPrototypeWebPage(input).html).toContain('data-platform="android"');
+    expect(PROTOTYPE_WEB_RUNTIME).toContain("rotation: ");
+    expect(PROTOTYPE_WEB_RUNTIME).toContain("prefers-reduced-motion: reduce");
   });
 });

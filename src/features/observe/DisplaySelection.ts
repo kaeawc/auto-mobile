@@ -54,7 +54,7 @@ export interface DisplayLiveState {
   displayPin?: string;
 }
 
-const roles = new Set(["inner", "cover", "rear", "external"]);
+const roles = new Set(["inner", "cover", "rear", "external", "cluster", "overlay", "virtual"]);
 
 function selectExplicitPanel(panels: readonly DisplayPanel[], request: string): DisplayPanel {
   const available = panels.map((panel) => `${panel.key} (${panel.role})`).join(", ");

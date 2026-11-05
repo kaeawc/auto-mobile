@@ -59,6 +59,7 @@ test("launches only the service test with the requested port and binds the exact
     "-only-testing:CtrlProxyWatchUITests/CtrlProxyWatchUITests/testRunService",
   ]);
   expect(launch.options?.env).toEqual({ ...process.env, TEST_RUNNER_AM_PORT: "8765" });
+  expect(launch.options?.env).not.toHaveProperty("TEST_RUNNER_AM_BUNDLE_ID");
   expect(launch.options?.stdio).toBe("ignore");
   expect(launch.options?.signal).toBeUndefined();
   expect(environments).toEqual([{ AM_PORT: "8765" }]);
@@ -70,6 +71,23 @@ test("launches only the service test with the requested port and binds the exact
   expect(child.killed).toBe(true);
   expect(client.closed).toBe(true);
   expect(watchRunners.get(options.deviceId)).toBeUndefined();
+});
+
+test("forwards the requested app bundle to the XCTest runner", async () => {
+  const timer = new FakeTimer();
+  const xcodebuild = new FakeStreamingXcodebuild(new FakeChildProcess(timer));
+  ({ stop } = await new XcodebuildWatchRunnerLauncher({
+    writeRunnerEnvironment: async (file) => file,
+    xcodebuild,
+    timer,
+    connect: () => new FakeWatchRunnerClient(),
+  }).launch({ ...options, bundleId: "com.example.workout.watchkitapp" }));
+
+  expect(xcodebuild.launches[0].options?.env).toMatchObject({
+    TEST_RUNNER_AM_PORT: "8765",
+    TEST_RUNNER_AM_BUNDLE_ID: "com.example.workout.watchkitapp",
+  });
+  expect(timer.getSleepHistory()).toEqual([]);
 });
 
 test("the fake launcher registers without creating a process", async () => {

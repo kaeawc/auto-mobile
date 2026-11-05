@@ -187,4 +187,131 @@ describe("Android physical display inventory", () => {
       { key: "4619827551948147201", role: "cover", sizePx: { width: 1080, height: 2364 } },
     ]);
   });
+  // Overlay displays (`settings put global overlay_display_devices 1080x1920/320`) have no
+  // SurfaceFlinger physical id; their display-service record carries `type OVERLAY` (#13138).
+  const overlayRecord =
+    '    DisplayDeviceInfo{"Overlay #1": uniqueId="overlay:1", 1080 x 1920, modeId 2, density 320, 320.0 x 320.0 dpi, touch NONE, rotation 0, type OVERLAY, state ON, FLAG_PRESENTATION}\n';
+
+  test("adds an overlay display to a phone inventory under the overlay role", () => {
+    const infos = fixture("phone-display-device-info.txt") + overlayRecord;
+    expect(
+      parseAndroidDeviceDisplayOutcome(
+        fixture("phone-surfaceflinger.txt"),
+        infos,
+        fixture("phone-states.txt"),
+      ),
+    ).toEqual({ kind: "multi" });
+    expect(
+      parseAndroidDeviceDisplays(
+        fixture("phone-surfaceflinger.txt"),
+        infos,
+        fixture("phone-states.txt"),
+      )?.panels,
+    ).toEqual([
+      { key: "4619827259835644672", role: "unknown", sizePx: { width: 1080, height: 2400 } },
+      { key: "overlay:1", role: "overlay", sizePx: { width: 1080, height: 1920 } },
+    ]);
+  });
+
+  test("lists overlays after physical panels without changing fold roles", () => {
+    expect(
+      parseAndroidDeviceDisplays(
+        fixture("fold-surfaceflinger.txt"),
+        overlayRecord + fixture("dual-display-device-info.txt"),
+        "Supported states: []",
+      )?.panels,
+    ).toEqual([
+      { key: "4619827259835644672", role: "inner", sizePx: { width: 2256, height: 2504 } },
+      { key: "4619827551948147201", role: "cover", sizePx: { width: 1080, height: 2520 } },
+      { key: "overlay:1", role: "overlay", sizePx: { width: 1080, height: 1920 } },
+    ]);
+  });
+
+  test("an overlay without a readable physical panel cannot establish an inventory", () => {
+    expect(
+      parseAndroidDeviceDisplayOutcome("", overlayRecord + overlayRecord, "Supported states: []"),
+    ).toEqual({ kind: "unreadable", reason: "no matched physical display records" });
+    expect(
+      parseAndroidDeviceDisplays("", overlayRecord + overlayRecord, "Supported states: []"),
+    ).toBeUndefined();
+  });
+
+  test("ignores an overlay: uniqueId whose record is not typed OVERLAY", () => {
+    expect(
+      parseAndroidDeviceDisplays(
+        fixture("phone-surfaceflinger.txt"),
+        fixture("phone-display-device-info.txt") +
+          overlayRecord.replace("type OVERLAY", "type VIRTUAL"),
+        fixture("phone-states.txt"),
+      ),
+    ).toBeUndefined();
+  });
+  // App-created virtual displays (`DisplayManager.createVirtualDisplay`) carry `type VIRTUAL`
+  // and a `virtual:<package>,<uid>,<name>,<index>` uniqueId (#16462).
+  const virtualRecord = (uniqueId: string) =>
+    `    DisplayDeviceInfo{"Presentation": uniqueId="${uniqueId}", 1280 x 720, modeId 1, density 213, touch NONE, rotation 0, type VIRTUAL, owner com.example.app (uid 10123), state ON, FLAG_PRESENTATION}\n`;
+  const appVirtual = virtualRecord("virtual:com.example.app,10123,Presentation,0");
+
+  test("adds an app-created virtual display under the virtual role, after overlays", () => {
+    const infos = fixture("phone-display-device-info.txt") + appVirtual + overlayRecord;
+    expect(
+      parseAndroidDeviceDisplayOutcome(fixture("phone-surfaceflinger.txt"), infos, ""),
+    ).toEqual({ kind: "multi" });
+    expect(
+      parseAndroidDeviceDisplays(
+        fixture("phone-surfaceflinger.txt"),
+        infos,
+        fixture("phone-states.txt"),
+      )?.panels,
+    ).toEqual([
+      { key: "4619827259835644672", role: "unknown", sizePx: { width: 1080, height: 2400 } },
+      { key: "overlay:1", role: "overlay", sizePx: { width: 1080, height: 1920 } },
+      {
+        key: "virtual:com.example.app:Presentation",
+        role: "virtual",
+        sizePx: { width: 1280, height: 720 },
+      },
+    ]);
+  });
+
+  test("leaves AutoMobile's own virtual displays out so recording does not change inventory", () => {
+    for (const uniqueId of [
+      "virtual:com.android.shell,2000,automobile-mirror,0",
+      "virtual:dev.jasonpearson.automobile.ctrlproxy,10200,mirror,0",
+    ]) {
+      const infos = fixture("phone-display-device-info.txt") + virtualRecord(uniqueId);
+      expect(
+        parseAndroidDeviceDisplayOutcome(fixture("phone-surfaceflinger.txt"), infos, ""),
+      ).toEqual({ kind: "single" });
+      expect(
+        parseAndroidDeviceDisplays(fixture("phone-surfaceflinger.txt"), infos, ""),
+      ).toBeUndefined();
+    }
+  });
+
+  test("keeps a virtual key stable across uid and index changes", () => {
+    const panelsFor = (uniqueId: string) =>
+      parseAndroidDeviceDisplays(
+        fixture("phone-surfaceflinger.txt"),
+        fixture("phone-display-device-info.txt") + virtualRecord(uniqueId),
+        "",
+      )?.panels.at(-1)?.key;
+    expect(panelsFor("virtual:com.example.app,10123,Presentation,0")).toBe(
+      panelsFor("virtual:com.example.app,10456,Presentation,3"),
+    );
+  });
+
+  test("leaves out a virtual key two live displays share", () => {
+    const infos =
+      fixture("phone-display-device-info.txt") +
+      appVirtual +
+      virtualRecord("virtual:com.example.app,10123,Presentation,1");
+    expect(
+      parseAndroidDeviceDisplayOutcome(fixture("phone-surfaceflinger.txt"), infos, ""),
+    ).toEqual({ kind: "single" });
+  });
+
+  test("a virtual display without a readable physical panel cannot establish an inventory", () => {
+    expect(parseAndroidDeviceDisplays("", appVirtual + overlayRecord, "")).toBeUndefined();
+  });
 });

@@ -1,0 +1,163 @@
+{
+  "spec": {
+    "id": "media-video-poster",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["media"]
+    },
+    "media": {
+      "players": {
+        "main": {
+          "kind": "video",
+          "source": {
+            "sample": "countdown"
+          }
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "image",
+          "asset": "photo"
+        },
+        {
+          "type": "videoPlayer",
+          "player": "main",
+          "poster": "poster"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[32]",
+  "expectedMessage": "Image limit exceeded"
+}

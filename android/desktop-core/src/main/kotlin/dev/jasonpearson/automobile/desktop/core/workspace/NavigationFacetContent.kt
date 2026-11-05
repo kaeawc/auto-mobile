@@ -10,6 +10,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -17,7 +19,10 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
+import dev.jasonpearson.automobile.desktop.core.daemon.allocatingClientProvider
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
+import dev.jasonpearson.automobile.desktop.core.navigation.DaemonEdgeNavigator
+import dev.jasonpearson.automobile.desktop.core.navigation.EdgeNavigator
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboard
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboardOptions
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader
@@ -28,6 +33,7 @@ internal fun NavigationFacetOptions.NavigationContent(
   stream: ObservationStream?,
   clientProvider: () -> dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient,
   screenshotLoader: ScreenshotLoader,
+  edgeNavigator: EdgeNavigator? = null,
 ) {
   val graph = LocalAutoMobileGraph.current
   with(memory) {
@@ -76,6 +82,10 @@ internal fun NavigationFacetOptions.NavigationContent(
               // hash.
               // No known key keeps the existing device+package fallback.
               activeContext = buildKeys.activeContext(current.appId),
+              edgeNavigator = edgeNavigator,
+              // The daemon records the traversal under the active build; pull it now so a
+              // speculative edge reads as verified without waiting for the next push (#16953).
+              onEdgeNavigated = { stream?.requestNavigationGraph() },
             ),
         )
     }
@@ -119,4 +129,26 @@ internal fun NavigationFacetError(
         },
     )
   }
+}
+
+/**
+ * The pane's navigator for transition navigate actions (#16953):
+ * [NavigationFacetOptions.edgeNavigator] when given, else a daemon navigator whose client allocates
+ * the pane's device to the desktop session first, exactly as a pane's input does (#10730). Null
+ * without an input allocation.
+ */
+@Composable
+internal fun rememberEdgeNavigator(
+  options: NavigationFacetOptions,
+  clientProvider: () -> dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient,
+): EdgeNavigator? {
+  val latestSessionUuidProvider by rememberUpdatedState(options.sessionUuidProvider)
+  val allocated =
+    remember(clientProvider, options.inputAllocation) {
+      options.inputAllocation?.let { allocation ->
+        allocatingClientProvider(clientProvider, { allocation }) { latestSessionUuidProvider() }
+          ?.let { DaemonEdgeNavigator(it, options.ioDispatcher) }
+      }
+    }
+  return options.edgeNavigator ?: allocated
 }

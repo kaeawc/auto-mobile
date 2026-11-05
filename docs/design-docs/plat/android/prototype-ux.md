@@ -1442,7 +1442,9 @@ uncapped path-key identifier grammar; bound state keys are checked by the runtim
 Push and replace accept up to 16 scalar literals or existing state/data/item/index value bindings
 in `params`. All declared params are required; unknown names and incorrectly typed literals are
 rejected at the action. `setStack {stack, path:[{screen,params?}]}` validates each entry the same way
-and requires 1–MAX_PROTOTYPE_STACK_DEPTH entries. A non-forced pop of the owning stack in
+and requires 1–MAX_PROTOTYPE_STACK_DEPTH entries. The device runtimes replace the whole path with
+the entries' screens and report one `screen_changed` when the top screen or depth changes; a path
+naming an unknown screen leaves the stack unchanged. A non-forced pop of the owning stack in
 its screen's onBack list, including nested timer and request follow-ups, is rejected; `force:true`
 bypasses that guard. Pops in dialog actions are independent. An onEnter list cannot push or replace
 its own screen, including through nested action lists. Cross-screen lifecycle cycles, including
@@ -2056,6 +2058,11 @@ values, delivered like `connectivity.changed`: the state updates at once, the ev
 state has been quiet for 500 ms, and a flap that settles back on the last delivered values is not an
 event. Unknown keys and events fail validation with a
 path. No production runtime advertises them yet: the Android and iOS readers are #14322 and #14323.
+The host mirrors each delivered `<module>.changed` as `platformStatus.<module>` in `prototype status`
+and `inspect` (`values`, the event's device `timestamp`, the host `receivedAt`, and `simulated` for an
+injected event), so an agent can assert the device's last values without observing. A replayed event
+older than the mirrored reading on the device clock does not replace it. Data with a key or value outside the module's
+state table, or cut by the emit budget, is not mirrored and leaves the previous reading.
 
 | Module (capability)                         | Keys                                                                                                                                                                                  |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -2132,8 +2139,14 @@ the capability yet.
 `settings.open` with `page` one of `app`, `notifications`, `location`, `wifi`, `bluetooth` or `display`. The
 list is closed and the target package is always the prototype's own runtime package; a spec cannot name
 another. The module has no events or `/platform` state. Pages other than `app` and `notifications` are
-Android only; the host validator does not yet know the target platform, so that restriction is reported by the
-runtime. No production runtime advertises the module yet.
+Android only. The spec validators are platform-neutral, so the host's iOS show preflight refuses a literal
+Android-only `page` with the action's path; a bound page is left to the runtime. The Kotlin validator needs no
+such check because it runs only on Android, and the Swift agent validator has none yet because the iOS agent
+does not advertise the module, which the host's capability gate refuses. CtrlProxy registers the module on Android and opens each page for its own package with
+`FLAG_ACTIVITY_NEW_TASK`. Below API 26 `notifications` opens the app details page, and below API 29 `wifi` opens
+the full Wi-Fi screen instead of the panel; both report `outcome: "fallback"`. The result is `{outcome, page,
+handler?}`, and no resolving Settings activity is the typed error `unavailable`. The embedded renderer and iOS do
+not advertise it yet.
 
 **Contact and calendar pickers (#14318).** Two modules reach the system pickers, which return only what the
 user picks and need no declared permission. `contacts` (`prototype_platform_contacts_v1`) has
@@ -2216,6 +2229,16 @@ avatar?}` with unique ids. Each email must use a reserved domain (`example.test`
 `.invalid`), so a fake account can never match a real one. No field holds a password, secret or client id.
 `sessionTtlSeconds` runs from 60 to 2592000. An `auth.signIn` or `auth.signOut` call without the block fails
 validation. No production runtime advertises the module yet.
+`prototypeAuthSession.ts` is the session reference both runtimes copy. A sign-in writes the account to `into`
+(default `/data/session`) and then saves `{token, userId, expiresAtMs}` in the prototype's secure store. The
+token is an opaque `fake-<IdGenerator id>`, and the TTL is `sessionTtlSeconds`, default 3600. An account the
+block does not list, a `/data` write that fails or a store write that fails is `platform_error` and changes
+nothing. `cancelled` and `unavailable` keep their codes, any other code becomes `platform_error`, and a
+failed sign-in keeps the previous session. `auth.signOut` clears the store and removes `into`.
+`auth.sessionExpired` clears the store and leaves `/data` to the `platform.on` handlers. At launch, a session
+that is still valid for a listed account restores `/platform/auth`; any other is cleared. A session past its
+TTL is reported as expired, so the runtime raises `auth.sessionExpired`. The token appears in no result,
+`/data` value or `/platform` key, and a store error is reported by its name only.
 
 **Location (#14324).** The `location` module (`prototype_platform_location_v1`) has one call,
 `location.request` with `accuracy` (optional: `precise` or `approximate`) and `maxAgeMs` (optional, whole
@@ -2237,6 +2260,12 @@ it keeps `/platform/location/current` current while the prototype is shown and r
 write, at most once per `minIntervalMs` (whole milliseconds, 1000 to one hour) and only after moving
 `minDistanceM` (0 to 100 km). Like the call, the block needs `location` in both `requires.platform` and
 `requires.permissions`. No updates are delivered in the background. No production runtime advertises the module.
+The delivered `location.updated` event carries only `{accuracyM, approximate}`, so coordinates reach the host
+only when the spec emits them or writes them into `/data`. `prototypeLocationEventSummary`
+(`prototypeLocationPrivacy.ts`) is the reference the runtimes copy, with shared cases in
+`test/fixtures/prototype-location/event-summary.json`. As a second layer the host's event decoder, shared by
+the Android and iOS transports, reduces any decoded `location.updated` data to those two fields and logs the
+names (never the values) of anything it dropped.
 
 **BLE value codecs (#14266).** The `ble` module's `decode` and `encode` arguments name one of a closed list
 of codecs, with no expressions: `utf8`, `hex` (lowercase out, either case in), `base64` (standard alphabet,
@@ -2264,6 +2293,20 @@ whole days, weeks, months or years (`P7D`, `P1M`). The block has no merchant, ga
 Every `commerce.*` call needs the catalog, and a literal `productId` must name one of its products.
 `commerce.checkout` is not in the contract, and no production runtime advertises the module.
 
+The fake store's state follows one reducer, `prototypePurchaseOutcome.ts`; Kotlin `PrototypePurchaseOutcome`
+copies it, and both replay `test/fixtures/prototype-purchase/`. `entitlements` maps a product id to `active`,
+`gracePeriod` or `billingRetry`, and a consumable never holds one. `lastTransaction` is
+`{transactionId, productId, status}`, or null. Buying a product that is `active` or in `gracePeriod` fails
+with `alreadyOwned`, whatever outcome was queued; a product in `billingRetry` can be bought again. A product
+the catalog does not list is `platform_error` with reason `unavailable`. A failed purchase leaves the state
+untouched. A code other than `cancelled`, `alreadyOwned` or `platform_error` becomes `platform_error`, and only
+`platform_error` keeps a reason: `network`, `declined` or `unavailable`. Every result is recorded as
+`lastTransaction`, but only `purchased` grants the entitlement. A `deferred` or `pending` transaction is
+resolved later: `approved` grants the entitlement and `declined` records `declined`. Simulated
+`entitlementsChanged` events work on a subscription the user holds. `renew` sets it `active`, and
+`gracePeriod` and `billingRetry` set those states. `expire` and `refund` remove an entitlement and also apply to
+a non-consumable. `commerce.entitlementsChanged` is raised only when the entitlements actually change.
+
 **Secure storage (#14321).** `storage.secure` lists up to 8 `state:` keys the runtime keeps in the Android
 Keystore or the iOS Keychain instead of plaintext storage. Each must be a declared state key holding a string,
 and it may not also appear in `storage.keys`. The list needs the `secureStorage` module
@@ -2273,8 +2316,13 @@ and it may not also appear in `storage.keys`. The list needs the `secureStorage`
 in `requires.platform`. A secure key never leaves the device through an emit `context`: the validators refuse
 `{state: <secure key>}` there. A `request` may send one only with `allowSecureInRequest: true`; otherwise a
 `{state: <secure key>}` binding in a header, query value or body (whole, form entry or multipart value), or a
-`{<secure key>}` placeholder in the URL, a header or a query value, is refused. No production runtime advertises
-the module yet.
+`{<secure key>}` placeholder in the URL, a header or a query value, is refused. On a show, `restorePrototypeStorage`
+and its Kotlin and Swift twins apply the secure store's values under the same version and listing rules: a value restores only into a listed
+secure key, as a string of at most `MAX_PROTOTYPE_SECURE_VALUE_BYTES` (4096) UTF-8 bytes into a string state key,
+and a plaintext stored copy never fills one. A biometric-bound key that holds a value is not read: its state holds
+`""` and it is reported in `locked` until `biometric.authenticate` unlocks it. A key the store reports invalidated
+(biometric re-enrolment revoked its hardware key) is dropped and the spec's value stands. No production runtime
+advertises the module yet.
 
 **Motion and sensors (#14327).** The `sensors` module (`prototype_platform_sensors_v1`) has no calls and one
 event, `sensors.shake`, handled in `platform.on`. Its read-only keys are flat, because a `/platform` pointer reads
@@ -2326,7 +2374,10 @@ must name a declared channel, a literal `actions` list needs unique ids, and `no
 exactly one of `id`, `group` or `all`; bound values are checked by the runtime.
 `notifications.schedule` takes the `post` arguments plus `delaySeconds` (a whole number, 1 to 604800)
 and needs `prototype_platform_notifications_scheduled_v1` as well; the same channel and action-id rules
-apply, and `notifications.scheduledFired` reports a scheduled notification that fired (#14283). On iOS, `min` and `low`
+apply, and `notifications.scheduledFired` reports a scheduled notification that fired (#14283).
+A `notifications.push` handler receives a simulated push (`{type, data, notification?}`, at most
+4096 bytes of compact JSON, the APNs limit) and needs `prototype_platform_push_v1` on top of the
+module, gated per event rather than per call (#14285). On iOS, `min` and `low`
 map to the passive interruption level and `default` and `high` to active. No production runtime
 advertises the module yet.
 
@@ -2380,6 +2431,9 @@ one-key union), which is a node-scoped player released when the node leaves comp
   position into; a slider bound to it holds device writes while it is dragged and seeks on release.
 - Every `videoPlayer` needs `media` in `requires.platform`. Authored controls are ordinary nodes
   calling `media.*`.
+- At most `MAX_PROTOTYPE_VIDEO_NODES` (64) `videoPlayer` nodes, counted in the authored tree and
+  again after repeat expansion, so every repeat instance counts. A `poster` costs one image against
+  `MAX_PROTOTYPE_IMAGES` in both counts.
 
 **Captions (#14259, contract only).** A `videoPlayer` may list up to 8 `captions` tracks
 `{id, language, label, source}`, where `source` is an uploaded WebVTT `{asset}` or `{data}`, a `/data`
@@ -2471,8 +2525,10 @@ app) and `cast.setVolume` (`volume` 0-1, the remote device volume); play, pause 
 The host decodes them with `prototypeCastEventOf` (truncated data does not decode); Kotlin
 `PrototypeCastEvents` and Swift `PrototypeCastEvents` are the twins, and all three replay
 `test/fixtures/prototype-spec/cast/events.json`. `/platform/cast/state` is `unavailable`, `noDevices`, `notConnected`,
-`connecting` or `connected`, with `deviceName`, `protocol` (`googleCast` or `airplay`), `player` (the
-cast `media` player id) and `volume`. CtrlProxy never advertises the module.
+`connecting` or `connected`, with `deviceName`, `protocol` (`googleCast` or `airplay`), `protocols`
+(the unique protocols the device supports, read whole as `{platform:/cast/protocols}`; an iOS agent
+reports `["airplay"]`), `player` (the cast `media` player id) and `volume`. CtrlProxy never advertises
+the module.
 
 The `castButton` node is the system route picker that starts a session; there is no start call. Its
 required `player` names a declared `media.players` id or an inline `videoPlayer` id, and optional
@@ -2953,12 +3009,29 @@ or appends; the incoming value must contain its valid, nonempty key pointer. A l
 refused statically when that pointer is missing or resolves to null. JSON identity uses
 numeric value, exact strings and member names, and structural array/object equality. maxItems
 is an integer 1..2000; oldest rows are dropped after replacement/append and before final data
-limits. Missing/non-array targets and invalid writes leave input unchanged.
+limits. Missing/non-array targets and invalid writes leave input unchanged. The device runtimes run
+an upsert from any action list through the shared writer and report it as a `change` event
+`{op:"upsert",key,value?,maxItems?,revision}`, which the host replays the same way.
 
 The daemon holds the upstream connection for `via: "host"` channels (see
-[Host channel transport](#host-channel-transport)). Runtime work remains owed: the device-side
-transports, device client frame routing, routing and atomic frame writes, reconnect/backoff, send queues, counters/events, inspection, simulation and
-foreground/background/patch/reset/dismiss lifecycle. Pure TS, Kotlin and Swift rules replay shared
+[Host channel transport](#host-channel-transport)).
+
+On Android, `PrototypeChannelController` (`prototype-compose`) is the per-prototype state machine
+behind a `PrototypeChannelTransport`: OkHttp WebSocket/okhttp-sse from the device (`prototype-saved`,
+same egress policy as device requests, no redirects followed, 25 s pings) or the CtrlProxy-socket
+relay for `via: "host"`, which fails an open at once with `network` when no host is connected.
+Transport callbacks pass through one ordered inbox, and every effect reaches its sink under one lock:
+the `/platform/realtime/<channel>` snapshot, `realtime.status`/`realtime.frame` events, and route,
+callback and `statusKey` actions to apply atomically. The first matching route wins (`{event}`
+defaults to `message`); matched frames wait for the flush window and are coalesced. A frame that is
+not JSON on a json channel, or larger than the frame cap, counts in `framesDropped`. Status runs
+idle → connecting → open, then reconnecting with backoff, ending closed (or error when the last
+close carried one). Attempts reset after 5 s open. Sends wait in a 32-entry queue while
+(re)connecting, flush on open and drop on close. A patch closes removed channels and reconnects only
+changed live ones; dismiss closes every connection with 1001 and silences the sink. Runtime work
+remains owed: wiring the controller into the prototype runtime as the `realtime` module (calls,
+data writes including `upsertData`/`maxItems`), capability advertisement, foreground/background
+lifecycle, inspection and simulation. Pure TS, Kotlin and Swift rules replay shared
 backoff and coalescing vectors under `test/fixtures/prototype-spec/realtime/`. Reconnect uses
 full jitter: `floor(random * min(maxDelayMs, initialDelayMs * 2^(attempt-1)))`, with defaults of
 8 attempts, 500 ms initial delay and 30000 ms maximum delay; exhausted attempts consume no
@@ -3006,7 +3079,8 @@ A prototype can talk to a declarative backend with no server code (decisions in
 `<backendId>.mock.automobile.invalid` is answered in process by the daemon's backend of that id,
 before the egress policy: no DNS lookup, socket or `adb reverse`. A host under that suffix that
 names no defined backend fails as `network`. Backends live for the daemon session and are bounded
-(16 backends, 16 collections, 64 routes, 1 MiB of collections and routes).
+(16 backends, 16 collections, 64 routes, 64 rooms, 1 MiB of collections, routes, rooms and
+broadcasts).
 
 - **Collections** are json-server style: `GET /<name>` filters by `?field=value`, `q` matches a
   case-insensitive substring of any string or number member, `_sort=price|-price` sorts stably
@@ -3024,12 +3098,38 @@ names no defined backend fails as `network`. Backends live for the daemon sessio
   timer, so a run replays identically: `latencyMs {min, max}` delays every answer, and each fault
   `{path, method?, status, every | rate}` fires on every nth matching request or with probability
   `rate`, answering `{error: "mock fault"}`.
-- Every answered request is logged (latest 200, with a sequence number) for assertions.
+- **Rooms** serve `via: "host"` channels to the same origin (`wss://` for WebSocket, `https://` for
+  SSE), with no socket. A connection joins the first room `{path, onConnect?, echo?, relay?,
+  timeline?}` whose path pattern matches its URL path; no match is `handshake_failed` with status 404,
+  and a room path with 64 connections refuses the next with 503. `onConnect` frames are delivered
+  right after `opened`; each `timeline` entry fires `afterMs` after its own connection opened, on the
+  injected timer. `echo` returns a client send to its sender and `relay` passes it to the other
+  connections of the same room path. Scripted frames bind `{params.x}` and `{query.x}` from the
+  channel URL; a string frame goes on the wire as written and other JSON as JSON text. SSE
+  connections only receive. Latency and faults apply to requests, not to channels.
+- **Broadcasts** `{collection: {room, frame, on?}}` send a 2xx collection write (`POST` unless `on`
+  lists `PUT` or `PATCH`) to the room path the binding produces; `{item}` and `{item:/pointer}` bind
+  the stored item, so a message one device posts reaches every device in its room.
+- Every answered request, client send, `publish` and broadcast is logged (latest 200, with one
+  sequence number) for assertions; a frame entry is `{seq, room, from, data}`.
+- **Actors** (at most 16, each with 1–64 steps) write to collections on the backend's injected
+  timer. One fires after a successful (status below 400) request matching `on.route` (`"POST
+  /path/:id"`), or runs `maxRuns` times every `every` ms (100 ms or more; run k starts at
+  `afterMs + k * every`). Its steps run in order: `append`, `update` and `remove` go through the
+  same collection code as `POST`, `PATCH` and `DELETE` (ids, 409, 413 and the size budget apply), and
+  each step's `afterMs` is relative to the previous step. `value` and `id` bind the triggering
+  request's placeholders. A failing step is logged and skipped. A backend holds at most 256
+  scheduled steps; a trigger past that is dropped and logged. Redefining, clearing or ending the
+  session cancels every pending step. `publish`, `advance` and `notify` are refused at definition
+  until mock channels, polylines and simulated push exist, and actors follow the daemon's timer,
+  not the device clock that `prototype simulate` advances.
 
 The `prototype` tool drives it with host-local actions that make no device request: `defineBackend
 {backendId, backend}` validates the definition and replaces the backend of that id (a failed
-definition leaves the old one), `clearBackend {backendId}` removes it, and `backendLog {backendId,
-since?}` returns the log. Their results report the origin a spec should call. `show` takes `mock`
+definition leaves the old one), `clearBackend {backendId}` removes it, `publish {backendId, room,
+frame}` delivers a frame to every connection in a room path and reports `delivered`, and
+`backendLog {backendId, since?}` returns the log. Replacing or clearing a backend, and session end,
+close its open channels with code 1001. Their results report the origin a spec should call. `show` takes `mock`
 (`{backendId: definition}`) or `mockPath` (an absolute file of the same, read like `specPath`, up to
 2 MiB): after the spec passes validation, every entry is validated and defined or none is, replacing
 backends of the same id. A saved prototype does not carry its mock backends. A request that
@@ -3895,6 +3995,11 @@ The `map` node (#14309, contract only: no renderer draws it and no runtime adver
   `width` (1 to 16) and `color`.
 - `onMarkerTap` runs with the tapped marker's item bound under `as`. `onCameraIdle.into` is a `/data/<pointer>`
   path that receives the settled camera.
+- Every `emit` a marker tap runs, including those in its nested `onSuccess`, `onError` and `startTimer`
+  actions, reports `markerId` (the tapped marker's resolved `id`) in its event context after the authored
+  entries, under the same byte budget. The contract lists the name in
+  `platformModules.map.events.markerTap.emitContext`. All three validators refuse an authored
+  `context.markerId` inside `onMarkerTap`. Outside it, `markerId` is an ordinary context name.
 - `showUserLocation: true` reads the `location` module, so it also needs `location` in `requires.platform`
   and the `location` permission in `requires.permissions`.
 - The `map` module has no calls or state. Its events `map.markerTap` and `map.cameraIdle` exist so a
@@ -4146,12 +4251,19 @@ prototype id; tapping it opens `SavedPrototypeActivity`, which needs no host.
   work: launcher dialogs differ).
 - A launcher caches its workspace, so a new or updated shortcut can stay invisible (#14887). After a
   `pinned` result, or a save whose shortcut was `updated`, the host looks for the label on the home
-  screen. If it is missing, it resolves the default launcher (`cmd package resolve-activity`), and
-  when that package is a known launcher runs `am force-stop` plus a HOME intent once, waits for the
-  launcher's tree to go quiet, and looks again. The result reports `launcherRestarted` and
-  `shortcutVisible`; an unknown launcher is left alone with a warning. It is on by default on
-  emulators and physical devices; `restartLauncher:false` opts out. It never runs on a pending pin
-  (no shortcut exists yet) and runs at most once per call.
+  screen, swiping through the following workspace pages (Pixel Launcher puts a new pin on page 2)
+  until the label appears, a page repeats, or ten pages are checked. If it is missing, it resolves
+  the default launcher (`cmd package resolve-activity`), and when that package is a known launcher
+  runs `am force-stop` plus a HOME intent once, waits for the launcher's tree to go quiet, and scans
+  again from the reset page. The result reports `launcherRestarted` and `shortcutVisible`; an
+  unknown launcher is left alone with a warning. It is on by default on emulators and physical
+  devices; `restartLauncher:false` opts out. It never runs on a pending pin (no shortcut exists
+  yet) and runs at most once per call.
+- Guards: the save is a control call, so the device-ownership layer refuses it on a device another
+  session, daemon or binding holds. The check never swipes or restarts when the foreground app is
+  not a launcher; it reports the shortcut unconfirmed instead. In-process saves take a per-device
+  ownership; a second concurrent save only checks the current page and never swipes or restarts
+  under the first.
 - An unsupported launcher keeps the save and reports `pinned:"unsupported"`. With the screen off,
   `requestPinShortcut` throws `IllegalStateException` and the call reports `device_locked`; the save
   remains and a retry is safe. An awake device showing the keyguard accepts the request, and the

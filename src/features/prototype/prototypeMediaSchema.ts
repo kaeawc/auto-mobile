@@ -40,6 +40,24 @@ export const prototypeMediaSchema = z
   })
   .strict();
 
+/**
+ * Counts a `videoPlayer` against `MAX_PROTOTYPE_VIDEO_NODES`. Both the authored and the
+ * repeat-expanded walks charge it, so repeat instances count.
+ */
+export function chargeVideoNode(
+  node: Record<string, unknown>,
+  counter: { videoNodes: number },
+  path: string,
+): { path: string; message: string } | undefined {
+  if (
+    node.type === "videoPlayer" &&
+    ++counter.videoNodes > contract.limits.MAX_PROTOTYPE_VIDEO_NODES
+  ) {
+    return { path, message: "Video node limit exceeded" };
+  }
+  return undefined;
+}
+
 /** A nonblank string kept as authored: trimming would change ids after their semantic checks. */
 const nonblank = (max: number) =>
   z

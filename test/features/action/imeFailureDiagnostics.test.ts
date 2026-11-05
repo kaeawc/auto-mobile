@@ -1,6 +1,8 @@
 import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../src/models";
+import { ActionableError } from "../../../src/models/ActionableError";
+import { sessionDisplayPinnedHandler } from "../../../src/server/pipeline/deviceCallDispatch";
 import { DefaultSendKeysCommandExecutor, SendKeys } from "../../../src/features/action/SendKeys";
 import { clearAndroidImeQuarantine } from "../../../src/features/action/androidImeLock";
 import {
@@ -55,6 +57,7 @@ function harness(text: string, observation: ObserveResult = field(text)) {
   timer.enableAutoAdvance();
   const executor = new DefaultSendKeysCommandExecutor(device, h.adbFactory, observer, {
     textClient: h.client,
+    pendingImeRestores: h.pendingImeRestores,
     timer,
     inputKey: { press: async () => ({ success: true }) },
   });
@@ -458,7 +461,7 @@ describe("IME failure diagnostics", () => {
     expect(h.timer.getSleepHistory()).toEqual([]);
   });
 
-  test("span restoration diagnostics belong to the last IME type and retain its progress", async () => {
+  test("deferred span restoration failure reaches the next tool and retains the last IME type's progress", async () => {
     const h = harness("@everyone");
     const priors: (string | null)[] = [];
     h.adb.setCommandResponse("shell ime disable", createExecResult("", "disable failed"));
@@ -471,25 +474,31 @@ describe("IME failure diagnostics", () => {
       { action: "type", text: "@everyone" },
       { action: "key", key: "enter" },
     ]);
-    expect(result).toMatchObject({ success: false, completedCommands: 2, failedIndex: 1 });
+    expect(result).toMatchObject({ success: true, completedCommands: 3 });
     expect(result.commands[0].success).toBe(true);
-    expect(result.commands[1]).toMatchObject({
-      action: "type",
-      success: false,
-      committedUnits: 9,
-      committedGraphemes: 4,
-      imeFailure: {
-        stage: "restoration",
-        expectedText: "@everyone",
-        observedText: null,
-        focusedFieldClass: "android.widget.MultiAutoCompleteTextView",
-        textMayHaveBeenApplied: true,
-        committedUnits: 9,
-        verifiedGraphemes: 4,
+    expect(h.pendingImeRestores.hasPending(device.deviceId)).toBe(true);
+    let dispatched = false;
+    const trigger = sessionDisplayPinnedHandler({
+      name: "tapAt",
+      schema: {},
+      pendingImeRestores: h.pendingImeRestores,
+      handler: async () => {
+        dispatched = true;
+        return { content: [] };
       },
     });
-    expect(result.error).toBe(result.commands[1].error);
-    expect(result.error).toContain("Text commit succeeded, but");
+    const failure = await trigger(device, {}).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ActionableError);
+    expect(String(failure)).toContain("Could not restore the original keyboard");
+    expect(String(failure)).toContain("keyboard setIme com.example.keyboard/.Ime");
+    expect(dispatched).toBe(false);
+    expect(h.pendingImeRestores.hasPending(device.deviceId)).toBe(false);
+    expect(result.commands[1]).toMatchObject({
+      action: "type",
+      success: true,
+      committedUnits: 9,
+      committedGraphemes: 4,
+    });
     expect(result.commands[2]).toMatchObject({ action: "key", success: true });
     expect(result.commands[2]).not.toHaveProperty("imeFailure");
     expect(priors).toEqual([null, null]);

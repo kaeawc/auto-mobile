@@ -61,6 +61,47 @@ class ContentBlocklistTest {
   }
 
   @Test
+  fun purgeDeletesHiddenAndBlockedReceivedEntriesOnly() {
+    put(FIRST, LibrarySource.file)
+    put(SECOND, LibrarySource.share, host = "proto.example.com", hash = OTHER_HASH)
+    put(THIRD, LibrarySource.mcp)
+    put(FOURTH, LibrarySource.share, hash = OTHER_HASH)
+    blocklist.hide(HASH)
+    blocklist.block("proto.example.com")
+    assertEquals(
+      setOf(FIRST, SECOND),
+      (repository.purgeBlocked() as LibraryResult.Success).value.map { it.libraryId }.toSet(),
+    )
+    assertEquals(setOf(THIRD, FOURTH), library.prototypes.keys)
+  }
+
+  @Test
+  fun purgeReportsOnlyDeletedEntriesAndPassesListFailuresThrough() {
+    put(FIRST, LibrarySource.file)
+    blocklist.hide(HASH)
+    library.failDelete = true
+    assertEquals(
+      emptyList<LibraryEntry>(),
+      (repository.purgeBlocked() as LibraryResult.Success).value,
+    )
+    assertEquals(LibraryResult.Failure(LibraryError.NotFound), repository.get(FIRST))
+    library.failDelete = false
+    library.error = LibraryError.Storage
+    assertEquals(LibraryResult.Failure(LibraryError.Storage), repository.purgeBlocked())
+  }
+
+  @Test
+  fun rejectsMatchesHiddenHashesAndBlockedHostsForReceivedSourcesOnly() {
+    blocklist.hide(HASH)
+    blocklist.block("proto.example.com")
+    assertTrue(blocklist.rejects(LibrarySource.file, HASH))
+    assertTrue(blocklist.rejects(LibrarySource.share, OTHER_HASH, "proto.example.com"))
+    assertFalse(blocklist.rejects(LibrarySource.share, OTHER_HASH))
+    assertFalse(blocklist.rejects(LibrarySource.mcp, HASH))
+    assertFalse(blocklist.rejects(LibrarySource.paste, HASH, "proto.example.com"))
+  }
+
+  @Test
   fun sourceHostAcceptsOnlyLowercaseDnsNames() {
     assertTrue(validSourceHost("proto.example.com"))
     assertTrue(validSourceHost("a-b.example.io"))
@@ -78,6 +119,8 @@ class ContentBlocklistTest {
   }
 
   private companion object {
+    const val THIRD = "00000000-0000-4000-8000-000000000003"
+    const val FOURTH = "00000000-0000-4000-8000-000000000004"
     val HASH = Fixtures.entry().specSha256
     val OTHER_HASH = "b".repeat(64)
   }

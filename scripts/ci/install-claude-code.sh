@@ -8,6 +8,12 @@
 # Actions, appends INSTALL_DIR to GITHUB_PATH. 2.1.318 is the first version
 # checked with `claude plugin validate --profile directory`; bump the version
 # and both checksums together.
+#
+# CI restores INSTALL_DIR from actions/cache (.github/actions/install-claude-code,
+# #16985). A stamp file records the version and checksum the binary was installed
+# from; when it matches the pin and `claude --version` runs, the download is
+# skipped. `--cache-key` prints the key for that cache: platform, version and
+# checksum, so a bump of either invalidates it.
 set -euo pipefail
 
 CLAUDE_CODE_VERSION="2.1.318"
@@ -43,6 +49,31 @@ case "$MACHINE" in
     ;;
 esac
 
+if [[ "${1:-}" == "--cache-key" ]]; then
+  echo "claude-code-${platform}-${CLAUDE_CODE_VERSION}-${expected_sha}"
+  exit 0
+elif [[ $# -gt 0 ]]; then
+  die "unknown argument '$1'; usage: install-claude-code.sh [--cache-key]"
+fi
+
+add_to_github_path() {
+  if [[ -n "${GITHUB_PATH:-}" ]]; then
+    echo "$INSTALL_DIR" >>"$GITHUB_PATH"
+  fi
+}
+
+stamp="${INSTALL_DIR}/.claude-code-pin"
+pin="${CLAUDE_CODE_VERSION} ${expected_sha}"
+if [[ -x "${INSTALL_DIR}/claude" && -f "$stamp" && "$(cat "$stamp")" == "$pin" ]]; then
+  if cached_version="$("${INSTALL_DIR}/claude" --version)"; then
+    log "using cached ${cached_version} at ${INSTALL_DIR}/claude"
+    add_to_github_path
+    exit 0
+  fi
+  log "cached binary at ${INSTALL_DIR}/claude did not run; reinstalling"
+fi
+rm -f "$stamp"
+
 package="claude-code-${platform}"
 url="${REGISTRY}/@anthropic-ai/${package}/-/${package}-${CLAUDE_CODE_VERSION}.tgz"
 mkdir -p "$INSTALL_DIR"
@@ -67,7 +98,6 @@ tar -xzf "$tarball" -C "$INSTALL_DIR" --strip-components=1 package/claude
 rm -f "$tarball"
 chmod +x "${INSTALL_DIR}/claude"
 log "installed $("${INSTALL_DIR}/claude" --version) at ${INSTALL_DIR}/claude"
+echo "$pin" >"$stamp"
 
-if [[ -n "${GITHUB_PATH:-}" ]]; then
-  echo "$INSTALL_DIR" >>"$GITHUB_PATH"
-fi
+add_to_github_path

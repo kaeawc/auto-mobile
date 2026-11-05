@@ -1,0 +1,37 @@
+#file: noinspection YAMLSchemaValidation
+name: "install-claude-code"
+description: "Install the pinned Claude Code CLI, restoring it from actions/cache when the pin is unchanged."
+
+runs:
+  using: "composite"
+  steps:
+    # The key names the platform, version and checksum the script pins (#16985),
+    # so bumping either one misses the cache and downloads the new tarball.
+    - name: "Resolve Claude Code cache key"
+      id: key
+      shell: bash
+      run: echo "key=$(scripts/ci/install-claude-code.sh --cache-key)" >> "$GITHUB_OUTPUT"
+
+    - name: "Restore cached Claude Code"
+      id: restore
+      uses: actions/cache/restore@v5
+      with:
+        path: ${{ runner.temp }}/claude-code
+        key: ${{ steps.key.outputs.key }}
+
+    # On a hit the script finds its stamp, runs `claude --version` and skips the
+    # download; on a miss (or a cached binary that does not run) it installs.
+    - name: "Install pinned Claude Code"
+      shell: bash
+      env:
+        CLAUDE_CODE_INSTALL_DIR: ${{ runner.temp }}/claude-code
+      run: scripts/ci/install-claude-code.sh
+
+    # Saved right after install, not in a post step, so a later failing step in
+    # the job still leaves the binary cached for the next run.
+    - name: "Save Claude Code cache"
+      if: steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v5
+      with:
+        path: ${{ runner.temp }}/claude-code
+        key: ${{ steps.key.outputs.key }}

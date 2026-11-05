@@ -35,6 +35,7 @@ class ImportActivityTest {
         UnconfinedTestDispatcher(),
         importer = importer,
         settings = FakeSettingsStore(),
+        blocklist = FakeContentBlocklist(),
       )
     }
   }

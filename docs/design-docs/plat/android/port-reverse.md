@@ -9,26 +9,31 @@ manager (#12530) also uses.
 
 ## Ownership
 
-- One owner per device port: the session UUID, or `sessionless`. State is per
-  device serial; operations on one device are serialised.
+- One owner per device port: the routed session UUID, or `sessionless`. State is
+  per device serial; operations on one device are serialised. One process-wide
+  manager is shared by the tool and the daemon's session cleanup.
 - A mapping AutoMobile did not create for this session (another session's, a
-  user's, a prototype's) is a `port_reverse_conflict` on `ensure`, never
-  overwritten. `ensure` checks every requested port before adding any, adds with
-  `--no-rebind` so a mapping made after the `--list` read is refused, and rolls
-  back its own adds if a later add fails.
+  user's, a prototype's), or one of its own that was re-pointed outside
+  AutoMobile, is a `port_reverse_conflict` on `ensure`, never overwritten.
+  `ensure` judges conflicts on the device as listed, before any restore, so a
+  refused request changes nothing. It adds with `--no-rebind`; a refused add
+  whose port `--list` then shows is reported as a conflict. A later failed add
+  rolls back this call's earlier adds through the same re-checked removal.
 - `remove` refuses ports the session does not own, then re-reads `--list` and
   removes a port only while it still maps to the host port AutoMobile set.
-  `--remove-all` is never used.
+  `adb reverse --remove` takes no host argument, so a re-point between that read
+  and the removal cannot be detected. Ownership is dropped only once removal
+  succeeds or the mapping is gone or re-pointed. `--remove-all` is never used.
 - The prototype manager and this one keep separate owner maps. Each treats the
-  other's mappings as pre-existing: prototypes skip them, and `portReverse`
-  reports them as conflicts.
+  other's mappings as pre-existing: prototypes skip them (and add with
+  `--no-rebind`), and `portReverse` reports them as conflicts.
 
 ## Restore
 
 Reverse listeners live in adbd, so an adb server restart, `adb reconnect`, an
 adbd restart (`root`/`unroot`) or an emulator restart drops them. Every
-`portReverse` call first re-reads `--list` and re-adds the device's owned
-mappings that are missing, reporting the caller's in `restored` or
+`portReverse` call except `remove` re-reads `--list` and re-adds the device's
+owned mappings that are missing, reporting the caller's in `restored` or
 `restoreFailures`. A failed restore keeps ownership so the next call retries. A
 port someone else re-mapped while ours was gone is dropped from ownership and
 left in place. `reconcile(deviceId)` runs the same pass for a recovery hook;
@@ -37,8 +42,11 @@ call.
 
 ## Release
 
-Session release removes that session's mappings; device removal removes all
-owned mappings on the device. A device that cannot answer `--list` during
+Session release and device unbind remove that session's mappings on the device,
+registered as pending device cleanup so the next session waits for it. Device
+removal from the pool removes only `sessionless` mappings: Android recovery
+removes and re-adds a device while its session stays bound, and that session's
+mappings are restored on its next call. A device that cannot answer during
 release is assumed gone: ownership is dropped and the failure logged at debug.
 
 ## Policy

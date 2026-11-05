@@ -106,29 +106,44 @@ describe("portReverse tool", () => {
     expect(executor.commands).toEqual([]);
   });
 
-  test("session release and device removal release through the manager", () => {
-    const released: string[] = [];
-    let onRelease: (sessionUuid: string) => void = () => undefined;
+  test("device removal releases only sessionless mappings", async () => {
+    const { mappings, manager, handler } = setup("session-a");
+    await handler(android, { action: "ensure", ports: [{ devicePort: 8080 }] });
+    const sessionless = createPortReverseHandler({
+      manager,
+      policy: {},
+      adbFactory: { create: () => fakeExecutor(mappings) },
+      sessionUuid: () => undefined,
+    });
+    await sessionless(android, { action: "ensure", ports: [{ devicePort: 9090 }] });
     let onRemoval: (deviceId: string) => void = () => undefined;
-    let unsubscribed = 0;
     const lifecycle: PortReverseLifecycle = {
-      subscribeSessionRelease: (listener) => {
-        onRelease = listener;
-        return () => unsubscribed++;
-      },
       subscribeDeviceRemoval: (listener) => {
         onRemoval = listener;
-        return () => unsubscribed++;
+        return () => undefined;
       },
     };
-    const unsubscribe = subscribePortReverseCleanup(lifecycle, {
-      releaseOwner: async (owner) => void released.push(`owner ${owner}`),
-      releaseDeviceMappings: async (deviceId) => void released.push(`device ${deviceId}`),
-    });
-    onRelease("s1");
+    subscribePortReverseCleanup(lifecycle, manager);
     onRemoval("emulator-5554");
-    unsubscribe();
-    expect(released).toEqual(["owner s1", "device emulator-5554"]);
-    expect(unsubscribed).toBe(2);
+    // Queued behind the release on the same device, so it observes its result.
+    await handler(android, { action: "list" });
+    // The session's 8080 survives (recovery keeps the session bound); sessionless 9090 is gone.
+    expect(manager.ownedPorts("emulator-5554")).toEqual([8080]);
+    expect(mappings.has(9090)).toBe(false);
+  });
+
+  test("an aborted call creates no mapping", async () => {
+    const { mappings, handler } = setup("session-a");
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      handler(
+        android,
+        { action: "ensure", ports: [{ devicePort: 8080 }] },
+        undefined,
+        controller.signal,
+      ),
+    ).rejects.toThrow();
+    expect(mappings.size).toBe(0);
   });
 });

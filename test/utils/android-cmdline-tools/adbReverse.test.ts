@@ -23,9 +23,11 @@ describe("adbReverse", () => {
 
   test("issues bounded add/remove commands and never --remove-all", async () => {
     const commands: string[] = [];
+    const timeouts: (number | undefined)[] = [];
     const reverse = createAdbReverseCommands({
-      executeCommand: async (command: string) => {
+      executeCommand: async (command: string, options?: { timeoutMs?: number }) => {
         commands.push(command);
+        timeouts.push(options?.timeoutMs);
         return { stdout: "", stderr: "" } as never;
       },
     });
@@ -39,5 +41,6 @@ describe("adbReverse", () => {
       "reverse --remove tcp:8080",
       "reverse --list",
     ]);
+    expect(timeouts).toEqual([5000, 5000, 5000, 5000]);
   });
 });

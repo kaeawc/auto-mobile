@@ -87,9 +87,11 @@ mock backend), use `portReverse` instead of running `adb reverse` yourself:
 
 AutoMobile owns the mappings it creates for your session. If one disappears
 (an adb server restart, `adb reconnect`, `adb root`/`unroot`, an emulator
-restart), the next `portReverse` call re-adds it and lists it in `restored`;
-a mapping it could not re-add is listed in `restoreFailures` and retried on the
-next call. Mappings are removed when the session or the device is released.
+restart), the next `ensure`, `list` or `verify` call re-adds it and lists it in
+`restored`; a mapping it could not re-add is listed in `restoreFailures` and
+retried on the next call. Your mappings are removed when your session is
+released or leaves the device; mappings made without a session are removed when
+the device is disconnected.
 
 Errors come back with `errorCode`:
 

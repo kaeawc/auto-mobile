@@ -23,7 +23,8 @@ export function createPrototypeReverseAdb(
     async listReversedPorts() {
       return new Set((await commands.list()).map((entry) => entry.devicePort));
     },
-    addReverse: (port) => commands.add(port, port),
+    // --no-rebind: a mapping made between the list and the add (a portReverse one) is never replaced.
+    addReverse: (port) => commands.add(port, port, { noRebind: true }),
     removeReverse: (port) => commands.remove(port),
   };
 }

@@ -1,6 +1,6 @@
 import { z } from "zod/v4";
-import { SessionReleaseBroadcaster } from "../daemon/sessionReleaseBroadcast";
 import { getDaemonStreamDeviceLifecycleEmitter } from "../daemon/streamDeviceLifecycleEvents";
+import { defaultPortReverseManager } from "../features/portReverse/defaultPortReverseManager";
 import { PortReverseError } from "../features/portReverse/PortReverseError";
 import {
   PortReverseManager,
@@ -49,20 +49,22 @@ type PortReverseAction = z.infer<typeof portReverseInput>["action"];
 export const SESSIONLESS_PORT_REVERSE_OWNER = "sessionless";
 
 export interface PortReverseLifecycle {
-  subscribeSessionRelease(listener: (sessionUuid: string) => void): () => void;
   subscribeDeviceRemoval(listener: (deviceId: string) => void): () => void;
 }
 
-/** Releases a session's mappings when it ends and a device's when it goes away. */
+/**
+ * Releases the sessionless mappings on a device when it leaves the pool. Session-owned mappings are
+ * released by the session's own release or unbind (`registerPortReverseSessionCleanup`), not here:
+ * Android recovery removes and re-adds a device while its session stays bound, and those mappings
+ * must survive to be restored after the relaunch.
+ */
 export function subscribePortReverseCleanup(
   lifecycle: PortReverseLifecycle,
-  manager: Pick<PortReverseManager, "releaseOwner" | "releaseDeviceMappings">,
+  manager: Pick<PortReverseManager, "releaseOwnerOnDevice">,
 ): () => void {
-  const cleanups = [
-    lifecycle.subscribeSessionRelease((sessionUuid) => void manager.releaseOwner(sessionUuid)),
-    lifecycle.subscribeDeviceRemoval((deviceId) => void manager.releaseDeviceMappings(deviceId)),
-  ];
-  return () => cleanups.forEach((cleanup) => cleanup());
+  return lifecycle.subscribeDeviceRemoval(
+    (deviceId) => void manager.releaseOwnerOnDevice(SESSIONLESS_PORT_REVERSE_OWNER, deviceId),
+  );
 }
 
 export interface PortReverseToolDependencies {
@@ -75,7 +77,8 @@ export interface PortReverseToolDependencies {
 
 const routedSessionUuid = () => {
   const context = getToolSelectionContext();
-  return context?.routingSessionUuid ?? context?.toolSelectionProfileUuid;
+  // A tool-selection profile is not a session: nothing releases it, so it never owns mappings.
+  return context?.routingSessionUuid;
 };
 
 function message(action: PortReverseAction, result: PortReverseResult): string {
@@ -130,7 +133,9 @@ async function run(
 export function createPortReverseHandler(
   deps: PortReverseToolDependencies,
 ): DeviceToolHandler<typeof portReverseInput> {
-  return async (device, args) => {
+  return async (device, args, _progress, signal) => {
+    // A call its session's release aborted must not create mappings that release already missed.
+    signal?.throwIfAborted();
     const base = { action: args.action, deviceId: device.deviceId };
     if (device.platform !== "android") {
       return createStructuredToolResponse({
@@ -190,24 +195,17 @@ const portReverseTool = defineDeviceTool({
 
 export const portReverseSchema = portReverseTool.schema;
 
-/** One manager per process: every MCP connection shares its ownership state. */
-let daemonPortReverseManager: PortReverseManager | undefined;
+let deviceRemovalSubscribed = false;
 
 function daemonManager(): PortReverseManager {
-  if (daemonPortReverseManager === undefined) {
-    const manager = new PortReverseManager();
+  if (!deviceRemovalSubscribed) {
+    deviceRemovalSubscribed = true;
     subscribePortReverseCleanup(
-      {
-        subscribeSessionRelease: (listener) =>
-          SessionReleaseBroadcaster.subscribe((sessionUuid) => listener(sessionUuid)),
-        subscribeDeviceRemoval: (listener) =>
-          getDaemonStreamDeviceLifecycleEmitter().onDeviceRemoved(listener),
-      },
-      manager,
+      { subscribeDeviceRemoval: (l) => getDaemonStreamDeviceLifecycleEmitter().onDeviceRemoved(l) },
+      defaultPortReverseManager,
     );
-    daemonPortReverseManager = manager;
   }
-  return daemonPortReverseManager;
+  return defaultPortReverseManager;
 }
 
 export function registerPortReverseTools(deps?: PortReverseToolDependencies): void {

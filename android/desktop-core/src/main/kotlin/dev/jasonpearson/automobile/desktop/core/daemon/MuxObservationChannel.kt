@@ -102,7 +102,7 @@ internal class MuxChannelFlows {
       "navigation_update" -> response.toNavigationUpdate()?.let(navigation::tryEmit)
       "performance_update" -> response.toPerformanceUpdate()?.let(performance::tryEmit)
       "device_build_context" -> response.toBuildContextUpdate()?.let(buildContext::tryEmit)
-      "device_session_ended" -> response.toSessionSuperseded()?.let(deviceEvents::tryEmit)
+      "device_session_ended" -> response.toDeviceSessionEvent()?.let(deviceEvents::tryEmit)
       else -> return false
     }
     return true

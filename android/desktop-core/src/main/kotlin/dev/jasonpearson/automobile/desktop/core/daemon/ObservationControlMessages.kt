@@ -38,7 +38,7 @@ internal suspend fun ObservationStreamClient.handleStorageReconciliationRequired
 
 internal suspend fun ObservationStreamClient.handleDeviceSessionEnded(response: StreamResponse) {
 
-  response.toSessionSuperseded()?.let { _deviceEvents.emit(it) }
+  response.toDeviceSessionEvent()?.let { _deviceEvents.emit(it) }
 }
 
 internal fun ObservationStreamClient.handlePing(response: StreamResponse) {

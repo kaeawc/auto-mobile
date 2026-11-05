@@ -48,8 +48,11 @@ fallback), instead of opening their own socket:
   device remains. After a reconnect every live device subscribes again. A
   refused subscription, such as a device that is not live yet, retries on its
   own backoff without affecting other devices; a refused desktop session fails
-  them all. A facet mounted on a live subscription first receives its device's
-  recent events.
+  them all, and a device subscribing while that session is still current gets
+  the refusal at once. The refusal holds only for the refused session UUID: once
+  a different session registers, a retry or a new subscription connects again
+  and subscribes every live device. A facet mounted on a live subscription first
+  receives its device's recent events.
 - Observation (Layout, Performance, Navigation) uses one stream per device,
   shared by every facet on it, and every device's stream shares one socket and
   one reader thread. Each device sends its own `subscribe` with its own cadence;
@@ -79,3 +82,14 @@ fallback), instead of opening their own socket:
 
 Storage, failures and video streams still connect per pane, as do observation
 streams in hosts without a hub (the IDE plugin).
+
+A pane is keyed on its device epoch. When the daemon ends that epoch with a
+successor, the pane re-keys onto the successor. When it ends with no successor
+(the device disconnected for good), the pane drops the epoch and shows "Device
+disconnected" in place of its stream and facets, which releases their leases.
+The pane is marked rather than closed so the user sees why the device went away;
+it stays until closed, and observing the device again or a fresh epoch for it
+(including one reported after a daemon restart) restores the live pane as a new
+epoch, so nothing observed from the retired epoch carries over. A daemon
+restart that re-mints a live pane's epoch is not a new epoch: that pane keeps
+its remembered state. An end for an epoch the pane is not on is ignored.

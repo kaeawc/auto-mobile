@@ -125,20 +125,23 @@ internal fun StreamResponse.toBuildContextUpdate(): BuildContextStreamUpdate? {
   )
 }
 
-/** A `device_session_ended` frame's successor epoch; null when any identity is missing. */
-internal fun StreamResponse.toSessionSuperseded(): DeviceStreamEvent.DeviceSessionSuperseded? {
+/**
+ * A `device_session_ended` frame as the device event it carries: a successor epoch is
+ * [DeviceStreamEvent.DeviceSessionSuperseded]; no successor means the device left for good, so
+ * [DeviceStreamEvent.DeviceSessionEnded]. Null when an identity is missing or the successor is blank.
+ */
+internal fun StreamResponse.toDeviceSessionEvent(): DeviceStreamEvent? {
   val deviceId = deviceId
   val retiredUuid = deviceSessionUuid
+  if (deviceId.isNullOrBlank() || retiredUuid.isNullOrBlank()) return null
+  val timestamp = timestamp ?: System.currentTimeMillis()
   val successorUuid = successorSessionUuid
-  if (deviceId.isNullOrBlank() || retiredUuid.isNullOrBlank() || successorUuid.isNullOrBlank()) {
-    return null
+  return when {
+    successorUuid == null ->
+      DeviceStreamEvent.DeviceSessionEnded(deviceId, retiredUuid, timestamp)
+    successorUuid.isBlank() -> null
+    else -> DeviceStreamEvent.DeviceSessionSuperseded(deviceId, retiredUuid, successorUuid, timestamp)
   }
-  return DeviceStreamEvent.DeviceSessionSuperseded(
-    deviceId = deviceId,
-    retiredUuid = retiredUuid,
-    successorUuid = successorUuid,
-    timestamp = timestamp ?: System.currentTimeMillis(),
-  )
 }
 
 /** A `device connection lost` error frame as an event; null for any other error. */

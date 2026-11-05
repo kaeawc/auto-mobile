@@ -70,52 +70,66 @@ internal fun DeviceColumnView(
           .focusDeviceColumn(column, focused, onAction),
     ) {
       DeviceColumnHeader(column, displayName, onAction)
-      val tool = column.activeTool
-      VerticalSplitPane(
-        options =
-          VerticalSplitOptions(
-            showSecond = tool != null,
-            firstPaneFraction = firstPaneFraction(column),
-            minFirstDp = 48.dp,
-            minSecondDp = 48.dp,
-            onFractionChanged = {
-              onAction(WorkspaceAction.SetFirstPaneFraction(column.deviceId, it))
-            },
-          ),
-        first = {
-          PaneMainContent(
-            column = column,
-            onAction = onAction,
-            modifier = Modifier.fillMaxSize(),
-            options =
-              PaneContent(
-                inspectContent = inspectContent,
-                streamContent = streamContent,
-                observationStreamFactory = observationStreamFactory,
-                screenshotSaver = screenshotSaver,
-                externalCaptureRequest = externalCaptureRequest,
-              ),
-          )
-        },
-        second = {
-          if (tool != null) {
-            DockedFacet(
-              column = column,
-              tool = tool,
-              onAction = onAction,
-              modifier = Modifier.fillMaxSize(),
-              options =
-                DockedFacetContent(
-                  facetContent = facetContent,
-                  canDiff = canDiff,
-                ),
-            )
-          }
-        },
-        modifier = Modifier.weight(1f),
-      )
+      if (column.sessionEnded) {
+        // No stream or facet may compose here: each would re-attach to the dead epoch.
+        DeviceSessionEndedPane(Modifier.weight(1f).fillMaxWidth())
+      } else {
+        PaneSplit(column, onAction, Modifier.weight(1f))
+      }
     }
   }
+}
+
+@Composable
+private fun DeviceColumnContent.PaneSplit(
+  column: DeviceColumn,
+  onAction: (WorkspaceAction) -> Unit,
+  modifier: Modifier,
+) {
+  val tool = column.activeTool
+  VerticalSplitPane(
+    options =
+      VerticalSplitOptions(
+        showSecond = tool != null,
+        firstPaneFraction = firstPaneFraction(column),
+        minFirstDp = 48.dp,
+        minSecondDp = 48.dp,
+        onFractionChanged = {
+          onAction(WorkspaceAction.SetFirstPaneFraction(column.deviceId, it))
+        },
+      ),
+    first = {
+      PaneMainContent(
+        column = column,
+        onAction = onAction,
+        modifier = Modifier.fillMaxSize(),
+        options =
+          PaneContent(
+            inspectContent = inspectContent,
+            streamContent = streamContent,
+            observationStreamFactory = observationStreamFactory,
+            screenshotSaver = screenshotSaver,
+            externalCaptureRequest = externalCaptureRequest,
+          ),
+      )
+    },
+    second = {
+      if (tool != null) {
+        DockedFacet(
+          column = column,
+          tool = tool,
+          onAction = onAction,
+          modifier = Modifier.fillMaxSize(),
+          options =
+            DockedFacetContent(
+              facetContent = facetContent,
+              canDiff = canDiff,
+            ),
+        )
+      }
+    },
+    modifier = modifier,
+  )
 }
 
 /**
@@ -302,6 +316,19 @@ internal fun DockedFacet(
  * [WorkspaceShell]'s `streamContent` slot; tests and previews keep this so composing the shell
  * never opens a relay socket.
  */
+/** Body of a pane whose device epoch ended with no successor; the header's ✕ closes it. */
+@Composable
+internal fun DeviceSessionEndedPane(modifier: Modifier) {
+  Box(
+    modifier.semantics { contentDescription = DEVICE_SESSION_ENDED_DESCRIPTION },
+    contentAlignment = Alignment.Center,
+  ) {
+    Text("Device disconnected", color = MaterialTheme.colorScheme.outline)
+  }
+}
+
+internal const val DEVICE_SESSION_ENDED_DESCRIPTION = "Device disconnected"
+
 @Composable
 fun WorkspaceStreamPlaceholder() {
   Text("stream", color = MaterialTheme.colorScheme.outline)

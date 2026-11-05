@@ -39,7 +39,7 @@ class SharedDaemonStreamHubLifecycleTest {
   @Test
   fun `a stream held only by a lifecycle lease asks for no frames`() = runTest {
     val h = harness()
-    val lifecycle = h.hub.lifecycleStream(phone).also { it.connect() }
+    val lifecycle = h.hub.observationStream(phone, lifecycleOnly = true).also { it.connect() }
 
     val shared = h.streams.single()
     assertEquals(1, shared.connectCallCount)
@@ -55,7 +55,7 @@ class SharedDaemonStreamHubLifecycleTest {
   fun `a facet joining a lifecycle lease restores the default cadence, and leaving idles it`() =
     runTest {
       val h = harness()
-      h.hub.lifecycleStream(phone).connect()
+      h.hub.observationStream(phone, lifecycleOnly = true).connect()
       val shared = h.streams.single()
 
       val facet = h.hub.observationStream(phone).also { it.connect() }
@@ -78,7 +78,7 @@ class SharedDaemonStreamHubLifecycleTest {
     facet.setCadence(screenshotIntervalMs = 1_000L, hierarchyIntervalMs = 2_000L)
     val shared = h.streams.single()
 
-    val lifecycle = h.hub.lifecycleStream(phone).also { it.connect() }
+    val lifecycle = h.hub.observationStream(phone, lifecycleOnly = true).also { it.connect() }
     assertEquals(listOf(1_000L to 2_000L), shared.cadenceCalls)
 
     lifecycle.dispose()
@@ -89,7 +89,7 @@ class SharedDaemonStreamHubLifecycleTest {
   @Test
   fun `the lifecycle lease hears the shared stream's device events`() = runTest {
     val h = harness()
-    val lifecycle = h.hub.lifecycleStream(phone).also { it.connect() }
+    val lifecycle = h.hub.observationStream(phone, lifecycleOnly = true).also { it.connect() }
     val ended = DeviceStreamEvent.DeviceSessionEnded(phone.deviceId, "uuid-a", 1L)
 
     assertTrue(h.streams.single().emitDeviceEvent(ended))

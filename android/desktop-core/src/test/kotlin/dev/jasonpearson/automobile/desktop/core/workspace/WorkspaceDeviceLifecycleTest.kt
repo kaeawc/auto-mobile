@@ -66,7 +66,9 @@ class WorkspaceDeviceLifecycleTest {
 
     fun columns() = (vm.state.value as? WorkspaceUiState.Content)?.columns.orEmpty()
 
-    fun streamFor(epoch: String) = streams.single { it.lastConnectedDeviceSessionUuid == epoch }
+    fun streamFor(epoch: String): FakeObservationStream = streams.single {
+      it.lastConnectedDeviceSessionUuid == epoch
+    }
 
     fun close() {
       hub.close()
@@ -80,7 +82,10 @@ class WorkspaceDeviceLifecycleTest {
       WorkspaceDeviceLifecycle(
         columns = (state as? WorkspaceUiState.Content)?.columns.orEmpty(),
         lifecycleStreamFor = {
-          h.hub.lifecycleStream(DeviceStreamKey(it.deviceId, it.deviceSessionUuid))
+          h.hub.observationStream(
+            DeviceStreamKey(it.deviceId, it.deviceSessionUuid),
+            lifecycleOnly = true,
+          )
         },
         handlers =
           WorkspaceDeviceLifecycleHandlers(

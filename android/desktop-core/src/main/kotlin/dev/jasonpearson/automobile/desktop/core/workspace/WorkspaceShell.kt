@@ -36,7 +36,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonBootstrapState
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
-import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamKey
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
@@ -147,27 +146,6 @@ fun Modifier.isolatedBehindOverlay(active: Boolean): Modifier =
   } else {
     this
   }
-
-/**
- * Holds the workspace-scope device lifecycle streams on the app's [LocalDaemonStreamHub]. Without a
- * hub (the IDE plugin) no lifecycle events are forwarded, as before.
- */
-@Composable
-private fun WorkspaceHubDeviceLifecycle(state: WorkspaceUiState, options: WorkspaceShellOptions) {
-  val streamHub = LocalDaemonStreamHub.current ?: return
-  val content = state as? WorkspaceUiState.Content ?: return
-  WorkspaceDeviceLifecycle(
-    columns = content.columns,
-    lifecycleStreamFor = { column ->
-      streamHub.lifecycleStream(DeviceStreamKey(column.deviceId, column.deviceSessionUuid))
-    },
-    handlers =
-      WorkspaceDeviceLifecycleHandlers(
-        onSuperseded = options.onDeviceSessionSuperseded,
-        onEnded = options.onDeviceSessionEnded,
-      ),
-  )
-}
 
 /**
  * Pick the two device columns to compare: the focused column plus the first other observed column.

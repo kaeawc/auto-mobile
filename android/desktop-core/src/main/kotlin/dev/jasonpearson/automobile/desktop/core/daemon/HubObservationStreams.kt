@@ -107,11 +107,10 @@ internal class HubObservationStreams(
   override val observationSubscriptions: StateFlow<Map<DeviceStreamKey, Int>> =
     _subscriptions.asStateFlow()
 
-  override fun observationStream(key: DeviceStreamKey): HubManagedObservationStream =
-    HubObservationStream(this, key)
-
-  override fun lifecycleStream(key: DeviceStreamKey): HubManagedObservationStream =
-    HubObservationStream(this, key, lifecycleOnly = true)
+  override fun observationStream(
+    key: DeviceStreamKey,
+    lifecycleOnly: Boolean,
+  ): HubManagedObservationStream = HubObservationStream(this, key, lifecycleOnly)
 
   /** Take a lease on [key]'s shared stream, opening and connecting it for the first lease. */
   fun acquire(key: DeviceStreamKey, lifecycleOnly: Boolean = false): Lease {

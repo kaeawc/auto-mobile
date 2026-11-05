@@ -6,6 +6,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.rememberUpdatedState
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
+import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamKey
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 
 /** Where the workspace sends an observed column's device epoch lifecycle events. */
@@ -56,4 +57,28 @@ internal fun WorkspaceDeviceLifecycle(
         }
       }
     }
+}
+
+/**
+ * Holds the workspace-scope device lifecycle streams on the app's [LocalDaemonStreamHub]. Without a
+ * hub (the IDE plugin) no lifecycle events are forwarded, as before.
+ */
+@Composable
+internal fun WorkspaceHubDeviceLifecycle(state: WorkspaceUiState, options: WorkspaceShellOptions) {
+  val streamHub = LocalDaemonStreamHub.current ?: return
+  val content = state as? WorkspaceUiState.Content ?: return
+  WorkspaceDeviceLifecycle(
+    columns = content.columns,
+    lifecycleStreamFor = { column ->
+      streamHub.observationStream(
+        DeviceStreamKey(column.deviceId, column.deviceSessionUuid),
+        lifecycleOnly = true,
+      )
+    },
+    handlers =
+      WorkspaceDeviceLifecycleHandlers(
+        onSuperseded = options.onDeviceSessionSuperseded,
+        onEnded = options.onDeviceSessionEnded,
+      ),
+  )
 }

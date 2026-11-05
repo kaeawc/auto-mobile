@@ -415,7 +415,7 @@ interface TestExecutionsTable {
   timestamp: number;
   device_id: string | null;
   device_name: string | null;
-  device_platform: "android" | "ios" | null;
+  device_platform: "android" | "ios" | "tvos" | null;
   device_type: "emulator" | "simulator" | "device" | null;
   app_version: string | null;
   git_commit: string | null;

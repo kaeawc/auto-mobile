@@ -6213,7 +6213,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": ["android", "ios", "tvos"]
         },
         "deviceId": {
           "type": "string"

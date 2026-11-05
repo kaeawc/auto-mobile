@@ -41,6 +41,8 @@ unavailable runtime fails, lists the available runtimes and repeats the install 
 | `pressButton`      | Presses a Siri Remote button.                                                |
 | `tapOn`            | Moves focus to a matched element and selects it.                             |
 | `sendKeys`         | Types text into the focused field.                                           |
+| `explore`          | Crawls the foreground app by focus and records its screens.                  |
+| `executePlan`      | Replays a plan of Apple TV steps.                                            |
 
 <!-- apple-tv-supported-tools:end -->
 
@@ -154,6 +156,27 @@ with `type` commands. Text is appended to the field.
 
 - `operation: "replace"`, key commands, clear commands and selectors are refused.
 - To change existing text, edit it on the on-screen keyboard with `pressButton`, then type.
+
+## Explore an app
+
+Launch the app with `launchApp`, then call `explore` with `platform: "tvos"`. Explore selects
+every item it can focus on a screen, observes after every remote press, records each screen a
+`select` opens in the navigation graph, and presses `menu` to go back.
+
+- It accepts `maxInteractions` (default 200), `timeoutMs` (default 300000) and `packageName`.
+  `strategy`, `mode`, `resetToHome`, `resetInterval` and `dryRun` are refused.
+- With `packageName`, that app must already be in the foreground.
+- It stops at either limit, when the first screen has nothing left to select, or when the app
+  cannot be brought back after leaving it (`stopReason`).
+- A recorded transition replays as `tapOn` with the item's text or identifier, or as
+  `pressButton select` when the item has neither; going back replays as `pressButton menu`.
+
+## Run a plan
+
+`executePlan` with `platform: "tvos"` runs plan steps that use Apple TV tools: `pressButton`,
+`tapOn`, `sendKeys`, `observe` and the app tools. A step whose tool is not in the supported-tools
+table fails the plan with the same error the tool returns on its own. Apple TV plans are not
+video-recorded.
 
 ## Out of scope
 

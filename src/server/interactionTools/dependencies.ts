@@ -2,7 +2,7 @@ import type { Clipboard } from "../../features/action/Clipboard";
 import type { DragAndDrop } from "../../features/action/DragAndDrop";
 import type { HandleIntentChooser } from "../../features/action/HandleIntentChooser";
 import type { Keyboard } from "../../features/action/Keyboard";
-import type { OpenURL } from "../../features/action/OpenURL";
+import type { ActionCall } from "../../features/action/ActionCall";
 import type { PinchOn } from "../../features/action/PinchOn";
 import type { PressButton } from "../../features/action/PressButton";
 import type { RecentApps } from "../../features/action/RecentApps";
@@ -17,7 +17,7 @@ import type { TapOnElement } from "../../features/action/TapOnElement";
 import type { WakeAndUnlock } from "../../features/action/WakeAndUnlock";
 import type { SetPosture } from "../../features/device/SetPosture";
 import type { RealObserveScreen } from "../../features/observe/ObserveScreen";
-import type { BootedDevice, ObserveResult } from "../../models";
+import type { BootedDevice, ObserveResult, OpenURLResult } from "../../models";
 import type { Timer } from "../../utils/SystemTimer";
 import type { WaitForObservationOutcome } from "../observeTools";
 import type { AndroidCtrlProxy } from "../../features/observe/android";
@@ -47,6 +47,11 @@ export type SwipeOnLike = Pick<SwipeOn, "execute">;
  * optional and defaults to the real implementation; tests pass fakes instead
  * of mutating module-level state (#11831).
  */
+/** What openLink needs from a link opener: open one URL within the request's call context. */
+export interface OpenLinkExecutor {
+  execute(url: string, call?: ActionCall): Promise<OpenURLResult>;
+}
+
 export interface InteractionToolDependencies {
   sendKeysFactory?: (device: BootedDevice) => SendKeysLike;
   swipeOnFactory?: (device: BootedDevice) => SwipeOnLike;
@@ -62,7 +67,8 @@ export interface InteractionToolDependencies {
   rotateFactory?: (device: BootedDevice, options?: RotateOptions) => RotateLike;
   setPostureFactory?: (device: BootedDevice) => SetPostureLike;
   keyboardFactory?: (device: BootedDevice) => Pick<Keyboard, "execute">;
-  openUrlFactory?: (device: BootedDevice) => Pick<OpenURL, "execute">;
+  /** OpenURL for Android and iOS, TvosOpenURL for an Apple TV (#16724). */
+  openUrlFactory?: (device: BootedDevice) => OpenLinkExecutor;
   openLinkChooserFactory?: (device: BootedDevice) => Pick<HandleIntentChooser, "execute">;
   shakeFactory?: (device: BootedDevice) => Pick<Shake, "execute">;
   recentAppsFactory?: (device: BootedDevice) => Pick<RecentApps, "execute">;

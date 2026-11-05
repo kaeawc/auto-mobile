@@ -187,12 +187,20 @@ export class WatchSystemTray {
         );
       }
       const deadline = getSystemTrayDependencies().timer.now() + timeout;
-      let observation = opened.observation ?? (await this.read());
-      if (initiallyOpen) {
-        // The scan only moves toward the end, so a stream left scrolled down must start at the top.
-        observation = await this.rewind(observation, deadline);
-      }
-      result = await this.run(args, { criteria, label, deadline, dismissedCount: 0 }, observation);
+      const observation = opened.observation ?? (await this.read());
+      // The scan only moves toward the end, so a stream left scrolled down must start at the top.
+      const top = initiallyOpen ? await this.rewind(observation, deadline) : observation;
+      result = top
+        ? await this.run(args, { criteria, label, deadline, dismissedCount: 0 }, top)
+        : outcome(
+            {
+              code: "notification_not_found",
+              message:
+                "Could not scroll the watch notification stream back to its top before the scan limit or deadline",
+              observation,
+            },
+            false,
+          );
     } finally {
       const controller = new AbortController();
       restored = await raceWithDeadline(() => this.restore(initiallyOpen, controller.signal), {
@@ -289,7 +297,9 @@ export class WatchSystemTray {
       if (args.action !== "list" && matching[0]) {
         return this.act(args, matching[0], observation, scope);
       }
-      const unmoved = previous ? await this.unmoved(previous, observation, deadline) : false;
+      // Strict: a different ongoing card that scrolled in must never be mistaken for this page.
+      const unmoved =
+        previous !== undefined && pageSignature(previous) === pageSignature(observation);
       // Preserve identical cards within a page. Cross-page overlap is deliberately conservative:
       // without captured stable IDs, keep duplicates rather than silently lose notifications.
       if (!unmoved) {
@@ -377,38 +387,47 @@ export class WatchSystemTray {
   }
 
   /**
-   * Whether `after` shows the stream where `before` left it. When only a body differs, re-read
-   * without scrolling: a body that keeps changing on its own is an ongoing card updating in place,
-   * while a stable one is a different card from the same app and title at the same snapped bounds.
+   * Whether a swipe moved the stream from `before` to `after`. When only a body differs, re-read
+   * without scrolling: a stable body is a different card from the same app and title at the same
+   * snapped bounds ("moved"); a body that keeps changing on its own is "ambiguous", since it is
+   * either an ongoing card updating in place or a different ongoing card that scrolled in.
    */
-  private async unmoved(
+  private async swipeProgress(
     before: ObserveResult,
     after: ObserveResult,
     deadline: number,
-  ): Promise<boolean> {
+  ): Promise<"moved" | "unmoved" | "ambiguous"> {
     if (pageSignature(before) === pageSignature(after)) {
-      return true;
+      return "unmoved";
     }
     if (cardPositions(before) !== cardPositions(after)) {
-      return false;
+      return "moved";
     }
     await sleep(
       Math.min(POLL_MS, Math.max(0, deadline - getSystemTrayDependencies().timer.now())),
       this.signal,
     );
     const settled = await this.read();
-    return (
-      cardPositions(settled) === cardPositions(after) &&
+    return cardPositions(settled) === cardPositions(after) &&
       pageSignature(settled) !== pageSignature(after)
-    );
+      ? "ambiguous"
+      : "moved";
   }
 
-  /** Scroll toward the top until the visible cards stop moving. */
-  private async rewind(observation: ObserveResult, deadline: number): Promise<ObserveResult> {
+  /**
+   * Scroll toward the top until the visible cards stop moving, or `undefined` when the top was not
+   * reached. Overshooting the top is harmless, so an ambiguous page only ends the rewind when the
+   * next swipe is ambiguous too.
+   */
+  private async rewind(
+    observation: ObserveResult,
+    deadline: number,
+  ): Promise<ObserveResult | undefined> {
     let previous = observation;
+    let ambiguous = 0;
     for (let page = 0; page < MAX_STREAM_PAGES; page++) {
       if (getSystemTrayDependencies().timer.now() >= deadline) {
-        break;
+        return undefined;
       }
       const { width, height } = observation.screenSize;
       await this.command(
@@ -419,12 +438,14 @@ export class WatchSystemTray {
         this.signal,
       );
       observation = await this.read();
-      if (await this.unmoved(previous, observation, deadline)) {
-        break;
+      const progress = await this.swipeProgress(previous, observation, deadline);
+      ambiguous = progress === "ambiguous" ? ambiguous + 1 : 0;
+      if (progress === "unmoved" || ambiguous >= 2) {
+        return observation;
       }
       previous = observation;
     }
-    return observation;
+    return undefined;
   }
 
   private async nextPage(

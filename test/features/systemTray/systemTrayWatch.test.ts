@@ -621,12 +621,46 @@ describe("Wear stream scroll progress with changing text", () => {
     const result = await tray.execute({
       action: "find",
       notification: { appId: "com.android.shell" },
-      awaitTimeout: 500,
+      awaitTimeout: 2000,
     });
     expect(result.isError).toBe(false);
-    expect(adb.getExecutedCommands()).toEqual([REWIND_SWIPE]);
-    // One settle after the swipe, one re-read without scrolling that sees the body still changing.
-    expect(timer.getSleepHistory()).toEqual([250, 250]);
+    // Each swipe settles, then re-reads without scrolling and sees the body still changing; two
+    // such ambiguous pages in a row end the rewind.
+    expect(adb.getExecutedCommands()).toEqual([REWIND_SWIPE, REWIND_SWIPE]);
+    expect(timer.getSleepHistory()).toEqual([250, 250, 250, 250]);
+  });
+
+  test("rewinding passes a different ongoing card at the same snapped bounds", async () => {
+    let reads = 0;
+    const { tray, adb } = setup((commands) => {
+      reads++;
+      const swipes = commands.filter((command) => command === REWIND_SWIPE).length;
+      return swipes === 0 ? withBody("C") : swipes === 1 ? withBody(`B ${reads}%`) : withBody("A");
+    });
+    const result = await tray.execute({
+      action: "find",
+      notification: { title: "Wear", body: "A" },
+      awaitTimeout: 2000,
+    });
+    expect(result).toMatchObject({ isError: false, payload: { body: "A" } });
+    expect(adb.getExecutedCommands()).toEqual([REWIND_SWIPE, REWIND_SWIPE, REWIND_SWIPE]);
+  });
+
+  test("fails rather than scanning from mid-stream when rewind cannot reach the top", async () => {
+    const { tray, adb } = setup((commands) =>
+      withBody(`card ${commands.filter((command) => command === REWIND_SWIPE).length}`),
+    );
+    const result = await tray.execute({
+      action: "find",
+      notification: { title: "Wear", body: "nowhere" },
+      awaitTimeout: 500,
+    });
+    expect(result).toMatchObject({
+      isError: true,
+      payload: { code: "notification_not_found", success: false },
+    });
+    expect(result.payload.message).toContain("back to its top");
+    expect(adb.getExecutedCommands().every((command) => command === REWIND_SWIPE)).toBe(true);
   });
 
   test("rewinding passes same-app, same-title cards whose bodies differ at snapped bounds", async () => {
@@ -644,18 +678,30 @@ describe("Wear stream scroll progress with changing text", () => {
     expect(adb.getExecutedCommands()).toEqual([REWIND_SWIPE, REWIND_SWIPE, REWIND_SWIPE]);
   });
 
-  test("a footerless list ends on a page whose ongoing body keeps updating in place", async () => {
-    const footerless = withoutFooter(stream);
-    const { tray, adb } = setup(withChangingBody(() => footerless));
+  test("a forward list keeps a different ongoing card that updates while it is read", async () => {
+    let reads = 0;
+    const done = withoutFooter(withBody("A done"));
+    const { tray } = setup((commands) => {
+      reads++;
+      if (
+        commands.includes("shell input keyevent 4") ||
+        !commands.some((command) => command.startsWith("shell input swipe 192 370"))
+      ) {
+        return closed;
+      }
+      const swipes = forwardSwipes(commands);
+      return swipes === 0 ? done : swipes === 1 ? withoutFooter(withBody(`B ${reads}%`)) : stream;
+    });
     const result = await tray.execute({
       action: "list",
       notification: { appId: "com.android.shell" },
       awaitTimeout: 2000,
     });
-    expect(result).toMatchObject({ isError: false, payload: { success: true } });
-    expect(result.payload.notifications).toHaveLength(1);
-    expect(adb.getExecutedCommands().filter((command) => command !== REWIND_SWIPE)).toEqual([
-      "shell input swipe 192 288 192 96 500",
+    expect(result.isError).toBe(false);
+    expect(result.payload.notifications).toMatchObject([
+      { body: "A done" },
+      { body: expect.stringMatching(/^B \d+%$/) },
+      { body: "-i" },
     ]);
   });
 

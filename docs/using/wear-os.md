@@ -128,7 +128,8 @@ On a watch, `systemTray` drives the Wear OS notification stream instead of the p
 `open` swipes the stream up from the bottom edge and `close` goes back. `list` and `clearAll`
 require `notification.appId`; `find`, `tap`, `dismiss`, `list` and `clearAll` scroll the stream
 from its top, and an already-open stream is scrolled back to the top first and left open
-afterwards.
+afterwards. If the top cannot be reached within `awaitTimeout`, the action fails with
+`notification_not_found` instead of scanning from the middle.
 
 - `list` returns each card's app label, `title`, `body`, `texts` and `bounds`; `id` is `null`
   and `actions` is empty.

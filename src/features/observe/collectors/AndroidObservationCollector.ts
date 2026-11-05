@@ -65,7 +65,9 @@ export function scopeActiveWindowToBackStack(result: ObserveResult): void {
 
 /**
  * A UIAutomator-only display read names its own app; the legacy window query answers for the
- * default display, so its activity belongs to another app and must not label this capture.
+ * default display, so its activity was never verified for this display and must not label this
+ * capture, even when the same app runs on both displays. The display-scoped back stack applied
+ * afterwards may still supply a verified activity.
  */
 function replaceDisplayReadAppId(result: ObserveResult): boolean {
   const hierarchy = result.viewHierarchy;
@@ -73,7 +75,7 @@ function replaceDisplayReadAppId(result: ObserveResult): boolean {
   const appId = result.activeWindow?.appId;
   const uiautomatorOnly =
     hierarchy?.sources?.length === 1 && hierarchy.sources[0] === "uiautomator";
-  if (!packageName || !appId || appId === packageName || !uiautomatorOnly || !result.activeWindow) {
+  if (!packageName || !appId || !uiautomatorOnly || !result.activeWindow) {
     return false;
   }
   result.activeWindow = { ...result.activeWindow, appId: packageName, activityName: "" };

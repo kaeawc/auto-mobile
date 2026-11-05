@@ -71,7 +71,8 @@ avoided as well, for a row inside a scroll container. iOS counts a control outsi
 that container, or after the row inside it. Android counts a control outside the
 container that comes after it in capture order, and only in captures with
 per-window trees. When covers leave no exposed point,
-the tap is refused with a `no-visible-tap-area` error that names the cover. A row
+the tap is refused with a `no-visible-tap-area` error that names the cover, and
+observe reports that row `occluded`, with no affordances, from the same check. A row
 with no on-screen part is refused and the error says to scroll it into view.
 
 iOS simulator lock readings are shared per device: unlocked known readings use

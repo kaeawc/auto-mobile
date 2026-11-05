@@ -40,6 +40,8 @@ internal class DesktopAppUiState(settings: SettingsProvider) {
   var showOnboarding by mutableStateOf(!settings.hasSeenOnboarding)
   var showBasicsChecklist by mutableStateOf(!settings.hasDismissedBasicsChecklist)
   val deviceObserved = DeviceObservedRecord(settings)
+  // The focused pane's control stream reports its device's foreground app for the window title.
+  val foregroundApps = ForegroundAppsByDevice()
 }
 
 internal data class AppDaemonSession(

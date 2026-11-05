@@ -170,15 +170,19 @@ private fun CompareSide(
       rememberPaneObservationState(column, observationStreamFactory, backoffDelay, socketAvailable)
         .stream
     val activeStream = stream ?: return
-    // Fresh token per stream instance (i.e. per mount / device change). A reconnect reuses the same
-    // instance, so the token and these collectors deliberately persist across it; correctness only
-    // needs the token bumped on every clearHierarchy(), which still holds.
+    // Fresh token per stream instance (i.e. per mount / device or epoch change). A reconnect reuses
+    // the same instance, so the token and these collectors deliberately persist across it;
+    // correctness only needs the token bumped on every clearHierarchy(), which still holds.
     val generation = remember(activeStream) { AtomicInteger(0) }
     val clearHierarchy = {
       generation.incrementAndGet()
       onHierarchy(null)
     }
     LaunchedEffect(activeStream) {
+      // A new stream instance is a new device epoch (or a remount): the snapshot remembered by
+      // device id belongs to the retired one, so drop it before this stream's first (possibly
+      // replayed) frame is parsed rather than diffing the old epoch's tree meanwhile (#17116).
+      clearHierarchy()
       activeStream.hierarchyUpdates.collect { update ->
         val json = update.data ?: return@collect
         val launchGeneration = generation.get()

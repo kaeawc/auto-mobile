@@ -143,6 +143,7 @@ nav:
       - "Installing ProtoViewer (Android)": using/protoviewer-install.md
       - "Agent benchmarks": using/agent-benchmarks.md
       - "Dynamic Tools": using/dynamic-tools.md
+      - "Navigation graph": using/navigation-graph.md
       - "Device condition fixtures": using/device-condition.md
       - "Android Automotive OS": using/android-automotive.md
       - "Android TV": using/android-tv.md
@@ -152,6 +153,7 @@ nav:
       - "Environment variables": using/environment-variables.md
       - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
       - "Screen control": using/screen-control.md
+      - "Performance traces": using/performance-trace.md
       - "Emulator and simulator audio": using/emulator-audio.md
       - "Headless host audio setup": using/headless-audio.md
       - "Device ownership": using/device-ownership.md
@@ -175,6 +177,7 @@ nav:
       - "iOS SDK contract suite": design-docs/plat/ios/sdk-contract-suite.md
       - "tvOS XCUITest spike": design-docs/plat/tvos/xcuitest-spike.md
       - "watchOS XCUITest spike": design-docs/plat/watchos/xcuitest-spike.md
+      - "visionOS XCUITest capability boundary": design-docs/plat/visionos/xcuitest-capabilities.md
       - "iOS iproxy tunnel client": design-docs/plat/ios/iproxy-tunnel-client.md
       - "iOS network capture wire contract": design-docs/plat/ios/network-capture-wire-contract.md
       - "iOS WKWebView bridge actions": design-docs/plat/ios/webview-bridge-actions.md
@@ -188,6 +191,7 @@ nav:
       - "iOS keep-booted reset": design-docs/ios-keep-booted-reset.md
       - "Android emulator optimization": design-docs/android-emulator-optimization.md
       - "Android emulator host cost": design-docs/android-emulator-host-cost.md
+      - "Android port reverse ownership": design-docs/plat/android/port-reverse.md
       - "Android prototype specification": design-docs/plat/android/prototype-ux.md
       - "Prototype performance measurement": design-docs/plat/android/prototype-performance-measurement.md
       - "Prototype Compose compiler report": design-docs/plat/android/prototype-compose-compiler-report.md

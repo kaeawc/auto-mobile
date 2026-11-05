@@ -31,6 +31,7 @@ import type {
   ListPreferenceFilesMessage,
   GetPreferencesMessage,
   DiscoverKeystoreMessage,
+  ExportAttestationMessage,
   ResetKeystoreMessage,
   GetSdkCapabilitiesMessage,
   ListDataStoresMessage,
@@ -460,6 +461,10 @@ export const ctrlProxyRequests = {
     alias?: string;
   }): ResetKeystoreMessage {
     return { type: "reset_keystore", ...args };
+  },
+
+  exportAttestation(args: { requestId: string }): ExportAttestationMessage {
+    return { type: "export_attestation", ...args };
   },
 
   discoverKeystore(args: { requestId: string; packageName: string }): DiscoverKeystoreMessage {

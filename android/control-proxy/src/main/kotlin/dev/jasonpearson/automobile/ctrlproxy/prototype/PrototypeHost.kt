@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
 import android.view.Display
@@ -271,12 +272,12 @@ interface PrototypeHost : PrototypeHostLifecycle, PrototypeClipboardHost {
  * path (relayout, replace, touch-through). Service wiring uses it to schedule the controller's
  * restore-or-abandon pass promptly instead of waiting for an unrelated event. Same constraints.
  *
- * While a text field is visible or a stack can pop the window is focusable. Back first navigates
- * through the controller; without navigation it dismisses the prototype through the request's
- * `onHostDismiss` on [backScope], the same `user`-reason path as the fullscreen dismiss row. Back
- * arrives as a key event below API 33 and as an OnBackInvokedCallback (registered through
+ * On TV, while a text field is visible, or while a stack can pop the window is focusable. Back
+ * first navigates through the controller; without navigation it dismisses the prototype through the
+ * request's `onHostDismiss` on [backScope], the same `user`-reason path as the fullscreen dismiss
+ * row. Back arrives as a key event below API 33 and as an OnBackInvokedCallback (registered through
  * [backRegistrarFactory] only while focusable) from API 33; both call one target. Without a visible
- * text field or navigated stack the window is not focusable and never sees Back at all.
+ * text field or navigated stack a non-TV window is not focusable and never sees Back at all.
  *
  * [context] must be the service/display context used for the default display; [densityProvider]
  * defaults to its resources. A request for any other display takes its context, WindowManager and
@@ -320,6 +321,12 @@ class DefaultPrototypeHost(
   /** Tests supply a deterministic waiter instead of driving real Compose frames. */
   private val firstRenderWaiter: PrototypeFirstRenderWaiter = CoroutinePrototypeFirstRenderWaiter,
 ) : PrototypeHost {
+  private val tvNavigation =
+    context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+
+  private val PrototypeRequest.windowFocusable: Boolean
+    get() = focusable || tvNavigation
+
   private class Window(
     val view: PrototypeComposeView,
     val back: PrototypeBackBinding,
@@ -412,7 +419,7 @@ class DefaultPrototypeHost(
       old.anchoredOrigin = previous.origin
       update(old, checkNotNull(previous.params))
       applyContent(old)
-      old.back.sync(old.request.focusable)
+      old.back.sync(old.request.windowFocusable)
     } else if (failed != null && failed !== old && window === failed) {
       retire(failed)
       window = old
@@ -473,7 +480,8 @@ class DefaultPrototypeHost(
           sdkInt,
           request.layer,
           imeLift(request),
-          hasStackBack = request.hasStackBack,
+          // D-pad navigation uses the existing Back-only key focus mode, without attaching the IME.
+          hasStackBack = request.hasStackBack || tvNavigation,
           opaque = prototypeWindowOpaque(request),
           surfaceId = request.surfaceId,
           blurBehindRadiusPx = backdropBlurPx(request, target.density()),
@@ -519,7 +527,7 @@ class DefaultPrototypeHost(
         error,
       )
     }
-    current.back.sync(request.focusable)
+    current.back.sync(request.windowFocusable)
     return true
   }
 
@@ -580,7 +588,7 @@ class DefaultPrototypeHost(
     window = added
     placement = request.placement
     owner.resume()
-    added.back.sync(request.focusable)
+    added.back.sync(request.windowFocusable)
     return true
   }
 
@@ -692,7 +700,7 @@ class DefaultPrototypeHost(
         sdkInt,
         current.request.layer,
         imeLift(current.request),
-        hasStackBack = current.request.hasStackBack,
+        hasStackBack = current.request.hasStackBack || tvNavigation,
         opaque = prototypeWindowOpaque(current.request),
         surfaceId = current.request.surfaceId,
         blurBehindRadiusPx = backdropBlurPx(current.request, current.target.density()),
@@ -714,7 +722,7 @@ class DefaultPrototypeHost(
     if (!visible) hideKeyboard(current.view)
     current.request = previous.copy(hasTextField = visible)
     val applied = relayoutOnMain(current)
-    if (applied) current.back.sync(current.request.focusable) else current.request = previous
+    if (applied) current.back.sync(current.request.windowFocusable) else current.request = previous
     applied
   }
 
@@ -724,7 +732,7 @@ class DefaultPrototypeHost(
     if (previous.hasStackBack == enabled) return@onMain true
     current.request = previous.copy(hasStackBack = enabled)
     val applied = relayoutOnMain(current)
-    if (applied) current.back.sync(current.request.focusable) else current.request = previous
+    if (applied) current.back.sync(current.request.windowFocusable) else current.request = previous
     applied
   }
 
@@ -768,7 +776,7 @@ class DefaultPrototypeHost(
 
   private fun backDecision(event: KeyEvent): PrototypeBackDecision =
     prototypeBackDecision(
-      window?.request?.focusable == true,
+      window?.request?.windowFocusable == true,
       event.keyCode,
       event.action,
       event.isCanceled,
@@ -776,7 +784,7 @@ class DefaultPrototypeHost(
 
   /** The one Back target for the key-event path and the predictive-back callback. */
   private fun dismissFromBack() {
-    val request = window?.request?.takeIf { it.focusable } ?: return
+    val request = window?.request?.takeIf { it.windowFocusable } ?: return
     backScope.launch { (request.onHostBack ?: request.onHostDismiss)() }
   }
 
@@ -1035,9 +1043,9 @@ enum class PrototypeBackDecision {
 }
 
 /**
- * Back reaches the prototype only while its window is focusable, which is exactly while a text
- * field is visible or stack navigation can pop. Dispatch fires once, on the up half of an
- * uncanceled press.
+ * Back reaches the prototype only while its window is focusable: on TV, while a text field is
+ * visible, or while stack navigation can pop. Dispatch fires once, on the up half of an uncanceled
+ * press.
  */
 fun prototypeBackDecision(
   focusable: Boolean,

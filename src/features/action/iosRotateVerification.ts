@@ -3,6 +3,54 @@ import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
 
 type Orientation = "portrait" | "landscape" | "unknown";
 
+const IOS_ROTATION_UNSUPPORTED_ERROR =
+  "Rotation is not supported on this display (the screen size did not change)";
+const IOS_COVER_ROTATION_UNSUPPORTED_ERROR =
+  "Rotation is not supported on the cover panel (the screen size did not change). Open the device to its inner panel (unfold the hinge) and retry there, or keep the current orientation.";
+
+function coverPanelRefusalError(
+  previousObservation: ObserveResult | undefined,
+  runnerError: string | undefined,
+): string | undefined {
+  return previousObservation?.display.role === "cover" &&
+    runnerError === IOS_ROTATION_UNSUPPORTED_ERROR
+    ? IOS_COVER_ROTATION_UNSUPPORTED_ERROR
+    : undefined;
+}
+
+function verifyIosRunnerFailure(
+  normalized: RotateResult,
+  result: RotateResult,
+  context: {
+    requested: "portrait" | "landscape";
+    previous: Orientation;
+    current: Orientation;
+    previousObservation: ObserveResult | undefined;
+  },
+): RotateResult {
+  const { requested, previous, current, previousObservation } = context;
+  const coverError = coverPanelRefusalError(previousObservation, result.error);
+  if (coverError) {
+    return {
+      ...normalized,
+      success: false,
+      rotationPerformed: false,
+      error: coverError,
+    };
+  }
+  if (current === requested && previous !== "unknown" && previous !== requested) {
+    return {
+      ...normalized,
+      success: true,
+      rotationPerformed: true,
+      error: undefined,
+      warning: `The runner reported "${result.error ?? "Failed to rotate iOS device"}" although the observed display changed from ${previous} to ${current}.`,
+      message: `Successfully rotated from ${previous} to ${current}`,
+    };
+  }
+  return normalized;
+}
+
 export function normalizeIosOrientation(orientation: string | undefined): Orientation {
   switch (orientation) {
     case "portrait":
@@ -43,13 +91,7 @@ function rotationMismatchError(
   const claim = result.rotationPerformed
     ? `a completed rotation to ${requested}`
     : `the device was already in ${requested} orientation`;
-  const beforeSize = previousObservation?.screenSize;
-  const afterSize = result.observation?.screenSize;
-  const unchangedSize =
-    beforeSize &&
-    afterSize &&
-    beforeSize.width === afterSize.width &&
-    beforeSize.height === afterSize.height;
+  const unchangedSize = iosRotationScreenSizeUnchanged(previousObservation, result);
   const unsupported =
     result.rotationPerformed &&
     normalizeIosOrientation(result.previousOrientation) === "unknown" &&
@@ -58,6 +100,55 @@ function rotationMismatchError(
       : "";
   const error = `${unsupported}The display is still ${current} after the runner reported ${claim} (currentOrientation: ${result.currentOrientation ?? "unknown"}).`;
   return error;
+}
+
+function iosRotationScreenSizeUnchanged(
+  previousObservation: ObserveResult | undefined,
+  result: RotateResult,
+): boolean {
+  const beforeSize = previousObservation?.screenSize;
+  const afterSize = result.observation?.screenSize;
+  return (
+    Boolean(
+      beforeSize &&
+      afterSize &&
+      beforeSize.width === afterSize.width &&
+      beforeSize.height === afterSize.height,
+    ) === true
+  );
+}
+
+function knownPositiveSize(observation: ObserveResult | undefined): boolean {
+  return (observation?.screenSize.width ?? 0) > 0 && (observation?.screenSize.height ?? 0) > 0;
+}
+
+// Only a cross-axis rotation must change the screen size. A same-axis repair
+// (the app already showed the requested axis but XCUIDevice still remembered
+// the other one) legitimately keeps its dimensions and must stay a success.
+function isUnverifiedIosRotationSize(
+  result: RotateResult,
+  requested: "portrait" | "landscape",
+  observed: { previous: Orientation; current: Orientation },
+  previousObservation: ObserveResult | undefined,
+): boolean {
+  const { previous, current } = observed;
+  return (
+    (((result.success && result.rotationPerformed) ||
+      (!result.success && previous !== "unknown" && current === requested)) &&
+      previous !== requested &&
+      (current === requested || current === "unknown") &&
+      knownPositiveSize(previousObservation) &&
+      knownPositiveSize(result.observation) &&
+      iosRotationScreenSizeUnchanged(previousObservation, result)) === true
+  );
+}
+
+function isObservedRotationMismatch(
+  result: RotateResult,
+  requested: "portrait" | "landscape",
+  current: Orientation,
+): boolean {
+  return result.success && current !== "unknown" && current !== requested;
 }
 
 export function verifyIosRotation(
@@ -74,7 +165,19 @@ export function verifyIosRotation(
     currentOrientation:
       current === "unknown" ? normalizeIosOrientation(result.currentOrientation) : current,
   };
-  if (result.success && current !== "unknown" && current !== requested) {
+  if (isUnverifiedIosRotationSize(result, requested, { previous, current }, previousObservation)) {
+    const error =
+      coverPanelRefusalError(previousObservation, IOS_ROTATION_UNSUPPORTED_ERROR) ??
+      "Rotation is not supported on this display (the screen size did not change). The runner reported a rotation but the screen size is unchanged.";
+    return {
+      ...normalized,
+      success: false,
+      rotationPerformed: false,
+      error,
+      message: `Failed to rotate to ${requested}; the screen size did not change.`,
+    };
+  }
+  if (isObservedRotationMismatch(result, requested, current)) {
     const error = rotationMismatchError(result, requested, current, previousObservation);
     return {
       ...normalized,
@@ -85,17 +188,12 @@ export function verifyIosRotation(
     };
   }
   if (!result.success) {
-    if (current === requested && previous !== "unknown" && previous !== requested) {
-      return {
-        ...normalized,
-        success: true,
-        rotationPerformed: true,
-        error: undefined,
-        warning: `The runner reported "${result.error ?? "Failed to rotate iOS device"}" although the observed display changed from ${previous} to ${current}.`,
-        message: `Successfully rotated from ${previous} to ${current}`,
-      };
-    }
-    return normalized;
+    return verifyIosRunnerFailure(normalized, result, {
+      requested,
+      previous,
+      current,
+      previousObservation,
+    });
   }
   return {
     ...normalized,

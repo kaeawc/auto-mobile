@@ -112,9 +112,9 @@ describe("notification tools", () => {
     const schema = parseJsonSchemaNode(toolDefinition!.inputSchema);
     // #6154: platform is optional wherever deviceId/session resolves it.
     expect(schema.required).toEqual(["title", "body"]);
-    // #6154: platform now comes from the shared `platformSchema` (android, ios, and tvos, which every
+    // #6154: platform now comes from the shared `platformSchema` (android, ios, tvos, and visionos, which every
     // tool refuses until it supports one) instead of a per-branch literal union.
-    expect(schema.properties?.platform?.enum).toEqual(["android", "ios", "tvos"]);
+    expect(schema.properties?.platform?.enum).toEqual(["android", "ios", "tvos", "visionos"]);
     expect(schema.properties?.appId?.description).toContain(
       "Android defaults to the live foreground app",
     );

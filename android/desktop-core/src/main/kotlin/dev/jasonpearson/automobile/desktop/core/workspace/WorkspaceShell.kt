@@ -19,7 +19,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -95,38 +94,35 @@ fun WorkspaceShell(
       // the exact render conditions below so isolation tracks the overlays one-for-one.
       val overlayActive =
         showHealthSheet || (showCompare && comparePair != null) || showOfflineBrowse
-      CompositionLocalProvider(
-        LocalDeviceSessionSupersededHandler provides onDeviceSessionSuperseded,
-      ) {
-        Box(modifier.fillMaxSize()) {
-          Column(Modifier.fillMaxSize().isolatedBehindOverlay(overlayActive)) {
-            TopBar(
-              status = status,
-              statusDetail = statusDetail,
-              updateStatus = updateStatus,
-              options =
-                TopBarActions(
-                  onUpdateClick = onUpdateClick,
-                  onOpenPicker = onOpenPicker,
-                  onOpenPalette = onOpenPalette,
-                  onStatusClick = { showHealthSheet = true },
-                  canCompare = comparePair != null,
-                  onCompare = { showCompare = true },
-                ),
-            )
-            when (state) {
-              is WorkspaceUiState.Empty ->
-                EmptyState(
-                  onOpenPicker = onOpenPicker,
-                  onBrowseHistory = { showOfflineBrowse = true },
-                  modifier = Modifier.weight(1f).fillMaxWidth(),
-                )
-              is WorkspaceUiState.Content ->
-                WorkspaceColumns(state, onAction, Modifier.weight(1f).fillMaxWidth())
-            }
+      WorkspaceShellDeviceLifecycle(state, options)
+      Box(modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().isolatedBehindOverlay(overlayActive)) {
+          TopBar(
+            status = status,
+            statusDetail = statusDetail,
+            updateStatus = updateStatus,
+            options =
+              TopBarActions(
+                onUpdateClick = onUpdateClick,
+                onOpenPicker = onOpenPicker,
+                onOpenPalette = onOpenPalette,
+                onStatusClick = { showHealthSheet = true },
+                canCompare = comparePair != null,
+                onCompare = { showCompare = true },
+              ),
+          )
+          when (state) {
+            is WorkspaceUiState.Empty ->
+              EmptyState(
+                onOpenPicker = onOpenPicker,
+                onBrowseHistory = { showOfflineBrowse = true },
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+              )
+            is WorkspaceUiState.Content ->
+              WorkspaceColumns(state, onAction, Modifier.weight(1f).fillMaxWidth())
           }
-          WorkspaceOverlays(memory, comparePair)
         }
+        WorkspaceOverlays(memory, comparePair)
       }
     }
   }
@@ -164,11 +160,11 @@ fun Modifier.isolatedBehindOverlay(active: Boolean): Modifier =
  * A same-platform pair keeps the raw-class identity.
  */
 internal fun compareColumns(content: WorkspaceUiState.Content): Pair<DeviceColumn, DeviceColumn>? {
+  // An ended pane has no epoch to stream from, so it can't be one side of a compare.
+  val live = content.columns.filterNot { it.sessionEnded }
   val focused =
-    content.columns.firstOrNull { it.deviceId == content.focusedDeviceId }
-      ?: content.columns.firstOrNull()
-      ?: return null
-  val other = content.columns.firstOrNull { it.deviceId != focused.deviceId } ?: return null
+    live.firstOrNull { it.deviceId == content.focusedDeviceId } ?: live.firstOrNull() ?: return null
+  val other = live.firstOrNull { it.deviceId != focused.deviceId } ?: return null
   return focused to other
 }
 
@@ -279,6 +275,12 @@ data class WorkspaceShellOptions(
   val onUpdateClick: () -> Unit = {},
   val onOpenPalette: () -> Unit = {},
   val onDeviceSessionSuperseded: (DeviceStreamEvent.DeviceSessionSuperseded) -> Unit = {},
+  val onDeviceSessionEnded: (DeviceStreamEvent.DeviceSessionEnded) -> Unit = {},
+  /**
+   * Opens a lifecycle-only stream for a column's epoch (see [WorkspaceDeviceLifecycle]); null
+   * forwards no lifecycle events.
+   */
+  val lifecycleStreamFactory: ((DeviceColumn) -> ObservationStream)? = null,
   val externalCaptureRequest: Pair<String, Int>? = null,
   val facetContent: @Composable (DeviceColumn, Tool) -> Unit = { _, tool ->
     WorkspaceFacetPlaceholder(tool)
@@ -380,10 +382,10 @@ private fun WorkspaceShellOptions.WorkspaceColumns(
     val canDiff = state.columns.size > 1
     val displayNames = disambiguateLabels(state.columns, DeviceColumn::deviceId, DeviceColumn::name)
     state.columns.forEach { column ->
-      // Key by deviceId so a surviving pane keeps its own remembered state + facet
+      // Key by device epoch so a surviving pane keeps its own remembered state + facet
       // connection when another pane closes (unkeyed = positional identity churns
-      // survivors).
-      key(column.deviceId) {
+      // survivors), and a new epoch of a reused serial starts with nothing remembered.
+      key(column.deviceId, column.epochGeneration) {
         DeviceColumnView(
           column = column,
           onAction = onAction,

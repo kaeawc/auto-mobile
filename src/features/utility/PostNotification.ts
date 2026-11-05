@@ -11,6 +11,7 @@ import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
+import { parseIosMajorVersion } from "../../utils/ios-cmdline-tools/iosVersion";
 import { fileURLToPath } from "url";
 import path from "path";
 import { DefaultFileSystem, type FileSystem } from "../../utils/filesystem/DefaultFileSystem";
@@ -19,6 +20,10 @@ import { shellQuote } from "../../utils/shellQuote";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 import { ANDROID_PACKAGE_NAME_PATTERN } from "../../utils/androidPackageName";
 import { buildIosPushPayload } from "./iosPushPayload";
+import {
+  defaultBulletinBoardReader,
+  type IosNotificationAuthorizationReader,
+} from "./ios/IosNotificationAuthorizationReader";
 
 export { ANDROID_PACKAGE_NAME_PATTERN } from "../../utils/androidPackageName";
 
@@ -101,6 +106,10 @@ export class PostNotification {
   private window: WindowInterface;
   private simctl: Pick<SimCtlClient, "pushNotification">;
   private fileSystem: FileSystem;
+  private notificationAuthorization:
+    | Pick<IosNotificationAuthorizationReader, "read">
+    | null
+    | undefined;
 
   constructor(
     device: BootedDevice,
@@ -109,15 +118,18 @@ export class PostNotification {
       window = null,
       simctl = null,
       fileSystem = null,
+      notificationAuthorization,
     }: {
       adbFactoryOrExecutor?: AdbClientFactory | AdbExecutor | null;
       window?: WindowInterface | null;
       simctl?: Pick<SimCtlClient, "pushNotification"> | null;
       fileSystem?: FileSystem | null;
+      notificationAuthorization?: Pick<IosNotificationAuthorizationReader, "read"> | null;
     } = {},
   ) {
     this.device = device;
     this.fileSystem = fileSystem ?? new DefaultFileSystem();
+    this.notificationAuthorization = notificationAuthorization;
     // Detect if the argument is a factory (has create method) or an executor
     if (
       adbFactoryOrExecutor &&
@@ -198,6 +210,11 @@ export class PostNotification {
       return { success: false, supported: true, appId: bundleId, error: built.error, warning };
     }
 
+    const refusal = await this.checkIosNotificationAuthorization(bundleId, warning);
+    if (refusal) {
+      return refusal;
+    }
+
     const result = await this.simctl.pushNotification(this.device.deviceId, bundleId, built.json);
     if (!result.success) {
       return {
@@ -216,6 +233,34 @@ export class PostNotification {
       channelId: options.channelId,
       warning,
     };
+  }
+
+  private async checkIosNotificationAuthorization(
+    bundleId: string,
+    warning: string | undefined,
+  ): Promise<PostNotificationResult | undefined> {
+    const iosMajor = parseIosMajorVersion(this.device.iosVersion ?? this.device.osVersion);
+    if (iosMajor !== null && iosMajor < 27) {
+      const reader = this.notificationAuthorization ?? defaultBulletinBoardReader();
+      const authorization = await reader.read(this.device.deviceId, bundleId);
+      if (authorization.allowed !== true) {
+        const detail = [
+          `Notification authorization status is ${authorization.authorizationStatus ?? "unknown"}.`,
+          authorization.warning || authorization.error,
+        ]
+          .filter(Boolean)
+          .join(" ");
+        return {
+          success: false,
+          supported: true,
+          appId: bundleId,
+          error: `${NOTIFICATION_AUTHORIZATION_GUIDANCE} ${detail}`,
+          warning,
+        };
+      }
+    }
+
+    return undefined;
   }
 
   /** Android: post a local notification through the AutoMobile SDK BroadcastReceiver. */

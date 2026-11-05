@@ -15,7 +15,11 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 // The handlers map a failed Telephony result to an ActionableError. iOS routes
 // to the in-app SDK trigger route (#1580) through an injected fake sender, so
 // the mapping is exercised with no sockets, no timers, no real device.
-const iosDevice: BootedDevice = { name: "iPhone", deviceId: "sim-1", platform: "ios" };
+const iosDevice: BootedDevice = {
+  name: "iPhone",
+  deviceId: "C4115418-CF17-4907-B214-EAC759E48675",
+  platform: "ios",
+};
 const androidDevice: BootedDevice = {
   name: "Pixel",
   deviceId: "emulator-5554",

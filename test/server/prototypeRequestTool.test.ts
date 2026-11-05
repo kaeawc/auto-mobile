@@ -82,7 +82,7 @@ describe("request actions through the registered prototype tool (#12523, #12530)
   test("show reverses the port of a schema-valid via device request, dismiss removes it", async () => {
     const shown = await call({ action: "show", spec: fixture });
     expect(shown.success).toBe(true);
-    expect(reverses()).toEqual(["reverse --list", "reverse tcp:8080 tcp:8080"]);
+    expect(reverses()).toEqual(["reverse --list", "reverse --no-rebind tcp:8080 tcp:8080"]);
     expect(shown.unreversiblePorts).toBeUndefined();
 
     expect((await call({ action: "dismiss", id: fixture.id })).success).toBe(true);

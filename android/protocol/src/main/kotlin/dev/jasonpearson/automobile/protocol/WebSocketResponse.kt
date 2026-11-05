@@ -1164,6 +1164,14 @@ data class KeystoreResetResult(
 ) : WebSocketResponse(), CorrelatedResponse
 
 @Serializable
+@SerialName("attestation_chain")
+data class AttestationChainResult(
+  override val timestamp: Long,
+  override val requestId: String? = null,
+  val certificateChainBase64: List<String>,
+) : WebSocketResponse(), CorrelatedResponse
+
+@Serializable
 @SerialName("keystore_discovery")
 data class KeystoreDiscoveryResult(
   override val timestamp: Long,

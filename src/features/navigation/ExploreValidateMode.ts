@@ -7,6 +7,27 @@ import type { EdgeValidationResult, GraphTraversalState } from "./ExploreTypes";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { scoreSelectedElementMatch } from "./ExploreElementScoring";
+import { elementMatchesTarget, type FocusNavigateTarget } from "../action/FocusNavigate";
+import type { ToolCallInteraction } from "../../utils/interfaces/NavigationGraph";
+
+/** The `until` of a recorded `focusNavigate`, keeping only its string target fields. */
+export function recordedFocusTarget(
+  interaction: Pick<ToolCallInteraction, "toolName" | "args"> | undefined,
+): FocusNavigateTarget | undefined {
+  const until =
+    interaction?.toolName === "focusNavigate" ? asRecord(interaction.args?.until) : undefined;
+  if (!until) {
+    return undefined;
+  }
+  const target: FocusNavigateTarget = {};
+  for (const key of ["text", "contentDesc", "label", "resourceId"] as const) {
+    const value = until[key];
+    if (typeof value === "string" && value.length > 0) {
+      target[key] = value;
+    }
+  }
+  return Object.keys(target).length > 0 ? target : undefined;
+}
 
 // Validation waits for the explored screen to settle.
 const EXPLORE_VALIDATION_SETTLE_MS = 500;
@@ -442,6 +463,18 @@ function bestDescriptorMatch(
 }
 
 /**
+ * A recorded `focusNavigate` whose `until` names several fields requires all of them on one
+ * element; keep only the elements that satisfy every field before scoring alternatives.
+ */
+function focusTargetCandidates(elements: Element[], edge: NavigationEdge): Element[] {
+  const until = recordedFocusTarget(edge.interaction);
+  const fields = until ? Object.values(until).filter((value) => value) : [];
+  return until && fields.length > 1
+    ? elements.filter((element) => elementMatchesTarget(element, until))
+    : elements;
+}
+
+/**
  * Resolve the on-screen element for a target edge from its recorded interaction
  * (`edge.interaction.args`). Never matches against `uiState.selectedElements`.
  */
@@ -457,7 +490,7 @@ export function resolveEdgeTarget(elements: Element[], edge: NavigationEdge): Ed
     return notValidatable(edge, target.reason);
   }
 
-  const best = bestDescriptorMatch(elements, target.descriptors);
+  const best = bestDescriptorMatch(focusTargetCandidates(elements, edge), target.descriptors);
   if (best && best.confidence >= MIN_CONFIDENCE) {
     logger.debug(
       `[Explore] Matched element for edge ${edge.from}->${edge.to} with confidence ${best.confidence.toFixed(2)}`,

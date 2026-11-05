@@ -857,7 +857,10 @@ export class Explore extends BaseVisualChange {
 
       const success =
         (await this.inputMode()) === "dpad"
-          ? await this.elementActions().focusSelectElement(element, observation, signal)
+          ? await this.elementActions().focusSelectElement(element, observation, {
+              signal,
+              recorded: this.currentTargetEdge?.interaction,
+            })
           : isScrollable
             ? await this.swipeContainer(element, observation, progress, signal)
             : await this.tapElement(element, observation, progress, signal);

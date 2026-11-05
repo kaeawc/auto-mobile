@@ -7,6 +7,8 @@ import { TapAtCoordinate } from "../action/TapAtCoordinate";
 import { TapOnElement } from "../action/TapOnElement";
 import { Timer } from "../../utils/SystemTimer";
 import { FocusNavigate } from "../action/FocusNavigate";
+import type { ToolCallInteraction } from "../../utils/interfaces/NavigationGraph";
+import { recordedFocusTarget } from "./ExploreValidateMode";
 import { createFocusNavigateObserver } from "../action/FocusNavigateObserver";
 import { InputKey } from "../action/InputKey";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
@@ -28,7 +30,7 @@ export function defaultFocusSelectNavigator(
   const keys = new InputKey(device, { adbFactory, timer });
   return new FocusNavigate(
     createFocusNavigateObserver(observeScreen),
-    { press: (key) => keys.press(key) },
+    { press: (key, signal) => keys.press(key, undefined, undefined, { signal }) },
     timer,
   );
 }
@@ -111,20 +113,26 @@ export class ExploreElementActions {
   /**
    * Move D-pad focus to the element and select it, recorded as `focusNavigate` with
    * `select: true` so navigateTo replays the same D-pad walk; null when nothing names it.
-   * A scrollable container is not selected: moving focus through it scrolls it.
+   * A scrollable container is not selected: moving focus through it scrolls it. Validate mode
+   * passes its edge's recorded interaction, so a recorded `focusNavigate` replays its `until`.
    */
   async focusSelectElement(
     element: Element,
     observation: ObserveResult,
-    signal?: AbortSignal,
+    {
+      signal,
+      recorded,
+    }: { signal?: AbortSignal; recorded?: Pick<ToolCallInteraction, "toolName" | "args"> } = {},
   ): Promise<boolean | null> {
     if (isTruthy(element.scrollable)) {
       logger.debug("[Explore] D-pad mode: skipping scrollable container; focus moves scroll it");
       return null;
     }
-    const until = observation.viewHierarchy
-      ? focusTargetForElement(element, observation.viewHierarchy)
-      : null;
+    const until =
+      recordedFocusTarget(recorded) ??
+      (observation.viewHierarchy
+        ? focusTargetForElement(element, observation.viewHierarchy)
+        : null);
     if (!until) {
       logger.warn(
         `[Explore] Element has no focus target: missing resource-id and text/content-desc (including descendants); class=${element["class"] || "<empty>"}`,

@@ -563,6 +563,18 @@ describe("ExploreValidateMode", () => {
       });
     });
 
+    test("requires every field of a multi-field focusNavigate target on one element", () => {
+      const first = createMockElement({ text: "First", "resource-id": "app:id/tile" });
+      const second = createMockElement({ text: "Second", "resource-id": "app:id/tile" });
+      const edge = interactionEdge("focusNavigate", {
+        until: { resourceId: "app:id/tile", text: "Second" },
+        select: true,
+      });
+
+      expect(findElementMatchingEdge([first, second], edge)?.element).toBe(second);
+      expect(resolveEdgeTarget([first], edge)).toMatchObject({ status: "not-found" });
+    });
+
     test("never taps the selected tab when the recorded target is absent", () => {
       const edge = interactionEdge(
         "tapOn",

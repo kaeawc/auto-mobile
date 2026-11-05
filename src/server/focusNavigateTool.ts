@@ -73,7 +73,7 @@ export const focusNavigateResultSchema = z
 
 function createKeyPresser(device: BootedDevice): FocusKeyPresser {
   const input = new InputKey(device, { adbFactory: defaultAdbClientFactory, timer: defaultTimer });
-  return { press: (key) => input.press(key) };
+  return { press: (key, signal) => input.press(key, undefined, undefined, { signal }) };
 }
 
 export const focusNavigateTool = defineDeviceTool({

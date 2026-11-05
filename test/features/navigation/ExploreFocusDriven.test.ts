@@ -1,4 +1,10 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { InputKey } from "../../../src/features/action/InputKey";
+import {
+  defaultFocusSelectNavigator,
+  ExploreElementActions,
+} from "../../../src/features/navigation/ExploreElementActions";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import type { FocusNavigateOptions } from "../../../src/features/action/FocusNavigate";
 import { Explore } from "../../../src/features/navigation/Explore";
 import type { ExploreResult } from "../../../src/features/navigation/ExploreTypes";
@@ -177,5 +183,64 @@ describe("Explore on a focus-driven TV app", () => {
       ),
     ).toBe(true);
     expect(tv.selections).toEqual([]);
+  });
+
+  test("validate replays a recorded focusNavigate target instead of rebuilding one", async () => {
+    const recorded = { until: { resourceId: "app:id/movies", text: "Movies" }, select: true };
+    const actions = new ExploreElementActions({
+      device,
+      adb: undefined,
+      timer,
+      focusNavigator: () => ({ execute: (options) => tv.select(options) }),
+      runRecorded: (_toolName, _args, _observation, run) => run(),
+    });
+    const element: Element = {
+      bounds: { left: 0, top: 0, right: 400, bottom: 100 },
+      "resource-id": "app:id/movies",
+      text: "Movies",
+    };
+    expect(
+      await actions.focusSelectElement(element, observationOf("Home"), {
+        recorded: { toolName: "focusNavigate", args: recorded },
+      }),
+    ).toBe(true);
+    expect(tv.selections[0].until).toEqual(recorded.until);
+  });
+});
+
+describe("defaultFocusSelectNavigator", () => {
+  test("forwards the abort signal to every D-pad key press", async () => {
+    const focused: Element = {
+      bounds: { left: 0, top: 0, right: 400, bottom: 100 },
+      text: "Movies",
+      focused: true,
+    };
+    const screen = new (class extends FakeObserveScreen {
+      override async execute(): Promise<ObserveResult> {
+        return { ...observationOf("Home"), focusedElement: focused };
+      }
+    })();
+    const routing: unknown[] = [];
+    const press = spyOn(InputKey.prototype, "press").mockImplementation(
+      async (key, _timeout, _frame, options) => {
+        routing.push(options);
+        return { success: true, key, keyCode: key };
+      },
+    );
+    try {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const signal = new AbortController().signal;
+      const result = await defaultFocusSelectNavigator(
+        device,
+        screen,
+        new FakeAdbClientFactory(),
+        timer,
+      ).execute({ until: { text: "Movies" }, select: true, signal });
+      expect(result.selected).toBe(true);
+      expect(routing).toEqual([{ signal }]);
+    } finally {
+      press.mockRestore();
+    }
   });
 });

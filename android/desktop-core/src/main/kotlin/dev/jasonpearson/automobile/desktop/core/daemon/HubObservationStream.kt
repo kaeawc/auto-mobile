@@ -137,8 +137,27 @@ internal class HubObservationStream(
     streams.setCadence(held, ObservationCadence(screenshotIntervalMs, hierarchyIntervalMs))
   }
 
+  /**
+   * The layout replay belongs to the shared stream, so a lease does not clear it while the stream
+   * is live: that would take the latest hierarchy and screenshot from every other lease on the
+   * device, and a lease joining a live stream makes no new daemon subscription, so no initial
+   * frames would follow (#17041). The replayed frame is the device session's current layout, kept
+   * fresh by the shared subscription. When the live stream has nothing to replay, ask for a fresh
+   * paired observation, so a collector on a static screen still gets one.
+   *
+   * A stream that is not connected holds a pre-outage layout that is stale for every lease, so it
+   * is cleared; the hub's resubscribe brings the daemon's initial frames.
+   */
   override fun resetLayoutReplayCache() {
-    current()?.resetLayoutReplayCache()
+    val stream = current() ?: return
+    if (!stream.isConnected()) {
+      stream.resetLayoutReplayCache()
+      return
+    }
+    val replayed =
+      stream.hierarchyUpdates.replayCache.isNotEmpty() &&
+        stream.screenshotUpdates.replayCache.isNotEmpty()
+    if (!replayed) stream.requestObservation(key.deviceId)
   }
 
   override fun requestNavigationGraph(appId: String?) {

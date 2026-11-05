@@ -72,7 +72,11 @@ internal class VerifiedShareLibraryImporter(
     try {
       val bytes = client.download(link.url)
       if (sha256Hex(bytes) != link.sha256) ShareImportResult.Failed(ShareImportError.HashMismatch)
-      else ShareImportResult.Completed(importer.importBytes(bytes, LibrarySource.share, null))
+      else
+        ShareImportResult.Completed(
+          // The confirmed link's host is app-owned origin identity; OkHttp lowercases it.
+          importer.importBytes(bytes, LibrarySource.share, null, link.url.host),
+        )
     } catch (error: ShareImportException) {
       ShareImportResult.Failed(error.error)
     } catch (error: IOException) {

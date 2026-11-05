@@ -212,6 +212,7 @@ class DirectoryLibraryRepository(
     request: SavedPrototypeSaveRequest,
     source: LibrarySource,
     requires: List<String> = emptyList(),
+    sourceHost: String? = null,
   ): LibraryResult<LibraryEntry> {
     if (
       !validLibrarySpec(request.specJson) || !AutoMobilePrototype.capabilities.containsAll(requires)
@@ -254,6 +255,9 @@ class DirectoryLibraryRepository(
               sha256Hex(request.specJson.toByteArray()),
               requires.distinct().sorted(),
               false,
+              // A host the reader would reject (IP literal, single label) is dropped, not stored,
+              // so the entry stays listable; it just has no Block identity.
+              sourceHost?.takeIf(::validSourceHost),
             )
           // Metadata is the library's commit marker. An interrupted commit stays invisible.
           var committed = false

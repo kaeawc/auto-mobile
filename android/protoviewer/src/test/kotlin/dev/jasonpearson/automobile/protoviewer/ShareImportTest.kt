@@ -74,7 +74,7 @@ class ShareImportTest {
     val importer =
       VerifiedShareLibraryImporter(
         client,
-        LibraryBytesImporter { _, _, _ ->
+        LibraryBytesImporter { _, _, _, _ ->
           reads++
           error("Must not read mismatched bytes")
         },
@@ -90,14 +90,16 @@ class ShareImportTest {
   @Test
   fun verifiedBundleUsesNormalStrictImportWithShareSource() {
     var source: LibrarySource? = null
+    var sourceHost: String? = null
     val strict =
       ValidatedLibraryImporter(
         emptySet(),
         ImportContent { error("Must use downloaded bytes") },
         AutoMobilePrototype.capabilities,
         ImportAssetCheck { null },
-        LibraryImportCommit { _, origin, label ->
+        LibraryImportCommit { _, origin, label, host ->
           source = origin
+          sourceHost = host
           assertNull(label)
           LibraryResult.Success(Fixtures.entry())
         },
@@ -108,6 +110,7 @@ class ShareImportTest {
     val result = importer.importConfirmed(link) as ShareImportResult.Completed
     assertTrue(result.result is LibraryImportResult.Imported)
     assertEquals(LibrarySource.share, source)
+    assertEquals("bundles.example", sourceHost)
   }
 
   @Test
@@ -119,7 +122,7 @@ class ShareImportTest {
         ImportContent { error("Must use downloaded bytes") },
         AutoMobilePrototype.capabilities,
         ImportAssetCheck { null },
-        LibraryImportCommit { _, _, _ -> error("Must not commit hostile zip") },
+        LibraryImportCommit { _, _, _, _ -> error("Must not commit hostile zip") },
       )
     val link = checkNotNull(ShareImportLink.parse(shareLink(hash = sha256Hex(client.bytes))))
     val result = VerifiedShareLibraryImporter(client, strict).importConfirmed(link)

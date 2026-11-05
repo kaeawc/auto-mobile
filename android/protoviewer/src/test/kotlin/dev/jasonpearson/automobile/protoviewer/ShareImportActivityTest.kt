@@ -45,7 +45,7 @@ class ShareImportActivityTest {
           services.shareImporter =
             VerifiedShareLibraryImporter(
               client,
-              LibraryBytesImporter { _, source, _ ->
+              LibraryBytesImporter { _, source, _, _ ->
                 reads++
                 assertEquals(LibrarySource.share, source)
                 LibraryImportResult.Imported(Fixtures.entry())

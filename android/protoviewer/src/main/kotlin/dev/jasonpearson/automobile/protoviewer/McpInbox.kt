@@ -149,7 +149,7 @@ class McpInbox(
       val bytes =
         file.inputStream().use(::readImportLimited)
           ?: return rejected(command.request, "content", "Content exceeds byte limit")
-      return when (val imported = importer.importBytes(bytes, LibrarySource.mcp, label)) {
+      return when (val imported = importer.importBytes(bytes, LibrarySource.mcp, label, null)) {
         is LibraryImportResult.Imported -> entry("imported", command.request, imported.entry)
         is LibraryImportResult.Rejected ->
           rejected(

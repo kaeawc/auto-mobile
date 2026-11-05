@@ -46,6 +46,7 @@ class DirectoryLibraryImport(
     bundle: PrototypeBundle,
     source: LibrarySource,
     label: String?,
+    sourceHost: String?,
   ): LibraryResult<LibraryEntry> {
     val id = ids.newId()
     require(validLibraryId(id))
@@ -73,6 +74,7 @@ class DirectoryLibraryImport(
         ),
         source,
         bundle.requires,
+        sourceHost,
       )
     } finally {
       // Cleanup after a committed library entry cannot turn success into a reported failure.

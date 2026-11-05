@@ -531,6 +531,14 @@ class MultiplexedObservationSocketClientTest {
       assertEquals("unsubscribe", released["command"])
       assertEquals("devicedatastream-old", released["subscriptionId"])
       assertNull(socket.fromClient.poll())
+
+      // The incoming epoch is still acknowledged and still receives the file's updates.
+      socket.send("""{"id":"${nextCommand["id"]}","type":"subscription_response","success":true}""")
+      assertTrue(next.storageSubscriptionResponses.awaitFirst().success)
+      socket.send(
+        """{"type":"storage_update","subscriptionId":"devicedatastream-new","deviceId":"emulator-0","storageEvent":{"packageName":"com.example","fileName":"prefs.xml","key":"k","value":"v","sequenceNumber":9}}""",
+      )
+      assertEquals(9L, next.storageUpdates.awaitFirst().sequenceNumber)
       mux.close()
     }
 

@@ -1,4 +1,5 @@
 import AppKit
+import AutoMobileHighlightCore
 import ScreenCaptureCore
 @testable import ScreenCaptureHelper
 import XCTest
@@ -25,6 +26,83 @@ final class SimulatorHighlightTests: XCTestCase {
             )
             XCTAssertEqual(selected.windowID, expectedID)
         }
+    }
+
+    func testSelectsInnerPanelDrawnInOtherOrientation() throws {
+        // These measurements come from the Duo capture on 2026-11-05 (scratch/ax-dump-simulator-app.txt), not a
+        // hand-written guess.
+        let candidates = [target(1), target(2)]
+        for (source, expectedID) in [
+            (CGSize(width: 951, height: 669), UInt32(1)),
+            (CGSize(width: 466, height: 678), UInt32(2)),
+        ] {
+            let selected = try SimulatorDisplayGeometry.find(
+                deviceName: "mt-duo-0090b",
+                sourceSize: source,
+                candidates: candidates,
+                displayFrame: { window in
+                    CGRect(
+                        origin: .zero,
+                        size: window.windowID == 1
+                            ? CGSize(width: 615, height: 875)
+                            : CGSize(width: 466, height: 678)
+                    )
+                }
+            )
+            XCTAssertEqual(selected.windowID, expectedID)
+        }
+    }
+
+    func testOrientationIndependentMatchStaysAmbiguousForSameShapedPanels() {
+        XCTAssertThrowsError(try SimulatorDisplayGeometry.find(
+            deviceName: "mt-duo-0090b",
+            sourceSize: CGSize(width: 951, height: 669),
+            candidates: [target(1), target(2)],
+            displayFrame: { _ in CGRect(x: 0, y: 0, width: 615, height: 875) }
+        )) { error in
+            XCTAssertTrue(String(describing: error).contains("found 2"))
+        }
+    }
+
+    func testOrientedBoundsRotatesLandscapeSourceForPortraitDisplay() throws {
+        let bounds = CircleBounds(x: 100, y: 200, width: 120, height: 120, sourceWidth: 951, sourceHeight: 669)
+        let targetSize = CGSize(width: 615, height: 875)
+        let oriented = SimulatorDisplayGeometry.orientedBounds(bounds, targetSize: targetSize)
+
+        XCTAssertEqual(oriented.x, 349)
+        XCTAssertEqual(oriented.y, 100)
+        XCTAssertEqual(oriented.width, 120)
+        XCTAssertEqual(oriented.height, 120)
+        XCTAssertEqual(oriented.sourceWidth, 669)
+        XCTAssertEqual(oriented.sourceHeight, 951)
+
+        let scaled = try XCTUnwrap(oriented.scaled(to: targetSize))
+        XCTAssertLessThanOrEqual(abs(scaled.width / scaled.height - 1), 0.01)
+        // Rotated center is (349 + 60, 100 + 60); scale by 615/669 and 875/951 to about (376, 147).
+        XCTAssertLessThanOrEqual(abs(scaled.midX - 376), 1)
+        XCTAssertLessThanOrEqual(abs(scaled.midY - 147), 1)
+    }
+
+    func testOrientedBoundsLeavesMatchingOrientationUnchanged() {
+        let bounds = CircleBounds(x: 12, y: 34, width: 56, height: 78, sourceWidth: 466, sourceHeight: 678)
+        let oriented = SimulatorDisplayGeometry.orientedBounds(bounds, targetSize: CGSize(width: 466, height: 678))
+        XCTAssertEqual(oriented.x, bounds.x)
+        XCTAssertEqual(oriented.y, bounds.y)
+        XCTAssertEqual(oriented.width, bounds.width)
+        XCTAssertEqual(oriented.height, bounds.height)
+        XCTAssertEqual(oriented.sourceWidth, bounds.sourceWidth)
+        XCTAssertEqual(oriented.sourceHeight, bounds.sourceHeight)
+    }
+
+    func testOrientedBoundsLeavesNilSourceUnchanged() {
+        let bounds = CircleBounds(x: 12, y: 34, width: 56, height: 78, sourceWidth: nil, sourceHeight: nil)
+        let oriented = SimulatorDisplayGeometry.orientedBounds(bounds, targetSize: CGSize(width: 615, height: 875))
+        XCTAssertEqual(oriented.x, bounds.x)
+        XCTAssertEqual(oriented.y, bounds.y)
+        XCTAssertEqual(oriented.width, bounds.width)
+        XCTAssertEqual(oriented.height, bounds.height)
+        XCTAssertEqual(oriented.sourceWidth, bounds.sourceWidth)
+        XCTAssertEqual(oriented.sourceHeight, bounds.sourceHeight)
     }
 
     func testMultipleWindowsWithoutSourceSizeRemainAmbiguous() {

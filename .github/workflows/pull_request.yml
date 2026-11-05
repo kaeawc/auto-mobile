@@ -1033,6 +1033,12 @@ jobs:
 
       - wait: [setup-python-lock, setup-uv-lock]
 
+      # The claude-plugin check fails in CI without the Claude CLI (#16963).
+      - name: "Install pinned Claude Code"
+        shell: bash
+        timeout-minutes: 10
+        run: scripts/ci/install-claude-code.sh
+
       - name: "Run fast validation checks"
         shell: bash
         env:
@@ -1136,6 +1142,13 @@ jobs:
       - name: "Install Bun dependencies"
         shell: bash
         run: scripts/ci/install-bun-deps.sh
+
+      # The selector adds `claude-plugin` for plugin changes, and that check fails
+      # in CI without the Claude CLI (#16963). Foreground: it appends to $GITHUB_PATH.
+      - name: "Install pinned Claude Code"
+        shell: bash
+        timeout-minutes: 10
+        run: scripts/ci/install-claude-code.sh
 
       - wait: [install-bats, install-uv]
 

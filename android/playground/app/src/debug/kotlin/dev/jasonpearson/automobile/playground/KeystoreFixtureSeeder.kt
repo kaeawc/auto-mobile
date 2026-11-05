@@ -11,11 +11,13 @@ internal class KeystoreFixtureSeeder(private val store: KeystoreFixtureStore) {
   fun seed() {
     if (!store.containsAlias(KEY_ALIAS)) store.createKey(KEY_ALIAS)
     if (!store.containsAlias(CERTIFICATE_ALIAS)) store.createCertificate(CERTIFICATE_ALIAS)
+    if (!store.containsAlias(AUTH_BOUND_KEY_ALIAS)) store.createAuthBoundKey(AUTH_BOUND_KEY_ALIAS)
   }
 
   companion object {
     const val KEY_ALIAS = "automobile.fixture"
     const val CERTIFICATE_ALIAS = "automobile.fixture.certificate"
+    const val AUTH_BOUND_KEY_ALIAS = "automobile.fixture.auth-bound"
   }
 }
 
@@ -23,6 +25,8 @@ internal interface KeystoreFixtureStore {
   fun containsAlias(alias: String): Boolean
 
   fun createKey(alias: String)
+
+  fun createAuthBoundKey(alias: String)
 
   fun createCertificate(alias: String)
 }
@@ -43,6 +47,24 @@ internal class AndroidKeystoreFixtureStore : KeystoreFixtureStore {
           .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
           .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
           .setUserAuthenticationRequired(false)
+          .build(),
+      )
+      generateKey()
+    }
+  }
+
+  override fun createAuthBoundKey(alias: String) {
+    require(alias == KeystoreFixtureSeeder.AUTH_BOUND_KEY_ALIAS)
+    KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
+      init(
+        KeyGenParameterSpec.Builder(
+            alias,
+            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
+          )
+          .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+          .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+          .setUserAuthenticationRequired(true)
+          .setInvalidatedByBiometricEnrollment(true)
           .build(),
       )
       generateKey()

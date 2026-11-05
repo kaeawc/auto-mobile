@@ -42242,7 +42242,7 @@
           "type": "boolean"
         },
         "readiness": {
-          "description": "Whether to wait for the AutoMobile automation runner after device boot (default \"automation\"); watchOS and tvOS provisioning take only \"none\" (their default); visionOS also takes only \"none\" and has no runner; startDevice prepares watchOS/tvOS runners",
+          "description": "Whether to wait for the AutoMobile automation runner after device boot (default \"automation\"); watchOS and tvOS provisioning take only \"none\" (their default); visionOS also takes only \"none\" and prepares its window-app runner on the first observe, tapOn or sendKeys; startDevice prepares watchOS/tvOS runners",
           "type": "string",
           "enum": ["automation", "none"]
         },

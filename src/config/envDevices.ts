@@ -383,6 +383,12 @@ export const DEVICES_ENV = {
     default: "discover or build the AutoMobileTVTest scheme",
     doc: "Prebuilt tvOS simulator runner xctestrun used by startDevice.",
   },
+  VISIONOS_RUNNER_XCTESTRUN: {
+    name: "AUTOMOBILE_VISIONOS_RUNNER_XCTESTRUN",
+    kind: "path",
+    default: "discover or build the AutoMobileVisionTest scheme",
+    doc: "Prebuilt visionOS window-app runner xctestrun used on first observe, tapOn or sendKeys.",
+  },
   WATCH_RUNNER_XCTESTRUN: {
     name: "AUTOMOBILE_WATCH_RUNNER_XCTESTRUN",
     kind: "path",

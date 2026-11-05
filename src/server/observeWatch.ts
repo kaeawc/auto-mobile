@@ -1,4 +1,6 @@
-/** Apple simulator observation: a retained screenshot, plus a connected watchOS or tvOS runner's hierarchy. */
+import { normalizeVisionosHierarchy } from "../features/visionos/VisionosHierarchy";
+import { requireVisionosRunner } from "../features/visionos/VisionosRunnerLifecycle";
+/** Apple simulator observation: a retained screenshot and platform-specific runner hierarchy. */
 import { findFocusedElement } from "../features/observe/HierarchyFocus";
 import { normalizeTvosHierarchy } from "../features/tvos/TvosHierarchy";
 import { tvosRunners } from "../features/tvos/TvosRunnerRegistry";
@@ -71,6 +73,8 @@ const HIERARCHY_UNAVAILABLE_MESSAGES: Record<AppleScreenshotOnlyPlatform, string
   tvos: TVOS_HIERARCHY_UNAVAILABLE_MESSAGE,
 };
 
+type RunnerObservePlatform = AppleScreenshotOnlyPlatform | "visionos";
+
 type OptionCheck = readonly [name: string, isSet: (args: ObserveArgs) => boolean];
 
 /** Options that need a view hierarchy, an Android/iOS pipeline or an encoder this path lacks. */
@@ -97,7 +101,10 @@ function watchDisplay(device: BootedDevice): { ref: DisplayRef; captureKey: stri
       posture: "unknown",
       generation: 0,
     },
-    captureKey: device.platform === "tvos" ? undefined : (panel?.key ?? SIMCTL_DEFAULT_DISPLAY),
+    captureKey:
+      device.platform === "tvos" || device.platform === "visionos"
+        ? undefined
+        : (panel?.key ?? SIMCTL_DEFAULT_DISPLAY),
   };
 }
 
@@ -105,7 +112,7 @@ function watchDisplay(device: BootedDevice): { ref: DisplayRef; captureKey: stri
 export function assertWatchObserveOptions(
   args: ObserveArgs,
   displayKey: string,
-  platform: AppleScreenshotOnlyPlatform = "watchos",
+  platform: RunnerObservePlatform = "watchos",
   hierarchyAvailable = false,
 ): void {
   const hasRunnerHierarchy = hierarchyAvailable;
@@ -118,8 +125,8 @@ export function assertWatchObserveOptions(
   if (refused.length > 0) {
     throw new ActionableError(
       (hasRunnerHierarchy
-        ? `observe with the ${platform === "tvos" ? "tvOS" : "watchOS"} runner `
-        : `observe on ${platform === "tvos" ? "tvOS" : "watchOS"} returns only a screenshot (the view hierarchy is not available yet) `) +
+        ? `observe with the ${platform === "visionos" ? "visionOS" : platform === "tvos" ? "tvOS" : "watchOS"} runner `
+        : `observe on ${platform === "visionos" ? "visionOS" : platform === "tvos" ? "tvOS" : "watchOS"} returns only a screenshot (the view hierarchy is not available yet) `) +
         `and does not support: ${refused.join(", ")}. Remove these options and observe again.`,
     );
   }
@@ -137,13 +144,13 @@ async function captureWatchPng(
   } catch (error) {
     throw toActionableError(
       error,
-      `Failed to capture a screenshot of ${device.platform === "tvos" ? "tvOS" : "watch"} simulator ${device.deviceId} with simctl`,
+      `Failed to capture a screenshot of ${device.platform === "visionos" ? "visionOS" : device.platform === "tvos" ? "tvOS" : "watch"} simulator ${device.deviceId} with simctl`,
     );
   }
   const size = detectImageMimeType(png) === "image/png" ? readImageHeaderDimensions(png) : null;
   if (!size) {
     throw new ActionableError(
-      `simctl returned no readable PNG for ${device.platform === "tvos" ? "tvOS" : "watch"} simulator ${device.deviceId}; observe again.`,
+      `simctl returned no readable PNG for ${device.platform === "visionos" ? "visionOS" : device.platform === "tvos" ? "tvOS" : "watch"} simulator ${device.deviceId}; observe again.`,
     );
   }
   return { png, ...size };
@@ -155,7 +162,13 @@ async function watchHierarchyForObserve(
   signal: AbortSignal | undefined,
   injectedRunner?: WatchRunnerClient,
 ): Promise<ViewHierarchyResult | undefined> {
-  const platform = device.platform === "tvos" ? "tvos" : "watchos";
+  const platform =
+    device.platform === "visionos" ? "visionos" : device.platform === "tvos" ? "tvos" : "watchos";
+  if (platform === "visionos") {
+    assertWatchObserveOptions(args, watchDisplay(device).ref.key, platform, true);
+    const runner = await requireVisionosRunner(device.deviceId, signal);
+    return normalizeVisionosHierarchy(await runner.hierarchy(signal));
+  }
   if (platform === "tvos") {
     const runner = tvosRunners.get(device.deviceId);
     assertWatchObserveOptions(args, watchDisplay(device).ref.key, platform, runner !== undefined);
@@ -176,14 +189,22 @@ async function watchHierarchyForObserve(
   }
 }
 
-/** Capture an Apple simulator screenshot, adding hierarchy for a connected watchOS or tvOS runner. */
+function runnerObservePlatform(device: BootedDevice): RunnerObservePlatform {
+  return device.platform === "visionos"
+    ? "visionos"
+    : device.platform === "tvos"
+      ? "tvos"
+      : "watchos";
+}
+
+/** Capture an Apple simulator screenshot, adding the platform runner hierarchy. */
 export async function observeWatch(
   device: BootedDevice,
   args: ObserveArgs,
   signal: AbortSignal | undefined,
   dependencies: WatchObserveDependencies = {},
 ): Promise<ObserveResponse<WatchObservation | ObserveResult>> {
-  const platform = device.platform === "tvos" ? "tvos" : "watchos";
+  const platform = runnerObservePlatform(device);
   const display = watchDisplay(device);
   const viewHierarchy = await watchHierarchyForObserve(device, args, signal, dependencies.runner);
   const timer = dependencies.timer ?? defaultTimer;
@@ -241,10 +262,13 @@ export async function observeWatch(
 
 function watchObservationPayload(
   capture: Omit<WatchObservation, "hierarchyUnavailable">,
-  platform: AppleScreenshotOnlyPlatform,
+  platform: RunnerObservePlatform,
   viewHierarchy?: ViewHierarchyResult,
 ): WatchObservation | ObserveResult {
   if (!viewHierarchy) {
+    if (platform === "visionos") {
+      throw new ActionableError("visionOS observe requires the window-app runner hierarchy.");
+    }
     return {
       ...capture,
       hierarchyUnavailable: { platform, message: HIERARCHY_UNAVAILABLE_MESSAGES[platform] },
@@ -253,7 +277,7 @@ function watchObservationPayload(
   return {
     ...capture,
     viewHierarchy,
-    ...(platform === "tvos"
+    ...(platform === "tvos" || platform === "visionos"
       ? { focusedElement: findFocusedElement(viewHierarchy) ?? undefined }
       : {}),
     elements: new ObserveElementsBuilder().build(viewHierarchy, "ios"),

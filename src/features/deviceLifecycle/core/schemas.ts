@@ -629,7 +629,7 @@ function refineAppleTvProvisionOptions(
       path: ["readiness"],
       message:
         args.device.platform === "visionos"
-          ? 'visionOS has no automation runner; pass readiness "none" or omit it.'
+          ? 'visionOS provisioning accepts only readiness "none"; observe, tapOn and sendKeys prepare the window-app runner on demand.'
           : 'tvOS provisioning accepts only readiness "none"; call startDevice afterward to prepare automation.',
     });
   }
@@ -658,7 +658,7 @@ export const provisionDeviceRegistrationSchema = z
       .enum(["automation", "none"])
       .optional()
       .describe(
-        'Whether to wait for the AutoMobile automation runner after device boot (default "automation"); watchOS and tvOS provisioning take only "none" (their default); visionOS also takes only "none" and has no runner; startDevice prepares watchOS/tvOS runners',
+        'Whether to wait for the AutoMobile automation runner after device boot (default "automation"); watchOS and tvOS provisioning take only "none" (their default); visionOS also takes only "none" and prepares its window-app runner on the first observe, tapOn or sendKeys; startDevice prepares watchOS/tvOS runners',
       ),
   })
   .strict()

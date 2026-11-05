@@ -834,7 +834,7 @@ describe("provisionDevice on an Apple Vision Pro simulator", () => {
     const tools = await failure(provision({ device: headset, enableTools: ["observe"] }));
 
     expect(readiness).toBeInstanceOf(ActionableError);
-    expect(String(readiness)).toContain("visionOS has no automation runner");
+    expect(String(readiness)).toContain('visionOS provisioning accepts only readiness "none"');
     expect(String(resources)).toContain("resources is not supported on visionOS");
     expect(String(tools)).toContain("enableTools is not supported on visionOS");
     expect(simctl.commands).toEqual([]);

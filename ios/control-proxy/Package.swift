@@ -71,6 +71,19 @@ let package = Package(
             path: "Tests/TVCommandPolicyTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
+        .target(
+            name: "VisionCommandPolicy",
+            path: "Tests/CtrlProxyVisionUITests",
+            exclude: ["CtrlProxyVisionUITests.swift", "VisionCommandRouter.swift", "VisionWebSocketServer.swift", "VisionCommandRouterSmokeTests.swift"],
+            sources: ["VisionCommandPolicy.swift", "ConnectedEvent.swift"],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
+            name: "VisionCommandPolicyTests",
+            dependencies: ["VisionCommandPolicy"],
+            path: "Tests/VisionCommandPolicyTests",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
         // Shared test doubles + fixtures for the implementation. NOT a dependency of the
         // shipped `.library`, so the product stays fake-free and Sendable-clean.
         .target(

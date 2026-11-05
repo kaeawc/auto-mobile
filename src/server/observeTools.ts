@@ -590,7 +590,7 @@ function withWatchObserve(handler: ObserveHandler, dependencies: ObserveToolDepe
     progress?: unknown,
     signal?: AbortSignal,
   ): Promise<ObserveResponse | ObserveResponse<WatchObservation | ObserveResult>> =>
-    device.platform === "watchos" || device.platform === "tvos"
+    device.platform === "watchos" || device.platform === "tvos" || device.platform === "visionos"
       ? observeWatch(device, args, signal, watch)
       : handler(device, args, progress, signal);
 }

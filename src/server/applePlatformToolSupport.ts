@@ -44,8 +44,11 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "setActiveDevice",
     "killDevice",
   ]),
-  // simctl lifecycle only; every other tool joins once verified on a Vision Pro.
+  // Window-app XCUITest subset; screenshots stay on simctl.
   visionos: new Set<string>([
+    "observe",
+    "tapOn",
+    "sendKeys",
     "listDevices",
     "listDeviceImages",
     "provisionDevice",

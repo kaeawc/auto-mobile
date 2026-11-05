@@ -33,6 +33,7 @@ internal fun WorkspaceHierarchyCollector(
     // fire BEFORE the async parse so a scale/context flip invalidates control immediately; the
     // frame
     // generation is captured before the parse so a frame decoded across an invalidation is dropped.
+    ForegroundAppReporter(stream, column.deviceId, onForegroundApp)
     LaunchedEffect(stream, column.deviceId) {
       val active = stream ?: return@LaunchedEffect
       active.resetLayoutReplayCache()

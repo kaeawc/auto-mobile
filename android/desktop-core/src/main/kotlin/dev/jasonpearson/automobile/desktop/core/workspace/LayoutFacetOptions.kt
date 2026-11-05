@@ -20,6 +20,11 @@ data class LayoutFacetOptions(
   },
   val socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
   val streamingEnabled: Boolean = true,
+  /**
+   * Receives the device's foreground app from the inspector's hierarchy frames, so the window title
+   * keeps following it while Inspect mode replaces the pane's stream area.
+   */
+  val onForegroundApp: (deviceId: String, packageName: String) -> Unit = { _, _ -> },
   val videoSourceFactory: (deviceId: String) -> VideoStreamSource = {
     VideoStreamClient(
       VideoStreamClient.Options(

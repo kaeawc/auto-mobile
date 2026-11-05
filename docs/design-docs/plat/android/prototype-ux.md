@@ -2361,6 +2361,45 @@ in `requires.permissions`. `audioRecorder.start` takes an optional `maxDurationM
 counts the current recording. A press-and-hold control uses the gesture action lists, and playback
 uses a `media` audio player. No production runtime advertises the module yet.
 
+**Runtime permissions (#14297).** Canonical names live in `requires.permissions[].name`, and each entry's
+`purpose` becomes the iOS usage string and the Android rationale text. `schemas/prototype-platform-permissions.json`
+maps each name to its Android manifest permissions and grant mechanism, and to its iOS Info.plist usage key and
+`simctl privacy` service:
+
+| Name                 | Android manifest                                 | Android grant     | iOS usage key                                  | `simctl privacy`        |
+| -------------------- | ------------------------------------------------ | ----------------- | ---------------------------------------------- | ----------------------- |
+| `camera`             | `CAMERA`                                         | `pm grant`        | `NSCameraUsageDescription`                     | `camera`                |
+| `microphone`         | `RECORD_AUDIO`                                   | `pm grant`        | `NSMicrophoneUsageDescription`                 | `microphone`            |
+| `location`           | `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION` | `pm grant`        | `NSLocationWhenInUseUsageDescription`          | `location`              |
+| `locationBackground` | `ACCESS_BACKGROUND_LOCATION`                     | `pm grant`        | `NSLocationAlwaysAndWhenInUseUsageDescription` | `location-always`       |
+| `notifications`      | `POST_NOTIFICATIONS`                             | app setting       | none                                           | notGrantableOnSimulator |
+| `photos`             | `READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO`          | `pm grant`        | `NSPhotoLibraryUsageDescription`               | `photos`                |
+| `photosAdd`          | none                                             | none (MediaStore) | `NSPhotoLibraryAddUsageDescription`            | `photos-add`            |
+| `contacts`           | `READ_CONTACTS`                                  | `pm grant`        | `NSContactsUsageDescription`                   | `contacts`              |
+| `calendar`           | `READ_CALENDAR`, `WRITE_CALENDAR`                | `pm grant`        | `NSCalendarsFullAccessUsageDescription`        | `calendar`              |
+| `bluetooth`          | `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`            | `pm grant`        | `NSBluetoothAlwaysUsageDescription`            | notGrantableOnSimulator |
+| `nearbyWifi`         | `NEARBY_WIFI_DEVICES`                            | `pm grant`        | `NSLocalNetworkUsageDescription`               | notGrantableOnSimulator |
+| `motion`             | `ACTIVITY_RECOGNITION`                           | `pm grant`        | `NSMotionUsageDescription`                     | `motion`                |
+| `speech`             | `RECORD_AUDIO`                                   | `pm grant`        | `NSSpeechRecognitionUsageDescription`          | notGrantableOnSimulator |
+
+The `permissions` module (`prototype_platform_permissions_v1`) has one call, `permissions.request` with
+`names` (1-16 unique canonical names). A literal list may only name permissions declared in
+`requires.permissions`; a bound list is checked by the runtime. State is `/platform/permissions/<name>`, one
+of `granted`, `denied`, `blocked`, `notDetermined`, `limited`, `restricted` or `unavailable`, and
+`permissions.changed` fires when the user changes a permission in Settings and the app resumes. A call that
+needs a permission the user denied fails with `permission_denied` and never prompts implicitly. Overlay
+runtimes do not advertise the module, since a grant there would go to CtrlProxy or the borrowed host app.
+
+The host sets declared permissions after install and before launch, so the first frame shows the final
+state. The mode is `prompt` (the default for interactive shows: nothing is granted, so the first request
+shows the system dialog and plans rely on the system-alert policy, #14106), `grantDeclared`, or
+`{grant: [...], deny: [...]}` naming declared permissions only, each in one list. Tests and agent loops pass
+an explicit mode. An Android denial revokes with the `user-fixed` flag, so it reads `blocked` and no dialog
+appears; an iOS simulator denial is `simctl privacy revoke` and reads `denied`. Each declared permission is
+reported as `{name, state, verified}`; `verified` is false, with `reason`, for a simulator name that is
+notGrantableOnSimulator and for an Android `photosAdd` denial (`notRevocable`). No production runtime
+advertises the module, and `prototype show` does not yet accept the mode.
+
 **Notifications (#14280).** The `notifications` module (`prototype_platform_notifications_v1`) has three
 calls. `notifications.post` takes `id` (1-128 characters), `channel` (a key-shaped channel id) and `title`
 (non-blank, at most 128), plus optional `body` (at most 1024), `largeImage` (an asset id), `style`, `group`,

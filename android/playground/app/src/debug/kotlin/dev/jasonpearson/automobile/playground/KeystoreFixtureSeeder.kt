@@ -8,10 +8,11 @@ import javax.crypto.KeyGenerator
 
 /** Only these two aliases may be created by the debug fixture. */
 internal class KeystoreFixtureSeeder(private val store: KeystoreFixtureStore) {
-  fun seed() {
+  fun seed(includeAuthBoundKey: Boolean = false) {
     if (!store.containsAlias(KEY_ALIAS)) store.createKey(KEY_ALIAS)
     if (!store.containsAlias(CERTIFICATE_ALIAS)) store.createCertificate(CERTIFICATE_ALIAS)
-    if (!store.containsAlias(AUTH_BOUND_KEY_ALIAS)) store.createAuthBoundKey(AUTH_BOUND_KEY_ALIAS)
+    if (includeAuthBoundKey && !store.containsAlias(AUTH_BOUND_KEY_ALIAS))
+      store.createAuthBoundKey(AUTH_BOUND_KEY_ALIAS)
   }
 
   companion object {

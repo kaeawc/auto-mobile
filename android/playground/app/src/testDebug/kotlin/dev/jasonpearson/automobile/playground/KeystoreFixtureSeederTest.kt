@@ -35,8 +35,8 @@ class KeystoreFixtureSeederTest {
     val store = FakeStore()
     store.entries["unrelated"] = "KEY"
     val seeder = KeystoreFixtureSeeder(store)
-    seeder.seed()
-    seeder.seed()
+    seeder.seed(includeAuthBoundKey = true)
+    seeder.seed(includeAuthBoundKey = true)
     assertEquals(
       mapOf(
         "unrelated" to "KEY",
@@ -87,9 +87,26 @@ class KeystoreFixtureSeederTest {
   fun fillsMissingCertificateWithoutRecreatingExistingKey() {
     val store = FakeStore()
     store.entries[KeystoreFixtureSeeder.KEY_ALIAS] = "KEY"
-    KeystoreFixtureSeeder(store).seed()
+    KeystoreFixtureSeeder(store).seed(includeAuthBoundKey = true)
     assertEquals(
       listOf(KeystoreFixtureSeeder.CERTIFICATE_ALIAS, KeystoreFixtureSeeder.AUTH_BOUND_KEY_ALIAS),
+      store.creations,
+    )
+  }
+
+  @Test
+  fun ordinarySeedLeavesAuthBoundKeyUncreated() {
+    val store = FakeStore()
+    KeystoreFixtureSeeder(store).seed()
+    assertEquals(
+      mapOf(
+        KeystoreFixtureSeeder.KEY_ALIAS to "KEY",
+        KeystoreFixtureSeeder.CERTIFICATE_ALIAS to "CERTIFICATE",
+      ),
+      store.entries,
+    )
+    assertEquals(
+      listOf(KeystoreFixtureSeeder.KEY_ALIAS, KeystoreFixtureSeeder.CERTIFICATE_ALIAS),
       store.creations,
     )
   }

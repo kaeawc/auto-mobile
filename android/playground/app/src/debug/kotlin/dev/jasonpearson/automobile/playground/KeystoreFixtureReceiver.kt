@@ -15,15 +15,15 @@ import javax.crypto.Cipher
 class KeystoreFixtureReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent) {
     when (intent.action) {
-      ACTION_SEED -> seedFixture()
+      ACTION_SEED -> seedFixture(intent.getBooleanExtra(EXTRA_INCLUDE_AUTH_BOUND_KEY, false))
       ACTION_PROBE_AUTH_BOUND_KEY -> probeAuthBoundKey()
       else -> return
     }
   }
 
-  private fun seedFixture() {
+  private fun seedFixture(includeAuthBoundKey: Boolean) {
     try {
-      KeystoreFixtureSeeder(AndroidKeystoreFixtureStore()).seed()
+      KeystoreFixtureSeeder(AndroidKeystoreFixtureStore()).seed(includeAuthBoundKey)
       resultCode = Activity.RESULT_OK
       resultData = "Keystore fixture seeded"
     } catch (error: GeneralSecurityException) {
@@ -64,6 +64,8 @@ class KeystoreFixtureReceiver : BroadcastReceiver() {
       "dev.jasonpearson.automobile.playground.action.TEST_SEED_KEYSTORE_FIXTURE"
     const val ACTION_PROBE_AUTH_BOUND_KEY =
       "dev.jasonpearson.automobile.playground.action.PROBE_AUTH_BOUND_KEY"
+    const val EXTRA_INCLUDE_AUTH_BOUND_KEY =
+      "dev.jasonpearson.automobile.playground.extra.INCLUDE_AUTH_BOUND_KEY"
   }
 }
 

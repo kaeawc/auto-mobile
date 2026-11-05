@@ -40451,59 +40451,65 @@
               "hiddenReason": {
                 "$ref": "#/$defs/__schema8"
               },
-              "suspended": {
+              "orientation": {
                 "$ref": "#/$defs/__schema9"
               },
-              "displayId": {
+              "statusBar": {
                 "$ref": "#/$defs/__schema10"
               },
-              "chrome": {
+              "suspended": {
                 "$ref": "#/$defs/__schema11"
               },
-              "backdrop": {
+              "displayId": {
                 "$ref": "#/$defs/__schema12"
               },
-              "appearance": {
+              "chrome": {
                 "$ref": "#/$defs/__schema13"
               },
-              "degradedEffects": {
+              "backdrop": {
                 "$ref": "#/$defs/__schema14"
               },
-              "feedbackLog": {
+              "appearance": {
+                "$ref": "#/$defs/__schema15"
+              },
+              "degradedEffects": {
                 "$ref": "#/$defs/__schema16"
               },
-              "warning": {
-                "$ref": "#/$defs/__schema17"
-              },
-              "storage": {
+              "feedbackLog": {
                 "$ref": "#/$defs/__schema18"
               },
-              "shaderFailures": {
+              "warning": {
                 "$ref": "#/$defs/__schema19"
               },
-              "timers": {
+              "storage": {
                 "$ref": "#/$defs/__schema20"
               },
-              "success": {
+              "shaderFailures": {
                 "$ref": "#/$defs/__schema21"
               },
-              "error": {
+              "timers": {
                 "$ref": "#/$defs/__schema22"
               },
-              "totalTimeMs": {
+              "success": {
                 "$ref": "#/$defs/__schema23"
               },
-              "timestamp": {
+              "error": {
                 "$ref": "#/$defs/__schema24"
               },
-              "pendingCount": {
+              "totalTimeMs": {
                 "$ref": "#/$defs/__schema25"
               },
-              "lastSequence": {
+              "timestamp": {
                 "$ref": "#/$defs/__schema26"
               },
-              "droppedCount": {
+              "pendingCount": {
                 "$ref": "#/$defs/__schema27"
+              },
+              "lastSequence": {
+                "$ref": "#/$defs/__schema28"
+              },
+              "droppedCount": {
+                "$ref": "#/$defs/__schema29"
               },
               "pages": {
                 "type": "object",
@@ -40598,14 +40604,14 @@
                   "type": "string"
                 },
                 "additionalProperties": {
-                  "$ref": "#/$defs/__schema28"
+                  "$ref": "#/$defs/__schema30"
                 }
               },
               "context": {
-                "$ref": "#/$defs/__schema29"
+                "$ref": "#/$defs/__schema31"
               },
               "contextTruncated": {
-                "$ref": "#/$defs/__schema31"
+                "$ref": "#/$defs/__schema33"
               },
               "lastKnown": {
                 "description": "Pages, stacks and state are the last reported device snapshot, not a live device query",
@@ -40641,50 +40647,56 @@
             "hiddenReason": {
               "$ref": "#/$defs/__schema8"
             },
-            "suspended": {
+            "orientation": {
               "$ref": "#/$defs/__schema9"
             },
-            "displayId": {
+            "statusBar": {
               "$ref": "#/$defs/__schema10"
             },
-            "chrome": {
+            "suspended": {
               "$ref": "#/$defs/__schema11"
             },
-            "backdrop": {
+            "displayId": {
               "$ref": "#/$defs/__schema12"
             },
-            "appearance": {
+            "chrome": {
               "$ref": "#/$defs/__schema13"
             },
-            "degradedEffects": {
+            "backdrop": {
               "$ref": "#/$defs/__schema14"
             },
-            "feedbackLog": {
+            "appearance": {
+              "$ref": "#/$defs/__schema15"
+            },
+            "degradedEffects": {
               "$ref": "#/$defs/__schema16"
             },
-            "warning": {
-              "$ref": "#/$defs/__schema17"
-            },
-            "storage": {
+            "feedbackLog": {
               "$ref": "#/$defs/__schema18"
             },
-            "shaderFailures": {
+            "warning": {
               "$ref": "#/$defs/__schema19"
             },
-            "timers": {
+            "storage": {
               "$ref": "#/$defs/__schema20"
             },
-            "success": {
+            "shaderFailures": {
               "$ref": "#/$defs/__schema21"
             },
-            "error": {
+            "timers": {
               "$ref": "#/$defs/__schema22"
             },
-            "totalTimeMs": {
+            "success": {
               "$ref": "#/$defs/__schema23"
             },
-            "timestamp": {
+            "error": {
               "$ref": "#/$defs/__schema24"
+            },
+            "totalTimeMs": {
+              "$ref": "#/$defs/__schema25"
+            },
+            "timestamp": {
+              "$ref": "#/$defs/__schema26"
             }
           },
           "required": ["lastAction", "success", "timestamp"],
@@ -40695,13 +40707,13 @@
           "type": "object",
           "properties": {
             "battery": {
-              "$ref": "#/$defs/__schema32"
+              "$ref": "#/$defs/__schema34"
             },
             "power": {
-              "$ref": "#/$defs/__schema32"
+              "$ref": "#/$defs/__schema34"
             },
             "audio": {
-              "$ref": "#/$defs/__schema32"
+              "$ref": "#/$defs/__schema34"
             }
           },
           "additionalProperties": false
@@ -40891,13 +40903,13 @@
               ]
             },
             "payload": {
-              "$ref": "#/$defs/__schema33"
+              "$ref": "#/$defs/__schema35"
             },
             "context": {
-              "$ref": "#/$defs/__schema29"
+              "$ref": "#/$defs/__schema31"
             },
             "contextTruncated": {
-              "$ref": "#/$defs/__schema31"
+              "$ref": "#/$defs/__schema33"
             },
             "state": {
               "type": "object",
@@ -41044,7 +41056,7 @@
         "degradedEffects": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/__schema15"
+            "$ref": "#/$defs/__schema17"
           }
         },
         "missingAssets": {
@@ -41177,13 +41189,13 @@
           "maximum": 9007199254740991
         },
         "pendingCount": {
-          "$ref": "#/$defs/__schema25"
+          "$ref": "#/$defs/__schema27"
         },
         "lastSequence": {
-          "$ref": "#/$defs/__schema26"
+          "$ref": "#/$defs/__schema28"
         },
         "droppedCount": {
-          "$ref": "#/$defs/__schema27"
+          "$ref": "#/$defs/__schema29"
         },
         "artifact": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -41314,27 +41326,37 @@
           "enum": ["app_layer_window_hidden", "device_blocked"]
         },
         "__schema9": {
+          "description": "Inspect: the orientation the prototype's window.orientation requested; the overlay may not honor it. Absent when none was requested or the device lacks prototype_platform_window_controls_v1",
+          "type": "string",
+          "enum": ["portrait", "landscape", "unlocked"]
+        },
+        "__schema10": {
+          "description": "Inspect: unsupported when window.statusBar was requested but the overlay cannot restyle the status bar. Absent when none was requested or the device lacks prototype_platform_window_controls_v1",
+          "type": "string",
+          "enum": ["unsupported"]
+        },
+        "__schema11": {
           "description": "Android only: the prototype is hidden because the app it was shown over is not in front (as of the last inspect); its state is kept and it returns with the app. Absent when visible and on iOS",
           "type": "boolean",
           "const": true
         },
-        "__schema10": {
+        "__schema12": {
           "description": "Android logical display the prototype was shown on; absent for the default display",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "__schema11": {
+        "__schema13": {
           "description": "show of a fullscreen window: the host chrome the device draws. none: no dismiss bar; a two-finger long press (about 1 s) reveals a dismiss pill. bar: the host dismiss bar across the top, which is what a device that does not advertise prototype_window_chrome_v1 always draws, whatever the spec default. Absent for sheet and floating windows, on dismiss and on a failed show",
           "type": "string",
           "enum": ["none", "bar"]
         },
-        "__schema12": {
+        "__schema14": {
           "description": "show of a spec with window.backdrop: blur when the device blurred what is behind the window, fallback when it drew the tonal fill instead (blur unsupported or disabled). Absent without window.backdrop, on dismiss and on a failed show",
           "type": "string",
           "enum": ["blur", "fallback"]
         },
-        "__schema13": {
+        "__schema15": {
           "description": "The light or dark mode the prototype is drawn in, as the device last reported it: in lastResult what a successful show resolved to, and per prototype in inspect that value, and in status its mode and source as refreshed by inspect and by appearance_changed events (status never carries deviceDark; after a show crossed by an appearance_changed event, its status entry has no appearance until a later event or inspect states it). Absent when the device does not advertise prototype_appearance_v1, on dismiss and on a failed show",
           "type": "object",
           "properties": {
@@ -41355,13 +41377,13 @@
           "required": ["mode", "source"],
           "additionalProperties": false
         },
-        "__schema14": {
+        "__schema16": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/__schema15"
+            "$ref": "#/$defs/__schema17"
           }
         },
-        "__schema15": {
+        "__schema17": {
           "type": "object",
           "properties": {
             "path": {
@@ -41380,7 +41402,7 @@
           "required": ["path", "type", "reason"],
           "additionalProperties": false
         },
-        "__schema16": {
+        "__schema18": {
           "description": "inspect: the last haptic (effect) and sound calls this prototype made, oldest first, at most 64, each with the owning nodeId when one node made the call and suppressed when a system setting or the ringer stopped it. Reported by a device advertising prototype_platform_haptics_v1 or prototype_platform_sound_v1; absent when none were made",
           "maxItems": 64,
           "type": "array",
@@ -41410,11 +41432,11 @@
             "additionalProperties": false
           }
         },
-        "__schema17": {
+        "__schema19": {
           "description": "Effects omitted or frozen by the device, with their paths and reasons",
           "type": "string"
         },
-        "__schema18": {
+        "__schema20": {
           "description": "inspect only: what the device has stored for this prototype's storage block (prototype_storage_v1), as the device last reported it. Absent when the device does not report it or the prototype has no storage block",
           "type": "object",
           "properties": {
@@ -41459,7 +41481,7 @@
           "required": ["version", "keys", "totalBytes"],
           "additionalProperties": false
         },
-        "__schema19": {
+        "__schema21": {
           "type": "object",
           "propertyNames": {
             "type": "string"
@@ -41468,7 +41490,7 @@
             "type": "string"
           }
         },
-        "__schema20": {
+        "__schema22": {
           "maxItems": 8,
           "type": "array",
           "items": {
@@ -41494,81 +41516,36 @@
             "additionalProperties": false
           }
         },
-        "__schema21": {
+        "__schema23": {
           "type": "boolean"
         },
-        "__schema22": {
+        "__schema24": {
           "type": "string"
         },
-        "__schema23": {
+        "__schema25": {
           "type": "number"
         },
-        "__schema24": {
+        "__schema26": {
           "description": "Host clock milliseconds when the request completed",
           "type": "number"
         },
-        "__schema25": {
+        "__schema27": {
           "description": "Unconsumed events, including events excluded by filters or cursor",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "__schema26": {
+        "__schema28": {
           "description": "Highest sequence accepted for this prototype",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "__schema27": {
+        "__schema29": {
           "description": "Cumulative events dropped by buffer overflow in this scope",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
-        },
-        "__schema28": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "number"
-            },
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            },
-            {
-              "type": "array",
-              "items": {
-                "$ref": "#/$defs/__schema28"
-              }
-            },
-            {
-              "type": "object",
-              "propertyNames": {
-                "type": "string"
-              },
-              "additionalProperties": {
-                "$ref": "#/$defs/__schema28"
-              }
-            }
-          ]
-        },
-        "__schema29": {
-          "allOf": [
-            {
-              "type": "object",
-              "propertyNames": {
-                "type": "string"
-              },
-              "additionalProperties": {
-                "$ref": "#/$defs/__schema30"
-              }
-            },
-            {}
-          ]
         },
         "__schema30": {
           "anyOf": [
@@ -41602,10 +41579,55 @@
           ]
         },
         "__schema31": {
+          "allOf": [
+            {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema32"
+              }
+            },
+            {}
+          ]
+        },
+        "__schema32": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema32"
+              }
+            },
+            {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema32"
+              }
+            }
+          ]
+        },
+        "__schema33": {
           "type": "boolean",
           "const": true
         },
-        "__schema32": {
+        "__schema34": {
           "type": "object",
           "properties": {
             "values": {
@@ -41642,7 +41664,7 @@
           "required": ["values", "timestamp", "receivedAt"],
           "additionalProperties": false
         },
-        "__schema33": {
+        "__schema35": {
           "anyOf": [
             {
               "type": "string"
@@ -41659,7 +41681,7 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema33"
+                "$ref": "#/$defs/__schema35"
               }
             },
             {
@@ -41668,7 +41690,7 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema33"
+                "$ref": "#/$defs/__schema35"
               }
             }
           ]

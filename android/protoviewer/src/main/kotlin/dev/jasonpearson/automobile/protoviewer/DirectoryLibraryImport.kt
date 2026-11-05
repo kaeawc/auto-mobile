@@ -53,7 +53,9 @@ class DirectoryLibraryImport(
     // Hash the same text the repository records, so a hidden hash matches before anything is
     // stored.
     val specSha256 = sha256Hex(bundle.spec.toString(Charsets.UTF_8).toByteArray())
-    if (blocklist.rejects(source, specSha256)) return LibraryResult.Failure(LibraryError.Hidden)
+    if (blocklist.rejects(source, specSha256, sourceHost)) {
+      return LibraryResult.Failure(LibraryError.Hidden)
+    }
     val id = ids.newId()
     require(validLibraryId(id))
     val destination = stagingRoot.resolve(id)

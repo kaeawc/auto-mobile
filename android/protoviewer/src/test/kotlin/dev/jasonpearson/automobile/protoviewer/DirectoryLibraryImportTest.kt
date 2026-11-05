@@ -126,6 +126,18 @@ class DirectoryLibraryImportTest {
   }
 
   @Test
+  fun shareFromABlockedHostIsRejectedBeforeAnythingIsStaged() {
+    blocklist.block("proto.example.com")
+    assertEquals(
+      LibraryResult.Failure(LibraryError.Hidden),
+      commit.commit(bundle, LibrarySource.share, null, "proto.example.com"),
+    )
+    assertNull(files.renamedTo)
+    assertTrue(store.results.isEmpty())
+    assertTrue(metadata.documents.isEmpty())
+  }
+
+  @Test
   fun hidingNeverRejectsTheUsersOwnPrototypes() {
     blocklist.hide(sha256Hex(bundle.spec.toString(Charsets.UTF_8).toByteArray()))
     assertTrue(commit.commit(bundle, LibrarySource.mcp, null, null) is LibraryResult.Success)

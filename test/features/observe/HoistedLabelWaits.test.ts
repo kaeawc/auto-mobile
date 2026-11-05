@@ -274,3 +274,37 @@ describe("regex waits keep whitespace when judging the folded part (#17026)", ()
     expect(disappear(resolver, selector)(observation).matched).toBe(true);
   });
 });
+
+describe("case-insensitive regex waits judge the folded part with the regex engine's case folding (#17044)", () => {
+  /** A " Alarm" row whose folded "K" part is off screen, with a visible `visibleText` child. */
+  const kelvinRow = (visibleText: string) =>
+    screenWith([
+      {
+        text: " Alarm",
+        clickable: "true",
+        bounds: { left: 0, top: 0, right: 400, bottom: 900 },
+        node: [
+          { text: "K", bounds: { left: 0, top: -90, right: 100, bottom: -50 } },
+          { text: visibleText, bounds: { left: 0, top: 20, right: 100, bottom: 60 } },
+        ],
+      },
+    ]);
+  const selector = { text: "^K Alarm$", match: "regex" as const };
+
+  test("a visible part that only lowercases to the folded part does not back it", () => {
+    // "K" (KELVIN SIGN) lowercases to "k", but non-Unicode /i does not fold it to "K".
+    const observation = kelvinRow("K");
+    const resolver = new ElementResolver();
+
+    expect(appear(resolver, selector)(observation).matched).toBe(false);
+    expect(disappear(resolver, selector)(observation).matched).toBe(true);
+  });
+
+  test("a visible part that /i folds to the folded part still backs it", () => {
+    const observation = kelvinRow("k");
+    const resolver = new ElementResolver();
+
+    expect(appear(resolver, selector)(observation).matched).toBe(true);
+    expect(disappear(resolver, selector)(observation).matched).toBe(false);
+  });
+});

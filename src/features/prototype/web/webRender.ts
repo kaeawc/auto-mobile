@@ -53,6 +53,7 @@ import {
 } from "./webCollections";
 import { conditionHolds, decide, type ConditionScope } from "./webCondition";
 import { webControlRenderers } from "./webControls";
+import { webIndicatorRenderers, withSwipeActions } from "./webIndicators";
 import { webMapRenderers } from "./webMap";
 import { webMediaRenderers } from "./webMedia";
 import { bindStillPlatformText } from "./webPlatformState";
@@ -909,6 +910,7 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   ...webMediaRenderers(KIT),
   ...webMapRenderers(KIT),
   ...webStackRenderers(KIT),
+  ...webIndicatorRenderers(KIT),
 };
 
 const WEB_LAYER_RENDERERS = { ...webSheetLayers(KIT), ...webModalLayers(KIT) };
@@ -1007,7 +1009,9 @@ export function renderWebNode(
     return undefined;
   }
   const renderer = WEB_NODE_RENDERERS[String(styled.type)];
-  const element = renderer ? renderer(styled, own, path) : placeholder(styled, own, path);
+  const element = renderer
+    ? withSwipeActions(renderer(styled, own, path), styled, own, KIT)
+    : placeholder(styled, own, path);
   const shaded = shaderFallback(styled, path);
   if (shaded) {
     own.unsupported.push(shaded);

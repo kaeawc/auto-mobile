@@ -26,6 +26,15 @@ fun interface LibraryClock {
   fun nowMillis(): Long
 }
 
+/**
+ * Whether content may enter the library. [DirectoryLibraryRepository.add] asks under its lock, so a
+ * Hide that lands while an import is staging either rejects the import or is followed by a purge
+ * that sees the new entry (#16669).
+ */
+fun interface LibraryAdmission {
+  fun admits(source: LibrarySource, specSha256: String, sourceHost: String?): Boolean
+}
+
 @Serializable
 enum class LibrarySource {
   mcp,
@@ -96,6 +105,7 @@ class DirectoryLibraryRepository(
   private val storage: LibraryStorage,
   private val ids: IdGenerator = IdGenerator { UUID.randomUUID().toString() },
   private val clock: LibraryClock = LibraryClock(System::currentTimeMillis),
+  private val admission: LibraryAdmission = LibraryAdmission { _, _, _ -> true },
 ) : LibraryRepository {
   private val json = Json {
     ignoreUnknownKeys = false
@@ -216,10 +226,10 @@ class DirectoryLibraryRepository(
     requires: List<String> = emptyList(),
     sourceHost: String? = null,
   ): LibraryResult<LibraryEntry> {
-    if (
-      !validLibrarySpec(request.specJson) || !AutoMobilePrototype.capabilities.containsAll(requires)
-    )
-      return LibraryResult.Failure(LibraryError.Invalid)
+    val specSha256 = sha256Hex(request.specJson.toByteArray())
+    rejectedEntry(request, source, specSha256, requires, admission)?.let {
+      return LibraryResult.Failure(it)
+    }
     val listed = list()
     if (listed is LibraryResult.Failure) return listed
     if ((listed as LibraryResult.Success).value.size >= MAX_LIBRARY_PROTOTYPES)
@@ -254,7 +264,7 @@ class DirectoryLibraryRepository(
               clock.nowMillis(),
               0,
               source,
-              sha256Hex(request.specJson.toByteArray()),
+              specSha256,
               requires.distinct().sorted(),
               false,
               // A host the reader would reject (IP literal, single label) is dropped, not stored,
@@ -327,3 +337,21 @@ internal fun <T> storageResult(block: () -> T): LibraryResult<T> =
 private fun validLibrarySpec(spec: String): Boolean =
   PrototypeSpecValidator.validate(spec, AutoMobilePrototype.capabilities, library = true) is
     PrototypeSpecValidation.Success
+
+/**
+ * Validity and admission checks for a new entry. [DirectoryLibraryRepository.add] repeats the
+ * importer's early admission check under its lock, because purgeBlocked() lists through that lock.
+ */
+private fun rejectedEntry(
+  request: SavedPrototypeSaveRequest,
+  source: LibrarySource,
+  specSha256: String,
+  requires: List<String>,
+  admission: LibraryAdmission,
+): LibraryError? =
+  when {
+    !validLibrarySpec(request.specJson) ||
+      !AutoMobilePrototype.capabilities.containsAll(requires) -> LibraryError.Invalid
+    !admission.admits(source, specSha256, null) -> LibraryError.Hidden
+    else -> null
+  }

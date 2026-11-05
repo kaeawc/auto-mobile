@@ -956,6 +956,8 @@ internal constructor(
       prototypePlacement = prototypeMetadata?.placement,
       prototypeOpaque = prototypeMetadata?.opaque,
       prototypeAppearance = prototypeMetadata?.appearance,
+      prototypeOrientation = prototypeMetadata?.orientation,
+      prototypeStatusBar = prototypeMetadata?.statusBar,
       prototypeMotion =
         prototypeMetadata?.motion?.let { PrototypeWindowMotion(it.active, it.loops) },
     )

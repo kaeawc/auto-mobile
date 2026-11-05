@@ -8,6 +8,8 @@ import {
   ProtoViewerEntryPointMissingError,
   ProtoViewerInboxUnsupportedError,
   ProtoViewerStorageError,
+  type ProtoViewerCapabilityOptions,
+  type ProtoViewerCapabilityReport,
   type ProtoViewerDevice,
 } from "../../../../src/features/prototype/protoViewer/protoViewerDevice";
 import type { ProtoViewerResult } from "../../../../src/features/prototype/protoViewer/protoViewerContract";
@@ -44,6 +46,19 @@ class FakeProtoViewerDevice implements ProtoViewerDevice {
   readonly imports: Array<{ bytes: Uint8Array; label?: string }> = [];
   readonly opens: Array<{ libraryId: string }> = [];
   readonly budgets: Array<{ timeoutMs: number; signal?: AbortSignal }> = [];
+  /** What the installed build reports; the second entry answers a refresh. */
+  reports: Array<ProtoViewerCapabilityReport | undefined | Error> = [undefined];
+  readonly capabilityReads: ProtoViewerCapabilityOptions[] = [];
+  async capabilities(
+    options: ProtoViewerCapabilityOptions,
+  ): Promise<ProtoViewerCapabilityReport | undefined> {
+    this.capabilityReads.push(options);
+    const report = this.reports[Math.min(this.capabilityReads.length - 1, this.reports.length - 1)];
+    if (report instanceof Error) {
+      throw report;
+    }
+    return report;
+  }
   async installed(): Promise<boolean> {
     if (this.available instanceof Error) {
       throw this.available;
@@ -509,3 +524,89 @@ test.each(["save", "open"])(
     expect(out?.error).toContain("Install a newer ProtoViewer");
   },
 );
+
+describe("capability handshake before a save (#14156)", () => {
+  const deadTapSpec = {
+    ...spec,
+    window: { placement: { type: "fullscreen" }, deadTaps: true },
+  } as PrototypeSpec;
+  const PLAY =
+    "https://play.google.com/store/apps/details?id=dev.jasonpearson.automobile.protoviewer";
+  const older = (capabilities: string[] = []): ProtoViewerCapabilityReport => ({
+    version: "0.0.86",
+    capabilities: new Set(capabilities),
+    updateUrl: PLAY,
+  });
+
+  test("an older build without a needed capability gets a typed error and update hint, and nothing is pushed", async () => {
+    const device = new FakeProtoViewerDevice();
+    device.reports = [older(), older()];
+    const output = await routeToProtoViewer(
+      { action: "save", spec: deadTapSpec, timeoutMs: 5000 },
+      deps(device),
+    );
+    expect(output).toEqual({
+      success: false,
+      errorCode: "unsupported_capability",
+      error: `The installed ProtoViewer (0.0.86) cannot show this prototype: it lacks prototype_dead_tap_v1. Update ProtoViewer from ${PLAY} and save again. Nothing was saved.`,
+      update: {
+        missingCapabilities: ["prototype_dead_tap_v1"],
+        installedVersion: "0.0.86",
+        url: PLAY,
+      },
+    });
+    expect(device.imports).toHaveLength(0);
+    // The refusal is confirmed against a refreshed report, never a possibly stale one alone.
+    expect(device.capabilityReads.map((read) => read.refresh)).toEqual([undefined, true]);
+    expect(device.capabilityReads[0].timeoutMs).toBe(5000);
+  });
+
+  test("a stale report that a refresh corrects lets the save through", async () => {
+    const device = new FakeProtoViewerDevice();
+    device.reports = [older(), older(["prototype_dead_tap_v1"])];
+    const output = await routeToProtoViewer({ action: "save", spec: deadTapSpec }, deps(device));
+    expect(output?.success).toBe(true);
+    expect(device.imports).toHaveLength(1);
+  });
+
+  test("a build that reports every needed capability is read once and imports", async () => {
+    const device = new FakeProtoViewerDevice();
+    device.reports = [older(["prototype_dead_tap_v1"])];
+    const output = await routeToProtoViewer({ action: "save", spec: deadTapSpec }, deps(device));
+    expect(output?.success).toBe(true);
+    expect(device.capabilityReads).toHaveLength(1);
+    expect(device.imports).toHaveLength(1);
+  });
+
+  test("a build without a report leaves the decision to the app's own import gate", async () => {
+    const device = new FakeProtoViewerDevice();
+    device.reports = [undefined];
+    const output = await routeToProtoViewer({ action: "save", spec: deadTapSpec }, deps(device));
+    expect(output?.success).toBe(true);
+    expect(device.capabilityReads).toHaveLength(1);
+    expect(device.imports).toHaveLength(1);
+  });
+
+  test("a spec that needs no capability skips the handshake", async () => {
+    const device = new FakeProtoViewerDevice();
+    await routeToProtoViewer({ action: "save", spec }, deps(device));
+    expect(device.capabilityReads).toHaveLength(0);
+    expect(device.imports).toHaveLength(1);
+  });
+
+  test("an unreadable report never fails the save by itself", async () => {
+    const device = new FakeProtoViewerDevice();
+    device.reports = [new Error("adb went away")];
+    const output = await routeToProtoViewer({ action: "save", spec: deadTapSpec }, deps(device));
+    expect(output?.success).toBe(true);
+    expect(device.imports).toHaveLength(1);
+  });
+
+  test("unusable app storage during the handshake keeps the platform save path", async () => {
+    const device = new FakeProtoViewerDevice();
+    device.reports = [new ProtoViewerStorageError("shell-owned folders")];
+    const output = await routeToProtoViewer({ action: "save", spec: deadTapSpec }, deps(device));
+    expect(output).toBeUndefined();
+    expect(device.imports).toHaveLength(0);
+  });
+});

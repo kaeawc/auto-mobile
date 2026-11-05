@@ -285,7 +285,9 @@ Android implements them; the iOS viewer does not yet (#16437).
   start repeats the sweep, so an entry whose delete failed before its metadata was removed is
   retried. A later file or share import of hidden content, or of content from a blocked host, is
   rejected as `Hidden` ("hidden on this device") before anything is staged or stored, so hidden
-  content does not hold library quota. There is no unhide.
+  content does not hold library quota. The repository repeats that check under its lock when it
+  commits the entry, and the purge lists through the same lock after Hide records the hash, so an
+  import that races Hide is either rejected or deleted by that purge. There is no unhide.
 - Report opens the user's mail app addressed to the published contact
   (`automobile+coc@jasonpearson.dev`, the project's code-of-conduct enforcement address) with the
   label, spec SHA-256, source and host. The app sends nothing itself and attaches no bundle bytes.
@@ -356,7 +358,10 @@ app-owned parent directory; callers serialize commits and the Node adapter uses 
 8. Commit atomically; the app assigns `libraryId` and `source`.
 
 Version compatibility: there is no `specVersion`. Compatibility is the strict validator of the
-app's release plus the capability gates. There are no migrations.
+app's release plus the capability gates. There are no migrations. A store-installed app lags or
+leads the MCP server, so the host also checks capabilities before an MCP save (section 7,
+capability handshake); step 5 stays the authority for every import, including builds that predate
+the handshake.
 
 ## 6. Network policy and limits
 
@@ -473,6 +478,26 @@ The shared request-policy and storage work is tracked in #13622.
   hard failure; retrying the same bundle is safe because imports are idempotent.
   Physical devices keep the template path's existing behavior; `open` needs an iOS simulator.
   `devicectl` delivery to dev-signed physical devices remains later work.
+- Capability handshake (#14156). On Android the app writes `mcp/capabilities.json`
+  (`{versionCode, versionName, capabilities}`, atomically) whenever it prepares its MCP folders: on
+  every start and on PREPARE. Before pushing a save whose spec needs any capability, the host reads
+  the installed `versionCode` from `dumpsys package` and that report; a report for another
+  `versionCode` is refreshed with PREPARE first. When the spec needs a capability the report lacks,
+  the host refreshes once more (debug builds all keep `versionCode` 1, so a report can be stale at
+  an equal version) and then returns `unsupported_capability` with `update`
+  `{missingCapabilities, installedVersion, url}` (the Play listing) without pushing. No report
+  (a build from before the handshake, which never writes one, so no extra launch), an unreadable
+  report, or a report still for another version leaves the decision to the app's import gate
+  (section 5 step 5); unusable storage keeps the platform save path, as for an import. A secondary
+  Android user also defers to the app: its MCP storage is reached only through the app's provider,
+  which serves inbox writes and result reads, not the report. The iOS simulator path has no report
+  yet and always defers to the app.
+- Trust model for store-installed builds. The host cannot pin a store binary's
+  checksum the way it pins CtrlProxy, and the Play-signed binary differs from the GitHub one
+  (#14145). It accepts any ProtoViewer signed with the expected certificate (Android) or team
+  (iOS); the host does not verify the signer yet.
+- Support window: the MCP server supports the three most recent ProtoViewer
+  releases. Older builds still get the handshake or the app's own gate, without a guarantee.
 - `prototype save`: on Android (for the current user) or an iOS simulator, when ProtoViewer is installed, build a
   canonical bundle (#13616) and route it as above; otherwise the CtrlProxy or template path is
   unchanged. `pin` and `icon` describe CtrlProxy launcher shortcuts, which ProtoViewer has not, so
@@ -746,7 +771,8 @@ harnesses and a nightly CI job remain future work.
 2. Library network policy differs from #12518's "no allowlist"; MCP-direct `show` is unchanged.
 3. The extraction touches CtrlProxy (one mechanical change plus existing suites).
 4. The adb-based MCP channel is Android-specific; iOS simulators use the filesystem and `simctl openurl`; physical-device delivery is later work.
-5. With no `specVersion`, older apps reject newer specs; `requires` and capability messages soften this.
+5. With no `specVersion`, older apps reject newer specs; the capability handshake (section 7) and
+   `requires` turn that into an update hint before anything is pushed.
 
 ## 12. Decisions
 
@@ -763,6 +789,7 @@ harnesses and a nightly CI job remain future work.
 | Store identity             | `dev.jasonpearson.automobile.protoviewer` on both stores, `.dev` for dev builds, title ProtoViewer (owner, 2026-10-31, #14144). |
 | Store accounts             | Personal enrollment on both stores; Play needs a 14-day closed test with 12 testers first (owner, 2026-10-31, #14144).          |
 | Store support and privacy  | Hosted on the docs site: `protoviewer/support.md` and `protoviewer/privacy.md` (owner, 2026-10-31, #14144).                     |
+| Version skew               | Host capability handshake before `save`, signer trust, store link, last 3 releases.                                             |
 | Crash and quality signals  | Store vitals and Xcode Organizer plus Copy diagnostics; no crash SDK.                                                           |
 | Rollout gates              | Halt above 1.09% crash or 0.47% ANR (Android), 1.09% crash (iOS) (owner, 2026-11-03, #16516).                                   |
 

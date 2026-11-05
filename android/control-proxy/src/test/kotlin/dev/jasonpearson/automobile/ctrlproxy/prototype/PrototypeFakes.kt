@@ -168,6 +168,10 @@ internal class FakePrototypeHost : PrototypeHost {
     return display("replace", request)
   }
 
+  override suspend fun hideKeyboard() {
+    calls += "hideKeyboard"
+  }
+
   override suspend fun relayout(): Boolean {
     calls += "relayout"
     return accept

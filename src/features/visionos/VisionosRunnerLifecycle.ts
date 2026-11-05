@@ -132,11 +132,14 @@ export class VisionosRunnerLifecycle {
     sessions: VisionosRunnerSessions;
   }): string | undefined {
     this.observeSessions(sessions);
+    const entry = this.runners.get(deviceId);
     if (!sessions.hasSession(ownerSession)) {
-      this.stop(deviceId);
+      // A runner another live session already owns must outlive this caller's ended session.
+      if (!entry?.ownerSession) {
+        this.stop(deviceId);
+      }
       return "the visionos session ended before runner startup";
     }
-    const entry = this.runners.get(deviceId);
     if (entry) {
       entry.ownerSession = ownerSession;
     }
@@ -277,7 +280,8 @@ function attachVisionosRunnerToSession(
 ): void {
   const ownerSession = getToolSelectionContext()?.routingSessionUuid;
   const sessions = defaultDaemonContext.sessionManager();
-  if (ownerSession && sessions?.hasSession(ownerSession)) {
+  // An ended routing session still reaches attach, which stops the unowned runner this call started.
+  if (ownerSession && sessions) {
     const unavailable = (lifecycle ?? defaultLifecycle)?.attach({
       deviceId,
       ownerSession,

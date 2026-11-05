@@ -14,6 +14,7 @@ import kotlinx.serialization.serializer
 internal class ObservationMuxFrames(
   private val table: ObservationMuxTable,
   private val wire: ObservationMuxWire,
+  private val storage: ObservationMuxStorage,
   private val log: Logger,
 ) {
   fun handle(open: TelemetrySocket, line: String) {
@@ -33,6 +34,7 @@ internal class ObservationMuxFrames(
         if (response.success == true) acknowledge(open, response) else refuse(response)
       "error" -> refuse(response)
       "device_session_started" -> Unit
+      "storage_reconciliation_required" -> storage.reconcile(response)
       else -> route(response)
     }
   }
@@ -51,6 +53,7 @@ internal class ObservationMuxFrames(
 
   private fun acknowledge(open: TelemetrySocket, response: StreamResponse) {
     val id = response.id ?: return
+    if (storage.resolve(id, success = true, error = null)) return
     val ack =
       synchronized(table.lock) {
         // An on-demand request's acknowledgement completes it; unsubscribe/cadence acks match
@@ -75,6 +78,7 @@ internal class ObservationMuxFrames(
 
   private fun refuse(response: StreamResponse) {
     val error = response.error
+    if (response.id?.let { storage.resolve(it, success = false, error = error) } == true) return
     if (isStreamSessionRejection(error)) {
       rejectSession(error)
       return

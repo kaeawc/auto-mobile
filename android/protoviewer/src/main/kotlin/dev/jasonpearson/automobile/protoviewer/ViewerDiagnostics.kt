@@ -27,7 +27,8 @@ enum class ViewerFailure(val code: String) {
   UnsupportedFormat("library-unsupported-format"),
   Storage("library-storage"),
   Limit("library-limit"),
-  Invalid("library-invalid");
+  Invalid("library-invalid"),
+  Hidden("library-hidden");
 
   companion object {
     fun of(error: PrototypeLoadError): ViewerFailure =
@@ -44,6 +45,7 @@ enum class ViewerFailure(val code: String) {
         LibraryError.Storage -> Storage
         LibraryError.Limit -> Limit
         LibraryError.Invalid -> Invalid
+        LibraryError.Hidden -> Hidden
       }
   }
 }

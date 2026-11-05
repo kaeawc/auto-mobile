@@ -1,13 +1,16 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.domain.KeyValueType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -51,8 +54,16 @@ class SharedDaemonStreamHubStorageTest {
       CoroutineScope(backgroundScope.coroutineContext + UnconfinedTestDispatcher(testScheduler)),
     )
 
-  private fun TestScope.pane(h: Harness): Pane {
-    val pane = Pane(h.hub.observationStream(phone).also { it.connect() })
+  /** A hub whose coroutines run only on [runCurrent], so connection states can be conflated. */
+  private fun TestScope.queuedHarness() =
+    Harness(
+      CoroutineScope(backgroundScope.coroutineContext + StandardTestDispatcher(testScheduler)),
+    )
+
+  private fun TestScope.pane(h: Harness): Pane = pane(h.hub)
+
+  private fun TestScope.pane(hub: SharedDaemonStreamHub): Pane {
+    val pane = Pane(hub.observationStream(phone).also { it.connect() })
     val dispatcher = UnconfinedTestDispatcher(testScheduler)
     backgroundScope.launch(dispatcher) {
       pane.stream.storageSubscriptionResponses.toList(pane.responses)
@@ -212,5 +223,93 @@ class SharedDaemonStreamHubStorageTest {
     h.shared.emitStorageSubscriptionResponse(ack("req-2", prefs))
     assertEquals(listOf(ack("req-2", prefs)), b.responses)
     assertEquals(listOf(refused, ack("req-2", prefs)), a.responses)
+  }
+
+  @Test
+  fun `a reconnect whose drop the hub never saw still forgets confirmations`() = runTest {
+    val h = queuedHarness()
+    val a = pane(h)
+    a.stream.subscribeStorage(prefs.packageName, prefs.fileName)
+    runCurrent()
+    h.shared.emitStorageSubscriptionResponse(ack("req-1", prefs))
+    runCurrent()
+
+    // The drop and the reconnect land before the hub collects either state: only the conflated
+    // Connected is seen, so the reconnect call itself must forget the old registration.
+    h.shared.emitConnectionState(ConnectionState.Disconnected("x"))
+    a.stream.connect()
+    runCurrent()
+    assertEquals(2, h.shared.connectCallCount)
+
+    val b = pane(h)
+    b.stream.subscribeStorage(prefs.packageName, prefs.fileName)
+    runCurrent()
+    assertTrue(b.responses.isEmpty())
+    h.shared.emitStorageSubscriptionResponse(ack("req-2", prefs))
+    runCurrent()
+    assertEquals(listOf(ack("req-2", prefs)), b.responses)
+  }
+
+  @Test
+  fun `a pane joining while the stream is down waits instead of taking a stale confirmation`() =
+    runTest {
+      val h = queuedHarness()
+      val a = pane(h)
+      a.stream.subscribeStorage(prefs.packageName, prefs.fileName)
+      runCurrent()
+      h.shared.emitStorageSubscriptionResponse(ack("req-1", prefs))
+      runCurrent()
+
+      // Down, but the hub has not collected the drop yet.
+      h.shared.emitConnectionState(ConnectionState.Disconnected("x"))
+      val b = pane(h)
+      b.stream.subscribeStorage(prefs.packageName, prefs.fileName)
+      runCurrent()
+
+      assertTrue(b.responses.isEmpty())
+    }
+
+  /** A stream whose next [staleChecks] connectivity checks still report the drop. */
+  private class StaleCheckStream(private val fake: FakeObservationStream) :
+    ObservationStream by fake {
+    var staleChecks = 0
+
+    override fun isConnected(): Boolean {
+      if (staleChecks == 0) return fake.isConnected()
+      staleChecks--
+      return false
+    }
+  }
+
+  @Test
+  fun `a reconnect that lost the race keeps the winner's fresh confirmations`() = runTest {
+    val fake = FakeObservationStream()
+    val shared = StaleCheckStream(fake)
+    val hub =
+      SharedDaemonStreamHub(
+        telemetry = FakeTelemetryMultiplexer(),
+        scope =
+          CoroutineScope(
+            backgroundScope.coroutineContext + UnconfinedTestDispatcher(testScheduler),
+          ),
+        observation =
+          ObservationHubConfig(
+            streamFactory = { shared },
+            reconnect = ObservationReconnectPolicy({ awaitCancellation() }, { true }),
+            newRequestId = { "hub-1" },
+          ),
+      )
+    val a = pane(hub)
+    a.stream.subscribeStorage(prefs.packageName, prefs.fileName)
+    fake.emitStorageSubscriptionResponse(ack("req-1", prefs))
+
+    // This retry saw the stream down, but another reconnect revived it before it took the lock.
+    shared.staleChecks = 1
+    a.stream.connect()
+    assertEquals(1, fake.connectCallCount)
+
+    val b = pane(hub)
+    b.stream.subscribeStorage(prefs.packageName, prefs.fileName)
+    assertEquals(listOf(ack("hub-1", prefs)), b.responses)
   }
 }

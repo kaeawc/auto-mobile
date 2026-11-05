@@ -135,6 +135,19 @@ describe("assertToolSupportsDevicePlatform", () => {
     }
   });
 
+  test("admits postNotification on watchOS while refusing tvOS", () => {
+    expect(() => assertToolSupportsDevicePlatform("postNotification", watch)).not.toThrow();
+    expect(() =>
+      assertRequestedPlatformSupported("postNotification", { platform: "watchos" }),
+    ).not.toThrow();
+    expect(() => assertToolSupportsDevicePlatform("postNotification", appleTv)).toThrow(
+      "does not support tvOS yet",
+    );
+    expect(() =>
+      assertRequestedPlatformSupported("postNotification", { platform: "tvos" }),
+    ).toThrow("does not support tvOS yet");
+  });
+
   test("never rejects an Android or iOS device", () => {
     expect(() => assertToolSupportsDevicePlatform("tapOn", iphone)).not.toThrow();
     expect(() =>

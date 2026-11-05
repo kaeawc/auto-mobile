@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.protoviewer
 
+import dev.jasonpearson.automobile.ctrlproxy.prototype.sha256Hex
 import dev.jasonpearson.automobile.protocol.PrototypeBundleCommitFileSystem
 import dev.jasonpearson.automobile.protocol.PrototypeBundleReadResult
 import dev.jasonpearson.automobile.protocol.PrototypeBundleReader
@@ -22,8 +23,9 @@ class DirectoryLibraryImportTest {
       LibraryClock { 42 },
     )
   private val files = FakeCommitFiles()
+  private val blocklist = FakeContentBlocklist()
   private val commit =
-    DirectoryLibraryImport(repository, Path.of("/import"), files, IdGenerator { SECOND })
+    DirectoryLibraryImport(repository, Path.of("/import"), files, IdGenerator { SECOND }, blocklist)
   private val bundle =
     (PrototypeBundleReader.read(ImportBundleFixtures.minimal) as PrototypeBundleReadResult.Success)
       .bundle
@@ -72,7 +74,13 @@ class DirectoryLibraryImportTest {
         LibraryClock { 42 },
       )
     val target =
-      DirectoryLibraryImport(targetRepository, Path.of("/import"), files, IdGenerator { SECOND })
+      DirectoryLibraryImport(
+        targetRepository,
+        Path.of("/import"),
+        files,
+        IdGenerator { SECOND },
+        blocklist,
+      )
     assertEquals(
       LibraryResult.Failure(LibraryError.Storage),
       target.commit(bundle, LibrarySource.file, null, null),
@@ -101,6 +109,26 @@ class DirectoryLibraryImportTest {
       (commit.commit(bundle, LibrarySource.share, null, "192.0.2.1") as LibraryResult.Success).value
     assertNull(entry.sourceHost)
     assertEquals(1, (repository.list() as LibraryResult.Success).value.size)
+  }
+
+  @Test
+  fun hiddenReceivedContentIsRejectedBeforeAnythingIsStaged() {
+    blocklist.hide(sha256Hex(bundle.spec.toString(Charsets.UTF_8).toByteArray()))
+    listOf(LibrarySource.file, LibrarySource.share).forEach {
+      assertEquals(
+        LibraryResult.Failure(LibraryError.Hidden),
+        commit.commit(bundle, it, null, null),
+      )
+    }
+    assertNull(files.renamedTo)
+    assertTrue(store.results.isEmpty())
+    assertTrue(metadata.documents.isEmpty())
+  }
+
+  @Test
+  fun hidingNeverRejectsTheUsersOwnPrototypes() {
+    blocklist.hide(sha256Hex(bundle.spec.toString(Charsets.UTF_8).toByteArray()))
+    assertTrue(commit.commit(bundle, LibrarySource.mcp, null, null) is LibraryResult.Success)
   }
 
   private class FakeCommitFiles : PrototypeBundleCommitFileSystem {

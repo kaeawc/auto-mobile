@@ -4,6 +4,7 @@ import android.graphics.BitmapFactory
 import dev.jasonpearson.automobile.ctrlproxy.prototype.BitmapPrototypeImageDecoder
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeAsset
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeSaveRequest
+import dev.jasonpearson.automobile.ctrlproxy.prototype.sha256Hex
 import dev.jasonpearson.automobile.protocol.PrototypeBundle
 import dev.jasonpearson.automobile.protocol.PrototypeBundleCommit
 import dev.jasonpearson.automobile.protocol.PrototypeBundleCommitFileSystem
@@ -37,6 +38,7 @@ class DirectoryLibraryImport(
   private val stagingRoot: Path,
   private val files: PrototypeBundleCommitFileSystem,
   private val ids: IdGenerator,
+  private val blocklist: ContentBlocklist,
 ) : LibraryImportCommit {
   @Suppress(
     "TooGenericExceptionCaught",
@@ -48,6 +50,10 @@ class DirectoryLibraryImport(
     label: String?,
     sourceHost: String?,
   ): LibraryResult<LibraryEntry> {
+    // Hash the same text the repository records, so a hidden hash matches before anything is
+    // stored.
+    val specSha256 = sha256Hex(bundle.spec.toString(Charsets.UTF_8).toByteArray())
+    if (blocklist.rejects(source, specSha256)) return LibraryResult.Failure(LibraryError.Hidden)
     val id = ids.newId()
     require(validLibraryId(id))
     val destination = stagingRoot.resolve(id)

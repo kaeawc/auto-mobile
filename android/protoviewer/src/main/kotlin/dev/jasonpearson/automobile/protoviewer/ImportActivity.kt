@@ -38,15 +38,7 @@ class ImportActivity : ComponentActivity() {
         if (share != null) {
           ShareImportConfirmation(share, ::confirmShare) { finish() }
         } else {
-          val failed = rejection
-          val failureResource = shareFailure
-          val text =
-            when {
-              failureResource != null -> stringResource(failureResource)
-              failed != null -> stringResource(R.string.import_rejected, failed.path, failed.reason)
-              else -> stringResource(R.string.loading)
-            }
-          ImportStatus(text) { finish() }
+          ImportStatus(importStatusText(shareFailure, rejection)) { finish() }
         }
       }
     }
@@ -132,6 +124,19 @@ internal fun ShareImportConfirmation(
     TextButton(onClick = cancel) { Text(stringResource(R.string.cancel)) }
   }
 }
+
+@Composable
+private fun importStatusText(shareFailure: Int?, failed: LibraryImportResult.Rejected?): String =
+  when {
+    shareFailure != null -> stringResource(shareFailure)
+    failed != null && failed.isHidden -> stringResource(R.string.import_hidden)
+    failed != null -> stringResource(R.string.import_rejected, failed.path, failed.reason)
+    else -> stringResource(R.string.loading)
+  }
+
+/** The library refused content the user hid or blocked; it is never stored. */
+internal val LibraryImportResult.Rejected.isHidden: Boolean
+  get() = path == "library" && reason == LibraryError.Hidden.name
 
 @Composable
 internal fun ImportStatus(text: String, back: () -> Unit) {

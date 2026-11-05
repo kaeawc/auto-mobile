@@ -40,6 +40,8 @@ class ProtoViewerApplication : Application() {
         // A crash mid-commit leaves staging directories behind; nothing else cleans them.
         listFiles()?.forEach { it.deleteRecursively() }
       }
+    val blocklist =
+      SharedPreferencesContentBlocklist(app.getSharedPreferences("blocklist", MODE_PRIVATE))
     val sharer =
       CanonicalLibrarySharer(repository, DirectoryLibraryExports(File(app.cacheDir, "export")), ids)
     val importer =
@@ -57,11 +59,10 @@ class ProtoViewerApplication : Application() {
             stagingRoot,
             PrototypeBundleDirectoryFileSystem(stagingRoot),
             ids,
+            blocklist,
           )
         },
       )
-    val blocklist =
-      SharedPreferencesContentBlocklist(app.getSharedPreferences("blocklist", MODE_PRIVATE))
     ProtoViewerServices(
         repository,
         storage,
@@ -95,6 +96,8 @@ class ProtoViewerApplication : Application() {
       services.flushScope.launch(services.io) { services.repository.sweepOrphans() }
       // Drop results and pushed bundles whose host request is long over (#13621).
       services.flushScope.launch(services.io) { services.mcpInbox?.sweepOrphans() }
+      // Free quota still held by content hidden before Hide and Block deleted it (#16631).
+      services.flushScope.launch(services.io) { services.repository.purgeBlocked() }
     }
   }
 }
@@ -123,7 +126,7 @@ class ProtoViewerServices(
 ) {
   internal var shareImporter: ShareLibraryImporter? = null
   /** Every reader sees the library with hidden and blocked received content removed. */
-  val repository: LibraryRepository = BlocklistLibraryRepository(library, blocklist)
+  val repository: BlocklistLibraryRepository = BlocklistLibraryRepository(library, blocklist)
   val networkClient = SettingsPrototypeHttpClient(settings, allowedClient)
 
   // Outlives activities so a stop/destroy still finishes the renderer's pending disk flush.

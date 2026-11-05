@@ -4,6 +4,7 @@ import {
   PortReverseManager,
   type PortReverseTarget,
 } from "../../../src/features/portReverse/PortReverseManager";
+import { DeviceLostError } from "../../../src/models/DeviceLostError";
 import { FakeAdbReverseCommands } from "../../fakes/FakeAdbReverseCommands";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
@@ -64,6 +65,14 @@ describe("PortReverseManager verify probe", () => {
     timer.advanceTime(PORT_PROBE_TIMEOUT_MS);
     const [mapping] = (await pending).mappings;
     expect(mapping).toMatchObject({ status: "unreachable", probeReason: "timeout" });
+  });
+
+  test("device loss during the probe propagates instead of reporting unreachable", async () => {
+    const { adb, manager, target } = setup();
+    await manager.ensure(target, [{ devicePort: 8080, hostPort: 8080 }]);
+    const lost = new DeviceLostError("emulator-5554", "device offline");
+    adb.probeError = lost;
+    await expect(manager.verify(target, undefined, { probe: true })).rejects.toBe(lost);
   });
 
   test("a missing mapping is not probed", async () => {

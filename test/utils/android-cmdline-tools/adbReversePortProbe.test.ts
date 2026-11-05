@@ -26,6 +26,16 @@ describe("port probe", () => {
     expect(parsePortProbeOutput(capture("refused.txt"))).toEqual({ kind: "refused" });
   });
 
+  test("a banner sent without a trailing newline does not hide the exit marker", () => {
+    // Shape of nc output when the peer greets without "\n" and the script's marker follows.
+    expect(parsePortProbeOutput("banner-no-newlineautomobile-probe-exit=124\n")).toEqual({
+      kind: "held",
+    });
+    expect(parsePortProbeOutput("banner-no-newline\nautomobile-probe-exit=124\n")).toEqual({
+      kind: "held",
+    });
+  });
+
   test("a missing binary or unrecognised output is unsupported, never a guess", () => {
     expect(parsePortProbeOutput(capture("missing-binary.txt"))).toEqual({
       kind: "unsupported",
@@ -51,7 +61,7 @@ describe("port probe", () => {
     expect(await reverse.probe(8081)).toEqual({ kind: "held" });
     expect(commands).toEqual([`shell sh -c '${portProbeScript(8081)}'`]);
     expect(portProbeScript(8081)).toBe(
-      "sleep 1.1 | timeout 1 nc -w 1 127.0.0.1 8081 2>&1; echo automobile-probe-exit=$?",
+      'sleep 1.1 | timeout 1 nc -w 1 127.0.0.1 8081 2>&1; printf "\\nautomobile-probe-exit=%s\\n" $?',
     );
     expect(timeouts).toEqual([4000]);
   });

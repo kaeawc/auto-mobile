@@ -88,7 +88,8 @@ export function portProbeScript(devicePort: number): string {
   const stdinHold = PORT_PROBE_HOLD_SECONDS + 0.1;
   return (
     `sleep ${stdinHold} | timeout ${PORT_PROBE_HOLD_SECONDS} nc -w ${PORT_PROBE_HOLD_SECONDS} ` +
-    `127.0.0.1 ${devicePort} 2>&1; echo ${PROBE_EXIT_MARKER}$?`
+    // The leading newline keeps the marker off a banner line the peer sent without a newline.
+    `127.0.0.1 ${devicePort} 2>&1; printf "\\n${PROBE_EXIT_MARKER}%s\\n" $?`
   );
 }
 
@@ -99,17 +100,20 @@ export function portProbeScript(devicePort: number): string {
  * `unsupported` rather than a guess.
  */
 export function parsePortProbeOutput(stdout: string): PortProbeOutcome {
-  const lines = stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-  const marker = lines.findLast((line) => line.startsWith(PROBE_EXIT_MARKER));
-  if (marker === undefined) {
-    return { kind: "unsupported", detail: lines.join(" ") || "no output" };
+  const toDetail = (text: string) =>
+    text
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .join(" ");
+  // The marker is the last occurrence anywhere: a banner without a trailing newline sits on its line.
+  const markerAt = stdout.lastIndexOf(PROBE_EXIT_MARKER);
+  if (markerAt < 0) {
+    return { kind: "unsupported", detail: toDetail(stdout) || "no output" };
   }
-  const exitText = marker.slice(PROBE_EXIT_MARKER.length);
+  const exitText = (stdout.slice(markerAt + PROBE_EXIT_MARKER.length).split("\n")[0] ?? "").trim();
   const exit = /^\d+$/.test(exitText) ? Number(exitText) : NaN;
-  const detail = lines.filter((line) => line !== marker).join(" ");
+  const detail = toDetail(stdout.slice(0, markerAt));
   if (exit === TIMEOUT_KILLED_EXIT) {
     return { kind: "held" };
   }

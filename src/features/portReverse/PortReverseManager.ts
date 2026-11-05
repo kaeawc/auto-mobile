@@ -4,6 +4,7 @@ import type {
   PortProbeOutcome,
 } from "../../utils/android-cmdline-tools/adbReverse";
 import { rethrowDeviceTransportUnavailable } from "../../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
+import { DeviceLostError } from "../../models/DeviceLostError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { toActionableError } from "../../models/ActionableError";
@@ -253,6 +254,9 @@ export class PortReverseManager {
           unref: true,
         });
       } catch (error) {
+        if (error instanceof DeviceLostError) {
+          throw error;
+        }
         rethrowDeviceTransportUnavailable(error);
         // A probe that hangs or fails says nothing about the mapping beyond "no answer".
         logger.warn(

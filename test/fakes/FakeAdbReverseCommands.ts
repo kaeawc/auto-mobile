@@ -19,8 +19,14 @@ export class FakeAdbReverseCommands implements AdbReverseCommands {
   /** Scripted probe outcomes per device port, consumed in order (the last one repeats). */
   readonly probeOutcomes = new Map<number, (PortProbeOutcome | "hang")[]>();
 
+  /** When set, every probe rejects with it. */
+  probeError: Error | undefined;
+
   async probe(devicePort: number): Promise<PortProbeOutcome> {
     this.calls.push(`probe ${devicePort}`);
+    if (this.probeError !== undefined) {
+      throw this.probeError;
+    }
     const queue = this.probeOutcomes.get(devicePort) ?? [{ kind: "refused" }];
     const next = queue.length > 1 ? queue.shift() : queue[0];
     if (next === "hang") {

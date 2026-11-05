@@ -3,7 +3,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { DefaultIosObservationCollector } from "../../../src/features/observe/collectors/IosObservationCollector";
+import { IosDisplayBindingCollector } from "../../../src/features/observe/collectors/IosDisplayBindingCollector";
+import type { IosSdkBridgeReader } from "../../../src/features/observe/ios/IosSdkBridgeReader";
 import {
+  liveIosPanelFor,
   ObservedAndroidDisplayCache,
   observedIosDisplay,
 } from "../../../src/features/observe/ObservationDisplay";
@@ -20,6 +23,7 @@ import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { FakeHierarchyCollector } from "../../fakes/FakeHierarchyCollector";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
 import { FakeLogger } from "../../fakes/FakeLogger";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { loadDuoEnumerate } from "../../fixtures/loadDuoEnumerate";
 
@@ -66,6 +70,7 @@ async function collect(
     rotation?: number;
     size?: { width: number; height: number };
     target?: BootedDevice;
+    sdkBridge?: IosSdkBridgeReader;
   } = {},
 ) {
   const target = options.target ?? device;
@@ -77,6 +82,7 @@ async function collect(
     screenWidth: size.width,
     screenHeight: size.height,
     rotation: options.rotation ?? 0,
+    ...(options.sdkBridge ? { packageName: "com.example.duo" } : {}),
   };
   const hierarchyCollector = new FakeHierarchyCollector();
   hierarchyCollector.extractScreenSize = () => size;
@@ -85,6 +91,7 @@ async function collect(
     viewHierarchy: () => new FakeViewHierarchy(),
     device: () => target,
     iosDisplayInfoSource: source,
+    ...(options.sdkBridge ? { sdkBridge: () => options.sdkBridge! } : {}),
   });
   const result = buildObserveResult({
     updatedAt: 0,
@@ -102,8 +109,47 @@ async function collect(
     capturedHierarchy: hierarchy,
     readOptions: undefined,
   });
-  result.display = observedIosDisplay(target, result.viewHierarchy);
+  result.display = observedIosDisplay(target, result.viewHierarchy, liveIosPanelFor(result));
   return result;
+}
+function bindFinal(result: ObserveResult, displayRequest?: string) {
+  new IosDisplayBindingCollector({
+    device: () => device,
+    adb: () => {
+      throw new Error("iOS binding must not read adb");
+    },
+  }).bindFinalDisplay({
+    result,
+    displayRequest,
+    androidDisplayCache: new ObservedAndroidDisplayCache(new FakeTimer()),
+    observedAndroid: undefined,
+    requestedPanel: undefined,
+    requestedDisplayId: undefined,
+    explicitlyRouted: displayRequest !== undefined,
+    preserveDisplayState: true,
+    observerMode: false,
+    recordProvenance: { revision: 0, identityRevision: 0 },
+    signal: undefined,
+  });
+  return result.display;
+}
+/** An SDK bridge whose observe() stays pending until the test releases it. */
+class GatedSdkBridge implements IosSdkBridgeReader {
+  private release!: () => void;
+  private readonly gate = new Promise<void>((resolve) => (this.release = resolve));
+  entered!: Promise<void>;
+  private enter!: () => void;
+  constructor() {
+    this.entered = new Promise<void>((resolve) => (this.enter = resolve));
+  }
+  async observe(): Promise<{ kind: "none" }> {
+    this.enter();
+    await this.gate;
+    return { kind: "none" };
+  }
+  open(): void {
+    this.release();
+  }
 }
 afterEach(() => ObservedAndroidDisplayCache.release(device.deviceId));
 
@@ -172,12 +218,25 @@ test("single-panel collection does not read devicectl", async () => {
   });
   expect(source.calls).toBe(0);
 });
-test("clear and release discard live panel evidence", async () => {
-  for (const clear of [ObservedAndroidDisplayCache.clear, ObservedAndroidDisplayCache.release]) {
-    await collect(new FakeDisplaySource(displays("inner")));
-    clear(device.deviceId);
-    expect(observedIosDisplay(device, { pixelWidth: 1398, pixelHeight: 2034 }).key).toBe("primary");
-  }
+test("live panel evidence belongs to its own observation", async () => {
+  const inner = await collect(new FakeDisplaySource(displays("inner")));
+  const streamRead = await collect();
+  expect(liveIosPanelFor(inner)?.key).toBe("primary-1");
+  expect(liveIosPanelFor(streamRead)).toBeUndefined();
+  expect(observedIosDisplay(device, { pixelWidth: 1398, pixelHeight: 2034 }).key).toBe("primary");
+});
+test("an overlapping stream read cannot revert an in-flight observation's live panel", async () => {
+  const sdk = new GatedSdkBridge();
+  const inFlight = collect(new FakeDisplaySource(displays("inner")), { sdkBridge: sdk });
+  await sdk.entered;
+  // The observation has adopted the inner geometry and is parked in its SDK await.
+  const streamRead = await collect();
+  expect(streamRead.display).toMatchObject({ key: "primary", role: "cover", posture: "closed" });
+  sdk.open();
+  const result = await inFlight;
+  expect(result.screenSize).toEqual({ width: 669, height: 951 });
+  expect(bindFinal(result)).toMatchObject({ key: "primary-1", role: "inner", posture: "opened" });
+  expect(bindFinal(result, "primary-1")).toMatchObject({ key: "primary-1", role: "inner" });
 });
 
 test("active display bounds reuse the existing point-size panel matcher", async () => {

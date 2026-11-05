@@ -1,4 +1,10 @@
-import type { BootedDevice, DisplayPanel, DisplayRef, ViewHierarchyResult } from "../../models";
+import type {
+  BootedDevice,
+  DisplayPanel,
+  DisplayRef,
+  ObserveResult,
+  ViewHierarchyResult,
+} from "../../models";
 import {
   buildDisconnectedPanelMessage,
   isPhysicalPanel,
@@ -132,34 +138,18 @@ async function readAndroidPosture(adb: AdbCommandRunner, signal?: AbortSignal): 
 /** Reuse the panel mapping across observe instances and settle polls. */
 export class ObservedAndroidDisplayCache {
   private static readonly TTL_MS = 5000;
-  private static readonly liveIosPanels = new Map<string, string>();
 
   static clear(deviceId: string): void {
-    ObservedAndroidDisplayCache.liveIosPanels.delete(deviceId);
     rememberedIosPostures.delete(deviceId);
     androidDisplayCache.delete(deviceId);
     androidPostureCache.delete(deviceId);
   }
 
   static release(deviceId: string): void {
-    ObservedAndroidDisplayCache.liveIosPanels.delete(deviceId);
     rememberedIosPostures.delete(deviceId);
     androidDisplayCache.delete(deviceId);
     lastKnownAndroidDisplay.delete(deviceId);
     androidPostureCache.delete(deviceId);
-  }
-
-  static rememberLiveIosPanel(deviceId: string, panel: DisplayPanel | undefined): void {
-    if (panel) {
-      ObservedAndroidDisplayCache.liveIosPanels.set(deviceId, panel.key);
-    } else {
-      ObservedAndroidDisplayCache.liveIosPanels.delete(deviceId);
-    }
-  }
-
-  static liveIosPanel(device: BootedDevice): DisplayPanel | undefined {
-    const key = ObservedAndroidDisplayCache.liveIosPanels.get(device.deviceId);
-    return device.displays?.panels.find((panel) => panel.key === key);
   }
 
   static rememberIosPosture(deviceId: string, display: DisplayRef): void {
@@ -429,15 +419,37 @@ function iosPanelPosture(role: DisplayPanel["role"] | undefined): Posture {
   return POSTURE_PANEL_ROLES.find(([, panelRole]) => panelRole === role)?.[0] ?? "unknown";
 }
 
-/** Prefer the live CoreDevice panel, falling back to the runner pixel size. */
+/**
+ * Live CoreDevice panel evidence, keyed by the observation it was read for. It is never shared
+ * per device: a concurrent observation without a live source cannot clear or replace the panel
+ * an in-flight observation already adopted (#17114).
+ */
+const liveIosPanelEvidence = new WeakMap<ObserveResult, DisplayPanel>();
+
+export function rememberLiveIosPanel(result: ObserveResult, panel: DisplayPanel | undefined): void {
+  if (panel) {
+    liveIosPanelEvidence.set(result, panel);
+  } else {
+    liveIosPanelEvidence.delete(result);
+  }
+}
+
+export function liveIosPanelFor(result: ObserveResult): DisplayPanel | undefined {
+  return liveIosPanelEvidence.get(result);
+}
+
+/** Prefer the observation's live CoreDevice panel, falling back to the runner pixel size. */
 export function observedIosDisplay(
   device: BootedDevice,
   hierarchy:
     | Pick<ViewHierarchyResult, "pixelWidth" | "pixelHeight" | "captureSequence">
     | undefined,
+  livePanel?: DisplayPanel,
 ): DisplayRef {
   const panels = device.displays?.panels ?? [];
-  const panel = ObservedAndroidDisplayCache.liveIosPanel(device) ?? liveIosPanel(panels, hierarchy);
+  const panel =
+    (livePanel && panels.find((candidate) => candidate.key === livePanel.key)) ??
+    liveIosPanel(panels, hierarchy);
   return {
     key: panel?.key ?? "0",
     role: panel?.role ?? "unknown",

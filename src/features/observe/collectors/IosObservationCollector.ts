@@ -4,7 +4,7 @@ import type {
 } from "../../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
 import type { DisplayPanel } from "../../../models/DisplayPanel";
 import { sizeMatchesPanel } from "../../device/postureCommands";
-import { ObservedAndroidDisplayCache } from "../ObservationDisplay";
+import { liveIosPanelFor, rememberLiveIosPanel } from "../ObservationDisplay";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import type { BootedDevice, ObserveResult, ScreenIdentity } from "../../../models";
@@ -78,7 +78,7 @@ export class DefaultIosObservationCollector implements IosObservationCollector {
       readOptions,
     });
 
-    await this.readLiveIosPanel(signal);
+    rememberLiveIosPanel(result, await this.readLiveIosPanel(signal));
     this.applyIosScreenMetadata(result);
     this.applyLiveIosPanelSize(result);
     this.applyIosInsetsAndRotation(result);
@@ -145,16 +145,16 @@ export class DefaultIosObservationCollector implements IosObservationCollector {
     }
   }
 
-  private async readLiveIosPanel(signal?: AbortSignal): Promise<void> {
+  /** Read this observation's live panel; the caller keeps it on this observation only. */
+  private async readLiveIosPanel(signal?: AbortSignal): Promise<DisplayPanel | undefined> {
     const device = this.deps.device();
-    ObservedAndroidDisplayCache.rememberLiveIosPanel(device.deviceId, undefined);
     const panels = device.displays?.panels ?? [];
     if (panels.length < 2) {
-      return;
+      return undefined;
     }
     if (!this.deps.iosDisplayInfoSource) {
       logger.debug("[iOS] Live panel source unavailable; using runner size");
-      return;
+      return undefined;
     }
     try {
       const displays = await this.deps.iosDisplayInfoSource.readDisplays({
@@ -163,21 +163,21 @@ export class DefaultIosObservationCollector implements IosObservationCollector {
       });
       signal?.throwIfAborted();
       const panel = activeLivePanel(displays, panels);
-      if (panel) {
-        ObservedAndroidDisplayCache.rememberLiveIosPanel(device.deviceId, panel);
-      } else {
+      if (!panel) {
         logger.debug("[iOS] No unique active CoreDevice panel; using runner size");
       }
+      return panel;
     } catch (error) {
       if (signal?.aborted) {
         throw error;
       }
       logger.warn(`[iOS] Live panel read failed; using runner size: ${errorMessage(error)}`, error);
+      return undefined;
     }
   }
 
   private applyLiveIosPanelSize(result: ObserveResult): void {
-    const panel = ObservedAndroidDisplayCache.liveIosPanel(this.deps.device());
+    const panel = liveIosPanelFor(result);
     if (!panel?.scale || panel.scale <= 0) {
       return;
     }

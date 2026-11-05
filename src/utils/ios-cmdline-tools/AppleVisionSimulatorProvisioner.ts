@@ -1,6 +1,8 @@
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../describeUnknownError";
 import { logger } from "../logger";
+import { APPLE_PROVISION_SPEC_GUIDANCE } from "../provisionDeviceSpecSchemas";
+import { unknownSimulatorIdentifierMessage } from "./simulatorCatalogRefusal";
 import type { SimCtlClient } from "./SimCtlClient";
 import type {
   AppleVisionSimulatorCatalog,
@@ -221,16 +223,23 @@ export function assertAppleVisionSpecInCatalog(
 ): void {
   if (!catalog.deviceTypes.some((type) => type.identifier === spec.deviceType)) {
     throw new ActionableError(
-      `Unknown Apple Vision Pro device type '${spec.deviceType}'. Available: ` +
-        listOrNone(catalog.deviceTypes.map((type) => type.identifier)),
+      unknownSimulatorIdentifierMessage({
+        kind: "Apple Vision Pro device type",
+        requested: spec.deviceType,
+        identifiers: catalog.deviceTypes.map((type) => type.identifier),
+        catalog: APPLE_PROVISION_SPEC_GUIDANCE.visionos.catalog,
+      }),
     );
   }
   const runtime = catalog.runtimes.find((entry) => entry.identifier === spec.runtime);
   if (!runtime) {
     throw new ActionableError(
-      `Unknown visionOS runtime '${spec.runtime}'. Available: ` +
-        listOrNone(catalog.runtimes.map((entry) => entry.identifier)) +
-        ". Install it with `xcodebuild -downloadPlatform visionOS`.",
+      unknownSimulatorIdentifierMessage({
+        kind: "visionOS runtime",
+        requested: spec.runtime,
+        identifiers: catalog.runtimes.map((entry) => entry.identifier),
+        catalog: APPLE_PROVISION_SPEC_GUIDANCE.visionos.catalog,
+      }) + " Install a missing runtime with `xcodebuild -downloadPlatform visionOS`.",
     );
   }
   if (!runtime.isAvailable) {
@@ -263,8 +272,4 @@ function assertMatchesSpec(headset: ListedAppleVision, request: AppleVisionProvi
         (headset.availabilityError ? `: ${headset.availabilityError}` : ""),
     );
   }
-}
-
-function listOrNone(identifiers: string[]): string {
-  return identifiers.length > 0 ? identifiers.join(", ") : "none installed";
 }

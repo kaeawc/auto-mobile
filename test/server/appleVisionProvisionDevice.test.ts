@@ -913,14 +913,14 @@ describe("provisionDevice on an Apple Vision Pro simulator", () => {
   });
 
   test("a created headset another daemon claimed after a failed boot is left in place", async () => {
-    let simctlRef: FakeAppleVisionProvisionSimctl | undefined;
+    const ref: { simctl?: FakeAppleVisionProvisionSimctl } = {};
     const { simctl } = await arrange([], {
       // The peer claims the new headset only once this call has tried to boot it.
       ownership: new FakeVisionClaims(
-        () => simctlRef?.commands.some((command) => command.startsWith("boot ")) === true,
+        () => ref.simctl?.commands.some((command) => command.startsWith("boot ")) === true,
       ),
     });
-    simctlRef = simctl;
+    ref.simctl = simctl;
     simctl.bootError = new Error("Unable to boot: CoreSimulator timed out");
 
     const error = await failure(provision({ device: headset }));

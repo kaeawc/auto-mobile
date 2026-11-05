@@ -44,7 +44,7 @@ describe("dpadTapOnTarget", () => {
   test("text matches text or content-desc; elementId matches the resource id", () => {
     expect(dpadTapOnTarget({ selector: { text: "Movies" } })).toEqual({ label: "Movies" });
     expect(dpadTapOnTarget({ selector: { elementId: "app:id/row" }, action: "tap" })).toEqual({
-      resourceId: "app:id/row",
+      elementId: "app:id/row",
     });
   });
 
@@ -99,6 +99,21 @@ describe("DpadTapOn", () => {
     });
   });
 
+  test("does not press enter when the request is cancelled during the last read", async () => {
+    const controller = new AbortController();
+    const navigator: DpadTapOnNavigator = {
+      execute: async () => {
+        controller.abort();
+        return focused;
+      },
+    };
+    const keys = new FakeKeys();
+    await expect(
+      new DpadTapOn(navigator, keys).execute({ label: "Movies" }, controller.signal),
+    ).rejects.toThrow();
+    expect(keys.presses).toEqual([]);
+  });
+
   test("does not press enter when focus never reaches the match", async () => {
     const keys = new FakeKeys();
     const result = await new DpadTapOn(
@@ -110,7 +125,7 @@ describe("DpadTapOn", () => {
         message: "Focus did not move after 2 presses",
       }),
       keys,
-    ).execute({ resourceId: "app:id/row" });
+    ).execute({ elementId: "app:id/row" });
 
     expect(keys.presses).toEqual([]);
     expect(result.success).toBe(false);

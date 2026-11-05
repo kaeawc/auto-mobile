@@ -100,7 +100,9 @@ export function createFocusNavigateObserver(screen: Pick<ObserveScreen, "execute
 
 export function createFocusKeyPresser(device: BootedDevice): FocusKeyPresser {
   const input = new InputKey(device, { adbFactory: defaultAdbClientFactory, timer: defaultTimer });
-  return { press: (key) => input.press(key) };
+  return {
+    press: (key, signal) => input.press(key, undefined, undefined, signal ? { signal } : {}),
+  };
 }
 
 export const focusNavigateTool = defineDeviceTool({

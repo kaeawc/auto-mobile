@@ -419,6 +419,14 @@ describe("elementMatchesTarget", () => {
     expect(elementMatchesTarget(tile(1), { text: "Movies", resourceId: "tile_2" })).toBe(false);
   });
 
+  test("elementId matches the native resource id or an id-less node's synthetic view-id", () => {
+    const idLess: Element = { bounds: tile(0).bounds, "view-id": "s2-7f3a" };
+    expect(elementMatchesTarget(tile(1), { elementId: "app:id/tile_1" })).toBe(true);
+    expect(elementMatchesTarget(tile(1), { elementId: "tile_1" })).toBe(true);
+    expect(elementMatchesTarget(idLess, { elementId: "s2-7f3a" })).toBe(true);
+    expect(elementMatchesTarget(idLess, { elementId: "s2-0000" })).toBe(false);
+  });
+
   test("label matches text or content-desc, as tapOn's text selector does", () => {
     const icon: Element = { bounds: tile(0).bounds, "content-desc": "Search" };
     expect(elementMatchesTarget(tile(1), { label: "movies" })).toBe(true);

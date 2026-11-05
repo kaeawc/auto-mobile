@@ -71,10 +71,10 @@ describe("tapOn on an Android device without a touchscreen", () => {
     expect(tapOnResultSchema.safeParse(response.structuredContent).success).toBe(true);
   });
 
-  test("an elementId selector focuses by resource id", async () => {
+  test("an elementId selector focuses by element id", async () => {
     const { deps, fallback } = harness(false);
     await tapOnHandler(tv, args({ selector: { elementId: "app:id/row" } }), { deps });
-    expect(fallback.taps).toEqual([{ resourceId: "app:id/row" }]);
+    expect(fallback.taps).toEqual([{ elementId: "app:id/row" }]);
   });
 
   test("a focus walk that misses marks the response as an error", async () => {

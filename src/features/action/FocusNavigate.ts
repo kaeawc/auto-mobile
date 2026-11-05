@@ -38,6 +38,11 @@ export interface FocusNavigateTarget {
   label?: string;
   /** Require `label` to equal the text or content-desc; see {@link exactFirstTarget}. */
   labelExact?: boolean;
+  /**
+   * tapOn's elementId: the native resource-id, or the synthetic `view-id` an observation gives an
+   * id-less node (`s2-…`).
+   */
+  elementId?: string;
 }
 
 /** One screen read: the focused element (if any) and every element that could match. */
@@ -95,15 +100,22 @@ const DIRECTION_KEYS = {
 const textMatcher = new DefaultTextMatcher();
 
 export function focusNavigateTargetError(target: FocusNavigateTarget): string | undefined {
-  const given = [target.text, target.contentDesc, target.resourceId, target.label].some(
-    (value) => value !== undefined && value.length > 0,
-  );
+  const given = [
+    target.text,
+    target.contentDesc,
+    target.resourceId,
+    target.label,
+    target.elementId,
+  ].some((value) => value !== undefined && value.length > 0);
   return given
     ? undefined
     : "focusNavigate requires until.text, until.contentDesc or until.resourceId";
 }
 
-function stringProp(element: Element, key: "text" | "content-desc" | "resource-id"): string {
+function stringProp(
+  element: Element,
+  key: "text" | "content-desc" | "resource-id" | "view-id",
+): string {
   const value = element[key];
   return typeof value === "string" ? value : "";
 }
@@ -126,6 +138,13 @@ export function elementMatchesTarget(element: Element, target: FocusNavigateTarg
     ) {
       return false;
     }
+  }
+  if (
+    target.elementId &&
+    !matchesCtrlProxyResourceId(stringProp(element, "resource-id"), target.elementId) &&
+    stringProp(element, "view-id") !== target.elementId
+  ) {
+    return false;
   }
   return (
     !target.resourceId ||

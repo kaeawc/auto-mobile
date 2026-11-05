@@ -10,6 +10,7 @@ import type {
   FocusNavigateResult,
   FocusNavigateTarget,
 } from "./FocusNavigate";
+import { throwIfAborted } from "../../utils/toolUtils";
 
 /** tapOn options only a touch tap serves: each changes which element is tapped, or when. */
 const TOUCH_ONLY_OPTIONS = [
@@ -80,7 +81,7 @@ export function dpadTapOnTarget(request: DpadTapOnRequest): FocusNavigateTarget 
   if (selector.text) {
     return { label: selector.text };
   }
-  return selector.elementId ? { resourceId: selector.elementId } : undefined;
+  return selector.elementId ? { elementId: selector.elementId } : undefined;
 }
 
 export interface DpadTapOnResult {
@@ -123,6 +124,8 @@ export class DpadTapOn {
         error,
       };
     }
+    // A request cancelled during the last read must not still activate the control.
+    throwIfAborted(signal);
     const pressed = await this.keys.press("enter", signal);
     if (!pressed.success) {
       const error = `No touchscreen; focused ${described} but pressing enter failed: ${pressed.error ?? "unknown error"}`;
@@ -150,5 +153,6 @@ function describeTarget(target: FocusNavigateTarget): string {
   if (target.label) {
     return `text=${JSON.stringify(target.label)}`;
   }
-  return target.resourceId ? `id=${target.resourceId}` : "the target";
+  const id = target.elementId ?? target.resourceId;
+  return id ? `id=${id}` : "the target";
 }

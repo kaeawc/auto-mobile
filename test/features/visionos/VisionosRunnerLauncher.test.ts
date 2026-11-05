@@ -72,6 +72,27 @@ test("launches only the service test with the requested port and binds the exact
   expect(visionosRunners.get(options.deviceId)).toBeUndefined();
 });
 
+test("passes the target bundle id to the runner environment", async () => {
+  const xcodebuild = new FakeStreamingXcodebuild(new FakeChildProcess());
+  const environments: Array<Record<string, string>> = [];
+  const launcher = new XcodebuildVisionosRunnerLauncher({
+    writeRunnerEnvironment: async (file, env) => {
+      environments.push(env);
+      return file;
+    },
+    xcodebuild,
+    timer: new FakeTimer(),
+    connect: () => new FakeVisionosRunnerClient(),
+  });
+  ({ stop } = await launcher.launch({
+    ...options,
+    deviceId: "visionos-bundle",
+    bundleId: " com.example.app ",
+  }));
+  expect(environments).toEqual([{ AM_PORT: "8765", AM_BUNDLE_ID: "com.example.app" }]);
+  expect(xcodebuild.launches[0].options?.env?.TEST_RUNNER_AM_BUNDLE_ID).toBe("com.example.app");
+});
+
 test("the fake launcher registers without creating a process", async () => {
   const launcher = new FakeVisionosRunnerLauncher();
   ({ stop } = await launcher.launch(options));

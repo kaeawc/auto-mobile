@@ -115,14 +115,32 @@ final class VisionCommandRouter {
         }
     }
 
+    private func kind(of type: XCUIElement.ElementType) -> VisionElementKind {
+        switch type {
+        case .button, .link, .switch, .toggle, .checkBox, .radioButton, .segmentedControl, .cell, .tab:
+            return .button
+        case .textField, .textView, .searchField:
+            return .textInput
+        case .secureTextField:
+            return .secureTextInput
+        default:
+            return .other
+        }
+    }
+
     private func element(_ snapshot: any XCUIElementSnapshot) -> UIElementInfo {
-        UIElementInfo(
+        let traits = VisionElementTraits.traits(for: kind(of: snapshot.elementType), isEnabled: snapshot.isEnabled)
+        return UIElementInfo(
             text: snapshot.label,
+            value: traits.enteredValue(snapshot.value, label: snapshot.label),
             resourceId: snapshot.identifier,
             className: String(snapshot.elementType.rawValue),
             bounds: ElementBounds(clamping: snapshot.frame),
+            clickable: traits.clickable,
             enabled: String(snapshot.isEnabled),
-            focused: String(snapshot.hasFocus)
+            focusable: traits.focusable,
+            focused: String(snapshot.hasFocus),
+            actions: traits.actions
         )
     }
 }

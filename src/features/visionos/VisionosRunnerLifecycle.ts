@@ -39,6 +39,8 @@ export class VisionosRunnerLifecycle {
     private readonly dependencies: {
       artifacts: Pick<VisionosRunnerArtifacts, "resolve">;
       launcher: VisionosRunnerLauncher;
+      /** The user's window app, when known; absent keeps the runner on its demo app. */
+      targetBundleId?: () => string | undefined;
       ports: { allocate(deviceId: string): number; release(deviceId: string, port: number): void };
     },
   ) {}
@@ -92,6 +94,7 @@ export class VisionosRunnerLifecycle {
         deviceId,
         xctestrun,
         port: entry.port,
+        bundleId: this.dependencies.targetBundleId?.(),
         signal,
       });
       entry.stop = handle.stop;
@@ -229,6 +232,7 @@ export function getVisionosRunnerLifecycle(): VisionosRunnerLifecycle {
             `${deviceId}-${defaultIdGenerator.next()}`,
           ),
       }),
+      targetBundleId: () => globalThis.process.env.CTRL_PROXY_IOS_BUNDLE_ID,
       ports: {
         allocate: (deviceId) =>
           PortManager.allocate(`visionos:${deviceId}`, {

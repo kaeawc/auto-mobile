@@ -13,6 +13,8 @@ export interface VisionosRunnerLaunchOptions {
   deviceId: string;
   xctestrun: string;
   port: number;
+  /** Window app to automate; the runner falls back to its demo app when absent. */
+  bundleId?: string;
   /** Startup cancellation only; the resident process outlives a completed start request. */
   signal?: AbortSignal;
 }
@@ -43,9 +45,10 @@ export class XcodebuildVisionosRunnerLauncher implements VisionosRunnerLauncher 
       throw new ActionableError("Visionos runner is already connected.");
     }
     options.signal?.throwIfAborted();
+    const bundleId = options.bundleId?.trim() || undefined;
     const prepared = await this.dependencies.writeRunnerEnvironment(
       options.xctestrun,
-      { AM_PORT: String(options.port) },
+      { AM_PORT: String(options.port), ...(bundleId ? { AM_BUNDLE_ID: bundleId } : {}) },
       `visionos-${options.deviceId}`,
     );
     let removed = false;
@@ -58,7 +61,10 @@ export class XcodebuildVisionosRunnerLauncher implements VisionosRunnerLauncher 
       }
     };
     try {
-      return await this.launchPrepared({ ...options, xctestrun: prepared }, removePrepared);
+      return await this.launchPrepared(
+        { ...options, bundleId, xctestrun: prepared },
+        removePrepared,
+      );
     } catch (error) {
       removePrepared();
       throw toActionableError(error, "Failed to launch visionos runner");
@@ -81,7 +87,11 @@ export class XcodebuildVisionosRunnerLauncher implements VisionosRunnerLauncher 
         "-only-testing:CtrlProxyVisionUITests/CtrlProxyVisionUITests/testRunService",
       ],
       {
-        env: { ...globalThis.process.env, TEST_RUNNER_AM_PORT: String(options.port) },
+        env: {
+          ...globalThis.process.env,
+          TEST_RUNNER_AM_PORT: String(options.port),
+          ...(options.bundleId ? { TEST_RUNNER_AM_BUNDLE_ID: options.bundleId } : {}),
+        },
         stdio: "ignore",
         startupSignal: options.signal,
       },

@@ -36,6 +36,29 @@ function isOwnTransportRefusal(error: unknown, deviceId?: string, transportId?: 
   return isAdbMissingDeviceError(text, deviceId, transportId) || isAdbDeviceOfflineError(text);
 }
 
+/**
+ * The first numeric exit code in the cause chain, or `null` when the chain already carries
+ * a typed loss or transport failure that must not be reclassified.
+ */
+function untypedAdbExitCode(error: unknown): number | undefined | null {
+  let current = error;
+  let exitCode: number | undefined;
+  for (let depth = 0; depth < 5 && current instanceof Error; depth++) {
+    if (
+      current instanceof DeviceLostError ||
+      current instanceof AdbDeviceTransportUnavailableError
+    ) {
+      return null;
+    }
+    const code = (current as Error & { code?: unknown }).code;
+    if (typeof code === "number") {
+      exitCode ??= code;
+    }
+    current = current.cause;
+  }
+  return exitCode;
+}
+
 /** A serial-less diagnostic belongs to this client's selected -s transport. */
 function isOwnPostDispatchTransportFailure(
   error: unknown,
@@ -46,20 +69,9 @@ function isOwnPostDispatchTransportFailure(
   if (!deviceId || (error instanceof Error && isPreDispatchError(error))) {
     return false;
   }
-  let current = error;
-  let exitCode: number | undefined;
-  for (let depth = 0; depth < 5 && current instanceof Error; depth++) {
-    if (
-      current instanceof DeviceLostError ||
-      current instanceof AdbDeviceTransportUnavailableError
-    ) {
-      return false;
-    }
-    const code = (current as Error & { code?: unknown }).code;
-    if (typeof code === "number") {
-      exitCode ??= code;
-    }
-    current = current.cause;
+  const exitCode = untypedAdbExitCode(error);
+  if (exitCode === null) {
+    return false;
   }
   const { stdout, stderr } = adbFailureOutput(error);
   return isAdbPostDispatchTransportError(stderr, exitCode, deviceId, {

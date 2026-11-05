@@ -185,6 +185,7 @@ class PrototypeRuntime(
   platform: RuntimePlatform = RuntimePlatform.None,
   platformLimiter: PrototypeRequestLimiter =
     PrototypeRequestLimiter(PrototypePlatformCalls.maxInFlight),
+  private val requestHideKeyboard: suspend () -> Unit = {},
   monotonicMs: () -> Long = { System.nanoTime() / 1_000_000L },
 ) {
   @Volatile private var stateWriteValidator: PrototypeStateWriteValidator? = null
@@ -714,6 +715,7 @@ class PrototypeRuntime(
         is PrototypeReplaceAction,
         is PrototypeSetStackAction -> runStackAction(action)
         PrototypeDismissAction -> dismiss()
+        PrototypeHideKeyboardAction -> requestHideKeyboard()
         is PrototypeSetDataAction,
         is PrototypeAppendDataAction,
         is PrototypePrependDataAction,

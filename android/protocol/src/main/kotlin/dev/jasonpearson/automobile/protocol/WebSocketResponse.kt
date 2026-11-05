@@ -1081,6 +1081,10 @@ data class PrototypeStatusEntry(
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER)
   val feedbackLog: List<PrototypeFeedbackEntry> = emptyList(),
+  /** Requested orientation, best effort for overlays; absent when no request was made. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val orientation: String? = null,
+  /** `unsupported` when a style was requested: overlays do not own the status bar. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val statusBar: String? = null,
 )
 
 /**

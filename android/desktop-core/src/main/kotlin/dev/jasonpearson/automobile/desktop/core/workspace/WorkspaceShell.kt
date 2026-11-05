@@ -19,7 +19,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -95,39 +94,35 @@ fun WorkspaceShell(
       // the exact render conditions below so isolation tracks the overlays one-for-one.
       val overlayActive =
         showHealthSheet || (showCompare && comparePair != null) || showOfflineBrowse
-      CompositionLocalProvider(
-        LocalDeviceSessionSupersededHandler provides onDeviceSessionSuperseded,
-        LocalDeviceSessionEndedHandler provides onDeviceSessionEnded,
-      ) {
-        Box(modifier.fillMaxSize()) {
-          Column(Modifier.fillMaxSize().isolatedBehindOverlay(overlayActive)) {
-            TopBar(
-              status = status,
-              statusDetail = statusDetail,
-              updateStatus = updateStatus,
-              options =
-                TopBarActions(
-                  onUpdateClick = onUpdateClick,
-                  onOpenPicker = onOpenPicker,
-                  onOpenPalette = onOpenPalette,
-                  onStatusClick = { showHealthSheet = true },
-                  canCompare = comparePair != null,
-                  onCompare = { showCompare = true },
-                ),
-            )
-            when (state) {
-              is WorkspaceUiState.Empty ->
-                EmptyState(
-                  onOpenPicker = onOpenPicker,
-                  onBrowseHistory = { showOfflineBrowse = true },
-                  modifier = Modifier.weight(1f).fillMaxWidth(),
-                )
-              is WorkspaceUiState.Content ->
-                WorkspaceColumns(state, onAction, Modifier.weight(1f).fillMaxWidth())
-            }
+      WorkspaceShellDeviceLifecycle(state, options)
+      Box(modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().isolatedBehindOverlay(overlayActive)) {
+          TopBar(
+            status = status,
+            statusDetail = statusDetail,
+            updateStatus = updateStatus,
+            options =
+              TopBarActions(
+                onUpdateClick = onUpdateClick,
+                onOpenPicker = onOpenPicker,
+                onOpenPalette = onOpenPalette,
+                onStatusClick = { showHealthSheet = true },
+                canCompare = comparePair != null,
+                onCompare = { showCompare = true },
+              ),
+          )
+          when (state) {
+            is WorkspaceUiState.Empty ->
+              EmptyState(
+                onOpenPicker = onOpenPicker,
+                onBrowseHistory = { showOfflineBrowse = true },
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+              )
+            is WorkspaceUiState.Content ->
+              WorkspaceColumns(state, onAction, Modifier.weight(1f).fillMaxWidth())
           }
-          WorkspaceOverlays(memory, comparePair)
         }
+        WorkspaceOverlays(memory, comparePair)
       }
     }
   }
@@ -281,6 +276,11 @@ data class WorkspaceShellOptions(
   val onOpenPalette: () -> Unit = {},
   val onDeviceSessionSuperseded: (DeviceStreamEvent.DeviceSessionSuperseded) -> Unit = {},
   val onDeviceSessionEnded: (DeviceStreamEvent.DeviceSessionEnded) -> Unit = {},
+  /**
+   * Opens a lifecycle-only stream for a column's epoch (see [WorkspaceDeviceLifecycle]); null
+   * forwards no lifecycle events.
+   */
+  val lifecycleStreamFactory: ((DeviceColumn) -> ObservationStream)? = null,
   val externalCaptureRequest: Pair<String, Int>? = null,
   val facetContent: @Composable (DeviceColumn, Tool) -> Unit = { _, tool ->
     WorkspaceFacetPlaceholder(tool)

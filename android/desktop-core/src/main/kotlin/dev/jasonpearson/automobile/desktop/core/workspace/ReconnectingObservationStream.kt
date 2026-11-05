@@ -6,9 +6,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
 import dev.jasonpearson.automobile.desktop.core.daemon.HubManagedObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.countHubReconnects
@@ -72,21 +70,8 @@ fun rememberReconnectingObservationState(
       }
     }
 
+    // Device lifecycle frames are collected once, at workspace scope (WorkspaceDeviceLifecycle).
     val active = observationState.stream
-    val onSuperseded by rememberUpdatedState(LocalDeviceSessionSupersededHandler.current)
-    val onEnded by rememberUpdatedState(LocalDeviceSessionEndedHandler.current)
-    LaunchedEffect(active, deviceId) {
-      active?.deviceEvents?.collect { event ->
-        when {
-          event is DeviceStreamEvent.DeviceSessionSuperseded && event.deviceId == deviceId ->
-            onSuperseded(event)
-          // Forwarded for any device: an all-device stream (the focused pane's control stream)
-          // may be the only one that hears another pane's device leave. The handler checks the
-          // target column and its epoch.
-          event is DeviceStreamEvent.DeviceSessionEnded -> onEnded(event)
-        }
-      }
-    }
     // Reconnect loop, keyed on the live stream so it restarts for a new device and is cancelled on
     // dispose (which ends reconnection). Driven by the stream's connection state — the single
     // source

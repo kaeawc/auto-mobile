@@ -49,7 +49,7 @@ internal class StorageSubscriptionLedger {
         key = key,
         subscribe = subscribe,
         intentVersion = intentVersions[key] ?: 0L,
-        forcedReconciliation = forced,
+        forcedReconciliation = key in forcedReconciliations,
         connectionGeneration = connectionGeneration,
       )
       .also { pending[it.requestId] = it }

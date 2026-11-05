@@ -5,7 +5,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamKey
-import dev.jasonpearson.automobile.desktop.core.daemon.FakeTelemetryPushClient
+import dev.jasonpearson.automobile.desktop.core.daemon.FakeTelemetryMultiplexer
 import dev.jasonpearson.automobile.desktop.core.daemon.SharedDaemonStreamHub
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -23,10 +23,10 @@ class WorkspaceStatusStateTest {
 
   @Test
   fun `status follows the hub's device streams and failing checks`() = runComposeUiTest {
-    val clients = mutableListOf<FakeTelemetryPushClient>()
+    val telemetry = FakeTelemetryMultiplexer()
     val hub =
       SharedDaemonStreamHub(
-        telemetryClientFactory = { FakeTelemetryPushClient().also { clients += it } },
+        telemetry = telemetry,
         scope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher()),
       )
     val failingChecks = MutableStateFlow(0)
@@ -52,10 +52,12 @@ class WorkspaceStatusStateTest {
 
       // A facet's stream for that pane drops: the dot turns yellow for it.
       val lease = hub.subscribeTelemetry(DeviceStreamKey(pixel.deviceId, "uuid-a")) {}
-      runOnIdle { clients.single().setConnectionState(ConnectionState.Error("socket closed")) }
+      runOnIdle {
+        telemetry.subscriptions.single().setState(ConnectionState.Error("socket closed"))
+      }
       waitUntil { result?.detail == "1 device offline" }
 
-      runOnIdle { clients.single().setConnectionState(ConnectionState.Connected()) }
+      runOnIdle { telemetry.subscriptions.single().setState(ConnectionState.Connected()) }
       waitUntil { result?.status == WorkspaceStatus.Green }
 
       runOnIdle { failingChecks.value = 2 }

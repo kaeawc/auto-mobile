@@ -3,7 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamKey
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
-import dev.jasonpearson.automobile.desktop.core.daemon.FakeTelemetryPushClient
+import dev.jasonpearson.automobile.desktop.core.daemon.FakeTelemetryMultiplexer
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationHubConfig
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationReconnectPolicy
 import dev.jasonpearson.automobile.desktop.core.daemon.SharedDaemonStreamHub
@@ -26,11 +26,11 @@ class DeviceStreamHealthTest {
   private fun DeviceColumn.key() = DeviceStreamKey(deviceId, deviceSessionUuid)
 
   private class Harness(scope: CoroutineScope) {
-    val telemetry = mutableListOf<FakeTelemetryPushClient>()
+    val telemetry = FakeTelemetryMultiplexer()
     val observations = mutableListOf<FakeObservationStream>()
     val hub =
       SharedDaemonStreamHub(
-        telemetryClientFactory = { FakeTelemetryPushClient().also { telemetry += it } },
+        telemetry = telemetry,
         scope = scope,
         observation =
           ObservationHubConfig(
@@ -72,10 +72,10 @@ class DeviceStreamHealthTest {
     val h = harness()
     val latest = collect(h, listOf(a, b))
     val lease = h.hub.subscribeTelemetry(a.key()) {}
-    h.telemetry.single().setConnectionState(ConnectionState.Connected())
+    h.telemetry.subscriptions.single().setState(ConnectionState.Connected())
     assertEquals(listOf(ConnectionState.Connected()), latest.value)
 
-    h.telemetry.single().setConnectionState(ConnectionState.Error("socket closed"))
+    h.telemetry.subscriptions.single().setState(ConnectionState.Error("socket closed"))
     assertEquals(listOf(ConnectionState.Error("socket closed")), latest.value)
 
     lease.close()
@@ -89,9 +89,9 @@ class DeviceStreamHealthTest {
     h.hub.subscribeTelemetry(a.key()) {}
     h.hub.observationStream(a.key()).connect()
     h.hub.subscribeTelemetry(b.key()) {}
-    val (telemetryA, telemetryB) = h.telemetry
-    telemetryA.setConnectionState(ConnectionState.Reconnecting(1, 1_000))
-    telemetryB.setConnectionState(ConnectionState.Connected())
+    val (telemetryA, telemetryB) = h.telemetry.subscriptions
+    telemetryA.setState(ConnectionState.Reconnecting(1, 1_000))
+    telemetryB.setState(ConnectionState.Connected())
 
     // Device A's observation stream is connected; its telemetry stream is not.
     assertEquals(ConnectionState.Connected(), h.hub.observationConnectionState(a.key()).value)
@@ -112,7 +112,7 @@ class DeviceStreamHealthTest {
     val h = harness()
     val latest = collect(h, listOf(a))
     h.hub.subscribeTelemetry(DeviceStreamKey(a.deviceId, "uuid-retired")) {}
-    h.telemetry.single().setConnectionState(ConnectionState.Error("gone"))
+    h.telemetry.subscriptions.single().setState(ConnectionState.Error("gone"))
     assertEquals(emptyList<ConnectionState>(), latest.value)
   }
 

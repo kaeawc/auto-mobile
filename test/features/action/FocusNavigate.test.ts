@@ -403,4 +403,12 @@ describe("elementMatchesTarget", () => {
     expect(elementMatchesTarget(tile(1), { text: "MOV" })).toBe(true);
     expect(elementMatchesTarget(tile(1), { text: "Movies", resourceId: "tile_2" })).toBe(false);
   });
+
+  test("label matches text or content-desc, as tapOn's text selector does", () => {
+    const icon: Element = { bounds: tile(0).bounds, "content-desc": "Search" };
+    expect(elementMatchesTarget(tile(1), { label: "movies" })).toBe(true);
+    expect(elementMatchesTarget(icon, { label: "search" })).toBe(true);
+    expect(elementMatchesTarget(icon, { label: "Music" })).toBe(false);
+    expect(elementMatchesTarget(tile(1), { label: "Movies", resourceId: "tile_2" })).toBe(false);
+  });
 });

@@ -5,7 +5,7 @@ it uses for a phone, plus D-pad focus navigation. This guide covers creating one
 and what is out of scope.
 
 > Use the `android-tv` image for TV apps. Touch gestures need a device with a touchscreen;
-> otherwise, use D-pad navigation.
+> otherwise, use D-pad navigation. `tapOn` falls back to D-pad navigation on its own.
 
 ## Install a TV system image
 
@@ -104,8 +104,14 @@ TV apps are driven by focus, not touch. Use `focusNavigate` to move D-pad focus 
 on a child view of the focused row counts. A large focused container that holds the target also
 counts as focused.
 
-`tapOn` and `swipeOn` need a device that reports a touchscreen; on a TV without one, navigate with
-`focusNavigate` and `sendKeys` instead.
+On a TV without a touchscreen, `tapOn` with a `text` or `elementId` selector moves D-pad focus to
+the match and presses `enter`, so one flow can tap on both Android TV and tvOS. The result then has
+`inputMethod: "dpad"` and a `focusNavigation` object with the focus `status`, `steps` and `path`.
+If focus cannot reach the match, the call fails without pressing `enter`; observe and retry, or
+move closer with `focusNavigate`. Other selectors (`testTag`, `textAny`, `accessibilityLink`),
+other actions, and the options `sibling`, `container`, `index`, `searchUntil`, `ensureChecked`,
+`subtext`, `layer`, `display` and a `selectionStrategy` other than `first` still need a touchscreen. `swipeOn` needs a touchscreen too;
+on a TV without one, navigate with `focusNavigate` and `sendKeys` instead.
 
 Prototype overlay buttons support D-pad navigation and show a visible outline when focused.
 Use `focusNavigate` to reach a button and `sendKeys` with `enter` to activate it.

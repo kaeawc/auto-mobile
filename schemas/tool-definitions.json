@@ -63876,7 +63876,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Tap an element by text/content-desc, resource-id, or Android test tag; use sibling for adjacent controls.",
+    "description": "Tap an element by text/content-desc, resource-id, or Android test tag; use sibling for adjacent controls. On an Android device without a touchscreen (TV), a text or elementId tap moves D-pad focus to the match and presses enter.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -65167,6 +65167,43 @@
             }
           },
           "required": ["reachable", "traversalOrder", "focusTrapDetected"],
+          "additionalProperties": {}
+        },
+        "inputMethod": {
+          "description": "Present when the Android device has no touchscreen: focus was moved with the D-pad and enter was pressed instead of a touch tap",
+          "type": "string",
+          "const": "dpad"
+        },
+        "focusNavigation": {
+          "description": "The D-pad focus walk that preceded enter, when inputMethod is dpad",
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["focused", "max_steps", "stuck"]
+            },
+            "steps": {
+              "type": "number"
+            },
+            "path": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            },
+            "focusedElement": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "required": ["status", "steps", "path"],
           "additionalProperties": {}
         },
         "debug": {}

@@ -8,6 +8,7 @@ import { elementSchema, selectedElementSchema } from "./elements";
 import { observationBackendFields, observationOutputSchema } from "./observation";
 import { observationDiffMetadataSchema, tapEffectSchema } from "./observationMetadata";
 import { platformSchema } from "../../utils/schemaHelpers";
+import { FOCUS_NAVIGATE_STATUSES } from "../../features/action/FocusNavigate";
 
 /** A successful openurl may still need a foreground confirmation before the next action. */
 export const openLinkResultSchema = z
@@ -253,6 +254,22 @@ export const tapOnResultSchema = z
     selectionStarted: z.boolean().optional(),
     searchUntil: tapOnSearchUntilSchema.optional(),
     screenReaderNavigation: screenReaderNavigationSchema.optional(),
+    inputMethod: z
+      .literal("dpad")
+      .optional()
+      .describe(
+        "Present when the Android device has no touchscreen: focus was moved with the D-pad and enter was pressed instead of a touch tap",
+      ),
+    focusNavigation: z
+      .object({
+        status: z.enum(FOCUS_NAVIGATE_STATUSES),
+        steps: z.number(),
+        path: z.array(z.record(z.string(), z.unknown())),
+        focusedElement: z.record(z.string(), z.unknown()).optional(),
+      })
+      .passthrough()
+      .optional()
+      .describe("The D-pad focus walk that preceded enter, when inputMethod is dpad"),
     debug: z.any().optional(),
   })
   .passthrough();

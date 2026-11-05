@@ -34,6 +34,8 @@ export interface FocusNavigateTarget {
   text?: string;
   contentDesc?: string;
   resourceId?: string;
+  /** Matches an element whose text or content-desc matches, as tapOn's text selector does. */
+  label?: string;
 }
 
 /** One screen read: the focused element (if any) and every element that could match. */
@@ -91,7 +93,7 @@ const DIRECTION_KEYS = {
 const textMatcher = new DefaultTextMatcher();
 
 export function focusNavigateTargetError(target: FocusNavigateTarget): string | undefined {
-  const given = [target.text, target.contentDesc, target.resourceId].some(
+  const given = [target.text, target.contentDesc, target.resourceId, target.label].some(
     (value) => value !== undefined && value.length > 0,
   );
   return given
@@ -113,6 +115,15 @@ export function elementMatchesTarget(element: Element, target: FocusNavigateTarg
     !textMatcher.createTextMatcher(target.contentDesc)(stringProp(element, "content-desc"))
   ) {
     return false;
+  }
+  if (target.label) {
+    const matchesLabel = textMatcher.createTextMatcher(target.label);
+    if (
+      !matchesLabel(stringProp(element, "text")) &&
+      !matchesLabel(stringProp(element, "content-desc"))
+    ) {
+      return false;
+    }
   }
   return (
     !target.resourceId ||

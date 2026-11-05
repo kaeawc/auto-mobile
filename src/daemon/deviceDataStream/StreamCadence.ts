@@ -247,6 +247,10 @@ export class StreamCadence {
   }
 
   notifyCadenceChangedForFilter(filter: DeviceDataFilter): void {
+    // A lifecycle-only subscription never contributes to cadence, so removing it changes nothing.
+    if (filter.lifecycleOnly) {
+      return;
+    }
     if (filter.deviceSessionUuid !== null && filter.deviceId === null) {
       return;
     }

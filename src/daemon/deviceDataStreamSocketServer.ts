@@ -772,7 +772,12 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
 
   private async handleObservationSubscribe(
     socket: Socket,
-    request: { id?: string; sessionUuid?: string; deviceSessionUuid?: string },
+    request: {
+      id?: string;
+      sessionUuid?: string;
+      deviceSessionUuid?: string;
+      lifecycleOnly?: unknown;
+    },
     line: string,
   ): Promise<void> {
     let deviceSessionUuid: string | null;
@@ -819,7 +824,12 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     // The wire now targets a deviceSessionUuid; the cadence/connect machinery is
     // serial-scoped, so resolve to the current serial. A missing UUID is an
     // intentional all-device subscription; an unresolvable UUID schedules no
-    // device and must not be treated as that all-device case.
+    // device and must not be treated as that all-device case. A lifecycle-only
+    // subscription never contributes to cadence, so it owes no notification
+    // (the hierarchy callback can reconnect an idle iOS CtrlProxy client).
+    if (request.lifecycleOnly === true) {
+      return;
+    }
     if (deviceSessionUuid === null || subscribedDeviceId !== null) {
       this.cadence.notifyScreenshotCadenceChanged(subscribedDeviceId);
       this.cadence.notifyHierarchyCadenceChanged(subscribedDeviceId);

@@ -112,6 +112,7 @@ import type {
   AccessibilityHierarchy,
   AndroidPerfTiming,
   ObserverHierarchyRequestOptions,
+  HierarchySyncDiagnostics,
 } from "./types";
 
 export type {
@@ -779,7 +780,12 @@ export class AndroidCtrlProxyClient
     {
       timeoutMs = 10000,
       display,
-    }: { timeoutMs?: number; display?: number | ObserverHierarchyRequestOptions } = {},
+      diagnostics,
+    }: {
+      timeoutMs?: number;
+      diagnostics?: HierarchySyncDiagnostics;
+      display?: number | ObserverHierarchyRequestOptions;
+    } = {},
   ): Promise<{ hierarchy: AccessibilityHierarchy; frameContext?: string } | null> {
     const deadline = this.timer.now() + timeoutMs;
     await this.waitForPendingRequests(timeoutMs, signal);
@@ -789,6 +795,7 @@ export class AndroidCtrlProxyClient
     }
     return this.hierarchy.requestHierarchySyncForObserver(perf, disableAllFiltering, signal, {
       timeoutMs: remaining,
+      diagnostics,
       display,
     });
   }

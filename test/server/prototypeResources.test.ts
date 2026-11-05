@@ -51,7 +51,9 @@ describe("automobile:prototype resource", () => {
     const templates = ResourceRegistry.getTemplateDefinitions().map((t) => t.uriTemplate);
     expect(templates).toContain("automobile:prototype/native{?id,platform,deviceId}");
     expect(templates).toContain("automobile:prototype/native/asset{?id,assetId,deviceId}");
+    expect(templates).toContain("automobile:prototype/eject{?id,platform,deviceId}");
     expect(renderPrototypeGuide()).toContain("automobile:prototype/native?id=<id>");
+    expect(renderPrototypeGuide()).toContain("automobile:prototype/eject?id=<id>");
   });
 
   test("limits table matches the contract", () => {

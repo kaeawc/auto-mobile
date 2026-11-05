@@ -16,6 +16,7 @@ import { resolveAppFileFaultInjector } from "./appFileFaultInjectors";
 import { resolveClockFaultInjector } from "./clockFaultInjectors";
 import { resolvePackageFaultInjector } from "./packageFaultInjectors";
 import { resolvePermissionFaultInjector } from "./permissionFaultInjectors";
+import { resolveLockScreenFaultInjector } from "./lockScreenFaultInjectors";
 import { resolvePowerFaultInjector } from "./powerFaultInjectors";
 import { resolveProcessFaultInjector } from "./processFaultInjectors";
 import {
@@ -264,23 +265,35 @@ export function createDefaultInjectorResolver(
       artifactOwners,
     }) ??
     resolveMemoryPressureInjector(device, key, { ...deps, adbFactory, cache: memoryCache });
-  return (owner, key) =>
-    owner.device
-      ? (resolveFixture(owner.device, key) ??
-        resolvePowerFaultInjector(owner.device, key, { adbFactory }) ??
-        resolveLifecycleFaultInjector(owner.device, key, { adbFactory }) ??
-        resolveStorageFaultInjector(owner.device, key, { adbFactory }) ??
-        resolveReadOnlyFilesystemInjector(owner.device, key, {
-          adbFactory,
-          cache: readOnlyCache,
-        }) ??
-        resolvePermissionFaultInjector(owner.device, key, { adbFactory }) ??
-        resolvePackageFaultInjector(owner.device, key, { adbFactory }) ??
-        resolveProcessFaultInjector(owner.device, key, { adbFactory }) ??
-        resolveAppFileFaultInjector(owner.device, key, { adbFactory }) ??
-        resolveClockFaultInjector(owner.device, key, { adbFactory }) ??
-        resolveVehicleStateInjector(owner.device, key, { adbFactory }))
-      : undefined;
+  const deviceResolvers: Array<
+    (device: BootedDevice, key: DeviceConditionKey) => DeviceConditionInjector | undefined
+  > = [
+    resolveFixture,
+    (device, key) => resolvePowerFaultInjector(device, key, { adbFactory }),
+    (device, key) => resolveLifecycleFaultInjector(device, key, { adbFactory }),
+    (device, key) => resolveStorageFaultInjector(device, key, { adbFactory }),
+    (device, key) =>
+      resolveReadOnlyFilesystemInjector(device, key, { adbFactory, cache: readOnlyCache }),
+    (device, key) => resolvePermissionFaultInjector(device, key, { adbFactory }),
+    (device, key) => resolveLockScreenFaultInjector(device, key, { adbFactory }),
+    (device, key) => resolvePackageFaultInjector(device, key, { adbFactory }),
+    (device, key) => resolveProcessFaultInjector(device, key, { adbFactory }),
+    (device, key) => resolveAppFileFaultInjector(device, key, { adbFactory }),
+    (device, key) => resolveClockFaultInjector(device, key, { adbFactory }),
+    (device, key) => resolveVehicleStateInjector(device, key, { adbFactory }),
+  ];
+  return (owner, key) => {
+    if (!owner.device) {
+      return undefined;
+    }
+    for (const resolve of deviceResolvers) {
+      const injector = resolve(owner.device, key);
+      if (injector) {
+        return injector;
+      }
+    }
+    return undefined;
+  };
 }
 
 const defaultInjectorResolver = createDefaultInjectorResolver();

@@ -59,6 +59,10 @@ export class IosProtoViewer implements ProtoViewerDevice {
       (await this.deps.simctl.installed(this.deps.deviceId, signal))
     );
   }
+  /** The iOS app does not publish a capabilities report yet; its own import gate decides. */
+  async capabilities(): Promise<undefined> {
+    return undefined;
+  }
   importBundle(
     bytes: Uint8Array,
     label: string | undefined,

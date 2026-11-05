@@ -307,7 +307,7 @@ function interactionSelector(
     // Explore's D-pad select on a TV (#16737) names its target in `until`.
     const until = asRecord(args.until);
     return until
-      ? { text: until.text ?? until.contentDesc, elementId: until.resourceId }
+      ? { text: until.text ?? until.label ?? until.contentDesc, elementId: until.resourceId }
       : undefined;
   }
   return toolName === "swipeOn" ? innermostContainer(args) : undefined;

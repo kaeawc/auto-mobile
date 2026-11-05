@@ -552,7 +552,7 @@ describe("ExploreValidateMode", () => {
         select: true,
       });
       const byDescription = interactionEdge("focusNavigate", {
-        until: { contentDesc: "Open settings" },
+        until: { label: "Open settings" },
         select: true,
       });
 

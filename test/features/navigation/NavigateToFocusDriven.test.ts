@@ -99,12 +99,12 @@ describe("NavigateTo on a focus-driven TV", () => {
       "focusNavigate",
       "focusNavigate",
     ]);
-    expect(caller.calls[0].args).toMatchObject({ until: { text: "Movies" }, select: true });
+    expect(caller.calls[0].args).toMatchObject({ until: { label: "Movies" }, select: true });
     expect(caller.calls[1].args).toMatchObject({
       until: { resourceId: "app:id/first_title" },
       select: true,
     });
-    expect(result.path?.[0]).toBe('focusNavigate({"until":{"text":"Movies"},"select":true})');
+    expect(result.path?.[0]).toBe('focusNavigate({"until":{"label":"Movies"},"select":true})');
   });
 
   test("touch input replays the tap unchanged", async () => {

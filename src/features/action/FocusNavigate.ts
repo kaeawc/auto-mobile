@@ -12,6 +12,7 @@ import type { ElementBounds } from "../../models/ElementBounds";
 import { DefaultTextMatcher } from "../utility/TextMatcher";
 import { matchesCtrlProxyResourceId } from "../utility/SearchableNode";
 import { throwIfAborted } from "../../utils/toolUtils";
+import { reportToolDispatched } from "../../utils/ToolDispatchContext";
 import { boundsEqual, intersectBounds } from "../../utils/bounds";
 import type { Timer } from "../../utils/SystemTimer";
 import type { InputKeyName } from "./InputKey";
@@ -33,6 +34,8 @@ export type FocusNavigateStatus = (typeof FOCUS_NAVIGATE_STATUSES)[number];
 export interface FocusNavigateTarget {
   text?: string;
   contentDesc?: string;
+  /** Matches the text or the content-desc, as `tapOn`'s text selector does. */
+  label?: string;
   resourceId?: string;
 }
 
@@ -98,12 +101,12 @@ const DIRECTION_KEYS = {
 const textMatcher = new DefaultTextMatcher();
 
 export function focusNavigateTargetError(target: FocusNavigateTarget): string | undefined {
-  const given = [target.text, target.contentDesc, target.resourceId].some(
+  const given = [target.text, target.contentDesc, target.label, target.resourceId].some(
     (value) => value !== undefined && value.length > 0,
   );
   return given
     ? undefined
-    : "focusNavigate requires until.text, until.contentDesc or until.resourceId";
+    : "focusNavigate requires until.text, until.contentDesc, until.label or until.resourceId";
 }
 
 function stringProp(element: Element, key: "text" | "content-desc" | "resource-id"): string {
@@ -111,19 +114,21 @@ function stringProp(element: Element, key: "text" | "content-desc" | "resource-i
   return typeof value === "string" ? value : "";
 }
 
+function textMatches(expected: string | undefined, actual: string): boolean {
+  return !expected || textMatcher.createTextMatcher(expected)(actual);
+}
+
 export function elementMatchesTarget(element: Element, target: FocusNavigateTarget): boolean {
-  if (target.text && !textMatcher.createTextMatcher(target.text)(stringProp(element, "text"))) {
-    return false;
-  }
-  if (
-    target.contentDesc &&
-    !textMatcher.createTextMatcher(target.contentDesc)(stringProp(element, "content-desc"))
-  ) {
-    return false;
-  }
+  const text = stringProp(element, "text");
+  const contentDesc = stringProp(element, "content-desc");
+  const labelMatches =
+    !target.label || textMatches(target.label, text) || textMatches(target.label, contentDesc);
   return (
-    !target.resourceId ||
-    matchesCtrlProxyResourceId(stringProp(element, "resource-id"), target.resourceId)
+    textMatches(target.text, text) &&
+    textMatches(target.contentDesc, contentDesc) &&
+    labelMatches &&
+    (!target.resourceId ||
+      matchesCtrlProxyResourceId(stringProp(element, "resource-id"), target.resourceId))
   );
 }
 
@@ -374,6 +379,8 @@ export class FocusNavigate {
       return done;
     }
     throwIfAborted(signal);
+    // The select key, not the first arrow, is what can navigate: time the recorded call from it.
+    reportToolDispatched();
     const pressed = await this.keys.press(FOCUS_NAVIGATE_SELECT_KEY, signal);
     if (!pressed.success) {
       throw new ActionableError(pressed.error ?? "Failed to press the D-pad select key");

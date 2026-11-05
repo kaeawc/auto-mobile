@@ -10,6 +10,7 @@ import {
 } from "../../../src/features/action/FocusNavigate";
 import type { InputKeyName } from "../../../src/features/action/InputKey";
 import type { Element } from "../../../src/models/Element";
+import { runWithToolDispatchReporter } from "../../../src/utils/ToolDispatchContext";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 // Hand-reconstructed layout (not captured from a TV image): a 2x3 grid of 100px tiles.
@@ -104,6 +105,18 @@ describe("FocusNavigate", () => {
     expect(result).toMatchObject({ success: true, status: "focused", selected: true });
     expect(grid.presses.at(-1)).toBe("enter");
     expect(grid.presses.filter((key) => key === "enter")).toHaveLength(1);
+  });
+
+  test("select reports dispatch when the select key goes out, not at the first arrow", async () => {
+    const grid = new FakeGrid(0);
+    const pressesAtDispatch: number[] = [];
+    const result = await runWithToolDispatchReporter(
+      () => pressesAtDispatch.push(grid.presses.length),
+      () => navigator(grid).execute({ until: { text: "Search" }, select: true }),
+    );
+    expect(result.selected).toBe(true);
+    // Reported once, after every arrow press and just before enter.
+    expect(pressesAtDispatch).toEqual([grid.presses.length - 1]);
   });
 
   test("select does not press enter when the target is never focused", async () => {
@@ -427,5 +440,13 @@ describe("elementMatchesTarget", () => {
     expect(elementMatchesTarget(tile(1), { resourceId: "tile_2" })).toBe(false);
     expect(elementMatchesTarget(tile(1), { text: "MOV" })).toBe(true);
     expect(elementMatchesTarget(tile(1), { text: "Movies", resourceId: "tile_2" })).toBe(false);
+  });
+
+  test("label matches the text or the content-desc", () => {
+    const described: Element = { ...tile(1), text: undefined, "content-desc": "Search" };
+    expect(elementMatchesTarget(described, { label: "search" })).toBe(true);
+    expect(elementMatchesTarget(tile(1), { label: "Movies" })).toBe(true);
+    expect(elementMatchesTarget(described, { text: "Search" })).toBe(false);
+    expect(elementMatchesTarget(tile(1), { label: "Music" })).toBe(false);
   });
 });

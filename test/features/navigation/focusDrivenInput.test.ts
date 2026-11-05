@@ -55,7 +55,7 @@ describe("focusTargetFromSelector", () => {
     expect(focusTargetFromSelector({ elementId: "app:id/row", text: "Movies" })).toEqual({
       resourceId: "app:id/row",
     });
-    expect(focusTargetFromSelector({ text: "Movies" })).toEqual({ text: "Movies" });
+    expect(focusTargetFromSelector({ text: "Movies" })).toEqual({ label: "Movies" });
     expect(focusTargetFromSelector({ text: "  " })).toBeNull();
     expect(focusTargetFromSelector({ x: 1, y: 2 })).toBeNull();
   });
@@ -68,7 +68,7 @@ describe("dpadReplayInteraction", () => {
   test("rewrites a public and an explore-flat tapOn into focusNavigate with select", () => {
     expect(replay("tapOn", { selector: { text: "Movies" }, action: "tap" })).toEqual({
       toolName: "focusNavigate",
-      args: { until: { text: "Movies" }, select: true },
+      args: { until: { label: "Movies" }, select: true },
     });
     expect(replay("tapOn", { elementId: "app:id/row" })).toEqual({
       toolName: "focusNavigate",
@@ -85,6 +85,14 @@ describe("dpadReplayInteraction", () => {
       { toolName: "tapOn", args: { selector: { text: "Row" }, duration: 800 } },
       { toolName: "tapOn", args: { selector: { text: "More" }, index: 1, action: "tap" } },
       { toolName: "tapOn", args: { text: "More", index: 1 } },
+      {
+        toolName: "tapOn",
+        args: { selector: { elementId: "app:id/more" }, container: { elementId: "app:id/row_2" } },
+      },
+      {
+        toolName: "tapOn",
+        args: { selector: { elementId: "app:id/more", container: { text: "Row 2" } } },
+      },
     ];
     for (const interaction of unchanged) {
       expect(dpadReplayInteraction(interaction)).toBe(interaction);

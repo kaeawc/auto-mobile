@@ -98,7 +98,8 @@ appears in `listDevices` and can be asked for in a device `requires` clause or a
 
 TV apps are driven by focus, not touch. Use `focusNavigate` to move D-pad focus to an element and
 `sendKeys` with `enter` to activate the focused item, or pass `select: true` to `focusNavigate` to
-press `enter` once focus lands; the result then reports `selected: true`.
+press `enter` once focus lands; the result then reports `selected: true`. `until.label` matches the
+text or the content description, like `tapOn`'s `text`.
 `pressButton` handles back and home.
 
 `explore` walks a TV app the same way: it moves focus to each element and selects it, recording the

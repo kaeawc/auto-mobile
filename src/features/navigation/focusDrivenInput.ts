@@ -74,7 +74,7 @@ function nonEmpty(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
 
-/** The focus target an element-addressing selector (`elementId` or `text`) names. */
+/** The focus target a recorded `tapOn` selector (`elementId` or `text`) names. */
 export function focusTargetFromSelector(
   selector: Record<string, unknown>,
 ): FocusNavigateTarget | null {
@@ -82,8 +82,9 @@ export function focusTargetFromSelector(
   if (resourceId) {
     return { resourceId };
   }
-  const text = nonEmpty(selector.text);
-  return text ? { text } : null;
+  // tapOn's text selector matches the text or the content-desc; `label` keeps that.
+  const label = nonEmpty(selector.text);
+  return label ? { label } : null;
 }
 
 /**
@@ -119,11 +120,15 @@ export function focusSelectArgs(until: FocusNavigateTarget): {
   return { until, select: true };
 }
 
+/** `tapOn` arguments a D-pad select reproduces exactly. */
+const PLAIN_TAP_ARGS: ReadonlySet<string> = new Set(["selector", "action", "elementId", "text"]);
+
 /**
  * The D-pad replay of a recorded interaction on a TV: a plain `tapOn` by element id or text
- * becomes `focusNavigate` to that element with select. Every other call (including a
- * `focusNavigate` explore recorded, a long press, an occurrence `index`, or a coordinate tap)
- * replays unchanged.
+ * becomes `focusNavigate` to that element with select (text as `label`, which also matches the
+ * content-desc as tapOn does). Every other call (including a `focusNavigate` explore recorded,
+ * a long press, a `container` scope, an occurrence `index`, or a coordinate tap) replays
+ * unchanged.
  */
 export function dpadReplayInteraction<T extends Pick<ToolCallInteraction, "toolName" | "args">>(
   interaction: T,
@@ -132,14 +137,12 @@ export function dpadReplayInteraction<T extends Pick<ToolCallInteraction, "toolN
     return interaction;
   }
   const { args } = interaction;
-  // tapOn reads a positive duration without an action as a long press.
-  const longPress = typeof args.duration === "number" && args.duration > 0;
-  if ((args.action !== undefined && args.action !== "tap") || longPress) {
-    return interaction;
-  }
   const selector = asRecord(args.selector) ?? args;
-  if (args.index !== undefined || selector.index !== undefined) {
-    // focusNavigate has no occurrence index, so a duplicate would select the wrong one.
+  // Only a plain tap converts: a container scope, occurrence index, duration (a long press)
+  // or any other qualifier has no focusNavigate equivalent, so that call replays unchanged.
+  const plainArgs = Object.keys(args).every((key) => PLAIN_TAP_ARGS.has(key));
+  const plainSelector = Object.keys(selector).every((key) => PLAIN_TAP_ARGS.has(key));
+  if (!plainArgs || !plainSelector || (args.action !== undefined && args.action !== "tap")) {
     return interaction;
   }
   const until = focusTargetFromSelector(selector);

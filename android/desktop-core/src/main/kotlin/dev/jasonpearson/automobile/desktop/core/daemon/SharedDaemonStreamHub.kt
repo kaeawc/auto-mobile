@@ -19,31 +19,41 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 
 /**
- * [DaemonStreamHub] that keeps one device-scoped telemetry connection per observed device, shared
- * by every facet showing that device. Each connection subscribes with the device's
- * `deviceSessionUuid`, so the daemon backfills that device's own recent history; an all-devices
- * subscription would backfill only the newest rows across every device and starve a quiet one.
+ * [DaemonStreamHub] that holds one device-scoped telemetry subscription per observed device, shared
+ * by every facet showing that device. Each subscription names the device's `deviceSessionUuid`, so
+ * the daemon backfills that device's own recent history; an all-devices subscription would backfill
+ * only the newest rows across every device and starve a quiet one.
  *
- * [telemetryClientFactory] creates each connection (production: a [TelemetryPushSocketClient] with
- * a dedicated reader thread); [scope] runs the routing collectors (production:
- * [Dispatchers.Default], since routing never blocks). Observation streams are shared the same way,
- * one per device, opened and revived as [observation] describes.
+ * [telemetry] carries the subscriptions (production: a [MultiplexedTelemetrySocketClient], one
+ * socket and one reader thread for every device); [scope] runs the state collectors (production:
+ * [Dispatchers.Default], since routing never blocks). Observation streams are shared one per
+ * device, opened and revived as [observation] describes.
  */
 class SharedDaemonStreamHub
 private constructor(
-  private val telemetryClientFactory: () -> TelemetryPushClient,
+  private val telemetry: TelemetryMultiplexer,
   private val scope: CoroutineScope,
   private val observations: HubObservationStreams,
 ) : DaemonStreamHub, ObservationStreamHub by observations {
   constructor(
+    telemetry: TelemetryMultiplexer,
+    scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    observation: ObservationHubConfig = ObservationHubConfig(),
+  ) : this(telemetry, scope, HubObservationStreams(observation, scope))
+
+  /** A hub with one [TelemetryPushClient] connection per device, from [telemetryClientFactory]. */
+  constructor(
     telemetryClientFactory: () -> TelemetryPushClient,
     scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     observation: ObservationHubConfig = ObservationHubConfig(),
-  ) : this(telemetryClientFactory, scope, HubObservationStreams(observation, scope))
+  ) : this(PerConnectionTelemetryMultiplexer(telemetryClientFactory, scope), scope, observation)
 
   private class Subscriber(val key: DeviceStreamKey, val sink: (TelemetryDisplayEvent) -> Unit)
 
-  private class DeviceTelemetry(val client: TelemetryPushClient, val routing: Job) {
+  private class DeviceTelemetry {
+    lateinit var subscription: TelemetrySubscription
+    var stateWatch: Job? = null
+
     // Recently routed events, so a pane that mounts while the connection is already open still
     // sees its device's recent history (the daemon backfills only on subscribe).
     val recent = ArrayDeque<TelemetryDisplayEvent>()
@@ -67,7 +77,7 @@ private constructor(
     val subscriber = Subscriber(key, sink)
     synchronized(lock) {
       check(!closed) { "DaemonStreamHub is closed" }
-      val device = devices.getOrPut(key) { open(key) }
+      val device = devices[key] ?: open(key)
       // Backlog and registration share the lock with [route], so no event is lost or repeated.
       device.recent.forEach(sink)
       subscribers.add(subscriber)
@@ -92,8 +102,7 @@ private constructor(
     }
 
   override fun retry(key: DeviceStreamKey) {
-    val client = synchronized(lock) { devices[key]?.client } ?: return
-    if (!client.isConnected()) client.reconnect()
+    synchronized(lock) { devices[key]?.subscription }?.retry()
   }
 
   override fun close() {
@@ -106,6 +115,7 @@ private constructor(
         devices.toMap().also { devices.clear() }
       }
     open.forEach { (key, device) -> shutDown(key, device) }
+    telemetry.close()
     scope.cancel()
   }
 
@@ -122,24 +132,22 @@ private constructor(
 
   // Called under [lock].
   private fun open(key: DeviceStreamKey): DeviceTelemetry {
-    val client = telemetryClientFactory()
+    // Registered before subscribing, so routing and state reports from the start are accepted.
+    val device = DeviceTelemetry().also { devices[key] = it }
     val state = states.getOrPut(key) { MutableStateFlow(ConnectionState.Disconnected(null)) }
-    val routing = scope.launch {
-      launch {
-        client.connectionState.collect { next ->
-          // A connection being shut down may still report; only the live one publishes.
-          synchronized(lock) { if (devices[key]?.client === client) state.value = next }
-        }
+    device.subscription = telemetry.subscribe(key) { route(key, device, it) }
+    device.stateWatch = scope.launch {
+      device.subscription.state.collect { next ->
+        // A subscription being released may still report; only the live one publishes.
+        synchronized(lock) { if (devices[key] === device) state.value = next }
       }
-      client.telemetryEvents.collect { route(key, client, it) }
     }
-    client.connect(deviceId = key.deviceId, deviceSessionUuid = key.deviceSessionUuid)
-    return DeviceTelemetry(client, routing)
+    return device
   }
 
   private fun shutDown(key: DeviceStreamKey, device: DeviceTelemetry) {
-    device.routing.cancel()
-    device.client.dispose()
+    device.stateWatch?.cancel()
+    device.subscription.close()
     // A lease taken since the release may already have opened a new connection for this key.
     synchronized(lock) {
       if (key !in devices) states[key]?.value = ConnectionState.Disconnected(null)
@@ -148,13 +156,13 @@ private constructor(
 
   private fun route(
     key: DeviceStreamKey,
-    source: TelemetryPushClient,
+    source: DeviceTelemetry,
     event: TelemetryDisplayEvent,
   ) {
     synchronized(lock) {
       val device = devices[key]
-      // Only the live connection routes, and only events stamped with this device's epoch.
-      if (device?.client !== source || !event.belongsTo(key)) return
+      // Only the live subscription routes, and only events stamped with this device's epoch.
+      if (device !== source || !event.belongsTo(key)) return
       device.recent.addLast(event)
       if (device.recent.size > RECENT_EVENT_CAPACITY) device.recent.removeFirst()
       subscribers.forEach { if (it.key == key) it.sink(event) }

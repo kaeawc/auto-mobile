@@ -97,11 +97,12 @@ class InventoryAdb extends FakeAdbExecutor {
 }
 
 // Fake service inventories, not captured dumps.
-const record = (pkg: string, id: number, title: string) =>
+const record = (pkg: string, id: number, title: string, body: string) =>
   [
     `    NotificationRecord(0x${id}: pkg=${pkg} user=UserHandle{0} id=${id} tag=null key=0|${pkg}|${id}|null|${2000 + id}: Notification(channel=c flags=0))`,
     "      extras={",
     `        android.title=String (${title})`,
+    `        android.text=String (${body})`,
     "      }",
   ].join("\n");
 const inventory = (...records: string[]) =>
@@ -111,9 +112,10 @@ const inventory = (...records: string[]) =>
     ...records,
     "  Snoozed notifications:",
   ].join("\n");
-// Titled like the captured card ("Wear") unless a test models a differently titled notification.
-const shell = (id: number, title = "Wear") => record("com.android.shell", id, title);
-const otherApp = record("com.other", 9, "Ping");
+// Shows the captured card ("Wear", "-i") unless a test models a different notification.
+const shell = (id: number, title = "Wear", body = "-i") =>
+  record("com.android.shell", id, title, body);
+const otherApp = record("com.other", 9, "Ping", "pong");
 
 function setup(
   read: (commands: string[]) => ObserveResult = () => stream,
@@ -617,6 +619,23 @@ describe("Wear duplicate-card dismissal", () => {
       await tray.execute({
         action: "dismiss",
         notification: { appId: "com.android.shell", title: "Wear" },
+        awaitTimeout: 500,
+      }),
+    ).toMatchObject({ isError: true, payload: { code: "dismissal_unconfirmed" } });
+  });
+
+  test("does not confirm a refused card when a same-titled notification of the app expires", async () => {
+    const { tray } = setup(
+      () => stream,
+      (commands) =>
+        dismissSwipes(commands) === 0
+          ? inventory(shell(1), shell(2, "Wear", "other body"))
+          : inventory(shell(1)),
+    );
+    expect(
+      await tray.execute({
+        action: "dismiss",
+        notification: { appId: "com.android.shell", title: "Wear", body: "-i" },
         awaitTimeout: 500,
       }),
     ).toMatchObject({ isError: true, payload: { code: "dismissal_unconfirmed" } });

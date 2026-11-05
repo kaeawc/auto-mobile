@@ -5,6 +5,7 @@ import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLim
 import {
   parseActiveNotificationKeysForApp,
   parseDumpsysNotificationRecords,
+  type DumpsysNotificationRecord,
 } from "./notificationDumpsys";
 import { readActiveNotificationKeysForApp } from "./helpers/listing";
 import { createNotificationUIDetector } from "./createNotificationUIDetector";
@@ -61,6 +62,18 @@ const cardPositions = (observation: ObserveResult) =>
   visibleCards(observation, (card) => [card.appLabel, card.title]);
 const identityCount = (cards: WatchNotification[], card: WatchNotification) =>
   cards.filter((other) => cardIdentity(other) === cardIdentity(card)).length;
+/**
+ * Whether an active record shows this card: the card's title is one of the record's titles, and
+ * each body line appears in one of its bodies (a trailing ellipsis from truncation is ignored).
+ */
+const recordShowsCard = (record: DumpsysNotificationRecord, card: WatchNotification) =>
+  card.title !== null &&
+  record.titles.includes(card.title) &&
+  (card.body ?? "")
+    .split("\n")
+    .map((line) => line.replace(/(?:…|\.\.\.)$/, ""))
+    .filter((line) => line.length > 0)
+    .every((line) => record.bodies.some((body) => body.includes(line)));
 /** Fallback dismissal check from visible cards alone, when no active inventory is readable. */
 const visiblyRemoved = (card: WatchNotification, before: ObserveResult, after: ObserveResult) => {
   const sameCard = (other: WatchNotification) =>
@@ -559,26 +572,27 @@ export class WatchSystemTray {
       return { next, removed: false };
     }
     const after = appId && before ? await this.inventory(appId, card) : undefined;
-    if (!before || !after || before.titled === 0) {
+    if (!before || !after || before.matching === 0) {
       return { next, removed: visiblyRemoved(card, observation, next) };
     }
     // An identical card scrolling into view cannot fake a removed key, a refused card that
-    // rewrites its title keeps its key, and another notification of the app expiring meanwhile
-    // removes a key but not one titled like the swiped card.
+    // rewrites its text keeps its key, and another notification of the app expiring meanwhile
+    // removes a key but not one showing the swiped card's title and body.
     return {
       next,
-      removed: before.keys.some((key) => !after.keys.includes(key)) && after.titled < before.titled,
+      removed:
+        before.keys.some((key) => !after.keys.includes(key)) && after.matching < before.matching,
     };
   }
 
   /**
-   * The app's active notification keys, and how many of its active records carry the card's
-   * title, or `undefined` when the dump is not trustworthy enough for before/after accounting.
+   * The app's active notification keys, and how many of its active records show the card's title
+   * and body, or `undefined` when the dump is not trustworthy enough for before/after accounting.
    */
   private async inventory(
     appId: string,
     card: WatchNotification,
-  ): Promise<{ keys: string[]; titled: number } | undefined> {
+  ): Promise<{ keys: string[]; matching: number } | undefined> {
     const { stdout } = await awaitWhileRequestIsLive(
       getSystemTrayDependencies()
         .adbFactory(this.device)
@@ -592,10 +606,10 @@ export class WatchSystemTray {
     if (!keys) {
       return undefined;
     }
-    const titled = parseDumpsysNotificationRecords(stdout).filter(
-      (record) => record.pkg === appId && card.title !== null && record.titles.includes(card.title),
+    const matching = parseDumpsysNotificationRecords(stdout).filter(
+      (record) => record.pkg === appId && recordShowsCard(record, card),
     ).length;
-    return { keys, titled };
+    return { keys, matching };
   }
 
   private async verifyClearAll(

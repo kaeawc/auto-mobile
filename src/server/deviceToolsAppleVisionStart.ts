@@ -3,6 +3,7 @@ import {
   getDeviceToolsDependencies,
   mergeLegacyStartDevicePayload,
   reserveStableDeviceLifecycle,
+  startDeviceParametersSchema,
   watchStartDeviceParametersSchema,
 } from "../features/deviceLifecycle/deviceLifecycleCore";
 import { combineAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
@@ -11,14 +12,21 @@ import { createStructuredToolResponse } from "../utils/toolUtils";
 import { describeDevice, projectBootedDevice } from "../daemon/deviceDescription";
 import { runWithAcquisitionDeadline } from "./deviceToolsAcquisition";
 import { bootAndBindHeadset } from "./deviceToolsAppleVisionProvision";
+import { compareVersions } from "../utils/deviceMatcher";
+import type { ListedAppleVision } from "../utils/ios-cmdline-tools/AppleVisionSimulatorBoot";
 import type { BindBootedSession } from "./deviceToolsWatchOs";
 import { stripInternalToolParams } from "./internalToolParams";
 import { z } from "zod/v4";
 
-// The registered shape already advertises visionOS; only exact simulator selectors apply here.
-const parameters = watchStartDeviceParametersSchema
-  .omit({ enableTools: true })
-  .extend({ platform: z.literal("visionos") });
+// The registered startDevice input advertises these selectors for visionOS; every other
+// Android/iOS option is refused by name. Without deviceId or name the selectors pick the headset.
+const parameters = watchStartDeviceParametersSchema.omit({ enableTools: true }).extend({
+  platform: z.literal("visionos"),
+  formFactor: startDeviceParametersSchema.shape.formFactor,
+  minOsVersion: startDeviceParametersSchema.shape.minOsVersion,
+  maxOsVersion: startDeviceParametersSchema.shape.maxOsVersion,
+  preferRunning: startDeviceParametersSchema.shape.preferRunning,
+});
 
 export function isAppleVisionStartRequest(rawArgs: object): boolean {
   const merged = mergeLegacyStartDevicePayload(rawArgs);
@@ -41,9 +49,6 @@ export async function startAppleVisionDevice(
     );
   }
   const args = parsed.data;
-  if (!args.deviceId && !args.name) {
-    throw new ActionableError("A visionOS startDevice request needs deviceId or name");
-  }
   const deps = getDeviceToolsDependencies();
   const startedAtMs = deps.timer.now();
   return await runWithAcquisitionDeadline(
@@ -53,13 +58,13 @@ export async function startAppleVisionDevice(
       operationName: "startDevice",
       operation: async (deadlineMs, requestSignal, stage) =>
         await runWithAbortSignal(requestSignal, async () => {
-          const find = async (signal: AbortSignal) => {
+          const find = async (signal: AbortSignal, selection: VisionStartSelection) => {
             signal.throwIfAborted();
             stage.current = "resolving the Apple Vision Pro simulator";
             const images = await deps.deviceManagerFactory().listDeviceImages("visionos", signal);
-            return selectAppleVisionSimulator(images, args);
+            return selectAppleVisionSimulator(images, selection);
           };
-          const headset = await find(requestSignal);
+          const headset = await find(requestSignal, args);
           const lease = await reserveStableDeviceLifecycle(
             { platform: "visionos", stableId: headset.deviceId },
             { platform: "visionos", name: headset.name, deviceId: headset.deviceId },
@@ -75,7 +80,7 @@ export async function startAppleVisionDevice(
             const lifecycleSignal =
               combineAbortSignals(requestSignal, lease.signal) ?? lease.signal;
             // A shutdown may have completed while this request waited for the lease.
-            const fresh = await find(lifecycleSignal);
+            const fresh = await find(lifecycleSignal, { ...args, deviceId: headset.deviceId });
             if (fresh.deviceId !== headset.deviceId) {
               throw new ActionableError(
                 "Apple Vision Pro simulator identity changed; retry with deviceId",
@@ -113,19 +118,59 @@ export async function startAppleVisionDevice(
   );
 }
 
-function selectAppleVisionSimulator(images: DeviceInfo[], args: z.infer<typeof parameters>) {
+type VisionStartSelection = z.infer<typeof parameters>;
+
+/**
+ * The one headset the request selects. Exact deviceId and name, formFactor (only "xr-headset"
+ * matches) and the inclusive OS range filter the listing. Several matches resolve to the single
+ * running one when preferRunning (default true) allows it; otherwise the request is ambiguous.
+ */
+export function selectAppleVisionSimulator(
+  images: DeviceInfo[],
+  args: Omit<VisionStartSelection, "platform" | "timeoutMs" | "sessionUuid">,
+): ListedAppleVision {
   const matches = images.filter(
-    (headset) =>
+    (headset): headset is ListedAppleVision =>
       headset.platform === "visionos" &&
-      headset.deviceId &&
+      !!headset.deviceId &&
       (!args.deviceId || headset.deviceId === args.deviceId) &&
-      (!args.name || headset.name === args.name),
+      (!args.name || headset.name === args.name) &&
+      (!args.formFactor || args.formFactor === "xr-headset") &&
+      withinOsRange(headset.osVersion, args.minOsVersion, args.maxOsVersion),
   );
-  const headset = matches[0];
-  if (matches.length !== 1 || !headset?.deviceId) {
+  const running = matches.filter((headset) => headset.isRunning === true);
+  const selected =
+    matches.length === 1
+      ? matches[0]
+      : args.preferRunning !== false && running.length === 1
+        ? running[0]
+        : undefined;
+  if (!selected) {
     throw new ActionableError(
-      "Apple Vision Pro simulator not found or ambiguous; use an exact deviceId",
+      matches.length === 0
+        ? "No Apple Vision Pro simulator matches the startDevice request; list them with automobile:devices/images/visionos"
+        : `Apple Vision Pro simulator selection is ambiguous (${matches
+            .map((headset) => `${headset.name} ${headset.deviceId}`)
+            .join(", ")}); pass deviceId or name`,
     );
   }
-  return { ...headset, deviceId: headset.deviceId };
+  return selected;
+}
+
+function withinOsRange(
+  osVersion: string | undefined,
+  min: string | undefined,
+  max: string | undefined,
+): boolean {
+  if (min === undefined && max === undefined) {
+    return true;
+  }
+  if (!osVersion) {
+    return false;
+  }
+  // compareVersions returns NaN for an unparseable pair, which fails both comparisons.
+  return (
+    (min === undefined || compareVersions(osVersion, min) >= 0) &&
+    (max === undefined || compareVersions(osVersion, max) <= 0)
+  );
 }

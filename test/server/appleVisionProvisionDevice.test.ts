@@ -357,6 +357,68 @@ describe("provisionDevice on an Apple Vision Pro simulator", () => {
     expect(timer.getSleepHistory()).toEqual([]);
   });
 
+  test("startDevice accepts the advertised selectors and picks the one matching headset", async () => {
+    const existing = visionDevice({ name: NAME });
+    const { simctl } = await arrange([existing]);
+
+    const result = toolJson(
+      await call("startDevice", {
+        platform: "visionos",
+        formFactor: "xr-headset",
+        minOsVersion: "26",
+        maxOsVersion: "26.5",
+        preferRunning: true,
+        __mcpSessionId: "client-a",
+      }),
+    );
+
+    expect(result).toMatchObject({ platform: "visionos", acquisition: "cold-boot" });
+    expect(simctl.commands).toEqual([`boot ${existing.udid} 360000`]);
+  });
+
+  for (const preferRunning of [true, false]) {
+    test(`startDevice without deviceId or name prefers the single running headset (preferRunning=${preferRunning})`, async () => {
+      const stopped = visionDevice({ name: "Vision A" });
+      const running = visionDevice({
+        name: "Vision B",
+        udid: "C0FFEE00-0000-4000-8000-0000000000AA",
+        state: "Booted",
+      });
+      const { simctl } = await arrange([stopped, running]);
+
+      const outcome = await call("startDevice", {
+        platform: "visionos",
+        preferRunning,
+        __mcpSessionId: "client-a",
+      }).then(toolJson, (error: unknown) => error);
+
+      if (preferRunning) {
+        expect(outcome).toMatchObject({ acquisition: "already-booted" });
+        expect(JSON.stringify(outcome)).toContain(running.udid);
+        expect(JSON.stringify(outcome)).not.toContain(stopped.udid);
+      } else {
+        expect(String(outcome)).toContain("ambiguous");
+      }
+      expect(simctl.commands).toEqual([]);
+    });
+  }
+
+  for (const [label, selector] of [
+    ["another form factor", { formFactor: "phone" }],
+    ["an OS range the runtime is outside", { minOsVersion: "27" }],
+  ] as const) {
+    test(`startDevice with ${label} matches no headset and boots nothing`, async () => {
+      const { simctl } = await arrange([visionDevice({ name: NAME })]);
+
+      const error = await failure(
+        call("startDevice", { platform: "visionos", ...selector, __mcpSessionId: "client-a" }),
+      );
+
+      expect(String(error)).toContain("No Apple Vision Pro simulator matches");
+      expect(simctl.commands).toEqual([]);
+    });
+  }
+
   test("startDevice refuses Android/iOS setup options before booting a headset", async () => {
     const { simctl } = await arrange([visionDevice({ name: NAME })]);
     await expect(

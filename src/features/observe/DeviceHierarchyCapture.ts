@@ -155,7 +155,11 @@ function throwSyncHierarchyFailure(
   options: { deviceId: string; owned: boolean },
   diagnostics: HierarchySyncDiagnostics,
 ): never {
-  if (request.displayId !== undefined && request.displayId !== 0 && diagnostics.runnerError) {
+  if (
+    request.displayId !== undefined &&
+    request.displayId !== 0 &&
+    diagnostics.runnerError?.includes("exposes no accessibility windows")
+  ) {
     throw new AndroidDisplayReadError(diagnostics.runnerError);
   }
   const detail =

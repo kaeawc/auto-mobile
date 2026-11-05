@@ -77,6 +77,7 @@ unavailable, and a broker binding never reuses one.
   confined to the watch's device-set directory, remove Documents, Library and tmp), and a failed
   wipe launches nothing. `prototype: true` is refused before any agent preparation. A
   `terminateApp` whose process is already gone is a success with `wasRunning: false`.
+- **Watch notifications.** `postNotification` delivers an APNs payload via `simctl push` to the watch simulator UDID and requires the watch app bundle ID as `appId`.
 - **Runner-backed watch observation and actions.** `observe` retains a simctl PNG. When an
   explicitly registered watch runner is connected, it also returns the hierarchy normalized
   through the iOS observation model; bounds and `screenSize` use XCTest points while

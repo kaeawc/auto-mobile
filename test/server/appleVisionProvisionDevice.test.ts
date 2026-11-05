@@ -45,6 +45,7 @@ import type { AppleDevice } from "../../src/utils/ios-cmdline-tools/SimCtlSuppor
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { DeviceOwnedByOtherDaemonError } from "../../src/models/deviceAcquisitionRefusals";
+import { BootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
@@ -176,6 +177,7 @@ describe("provisionDevice on an Apple Vision Pro simulator", () => {
       runnerCalls,
       timer,
       lifecycleCoordinator,
+      deviceUtils,
     };
   }
 
@@ -473,6 +475,31 @@ describe("provisionDevice on an Apple Vision Pro simulator", () => {
     });
     expect(sessions.getSession("unpooled")?.platform).toBe("visionos");
   });
+
+  for (const listing of ["failed", "complete"] as const) {
+    test(`setActiveDevice on a pooled headset the visionOS listing ${listing === "failed" ? "could not read" : "no longer shows"}`, async () => {
+      const headset = visionDevice({ name: NAME, state: "Booted" });
+      const { deviceUtils, sessions } = await arrange([headset]);
+      if (listing === "failed") {
+        deviceUtils.failedPlatforms.add("visionos");
+      } else {
+        deviceUtils.setBootedDevices("visionos", []);
+      }
+      const handler = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+
+      const error = await failure(
+        handler({ deviceId: headset.udid, platform: "visionos", sessionUuid: "lost" }),
+      );
+
+      expect(error).toBeInstanceOf(ActionableError);
+      expect(error instanceof BootedDeviceDiscoveryIncompleteError).toBe(listing === "failed");
+      if (error instanceof BootedDeviceDiscoveryIncompleteError) {
+        expect(error).toMatchObject({ code: "discovery_incomplete", retryable: true });
+        expect(error.message).not.toContain("iOS");
+      }
+      expect(sessions.getSession("lost")?.assignedDevice ?? null).toBeNull();
+    });
+  }
 
   test("creates a missing headset, boots it and binds a visionOS session without a runner", async () => {
     const { simctl, pool, sessions, runnerCalls } = await arrange();

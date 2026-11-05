@@ -38,6 +38,7 @@ jobs:
       ide_plugin_changed: ${{ steps.filter-ide-plugin.outputs.ide_plugin }}
       desktop_app_changed: ${{ steps.filter-desktop-app.outputs.desktop_app }}
       android_changed: ${{ steps.filter-android.outputs.android }}
+      lmk_pressure_changed: ${{ steps.filter-lmk-pressure.outputs.lmk }}
       kotlin_changed: ${{ steps.filter-kotlin.outputs.kotlin }}
       android_lint_changed: ${{ steps.filter-android-lint.outputs.lint }}
       installer_changed: ${{ steps.filter-installer.outputs.installer }}
@@ -321,6 +322,19 @@ jobs:
       # nightly iOS simulator and Android emulator suites; a PR opts into the iOS
       # simulator lane with the `run-ios-sim` label (#10895). Authors can force a
       # full native run with the `run-native` / `run-ios` / `run-android` labels.
+      # Gates the x86_64 memory-pressure payload emulator smoke (#16402).
+      - name: "Check for lmk-pressure payload changes"
+        id: filter-lmk-pressure
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            lmk:
+              - 'android/lmk-pressure/**'
+              - 'scripts/android/build-lmk-pressure.sh'
+              - 'scripts/android/lmk-pressure-emulator-smoke.sh'
+              - 'src/features/deviceCondition/memoryPressureInjector.ts'
+              - '.github/workflows/build-lmk-pressure.yml'
+
       - name: "Check for Android-related changes"
         id: filter-android
         uses: dorny/paths-filter@v3
@@ -2479,6 +2493,38 @@ jobs:
     uses: ./.github/workflows/build-lmk-pressure.yml
     with:
       upload-artifact: false
+
+  # Runs the x86_64 memory-pressure payload on an x86_64 emulator: it starts,
+  # reports READY, drops to the shell user and stops (#16402). Only arm64 had
+  # run on a device. Advisory, and only when the payload or its injector changes.
+  lmk-pressure-x86_64-emulator-smoke:
+    name: "lmk-pressure x86_64 emulator smoke"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: detect-changes
+    if: needs.detect-changes.outputs.lmk_pressure_changed == 'true'
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: "Build lmk-pressure binaries"
+        env:
+          LMK_PRESSURE_OUT: build/lmk-pressure
+        run: |
+          set -euo pipefail
+          bash scripts/android/build-lmk-pressure.sh
+          bash scripts/ci/verify-lmk-pressure-binaries.sh build/lmk-pressure
+
+      # The emulator action boots through `bun run src/index.ts --boot-device`.
+      - uses: ./.github/actions/setup-auto-mobile-npm-package
+
+      - uses: ./.github/actions/android-emulator
+        with:
+          arch: "x86_64"
+          script: "bash scripts/android/lmk-pressure-emulator-smoke.sh build/lmk-pressure"
+          working-directory: "./"
 
   # =============================================================================
   # Kotlin Code Coverage

@@ -29,6 +29,9 @@ export const WEB_SCREENSHOT_SPECS: Readonly<Record<string, string>> = {
   "material-controls": "prototype-spec/valid/material-controls.json",
   "component-gallery": "prototype-spec/valid/component-gallery.json",
   "doc-example-2": "prototype-spec/valid/doc-example-2.json",
+  "flow-basic": "prototype-spec/valid/flow-basic.json",
+  "flow-max-lines-repeat": "prototype-spec/valid/flow-max-lines-repeat.json",
+  "chart-variants": "prototype-spec/valid/chart-variants.json",
   "status-bar-light-content": "prototype-web/status-bar-light-content.json",
   "status-bar-dark-content": "prototype-web/status-bar-dark-content.json",
 };

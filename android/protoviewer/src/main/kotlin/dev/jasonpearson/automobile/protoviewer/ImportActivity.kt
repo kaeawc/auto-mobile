@@ -35,6 +35,7 @@ class ImportActivity : ComponentActivity() {
         val failed = rejection
         val text =
           if (failed == null) stringResource(R.string.loading)
+          else if (failed.isHidden) stringResource(R.string.import_hidden)
           else stringResource(R.string.import_rejected, failed.path, failed.reason)
         ImportStatus(text) { finish() }
       }
@@ -73,6 +74,10 @@ class ImportActivity : ComponentActivity() {
     }
   }
 }
+
+/** The library refused content the user hid or blocked; it is never stored. */
+internal val LibraryImportResult.Rejected.isHidden: Boolean
+  get() = path == "library" && reason == LibraryError.Hidden.name
 
 @Composable
 internal fun ImportStatus(text: String, back: () -> Unit) {

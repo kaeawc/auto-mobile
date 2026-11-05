@@ -944,7 +944,6 @@ test/features/deviceLogs/AndroidLogReader.test.ts
 test/features/deviceLogs/GetLogs.test.ts
 test/features/deviceLogs/logcatQuery.test.ts
 test/features/element-resolution/ConsumerAgreement.test.ts
-test/features/element-resolution/DeviceHierarchyCapture.test.ts
 test/features/element-resolution/ElementResolver.acceptance.test.ts
 test/features/element-resolution/ElementResolver.review.test.ts
 test/features/element-resolution/ElementResolver.staleSyntheticId.test.ts

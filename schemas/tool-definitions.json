@@ -15612,6 +15612,7 @@
           "enum": [
             "samsung-sleeping",
             "samsung-deep-sleeping",
+            "samsung-auto-disable",
             "xiaomi-autostart-off",
             "oneplus-deep-optimization",
             "recents-swipe-kill",
@@ -15619,7 +15620,8 @@
             "oneplus-sleep-standby",
             "motorola-adaptive",
             "user-restricted",
-            "exact-alarm-denied"
+            "exact-alarm-denied",
+            "notifications-off"
           ]
         },
         "baseline": {
@@ -15682,6 +15684,7 @@
               "enum": [
                 "samsung-sleeping",
                 "samsung-deep-sleeping",
+                "samsung-auto-disable",
                 "xiaomi-autostart-off",
                 "oneplus-deep-optimization",
                 "recents-swipe-kill",
@@ -15689,7 +15692,8 @@
                 "oneplus-sleep-standby",
                 "motorola-adaptive",
                 "user-restricted",
-                "exact-alarm-denied"
+                "exact-alarm-denied",
+                "notifications-off"
               ]
             },
             "version": {
@@ -15758,6 +15762,7 @@
                 "enum": [
                   "samsung-sleeping",
                   "samsung-deep-sleeping",
+                  "samsung-auto-disable",
                   "xiaomi-autostart-off",
                   "oneplus-deep-optimization",
                   "recents-swipe-kill",
@@ -15765,7 +15770,8 @@
                   "oneplus-sleep-standby",
                   "motorola-adaptive",
                   "user-restricted",
-                  "exact-alarm-denied"
+                  "exact-alarm-denied",
+                  "notifications-off"
                 ]
               }
             },

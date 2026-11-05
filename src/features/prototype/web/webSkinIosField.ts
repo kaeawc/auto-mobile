@@ -12,6 +12,7 @@ import {
   FLEX_SHRINK,
   INLINE_FLEX,
   JUSTIFY_CONTENT,
+  LINE_HEIGHT,
   MAX_HEIGHT,
   MIN_HEIGHT,
   MIN_WIDTH,
@@ -119,21 +120,24 @@ function inputChrome(node: Raw, error: boolean, scope: WebRenderScope): Css {
  * The input keeps at least one 22 pt body line even when empty, as a TextField does. A multiline
  * field keeps its newlines and its minLines and maxLines.
  */
-function lineBounds(node: Raw): Css {
+function lineBounds(node: Raw, scope: WebRenderScope): Css {
+  // The body line as iosText scales it with the frame's Dynamic Type size.
+  const line = iosText("body", scope)[LINE_HEIGHT]!;
+  const lines = (count: number) => (count === 1 ? line : `calc(${count} * ${line})`);
   if (node.multiline !== true) {
     return {
-      [MIN_HEIGHT]: "22px",
+      [MIN_HEIGHT]: line,
       [WHITE_SPACE]: "nowrap",
       overflow: "hidden",
       "text-overflow": "ellipsis",
     };
   }
-  const lines = typeof node.minLines === "number" ? Math.max(node.minLines, 1) : 1;
+  const min = typeof node.minLines === "number" ? Math.max(node.minLines, 1) : 1;
   const max: Css =
     typeof node.maxLines === "number"
-      ? { [MAX_HEIGHT]: `${node.maxLines * 22}px`, overflow: "hidden" }
+      ? { [MAX_HEIGHT]: lines(node.maxLines), overflow: "hidden" }
       : {};
-  return { [WHITE_SPACE]: "pre-wrap", [MIN_HEIGHT]: `${lines * 22}px`, ...max };
+  return { [WHITE_SPACE]: "pre-wrap", [MIN_HEIGHT]: lines(min), ...max };
 }
 
 function input(node: Raw, text: IosFieldText, error: boolean, scope: WebRenderScope): WebElement {
@@ -151,7 +155,7 @@ function input(node: Raw, text: IosFieldText, error: boolean, scope: WebRenderSc
       },
     },
     [
-      el("span", { style: { flex: "1 1 auto", [MIN_WIDTH]: "0", ...lineBounds(node) } }, [
+      el("span", { style: { flex: "1 1 auto", [MIN_WIDTH]: "0", ...lineBounds(node, scope) } }, [
         text.shown,
       ]),
     ],

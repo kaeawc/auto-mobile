@@ -406,8 +406,30 @@ describe("iOS skin text field, navigation bars and sheet (#16646)", () => {
     const line = (element: WebElement) => (input(element).children[0] as WebElement).style;
     expect(line(empty)["min-height"]).toBe("22px");
     expect(line(field({ label: "Notes", multiline: true, minLines: 3 }))["min-height"]).toBe(
-      "66px",
+      "calc(3 * 22px)",
     );
+  });
+
+  test("a field's line bounds follow the Dynamic Type body line", () => {
+    const notes = {
+      type: "textField",
+      label: "Notes",
+      stateKey: "n",
+      multiline: true,
+      maxLines: 2,
+      testTag: "f",
+    };
+    const scaled = rendered(
+      [notes],
+      { frame: "iphone-16", textSize: { contentSize: "accessibility-large" } },
+      "f",
+    );
+    const box = find(scaled, (candidate) => candidate.attrs.role === "textbox")[0]!;
+    const span = box.children[0] as WebElement;
+    const lineHeight = box.style["line-height"]!;
+    expect(Number.parseFloat(lineHeight)).toBeGreaterThan(22);
+    expect(span.style["max-height"]).toBe(`calc(2 * ${lineHeight})`);
+    expect(span.style["min-height"]).toBe(lineHeight);
   });
 
   test("an outlined field is a 1 pt 4 pt-radius outline stroke, red on an error", () => {

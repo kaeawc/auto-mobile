@@ -85,6 +85,11 @@ internal fun ContentBlocklist.rejects(
   sourceHost: String? = null,
 ): Boolean = isBlocked(source, specSha256, sourceHost, hiddenSpecHashes(), blockedHosts())
 
+/** Admits only content this blocklist does not reject, for the repository's commit-time check. */
+fun ContentBlocklist.admission(): LibraryAdmission = LibraryAdmission { source, specSha256, host ->
+  !rejects(source, specSha256, host)
+}
+
 /**
  * Hides received content from a hidden spec or blocked host everywhere the library is read: the
  * list, MCP `open` and the viewer all see a blocked entry as not found.

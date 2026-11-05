@@ -4,6 +4,7 @@ import java.io.File
 import java.nio.file.Files
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
@@ -276,5 +277,57 @@ class McpInboxTest {
 
     assertFalse(stale.exists())
     assertEquals("imported", result("mcp-9").text("status"))
+  }
+
+  @Test
+  fun preparingPublishesThisBuildsVersionAndCapabilitiesForTheHost() {
+    val described =
+      McpInbox(
+        root,
+        { _, _, _ -> importResult },
+        repository,
+        { nowMillis },
+        McpAbout(42, "1.2.3", setOf("prototype_routes_v1", "prototype_anchor_v1")),
+      )
+
+    assertNull(described.handle(McpCommand.Prepare("mcp-p")))
+
+    val report = Json.parseToJsonElement(File(root, MCP_CAPABILITIES_FILE).readText()).jsonObject
+    assertEquals("42", report.text("versionCode"))
+    assertEquals("1.2.3", report.text("versionName"))
+    assertEquals(
+      listOf("prototype_anchor_v1", "prototype_routes_v1"),
+      report.getValue("capabilities").jsonArray.map { it.jsonPrimitive.content },
+    )
+    assertFalse("no temporary file is left", File(root, ".$MCP_CAPABILITIES_FILE.tmp").exists())
+  }
+
+  @Test
+  fun aNewerBuildReplacesTheReportAnOlderOneLeft() {
+    File(root, MCP_CAPABILITIES_FILE).apply {
+      root.mkdirs()
+      writeText("""{"versionCode":1,"capabilities":[]}""")
+    }
+    val described =
+      McpInbox(
+        root,
+        { _, _, _ -> importResult },
+        repository,
+        { nowMillis },
+        McpAbout(2, null, setOf("x")),
+      )
+
+    assertTrue(described.ensureDirectories())
+
+    val report = Json.parseToJsonElement(File(root, MCP_CAPABILITIES_FILE).readText()).jsonObject
+    assertEquals("2", report.text("versionCode"))
+    assertFalse(report.containsKey("versionName"))
+  }
+
+  @Test
+  fun anInboxWithoutBuildDetailsPublishesNoReport() {
+    assertTrue(inbox.ensureDirectories())
+
+    assertFalse(File(root, MCP_CAPABILITIES_FILE).exists())
   }
 }

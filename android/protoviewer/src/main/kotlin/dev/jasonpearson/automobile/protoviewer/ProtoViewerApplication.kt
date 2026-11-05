@@ -1,7 +1,10 @@
 package dev.jasonpearson.automobile.protoviewer
 
 import android.app.Application
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.ComponentActivity
+import androidx.core.content.pm.PackageInfoCompat
 import androidx.core.net.toUri
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEgressPolicy
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient
@@ -26,12 +29,15 @@ class ProtoViewerApplication : Application() {
     val storage = LibraryStorage(PrototypeStorage.fileBacked(app))
     val root = File(app.filesDir, "library")
     val ids = IdGenerator { UUID.randomUUID().toString() }
+    val blocklist =
+      SharedPreferencesContentBlocklist(app.getSharedPreferences("blocklist", MODE_PRIVATE))
     val repository =
       DirectoryLibraryRepository(
         SavedPrototypeDirectoryStore(File(root, "prototypes"), limits = libraryLimits),
         DirectoryLibraryFiles(File(root, "metadata")),
         storage,
         ids,
+        admission = blocklist.admission(),
       )
     val staging =
       File(app.cacheDir, "import").apply {
@@ -39,8 +45,6 @@ class ProtoViewerApplication : Application() {
         // A crash mid-commit leaves staging directories behind; nothing else cleans them.
         listFiles()?.forEach { it.deleteRecursively() }
       }
-    val blocklist =
-      SharedPreferencesContentBlocklist(app.getSharedPreferences("blocklist", MODE_PRIVATE))
     val sharer =
       CanonicalLibrarySharer(repository, DirectoryLibraryExports(File(app.cacheDir, "export")), ids)
     val importer =
@@ -68,7 +72,12 @@ class ProtoViewerApplication : Application() {
       importer = importer,
       mcpInbox =
         app.getExternalFilesDir(null)?.let {
-          McpInbox(File(it, "mcp"), importer, BlocklistLibraryRepository(repository, blocklist))
+          McpInbox(
+            File(it, "mcp"),
+            importer,
+            BlocklistLibraryRepository(repository, blocklist),
+            about = app.mcpAbout(),
+          )
         },
       sharer = sharer,
       settings = SharedPreferencesSettingsStore(app.getSharedPreferences("settings", MODE_PRIVATE)),
@@ -88,6 +97,21 @@ class ProtoViewerApplication : Application() {
       services.flushScope.launch(services.io) { services.repository.purgeBlocked() }
     }
   }
+}
+
+/** This build's version and the capabilities its importer accepts, for the MCP host (#14156). */
+private fun Application.mcpAbout(): McpAbout {
+  val info =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
+    } else {
+      @Suppress("DEPRECATION") packageManager.getPackageInfo(packageName, 0)
+    }
+  return McpAbout(
+    PackageInfoCompat.getLongVersionCode(info),
+    info.versionName,
+    AutoMobilePrototype.capabilities,
+  )
 }
 
 // Application composition root: keep independent dependencies explicit for constructor injection.

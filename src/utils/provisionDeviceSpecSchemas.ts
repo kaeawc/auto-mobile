@@ -78,6 +78,14 @@ export const APPLE_PROVISION_SPEC_GUIDANCE = {
       deviceType: "com.apple.CoreSimulator.SimDeviceType.Apple-TV-4K-3rd-generation-4K",
     },
   },
+  visionos: {
+    platform: "visionos",
+    catalog: "automobile:devices/images/visionos",
+    example: {
+      runtime: "com.apple.CoreSimulator.SimRuntime.xrOS-26-5",
+      deviceType: "com.apple.CoreSimulator.SimDeviceType.Apple-Vision-Pro-4K",
+    },
+  },
 } as const satisfies Record<string, AppleProvisionSpecGuidance>;
 
 /** "runtime and deviceType ..., e.g. {...}; list them with ..." for an Apple spec refusal. */
@@ -295,8 +303,19 @@ export const appleTvProvisionDeviceSpecSchema = z
 
 /** Exact identifiers from the host's Apple Vision Pro catalog. */
 export const appleVisionProvisionDeviceSpecSchema = z
-  .object({
-    runtime: z.string().min(1).describe("visionOS CoreSimulator runtime identifier"),
-    deviceType: z.string().min(1).describe("Apple Vision Pro CoreSimulator device-type identifier"),
-  })
+  .object(
+    {
+      runtime: appleSpecField(
+        "runtime",
+        APPLE_PROVISION_SPEC_GUIDANCE.visionos,
+        "visionOS CoreSimulator runtime identifier",
+      ),
+      deviceType: appleSpecField(
+        "deviceType",
+        APPLE_PROVISION_SPEC_GUIDANCE.visionos,
+        "Apple Vision Pro CoreSimulator device-type identifier",
+      ),
+    },
+    appleSpecObjectError(APPLE_PROVISION_SPEC_GUIDANCE.visionos),
+  )
   .strict();

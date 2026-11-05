@@ -1,3 +1,4 @@
+import { NoOpPerformanceTracker } from "../../../../src/utils/PerformanceTracker";
 import { expect, test } from "bun:test";
 import { CtrlProxyHierarchy } from "../../../../src/features/observe/android/CtrlProxyHierarchy";
 import type {
@@ -139,4 +140,26 @@ test("selected-display caller abort does not misattribute the joined flight fail
     failureReason: "Timed out waiting for hierarchy response after 250ms",
   });
   expect(h.diagnostics).toMatchObject({ failureReason: "owner call cancelled" });
+});
+
+test("observer selected-display sync carries the untracked-display refusal to diagnostics", async () => {
+  const h = await harness();
+  const pending = h.hierarchy.requestHierarchySyncForObserver(
+    new NoOpPerformanceTracker(),
+    false,
+    undefined,
+    {
+      timeoutMs: 250,
+      display: 2,
+      diagnostics: h.diagnostics,
+    },
+  );
+  await drain();
+  const { requestId } = JSON.parse(h.frames[0]!) as { requestId: string };
+  const refusal =
+    "Display 2 exposes no accessibility windows on this device: the accessibility service does not track this display (overlay displays are not tracked).";
+  expect(h.hierarchy.rejectPendingHierarchy(requestId, refusal)).toBe(true);
+  expect(await pending).toBeNull();
+  expect(h.diagnostics.runnerError).toBe(refusal);
+  expect(h.timer.getSleepHistory()).toEqual([]);
 });

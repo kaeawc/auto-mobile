@@ -373,6 +373,35 @@ jobs:
           LMK_PRESSURE_X86_64_SHA256: ${{ needs.build-candidate-lmk-pressure.outputs.x86_64_sha256 }}
         run: bash scripts/generate-release-constants.sh
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+          no-cache: true
+
+      - name: Install Bun dependencies
+        run: bun install --frozen-lockfile
+
+      # The step above pins this version in src/constants/release.ts, and the
+      # capability guard fails on main for any pinned version the manifest does
+      # not know (#17109). Record it here so the same [skip ci] commit carries
+      # both. The ref is the commit the artifacts were built from; the tag is
+      # created later on this job's commit, whose Kotlin/Swift sources are the
+      # same. The second run fails closed if the pin still has no entry.
+      - name: Record artifact capabilities
+        env:
+          VERSION: ${{ inputs.version }}
+          BUILT_REF: ${{ needs.prepare-version.outputs.release_commit }}
+        run: |
+          set -euo pipefail
+          bun scripts/release/check-artifact-capabilities.ts --record "$VERSION" --ref "$BUILT_REF"
+          bun scripts/release/check-artifact-capabilities.ts
+
+      # The recorder writes JSON.stringify output, which oxfmt reflows; the
+      # commit carries [skip ci], so format here as prepare-version does (#5817).
+      - name: Format generated files
+        run: bun run format
+
       - name: Commit release constants to staging ref
         id: commit
         shell: bash
@@ -401,6 +430,7 @@ jobs:
                 android/*/build.gradle.kts | \
                 ios/XCTestRunner/Sources/XCTestRunner/AutoMobileVersion.swift | \
                 package.json | \
+                scripts/release/artifact-capabilities.json | \
                 server.json | \
                 src/constants/release.ts)
                   ;;

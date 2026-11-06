@@ -418,6 +418,8 @@ interface FocusProgress {
   readonly tried: ReadonlySet<FocusNavigateDirection>;
   /** Directions that kept moving focus without closing distance; tried after every other one. */
   readonly stalled: ReadonlySet<FocusNavigateDirection>;
+  /** Presses a stalled direction again because every escape from it failed; it stays undemoted. */
+  resume(direction: FocusNavigateDirection): void;
   /**
    * Records an observation and the focused element's distance to the target (undefined when
    * either is missing); returns true when focus differs from the previous one.
@@ -434,10 +436,16 @@ interface ElementMemory {
 /** Tracks presses in one direction that move focus without bringing it closer to the target. */
 function createStallTracker() {
   const stalled = new Set<FocusNavigateDirection>();
+  /** Directions resumed after their escapes failed; demoting them again would only repeat that. */
+  const resumed = new Set<FocusNavigateDirection>();
   let previous: number | undefined;
   let run: { direction: FocusNavigateDirection; presses: number } | undefined;
   return {
     stalled,
+    resume(direction: FocusNavigateDirection) {
+      resumed.add(direction);
+      stalled.delete(direction);
+    },
     /** `moved` is the direction of the press that moved focus, if the last press did. */
     observe(distance: number | undefined, moved: FocusNavigateDirection | undefined) {
       const before = previous;
@@ -457,7 +465,9 @@ function createStallTracker() {
       const presses = run?.direction === moved ? run.presses + 1 : 1;
       run = { direction: moved, presses };
       if (presses >= FOCUS_NAVIGATE_STALL_PRESSES) {
-        stalled.add(moved);
+        if (!resumed.has(moved)) {
+          stalled.add(moved);
+        }
       }
     },
   };
@@ -481,6 +491,7 @@ function createFocusProgress(): FocusProgress {
       return memory.tried;
     },
     stalled: stall.stalled,
+    resume: (direction) => stall.resume(direction),
     observe(key, distance) {
       const didNotMove = previousKey !== undefined && key === previousKey;
       const moved = key !== previousKey;
@@ -596,8 +607,8 @@ export class FocusNavigate {
   /**
    * The best direction not yet pressed from the focused element. With the target on screen every
    * direction is a candidate, so focus can leave a container that traps it (#17209): directions
-   * toward the target first, then the escape directions, and a direction that kept moving focus
-   * without getting closer only after all of those. Without a match on screen the only move is
+   * toward the target first, then the sideways escapes, then a direction that kept moving focus
+   * without getting closer (resumed for the rest of the call), and backing away last. Without a match on screen the only move is
    * down, so an absent target scans down rather than wandering the whole screen.
    */
   private nextDirection(
@@ -609,7 +620,21 @@ export class FocusNavigate {
     const candidates =
       focused && matches.length > 0 ? directionsWithFallbacks(toward) : [...toward];
     const untried = candidates.filter((direction) => !progress.tried.has(direction));
-    return untried.find((direction) => !progress.stalled.has(direction)) ?? untried[0];
+    // Backing away from the target retraces the path, so a stalled direction comes before it.
+    const away = OPPOSITE[toward[0]];
+    const fresh = untried.find(
+      (direction) => !progress.stalled.has(direction) && direction !== away,
+    );
+    if (fresh) {
+      return fresh;
+    }
+    const stalled = untried.find((direction) => progress.stalled.has(direction));
+    if (stalled) {
+      // Every escape from here failed: keep going the stalled way (a list with no side exit).
+      progress.resume(stalled);
+      return stalled;
+    }
+    return untried[0];
   }
 
   private async press(

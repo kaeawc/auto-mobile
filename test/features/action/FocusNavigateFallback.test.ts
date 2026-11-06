@@ -160,6 +160,31 @@ describe("FocusNavigate direction fallback (#17209)", () => {
     ]);
   });
 
+  test("keeps scrolling a list with no side exit once every escape fails", async () => {
+    // Hand-built: the same scrolling list with no rail, so left and right do nothing and the
+    // footer is reachable only past the last item.
+    const nodes: Record<string, FakeNode> = {
+      footer: { element: box("Footer", 500, 1000) },
+    };
+    Array.from({ length: LIST_LENGTH }, (_, index) => {
+      nodes[`item${index}`] = {
+        element: box(`Item ${index}`, 500, LIST_SLOTS[Math.min(index, LIST_SLOTS.length - 1)]),
+        moves: {
+          ...(index > 0 ? { up: `item${index - 1}` } : {}),
+          down: index < LIST_LENGTH - 1 ? `item${index + 1}` : "footer",
+        },
+      };
+    });
+    const graph = new FakeFocusGraph(nodes, "item0", (focus) =>
+      focus === "footer" ? ["footer"] : ["footer", focus],
+    );
+    const result = await navigator(graph).execute({ until: { text: "Footer" }, maxSteps: 60 });
+    expect(result).toMatchObject({ success: true, status: "focused" });
+    // Left and right are tried once where down stalled; up (away from the footer) never is.
+    expect(graph.presses.filter((direction) => direction !== "down")).toEqual(["left", "right"]);
+    expect(result.steps).toBe(LIST_LENGTH + 2);
+  });
+
   test("an explicit direction still only presses that direction", async () => {
     const graph = listAboveBottomBar();
     const result = await navigator(graph).execute({

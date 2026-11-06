@@ -46,16 +46,48 @@ internal class KeystoreFaultInjectionTest : KeystoreFaultTestBase() {
   fun `delay precedes each backend operation without sleeping`() {
     enable()
     backend.entries["aes"] = EntryCategory.KEY
-    inject("DELAY", delayMs = 10_000L)
+    inject("DELAY", delayMs = 1_000L)
     val order = mutableListOf<String>()
     val recordingBackend =
       FaultingKeystoreBackend(backend, KeystoreSleeper { order.add("$it:${backend.calls.size}") })
     assertTrue(recordingBackend.containsAlias("aes"))
     assertEquals(EntryCategory.KEY, recordingBackend.entryCategory("aes"))
     recordingBackend.deleteAlias("aes")
-    assertEquals(listOf("10000:0", "10000:1", "10000:2"), order)
+    assertEquals(listOf("1000:0", "1000:1", "1000:2"), order)
     assertEquals(listOf("containsAlias:aes", "entryCategory:aes", "deleteAlias:aes"), backend.calls)
     assertFalse(backend.entries.containsKey("aes"))
+  }
+
+  @Test
+  fun `one call spends at most the per-call delay budget across aliases and operations`() {
+    enable()
+    backend.entries["aes"] = EntryCategory.KEY
+    backend.entries["cert"] = EntryCategory.CERTIFICATE
+    allowedHandler.handle("injectFault", "fixture", null, "DELAY", 3_000L)
+    val result = allowedHandler.handle("delete", "fixture")
+    // aes and cert each need contains + delete; the fourth delay gets only the 1000 ms left and
+    // the absent aliases' lookups run undelayed, yet every alias is still attempted.
+    assertEquals("partial", result.getString("status"))
+    assertEquals(2, result.getInt("deletedCount"))
+    assertEquals(5, result.getJSONArray("aliases").length())
+    assertEquals(listOf(3_000L, 3_000L, 3_000L, 1_000L), sleeper.delays)
+    assertEquals(MAX_INJECTED_DELAY_PER_CALL_MS, sleeper.delays.sum())
+    // A new provider call constructs a new backend, so its budget starts full again.
+    backend.entries["aes"] = EntryCategory.KEY
+    val nextCall = KeystoreStateHandler(FaultingKeystoreBackend(backend, sleeper), probe) { true }
+    sleeper.delays.clear()
+    assertEquals("deleted", nextCall.handle("delete", "fixture", "aes").getString("status"))
+    assertEquals(listOf(3_000L, 3_000L), sleeper.delays)
+  }
+
+  @Test
+  fun `maximum delay is spent once per call and every operation still runs`() {
+    enable()
+    backend.entries["aes"] = EntryCategory.KEY
+    inject("DELAY", delayMs = MAX_INJECTED_DELAY_PER_CALL_MS)
+    assertEquals("deleted", allowedHandler.handle("delete", "fixture", "aes").getString("status"))
+    assertEquals(listOf(MAX_INJECTED_DELAY_PER_CALL_MS), sleeper.delays)
+    assertEquals(listOf("containsAlias:aes", "deleteAlias:aes"), backend.calls)
   }
 
   @Test

@@ -73,7 +73,10 @@ with extras `scope` and/or `alias`, and `kind`: `KEY_STORE_EXCEPTION`,
 `PROVIDER_EXCEPTION`, `USER_NOT_AUTHENTICATED`, or `DELAY`. Use exact declared
 aliases; a scope selects all its aliases. For `DELAY`, supply a long integer
 `delayMs` from 1 through 10000. The delay runs before each selected alias's
-metadata lookup or deletion operation. Other kinds simulate the named failure.
+metadata lookup or deletion operation, and the delays in one provider call add up
+to at most 10000 ms in total: once that is spent, the call's remaining operations
+run without delay. `resetKeychain` waits up to 20 s for the bridge, so injected
+delay alone does not make it report `BRIDGE_UNAVAILABLE`. Other kinds simulate the named failure.
 Setting a fault replaces the previous fault for each selected alias. These calls
 require the same app opt-in, caller authorization, and mutation policy as deletion.
 

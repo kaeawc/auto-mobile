@@ -8,6 +8,25 @@ internal fun interface KeystoreSleeper {
   fun sleep(delayMs: Long)
 }
 
+/**
+ * Upper bound on injected DELAY for one provider call, summed across every selected alias and
+ * backend operation. It equals the largest single delay, so one call never waits longer than one
+ * maximal fault and the host's Keystore reset timeout can cover it (#17291).
+ */
+internal const val MAX_INJECTED_DELAY_PER_CALL_MS = 10_000L
+
+/** Spends at most [MAX_INJECTED_DELAY_PER_CALL_MS] in total; delays past the budget are skipped. */
+internal class KeystoreDelayBudget(private val sleeper: KeystoreSleeper) {
+  private var remainingMs = MAX_INJECTED_DELAY_PER_CALL_MS
+
+  fun sleep(delayMs: Long) {
+    val granted = minOf(delayMs, remainingMs)
+    if (granted <= 0L) return
+    remainingMs -= granted
+    sleeper.sleep(granted)
+  }
+}
+
 /** Process-wide debug faults, restricted to exact currently declared aliases. */
 internal object KeystoreFaultPlan {
   private enum class Kind {
@@ -27,7 +46,8 @@ internal object KeystoreFaultPlan {
     clearIfDisabled()
     if (!KeystoreTestState.isEnabled()) return false
     val parsed = Kind.entries.firstOrNull { it.name == kind } ?: return false
-    if (parsed == Kind.DELAY && (delayMs == null || delayMs !in 1L..10_000L)) return false
+    val delayValid = delayMs != null && delayMs in 1L..MAX_INJECTED_DELAY_PER_CALL_MS
+    if (parsed == Kind.DELAY && !delayValid) return false
     if (aliases.isEmpty() || aliases.any { !isDeclared(it) }) return false
     val fault = Fault(parsed, if (parsed == Kind.DELAY) delayMs else null)
     aliases.forEach { faults[it] = fault }
@@ -69,34 +89,37 @@ internal object KeystoreFaultPlan {
     return fault
   }
 
-  fun apply(alias: String, sleeper: KeystoreSleeper) {
+  fun apply(alias: String, budget: KeystoreDelayBudget) {
     val fault = faultFor(alias) ?: return
     // Never hold the process-wide plan monitor while sleeping or accessing the backend.
     when (fault.kind) {
       Kind.KEY_STORE_EXCEPTION -> throw KeyStoreException()
       Kind.PROVIDER_EXCEPTION -> throw ProviderException()
       Kind.USER_NOT_AUTHENTICATED -> throw UserNotAuthenticatedException()
-      Kind.DELAY -> sleeper.sleep(requireNotNull(fault.delayMs))
+      Kind.DELAY -> budget.sleep(requireNotNull(fault.delayMs))
     }
   }
 }
 
+/** Construct one per provider call: its delay budget bounds that call's total injected delay. */
 internal class FaultingKeystoreBackend(
   private val backend: KeystoreBackend,
-  private val sleeper: KeystoreSleeper = KeystoreSleeper { Thread.sleep(it) },
+  sleeper: KeystoreSleeper = KeystoreSleeper { Thread.sleep(it) },
 ) : KeystoreBackend {
+  private val budget = KeystoreDelayBudget(sleeper)
+
   override fun containsAlias(alias: String): Boolean {
-    KeystoreFaultPlan.apply(alias, sleeper)
+    KeystoreFaultPlan.apply(alias, budget)
     return backend.containsAlias(alias)
   }
 
   override fun entryCategory(alias: String): EntryCategory {
-    KeystoreFaultPlan.apply(alias, sleeper)
+    KeystoreFaultPlan.apply(alias, budget)
     return backend.entryCategory(alias)
   }
 
   override fun deleteAlias(alias: String) {
-    KeystoreFaultPlan.apply(alias, sleeper)
+    KeystoreFaultPlan.apply(alias, budget)
     backend.deleteAlias(alias)
   }
 }

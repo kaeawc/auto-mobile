@@ -62,6 +62,19 @@ export const EXPORT_ATTESTATION_UNSUPPORTED_MESSAGE =
   `Install CtrlProxy ${EXPORT_ATTESTATION_MIN_CTRL_PROXY_VERSION}+ and retry.`;
 
 /**
+ * Debug-SDK cap on injected Keystore DELAY per provider call, summed over every alias and
+ * operation (`MAX_INJECTED_DELAY_PER_CALL_MS` in the SDK's `KeystoreFaultPlan`).
+ */
+export const KEYSTORE_MAX_INJECTED_DELAY_MS = 10_000;
+
+/**
+ * Bridge deadline for `reset_keystore`: the SDK's whole injected-delay budget plus headroom for
+ * the real Keystore work, so a delayed reset reports its outcome instead of BRIDGE_UNAVAILABLE
+ * (#17291). It stays below the daemon's default 30 s MCP request deadline.
+ */
+export const KEYSTORE_RESET_TIMEOUT_MS = KEYSTORE_MAX_INJECTED_DELAY_MS + 10_000;
+
+/**
  * Delegate class for handling SharedPreferences operations.
  */
 export class CtrlProxyStorage {
@@ -167,7 +180,7 @@ export class CtrlProxyStorage {
     packageName: string,
     scope?: string,
     alias?: string,
-    timeoutMs = 5000,
+    timeoutMs = KEYSTORE_RESET_TIMEOUT_MS,
   ): Promise<KeystoreReset> {
     const refusal = (
       outcome: "unsupported" | "unavailable",

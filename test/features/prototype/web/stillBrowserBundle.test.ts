@@ -2,7 +2,11 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { builtinModules } from "node:module";
 import { fileURLToPath } from "node:url";
 
-/** Budgets from docs/design-docs/prototype-web-library.md for the core entry. */
+/**
+ * Budgets from docs/design-docs/prototype-web-library.md for the core entry. A prototype-web PR that
+ * grows the bundle past a budget raises that budget in the same PR, with a line below naming it and
+ * the measured size, so main never goes red on a merge.
+ */
 // The badge/progress/fab/flow/list/chart/adaptive/swipe component set accounts for the growth past
 // 120 KB / 40 KB. Raised for the inlined image renderer (#16533): measured 137,146 bytes plus ~8% headroom.
 // The iOS skin's textField, bottomNav, tabBar and sheet account for the gzip growth past 46 KB.
@@ -11,8 +15,10 @@ import { fileURLToPath } from "node:url";
 // The still's mode resolution from role overrides and the authored background (#16654) grew it past
 // 150 KB / 49 KB: measured 150,452 / 49,246 bytes.
 // Foldable frames, posture and the hinge drawing (#16632) on top: measured 155,482 / 50,526 bytes.
-const MAX_MINIFIED_BYTES = 156_500;
-const MAX_GZIP_BYTES = 51_000;
+// The authored-background walk through scroll/stack/closed layers (#16677) and map min/max and
+// aspect-ratio sizing (#16678) grew it past 156.5 KB / 51 KB: measured 157,052 / 51,031 bytes.
+const MAX_MINIFIED_BYTES = 158_000;
+const MAX_GZIP_BYTES = 51_500;
 
 /** Server-only modules the renderer once reached; any of them back in the closure is a regression. */
 const FORBIDDEN_INPUTS = [

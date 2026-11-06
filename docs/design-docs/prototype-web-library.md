@@ -184,11 +184,11 @@ that needs more is refused whole, never half drawn.
 Budgets are minified and gzip, measured by the bundling test, for an embed that imports only
 that entry:
 
-| Entry          | Contents                           | Minified | Gzip   |
-| -------------- | ---------------------------------- | -------- | ------ |
-| core (`mount`) | renderer, frame registry, `mount`  | 156.5 KB | 51 KB  |
-| `element`      | core plus the custom element       | 159.5 KB | 51 KB  |
-| `interactive`  | the action runtime, on top of core | +40 KB   | +12 KB |
+| Entry          | Contents                           | Minified | Gzip    |
+| -------------- | ---------------------------------- | -------- | ------- |
+| core (`mount`) | renderer, frame registry, `mount`  | 158 KB   | 51.5 KB |
+| `element`      | core plus the custom element       | 161 KB   | 51.5 KB |
+| `interactive`  | the action runtime, on top of core | +40 KB   | +12 KB  |
 
 - Per-node tree-shaking is not offered. Node renderers are dispatched by type from a spec only
   known at runtime, so a bundler cannot drop any. Splitting renderers into opt-in groups would

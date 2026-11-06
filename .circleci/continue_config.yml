@@ -65,15 +65,16 @@ executors:
   # the JDK 21 that Fast Validation's ktfmt check needs plus the npm that the
   # pinned-graph and unpacked-size checks shell out to; every Linux job shares it.
   linux:
-    parameters:
-      resource_class:
-        type: string
-        default: large
     docker:
       - image: cimg/openjdk:21.0-node
-    resource_class: << parameters.resource_class >>
+    resource_class: large
     environment:
       GIT_LFS_SKIP_SMUDGE: "1"
+      # A Docker container reports the host's core count, so the scripts that size
+      # themselves from nproc oversubscribe the 4 vCPU. Pin them to what the GitHub
+      # 4-core runner picks.
+      AUTOMOBILE_UNIT_TEST_WORKERS: "3"
+      AUTOMOBILE_BATS_JOBS: "4"
   ios:
     parameters:
       xcode:
@@ -378,11 +379,7 @@ jobs:
           destination: ci-logs
 
   linux-node-build-and-test:
-    # xlarge (8 vCPU / 16 GB, matching the GitHub runner's memory): the unit lane's
-    # parallel workers do not fit in `large`.
-    executor:
-      name: linux
-      resource_class: xlarge
+    executor: linux
     steps:
       - checkout_without_lfs
       - setup_auto_mobile_npm_package

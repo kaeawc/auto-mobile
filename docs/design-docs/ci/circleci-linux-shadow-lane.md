@@ -19,10 +19,12 @@ mapping, so any PR that changes a file runs the lane.
 | `linux-node-host-integration-tests` | `node-host-integration-tests` |
 | `linux-bats-tests`                  | `bats-tests`                  |
 
-All run on the `linux` executor (`cimg/openjdk:21.0-node`). It defaults to `large`
-(4 vCPU, 8 GB); the unit-test job uses `xlarge` (8 vCPU, 16 GB) because the unit
-lane's parallel workers need the memory. Fast Validation installs ShellCheck 0.9.0
-(the version the shell validators baseline) and Ruby (the dependabot validator).
+All run on the `linux` executor (`cimg/openjdk:21.0-node`, `large`: 4 vCPU, 8 GB;
+`xlarge` is not in the open-source Docker plan). A container reports the host's
+core count, so the executor pins `AUTOMOBILE_UNIT_TEST_WORKERS` and
+`AUTOMOBILE_BATS_JOBS` to values suited to 4 vCPU. Fast Validation installs
+ShellCheck 0.9.0 (the version the shell validators baseline) and Ruby (the
+dependabot validator).
 
 ## Differences from the GitHub jobs
 

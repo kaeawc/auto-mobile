@@ -109,6 +109,11 @@ describe("prototype web parity with the Android goldens (#16534)", () => {
     }
   });
 
+  test("icons draw the production Material glyphs, not placeholders", () => {
+    const entry = ANDROID_PARITY_CASES.find((c) => c.golden === "fullscreen_all_nodes")!;
+    expect(androidParityHtml(entry)).toContain("<svg");
+  });
+
   test("the page is the chromeless still alone, transparent and inset-free", () => {
     const html = androidParityHtml(ANDROID_PARITY_CASES[0]!);
     expect(html).toContain('data-chrome="screen"');

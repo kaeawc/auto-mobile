@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { materialIconGlyphs } from "../../../../src/features/prototype/web/materialIconGlyphs";
 import { renderPrototypeStill } from "../../../../src/features/prototype/web/webStill";
 import { toHtml } from "../../../../src/features/prototype/web/webNodes";
 
@@ -304,6 +305,8 @@ export function androidParityHtml(entry: AndroidParityCase): string {
     frame: ANDROID_PARITY_FRAME,
     mode: entry.mode ?? "light",
     chromeless: true,
+    // The glyphs the production page draws, so an icon compares as the icon, not a placeholder.
+    glyphs: materialIconGlyphs(),
   });
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><style>*{box-sizing:border-box}html,body{margin:0}</style></head><body>${toHtml(still.element)}</body></html>\n`;
 }

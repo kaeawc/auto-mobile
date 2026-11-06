@@ -136,10 +136,32 @@ describe("device frame schema v2 (#16444)", () => {
     ]);
   });
 
-  test("every checked-in entry normalizes to a single inner panel", () => {
+  test("every checked-in phone and tablet normalizes to one inner panel; foldables add a cover", () => {
     expect(DEVICE_FRAMES.map((f) => f.panels.map((panel) => panel.role))).toEqual(
-      registry.frames.map(() => ["inner"]),
+      DEVICE_FRAMES.map((f) => (f.formFactor === "foldable" ? ["inner", "cover"] : ["inner"])),
     );
+    expect(DEVICE_FRAMES.filter((f) => f.formFactor === "foldable").map((f) => f.id)).toEqual([
+      "pixel-fold",
+      "flip-foldable",
+    ]);
+  });
+
+  test("a foldable's unmeasured geometry says so in its source (#16445)", () => {
+    const parsed = parseDeviceFrames(registry);
+    if (!parsed.success) {
+      throw new Error(parsed.error.message);
+    }
+    const foldables = parsed.data.frames.filter((f) => f.formFactor === "foldable");
+    expect(foldables.length).toBe(2);
+    for (const { source } of foldables) {
+      const { kinds } = source;
+      expect(kinds?.hinge).toBeDefined();
+      for (const field of ["screen", "insets", "hinge"] as const) {
+        if (kinds?.[field] !== "measured") {
+          expect(source[field]).toContain("not yet measured");
+        }
+      }
+    }
   });
 
   test("accepts a foldable with a cover panel, hinge, postures and source kinds", () => {

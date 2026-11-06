@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createPerformanceAuditTool } from "../../src/server/performanceAuditTool";
+import type { MemoryAuditResult } from "../../src/features/audit/OnDemandAudit";
 import { FakeOnDemandAuditEngines } from "../fakes/FakeOnDemandAuditEngines";
 import {
   AUDIT_ANDROID,
@@ -30,6 +31,25 @@ describe("performanceAudit tool (#17279)", () => {
 
     expect(response.isError).toBe(true);
     expect(response.structuredContent).toEqual(PINNED_PERFORMANCE);
+  });
+
+  test("a failing memory check alone fails failOn", async () => {
+    const engines = performanceScenarioEngines();
+    engines.performanceResult = { ...engines.performanceResult!, passed: true };
+    engines.memoryResult = { passed: false } as MemoryAuditResult;
+
+    const response = await registeredHandler(createPerformanceAuditTool(() => engines))(
+      AUDIT_ANDROID,
+      { failOn: "warning" },
+    );
+
+    expect(response.isError).toBe(true);
+    expect(response.structuredContent).toMatchObject({
+      success: false,
+      failed: true,
+      performance: { passed: true },
+      memory: { passed: false },
+    });
   });
 
   test("runs both kinds by default", async () => {

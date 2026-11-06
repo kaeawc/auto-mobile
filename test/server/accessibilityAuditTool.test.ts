@@ -156,6 +156,7 @@ describe("accessibilityAudit wcag engine (#17279)", () => {
     expect(wcag.isError).toBe(true);
     expect(wcag.structuredContent).toEqual({
       success: false,
+      failed: false,
       engine: "wcag",
       error: "maxIssues does not apply to engine wcag; pass engine platform or drop it.",
     });
@@ -163,6 +164,10 @@ describe("accessibilityAudit wcag engine (#17279)", () => {
     expect(platform.structuredContent).toEqual({
       success: false,
       engine: "xcuitest",
+      issues: [],
+      totalIssues: 0,
+      truncated: false,
+      unsupportedChecks: [],
       error: "baseline, failOn do not apply to engine platform; pass engine wcag or drop them.",
     });
   });

@@ -159,6 +159,10 @@ export function createAccessibilityAuditTool(
         const result = {
           success: false,
           engine: engineName(engine, device),
+          // A platform result always carries its issue fields, an error included.
+          ...(engine === "platform"
+            ? { issues: [], totalIssues: 0, truncated: false, unsupportedChecks: [] }
+            : { failed: false }),
           error: `${foreign.join(", ")} ${foreign.length === 1 ? "does" : "do"} not apply to engine ${engine}; pass engine ${engine === "wcag" ? "platform" : "wcag"} or drop ${foreign.length === 1 ? "it" : "them"}.`,
         };
         return withIsErrorOnFailure(createStructuredToolResponse(result), false);

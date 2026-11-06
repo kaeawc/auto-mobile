@@ -50,6 +50,12 @@ export class SelectorDpadTargetResolver implements DpadTargetResolver {
   }
 }
 
+/** Whether `until` is only a `label` or only an `elementId`, the targets tapOn's resolver reads. */
+export function isPinnableFocusTarget(until: FocusNavigateTarget): boolean {
+  const fields = Object.entries(until).filter(([, value]) => value !== undefined);
+  return fields.length === 1 && (fields[0][0] === "label" || fields[0][0] === "elementId");
+}
+
 /**
  * Focus walk options that pin a target named the way tapOn names one (only a `label` or only an
  * `elementId`) to the element tapOn would tap on each read, so a focused parent row never stands
@@ -60,9 +66,7 @@ export function pinnedFocusOptions(
   until: FocusNavigateTarget,
   resolver: DpadTargetResolver,
 ): Pick<FocusNavigateOptions, "firstMatch" | "pinTarget"> {
-  const fields = Object.entries(until).filter(([, value]) => value !== undefined);
-  const single = fields.length === 1 ? fields[0][0] : undefined;
-  if (single !== "label" && single !== "elementId") {
+  if (!isPinnableFocusTarget(until)) {
     return {};
   }
   return { firstMatch: true, pinTarget: (screen) => resolver.resolve(screen, until) };

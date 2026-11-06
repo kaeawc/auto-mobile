@@ -15,6 +15,19 @@ import {
   type FocusNavigateTarget,
 } from "../action/FocusNavigate";
 import type { ToolCallInteraction } from "../../utils/interfaces/NavigationGraph";
+import type { ViewHierarchyResult } from "../../models";
+import { boundsEqual } from "../../utils/bounds";
+import {
+  isPinnableFocusTarget,
+  SelectorDpadTargetResolver,
+  type DpadTargetResolver,
+} from "../action/DpadTargetResolver";
+import { ResolverElementSelector } from "../utility/ResolverElementSelector";
+
+/** Resolves lone `label`/`elementId` targets as the replayed focus walk pins them. */
+const focusEdgeTargetResolver: DpadTargetResolver = new SelectorDpadTargetResolver(
+  new ResolverElementSelector(),
+);
 
 /** The walk options (`direction`, `maxSteps`, `settleMs`) a recorded `focusNavigate` used. */
 export function recordedFocusWalkOptions(
@@ -482,17 +495,32 @@ function bestDescriptorMatch(
 const FOCUS_TARGET_CONFIDENCE = 0.9;
 
 /**
- * Resolve a recorded `focusNavigate` (#16737) with `focusNavigate`'s own matcher, so validation
- * finds what the replay will select: every `until` field on one element, exact labels first. When the target is a label inside a clickable
- * row (a contained node that carries its own id), the row matching the label alone is used.
+ * Resolve a recorded `focusNavigate` (#16737) the way its replay will: a lone `label` or
+ * `elementId` with tapOn's resolver, as the walk pins it; any other target with `focusNavigate`'s
+ * own matcher, every `until` field on one element, exact labels first. When the target is a label
+ * inside a clickable row (a contained node that carries its own id), the row matching the label
+ * alone is used.
  */
-function resolveFocusEdgeTarget(elements: Element[], edge: NavigationEdge): EdgeTargetResolution {
+function resolveFocusEdgeTarget(
+  elements: Element[],
+  edge: NavigationEdge,
+  hierarchy: ViewHierarchyResult | undefined,
+): EdgeTargetResolution {
   const until = recordedFocusTarget(edge.interaction);
   if (!until) {
     return notValidatable(
       edge,
       'recorded "focusNavigate" interaction has no until target to match on screen',
     );
+  }
+  const pinned = isPinnableFocusTarget(until)
+    ? focusEdgeTargetResolver.resolve({ focused: null, elements, hierarchy }, until)
+    : undefined;
+  if (pinned !== undefined) {
+    const element = pinned ? elements.find((e) => boundsEqual(e.bounds, pinned)) : undefined;
+    return element
+      ? { status: "matched", element, confidence: FOCUS_TARGET_CONFIDENCE }
+      : { status: "not-found", bestScore: 0 };
   }
   const label: FocusNavigateTarget = { ...until, resourceId: undefined };
   const hasLabel = Boolean(label.text || label.contentDesc || label.label);
@@ -514,7 +542,11 @@ function findFocusTarget(elements: Element[], until: FocusNavigateTarget): Eleme
  * Resolve the on-screen element for a target edge from its recorded interaction
  * (`edge.interaction.args`). Never matches against `uiState.selectedElements`.
  */
-export function resolveEdgeTarget(elements: Element[], edge: NavigationEdge): EdgeTargetResolution {
+export function resolveEdgeTarget(
+  elements: Element[],
+  edge: NavigationEdge,
+  hierarchy?: ViewHierarchyResult,
+): EdgeTargetResolution {
   if (isRecordedBackEdge(edge)) {
     return { status: "back" };
   }
@@ -522,7 +554,7 @@ export function resolveEdgeTarget(elements: Element[], edge: NavigationEdge): Ed
     return resolveCoordinateTap(elements, edge, edge.interaction.args ?? {});
   }
   if (edge.interaction?.toolName === "focusNavigate") {
-    return resolveFocusEdgeTarget(elements, edge);
+    return resolveFocusEdgeTarget(elements, edge, hierarchy);
   }
   const target = describeInteractionTarget(edge);
   if ("reason" in target) {

@@ -1,4 +1,4 @@
-import { tcpHostLoopbackProbe } from "./HostLoopbackProbe";
+import { hostLoopbackProbeFor } from "./HostLoopbackProbe";
 import { PortReverseManager } from "./PortReverseManager";
 import { defaultTimer } from "../../utils/SystemTimer";
 
@@ -6,5 +6,5 @@ import { defaultTimer } from "../../utils/SystemTimer";
 export const defaultPortReverseManager = new PortReverseManager(
   undefined,
   defaultTimer,
-  tcpHostLoopbackProbe,
+  hostLoopbackProbeFor(),
 );

@@ -1,4 +1,5 @@
 import { createConnection } from "node:net";
+import { adbServerScope } from "../../utils/adbServerScope";
 import { logger } from "../../utils/logger";
 
 /**
@@ -63,3 +64,15 @@ export const tcpHostLoopbackProbe: HostLoopbackProbe = {
     return states.every((state) => state === "absent") ? "refused" : "unknown";
   },
 };
+
+/**
+ * The probe for the adb server this process uses. A reverse's `tcp:<port>` target is connected
+ * by the adb server, so it can be checked from here only when that server is on this host's
+ * loopback; any other server (a remote address, a non-TCP socket) gets the probe that never
+ * knows, so nothing is reclaimed and `hostListening` is left out.
+ */
+export function hostLoopbackProbeFor(env: NodeJS.ProcessEnv = process.env): HostLoopbackProbe {
+  return adbServerScope(env).startsWith("tcp-localhost-")
+    ? tcpHostLoopbackProbe
+    : unknownHostLoopbackProbe;
+}

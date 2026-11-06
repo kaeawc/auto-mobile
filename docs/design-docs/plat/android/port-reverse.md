@@ -31,8 +31,12 @@ manager (#12530) also uses.
   error is unknown and never reclaims). It re-reads `--list` just before
   `--remove` and leaves a port that changed meanwhile (`port_reverse_reclaim_failed`,
   after rolling back this call's adds), then audit-logs the reclaim and adds the
-  requested mapping with `--no-rebind`. The probe runs on the daemon's host, so a
-  remote adb server's host is not what is checked.
+  requested mapping with `--no-rebind`. The adb server connects the `tcp:H`
+  target, so the probe is used only when that server is on this host's loopback
+  (`adbServerScope` is `tcp-localhost-*`); with a remote or non-TCP server every
+  check is unknown, nothing is reclaimed and `hostListening` is omitted. A
+  reclaimed mapping is not restored if a later add in the same call fails: its
+  host target was dead.
 - `remove` refuses ports the session does not own, then re-reads `--list` and
   removes a port only while it still maps to the host port AutoMobile set.
   `adb reverse --remove` takes no host argument, so a re-point between that read

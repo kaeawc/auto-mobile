@@ -42,7 +42,8 @@ class FixturePlayerSession(context: Context, private val onCommand: (PlayerComma
         .setState(
           if (state.isPlaying) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
           state.positionSeconds * MILLIS,
-          if (state.isPlaying) 1f else 0f,
+          // The simulated position never ticks, so a controller must not extrapolate it either.
+          STILL,
         )
         .build(),
     )
@@ -86,6 +87,7 @@ class FixturePlayerSession(context: Context, private val onCommand: (PlayerComma
   private companion object {
     const val TAG = "AutoMobileTvFixture"
     const val MILLIS = 1000L
+    const val STILL = 0f
     const val SUPPORTED_ACTIONS =
       PlaybackState.ACTION_PLAY or
         PlaybackState.ACTION_PAUSE or

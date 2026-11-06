@@ -53,6 +53,8 @@ class FixtureStateTest {
     val state = initial.openCard("card_shows_02").cardFocused("card_shows_02").queryChanged("shows")
     assertEquals(state, FixtureState.fromSaved(state.toSaved()))
     assertEquals(FixtureState(), FixtureState.fromSaved(listOf("bad")))
+    assertEquals(FixtureState(), FixtureState.fromSaved(listOf("browse", "s", "f", "q")))
+    assertEquals(FixtureState(), FixtureState.fromSaved(listOf(listOf("browse"), "s", 3, "q")))
     assertEquals(
       FixtureBackStack(),
       FixtureState.fromSaved(listOf(listOf("detail/card_gone"), "s", "f", "q")).backStack,

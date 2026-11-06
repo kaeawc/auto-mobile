@@ -52,12 +52,15 @@ data class FixtureState(
     /** Restores [toSaved] output; anything malformed restores the initial state. */
     fun fromSaved(saved: List<Any?>): FixtureState {
       if (saved.size != SAVED_SIZE) return FixtureState()
-      val routes = (saved[0] as? List<*>)?.filterIsInstance<String>().orEmpty()
+      val routes = (saved[0] as? List<*>)?.takeIf { list -> list.all { it is String } }
+      val texts = saved.drop(1).filterIsInstance<String>()
+      if (routes == null || texts.size != SAVED_SIZE - 1) return FixtureState()
+      val (status, focus, query) = texts
       return FixtureState(
-        backStack = FixtureBackStack.fromRoutes(routes),
-        status = saved[1] as? String ?: TvFixtureCatalog.STATUS_READY,
-        focus = saved[2] as? String ?: TvFixtureCatalog.FOCUS_NONE,
-        query = saved[3] as? String ?: "",
+        backStack = FixtureBackStack.fromRoutes(routes.filterIsInstance<String>()),
+        status = status,
+        focus = focus,
+        query = query,
       )
     }
   }

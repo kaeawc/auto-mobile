@@ -6,7 +6,7 @@ plugins {
 
 // Deterministic Compose for TV fixture: browse rows of cards that reveal more cards on D-pad
 // advance, a search field, a detail screen and a player whose MediaSession reacts to media keys.
-// No network, no video decoding and no Google account, so it installs on any Android TV image.
+// No network, no video decoding and no Google account; it needs API 28 or later.
 android {
   namespace = "dev.jasonpearson.automobile.tvfixture"
   defaultConfig {

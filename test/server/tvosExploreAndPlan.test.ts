@@ -117,7 +117,7 @@ describe("executePlan on an Apple TV", () => {
         request: {
           platform: device.platform,
           planContent:
-            "name: tv\nsteps:\n  - tool: pressButton\n    params: { button: down }\n  - tool: tapOn\n    params: { action: tap, text: Play }\n",
+            "name: tv\nsteps:\n  - tool: pressButton\n    params: { button: down }\n  - tool: tapOn\n    params: { action: tap, selector: { text: Play } }\n",
           startStep: 0,
           deviceAllocationTimeoutMs: 5000,
         },

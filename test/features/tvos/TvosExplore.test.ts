@@ -11,9 +11,21 @@ import {
 import { tvosRunners } from "../../../src/features/tvos/TvosRunnerRegistry";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FocusAwareFakeTvosRunnerClient } from "../../fakes/FocusAwareFakeTvosRunnerClient";
-import { FakeTvosExploreApp, RecordingTvosExploreGraph } from "../../fakes/FakeTvosExploreApp";
+import { tapOnSchema } from "../../../src/server/interactionTools/tapSchemas";
+import { pressButtonSchema } from "../../../src/server/interactionTools";
+import {
+  FakeTvosExploreApp,
+  RecordingTvosExploreGraph,
+  type RecordedCall,
+} from "../../fakes/FakeTvosExploreApp";
 
 const DEVICE = "tv-explore";
+
+/** The selector a recorded tapOn call carries, or an empty one for other calls. */
+function selectorOf(call: RecordedCall): { elementId?: unknown; text?: unknown } {
+  const selector = call.args.selector;
+  return typeof selector === "object" && selector !== null ? selector : {};
+}
 
 /** Home has a row of two items; each opens a detail screen with one item. */
 function homeApp(): FakeTvosExploreApp {
@@ -49,9 +61,9 @@ describe("TvosExplore", () => {
     ]);
     expect(graph.edgeCalls.map((call) => call && [call.tool, call.args])).toEqual([
       undefined,
-      ["tapOn", { action: "tap", elementId: "movies" }],
+      ["tapOn", { action: "tap", selector: { elementId: "movies" } }],
       ["pressButton", { button: "menu" }],
-      ["tapOn", { action: "tap", elementId: "settings" }],
+      ["tapOn", { action: "tap", selector: { elementId: "settings" } }],
       ["pressButton", { button: "menu" }],
     ]);
     expect(graph.calls.every((call) => call.dispatched)).toBe(true);
@@ -71,7 +83,7 @@ describe("TvosExplore", () => {
   test("an item without an identifier replays by text and a no-op select is withdrawn", async () => {
     const { graph, explore } = arrange();
     await explore.execute({});
-    const toggle = graph.calls.find((call) => call.args.text === "Toggle");
+    const toggle = graph.calls.find((call) => selectorOf(call).text === "Toggle");
     expect(toggle).toMatchObject({ tool: "tapOn", withdrawn: true });
     expect(graph.edgeCalls).not.toContain(toggle);
   });
@@ -96,9 +108,28 @@ describe("TvosExplore", () => {
         : [],
     );
     expect(edges).toEqual([
-      ["tvos-fp-movies", { action: "tap", elementId: "open-movies" }],
-      ["tvos-fp-shows", { action: "tap", elementId: "open-shows" }],
+      ["tvos-fp-movies", { action: "tap", selector: { elementId: "open-movies" } }],
+      ["tvos-fp-shows", { action: "tap", selector: { elementId: "open-shows" } }],
     ]);
+  });
+
+  test("every recorded call passes its public tool's input schema", async () => {
+    const { graph, explore } = arrange();
+    await explore.execute({});
+    const schemas = { tapOn: tapOnSchema, pressButton: pressButtonSchema } as const;
+    const rejected = graph.calls.filter((call) => {
+      const schema = schemas[call.tool as keyof typeof schemas];
+      return !schema?.safeParse(call.args).success;
+    });
+    expect(graph.calls.map((call) => call.tool).sort()).toEqual([
+      "pressButton",
+      "pressButton",
+      "tapOn",
+      "tapOn",
+      "tapOn",
+      "tapOn",
+    ]);
+    expect(rejected).toEqual([]);
   });
 
   test("stops at maxInteractions", async () => {
@@ -170,7 +201,9 @@ describe("TvosExplore", () => {
     const app = new FakeTvosExploreApp({ home: items }, "home");
     const { graph, explore } = arrange(app);
     const result = await explore.execute({});
-    expect(graph.calls.map((call) => call.args.elementId)).toEqual(items.map((item) => item.id));
+    expect(graph.calls.map((call) => selectorOf(call).elementId)).toEqual(
+      items.map((item) => item.id),
+    );
     expect(result).toMatchObject({
       interactionsPerformed: 40,
       stopReason: "No unexplored focus on the root screen",

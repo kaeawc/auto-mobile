@@ -98,10 +98,13 @@ function focusKey(element: Element | undefined): string {
  */
 function selectCall(focused: Element | undefined): { tool: string; args: Record<string, unknown> } {
   if (focused?.["resource-id"]) {
-    return { tool: "tapOn", args: { action: "tap", elementId: focused["resource-id"] } };
+    return {
+      tool: "tapOn",
+      args: { action: "tap", selector: { elementId: focused["resource-id"] } },
+    };
   }
   if (focused?.text) {
-    return { tool: "tapOn", args: { action: "tap", text: focused.text } };
+    return { tool: "tapOn", args: { action: "tap", selector: { text: focused.text } } };
   }
   return { tool: "pressButton", args: { button: "select" } };
 }

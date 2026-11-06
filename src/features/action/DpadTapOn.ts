@@ -109,6 +109,7 @@ export class DpadTapOn {
   async execute(target: FocusNavigateTarget, signal?: AbortSignal): Promise<DpadTapOnResult> {
     const navigation = await this.navigator.execute({
       until: target,
+      firstMatch: true,
       ...(signal ? { signal } : {}),
     });
     const { success, message, ...focusNavigation } = navigation;

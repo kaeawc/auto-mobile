@@ -88,7 +88,7 @@ describe("DpadTapOn", () => {
     const keys = new FakeKeys();
     const result = await new DpadTapOn(navigator, keys).execute({ label: "Movies" });
 
-    expect(navigator.calls).toEqual([{ until: { label: "Movies" } }]);
+    expect(navigator.calls).toEqual([{ until: { label: "Movies" }, firstMatch: true }]);
     expect(keys.presses).toEqual(["enter"]);
     expect(result).toEqual({
       success: true,

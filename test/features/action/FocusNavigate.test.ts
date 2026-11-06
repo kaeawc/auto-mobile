@@ -107,6 +107,24 @@ describe("FocusNavigate", () => {
     expect(result.focusedElement?.text).toBe("Movies");
   });
 
+  test("firstMatch moves off a focused later duplicate to the first match", async () => {
+    const grid = new FakeGrid(4);
+    grid.elements[1] = { ...tile(1), text: "Play" };
+    grid.elements[4] = { ...tile(4), text: "Play" };
+    const result = await navigator(grid).execute({ until: { label: "Play" }, firstMatch: true });
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 1 });
+    expect(grid.presses).toEqual(["arrow_up"]);
+    expect(result.focusedElement?.bounds).toEqual(tile(1).bounds);
+  });
+
+  test("without firstMatch a focused duplicate is accepted, as focusNavigate always has", async () => {
+    const grid = new FakeGrid(4);
+    grid.elements[1] = { ...tile(1), text: "Play" };
+    grid.elements[4] = { ...tile(4), text: "Play" };
+    const result = await navigator(grid).execute({ until: { label: "Play" } });
+    expect(result).toMatchObject({ success: true, steps: 0 });
+  });
+
   test("a label compares normalized whitespace, as the touch resolver does", async () => {
     const grid = new FakeGrid(0);
     grid.elements[0] = { ...tile(0), text: "Movies Plus" };

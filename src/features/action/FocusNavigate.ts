@@ -44,6 +44,8 @@ export interface FocusNavigateTarget {
    * id-less node (`s2-…`).
    */
   elementId?: string;
+  /** Only the element at these bounds counts; see {@link firstMatchTarget}. */
+  atBounds?: ElementBounds;
 }
 
 /** One screen read: the focused element (if any) and every element that could match. */
@@ -78,6 +80,11 @@ export interface FocusNavigateOptions {
   maxSteps?: number;
   settleMs?: number;
   signal?: AbortSignal;
+  /**
+   * Only the first match in hierarchy order on each read counts, as tapOn's default selection
+   * does, so focus already resting on a later duplicate is not accepted.
+   */
+  firstMatch?: boolean;
 }
 
 export interface FocusNavigateResult {
@@ -136,7 +143,8 @@ function labelMatches(label: string, exact: boolean, fields: readonly string[]):
   });
 }
 
-export function elementMatchesTarget(element: Element, target: FocusNavigateTarget): boolean {
+/** Text-field checks: text, contentDesc and label. Each given field must match. */
+function textFieldsMatch(element: Element, target: FocusNavigateTarget): boolean {
   if (target.text && !textMatcher.createTextMatcher(target.text)(stringProp(element, "text"))) {
     return false;
   }
@@ -146,26 +154,33 @@ export function elementMatchesTarget(element: Element, target: FocusNavigateTarg
   ) {
     return false;
   }
-  if (
-    target.label &&
-    !labelMatches(target.label, Boolean(target.labelExact), [
+  return (
+    !target.label ||
+    labelMatches(target.label, Boolean(target.labelExact), [
       stringProp(element, "text"),
       stringProp(element, "content-desc"),
     ])
-  ) {
-    return false;
-  }
+  );
+}
+
+/** Identity checks: elementId (native or synthetic view-id) and resourceId. */
+function idFieldsMatch(element: Element, target: FocusNavigateTarget): boolean {
+  const resourceId = stringProp(element, "resource-id");
   if (
     target.elementId &&
-    !matchesCtrlProxyResourceId(stringProp(element, "resource-id"), target.elementId) &&
+    !matchesCtrlProxyResourceId(resourceId, target.elementId) &&
     stringProp(element, "view-id") !== target.elementId
   ) {
     return false;
   }
-  return (
-    !target.resourceId ||
-    matchesCtrlProxyResourceId(stringProp(element, "resource-id"), target.resourceId)
-  );
+  return !target.resourceId || matchesCtrlProxyResourceId(resourceId, target.resourceId);
+}
+
+export function elementMatchesTarget(element: Element, target: FocusNavigateTarget): boolean {
+  if (target.atBounds && !boundsEqual(element.bounds, target.atBounds)) {
+    return false;
+  }
+  return textFieldsMatch(element, target) && idFieldsMatch(element, target);
 }
 
 /**
@@ -182,6 +197,21 @@ export function exactFirstTarget(
   }
   const exact = { ...target, labelExact: true };
   return screen.elements.some((element) => elementMatchesTarget(element, exact)) ? exact : target;
+}
+
+/** The target for one screen read: exact-first, then pinned to the first match when asked. */
+function resolveTarget(screen: FocusScreen, options: FocusNavigateOptions): FocusNavigateTarget {
+  const exact = exactFirstTarget(screen, options.until);
+  return options.firstMatch ? firstMatchTarget(screen, exact) : exact;
+}
+
+/** Pin `target` to the first element on this screen that matches it, in hierarchy order. */
+export function firstMatchTarget(
+  screen: FocusScreen,
+  target: FocusNavigateTarget,
+): FocusNavigateTarget {
+  const first = screen.elements.find((element) => elementMatchesTarget(element, target));
+  return first ? { ...target, atBounds: first.bounds } : target;
 }
 
 function center(bounds: ElementBounds): { x: number; y: number } {
@@ -357,7 +387,7 @@ export class FocusNavigate {
       throwIfAborted(signal);
       const screen = await this.observer.read(signal);
       const { focused } = screen;
-      const until = exactFirstTarget(screen, options.until);
+      const until = resolveTarget(screen, options);
       const { focusedElement, matches } = describeFocus(screen, until);
       const key = focusKey(focused);
       if (progress.observe(key) && focusedElement) {

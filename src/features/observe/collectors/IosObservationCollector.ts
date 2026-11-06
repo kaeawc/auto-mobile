@@ -4,7 +4,8 @@ import type {
 } from "../../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
 import type { DisplayPanel } from "../../../models/DisplayPanel";
 import { sizeMatchesPanel } from "../../device/postureCommands";
-import { liveIosPanelFor, rememberLiveIosPanel } from "../ObservationDisplay";
+import { liveIosPanelFor, rememberLiveIosPanel, runnerIosPanel } from "../ObservationDisplay";
+import { appendObserveError } from "../ObserveError";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import type { BootedDevice, ObserveResult, ScreenIdentity } from "../../../models";
@@ -42,6 +43,8 @@ export interface IosObservationCollectorDeps {
   sdkWeb?: () => IosSdkWebReader;
 }
 
+const SPRINGBOARD_BUNDLE_ID = "com.apple.springboard";
+
 function activeLivePanel(
   displays: DevicectlDisplayInfo[],
   panels: DisplayPanel[],
@@ -78,7 +81,9 @@ export class DefaultIosObservationCollector implements IosObservationCollector {
       readOptions,
     });
 
-    rememberLiveIosPanel(result, await this.readLiveIosPanel(signal));
+    const livePanel = await this.readLiveIosPanel(signal);
+    rememberLiveIosPanel(result, livePanel);
+    this.dropHomeScreenOfOtherPanel(result, livePanel);
     this.applyIosScreenMetadata(result);
     this.applyLiveIosPanelSize(result);
     this.applyIosInsetsAndRotation(result);
@@ -142,6 +147,31 @@ export class DefaultIosObservationCollector implements IosObservationCollector {
     const merged = await mergeIosSdkWebInto(result.viewHierarchy, reader, signal);
     if (merged && !result.backend) {
       result.backend = "sdk";
+    }
+  }
+
+  /**
+   * The runner only ever sees the cover panel's SpringBoard scene. After an unfold from the home
+   * screen the active panel is the inner one, so its tree would describe the wrong panel under
+   * the inner label and taps would land in the cover frame (#17046).
+   */
+  private dropHomeScreenOfOtherPanel(
+    result: ObserveResult,
+    livePanel: DisplayPanel | undefined,
+  ): void {
+    const hierarchy = result.viewHierarchy;
+    if (!livePanel || hierarchy?.packageName !== SPRINGBOARD_BUNDLE_ID) {
+      return;
+    }
+    const runnerPanel = runnerIosPanel(this.deps.device().displays?.panels ?? [], hierarchy);
+    if (runnerPanel && runnerPanel.key !== livePanel.key) {
+      // Report the gap instead of the other panel's elements under this panel's label; a thrown
+      // error here would also degrade the observation setPosture and the action tools take.
+      result.viewHierarchy = undefined;
+      appendObserveError(result, {
+        phase: "viewHierarchy",
+        message: `The home screen is not observable on the ${livePanel.role} panel: the runner only sees the ${runnerPanel.role} panel's SpringBoard. Launch an app, or setPosture closed to return to the ${runnerPanel.role} panel.`,
+      });
     }
   }
 

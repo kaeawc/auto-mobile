@@ -3,10 +3,18 @@ export interface VisionosTargetApps {
   get(deviceId: string): string | undefined;
   launched(deviceId: string, bundleId: string): void;
   terminated(deviceId: string, bundleId: string): void;
+  /** The app left the device: it stops being the target, and listeners hear about it. */
+  uninstalled(deviceId: string, bundleId: string): void;
 }
 
-export class InMemoryVisionosTargetApps implements VisionosTargetApps {
+/** Tells the runner lifecycle that an app was uninstalled, so a runner automating it is dead. */
+export interface VisionosAppUninstalls {
+  onUninstalled(listener: (deviceId: string, bundleId: string) => void): void;
+}
+
+export class InMemoryVisionosTargetApps implements VisionosTargetApps, VisionosAppUninstalls {
   private readonly apps = new Map<string, string>();
+  private readonly uninstallListeners: Array<(deviceId: string, bundleId: string) => void> = [];
 
   get(deviceId: string): string | undefined {
     return this.apps.get(deviceId);
@@ -22,6 +30,17 @@ export class InMemoryVisionosTargetApps implements VisionosTargetApps {
       this.apps.delete(deviceId);
     }
   }
+
+  uninstalled(deviceId: string, bundleId: string): void {
+    this.terminated(deviceId, bundleId);
+    for (const listener of this.uninstallListeners) {
+      listener(deviceId, bundleId);
+    }
+  }
+
+  onUninstalled(listener: (deviceId: string, bundleId: string) => void): void {
+    this.uninstallListeners.push(listener);
+  }
 }
 
-export const visionosTargetApps: VisionosTargetApps = new InMemoryVisionosTargetApps();
+export const visionosTargetApps = new InMemoryVisionosTargetApps();

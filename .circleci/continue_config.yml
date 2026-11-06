@@ -531,6 +531,7 @@ jobs:
             scripts/ci/run-bats.sh unit 2>&1 | tee ci-logs/bats-unit.log
       - run:
           name: "Run BATS Integration Tests"
+          when: always
           command: |
             mkdir -p ci-logs
             set -o pipefail

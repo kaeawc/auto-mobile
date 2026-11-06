@@ -144,6 +144,8 @@ commands:
           command: |
             bun_version="$(jq -r '.packageManager | sub("^bun@"; "")' package.json)"
             curl -fsSL https://bun.sh/install | bash -s "bun-v${bun_version}"
+            # The installer leaves no `bunx` on PATH here; bun runs as bunx when invoked by that name.
+            ln -sf "${HOME}/.bun/bin/bun" "${HOME}/.bun/bin/bunx"
             echo 'export PATH="${HOME}/.bun/bin:${PATH}"' >> "${BASH_ENV}"
 
   # Mirror of .github/actions/setup-auto-mobile-npm-package: Bun, ripgrep,
@@ -180,7 +182,7 @@ commands:
             NO_COLOR: "1"
           command: |
             mkdir -p ci-logs
-            { bunx turbo run build --output-logs=errors-only; } 2>&1 | tee -a ci-logs/setup.log
+            { bun x turbo run build --output-logs=errors-only; } 2>&1 | tee -a ci-logs/setup.log
       - run:
           name: "Globally Install AutoMobile"
           command: |
@@ -369,7 +371,7 @@ jobs:
             NO_COLOR: "1"
           command: |
             mkdir -p ci-logs
-            { bunx turbo run lint --output-logs=errors-only --log-order=grouped; } 2>&1 | tee -a ci-logs/build-and-test.log
+            { bun x turbo run lint --output-logs=errors-only --log-order=grouped; } 2>&1 | tee -a ci-logs/build-and-test.log
       - run:
           name: "Check stdlib-first dependency decisions"
           command: |

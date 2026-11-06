@@ -251,6 +251,14 @@ function notificationSteps(): SmokeStep[] {
       { action: "tap", notification: { ...notification, tapActionLabel: notificationActionLabel } },
       `tap the "${notificationActionLabel}" action`,
     ),
+    // The action reuses the running activity, whose list can still be scrolled down to the
+    // post row; the status line sits above the action rows, so scroll back up to it.
+    step(
+      "scroll-to-status",
+      "swipeOn",
+      { direction: "down", lookFor: { text: notificationActionStatus } },
+      `scroll the list until "${notificationActionStatus}" is visible`,
+    ),
     observeStep(
       "observe-notification-action",
       `the fixture reports "${notificationActionStatus}"`,

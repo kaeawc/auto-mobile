@@ -700,10 +700,10 @@ exists, and runs `scripts/ci/wear-smoke/wearSmoke.ts`. The plan observes the wat
 `isScreenRound: true`), then with the fixture installs it with its permissions granted, launches
 it, scrolls to a list row, taps it, goes back, moves the rotary picker with `rotaryScroll`, posts
 the fixture notification, goes home, finds the notification and taps its `Archive` action with
-`systemTray`, checks the app's status line names that action, and enters and exits `ambient`. Without the fixture only the device-level steps run, with a warning and a summary note.
-The fixture texts the plan expects live in `WEAR_FIXTURE` in `wearSmoke.ts` and mirror
-`WearFixtureCatalog` in the fixture. Step JSON,
-screenshots, `summary.md`, the fixture build log and emulator diagnostics land in
+`systemTray`, scrolls back up to the app's status line and checks it names that action, and
+enters and exits `ambient`. Without the fixture only the device-level steps run, with a warning and
+a summary note. The fixture texts the plan expects live in `WEAR_FIXTURE` in `wearSmoke.ts` and
+mirror `WearFixtureCatalog` in the fixture. Step JSON, screenshots, `summary.md`, the fixture build log and emulator diagnostics land in
 `WEAR_SMOKE_OUT_DIR` (default `scratch/wear-smoke`); `WEAR_SMOKE_BREAK_ASSERTION=1` (the
 `break-assertion` dispatch input) swaps in an impossible assertion. Both smoke lanes share
 `scripts/ci/emulator-smoke/` (the step runner and the bounded `sdkmanager` install).

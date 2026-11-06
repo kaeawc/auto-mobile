@@ -154,6 +154,7 @@ describe("buildWearSmokePlan", () => {
       "observe-home",
       "find-notification",
       "notification-action",
+      "scroll-to-status",
       "observe-notification-action",
       "ambient-enter",
     ].map((id) => ids.indexOf(id));
@@ -167,6 +168,10 @@ describe("buildWearSmokePlan", () => {
     expect(plan.find((step) => step.id === "notification-action")?.args).toMatchObject({
       action: "tap",
       notification: { ...notification, tapActionLabel: WEAR_FIXTURE.notificationActionLabel },
+    });
+    expect(plan.find((step) => step.id === "scroll-to-status")?.args).toMatchObject({
+      direction: "down",
+      lookFor: { text: WEAR_FIXTURE.notificationActionStatus },
     });
   });
 

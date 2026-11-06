@@ -501,7 +501,13 @@ jobs:
             sudo curl -fsSL -o /usr/local/bin/jq https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64
             sudo chmod +x /usr/local/bin/yq /usr/local/bin/jq
             sudo bash .github/actions/setup-ripgrep/install-ripgrep.sh --install-dir /usr/local/bin
-            sudo apt-get update -qq && sudo apt-get install -y -qq parallel
+            # gawk: the image's mawk does not support {n} interval expressions.
+            sudo apt-get update -qq && sudo apt-get install -y -qq parallel gawk
+            # Tests parse TOML with python3's tomllib (3.11+); the image has 3.10.
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+            "${HOME}/.local/bin/uv" python install 3.12
+            sudo ln -sf "$("${HOME}/.local/bin/uv" python find 3.12)" /usr/local/bin/python3
+            python3 --version
       - run:
           name: "Install Bun"
           command: |
@@ -541,7 +547,7 @@ jobs:
               printf '\n=== %s\n' "$f"
               timeout 150 bats --print-output-on-failure "$f" 2>&1 | grep -vE '^ok ' | head -60
             done < ci-logs/failing-files.txt > ci-logs/bats-failure-detail.txt 2>&1 || true
-            { for t in jq yq rg shellcheck parallel bats python3 xcrun xmllint; do printf '%s: ' "$t"; (command -v "$t" >/dev/null && "$t" --version 2>&1 | head -1) || echo missing; done; } > ci-logs/tools.txt
+            { for t in jq yq rg shellcheck parallel awk bats python3 xcrun xmllint; do printf '%s: ' "$t"; (command -v "$t" >/dev/null && "$t" --version 2>&1 | head -1) || echo missing; done; } > ci-logs/tools.txt
       - store_artifacts:
           when: always
           path: ci-logs

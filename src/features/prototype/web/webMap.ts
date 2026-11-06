@@ -1,3 +1,16 @@
+import {
+  ABSOLUTE,
+  ALIGN_SELF,
+  ARIA_HIDDEN,
+  ARIA_LABEL,
+  BACKGROUND_COLOR,
+  BORDER_BOX,
+  BORDER_RADIUS,
+  BOX_SIZING,
+  DATA_PART,
+  RELATIVE,
+  STRETCH,
+} from "./webCss";
 import { resolvePrototypeDataPointer } from "../prototypeData";
 import { bindText, record, type Raw } from "../prototypeTemplate";
 import { el, type WebElement } from "./webNodes";
@@ -26,7 +39,10 @@ export interface MapOrientation {
 }
 
 const NORTH_UP: MapOrientation = { bearing: 0, tilt: 0 };
-/** The eye sits this many map heights from the ground plane, as Mapbox GL places its camera. */
+/**
+ * The eye sits this many map heights from the ground plane, as Mapbox GL places its camera. A map
+ * that fills an axis its parent sizes takes the screen's height here (see `mapSize`).
+ */
 const EYE_DISTANCE = 1.5;
 
 const TILE_SIZE = 256;
@@ -122,13 +138,13 @@ export function wrapOffset(dx: number): number {
 
 /** A line's x coordinates as it is drawn: each one the short way round from the one before. */
 function unwrappedXs(points: readonly MapPoint[]): number[] {
-  return points.reduce<number[]>(
-    (xs, point, index) => [
-      ...xs,
-      index === 0 ? point.x : xs[index - 1]! + wrapOffset(point.x - points[index - 1]!.x),
-    ],
-    [],
-  );
+  let previous: MapPoint | undefined;
+  let x = 0;
+  return points.map((point) => {
+    x = previous ? x + wrapOffset(point.x - previous.x) : point.x;
+    previous = point;
+    return x;
+  });
 }
 
 interface Span {
@@ -137,14 +153,16 @@ interface Span {
 }
 
 function mergeSpans(spans: readonly Span[]): Span[] {
-  return spans
-    .toSorted((a, b) => a.start - b.start)
-    .reduce<Span[]>((merged, span) => {
-      const last = merged.at(-1);
-      return last && span.start <= last.end
-        ? [...merged.slice(0, -1), { start: last.start, end: Math.max(last.end, span.end) }]
-        : [...merged, span];
-    }, []);
+  const merged: Span[] = [];
+  for (const span of spans.toSorted((a, b) => a.start - b.start)) {
+    const last = merged.at(-1);
+    if (last && span.start <= last.end) {
+      merged[merged.length - 1] = { start: last.start, end: Math.max(last.end, span.end) };
+    } else {
+      merged.push(span);
+    }
+  }
+  return merged;
 }
 
 /**
@@ -194,7 +212,7 @@ function union(spans: readonly Span[]): Span {
 
 /**
  * Bounds for spans that together leave no gap round the world. Each span is placed as
- * `mapPercent`/`routePercents` draw it: whole, on the copy whose middle is nearest the framing
+ * `mapOffset`/`projectLine` draw it: whole, on the copy whose middle is nearest the framing
  * centre. Seeded on the widest span, the centre moves to the middle of the placed spans' union;
  * the bounds are then symmetric round that centre and cover every span as placed from it (at least
  * one world wide), so fitting and drawing agree and no span is clipped, even past one world.
@@ -287,7 +305,7 @@ function framing(
   scope: WebRenderScope,
   points: { markers: MapPoint[]; lines: MapPoint[][] },
   size: { width: number; height: number },
-): { view: MapFraming; orientation: MapOrientation } {
+): { view: MapFraming; orientation: MapOrientation; fitted: boolean } {
   const fitted =
     node.fit === "markers"
       ? fitFraming(points.markers, size)
@@ -295,70 +313,71 @@ function framing(
         ? fitFraming([], size, points.lines)
         : undefined;
   if (fitted) {
-    return { view: fitted, orientation: NORTH_UP };
+    return { view: fitted, orientation: NORTH_UP, fitted: true };
   }
   const camera = cameraFraming(node, scope);
   if (camera) {
-    return { view: camera, orientation: cameraOrientation(cameraRecord(node, scope)) };
+    return {
+      view: camera,
+      orientation: cameraOrientation(cameraRecord(node, scope)),
+      fitted: false,
+    };
   }
-  const view = fitFraming(points.markers, size, points.lines) ?? {
-    center: { x: 0.5, y: 0.5 },
-    worldSize: TILE_SIZE,
-  };
-  return { view, orientation: NORTH_UP };
-}
-
-/** Where a world offset from the centre falls in the box, as a percentage of each side. */
-function offsetPercent(
-  dx: number,
-  dy: number,
-  view: MapFraming,
-  size: { width: number; height: number },
-): { left: number; top: number } {
-  const round = (value: number) => Number(value.toFixed(3));
+  const all = fitFraming(points.markers, size, points.lines);
   return {
-    left: round(50 + (dx * view.worldSize * 100) / size.width),
-    top: round(50 + (dy * view.worldSize * 100) / size.height),
+    view: all ?? { center: { x: 0.5, y: 0.5 }, worldSize: TILE_SIZE },
+    orientation: NORTH_UP,
+    fitted: all !== undefined,
   };
 }
 
 /**
- * Where a world point falls in the box, as a percentage of each side (outside is 0–100 too), taking
- * the copy of the world nearest the centre so the 180° line does not split the view.
+ * Where a drawn point sits, in dp right of and below the box centre. The page places it from the
+ * centre (`calc(50% + …px)`), so CSS resolves it against the box as rendered: a camera map that
+ * fills its parent draws its points at their true zoom whatever size it takes. A fit scales the
+ * offset with the box instead (`fittedFromCentre`).
  */
-export function mapPercent(
-  point: MapPoint,
-  view: MapFraming,
-  size: { width: number; height: number },
-): { left: number; top: number } {
-  return offsetPercent(wrapOffset(point.x - view.center.x), point.y - view.center.y, view, size);
+export interface MapOffset {
+  readonly x: number;
+  readonly y: number;
+}
+
+function rounded(value: number): number {
+  // `+ 0` folds -0 into 0, so a centred point prints the same either side.
+  return Number(value.toFixed(3)) + 0;
+}
+
+/** `point` on the copy of the world nearest the framing centre, so the 180° line does not split the view. */
+function nearestCopy(point: MapPoint, view: MapFraming): MapPoint {
+  return { x: view.center.x + wrapOffset(point.x - view.center.x), y: point.y };
 }
 
 /**
- * A line's horizontal world offsets from the centre: each point the short way round from the one
- * before, the line anchored by its middle, as fitting frames it, so a line wider than half the
- * world keeps the copy it was fitted on.
+ * A line's points as drawn: each one the short way round from the one before, so a segment crossing
+ * the 180° line does not span the world, and the whole line on the copy whose middle is nearest the
+ * framing centre (as fitting frames it), so a line wider than half the world keeps that copy.
  */
-function routeOffsets(points: readonly MapPoint[], view: MapFraming): number[] {
+function drawnLine(points: readonly MapPoint[], view: MapFraming): MapPoint[] {
+  if (points.length === 0) {
+    return [];
+  }
   const xs = unwrappedXs(points);
   const middle = (Math.min(...xs) + Math.max(...xs)) / 2;
-  const shift = wrapOffset(middle - view.center.x) - middle;
-  return xs.map((x) => x + shift);
+  const shift = view.center.x + wrapOffset(middle - view.center.x) - middle;
+  return points.map((point, index) => ({ x: xs[index]! + shift, y: point.y }));
 }
 
-/**
- * A line's points in the box: the first as `mapPercent` places it, each next one the short way
- * round from the one before, so a segment crossing the 180° line does not span the world.
- */
-export function routePercents(
-  points: readonly MapPoint[],
-  view: MapFraming,
-  size: { width: number; height: number },
-): { left: number; top: number }[] {
-  const offsets = routeOffsets(points, view);
-  return points.map((point, index) =>
-    offsetPercent(offsets[index]!, point.y - view.center.y, view, size),
-  );
+/** Where an already-placed world point falls, flat and north up, in dp from the box centre. */
+function flatOffset(point: MapPoint, view: MapFraming): MapOffset {
+  return {
+    x: rounded((point.x - view.center.x) * view.worldSize),
+    y: rounded((point.y - view.center.y) * view.worldSize),
+  };
+}
+
+/** Where a world point falls, flat and north up, in dp from the box centre (nearest world copy). */
+export function mapOffset(point: MapPoint, view: MapFraming): MapOffset {
+  return flatOffset(nearestCopy(point, view), view);
 }
 
 /** A point on the turned ground plane, in dp from the box centre, before the tilt. */
@@ -368,7 +387,6 @@ interface GroundPoint {
 }
 
 type Size = { width: number; height: number };
-type Percent = { left: number; top: number };
 
 /** A point nearer than this share of the eye distance is clipped, so nothing divides by ~0. */
 const NEAR_PLANE = 0.1;
@@ -377,10 +395,15 @@ function radians(degrees: number): number {
   return (degrees * Math.PI) / 180;
 }
 
-/** A world offset from the centre turned by `-bearing` about the box centre, in dp. */
-function turnGround(offset: GroundPoint, view: MapFraming, bearing: number): GroundPoint {
-  const dx = offset.x * view.worldSize;
-  const dy = offset.y * view.worldSize;
+/** How far the perspective eye sits from the ground, in dp, for a map `height` dp tall. */
+export function eyeDistance(height: number): number {
+  return EYE_DISTANCE * height;
+}
+
+/** The world point turned by `-bearing` about the box centre, in dp. */
+function turnGround(point: MapPoint, view: MapFraming, bearing: number): GroundPoint {
+  const dx = (point.x - view.center.x) * view.worldSize;
+  const dy = (point.y - view.center.y) * view.worldSize;
   const turn = radians(-bearing);
   return {
     x: dx * Math.cos(turn) - dy * Math.sin(turn),
@@ -389,43 +412,39 @@ function turnGround(offset: GroundPoint, view: MapFraming, bearing: number): Gro
 }
 
 /** The furthest a ground point may lie toward the viewer (down the box) and still be drawn. */
-function nearLimit(tilt: number, height: number): number {
+function nearLimit(tilt: number, eye: number): number {
   const sin = Math.sin(radians(tilt));
-  return sin > 0 ? (EYE_DISTANCE * height * (1 - NEAR_PLANE)) / sin : Infinity;
+  return sin > 0 ? (eye * (1 - NEAR_PLANE)) / sin : Infinity;
 }
 
-/** A ground point tilted away under the perspective eye, as a percentage of each side. */
-function projectGround(point: GroundPoint, size: Size, tilt: number): Percent {
-  const eye = EYE_DISTANCE * size.height;
+/** A ground point tilted away under a perspective eye `eye` dp out, in dp from the box centre. */
+function projectGround(point: GroundPoint, eye: number, tilt: number): MapOffset {
   const scale = eye / (eye - point.y * Math.sin(radians(tilt)));
-  const round = (value: number) => Number(value.toFixed(3));
   return {
-    left: round(50 + (point.x * scale * 100) / size.width),
-    top: round(50 + (point.y * Math.cos(radians(tilt)) * scale * 100) / size.height),
+    x: rounded(point.x * scale),
+    y: rounded(point.y * Math.cos(radians(tilt)) * scale),
   };
 }
 
 /**
- * Where a world point falls under a turned camera, as a percentage of each side: the map turns by
- * `-bearing` about the box centre, then the ground plane tilts away under a perspective eye
- * `EYE_DISTANCE` heights out, exactly as `groundTransform` turns the canvas. Undefined for a point
- * at or behind the near plane. North up and straight down, this is `mapPercent`; like it, a
- * point takes the copy of the world nearest the centre.
+ * Where a world point falls under a turned camera, in dp from the box centre: the map turns by
+ * `-bearing` about the centre, then the ground plane tilts away under a perspective eye `eye` dp
+ * out, exactly as `groundTransform` turns the canvas. Undefined for a point at or behind the near
+ * plane. North up and straight down, this is `mapOffset`.
  */
-export function projectPercent(
+export function projectOffset(
   point: MapPoint,
   view: MapFraming,
-  size: Size,
+  eye: number,
   orientation: MapOrientation,
-): Percent | undefined {
+): MapOffset | undefined {
   if (orientation.bearing === 0 && orientation.tilt === 0) {
-    return mapPercent(point, view, size);
+    return mapOffset(point, view);
   }
-  const offset = { x: wrapOffset(point.x - view.center.x), y: point.y - view.center.y };
-  const ground = turnGround(offset, view, orientation.bearing);
-  return ground.y > nearLimit(orientation.tilt, size.height)
+  const ground = turnGround(nearestCopy(point, view), view, orientation.bearing);
+  return ground.y > nearLimit(orientation.tilt, eye)
     ? undefined
-    : projectGround(ground, size, orientation.tilt);
+    : projectGround(ground, eye, orientation.tilt);
 }
 
 /**
@@ -435,20 +454,15 @@ export function projectPercent(
 export function projectLine(
   points: readonly MapPoint[],
   view: MapFraming,
-  size: Size,
+  eye: number,
   orientation: MapOrientation,
-): Percent[][] {
+): MapOffset[][] {
+  const drawn = drawnLine(points, view);
   if (orientation.bearing === 0 && orientation.tilt === 0) {
-    return points.length > 0 ? [routePercents(points, view, size)] : [];
+    return drawn.length > 0 ? [drawn.map((point) => flatOffset(point, view))] : [];
   }
-  if (points.length === 0) {
-    return [];
-  }
-  const limit = nearLimit(orientation.tilt, size.height);
-  const offsets = routeOffsets(points, view);
-  const ground = points.map((point, index) =>
-    turnGround({ x: offsets[index]!, y: point.y - view.center.y }, view, orientation.bearing),
-  );
+  const limit = nearLimit(orientation.tilt, eye);
+  const ground = drawn.map((point) => turnGround(point, view, orientation.bearing));
   const runs: GroundPoint[][] = [];
   let run: GroundPoint[] = [];
   const at = (from: GroundPoint, to: GroundPoint): GroundPoint => {
@@ -472,16 +486,17 @@ export function projectLine(
   runs.push(run);
   return runs
     .filter((points) => points.length > 0)
-    .map((points) => points.map((point) => projectGround(point, size, orientation.tilt)));
+    .map((points) => points.map((point) => projectGround(point, eye, orientation.tilt)));
 }
 
 /**
- * How far from the box centre the turned ground must reach to cover the whole box: each box
- * corner traced back through the perspective onto the ground plane. The bearing turns the plane
- * about the centre, so the farthest corner's distance covers every bearing.
+ * How far from the box centre the turned ground must reach to cover a `size` box: each box corner
+ * traced back through the perspective onto the ground plane. The bearing turns the plane about the
+ * centre, so the farthest corner's distance covers every bearing, and a smaller box (a `fill` map
+ * rendering under the size it is bounded by) needs less.
  */
 export function groundReach(size: Size, tilt: number): number {
-  const eye = EYE_DISTANCE * size.height;
+  const eye = eyeDistance(size.height);
   const [sin, cos] = [Math.sin(radians(tilt)), Math.cos(radians(tilt))];
   const corners = [-1, 1].flatMap((sx) =>
     [-1, 1].map((sy) => ({ X: (sx * size.width) / 2, Y: (sy * size.height) / 2 })),
@@ -496,42 +511,112 @@ export function groundReach(size: Size, tilt: number): number {
   );
 }
 
-/** The CSS transform that turns the ground canvas the way `projectPercent` turns points. */
+/** The CSS transform that turns the ground canvas the way `projectOffset` turns points. */
 export function groundTransform(orientation: MapOrientation, height: number): string {
-  const eye = Number((EYE_DISTANCE * height).toFixed(3));
+  const eye = rounded(eyeDistance(height));
   return `perspective(${eye}px) rotateX(${orientation.tilt}deg) rotate(${-orientation.bearing}deg)`;
 }
 
-/** A `{dp}` dimension, as the style maps it to CSS; anything else (unsized, `fill`) falls back. */
-function dpSize(value: unknown, fallback: number): number {
-  const dp = record(value)?.dp;
-  return typeof dp === "number" && dp > 0 ? dp : fallback;
+/** One offset from the box centre as a CSS position: `50%` when centred. */
+export function fromCentre(dp: number): string {
+  return dp === 0 ? "50%" : `calc(50% ${dp < 0 ? "-" : "+"} ${Math.abs(dp)}px)`;
 }
 
-function routeLayer(lines: MapLine[], project: (points: MapPoint[]) => Percent[][]) {
+/**
+ * One offset from the box centre for a fitted framing, scaled by how the rendered box compares
+ * with the `size` it was fitted in: `min(100cqw / width, 100cqh / height)` per dp, the box being a
+ * size container. A box rendered at the fitted size places the point exactly as `fromCentre`; a
+ * box its parent renders narrower or shorter shrinks the fit uniformly, so the points stay inside
+ * it and keep their shape, as `routeLayer`'s `meet` viewBox scales the lines.
+ */
+export function fittedFromCentre(dp: number, size: Size): string {
+  if (dp === 0) {
+    return "50%";
+  }
+  const share = (side: number) => Number(((Math.abs(dp) / side) * 100).toFixed(4));
+  return `calc(50% ${dp < 0 ? "-" : "+"} min(${share(size.width)}cqw, ${share(size.height)}cqh))`;
+}
+
+/** A `{dp}` dimension, as the style maps it to CSS; undefined for anything else. */
+function dpSize(value: unknown): number | undefined {
+  const dp = record(value)?.dp;
+  return typeof dp === "number" && dp > 0 ? dp : undefined;
+}
+
+/**
+ * The size the map frames and projects against: its `{dp}` size; any other height but `fill`
+ * (unsized, `wrap`) leaves the box at its 200 dp. An axis its parent sizes (`fill`, a `weight` on
+ * the parent's main axis, or stretching across a column) cannot be known here, so it takes the
+ * screen's, the most it can render at: the eye then sits far enough out that no horizon shows in
+ * the box, and the ground's reach covers it. A camera's points are placed from the centre in dp,
+ * so they land true whatever size the box renders at; a fit's scale with the box (see
+ * `fittedFromCentre`).
+ */
+export function mapSize(
+  style: Raw | undefined,
+  screen: { readonly width: number; readonly height: number },
+  parentAxis?: "row" | "column",
+): Size {
+  // A weight sets `flex: w w 0` on the parent's main axis, which overrides any size there.
+  const weighted = typeof style?.weight === "number" ? parentAxis : undefined;
+  return {
+    width: (weighted === "row" ? undefined : dpSize(style?.width)) ?? screen.width,
+    height:
+      weighted === "column" || style?.height === "fill"
+        ? screen.height
+        : (dpSize(style?.height) ?? DEFAULT_MAP_HEIGHT),
+  };
+}
+
+/**
+ * The route lines in an SVG whose origin is the box centre, one user unit a dp. Under a camera the
+ * SVG is a pixel square at the centre (a zero-size one draws nothing), so the lines keep their zoom
+ * at any rendered size. Under a fit (`fitted` is the size it was fitted in) the SVG is the box's
+ * content size (`100cqw` × `100cqh`) about the same centre, with that size as a `meet` viewBox, so a box rendered smaller shrinks the lines uniformly, as
+ * `fittedFromCentre` places the pins; the stroke keeps its dp width.
+ */
+function routeLayer(
+  lines: MapLine[],
+  project: (points: MapPoint[]) => MapOffset[][],
+  fitted: Size | undefined,
+) {
+  const frame: { attrs: Record<string, string>; style: Record<string, string> } = fitted
+    ? {
+        attrs: {
+          viewBox: `${-fitted.width / 2} ${-fitted.height / 2} ${fitted.width} ${fitted.height}`,
+          preserveAspectRatio: "xMidYMid meet",
+          [ARIA_HIDDEN]: "true",
+        },
+        // Sized in container units, the content box `fittedFromCentre` scales the pins by, and
+        // centred where the pins' `50%` is, so padding cannot part the lines from the pins.
+        style: {
+          position: ABSOLUTE,
+          left: "50%",
+          top: "50%",
+          width: "100cqw",
+          height: "100cqh",
+          transform: "translate(-50%,-50%)",
+          overflow: "visible",
+        },
+      }
+    : {
+        attrs: { width: "1", height: "1", [ARIA_HIDDEN]: "true" },
+        style: { position: ABSOLUTE, left: "50%", top: "50%", overflow: "visible" },
+      };
   return el(
     "svg",
-    {
-      attrs: { viewBox: "0 0 100 100", preserveAspectRatio: "none", "aria-hidden": "true" },
-      style: {
-        position: "absolute",
-        inset: "0",
-        width: "100%",
-        height: "100%",
-        overflow: "visible",
-      },
-    },
+    frame,
     lines.flatMap((line) =>
       project(line.points).map((run) =>
         el("polyline", {
           attrs: {
-            points: run.map(({ left, top }) => `${left},${top}`).join(" "),
+            points: run.map(({ x, y }) => `${x},${y}`).join(" "),
             fill: "none",
             stroke: line.color,
             "stroke-width": String(line.width),
             "stroke-linecap": "round",
             "stroke-linejoin": "round",
-            "vector-effect": "non-scaling-stroke",
+            ...(fitted ? { "vector-effect": "non-scaling-stroke" } : {}),
           },
         }),
       ),
@@ -541,23 +626,24 @@ function routeLayer(lines: MapLine[], project: (points: MapPoint[]) => Percent[]
 
 function markerPin(
   marker: MapMarker,
-  at: { left: number; top: number },
+  at: MapOffset,
   color: string,
+  place: (dp: number) => string,
 ): WebElement {
   return el("span", {
-    attrs: { role: "img", "aria-label": marker.title, title: marker.title, "data-part": "marker" },
+    attrs: { role: "img", [ARIA_LABEL]: marker.title, title: marker.title, [DATA_PART]: "marker" },
     style: {
-      position: "absolute",
-      left: `${at.left}%`,
-      top: `${at.top}%`,
+      position: ABSOLUTE,
+      left: place(at.x),
+      top: place(at.y),
       width: "20px",
       height: "20px",
       transform: "translate(-50%,-100%) rotate(-45deg)",
       "transform-origin": "50% 100%",
-      "border-radius": "50% 50% 50% 0",
-      "background-color": color,
+      [BORDER_RADIUS]: "50% 50% 50% 0",
+      [BACKGROUND_COLOR]: color,
       border: "2px solid #fff",
-      "box-sizing": "border-box",
+      [BOX_SIZING]: BORDER_BOX,
     },
   });
 }
@@ -565,17 +651,17 @@ function markerPin(
 /**
  * The canvas on its own layer, turned like the camera: a square centred on the box that reaches
  * `groundReach` (plus a pixel) out, so the tilted, turned plane covers the box at any aspect ratio.
- * A `fill` box can render larger than the dp size the reach is computed from, so the square is also
- * at least three times the box's longer side (`cqmax`, the box being a size container), which
- * covers it at any bearing; the box clips the rest.
+ * A box sized by its parent is bounded by the screen size the reach is computed from; the square is
+ * also at least three times the box's longer side (`cqmax`, the box being a size container), which
+ * covers a flat box at any bearing; the box clips the rest.
  */
 function groundLayer(background: string, orientation: MapOrientation, size: Size): WebElement {
   const reach = Math.ceil(groundReach(size, orientation.tilt)) + 1;
   const side = `max(${reach * 2}px,300cqmax)`;
   return el("div", {
-    attrs: { "aria-hidden": "true", "data-part": "ground" },
+    attrs: { [ARIA_HIDDEN]: "true", [DATA_PART]: "ground" },
     style: {
-      position: "absolute",
+      position: ABSOLUTE,
       left: "50%",
       top: "50%",
       width: side,
@@ -604,13 +690,15 @@ const mapRenderer =
   (kit: WebRenderKit): NodeRenderer =>
   (node, scope) => {
     const style = record(node.style);
-    const size = {
-      width: dpSize(style?.width, scope.screenWidth),
-      height: dpSize(style?.height, DEFAULT_MAP_HEIGHT),
-    };
+    const size = mapSize(
+      style,
+      { width: scope.screenWidth, height: scope.screenHeight },
+      scope.style.parentAxis,
+    );
+    const eye = eyeDistance(size.height);
     const markers = mapMarkers(node, scope);
     const lines = mapLines(node, scope);
-    const { view, orientation } = framing(
+    const { view, orientation, fitted } = framing(
       node,
       scope,
       {
@@ -622,24 +710,34 @@ const mapRenderer =
     const turned = orientation.bearing !== 0 || orientation.tilt !== 0;
     const background = MAP_BACKGROUNDS[String(node.mapStyle)] ?? MAP_BACKGROUNDS.streets!;
     const { attrs, style: css } = kit.base(node, scope, {
-      position: "relative",
+      position: RELATIVE,
       overflow: "hidden",
       background: turned ? MAP_BACKGROUNDS.plain! : background,
-      // Lets the ground layer size itself from the box as rendered (`cqmax`); the map's content is
-      // all absolutely placed, so size containment changes nothing else.
-      ...(turned ? { "container-type": "size" } : {}),
-      "align-self": "stretch",
+      // Lets the ground layer (`cqmax`) and a fit's pins (`cqw`/`cqh`) size themselves from the box
+      // as rendered; the map's content is all absolutely placed, so size containment changes
+      // nothing else.
+      ...(turned || fitted ? { "container-type": "size" } : {}),
+      [ALIGN_SELF]: STRETCH,
       height: `${DEFAULT_MAP_HEIGHT}px`,
     });
     const pin = cssColor("error", scope.style) ?? "#b3261e";
-    return el("div", { attrs: { "aria-label": "Map", ...attrs, role: "img" }, style: css }, [
+    // A fit chose its zoom for `size`, so its points scale with the box as rendered; a camera's
+    // zoom is fixed, so its points stay in dp.
+    const place = fitted ? (dp: number) => fittedFromCentre(dp, size) : fromCentre;
+    return el("div", { attrs: { [ARIA_LABEL]: "Map", ...attrs, role: "img" }, style: css }, [
       ...(turned ? [groundLayer(background, orientation, size)] : []),
       ...(lines.length > 0
-        ? [routeLayer(lines, (points) => projectLine(points, view, size, orientation))]
+        ? [
+            routeLayer(
+              lines,
+              (points) => projectLine(points, view, eye, orientation),
+              fitted ? size : undefined,
+            ),
+          ]
         : []),
       ...markers.flatMap((marker) => {
-        const at = projectPercent(marker.point, view, size, orientation);
-        return at ? [markerPin(marker, at, pin)] : [];
+        const at = projectOffset(marker.point, view, eye, orientation);
+        return at ? [markerPin(marker, at, pin, place)] : [];
       }),
     ]);
   };

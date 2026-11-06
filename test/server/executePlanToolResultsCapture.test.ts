@@ -10,6 +10,7 @@ import {
 } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { z } from "zod/v4";
 import type { BootedDevice } from "../../src/models";
 import type { ElementSelectionStrategy } from "../../src/models/ElementSelectionStrategy";
 import { AndroidSegmentedPlanVideoSession } from "../../src/server/androidSegmentedPlanVideoSession";
@@ -42,6 +43,16 @@ const CAPTURED_DIR = path.join(
 const FIXTURE = path.join(CAPTURED_DIR, "execute-plan-tool-results.json");
 // A plan whose third step fails, so the runner's recovery context is built from a real failure.
 const FAILED_FIXTURE = path.join(CAPTURED_DIR, "execute-plan-failed-step.json");
+// A plan whose step succeeds but whose expectation does not hold (#16817), captured once per
+// platform: the JUnit runner and XCTestRunner each parse their own copy.
+const EXPECTATION_FIXTURES = {
+  android: path.join(CAPTURED_DIR, "execute-plan-failed-expectation.json"),
+  ios: path.join(
+    import.meta.dir,
+    "../../ios/XCTestRunner/Sources/XCTestRunnerTests/Resources/Captured/execute-plan-failed-expectation.json",
+  ),
+};
+const iosDevice: BootedDevice = { platform: "ios", deviceId: "SIM-UDID-1", name: "Fake iPhone" };
 
 const device: BootedDevice = { platform: "android", deviceId: "emulator-5554", name: "Fake" };
 
@@ -86,6 +97,20 @@ steps:
         text: Missing
 `;
 
+const EXPECTATION_PLAN = `name: counter-increments
+steps:
+  - tool: tapOn
+    params:
+      action: tap
+      selector:
+        text: Item
+    expectations:
+      - type: textEquals
+        selector:
+          testTag: counter
+        text: "1"
+`;
+
 function selectedElement(text: string, totalMatches: number, strategy: ElementSelectionStrategy) {
   return {
     text,
@@ -101,6 +126,7 @@ describe("executePlan toolResults capture (#10090)", () => {
   let restoreSuiteTools: () => void;
   let restoreTools: () => void;
   let restoreHandler: () => void;
+  let target: BootedDevice;
 
   beforeAll(() => {
     restoreSuiteTools = preserveToolRegistry();
@@ -113,6 +139,7 @@ describe("executePlan toolResults capture (#10090)", () => {
 
   beforeEach(() => {
     restoreTools = preserveToolRegistry();
+    target = device;
     interactionDeps.tapOnElementFactory = () => ({
       execute: async (params) => {
         const label = params.text ?? "";
@@ -135,7 +162,7 @@ describe("executePlan toolResults capture (#10090)", () => {
     });
     const tap = ToolRegistry.getToolForPlan("tapOn")!;
     const handler = spyOn(tap, "handler").mockImplementation(async (params, progress, signal) =>
-      finalizeToolResponse(await tap.deviceAwareHandler!(device, params, progress, signal), {
+      finalizeToolResponse(await tap.deviceAwareHandler!(target, params, progress, signal), {
         name: tap.name,
         internal: true,
       }),
@@ -173,9 +200,9 @@ describe("executePlan toolResults capture (#10090)", () => {
     };
     return new PlanExecutionOrchestrator(
       {
-        device,
+        device: target,
         request: {
-          platform: "android",
+          platform: target.platform,
           planContent,
           startStep: 0,
           deviceAllocationTimeoutMs: 5000,
@@ -228,4 +255,42 @@ describe("executePlan toolResults capture (#10090)", () => {
     }
     expect(captured).toBe(readFileSync(FAILED_FIXTURE, "utf8"));
   });
+
+  for (const platform of ["android", "ios"] as const) {
+    test(`a failed ${platform} expectation fails the plan and names what was observed (#16817)`, async () => {
+      target = platform === "android" ? device : iosDevice;
+      // The failure observation's capture time is the only clock read the capture keeps.
+      const now = spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+      ToolRegistry.register(
+        "observe",
+        "fake observe",
+        z.object({ waitFor: z.unknown().optional() }).passthrough(),
+        async () =>
+          createStructuredToolResponse({
+            awaitTimeout: true,
+            awaitDuration: 5000,
+            elements: { text: [{ text: "Count: 0", resourceId: "counter" }] },
+            candidates: [{ text: "Count: 0", "resource-id": "counter" }],
+          }),
+      );
+      try {
+        const result = await runOrchestrator(EXPECTATION_PLAN);
+
+        expect(result.success).toBe(false);
+        expect(result.failedStep).toMatchObject({ stepIndex: 0, tool: "tapOn" });
+        expect(result.failedStep?.error).toBe(
+          'Expectation 1/1 (textEquals testTag="counter" text="1") failed: not satisfied after 5000ms; 1 near match(es); observed texts: "Count: 0"',
+        );
+
+        const envelope = withIsErrorOnFailure(createStructuredToolResponse(result), result.success);
+        const captured = `${JSON.stringify(envelope, null, 2)}\n`;
+        if (process.env.UPDATE_CAPTURED_FIXTURES === "1") {
+          writeFileSync(EXPECTATION_FIXTURES[platform], captured);
+        }
+        expect(captured).toBe(readFileSync(EXPECTATION_FIXTURES[platform], "utf8"));
+      } finally {
+        now.mockRestore();
+      }
+    });
+  }
 });

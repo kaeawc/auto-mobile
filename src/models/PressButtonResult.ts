@@ -9,5 +9,7 @@ export interface PressButtonResult extends BaseActionResult {
   code?: string;
   retryable?: boolean;
   dispatched?: boolean;
+  /** How long the key was held, when the press was a long press (#16734). */
+  durationMs?: number;
   acknowledged?: boolean;
 }

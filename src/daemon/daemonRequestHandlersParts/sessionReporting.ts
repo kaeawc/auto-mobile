@@ -31,23 +31,59 @@ export async function sessionNotFoundResult(
 ): Promise<DaemonMethodResult> {
   return notFoundResult(
     sessionId,
-    await lookupReleasedSessionReason(manager, sessionId),
+    await lookupReleasedSessionEnd(manager, sessionId),
     daemonInstance,
   );
 }
 
+/** How a released UUID ended: its reason and, for `cli-idle-timeout`, its idle window (#16937). */
+export interface ReleasedSessionEnd {
+  releaseReason: string | undefined;
+  idleTimeoutMs?: number;
+}
+
 export function notFoundResult(
   sessionId: string,
-  releaseReason: string | undefined,
+  end: ReleasedSessionEnd,
   daemonInstance?: string,
 ): DaemonMethodResult {
   return {
     success: false,
     error: `Session not found: ${sessionId}`,
     code: DAEMON_SESSION_NOT_FOUND_CODE,
-    ...releasedSessionNotFoundFields(releaseReason),
+    ...releasedSessionNotFoundFields(end.releaseReason, end.idleTimeoutMs),
     ...(daemonInstance !== undefined ? { daemonInstance } : {}),
   };
+}
+
+/** The recorded end of a UUID (best-effort): its reason, plus the CLI window for a cli-idle end. */
+export async function lookupReleasedSessionEnd(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+): Promise<ReleasedSessionEnd> {
+  const releaseReason = await lookupReleasedSessionReason(manager, sessionId);
+  const idleTimeoutMs = await lookupReleasedSessionIdleTimeoutMs(manager, sessionId, releaseReason);
+  return idleTimeoutMs === undefined ? { releaseReason } : { releaseReason, idleTimeoutMs };
+}
+
+/**
+ * The CLI idle window of a UUID released as `cli-idle-timeout` (#16937), or undefined for any
+ * other reason, an unknown window, or a failed lookup (best-effort, like the reason).
+ */
+export async function lookupReleasedSessionIdleTimeoutMs(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+  releaseReason: string | undefined,
+): Promise<number | undefined> {
+  if (releaseReason !== "cli-idle-timeout") {
+    return undefined;
+  }
+  try {
+    return await manager.getReleasedSessionIdleTimeoutMs?.(sessionId);
+  } catch (error) {
+    logger.warn(`Idle window lookup failed for ${sessionId}: ${errorMessage(error)}`, error);
+    return undefined;
+  }
 }
 
 /** The recorded release reason, or undefined when unknown or the lookup fails (best-effort). */

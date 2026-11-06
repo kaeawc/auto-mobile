@@ -220,13 +220,58 @@ function spillOversizedPayload(
 ): Record<string, unknown> {
   // The request-local writer shares the complete rendering with the size probe.
   const artifact = writeJsonArtifact(ctx, "ToolResponse", payload);
-  const spilled = { ...pickInlineResidue(ctx, payload), ...artifact };
+  const spilled = {
+    ...withInventorySpillShape(ctx, payload, pickInlineResidue(ctx, payload)),
+    ...artifact,
+  };
   // The per-field cap is counted in UTF-16 code units, so multi-byte text can
   // still serialize past the ceiling across every retained field. Fall back to
   // markers-only, whose size does not depend on the input at all.
   return exceedsInlineLimit(spilled, hasStructured, serialization)
-    ? { ...markerResidue(ctx, payload), ...artifact }
+    ? { ...withInventorySpillShape(ctx, payload, markerResidue(ctx, payload)), ...artifact }
     : spilled;
+}
+
+/**
+ * Inventory tools whose callers validate the inline result for completeness
+ * (#17235). The generic residue cuts the required list to a prefix while the
+ * total `count` survives, and drops the optional `configuredInventory`, so a
+ * spilled inventory contradicted its own contract. For these tools the spill
+ * keeps the named summary fields and states how many list entries are inline.
+ */
+const INVENTORY_SPILL_SHAPES: Readonly<
+  Record<string, { listKey: string; returnedKey: string; summaryKeys: readonly string[] }>
+> = {
+  listDeviceImages: {
+    listKey: "images",
+    returnedKey: "imagesReturned",
+    summaryKeys: ["configuredInventory"],
+  },
+};
+
+function withInventorySpillShape(
+  ctx: FinalizeToolResponseContext,
+  payload: Record<string, unknown>,
+  residue: Record<string, unknown>,
+): Record<string, unknown> {
+  const shape = INVENTORY_SPILL_SHAPES[ctx.name];
+  const fullList = shape ? payload[shape.listKey] : undefined;
+  if (!shape || !Array.isArray(fullList)) {
+    return residue;
+  }
+  const inlineList = Array.isArray(residue[shape.listKey]) ? residue[shape.listKey] : [];
+  const returned = (inlineList as unknown[]).length;
+  return {
+    ...residue,
+    ...Object.fromEntries(
+      shape.summaryKeys
+        .filter((key) => payload[key] !== undefined)
+        .map((key) => [key, boundResidueField(payload[key])]),
+    ),
+    [shape.listKey]: inlineList,
+    truncated: returned < fullList.length,
+    [shape.returnedKey]: returned,
+  };
 }
 
 function inlineResidueKeys(ctx: FinalizeToolResponseContext): readonly string[] {

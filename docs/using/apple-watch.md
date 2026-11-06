@@ -43,7 +43,9 @@ A watch with that name (and `deviceId`, if given) and the same runtime and devic
 A new watch is created only when no watch has that name, no `deviceId` is given and device
 creation is enabled. Two watches with the same name need `deviceId`. A watch with
 that name but a different runtime or device type is an error: use another name, or delete that
-watch first. `resources`, `enableTools` and `readiness: "automation"` are refused.
+watch first. A missing `spec` or field, or an identifier the host does not list, is refused with
+an example and the accepted identifiers. `resources`, `enableTools` and `readiness: "automation"`
+are refused.
 
 Boot an existing watch and start a session with `startDevice`, naming it by exact UDID or exact
 name. Every other option is refused.
@@ -76,6 +78,7 @@ Besides the device management above, these tools accept a watch:
 - `swipeOn`
 - `pressButton`
 - `rotateCrown`
+- `postNotification`
 - `installApp`
 - `uninstallApp`
 - `listApps`
@@ -121,8 +124,10 @@ Every other tool refuses a watch before doing anything, with:
 ## Limits
 
 - No physical Apple Watch and no paired iPhone (see above).
-- The automation runner reads the view hierarchy of its own bundled watch app only, and its target
-  cannot be changed yet. For any other app, including yours, `observe` is screenshot-only and
+- The automation runner reads the view hierarchy of one target app at a time. It starts on its own
+  bundled watch app; `launchApp` restarts it targeting the launched app, and fails with the reason
+  if that restart fails even though the app itself launched. A runner AutoMobile did not start
+  keeps its target. For any app other than the runner's target, `observe` is screenshot-only and
   `tapOn` and `swipeOn` with `lookFor` cannot match elements.
 - No text input, pinch, multi-touch or drag.
 - Prototypes do not run on a watch. To mock up a watch screen, use a watch-sized prototype spec on a

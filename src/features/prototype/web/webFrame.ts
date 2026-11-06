@@ -1,3 +1,22 @@
+import {
+  ABSOLUTE,
+  ALIGN_ITEMS,
+  ARIA_HIDDEN,
+  ARIA_LABEL,
+  BACKGROUND_COLOR,
+  BORDER_RADIUS,
+  CENTER,
+  COLUMN,
+  DATA_CHROME,
+  FLEX,
+  FLEX_DIRECTION,
+  FONT_FAMILY,
+  FONT_SIZE,
+  JUSTIFY_CONTENT,
+  POINTER_EVENTS,
+  RELATIVE,
+  Z_INDEX,
+} from "./webCss";
 import type { DeviceFrame } from "./deviceFrames";
 import { el, type WebElement } from "./webNodes";
 import { renderStatusBar, type WebStatusBarContent } from "./webStatusBar";
@@ -35,16 +54,16 @@ function cutout(frame: DeviceFrame, orientation: WebOrientation): WebElement[] {
   const [width, height] = orientation === "portrait" ? [w, h] : [h, w];
   return [
     el("div", {
-      attrs: { "data-chrome": "cutout", "aria-hidden": "true" },
+      attrs: { [DATA_CHROME]: "cutout", [ARIA_HIDDEN]: "true" },
       style: {
-        position: "absolute",
+        position: ABSOLUTE,
         left: px(center.x - width / 2),
         top: px(center.y - height / 2),
         width: px(width),
         height: px(height),
-        "border-radius": shape.type === "notch" ? "0 0 16px 16px" : px(Math.min(width, height) / 2),
-        "background-color": "#000",
-        "z-index": "3",
+        [BORDER_RADIUS]: shape.type === "notch" ? "0 0 16px 16px" : px(Math.min(width, height) / 2),
+        [BACKGROUND_COLOR]: "#000",
+        [Z_INDEX]: "3",
       },
     }),
   ];
@@ -72,7 +91,7 @@ function buttonNavigation(color: string, side: boolean): WebElement {
         width: "14px",
         height: "14px",
         border: `2px solid ${color}`,
-        "border-radius": radius,
+        [BORDER_RADIUS]: radius,
         opacity: "0.6",
       },
     });
@@ -81,9 +100,9 @@ function buttonNavigation(color: string, side: boolean): WebElement {
     {
       attrs: { "data-nav": "buttons" },
       style: {
-        display: "flex",
+        display: FLEX,
         gap: "64px",
-        "flex-direction": side ? "column" : "row",
+        [FLEX_DIRECTION]: side ? "column" : "row",
       },
     },
     [mark("2px 50% 50% 2px"), mark("50%"), mark("2px")],
@@ -106,7 +125,7 @@ function navOnSide(frame: DeviceFrame, orientation: WebOrientation): boolean {
 function navPlacement(heightDp: number, side: boolean): Record<string, string> {
   const size = px(heightDp);
   return side
-    ? { top: "0", bottom: "0", right: "0", width: size, "flex-direction": "column" }
+    ? { top: "0", bottom: "0", right: "0", width: size, [FLEX_DIRECTION]: COLUMN }
     : { left: "0", right: "0", bottom: "0", height: size };
 }
 
@@ -121,8 +140,8 @@ function gestureHandle(platform: DeviceFrame["platform"], dark: boolean): WebEle
     style: {
       width: ios ? "134px" : "108px",
       height: ios ? "5px" : "4px",
-      "border-radius": ios ? "2.5px" : "2px",
-      "background-color": dark ? "#ffffff" : "#000000",
+      [BORDER_RADIUS]: ios ? "2.5px" : "2px",
+      [BACKGROUND_COLOR]: dark ? "#ffffff" : "#000000",
       opacity: ios ? "0.9" : "0.6",
     },
   });
@@ -140,15 +159,15 @@ function navBar(frame: DeviceFrame, orientation: WebOrientation, dark: boolean):
     el(
       "div",
       {
-        attrs: { "data-chrome": "navBar", "aria-hidden": "true" },
+        attrs: { [DATA_CHROME]: "navBar", [ARIA_HIDDEN]: "true" },
         style: {
-          position: "absolute",
+          position: ABSOLUTE,
           ...navPlacement(frame.navBar.heightDp, navOnSide(frame, orientation)),
-          display: "flex",
-          "align-items": "center",
-          "justify-content": "center",
-          "z-index": "2",
-          "pointer-events": "none",
+          display: FLEX,
+          [ALIGN_ITEMS]: CENTER,
+          [JUSTIFY_CONTENT]: CENTER,
+          [Z_INDEX]: "2",
+          [POINTER_EVENTS]: "none",
         },
       },
       [handle],
@@ -156,44 +175,89 @@ function navBar(frame: DeviceFrame, orientation: WebOrientation, dark: boolean):
   ];
 }
 
+interface ScreenPaint {
+  readonly dark: boolean;
+  readonly textColor: string;
+  readonly background: string;
+  /** The content's base font size; 14px unless the system text size scales it. */
+  readonly fontSize?: string;
+}
+
+type Insets = DeviceFrame["safeArea"]["portrait"];
+
+const NO_INSETS: Insets = { top: 0, bottom: 0, left: 0, right: 0 };
+
+function screenStyle(
+  size: { width: number; height: number },
+  radius: number,
+  insets: Insets,
+  options: ScreenPaint,
+): Record<string, string> {
+  return {
+    position: RELATIVE,
+    width: px(size.width),
+    height: px(size.height),
+    overflow: "hidden",
+    [BORDER_RADIUS]: px(radius),
+    // Both devices paint nothing behind a window, so the app below shows through; a still has no
+    // app below, so the theme's background stands in for it.
+    [BACKGROUND_COLOR]: options.background,
+    color: options.textColor,
+    [FONT_FAMILY]: "system-ui, -apple-system, Roboto, sans-serif",
+    [FONT_SIZE]: options.fontSize ?? "14px",
+    "--safe-top": px(insets.top),
+    "--safe-bottom": px(insets.bottom),
+    "--safe-left": px(insets.left),
+    "--safe-right": px(insets.right),
+    "--safe-start": "var(--safe-left)",
+    "--safe-end": "var(--safe-right)",
+  };
+}
+
+/**
+ * The frame's screen alone: no bezel, corner radius, status bar, cutout or navigation marks, no
+ * safe-area insets and no window background, so the content draws as a renderer's content path
+ * does without a window (#16534).
+ */
+export function renderChromelessScreen(
+  frame: DeviceFrame,
+  orientation: WebOrientation,
+  options: ScreenPaint,
+  content: WebElement,
+): WebElement {
+  return el(
+    "div",
+    {
+      attrs: { [DATA_CHROME]: "screen", "data-frame": frame.id, "data-orientation": orientation },
+      style: screenStyle(screenSize(frame, orientation), 0, NO_INSETS, {
+        ...options,
+        background: "transparent",
+      }),
+    },
+    [content],
+  );
+}
+
 /** A device frame around the screen content, with status bar, cutout and navigation handle or home indicator. */
 export function renderDeviceFrame(
   frame: DeviceFrame,
   orientation: WebOrientation,
-  options: {
-    dark: boolean;
-    textColor: string;
-    background: string;
+  options: ScreenPaint & {
     /** The status bar's content style; absent follows `dark`. */
-    statusBarContent?: WebStatusBarContent;
+    readonly statusBarContent?: WebStatusBarContent;
   },
   content: WebElement,
 ): WebElement {
-  const { width, height } = screenSize(frame, orientation);
-  const insets = frame.safeArea[orientation];
   const screen = el(
     "div",
     {
-      attrs: { "data-chrome": "screen" },
-      style: {
-        position: "relative",
-        width: px(width),
-        height: px(height),
-        overflow: "hidden",
-        "border-radius": px(frame.cornerRadiusDp),
-        // Both devices paint nothing behind a window, so the app below shows through; a still has no
-        // app below, so the theme's background stands in for it.
-        "background-color": options.background,
-        color: options.textColor,
-        "font-family": "system-ui, -apple-system, Roboto, sans-serif",
-        "font-size": "14px",
-        "--safe-top": px(insets.top),
-        "--safe-bottom": px(insets.bottom),
-        "--safe-left": px(insets.left),
-        "--safe-right": px(insets.right),
-        "--safe-start": "var(--safe-left)",
-        "--safe-end": "var(--safe-right)",
-      },
+      attrs: { [DATA_CHROME]: "screen" },
+      style: screenStyle(
+        screenSize(frame, orientation),
+        frame.cornerRadiusDp,
+        frame.safeArea[orientation],
+        options,
+      ),
     },
     [
       content,
@@ -210,16 +274,16 @@ export function renderDeviceFrame(
     "div",
     {
       attrs: {
-        "data-chrome": "frame",
+        [DATA_CHROME]: "frame",
         "data-frame": frame.id,
         "data-orientation": orientation,
-        "aria-label": `${frame.label} (${orientation})`,
+        [ARIA_LABEL]: `${frame.label} (${orientation})`,
       },
       style: {
         display: "inline-block",
         padding: px(frame.frame.bezelDp),
-        "background-color": frame.frame.color,
-        "border-radius": px(frame.cornerRadiusDp + frame.frame.bezelDp),
+        [BACKGROUND_COLOR]: frame.frame.color,
+        [BORDER_RADIUS]: px(frame.cornerRadiusDp + frame.frame.bezelDp),
       },
     },
     [screen],

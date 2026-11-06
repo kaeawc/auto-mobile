@@ -22,7 +22,8 @@ import {
   IME_COMMIT_READ_BACK_SETTLE_MS,
   KEY_EVENT_FORMAT_MARKERS,
   ANDROID_FOCUSED_INPUT_ERROR,
-  ANDROID_TYPE_FOCUSED_INPUT_ERROR,
+  NO_FOCUSED_EDITABLE_ERROR_CODE,
+  type FocusedInputFailure,
   isPrintableAscii,
 } from "./AndroidTypingConstants";
 
@@ -140,11 +141,11 @@ export class KeyEventSupport {
 
   async requireFocusedAndroidInput(
     signal?: AbortSignal,
-    error: string = ANDROID_FOCUSED_INPUT_ERROR,
+    failure: FocusedInputFailure = { error: ANDROID_FOCUSED_INPUT_ERROR },
     display?: string,
   ): Promise<
     | { success: true; hierarchy: NonNullable<ObserveResult["viewHierarchy"]> }
-    | { success: false; error: string }
+    | ({ success: false } & FocusedInputFailure)
   > {
     const observation = await this.host.observer.execute({
       signal,
@@ -153,14 +154,15 @@ export class KeyEventSupport {
       skipScreenshot: true,
     });
     const hierarchy = observation.viewHierarchy;
-    if (this.host.getTargetLayer() === "prototype" && error === ANDROID_TYPE_FOCUSED_INPUT_ERROR) {
+    // Keyed off the code, not the message, so rewording the text cannot change routing (#17165).
+    if (
+      this.host.getTargetLayer() === "prototype" &&
+      failure.errorCode === NO_FOCUSED_EDITABLE_ERROR_CODE
+    ) {
       return { success: true, hierarchy: hierarchy ?? { hierarchy: {} } };
     }
     if (!hierarchy || !hasFocusedTextInput(hierarchy)) {
-      return {
-        success: false,
-        error,
-      };
+      return { success: false, ...failure };
     }
     return { success: true, hierarchy };
   }

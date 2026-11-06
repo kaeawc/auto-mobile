@@ -31,6 +31,8 @@ internal fun TelemetryEventReader.parseNetwork(): TelemetryDisplayEvent {
   }
   return TelemetryDisplayEvent.Network(
     timestamp = envelope.timestamp,
+    deviceId = envelope.deviceId,
+    deviceSessionUuid = envelope.deviceSessionUuid,
     method = d.stringOrDefault("method", "?"),
     statusCode =
       d.primitiveOrNull("statusCode")?.intOrNull
@@ -66,6 +68,8 @@ internal fun TelemetryEventReader.parseNavigation(): TelemetryDisplayEvent {
     }
   return TelemetryDisplayEvent.Navigation(
     timestamp = envelope.timestamp,
+    deviceId = envelope.deviceId,
+    deviceSessionUuid = envelope.deviceSessionUuid,
     destination = d.stringOrDefault("destination", "unknown"),
     source = d.stringOrNull("source"),
     arguments = args.ifEmpty { null },

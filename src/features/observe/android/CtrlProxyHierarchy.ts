@@ -792,13 +792,19 @@ export class CtrlProxyHierarchy {
     {
       timeoutMs,
       display,
-    }: { timeoutMs: number; display?: number | ObserverHierarchyRequestOptions },
+      diagnostics,
+    }: {
+      timeoutMs: number;
+      diagnostics?: HierarchySyncDiagnostics;
+      display?: number | ObserverHierarchyRequestOptions;
+    },
   ): Promise<HierarchySyncResult> {
     return this.requestHierarchySyncWithOptions({
       perf,
       disableAllFiltering,
       signal,
       timeoutMs,
+      diagnostics,
       ...(typeof display === "number" ? { displayId: display } : display),
       observerMode: true,
     });

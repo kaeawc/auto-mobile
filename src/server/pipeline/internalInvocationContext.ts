@@ -41,6 +41,7 @@ export function internalToolInvocationContext(
   return {
     args: sessionUuid && args.sessionUuid !== sessionUuid ? { ...args, sessionUuid } : args,
     tapAtPlanContext: options.tapAtPlanContext,
+    planLockNamespace: options.planLockNamespace,
     requestDeadline: internalCallRequestDeadline(context, options),
     autolockMcpSessionId: undefined,
     oneShotCli: undefined,

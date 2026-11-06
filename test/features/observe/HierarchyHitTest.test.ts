@@ -179,7 +179,7 @@ test("application fallback avoids multiple covering windows and the IME", () => 
       point: { x: 200, y: 50 },
       imeBounds: { left: 360, top: 0, right: 400, bottom: 100 },
     }),
-  ).toEqual({ point: null, coveredBy: "Dialog" });
+  ).toEqual({ point: null, coveredBy: "Dialog", coveredByKind: "window" });
 });
 
 // Inline two-window tree mirroring the tapOn fixtures: no capture of overlapping app dialogs exists.

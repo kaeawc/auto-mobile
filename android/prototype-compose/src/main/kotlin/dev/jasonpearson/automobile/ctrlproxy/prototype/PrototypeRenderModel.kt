@@ -509,6 +509,7 @@ internal fun prototypeNodeRole(node: PrototypeNode): String =
     is PrototypeDrawerNode -> "drawer"
     is PrototypeVideoPlayerNode -> "videoPlayer"
     is PrototypeMapNode -> "map"
+    is PrototypeWebViewNode -> "webView"
     is PrototypeCastButtonNode -> "castButton"
     is PrototypeCameraPreviewNode -> "cameraPreview"
   }

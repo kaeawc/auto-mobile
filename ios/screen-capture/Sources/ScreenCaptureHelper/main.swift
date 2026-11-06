@@ -269,20 +269,15 @@ case let .captureSimulator(windowID, fps, audio, encode):
     }
     let firstFrameSignal = simSession.firstFrameSignal
 
-    // In encode mode, read newline-delimited JSON control commands from STDIN
-    // (today only `{"cmd":"forceKeyFrame"}`). The raw path never touches STDIN,
-    // so its output is byte-for-byte unchanged (issue #4788).
-    var controlChannel: ControlChannel?
-    if encode != nil {
-        let channel = ControlChannel { command in
-            switch command {
-            case .forceKeyFrame:
-                simSession.forceKeyFrameLatch.request()
-            }
+    // Read newline-delimited JSON control commands from STDIN (today only
+    // `{"cmd":"forceKeyFrame"}`) (issue #4788).
+    let controlChannel = ControlChannel { command in
+        switch command {
+        case .forceKeyFrame:
+            simSession.forceKeyFrameLatch.request()
         }
-        channel.start()
-        controlChannel = channel
     }
+    controlChannel.start()
 
     // ScreenCaptureKit silently emits no frames when the host process lacks
     // Screen Recording permission — there's no error to surface. Emit a hint on
@@ -302,7 +297,7 @@ case let .captureSimulator(windowID, fps, audio, encode):
     installShutdownHandlers {
         metricsReporter.stop()
         permissionHintTimer.stop()
-        controlChannel?.stop()
+        controlChannel.stop()
         Task { @MainActor in
             await simSession.stop()
             exit(0)
@@ -363,24 +358,19 @@ case let .capture(deviceID, encode):
         exit(midStreamFatalExitCode)
     }
 
-    // In encode mode, read newline-delimited JSON control commands from STDIN
-    // (today only `{"cmd":"forceKeyFrame"}`). The raw path never touches STDIN, so
-    // its stdout is byte-for-byte unchanged (issues #4788 / #4790).
-    var deviceControlChannel: ControlChannel?
-    if encode != nil {
-        let channel = ControlChannel { command in
-            switch command {
-            case .forceKeyFrame:
-                captureSession.forceKeyFrameLatch.request()
-            }
+    // Read newline-delimited JSON control commands from STDIN (today only
+    // `{"cmd":"forceKeyFrame"}`) (issues #4788 / #4790).
+    let deviceControlChannel = ControlChannel { command in
+        switch command {
+        case .forceKeyFrame:
+            captureSession.forceKeyFrameLatch.request()
         }
-        channel.start()
-        deviceControlChannel = channel
     }
+    deviceControlChannel.start()
 
     installShutdownHandlers {
         metricsReporter.stop()
-        deviceControlChannel?.stop()
+        deviceControlChannel.stop()
         captureSession.stop()
         exit(0)
     }

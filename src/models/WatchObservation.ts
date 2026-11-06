@@ -6,11 +6,16 @@ export const WATCH_HIERARCHY_UNAVAILABLE_MESSAGE =
   "screenshot. viewHierarchy, skeleton, elements and the other element fields are absent, " +
   "not empty, so their absence does not mean the screen is empty. Read the screenshot instead.";
 
-export type AppleScreenshotOnlyPlatform = "watchos" | "tvos";
+export type AppleScreenshotOnlyPlatform = "watchos" | "tvos" | "visionos";
 
 export const TVOS_HIERARCHY_UNAVAILABLE_MESSAGE =
   "No tvOS runner is connected: this observation carries only a screenshot. " +
   "Call startDevice to prepare the runner for hierarchy and focus navigation. " +
+  "Absent hierarchy fields do not mean the screen is empty; read the screenshot instead.";
+
+export const VISIONOS_HIERARCHY_UNAVAILABLE_MESSAGE =
+  "The visionOS window-app runner is unavailable: this observation carries only a screenshot. " +
+  "The view hierarchy needs the runner. " +
   "Absent hierarchy fields do not mean the screen is empty; read the screenshot instead.";
 
 export interface WatchHierarchyUnavailable<
@@ -54,6 +59,6 @@ export function isWatchObservation(value: unknown): value is WatchObservation {
     typeof note === "object" &&
     note !== null &&
     "platform" in note &&
-    (note.platform === "watchos" || note.platform === "tvos")
+    (note.platform === "watchos" || note.platform === "tvos" || note.platform === "visionos")
   );
 }

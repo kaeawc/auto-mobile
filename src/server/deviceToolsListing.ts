@@ -65,7 +65,7 @@ async function transitionalHeldListing(input: {
   let probeFailure: DeviceDiscoveryError | undefined;
   const devices: BootedDevice[] = [];
   const holds = new Map<string, TransitionalHold>();
-  if (input.platform !== "tvos") {
+  if (input.platform !== "tvos" && input.platform !== "visionos") {
     for (const offlineHeld of await adbOfflineHeldDevices({
       platform: input.platform === "ios" ? "ios" : "android",
       discovered,
@@ -178,7 +178,7 @@ function listingDiscoveryObservation(
 }
 
 function listingPlatform(platform: SomePlatform): SomePlatform {
-  if (platform === "either" || platform === "tvos") {
+  if (platform === "either" || platform === "tvos" || platform === "visionos") {
     return platform;
   }
   return requireAndroidOrIosPlatform(platform, "listDevices");

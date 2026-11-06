@@ -531,6 +531,18 @@
     },
     "onMarkerTap": [{ "type": "setState", "key": "text", "value": "{stop.id}" }]
   },
+  "nodeWebView": {
+    "type": "webView",
+    "id": "article",
+    "url": "https://example.com/post",
+    "allowedOrigins": ["https://example.com"],
+    "javaScript": false,
+    "navigationStateKey": "status",
+    "titleKey": "text",
+    "canGoBackKey": "enabled",
+    "onNavigate": [{ "type": "setState", "key": "text", "value": "Text" }],
+    "onBlockedNavigation": [{ "type": "emit", "name": "openExternally" }]
+  },
   "nodeVideoPlayer": { "type": "videoPlayer", "id": "clip", "source": { "sample": "countdown" } },
   "nodeCastButton": { "type": "castButton", "player": "main", "protocols": ["airplay"] },
   "nodeCameraPreview": {
@@ -905,6 +917,11 @@
     "press": {
       "scale": 0.9,
       "alpha": 0.8
+    },
+    "attentionLoop": {
+      "effect": "spin",
+      "periodMs": 800,
+      "iterations": 2
     }
   },
   "actionRequestFilled": {
@@ -1028,5 +1045,10 @@
   "windowLayoutDirection": {
     "placement": { "type": "fullscreen" },
     "layoutDirection": "rtl"
+  },
+  "loop": {
+    "effect": "pulse",
+    "periodMs": 1200,
+    "iterations": "infinite"
   }
 }

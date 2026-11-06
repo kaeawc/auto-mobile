@@ -1,7 +1,13 @@
 import { ExportedGraph } from "../../utils/interfaces/NavigationGraph";
 import { type NavigationGraphService } from "./NavigationGraphManager";
 import { Timer } from "../../utils/SystemTimer";
-import type { ElementSelectionStats, ExploreResult, GraphTraversalState } from "./ExploreTypes";
+import type { ProgressCallback } from "../action/BaseVisualChange";
+import type {
+  ElementSelectionStats,
+  ExplorationMode,
+  ExploreResult,
+  GraphTraversalState,
+} from "./ExploreTypes";
 import { countNewTransitions } from "./ExploreValidateMode";
 
 interface ExploreReportState {
@@ -112,5 +118,37 @@ export function isExplorationResetDue(
     interactionCount > 0 &&
     interactionCount !== lastResetAt &&
     interactionCount % resetInterval === 0
+  );
+}
+
+/** Report loop progress: edges traversed in validate mode, new screens otherwise. */
+export async function reportExplorationProgress(
+  progress: ProgressCallback,
+  state: {
+    mode: ExplorationMode;
+    maxInteractions: number;
+    initialNodeCount: number;
+    interactionCount: number;
+    graphTraversalState: GraphTraversalState | null;
+    navigationManager: Pick<NavigationGraphService, "getStats">;
+  },
+): Promise<void> {
+  const { mode, maxInteractions, interactionCount, graphTraversalState } = state;
+  if (mode === "validate" && graphTraversalState) {
+    const edgesTraversed = graphTraversalState.traversedEdges.size;
+    const totalEdges = graphTraversalState.totalEdgesInGraph;
+    const coveragePercent = totalEdges > 0 ? Math.round((edgesTraversed / totalEdges) * 100) : 0;
+    await progress(
+      interactionCount,
+      maxInteractions,
+      `Validating graph: ${edgesTraversed}/${totalEdges} edges traversed (${coveragePercent}%) - ${interactionCount}/${maxInteractions} interactions`,
+    );
+    return;
+  }
+  const { nodeCount } = await state.navigationManager.getStats();
+  await progress(
+    interactionCount,
+    maxInteractions,
+    `Explored ${nodeCount - state.initialNodeCount} new screens (${interactionCount}/${maxInteractions} interactions)`,
   );
 }

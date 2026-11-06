@@ -5,8 +5,12 @@ version: 2.1
 # REQUIRED dynamic-config project setting, and
 # docs/design-docs/ci/macos-capacity-plan.md for where every macOS job runs.
 #
-# CircleCI runs ONE macOS job at a time for this organization (#11010), so this
-# file holds exactly three kinds of work:
+# The `linux-*` jobs (workflow `linux-pr`, gated on `run-linux`) are a PR shadow
+# lane that mirrors GitHub's Linux Node/shell jobs; see
+# docs/design-docs/ci/circleci-linux-shadow-lane.md.
+#
+# CircleCI runs ONE macOS job at a time for this organization (#11010), so the
+# macOS part of this file holds exactly three kinds of work:
 #
 # 1. Pull requests: only `ios-playground-tests` (advisory Playground design-system
 #    tests), gated on `run-ios`. Every other PR macOS job runs in exactly one place
@@ -36,6 +40,11 @@ parameters:
   run-ios:
     type: boolean
     default: false
+  # Set by the `.*` mapping in config.yml for every PR that changes a file: gates
+  # the Linux shadow jobs below.
+  run-linux:
+    type: boolean
+    default: false
   run-swift-coverage-main:
     type: boolean
     default: false
@@ -52,6 +61,15 @@ parameters:
     default: false
 
 executors:
+  # Shadow Linux lane (4 vCPU / 8 GB, 20 credits/min). `cimg/openjdk` carries the
+  # JDK 21 that Fast Validation's ktfmt check needs; the other jobs use it too so
+  # every Linux job shares one image.
+  linux:
+    docker:
+      - image: cimg/openjdk:21.0
+    resource_class: large
+    environment:
+      GIT_LFS_SKIP_SMUDGE: "1"
   ios:
     parameters:
       xcode:
@@ -210,6 +228,203 @@ jobs:
       - run:
           name: "Run Playground tests"
           command: ./scripts/ios/xcode-test.sh Playground
+
+  # ── Linux shadow lane (PRs) ─────────────────────────────────────────────
+  # Mirrors of the Linux jobs in .github/workflows/pull_request.yml, run on the
+  # CircleCI open-source plan. They report as `ci/circleci: <job>` and are NOT
+  # required checks: the GitHub jobs stay authoritative until these have been
+  # green long enough to swap the `green-main` ruleset contexts. Steps that need
+  # a GitHub token (PR comment, artifact upload, rerun dispatch) are omitted.
+  linux-fast-validation:
+    executor: linux
+    steps:
+      - checkout_without_lfs
+      - run:
+          name: "Install fast validation dependencies"
+          command: scripts/ci/install-fast-validation-deps.sh
+      - run:
+          name: "Install uv and hadolint"
+          command: |
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+            echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${BASH_ENV}"
+            sudo curl -fsSL -o /usr/local/bin/hadolint \
+              https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64
+            sudo chmod +x /usr/local/bin/hadolint
+      - setup_auto_mobile_npm_package
+      - run:
+          name: "Check formatting"
+          command: bun run format:check
+      - run:
+          name: "Run hadolint"
+          command: hadolint --config .hadolint.yaml --failure-threshold error Dockerfile
+      - run:
+          name: "Run fast validation checks"
+          environment:
+            INSTALL_KTFMT_WHEN_MISSING: "true"
+            KTFMT_ONLY_TOUCHED_FILES: "false"
+          command: |
+            scripts/all_fast_validate_checks.sh \
+              --only yaml,lfs-pointers,scripts-referenced,schema-copy-drift,tool-definitions,prototype-spec-models,protoviewer-notices,privacy-manifests,store-listing,ctrl-proxy-project-sources,xml,bun-version-coherence,sh \
+              --max-parallel 4
+      - run:
+          name: "Run offline lychee link check"
+          command: scripts/all_fast_validate_checks.sh --only lychee-offline
+      - run:
+          name: "Check iOS version constant is in sync with package.json"
+          command: bash scripts/versioning/generate-ios-version.sh --check
+      - store_artifacts:
+          when: on_fail
+          path: scratch
+          destination: fast-validation-logs
+
+  linux-node-checks:
+    executor: linux
+    steps:
+      - checkout_without_lfs
+      - setup_auto_mobile_npm_package
+      - run:
+          name: "Run Bun Audit"
+          command: bun pm audit --json > bun-audit-results.json || true
+      - run:
+          name: "Verify pinned runtime dependency graph"
+          when: always
+          command: bash scripts/ci/verify-pinned-runtime-graph.sh
+      - run:
+          name: "Run Memory Leak Detection"
+          when: always
+          command: bun run test:memory-leaks
+      - run:
+          name: "Run MCP Benchmarks"
+          when: always
+          command: |
+            mkdir -p reports
+            failed=false
+            bun run benchmark-context --output reports/context-benchmark.json || failed=true
+            bun run benchmark-tools --output reports/tool-benchmark.json || failed=true
+            timeout 60s bun run benchmark-startup --compare benchmark/startup-baseline.json --output reports/startup-benchmark.json || failed=true
+            bun run benchmark-npm-unpacked-size --output reports/npm-unpacked-size.json || failed=true
+            if [ "$failed" = "true" ]; then
+              echo "One or more MCP benchmarks failed; see reports/*.json" >&2
+              exit 1
+            fi
+      - store_artifacts:
+          when: always
+          path: reports
+          destination: benchmark-reports
+      - store_artifacts:
+          when: always
+          path: bun-audit-results.json
+          destination: bun-audit-results.json
+      - store_artifacts:
+          when: always
+          path: ci-logs
+          destination: ci-logs
+
+  linux-node-build-and-test:
+    executor: linux
+    steps:
+      - checkout_without_lfs
+      - setup_auto_mobile_npm_package
+      - run:
+          name: "Run Lint"
+          environment:
+            NODE_OPTIONS: "--max-old-space-size=4096"
+            TURBO_TELEMETRY_DISABLED: "1"
+            TURBO_NO_UPDATE_NOTIFIER: "1"
+            DO_NOT_TRACK: "1"
+            NO_COLOR: "1"
+          command: turbo run lint --output-logs=errors-only --log-order=grouped
+      - run:
+          name: "Check stdlib-first dependency decisions"
+          command: |
+            STDLIB_FIRST_BASE_REF="$(git merge-base origin/main HEAD)" bun run check:stdlib-first
+      - run:
+          name: "Run Typecheck Gate"
+          command: bun run typecheck
+      - run:
+          name: "Run Test Typecheck Gate"
+          command: bun run typecheck:test
+      - run:
+          name: "Run Bun MCP startup smoke"
+          command: bun run test:startup:bun
+      - run:
+          name: "Run Bun image runtime smoke"
+          command: bun run test:image:bun
+      - run:
+          name: "Run complete unit lane"
+          no_output_timeout: 20m
+          environment:
+            AUTOMOBILE_TEST_MODE: "true"
+            AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720"
+            AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS: "1560"
+            AUTOMOBILE_UNIT_JUNIT_DIR: scratch/timing-unit-reports
+          command: bash scripts/test-ts.sh unit
+      - run:
+          name: "Enforce 100ms budget for changed unit tests"
+          environment:
+            BUN_TEST_TIMING_REPORT_DIR: scratch/timing-unit-reports
+            BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS: "360"
+          command: |
+            BUN_TEST_TIMING_BASE_REF="$(git merge-base origin/main HEAD)" bash scripts/validate-bun-test-timings.sh
+      - store_artifacts:
+          when: always
+          path: scratch/timing-unit-reports
+          destination: node-unit-test-diagnostics/timing-unit-reports
+      - store_artifacts:
+          when: always
+          path: scratch/test-ts-unit-shards
+          destination: node-unit-test-diagnostics/test-ts-unit-shards
+
+  linux-node-host-integration-tests:
+    executor: linux
+    steps:
+      - checkout_without_lfs
+      - install_bun
+      - run:
+          name: "Install Bun dependencies"
+          command: bash scripts/ci/install-bun-deps.sh
+      - run:
+          name: "Run host integration lane"
+          no_output_timeout: 15m
+          environment:
+            AUTOMOBILE_TEST_MODE: "true"
+            AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "900"
+          command: bash scripts/test-ts.sh integration
+      - run:
+          name: "Run stress lane"
+          environment:
+            AUTOMOBILE_TEST_MODE: "true"
+            AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "300"
+          command: bash scripts/test-ts.sh stress
+
+  linux-bats-tests:
+    executor: linux
+    steps:
+      - checkout_without_lfs
+      - run:
+          name: "Install BATS and ShellCheck"
+          command: |
+            git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
+            test "$(git -C /tmp/bats-core rev-parse HEAD)" = "eb7f42f8d608ac693d7a4b67474f6714ea68cfc5"
+            sudo /tmp/bats-core/install.sh /usr/local
+            command -v shellcheck >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y shellcheck; }
+      - install_bun
+      - run:
+          name: "Install Bun dependencies"
+          command: bash scripts/ci/install-bun-deps.sh
+      - run:
+          name: "Run BATS Unit Tests"
+          environment:
+            AUTOMOBILE_BATS_MAX_FILE_SECONDS: "240"
+            AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS: "420"
+          command: scripts/ci/run-bats.sh unit
+      - run:
+          name: "Run BATS Integration Tests"
+          command: scripts/ci/run-bats.sh integration
+      - store_artifacts:
+          when: always
+          path: scratch/bats-unit-joblog.tsv
+          destination: bats-unit-joblog/bats-unit-joblog.tsv
 
   # ── Post-merge (formerly merge.yml) and nightly sweeps ──────────────────────
   # Generate + drift-check + build every XcodeGen project. Post-merge it replaces
@@ -614,6 +829,20 @@ jobs:
           destination: automobile-daemon-logs-xctestrunner
 
 workflows:
+  # Linux shadow lane: PR-only mirrors of the GitHub Linux jobs, off the
+  # required-check list (see the job comments above). The four heavy jobs run in
+  # parallel; Fast Validation is the required gate on GitHub, so it also runs here.
+  linux-pr:
+    when: << pipeline.parameters.run-linux >>
+    jobs:
+      - linux-fast-validation
+      - linux-node-checks
+      - linux-node-build-and-test
+      - linux-node-host-integration-tests:
+          requires:
+            - linux-fast-validation
+      - linux-bats-tests
+
   # PR path: exactly one macOS job (#11010). When `run-ios` is false (no iOS
   # changes) the workflow has no jobs and no macOS executor is used.
   ios-macos:

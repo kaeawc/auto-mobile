@@ -83,25 +83,25 @@ STUB
 @test "an unknown creation mode is rejected" {
   WEAR_SMOKE_CREATE_VIA=gradle run bash "$SCRIPT"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"WEAR_SMOKE_CREATE_VIA must be avdmanager or startDevice"* ]]
+  [[ "$output" == *"WEAR_SMOKE_CREATE_VIA must be startDevice or avdmanager"* ]]
 }
 
-@test "without the fixture module the default run installs, creates a round AVD and warns" {
+@test "without the fixture module the default run installs the image, leaves the AVD to startDevice and warns" {
   run bash "$SCRIPT"
   [ "$status" -eq 0 ]
   grep -qx -- "--install system-images;android-37.0;android-wear-signed;x86_64" "$SDK_LOG"
-  grep -q -- "--name automobile-wear-smoke --package system-images;android-37.0;android-wear-signed;x86_64 --device wearos_small_round" "$AVD_LOG"
-  [[ "$output" == *"::warning title=Wear smoke::android/wear-fixture does not exist yet"* ]]
-  grep -qx "wearSmoke.ts avd=automobile-wear-smoke apk=" "$BUN_LOG"
+  [ ! -e "$AVD_LOG" ]
+  [[ "$output" == *"::warning title=Wear smoke::android/wear-fixture does not exist;"* ]]
+  grep -qx "wearSmoke.ts avd= apk=" "$BUN_LOG"
   [ "$(wc -l < "$DIAG_LOG")" -eq 1 ]
   [ ! -e "$GITHUB_STEP_SUMMARY" ]
 }
 
-@test "startDevice creation skips avdmanager and passes no AVD name" {
-  WEAR_SMOKE_CREATE_VIA=startDevice run bash "$SCRIPT"
+@test "avdmanager creation makes a named round AVD and passes its name to the smoke" {
+  WEAR_SMOKE_CREATE_VIA=avdmanager run bash "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ ! -e "$AVD_LOG" ]
-  grep -qx "wearSmoke.ts avd= apk=" "$BUN_LOG"
+  grep -q -- "--name automobile-wear-smoke --package system-images;android-37.0;android-wear-signed;x86_64 --device wearos_small_round" "$AVD_LOG"
+  grep -qx "wearSmoke.ts avd=automobile-wear-smoke apk=" "$BUN_LOG"
 }
 
 @test "a fixture module is built and its APK handed to the smoke" {
@@ -109,7 +109,7 @@ STUB
   WEAR_SMOKE_SKIP_IMAGE_INSTALL=1 run bash "$SCRIPT"
   [ "$status" -eq 0 ]
   grep -q ":wear-fixture:assembleDebug" "$GRADLE_LOG"
-  grep -qx "wearSmoke.ts avd=automobile-wear-smoke apk=$ROOT/android/wear-fixture/build/outputs/apk/debug/wear-fixture-debug.apk" "$BUN_LOG"
+  grep -qx "wearSmoke.ts avd= apk=$ROOT/android/wear-fixture/build/outputs/apk/debug/wear-fixture-debug.apk" "$BUN_LOG"
   [[ "$output" != *"::warning"* ]]
 }
 
@@ -128,7 +128,7 @@ STUB
 }
 
 @test "a failed AVD creation collects diagnostics and writes a summary line" {
-  FAKE_AVD_STATUS=3 run bash "$SCRIPT"
+  FAKE_AVD_STATUS=3 WEAR_SMOKE_CREATE_VIA=avdmanager run bash "$SCRIPT"
   [ "$status" -eq 3 ]
   grep -q "setup failed while creating the automobile-wear-smoke AVD (exit 3)" "$DIAG_LOG"
   [[ "$(<"$GITHUB_STEP_SUMMARY")" == *"creating the automobile-wear-smoke AVD"* ]]

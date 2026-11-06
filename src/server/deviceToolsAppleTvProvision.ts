@@ -1,3 +1,4 @@
+import { notifyAfterAppleSimulatorProvision } from "./appleSimulatorInventoryNotify";
 import { requestAcquisitionReceipt } from "../daemon/acquisitionReceipt";
 import {
   currentAutolockMcpSessionId,
@@ -146,6 +147,11 @@ export async function provisionAppleTvDevice(
             }
             const { tv, created } = resolved;
             if (args.boot === false) {
+              notifyAfterAppleSimulatorProvision(
+                `tvOS simulator ${tv.deviceId}`,
+                created,
+                undefined,
+              );
               return tvProvisionResponse(args, tv, created, undefined);
             }
             const booted = await bootAndBind(
@@ -154,6 +160,7 @@ export async function provisionAppleTvDevice(
               deadlineMs,
               { signal: requestSignal, stage },
             );
+            notifyAfterAppleSimulatorProvision(`tvOS simulator ${tv.deviceId}`, created, booted);
             return tvProvisionResponse(args, tv, created, booted);
           } finally {
             leaseReleased = true;

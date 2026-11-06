@@ -48,8 +48,9 @@ function fixtureObserves(): Payload[] {
     screen(APP, WEAR_FIXTURE.detailText),
     screen(APP, WEAR_FIXTURE.listRowText),
     screen(APP, WEAR_FIXTURE.pickerInitialText),
-    screen(APP, "Value 3"),
+    screen(APP, "Level 3"),
     screen("com.google.android.wearable.sysui"),
+    screen(APP, WEAR_FIXTURE.notificationActionStatus),
   ];
 }
 
@@ -127,10 +128,58 @@ describe("buildWearSmokePlan", () => {
     }
   });
 
+  test("installs the fixture with its permissions granted, so posting needs no dialog", () => {
+    const install = buildWearSmokePlan({ fixtureApkPath: "/f.apk" }).find(
+      (step) => step.id === "install",
+    );
+    expect(install?.args).toMatchObject({ artifactPath: "/f.apk", grantAllPermissions: true });
+  });
+
+  test("scrolls back up to the picker row, which sits above the item list", () => {
+    const scroll = buildWearSmokePlan({ fixtureApkPath: "/f.apk" }).find(
+      (step) => step.id === "scroll-to-picker",
+    );
+    expect(scroll?.args).toMatchObject({
+      direction: "down",
+      lookFor: { text: WEAR_FIXTURE.pickerRowText },
+    });
+  });
+
+  test("posts the notification, goes home, then finds it and taps its action", () => {
+    const plan = buildWearSmokePlan({ fixtureApkPath: "/f.apk" });
+    const ids = plan.map((step) => step.id);
+    const order = [
+      "post-notification",
+      "home",
+      "observe-home",
+      "find-notification",
+      "notification-action",
+      "scroll-to-status",
+      "observe-notification-action",
+      "ambient-enter",
+    ].map((id) => ids.indexOf(id));
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(order).not.toContain(-1);
+    const notification = { title: WEAR_FIXTURE.notificationTitle, appId: APP };
+    expect(plan.find((step) => step.id === "find-notification")?.args).toMatchObject({
+      action: "find",
+      notification,
+    });
+    expect(plan.find((step) => step.id === "notification-action")?.args).toMatchObject({
+      action: "tap",
+      notification: { ...notification, tapActionLabel: WEAR_FIXTURE.notificationActionLabel },
+    });
+    expect(plan.find((step) => step.id === "scroll-to-status")?.args).toMatchObject({
+      direction: "down",
+      lookFor: { text: WEAR_FIXTURE.notificationActionStatus },
+    });
+  });
+
   test("without the fixture runs only device-level steps and says so", () => {
     const plan = buildWearSmokePlan({});
     expect(plan.map((step) => step.tool)).not.toContain("installApp");
     expect(plan.map((step) => step.tool)).not.toContain("rotaryScroll");
+    expect(plan.map((step) => step.tool)).not.toContain("systemTray");
     expect(wearSmokeNotes({})[0]).toContain("#16828");
     expect(wearSmokeNotes({ fixtureApkPath: "/fixture.apk" })).toEqual([]);
   });
@@ -209,6 +258,38 @@ describe("runSmoke with the Wear plan", () => {
       deps(client),
     );
     expect(result.steps.find((step) => step.status === "failed")?.id).toBe("rotary");
+  });
+
+  test("a notification action that leaves no status line fails the final observe", async () => {
+    const observes = fixtureObserves();
+    observes[observes.length - 1] = screen(APP, "Ready");
+    const client = new FakeClient({ startDevice: START }, observes);
+    const result = await runSmoke(
+      buildWearSmokePlan({ fixtureApkPath: "/f.apk", avdName: "w" }),
+      deps(client),
+    );
+    const failed = result.steps.find((step) => step.status === "failed");
+    expect(failed?.id).toBe("observe-notification-action");
+    expect(failed?.detail).toContain(`"${WEAR_FIXTURE.notificationActionStatus}" is not on screen`);
+  });
+
+  test("a systemTray failure stops the plan at the find step and still wakes the watch", async () => {
+    const client = new FakeClient(
+      {
+        startDevice: START,
+        systemTray: envelope(
+          { success: false, message: "Could not open the watch notification stream" },
+          true,
+        ),
+      },
+      fixtureObserves(),
+    );
+    const result = await runSmoke(
+      buildWearSmokePlan({ fixtureApkPath: "/f.apk", avdName: "w" }),
+      deps(client),
+    );
+    expect(result.steps.find((step) => step.status === "failed")?.id).toBe("find-notification");
+    expect(result.steps.at(-1)).toMatchObject({ id: "ambient-exit", status: "passed" });
   });
 
   test("the device-only plan passes on a round watch and notes the missing fixture", async () => {

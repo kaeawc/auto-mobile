@@ -20,6 +20,7 @@ export const ANDROID_CAPABILITY_REQUEST_TYPES = [
   "put_prototype_asset",
   "remove_prototype_asset",
   "discover_keystore",
+  "export_attestation",
   "reset_keystore",
   "get_sdk_capabilities",
   "set_hierarchy_interval",
@@ -145,6 +146,7 @@ export const PROTOTYPE_CHOREOGRAPHY_CAPABILITY = "prototype_choreography_v1";
 /** One-shot draw transforms on a state/data trigger change (#15249). */
 export const PROTOTYPE_MOTION_TOKENS_CAPABILITY = "prototype_motion_tokens_v1";
 
+export const PROTOTYPE_LOOPS_CAPABILITY = "prototype_loops_v1";
 export const PROTOTYPE_KEYFRAMES_CAPABILITY = "prototype_keyframes_v1";
 /** Draws `style.effects`: closed, paint-only looks such as noise, glow and blur (#15128). */
 export const PROTOTYPE_EFFECTS_CAPABILITY = "prototype_effects_v1";
@@ -375,6 +377,7 @@ export const ANDROID_REQUEST_ID_RESPONSE_TYPES: ReadonlySet<string> = /* @__PURE
   "frame_context_validation_result",
   "device_info_result",
   "keystore_discovery",
+  "attestation_chain",
   "keystore_reset",
   "sdk_capabilities",
   "preference_files",
@@ -484,6 +487,7 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   list_preference_files: true,
   get_preferences: true,
   discover_keystore: true,
+  export_attestation: true,
   reset_keystore: true,
   get_sdk_capabilities: true,
   list_data_stores: true,

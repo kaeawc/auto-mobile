@@ -234,13 +234,25 @@ the windows with the variables in
 - **Terminal releases.** A released session UUID is never revived. A later call
   naming it is refused with `session_ownership_lost`, `retryable: false` and
   `nextAction: "acquire_new_session"`. After an idle release the refusal also
-  carries `idle: true`. A call still running when its session is released is cut
-  with the same refusal.
+  carries `idle: true`. After a `cli-idle-timeout` release it also carries
+  `idleTimeoutMs`, the idle window the session had: the
+  `AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS` of the last `--cli` call that used it,
+  capped at 1 hour. A plan's derived label session that ends with its base's
+  `cli-idle-timeout` carries the base's `idleTimeoutMs`, the window that
+  expired. A call still running when its session is released is cut with the same
+  refusal.
 - **Daemon restart.** A daemon restart is not terminal: the owner reclaims the
   session under the same UUID. While the daemon reclaims the binding, calls may
   receive the retryable `binding_ownership_unconfirmed`; wait `retryAfterMs`.
   If ownership cannot be confirmed in about a minute the session is released and
   calls get `session_ownership_lost`.
+  If the previous daemon exited without shutting down (it crashed or was killed),
+  its sessions wait at most about 8 seconds for their owner to reconnect, whatever
+  their own heartbeat or CLI idle window; a client that is still running and
+  heartbeating keeps its session, and otherwise the device is free for another
+  session within seconds. A CLI session (which does not heartbeat) does not
+  survive such a restart: its next call gets `session_ownership_lost`, and a new
+  session is acquired.
 - **Device restart.** When a device restarts, its session can resume under the
   same UUID for 180 seconds; other sessions cannot take that device meanwhile
   (a start naming it is refused with a retry hint). If the window passes without
@@ -274,7 +286,7 @@ the windows with the variables in
 | ------------------------------------------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `explicit-release`                                                                                      | Yes        | `session_ownership_lost`; acquire a new session.                                                                                                                                                                                                                    |
 | `cleanup-expired` (legacy: `lazy-expiry`)                                                               | Yes (idle) | `session_ownership_lost` refusals and session-not-found answers (heartbeat, `daemon/sessionInfo`) carry `idle: true`. Acquire a new session.                                                                                                                        |
-| `cli-idle-timeout`                                                                                      | Yes (idle) | `session_ownership_lost` refusals and session-not-found answers (heartbeat, `daemon/sessionInfo`) carry `idle: true` for a one-shot CLI session.                                                                                                                    |
+| `cli-idle-timeout`                                                                                      | Yes (idle) | `session_ownership_lost` refusals (including the `daemon/registerSession` refusal) and session-not-found answers (heartbeat, `daemon/sessionInfo`) carry `idle: true` and `idleTimeoutMs` for a one-shot CLI session.                                               |
 | `heartbeat-timeout`, `missing-first-heartbeat`                                                          | Yes        | `session_ownership_lost`, with the heartbeat age and limit in the message.                                                                                                                                                                                          |
 | `rehydration-owner-timeout`                                                                             | Yes        | `session_ownership_lost`: a rehydrated session's owner never reclaimed it.                                                                                                                                                                                          |
 | `owner-disconnected`                                                                                    | Yes        | `session_ownership_lost`: the owning connection closed and no other client owns the session.                                                                                                                                                                        |
@@ -328,6 +340,19 @@ the device really should be stopped out from under its holder.
 
 Listing, provisioning, starting, deleting and driving Apple TV simulators are covered in
 [Apple TV simulators](apple-tv.md).
+
+## Apple Vision Pro simulators
+
+Name `platform: "visionos"` or a Vision Pro session to use `installApp`,
+`uninstallApp`, `launchApp`, `terminateApp` and `listApps` on an Apple Vision Pro
+simulator. Install a `.app` bundle built for the visionOS simulator;
+`launchApp` refuses `prototype: true`. With the visionOS runner active,
+`observe` returns the window app's accessibility hierarchy, including
+ornaments, `tapOn` taps an element by a unique accessibility identifier, and
+`sendKeys` types into the focused text field. These act on the app you last
+started with `launchApp`; launch a different app and the next call follows it. If the runner is unavailable, `observe` returns a
+screenshot-only observation with `hierarchyUnavailable`; read the screenshot.
+Coordinate gestures and other input tools are not supported.
 
 ## Apple Watch simulators
 

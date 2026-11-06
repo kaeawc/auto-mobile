@@ -2,8 +2,10 @@ package dev.jasonpearson.automobile.protoviewer
 
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.*
 import org.junit.Test
@@ -12,6 +14,24 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class ManifestTest {
+  @Test
+  fun browsableShareLinksResolveOnlyToImportActivity() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    fun matches(uri: String) =
+      context.packageManager.queryIntentActivities(
+        Intent(Intent.ACTION_VIEW, Uri.parse(uri))
+          .addCategory(Intent.CATEGORY_BROWSABLE)
+          .setPackage(context.packageName),
+        PackageManager.MATCH_DEFAULT_ONLY,
+      )
+    assertEquals(
+      listOf(ImportActivity::class.java.name),
+      matches(shareLink()).map { it.activityInfo.name },
+    )
+    assertTrue(matches("automobile-proto://other").isEmpty())
+    assertTrue(matches("https://import").isEmpty())
+  }
+
   @Test
   fun debugBuildUsesTheDevAppIdWithStoreActionNames() {
     // Unit tests run the debug variant; the store ID is reserved for release builds (#14144).
@@ -67,6 +87,12 @@ class ManifestTest {
     assertEquals(1, cachePaths)
     val mcp =
       context.packageManager.getActivityInfo(ComponentName(context, McpActivity::class.java), 0)
+    val mcpProvider =
+      context.packageManager.resolveContentProvider("${context.packageName}.mcp", 0)!!
+    assertEquals(McpProvider::class.java.name, mcpProvider.name)
+    assertTrue(mcpProvider.exported)
+    assertEquals("android.permission.DUMP", mcpProvider.readPermission)
+    assertEquals("android.permission.DUMP", mcpProvider.writePermission)
     // Only the adb shell holds DUMP, so no app can start the MCP entry; its actions resolve
     // nowhere.
     assertTrue(mcp.exported)

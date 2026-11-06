@@ -16,6 +16,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.ComposePrototypeFontLoade
 import dev.jasonpearson.automobile.ctrlproxy.prototype.CoroutinePrototypeScheduler
 import dev.jasonpearson.automobile.ctrlproxy.prototype.InternalAutoMobilePrototypeApi
 import dev.jasonpearson.automobile.ctrlproxy.prototype.LocalPrototypeBackSeek
+import dev.jasonpearson.automobile.ctrlproxy.prototype.LocalPrototypeRootBack
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBackSeek
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeDismissReason as InternalPrototypeDismissReason
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeFontCache
@@ -169,7 +170,16 @@ private fun EmbeddedBackHandling(
       }
     }
   } else {
-    BackHandler(enabled = enabled) { scope.launch { dispatch(PrototypeInteraction.Back) } }
+    val rootBack = LocalPrototypeRootBack.current
+    BackHandler(enabled = enabled) {
+      // hasPoppableStack is not snapshot state, so this branch can outlive a push: check at
+      // delivery time and let the renderer pop a nested stack before the host handles root Back.
+      if (rootBack != null && !runtime.hasPoppableStack()) {
+        rootBack()
+      } else {
+        scope.launch { dispatch(PrototypeInteraction.Back) }
+      }
+    }
   }
 }
 

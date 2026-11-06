@@ -1185,6 +1185,29 @@ describe("Explore", () => {
       expect(seams.consecutiveNoChangeCount).toBe(0);
     });
 
+    // #17284: one interaction then a no-change streak reported "after 40
+    // interactions"; the stop reason must count what was actually performed.
+    test("stuck-screen stop reports the interactions actually performed", async () => {
+      explore = new Explore(device, mockAdb, fakeTimer, { navigationManager: fakeGraph });
+      spyOn(explore.observeScreen, "execute").mockResolvedValue(createMockObservation());
+      const seams = executionSeams(explore);
+      let calls = 0;
+      spyOn(seams, "performInteraction").mockImplementation(async () => {
+        calls++;
+        fakeGraph.setCurrentScreenValue("A");
+        return calls === 1;
+      });
+
+      const result = await runExplore(explore, { maxInteractions: 8, timeoutMs: 60_000_000 });
+
+      const limit = Explore.MAX_CONSECUTIVE_NO_CHANGE;
+      expect(result.interactionsPerformed).toBe(1);
+      expect(calls).toBe(1 + limit);
+      expect(result.stopReason).toBe(
+        `Screen appears stuck - no changes detected after ${limit} consecutive attempts (1 interaction performed)`,
+      );
+    });
+
     for (const reachesDestination of [true, false]) {
       test(`validation ${reachesDestination ? "success precedes progress and reset" : "failure skips loop accounting, progress and reset"}`, async () => {
         fakeGraph.setCurrentScreenValue("A");

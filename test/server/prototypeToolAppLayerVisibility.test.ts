@@ -251,6 +251,23 @@ test("inspect and host status surface hidden reason and clear absent device fiel
   }
 });
 
+test("inspect and host status surface requested orientation and status bar support", async () => {
+  client.setSupportedCommands(["prototype_persistence_replay_v1"]);
+  const entry = { id: "panel", state: {}, pages: {}, persistent: true, lastSequence: 0 };
+  const tool = ToolRegistry.getTool("prototype")!.deviceAwareHandler!;
+  client.setInspectReply({
+    success: true,
+    prototypes: [{ ...entry, orientation: "landscape", statusBar: "unsupported" }],
+  });
+  for (const action of ["inspect", "status"]) {
+    const reported = prototypeOutputSchema.parse(
+      toolStructured(await tool(android, { action }, undefined)),
+    ).prototypes?.[0];
+    expect(reported?.orientation).toBe("landscape");
+    expect(reported?.statusBar).toBe("unsupported");
+  }
+});
+
 test("older-device app-layer tool output deep-equals the previous output", async () => {
   expect(await call("app")).toEqual({
     success: true,

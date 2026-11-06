@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct CtrlProxyWatchApp: App {
     @State private var crown = 0.0
+    @State private var text = ""
     private enum CrownFocus: Hashable {
         case fixture, list
     }
@@ -23,6 +24,17 @@ struct CtrlProxyWatchApp: App {
                             Text("watch-smoke-row")
                         }
                         .accessibilityIdentifier("watch-smoke-row")
+                        NavigationLink {
+                            VStack {
+                                TextField("Text", text: $text)
+                                    .accessibilityIdentifier("watch-text-field")
+                                Text(text)
+                                    .accessibilityIdentifier("watch-text-value")
+                            }
+                        } label: {
+                            Text("Text entry")
+                        }
+                        .accessibilityIdentifier("watch-text-entry")
                         ForEach(1 ... 30, id: \.self) { row in
                             Text("Scroll row \(row)")
                                 .accessibilityIdentifier("watch-scroll-row-\(row)")

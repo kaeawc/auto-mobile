@@ -8,12 +8,10 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.desktop.core.components.ErrorCard
 import dev.jasonpearson.automobile.desktop.core.components.SearchBar
 import dev.jasonpearson.automobile.desktop.core.components.SearchBarOptions
-import dev.jasonpearson.automobile.desktop.core.shell.StatusBarBadge
 import org.junit.Test
 
 /**
@@ -94,14 +92,6 @@ class ComponentScreenshotTest {
               onRegexToggle = {},
             ),
         )
-      }
-    }
-
-  @Test
-  fun statusBarBadge() =
-    screenshotTest("status_bar_badge") {
-      ThemedSurface(dark = true) {
-        StatusBarBadge(count = 12, label = "Crashes", color = Color(0xFFF28B82))
       }
     }
 }

@@ -13,13 +13,9 @@ import {
   FLEX_BASIS,
   FLEX_DIRECTION,
   FONT_SIZE,
-  FONT_WEIGHT,
   GRID_AREA,
-  INLINE_FLEX,
-  JUSTIFY_CONTENT,
   JUSTIFY_SELF,
   MIN_HEIGHT,
-  MIN_WIDTH,
   PADDING_BOTTOM,
   PADDING_INLINE,
   POINTER_EVENTS,
@@ -52,14 +48,18 @@ import {
   type WebAxis,
 } from "./webCollections";
 import { conditionHolds, decide, type ConditionScope } from "./webCondition";
+import { materialButtonRenderer } from "./webButton";
 import { webControlRenderers } from "./webControls";
+import { webIndicatorRenderers, withSwipeActions } from "./webIndicators";
 import { webMapRenderers } from "./webMap";
 import { webMediaRenderers } from "./webMedia";
 import { bindStillPlatformText } from "./webPlatformState";
 import { webModalLayers } from "./webModal";
 import { webRepeatLimit, webRepeatRows } from "./webRepeat";
-import { webSelectionRenderers } from "./webSelection";
+import { searchBarFillAxes, webSelectionRenderers } from "./webSelection";
 import { webSheetLayers } from "./webSheet";
+import { webSkins, type WebSkinId } from "./webSkin";
+import { iosCardChrome } from "./webSkinIos";
 import { webStackRenderers, type WebStackScreens } from "./webStack";
 import { withLaterMinStrut } from "./webLaterMin";
 import { el, type WebChild, type WebElement } from "./webNodes";
@@ -76,6 +76,7 @@ import {
   type WebStyleContext,
 } from "./webStyle";
 import { safeAreaCss, safeAreaEdges } from "./webInsets";
+import { webImageRenderer, type WebImageDraw } from "./webImages";
 import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
 import { textRuns } from "./webText";
 import {
@@ -94,10 +95,19 @@ export interface UnsupportedWebNode {
   readonly id?: string;
   readonly path: string;
   /**
-   * `shaderFallback`: the node drew without its `style.shader`, as a device that cannot run the
-   * shader does. `iconMissing`: an icon name with no glyph drew the placeholder.
+   * `assetNotInlined`: the host has no bytes for the asset; `assetOverBudget`: it has them, but the
+   * page's 2 MiB budget left no room for them. `shaderFallback`: the node drew without its
+   * `style.shader`, as a device that cannot run the shader does. `iconMissing`: an icon name with no
+   * glyph drew the placeholder.
    */
-  readonly reason: "unsupportedType" | "assetNotInlined" | "shaderFallback" | "iconMissing";
+  readonly reason:
+    | "unsupportedType"
+    | "assetNotInlined"
+    | "assetOverBudget"
+    | "shaderFallback"
+    | "iconMissing";
+  /** The asset an `image` node draws, once bound. */
+  readonly asset?: string;
 }
 
 /** Everything one render pass reads, plus where it records placeholders. */
@@ -113,6 +123,8 @@ export interface WebRenderScope {
   readonly instances: readonly Instance[];
   readonly inBox: boolean;
   readonly unsupported: UnsupportedWebNode[];
+  /** The platform skin components draw in; Android (Material 3) when absent. */
+  readonly skin?: WebSkinId;
   /**
    * Where icons find their glyphs; without one every icon draws the placeholder and none is
    * reported, since no glyph set was asked for.
@@ -134,6 +146,10 @@ export interface WebRenderScope {
   readonly stacks?: WebStackScreens[];
   /** What the window draws above the whole tree (an open sheet, dialog or snackbar), in tree order. */
   readonly layers: WebElement[];
+  /** Encoded assets the page may inline, by asset id, to the CSS slot that would hold them. */
+  readonly imageSlots?: ReadonlyMap<string, number>;
+  /** Collects every image drawn with a bound asset, so the page can size and inline it. */
+  readonly imageDraws?: WebImageDraw[];
   /** Safe-area edges an ancestor already applied. */
   readonly consumedInsets?: readonly string[];
   /** Safe-area edges the node being rendered applies, consumed for its descendants. */
@@ -153,6 +169,7 @@ export interface WebRenderKit {
   readonly disabledState: typeof disabledState;
   readonly renderNode: typeof renderWebNode;
   readonly safeAreaEdges: typeof safeAreaEdges;
+  readonly fieldErrored: typeof fieldErrored;
 }
 
 /** `{key}` reads state; `{derived:name}` reads a top-level derived value, as on the devices. */
@@ -271,36 +288,50 @@ export type WebCellDecorator = (
   authored: Raw,
 ) => WebElement | undefined;
 
-export function children(
-  node: Raw,
-  scope: WebRenderScope,
-  path: string,
-  cell?: WebCellDecorator,
-): WebChild[] {
+/** The children a container draws, each in its own scope and path: a repeat's once per row. */
+export function childEntries(node: Raw, scope: WebRenderScope, path: string): WebChildEntry[] {
   const list = Array.isArray(node.children) ? node.children : [];
+  return rowScopes(node, scope).flatMap((itemScope) =>
+    list.map((entry, at) => ({ node: entry, scope: itemScope, path: `${path}.children[${at}]` })),
+  );
+}
+
+/** The scope each copy of a node's children renders in: one per repeat row, else the node's own. */
+function rowScopes(node: Raw, scope: WebRenderScope): WebRenderScope[] {
   const repeat = record(node.repeat);
   if (!repeat) {
-    return list.flatMap((entry, index) =>
-      renderOrSkip(entry, scope, `${path}.children[${index}]`, cell),
-    );
+    return [scope];
   }
-  const rows = webRepeatRows(repeat, scope.data, webRepeatLimit(node));
   const alias = typeof repeat.as === "string" ? repeat.as : "item";
   const derive = record(repeat.derive) as
     | Parameters<typeof projectPrototypeDerivedItem>[0]
     | undefined;
-  return rows.flatMap((item, index) => {
+  return webRepeatRows(repeat, scope.data, webRepeatLimit(node)).map((item, index) => {
     const values = record(item) ?? {};
     const instance: Instance = {
       binding: { alias, index: true },
       values: derive ? projectPrototypeDerivedItem(derive, values, scope.format) : values,
       index,
     };
-    const itemScope = child(scope, { instances: [...scope.instances, instance] });
-    return list.flatMap((entry, at) =>
-      renderOrSkip(entry, itemScope, `${path}.children[${at}]`, cell),
-    );
+    return child(scope, { instances: [...scope.instances, instance] });
   });
+}
+
+export interface WebChildEntry {
+  readonly node: unknown;
+  readonly scope: WebRenderScope;
+  readonly path: string;
+}
+
+export function children(
+  node: Raw,
+  scope: WebRenderScope,
+  path: string,
+  cell?: WebCellDecorator,
+): WebChild[] {
+  return childEntries(node, scope, path).flatMap((entry) =>
+    renderOrSkip(entry.node, entry.scope, entry.path, cell),
+  );
 }
 
 function renderOrSkip(
@@ -333,8 +364,8 @@ function fillMissing(node: Raw): Raw {
 
 /**
  * The axes a child will fill in its line: both for a visible unsized spacer, else those its type
- * fills by default (a slider's width, say). Its repeat placeholders bind, its visibleWhen must keep
- * it, and its style includes matching styleWhen entries.
+ * fills by default (a slider's width, or an expanded search bar's width and height). Its repeat
+ * placeholders bind, its visibleWhen must keep it, and its style includes matching styleWhen entries.
  */
 function childFillAxes(entry: unknown, scope: WebRenderScope, path: string): WebAxis[] {
   const prepared = preparedNode(entry, scope, path);
@@ -351,7 +382,9 @@ function childFillAxes(entry: unknown, scope: WebRenderScope, path: string): Web
   // A nested line or card grows around its own filling child, so its parent grows too.
   const inferred = GROWING_CONTAINERS.has(String(styled.type))
     ? lineFillAxes(styled, local, path).filter((axis) => style[axis] === undefined)
-    : defaultFillAxes(styled);
+    : styled.type === "searchBar"
+      ? searchBarFillAxes(styled, local, { bound })
+      : defaultFillAxes(styled);
   return [...authored, ...inferred];
 }
 
@@ -363,15 +396,15 @@ const GROWING_CONTAINERS: ReadonlySet<string> = new Set(["row", "column", "box",
  * no children.
  */
 function lineFillAxes(raw: Raw, scope: WebRenderScope, path: string): WebAxis[] {
-  const repeat = record(raw.repeat);
-  if (
-    !Array.isArray(raw.children) ||
-    (repeat && webRepeatRows(repeat, scope.data, webRepeatLimit(raw)).length === 0)
-  ) {
+  // Each repeat row binds its own placeholders, as `children` renders it (#16803).
+  const rows = rowScopes(raw, scope);
+  if (!Array.isArray(raw.children) || rows.length === 0) {
     return [];
   }
+  const list: unknown[] = raw.children;
   const own = rowFillAxes(raw, path, prepareIn(scope));
-  const axes = new Set([...own, ...raw.children.flatMap((e) => childFillAxes(e, scope, path))]);
+  const fromRows = rows.flatMap((row) => list.flatMap((e) => childFillAxes(e, row, path)));
+  const axes = new Set([...own, ...fromRows]);
   return (["width", "height"] as const).filter((axis) => axes.has(axis));
 }
 
@@ -477,26 +510,7 @@ const icon: NodeRenderer = (node, scope, path) => {
   ]);
 };
 
-const image: NodeRenderer = (node, scope, path) => {
-  scope.unsupported.push({
-    type: "image",
-    ...(typeof node.id === "string" ? { id: node.id } : {}),
-    path,
-    reason: "assetNotInlined",
-  });
-  const { attrs, style } = base(node, scope, {
-    [BACKGROUND_COLOR]: cssColor("surfaceVariant", scope.style) ?? "#e7e0ec",
-    [MIN_HEIGHT]: "48px",
-    [MIN_WIDTH]: "48px",
-  });
-  return el("div", { attrs: { ...attrs, role: "img" }, style });
-};
-
-const BUTTON_ROLES: Readonly<Record<string, [string, string]>> = {
-  filled: ["primary", "onPrimary"],
-  tonal: ["secondaryContainer", "onSecondaryContainer"],
-  elevated: ["surfaceContainerLow", "primary"],
-};
+const image = webImageRenderer({ base, bound });
 
 /**
  * A control whose enabledWhen is decidably false draws disabled (Material's 0.38 opacity) and
@@ -512,33 +526,6 @@ function disabledState(
     ? { css: {}, attrs: {} }
     : { css: { opacity: "0.38" }, attrs: { "aria-disabled": "true" } };
 }
-
-const button: NodeRenderer = (node, scope) => {
-  const disabled = disabledState(node, scope);
-  const variant = typeof node.variant === "string" ? node.variant : "filled";
-  const roles = BUTTON_ROLES[variant];
-  const outline: Record<string, string> =
-    variant === "outlined"
-      ? { border: `1px solid ${cssColor("outline", scope.style) ?? "currentColor"}` }
-      : {};
-  const { attrs, style } = base(node, scope, {
-    display: INLINE_FLEX,
-    [ALIGN_ITEMS]: CENTER,
-    [JUSTIFY_CONTENT]: CENTER,
-    [MIN_HEIGHT]: "40px",
-    padding: "0 24px",
-    [BORDER_RADIUS]: "20px",
-    [FONT_WEIGHT]: "500",
-    ...(roles ? roleCss(scope, roles[0], roles[1]) : roleCss(scope, "transparent", "primary")),
-    gap: "8px",
-    ...outline,
-    ...disabled.css,
-  });
-  return el("div", { attrs: { ...attrs, role: "button", ...disabled.attrs }, style }, [
-    ...namedIcon(node.icon, scope),
-    bound(node.label, scope),
-  ]);
-};
 
 /** App-bar navigation and action slots draw as icon placeholders labelled with their action. */
 function appBarIcons(slots: readonly unknown[], scope: WebRenderScope, path: string): WebElement[] {
@@ -701,10 +688,14 @@ function fieldCaption(node: Raw, error: boolean, scope: WebRenderScope): WebElem
   ];
 }
 
+/** Whether a field's `errorWhen` decidably holds, which shows its error as on both devices. */
+function fieldErrored(node: Raw, scope: WebRenderScope): boolean {
+  return node.errorWhen !== undefined && decide(node.errorWhen, presentation(scope)) === true;
+}
+
 const textField: NodeRenderer = (node, scope, path) => {
   const { shown, empty } = fieldValue(node, scope);
-  const error =
-    node.errorWhen !== undefined && decide(node.errorWhen, presentation(scope)) === true;
+  const error = fieldErrored(node, scope);
   const disabled = disabledState(node, scope);
   const { attrs, style } = base(node, scope, {
     display: FLEX,
@@ -793,11 +784,14 @@ const card: NodeRenderer = (raw, scope, path) => {
     // Material's ColumnScope keeps wrap-sized content at its own width.
     [ALIGN_ITEMS]: "flex-start",
     [BORDER_RADIUS]: "12px",
-    ...roleCss(
-      scope,
-      node.variant === "outlined" ? "surface" : "surfaceContainerHighest",
-      "onSurface",
-    ),
+    // The container is a skin metric; the layout is shared.
+    ...(scope.skin === "ios"
+      ? iosCardChrome(node.variant, scope)
+      : roleCss(
+          scope,
+          node.variant === "outlined" ? "surface" : "surfaceContainerHighest",
+          "onSurface",
+        )),
   });
   const inner = child(scope, { inBox: false, style: containerChildStyle(scope, node, "column") });
   return el("div", { attrs, style }, children(node, inner, path));
@@ -881,7 +875,10 @@ const KIT: WebRenderKit = {
   disabledState,
   renderNode: renderWebNode,
   safeAreaEdges,
+  fieldErrored,
 };
+
+const materialButton = materialButtonRenderer(KIT);
 
 export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   box,
@@ -893,22 +890,30 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   divider,
   icon,
   image,
-  button,
   topAppBar,
   textField,
   switch: toggle("switch"),
   checkbox: toggle("checkbox"),
   card,
   listItem,
+  button: materialButton,
   ...webCollectionRenderers(KIT),
   ...webControlRenderers(KIT),
-  ...webSelectionRenderers(KIT, button),
+  ...webSelectionRenderers(KIT, materialButton),
   ...webMediaRenderers(KIT),
   ...webMapRenderers(KIT),
   ...webStackRenderers(KIT),
+  ...webIndicatorRenderers(KIT),
 };
 
 const WEB_LAYER_RENDERERS = { ...webSheetLayers(KIT), ...webModalLayers(KIT) };
+
+/** Whether `type` draws only in the window's layer while its `openWhen` holds, never in place. */
+export function isWebLayerType(type: unknown): boolean {
+  return Object.hasOwn(WEB_LAYER_RENDERERS, String(type));
+}
+
+const WEB_SKINS = webSkins(KIT);
 
 function placeholder(node: Raw, scope: WebRenderScope, path: string): WebElement {
   const type = String(node.type);
@@ -967,7 +972,7 @@ function resolvedStyle(node: Raw, scope: WebRenderScope): Raw | undefined {
  * (through the devices' own contract), a pager's locals set before its own conditions run, its
  * `visibleWhen` (undefined when hidden) and its `styleWhen` merged. One path, so the two agree.
  */
-function preparedNode(
+export function preparedNode(
   node: unknown,
   scope: WebRenderScope,
   path: string,
@@ -1003,8 +1008,11 @@ export function renderWebNode(
     layer(styled, own, path);
     return undefined;
   }
-  const renderer = WEB_NODE_RENDERERS[String(styled.type)];
-  const element = renderer ? renderer(styled, own, path) : placeholder(styled, own, path);
+  const type = String(styled.type);
+  const renderer = WEB_SKINS[own.skin ?? "android"].renderers[type] ?? WEB_NODE_RENDERERS[type];
+  const element = renderer
+    ? withSwipeActions(renderer(styled, own, path), styled, own, KIT)
+    : placeholder(styled, own, path);
   const shaded = shaderFallback(styled, path);
   if (shaded) {
     own.unsupported.push(shaded);

@@ -64,14 +64,14 @@ describe("prototype web still (#16346)", () => {
   test("lists unsupported nodes with their paths and draws a labelled placeholder", () => {
     expect(still.unsupportedNodes).toEqual([
       {
-        type: "progress",
+        type: "menu",
         id: "spend",
         path: 'root.screens["cart"].children[5]',
         reason: "unsupportedType",
       },
     ]);
     expect(
-      find(still.element, (element) => element.attrs["data-unsupported"] === "progress"),
+      find(still.element, (element) => element.attrs["data-unsupported"] === "menu"),
     ).toHaveLength(1);
   });
 
@@ -89,7 +89,7 @@ describe("prototype web still (#16346)", () => {
   test("an image draws a placeholder and is listed as not inlined", () => {
     const spec = { ...reference, root: { type: "image", id: "hero", asset: "hero" } };
     expect(renderPrototypeStill(spec).unsupportedNodes).toEqual([
-      { type: "image", id: "hero", path: "root", reason: "assetNotInlined" },
+      { type: "image", id: "hero", path: "root", reason: "assetNotInlined", asset: "hero" },
     ]);
   });
 

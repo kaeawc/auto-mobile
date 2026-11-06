@@ -102,6 +102,13 @@ Read `artifact.path` for the full payload. If the payload could not be written
 anywhere, the CLI prints `"truncated": true` with a reason instead. Either way
 the output is always complete, parseable JSON — it is never cut mid-value.
 
+An oversized `listDeviceImages` result keeps `count` (the total), `platform`,
+`message`, `configuredInventory`, `capabilityProfiles` and `host` inline beside
+`artifact`, plus `truncated` and `imagesReturned`. When `truncated` is `true`,
+`images` holds only the first `imagesReturned` entries; read `artifact.path` for
+the full list. A result without `truncated` has every image inline. See
+[Listing device images](using/device-images.md).
+
 ## My MCP client cannot see AutoMobile. What should I do?
 
 Run the installer again and select the intended client and configuration scope,

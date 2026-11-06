@@ -1,7 +1,8 @@
 # watchOS as its own platform, fail-closed per tool
 
 Status: accepted for #14899 (part of the Apple Watch simulator epic #14895); extended to every
-non-iOS Apple platform for #15886 (Apple TV epic #15884).
+non-iOS Apple platform for #15886 (Apple TV epic #15884) and to Apple Vision Pro for #16848
+(visionOS epic #16857).
 
 ## Decision
 
@@ -11,7 +12,8 @@ non-iOS Apple platform (`NonIosApplePlatform`): an Apple TV simulator is `platfo
 everything below that says "watch" applies to it unless a section names watchOS specifically.
 `tvos` supports `listDevices`, `listDeviceImages`, `provisionDevice`, `deleteDevice`,
 `startDevice`, `setActiveDevice`, `killDevice`, `installApp`, `uninstallApp`, `launchApp`,
-`terminateApp`, `listApps`, `observe`, `tapOn` and `pressButton`. Discovery and selection require an explicit
+`terminateApp`, `listApps`, `observe`, `tapOn`, `pressButton`, `openLink`, `getDeepLinks`,
+`videoRecording` and `compareScreenshot`. Discovery and selection require an explicit
 tvOS request. Boot uses simctl readiness and the simulator gate; start binds at `booted`
 readiness after best-effort tvOS runner startup, without iOS keyboard, biometric or prototype setup.
 The tvOS runner uses `request_hierarchy` through the iOS hierarchy converter, preserving focus
@@ -26,9 +28,21 @@ long press and text input are unsupported. A tvOS handshake is required before r
 xctestrun is discovered or the `AutoMobileTVTest` scheme is built with a 120-second limit.
 Startup uses the tvOS destination and an isolated xctestrun with `AM_PORT`; runner ownership,
 release, shutdown and deletion follow the watch lifecycle. Connected observations use runner
-screenshots, while observations without a runner retain the simctl screenshot-only fallback. A broker binding
+screenshots, while observations without a runner retain the simctl screenshot-only fallback.
+`videoRecording` captures through the iOS simulator `simctl io recordVideo` path on simctl's
+default display (`VideoRecordingPlatform`; rows store `tvos`); audio is refused. `compareScreenshot`
+uses the same screenshot source; without a runner it has no point geometry, so it compares only
+the full screenshot and refuses regions, and a tvOS profile is keyed by screenshot size alone. A broker binding
 never reuses a TV. Unlike watchOS,
 `tvos` is advertised in tool input schemas ahead of support (see the schema rule below).
+
+An Apple Vision Pro simulator is `platform: "visionos"` (owner decision 2026-11-04, #16848), under
+the same fail-closed rules. Its allowlist starts with the device lifecycle tools only
+(`listDevices`, `listDeviceImages`, `provisionDevice`, `deleteDevice`, `startDevice`,
+`setActiveDevice`, `killDevice`); every other tool joins once verified on a Vision Pro simulator.
+No input schema names `visionos` and no inventory discovers one until the simctl lifecycle lands
+(#16849): sweeps, discovery sources and the device-image catalog report it unscanned or
+unavailable, and a broker binding never reuses one.
 
 - **Fail closed at the tool boundary.** Every device-aware tool rejects a watch or an Apple TV with
   an `ActionableError` naming the platform (`<tool> does not support watchOS yet`, `<tool> does
@@ -68,6 +82,7 @@ never reuses a TV. Unlike watchOS,
   confined to the watch's device-set directory, remove Documents, Library and tmp), and a failed
   wipe launches nothing. `prototype: true` is refused before any agent preparation. A
   `terminateApp` whose process is already gone is a success with `wasRunning: false`.
+- **Watch notifications.** `postNotification` delivers an APNs payload via `simctl push` to the watch simulator UDID and requires the watch app bundle ID as `appId`.
 - **Runner-backed watch observation and actions.** `observe` retains a simctl PNG. When an
   explicitly registered watch runner is connected, it also returns the hierarchy normalized
   through the iOS observation model; bounds and `screenSize` use XCTest points while
@@ -91,7 +106,10 @@ never reuses a TV. Unlike watchOS,
   hierarchy read. Startup retries connection/readiness for a bounded budget. Process exit or
   the returned stop handle closes the client and removes the registration. After boot, before session
   binding, `startDevice` discovers a watchsimulator xctestrun in the configured CtrlProxy derived
-  data, building the `CtrlProxyWatch` scheme with `build-for-testing` if absent.
+  data, building the `CtrlProxyWatch` scheme with `build-for-testing` if absent. The project is
+  looked up under `AUTOMOBILE_PROJECT_ROOT` (default: process working directory), then the
+  daemon launch directory, then the running AutoMobile package root, because the detached
+  daemon runs in the home directory; when none has it, the error lists every path checked.
   `AUTOMOBILE_WATCH_RUNNER_XCTESTRUN` selects an explicit prebuilt artifact. A per-launch copy
   injects `AM_PORT` for the allocated localhost port. The lifecycle owner reuses a registered
   runner and attaches its own runner to the newly bound session. It stops its own handle on

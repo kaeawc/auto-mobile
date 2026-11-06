@@ -25,6 +25,22 @@ enum PrototypeSensitiveSinkRules {
     )
         -> [PrototypeLoadError]
     {
+        scan(spec, nodes: nodes, actions: actions, repeats: repeats, validRepeats: validRepeats).errors
+    }
+
+    /// Counts sink trie-node visits, excluding construction and copy propagation.
+    static func scan(
+        _ spec: [String: JSONValue], nodes: [PrototypeLocatedValue],
+        actions: [PrototypeLocatedValue], repeats: PrototypeStrictRepeats, validRepeats: Bool = true
+    )
+        -> (errors: [PrototypeLoadError], checks: Int)
+    {
+        var checks = 0
+        func visit() -> Bool {
+            guard checks <= 4_000_000 else { return false }
+            checks += 1
+            return checks <= 4_000_000
+        }
         let seeds = sensitivePointers(spec)
         let declared = PrototypeStrictBindings.array(spec["requires"]?.objectFields?["platform"])
         let platformTaints = PrototypeContractValidator.platformModules.flatMap { module, raw in
@@ -33,10 +49,15 @@ enum PrototypeSensitiveSinkRules {
                     "/\(module)/\(key)" : nil
             }
         }
-        guard !seeds.isEmpty || !platformTaints.isEmpty else { return [] }
-        guard let taints = propagateCopies(seeds, platformTaints: platformTaints, actions: actions) else {
-            return [.invalidSpec(path: "$", message: "Secure copy taint analysis exceeds 4000000 overlap checks")]
+        guard !seeds.isEmpty || !platformTaints.isEmpty else { return ([], checks) }
+        guard let taints = propagateCopies(seeds, platformTaints: platformTaints, nodes: nodes, actions: actions) else {
+            return (
+                [.invalidSpec(path: "$", message: "Secure copy taint analysis exceeds 4000000 overlap checks")],
+                checks
+            )
         }
+        let dataIndex = sinkOverlapIndex(taints, visit: visit)
+        let platformIndex = sinkOverlapIndex(platformTaints, visit: visit)
         let sinks = sinkFields(spec, actions: actions).sorted {
             $0.path.utf16.lexicographicallyPrecedes($1.path.utf16)
         }
@@ -46,10 +67,10 @@ enum PrototypeSensitiveSinkRules {
                 let scope = repeats.scopes.first { field.path.hasPrefix("\($0.path).children[") }
                 bytes += field.text.utf8.count * max(1, scope?.items.count ?? 1)
                 if bytes > 4_194_304 {
-                    return [.invalidSpec(
+                    return ([.invalidSpec(
                         path: field.path,
                         message: "Secure binding scan exceeds 4194304 expanded UTF-8 bytes"
-                    )]
+                    )], checks)
                 }
             }
         }
@@ -58,11 +79,12 @@ enum PrototypeSensitiveSinkRules {
             guard let alias = repeated?["as"]?.stringValue,
                   let pointer = repeated?["items"]?.objectFields?["path"]?.stringValue,
                   PrototypeDataPointer.isValid(pointer),
-                  taints.contains(where: { overlaps($0, pointer, pointerIndexWildcard: false) }) else { return nil }
+                  dataIndex(pointer, false) else { return nil }
             return (node.path, alias)
         }
         var errors: [PrototypeLoadError] = []
         for field in sinks {
+            if checks > 4_000_000 { break }
             let rowRead = taintedRows.contains { scope in
                 field.path.hasPrefix("\(scope.path).children[") &&
                     (field.itemBinding || (
@@ -82,15 +104,13 @@ enum PrototypeSensitiveSinkRules {
                 let bound = repeats.bound([.init(value: ["stateKey": .string(field.text)], path: field.path)])
                 texts = bound.isEmpty ? [field.text] : bound.compactMap { $0.value["stateKey"]?.stringValue }
             }
-            func reaches(_ source: String, taints: [String]) -> Bool {
+            func reaches(_ source: String, index: (String, Bool) -> Bool) -> Bool {
                 let pointers = field.pointerSource == nil ? texts.flatMap {
                     source == "data" ? dataPlaceholders($0) : PrototypePlatformValidator.placeholders($0)
                 } : (field.pointerSource == source ? [field.text] : [])
-                return pointers.contains { pointer in
-                    taints.contains { overlaps($0, pointer, pointerIndexWildcard: field.pointerSource == nil) }
-                }
+                return pointers.contains { index($0, field.pointerSource == nil) }
             }
-            if rowRead || reaches("data", taints: taints) || reaches("platform", taints: platformTaints) {
+            if rowRead || reaches("data", index: dataIndex) || reaches("platform", index: platformIndex) {
                 errors.append(.invalidSpec(
                     path: field.path,
                     message: field.path.hasPrefix("storage.keys[") ? "Sensitive value cannot be persisted" :
@@ -98,41 +118,104 @@ enum PrototypeSensitiveSinkRules {
                 ))
             }
         }
-        return errors
+        if checks > 4_000_000 {
+            return (
+                [.invalidSpec(path: "$", message: "Secure copy taint analysis exceeds 4000000 overlap checks")],
+                checks
+            )
+        }
+        return (errors, checks)
+    }
+
+    private final class TaintNode {
+        var children: [[UInt16]: TaintNode] = [:]
+        var terminal = false
+        var hasTaintBelow = false
+    }
+
+    /// Existence index for overlaps' segment-prefix and {index} rules, with exact UTF-16 keys.
+    private static func sinkOverlapIndex(_ taints: [String], visit: @escaping () -> Bool) -> (String, Bool) -> Bool {
+        let root = TaintNode()
+        let wildcard = Array("{index}".utf16)
+        for taint in taints {
+            var node = root
+            node.hasTaintBelow = true
+            for segment in pointerSegments(taint) {
+                let child = node.children[segment] ?? TaintNode()
+                node.children[segment] = child
+                node = child
+                node.hasTaintBelow = true
+            }
+            node.terminal = true
+        }
+        return { pointer, pointerIndexWildcard in
+            let segments = pointerSegments(pointer)
+            func walk(_ node: TaintNode, depth: Int) -> Bool {
+                guard visit() else { return false }
+                if node.terminal || depth == segments.count { return node.hasTaintBelow }
+                let segment = segments[depth]
+                if pointerIndexWildcard, segment == wildcard {
+                    return node.children.values.contains { walk($0, depth: depth + 1) }
+                }
+                if let literal = node.children[segment], walk(literal, depth: depth + 1) { return true }
+                if segment != wildcard, let child = node.children[wildcard] {
+                    return walk(child, depth: depth + 1)
+                }
+                return false
+            }
+            return walk(root, depth: 0)
+        }
+    }
+
+    private static func pointerSegments(_ pointer: String) -> [[UInt16]] {
+        pointer.utf16.dropFirst().split(separator: 47, omittingEmptySubsequences: false).map { Array($0) }
     }
 
     /// A data action copying a tainted read into `/data` taints its destination, transitively. A
     /// worklist over copies bucketed by their source's first segment keeps long chains linear;
     /// nil means the check cap was exceeded, so callers fail closed.
     private static func propagateCopies(
-        _ seeds: [String], platformTaints: [String], actions: [PrototypeLocatedValue]
+        _ seeds: [String], platformTaints: [String], nodes: [PrototypeLocatedValue], actions: [PrototypeLocatedValue]
     )
         -> [String]?
     {
         let writes: Set<String> = ["setData", "appendData", "prependData", "upsertData"]
-        let copies = actions.compactMap { action -> (into: String, source: String, from: String)? in
+        let copies = actions.flatMap { action -> [(into: String, source: String, from: String)] in
             guard let type = action.value["type"]?.stringValue, writes.contains(type),
                   let into = action.value["path"]?.stringValue.flatMap(PrototypeDataWrite.pointer(ofPath:)),
-                  let read = action.value["value"]?.objectFields else { return nil }
+                  let read = action.value["value"]?.objectFields else { return [] }
             for source in ["data", "platform"] {
-                if let from = read[source]?.stringValue { return (into, source, from) }
+                if let from = read[source]?.stringValue { return [(into, source, from)] }
             }
-            return nil
+            if read["item"]?.stringValue != nil {
+                return nodes.compactMap { node -> (into: String, source: String, from: String)? in
+                    let repeated = node.value["repeat"]?.objectFields
+                    if action.path.hasPrefix("\(node.path).children["),
+                       repeated?["as"]?.stringValue != nil,
+                       let from = repeated?["items"]?.objectFields?["path"]?.stringValue,
+                       PrototypeDataPointer.isValid(from)
+                    {
+                        return (into, "data", from)
+                    }
+                    return nil
+                }
+            }
+            return []
         }
-        func firstSegment(_ pointer: String) -> String {
-            String(pointer.dropFirst().split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)[0])
+        func firstSegment(_ pointer: String) -> [UInt16] {
+            Array(pointer.utf16.dropFirst().split(separator: 47, maxSplits: 1, omittingEmptySubsequences: false)[0])
         }
         var taints = seeds
-        var known = Set(seeds)
+        var known = Set(seeds.map { Array($0.utf16) })
         var queue = seeds
         func mark(_ pointer: String) {
-            if known.insert(pointer).inserted {
+            if known.insert(Array(pointer.utf16)).inserted {
                 taints.append(pointer)
                 queue.append(pointer)
             }
         }
         var checks = 0
-        var buckets: [String: [(into: String, from: String)]] = [:]
+        var buckets: [[UInt16]: [(into: String, from: String)]] = [:]
         for copy in copies {
             if copy.source == "data" {
                 buckets[firstSegment(copy.from), default: []].append((copy.into, copy.from))
@@ -149,7 +232,7 @@ enum PrototypeSensitiveSinkRules {
             cursor += 1
             let key = firstSegment(taint)
             // A leading {index} taint segment matches any source segment.
-            for name in key == "{index}" ? Array(buckets.keys) : [key] {
+            for name in key == Array("{index}".utf16) ? Array(buckets.keys) : [key] {
                 var rest: [(into: String, from: String)] = []
                 for copy in buckets[name] ?? [] {
                     checks += 1
@@ -250,8 +333,8 @@ enum PrototypeSensitiveSinkRules {
     }
 
     private static func overlaps(_ taint: String, _ pointer: String, pointerIndexWildcard: Bool) -> Bool {
-        let left = taint.utf16.dropFirst().split(separator: 47, omittingEmptySubsequences: false)
-        let right = pointer.utf16.dropFirst().split(separator: 47, omittingEmptySubsequences: false)
+        let left = pointerSegments(taint)
+        let right = pointerSegments(pointer)
         let wildcard = Array("{index}".utf16)
         return zip(left, right).allSatisfy {
             $0.elementsEqual($1) || $0.elementsEqual(wildcard) || (pointerIndexWildcard && $1.elementsEqual(wildcard))

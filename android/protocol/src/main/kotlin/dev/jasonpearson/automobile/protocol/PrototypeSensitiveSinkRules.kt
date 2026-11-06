@@ -1,12 +1,16 @@
 package dev.jasonpearson.automobile.protocol
 
 import dev.jasonpearson.automobile.protocol.PrototypePlatformModules.callDefinition
+import dev.jasonpearson.automobile.protocol.PrototypeSensitiveSinkIndex.Companion.overlaps
 import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.flag
 import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.text
 import kotlinx.serialization.json.*
 
 /** R2: sensitive call results and platform state cannot reach network or storage sinks. */
 internal object PrototypeSensitiveSinkRules {
+  private const val MAX_COPY_TAINT_CHECKS = 4_000_000
+  private const val CHECK_MESSAGE = "Secure copy taint analysis exceeds 4000000 overlap checks"
+
   private data class Field(
     val text: String,
     val path: String,
@@ -16,53 +20,70 @@ internal object PrototypeSensitiveSinkRules {
     fun reaches(
       texts: List<String>,
       source: String,
-      taints: List<String>,
+      index: PrototypeSensitiveSinkIndex,
     ): Boolean {
       val pointers =
         if (pointerSource == null) texts.flatMap { PrototypeDataText.pointers(it, source) }
         else if (pointerSource == source) listOf(this.text) else emptyList()
-      return pointers.any { pointer ->
-        taints.any { PrototypeSensitiveSinkRules.overlaps(it, pointer, pointerSource == null) }
-      }
+      return pointers.any { index.overlaps(it, pointerSource == null) }
     }
   }
 
-  fun errors(spec: JsonObject, context: PrototypeStateChecks.Context): List<PrototypeSpecError> {
+  fun errors(spec: JsonObject, context: PrototypeStateChecks.Context): List<PrototypeSpecError> =
+    scan(spec, context).errors
+
+  data class Scan(val errors: List<PrototypeSpecError>, val checks: Int)
+
+  /** Counts sink trie-node visits, excluding construction and copy propagation. */
+  fun scan(spec: JsonObject, context: PrototypeStateChecks.Context): Scan {
+    val budget = PrototypeSensitiveSinkIndex.Budget(MAX_COPY_TAINT_CHECKS)
     val platformTaints = sensitivePlatformPointers(spec)
     val seeds = sensitiveDataPointers(spec, context)
-    if (seeds.isEmpty() && platformTaints.isEmpty()) return emptyList()
+    if (seeds.isEmpty() && platformTaints.isEmpty()) return Scan(emptyList(), budget.checks)
     val dataTaints =
       PrototypeCopyTaint.propagate(seeds, platformTaints, context, ::overlaps)
-        ?: return listOf(
-          PrototypeSpecError("$", "Secure copy taint analysis exceeds 4000000 overlap checks"),
+        ?: return Scan(
+          listOf(
+            PrototypeSpecError("$", CHECK_MESSAGE),
+          ),
+          budget.checks,
         )
+    val dataIndex = PrototypeSensitiveSinkIndex(dataTaints, budget::visit)
+    val platformIndex = PrototypeSensitiveSinkIndex(platformTaints, budget::visit)
     val fields = sinkFields(spec, context).sortedBy { it.path }
     val validRepeats = PrototypeRepeatValidator.validate(spec) == null
     val scopes = if (validRepeats) PrototypeRepeatValidator.scopes(spec) else emptyList()
     budgetError(fields, scopes, validRepeats)?.let {
-      return listOf(it)
+      return Scan(listOf(it), budget.checks)
     }
-    val taintedRows = taintedRows(context, dataTaints)
-    return fields
-      .filter { field ->
-        val rowRead = taintedRows.any { (path, alias) ->
-          field.path.startsWith("$path.children[") &&
-            (field.itemBinding ||
-              (field.pointerSource == null &&
-                PrototypeRepeatTemplate.fieldReferences(field.text, alias).isNotEmpty()))
+    val taintedRows = taintedRows(context, dataIndex)
+    val errors =
+      fields
+        .filter { field ->
+          if (budget.checks > MAX_COPY_TAINT_CHECKS) return@filter false
+          val rowRead = taintedRows.any { (path, alias) ->
+            field.path.startsWith("$path.children[") &&
+              (field.itemBinding ||
+                (field.pointerSource == null &&
+                  PrototypeRepeatTemplate.fieldReferences(field.text, alias).isNotEmpty()))
+          }
+          val texts = boundTexts(field, scopes, validRepeats)
+          rowRead ||
+            field.reaches(texts, "data", dataIndex) ||
+            field.reaches(texts, "platform", platformIndex)
         }
-        val texts = boundTexts(field, scopes, validRepeats)
-        rowRead ||
-          field.reaches(texts, "data", dataTaints) ||
-          field.reaches(texts, "platform", platformTaints)
-      }
-      .map { field ->
-        PrototypeSpecError(
-          field.path,
-          if (field.path.startsWith("storage.keys[")) "Sensitive value cannot be persisted"
-          else "Sensitive value cannot be bound into a request",
-        )
-      }
+        .map { field ->
+          PrototypeSpecError(
+            field.path,
+            if (field.path.startsWith("storage.keys[")) "Sensitive value cannot be persisted"
+            else "Sensitive value cannot be bound into a request",
+          )
+        }
+    return Scan(
+      if (budget.checks > MAX_COPY_TAINT_CHECKS) listOf(PrototypeSpecError("$", CHECK_MESSAGE))
+      else errors,
+      budget.checks,
+    )
   }
 
   private fun sensitiveDataPointers(
@@ -113,19 +134,14 @@ internal object PrototypeSensitiveSinkRules {
 
   private fun taintedRows(
     context: PrototypeStateChecks.Context,
-    taints: List<String>,
+    index: PrototypeSensitiveSinkIndex,
   ): List<Pair<String, String>> =
     context.nodes.mapNotNull { node ->
       val repeat = node.value["repeat"] as? JsonObject
       val pointer = (repeat?.get("items") as? JsonObject)?.text("path")
       val alias = repeat?.text("as")
-      if (alias != null && isTaintedPointer(pointer, taints)) node.path to alias else null
+      if (alias != null && index.isTaintedPointer(pointer)) node.path to alias else null
     }
-
-  private fun isTaintedPointer(pointer: String?, taints: List<String>): Boolean =
-    pointer != null &&
-      PrototypeDataPointer.isValid(pointer) &&
-      taints.any { overlaps(it, pointer, false) }
 
   private fun boundTexts(
     field: Field,
@@ -142,11 +158,6 @@ internal object PrototypeSensitiveSinkRules {
       .mapNotNull { (value, _) -> value.text("stateKey") }
       .ifEmpty { listOf(field.text) }
   }
-
-  internal fun overlaps(taint: String, pointer: String, pointerIndexWildcard: Boolean): Boolean =
-    taint.drop(1).split('/').zip(pointer.drop(1).split('/')).all { (left, right) ->
-      left == right || left == "{index}" || (pointerIndexWildcard && right == "{index}")
-    }
 
   private fun bindingFields(raw: JsonElement?, path: String, text: Boolean = false): List<Field> {
     val fields = mutableListOf<Field>()

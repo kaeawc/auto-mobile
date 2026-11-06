@@ -35,6 +35,65 @@ const spec = (extra: Record<string, unknown>, root: unknown = { type: "spacer" }
   root,
 });
 
+describe("permissions module contract", () => {
+  const permissions = PROTOTYPE_PLATFORM_MODULES.permissions;
+
+  test("request takes a list of names and needs no permission itself", () => {
+    expect(Object.keys(permissions.calls)).toEqual(["request"]);
+    expect(permissions.calls.request.permissions).toEqual([]);
+    expect(permissions.calls.request.args.names.value).toMatchObject({
+      kind: "array",
+      min: 1,
+      max: 16,
+      unique: true,
+    });
+  });
+
+  test("changed is the only event, and every name has a state in the shared vocabulary", () => {
+    expect(permissions.events).toEqual({ changed: { sensitive: false } });
+    const states = Object.values(permissions.state ?? {});
+    expect(states).toHaveLength(13);
+    for (const state of states) {
+      expect(state.value.values).toEqual([
+        "granted",
+        "denied",
+        "blocked",
+        "notDetermined",
+        "limited",
+        "restricted",
+        "unavailable",
+      ]);
+    }
+  });
+
+  test("a literal request names only declared permissions; a bound list waits for the runtime", () => {
+    const request = (names: unknown) =>
+      spec(
+        {
+          data: { names: [] },
+          requires: {
+            platform: ["permissions"],
+            permissions: [{ name: "camera", purpose: "Scan a receipt." }],
+          },
+        },
+        {
+          type: "button",
+          label: "Allow",
+          onTap: [{ type: "platform", call: "permissions.request", args: { names } }],
+        },
+      );
+    expect(validatePrototypeSpec(request({ value: ["camera"] })).success).toBe(true);
+    expect(validatePrototypeSpec(request({ data: "/names" })).success).toBe(true);
+    expect(validatePrototypeSpec(request({ value: ["camera", "speech"] }))).toMatchObject({
+      success: false,
+      error: {
+        path: "root.onTap[0].args.names.value[1]",
+        message: "Permission speech is not declared in requires.permissions",
+      },
+    });
+  });
+});
+
 describe("notifications module contract", () => {
   const notifications = PROTOTYPE_PLATFORM_MODULES.notifications;
 
@@ -163,8 +222,15 @@ describe("platform module table", () => {
     );
     expect(PROTOTYPE_PLATFORM_MODULE_GATES.map((gate) => gate.capability).sort()).toEqual(
       [
-        ...Object.values(PROTOTYPE_PLATFORM_MODULES).flatMap((definition) => [
+        ...Object.entries(PROTOTYPE_PLATFORM_MODULES).flatMap(([name, definition]) => [
           definition.capability,
+          // A backend capability is prototype_platform_<module>_<backend>_vN (#14302).
+          ...Object.entries(definition.backends ?? {}).map(([backend, { capability }]) => {
+            expect(capability).toMatch(
+              new RegExp(`^prototype_platform_${name}_${backend}_v[0-9]+$`),
+            );
+            return capability;
+          }),
           ...(definition.deviceCapability ? [definition.deviceCapability] : []),
         ]),
         ...new Set(callCapabilities),
@@ -1172,6 +1238,7 @@ describe("cast module contract", () => {
       "state",
       "deviceName",
       "protocol",
+      "protocols",
       "player",
       "volume",
     ]);
@@ -1183,5 +1250,32 @@ describe("cast module contract", () => {
       "connected",
     ]);
     expect(cast.state?.protocol.value.values).toEqual(["googleCast", "airplay"]);
+  });
+
+  test("protocols is a unique list of the protocols castButton.protocols accepts", () => {
+    const castButtonProtocols =
+      contract.definitions.node.variants.castButton.fields.protocols.rule.item;
+    expect(cast.state?.protocols.platforms).toEqual(["android", "ios"]);
+    expect(cast.state?.protocols.value).toEqual({
+      kind: "array",
+      item: castButtonProtocols,
+      min: 0,
+      max: 2,
+      unique: true,
+    });
+  });
+
+  test("a spec reads the whole protocols list and an unknown key is refused", () => {
+    const spec = (text: string) => ({
+      id: "c",
+      window: { placement: { type: "fullscreen" } },
+      requires: { platform: ["cast"] },
+      root: { type: "text", text },
+    });
+    expect(validatePrototypeSpec(spec("{platform:/cast/protocols}")).success).toBe(true);
+    expect(validatePrototypeSpec(spec("{platform:/cast/protocols/0}"))).toMatchObject({
+      success: false,
+      error: { path: "root.text", message: "Unknown platform state /cast/protocols/0" },
+    });
   });
 });

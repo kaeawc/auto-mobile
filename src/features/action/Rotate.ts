@@ -14,7 +14,7 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios";
 import { readWindowManagerRotation } from "../../utils/android-cmdline-tools/readWindowManagerRotation";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import { observedIosOrientation, verifyIosRotation } from "./iosRotateVerification";
+import { restoreTargetIosOrientation, verifyIosRotation } from "./iosRotateVerification";
 import { ROTATION_READ_FLOOR_MS } from "../observe/Idle";
 import {
   orientationFromRotation,
@@ -423,7 +423,7 @@ export class Rotate extends BaseVisualChange {
     call: { perf: RotationPerf; signal?: AbortSignal },
   ): Promise<RotateResult> {
     const { perf, signal } = call;
-    const prior = observedIosOrientation(previousObservation);
+    const prior = restoreTargetIosOrientation(previousObservation);
     if (!client || prior === "unknown" || prior === failed.orientation) {
       return failed;
     }

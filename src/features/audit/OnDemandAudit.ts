@@ -18,6 +18,13 @@ import { matchesCtrlProxyResourceId } from "../utility/SearchableNode";
 export const AUDIT_KINDS = ["accessibility", "performance", "memory"] as const;
 export type AuditKind = (typeof AUDIT_KINDS)[number];
 
+/** The kinds the `performanceAudit` tool runs (#17279). */
+export const PERFORMANCE_AUDIT_KINDS = [
+  "performance",
+  "memory",
+] as const satisfies readonly AuditKind[];
+export type PerformanceAuditKind = (typeof PERFORMANCE_AUDIT_KINDS)[number];
+
 export const AUDIT_FAIL_ON = ["error", "warning", "never"] as const;
 export type AuditFailOn = (typeof AUDIT_FAIL_ON)[number];
 
@@ -37,6 +44,8 @@ export interface OnDemandAuditInput {
   container?: AuditContainer;
   baseline?: { name: string; mode: "compare" | "record" };
   failOn?: AuditFailOn;
+  /** The call's cancellation; a cancelled call never records a baseline. */
+  signal?: AbortSignal;
 }
 
 export interface AuditBaselineStore {
@@ -123,6 +132,37 @@ export function findAuditContainer(
   );
 }
 
+/**
+ * Why the observed screen cannot stand for `appId`, or undefined when it can. The WCAG audit reads
+ * the observed screen, so a requested app that is not in the foreground would be judged by another
+ * app's screen (#17281). An unknown foreground is not treated as a mismatch.
+ */
+function foregroundMismatch(observation: ObserveResult, appId: string): string | undefined {
+  const foreground = observation.activeWindow?.appId;
+  if (foreground === undefined || foreground === appId) {
+    return undefined;
+  }
+  return `The accessibility audit checks the foreground screen; ${appId} is not in the foreground (${foreground} is). Bring ${appId} to the foreground or omit appId.`;
+}
+
+/** The app to audit, or the failed result when there is none or it is not on screen. */
+function auditTarget(
+  kinds: ReadonlySet<AuditKind>,
+  requested: string | undefined,
+  observation: ObserveResult,
+): string | OnDemandAuditResult {
+  const appId = requested ?? observation.activeWindow?.appId;
+  if (!appId) {
+    return {
+      success: false,
+      failed: false,
+      error: "No foreground app to audit; launch the app or pass appId.",
+    };
+  }
+  const mismatch = kinds.has("accessibility") ? foregroundMismatch(observation, appId) : undefined;
+  return mismatch ? { success: false, failed: false, appId, error: mismatch } : appId;
+}
+
 const SEVERITY_FAILS: Record<AuditFailOn, ReadonlySet<WcagViolation["severity"]>> = {
   error: new Set(["error"]),
   warning: new Set(["error", "warning"]),
@@ -146,13 +186,9 @@ export class OnDemandAudit {
       };
     }
     const { result: observation, screenshotPath } = await this.engines.observe();
-    const appId = input.appId ?? observation.activeWindow?.appId;
-    if (!appId) {
-      return {
-        success: false,
-        failed: false,
-        error: "No foreground app to audit; launch the app or pass appId.",
-      };
+    const appId = auditTarget(kinds, input.appId, observation);
+    if (typeof appId !== "string") {
+      return appId;
     }
     const output: OnDemandAuditResult = { success: true, failed: false, appId };
     const reported = kinds.has("accessibility")
@@ -212,18 +248,21 @@ export class OnDemandAudit {
       summary: audit.summary,
       screenId: audit.screenId,
     };
-    return this.applyBaseline(violations, input.baseline, output);
+    return this.applyBaseline(violations, input, output);
   }
 
   private async applyBaseline(
     violations: WcagViolation[],
-    baseline: OnDemandAuditInput["baseline"],
+    { baseline, signal }: Pick<OnDemandAuditInput, "baseline" | "signal">,
     output: OnDemandAuditResult,
   ): Promise<WcagViolation[]> {
     if (!baseline) {
       return violations;
     }
     if (baseline.mode === "record") {
+      // The audit may outlive a cancelled call; persisting then would replace a baseline the
+      // caller abandoned (#17281).
+      signal?.throwIfAborted();
       await this.engines.baselines.saveBaseline(baseline.name, violations);
       output.baselineRecorded = baseline.name;
       return violations;
@@ -275,6 +314,9 @@ export class OnDemandAudit {
     const failing = SEVERITY_FAILS[failOn];
     return (
       reported.some((violation) => failing.has(violation.severity)) ||
+      // A requested check that could not run (a background app's performance) cannot pass, so
+      // an assertion on it fails rather than succeeding silently (#17281).
+      Object.keys(output.unsupported ?? {}).length > 0 ||
       output.performance?.passed === false ||
       output.memory?.passed === false
     );

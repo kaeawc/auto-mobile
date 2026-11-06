@@ -6,6 +6,7 @@ import type {
   MultiPlatformDeviceManager,
 } from "../devices/deviceUtils";
 import { transitionalHeldSimulators } from "./adbOfflineHeldDevices";
+import { appleSimulatorSweepsFor } from "../devices/deviceDiscoveryContracts";
 import type { Session } from "./sessionManager";
 import {
   interruptVideoRecording,
@@ -74,12 +75,21 @@ function needsFreshTransitionalSimulatorRead(
 
 /**
  * Pooled watches need their own sweep on an "either" loss read, first read and confirmation re-read
- * alike (#14908). Other reads carry no watch option, so their options are unchanged.
+ * alike (#14908); so does a tracked Apple TV or Vision Pro, whose family is swept only while one is
+ * tracked. Other reads carry neither option, so their options are unchanged.
  */
-function watchSweepOption(
+function companionSweepOptions(
   platform: Parameters<MultiPlatformDeviceManager["getBootedDevicesDetailed"]>[0],
-): { includeWatchOs?: true } {
-  return platform === "either" ? { includeWatchOs: true } : {};
+  trackedDevices: readonly { platform: Platform }[],
+): Pick<BootedDeviceDiscoveryOptions, "includeWatchOs" | "includeAppleSimulatorPlatforms"> {
+  if (platform !== "either") {
+    return {};
+  }
+  const families = appleSimulatorSweepsFor(trackedDevices.map((device) => device.platform));
+  return {
+    includeWatchOs: true,
+    ...(families.length > 0 ? { includeAppleSimulatorPlatforms: families } : {}),
+  };
 }
 
 export async function discoverAndReconcile(
@@ -106,7 +116,7 @@ export async function discoverAndReconcile(
   const options = {
     bypassAndroidDeviceListCache,
     skipAndroidProfileEnrichment: true,
-    ...watchSweepOption(platform),
+    ...companionSweepOptions(platform, trackedDevices),
     // An unpooled held device still needs liveness evidence from its own source.
     skipPhysicalIosDiscovery: !trackedDevices.some(
       (device) => discoverySourceFor(device.platform, device.id) === "ios-physical",

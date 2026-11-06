@@ -1,0 +1,30 @@
+{
+  "spec": {
+    "id": "map-backend-unknown",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["map"]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "map",
+          "id": "map0",
+          "camera": {
+            "lat": 37.7749,
+            "lng": -122.4194,
+            "zoom": 13
+          },
+          "backend": "mapbox"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].backend",
+  "expectedMessage": "Invalid enum value"
+}

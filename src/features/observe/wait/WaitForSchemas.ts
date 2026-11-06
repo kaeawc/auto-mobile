@@ -58,6 +58,11 @@ const absentPredicateBaseSchema = z
       .string()
       .optional()
       .describe("Resource ID / accessibility identifier that must be absent"),
+    testTag: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Android test tag that must be absent (matched like tapOn testTag)"),
     text: z.string().optional().describe("Element text that must be absent (contains match)"),
     className: z.string().optional().describe("Element class name that must be absent"),
     contentDescription: z
@@ -69,6 +74,7 @@ const absentPredicateBaseSchema = z
 
 const absentPredicatePresenceSchema = z.union([
   z.object({ elementId: z.string() }).passthrough(),
+  z.object({ testTag: z.string() }).passthrough(),
   z.object({ text: z.string() }).passthrough(),
   z.object({ className: z.string() }).passthrough(),
   z.object({ contentDescription: z.string() }).passthrough(),
@@ -139,6 +145,7 @@ const waitForTextAnySchema = z
       .min(1)
       .describe("Ordered text variants; first visible match wins"),
     elementId: z.never().optional(),
+    testTag: z.never().optional(),
     text: z.never().optional(),
     className: z.never().optional(),
     contentDescription: z.never().optional(),
@@ -161,6 +168,7 @@ const waitForElementBaseSchema = z
   .object({
     for: z.never().optional(),
     elementId: z.string().optional().describe("Element resource ID / accessibility identifier"),
+    testTag: z.string().min(1).optional().describe("Android test tag, matched like tapOn testTag"),
     text: z.string().optional().describe("Element text"),
     textAny: z.never().optional(),
     className: z.string().optional().describe("Element class name"),
@@ -210,6 +218,7 @@ const waitForPredicatePresenceSchema = z.union([
   z.object({ posture: waitForCommonShape.posture.unwrap() }).passthrough(),
   z.object({ activeDisplay: z.string().min(1) }).passthrough(),
   z.object({ elementId: z.string() }).passthrough(),
+  z.object({ testTag: z.string() }).passthrough(),
   z.object({ text: z.string() }).passthrough(),
   z.object({ className: z.string() }).passthrough(),
   z.object({ contentDescription: z.string() }).passthrough(),
@@ -266,6 +275,7 @@ const waitForConditionDslSchema = z
     container: waitForContainerField,
     selectionStrategy: resolverSelectionStrategySchema.optional(),
     textAny: z.never().optional(),
+    testTag: z.never().optional(),
     className: z.never().optional(),
     contentDescription: z.never().optional(),
     matchType: z.never().optional(),
@@ -316,6 +326,7 @@ export const waitForSchema = z.union([
 // Presence options shared by the two branches below.
 const ELEMENT_PREDICATE_REQUIRED = [
   { required: ["elementId"] },
+  { required: ["testTag"] },
   { required: ["text"] },
   { required: ["className"] },
   { required: ["contentDescription"] },
@@ -335,12 +346,14 @@ const ABSENT_PREDICATE_ADVERTISED_SCHEMA: Record<string, unknown> = {
   properties: {
     selectionStrategy: WAIT_SELECTION_ADVERTISED_SCHEMA,
     elementId: { type: "string" },
+    testTag: { type: "string" },
     text: { type: "string" },
     className: { type: "string" },
     contentDescription: { type: "string" },
   },
   anyOf: [
     { required: ["elementId"] },
+    { required: ["testTag"] },
     { required: ["text"] },
     { required: ["className"] },
     { required: ["contentDescription"] },
@@ -358,6 +371,7 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
     pollMs: { type: "number" },
     stableReads: { type: "number" },
     elementId: { type: "string" },
+    testTag: { type: "string", description: "Android test tag, matched like tapOn testTag" },
     text: { type: "string" },
     textAny: {
       type: "array",

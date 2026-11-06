@@ -56,14 +56,12 @@ manager (#12530) also uses.
   `ensure` gives its joined ports back with its adds. Neither manager removes a
   port the other still holds at the same host port: `remove` of a shared port drops the session's
   ownership and reports `released` with `owner: "prototype"`, and the last
-  holder removes the mapping. Every removal is tracked in the view while in
-  flight and counted per port, and the other manager waits for it before
-  joining, judging or adding that port; a prototype whose `--list` read
-  overlapped a removal treats that listing as stale. Each manager re-checks the
-  other's hold after its own awaits and immediately before removing, so nobody
-  joins a mapping being deleted or deletes one just claimed; `ensure` re-checks each shared
-  port just before claiming it, since its conflict checks may await host
-  probes. A session's pending removal
+  holder removes the mapping. Both managers run every operation on a device
+  through the view's one per-device queue (`exclusive`), so a `--list`, the
+  ownership decision on it and the add or removal that follows never interleave
+  with the other manager's work on that device; a prototype show therefore waits
+  behind a session's in-flight call on the same device, probes included. A task
+  must never wait for another task on the same device. A session's pending removal
   counts as a hold, and is dropped without removing when a prototype holds the
   port. The view is in memory and per process.
 

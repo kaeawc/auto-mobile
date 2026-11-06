@@ -14,22 +14,20 @@ export interface AdbReverseHold {
   hostPort: number;
 }
 
-const removalKey = (deviceId: string, devicePort: number) => `${deviceId}\u0000${devicePort}`;
-
 /**
  * The one ownership view the `portReverse` and prototype reverse managers share (#17253). Each
  * manager registers itself and answers from its own state, so nothing is copied; before removing a
- * reverse, or when it finds one already listed, a manager asks whether the other still holds it. A
- * port both hold stays on the device until the last of them releases it.
+ * reverse, or when it finds one already listed, a manager asks whether the other still holds it at
+ * the same host port. A port both hold stays on the device until the last of them releases it.
  *
- * Every `adb reverse --remove` either manager runs goes through {@link removing}, so the other can
- * see a removal in flight and wait for it instead of joining a mapping that is about to disappear.
+ * Both managers run every operation on a device through {@link exclusive}, so a `--list`, the
+ * ownership decision based on it, and the add or removal that follows never interleave with the
+ * other manager's work on that device.
  */
 export class AdbReverseOwnership {
   private readonly holders = new Set<AdbReverseHolder>();
-  private readonly removals = new Map<string, Promise<unknown>>();
-  /** Removals ever started per port, so a reader can tell one began and ended during its read. */
-  private readonly generations = new Map<string, number>();
+  /** Device -> the tail of the work queued on it by either manager. */
+  private readonly tails = new Map<string, Promise<unknown>>();
 
   /** Adds a manager's view; the returned function removes it. */
   register(holder: AdbReverseHolder): () => void {
@@ -54,39 +52,24 @@ export class AdbReverseOwnership {
     return undefined;
   }
 
-  /** Tracks a removal of the port until it settles; returns it unchanged. */
-  removing<T>(deviceId: string, devicePort: number, removal: Promise<T>): Promise<T> {
-    const key = removalKey(deviceId, devicePort);
-    this.generations.set(key, (this.generations.get(key) ?? 0) + 1);
-    const tracked = removal.finally(() => {
-      if (this.removals.get(key) === tracked) {
-        this.removals.delete(key);
+  /**
+   * Runs `task` once every earlier task on the device, from either manager, has settled. A task must
+   * not wait for another task on the same device, or both wait forever.
+   */
+  exclusive<T>(deviceId: string, task: () => Promise<T>): Promise<T> {
+    const run = (this.tails.get(deviceId) ?? Promise.resolve()).then(task);
+    // The tail only orders the next task; each caller handles its own task's failure.
+    const tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.tails.set(deviceId, tail);
+    void tail.then(() => {
+      if (this.tails.get(deviceId) === tail) {
+        this.tails.delete(deviceId);
       }
     });
-    this.removals.set(key, tracked);
-    return tracked;
-  }
-
-  /** How many removals of the port have started; compare two reads to detect one in between. */
-  removalGeneration(deviceId: string, devicePort: number): number {
-    return this.generations.get(removalKey(deviceId, devicePort)) ?? 0;
-  }
-
-  /** Whether a removal of the port is in flight. */
-  removalPending(deviceId: string, devicePort: number): boolean {
-    return this.removals.has(removalKey(deviceId, devicePort));
-  }
-
-  /** Resolves once no removal of the port is in flight (a failed removal settles too). */
-  async settled(deviceId: string, devicePort: number): Promise<void> {
-    const key = removalKey(deviceId, devicePort);
-    for (let pending = this.removals.get(key); pending; pending = this.removals.get(key)) {
-      // The removal's outcome belongs to the manager that ran it; waiting only needs it settled.
-      await pending.then(
-        () => undefined,
-        () => undefined,
-      );
-    }
+    return run;
   }
 }
 

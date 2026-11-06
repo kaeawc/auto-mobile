@@ -227,26 +227,19 @@ describe("shared adb reverse ownership", () => {
     expect(adb.mappings.get(18705)).toBe("tcp:9000");
   });
 
-  test("a prototype port released while ensure judges another port is added, not adopted", async () => {
-    let probed = () => {};
-    const probing = new Promise<void>((resolve) => {
-      probed = resolve;
-    });
-    let answer = () => {};
-    const answered = new Promise<void>((resolve) => {
-      answer = resolve;
-    });
+  test("a prototype release started while ensure judges another port waits for it", async () => {
+    let releasing: Promise<void> | undefined;
     const { adb, sessions, prototypes, target, show } = setup({
       probe: async () => {
-        probed();
-        await answered;
+        releasing = prototypes.release(DEVICE, "p");
+        await Promise.resolve();
         return "refused";
       },
     });
     await show("p", 18705);
     adb.mappings.set(18706, "tcp:7000");
 
-    const ensuring = sessions.ensure(
+    const result = await sessions.ensure(
       { ...target(), holdsDevice: true },
       [
         { devicePort: 18705, hostPort: 18705 },
@@ -254,15 +247,13 @@ describe("shared adb reverse ownership", () => {
       ],
       { reclaimStale: true },
     );
-    await probing;
-    await prototypes.release(DEVICE, "p");
-    expect(adb.mappings.has(18705)).toBe(false);
-    answer();
-    const result = await ensuring;
+    await releasing;
 
-    expect(result.mappings.find((m) => m.devicePort === 18705)?.status).toBe("added");
+    // The release ran after ensure shared 18705, so the session keeps the mapping.
+    expect(result.mappings.find((m) => m.devicePort === 18705)?.status).toBe("present");
     expect(adb.mappings.get(18705)).toBe("tcp:18705");
     expect(sessions.ownedPorts(DEVICE)).toEqual([18705, 18706]);
+    expect(removals(adb)).toEqual(["remove 18706"]);
   });
 
   test("a prototype's release leaves a joined port re-pointed after the join", async () => {
@@ -307,17 +298,19 @@ describe("shared adb reverse ownership", () => {
     await show("p", 18705);
     expect((await sessions.remove(target(), [18705])).mappings[0]?.status).toBe("released");
 
-    let ensured: Awaited<ReturnType<typeof sessions.ensure>> | undefined;
+    let ensuring: ReturnType<typeof sessions.ensure> | undefined;
     hooks.afterPrototypeList = async () => {
       hooks.afterPrototypeList = undefined;
-      ensured = await sessions.ensure(
+      ensuring = sessions.ensure(
         { ...target(), holdsDevice: true },
         [{ devicePort: 18705, hostPort: 18705 }],
         { reclaimStale: true },
       );
     };
     await prototypes.release(DEVICE, "p");
+    const ensured = await ensuring;
 
+    // The ensure ran after the release removed the mapping, so it added its own.
     expect(ensured?.mappings[0]?.status).toBe("added");
     expect(sessions.ownedPorts(DEVICE)).toEqual([18705]);
     expect(adb.mappings.get(18705)).toBe("tcp:18705");

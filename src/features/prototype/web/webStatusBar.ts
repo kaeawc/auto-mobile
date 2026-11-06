@@ -191,12 +191,18 @@ export interface WebScreenSize {
 
 /**
  * Whether a size or size cap (`width`, `max-width`, `max-height`) binds below full: anything but
- * `100%`, unless it is a px value at least `available`, which leaves the full size. With no
+ * `100%`, unless it is a px value at least `available`, which leaves the full size; a `min(...)`
+ * binds when any of its terms does. With no
  * `available` known, any cap binds.
  */
 function caps(value: string | undefined, available: number | undefined): boolean {
   if (value === undefined || value === "100%") {
     return false;
+  }
+  // `min(100%, 1000px)` (a row-bound maxWidth) binds only when one of its terms does.
+  const min = /^min\((.*)\)$/.exec(value.trim());
+  if (min) {
+    return min[1]!.split(",").some((term) => caps(term.trim(), available));
   }
   const px = /^(\d+(?:\.\d+)?)px$/.exec(value.trim());
   return available === undefined || px === null || Number(px[1]) < available;

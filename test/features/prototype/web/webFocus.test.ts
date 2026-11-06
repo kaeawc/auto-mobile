@@ -96,6 +96,15 @@ describe("markInitialFocus (#16446)", () => {
     expect(parts(marked)).toEqual(["second"]);
   });
 
+  test("a disabled wrapper's focusable parts are skipped", () => {
+    const field = el("div", { attrs: { "data-node": "textField", "aria-disabled": "true" } }, [
+      el("input", { attrs: { role: "textbox" } }),
+    ]);
+    expect(ringed(markInitialFocus(el("div", {}, [field, node("button", "button")])))).toEqual([
+      "button",
+    ]);
+  });
+
   test("each focusable role can take focus", () => {
     for (const role of ["button", "checkbox", "switch", "slider", "tab", "textbox"]) {
       expect(ringed(markInitialFocus(el("div", {}, [node(role, role)])))).toEqual([role]);

@@ -25,8 +25,7 @@ const FOCUS_SHADOW = "0 0 0 5px rgba(0, 0, 0, 0.6)";
 function isFocusable(element: WebElement, inSpec: boolean): boolean {
   return (
     (inSpec || element.attrs["data-node"] !== undefined) &&
-    FOCUSABLE_ROLES.has(element.attrs.role ?? "") &&
-    element.attrs["aria-disabled"] !== "true"
+    FOCUSABLE_ROLES.has(element.attrs.role ?? "")
   );
 }
 
@@ -67,7 +66,8 @@ function marked(element: WebElement): WebElement {
 
 /** Depth-first, document order; `found` flips once the first focusable node is marked. */
 function walk(child: WebChild, state: { found: boolean }, inSpec = false): WebChild {
-  if (typeof child === "string" || state.found) {
+  // A disabled control's parts (an iOS field's inner input) are disabled with it.
+  if (typeof child === "string" || state.found || child.attrs["aria-disabled"] === "true") {
     return child;
   }
   if (isFocusable(child, inSpec)) {

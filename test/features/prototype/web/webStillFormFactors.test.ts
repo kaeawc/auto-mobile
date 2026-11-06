@@ -92,6 +92,27 @@ describe("still on watch, TV and car frames (#16446)", () => {
     expect(ringed(closed.element).map((node) => node.attrs["data-node"])).toEqual(["button"]);
   });
 
+  test("a disabled field and its inner input are skipped on the iOS skin", () => {
+    const fields = {
+      id: "fields",
+      state: { canEdit: false },
+      root: {
+        type: "column",
+        children: [
+          {
+            type: "textField",
+            stateKey: "name",
+            label: "Name",
+            enabledWhen: { key: "canEdit", equals: true },
+          },
+          { type: "button", label: "Next" },
+        ],
+      },
+    };
+    const { element } = renderPrototypeStill(fields, { frame: "apple-tv" });
+    expect(ringed(element).map((node) => node.attrs["data-node"])).toEqual(["button"]);
+  });
+
   test("touch and rotary frames draw no focus ring", () => {
     for (const frame of ["pixel-9", "iphone-16", "wearos-small-round", "car-1024p-landscape"]) {
       expect(ringed(renderPrototypeStill(spec, { frame }).element)).toEqual([]);

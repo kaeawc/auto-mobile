@@ -56,7 +56,9 @@ manager (#12530) also uses.
   ownership and reports `released` with `owner: "prototype"`, and the last
   holder removes the mapping. Every removal is tracked in the view while in
   flight, and the other manager waits for it before joining or judging that
-  port, so nobody joins a mapping being deleted. A session's pending removal
+  port, so nobody joins a mapping being deleted; `ensure` re-checks each shared
+  port just before claiming it, since its conflict checks may await host
+  probes. A session's pending removal
   counts as a hold, and is dropped without removing when a prototype holds the
   port. The view is in memory and per process.
 

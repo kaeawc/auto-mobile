@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { AdbReverseOwnership } from "../../../src/features/portReverse/AdbReverseOwnership";
+import type { HostLoopbackProbe } from "../../../src/features/portReverse/HostLoopbackProbe";
 import { PortReverseError } from "../../../src/features/portReverse/PortReverseError";
 import {
   PortReverseManager,
@@ -14,10 +15,10 @@ import { FakeAdbReverseCommands } from "../../fakes/FakeAdbReverseCommands";
 const DEVICE = "emulator-5554";
 
 /** Both managers on one fake device, sharing one ownership view (#17253). */
-const setup = () => {
+const setup = (hostProbe?: HostLoopbackProbe) => {
   const adb = new FakeAdbReverseCommands();
   const ownership = new AdbReverseOwnership();
-  const sessions = new PortReverseManager(() => {}, undefined, undefined, ownership);
+  const sessions = new PortReverseManager(() => {}, undefined, hostProbe, ownership);
   const prototypes = new PrototypeAdbReverseManager(ownership);
   const prototypeAdb: PrototypeReverseAdb = {
     listReverses: async () =>
@@ -219,5 +220,43 @@ describe("shared adb reverse ownership", () => {
     ).rejects.toThrow("not created by AutoMobile");
     expect(sessions.ownedPorts(DEVICE)).toEqual([]);
     expect(adb.mappings.get(18705)).toBe("tcp:9000");
+  });
+
+  test("a prototype port released while ensure judges another port is added, not adopted", async () => {
+    let probed = () => {};
+    const probing = new Promise<void>((resolve) => {
+      probed = resolve;
+    });
+    let answer = () => {};
+    const answered = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    const { adb, sessions, prototypes, target, show } = setup({
+      probe: async () => {
+        probed();
+        await answered;
+        return "refused";
+      },
+    });
+    await show("p", 18705);
+    adb.mappings.set(18706, "tcp:7000");
+
+    const ensuring = sessions.ensure(
+      { ...target(), holdsDevice: true },
+      [
+        { devicePort: 18705, hostPort: 18705 },
+        { devicePort: 18706, hostPort: 18706 },
+      ],
+      { reclaimStale: true },
+    );
+    await probing;
+    await prototypes.release(DEVICE, "p");
+    expect(adb.mappings.has(18705)).toBe(false);
+    answer();
+    const result = await ensuring;
+
+    expect(result.mappings.find((m) => m.devicePort === 18705)?.status).toBe("added");
+    expect(adb.mappings.get(18705)).toBe("tcp:18705");
+    expect(sessions.ownedPorts(DEVICE)).toEqual([18705, 18706]);
   });
 });

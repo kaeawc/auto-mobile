@@ -232,13 +232,13 @@ export class PortReverseManager {
         wanted,
         { hostProbe: this.hostProbe, reclaimStale: options?.reclaimStale === true },
       );
-      this.share(target, state, wanted, shared);
+      const joined = await this.share(target, state, wanted, { shared, view });
       try {
         return await this.applyEnsure(target, state, wanted, { view, reclaimable });
       } catch (error) {
         // All-or-nothing: the shared claims go back too; a port the prototype released meanwhile
         // has no other holder left, so it is removed like this call's own adds.
-        await this.rollback(target.deviceId, state, shared);
+        await this.rollback(target.deviceId, state, joined);
         throw error;
       }
     });
@@ -252,19 +252,32 @@ export class PortReverseManager {
     });
   }
 
-  /** A prototype's mapping already pointing where asked is shared, not re-added (#17253). */
-  private share(
+  /**
+   * A prototype's mapping already pointing where asked is shared, not re-added (#17253). Conflict
+   * checks may await host probes, so each port is re-checked just before the claim, with no await
+   * between the check and the claim: one the prototype released (or is removing) meanwhile leaves
+   * `view` and is added like any missing port. Returns the ports this call joined.
+   */
+  private async share(
     target: PortReverseTarget,
     state: DeviceState,
     wanted: readonly PortReverseRequest[],
-    shared: readonly number[],
-  ): void {
-    for (const request of wanted.filter((r) => shared.includes(r.devicePort))) {
+    judged: { shared: readonly number[]; view: DeviceView },
+  ): Promise<number[]> {
+    const joined: number[] = [];
+    for (const request of wanted.filter((r) => judged.shared.includes(r.devicePort))) {
+      await this.ownership.settled(target.deviceId, request.devicePort);
+      if (this.heldElsewhere(target.deviceId, request.devicePort)?.hostPort !== request.hostPort) {
+        judged.view.delete(request.devicePort);
+        continue;
+      }
       state.owned.set(request.devicePort, { hostPort: request.hostPort, owner: target.owner });
+      joined.push(request.devicePort);
       this.audit(
         `share ${tcp(request.devicePort)} -> ${tcp(request.hostPort)} device=${target.deviceId} session=${target.owner} with prototype`,
       );
     }
+    return joined;
   }
 
   /** Restores, reclaims and adds what `ensure` judged free of conflicts. */

@@ -207,7 +207,10 @@ export class PrototypeAdbReverseManager {
     await this.enqueue(state, async () => {
       for (const port of [...state.owned.keys()]) {
         const joinedTo = this.forget(state, port);
-        if (this.keptForSession(deviceId, port) || (await this.repointed(state, port, joinedTo))) {
+        if (
+          this.keptForSession(deviceId, port, joinedTo ?? port) ||
+          (await this.repointed(state, port, joinedTo))
+        ) {
           continue;
         }
         // A gone device cannot answer, so a failed removal here is expected, not a warning.
@@ -304,7 +307,7 @@ export class PrototypeAdbReverseManager {
       }
       const joinedTo = this.forget(state, port);
       if (
-        this.keptForSession(state.deviceId, port) ||
+        this.keptForSession(state.deviceId, port, joinedTo ?? port) ||
         (await this.repointed(state, port, joinedTo))
       ) {
         continue;
@@ -424,13 +427,18 @@ export class PrototypeAdbReverseManager {
     return this.ownership.removing(state.deviceId, port, state.adb.removeReverse(port));
   }
 
-  /** A portReverse session still holds the port: the last prototype leaves the reverse to it. */
-  private keptForSession(deviceId: string, port: number): boolean {
+  /**
+   * A portReverse session still holds the port at the host port this prototype's mapping points to
+   * (`hostPort`): the last prototype leaves the reverse to it. A session expecting another host port
+   * does not own this mapping, so the prototype still removes it.
+   */
+  private keptForSession(deviceId: string, port: number, hostPort: number): boolean {
     const other = this.ownership.heldByOther(this.holder, deviceId, port);
-    if (other !== undefined) {
-      logger.debug(`[prototype] reverse tcp:${port} on ${deviceId} kept: a ${other.kind} holds it`);
+    const kept = other?.hostPort === hostPort;
+    if (kept) {
+      logger.debug(`[prototype] reverse tcp:${port} on ${deviceId} kept: a session holds it`);
     }
-    return other !== undefined;
+    return kept;
   }
 
   /** Joins an already-owned port's holders; false when this manager does not own it. */

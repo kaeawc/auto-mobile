@@ -611,9 +611,9 @@ export class PortReverseManager {
     for (const [devicePort, hostPort] of [...state.pendingRemoval]) {
       if (
         view.get(devicePort)?.hostPort !== hostPort ||
-        this.heldElsewhere(deviceId, devicePort) !== undefined
+        this.heldElsewhere(deviceId, devicePort)?.hostPort === hostPort
       ) {
-        // Gone, or re-pointed by someone else: nothing of ours is left to remove.
+        // Gone, re-pointed by someone else, or now a prototype's: nothing of ours is left to remove.
         state.pendingRemoval.delete(devicePort);
         continue;
       }
@@ -937,7 +937,7 @@ export class PortReverseManager {
       state.owned.delete(devicePort);
       return { ...current, owned: false, status: "foreign" };
     }
-    if (this.heldElsewhere(deviceId, devicePort) !== undefined) {
+    if (this.heldElsewhere(deviceId, devicePort)?.hostPort === mapping.hostPort) {
       // A prototype still uses it: only this session's claim ends; the prototype removes it last.
       state.owned.delete(devicePort);
       this.audit(

@@ -54,7 +54,7 @@ manager (#12530) also uses.
   `present`) while it still maps where the prototype set it, and to another
   host port is a `prototype` conflict; a re-pointed one is external. A failed
   `ensure` gives its joined ports back with its adds. Neither manager removes a
-  port the other still holds: `remove` of a shared port drops the session's
+  port the other still holds at the same host port: `remove` of a shared port drops the session's
   ownership and reports `released` with `owner: "prototype"`, and the last
   holder removes the mapping. Every removal is tracked in the view while in
   flight, and the other manager waits for it before joining or judging that

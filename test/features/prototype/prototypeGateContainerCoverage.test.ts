@@ -152,6 +152,7 @@ const statusRead = (module: string, key: string, equals: string | boolean | numb
 const fixtures: Record<string, Node> = {
   prototype_glass_v1: { ...label, style: { surface: "glass" } },
   prototype_scroll_edge_effect_v1: { type: "scroll", edgeEffect: "soft", child: label },
+  prototype_loops_v1: { ...label, attentionLoop: { effect: "pulse", periodMs: 800 } },
   prototype_icon_effects_v1: { type: "icon", name: "home", effect: { type: "bounce" } },
   prototype_routes_v1: { ...label, onTap: [{ type: "pop", stack: "nav", force: true }] },
   prototype_style_polish_v2: { ...label, style: { cornerStyle: "continuous" } },

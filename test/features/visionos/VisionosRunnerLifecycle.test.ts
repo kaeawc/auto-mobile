@@ -232,6 +232,17 @@ test("a session ending between bind and attach stops the launched runner with an
   expect(f.released).toEqual(["owned-visionos"]);
 });
 
+test("an ended session never stops a runner another live session owns", async () => {
+  const f = fixture();
+  await f.owner.ensure(f.request);
+  f.sessions.available = false;
+  expect(f.owner.attach({ ...f.request, ownerSession: "late-session" })).toBe(
+    "the visionos session ended before runner startup",
+  );
+  expect(f.launcher.stops).toBe(0);
+  expect(visionosRunners.get("owned-visionos")).toBeDefined();
+});
+
 test("abort during launch stops a late handle and frees its port", async () => {
   const f = fixture();
   const controller = new AbortController();

@@ -352,6 +352,7 @@ internal object PrototypeStrictPolicy {
       "shimmer" to "loading_states",
       "effects" to "effects",
       "keyframes" to "keyframes",
+      "attentionLoop" to "loops",
       "sharedKey" to "shared_element",
     )
 
@@ -438,8 +439,15 @@ internal object PrototypeStrictPolicy {
         key == "linkify" ->
           (child as? JsonObject)?.get("onTap")?.let { scan(it, "onTap", routeAlias) }
         key !in
-          listOf("series", "effects", "keyframes", "scrollLinked", "scrollTransition", "press") ->
-          scan(child, key, routeAlias)
+          listOf(
+            "series",
+            "effects",
+            "keyframes",
+            "attentionLoop",
+            "scrollLinked",
+            "scrollTransition",
+            "press",
+          ) -> scan(child, key, routeAlias)
       }
     }
 

@@ -8,6 +8,8 @@ import { XcodebuildClient, type Xcodebuild } from "../../utils/ios-cmdline-tools
 import { runWithAbortSignal } from "../../utils/AbortContext";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 
+const VISION_SCHEME = "AutoMobileVisionTest";
+
 /** Finds local visionos artifacts, building the checked-in visionos scheme when necessary. */
 export class VisionosRunnerArtifacts {
   private readonly builds = new SingleFlight<string, string>();
@@ -37,7 +39,7 @@ export class VisionosRunnerArtifacts {
       return resolvedOverride;
     }
     const builder = this.dependencies.builder;
-    const existing = await builder.getXctestrunPath("visionSimulator");
+    const existing = await builder.getXctestrunPath("visionSimulator", { scheme: VISION_SCHEME });
     if (existing) {
       return existing;
     }
@@ -49,7 +51,7 @@ export class VisionosRunnerArtifacts {
           const build = async () => {
             buildSignal?.throwIfAborted();
             const projectPath = join(
-              paths.projectRoot,
+              resolvePathFromDaemonLaunchWorkingDirectory(paths.projectRoot),
               "ios",
               "control-proxy",
               "CtrlProxy.xcodeproj",
@@ -68,7 +70,7 @@ export class VisionosRunnerArtifacts {
                 "-project",
                 projectPath,
                 "-scheme",
-                "AutoMobileVisionTest",
+                VISION_SCHEME,
                 "-destination",
                 "generic/platform=visionOS Simulator",
                 "-derivedDataPath",
@@ -77,7 +79,9 @@ export class VisionosRunnerArtifacts {
               ],
               { signal: buildSignal, timeoutMs: 120_000 },
             );
-            const built = await builder.getXctestrunPath("visionSimulator");
+            const built = await builder.getXctestrunPath("visionSimulator", {
+              scheme: VISION_SCHEME,
+            });
             if (!built) {
               throw new ActionableError(
                 `No xrsimulator xctestrun found in ${paths.derivedDataPath}/Build/Products after building AutoMobileVisionTest; set ${ENV.VISIONOS_RUNNER_XCTESTRUN.name} to a prebuilt visionos runner.`,

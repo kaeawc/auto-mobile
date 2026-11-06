@@ -109,6 +109,21 @@ describe("PortReverseManager", () => {
     expect((await manager.reconcile("emulator-5554")).restored).toEqual([8080]);
   });
 
+  test("a background restore is reported once, and kept for the next call when one throws", async () => {
+    const { adb, manager, target } = setup();
+    await manager.ensure(target(), [{ devicePort: 8080, hostPort: 8080 }]);
+    adb.dropAll();
+    expect((await manager.reconcile("emulator-5554")).restored).toEqual([8080]);
+    adb.failAdd.add(9090);
+    await expect(
+      manager.ensure(target(), [{ devicePort: 9090, hostPort: 9090 }]),
+    ).rejects.toThrow();
+    const listed = await manager.list(target());
+    expect(listed.restored).toEqual([8080]);
+    expect(listed.mappings[0]).toMatchObject({ devicePort: 8080, status: "restored" });
+    expect((await manager.list(target())).restored).toEqual([]);
+  });
+
   test("a failed restore is reported and retried on the next call", async () => {
     const { adb, manager, target } = setup();
     await manager.ensure(target(), [{ devicePort: 8080, hostPort: 8080 }]);

@@ -85,6 +85,31 @@ test("correlates taps and typing and propagates runner refusal", async () => {
   client.close();
 });
 
+test("a sent input that times out is reported as an unknown outcome, a hierarchy is not", async () => {
+  const { socket, timer, client } = fixture();
+  socket.receive(connected);
+  const typing = client
+    .request({ type: "request_append_text", text: "hello" }, undefined, { timeoutMs: 50 })
+    .then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+  await drainMicrotasks(2);
+  expect(socket.sent).toHaveLength(1);
+  timer.advanceTime(50);
+  const failure = (await typing) as { errorCode?: string; message?: string };
+  expect(failure.errorCode).toBe("input_outcome_unknown");
+  expect(failure.message).toContain("may still be applied");
+  const hierarchy = client.hierarchy(undefined, { timeoutMs: 20 }).then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  await drainMicrotasks(2);
+  timer.advanceTime(20);
+  expect(((await hierarchy) as { errorCode?: string }).errorCode).toBeUndefined();
+  client.close();
+});
+
 test("missing handshake times out with FakeTimer and no late input", async () => {
   const { socket, timer, client } = fixture();
   const failed = client

@@ -476,7 +476,10 @@ export function createDeviceHierarchyCapture(
         ? normalizeVisionosHierarchy(
             await (
               await requireVisionosRunner(device.deviceId, request.signal)
-            ).hierarchy(request.signal),
+            ).hierarchy(
+              request.signal,
+              request.timeoutMs === undefined ? undefined : { timeoutMs: request.timeoutMs },
+            ),
           )
         : device.platform === "tvos"
           ? normalizeTvosHierarchy(

@@ -11,6 +11,9 @@ import { normalizeVisionosHierarchy } from "./VisionosHierarchy";
 import { requireVisionosRunner } from "./VisionosRunnerLifecycle";
 import { logger } from "../../utils/logger";
 
+/** XCUIKeyboardKey.delete (U+0008 on iOS-family, U+007F on macOS) and forwardDelete (U+F728). */
+const DELETE_KEY_CHARACTERS = new Set(["\u0008", "\u007f", ""]);
+
 function assertVisionosTapOptions(options: TapOnElementOptions): void {
   const refused = Object.entries(options).filter(
     ([key, value]) =>
@@ -90,6 +93,11 @@ export async function visionosSendKeys(
     if (command.action !== "type" || !command.text || command.operation === "replace") {
       throw new ActionableError(
         "visionOS sendKeys supports only non-empty append type commands; focus the field with tapOn first.",
+      );
+    }
+    if ([...command.text].some((char) => DELETE_KEY_CHARACTERS.has(char))) {
+      throw new ActionableError(
+        "visionOS sendKeys appends text only; text containing a delete key would erase existing content.",
       );
     }
     return command;

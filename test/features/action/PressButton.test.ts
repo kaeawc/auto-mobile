@@ -31,6 +31,8 @@ import { IosHomeLaunchTimeoutError } from "../../../src/models/IosHomeLaunchTime
 import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeWindow } from "../../fakes/FakeWindow";
+import { createObserveResultForTest } from "../observe/flatHierarchyBuilders";
+import { convertToViewHierarchyResult } from "../../../src/features/observe/ios/IosHierarchyConverter";
 import { buildObserveResult, observeResultFromFixture } from "../../helpers/observeFixture";
 import capturedRecents from "../../fixtures/android-launcher/launcher-recents-emulator-5600.json";
 
@@ -91,6 +93,55 @@ describe("PressButton", () => {
       expect(invalidated).toEqual([iosSimulator.deviceId]);
       expect(launches).toEqual([["launch", iosSimulator.deviceId, "com.apple.springboard"]]);
       expect(client.getPressHomeRequestCount()).toBe(0);
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
+  test("simulator home from the App Switcher arms the second runner press (#17201)", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const client = new FakeIOSCtrlProxy(timer);
+    const hierarchy = (packageName: string, withSwitcher: boolean) => ({
+      packageName,
+      updatedAt: 1,
+      hierarchy: withSwitcher
+        ? {
+            className: "XCUIApplication",
+            node: {
+              resourceId: "AppSwitcherContentView",
+              bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+              node: {
+                resourceId: "card:com.apple.Preferences:sceneID:com.apple.Preferences-default",
+                bounds: { left: 63, top: 128, right: 338, bottom: 727 },
+              },
+            },
+          }
+        : { className: "XCUIApplication" },
+    });
+    // simctl returns to Settings; the first runner press leaves it there, the second reaches Home.
+    client.requestHierarchySync = async () => ({
+      hierarchy:
+        client.getPressHomeRequestCount() >= 2
+          ? hierarchy("com.apple.springboard", false)
+          : hierarchy("com.apple.Preferences", false),
+    });
+    const observeScreen = new FakeObserveScreen();
+    const before = createObserveResultForTest();
+    before.viewHierarchy = convertToViewHierarchyResult(hierarchy("com.apple.springboard", true));
+    observeScreen.setObserveResult(before);
+    const getInstanceSpy = spyOnIosClientInstance(client);
+    try {
+      const pressButton = new PressButton(iosSimulator, null, timer, {
+        observeScreen,
+        awaitIdle: new FakeAwaitIdle(),
+        window: new FakeWindow(),
+        simctl: { executeCommandArgs: async () => createExecResult("", "") },
+      });
+
+      const result = await pressButton.execute("home");
+      expect(result.success).toBe(true);
+      expect(client.getPressHomeRequestCount()).toBe(2);
     } finally {
       getInstanceSpy.mockRestore();
     }

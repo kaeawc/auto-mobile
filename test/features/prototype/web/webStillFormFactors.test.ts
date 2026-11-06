@@ -60,6 +60,38 @@ describe("still on watch, TV and car frames (#16446)", () => {
     }
   });
 
+  test("an open dialog takes the initial focus on its first action, not the screen below", () => {
+    const withDialog = {
+      id: "dialog",
+      state: { open: true },
+      root: {
+        type: "column",
+        children: [
+          { type: "button", label: "Behind" },
+          {
+            type: "dialog",
+            openWhen: { key: "open", equals: true },
+            title: "Delete?",
+            confirm: { label: "Delete" },
+            dismiss: { label: "Cancel" },
+          },
+        ],
+      },
+    };
+    const { element } = renderPrototypeStill(withDialog, { frame: "android-tv-1080p" });
+    const rings = ringed(element);
+    expect(rings).toHaveLength(1);
+    expect(rings[0]!.attrs["data-part"]).toMatch(/^(confirm|dismiss)$/);
+    const [layer] = find(element, (node) => node.attrs["data-part"] === "dialogLayer");
+    expect(ringed(layer!)).toEqual(rings);
+    // With the dialog closed, the screen's own button takes focus.
+    const closed = renderPrototypeStill(
+      { ...withDialog, state: { open: false } },
+      { frame: "android-tv-1080p" },
+    );
+    expect(ringed(closed.element).map((node) => node.attrs["data-node"])).toEqual(["button"]);
+  });
+
   test("touch and rotary frames draw no focus ring", () => {
     for (const frame of ["pixel-9", "iphone-16", "wearos-small-round", "car-1024p-landscape"]) {
       expect(ringed(renderPrototypeStill(spec, { frame }).element)).toEqual([]);

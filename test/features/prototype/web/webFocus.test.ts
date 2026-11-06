@@ -67,6 +67,35 @@ describe("markInitialFocus (#16446)", () => {
     );
   });
 
+  test("a focusable part inside a spec node takes focus; one outside every spec node does not", () => {
+    const action = el("span", { attrs: { role: "button", "data-part": "confirm" } }, ["OK"]);
+    const dialog = el("div", { attrs: { "data-node": "dialog" } }, [action]);
+    const chrome = el("span", { attrs: { role: "button" } }, ["chrome"]);
+    const marked = markInitialFocus(el("div", {}, [chrome, dialog]));
+    expect(ringed(marked)).toEqual(["span"]);
+    expect((marked.children[0] as WebElement).attrs["data-focus"]).toBeUndefined();
+  });
+
+  test("the last open dialog layer takes focus over earlier content", () => {
+    const layer = (label: string) =>
+      el("div", { attrs: { "data-part": "dialogLayer" } }, [
+        el("div", { attrs: { "data-node": "dialog" } }, [
+          el("span", { attrs: { role: "button", "data-part": label } }, [label]),
+        ]),
+      ]);
+    const marked = markInitialFocus(
+      el("div", {}, [node("button", "button"), layer("first"), layer("second")]),
+    );
+    const parts = (root: WebChild): string[] =>
+      typeof root === "string"
+        ? []
+        : [
+            ...(root.attrs["data-focus"] === "ring" ? [root.attrs["data-part"] ?? "node"] : []),
+            ...root.children.flatMap(parts),
+          ];
+    expect(parts(marked)).toEqual(["second"]);
+  });
+
   test("each focusable role can take focus", () => {
     for (const role of ["button", "checkbox", "switch", "slider", "tab", "textbox"]) {
       expect(ringed(markInitialFocus(el("div", {}, [node(role, role)])))).toEqual([role]);

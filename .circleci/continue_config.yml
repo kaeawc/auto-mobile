@@ -160,7 +160,11 @@ commands:
             fi
       - run:
           name: "Install dependencies"
-          command: bash scripts/ci/install-bun-deps.sh
+          # install-bun-deps.sh only puts node_modules/.bin on $GITHUB_PATH, so
+          # expose it here for bare `turbo` calls in later steps.
+          command: |
+            bash scripts/ci/install-bun-deps.sh
+            echo "export PATH=\"${PWD}/node_modules/.bin:\${PATH}\"" >> "${BASH_ENV}"
       - run:
           name: "Build AutoMobile"
           environment:
@@ -382,7 +386,9 @@ jobs:
       - install_bun
       - run:
           name: "Install Bun dependencies"
-          command: bash scripts/ci/install-bun-deps.sh
+          command: |
+            bash scripts/ci/install-bun-deps.sh
+            echo "export PATH=\"${PWD}/node_modules/.bin:\${PATH}\"" >> "${BASH_ENV}"
       - run:
           name: "Run host integration lane"
           no_output_timeout: 15m
@@ -411,7 +417,9 @@ jobs:
       - install_bun
       - run:
           name: "Install Bun dependencies"
-          command: bash scripts/ci/install-bun-deps.sh
+          command: |
+            bash scripts/ci/install-bun-deps.sh
+            echo "export PATH=\"${PWD}/node_modules/.bin:\${PATH}\"" >> "${BASH_ENV}"
       - run:
           name: "Run BATS Unit Tests"
           environment:

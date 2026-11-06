@@ -18,7 +18,7 @@ import {
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { FocusNavigateTarget } from "../action/FocusNavigate";
-import { enrichElementWithChildProperties, tapSelectorFor } from "./ExploreElementExtraction";
+import { tapSelectorFor } from "./ExploreElementExtraction";
 
 /** How explore addresses an element: by touch, or by D-pad focus and select. */
 export type InteractionInputMode = "touch" | "dpad";
@@ -68,9 +68,9 @@ export function deviceInputModeResolver(
 }
 
 /**
- * The focus target explore moves to for `element`: its resource id, else the label its tap
- * selector uses, matched on the property that label came from. Null when nothing names it, or
- * when the selector needs an occurrence index to tell duplicates apart.
+ * The focus target explore moves to for `element`: its tap selector's element id or text, as
+ * `elementId` or `label`. Null when nothing names it, or when the selector needs an occurrence
+ * index to tell duplicates apart.
  */
 export function focusTargetForElement(
   element: Element,
@@ -84,15 +84,8 @@ export function focusTargetForElement(
     // focusNavigate has no occurrence index, so a duplicate would select the wrong one.
     return null;
   }
-  if ("elementId" in selector) {
-    // A synthetic `view-id` (an id-less node) is not a resource id focusNavigate can match.
-    return element["resource-id"] === selector.elementId
-      ? { resourceId: selector.elementId }
-      : null;
-  }
-  const enriched = enrichElementWithChildProperties(element);
-  const fromText = element.text === selector.text || enriched.text === selector.text;
-  return fromText ? { text: selector.text } : { contentDesc: selector.text };
+  // Named as tapOn names it, so the walk pins the element tapOn would tap (see pinnedFocusOptions).
+  return "elementId" in selector ? { elementId: selector.elementId } : { label: selector.text };
 }
 
 /** The recorded `focusNavigate` arguments that move focus to `until` and select it. */

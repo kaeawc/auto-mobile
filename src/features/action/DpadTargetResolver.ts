@@ -1,4 +1,4 @@
-import type { FocusNavigateTarget, FocusScreen } from "./FocusNavigate";
+import type { FocusNavigateOptions, FocusNavigateTarget, FocusScreen } from "./FocusNavigate";
 import type { ElementBounds } from "../../models/ElementBounds";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 
@@ -48,4 +48,19 @@ export class SelectorDpadTargetResolver implements DpadTargetResolver {
     }
     return undefined;
   }
+}
+
+/**
+ * Focus walk options that pin a target named the way tapOn names one (`label` or `elementId`) to
+ * the element tapOn would tap on each read, so a focused parent row never stands in for an
+ * independently actionable child. Other targets keep focusNavigate's own matching.
+ */
+export function pinnedFocusOptions(
+  until: FocusNavigateTarget,
+  resolver: DpadTargetResolver,
+): Pick<FocusNavigateOptions, "firstMatch" | "pinTarget"> {
+  if (!until.label && !until.elementId) {
+    return {};
+  }
+  return { firstMatch: true, pinTarget: (screen) => resolver.resolve(screen, until) };
 }

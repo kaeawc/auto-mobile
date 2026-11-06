@@ -92,9 +92,8 @@ class FakeTvApp extends FakeObserveScreen {
 
   async select(options: FocusNavigateOptions) {
     this.selections.push(options);
-    const next = options.until.resourceId
-      ? SCREENS[this.screen].leadsTo[options.until.resourceId]
-      : undefined;
+    const id = options.until.elementId ?? options.until.resourceId;
+    const next = id ? SCREENS[this.screen].leadsTo[id] : undefined;
     if (next && options.select) {
       await this.navigateTo(next);
     }
@@ -144,6 +143,9 @@ describe("Explore on a focus-driven TV app", () => {
     expect(tv.selections).toHaveLength(1);
     const [selection] = tv.selections;
     expect(selection.select).toBe(true);
+    // The walk is pinned to the element tapOn would tap, so a focused parent row cannot stand in.
+    expect(selection.firstMatch).toBe(true);
+    expect(selection.pinTarget).toBeDefined();
     const { edges } = await graph.exportGraph();
     const edge = edges.find((e) => e.from === "Home");
     expect(edge?.to).toBe(tv.screen);

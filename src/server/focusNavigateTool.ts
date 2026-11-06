@@ -19,6 +19,11 @@ import {
 } from "../features/action/FocusNavigate";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { createFocusNavigateObserver } from "../features/action/FocusNavigateObserver";
+import {
+  pinnedFocusOptions,
+  SelectorDpadTargetResolver,
+} from "../features/action/DpadTargetResolver";
+import { ResolverElementSelector } from "../features/utility/ResolverElementSelector";
 
 const focusNavigateInput = z.object({
   until: z
@@ -26,6 +31,14 @@ const focusNavigateInput = z.object({
       text: z.string().optional().describe("Text of the element to focus (case-insensitive)"),
       contentDesc: z.string().optional().describe("Content-desc of the element to focus"),
       resourceId: z.string().optional().describe("Resource ID of the element to focus"),
+      label: z
+        .string()
+        .optional()
+        .describe("Text or content-desc of the element to focus, resolved as tapOn's text"),
+      elementId: z
+        .string()
+        .optional()
+        .describe("Element ID of the element to focus, resolved as tapOn's elementId"),
     })
     .strict()
     .describe("The element focus should land on; every field given must match"),
@@ -77,10 +90,13 @@ export function createFocusKeyPresser(device: BootedDevice): FocusKeyPresser {
   };
 }
 
+/** `label` and `elementId` targets resolve to the element tapOn would tap. */
+const targetResolver = new SelectorDpadTargetResolver(new ResolverElementSelector());
+
 export const focusNavigateTool = defineDeviceTool({
   name: "focusNavigate",
   description:
-    "Move D-pad focus to an element on a focus-driven UI such as Android TV. Observes, and until the focused element matches `until` (text, contentDesc or resourceId) presses the D-pad arrow that moves toward the nearest match, or `direction` when given. When a press leaves focus unchanged, the next arrow toward the match is tried. Returns the path of focused elements and a status: focused, max_steps (default 30) or stuck (every arrow toward the match left focus unchanged; two unchanged presses with `direction`). With `select`, presses enter once focused (`selected` reports whether it did); otherwise activate the result with sendKeys key enter.",
+    "Move D-pad focus to an element on a focus-driven UI such as Android TV. Observes, and until the focused element matches `until` (text, contentDesc, resourceId, or label/elementId resolved to the element tapOn would tap) presses the D-pad arrow that moves toward the nearest match, or `direction` when given. When a press leaves focus unchanged, the next arrow toward the match is tried. Returns the path of focused elements and a status: focused, max_steps (default 30) or stuck (every arrow toward the match left focus unchanged; two unchanged presses with `direction`). With `select`, presses enter once focused (`selected` reports whether it did); otherwise activate the result with sendKeys key enter.",
   input: focusNavigateInput,
   handler: async (device, args, _progress, signal) => {
     if (device.platform !== "android") {
@@ -97,6 +113,7 @@ export const focusNavigateTool = defineDeviceTool({
       ...(args.maxSteps !== undefined ? { maxSteps: args.maxSteps } : {}),
       ...(args.settleMs !== undefined ? { settleMs: args.settleMs } : {}),
       ...(args.select !== undefined ? { select: args.select } : {}),
+      ...pinnedFocusOptions(args.until, targetResolver),
       ...(signal ? { signal } : {}),
     });
     // `selected` is always reported, so callers never have to infer it from `select`.

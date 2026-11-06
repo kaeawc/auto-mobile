@@ -95,17 +95,17 @@ describe("focusTargetForElement", () => {
     expect(focusTargetForElement(second, hierarchy)).toBeNull();
   });
 
-  test("uses the resource id when the element has one", () => {
+  test("names the element by its tap selector's element id when it has one", () => {
     const { element, hierarchy } = candidate({ "resource-id": "app:id/movies", text: "Movies" });
-    expect(focusTargetForElement(element, hierarchy)).toEqual({ resourceId: "app:id/movies" });
+    expect(focusTargetForElement(element, hierarchy)).toEqual({ elementId: "app:id/movies" });
   });
 
-  test("matches a text label on text and a description-only label on content-desc", () => {
+  test("names an id-less element by the label its tap selector uses", () => {
     const text = candidate({ "resource-id": "", text: "Movies" });
-    expect(focusTargetForElement(text.element, text.hierarchy)).toEqual({ text: "Movies" });
+    expect(focusTargetForElement(text.element, text.hierarchy)).toEqual({ label: "Movies" });
     const described = candidate({ "resource-id": "", text: "", "content-desc": "Search" });
     expect(focusTargetForElement(described.element, described.hierarchy)).toEqual({
-      contentDesc: "Search",
+      label: "Search",
     });
   });
 });

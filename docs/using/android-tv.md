@@ -121,7 +121,9 @@ See [Navigation graph](navigation-graph.md).
 
 `focusNavigate` matches a target on the focused element or on a node inside its bounds, so a label
 on a child view of the focused row counts. A large focused container that holds the target also
-counts as focused.
+counts as focused. To land on the exact control `tapOn` would tap, name the target
+with `until.label` or `until.elementId` instead: focus must then reach that control, and a focused
+row that only contains it does not count.
 
 On a TV without a touchscreen, `tapOn` with a `text` or `elementId` selector moves D-pad focus to
 the match and presses `enter`, so one flow can tap on both Android TV and tvOS. The selector picks

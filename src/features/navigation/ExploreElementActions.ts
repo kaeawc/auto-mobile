@@ -7,6 +7,12 @@ import { TapAtCoordinate } from "../action/TapAtCoordinate";
 import { TapOnElement } from "../action/TapOnElement";
 import { Timer } from "../../utils/SystemTimer";
 import { FocusNavigate } from "../action/FocusNavigate";
+import {
+  pinnedFocusOptions,
+  SelectorDpadTargetResolver,
+  type DpadTargetResolver,
+} from "../action/DpadTargetResolver";
+import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import type { ToolCallInteraction } from "../../utils/interfaces/NavigationGraph";
 import { recordedFocusTarget, recordedFocusWalkOptions } from "./ExploreValidateMode";
 import { createFocusNavigateObserver } from "../action/FocusNavigateObserver";
@@ -18,6 +24,9 @@ import { beginPostActionCaptureAction } from "../../utils/PostActionCaptureConte
 import { awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import { publicTapOnArgs, tapCoordinatesFor, tapSelectorFor } from "./ExploreElementExtraction";
 import { focusSelectArgs, focusTargetForElement } from "./focusDrivenInput";
+
+/** Resolves `label`/`elementId` focus targets with tapOn's own selector. */
+const defaultTargetResolver = new SelectorDpadTargetResolver(new ResolverElementSelector());
 
 /** How long explore waits after a D-pad select for the screen to change, like a tap's settle. */
 const FOCUS_SELECT_SETTLE_MS = 1000;
@@ -45,6 +54,8 @@ interface ExplorationActionContext {
   adb: AdbExecutor | undefined;
   timer: Timer;
   focusNavigator: () => FocusSelectNavigator;
+  /** Pins `label`/`elementId` targets to the element tapOn would tap; tapOn's resolver by default. */
+  focusTargetResolver?: DpadTargetResolver;
   runRecorded<T extends { success: boolean }>(
     toolName: string | null,
     args: Record<string, unknown>,
@@ -140,7 +151,7 @@ export class ExploreElementActions {
         : null);
     if (!until) {
       logger.warn(
-        `[Explore] Element has no focus target: missing resource-id and text/content-desc (including descendants); class=${element["class"] || "<empty>"}`,
+        `[Explore] Element has no focus target: missing resource-id and text/content-desc (including descendants), or a duplicate needing an index; class=${element["class"] || "<empty>"}`,
       );
       return null;
     }
@@ -149,7 +160,11 @@ export class ExploreElementActions {
     // The walk bypasses BaseVisualChange's action boundary, which flushes earlier evidence.
     await beginPostActionCaptureAction();
     const result = await this.context.runRecorded("focusNavigate", args, observation, () =>
-      this.context.focusNavigator().execute({ ...args, ...(signal ? { signal } : {}) }),
+      this.context.focusNavigator().execute({
+        ...args,
+        ...pinnedFocusOptions(until, this.context.focusTargetResolver ?? defaultTargetResolver),
+        ...(signal ? { signal } : {}),
+      }),
     );
     if (!result.success) {
       logger.info(

@@ -43,7 +43,7 @@ export function recordedFocusTarget(
     return undefined;
   }
   const target: FocusNavigateTarget = {};
-  for (const key of ["text", "contentDesc", "label", "resourceId"] as const) {
+  for (const key of ["text", "contentDesc", "label", "resourceId", "elementId"] as const) {
     const value = until[key];
     if (typeof value === "string" && value.length > 0) {
       target[key] = value;

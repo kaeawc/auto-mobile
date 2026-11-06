@@ -44,6 +44,11 @@ class PrototypeSensitiveSinkRulesTest {
             // R1 refuses this spec's sensitive source in a library, so check R2 directly.
             assertEquals(emptyList<PrototypeSpecError>(), sinkErrors(spec), file.name)
           }
+          if (file.name == "repeat-item-copy.json") {
+            val clean = spec.replace("/data/rows/0/code", "/data/other")
+            assertTrue(PrototypeSpecValidator.validate(clean) is PrototypeSpecValidation.Success)
+            assertEquals(emptyList<PrototypeSpecError>(), sinkErrors(clean))
+          }
         }
       }
 

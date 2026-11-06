@@ -504,7 +504,16 @@ export interface DataWrite {
 /** Pairs a data action's `path` with its `value` read; both are visited at sibling paths. */
 class DataCopies {
   private readonly destinations = new Map<string, string>();
-  private readonly reads = new Map<string, { source: "data" | "platform"; from: string }>();
+  private readonly reads = new Map<string, { source: "data" | "platform"; from: string }[]>();
+  private readonly repeats: { path: string; from: string }[];
+
+  constructor(nodes: readonly Located[]) {
+    this.repeats = nodes.flatMap(({ value, path }) => {
+      const repeat = object(value.repeat);
+      const from = object(repeat?.items)?.path;
+      return typeof repeat?.as === "string" && isPrototypeDataPointer(from) ? [{ path, from }] : [];
+    });
+  }
 
   visit(raw: unknown, at: string, kind: string): void {
     if (kind === "dataPath" && at.endsWith(".path")) {
@@ -517,15 +526,24 @@ class DataCopies {
     for (const source of ["data", "platform"] as const) {
       const from = binding?.[source];
       if (typeof from === "string") {
-        this.reads.set(at.slice(0, -".value".length), { source, from });
+        this.reads.set(at.slice(0, -".value".length), [{ source, from }]);
+      }
+    }
+    if (typeof binding?.item === "string") {
+      const scopes = this.repeats.filter(({ path }) => at.startsWith(`${path}.children[`));
+      if (scopes.length > 0) {
+        this.reads.set(
+          at.slice(0, -".value".length),
+          scopes.map(({ from }) => ({ source: "data", from })),
+        );
       }
     }
   }
 
   writes(): DataWrite[] {
-    return [...this.reads].flatMap(([prefix, read]) => {
+    return [...this.reads].flatMap(([prefix, reads]) => {
       const into = this.destinations.get(prefix);
-      return into === undefined ? [] : [{ into, ...read }];
+      return into === undefined ? [] : reads.map((read) => ({ into, ...read }));
     });
   }
 }
@@ -537,7 +555,7 @@ function libraryFields(
 ): { requests: string[]; fields: LibraryField[]; dataWrites: DataWrite[] } {
   const requests: string[] = [];
   const fields: LibraryField[] = [];
-  const copies = new DataCopies();
+  const copies = new DataCopies(nodes);
   const collect: FieldVisitor = (raw, at, kind) => {
     copies.visit(raw, at, kind);
     if (kind === "request") {

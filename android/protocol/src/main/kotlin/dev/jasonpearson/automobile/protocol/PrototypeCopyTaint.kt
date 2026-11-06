@@ -70,16 +70,29 @@ internal object PrototypeCopyTaint {
   private fun copies(context: PrototypeStateChecks.Context): List<Copy> =
     context.actions
       .filter { it.value.text("type") in DATA_WRITES }
-      .mapNotNull { action ->
-        val into = action.value.text("path")?.let(PrototypeDataWriter::pathPointer)
+      .flatMap { action ->
+        val into =
+          action.value.text("path")?.let(PrototypeDataWriter::pathPointer)
+            ?: return@flatMap emptyList()
         val read = action.value["value"] as? JsonObject
         val data = read?.text("data")
         val platform = read?.text("platform")
         when {
-          into == null -> null
-          data != null -> Copy(into, "data", data)
-          platform != null -> Copy(into, "platform", platform)
-          else -> null
+          data != null -> listOf(Copy(into, "data", data))
+          platform != null -> listOf(Copy(into, "platform", platform))
+          read?.text("item") != null ->
+            context.nodes.mapNotNull { node ->
+              val repeat = node.value["repeat"] as? JsonObject
+              val pointer = (repeat?.get("items") as? JsonObject)?.text("path")
+              pointer
+                ?.takeIf {
+                  action.path.startsWith("${node.path}.children[") &&
+                    repeat != null && repeat.text("as") != null &&
+                    PrototypeDataPointer.isValid(it)
+                }
+                ?.let { Copy(into, "data", it) }
+            }
+          else -> emptyList()
         }
       }
 

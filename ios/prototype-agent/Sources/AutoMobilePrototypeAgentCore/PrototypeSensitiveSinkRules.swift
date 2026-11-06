@@ -34,7 +34,7 @@ enum PrototypeSensitiveSinkRules {
             }
         }
         guard !seeds.isEmpty || !platformTaints.isEmpty else { return [] }
-        guard let taints = propagateCopies(seeds, platformTaints: platformTaints, actions: actions) else {
+        guard let taints = propagateCopies(seeds, platformTaints: platformTaints, nodes: nodes, actions: actions) else {
             return [.invalidSpec(path: "$", message: "Secure copy taint analysis exceeds 4000000 overlap checks")]
         }
         let sinks = sinkFields(spec, actions: actions).sorted {
@@ -105,19 +105,32 @@ enum PrototypeSensitiveSinkRules {
     /// worklist over copies bucketed by their source's first segment keeps long chains linear;
     /// nil means the check cap was exceeded, so callers fail closed.
     private static func propagateCopies(
-        _ seeds: [String], platformTaints: [String], actions: [PrototypeLocatedValue]
+        _ seeds: [String], platformTaints: [String], nodes: [PrototypeLocatedValue], actions: [PrototypeLocatedValue]
     )
         -> [String]?
     {
         let writes: Set<String> = ["setData", "appendData", "prependData", "upsertData"]
-        let copies = actions.compactMap { action -> (into: String, source: String, from: String)? in
+        let copies = actions.flatMap { action -> [(into: String, source: String, from: String)] in
             guard let type = action.value["type"]?.stringValue, writes.contains(type),
                   let into = action.value["path"]?.stringValue.flatMap(PrototypeDataWrite.pointer(ofPath:)),
-                  let read = action.value["value"]?.objectFields else { return nil }
+                  let read = action.value["value"]?.objectFields else { return [] }
             for source in ["data", "platform"] {
-                if let from = read[source]?.stringValue { return (into, source, from) }
+                if let from = read[source]?.stringValue { return [(into, source, from)] }
             }
-            return nil
+            if read["item"]?.stringValue != nil {
+                return nodes.compactMap { node -> (into: String, source: String, from: String)? in
+                    let repeated = node.value["repeat"]?.objectFields
+                    if action.path.hasPrefix("\(node.path).children["),
+                       repeated?["as"]?.stringValue != nil,
+                       let from = repeated?["items"]?.objectFields?["path"]?.stringValue,
+                       PrototypeDataPointer.isValid(from)
+                    {
+                        return (into, "data", from)
+                    }
+                    return nil
+                }
+            }
+            return []
         }
         func firstSegment(_ pointer: String) -> String {
             String(pointer.dropFirst().split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)[0])

@@ -4,7 +4,6 @@ import type { BootedDevice, PlanExecutionResult, VideoRecordingMetadata } from "
 import {
   APPLE_PLATFORM_SUPPORTED_TOOLS,
   assertToolSupportsDevicePlatform,
-  unsupportedPlatformToolMessage,
 } from "../../src/server/applePlatformToolSupport";
 import { exploreResultSchema } from "../../src/server/navigationToolOutputSchemas";
 import { registerNavigationTools } from "../../src/server/navigationTools";
@@ -45,15 +44,12 @@ const tvRecording: VideoRecordingMetadata = {
 const appleTv: BootedDevice = { platform: "tvos", deviceId: "TV-UDID", name: "Apple TV 4K" };
 
 describe("tvOS allowlist for explore and executePlan", () => {
-  test("explore and executePlan accept an Apple TV; focusNavigate still refuses it", () => {
-    for (const tool of ["explore", "executePlan"]) {
+  test("explore, executePlan and focusNavigate accept an Apple TV", () => {
+    // A replayed focusNavigate step runs the tvOS focus walk (#16722).
+    for (const tool of ["explore", "executePlan", "focusNavigate"]) {
       expect(APPLE_PLATFORM_SUPPORTED_TOOLS.tvos.has(tool)).toBe(true);
       expect(() => assertToolSupportsDevicePlatform(tool, appleTv)).not.toThrow();
     }
-    // A replayed focusNavigate step fails with the tool's own refusal until tvOS supports it.
-    expect(() => assertToolSupportsDevicePlatform("focusNavigate", appleTv)).toThrow(
-      unsupportedPlatformToolMessage("focusNavigate", "tvos"),
-    );
   });
 });
 

@@ -24,6 +24,7 @@ import {
   type DpadTargetResolver,
 } from "../action/DpadTargetResolver";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
+import { DefaultElementParser } from "../utility/ElementParser";
 
 /** Resolves lone `label`/`elementId` targets as the replayed focus walk pins them. */
 const focusEdgeTargetResolver: DpadTargetResolver = new SelectorDpadTargetResolver(
@@ -531,14 +532,45 @@ function resolveFocusEdgeTarget(
       ? { status: "matched", element, confidence: FOCUS_TARGET_CONFIDENCE }
       : { status: "not-found", bestScore: 0 };
   }
-  const label: FocusNavigateTarget = { ...until, resourceId: undefined };
-  const hasLabel = Boolean(label.text || label.contentDesc || label.label);
-  const element =
-    findFocusTarget(elements, until) ??
-    (until.resourceId && hasLabel ? findFocusTarget(elements, label) : undefined);
+  const element = matchFocusTarget(elements, until, hierarchy);
   return element
     ? { status: "matched", element, confidence: FOCUS_TARGET_CONFIDENCE }
     : { status: "not-found", bestScore: 0 };
+}
+
+/**
+ * An unpinned target: every field on one candidate, else the label fields alone when the id is a
+ * label inside a row, else the candidate owning a matching hierarchy node.
+ */
+function matchFocusTarget(
+  elements: Element[],
+  until: FocusNavigateTarget,
+  hierarchy: ViewHierarchyResult | undefined,
+): Element | undefined {
+  const label: FocusNavigateTarget = { ...until, resourceId: undefined };
+  const hasLabel = Boolean(label.text || label.contentDesc || label.label);
+  return (
+    findFocusTarget(elements, until) ??
+    (until.resourceId && hasLabel ? findFocusTarget(elements, label) : undefined) ??
+    ownerOfHierarchyMatch(elements, until, hierarchy)
+  );
+}
+
+/**
+ * The candidate owning the first hierarchy node `focusNavigate` would accept for `until`: a static
+ * descendant (a label, an id-bearing child) is not a candidate, but focus on its owner counts.
+ */
+function ownerOfHierarchyMatch(
+  elements: Element[],
+  until: FocusNavigateTarget,
+  hierarchy: ViewHierarchyResult | undefined,
+): Element | undefined {
+  if (!hierarchy) {
+    return undefined;
+  }
+  const nodes = new DefaultElementParser().flattenViewHierarchy(hierarchy).map((e) => e.element);
+  const match = findFocusTarget(nodes, until);
+  return match ? candidateOwning(elements, match.bounds) : undefined;
 }
 
 /**

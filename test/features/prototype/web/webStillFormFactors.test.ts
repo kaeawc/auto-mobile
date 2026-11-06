@@ -1,0 +1,143 @@
+import { describe, expect, test } from "bun:test";
+import type { WebChild, WebElement } from "../../../../src/features/prototype/web/webNodes";
+import { renderPrototypeStill } from "../../../../src/features/prototype/web/webStill";
+
+const spec = {
+  id: "focus",
+  window: { placement: { type: "fullscreen" } },
+  root: {
+    type: "column",
+    children: [
+      { type: "text", text: "Watch next" },
+      { type: "button", label: "Play" },
+      { type: "button", label: "Later" },
+    ],
+  },
+};
+
+const find = (root: WebChild, match: (element: WebElement) => boolean): WebElement[] =>
+  typeof root === "string"
+    ? []
+    : [...(match(root) ? [root] : []), ...root.children.flatMap((child) => find(child, match))];
+const ringed = (root: WebElement) =>
+  find(root, (element) => element.attrs["data-focus"] === "ring");
+const screen = (root: WebElement) =>
+  find(root, (element) => element.attrs["data-chrome"] === "screen")[0]!;
+
+describe("still on watch, TV and car frames (#16446)", () => {
+  test("a TV still opens in landscape with focus on its first focusable node", () => {
+    for (const frame of ["android-tv-1080p", "apple-tv"]) {
+      const { element } = renderPrototypeStill(spec, { frame });
+      expect(element.attrs["data-orientation"]).toBe("landscape");
+      const width = parseFloat(screen(element).style.width!);
+      expect(width).toBeGreaterThan(parseFloat(screen(element).style.height!));
+      expect(ringed(element).map((node) => node.children)).toEqual([["Play"]]);
+    }
+  });
+
+  test("tabBar and bottomNav items take initial focus from the real renderer output", () => {
+    for (const type of ["tabBar", "bottomNav"]) {
+      const nav = {
+        id: "nav",
+        window: { placement: { type: "fullscreen" } },
+        root: {
+          type: "column",
+          children: [
+            { type: "text", text: "Home" },
+            { type: type, items: [{ label: "Movies" }, { label: "Shows" }] },
+            { type: "button", label: "Play" },
+          ],
+        },
+      };
+      const { element } = renderPrototypeStill(nav, { frame: "android-tv-1080p" });
+      const rings = ringed(element);
+      expect(rings.map((node) => node.attrs.role)).toEqual(["tab"]);
+      expect(JSON.stringify(rings[0])).toContain("Movies");
+      if (type === "tabBar") {
+        // The selected tab keeps its inset underline under the ring.
+        expect(rings[0]!.style["box-shadow"]).toContain("inset 0 -3px 0 0");
+      }
+    }
+  });
+
+  test("an open dialog takes the initial focus on its first action, not the screen below", () => {
+    const withDialog = {
+      id: "dialog",
+      state: { open: true },
+      root: {
+        type: "column",
+        children: [
+          { type: "button", label: "Behind" },
+          {
+            type: "dialog",
+            openWhen: { key: "open", equals: true },
+            title: "Delete?",
+            confirm: { label: "Delete" },
+            dismiss: { label: "Cancel" },
+          },
+        ],
+      },
+    };
+    const { element } = renderPrototypeStill(withDialog, { frame: "android-tv-1080p" });
+    const rings = ringed(element);
+    expect(rings).toHaveLength(1);
+    expect(rings[0]!.attrs["data-part"]).toMatch(/^(confirm|dismiss)$/);
+    const [layer] = find(element, (node) => node.attrs["data-part"] === "dialogLayer");
+    expect(ringed(layer!)).toEqual(rings);
+    // With the dialog closed, the screen's own button takes focus.
+    const closed = renderPrototypeStill(
+      { ...withDialog, state: { open: false } },
+      { frame: "android-tv-1080p" },
+    );
+    expect(ringed(closed.element).map((node) => node.attrs["data-node"])).toEqual(["button"]);
+  });
+
+  test("a disabled field and its inner input are skipped on the iOS skin", () => {
+    const fields = {
+      id: "fields",
+      state: { canEdit: false },
+      root: {
+        type: "column",
+        children: [
+          {
+            type: "textField",
+            stateKey: "name",
+            label: "Name",
+            enabledWhen: { key: "canEdit", equals: true },
+          },
+          { type: "button", label: "Next" },
+        ],
+      },
+    };
+    const { element } = renderPrototypeStill(fields, { frame: "apple-tv" });
+    expect(ringed(element).map((node) => node.attrs["data-node"])).toEqual(["button"]);
+  });
+
+  test("touch and rotary frames draw no focus ring", () => {
+    for (const frame of ["pixel-9", "iphone-16", "wearos-small-round", "car-1024p-landscape"]) {
+      expect(ringed(renderPrototypeStill(spec, { frame }).element)).toEqual([]);
+    }
+  });
+
+  test("a car still is landscape and never hides content", () => {
+    const { element } = renderPrototypeStill(spec, { frame: "car-1024p-landscape" });
+    expect(element.attrs["data-orientation"]).toBe("landscape");
+    const buttons = find(element, (node) => node.attrs["data-node"] === "button");
+    expect(buttons.map((node) => node.children)).toEqual([["Play"], ["Later"]]);
+    expect(buttons.every((node) => node.style.display !== "none")).toBe(true);
+  });
+
+  test("a watch still is portrait and round", () => {
+    const { element } = renderPrototypeStill(spec, { frame: "wearos-small-round" });
+    expect(element.attrs).toMatchObject({ "data-orientation": "portrait", "data-mask": "round" });
+  });
+
+  test("an orientation the frame does not have is an actionable error", () => {
+    expect(() =>
+      renderPrototypeStill(spec, { frame: "android-tv-1080p", orientation: "portrait" }),
+    ).toThrow('Device frame "android-tv-1080p" has no portrait view. Its orientations: landscape');
+    expect(() =>
+      renderPrototypeStill(spec, { frame: "apple-watch", orientation: "landscape" }),
+    ).toThrow("Its orientations: portrait");
+  });
+});

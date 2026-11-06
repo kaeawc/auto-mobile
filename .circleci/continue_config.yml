@@ -542,7 +542,7 @@ jobs:
             mkdir -p ci-logs
             { grep -hE '^(\[[^]]+\][[:space:]]+)?not ok' ci-logs/*.log || true; } > ci-logs/bats-failures.txt
             # Re-run each failing file alone with its command output printed.
-            awk -F'\t' 'NR>1 && $7 != 0 { n=split($NF, a, " "); for (i=1;i<=n;i++) if (a[i] ~ /\.bats$/) print a[i] }' scratch/bats-unit-joblog.tsv > ci-logs/failing-files.txt || true
+            awk '/^not ok/ {bad=1} /^BATS file duration:/ {if (bad) print $NF; bad=0}' ci-logs/bats-unit.log > ci-logs/failing-files.txt || true
             while read -r f; do
               printf '\n=== %s\n' "$f"
               timeout 150 bats --print-output-on-failure "$f" 2>&1 | grep -vE '^ok ' | head -60

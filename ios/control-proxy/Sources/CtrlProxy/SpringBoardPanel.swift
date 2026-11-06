@@ -42,6 +42,19 @@ enum SpringBoardPanel {
 }
 
 extension ElementLocator {
+    /// Dialogs and sheets are extracted from the portrait snapshot separately from the main tree, so
+    /// they get the same inner-panel rotation as it. `innerPanelPortraitHeight` is nil on the cover
+    /// and for every other app, which leaves them untouched.
+    nonisolated static func alertsInObservedSpace(
+        _ alerts: [UIElementInfo],
+        innerPanelPortraitHeight: Int?
+    )
+        -> [UIElementInfo]
+    {
+        guard let portraitHeight = innerPanelPortraitHeight else { return alerts }
+        return alerts.map { rotatedIntoLandscape($0, portraitHeight: portraitHeight) }
+    }
+
     /// Rotate every bound in a subtree into the landscape space the inner panel is shown in.
     nonisolated static func rotatedIntoLandscape(
         _ element: UIElementInfo,

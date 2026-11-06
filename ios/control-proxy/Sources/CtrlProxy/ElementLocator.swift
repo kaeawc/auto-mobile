@@ -408,7 +408,12 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             if !systemAlertCapture.alerts.isEmpty {
                 // Create a wrapper that contains both the app hierarchy and alerts
                 var children = rootElement.node ?? []
-                children.append(contentsOf: systemAlertCapture.alerts)
+                children.append(
+                    contentsOf: Self.alertsInObservedSpace(
+                        systemAlertCapture.alerts,
+                        innerPanelPortraitHeight: innerPanelFrame.map { ElementBounds.clampedInt($0.height) }
+                    )
+                )
                 finalHierarchy = UIElementInfo(
                     text: rootElement.text,
                     resourceId: rootElement.resourceId,

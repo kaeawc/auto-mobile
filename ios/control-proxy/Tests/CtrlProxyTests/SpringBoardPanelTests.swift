@@ -56,6 +56,24 @@ final class SpringBoardPanelTests: XCTestCase {
         XCTAssertEqual([window.left, window.top, window.right, window.bottom], [0, 0, 951, 669])
     }
 
+    func testAlertButtonIsRotatedIntoTheInnerPanelAndUntouchedOnTheCover() {
+        let button = UIElementInfo(
+            text: "Allow", bounds: ElementBounds(left: 52, top: 814, right: 139, bottom: 882)
+        )
+        let alert = UIElementInfo(
+            className: "Alert", bounds: ElementBounds(left: 20, top: 700, right: 446, bottom: 900), node: [button]
+        )
+        let inner = ElementLocator.alertsInObservedSpace([alert], innerPanelPortraitHeight: 951)
+        let moved = inner.first?.node?.first?.bounds
+        XCTAssertEqual([moved?.left, moved?.top, moved?.right, moved?.bottom], [69, 52, 137, 139])
+        XCTAssertEqual(inner.first?.bounds?.left, 951 - 900)
+
+        let cover = ElementLocator.alertsInObservedSpace([alert], innerPanelPortraitHeight: nil)
+        let kept = cover.first?.node?.first?.bounds
+        XCTAssertEqual([kept?.left, kept?.top, kept?.right, kept?.bottom], [52, 814, 139, 882])
+        XCTAssertEqual(cover.first?.bounds?.left, 20)
+    }
+
     func testRotatedTreeRotatesEveryDescendantAndReplacesTheRootBounds() {
         let child = UIElementInfo(
             text: "Settings", bounds: ElementBounds(left: 52, top: 814, right: 139, bottom: 882)

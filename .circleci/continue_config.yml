@@ -59,6 +59,14 @@ parameters:
   run-nightly-macos:
     type: boolean
     default: false
+  # Post-merge Linux Node mirrors, set from .circleci/main-macos-paths.txt on main.
+  run-main-linux:
+    type: boolean
+    default: false
+  # Set by the nightly Linux scheduled pipeline (owner-configured trigger).
+  run-nightly-linux:
+    type: boolean
+    default: false
 
 executors:
   # Shadow Linux lane (4 vCPU / 8 GB, 20 credits/min). The `-node` variant carries
@@ -258,8 +266,18 @@ jobs:
   # a GitHub token (PR comment, artifact upload, rerun dispatch) are omitted.
   linux-fast-validation:
     executor: linux
+    parameters:
+      superseded-path-group:
+        type: string
+        default: ""
+        description: "Main path group for halt_if_superseded_on_main; empty skips the check."
     steps:
       - checkout_without_lfs
+      - when:
+          condition: << parameters.superseded-path-group >>
+          steps:
+            - halt_if_superseded_on_main:
+                path-group: << parameters.superseded-path-group >>
       - run:
           name: "Install fast validation dependencies"
           command: |
@@ -337,8 +355,18 @@ jobs:
 
   linux-node-checks:
     executor: linux
+    parameters:
+      superseded-path-group:
+        type: string
+        default: ""
+        description: "Main path group for halt_if_superseded_on_main; empty skips the check."
     steps:
       - checkout_without_lfs
+      - when:
+          condition: << parameters.superseded-path-group >>
+          steps:
+            - halt_if_superseded_on_main:
+                path-group: << parameters.superseded-path-group >>
       - setup_auto_mobile_npm_package
       - run:
           name: "Run Bun Audit"
@@ -457,8 +485,18 @@ jobs:
 
   linux-node-host-integration-tests:
     executor: linux
+    parameters:
+      superseded-path-group:
+        type: string
+        default: ""
+        description: "Main path group for halt_if_superseded_on_main; empty skips the check."
     steps:
       - checkout_without_lfs
+      - when:
+          condition: << parameters.superseded-path-group >>
+          steps:
+            - halt_if_superseded_on_main:
+                path-group: << parameters.superseded-path-group >>
       - install_bun
       - run:
           name: "Install Bun dependencies"
@@ -478,6 +516,116 @@ jobs:
             AUTOMOBILE_TEST_MODE: "true"
             AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "300"
           command: bash scripts/test-ts.sh stress
+
+  # Post-merge mirror of merge.yml's `benchmark-context-thresholds`: the benchmark
+  # exits non-zero when a configured MCP context threshold is exceeded. The report
+  # is kept even then; the artifact upload there needs a GitHub token.
+  linux-benchmark-context-thresholds:
+    executor: linux
+    parameters:
+      superseded-path-group:
+        type: string
+        default: ""
+        description: "Main path group for halt_if_superseded_on_main; empty skips the check."
+    steps:
+      - checkout_without_lfs
+      - when:
+          condition: << parameters.superseded-path-group >>
+          steps:
+            - halt_if_superseded_on_main:
+                path-group: << parameters.superseded-path-group >>
+      - setup_auto_mobile_npm_package
+      - run:
+          name: "Run Context Baseline Benchmark"
+          command: |
+            mkdir -p reports ci-logs
+            set -o pipefail
+            if ! bun run benchmark-context --output reports/context-benchmark.json 2>&1 | tee -a ci-logs/benchmark-context.log; then
+              echo "MCP context benchmark failed - one or more configured thresholds were exceeded" >&2
+              cat reports/context-benchmark.json >&2 || true
+              exit 1
+            fi
+      - store_artifacts:
+          when: always
+          path: reports/context-benchmark.json
+          destination: context-benchmark-report
+      - store_artifacts:
+          when: always
+          path: ci-logs
+          destination: ci-logs
+
+  # Nightly Linux mirror of nightly.yml's advisory Node jobs: the randomized unit
+  # lane, the pinned Claude Code elicitation conformance run and the auto-advance
+  # race guard. Each step runs `when: always`, so one failure never hides the rest.
+  linux-nightly-node:
+    executor: linux
+    steps:
+      - checkout_without_lfs
+      - install_bun
+      - run:
+          name: "Install Bun dependencies"
+          command: |
+            mkdir -p ci-logs
+            {
+              bash scripts/ci/install-bun-deps.sh
+              echo "export PATH=\"${PWD}/node_modules/.bin:\${PATH}\"" >> "${BASH_ENV}"
+            } 2>&1 | tee -a ci-logs/setup.log
+      # Local repro: AUTOMOBILE_TEST_MODE=true AUTOMOBILE_UNIT_RANDOM_SEED=N bash scripts/test-ts.sh unit
+      - run:
+          name: "Run randomized unit lane"
+          when: always
+          no_output_timeout: 15m
+          environment:
+            AUTOMOBILE_TEST_MODE: "true"
+            AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720"
+          command: |
+            mkdir -p ci-logs
+            set -o pipefail
+            AUTOMOBILE_UNIT_RANDOM_SEED="${CIRCLE_BUILD_NUM}" bash scripts/test-ts.sh unit 2>&1 | tee -a ci-logs/randomized-unit.log
+      # Same pinned binary as nightly.yml: the first version that declares form and
+      # url elicitation and negotiates 2026-07-28; bump it deliberately.
+      - run:
+          name: "Fetch pinned Claude Code"
+          when: always
+          environment:
+            CLAUDE_CODE_VERSION: "2.1.311"
+          command: |
+            set -euo pipefail
+            mkdir -p ci-logs
+            dir="${HOME}/claude-code"
+            mkdir -p "$dir"
+            (
+              cd "$dir"
+              tgz="$(npm pack --silent "@anthropic-ai/claude-code-linux-x64@${CLAUDE_CODE_VERSION}")"
+              tar xzf "$tgz"
+              chmod +x "$dir/package/claude"
+            )
+            "$dir/package/claude" --version 2>&1 | tee -a ci-logs/claude-code.log
+            echo "export AUTOMOBILE_CLAUDE_BIN=\"$dir/package/claude\"" >> "${BASH_ENV}"
+      - run:
+          name: "Run Claude Code elicitation conformance"
+          when: always
+          no_output_timeout: 15m
+          command: |
+            mkdir -p ci-logs
+            set -o pipefail
+            bun test test/server/claudeCodeElicitation.integration.test.ts 2>&1 | tee -a ci-logs/claude-code-elicitation.log
+      - run:
+          name: "Run auto-advance race guard"
+          when: always
+          no_output_timeout: 20m
+          command: |
+            mkdir -p ci-logs
+            set -o pipefail
+            bash scripts/ci/auto-advance-race-guard.sh 2>&1 | tee -a ci-logs/auto-advance-race-guard.log
+      - store_artifacts:
+          when: always
+          path: ci-logs
+          destination: ci-logs
+      - store_artifacts:
+          when: always
+          path: scratch/test-ts-unit-shards
+          destination: node-unit-test-diagnostics/test-ts-unit-shards
 
   # ── Post-merge (formerly merge.yml) and nightly sweeps ──────────────────────
   # Generate + drift-check + build every XcodeGen project. Post-merge it replaces
@@ -894,6 +1042,42 @@ workflows:
       - linux-node-host-integration-tests:
           requires:
             - linux-fast-validation
+
+  # Post-merge Linux Node mirrors (main only; path group run-main-linux). Each job
+  # halts when a newer main commit touches the same group, so a merge burst runs
+  # once. Advisory like the PR lane: no required check.
+  main-linux:
+    when: << pipeline.parameters.run-main-linux >>
+    jobs:
+      - linux-fast-validation:
+          superseded-path-group: run-main-linux
+          filters:
+            branches:
+              only: main
+      - linux-node-checks:
+          superseded-path-group: run-main-linux
+          filters:
+            branches:
+              only: main
+      - linux-benchmark-context-thresholds:
+          superseded-path-group: run-main-linux
+          filters:
+            branches:
+              only: main
+      - linux-node-host-integration-tests:
+          superseded-path-group: run-main-linux
+          requires:
+            - linux-fast-validation
+          filters:
+            branches:
+              only: main
+
+  # Nightly Linux Node jobs (replaces nightly.yml's advisory Node jobs); started by
+  # a scheduled pipeline on main with run-nightly-linux=true.
+  nightly-linux:
+    when: << pipeline.parameters.run-nightly-linux >>
+    jobs:
+      - linux-nightly-node
 
   # PR path: exactly one macOS job (#11010). When `run-ios` is false (no iOS
   # changes) the workflow has no jobs and no macOS executor is used.

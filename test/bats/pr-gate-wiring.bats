@@ -839,13 +839,16 @@ load yq-helpers
 }
 
 @test "BATS unit lane budget is runner-aware and stays a tight guard in both workflows" {
-  local workflow block base hosted
+  require_mikefarah_yq
+  local workflow step base hosted
+  step='.jobs."bats-tests".steps[] | select(.name == "Run BATS Unit Tests")'
   for workflow in .github/workflows/pull_request.yml .github/workflows/merge.yml; do
-    block="$(job_block bats-tests "$workflow")"
-    base="$(printf '%s\n' "$block" | sed -n 's/^ *AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS: "\([0-9]*\)"$/\1/p')"
-    hosted="$(printf '%s\n' "$block" | sed -n 's/^ *AUTOMOBILE_BATS_UNIT_BUDGET_GITHUB_HOSTED_SECONDS: "\([0-9]*\)"$/\1/p')"
+    [ "$(yq -r "[${step}] | length" "$workflow")" = 1 ]
+    [[ "$(yq -r "${step} | .run" "$workflow")" == *"scripts/ci/run-bats.sh unit"* ]]
+    base="$(yq -r "${step} | .env.AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS" "$workflow")"
+    hosted="$(yq -r "${step} | .env.AUTOMOBILE_BATS_UNIT_BUDGET_GITHUB_HOSTED_SECONDS" "$workflow")"
     [ "$base" = 420 ]
-    [ -n "$hosted" ]
+    [[ "$hosted" =~ ^[1-9][0-9]*$ ]]
     # GitHub-hosted runners are slower, but the guard must stay within 10% of
     # the base budget (#17274); a larger gap needs fresh measurements.
     [ "$hosted" -ge "$base" ]

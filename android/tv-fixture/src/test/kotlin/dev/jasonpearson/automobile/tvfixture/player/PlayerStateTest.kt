@@ -22,6 +22,8 @@ class PlayerStateTest {
     assertEquals("Paused", playing.apply(PlayerCommand.PLAY_PAUSE).stateLabel)
     assertEquals("Playing", playing.apply(PlayerCommand.PLAY).stateLabel)
     assertEquals("Paused", initial.apply(PlayerCommand.PAUSE).stateLabel)
+    assertEquals("Playing", initial.apply(PlayerCommand.PLAY).stateLabel)
+    assertEquals("Paused", playing.apply(PlayerCommand.PAUSE).stateLabel)
   }
 
   @Test
@@ -44,6 +46,9 @@ class PlayerStateTest {
     val last = second.apply(PlayerCommand.NEXT).apply(PlayerCommand.NEXT)
     assertEquals(2, last.trackIndex)
     assertEquals(0, initial.apply(PlayerCommand.PREVIOUS).trackIndex)
+    val back = last.copy(positionSeconds = 30).apply(PlayerCommand.PREVIOUS)
+    assertEquals(1, back.trackIndex)
+    assertEquals(0, back.positionSeconds)
     assertEquals("Last command: previous", initial.apply(PlayerCommand.PREVIOUS).lastCommandLabel)
   }
 

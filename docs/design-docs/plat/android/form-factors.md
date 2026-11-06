@@ -64,9 +64,9 @@ The TV image is `system-images;android-36;android-tv;arm64-v8a` with profile `tv
 
 Two deterministic targets for TV checks and focus regression tests, with no network, no video decoding
 and no Google account. Each has `LAUNCHER` and `LEANBACK_LAUNCHER` entries, a banner, and declares
-touchscreen and leanback optional, so it installs on any TV or phone image at API 28 or later. Row,
-card, search and player content comes from each module's catalog object; screen tags and button labels
-are the ones listed below. Changing either is a contract change.
+touchscreen and leanback optional, so it installs on any TV or phone image at API 28 or later. Rows,
+cards, search text and player tracks come from each module's catalog object; screen tags, button labels
+and the player's state lines are the ones listed below. Changing either is a contract change.
 
 `android/tv-fixture` (`dev.jasonpearson.automobile.tvfixture`, launcher "AutoMobile TV Fixture") is
 Compose for TV (`androidx.tv:tv-material`). Compose test tags are exposed as resource ids.

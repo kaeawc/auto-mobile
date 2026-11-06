@@ -67,8 +67,6 @@ interface DeviceState {
   /** Owned ports joined from a portReverse session -> the host port that session mapped them to. */
   joined: Map<number, number>;
   report: Map<string, PrototypeReverseReport>;
-  /** Serialises operations on one device so list-then-add cannot interleave. */
-  tail: Promise<unknown>;
   /** Tasks queued or running on this device, so a release can tell whether anything waits behind it. */
   pending: number;
 }
@@ -255,7 +253,6 @@ export class PrototypeAdbReverseManager {
         owned: new Map(),
         joined: new Map(),
         report: new Map(),
-        tail: Promise.resolve(),
         pending: 0,
       };
       this.devices.set(deviceId, state);
@@ -268,12 +265,10 @@ export class PrototypeAdbReverseManager {
   /** Serialises the device's work, and shares that order with portReverse sessions (#17253). */
   private enqueue<T>(state: DeviceState, task: () => Promise<T>): Promise<T> {
     state.pending++;
-    const exclusive = () => this.ownership.exclusive(state.deviceId, task);
-    const run = state.tail.then(exclusive, exclusive).finally(() => {
+    // The shared per-device queue orders this manager's own tasks too, so it keeps no queue of its own.
+    return this.ownership.exclusive(state.deviceId, task).finally(() => {
       state.pending--;
     });
-    state.tail = run.catch(() => undefined);
-    return run;
   }
 
   private record(state: DeviceState, prototypeId: string, report: PrototypeReverseReport): void {

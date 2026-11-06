@@ -156,8 +156,6 @@ interface DeviceState {
    * that owner's last ensure/list/verify, which reports them as `restored` once and clears them.
    */
   backgroundRestored: Map<string, Set<number>>;
-  /** Serialises operations on one device so list-then-add/remove cannot interleave. */
-  tail: Promise<unknown>;
   pending: number;
 }
 
@@ -594,7 +592,6 @@ export class PortReverseManager {
         pendingRemoval: new Map(),
         ensuring: new Map(),
         backgroundRestored: new Map(),
-        tail: Promise.resolve(),
         pending: 0,
       };
       this.devices.set(target.deviceId, state);
@@ -607,12 +604,10 @@ export class PortReverseManager {
   /** Serialises the device's work, and shares that order with the prototype manager (#17253). */
   private enqueue<T>(state: DeviceState, task: () => Promise<T>): Promise<T> {
     state.pending++;
-    const exclusive = () => this.ownership.exclusive(state.deviceId, task);
-    const run = state.tail.then(exclusive, exclusive).finally(() => {
+    // The shared per-device queue orders this manager's own tasks too, so it keeps no queue of its own.
+    return this.ownership.exclusive(state.deviceId, task).finally(() => {
       state.pending--;
     });
-    state.tail = run.catch(() => undefined);
-    return run;
   }
 
   private portsOf(state: DeviceState, owner: string): number[] {

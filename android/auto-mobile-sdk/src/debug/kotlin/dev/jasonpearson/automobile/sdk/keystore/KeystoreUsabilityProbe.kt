@@ -13,6 +13,8 @@ import javax.crypto.Cipher
 import javax.crypto.Mac
 import javax.crypto.SecretKey
 import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.IvParameterSpec
 
 /**
  * One Keystore operation to begin (never finish) on an auth-bound key. Beginning it is where
@@ -20,11 +22,25 @@ import javax.crypto.SecretKeyFactory
  * presence and category lookups never do (#17294).
  */
 internal sealed interface UsabilityProbe {
-  data class CipherInit(val transformation: String, val opmode: Int) : UsabilityProbe
+  data class CipherInit(
+    val transformation: String,
+    val opmode: Int,
+    val iv: ProbeIv = ProbeIv.NONE,
+  ) : UsabilityProbe
 
   data class SignatureInit(val algorithm: String) : UsabilityProbe
 
   data class MacInit(val algorithm: String) : UsabilityProbe
+}
+
+/**
+ * Decryption in an IV mode needs caller parameters, or init fails before Keystore is reached. A
+ * synthetic all-zero IV is safe because the operation is only begun, never fed data.
+ */
+internal enum class ProbeIv {
+  NONE,
+  BLOCK_16,
+  GCM_12,
 }
 
 /** The KeyInfo fields the probe choice depends on; never key material. */
@@ -66,7 +82,14 @@ private fun aesProbe(shape: ProbeKeyShape): UsabilityProbe? {
     }
   val blockMode = shape.blockModes.firstOrNull() ?: return null
   val padding = shape.encryptionPaddings.firstOrNull() ?: KeyProperties.ENCRYPTION_PADDING_NONE
-  return UsabilityProbe.CipherInit("AES/$blockMode/$padding", mode)
+  val iv =
+    when {
+      mode == Cipher.ENCRYPT_MODE -> ProbeIv.NONE
+      blockMode == KeyProperties.BLOCK_MODE_GCM -> ProbeIv.GCM_12
+      blockMode == KeyProperties.BLOCK_MODE_ECB -> ProbeIv.NONE
+      else -> ProbeIv.BLOCK_16
+    }
+  return UsabilityProbe.CipherInit("AES/$blockMode/$padding", mode, iv)
 }
 
 private fun privateKeyProbe(shape: ProbeKeyShape): UsabilityProbe? {
@@ -143,7 +166,7 @@ internal fun beginUsabilityProbe(key: Key) {
     )
   // The begun operation is never updated or finished; the provider aborts it when collected.
   when (val probe = usabilityProbeFor(shape)) {
-    is UsabilityProbe.CipherInit -> Cipher.getInstance(probe.transformation).init(probe.opmode, key)
+    is UsabilityProbe.CipherInit -> beginCipher(probe, key)
     is UsabilityProbe.SignatureInit ->
       Signature.getInstance(probe.algorithm).initSign(key as PrivateKey)
     is UsabilityProbe.MacInit -> Mac.getInstance(probe.algorithm).init(key)
@@ -152,3 +175,17 @@ internal fun beginUsabilityProbe(key: Key) {
 }
 
 internal const val ANDROID_KEYSTORE = "AndroidKeyStore"
+
+private fun beginCipher(probe: UsabilityProbe.CipherInit, key: Key) {
+  val cipher = Cipher.getInstance(probe.transformation)
+  when (probe.iv) {
+    ProbeIv.NONE -> cipher.init(probe.opmode, key)
+    ProbeIv.BLOCK_16 -> cipher.init(probe.opmode, key, IvParameterSpec(ByteArray(AES_BLOCK_BYTES)))
+    ProbeIv.GCM_12 ->
+      cipher.init(probe.opmode, key, GCMParameterSpec(GCM_TAG_BITS, ByteArray(GCM_NONCE_BYTES)))
+  }
+}
+
+private const val AES_BLOCK_BYTES = 16
+private const val GCM_NONCE_BYTES = 12
+private const val GCM_TAG_BITS = 128

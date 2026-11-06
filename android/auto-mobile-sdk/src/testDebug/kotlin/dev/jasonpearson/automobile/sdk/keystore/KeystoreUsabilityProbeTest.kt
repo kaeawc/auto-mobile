@@ -37,12 +37,25 @@ internal class KeystoreUsabilityProbeTest {
       usabilityProbeFor(authBoundAes),
     )
     assertEquals(
-      UsabilityProbe.CipherInit("AES/CBC/PKCS7Padding", Cipher.DECRYPT_MODE),
+      UsabilityProbe.CipherInit("AES/CBC/PKCS7Padding", Cipher.DECRYPT_MODE, ProbeIv.BLOCK_16),
       usabilityProbeFor(
         authBoundAes.copy(
           purposes = KeyProperties.PURPOSE_DECRYPT,
           blockModes = listOf(KeyProperties.BLOCK_MODE_CBC),
           encryptionPaddings = listOf(KeyProperties.ENCRYPTION_PADDING_PKCS7),
+        ),
+      ),
+    )
+    assertEquals(
+      UsabilityProbe.CipherInit("AES/GCM/NoPadding", Cipher.DECRYPT_MODE, ProbeIv.GCM_12),
+      usabilityProbeFor(authBoundAes.copy(purposes = KeyProperties.PURPOSE_DECRYPT)),
+    )
+    assertEquals(
+      UsabilityProbe.CipherInit("AES/ECB/NoPadding", Cipher.DECRYPT_MODE),
+      usabilityProbeFor(
+        authBoundAes.copy(
+          purposes = KeyProperties.PURPOSE_DECRYPT,
+          blockModes = listOf(KeyProperties.BLOCK_MODE_ECB),
         ),
       ),
     )

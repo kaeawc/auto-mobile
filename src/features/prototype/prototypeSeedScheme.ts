@@ -144,12 +144,20 @@ export function prototypeSeedRoles(seed: Rgba, mode: PrototypeColorMode): Record
 /**
  * The role colours a device draws a spec with, for a renderer that has no device scheme of its
  * own (the web still): the mode's baseline, the seed's derived roles over it, then the explicit
- * overrides. `source: device` has no device to read here, so it falls through to the seed or the
- * baseline, as iOS and Android below API 31 do.
+ * overrides. `surface`, the screen colour the author painted, replaces the baseline surface roles
+ * unless a seed or device source derives the scheme. `source: device` has no device to read here,
+ * so it falls through to the seed or the baseline, as iOS and Android below API 31 do.
  */
-export function prototypeDrawnPalette(spec: unknown, mode: PrototypeColorMode): Map<string, Rgba> {
-  const palette = prototypeRolePalette({}, mode);
-  const seedHex = record(record(record(spec)?.theme)?.colors)?.seed;
+export function prototypeDrawnPalette(
+  spec: unknown,
+  mode: PrototypeColorMode,
+  surface?: Rgba,
+): Map<string, Rgba> {
+  const colors = record(record(record(spec)?.theme)?.colors);
+  // As on Android, an authored screen colour replaces the surface roles only of a base scheme.
+  const derived = colors?.seed !== undefined || colors?.source !== undefined;
+  const palette = prototypeRolePalette({}, mode, derived ? undefined : surface);
+  const seedHex = colors?.seed;
   const seed = typeof seedHex === "string" ? parsePrototypeHex(seedHex) : undefined;
   if (seed) {
     for (const [role, color] of Object.entries(prototypeSeedRoles(seed, mode))) {

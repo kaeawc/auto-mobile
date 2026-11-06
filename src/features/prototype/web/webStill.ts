@@ -31,6 +31,7 @@ import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
 import type { WebSkinId } from "./webSkin";
+import { resolveWebStillAppearance, webAuthoredBackground } from "./webStillAppearance";
 import type { WebStackScreens } from "./webStack";
 import type { WebImageDraw } from "./webImages";
 import { localeLayoutDirection, stillLocale } from "./webLocale";
@@ -51,6 +52,7 @@ export interface PrototypeStillOptions {
   readonly skin?: WebSkinId;
   /** One of the frame's orientations; defaults to its first (landscape for a TV or car). */
   readonly orientation?: WebOrientation;
+  /** The system setting: decides only when the spec's theme and authored background do not. */
   readonly mode?: PrototypeColorMode;
   /** The clock derived relative times read; fixed so the same input renders the same bytes. */
   readonly nowMs?: number;
@@ -246,12 +248,6 @@ function stillFormat(options: PrototypeStillOptions, locale: string): WebRenderS
   };
 }
 
-/** An explicit theme mode wins, as on the devices; `system` or none falls back to the caller's. */
-function colorMode(spec: Raw, options: PrototypeStillOptions): PrototypeColorMode {
-  const authored = record(spec.theme)?.mode;
-  return authored === "light" || authored === "dark" ? authored : (options.mode ?? "light");
-}
-
 function stillScope(
   expanded: unknown,
   options: PrototypeStillOptions,
@@ -261,14 +257,14 @@ function stillScope(
   const spec = record(expanded) ?? {};
   const size = screenSize(frame, orientation);
   const screenDp = { widthDp: size.width, heightDp: size.height };
-  const mode = colorMode(spec, options);
   // The skin decides every look the devices draw differently, glass included.
   const skin = options.skin ?? frame.platform;
   const textScale = stillTextScale(frame.platform, options.textSize);
-  return {
+  // Conditions and pager pages do not depend on the mode, so the walk reads a light scope.
+  const scope: WebRenderScope = {
     style: {
-      mode,
-      palette: prototypeDrawnPalette(expanded, mode),
+      mode: "light",
+      palette: prototypeDrawnPalette(expanded, "light"),
       parentAxis: COLUMN,
       typography: themeTypography(expanded),
       ...(textScale ? { textScale } : {}),
@@ -295,6 +291,16 @@ function stillScope(
     stacks: [],
     layers: [],
     imageDraws: [],
+  };
+  // The caller's mode is only the system setting; the spec decides first, as on the devices.
+  const { mode, surface } = resolveWebStillAppearance(
+    expanded,
+    webAuthoredBackground(spec.root, scope, "root"),
+    options.mode ?? "light",
+  );
+  return {
+    ...scope,
+    style: { ...scope.style, mode, palette: prototypeDrawnPalette(expanded, mode, surface) },
   };
 }
 

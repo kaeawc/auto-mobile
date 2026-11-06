@@ -537,10 +537,35 @@ export function fittedFromCentre(dp: number, size: Size): string {
   return `calc(50% ${dp < 0 ? "-" : "+"} min(${share(size.width)}cqw, ${share(size.height)}cqh))`;
 }
 
-/** A `{dp}` dimension, as the style maps it to CSS; undefined for anything else. */
+/** A `{dp}` dimension, as the style maps it to CSS (zero included); undefined for anything else. */
 function dpSize(value: unknown): number | undefined {
   const dp = record(value)?.dp;
-  return typeof dp === "number" && dp > 0 ? dp : undefined;
+  return typeof dp === "number" && dp >= 0 ? dp : undefined;
+}
+
+/** A positive number style field (`minHeight`, `aspectRatio`, ...); undefined otherwise. */
+function positive(value: unknown): number | undefined {
+  return typeof value === "number" && value > 0 ? value : undefined;
+}
+
+/** `value` within the style's `min*`/`max*` for that axis; the min wins, as in CSS. */
+function bounded(value: number, style: Raw | undefined, axis: "Width" | "Height"): number {
+  const max = positive(style?.[`max${axis}`]) ?? Number.POSITIVE_INFINITY;
+  return Math.max(positive(style?.[`min${axis}`]) ?? 0, Math.min(max, value));
+}
+
+/**
+ * Whether the map's height comes from its `aspectRatio` and its width: it names no height and sits
+ * in a column, which stretches its width or keeps its `{dp}` one. The renderer then drops its
+ * 200 dp default so the ratio applies. A row, a box or the root stretches the height instead, so the
+ * default stays there and an open width comes from the height, as CSS resolves `aspect-ratio`.
+ */
+export function heightFromRatio(style: Raw | undefined, parentAxis?: "row" | "column"): boolean {
+  const unsized = style?.height === undefined || style.height === "wrap";
+  const weighted = typeof style?.weight === "number";
+  return (
+    parentAxis === "column" && positive(style?.aspectRatio) !== undefined && unsized && !weighted
+  );
 }
 
 /**
@@ -548,8 +573,10 @@ function dpSize(value: unknown): number | undefined {
  * (unsized, `wrap`) leaves the box at its 200 dp. An axis its parent sizes (`fill`, a `weight` on
  * the parent's main axis, or stretching across a column) cannot be known here, so it takes the
  * screen's, the most it can render at: the eye then sits far enough out that no horizon shows in
- * the box, and the ground's reach covers it. A camera's points are placed from the centre in dp,
- * so they land true whatever size the box renders at; a fit's scale with the box (see
+ * the box, and the ground's reach covers it. Each axis is then held within its `min*`/`max*`, which
+ * can make the box larger or smaller than that size, and an `aspectRatio` derives the axis the
+ * style leaves open from the other (see `heightFromRatio`). A camera's points are placed from the
+ * centre in dp, so they land true whatever size the box renders at; a fit's scale with the box (see
  * `fittedFromCentre`).
  */
 export function mapSize(
@@ -557,15 +584,57 @@ export function mapSize(
   screen: { readonly width: number; readonly height: number },
   parentAxis?: "row" | "column",
 ): Size {
+  const ratio = positive(style?.aspectRatio);
+  const cap = freeRatioCap(style, ratio);
+  const { width, height, openWidth } = boundedAxes(style, screen, parentAxis, cap ?? Infinity);
+  if (ratio !== undefined && heightFromRatio(style, parentAxis)) {
+    return { width, height: bounded(width / ratio, style, "Height") };
+  }
+  // Outside a column, a ratio sizes an open width from the height, as CSS does in a row or a grid.
+  if (ratio !== undefined && openWidth && cap === undefined && parentAxis !== "column") {
+    return { width: bounded(height * ratio, style, "Width"), height };
+  }
+  return { width, height };
+}
+
+/**
+ * With no width, height or weight, a ratio takes the width it is offered (`width: 100%`, or a row's
+ * leftover) up to `maxHeight × ratio`, as webStyle's aspectRatioFill sizes it: that cap, else
+ * undefined.
+ */
+function freeRatioCap(style: Raw | undefined, ratio: number | undefined): number | undefined {
+  const free = style?.width === undefined && style?.height === undefined;
+  if (ratio === undefined || !free || typeof style?.weight === "number") {
+    return undefined;
+  }
+  return (positive(style?.maxHeight) ?? Infinity) * ratio;
+}
+
+/** Each axis before any aspect ratio, within its min and max, and whether the width is left open. */
+function boundedAxes(
+  style: Raw | undefined,
+  screen: { readonly width: number; readonly height: number },
+  parentAxis: "row" | "column" | undefined,
+  cap: number,
+): Size & { readonly openWidth: boolean } {
   // A weight sets `flex: w w 0` on the parent's main axis, which overrides any size there.
   const weighted = typeof style?.weight === "number" ? parentAxis : undefined;
+  const dpWidth = weighted === "row" ? undefined : dpSize(style?.width);
+  const height = bounded(baseHeight(style, screen.height, weighted === "column"), style, "Height");
+  // A zero-size box shows nothing, so it frames against the fallback rather than dividing by zero.
   return {
-    width: (weighted === "row" ? undefined : dpSize(style?.width)) ?? screen.width,
-    height:
-      weighted === "column" || style?.height === "fill"
-        ? screen.height
-        : (dpSize(style?.height) ?? DEFAULT_MAP_HEIGHT),
+    width: bounded(dpWidth ?? Math.min(screen.width, cap), style, "Width") || screen.width,
+    height: height || DEFAULT_MAP_HEIGHT,
+    openWidth: dpWidth === undefined && style?.width !== "fill" && weighted !== "row",
   };
+}
+
+/** The screen's height for one the parent sizes, else the `{dp}` height, else the 200 dp default. */
+function baseHeight(style: Raw | undefined, screenHeight: number, weighted: boolean): number {
+  if (weighted || style?.height === "fill") {
+    return screenHeight;
+  }
+  return dpSize(style?.height) ?? DEFAULT_MAP_HEIGHT;
 }
 
 /**
@@ -718,7 +787,10 @@ const mapRenderer =
       // nothing else.
       ...(turned || fitted ? { "container-type": "size" } : {}),
       [ALIGN_SELF]: STRETCH,
-      height: `${DEFAULT_MAP_HEIGHT}px`,
+      // An aspect ratio sets the height from a known width, so the default would override it.
+      ...(heightFromRatio(style, scope.style.parentAxis)
+        ? {}
+        : { height: `${DEFAULT_MAP_HEIGHT}px` }),
     });
     const pin = cssColor("error", scope.style) ?? "#b3261e";
     // A fit chose its zoom for `size`, so its points scale with the box as rendered; a camera's

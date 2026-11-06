@@ -186,8 +186,8 @@ that entry:
 
 | Entry          | Contents                           | Minified | Gzip   |
 | -------------- | ---------------------------------- | -------- | ------ |
-| core (`mount`) | renderer, frame registry, `mount`  | 156.5 KB | 51 KB  |
-| `element`      | core plus the custom element       | 159.5 KB | 51 KB  |
+| core (`mount`) | renderer, frame registry, `mount`  | 175 KB   | 57 KB  |
+| `element`      | core plus the custom element       | 178 KB   | 57 KB  |
 | `interactive`  | the action runtime, on top of core | +40 KB   | +12 KB |
 
 - Per-node tree-shaking is not offered. Node renderers are dispatched by type from a spec only

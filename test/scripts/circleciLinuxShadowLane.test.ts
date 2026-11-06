@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { load } from "js-yaml";
 
 interface CircleConfig {
-  jobs?: Record<string, { executor?: string }>;
+  jobs?: Record<string, { executor?: string | { name: string } }>;
   workflows?: Record<string, { when?: string; jobs?: unknown[] }>;
 }
 
@@ -21,7 +21,8 @@ test("Linux shadow jobs run in the run-linux workflow on the linux executor", ()
   );
   expect(invoked.sort()).toEqual([...linuxJobs].sort());
   for (const name of linuxJobs) {
-    expect(continued.jobs?.[name]?.executor).toBe("linux");
+    const executor = continued.jobs?.[name]?.executor;
+    expect(typeof executor === "string" ? executor : executor?.name).toBe("linux");
   }
 });
 

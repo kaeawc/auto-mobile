@@ -65,9 +65,13 @@ executors:
   # the JDK 21 that Fast Validation's ktfmt check needs plus the npm that the
   # pinned-graph and unpacked-size checks shell out to; every Linux job shares it.
   linux:
+    parameters:
+      resource_class:
+        type: string
+        default: large
     docker:
       - image: cimg/openjdk:21.0-node
-    resource_class: large
+    resource_class: << parameters.resource_class >>
     environment:
       GIT_LFS_SKIP_SMUDGE: "1"
   ios:
@@ -261,6 +265,17 @@ jobs:
             mkdir -p ci-logs
             { scripts/ci/install-fast-validation-deps.sh; } 2>&1 | tee -a ci-logs/fast-validation.log
       - run:
+          name: "Install ShellCheck 0.9.0 and Ruby"
+          # The shell validators baseline ShellCheck 0.9.0 (the GitHub runner's
+          # version); the image's newer ShellCheck reports extra findings.
+          # validate_dependabot.sh needs ruby.
+          command: |
+            curl -fsSL https://github.com/koalaman/shellcheck/releases/download/v0.9.0/shellcheck-v0.9.0.linux.x86_64.tar.xz | tar -xJ -C /tmp
+            mkdir -p "${HOME}/.local/bin"
+            install -m 0755 /tmp/shellcheck-v0.9.0/shellcheck "${HOME}/.local/bin/shellcheck"
+            echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${BASH_ENV}"
+            sudo apt-get update -qq && sudo apt-get install -y -qq ruby
+      - run:
           name: "Install uv and hadolint"
           command: |
             mkdir -p ci-logs
@@ -363,7 +378,11 @@ jobs:
           destination: ci-logs
 
   linux-node-build-and-test:
-    executor: linux
+    # xlarge (8 vCPU / 16 GB, matching the GitHub runner's memory): the unit lane's
+    # parallel workers do not fit in `large`.
+    executor:
+      name: linux
+      resource_class: xlarge
     steps:
       - checkout_without_lfs
       - setup_auto_mobile_npm_package

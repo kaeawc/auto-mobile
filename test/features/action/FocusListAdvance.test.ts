@@ -197,3 +197,97 @@ describe("listAdvanceDirection", () => {
     expect(listAdvanceDirection({ left: 0, top: 0, right: 400, bottom: 900 })).toBe("down");
   });
 });
+
+/**
+ * Two horizontal rails, the upper one virtualized (three of six tiles in the hierarchy, scrolled
+ * only by pressing right past its last visible tile) and the lower one fixed. Up and down move
+ * between rails keeping the column; right and left move within a rail.
+ */
+class FakeTwoRails implements FocusObserver, FocusKeyPresser {
+  row = 1;
+  col = 2;
+  first = 0;
+  readonly presses: InputKeyName[] = [];
+  static readonly UPPER: ElementBounds = { left: 0, top: 0, right: 300, bottom: 100 };
+
+  private tile(row: number, col: number, label: string): Element {
+    const top = row * 200;
+    return {
+      bounds: { left: col * 100, top, right: col * 100 + 100, bottom: top + 100 },
+      "resource-id": `app:id/tile_${row}`,
+      text: label,
+    };
+  }
+
+  private upper(col: number): Element {
+    return this.tile(0, col, `Show ${this.first + col}`);
+  }
+
+  async read(): Promise<FocusScreen> {
+    const upper = [0, 1, 2].map((col) => this.upper(col));
+    const lower = [0, 1, 2].map((col) => this.tile(1, col, `Song ${col}`));
+    return {
+      focused: this.row === 0 ? this.upper(this.col) : lower[this.col],
+      elements: [
+        { bounds: FakeTwoRails.UPPER, "resource-id": "app:id/shows", scrollable: true },
+        ...upper,
+        ...lower,
+      ],
+    };
+  }
+
+  async press(key: InputKeyName): Promise<{ success: boolean }> {
+    this.presses.push(key);
+    if (key === "arrow_up") {
+      this.row = 0;
+    } else if (key === "arrow_down") {
+      this.row = 1;
+    } else if (key === "arrow_right" && this.col < 2) {
+      this.col += 1;
+    } else if (key === "arrow_right" && this.row === 0 && this.first < 3) {
+      this.first += 1;
+    }
+    return { success: true };
+  }
+}
+
+describe("FocusListAdvance with focus outside the list", () => {
+  test("moves focus into the selected rail before advancing it", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const rails = new FakeTwoRails();
+    const result = await new FocusListAdvance(rails, rails, timer).execute({
+      container: FakeTwoRails.UPPER,
+    });
+
+    // Focus starts at the right end of the lower rail: up enters the upper rail, right scrolls it.
+    expect(rails.presses).toEqual(["arrow_up", "arrow_right"]);
+    expect(result).toMatchObject({ success: true, status: "revealed", direction: "right" });
+    expect(result.revealed).toEqual([expect.stringContaining("Show 3")]);
+  });
+
+  test("gives up when focus cannot reach the list", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const rails = new FakeTwoRails();
+    rails.press = async (key) => {
+      rails.presses.push(key);
+      return { success: true };
+    };
+    const result = await new FocusListAdvance(rails, rails, timer).execute({
+      container: FakeTwoRails.UPPER,
+    });
+
+    expect(result).toMatchObject({ success: false, status: "stuck", presses: 2 });
+  });
+});
+
+test("infers a vertical list from its rows, not the labels at their edges", () => {
+  const container = { left: 0, top: 0, right: 1000, bottom: 400 };
+  const row = (top: number): Element[] => [
+    { bounds: { left: 0, top, right: 1000, bottom: top + 200 }, "resource-id": "app:id/row" },
+    { bounds: { left: 0, top, right: 100, bottom: top + 200 }, text: `Title ${top}` },
+    { bounds: { left: 900, top, right: 1000, bottom: top + 200 }, text: `Price ${top}` },
+  ];
+  expect(listAdvanceDirection(container, [...row(0), ...row(200)])).toBe("down");
+});

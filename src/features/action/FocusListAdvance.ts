@@ -2,9 +2,10 @@
  * Bounded D-pad advance through a scrollable list (#17233).
  *
  * A focus-driven list (Android TV rails and vertical lists) scrolls only when focus moves past
- * its last visible row, so swiping it is not how a remote reveals more rows. This presses the
- * list's direction until a row that was not on screen appears inside the container, and stops
- * when focus stops moving, leaves the list, or the press bound is reached. It only needs an
+ * its last visible row, so swiping it is not how a remote reveals more rows. This steers focus
+ * into the container if it is elsewhere, then presses the list's direction until a row that was
+ * not on screen appears inside it, and stops when focus stops moving, leaves the list, or a press
+ * bound is reached. It only needs an
  * observer and a key presser, so it runs against fakes with no device and no real delay.
  */
 
@@ -19,26 +20,34 @@ import type {
   FocusObserver,
   FocusScreen,
 } from "./FocusNavigate";
-import { FOCUS_NAVIGATE_DEFAULT_SETTLE_MS } from "./FocusNavigate";
+import { directionToward, FOCUS_NAVIGATE_DEFAULT_SETTLE_MS } from "./FocusNavigate";
 
-/** Most presses one advance sends: a list's visible rows plus a scroll, on a 1080p TV. */
+/**
+ * Most presses one advance sends along the list: its visible rows plus a scroll, on a 1080p TV.
+ * Steering focus into the list first has its own bound of the same size.
+ */
 export const FOCUS_LIST_ADVANCE_MAX_PRESSES = 12;
 
 /** Consecutive presses that leave focus where it was before the list counts as exhausted. */
 const FOCUS_LIST_ADVANCE_STUCK_PRESSES = 2;
 
 const DIRECTION_KEYS = {
+  up: "arrow_up",
   down: "arrow_down",
+  left: "arrow_left",
   right: "arrow_right",
-} as const;
+} as const satisfies Record<FocusNavigateDirection, string>;
 
 /** The directions a list advances in: down a vertical list, right along a horizontal rail. */
-export type FocusListAdvanceDirection = Extract<
-  FocusNavigateDirection,
-  keyof typeof DIRECTION_KEYS
->;
+export type FocusListAdvanceDirection = Extract<FocusNavigateDirection, "down" | "right">;
 
-export type FocusListAdvanceStatus = "revealed" | "stuck" | "left_list" | "max_presses";
+/** `not_entered`: focus moved but never reached the list within the entry bound. */
+export type FocusListAdvanceStatus =
+  | "revealed"
+  | "stuck"
+  | "left_list"
+  | "not_entered"
+  | "max_presses";
 
 export interface FocusListAdvanceOptions {
   /** The scrollable container's bounds; rows count when their centre falls inside them. */
@@ -71,8 +80,8 @@ export function listAdvanceDirection(
   container: ElementBounds,
   rows: readonly Element[] = [],
 ): FocusListAdvanceDirection {
-  const inside = rows.filter(
-    (row) => centreInside(row.bounds, container) && !sameBounds(row.bounds, container),
+  const inside = topLevel(
+    rows.filter((row) => centreInside(row.bounds, container) && !sameBounds(row.bounds, container)),
   );
   if (inside.length >= 2) {
     const xs = inside.map((row) => (row.bounds.left + row.bounds.right) / 2);
@@ -83,6 +92,27 @@ export function listAdvanceDirection(
   const width = container.right - container.left;
   const height = container.bottom - container.top;
   return width > height ? "right" : "down";
+}
+
+function contains(outer: ElementBounds, inner: ElementBounds): boolean {
+  return (
+    outer.left <= inner.left &&
+    outer.top <= inner.top &&
+    outer.right >= inner.right &&
+    outer.bottom >= inner.bottom &&
+    !sameBounds(outer, inner)
+  );
+}
+
+/**
+ * The row-level peers among `elements`: those no other element contains. A row's own labels and
+ * icons sit inside it, so they never decide the axis (a 1000px row with a title at its left edge
+ * and a price at its right is one row, not a horizontal pair).
+ */
+function topLevel(elements: readonly Element[]): Element[] {
+  return elements.filter(
+    (element) => !elements.some((other) => contains(other.bounds, element.bounds)),
+  );
 }
 
 function text(element: Element, key: "text" | "content-desc" | "resource-id"): string {
@@ -141,6 +171,9 @@ interface FocusTrail {
   focus: string;
   entered: boolean;
   unchanged: number;
+  /** Presses spent steering focus into the list, and then along it. */
+  entering: number;
+  advancing: number;
 }
 
 function startTrail(screen: FocusScreen, container: ElementBounds): FocusTrail {
@@ -148,7 +181,41 @@ function startTrail(screen: FocusScreen, container: ElementBounds): FocusTrail {
     focus: focusIdentity(screen.focused),
     entered: centreInside(screen.focused?.bounds, container),
     unchanged: 0,
+    entering: 0,
+    advancing: 0,
   };
+}
+
+type Stop = { status: Exclude<FocusListAdvanceStatus, "revealed">; message: string };
+
+/**
+ * The next key to press: toward the list until focus is inside it, then along it. A stop once
+ * either phase has spent its bound.
+ */
+function nextPress(
+  trail: FocusTrail,
+  screen: FocusScreen,
+  {
+    container,
+    direction,
+    maxPresses,
+  }: { container: ElementBounds; direction: FocusListAdvanceDirection; maxPresses: number },
+): FocusNavigateDirection | Stop {
+  if (trail.entered) {
+    if (trail.advancing >= maxPresses) {
+      return { status: "max_presses", message: `Reached maxPresses (${maxPresses})` };
+    }
+    trail.advancing += 1;
+    return direction;
+  }
+  if (trail.entering >= maxPresses) {
+    return {
+      status: "not_entered",
+      message: `Focus did not reach the list in ${maxPresses} presses`,
+    };
+  }
+  trail.entering += 1;
+  return directionToward(screen.focused, [{ bounds: container }]);
 }
 
 /** Follow focus to `screen`; the reason the list is exhausted, if focus says it is. */
@@ -156,7 +223,7 @@ function followFocus(
   trail: FocusTrail,
   screen: FocusScreen,
   container: ElementBounds,
-): { status: "stuck" | "left_list"; message: string } | undefined {
+): Stop | undefined {
   const focus = focusIdentity(screen.focused);
   trail.unchanged = focus === trail.focus ? trail.unchanged + 1 : 0;
   trail.focus = focus;
@@ -179,10 +246,11 @@ export class FocusListAdvance {
   ) {}
 
   /**
-   * Press `direction` until a row that was not on screen appears inside `container`. Rows already
-   * seen never count, so a list that wraps back to its first rows ends on the press bound. Stops
-   * without revealing when focus does not move for two presses (the end of the list) or leaves
-   * the list after entering it.
+   * Steer focus into `container` if it is elsewhere (discovery picks the list, not what holds
+   * focus), then press `direction` until a row that was not on screen appears inside it. Rows
+   * already seen never count, so a list that wraps back to its first rows ends on the press bound.
+   * Stops without revealing when focus does not move for two presses (the end of the list, or a
+   * list focus cannot reach), leaves the list after entering it, or a phase spends its bound.
    */
   async execute(options: FocusListAdvanceOptions): Promise<FocusListAdvanceResult> {
     const { container, signal } = options;
@@ -193,9 +261,15 @@ export class FocusListAdvance {
     const direction = options.direction ?? listAdvanceDirection(container, first.elements);
     const seen = new Set(rowsInside(first, container));
     const trail = startTrail(first, container);
+    const bounds = { container, direction, maxPresses };
 
-    for (let presses = 1; presses <= maxPresses; presses++) {
-      const screen = await this.pressAndRead(direction, options);
+    let screen = first;
+    for (let presses = 1; ; presses++) {
+      const next = nextPress(trail, screen, bounds);
+      if (typeof next !== "string") {
+        return this.exhausted(next.status, direction, presses - 1, next.message);
+      }
+      screen = await this.pressAndRead(next, options);
       const revealed = rowsInside(screen, container).filter((row) => !seen.has(row));
       if (revealed.length > 0) {
         return { success: true, status: "revealed", direction, presses, revealed };
@@ -205,17 +279,11 @@ export class FocusListAdvance {
         return this.exhausted(stop.status, direction, presses, stop.message);
       }
     }
-    return this.exhausted(
-      "max_presses",
-      direction,
-      maxPresses,
-      `Reached maxPresses (${maxPresses})`,
-    );
   }
 
   /** One press, its settle, and a fresh read. */
   private async pressAndRead(
-    direction: FocusListAdvanceDirection,
+    direction: FocusNavigateDirection,
     { signal, settleMs = FOCUS_NAVIGATE_DEFAULT_SETTLE_MS }: FocusListAdvanceOptions,
   ): Promise<FocusScreen> {
     throwIfAborted(signal);
@@ -229,7 +297,7 @@ export class FocusListAdvance {
   }
 
   private exhausted(
-    status: Exclude<FocusListAdvanceStatus, "revealed">,
+    status: Stop["status"],
     direction: FocusListAdvanceDirection,
     presses: number,
     message: string,

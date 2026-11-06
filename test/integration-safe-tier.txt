@@ -201,6 +201,7 @@ test/features/portReverse/HostLoopbackProbe.integration.test.ts | safe | loopbac
 test/features/prototype/PrototypeChannelExecutor.integration.test.ts | safe | ws server and Bun.serve on 127.0.0.1 port 0; loopback only
 test/features/prototype/PrototypeHttpExecutor.integration.test.ts | safe | Bun.serve on 127.0.0.1 port 0 L4; loopback only
 test/features/prototype/prototypeBundleFuzz.integration.test.ts | safe | seeded pure-function fuzz of the bundle reader over in-memory buffers; no I/O, ports or shared paths
+test/features/prototype/web/prototypeEmbedGlyphsCoverage.integration.test.ts | safe | renders read-only repo fixtures in process with a recording fake glyph source; no writes, ports or shared paths
 test/features/prototype/web/webAndroidParity.integration.test.ts | unsafe | launches headless Chromium via playwright-core and writes parity budgets or scratch/ screenshots; opt-in via AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1
 test/features/prototype/web/webImageEncoding.integration.test.ts | safe | encodes in-memory images with sharp and reads only a committed fixture; no paths, processes or network
 test/features/prototype/web/webScreenshots.integration.test.ts | unsafe | launches headless Chromium via playwright-core and writes goldens or scratch/ screenshots; opt-in via AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1

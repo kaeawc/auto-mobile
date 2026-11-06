@@ -132,6 +132,19 @@ describe("FocusNavigate", () => {
     expect(result.focusedElement?.text).toBe("Settings");
   });
 
+  test("targets the first duplicate, as an unindexed tapOn does, not a focused later one", async () => {
+    const grid = new FakeGrid(1);
+    grid.elements = [
+      { ...tile(0), text: "More" },
+      { ...tile(1), text: "More" },
+      ...grid.elements.slice(2),
+    ];
+    const result = await navigator(grid).execute({ until: { label: "More" }, select: true });
+    expect(result).toMatchObject({ success: true, selected: true, steps: 1 });
+    expect(grid.presses).toEqual(["arrow_left", "enter"]);
+    expect(grid.focusIndex).toBe(0);
+  });
+
   test("select does not press enter when the target is never focused", async () => {
     const grid = new FakeGrid(0);
     grid.blocked = new Set([1, 3]);

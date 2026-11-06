@@ -247,6 +247,17 @@ function pathEntry(element: Element, descendant?: Element): FocusPathEntry {
 }
 
 /** Match each contained node independently, preserving the focused container's identity. */
+/** True when `inner`'s bounds lie entirely within `outer`'s. */
+function containsBounds(outer: Element, inner: Element): boolean {
+  const intersection = intersectBounds(outer.bounds, inner.bounds);
+  return intersection !== null && boundsEqual(intersection, inner.bounds);
+}
+
+/** The first element on screen that is the target, in hierarchy order, as `tapOn` picks it. */
+function firstTarget(screen: FocusScreen, target: FocusNavigateTarget): Element | undefined {
+  return screen.elements.find(screenTargetMatcher(screen.elements, target));
+}
+
 function describeFocus(
   screen: FocusScreen,
   target: FocusNavigateTarget,
@@ -254,17 +265,18 @@ function describeFocus(
   const { focused } = screen;
   // The observer supplies flattened nodes, so require full bounds containment, not overlap.
   const contained = focused
-    ? screen.elements.filter((element) => {
-        if (element === focused) {
-          return false;
-        }
-        const intersection = intersectBounds(focused.bounds, element.bounds);
-        return intersection !== null && boundsEqual(intersection, element.bounds);
-      })
+    ? screen.elements.filter((element) => element !== focused && containsBounds(focused, element))
     : [];
-  const isTarget = screenTargetMatcher(screen.elements, target);
-  const matchingDescendant = contained.find(isTarget);
-  const matches = Boolean(focused && (isTarget(focused) || matchingDescendant));
+  const first = firstTarget(screen, target);
+  const matchingDescendant = first && contained.includes(first) ? first : undefined;
+  // Like an unindexed tapOn, the target is the first match: a later duplicate that happens to
+  // be focused does not count. With no match in the element list, the focused node decides.
+  const matches = Boolean(
+    focused &&
+    (first
+      ? containsBounds(focused, first)
+      : screenTargetMatcher(screen.elements, target)(focused)),
+  );
   const label =
     matchingDescendant ??
     contained.find(
@@ -413,8 +425,10 @@ export class FocusNavigate {
     options: FocusNavigateOptions,
     blocked: ReadonlySet<FocusNavigateDirection>,
   ): FocusNavigateDirection | undefined {
-    const matches = screen.elements.filter(screenTargetMatcher(screen.elements, options.until));
-    return directionsToward(screen.focused, matches).find((direction) => !blocked.has(direction));
+    const first = firstTarget(screen, options.until);
+    return directionsToward(screen.focused, first ? [first] : []).find(
+      (direction) => !blocked.has(direction),
+    );
   }
 
   /** With `select`, activate a focused target with the select key; a refused key fails the call. */

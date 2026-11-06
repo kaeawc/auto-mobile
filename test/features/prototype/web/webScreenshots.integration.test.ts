@@ -276,7 +276,7 @@ describeBrowser("prototype web page in headless Chromium (#16346)", () => {
     test(
       entry.name,
       async () => {
-        const { page, ...problems } = await openPage(browser, webScreenshotPage(entry));
+        const { page, ...problems } = await openPage(browser, await webScreenshotPage(entry));
         try {
           const first = await shownView(page);
           expect(first.count).toBe(1);
@@ -363,7 +363,7 @@ describeBrowser("prototype web page in headless Chromium (#16346)", () => {
     "the status bar clock follows the browser clock (#16585)",
     async () => {
       const [entry] = webScreenshotCases();
-      const { page } = await openPage(browser, webScreenshotPage(entry!), (opened) =>
+      const { page } = await openPage(browser, await webScreenshotPage(entry!), (opened) =>
         opened.clock.install({ time: "2026-01-01T13:07:30Z" }),
       );
       const clocks = () =>

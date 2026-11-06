@@ -52,8 +52,17 @@ import {
 import {
   prototypeVariantIds,
   readPrototypeWebResource,
+  type PrototypeWebImageSources,
   type PrototypeWebResourceQuery,
 } from "../features/prototype/web/prototypeWebResource";
+import {
+  SharpPrototypeWebImageEncoder,
+  type PrototypeWebAssetSource,
+} from "../features/prototype/web/webImageEncoding";
+import {
+  defaultPrototypeAssetCache,
+  type PrototypeAssetCache,
+} from "../features/prototype/prototypeAssetCache";
 import {
   readPrototypeEmbedResource,
   type PrototypeEmbedResourceQuery,
@@ -78,12 +87,43 @@ export function defaultNativePrototypeSources(): NativePrototypeSources {
 export interface PrototypeWebSources {
   readonly revisions: PrototypeSpecRevisionSource;
   readonly rendererVersion: () => string;
+  /** Asset bytes and the encoder for the web page's images; without it images stay placeholders. */
+  readonly images?: PrototypeWebImageSources;
+}
+
+/**
+ * Asset bytes the host cached when it uploaded them to a device showing one of the variants
+ * (Android caches uploads per device); the first device with the asset wins.
+ */
+export function cachedPrototypeWebAssets(
+  devicesShowing: (id: string) => readonly string[],
+  cache: Pick<PrototypeAssetCache, "get">,
+): (variantIds: readonly string[]) => PrototypeWebAssetSource {
+  return (variantIds) => ({
+    get: async (assetId) => {
+      const devices = [...new Set(variantIds.flatMap((id) => devicesShowing(id)))];
+      for (const device of devices) {
+        const asset = await cache.get(device, assetId);
+        if (asset) {
+          return asset;
+        }
+      }
+      return undefined;
+    },
+  });
 }
 
 export function defaultPrototypeWebSources(): PrototypeWebSources {
   return {
     revisions: daemonPrototypeSpecRevisions(),
     rendererVersion: () => releaseVersion(getMcpServerVersion()),
+    images: {
+      assets: cachedPrototypeWebAssets(
+        (id) => daemonPrototypeShownSpecs()?.devicesShowing(id) ?? [],
+        defaultPrototypeAssetCache(),
+      ),
+      encoder: new SharpPrototypeWebImageEncoder(),
+    },
   };
 }
 
@@ -102,8 +142,16 @@ function readUri(
   return query ? `${uri}?${query}` : uri;
 }
 
-function readWeb(sources: PrototypeWebSources, query: PrototypeWebResourceQuery): ResourceContent {
-  const web = readPrototypeWebResource(sources.revisions, query, sources.rendererVersion());
+async function readWeb(
+  sources: PrototypeWebSources,
+  query: PrototypeWebResourceQuery,
+): Promise<ResourceContent> {
+  const web = await readPrototypeWebResource(
+    sources.revisions,
+    query,
+    sources.rendererVersion(),
+    sources.images,
+  );
   const { frame, revision, variant } = query;
   return {
     uri: readUri(query.id, "web", { frame, revision, variant }),
@@ -153,7 +201,7 @@ interface PerIdFormat {
   readonly title: string;
   description(id: string): string;
   readonly mimeType: string;
-  read(sources: PrototypeWebSources, id: string): ResourceContent;
+  read(sources: PrototypeWebSources, id: string): ResourceContent | Promise<ResourceContent>;
 }
 
 const sourceFormat = (format: PrototypeSourceFormat, label: string): PerIdFormat => ({

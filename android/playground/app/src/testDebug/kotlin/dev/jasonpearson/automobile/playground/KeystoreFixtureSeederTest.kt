@@ -112,16 +112,14 @@ class KeystoreFixtureSeederTest {
   }
 
   @Test
-  fun mainActivityDeclaresExactlyTheFixtureAliasesInsideDebugGuard() {
+  fun mainActivityDeclaresThePlaygroundKeystoreScopesInsideDebugGuard() {
     val source =
       File("src/main/kotlin/dev/jasonpearson/automobile/playground/MainActivity.kt").readText()
     assertTrue(
       source.contains(
         """if (BuildConfig.DEBUG) {
-      KeystoreTestState.declareScope(
-        "fixture",
-        setOf("automobile.fixture", "automobile.fixture.certificate"),
-      )""",
+      PlaygroundKeystoreScopes.declare()
+      KeystoreTestState.setEnabled(true)""",
       ),
     )
   }

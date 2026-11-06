@@ -11,9 +11,14 @@ export type PortReverseErrorCode =
  * Who holds a conflicting device port. `other_session`: another live AutoMobile session owns it.
  * `external_live`: made outside AutoMobile (or by a session no longer running) and its host target
  * accepts connections. `external_unknown`: made outside AutoMobile and its host target was not
- * shown to be live (it refused, is not `tcp:`, or could not be checked).
+ * shown to be live (it refused, is not `tcp:`, or could not be checked). `prototype`: a shown or saved
+ * prototype's `via: "device"` request uses it, mapped to a different host port than requested.
  */
-export type PortReverseConflictKind = "other_session" | "external_live" | "external_unknown";
+export type PortReverseConflictKind =
+  | "other_session"
+  | "external_live"
+  | "external_unknown"
+  | "prototype";
 
 /** One conflicting device port; `conflictKind` is absent when the clash is the caller's own. */
 export interface PortReverseConflict {

@@ -1,4 +1,5 @@
 import type { AdbReverseEntry } from "../../utils/android-cmdline-tools/adbReverse";
+import type { AdbReverseHold } from "./AdbReverseOwnership";
 import type { HostLoopbackProbe, HostLoopbackState } from "./HostLoopbackProbe";
 import {
   PortReverseError,
@@ -21,6 +22,14 @@ export interface ConflictContext {
   view: ReadonlyMap<number, AdbReverseEntry>;
   /** Device port -> the session that owns AutoMobile's mapping there. */
   owned: ReadonlyMap<number, { hostPort: number; owner: string }>;
+  /** The other AutoMobile manager (a prototype) holding the device port, if any (#17253). */
+  heldElsewhere: (devicePort: number) => AdbReverseHold | undefined;
+}
+
+/** Stale mappings `ensure` may replace, and prototype-held ones it may share as they are. */
+export interface ConflictOutcome {
+  reclaimable: Map<number, AdbReverseEntry>;
+  shared: number[];
 }
 
 export interface ConflictOptions {
@@ -36,26 +45,33 @@ interface ConflictFinding extends PortReverseConflict {
 type Finding =
   | { kind: "conflict"; conflict: ConflictFinding }
   | { kind: "reclaim"; entry: AdbReverseEntry }
+  | { kind: "share"; devicePort: number }
   | undefined;
 
 const tcp = (port: number) => `tcp:${port}`;
 
 /**
  * Throws `port_reverse_conflict` for every requested port held by someone else; returns the ports
- * whose stale mapping may be reclaimed instead (only with `reclaimStale`).
+ * whose stale mapping may be reclaimed instead (only with `reclaimStale`), and the prototype-held
+ * ports already mapped as requested, which the caller joins rather than adds.
  */
 export async function assertNoConflicts(
   context: ConflictContext,
   wanted: readonly ConflictRequest[],
   options: ConflictOptions,
-): Promise<Map<number, AdbReverseEntry>> {
+): Promise<ConflictOutcome> {
   const reclaimable = new Map<number, AdbReverseEntry>();
+  const shared: number[] = [];
   const findings = await Promise.all(
     wanted.map((request) => conflictFor(context, request, options)),
   );
   const conflicts = findings.flatMap((finding) => {
     if (finding?.kind === "reclaim") {
       reclaimable.set(finding.entry.devicePort, finding.entry);
+      return [];
+    }
+    if (finding?.kind === "share") {
+      shared.push(finding.devicePort);
       return [];
     }
     return finding === undefined ? [] : [finding.conflict];
@@ -71,7 +87,7 @@ export async function assertNoConflicts(
       ),
     );
   }
-  return reclaimable;
+  return { reclaimable, shared };
 }
 
 /** Why one request clashes, whether its stale mapping may be replaced, or undefined. */
@@ -85,6 +101,10 @@ async function conflictFor(
   const own = ownConflict(context.owner, owned, request);
   if (own !== undefined) {
     return { kind: "conflict", conflict: own };
+  }
+  const shared = prototypeFinding(context, owned, live, request);
+  if (shared !== undefined) {
+    return shared;
   }
   if (live === undefined || (owned !== undefined && live.hostPort === owned.hostPort)) {
     return undefined;
@@ -109,6 +129,34 @@ async function conflictFor(
   return refusal === undefined
     ? { kind: "reclaim", entry: live }
     : conflict(`${held}; not reclaimed: ${refusal}`);
+}
+
+/**
+ * A mapping no session owns but a prototype holds and that still points where the prototype set it:
+ * shared when that is where asked, else a `prototype` conflict. Undefined for any other port,
+ * including a prototype's port re-pointed outside AutoMobile, which is judged as external.
+ */
+function prototypeFinding(
+  context: ConflictContext,
+  owned: { hostPort: number; owner: string } | undefined,
+  live: AdbReverseEntry | undefined,
+  request: ConflictRequest,
+): Finding {
+  const hold = owned === undefined ? context.heldElsewhere(request.devicePort) : undefined;
+  if (hold === undefined || live === undefined || hold.hostPort !== live.hostPort) {
+    return undefined;
+  }
+  if (live.hostPort === request.hostPort) {
+    return { kind: "share", devicePort: request.devicePort };
+  }
+  return {
+    kind: "conflict",
+    conflict: {
+      devicePort: request.devicePort,
+      conflictKind: "prototype",
+      reason: `${tcp(request.devicePort)} maps to ${live.host} for a prototype's via "device" request`,
+    },
+  };
 }
 
 /** A clash with a mapping a session owns: another session's, or this one's to another host port. */

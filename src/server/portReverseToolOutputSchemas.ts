@@ -5,12 +5,14 @@ const mappingSchema = z.object({
   hostPort: z.number().int().optional(),
   host: z.string(),
   owned: z.boolean(),
+  owner: z.enum(["prototype"]).optional(),
   status: z.enum([
     "added",
     "present",
     "restored",
     "missing",
     "removed",
+    "released",
     "gone",
     "foreign",
     "reachable",
@@ -46,7 +48,7 @@ const mappingSchema = z.object({
     .optional(),
 });
 
-const conflictKind = z.enum(["other_session", "external_live", "external_unknown"]);
+const conflictKind = z.enum(["other_session", "external_live", "external_unknown", "prototype"]);
 
 /** Every portReverse outcome; `failed` is returned with `isError`. */
 export const portReverseResultSchema = z

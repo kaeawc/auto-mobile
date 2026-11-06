@@ -3039,7 +3039,9 @@ ignored.
 
 - Implicit ports are reversed: `http://localhost/` reverses 80 and `https://localhost/` reverses 443,
   so the same URL reaches the same host server under both `via` values.
-- Ownership: a reverse is recorded as the host's own only when it created it. One already listed by
+- Ownership: a reverse is recorded as the host's own only when it created it, or when a
+  `portReverse` session holds it; the two share one ownership view and the last holder removes it
+  (see [port reverse ownership](port-reverse.md#ownership)). Any other one already listed by
   `adb reverse --list` is left alone and never removed. Ports are reference-counted across the
   prototypes shown on one device and removed when the last holder is dismissed, the session ends, or
   the device is unbound or removed.

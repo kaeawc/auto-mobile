@@ -160,8 +160,12 @@ presses `select`.
   action is supported; other options are refused.
 - Focus must already be somewhere on screen. With nothing focused, press a direction with
   `pressButton` and observe.
-- A missing match, a target that disappears, focus that stops moving, or more than 30 moves fails
-  the call. Observe, move closer with `pressButton`, and retry.
+- A match outside the visible area, such as an item further along a row, is still reached: focus
+  moves toward it and the row scrolls. On-screen matches count first for `index`.
+- When nothing on screen matches yet, focus sweeps each row right and left, moving down a row at a
+  time and then up, until the match appears, for at most 60 moves.
+- No match after that search, a target that disappears, focus that stops moving, or more than 30
+  moves toward the target fails the call. Observe, move closer with `pressButton`, and retry.
 
 The tvOS focus engine remembers the last focused item in each row or column, so the element a
 direction reaches can depend on where focus was before. Observe again rather than predicting focus

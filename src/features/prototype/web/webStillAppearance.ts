@@ -102,19 +102,22 @@ export function webAuthoredBackground(
   path: string,
 ): Rgba | undefined {
   // Only the outermost stack draws the still's chosen screen, as the stack renderer records it.
-  return chainBackground(node, scope, path, scope.stacks?.length === 0);
+  const root = drawnChild({ node, scope, path });
+  return root ? chainBackground(root, scope.stacks?.length === 0) : undefined;
+}
+
+type PreparedWebNode = NonNullable<ReturnType<typeof preparedNode>>;
+
+/** A node on the chain, prepared once and carried with its path into the next step. */
+interface DrawnChild {
+  readonly prepared: PreparedWebNode;
+  readonly path: string;
 }
 
 function chainBackground(
-  node: unknown,
-  scope: WebRenderScope,
-  path: string,
+  { prepared, path }: DrawnChild,
   outermostStack: boolean,
 ): Rgba | undefined {
-  const prepared = drawnNode(node, scope, path);
-  if (!prepared) {
-    return undefined;
-  }
   const { styled, scope: local } = prepared;
   const own = opaqueAuthoredBackground(record(styled.style)?.background);
   if (own) {
@@ -122,7 +125,7 @@ function chainBackground(
   }
   const next = leadingChild(styled, local, path, outermostStack);
   const stillOutermost = outermostStack && styled.type !== "stack";
-  return next ? chainBackground(next.node, next.scope, next.path, stillOutermost) : undefined;
+  return next ? chainBackground(next, stillOutermost) : undefined;
 }
 
 /** The prepared node when it draws: not hidden and not a closed window layer. */
@@ -140,37 +143,47 @@ function drawnNode(
     : prepared;
 }
 
-/** The child a container draws first, in the scope and path the renderer gives it. */
+function drawnChild(entry: WebChildEntry): DrawnChild | undefined {
+  const prepared = drawnNode(entry.node, entry.scope, entry.path);
+  return prepared ? { prepared, path: entry.path } : undefined;
+}
+
+/** The child a container draws first, prepared in the scope and path the renderer gives it. */
 function leadingChild(
   styled: Raw,
   scope: WebRenderScope,
   path: string,
   outermostStack: boolean,
-): WebChildEntry | undefined {
+): DrawnChild | undefined {
   switch (styled.type) {
     case "pager": {
       const pages = Array.isArray(styled.children) ? styled.children : [];
       const page = pagerPage(styled, scope, { bound });
-      return { node: pages[page], scope, path: `${path}.children[${page}]` };
+      return drawnChild({ node: pages[page], scope, path: `${path}.children[${page}]` });
     }
     case "scroll":
     case "bottomSheet":
     case "dialog":
-      return { node: styled.child, scope, path: `${path}.child` };
+      return drawnChild({ node: styled.child, scope, path: `${path}.child` });
     case "stack": {
       const screen = stackScreen(styled, scope, outermostStack);
       return screen === undefined
         ? undefined
-        : {
+        : drawnChild({
             node: record(styled.screens)?.[screen],
             scope,
             path: `${path}.screens[${JSON.stringify(screen)}]`,
-          };
+          });
     }
     default:
-      // A repeat's template counts only through the rows it draws, bound to each row.
-      return childEntries(styled, scope, path).find(
-        (entry) => drawnNode(entry.node, entry.scope, entry.path) !== undefined,
-      );
+      // A repeat's template counts only through the rows it draws, bound to each row; the first
+      // that draws is prepared once and carried on, not prepared again by the next step.
+      for (const entry of childEntries(styled, scope, path)) {
+        const child = drawnChild(entry);
+        if (child) {
+          return child;
+        }
+      }
+      return undefined;
   }
 }

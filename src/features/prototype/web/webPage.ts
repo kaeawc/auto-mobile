@@ -25,6 +25,7 @@ import {
   prototypeWebPostureAt,
   type PrototypeWebFold,
 } from "./webDevice3d";
+import { defaultFramePosture, framePostures } from "./webFold";
 import { frameOrientations, type WebOrientation } from "./webFrame";
 import { el, escapeAttribute, toHtml, type WebElement } from "./webNodes";
 import {
@@ -37,6 +38,7 @@ import {
   prototypeWebRotation,
   prototypeWebScreenView,
   prototypeWebStartClock,
+  prototypeWebViewMatches,
   prototypeWebWheelFactor,
   prototypeWebZoomScale,
 } from "./webPageRuntime";
@@ -112,7 +114,7 @@ export interface PrototypeWebPage {
   readonly inlinedImages: readonly string[];
 }
 
-const RUNTIME_2D = `(${prototypeWebPageRuntime.toString()})({ zoomScale: ${prototypeWebZoomScale.toString()}, fitScale: ${prototypeWebFitScale.toString()}, wheelFactor: ${prototypeWebWheelFactor.toString()}, screenView: ${prototypeWebScreenView.toString()}, rotation: ${prototypeWebRotation.toString()}, animateTurn: ${prototypeWebAnimateTurn.toString()}, clockText: ${prototypeWebClockText.toString()}, clockDelay: ${prototypeWebClockDelay.toString()}, startClock: ${prototypeWebStartClock.toString()}, browserClock: ${prototypeWebBrowserClock.toString()} });`;
+const RUNTIME_2D = `(${prototypeWebPageRuntime.toString()})({ zoomScale: ${prototypeWebZoomScale.toString()}, fitScale: ${prototypeWebFitScale.toString()}, wheelFactor: ${prototypeWebWheelFactor.toString()}, screenView: ${prototypeWebScreenView.toString()}, viewMatches: ${prototypeWebViewMatches.toString()}, rotation: ${prototypeWebRotation.toString()}, animateTurn: ${prototypeWebAnimateTurn.toString()}, clockText: ${prototypeWebClockText.toString()}, clockDelay: ${prototypeWebClockDelay.toString()}, startClock: ${prototypeWebStartClock.toString()}, browserClock: ${prototypeWebBrowserClock.toString()} });`;
 /** The opt-in 3D view (#16458) runs after the 2D runtime, so its pan handler is already bound. */
 const RUNTIME_3D = `(${prototypeWeb3dRuntime.toString()})({ pose: ${prototypeWebPose.toString()}, orbit: ${prototypeWebOrbit.toString()}, hingeLine: ${prototypeWebHingeLine.toString()}, postureAt: ${prototypeWebPostureAt.toString()}, wrap: ${prototypeWeb3dWrap.toString()}, unwrap: ${prototypeWeb3dUnwrap.toString()}, bodyHinge: ${prototypeWeb3dBodyHinge.toString()}, orbitKey: ${prototypeWebOrbitKey.toString()}, dragOrbit: ${prototypeWeb3dDragOrbit.toString()}, leaves: ${prototypeWebLeaves.toString()}, flat: ${JSON.stringify(PROTOTYPE_WEB_FLAT_ORBIT)}, start: ${JSON.stringify(PROTOTYPE_WEB_START_ORBIT)} });`;
 /** The page's script, whose hash the CSP pins. At most 150 KB uncompressed. */
@@ -156,6 +158,8 @@ interface RenderedView {
   readonly variant: string;
   readonly revision: number;
   readonly orientation: WebOrientation;
+  /** The foldable posture this view draws; absent for a frame without postures. */
+  readonly posture?: string;
   /** The outermost stack's screen this view draws; only a multi-screen stack sets it. */
   readonly screen?: string;
   readonly html: string;
@@ -163,7 +167,10 @@ interface RenderedView {
   readonly draws: readonly WebImageDraw[];
 }
 
-/** One screen of one revision in each of the frame's orientations: the unit the budget keeps or drops. */
+/**
+ * One screen of one revision in each of the frame's orientations and every posture: the unit the
+ * budget keeps or drops.
+ */
 type ScreenGroup = readonly RenderedView[];
 
 /** One revision's screen groups, its start screen first. */
@@ -184,15 +191,32 @@ function pickerScreens(stack: WebStackScreens | undefined): string[] {
   return [stack.start, ...stack.screens.filter((screen) => screen !== stack.start)];
 }
 
+/**
+ * The page's frame: its id, the orientations it has (the first shown first) and the postures it
+ * pre-renders (one undefined entry for none).
+ */
+interface ViewFrame {
+  readonly id: string;
+  readonly orientations: readonly WebOrientation[];
+  readonly postures: readonly (string | undefined)[];
+}
+
+/** Where a view sits among the page's dimensions besides variant and revision. */
+interface ViewAt {
+  readonly orientation: WebOrientation;
+  readonly posture: string | undefined;
+}
+
 function renderView(
   input: PrototypeWebPageInput & { readonly slots: ReadonlyMap<string, number> },
   frame: string,
   at: { variant: string; revision: PrototypeWebRevision; screen?: string },
-  orientation: WebOrientation,
+  { orientation, posture }: ViewAt,
 ): RenderedView & { stack?: WebStackScreens } {
   const still = renderPrototypeStill(at.revision.spec, {
     frame,
     orientation,
+    ...(posture === undefined ? {} : { posture }),
     mode: input.mode,
     nowMs: input.nowMs,
     imageSlots: input.slots,
@@ -210,6 +234,7 @@ function renderView(
         "data-variant": at.variant,
         "data-revision": String(at.revision.revision),
         "data-orientation": orientation,
+        ...(posture === undefined ? {} : { "data-posture": posture }),
         ...(at.screen === undefined ? {} : { "data-screen": at.screen }),
         hidden: "",
       },
@@ -220,6 +245,7 @@ function renderView(
     variant: at.variant,
     revision: at.revision.revision,
     orientation,
+    ...(posture === undefined ? {} : { posture }),
     ...(at.screen === undefined ? {} : { screen: at.screen }),
     html: toHtml(view),
     unsupported: still.unsupportedNodes,
@@ -228,37 +254,85 @@ function renderView(
   };
 }
 
+/** Every posture and orientation, the default posture's first orientation first. */
+function viewPoints(frame: ViewFrame): ViewAt[] {
+  return frame.postures.flatMap((posture) =>
+    frame.orientations.map((orientation) => ({ orientation, posture })),
+  );
+}
+
 /**
- * Each revision newest first, one group of the frame's orientations per screen of its outermost
- * stack (just one group without a multi-screen stack). The default orientation's still finds the
- * screens.
+ * One orientation and posture's views of a revision: its start view first, then its other screens.
+ * Each still finds its own stack, since a `visibleWhen` on orientation or posture can show a
+ * different stack (or none) in each.
+ */
+function pointViews(
+  input: PrototypeWebPageInput & { readonly slots: ReadonlyMap<string, number> },
+  frame: string,
+  at: { variant: string; revision: PrototypeWebRevision },
+  point: ViewAt,
+): RenderedView[] {
+  const probe = renderView(input, frame, at, point);
+  const screens = pickerScreens(probe.stack);
+  return screens.length === 0
+    ? [probe]
+    : screens.map((screen) => renderView(input, frame, { ...at, screen }, point));
+}
+
+/**
+ * Each revision newest first, grouped by screen index across every orientation and posture: group
+ * 0 holds each one's start view (the default posture's first orientation first), group i each one's i-th
+ * screen where it has one.
  */
 function renderViews(
   input: PrototypeWebPageInput & { readonly slots: ReadonlyMap<string, number> },
-  frame: { id: string; orientations: readonly WebOrientation[] },
+  frame: ViewFrame,
   variant: PrototypeWebVariant,
 ): RevisionViews[] {
-  const [first, ...rest] = frame.orientations as [WebOrientation, ...WebOrientation[]];
   return [...variant.revisions].reverse().map((revision) => {
-    const probe = renderView(input, frame.id, { variant: variant.id, revision }, first);
-    const screens = pickerScreens(probe.stack);
-    const groups =
-      screens.length === 0
-        ? [
-            [
-              probe,
-              ...rest.map((orientation) =>
-                renderView(input, frame.id, { variant: variant.id, revision }, orientation),
-              ),
-            ],
-          ]
-        : screens.map((screen) =>
-            frame.orientations.map((orientation) =>
-              renderView(input, frame.id, { variant: variant.id, revision, screen }, orientation),
-            ),
-          );
+    const at = { variant: variant.id, revision };
+    const perPoint = viewPoints(frame).map((point) => pointViews(input, frame.id, at, point));
+    const count = Math.max(...perPoint.map((views) => views.length));
+    const groups = Array.from({ length: count }, (_, index) =>
+      perPoint.flatMap((views) => views.slice(index, index + 1)),
+    );
     return { variant: variant.id, revision: revision.revision, screens: groups };
   });
+}
+
+const POSTURE_LABELS: Readonly<Record<string, string>> = {
+  closed: "Closed",
+  half_opened: "Half opened",
+  opened: "Opened",
+  rear_display: "Rear display",
+  flipped: "Flipped",
+  tent: "Tent",
+};
+
+/**
+ * The posture picker, which switches the shown view's posture layout: only a frame with two or
+ * more postures offers one. It is `layout-posture`, apart from the 3D view's `posture` select,
+ * which turns the 3D hinge.
+ */
+function posturePicker(frame: PageFrame): WebElement[] {
+  if (frame.postures.length < 2) {
+    return [];
+  }
+  return [
+    el(
+      "select",
+      { attrs: { "data-control": "layout-posture", "aria-label": "Layout posture" } },
+      frame.postures.map((posture) =>
+        el(
+          "option",
+          {
+            attrs: { value: posture, ...(posture === frame.posture ? { selected: "" } : {}) },
+          },
+          [POSTURE_LABELS[posture] ?? posture],
+        ),
+      ),
+    ),
+  ];
 }
 
 /** The screen picker's options, or undefined for no picker; fewer than two options hide it. */
@@ -285,6 +359,9 @@ interface PageFrame {
   readonly orientation: WebOrientation;
   /** A device that never rotates gets no rotate control. */
   readonly rotates: boolean;
+  /** The frame's postures, and the one shown first; a frame without postures has none. */
+  readonly postures: readonly string[];
+  readonly posture?: string;
   /** The frame's hinge and postures, for the 3D view's fold controls; none when it does not fold. */
   readonly fold: PrototypeWebFold | undefined;
 }
@@ -328,6 +405,7 @@ function toolbar(
     { attrs: { "data-toolbar": "", role: "toolbar", "aria-label": "Prototype view" } },
     [
       ...(frame.rotates ? [button("rotate", "Rotate device", "Rotate")] : []),
+      ...posturePicker(frame),
       button("zoom-out", "Zoom out", "−"),
       el("span", { attrs: { "data-control": "zoom-level", "aria-live": "polite" } }, ["100%"]),
       button("zoom-in", "Zoom in", "+"),
@@ -545,7 +623,8 @@ function imageRequests(
 
 /**
  * The picker for a page holding these revisions: none unless one of them has a multi-screen stack,
- * else the shown revision's screens (none or one hide it; the runtime lists each revision's own).
+ * else every screen the shown revision has in any orientation or posture (none or one hide it; the
+ * runtime lists the shown view's own), so the shell never undercounts the final picker.
  */
 function pickerFor(
   revisions: readonly RevisionViews[],
@@ -557,7 +636,8 @@ function pickerFor(
   const current = revisions.find(
     (revision) => revision.variant === shown.variant.id && revision.revision === shown.revision,
   );
-  return (current?.screens ?? []).flatMap((group) => (group[0]?.screen ? [group[0].screen] : []));
+  const screens = (current?.screens ?? []).flat().flatMap((view) => view.screen ?? []);
+  return [...new Set(screens)];
 }
 
 function chooseVariant(input: PrototypeWebPageInput): PrototypeWebVariant {
@@ -598,7 +678,7 @@ function pageHtml(
   first: { variant: PrototypeWebVariant; revision: number },
   { frame, views, history, screens, images = "" }: PageParts,
 ): string {
-  const body = `<body data-variant="${escapeAttribute(first.variant.id)}" data-revision="${first.revision}" data-platform="${escapeAttribute(frame.platform)}" data-orientation="${frame.orientation}"${prototypeWeb3dBodyAttributes(frame.fold)}>${toHtml(toolbar(input, first.variant, screens, frame))}<div data-main=""><div data-viewport="" aria-label="Device preview"><div data-stage="">${views}</div></div>${history ? toHtml(history) : ""}</div><script>${PROTOTYPE_WEB_RUNTIME}</script></body>`;
+  const body = `<body data-variant="${escapeAttribute(first.variant.id)}" data-revision="${first.revision}" data-platform="${escapeAttribute(frame.platform)}" data-orientation="${frame.orientation}"${frame.posture === undefined ? "" : ` data-posture="${escapeAttribute(frame.posture)}"`}${prototypeWeb3dBodyAttributes(frame.fold)}>${toHtml(toolbar(input, first.variant, screens, frame))}<div data-main=""><div data-viewport="" aria-label="Device preview"><div data-stage="">${views}</div></div>${history ? toHtml(history) : ""}</div><script>${PROTOTYPE_WEB_RUNTIME}</script></body>`;
   const head = `<head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${cspFor(PROTOTYPE_WEB_RUNTIME)}"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"><title>${toHtml(input.title)}</title><style>${PAGE_CSS}${images}</style></head>`;
   return `<!doctype html><html lang="en">${head}${body}</html>\n`;
 }
@@ -619,12 +699,22 @@ function assemblePrototypeWebPage(input: PrototypeWebPageInput): PrototypeWebPag
     input.frame ?? defaultDeviceFrameId(input.platform ?? "android"),
   );
   const orientations = frameOrientations(device);
-  const frame = { id: device.id, orientations };
+  const posture = defaultFramePosture(device);
+  const postures = framePostures(device);
   const pageFrame: PageFrame = {
     platform: device.platform,
     orientation: orientations[0]!,
     rotates: orientations.length > 1,
     fold: prototypeWebFold(device),
+    postures,
+    ...(posture === undefined ? {} : { posture }),
+  };
+  // The default posture first, so a revision's first view is the one the page shows first.
+  const frame: ViewFrame = {
+    id: device.id,
+    orientations,
+    postures:
+      posture === undefined ? [undefined] : [posture, ...postures.filter((p) => p !== posture)],
   };
   const shown = { variant: chosen, revision: input.revision ?? chosen.revisions.at(-1)!.revision };
   // The shell lists only the pinned revisions (each latest and the one shown first), which are
@@ -660,7 +750,8 @@ function assemblePrototypeWebPage(input: PrototypeWebPageInput): PrototypeWebPag
     (view) =>
       view.variant === chosen.id &&
       view.revision === shown.revision &&
-      view.orientation === pageFrame.orientation,
+      view.orientation === pageFrame.orientation &&
+      view.posture === posture,
   );
   if (!first) {
     throw new ActionableError(

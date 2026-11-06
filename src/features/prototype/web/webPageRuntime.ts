@@ -47,6 +47,28 @@ export function prototypeWebScreenView<View extends { dataset: { screen?: string
   return views.find((view) => view.dataset.screen === screen) ?? views[0];
 }
 
+/** Where the viewer is among the pre-rendered views' dimensions besides the screen. */
+export interface PrototypeWebViewKey {
+  readonly variant: string;
+  readonly revision: string;
+  readonly orientation: string;
+  /** Empty for a frame without postures, whose views carry none. */
+  readonly posture: string;
+}
+
+/** Whether a view belongs to the key: its variant, revision, orientation and posture (#16445). */
+export function prototypeWebViewMatches(
+  dataset: { readonly [name: string]: string | undefined },
+  key: PrototypeWebViewKey,
+): boolean {
+  return (
+    dataset.variant === key.variant &&
+    dataset.revision === key.revision &&
+    dataset.orientation === key.orientation &&
+    (dataset.posture ?? "") === key.posture
+  );
+}
+
 /** One rotation turn: the keyframes of the view turning away and of the view turning in. */
 export interface PrototypeWebRotation {
   readonly durationMs: number;
@@ -185,6 +207,7 @@ export interface PrototypeWebRuntimeRules {
   readonly fitScale: typeof prototypeWebFitScale;
   readonly wheelFactor: typeof prototypeWebWheelFactor;
   readonly screenView: typeof prototypeWebScreenView;
+  readonly viewMatches: typeof prototypeWebViewMatches;
   readonly rotation: typeof prototypeWebRotation;
   readonly animateTurn: typeof prototypeWebAnimateTurn;
   readonly clockText: typeof prototypeWebClockText;
@@ -194,7 +217,8 @@ export interface PrototypeWebRuntimeRules {
 }
 
 export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
-  const { zoomScale, fitScale: fitted, wheelFactor, screenView, rotation, animateTurn } = rules;
+  const { zoomScale, fitScale: fitted, wheelFactor, screenView, viewMatches } = rules;
+  const { rotation, animateTurn } = rules;
   const doc = document;
   const stage = doc.querySelector<HTMLElement>("[data-stage]");
   const viewport = doc.querySelector<HTMLElement>("[data-viewport]");
@@ -205,13 +229,16 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
   const pick = (name: string) => doc.querySelector<HTMLElement>(`[data-control="${name}"]`);
   const variantSelect = pick("variant") as HTMLSelectElement | null;
   const screenSelect = pick("screen") as HTMLSelectElement | null;
+  const postureSelect = pick("layout-posture") as HTMLSelectElement | null;
   const revisionList = pick("revisions");
   const zoomLabel = pick("zoom-level");
+  const bodyData = (name: string) => doc.body.dataset[name] ?? "";
   const state = {
-    variant: doc.body.dataset.variant ?? "",
-    revision: doc.body.dataset.revision ?? "",
+    variant: bodyData("variant"),
+    revision: bodyData("revision"),
     // The frame's first orientation: landscape for a TV or car, which never leaves it.
-    orientation: doc.body.dataset.orientation as "portrait" | "landscape",
+    orientation: bodyData("orientation") as "portrait" | "landscape",
+    posture: bodyData("posture"),
     // The first apply sets the shown view's screen.
     screen: "",
     scale: 1,
@@ -219,13 +246,7 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
     y: 0,
     fit: true,
   };
-  const revisionViews = () =>
-    views.filter(
-      (view) =>
-        view.dataset.variant === state.variant &&
-        view.dataset.revision === state.revision &&
-        view.dataset.orientation === state.orientation,
-    );
+  const revisionViews = () => views.filter((view) => viewMatches(view.dataset, state));
   const current = () => screenView(revisionViews(), state.screen);
   // The picker lists the shown revision's own screens, so it never offers a view the page lacks.
   // A revision without the chosen screen shows its start, which becomes the chosen screen.
@@ -235,7 +256,8 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
     if (!screenSelect) {
       return;
     }
-    const key = `${state.variant} ${state.revision}`;
+    // Each orientation and posture can show a different stack, so it lists its own screens.
+    const key = `${state.variant} ${state.revision} ${state.orientation} ${state.posture}`;
     if (key !== listed) {
       listed = key;
       const screens = revisionViews().flatMap((view) => view.dataset.screen ?? []);
@@ -300,8 +322,11 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
     state.variant = variantSelect.value;
     const option = variantSelect.selectedOptions[0];
     state.revision = option?.dataset.latest ?? state.revision;
-    state.fit = true;
-    apply();
+    fitView();
+  });
+  postureSelect?.addEventListener("change", () => {
+    state.posture = postureSelect.value;
+    fitView();
   });
   screenSelect?.addEventListener("change", () => {
     state.screen = screenSelect.value;

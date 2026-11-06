@@ -90,21 +90,27 @@ document, its `sha256`, the frame used, the unsupported nodes of the first view 
 it inlined per variant.
 
 - **Views.** Every inlined revision of every variant is pre-rendered in each orientation the frame
-  has (portrait and landscape; portrait only for a watch; landscape only for a TV or car),
-  once per screen of its outermost stack when that stack has more than one screen (start first,
-  then the others in key order; such views carry `data-screen`). The first view is the chosen
-  variant's chosen revision (default: latest) in the frame's first orientation (`data-orientation`
-  on `body`), on its start screen; the rest are
-  `hidden`. Every view renders in the input's `locale` and `textSize`, passed to the still.
-- **Controls.** Only six: rotate (portrait/landscape; absent for watch, TV and car frames, which
-  have one orientation), zoom and pan (fit, 50–400 %, wheel, drag,
-  double-click to fit), the opt-in 3D view ([Prototype web 3D device view](prototype-web-3d.md);
-  posture and hinge controls only for a frame with a hinge and postures), a variant select (only with more than one variant), a screen select (only
+  has (portrait and landscape; portrait only for a watch; landscape only for a TV or car) and in
+  every posture of a foldable frame (such views carry `data-posture`), once per screen of the
+  outermost stack each orientation and posture draws when that stack has more than one screen
+  (start first, then the others in key order; such views carry `data-screen`), since a
+  `visibleWhen` can show a different stack in each. The first view is the chosen variant's chosen
+  revision (default: latest) in the frame's first orientation (`data-orientation` on `body`), in
+  the frame's default posture, on its start screen; the rest are `hidden`. Views are kept or
+  dropped by screen index: every orientation and posture's start together, then each one's next
+  screen together. Every view renders in the input's `locale` and `textSize`, passed to the still.
+- **Controls.** Only seven: rotate (portrait/landscape; absent for watch, TV and car frames, which
+  have one orientation), a layout posture select (`layout-posture`, only for a frame with postures,
+  in registry order; switching shows that posture's views and fits the new view), zoom and pan
+  (fit, 50–400 %, wheel, drag, double-click to fit), the opt-in 3D view
+  ([Prototype web 3D device view](prototype-web-3d.md); posture and hinge controls only for a frame
+  with a hinge and postures), a variant select (only with more than one variant), a screen select (only
   when some revision in the page has more than one screen view) and the revision history (newest
   first, `r<N> · show|patch`; only when some variant has more than one revision in the page). The
   screen select lists the shown revision's own screen views and is hidden with fewer than two, so
   it never offers a view the page lacks; switching variant or revision keeps the chosen screen
-  when the new revision has it, else shows that revision's start. Controls are buttons and a select with labels. A toolbar note says the preview is
+  when the new revision has it, else shows that revision's start. Rotating or changing posture
+  relists the shown view's own screens. Controls are buttons and a select with labels. A toolbar note says the preview is
   static: taps do nothing, and the controls switch pre-rendered views. Below 720 px wide the
   history sits under the stage, so the stage keeps the width.
 - **Script.** `prototypeWebPageRuntime`, then `prototypeWeb3dRuntime`, are inlined from their
@@ -237,7 +243,7 @@ fullscreen, because the goldens draw the root and theme without the window's pla
 
 ## Still renderer
 
-`renderPrototypeStill(spec, {frame, orientation, mode, screen, locale, textSize, chromeless})` in
+`renderPrototypeStill(spec, {frame, orientation, posture, mode, screen, locale, textSize, chromeless})` in
 `src/features/prototype/web/webStill.ts` draws the spec as a still screen and returns an element
 tree plus `unsupportedNodes` and `stack` (the outermost stack's screens in key order, its
 start and the screen drawn). It renders on
@@ -329,9 +335,15 @@ the host, so the page's script only switches between views it was given and neve
   device scheme to read, so it falls through to the seed or the baseline, as iOS and Android
   below API 31 do. The accessibility lint still treats a seed or device scheme as unknown. Both
   devices paint nothing behind a window, so the app below shows through; the still has no app
-  below, so the screen paints the theme's `background` role (else `surface`). An explicit `theme.mode` of
-  `light` or `dark` wins over the caller's `mode`; `system` or no mode uses the caller's, then
-  light.
+  below, so the screen paints the theme's `background` role (else `surface`).
+- **Mode.** The still resolves light or dark in the devices' order: an explicit `theme.mode`;
+  with no mode, the luminance of the flat `theme.colors.background` (else `surface`) override,
+  then of the first opaque hex background on the root's leading chain (the first visible child,
+  a pager's current page; role and `{light, dark}` backgrounds are passed over); last the
+  caller's `mode`, then light. `theme.mode: "system"` goes straight to the caller's. As on
+  Android, an authored colour of the resolved mode's polarity replaces `background`, `surface`
+  and `surfaceContainer`/`Low`/`High`/`Highest` unless a seed or device source derives the scheme;
+  role overrides still win over it.
 - **Coverage.** Supported nodes: `box`, `row`, `column`, `stack`, `scroll`, `text`, `spacer`,
   `divider`, `icon`, `button`, `topAppBar`, `textField`, `switch`, `checkbox`, `card`,
   `listItem` (with its leading icon and its trailing switch, checkbox or icon), `pager`, `grid`,
@@ -484,6 +496,13 @@ the host, so the page's script only switches between views it was given and neve
   layer. `Modulate` multiplies alpha too, so a translucent tint wraps both layers in a group at the
   tint's alpha (a fully transparent tint hides the image); a corner radius clips both. Item images (nav items) are not inlined. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
+- **Posture.** A foldable frame draws the panel its `posture` lights (default `opened`, else its
+  first posture; a frame without postures takes none, and an unknown posture is an error listing
+  the frame's): `closed` draws the cover panel. The spec lays out on that panel in the drawn
+  orientation, minus an occluding hinge's width, shown in the two segments either side of the
+  hinge (the second copy `aria-hidden` and inert); a seamless fold lays out across the whole
+  panel and draws a crease shaded by its `hingeDegrees`, none when flat. Landscape turns the
+  hinge with the panel, so a flip's hinge runs top to bottom there.
 - **Skins.** `webSkin.ts` holds one skin per platform; the frame's platform picks it and the
   `skin` option overrides it. A skin replaces the renderers of the components its platform draws
   natively (`designCoverage` `native` in `schemas/prototype-spec-contract.json`), and those of the

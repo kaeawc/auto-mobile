@@ -27,10 +27,19 @@ import {
   type WebOrientation,
 } from "./webFrame";
 import { markInitialFocus } from "./webFocus";
+import {
+  frameInPosture,
+  layoutSize,
+  webFold,
+  type FramePosture,
+  type WebFold,
+  type WebPostureView,
+} from "./webFold";
 import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
 import type { WebSkinId } from "./webSkin";
+import { resolveWebStillAppearance, webAuthoredBackground } from "./webStillAppearance";
 import type { WebStackScreens } from "./webStack";
 import type { WebImageDraw } from "./webImages";
 import { localeLayoutDirection, stillLocale } from "./webLocale";
@@ -51,6 +60,12 @@ export interface PrototypeStillOptions {
   readonly skin?: WebSkinId;
   /** One of the frame's orientations; defaults to its first (landscape for a TV or car). */
   readonly orientation?: WebOrientation;
+  /**
+   * A foldable frame's posture (#16445); defaults to `opened`, else the frame's first. A frame
+   * without postures takes none.
+   */
+  readonly posture?: string;
+  /** The system setting: decides only when the spec's theme and authored background do not. */
   readonly mode?: PrototypeColorMode;
   /** The clock derived relative times read; fixed so the same input renders the same bytes. */
   readonly nowMs?: number;
@@ -83,6 +98,8 @@ export interface PrototypeStillOptions {
 export interface PrototypeStill {
   readonly element: WebElement;
   readonly frame: string;
+  /** The posture drawn; absent for a frame without postures. */
+  readonly posture?: FramePosture;
   readonly unsupportedNodes: readonly UnsupportedWebNode[];
   /** The outermost stack drawn, if any: its screens and the one drawn. */
   readonly stack?: WebStackScreens;
@@ -246,29 +263,42 @@ function stillFormat(options: PrototypeStillOptions, locale: string): WebRenderS
   };
 }
 
-/** An explicit theme mode wins, as on the devices; `system` or none falls back to the caller's. */
-function colorMode(spec: Raw, options: PrototypeStillOptions): PrototypeColorMode {
-  const authored = record(spec.theme)?.mode;
-  return authored === "light" || authored === "dark" ? authored : (options.mode ?? "light");
+/** The posture's panel is the active panel; its hinge, when it folds that panel, sets the posture. */
+function platformStateFor(
+  platform: "android" | "ios",
+  screenDp: { widthDp: number; heightDp: number },
+  fold: WebFold | undefined,
+) {
+  return stillPlatformState({
+    platform,
+    ...screenDp,
+    ...(fold ? { fold: { posture: fold.posture, hinge: fold.band.axis } } : {}),
+  });
 }
 
 function stillScope(
   expanded: unknown,
   options: PrototypeStillOptions,
-  frame: DeviceFrame,
-  { orientation, locale }: { orientation: WebOrientation; locale: string },
+  view: WebPostureView,
+  {
+    orientation,
+    locale,
+    fold,
+  }: { orientation: WebOrientation; locale: string; fold: WebFold | undefined },
 ): WebRenderScope {
+  const { frame } = view;
   const spec = record(expanded) ?? {};
-  const size = screenSize(frame, orientation);
+  // The spec lays out on the active panel, minus an occluding hinge.
+  const size = layoutSize(screenSize(frame, orientation), fold);
   const screenDp = { widthDp: size.width, heightDp: size.height };
-  const mode = colorMode(spec, options);
   // The skin decides every look the devices draw differently, glass included.
   const skin = options.skin ?? frame.platform;
   const textScale = stillTextScale(frame.platform, options.textSize);
-  return {
+  // Conditions and pager pages do not depend on the mode, so the walk reads a light scope.
+  const scope: WebRenderScope = {
     style: {
-      mode,
-      palette: prototypeDrawnPalette(expanded, mode),
+      mode: "light",
+      palette: prototypeDrawnPalette(expanded, "light"),
       parentAxis: COLUMN,
       typography: themeTypography(expanded),
       ...(textScale ? { textScale } : {}),
@@ -278,8 +308,7 @@ function stillScope(
     condition: {
       state: record(spec.state) ?? {},
       platform: frame.platform,
-      // The frame's one panel is the active panel; no registry frame has a hinge yet (#16444).
-      platformState: stillPlatformState({ platform: frame.platform, ...screenDp }),
+      platformState: platformStateFor(frame.platform, screenDp, fold),
     },
     data: spec.data,
     spec,
@@ -295,6 +324,16 @@ function stillScope(
     stacks: [],
     layers: [],
     imageDraws: [],
+  };
+  // The caller's mode is only the system setting; the spec decides first, as on the devices.
+  const { mode, surface } = resolveWebStillAppearance(
+    expanded,
+    webAuthoredBackground(spec.root, scope, "root"),
+    options.mode ?? "light",
+  );
+  return {
+    ...scope,
+    style: { ...scope.style, mode, palette: prototypeDrawnPalette(expanded, mode, surface) },
   };
 }
 
@@ -369,18 +408,34 @@ function stillOrientation(
   return requested;
 }
 
+/** The posture a foldable frame is drawn in; none for a frame without postures. */
+function postureOf(view: WebPostureView): { posture?: FramePosture } {
+  return view.posture ? { posture: view.posture } : {};
+}
+
+/** The posture a foldable frame names, and the fold it draws over the active panel. */
+function postureFrameOptions(
+  view: WebPostureView,
+  fold: WebFold | undefined,
+): { posture?: FramePosture; fold?: WebFold } {
+  return { ...postureOf(view), ...(fold ? { fold } : {}) };
+}
+
 export function renderPrototypeStill(
   spec: unknown,
   options: PrototypeStillOptions = {},
 ): PrototypeStill {
-  const frame = deviceFrameOrThrow(
-    options.frame ?? defaultDeviceFrameId(options.platform ?? "android"),
+  const view = frameInPosture(
+    deviceFrameOrThrow(options.frame ?? defaultDeviceFrameId(options.platform ?? "android")),
+    options.posture,
   );
+  const { frame } = view;
   const locale = stillLocale(options.locale);
   // Components expand, then string tables resolve for the host locale, as on devices.
   const expanded = resolvePrototypeStrings(prototypeSpecForDevice(spec), [locale]);
   const orientation = stillOrientation(frame, options.orientation);
-  const scope = stillScope(expanded, options, frame, { orientation, locale });
+  const fold = webFold(view, orientation);
+  const scope = stillScope(expanded, options, view, { orientation, locale, fold });
   const root = renderWebNode(sizedRoot(expanded), scope, "root");
   const dark = scope.style.mode === "dark";
   const textColor = cssColor("onSurface", scope.style) ?? (dark ? "#e6e0e9" : "#1d1b20");
@@ -407,6 +462,7 @@ export function renderPrototypeStill(
             dark,
             screen: screenSize(frame, orientation),
           }),
+          ...postureFrameOptions(view, fold),
         },
         content,
       );
@@ -414,6 +470,7 @@ export function renderPrototypeStill(
   return {
     element,
     frame: frame.id,
+    ...postureOf(view),
     unsupportedNodes: scope.unsupported,
     ...(stack ? { stack } : {}),
     imageDraws: scope.imageDraws ?? [],

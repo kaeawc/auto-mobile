@@ -93,7 +93,9 @@ export interface PrototypeWebSources {
 
 /**
  * Asset bytes the host cached when it uploaded them to a device showing one of the variants
- * (Android caches uploads per device); the first device with the asset wins.
+ * (Android caches uploads per device). Asset ids are chosen per device and the page holds one
+ * image per id, so when two devices cached different bytes under the id, it stays a placeholder
+ * rather than drawing one device's image in another's variant.
  */
 export function cachedPrototypeWebAssets(
   devicesShowing: (id: string) => readonly string[],
@@ -102,13 +104,21 @@ export function cachedPrototypeWebAssets(
   return (variantIds) => ({
     get: async (assetId) => {
       const devices = [...new Set(variantIds.flatMap((id) => devicesShowing(id)))];
+      let found: Awaited<ReturnType<PrototypeAssetCache["get"]>>;
       for (const device of devices) {
         const asset = await cache.get(device, assetId);
-        if (asset) {
-          return asset;
+        if (!asset) {
+          continue;
         }
+        if (found && !Buffer.from(found.bytes).equals(Buffer.from(asset.bytes))) {
+          logger.warn(
+            `[PROTOTYPE] Devices showing ${variantIds.join(", ")} cached different bytes for asset ${assetId}; the web page keeps its placeholder.`,
+          );
+          return undefined;
+        }
+        found ??= asset;
       }
-      return undefined;
+      return found;
     },
   });
 }

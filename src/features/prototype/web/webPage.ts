@@ -431,13 +431,13 @@ function drawnAssets(groups: readonly ScreenGroup[]): string[] {
 }
 
 /**
- * The pinned revisions' start screens always, then the images they draw; then their other screens
- * and those screens' images while they fit; then older revisions newest first, each while its start
- * screen and history entry fit, followed by its images, then its other screens and their images
- * while they fit. Each image is charged once, as the page rule that inlines it; one that does not
- * fit stays a placeholder. The shown revision's images go first among the pinned. The budget is the page
- * limit minus the shell (head, toolbar, script and the pinned revisions' history entries), so it
- * counts exactly what the final page holds.
+ * The pinned revisions' start screens always, then the images they draw; then each of their other
+ * screens while it fits, followed by its images; then older revisions newest first, each while its
+ * start screen and history entry fit, followed by its images, then its other screens in the same
+ * way. Each image is charged once, as the page rule that inlines it; one that does not fit stays a
+ * placeholder. The shown revision's images go first among the pinned. The budget is the page limit
+ * minus the shell (head, toolbar, script and the pinned revisions' history entries), so it counts
+ * exactly what the final page holds.
  */
 function budgetedViews(
   input: PrototypeWebPageInput,
@@ -480,10 +480,15 @@ function budgetedViews(
     }
   };
   const kept = new Map(latest.map((revision) => [revision, [revision.screens[0]!]]));
+  // Each screen's images are charged before the next screen, so a later screen cannot take the
+  // room an earlier kept screen's image needs.
   const addScreens = (revision: RevisionViews) => {
-    const added = revision.screens.slice(1).filter((group) => fits(groupBytes(group)));
-    kept.get(revision)!.push(...added);
-    addImages(added);
+    for (const group of revision.screens.slice(1)) {
+      if (fits(groupBytes(group))) {
+        kept.get(revision)!.push(group);
+        addImages([group]);
+      }
+    }
   };
   [...latest.filter(isShown), ...latest.filter((revision) => !isShown(revision))].forEach(
     (revision) => addImages([revision.screens[0]!]),

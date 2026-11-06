@@ -144,6 +144,32 @@ describe("an image with an inlinable asset", () => {
     });
   });
 
+  test("a fixed dp axis keeps its size; only a wrapped axis gets the 48px minimum (#17241)", () => {
+    // Android sizes an image with `size(24.dp)` at 24 dp: its 24 dp default minimum never applies
+    // to an authored size, so a 48px CSS minimum must not either.
+    const icon = (
+      asset: string,
+      style: Record<string, unknown>,
+    ): Readonly<Record<string, string | undefined>> =>
+      find(
+        still({ type: "image", asset, style }).element,
+        (e) => e.attrs["data-node"] === "image",
+      )[0]!.style;
+    for (const asset of ["photo", "missing"]) {
+      const fixed = icon(asset, { width: { dp: 24 }, height: { dp: 24 } });
+      expect([fixed.width, fixed.height, fixed["min-width"], fixed["min-height"]]).toEqual([
+        "24px",
+        "24px",
+        undefined,
+        undefined,
+      ]);
+      const half = icon(asset, { width: { dp: 24 } });
+      expect([half["min-width"], half["min-height"]]).toEqual([undefined, "48px"]);
+      const authored = icon(asset, { width: { dp: 24 }, height: { dp: 24 }, minWidth: 30 });
+      expect(authored["min-width"]).toBe("30px");
+    }
+  });
+
   test("binds a repeat item's asset id", () => {
     const rendered = still({
       type: "column",

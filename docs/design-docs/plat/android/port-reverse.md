@@ -102,9 +102,16 @@ adbd restart (`root`/`unroot`) or an emulator restart drops them. Every
 owned mappings that are missing, reporting the caller's in `restored` or
 `restoreFailures`. A failed restore keeps ownership so the next call retries. A
 port someone else re-mapped while ours was gone is dropped from ownership and
-left in place. `reconcile(deviceId)` runs the same pass for a recovery hook;
-transport-recovery paths do not call it yet, so restore happens on the next
-call.
+left in place. `reconcile(deviceId)` runs the same pass without a client call:
+the transport-recovery scheduler calls it after a device's adb transport
+recovers, and a periodic reconcile calls it for mappings removed while the
+transport stayed up (a raw `adb reverse --remove`, another tool). The periodic
+timer (injected `Timer`, `AUTOMOBILE_PORT_REVERSE_RECONCILE_INTERVAL_MS`,
+default 30 s) is armed by each `ensure` that leaves owned mappings and not
+re-armed once no device holds any. A pass reconciles at most four devices, one
+at a time, rotating through the rest on later passes; an unreachable device is
+logged at debug and retried on a later pass. Disposal cancels the timer and
+waits for a running pass.
 
 ## Release
 

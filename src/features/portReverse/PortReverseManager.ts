@@ -12,6 +12,7 @@ import { AdbReverseOwnership, type AdbReverseHolder } from "./AdbReverseOwnershi
 import { unknownHostLoopbackProbe, type HostLoopbackProbe } from "./HostLoopbackProbe";
 import { PortReverseError } from "./PortReverseError";
 import { assertNoConflicts } from "./portReverseConflicts";
+import { entryFor, ownedMapping, uniqueRequests } from "./portReverseRequests";
 import { deviceListeners, throwIfDevicePortHeld, type DeviceListener } from "./deviceListeners";
 import { httpProbePort, tcpProbePort, type PortReverseHttpProbe } from "./portReverseProbes";
 
@@ -190,6 +191,7 @@ export class PortReverseManager {
       return state?.owned.get(devicePort)?.hostPort ?? state?.pendingRemoval.get(devicePort);
     },
   };
+  private readonly ownedListeners = new Set<(deviceId: string) => void>();
 
   constructor(
     private readonly audit: PortReverseAudit = defaultAudit,
@@ -246,6 +248,9 @@ export class PortReverseManager {
       } else {
         state.ensuring.set(owner, left);
       }
+      if (state.owned.size > 0) {
+        this.notifyOwned(target.deviceId);
+      }
     });
   }
 
@@ -298,6 +303,36 @@ export class PortReverseManager {
       mappings.push(ownedMapping(request, "added"));
     }
     return this.acknowledge(state, target.owner, { mappings, ...report });
+  }
+
+  /**
+   * Calls `listener` with the device id after each `ensure` that leaves the device holding owned
+   * mappings (the periodic reconcile arms on it). Returns the unsubscribe.
+   */
+  onOwnedMappings(listener: (deviceId: string) => void): () => void {
+    this.ownedListeners.add(listener);
+    return () => {
+      this.ownedListeners.delete(listener);
+    };
+  }
+
+  /** Devices holding at least one owned mapping, ascending. */
+  ownedDevices(): string[] {
+    return [...this.devices]
+      .filter(([, state]) => state.owned.size > 0)
+      .map(([deviceId]) => deviceId)
+      .sort();
+  }
+
+  private notifyOwned(deviceId: string): void {
+    for (const listener of this.ownedListeners) {
+      try {
+        listener(deviceId);
+      } catch (error) {
+        // A listener is best-effort scheduling; it must never fail the ensure that triggered it.
+        logger.warn(`[portReverse] owned-mapping listener failed: ${errorMessage(error)}`);
+      }
+    }
   }
 
   /** Every reverse on the device, each marked whether this session owns it. */
@@ -1021,33 +1056,4 @@ export class PortReverseManager {
   private heldElsewhere(deviceId: string, devicePort: number) {
     return this.ownership.heldByOther(this.holder, deviceId, devicePort);
   }
-}
-
-function entryFor(request: PortReverseRequest): AdbReverseEntry {
-  return {
-    devicePort: request.devicePort,
-    host: tcp(request.hostPort),
-    hostPort: request.hostPort,
-  };
-}
-
-function ownedMapping(request: PortReverseRequest, status: PortReverseStatus): PortReverseMapping {
-  return { ...entryFor(request), owned: true, status };
-}
-
-/** One request per device port; two different host ports for one device port is a conflict. */
-function uniqueRequests(requests: readonly PortReverseRequest[]): PortReverseRequest[] {
-  const byPort = new Map<number, PortReverseRequest>();
-  for (const request of requests) {
-    const earlier = byPort.get(request.devicePort);
-    if (earlier !== undefined && earlier.hostPort !== request.hostPort) {
-      throw new PortReverseError(
-        "port_reverse_conflict",
-        `${tcp(request.devicePort)} was requested for both ${tcp(earlier.hostPort)} and ${tcp(request.hostPort)}.`,
-        [request.devicePort],
-      );
-    }
-    byPort.set(request.devicePort, request);
-  }
-  return [...byPort.values()];
 }

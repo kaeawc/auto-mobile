@@ -89,13 +89,15 @@ registry.
 document, its `sha256`, the frame used, the unsupported nodes of the first view and the revisions
 it inlined per variant.
 
-- **Views.** Every inlined revision of every variant is pre-rendered in portrait and landscape,
+- **Views.** Every inlined revision of every variant is pre-rendered in each orientation the frame
+  has (portrait and landscape; portrait only for a watch; landscape only for a TV or car),
   once per screen of its outermost stack when that stack has more than one screen (start first,
   then the others in key order; such views carry `data-screen`). The first view is the chosen
-  variant's chosen revision (default: latest) in portrait, on its start screen; the rest are
+  variant's chosen revision (default: latest) in the frame's first orientation (`data-orientation`
+  on `body`), on its start screen; the rest are
   `hidden`. Every view renders in the input's `locale` and `textSize`, passed to the still.
-- **Controls.** Only six: rotate (portrait/landscape; absent for watch and TV frames, which
-  never rotate), zoom and pan (fit, 50–400 %, wheel, drag,
+- **Controls.** Only six: rotate (portrait/landscape; absent for watch, TV and car frames, which
+  have one orientation), zoom and pan (fit, 50–400 %, wheel, drag,
   double-click to fit), the opt-in 3D view ([Prototype web 3D device view](prototype-web-3d.md);
   posture and hinge controls only for a frame with a hinge and postures), a variant select (only with more than one variant), a screen select (only
   when some revision in the page has more than one screen view) and the revision history (newest
@@ -158,14 +160,16 @@ it inlined per variant.
 spec in headless Chromium, Firefox and WebKit: `reference-checkout` plus `template-feed-detail`,
 `pager-indicator-dots`, `grid-fixed-columns-span`, `material-controls`, `component-gallery`,
 `doc-example-2`, `native-controls` (every button variant and two sliders) and `image-gallery`
-(its assets are `test/fixtures/prototype-web/assets/<id>.png`), each in `pixel-9` and `iphone-16`, portrait (the list is
+(its assets are `test/fixtures/prototype-web/assets/<id>.png`), each in `pixel-9` and `iphone-16`, portrait,
+and `reference-checkout` alone in each watch, TV and car frame (the list is
 `webScreenshotCases.ts`). Playwright (`playwright-core`) is a devDependency of this check only;
 nothing at runtime drives a browser.
 
 - **Assertions.** The page is served from one fixed URL and every other request is aborted and
   fails the case, on top of the page's own CSP. No console error, page error or
-  `securitypolicyviolation` event may occur. Exactly one view is shown, in portrait, with a
-  non-zero size; the stage carries the runtime's fitted scale and the zoom label shows it; halfway
+  `securitypolicyviolation` event may occur. Exactly one view is shown, with a non-zero size, in
+  the frame's first orientation; the stage carries the runtime's fitted scale and
+  the zoom label shows it; a watch, TV or car page has no rotate control; on other frames, halfway
   through rotate both views are shown and turned, and the finished turn shows only the landscape
   view, wider than tall; with reduced motion, rotate starts no animation; a page with a screen select shows exactly the picked
   screen's view; the 3D toggle turns the shown view to the three-quarter pose, an arrow key on the
@@ -175,13 +179,14 @@ nothing at runtime drives a browser.
   only an overflowing scroll fades, or, in an engine without scroll-driven animations, that every
   scroll does. Every engine runs these assertions; CSS 3D and clipping differ between engines, so
   a page that only works in Chromium fails here.
-- **Settings cases.** `reference-checkout` also renders in both frames at the largest text size
+- **Settings cases.** `reference-checkout` also renders in both phone frames at the largest text size
   (`fontScale` 2, `accessibility-extra-extra-extra-large`) and in the `ar` locale (RTL), golden
   `<spec>--<frame>--<setting>.png` (and `--landscape.png` after it).
 - **Goldens.** Compared only in Chromium, the one engine whose CI build they are trusted from.
-  Two PNGs per case in `test/fixtures/prototype-web/screenshots/`
-  (`<spec>--<frame>.png` in portrait and `<spec>--<frame>--landscape.png` at the end of the
-  turn, plain git blobs, not LFS), taken at 800×800 CSS px, device scale factor 1,
+  One PNG per orientation of the case's frame in `test/fixtures/prototype-web/screenshots/`
+  (`<spec>--<frame>.png` as the page opens and, on a frame that rotates,
+  `<spec>--<frame>--landscape.png` at the end of the turn; plain git blobs, not LFS), taken at
+  800×800 CSS px, device scale factor 1,
   with every font forced to `"DejaVu Sans", sans-serif` and the caret hidden. No font is bundled. A
   case matches when at most 0.1 % of pixels differ by more than pixelmatch's 0.1 colour distance; a
   different size never matches. A unit test keeps the directory in step with the case list.
@@ -529,8 +534,19 @@ the host, so the page's script only switches between views it was given and neve
   the browser's local time in the same `h:mm` 12-hour form, re-armed at each minute boundary. An iPhone with an island centres the clock and the marks in the
   ears beside it; Android puts them at the start and end. Its content is light or dark: `window.statusBar`
   `light` or `dark` picks it, and `auto` or none takes whichever of white or black contrasts more with the
-  app's top colour, which is the first opaque background spanning the screen along the content's leading
-  children (a top app bar), else the screen background. Landscape swaps the screen size, uses
+  app's top colour, else the screen background. The top colour is sampled only when the window's content
+  starts behind the status bar (a fullscreen window or a `top` sheet; a bottom sheet or floating window
+  keeps the screen background). It is the innermost opaque background along the content's leading children (a top app bar). The walk
+  follows a child only when its container places it at the top (a column's first child under a start
+  arrangement or growing, a box or row child aligned to the top, or one filling the height) and is not
+  narrowed by an explicit width or maximum width below the screen's (a maximum height likewise keeps a
+  growing child from filling), and a
+  background counts only on a child spanning its container's width, read on that container's axes. In a
+  `box` the walk samples the children that span it and reach its top, from the last painted to the first,
+  and the first with an opaque top colour wins. Element opacity multiplies down the walk, so a background
+  counts only when it is opaque after that opacity, and a fully transparent subtree is skipped. The walk
+  stops at an element with top padding (authored or the top safe area), whose children start below its
+  top edge. Landscape swaps the screen size, uses
   the landscape safe areas, and moves the cutout from the top edge to the left edge. A frame whose
   landscape top inset is 0 (an iPhone) draws no status bar in landscape. `safeAreaPadding` adds the inset on each named edge to the node's padding; like
   `windowInsetsPadding`, an edge an ancestor already applied adds nothing more, and an inset adds to a component's own

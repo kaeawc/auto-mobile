@@ -1,4 +1,5 @@
 import { isAndroidOrIosPlatform } from "../../models/Platform";
+import { UNCLEAN_DAEMON_EXIT_RELEASE_REASON } from "../../models/releaseReasons";
 import type { SessionBrokerService } from "../sessionBroker/service";
 import type { DaemonDeviceSessionStore } from "../daemonDependencies";
 import type {
@@ -942,7 +943,7 @@ export class DaemonStartup {
         this.host.identity.daemonSessionId(),
         // Persisted stamps are wall epoch ms, shared by every process (#11162).
         this.host.services.timer().now(),
-        "daemon-restart",
+        UNCLEAN_DAEMON_EXIT_RELEASE_REASON,
         liveDaemonSessionIds,
       );
       await this.host.setVideoRecordingManagerDependencies({

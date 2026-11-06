@@ -6,8 +6,9 @@ import { fileURLToPath } from "node:url";
 // The badge/progress/fab/flow/list/chart/adaptive/swipe component set accounts for the growth past
 // 120 KB / 40 KB. Raised for the inlined image renderer (#16533): measured 137,146 bytes plus ~8% headroom.
 // The iOS skin's textField, bottomNav, tabBar and sheet account for the gzip growth past 46 KB.
+// The watch, TV and car frames and the TV focus ring (#16446) account for the growth past 48 KB.
 const MAX_MINIFIED_BYTES = 148_000;
-const MAX_GZIP_BYTES = 48_000;
+const MAX_GZIP_BYTES = 49_000;
 
 /** Server-only modules the renderer once reached; any of them back in the closure is a regression. */
 const FORBIDDEN_INPUTS = [

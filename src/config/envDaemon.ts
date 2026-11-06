@@ -70,6 +70,14 @@ export const DAEMON_ENV = {
     default: "unset",
     doc: "Ports portReverse may map: comma-separated ports or inclusive ranges.",
   },
+  PORT_REVERSE_RECONCILE_INTERVAL_MS: {
+    name: "AUTOMOBILE_PORT_REVERSE_RECONCILE_INTERVAL_MS",
+    kind: "int",
+    default: "30000",
+    fallback: 30000,
+    min: 1000,
+    doc: "Milliseconds between periodic re-checks of owned portReverse mappings.",
+  },
   DOCTOR_TIMEOUT_MS: {
     name: "AUTOMOBILE_DOCTOR_TIMEOUT_MS",
     kind: "int",

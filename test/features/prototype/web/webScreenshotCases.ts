@@ -177,3 +177,45 @@ export function pngSize(png: Buffer): { width: number; height: number } {
   }
   return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
 }
+
+/**
+ * Browser engines the check runs in (#16459). Every engine runs the behavioural assertions; only
+ * `WEB_SCREENSHOT_GOLDEN_ENGINE` is compared with (or rewrites) the goldens, which are trusted
+ * only from the CI Linux Chromium build.
+ */
+export const WEB_SCREENSHOT_ENGINES = ["chromium", "firefox", "webkit"] as const;
+export type WebScreenshotEngine = (typeof WEB_SCREENSHOT_ENGINES)[number];
+export const WEB_SCREENSHOT_GOLDEN_ENGINE: WebScreenshotEngine = "chromium";
+
+function isWebScreenshotEngine(name: string): name is WebScreenshotEngine {
+  return (WEB_SCREENSHOT_ENGINES as readonly string[]).includes(name);
+}
+
+/**
+ * The engines named by a comma-separated list (`AUTOMOBILE_PROTOTYPE_WEB_ENGINES`), in canonical
+ * order without duplicates. Unset or blank means every engine; an unknown name throws.
+ */
+export function webScreenshotEngines(value: string | undefined): WebScreenshotEngine[] {
+  const names = (value ?? "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0);
+  if (names.length === 0) {
+    return [...WEB_SCREENSHOT_ENGINES];
+  }
+  const unknown = names.filter((name) => !isWebScreenshotEngine(name));
+  if (unknown.length > 0) {
+    throw new Error(
+      `unknown browser engine(s): ${unknown.join(", ")} (expected ${WEB_SCREENSHOT_ENGINES.join(", ")})`,
+    );
+  }
+  return WEB_SCREENSHOT_ENGINES.filter((engine) => names.includes(engine));
+}
+
+/**
+ * Where a captured screenshot is written under the output directory: the golden engine's at the
+ * top level, so adopting goldens stays a flat copy, and every other engine's under its own name.
+ */
+export function webScreenshotOutputPath(engine: WebScreenshotEngine, file: string): string {
+  return engine === WEB_SCREENSHOT_GOLDEN_ENGINE ? file : join(engine, file);
+}

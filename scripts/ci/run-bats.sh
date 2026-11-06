@@ -375,21 +375,46 @@ report_slowest_files() {
 # given, separate a slow runner (every pass slower) from one slow file. Only a
 # lane whose tests all passed (tests_passed=true) is annotated "no test failed",
 # which is what the known-flakes rerun signature keys on.
+# The lane budget is runner-aware: the same suite runs ~1.1-1.5x slower on
+# GitHub-hosted ubuntu-latest than on the Namespace runners the base budget was
+# calibrated on (#17274). GitHub sets RUNNER_ENVIRONMENT to github-hosted or
+# self-hosted (Namespace runners are self-hosted), so key on the runner that
+# actually picked up the job rather than re-deriving the runs-on expression.
+# AUTOMOBILE_BATS_UNIT_BUDGET_GITHUB_HOSTED_SECONDS applies only there; every
+# other runner (and local runs) uses AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS.
+# Prints the budget, or nothing when no budget is set; returns 2 on a
+# malformed value.
+resolve_unit_budget() {
+  local base="${AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS:-}"
+  local hosted="${AUTOMOBILE_BATS_UNIT_BUDGET_GITHUB_HOSTED_SECONDS:-}"
+  if [[ -n "$base" ]] && ! [[ "$base" =~ ^[1-9][0-9]*$ ]]; then
+    log "ERROR: AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS must be a positive integer"
+    return 2
+  fi
+  if [[ -n "$hosted" ]] && ! [[ "$hosted" =~ ^[1-9][0-9]*$ ]]; then
+    log "ERROR: AUTOMOBILE_BATS_UNIT_BUDGET_GITHUB_HOSTED_SECONDS must be a positive integer"
+    return 2
+  fi
+  if [[ "${RUNNER_ENVIRONMENT:-}" == "github-hosted" && -n "$hosted" ]]; then
+    printf '%s\n' "$hosted"
+  elif [[ -n "$base" ]]; then
+    printf '%s\n' "$base"
+  fi
+  return 0
+}
+
 enforce_unit_budget() {
   local elapsed="$1"
   local durations_file="${2:-}"
   local serial_seconds="${3:-}"
   local tests_passed="${4:-false}"
-  local budget="${AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS:-}"
+  local budget
+  budget="$(resolve_unit_budget)" || return 2
   if [[ -z "$budget" ]]; then
     return 0
   fi
-  if ! [[ "$budget" =~ ^[1-9][0-9]*$ ]]; then
-    log "ERROR: AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS must be a positive integer"
-    return 2
-  fi
   if [[ "$elapsed" -gt "$budget" ]]; then
-    log "ERROR: BATS unit lane took ${elapsed}s, exceeding ${budget}s"
+    log "ERROR: BATS unit lane took ${elapsed}s, exceeding ${budget}s (budget for runner environment ${RUNNER_ENVIRONMENT:-unset})"
     local split=""
     if [[ -n "$serial_seconds" ]]; then
       split=" (serial pass ${serial_seconds}s)"

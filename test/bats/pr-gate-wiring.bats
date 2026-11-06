@@ -837,3 +837,18 @@ load yq-helpers
   [[ $'\n'"$output"$'\n' == *$'\n'"android/ide-plugin/**"$'\n'* ]]
   [[ $'\n'"$output"$'\n' == *$'\n'"android/desktop-app/**"$'\n'* ]]
 }
+
+@test "BATS unit lane budget is runner-aware and stays a tight guard in both workflows" {
+  local workflow block base hosted
+  for workflow in .github/workflows/pull_request.yml .github/workflows/merge.yml; do
+    block="$(job_block bats-tests "$workflow")"
+    base="$(printf '%s\n' "$block" | sed -n 's/^ *AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS: "\([0-9]*\)"$/\1/p')"
+    hosted="$(printf '%s\n' "$block" | sed -n 's/^ *AUTOMOBILE_BATS_UNIT_BUDGET_GITHUB_HOSTED_SECONDS: "\([0-9]*\)"$/\1/p')"
+    [ "$base" = 420 ]
+    [ -n "$hosted" ]
+    # GitHub-hosted runners are slower, but the guard must stay within 10% of
+    # the base budget (#17274); a larger gap needs fresh measurements.
+    [ "$hosted" -ge "$base" ]
+    [ "$((hosted * 10))" -le "$((base * 11))" ]
+  done
+}

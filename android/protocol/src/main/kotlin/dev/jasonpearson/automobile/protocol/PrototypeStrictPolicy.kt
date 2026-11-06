@@ -61,10 +61,16 @@ internal object PrototypeStrictPolicy {
     val secure = secureStateKeys(scopes, context)
     if (secure.isEmpty()) return null
     val channels = (spec["channels"] as? JsonObject).orEmpty()
+    // A web view loads its url from the page host, so the url is a request sink (#16573).
+    val webViews = context.nodes.filter { it.value.text("type") == "webView" }
     val requests =
       context.actions.filter { it.value.text("type") == "request" }.map { it.path } +
-        channels.keys.map { PrototypeValidationPaths.keyPath("channels", it) }
-    val channelFields = mutableListOf<Field>()
+        channels.keys.map { PrototypeValidationPaths.keyPath("channels", it) } +
+        webViews.map { it.path }
+    val channelFields =
+      webViews
+        .mapNotNull { (node, path) -> node.text("url")?.let { Field(it, "$path.url", false) } }
+        .toMutableList()
     for ((id, raw) in channels) {
       val channel = raw.jsonObject
       val at = PrototypeValidationPaths.keyPath("channels", id)

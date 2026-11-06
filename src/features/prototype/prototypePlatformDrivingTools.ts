@@ -67,6 +67,10 @@ export const PROTOTYPE_PLATFORM_DRIVING_TOOLS: Readonly<
   secureStorage: { tools: [], note: "read `/platform/secureStorage/locked`; no device tool" },
   sensors: { tools: ["setSensor", "shake"], note: "emulator sensor values and a shake gesture" },
   map: { tools: ["tapOn", "swipeOn"], note: "tap markers and pan the map" },
+  webview: {
+    tools: ["observe", "tapOn"],
+    note: "page content is in the accessibility tree; tap a link to navigate",
+  },
   audioRecorder: {
     tools: ["injectAudioInput", "setAppPermissions"],
     note: "feed known audio into the microphone",

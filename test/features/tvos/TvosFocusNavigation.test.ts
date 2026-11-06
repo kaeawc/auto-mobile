@@ -196,9 +196,10 @@ function registerRow(
   rows: number[],
   prefetch: number,
   label?: (row: number, column: number) => string,
+  identifiers?: boolean,
 ): ScrollingRowFakeTvosRunnerClient {
   unregister();
-  const row = new ScrollingRowFakeTvosRunnerClient({ rows, prefetch, label });
+  const row = new ScrollingRowFakeTvosRunnerClient({ rows, prefetch, label, identifiers });
   unregister = tvosRunners.register(deviceId, row);
   return row;
 }
@@ -221,6 +222,19 @@ test("replays a row item in the second viewport that is not loaded yet", async (
   expect(pressesOf(row.commands)).toEqual([...Array(6).fill("right"), "select"]);
   expect(row.focusedId).toBe(itemId(0, 6));
 });
+
+test.each([2000, 0])(
+  "a scrolled row whose cells have no identifiers still advances focus (prefetch %d)",
+  async (prefetch) => {
+    // Once the row scrolls, each newly focused cell sits at the same bounds at the viewport edge;
+    // only its label tells the cells apart.
+    const row = registerRow([8], prefetch, undefined, false);
+    const result = await tvosTapOn(deviceId, { action: "tap", text: "Item 0-6" });
+    expect(result.element?.text).toBe("Item 0-6");
+    expect(pressesOf(row.commands)).toEqual([...Array(6).fill("right"), "select"]);
+    expect(row.focusedId).toBe(itemId(0, 6));
+  },
+);
 
 test("replays an unloaded item in a lower row by sweeping that row", async () => {
   const row = registerRow([3, 8], 0);

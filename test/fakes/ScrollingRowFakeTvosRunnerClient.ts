@@ -18,6 +18,8 @@ export interface ScrollingRowOptions {
   prefetch: number;
   /** Cell label; defaults to `Item <row>-<column>`. */
   label?: (row: number, column: number) => string;
+  /** False leaves every cell without an accessibility identifier. */
+  identifiers?: boolean;
 }
 
 /**
@@ -111,7 +113,7 @@ export class ScrollingRowFakeTvosRunnerClient extends FakeTvosRunnerClient {
         bounds: { left: 0, top: 0, right: SCREEN_WIDTH, bottom: SCREEN_HEIGHT },
         node: cells.map(({ row, column, left, right }) => ({
           className: "9",
-          "resource-id": itemId(row, column),
+          ...(options.identifiers === false ? {} : { "resource-id": itemId(row, column) }),
           text: options.label?.(row, column) ?? `Item ${row}-${column}`,
           enabled: "true",
           focused: row === focusRow && column === (columns[row] ?? 0) ? "true" : "false",

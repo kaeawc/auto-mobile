@@ -247,7 +247,7 @@ async function locate(
   lookup: Lookup,
   identity: TargetIdentity | undefined,
   maxSearchMoves: number,
-): Promise<{ focus: Element; target: Element; identity?: TargetIdentity }> {
+): Promise<{ focus: Element; target: Element; identity?: TargetIdentity; signature: string }> {
   const { client, options, signal } = lookup;
   let state = await readScreen(client, options, signal, identity);
   if (!state.target && !identity) {
@@ -259,7 +259,12 @@ async function locate(
     requireFocus(state);
     state = await searchForTarget(lookup, state, maxSearchMoves);
   }
-  return { focus: requireFocus(state), target: state.target!, identity: state.identity };
+  return {
+    focus: requireFocus(state),
+    target: state.target!,
+    identity: state.identity,
+    signature: state.signature,
+  };
 }
 
 export async function tvosTapOn(
@@ -273,7 +278,7 @@ export async function tvosTapOn(
   const lookup: Lookup = { client: tvosRunners.require(deviceId), options, signal };
   const { client } = lookup;
   const blocked = new Map<string, Set<Direction>>();
-  let previous: { key: string; direction: Direction } | undefined;
+  let previous: { signature: string; direction: Direction } | undefined;
   let identity: TargetIdentity | undefined;
   for (let moves = 0; ; moves++) {
     signal?.throwIfAborted();
@@ -284,11 +289,12 @@ export async function tvosTapOn(
       await client.request({ type: "request_press_button", action: "select" }, signal);
       return { success: true, action: "tap", element: target };
     }
-    const key = focusKey(focus);
-    const refused = blocked.get(key) ?? new Set<Direction>();
-    if (previous?.key === key) {
+    // A scrolled row keeps the focused cell at the same bounds, so focus positions are keyed by
+    // the whole hierarchy: only an unchanged hierarchy shows that the press was refused.
+    const refused = blocked.get(state.signature) ?? new Set<Direction>();
+    if (previous?.signature === state.signature) {
       refused.add(previous.direction);
-      blocked.set(key, refused);
+      blocked.set(state.signature, refused);
     }
     const direction = directions(focus, target).find((value) => !refused.has(value));
     if (!direction) {
@@ -302,6 +308,6 @@ export async function tvosTapOn(
       );
     }
     await client.request({ type: "request_press_button", action: direction }, signal);
-    previous = { key, direction };
+    previous = { signature: state.signature, direction };
   }
 }

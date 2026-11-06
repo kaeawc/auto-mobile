@@ -52,7 +52,10 @@ graph keeps one edge per screen change:
 
 - `tvosTapOn` matches anywhere in the hierarchy, not only inside the screen bounds. On-screen
   matches rank first, so `index` keeps its on-screen meaning; an off-screen match is approached
-  with the same directional moves, and the row scrolls as focus reaches it.
+  with the same directional moves, and the row scrolls as focus reaches it. A scrolled row keeps
+  the focused cell at the viewport edge, so successive cells can share bounds; a press counts as
+  refused only when the whole hierarchy is unchanged, and refused directions are remembered per
+  hierarchy state, not per focused frame.
 - A row that has not scrolled may not hold the target's cell at all. With no match, `tvosTapOn`
   sweeps the focused row right then left, steps down a row (then up once down is refused) and
   sweeps again, re-reading after each press until the target appears. A press that leaves the

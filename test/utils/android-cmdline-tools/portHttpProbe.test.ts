@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createAdbReverseCommands } from "../../../src/utils/android-cmdline-tools/adbReverse";
 import {
+  PROBE_HOST_HEADER_PATTERN,
   parsePortHttpProbeOutput,
   portHttpProbeScript,
 } from "../../../src/utils/android-cmdline-tools/portHttpProbe";
@@ -88,5 +89,20 @@ describe("port HTTP probe", () => {
       `shell sh -c ${"'" + portHttpProbeScript(3000, request).replaceAll("'", "'\\''") + "'"}`,
     ]);
     expect(timeouts).toEqual([5000]);
+  });
+
+  test("the host-header pattern accepts host names and IP literals with ports, and rejects spaces", () => {
+    for (const host of [
+      "example.com:8080",
+      "[::1]:8080",
+      "10.0.2.2",
+      "api-v2.local",
+      "[fe80::1]",
+    ]) {
+      expect(PROBE_HOST_HEADER_PATTERN.test(host)).toBe(true);
+    }
+    for (const host of ["a b", "", "host/path", "host\r\nX: y", "user@host"]) {
+      expect(PROBE_HOST_HEADER_PATTERN.test(host)).toBe(false);
+    }
   });
 });

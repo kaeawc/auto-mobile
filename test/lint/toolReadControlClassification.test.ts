@@ -120,10 +120,12 @@ const CLASSIFICATION: Classification = {
   control: [
     "accessibilityAction",
     "accessibilityFocus",
-    // Drives an XCUITest audit of the app under test, so it is held to the owner.
+    // Drives an XCUITest audit of the app under test, and a wcag baseline record writes state.
     "accessibilityAudit",
     // The performance and memory audits drive the app, and a baseline record writes state.
     "audit",
+    // The performance and memory audits drive the app.
+    "performanceAudit",
     "appLifecycle",
     "barrier",
     "biometricAuth",

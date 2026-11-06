@@ -68,34 +68,35 @@ A read never writes settings on a device another session holds. A sessionless re
 
 ## 📦 Apps, files & data
 
-| Tool                                  | What it does                                                                                   |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| 🗂️ <code>listApps</code>              | List installed apps                                                                            |
-| 🚀 <code>launchApp</code>             | Launch app by package name                                                                     |
-| 🛑 <code>terminateApp</code>          | Terminate app by package name                                                                  |
-| 💥 <code>crashApp</code>              | Intentionally crash a running app through the platform crash path                              |
-| 🔄 <code>appLifecycle</code>          | Background-kill an app to test state restoration (Android; iOS background and SIGKILL)         |
-| ⬇️ <code>installApp</code>            | Install app on device (.apk, split APKs, .apks, .aab, .app, or .ipa)                           |
-| 🗑️ <code>uninstallApp</code>          | Uninstall app by package name or bundle identifier                                             |
-| 🔏 <code>inspectPackageSigning</code> | Fresh read of one app's presence (installed/absent/unknown) and signing                        |
-| 🔗 <code>getDeepLinks</code>          | Query app deep links                                                                           |
-| 📥 <code>putAppFile</code>            | Write files into a bounded logical storage target                                              |
-| 🧹 <code>resetAppLogs</code>          | Reset named app log files                                                                      |
-| ⚙️ <code>getPreference</code>         | Read an Android system property, Android SharedPreferences key, or iOS UserDefaults key        |
-| ⚙️ <code>setPreference</code>         | Write a system property, SharedPreferences, or UserDefaults key                                |
-| 🗝️ <code>deleteKeychainItem</code>    | Delete one allowlisted app-owned iOS Keychain item (SDK opt-in, requires confirm)              |
-| 🔑 <code>setKeyValue</code>           | Set app key-value storage entry                                                                |
-| ❌ <code>removeKeyValue</code>        | Remove app key-value storage entry                                                             |
-| 🧼 <code>clearKeyValueFile</code>     | Clear app key-value storage file                                                               |
-| 🗄️ <code>listDataStores</code>        | List app Jetpack DataStore instances (Android, requires AutoMobile SDK adapter)                |
-| 🗄️ <code>getDataStore</code>          | Read entries from an app Jetpack DataStore instance (Android, requires AutoMobile SDK adapter) |
-| 🧮 <code>sqlQuery</code>              | Execute SQL on app SQLite database                                                             |
-| 🔐 <code>resetKeychain</code>         | Reset declared Android scope/alias; iOS Simulator clears all apps with confirm:true            |
-| 🔗 <code>setAppLinks</code>           | Android 12+: change an app's App Links state so https links open the app directly (or not)     |
-| ⏱️ <code>measureStartup</code>        | Measure cold/warm/hot app startup                                                              |
-| 📜 <code>getLogs</code>               | Read device logs with filters                                                                  |
-| 📡 <code>sendBroadcast</code>         | Send an Android broadcast to the app under test                                                |
-| 🛠️ <code>backgroundWork</code>        | Android: read and trigger an app's background work without waiting hours                       |
+| Tool                                  | What it does                                                                                     |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| 🗂️ <code>listApps</code>              | List installed apps                                                                              |
+| 🚀 <code>launchApp</code>             | Launch app by package name                                                                       |
+| 🛑 <code>terminateApp</code>          | Terminate app by package name                                                                    |
+| 💥 <code>crashApp</code>              | Intentionally crash a running app through the platform crash path                                |
+| 🔄 <code>appLifecycle</code>          | Background-kill an app to test state restoration (Android; iOS background and SIGKILL)           |
+| ⬇️ <code>installApp</code>            | Install app on device (.apk, split APKs, .apks, .aab, .app, or .ipa)                             |
+| 🗑️ <code>uninstallApp</code>          | Uninstall app by package name or bundle identifier                                               |
+| 🔏 <code>inspectPackageSigning</code> | Fresh read of one app's presence (installed/absent/unknown) and signing                          |
+| 🔗 <code>getDeepLinks</code>          | Query app deep links                                                                             |
+| 📥 <code>putAppFile</code>            | Write files into a bounded logical storage target                                                |
+| 🧹 <code>resetAppLogs</code>          | Reset named app log files                                                                        |
+| ⚙️ <code>getPreference</code>         | Read an Android system property, Android SharedPreferences key, or iOS UserDefaults key          |
+| ⚙️ <code>setPreference</code>         | Write a system property, SharedPreferences, or UserDefaults key                                  |
+| 🗝️ <code>deleteKeychainItem</code>    | Delete one allowlisted app-owned iOS Keychain item (SDK opt-in, requires confirm)                |
+| 🔑 <code>setKeyValue</code>           | Set app key-value storage entry                                                                  |
+| ❌ <code>removeKeyValue</code>        | Remove app key-value storage entry                                                               |
+| 🧼 <code>clearKeyValueFile</code>     | Clear app key-value storage file                                                                 |
+| 🗄️ <code>listDataStores</code>        | List app Jetpack DataStore instances (Android, requires AutoMobile SDK adapter)                  |
+| 🗄️ <code>getDataStore</code>          | Read entries from an app Jetpack DataStore instance (Android, requires AutoMobile SDK adapter)   |
+| 🧮 <code>sqlQuery</code>              | Execute SQL on app SQLite database                                                               |
+| 🔐 <code>resetKeychain</code>         | Reset declared Android scope/alias; iOS Simulator clears all apps with confirm:true              |
+| 🔗 <code>setAppLinks</code>           | Android 12+: change an app's App Links state so https links open the app directly (or not)       |
+| 🚦 <code>performanceAudit</code>      | Android: pass/fail jank, touch latency and memory checks with failOn ([audits](using/audits.md)) |
+| ⏱️ <code>measureStartup</code>        | Measure cold/warm/hot app startup                                                                |
+| 📜 <code>getLogs</code>               | Read device logs with filters                                                                    |
+| 📡 <code>sendBroadcast</code>         | Send an Android broadcast to the app under test                                                  |
+| 🛠️ <code>backgroundWork</code>        | Android: read and trigger an app's background work without waiting hours                         |
 
 ## 📱 Devices & system
 
@@ -170,14 +171,14 @@ A read never writes settings on a device another session holds. A sessionless re
 
 ## ♿ Accessibility & tooling
 
-| Tool                                | What it does                                                            |
-| ----------------------------------- | ----------------------------------------------------------------------- |
-| 🦮 <code>accessibility</code>       | Check or control accessibility services                                 |
-| 🎯 <code>accessibilityFocus</code>  | Set or clear Android TalkBack focus by resourceId, text, or contentDesc |
-| 🫶 <code>accessibilityAction</code> | Perform a TalkBack-style accessibility action (Android)                 |
-| ✅ <code>accessibilityAudit</code>  | Run the platform's own accessibility audit engine on the current screen |
-| 🧾 <code>audit</code>               | Audit the current screen on demand                                      |
-| 🧩 <code>setToolEnabled</code>      | Show or hide tools in discovery                                         |
+| Tool                                | What it does                                                                                                                                         |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🦮 <code>accessibility</code>       | Check or control accessibility services                                                                                                              |
+| 🎯 <code>accessibilityFocus</code>  | Set or clear Android TalkBack focus by resourceId, text, or contentDesc                                                                              |
+| 🫶 <code>accessibilityAction</code> | Perform a TalkBack-style accessibility action (Android)                                                                                              |
+| ✅ <code>accessibilityAudit</code>  | Audit accessibility: WCAG checks (Android default) or the platform engine (iOS default), with scope, baseline and failOn ([audits](using/audits.md)) |
+| 🧾 <code>audit</code>               | Deprecated: use accessibilityAudit and performanceAudit                                                                                              |
+| 🧩 <code>setToolEnabled</code>      | Show or hide tools in discovery                                                                                                                      |
 
 ## 📺 Android TV focus navigation
 

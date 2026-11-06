@@ -106,7 +106,10 @@ unavailable, and a broker binding never reuses one.
   hierarchy read. Startup retries connection/readiness for a bounded budget. Process exit or
   the returned stop handle closes the client and removes the registration. After boot, before session
   binding, `startDevice` discovers a watchsimulator xctestrun in the configured CtrlProxy derived
-  data, building the `CtrlProxyWatch` scheme with `build-for-testing` if absent.
+  data, building the `CtrlProxyWatch` scheme with `build-for-testing` if absent. The project is
+  looked up under `AUTOMOBILE_PROJECT_ROOT` (default: process working directory), then the
+  daemon launch directory, then the running AutoMobile package root, because the detached
+  daemon runs in the home directory; when none has it, the error lists every path checked.
   `AUTOMOBILE_WATCH_RUNNER_XCTESTRUN` selects an explicit prebuilt artifact. A per-launch copy
   injects `AM_PORT` for the allocated localhost port. The lifecycle owner reuses a registered
   runner and attaches its own runner to the newly bound session. It stops its own handle on

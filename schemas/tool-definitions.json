@@ -18928,6 +18928,14 @@
           "enum": ["android", "ios", "tvos", "visionos"]
         },
         "configuredInventory": {},
+        "truncated": {
+          "description": "Present only when the response was spilled to `artifact`: true when `images` holds fewer than `count` entries; read the artifact for the full list",
+          "type": "boolean"
+        },
+        "imagesReturned": {
+          "description": "Present only when spilled: number of entries inline in `images`",
+          "type": "number"
+        },
         "artifact": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
           "type": "object",

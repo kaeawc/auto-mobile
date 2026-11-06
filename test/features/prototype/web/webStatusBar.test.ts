@@ -525,6 +525,36 @@ test("a row-bound min() maximum width binds only below the screen width", () => 
   expect(statusBarOf(header(20).element)?.attrs["data-status-content"]).toBe("light");
 });
 
+test("a full-width child inside a wrap-sized column does not cover the status bar", () => {
+  const still = renderPrototypeStill({
+    id: "wrap-ancestor",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "box",
+      style: { width: "fill", height: "fill" },
+      children: [
+        { type: "column", style: { width: "fill", height: "fill", background: "#000000" } },
+        {
+          type: "column",
+          style: { width: "fill", height: "fill" },
+          children: [
+            {
+              type: "column",
+              style: { width: "wrap" },
+              children: [
+                { type: "column", style: { width: "fill", background: "#ffffff" } },
+                { type: "text", text: "x", style: { width: { dp: 20 } } },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
 test("a transparent root does not set the status bar content in a still", () => {
   const still = renderPrototypeStill({
     id: "alpha",

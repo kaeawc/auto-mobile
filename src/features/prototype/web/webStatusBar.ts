@@ -274,11 +274,14 @@ function topCandidates(element: WebElement, screen: WebScreenSize | undefined): 
       .reverse()
       .map((child) => ({ child, spans: true }));
   }
-  // A narrowed child's descendants span at most its width, so nothing inside it covers the top.
+  // A narrowed child's descendants span at most its width, so nothing inside it covers the top;
+  // a flex child that does not span its line is sized to its content, which narrows it too.
   const leading = children[0];
-  return leading && !narrowed(leading, screen) && reachesTop(leading, element, layout, screen)
-    ? [{ child: leading, spans: spansWidth(leading, layout, children.length, screen) }]
-    : [];
+  if (!leading || narrowed(leading, screen) || !reachesTop(leading, element, layout, screen)) {
+    return [];
+  }
+  const spans = spansWidth(leading, layout, children.length, screen);
+  return spans || layout === "flow" ? [{ child: leading, spans }] : [];
 }
 
 const MAX_DEPTH = 32;

@@ -174,6 +174,7 @@ const defaultAudit: PortReverseAudit = (event) => logger.info(`[portReverse] ${e
  */
 export class PortReverseManager {
   private readonly devices = new Map<string, DeviceState>();
+  private readonly ownedListeners = new Set<(deviceId: string) => void>();
 
   constructor(
     private readonly audit: PortReverseAudit = defaultAudit,
@@ -232,7 +233,40 @@ export class PortReverseManager {
       } else {
         state.ensuring.set(owner, left);
       }
+      if (state.owned.size > 0) {
+        this.notifyOwned(target.deviceId);
+      }
     });
+  }
+
+  /**
+   * Calls `listener` with the device id after each `ensure` that leaves the device holding owned
+   * mappings (the periodic reconcile arms on it). Returns the unsubscribe.
+   */
+  onOwnedMappings(listener: (deviceId: string) => void): () => void {
+    this.ownedListeners.add(listener);
+    return () => {
+      this.ownedListeners.delete(listener);
+    };
+  }
+
+  /** Devices holding at least one owned mapping, ascending. */
+  ownedDevices(): string[] {
+    return [...this.devices]
+      .filter(([, state]) => state.owned.size > 0)
+      .map(([deviceId]) => deviceId)
+      .sort();
+  }
+
+  private notifyOwned(deviceId: string): void {
+    for (const listener of this.ownedListeners) {
+      try {
+        listener(deviceId);
+      } catch (error) {
+        // A listener is best-effort scheduling; it must never fail the ensure that triggered it.
+        logger.warn(`[portReverse] owned-mapping listener failed: ${errorMessage(error)}`);
+      }
+    }
   }
 
   /** Every reverse on the device, each marked whether this session owns it. */

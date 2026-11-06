@@ -57,8 +57,11 @@ manager (#12530) also uses.
   port the other still holds at the same host port: `remove` of a shared port drops the session's
   ownership and reports `released` with `owner: "prototype"`, and the last
   holder removes the mapping. Every removal is tracked in the view while in
-  flight, and the other manager waits for it before joining or judging that
-  port, so nobody joins a mapping being deleted; `ensure` re-checks each shared
+  flight and counted per port, and the other manager waits for it before
+  joining, judging or adding that port; a prototype whose `--list` read
+  overlapped a removal treats that listing as stale. Each manager re-checks the
+  other's hold after its own awaits and immediately before removing, so nobody
+  joins a mapping being deleted or deletes one just claimed; `ensure` re-checks each shared
   port just before claiming it, since its conflict checks may await host
   probes. A session's pending removal
   counts as a hold, and is dropped without removing when a prototype holds the

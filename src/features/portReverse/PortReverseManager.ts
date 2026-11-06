@@ -835,6 +835,8 @@ export class PortReverseManager {
     request: PortReverseRequest,
     added: number[],
   ): Promise<void> {
+    // A prototype's removal of this port in flight lands first, so it cannot delete this add.
+    await this.ownership.settled(target.deviceId, request.devicePort);
     try {
       // --no-rebind: a mapping someone made since our --list is refused rather than overwritten.
       await state.adb.add(request.devicePort, request.hostPort, { noRebind: true });

@@ -207,9 +207,10 @@ export class PrototypeAdbReverseManager {
     await this.enqueue(state, async () => {
       for (const port of [...state.owned.keys()]) {
         const joinedTo = this.forget(state, port);
+        // The session check runs after the awaited --list, with no await before the removal.
         if (
-          this.keptForSession(deviceId, port, joinedTo ?? port) ||
-          (await this.repointed(state, port, joinedTo))
+          (await this.repointed(state, port, joinedTo)) ||
+          this.keptForSession(deviceId, port, joinedTo ?? port)
         ) {
           continue;
         }
@@ -306,9 +307,10 @@ export class PrototypeAdbReverseManager {
         continue;
       }
       const joinedTo = this.forget(state, port);
+      // The session check runs after the awaited --list, with no await before the removal.
       if (
-        this.keptForSession(state.deviceId, port, joinedTo ?? port) ||
-        (await this.repointed(state, port, joinedTo))
+        (await this.repointed(state, port, joinedTo)) ||
+        this.keptForSession(state.deviceId, port, joinedTo ?? port)
       ) {
         continue;
       }
@@ -330,6 +332,15 @@ export class PrototypeAdbReverseManager {
     if (missing.length === 0) {
       return;
     }
+    // -1 marks a port whose removal is already in flight: its listing is stale whatever follows.
+    const generations = new Map(
+      missing.map((port) => [
+        port,
+        this.ownership.removalPending(state.deviceId, port)
+          ? -1
+          : this.ownership.removalGeneration(state.deviceId, port),
+      ]),
+    );
     let existing: ReadonlyMap<number, number | undefined>;
     try {
       existing = await state.adb.listReverses();
@@ -339,7 +350,7 @@ export class PrototypeAdbReverseManager {
       return;
     }
     for (const port of missing) {
-      if (await this.joinSession(state, port, prototypeId, existing)) {
+      if (await this.joinSession(state, port, prototypeId, { existing, generations })) {
         continue;
       }
       try {
@@ -354,8 +365,8 @@ export class PrototypeAdbReverseManager {
 
   /**
    * Joins a listed port a portReverse session holds and still maps where it set it, so the session's
-   * removal waits for this prototype too. A port that session is removing right now is waited for
-   * and then added (or joined, if the removal failed). True when nothing is left to add: the port
+   * removal waits for this prototype too. A port that session is removing right now, or removed
+   * while `--list` was read, is waited for and then added (or joined, if the removal failed). True when nothing is left to add: the port
    * was joined, or it is someone else's reverse (the user's, or another tool's), which is left
    * alone and never removed.
    */
@@ -363,9 +374,18 @@ export class PrototypeAdbReverseManager {
     state: DeviceState,
     port: number,
     prototypeId: string,
-    existing: ReadonlyMap<number, number | undefined>,
+    listed: {
+      existing: ReadonlyMap<number, number | undefined>;
+      /** Each port's removal generation before `--list` was read. */
+      generations: ReadonlyMap<number, number>;
+    },
   ): Promise<boolean> {
-    if (this.ownership.removalPending(state.deviceId, port)) {
+    const { existing, generations } = listed;
+    // A removal in flight, or one that ran during the --list read, makes the listing stale.
+    if (
+      this.ownership.removalPending(state.deviceId, port) ||
+      this.ownership.removalGeneration(state.deviceId, port) !== generations.get(port)
+    ) {
       await this.ownership.settled(state.deviceId, port);
       const kept = this.ownership.heldByOther(this.holder, state.deviceId, port);
       return kept !== undefined && this.join(state, port, prototypeId, kept.hostPort);

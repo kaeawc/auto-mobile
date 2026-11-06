@@ -28,6 +28,8 @@ const removalKey = (deviceId: string, devicePort: number) => `${deviceId}\u0000$
 export class AdbReverseOwnership {
   private readonly holders = new Set<AdbReverseHolder>();
   private readonly removals = new Map<string, Promise<unknown>>();
+  /** Removals ever started per port, so a reader can tell one began and ended during its read. */
+  private readonly generations = new Map<string, number>();
 
   /** Adds a manager's view; the returned function removes it. */
   register(holder: AdbReverseHolder): () => void {
@@ -55,6 +57,7 @@ export class AdbReverseOwnership {
   /** Tracks a removal of the port until it settles; returns it unchanged. */
   removing<T>(deviceId: string, devicePort: number, removal: Promise<T>): Promise<T> {
     const key = removalKey(deviceId, devicePort);
+    this.generations.set(key, (this.generations.get(key) ?? 0) + 1);
     const tracked = removal.finally(() => {
       if (this.removals.get(key) === tracked) {
         this.removals.delete(key);
@@ -62,6 +65,11 @@ export class AdbReverseOwnership {
     });
     this.removals.set(key, tracked);
     return tracked;
+  }
+
+  /** How many removals of the port have started; compare two reads to detect one in between. */
+  removalGeneration(deviceId: string, devicePort: number): number {
+    return this.generations.get(removalKey(deviceId, devicePort)) ?? 0;
   }
 
   /** Whether a removal of the port is in flight. */

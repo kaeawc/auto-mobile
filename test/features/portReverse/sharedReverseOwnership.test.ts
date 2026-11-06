@@ -20,9 +20,14 @@ const setup = (hostProbe?: HostLoopbackProbe) => {
   const ownership = new AdbReverseOwnership();
   const sessions = new PortReverseManager(() => {}, undefined, hostProbe, ownership);
   const prototypes = new PrototypeAdbReverseManager(ownership);
+  /** Runs after the prototype's `--list` is read and before it returns, to interleave work. */
+  const hooks: { afterPrototypeList?: () => Promise<void> } = {};
   const prototypeAdb: PrototypeReverseAdb = {
-    listReverses: async () =>
-      new Map((await adb.list()).map((entry) => [entry.devicePort, entry.hostPort])),
+    listReverses: async () => {
+      const live = new Map((await adb.list()).map((entry) => [entry.devicePort, entry.hostPort]));
+      await hooks.afterPrototypeList?.();
+      return live;
+    },
     addReverse: (port) => adb.add(port, port, { noRebind: true }),
     removeReverse: (port) => adb.remove(port),
   };
@@ -39,7 +44,7 @@ const setup = (hostProbe?: HostLoopbackProbe) => {
       },
       prototypeAdb,
     );
-  return { adb, sessions, prototypes, target, show };
+  return { adb, sessions, prototypes, target, show, hooks };
 };
 
 const removals = (adb: FakeAdbReverseCommands) =>
@@ -292,5 +297,29 @@ describe("shared adb reverse ownership", () => {
     await show("q", 18705);
     await prototypes.releaseAll(DEVICE);
     expect(adb.mappings.has(18705)).toBe(false);
+  });
+
+  test("a session that reclaims a port while the last prototype releases it keeps it", async () => {
+    const { adb, sessions, prototypes, target, show, hooks } = setup({
+      probe: async () => "refused",
+    });
+    await sessions.ensure(target(), [{ devicePort: 18705, hostPort: 18705 }]);
+    await show("p", 18705);
+    expect((await sessions.remove(target(), [18705])).mappings[0]?.status).toBe("released");
+
+    let ensured: Awaited<ReturnType<typeof sessions.ensure>> | undefined;
+    hooks.afterPrototypeList = async () => {
+      hooks.afterPrototypeList = undefined;
+      ensured = await sessions.ensure(
+        { ...target(), holdsDevice: true },
+        [{ devicePort: 18705, hostPort: 18705 }],
+        { reclaimStale: true },
+      );
+    };
+    await prototypes.release(DEVICE, "p");
+
+    expect(ensured?.mappings[0]?.status).toBe("added");
+    expect(sessions.ownedPorts(DEVICE)).toEqual([18705]);
+    expect(adb.mappings.get(18705)).toBe("tcp:18705");
   });
 });

@@ -3,9 +3,9 @@ name: "Wear OS Emulator Smoke (Advisory)"
 # Advisory nightly Wear OS emulator lane (#16829). Not in the green-main ruleset and nothing
 # depends on it. Runs nightly, on dispatch, and on a pull request only when labelled `run-wear`.
 # Uses the x86_64 API 37 `android-wear-signed` image on the round `wearos_small_round` profile.
-# The AVD is created with avdmanager until startDevice createIfMissing can create watches
-# (#16823); set WEAR_SMOKE_CREATE_VIA=startDevice then. The fixture steps run once the Wear
-# fixture app (#16828) exists at android/wear-fixture; until then only device-level steps run.
+# startDevice createIfMissing creates the round watch AVD (#16823); WEAR_SMOKE_CREATE_VIA=avdmanager
+# is the fallback. The plan drives the Wear fixture app at android/wear-fixture (#16828), including
+# a notification action through watch systemTray (#16826).
 
 on:
   schedule:

@@ -1,17 +1,22 @@
 #!/usr/bin/env bash
-# Advisory Wear OS emulator smoke (#16829): install an x86_64 Wear OS image, create a round watch
-# AVD (until startDevice can create one, #16823), build the Wear fixture app (#16828) when its
-# module exists, run scripts/ci/wear-smoke/wearSmoke.ts, then capture emulator diagnostics
+# Advisory Wear OS emulator smoke (#16829): install an x86_64 Wear OS image, leave the round watch
+# AVD to startDevice createIfMissing (#16823) unless WEAR_SMOKE_CREATE_VIA=avdmanager, build the
+# Wear fixture app (#16828) when its module exists, run scripts/ci/wear-smoke/wearSmoke.ts, then
+# capture emulator diagnostics
 # whatever the outcome. Exits with the smoke's status. A setup failure also collects diagnostics
 # and adds a failure line to $GITHUB_STEP_SUMMARY through the EXIT trap.
 #
 # Env:
 #   WEAR_SMOKE_OUT_DIR          artifact directory (default: scratch/wear-smoke)
 #   WEAR_SMOKE_SYSTEM_IMAGE     sdkmanager package (default: API 37.0 android-wear-signed x86_64)
-#   WEAR_SMOKE_DEVICE_PROFILE   avdmanager profile (default: wearos_small_round)
-#   WEAR_SMOKE_AVD_NAME         AVD the runner creates (default: automobile-wear-smoke)
-#   WEAR_SMOKE_CREATE_VIA       avdmanager (default) creates the AVD here; startDevice leaves it
-#                               to startDevice createIfMissing (needs #16823)
+#   WEAR_SMOKE_CREATE_VIA       startDevice (default) leaves the AVD to startDevice
+#                               createIfMissing, which picks the round wearos_small_round
+#                               profile; avdmanager creates a named AVD here instead (a
+#                               fallback if startDevice creation regresses)
+#   WEAR_SMOKE_DEVICE_PROFILE   avdmanager profile with avdmanager creation (default:
+#                               wearos_small_round)
+#   WEAR_SMOKE_AVD_NAME         AVD avdmanager creation makes and boots (default:
+#                               automobile-wear-smoke)
 #   WEAR_SMOKE_OS_VERSION       Android version startDevice is pinned to with startDevice
 #                               creation (default: 17)
 #   WEAR_SMOKE_FIXTURE_MODULE   Gradle module of the fixture app under android/ (default:
@@ -73,7 +78,7 @@ trap on_exit EXIT
 system_image="${WEAR_SMOKE_SYSTEM_IMAGE:-system-images;android-37.0;android-wear-signed;x86_64}"
 device_profile="${WEAR_SMOKE_DEVICE_PROFILE:-wearos_small_round}"
 avd_name="${WEAR_SMOKE_AVD_NAME:-automobile-wear-smoke}"
-create_via="${WEAR_SMOKE_CREATE_VIA:-avdmanager}"
+create_via="${WEAR_SMOKE_CREATE_VIA:-startDevice}"
 os_version="${WEAR_SMOKE_OS_VERSION:-17}"
 fixture_module="${WEAR_SMOKE_FIXTURE_MODULE:-wear-fixture}"
 fixture_apk="${WEAR_SMOKE_FIXTURE_APK:-}"
@@ -94,9 +99,9 @@ if [[ ! "${system_image}" =~ ^system-images\;android-[0-9][0-9.]*(-ext[0-9]+)?\;
   exit 2
 fi
 case "${create_via}" in
-  avdmanager | startDevice) ;;
+  startDevice | avdmanager) ;;
   *)
-    echo "WEAR_SMOKE_CREATE_VIA must be avdmanager or startDevice: ${create_via}" >&2
+    echo "WEAR_SMOKE_CREATE_VIA must be startDevice or avdmanager: ${create_via}" >&2
     exit 2
     ;;
 esac
@@ -147,7 +152,7 @@ if [[ -z "${fixture_apk}" ]]; then
       exit 1
     fi
   else
-    fixture_note="android/${fixture_module} does not exist yet (#16828); fixture steps are skipped"
+    fixture_note="android/${fixture_module} does not exist; fixture steps are skipped"
     echo "::warning title=Wear smoke::${fixture_note}"
   fi
 elif [[ ! -f "${fixture_apk}" ]]; then

@@ -5,11 +5,11 @@
  * Drives one persistent MCP session through a fixed plan on a round x86_64 Wear OS emulator:
  * start the watch, observe (hierarchy and `isScreenRound`), then, when the Wear fixture APK
  * (#16828) is supplied, install and launch it, scroll to a list row, tap it, go back, move the
- * rotary picker with `rotaryScroll`, go home, and finally enter and exit ambient. Without the
- * fixture only the device-level steps run and the summary says why. The plan runs on the shared
- * emulator smoke runner (`scripts/ci/emulator-smoke/smokeRunner.ts`).
- *
- * Notification actions join the plan once watch `systemTray` support (#16826) lands.
+ * rotary picker with `rotaryScroll`, post the fixture notification, go home, find the
+ * notification and tap one of its actions with `systemTray`, check the app reports that action,
+ * and finally enter and exit ambient. Without the fixture only the device-level steps run and the
+ * summary says why. The plan runs on the shared emulator smoke runner
+ * (`scripts/ci/emulator-smoke/smokeRunner.ts`).
  */
 import { join } from "node:path";
 import {
@@ -26,15 +26,21 @@ export const WEAR_SMOKE_TITLE = "Wear OS emulator smoke (advisory)";
 
 /**
  * What the smoke expects of the Wear fixture app (#16828): its package, a list row that is
- * below the first screen, the text its detail screen shows, the list row that opens the rotary
- * picker, and the picker's initial value. Keep these in step with the fixture.
+ * below the first screen, the text its detail screen shows, the row above the item list that
+ * opens the rotary picker, the picker's initial value, the row that posts the notification, the
+ * notification's title, the action the smoke taps, and the status line that action leaves.
+ * These mirror `WearFixtureCatalog` in android/wear-fixture; keep them in step with it.
  */
 export const WEAR_FIXTURE = {
   appId: "dev.jasonpearson.automobile.wearfixture",
   listRowText: "Item 20",
-  detailText: "Item 20 detail",
+  detailText: "Detail for Item 20",
   pickerRowText: "Rotary picker",
-  pickerInitialText: "Value 0",
+  pickerInitialText: "Level 0",
+  postNotificationRowText: "Post notification",
+  notificationTitle: "Fixture alert",
+  notificationActionLabel: "Archive",
+  notificationActionStatus: "Notification action: Archive",
 } as const;
 
 const START_TIMEOUT_MS = 600_000;
@@ -146,7 +152,13 @@ const BROKEN_APP_ID = "com.example.deliberately.broken";
 function fixtureSteps(apkPath: string, breakAssertion: boolean): SmokeStep[] {
   const { appId, listRowText, detailText, pickerRowText, pickerInitialText } = WEAR_FIXTURE;
   return [
-    step("install", "installApp", { artifactPath: apkPath }, "the Wear fixture installs"),
+    // The grant covers POST_NOTIFICATIONS, so posting never stops at a permission dialog.
+    step(
+      "install",
+      "installApp",
+      { artifactPath: apkPath, grantAllPermissions: true },
+      "the Wear fixture installs with its permissions granted",
+    ),
     step("launch", "launchApp", { appId }, `${appId} launches`),
     observeStep(
       "observe-launched",
@@ -168,10 +180,11 @@ function fixtureSteps(apkPath: string, breakAssertion: boolean): SmokeStep[] {
     observeStep("observe-detail", `"${detailText}" is shown`, expectText(appId, detailText)),
     step("back", "pressButton", { button: "back" }, "back closes the detail screen"),
     observeStep("observe-list", "the detail screen is gone", expectNoText(appId, detailText)),
+    // The picker row sits above the item list, so scroll back towards the top.
     step(
       "scroll-to-picker",
       "swipeOn",
-      { direction: "up", lookFor: { text: pickerRowText } },
+      { direction: "down", lookFor: { text: pickerRowText } },
       `scroll the list until "${pickerRowText}" is visible`,
     ),
     step(
@@ -191,8 +204,66 @@ function fixtureSteps(apkPath: string, breakAssertion: boolean): SmokeStep[] {
       `the picker left "${pickerInitialText}"`,
       expectNoText(appId, pickerInitialText),
     ),
+    step("picker-back", "pressButton", { button: "back" }, "back closes the picker"),
+    ...notificationSteps(),
+  ];
+}
+
+/**
+ * Post the fixture notification from the app, leave for the watch face, then find it in the
+ * notification stream and tap one of its actions; the action reopens the app with a status line
+ * naming it.
+ */
+function notificationSteps(): SmokeStep[] {
+  const {
+    appId,
+    postNotificationRowText,
+    notificationTitle,
+    notificationActionLabel,
+    notificationActionStatus,
+  } = WEAR_FIXTURE;
+  const notification = { title: notificationTitle, appId };
+  return [
+    step(
+      "scroll-to-post",
+      "swipeOn",
+      { direction: "up", lookFor: { text: postNotificationRowText } },
+      `scroll the list until "${postNotificationRowText}" is visible`,
+    ),
+    step(
+      "post-notification",
+      "tapOn",
+      { action: "tap", selector: { text: postNotificationRowText } },
+      `tap "${postNotificationRowText}"`,
+    ),
+    // systemTray opens the watch stream from the watch face.
     step("home", "homeScreen", {}, "home is delivered"),
     observeStep("observe-home", `${appId} left the foreground`, expectNotForeground(appId)),
+    step(
+      "find-notification",
+      "systemTray",
+      { action: "find", notification },
+      `the "${notificationTitle}" notification is in the stream`,
+    ),
+    step(
+      "notification-action",
+      "systemTray",
+      { action: "tap", notification: { ...notification, tapActionLabel: notificationActionLabel } },
+      `tap the "${notificationActionLabel}" action`,
+    ),
+    // The action reuses the running activity, whose list can still be scrolled down to the
+    // post row; the status line sits above the action rows, so scroll back up to it.
+    step(
+      "scroll-to-status",
+      "swipeOn",
+      { direction: "down", lookFor: { text: notificationActionStatus } },
+      `scroll the list until "${notificationActionStatus}" is visible`,
+    ),
+    observeStep(
+      "observe-notification-action",
+      `the fixture reports "${notificationActionStatus}"`,
+      expectText(appId, notificationActionStatus),
+    ),
   ];
 }
 
@@ -234,7 +305,7 @@ export function wearSmokeNotes(options: WearSmokePlanOptions): string[] {
   return options.fixtureApkPath
     ? []
     : [
-        "The Wear fixture app (#16828) was not built, so only the device-level steps ran: list, detail, rotary picker and fixture assertions were skipped.",
+        "The Wear fixture app (#16828) was not built, so only the device-level steps ran: list, detail, rotary picker, notification and fixture assertions were skipped.",
       ];
 }
 

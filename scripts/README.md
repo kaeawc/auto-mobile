@@ -693,15 +693,17 @@ collects emulator diagnostics and adds a failure line to the job step summary.
 
 `.github/workflows/wear-emulator-smoke.yml` runs nightly, on dispatch, and on a pull request
 labelled `run-wear`; it is not a required check. `scripts/ci/wear-smoke/run-wear-smoke.sh` installs
-the x86_64 API 37 `android-wear-signed` image, creates a `wearos_small_round` AVD with avdmanager
-(`WEAR_SMOKE_CREATE_VIA=startDevice` hands creation to `startDevice` `createIfMissing` instead),
-builds the Wear fixture app (Gradle module `:wear-fixture`, #16828) when that module exists, and runs
-`scripts/ci/wear-smoke/wearSmoke.ts`. The plan observes the watch (hierarchy and
-`isScreenRound: true`), then with the fixture installs and launches it, scrolls to a list row,
-taps it, goes back, moves the rotary picker with `rotaryScroll`, goes home, and enters and exits
-`ambient`. Without the fixture only the device-level steps run, with a warning and a summary note.
-The fixture texts the plan expects live in `WEAR_FIXTURE` in `wearSmoke.ts`. Step JSON,
-screenshots, `summary.md`, the fixture build log and emulator diagnostics land in
+the x86_64 API 37 `android-wear-signed` image and leaves the round watch AVD to `startDevice`
+`createIfMissing` (`WEAR_SMOKE_CREATE_VIA=avdmanager` creates a named `wearos_small_round` AVD with
+avdmanager instead), builds the Wear fixture app (Gradle module `:wear-fixture`) when that module
+exists, and runs `scripts/ci/wear-smoke/wearSmoke.ts`. The plan observes the watch (hierarchy and
+`isScreenRound: true`), then with the fixture installs it with its permissions granted, launches
+it, scrolls to a list row, taps it, goes back, moves the rotary picker with `rotaryScroll`, posts
+the fixture notification, goes home, finds the notification and taps its `Archive` action with
+`systemTray`, scrolls back up to the app's status line and checks it names that action, and
+enters and exits `ambient`. Without the fixture only the device-level steps run, with a warning and
+a summary note. The fixture texts the plan expects live in `WEAR_FIXTURE` in `wearSmoke.ts` and
+mirror `WearFixtureCatalog` in the fixture. Step JSON, screenshots, `summary.md`, the fixture build log and emulator diagnostics land in
 `WEAR_SMOKE_OUT_DIR` (default `scratch/wear-smoke`); `WEAR_SMOKE_BREAK_ASSERTION=1` (the
 `break-assertion` dispatch input) swaps in an impossible assertion. Both smoke lanes share
 `scripts/ci/emulator-smoke/` (the step runner and the bounded `sdkmanager` install).

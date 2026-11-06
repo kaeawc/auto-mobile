@@ -34,7 +34,14 @@ const API_DEVICE_IDLE = 23;
 const API_POST_NOTIFICATION = 33;
 const API_APP_HIBERNATION = 31;
 
-const ACTIVE_BUCKET = "10";
+const STANDBY_BUCKET_VALUES = {
+  active: "10",
+  working_set: "20",
+  frequent: "30",
+  rare: "40",
+  restricted: "45",
+} as const;
+const ACTIVE_BUCKET = STANDBY_BUCKET_VALUES.active;
 
 /** App ops set per uid rather than per package (as `SetAndroidScheduleExactAlarmAppOp` does). */
 export const UID_MODE_OPS: ReadonlySet<KillProfileAppOp> = new Set(["SCHEDULE_EXACT_ALARM"]);
@@ -107,6 +114,8 @@ interface StepPlan {
   capture?: () => Promise<KillProfileRestoreAction>;
   /** Optional read-back for steps whose successful shell write does not prove application. */
   verify?: () => Promise<string | undefined>;
+  /** A mismatched read-back may reflect a partial write; retain the original state for cleanup. */
+  retainOnVerificationFailure?: boolean;
   /** Output that means the device cannot do this, not that the command broke. */
   unsupportedOutput?: RegExp;
 }
@@ -166,6 +175,17 @@ function hibernationPlan(context: Context): StepPlan {
     label: "app hibernation",
     command: `shell cmd app_hibernation set-state --user 0 ${context.quoted} true`,
     minApi: API_APP_HIBERNATION,
+    retainOnVerificationFailure: true,
+    verify: async () => {
+      const { stdout } = await run(
+        context,
+        `shell cmd app_hibernation get-state --user 0 ${context.quoted}`,
+      );
+      const observed = parseHibernationState(stdout);
+      return observed === "true"
+        ? undefined
+        : `hibernation reads back as ${observed}, expected true`;
+    },
     capture: async () => {
       const { stdout } = await run(
         context,
@@ -198,6 +218,15 @@ function standbyBucketPlan(context: Context, bucket: "restricted" | "rare"): Ste
     label: `standby bucket ${bucket}`,
     command: `shell am set-standby-bucket ${context.quoted} ${bucket}`,
     minApi: bucket === "restricted" ? API_RESTRICTED_BUCKET : API_STANDBY_BUCKET,
+    retainOnVerificationFailure: true,
+    verify: async () => {
+      const { stdout } = await run(context, `shell am get-standby-bucket ${context.quoted}`);
+      const observed = parseStandbyBucket(stdout);
+      const expected = STANDBY_BUCKET_VALUES[bucket];
+      return observed === expected
+        ? undefined
+        : `standby bucket reads back as ${observed ?? "unreadable"}, expected ${expected}`;
+    },
     capture: async () => {
       const { stdout } = await run(context, `shell am get-standby-bucket ${context.quoted}`);
       // An unreadable bucket is restored to active, the bucket of an app in use.
@@ -216,6 +245,14 @@ function appOpPlan(context: Context, op: KillProfileAppOp, mode: "ignore" | "den
     label: `appops ${op} ${mode}`,
     command: `${appOpCommand(context, "set", op)} ${mode}`,
     minApi: APP_OP_MIN_API[op],
+    retainOnVerificationFailure: true,
+    verify: async () => {
+      const { stdout } = await run(context, appOpCommand(context, "get", op));
+      const observed = parseAppOpMode(stdout, op);
+      return observed === mode
+        ? undefined
+        : `appops ${op} reads back as ${observed}, expected ${mode}`;
+    },
     unsupportedOutput: /Unknown operation string/i,
     capture: async () => {
       const { stdout } = await run(context, appOpCommand(context, "get", op));
@@ -320,7 +357,8 @@ type StepFailure = Pick<KillProfileStepResult, "status" | "reason">;
 
 /**
  * `indeterminate` means the write may have landed (the transport failed mid-write, or
- * the read-back could not be taken), so the restore record must stay for reset and release.
+ * the read-back could not be taken or did not confirm the requested value), so the
+ * restore record must stay for reset and release.
  */
 interface WriteOutcome {
   failure?: StepFailure;
@@ -332,7 +370,7 @@ function indeterminateFailure(error: unknown): WriteOutcome {
   return { failure: { status: "failed", reason: errorMessage(error) }, indeterminate: true };
 }
 
-/** Write a step and, when required, verify the resulting permission state. */
+/** Write a step and, when required, verify the resulting state. */
 async function writeStep(context: Context, plan: StepPlan): Promise<WriteOutcome> {
   let output;
   try {
@@ -350,7 +388,9 @@ async function writeStep(context: Context, plan: StepPlan): Promise<WriteOutcome
   }
   try {
     const reason = await plan.verify();
-    return reason ? { failure: { status: "failed", reason } } : {};
+    return reason
+      ? { failure: { status: "failed", reason }, indeterminate: plan.retainOnVerificationFailure }
+      : {};
   } catch (error) {
     return indeterminateFailure(error);
   }

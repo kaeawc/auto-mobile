@@ -216,7 +216,7 @@
     "knip": "^6.0.0",
     "kysely": "0.29.8",
     "oxc-parser": "0.157.0",
-    "oxfmt": "0.75.0",
+    "oxfmt": "0.76.0",
     "oxlint": "1.90.0",
     "oxlint-tsgolint": "7.0.2005",
     "pixelmatch": "^8.0.0",

@@ -181,11 +181,19 @@ export class WebSocketVisionosRunnerClient implements VisionosRunnerClient {
       return;
     }
     if (response.type === "error" || response.success === false) {
+      const runnerError = String(response.error ?? "Visionos command failed");
+      if (runnerError.includes("kAXErrorAPIDisabled")) {
+        pending.reject(
+          new VisionosRunnerError(
+            "The visionOS simulator's accessibility API is disabled, so no hierarchy can be read for the built-in app. Re-create the Apple Vision Pro simulator or boot it with accessibility enabled, then observe again.",
+            "accessibility_api_disabled",
+            { cause: runnerError },
+          ),
+        );
+        return;
+      }
       pending.reject(
-        new VisionosRunnerError(
-          String(response.error ?? "Visionos command failed"),
-          String(response.errorCode ?? "command_failed"),
-        ),
+        new VisionosRunnerError(runnerError, String(response.errorCode ?? "command_failed")),
       );
     } else if (
       response.type === expectedReplyType(pending.type) &&

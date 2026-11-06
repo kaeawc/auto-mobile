@@ -9,7 +9,10 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+// StrongBox key generation (setIsStrongBoxBacked) exists from API 28; the default SDK is older.
+@Config(sdk = [28])
 @RunWith(RobolectricTestRunner::class)
 internal class KeystoreStrongBoxFaultTest : KeystoreFaultTestBase() {
   @After

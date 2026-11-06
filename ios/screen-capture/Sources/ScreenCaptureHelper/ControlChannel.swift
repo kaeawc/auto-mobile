@@ -7,8 +7,7 @@ import ScreenCaptureCore
 /// permissive — malformed / partial / unknown lines are ignored — matching the
 /// repo's minimal-control-surface precedent.
 ///
-/// Only started in `--encode h264` mode, so the default raw path never touches
-/// STDIN and its output stays byte-for-byte unchanged.
+/// Started for every capture mode, which always encodes (`--encode h264`).
 ///
 /// `@unchecked Sendable`: `buffer` is mutated only on the serial `queue` (via
 /// `ingest`); `handle` and `onCommand` are `let`. This lets the `@Sendable`

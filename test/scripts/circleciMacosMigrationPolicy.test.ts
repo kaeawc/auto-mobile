@@ -117,7 +117,7 @@ function onlyTesting(command: string): string[] {
 }
 
 const PR_PARAMETERS = ["run-ios"];
-const MAIN_PARAMETERS = ["run-main-ios", "run-main-desktop"];
+const MAIN_PARAMETERS = ["run-main-ios", "run-main-desktop", "run-main-linux"];
 const NIGHTLY_ORDER = [
   "XCTestRunner Simulator Tests",
   "Swift Packages Sweep (Xcode 26.6)",

@@ -18,6 +18,7 @@ import { DefaultDeviceWindowCacheInvalidator } from "../../features/observe/Devi
 import { AndroidCtrlProxyClient } from "../../features/observe/android/AndroidCtrlProxyClient";
 import { PrototypeSpecRevisions } from "../../features/prototype/prototypeSpecRevisions";
 import { PrototypeAdbReverseManager } from "../../features/prototype/PrototypeAdbReverseManager";
+import { defaultAdbReverseOwnership } from "../../features/portReverse/AdbReverseOwnership";
 import { MAX_MOCK_DOCUMENT_BYTES } from "../../features/prototype/prototypeMockSchema";
 import { isMockBackendAction, mockBackendOutput } from "./mockBackend";
 import { PrototypeMockBackendRegistry } from "../../features/prototype/PrototypeMockBackendRegistry";
@@ -62,6 +63,7 @@ import {
 } from "../../features/prototype/protoViewer/protoViewerShare";
 import { readPrototypeSpecFile } from "../../features/prototype/prototypeSpecFile";
 import { requestedPrototypeWindowOptions } from "../../features/prototype/prototypeWindowOptions";
+import { prototypeSettingsPagePlatformError } from "../../features/prototype/prototypeSettings";
 import { TelemetryRecorder } from "../../features/telemetry/TelemetryRecorder";
 import { getToolSelectionContext } from "../../features/toolSelection/toolSelectionContext";
 import type { BootedDevice } from "../../models";
@@ -176,6 +178,16 @@ function prototypePlatformError(
     // agent's window level is fixed, so one spec runs on both platforms.
     if (options.devicePersistence) {
       return new ActionableError('window.persistence "device" is Android only; omit it on iOS.');
+    }
+    // Only a spec that runs or is saved for the device needs the page; screenMap is host-only.
+    const settingsPage =
+      args.action === "show" || args.action === "save"
+        ? prototypeSettingsPagePlatformError(args.spec, "ios")
+        : undefined;
+    if (settingsPage) {
+      return new ActionableError(
+        `Invalid prototype at spec.${settingsPage.path}: ${settingsPage.message}. Nothing was shown.`,
+      );
     }
   }
   return undefined;
@@ -320,7 +332,7 @@ function createPrototypeHost(
     requests: channelWiring.combinedPrototypeCancellation(requests, channels),
     recorder,
   });
-  const reverses = new PrototypeAdbReverseManager();
+  const reverses = new PrototypeAdbReverseManager(defaultAdbReverseOwnership);
   const cleanup = subscribePrototypeCleanup(
     dependencies.lifecycle ?? defaultPrototypeLifecycle(),
     events,

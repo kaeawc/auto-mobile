@@ -14,6 +14,7 @@ import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.CoalescingRecoveryLauncher
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
+import dev.jasonpearson.automobile.desktop.core.daemon.DaemonStreamHub
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionBinding
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionOptions
 import dev.jasonpearson.automobile.desktop.core.daemon.InputAllocatingClient
@@ -35,6 +36,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceViewModel
 import dev.jasonpearson.automobile.desktop.core.workspace.parseBootedDeviceSessionUuids
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerViewModel
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.RealDeviceBootController
+import dev.jasonpearson.automobile.desktop.core.workspace.rememberDaemonStreamHub
 import kotlinx.coroutines.CoroutineScope
 
 private val LOG = LoggerFactory.getLogger("AutoMobileDesktopApp")
@@ -130,17 +132,20 @@ internal fun rememberAppWorkspace(
   scope: CoroutineScope,
   session: AppDaemonSession,
   input: AppInputServices,
+  streamHub: DaemonStreamHub,
 ): AppWorkspaceServices {
   val desktopDaemonSession = session.state.session
   val desktopInputClient = input.desktopInputClient
   val controlExecutor =
-    remember(graph, desktopDaemonSession, desktopInputClient) {
+    remember(graph, desktopDaemonSession, desktopInputClient, streamHub) {
       DaemonEmulatorControlExecutor(
         graph.autoMobileClient,
         inputClient = desktopInputClient,
         foregroundAppResolver =
           ObservationForegroundAppResolver(
             sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+            // A pane's device is looked up on the shared stream that pane already leases.
+            hub = { streamHub },
           ),
       )
     }
@@ -210,7 +215,10 @@ internal fun rememberDesktopRuntime(windowVisible: Boolean): DesktopAppRuntime {
   val settings = remember(graph) { ObservableSettingsProvider(graph.settingsProvider) }
   val scope = rememberCoroutineScope()
   val input = rememberAppInput(graph, session)
-  val workspace = rememberAppWorkspace(graph, scope, session, input)
+  // One shared stream hub per app (#5262): panes lease device streams from it instead of each
+  // opening its own connection, and so do the workspace's one-shot captures (#17027).
+  val streamHub = rememberDaemonStreamHub { session.state.session?.sessionUuidProvider?.invoke() }
+  val workspace = rememberAppWorkspace(graph, scope, session, input, streamHub)
   val picker = rememberAppPicker(graph, scope, workspace.workspaceViewModel, session)
   val daemonBootstrap = graph.daemonBootstrap
   val recoveryLauncher =
@@ -226,6 +234,7 @@ internal fun rememberDesktopRuntime(windowVisible: Boolean): DesktopAppRuntime {
     workspace,
     picker,
     recoveryLauncher,
+    streamHub,
   )
 }
 

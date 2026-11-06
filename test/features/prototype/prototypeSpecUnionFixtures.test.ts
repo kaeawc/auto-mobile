@@ -9,7 +9,7 @@ for (const [name, value] of unionFixtures) {
     const spec = {
       id: "models",
       requires: {
-        platform: ["test", "clipboard", "media", "map", "cast", "camera"],
+        platform: ["test", "clipboard", "media", "map", "cast", "camera", "webview"],
         permissions: [{ name: "camera", purpose: "Preview" }],
       },
       state: {

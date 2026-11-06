@@ -1,0 +1,55 @@
+{
+  "pixel-9": {
+    "screen": "Public spec: 1080 x 2424 px at 420 dpi (density 2.625)",
+    "insets": "Estimated; not yet measured on an emulator"
+  },
+  "small-phone": {
+    "screen": "Android Studio small_phone device definition: 720 x 1280 px at 320 dpi",
+    "insets": "AOSP defaults: 24 dp status bar, 48 dp three-button navigation bar"
+  },
+  "medium-tablet": {
+    "screen": "Android Studio medium_tablet device definition: 1600 x 2560 px at 320 dpi",
+    "insets": "Estimated; not yet measured on an emulator"
+  },
+  "iphone-16": {
+    "screen": "Public spec: 393 x 852 pt at @3x",
+    "insets": "UIKit safe area insets for this model; cutout geometry estimated"
+  },
+  "iphone-16-pro-max": {
+    "screen": "Public spec: 440 x 956 pt at @3x",
+    "insets": "UIKit safe area insets for this model; cutout geometry estimated"
+  },
+  "iphone-se-3": {
+    "screen": "Public spec: 375 x 667 pt at @2x",
+    "insets": "UIKit safe area insets for this model"
+  },
+  "ipad-10": {
+    "screen": "Public spec: 820 x 1180 pt at @2x",
+    "insets": "UIKit safe area insets for this model; corner radius estimated"
+  },
+  "wearos-small-round": {
+    "screen": "wearos_small_round hardware profile: 384 x 384 px at xhdpi (density 2); not yet measured on an emulator",
+    "insets": "No system bars on a watch; not yet measured on an emulator",
+    "kinds": { "screen": "avdProfile", "insets": "avdProfile" }
+  },
+  "apple-watch": {
+    "screen": "Apple Watch Series 10 (46mm) simulator device type: 416 x 496 px at @2x; corner radius estimated",
+    "insets": "No system bars on a watch; not yet measured on a simulator",
+    "kinds": { "screen": "simulatorProfile", "insets": "simulatorProfile" }
+  },
+  "android-tv-1080p": {
+    "screen": "tv_1080p hardware profile: 1920 x 1080 px at xhdpi (density 2), recorded in portrait; not yet measured on an emulator",
+    "insets": "Android TV overscan margins (48 dp sides, 27 dp top and bottom); not yet measured on an emulator",
+    "kinds": { "screen": "avdProfile", "insets": "publicSpec" }
+  },
+  "apple-tv": {
+    "screen": "Apple TV 4K simulator device type: 1920 x 1080 pt at @2x, recorded in portrait; not yet measured on a simulator",
+    "insets": "tvOS safe area (60 pt top and bottom, 80 pt sides); not yet measured on a simulator",
+    "kinds": { "screen": "simulatorProfile", "insets": "publicSpec" }
+  },
+  "car-1024p-landscape": {
+    "screen": "automotive_1024p_landscape hardware profile: 1024 x 768 px at mdpi (density 1), recorded in portrait; not yet measured on an emulator",
+    "insets": "Estimated head-unit status and navigation bars; not yet measured on an emulator",
+    "kinds": { "screen": "avdProfile", "insets": "avdProfile" }
+  }
+}

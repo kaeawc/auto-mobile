@@ -11,12 +11,18 @@ describe("broker reset readiness lifecycle", () => {
   let finishReset: ReturnType<typeof Promise.withResolvers<ResetResult>>;
   let resetStarted: ReturnType<typeof Promise.withResolvers<void>>;
 
+  // Warm the whole per-test path (harness, broker, seed acquisition and reset) once, so the first
+  // test does not pay first-use costs inside its 100 ms budget.
   beforeAll(async () => {
-    const warm = await openExportHarness();
-    await warm.broker.close();
-    await warm.registry.close();
+    await openBroker();
+    const { released } = await startRelease();
+    await closeBroker();
+    await released;
   });
-  beforeEach(async () => {
+  beforeEach(openBroker);
+  afterEach(closeBroker);
+
+  async function openBroker() {
     harness = await openExportHarness();
     harness.options.timer = harness.timer;
     harness.options.reuseCleanDevices = true;
@@ -44,13 +50,14 @@ describe("broker reset readiness lifecycle", () => {
       resetStarted.resolve();
       return finishReset.promise;
     };
-  });
-  afterEach(async () => {
+  }
+
+  async function closeBroker() {
     finishReset.resolve("clean");
     await broker.close();
     await harness.broker.close();
     await harness.registry.close();
-  });
+  }
 
   async function startRelease() {
     const ready = await broker.prepare(exportConfig("release"), "token");

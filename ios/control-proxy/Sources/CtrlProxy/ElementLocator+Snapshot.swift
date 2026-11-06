@@ -1,4 +1,5 @@
 import Foundation
+import ObjCExceptionCatcher
 #if canImport(XCTest) && os(iOS)
     import os
     import UIKit
@@ -305,6 +306,22 @@ extension ElementLocator {
             return true
         }
 
+        /// Display a snapshot window is drawn on, nil when the element carries none.
+        static func displayId(of snapshot: XCUIElementSnapshot) -> UInt64? {
+            guard let object = snapshot as? NSObject else { return nil }
+            return ObjCExceptionCatcher_displayID(object)?.uint64Value
+        }
+
+        /// The panel a SpringBoard snapshot is showing on a two-panel device, nil on one panel.
+        static func activeSpringBoardPanel(in snapshot: XCUIElementSnapshot) -> SpringBoardPanel.Selection? {
+            let mainDisplayId = (ObjCExceptionCatcher_displayInventory() ?? [])
+                .first { $0["isMain"]?.boolValue == true }?["displayId"]?.uint64Value
+            return SpringBoardPanel.select(
+                windowDisplayIds: snapshot.children.compactMap { displayId(of: $0) },
+                mainDisplayId: mainDisplayId
+            )
+        }
+
         /// Build element info from XCUIElementSnapshot - all data is already captured, no IPC calls
         /// Applies early filtering: offscreen elements, empty zero-area subtrees
         /// Only sets boolean fields when true (nil = false) to reduce JSON size
@@ -318,7 +335,8 @@ extension ElementLocator {
             keyboardFocus: KeyboardFocus? = nil,
             disableAllFiltering: Bool = false,
             enclosingFrame: CGRect? = nil,
-            coordinateOffset: CGPoint = .zero
+            coordinateOffset: CGPoint = .zero,
+            rootChildFilter: ((XCUIElementSnapshot) -> Bool)? = nil
         )
             -> UIElementInfo
         {
@@ -359,6 +377,8 @@ extension ElementLocator {
                 let children = snapshot.children
                 if !children.isEmpty {
                     var filteredChildren = children.enumerated().compactMap { idx, child -> UIElementInfo? in
+                        // Only the root applies the filter (a two-panel SpringBoard's other panel).
+                        if depth == 0, let rootChildFilter, !rootChildFilter(child) { return nil }
                         guard shouldIncludeSnapshotChild(
                             child, enclosingFrame: frame, coordinateOffset: resolved.offset, screenBounds: screenBounds
                         ) else { return nil }

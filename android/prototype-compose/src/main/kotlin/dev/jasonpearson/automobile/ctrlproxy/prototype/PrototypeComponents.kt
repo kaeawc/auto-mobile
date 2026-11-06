@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import android.content.pm.PackageManager
+import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -35,10 +37,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -123,6 +130,23 @@ internal fun RenderPrototypeButton(
   interact: (PrototypeInteraction) -> Unit,
 ) {
   val source = node.source as? PrototypeButtonNode ?: return
+  val context = LocalContext.current
+  val tvNavigation =
+    remember(context) { context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) }
+  var focused by remember(node.identity) { mutableStateOf(false) }
+  // Material buttons already own a focus target. Observe it instead of adding a second one.
+  // The two contrasting outlines stay visible on authored gradients and either theme.
+  val buttonModifier =
+    if (tvNavigation) {
+      modifier
+        .onFocusChanged { focused = it.isFocused }
+        .then(
+          if (focused)
+            Modifier.border(3.dp, Color.Black, ButtonDefaults.shape)
+              .border(1.dp, Color.White, ButtonDefaults.shape)
+          else Modifier,
+        )
+    } else modifier
   val actions = source.onTap.orEmpty()
   val onClick = { if (actions.isNotEmpty()) interact(PrototypeInteraction.Tap(actions)) }
   val icon = prototypeIcon(source.icon)
@@ -144,7 +168,7 @@ internal fun RenderPrototypeButton(
     "tonal" ->
       FilledTonalButton(
         onClick,
-        modifier,
+        buttonModifier,
         enabled = node.enabled,
         contentPadding = padding,
         content = content,
@@ -152,7 +176,7 @@ internal fun RenderPrototypeButton(
     "elevated" ->
       ElevatedButton(
         onClick,
-        modifier,
+        buttonModifier,
         enabled = node.enabled,
         contentPadding = padding,
         content = content,
@@ -160,7 +184,7 @@ internal fun RenderPrototypeButton(
     "outlined" ->
       OutlinedButton(
         onClick,
-        modifier,
+        buttonModifier,
         enabled = node.enabled,
         contentPadding = padding,
         content = content,
@@ -168,7 +192,7 @@ internal fun RenderPrototypeButton(
     "text" ->
       TextButton(
         onClick,
-        modifier,
+        buttonModifier,
         enabled = node.enabled,
         contentPadding = padding,
         content = content,
@@ -177,7 +201,7 @@ internal fun RenderPrototypeButton(
       // An authored gradient is painted behind the button, so its container must not cover it.
       Button(
         onClick,
-        modifier,
+        buttonModifier,
         colors =
           if (node.style.source.gradient != null)
             ButtonDefaults.buttonColors(containerColor = Color.Transparent)

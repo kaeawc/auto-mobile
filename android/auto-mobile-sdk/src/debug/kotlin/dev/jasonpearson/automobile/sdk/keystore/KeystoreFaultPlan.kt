@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.sdk.keystore
 
+import android.os.Build
+import android.security.keystore.StrongBoxUnavailableException
 import android.security.keystore.UserNotAuthenticatedException
 import java.security.KeyStoreException
 import java.security.ProviderException
@@ -34,6 +36,8 @@ internal object KeystoreFaultPlan {
     PROVIDER_EXCEPTION,
     USER_NOT_AUTHENTICATED,
     DELAY,
+    // Observed only by KeystoreTestState.checkKeyGeneration; backend operations ignore it.
+    STRONGBOX_UNAVAILABLE,
   }
 
   private data class Fault(val kind: Kind, val delayMs: Long?)
@@ -51,6 +55,8 @@ internal object KeystoreFaultPlan {
     if (aliases.isEmpty() || aliases.any { !isDeclared(it) }) return false
     val fault = Fault(parsed, if (parsed == Kind.DELAY) delayMs else null)
     aliases.forEach { faults[it] = fault }
+    // Debug-only: release builds never install the gate, so checkKeyGeneration stays a no-op.
+    KeystoreTestState.keyGenerationGate = KeyGenerationGate(::checkKeyGeneration)
     return true
   }
 
@@ -97,7 +103,14 @@ internal object KeystoreFaultPlan {
       Kind.PROVIDER_EXCEPTION -> throw ProviderException()
       Kind.USER_NOT_AUTHENTICATED -> throw UserNotAuthenticatedException()
       Kind.DELAY -> budget.sleep(requireNotNull(fault.delayMs))
+      Kind.STRONGBOX_UNAVAILABLE -> Unit
     }
+  }
+
+  /** Fails StrongBox key generation for an armed alias as a device without StrongBox does. */
+  fun checkKeyGeneration(alias: String, strongBoxRequested: Boolean) {
+    if (!strongBoxRequested || Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+    if (faultFor(alias)?.kind == Kind.STRONGBOX_UNAVAILABLE) throw StrongBoxUnavailableException()
   }
 }
 

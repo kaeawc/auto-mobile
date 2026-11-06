@@ -80,13 +80,26 @@ Package-data reset remains a separate operation. On iOS Simulator,
 
 In a debug app, call `injectFault` on `content://<appId>.automobile.keystore`
 with extras `scope` and/or `alias`, and `kind`: `KEY_STORE_EXCEPTION`,
-`PROVIDER_EXCEPTION`, `USER_NOT_AUTHENTICATED`, or `DELAY`. Use exact declared
+`PROVIDER_EXCEPTION`, `USER_NOT_AUTHENTICATED`, `DELAY`, or
+`STRONGBOX_UNAVAILABLE`. Use exact declared
 aliases; a scope selects all its aliases. For `DELAY`, supply a long integer
 `delayMs` from 1 through 10000. The delay runs before each selected alias's
 metadata lookup or deletion operation, and the delays in one provider call add up
 to at most 10000 ms in total: once that is spent, the call's remaining operations
 run without delay. `resetKeychain` waits up to 20 s for the bridge, so injected
-delay alone does not make it report `BRIDGE_UNAVAILABLE`. Other kinds simulate the named failure.
+delay alone does not make it report `BRIDGE_UNAVAILABLE`. `KEY_STORE_EXCEPTION`,
+`PROVIDER_EXCEPTION`, and `USER_NOT_AUTHENTICATED` simulate the named failure on
+those same operations.
+
+`STRONGBOX_UNAVAILABLE` affects key generation only. The app must call
+`KeystoreTestState.checkKeyGeneration(spec)` with its `KeyGenParameterSpec`
+immediately before generating the key. When the spec's alias is armed and the spec
+requests StrongBox (`setIsStrongBoxBacked(true)`), the call throws
+`StrongBoxUnavailableException`, as key generation does on a device without
+StrongBox, so the app's fallback runs. A spec without StrongBox, an unarmed alias,
+API levels below 28, and release builds never throw. Metadata and deletion ignore
+this kind.
+
 Setting a fault replaces the previous fault for each selected alias. These calls
 require the same app opt-in, caller authorization, and mutation policy as deletion.
 

@@ -75,6 +75,34 @@ describe("RevealedListRows.railDirectionFor", () => {
     ).toBeUndefined();
   });
 
+  test("recognizes a card explore labelled from a child the advance reported separately", () => {
+    const rows = new RevealedListRows();
+    // The advance reads raw nodes: the id-only card and its child label.
+    rows.remember(RAIL, "right", ["app:id/card_3||", "|Show 3|"]);
+    // Explore's candidate carries the card's id and the label it inherited from that child.
+    const enriched: Element = {
+      bounds: { left: 600, top: 100, right: 900, bottom: 400 },
+      "resource-id": "app:id/card_3",
+      text: "Show 3",
+    };
+    expect(rows.railDirectionFor(enriched, focusedOn(card(2, 300)))).toBe("right");
+  });
+
+  test("keeps the adaptive walk for a revealed control below the focused card", () => {
+    const rows = new RevealedListRows();
+    rows.remember(RAIL, "right", ["app:id/more|More|"]);
+    const focusedCard: Element = {
+      bounds: { left: 300, top: 100, right: 600, bottom: 300 },
+      "resource-id": "app:id/show_2",
+    };
+    const below: Element = {
+      bounds: { left: 300, top: 300, right: 600, bottom: 400 },
+      "resource-id": "app:id/more",
+      text: "More",
+    };
+    expect(rows.railDirectionFor(below, focusedOn(focusedCard))).toBeUndefined();
+  });
+
   test("forgets every rail on clear", () => {
     const rows = railWithShow3Revealed();
     rows.clear();

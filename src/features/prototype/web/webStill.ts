@@ -34,7 +34,12 @@ import type { WebSkinId } from "./webSkin";
 import type { WebStackScreens } from "./webStack";
 import type { WebImageDraw } from "./webImages";
 import { localeLayoutDirection, stillLocale } from "./webLocale";
-import { appTopColor, statusBarContentFor, type WebStatusBarContent } from "./webStatusBar";
+import {
+  appTopColor,
+  statusBarContentFor,
+  type WebScreenSize,
+  type WebStatusBarContent,
+} from "./webStatusBar";
 import { cssColor, fontPx, themeTypography, type WebStyleContext } from "./webStyle";
 import { stillTextScale, type StillTextSize } from "./webTextScale";
 
@@ -314,23 +319,36 @@ function screenBackground(style: WebStyleContext): string {
 }
 
 /**
- * `window.statusBar` light or dark picks the content style; `auto` or none follows the app's top
- * colour (a fullscreen window's), as both platforms' edge-to-edge defaults do.
+ * Whether the window's content starts at the top of the screen, behind the status bar: a
+ * fullscreen window or a top sheet. A bottom sheet or floating window leaves the status area on
+ * the screen background.
  */
-function stillStatusBarContent(
-  spec: unknown,
-  content: WebElement,
-  background: string,
-  dark: boolean,
-): WebStatusBarContent {
+function coversStatusArea(spec: unknown): boolean {
+  const placement = record(record(record(spec)?.window)?.placement);
+  const type = placement?.type;
+  return (
+    type === undefined || type === "fullscreen" || (type === "sheet" && placement?.edge === "top")
+  );
+}
+
+/**
+ * `window.statusBar` light or dark picks the content style; `auto` or none follows the app's top
+ * colour (a fullscreen window's or top sheet's), as both platforms' edge-to-edge defaults do.
+ */
+interface StatusBarSample {
+  readonly content: WebElement;
+  readonly background: string;
+  readonly dark: boolean;
+  readonly screen: WebScreenSize;
+}
+
+function stillStatusBarContent(spec: unknown, sample: StatusBarSample): WebStatusBarContent {
+  const { content, background, dark, screen } = sample;
   const authored = record(record(spec)?.window)?.statusBar;
   if (authored === "light" || authored === "dark") {
     return authored;
   }
-  // A sheet or floating window leaves the status area on the screen background.
-  const placement = record(record(record(spec)?.window)?.placement)?.type;
-  const fullscreen = placement === undefined || placement === "fullscreen";
-  const top = fullscreen ? appTopColor(content, background) : background;
+  const top = coversStatusArea(spec) ? appTopColor(content, background, screen) : background;
   return statusBarContentFor(top, dark ? "light" : "dark");
 }
 
@@ -381,7 +399,15 @@ export function renderPrototypeStill(
     : renderDeviceFrame(
         frame,
         orientation,
-        { ...paint, statusBarContent: stillStatusBarContent(expanded, content, background, dark) },
+        {
+          ...paint,
+          statusBarContent: stillStatusBarContent(expanded, {
+            content,
+            background,
+            dark,
+            screen: screenSize(frame, orientation),
+          }),
+        },
         content,
       );
   const stack = scope.stacks?.[0];

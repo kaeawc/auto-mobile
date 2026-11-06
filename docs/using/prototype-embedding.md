@@ -259,13 +259,23 @@ To take a prototype's spec together with what it needs from a renderer, read
   "format": "automobile-prototype-embed",
   "version": 1,
   "requires": ["..."],
-  "spec": { "...": "..." }
+  "spec": { "...": "..." },
+  "glyphs": { "filled/home": "<path d=\"...\"></path>" },
+  "iconMissing": ["filled/..."]
 }
 ```
 
 `spec` is the prototype's spec and `requires` lists the renderer capabilities it needs, as this
 server computed them. Keep the two together: a renderer that lacks a listed capability should
 refuse the spec rather than draw part of it. A `version` other than `1` is a newer format.
+
+`glyphs` is present when the spec names an icon that has a glyph. It maps `<variant>/<name>` to the Material Icons
+glyph's shapes, as SVG markup for a `0 0 24 24` viewBox, so a renderer needs no icon set of its
+own. It covers every icon the spec's icon fields name, in the icon's `variant` (else `filled`), the glyphs controls draw on their own (a filter chip's or segment's selection check, a select's dropdown arrow and a date picker's month arrows),
+and every icon name that appears as a string in `state` or `data`, in `filled` and in each variant
+the spec's icons use, so an icon whose name changes with state still has its glyph. A variant
+without that glyph carries the `filled` one. `iconMissing` lists the keys with no glyph at all;
+draw a placeholder for them. iOS-style glyphs are not included yet.
 
 `revision` and `variant` work as for the web page; there is no `frame`. Errors, listing and
 subscriptions also match the web page, and `_meta` reports the same fields except `frame`.

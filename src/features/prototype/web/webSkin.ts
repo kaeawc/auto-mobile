@@ -8,6 +8,8 @@ import {
   iosToggleRenderer,
   iosTopAppBarRenderer,
 } from "./webSkinIos";
+import { iosTextFieldRenderer } from "./webSkinIosField";
+import { iosBottomNavRenderer, iosTabBarRenderer } from "./webSkinIosNav";
 import { cssColor, fontPx, rgbaCss } from "./webStyle";
 
 /**
@@ -230,6 +232,9 @@ export function webSkins(kit: WebRenderKit): Readonly<Record<WebSkinId, WebSkin>
         listItem: iosListItemRenderer(kit),
         chip: iosChipRenderer(kit),
         topAppBar: iosTopAppBarRenderer(kit),
+        textField: iosTextFieldRenderer(kit),
+        bottomNav: iosBottomNavRenderer(kit),
+        tabBar: iosTabBarRenderer(kit),
       },
     },
   };

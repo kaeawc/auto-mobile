@@ -129,6 +129,14 @@ export interface Session {
   ownership: "owned" | "awaiting-owner";
   /** Set only while a rehydrated session is waiting for its previous owner. */
   awaitingOwnerSince?: number;
+  /**
+   * Set on a session recovered from a row its previous daemon left active when it exited
+   * uncleanly (the startup sweep's `daemon-restart`, #17255). Its owner-reconnect window is
+   * capped at the default lease plus the suspect grace instead of its own lease, which for a CLI
+   * session is the whole idle window: nothing of the dead daemon can still hold it, and a live
+   * owner reconnects well inside the default window.
+   */
+  recoveredFromUncleanDaemonExit?: true;
   livenessPolicy: SessionLivenessPolicy; // How this session's liveness is judged (#6870)
   /**
    * The current token authorized to refresh this session's liveness. It is

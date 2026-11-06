@@ -14,7 +14,7 @@ import { DefaultTextMatcher } from "../utility/TextMatcher";
 import { normalize } from "../utility/ElementResolverMatching";
 import { isTruthyFlag } from "../utility/elementProperties";
 import { matchesCtrlProxyResourceId } from "../utility/SearchableNode";
-import { throwIfAborted } from "../../utils/toolUtils";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { reportToolDispatched } from "../../utils/ToolDispatchContext";
 import { boundsArea, boundsEqual, intersectBounds } from "../../utils/bounds";
 import { compareSelectionRank } from "../utility/selectionRank";
@@ -582,7 +582,8 @@ export class FocusNavigate {
       await this.press(direction, signal);
       progress.pressed(direction);
       steps += 1;
-      await this.timer.sleep(settleMs);
+      // The settle is the walk's longest wait (up to the tool's 5 s cap): a cancel ends it.
+      await awaitWhileRequestIsLive(this.timer.sleep(settleMs), signal);
     }
   }
 

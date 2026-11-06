@@ -246,6 +246,13 @@ the windows with the variables in
   receive the retryable `binding_ownership_unconfirmed`; wait `retryAfterMs`.
   If ownership cannot be confirmed in about a minute the session is released and
   calls get `session_ownership_lost`.
+  If the previous daemon exited without shutting down (it crashed or was killed),
+  its sessions wait at most about 8 seconds for their owner to reconnect, whatever
+  their own heartbeat or CLI idle window; a client that is still running and
+  heartbeating keeps its session, and otherwise the device is free for another
+  session within seconds. A CLI session (which does not heartbeat) does not
+  survive such a restart: its next call gets `session_ownership_lost`, and a new
+  session is acquired.
 - **Device restart.** When a device restarts, its session can resume under the
   same UUID for 180 seconds; other sessions cannot take that device meanwhile
   (a start naming it is refused with a retry hint). If the window passes without

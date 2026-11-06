@@ -11,6 +11,8 @@ import { MAX_PROTOTYPE_WEB_PAGE_BYTES } from "../../../../src/features/prototype
 
 // Real sharp encodes (#16533): the per-test 100 ms unit budget does not cover a native image backend.
 
+const ANDROID = { applyExifOrientation: false };
+
 /** A deterministic 2000x1500 "photo": smooth colour gradients with pseudo-random grain. */
 async function photo(seed: number): Promise<Uint8Array> {
   const width = 2000;
@@ -88,10 +90,30 @@ describe("prototype web page images with sharp", () => {
       readFileSync(join(import.meta.dir, "../../../fixtures/prototype-web/assets/sunset.png")),
     );
     const encoder = new SharpPrototypeWebImageEncoder();
-    const half = await encoder.encode(png, [{ width: 120, height: 120, cover: false }]);
+    const half = await encoder.encode(png, [{ width: 120, height: 120, cover: false }], ANDROID);
     expect(Buffer.from(half.bytes.subarray(8, 12)).toString("ascii")).toBe("WEBP");
     expect([half.width, half.height]).toEqual([120, 80]);
-    const whole = await encoder.encode(png, [{ height: 525, cover: true }]);
+    const whole = await encoder.encode(png, [{ height: 525, cover: true }], ANDROID);
     expect([whole.width, whole.height]).toEqual([240, 160]);
+  });
+
+  test("applies EXIF orientation for iOS and leaves it for Android, as each device draws (#17241)", async () => {
+    // A 40x20 JPEG tagged orientation 6 (rotate 90 clockwise): iOS's UIImage(data:) draws it 20x40,
+    // Android's BitmapFactory ignores the tag and draws the stored 40x20 pixels.
+    const sharp = await loadSharp();
+    const jpeg = new Uint8Array(
+      await sharp({ create: { width: 40, height: 20, channels: 3, background: "#f00" } })
+        .jpeg()
+        .withMetadata({ orientation: 6 })
+        .toBuffer(),
+    );
+    const encoder = new SharpPrototypeWebImageEncoder();
+    // A box half the oriented height: the scale must come from the oriented size.
+    const box = [{ width: 100, height: 20, cover: false }];
+    const ios = await encoder.encode(jpeg, box, { applyExifOrientation: true });
+    expect([ios.width, ios.height]).toEqual([10, 20]);
+    expect((await sharp(Buffer.from(ios.bytes)).metadata()).orientation).toBeUndefined();
+    const android = await encoder.encode(jpeg, box, ANDROID);
+    expect([android.width, android.height]).toEqual([40, 20]);
   });
 });

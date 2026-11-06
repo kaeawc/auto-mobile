@@ -178,3 +178,409 @@ test("a root padded by the top safe area keeps its own colour behind the status 
   });
   expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("dark");
 });
+
+test("in a box the last stretching child paints over its siblings, so its colour wins", () => {
+  const fill = (color: string, extra: Record<string, string> = {}) =>
+    el("div", {
+      style: { "justify-self": "stretch", width: "100%", "background-color": color, ...extra },
+    });
+  const box = (children: WebElement[]) =>
+    el(
+      "div",
+      { style: { display: "grid", "grid-template-areas": '"cell"', width: "100%" } },
+      children,
+    );
+  expect(appTopColor(box([fill("#000000"), fill("#ffffff")]), "#777777")).toBe("#ffffff");
+  // A later child that does not span the screen does not hide the full-width one.
+  const chip = el("div", { style: { "background-color": "#ff0000" } });
+  expect(appTopColor(box([fill("#000000"), chip]), "#777777")).toBe("#000000");
+  // A fully transparent later child paints nothing.
+  expect(appTopColor(box([fill("#000000"), fill("#ffffff", { opacity: "0" })]), "#777777")).toBe(
+    "#000000",
+  );
+  // A later full-fill child with no background of its own lets the earlier one show.
+  const clear = el("div", { style: { "justify-self": "stretch", width: "100%" } });
+  expect(appTopColor(box([fill("#000000"), clear]), "#777777")).toBe("#000000");
+  // A bottom-aligned child does not reach the top, so the earlier full-fill one still shows there.
+  const bottomBox = el(
+    "div",
+    {
+      style: {
+        display: "grid",
+        "grid-template-areas": '"cell"',
+        "align-items": "end",
+        width: "100%",
+      },
+    },
+    [fill("#000000", { "align-self": "stretch", height: "100%" }), fill("#ffffff")],
+  );
+  expect(appTopColor(bottomBox, "#777777")).toBe("#000000");
+  // A column still follows its leading child.
+  const column = el("div", { style: { display: "flex", width: "100%" } }, [
+    fill("#000000"),
+    fill("#ffffff"),
+  ]);
+  expect(appTopColor(column, "#777777")).toBe("#000000");
+});
+
+test("element opacity multiplies down the walk: transparent subtrees and faded backgrounds are skipped", () => {
+  const black = (style: Record<string, string>, children: WebElement[] = []) =>
+    el("div", { style: { width: "100%", "background-color": "#000000", ...style } }, children);
+  expect(appTopColor(el("div", {}, [black({ opacity: "0" })]), "#ffffff")).toBe("#ffffff");
+  expect(appTopColor(el("div", {}, [black({ opacity: "0.5" })]), "#ffffff")).toBe("#ffffff");
+  // An ancestor's opacity applies to every descendant.
+  const faded = el("div", { style: { width: "100%", opacity: "0.5" } }, [black({})]);
+  expect(appTopColor(el("div", {}, [faded]), "#ffffff")).toBe("#ffffff");
+  const hidden = el("div", { style: { width: "100%", opacity: "0" } }, [black({})]);
+  expect(appTopColor(el("div", {}, [hidden]), "#ffffff")).toBe("#ffffff");
+  expect(appTopColor(el("div", {}, [black({ opacity: "1" })]), "#ffffff")).toBe("#000000");
+});
+
+test("a fullscreen box's last full-fill child sets the status bar content in a still", () => {
+  const still = renderPrototypeStill({
+    id: "box",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "dark" },
+    root: {
+      type: "box",
+      style: { width: "fill", height: "fill" },
+      children: [
+        { type: "column", style: { width: "fill", height: "fill", background: "#000000" } },
+        { type: "column", style: { width: "fill", height: "fill", background: "#ffffff" } },
+      ],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("dark");
+});
+
+test("a bottom-aligned footer in a fullscreen box leaves the full-fill colour behind the status bar", () => {
+  const still = renderPrototypeStill({
+    id: "footer",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "box",
+      style: { width: "fill", height: "fill", alignment: "bottomStart" },
+      children: [
+        { type: "column", style: { width: "fill", height: "fill", background: "#000000" } },
+        { type: "column", style: { width: "fill", height: { dp: 80 }, background: "#ffffff" } },
+        { type: "column", style: { width: "fill", height: "fill" } },
+      ],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
+test("a narrow full-height child in a fullscreen box leaves the full-fill colour behind the status bar", () => {
+  const still = renderPrototypeStill({
+    id: "rail",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "box",
+      style: { width: "fill", height: "fill" },
+      children: [
+        { type: "column", style: { width: "fill", height: "fill", background: "#000000" } },
+        { type: "column", style: { width: { dp: 20 }, height: "fill", background: "#ffffff" } },
+      ],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
+test("top padding ends the walk, so a padded child's background does not reach the status bar", () => {
+  const white = el("div", { style: { width: "100%", "background-color": "#ffffff" } });
+  const padded = (style: Record<string, string>) =>
+    el("div", { style: { "justify-self": "stretch", width: "100%", ...style } }, [white]);
+  const black = el("div", {
+    style: { "justify-self": "stretch", width: "100%", "background-color": "#000000" },
+  });
+  const box = (top: WebElement) =>
+    el("div", { style: { display: "grid", "grid-template-areas": '"cell"', width: "100%" } }, [
+      black,
+      top,
+    ]);
+  expect(appTopColor(box(padded({ "padding-top": "80px" })), "#777777")).toBe("#000000");
+  expect(appTopColor(box(padded({ padding: "80px 16px" })), "#777777")).toBe("#000000");
+  // Zero top padding still lets the child show.
+  expect(appTopColor(box(padded({ padding: "0 16px" })), "#777777")).toBe("#ffffff");
+  expect(appTopColor(box(padded({ "padding-top": "0px" })), "#777777")).toBe("#ffffff");
+});
+
+test("a padded transparent overlay in a fullscreen box leaves the full-fill colour behind the status bar", () => {
+  const still = renderPrototypeStill({
+    id: "padded-overlay",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "box",
+      style: { width: "fill", height: "fill" },
+      children: [
+        { type: "column", style: { width: "fill", height: "fill", background: "#000000" } },
+        {
+          type: "column",
+          style: { width: "fill", height: "fill", padding: { top: 80 } },
+          children: [{ type: "column", style: { width: "fill", background: "#ffffff" } }],
+        },
+      ],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
+test("the walk follows a child only when its container places it at the top", () => {
+  const white = (style: Record<string, string> = {}) =>
+    el("div", {
+      style: { width: "100%", height: "80px", "background-color": "#ffffff", ...style },
+    });
+  const column = (style: Record<string, string>, children: WebElement[]) =>
+    el("div", { style: { display: "flex", "flex-direction": "column", width: "100%", ...style } }, [
+      ...children,
+    ]);
+  expect(appTopColor(column({ "justify-content": "flex-end" }, [white()]), "#000000")).toBe(
+    "#000000",
+  );
+  expect(appTopColor(column({ "justify-content": "center" }, [white()]), "#000000")).toBe(
+    "#000000",
+  );
+  // A growing child fills the column from its top whatever the arrangement.
+  expect(
+    appTopColor(column({ "justify-content": "flex-end" }, [white({ flex: "1 1 auto" })]), "#000"),
+  ).toBe("#ffffff");
+  expect(appTopColor(column({}, [white()]), "#000000")).toBe("#ffffff");
+  // In a row the vertical axis is align-items, and a full-height child that is narrow does not
+  // span the width.
+  const row = (style: Record<string, string>, children: WebElement[]) =>
+    el("div", { style: { display: "flex", "flex-direction": "row", width: "100%", ...style } }, [
+      ...children,
+    ]);
+  expect(appTopColor(row({ "align-items": "flex-end" }, [white()]), "#000000")).toBe("#000000");
+  const rail = el("div", {
+    style: { width: "20px", "align-self": "stretch", "background-color": "#ffffff" },
+  });
+  expect(appTopColor(row({}, [rail]), "#000000")).toBe("#000000");
+});
+
+test("a bottom-arranged footer inside a box overlay leaves the full-fill colour behind the status bar", () => {
+  const still = renderPrototypeStill({
+    id: "nested-footer",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "box",
+      style: { width: "fill", height: "fill" },
+      children: [
+        { type: "column", style: { width: "fill", height: "fill", background: "#000000" } },
+        {
+          type: "column",
+          style: { width: "fill", height: "fill", arrangement: "end" },
+          children: [
+            { type: "column", style: { width: "fill", height: { dp: 80 }, background: "#ffffff" } },
+          ],
+        },
+      ],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
+test("a weighted child fills an end-arranged column, so its colour reaches the status bar", () => {
+  const still = renderPrototypeStill({
+    id: "weighted",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "column",
+      style: { width: "fill", height: "fill", background: "#000000", arrangement: "end" },
+      children: [{ type: "column", style: { width: "fill", weight: 2, background: "#ffffff" } }],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("dark");
+});
+
+test("a full-width child inside a narrow ancestor does not cover the status bar", () => {
+  const still = renderPrototypeStill({
+    id: "narrow-ancestor",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "box",
+      style: { width: "fill", height: "fill" },
+      children: [
+        { type: "column", style: { width: "fill", height: "fill", background: "#000000" } },
+        {
+          type: "column",
+          style: { width: "fill", height: "fill" },
+          children: [
+            {
+              type: "column",
+              style: { width: { dp: 20 }, height: "fill" },
+              children: [{ type: "column", style: { width: "fill", background: "#ffffff" } }],
+            },
+          ],
+        },
+      ],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
+test("a sole filling child of a row spans it, and a capped maximum width does not", () => {
+  const row = renderPrototypeStill({
+    id: "row-fill",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "row",
+      style: { width: "fill", height: "fill", background: "#000000" },
+      children: [
+        { type: "column", style: { width: "fill", height: "fill", background: "#ffffff" } },
+      ],
+    },
+  });
+  expect(statusBarOf(row.element)?.attrs["data-status-content"]).toBe("dark");
+  const capped = renderPrototypeStill({
+    id: "max-width",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "box",
+      style: { width: "fill", height: "fill" },
+      children: [
+        { type: "column", style: { width: "fill", height: "fill", background: "#000000" } },
+        {
+          type: "column",
+          style: { width: "fill", height: "fill", maxWidth: 20, background: "#ffffff" },
+        },
+      ],
+    },
+  });
+  expect(statusBarOf(capped.element)?.attrs["data-status-content"]).toBe("light");
+});
+
+test("a maximum width at least the screen width does not narrow a child", () => {
+  const still = renderPrototypeStill({
+    id: "wide-cap",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "column",
+      style: { width: "fill", height: "fill", background: "#000000" },
+      children: [
+        {
+          type: "column",
+          style: { width: "fill", height: "fill", maxWidth: 1000, background: "#ffffff" },
+        },
+      ],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("dark");
+});
+
+test("a growing child held short by a maximum height does not reach the top of an end-arranged column", () => {
+  const still = renderPrototypeStill({
+    id: "capped-growth",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "box",
+      style: { width: "fill", height: "fill" },
+      children: [
+        { type: "column", style: { width: "fill", height: "fill", background: "#000000" } },
+        {
+          type: "column",
+          style: { width: "fill", height: "fill", arrangement: "end" },
+          children: [
+            {
+              type: "column",
+              style: { width: "fill", weight: 1, maxHeight: 80, background: "#ffffff" },
+            },
+          ],
+        },
+      ],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
+test("a row-bound min() maximum width binds only below the screen width", () => {
+  const header = (maxWidth: number) =>
+    renderPrototypeStill({
+      id: "row-bound",
+      window: { placement: { type: "fullscreen" } },
+      theme: { mode: "light" },
+      root: {
+        type: "column",
+        style: { width: "fill", height: "fill", background: "#000000" },
+        children: [
+          {
+            type: "row",
+            style: { width: "fill", height: { dp: 80 }, maxWidth, background: "#ffffff" },
+            children: [{ type: "box", style: { aspectRatio: 1, maxWidth } }],
+          },
+        ],
+      },
+    });
+  expect(statusBarOf(header(1000).element)?.attrs["data-status-content"]).toBe("dark");
+  expect(statusBarOf(header(20).element)?.attrs["data-status-content"]).toBe("light");
+});
+
+test("a full-width child inside a wrap-sized column does not cover the status bar", () => {
+  const still = renderPrototypeStill({
+    id: "wrap-ancestor",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "box",
+      style: { width: "fill", height: "fill" },
+      children: [
+        { type: "column", style: { width: "fill", height: "fill", background: "#000000" } },
+        {
+          type: "column",
+          style: { width: "fill", height: "fill" },
+          children: [
+            {
+              type: "column",
+              style: { width: "wrap" },
+              children: [
+                { type: "column", style: { width: "fill", background: "#ffffff" } },
+                { type: "text", text: "x", style: { width: { dp: 20 } } },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
+test("a transparent root does not set the status bar content in a still", () => {
+  const still = renderPrototypeStill({
+    id: "alpha",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "column",
+      style: { width: "fill", height: "fill", background: "#000000", alpha: 0 },
+      children: [{ type: "text", text: "Hidden" }],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("dark");
+});
+
+test("a top sheet's content sits behind the status bar; a bottom sheet's does not", () => {
+  const sheet = (edge: string) =>
+    renderPrototypeStill({
+      id: "sheet",
+      window: { placement: { type: "sheet", edge, height: 200 } },
+      theme: { mode: "light" },
+      root: {
+        type: "column",
+        style: { width: "fill", background: "#1d1b20" },
+        children: [{ type: "text", text: "Sheet" }],
+      },
+    });
+  expect(statusBarOf(sheet("top").element)?.attrs["data-status-content"]).toBe("light");
+  expect(statusBarOf(sheet("bottom").element)?.attrs["data-status-content"]).toBe("dark");
+});

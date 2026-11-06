@@ -12,12 +12,12 @@ class FakeReverseAdb implements PrototypeReverseAdb {
   failList = false;
   failRemove = false;
 
-  async listReversedPorts(): Promise<ReadonlySet<number>> {
+  async listReverses(): Promise<ReadonlyMap<number, number | undefined>> {
     this.calls.push("list");
     if (this.failList) {
       throw new Error("list failed");
     }
-    return new Set(this.existing);
+    return new Map([...this.existing].map((port) => [port, port]));
   }
 
   async addReverse(port: number): Promise<void> {
@@ -176,7 +176,10 @@ describe("createPrototypeReverseAdb", () => {
         return { stdout, stderr: "" } as never;
       },
     });
-    expect([...(await adapter.listReversedPorts())].sort()).toEqual([3000, 8080]);
+    expect([...(await adapter.listReverses())].sort(([a], [b]) => a - b)).toEqual([
+      [3000, 3000],
+      [8080, 9090],
+    ]);
     await adapter.addReverse(8080);
     await adapter.removeReverse(8080);
     expect(commands).toEqual([

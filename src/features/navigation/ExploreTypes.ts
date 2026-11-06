@@ -2,7 +2,7 @@ import type { ObserveResult } from "../../models";
 import type { ExportedGraph } from "../../utils/interfaces/NavigationGraph";
 import type { NavigationEdge } from "./NavigationGraphManager";
 import type { DialogTapActionFactory } from "./ExploreBlockerDetection";
-import type { FocusSelectNavigator } from "./ExploreElementActions";
+import type { FocusListAdvancer, FocusSelectNavigator } from "./ExploreElementActions";
 import type { InputModeResolver } from "./focusDrivenInput";
 
 /**
@@ -174,4 +174,6 @@ export interface ExploreSessionOptions {
   inputMode?: InputModeResolver;
   /** The D-pad focus walk used in D-pad mode; a fake drives it in tests. */
   focusNavigatorFactory?: () => FocusSelectNavigator;
+  /** The bounded D-pad advance through a scrollable list in D-pad mode; a fake in tests. */
+  focusListAdvancerFactory?: () => FocusListAdvancer;
 }

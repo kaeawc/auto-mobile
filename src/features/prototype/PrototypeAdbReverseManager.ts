@@ -2,12 +2,13 @@ import { createAdbReverseCommands } from "../../utils/android-cmdline-tools/adbR
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
+import { AdbReverseOwnership, type AdbReverseHolder } from "../portReverse/AdbReverseOwnership";
 import { extractDeviceLoopbackPorts, type UnreversibleLoopbackUrl } from "./prototypeLoopbackPorts";
 
 /** The three adb reverse operations the manager needs, for one device. */
 export interface PrototypeReverseAdb {
-  /** Device-side ports of the reverses that exist (`adb reverse --list`). */
-  listReversedPorts(): Promise<ReadonlySet<number>>;
+  /** Device port -> `tcp:` host port (undefined for other host specs) of each reverse (`--list`). */
+  listReverses(): Promise<ReadonlyMap<number, number | undefined>>;
   /** `adb reverse tcp:<port> tcp:<port>`. */
   addReverse(port: number): Promise<void>;
   /** `adb reverse --remove tcp:<port>`. */
@@ -20,8 +21,8 @@ export function createPrototypeReverseAdb(
 ): PrototypeReverseAdb {
   const commands = createAdbReverseCommands(adb);
   return {
-    async listReversedPorts() {
-      return new Set((await commands.list()).map((entry) => entry.devicePort));
+    async listReverses() {
+      return new Map((await commands.list()).map((entry) => [entry.devicePort, entry.hostPort]));
     },
     // --no-rebind: a mapping made between the list and the add (a portReverse one) is never replaced.
     addReverse: (port) => commands.add(port, port, { noRebind: true }),
@@ -56,12 +57,16 @@ export interface StagedReverses {
 }
 
 interface DeviceState {
+  deviceId: string;
   adb: PrototypeReverseAdb;
-  /** Ports this manager created -> prototypes relying on each (the refcount). */
+  /**
+   * Ports this manager created, or joined because a portReverse session holds them -> prototypes
+   * relying on each (the refcount).
+   */
   owned: Map<number, Set<string>>;
+  /** Owned ports joined from a portReverse session -> the host port that session mapped them to. */
+  joined: Map<number, number>;
   report: Map<string, PrototypeReverseReport>;
-  /** Serialises operations on one device so list-then-add cannot interleave. */
-  tail: Promise<unknown>;
   /** Tasks queued or running on this device, so a release can tell whether anything waits behind it. */
   pending: number;
 }
@@ -69,11 +74,28 @@ interface DeviceState {
 /**
  * Creates `adb reverse` for the loopback ports of shown prototypes' `via: "device"` requests and
  * removes only the ones it created (#12530). A reverse that already existed is never touched, and a
- * port several prototypes on one device share is removed when the last of them goes. Everything is
- * best-effort: a failure is logged, reported through {@link report}, and never thrown.
+ * port several prototypes on one device share is removed when the last of them goes. A port a
+ * portReverse session holds, and still maps where that session set it, is shared through
+ * {@link AdbReverseOwnership}: the prototype joins it, and whichever of the two releases last
+ * removes it (#17253). Everything is best-effort: a failure
+ * is logged, reported through {@link report}, and never thrown.
  */
 export class PrototypeAdbReverseManager {
   private readonly devices = new Map<string, DeviceState>();
+  private readonly holder: AdbReverseHolder = {
+    kind: "prototype",
+    heldHostPort: (deviceId, devicePort) => {
+      const state = this.devices.get(deviceId);
+      return state?.owned.has(devicePort)
+        ? (state.joined.get(devicePort) ?? devicePort)
+        : undefined;
+    },
+  };
+  private readonly unregister: () => void;
+
+  constructor(private readonly ownership: AdbReverseOwnership = new AdbReverseOwnership()) {
+    this.unregister = ownership.register(this.holder);
+  }
 
   /** Makes `prototypeId`'s device-loopback ports reachable; replaces what it needed before. */
   async sync(
@@ -182,9 +204,15 @@ export class PrototypeAdbReverseManager {
     }
     await this.enqueue(state, async () => {
       for (const port of [...state.owned.keys()]) {
-        state.owned.delete(port);
+        const joinedTo = this.forget(state, port);
+        if (
+          (await this.repointed(state, port, joinedTo)) ||
+          this.keptForSession(deviceId, port, joinedTo ?? port)
+        ) {
+          continue;
+        }
         // A gone device cannot answer, so a failed removal here is expected, not a warning.
-        await state.adb.removeReverse(port).catch((error) => {
+        await this.remove(state, port).catch((error) => {
           logger.debug(`[prototype] reverse tcp:${port} removal on ${deviceId} failed: ${error}`);
         });
       }
@@ -199,6 +227,7 @@ export class PrototypeAdbReverseManager {
 
   async dispose(): Promise<void> {
     await Promise.all([...this.devices.keys()].map((id) => this.releaseAll(id)));
+    this.unregister();
   }
 
   /** Warnings for inspect: the unreversible URLs and failed reverses of every prototype on a device. */
@@ -218,7 +247,14 @@ export class PrototypeAdbReverseManager {
   private stateFor(deviceId: string, adb: PrototypeReverseAdb): DeviceState {
     let state = this.devices.get(deviceId);
     if (state === undefined) {
-      state = { adb, owned: new Map(), report: new Map(), tail: Promise.resolve(), pending: 0 };
+      state = {
+        deviceId,
+        adb,
+        owned: new Map(),
+        joined: new Map(),
+        report: new Map(),
+        pending: 0,
+      };
       this.devices.set(deviceId, state);
     } else {
       state.adb = adb;
@@ -226,13 +262,13 @@ export class PrototypeAdbReverseManager {
     return state;
   }
 
+  /** Serialises the device's work, and shares that order with portReverse sessions (#17253). */
   private enqueue<T>(state: DeviceState, task: () => Promise<T>): Promise<T> {
     state.pending++;
-    const run = state.tail.then(task, task).finally(() => {
+    // The shared per-device queue orders this manager's own tasks too, so it keeps no queue of its own.
+    return this.ownership.exclusive(state.deviceId, task).finally(() => {
       state.pending--;
     });
-    state.tail = run.catch(() => undefined);
-    return run;
   }
 
   private record(state: DeviceState, prototypeId: string, report: PrototypeReverseReport): void {
@@ -266,9 +302,15 @@ export class PrototypeAdbReverseManager {
       if (holders === undefined || !holders.delete(prototypeId) || holders.size > 0) {
         continue;
       }
-      state.owned.delete(port);
+      const joinedTo = this.forget(state, port);
+      if (
+        (await this.repointed(state, port, joinedTo)) ||
+        this.keptForSession(state.deviceId, port, joinedTo ?? port)
+      ) {
+        continue;
+      }
       try {
-        await state.adb.removeReverse(port);
+        await this.remove(state, port);
       } catch (error) {
         logger.warn(`[prototype] adb reverse --remove tcp:${port} failed: ${errorMessage(error)}`);
       }
@@ -285,17 +327,16 @@ export class PrototypeAdbReverseManager {
     if (missing.length === 0) {
       return;
     }
-    let existing: ReadonlySet<number>;
+    let existing: ReadonlyMap<number, number | undefined>;
     try {
-      existing = await state.adb.listReversedPorts();
+      existing = await state.adb.listReverses();
     } catch (error) {
       logger.warn(`[prototype] adb reverse --list failed: ${errorMessage(error)}`);
       failures.push(...missing.map((port) => ({ prototypeId, port, error: errorMessage(error) })));
       return;
     }
     for (const port of missing) {
-      // Someone else's reverse (the user's, or another tool's) is left alone and never removed.
-      if (existing.has(port)) {
+      if (this.joinSession(state, port, prototypeId, existing)) {
         continue;
       }
       try {
@@ -306,6 +347,87 @@ export class PrototypeAdbReverseManager {
         failures.push({ prototypeId, port, error: errorMessage(error) });
       }
     }
+  }
+
+  /**
+   * Joins a listed port a portReverse session holds and still maps where it set it, so the session's
+   * removal waits for this prototype too. True when nothing is left to add: the port was joined, or
+   * it is someone else's reverse (the user's, or another tool's), which is left alone and never
+   * removed. The device's work is exclusive across both managers, so the listing is current.
+   */
+  private joinSession(
+    state: DeviceState,
+    port: number,
+    prototypeId: string,
+    existing: ReadonlyMap<number, number | undefined>,
+  ): boolean {
+    if (!existing.has(port)) {
+      return false;
+    }
+    const hold = this.ownership.heldByOther(this.holder, state.deviceId, port);
+    if (hold !== undefined && hold.hostPort === existing.get(port)) {
+      this.join(state, port, prototypeId, hold.hostPort);
+    }
+    return true;
+  }
+
+  private join(state: DeviceState, port: number, prototypeId: string, hostPort: number): void {
+    state.owned.set(port, new Set([prototypeId]));
+    state.joined.set(port, hostPort);
+  }
+
+  /** Drops the port; returns the session host port it was joined at, if it was joined. */
+  private forget(state: DeviceState, port: number): number | undefined {
+    const joinedTo = state.joined.get(port);
+    state.owned.delete(port);
+    state.joined.delete(port);
+    return joinedTo;
+  }
+
+  /**
+   * A port joined from a session is someone else's once it no longer maps to that session's host
+   * port (re-pointed outside AutoMobile after the join), so it is left in place. A port this
+   * manager created is not re-checked; an unreadable `--list` falls back to removing, as before.
+   */
+  private async repointed(
+    state: DeviceState,
+    port: number,
+    joinedTo: number | undefined,
+  ): Promise<boolean> {
+    if (joinedTo === undefined) {
+      return false;
+    }
+    try {
+      const live = await state.adb.listReverses();
+      const kept = live.has(port) && live.get(port) !== joinedTo;
+      if (kept) {
+        logger.debug(`[prototype] reverse tcp:${port} on ${state.deviceId} was re-pointed; kept`);
+      }
+      return kept;
+    } catch (error) {
+      logger.warn(
+        `[prototype] adb reverse --list before removing tcp:${port} failed: ${errorMessage(error)}`,
+      );
+      return false;
+    }
+  }
+
+  private remove(state: DeviceState, port: number): Promise<void> {
+    return state.adb.removeReverse(port);
+  }
+
+  /**
+   * A portReverse session still holds the port at the host port this prototype's mapping points to
+   * (`hostPort`): the last prototype leaves the reverse to it. A session expecting another host port
+   * does not own this mapping, so the prototype still removes it.
+   */
+  private keptForSession(deviceId: string, port: number, hostPort: number): boolean {
+    const other = this.ownership.heldByOther(this.holder, deviceId, port);
+    const kept = other?.hostPort === hostPort;
+    if (kept) {
+      logger.debug(`[prototype] reverse tcp:${port} on ${deviceId} kept: a session holds it`);
+    }
+    return kept;
   }
 
   /** Joins an already-owned port's holders; false when this manager does not own it. */

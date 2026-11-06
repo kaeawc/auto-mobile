@@ -169,6 +169,7 @@ export interface WebRenderKit {
   readonly disabledState: typeof disabledState;
   readonly renderNode: typeof renderWebNode;
   readonly safeAreaEdges: typeof safeAreaEdges;
+  readonly fieldErrored: typeof fieldErrored;
 }
 
 /** `{key}` reads state; `{derived:name}` reads a top-level derived value, as on the devices. */
@@ -674,10 +675,14 @@ function fieldCaption(node: Raw, error: boolean, scope: WebRenderScope): WebElem
   ];
 }
 
+/** Whether a field's `errorWhen` decidably holds, which shows its error as on both devices. */
+function fieldErrored(node: Raw, scope: WebRenderScope): boolean {
+  return node.errorWhen !== undefined && decide(node.errorWhen, presentation(scope)) === true;
+}
+
 const textField: NodeRenderer = (node, scope, path) => {
   const { shown, empty } = fieldValue(node, scope);
-  const error =
-    node.errorWhen !== undefined && decide(node.errorWhen, presentation(scope)) === true;
+  const error = fieldErrored(node, scope);
   const disabled = disabledState(node, scope);
   const { attrs, style } = base(node, scope, {
     display: FLEX,
@@ -857,6 +862,7 @@ const KIT: WebRenderKit = {
   disabledState,
   renderNode: renderWebNode,
   safeAreaEdges,
+  fieldErrored,
 };
 
 const materialButton = materialButtonRenderer(KIT);

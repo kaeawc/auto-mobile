@@ -261,3 +261,68 @@ describe("device frame schema v2 (#16444)", () => {
     }
   });
 });
+
+describe("watch, TV and car frames (#16446)", () => {
+  const byId = (id: string) => deviceFrameOrThrow(id);
+
+  test("each matches its provisioned profile's form factor, mask and input", () => {
+    expect(
+      ["wearos-small-round", "apple-watch", "android-tv-1080p", "apple-tv", "car-1024p-landscape"]
+        .map(byId)
+        .map(({ id, platform, formFactor, mask, input }) => ({
+          id,
+          platform,
+          formFactor,
+          mask,
+          input,
+        })),
+    ).toEqual([
+      {
+        id: "wearos-small-round",
+        platform: "android",
+        formFactor: "watch",
+        mask: "round",
+        input: "rotary",
+      },
+      { id: "apple-watch", platform: "ios", formFactor: "watch", mask: "rect", input: "rotary" },
+      {
+        id: "android-tv-1080p",
+        platform: "android",
+        formFactor: "tv",
+        mask: "rect",
+        input: "dpad",
+      },
+      { id: "apple-tv", platform: "ios", formFactor: "tv", mask: "rect", input: "dpad" },
+      {
+        id: "car-1024p-landscape",
+        platform: "android",
+        formFactor: "automotive",
+        mask: "rect",
+        input: "touch",
+      },
+    ]);
+  });
+
+  test("watches and TVs have no system bars; every new frame says where its geometry came from", () => {
+    // Provenance lives in the sources file, merged in by frame id (#16809).
+    const screenKind = (id: string) => {
+      const source = registry.frames.find((frame) => frame.id === id)?.source;
+      return source && "kinds" in source ? source.kinds.screen : undefined;
+    };
+    for (const id of ["wearos-small-round", "apple-watch", "android-tv-1080p", "apple-tv"]) {
+      expect(byId(id)).toMatchObject({ statusBarDp: 0, navBar: { type: "none" } });
+    }
+    expect(screenKind("wearos-small-round")).toBe("avdProfile");
+    expect(screenKind("apple-watch")).toBe("simulatorProfile");
+    expect(screenKind("android-tv-1080p")).toBe("avdProfile");
+    expect(screenKind("apple-tv")).toBe("simulatorProfile");
+    expect(screenKind("car-1024p-landscape")).toBe("avdProfile");
+  });
+
+  test("a landscape-only frame records its geometry in portrait", () => {
+    for (const id of ["android-tv-1080p", "apple-tv", "car-1024p-landscape"]) {
+      const { widthDp, heightDp } = byId(id).screen;
+      expect(widthDp).toBeLessThan(heightDp);
+    }
+  });
+});

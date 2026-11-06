@@ -18,6 +18,7 @@ import { DefaultDeviceWindowCacheInvalidator } from "../../features/observe/Devi
 import { AndroidCtrlProxyClient } from "../../features/observe/android/AndroidCtrlProxyClient";
 import { PrototypeSpecRevisions } from "../../features/prototype/prototypeSpecRevisions";
 import { PrototypeAdbReverseManager } from "../../features/prototype/PrototypeAdbReverseManager";
+import { defaultAdbReverseOwnership } from "../../features/portReverse/AdbReverseOwnership";
 import { MAX_MOCK_DOCUMENT_BYTES } from "../../features/prototype/prototypeMockSchema";
 import { isMockBackendAction, mockBackendOutput } from "./mockBackend";
 import { PrototypeMockBackendRegistry } from "../../features/prototype/PrototypeMockBackendRegistry";
@@ -331,7 +332,7 @@ function createPrototypeHost(
     requests: channelWiring.combinedPrototypeCancellation(requests, channels),
     recorder,
   });
-  const reverses = new PrototypeAdbReverseManager();
+  const reverses = new PrototypeAdbReverseManager(defaultAdbReverseOwnership);
   const cleanup = subscribePrototypeCleanup(
     dependencies.lifecycle ?? defaultPrototypeLifecycle(),
     events,

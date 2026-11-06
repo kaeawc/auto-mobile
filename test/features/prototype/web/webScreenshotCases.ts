@@ -1,5 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { deviceFrameOrThrow } from "../../../../src/features/prototype/web/deviceFrames";
+import {
+  frameOrientations,
+  type WebOrientation,
+} from "../../../../src/features/prototype/web/webFrame";
 import {
   buildPrototypeWebPage,
   type PrototypeWebPageInput,
@@ -18,12 +23,26 @@ import {
 const FIXTURES = join(import.meta.dir, "../../../fixtures");
 
 /**
- * Committed goldens: two PNGs per case, `<spec>--<frame>.png` in portrait and
- * `<spec>--<frame>--landscape.png` at the end of the animated rotation (#16545).
+ * Committed goldens: two PNGs per case of a frame that rotates, `<spec>--<frame>.png` in portrait
+ * and `<spec>--<frame>--landscape.png` at the end of the animated rotation (#16545); one,
+ * `<spec>--<frame>.png` in its only orientation, for a watch, TV or car frame.
  */
 export const WEB_SCREENSHOT_GOLDEN_DIR = join(FIXTURES, "prototype-web/screenshots");
 
 export const WEB_SCREENSHOT_FRAMES = ["pixel-9", "iphone-16"] as const;
+
+/**
+ * One reference spec per watch, TV and car frame (#16446), rather than every spec on every frame,
+ * so the golden count grows by one per frame.
+ */
+export const WEB_SCREENSHOT_FORM_FACTOR_FRAMES = [
+  "wearos-small-round",
+  "apple-watch",
+  "android-tv-1080p",
+  "apple-tv",
+  "car-1024p-landscape",
+] as const;
+const FORM_FACTOR_SPEC = "reference-checkout";
 
 /** Spec name to fixture path under test/fixtures. */
 export const WEB_SCREENSHOT_SPECS: Readonly<Record<string, string>> = {
@@ -89,30 +108,35 @@ type WebScreenshotFrame = (typeof WEB_SCREENSHOT_FRAMES)[number];
 export interface WebScreenshotCase {
   readonly name: string;
   readonly spec: string;
-  readonly frame: WebScreenshotFrame;
+  readonly frame: string;
   readonly fixture: string;
+  /** The frame's orientations, the one the page opens in first. */
+  readonly orientations: readonly WebOrientation[];
+  /** The page as it opens, in `orientations[0]`. */
   readonly golden: string;
-  /** The system settings the page renders with; absent for the default ones. */
-  readonly landscapeGolden: string;
+  /** After rotating, for a frame with both orientations. */
+  readonly landscapeGolden?: string;
   /** The system settings the page renders with; absent for the default ones. */
   readonly settings?: Pick<PrototypeWebPageInput, "locale" | "textSize">;
 }
 
 function screenshotCase(
   spec: string,
-  frame: WebScreenshotFrame,
-  setting?: string,
+  frame: string,
+  settings?: { name: string; input: Pick<PrototypeWebPageInput, "locale" | "textSize"> },
 ): WebScreenshotCase {
-  const name = setting === undefined ? `${spec}--${frame}` : `${spec}--${frame}--${setting}`;
-  const settings = setting === undefined ? undefined : WEB_SCREENSHOT_SETTINGS[setting]?.(frame);
+  const name = settings === undefined ? `${spec}--${frame}` : `${spec}--${frame}--${settings.name}`;
+  const orientations = frameOrientations(deviceFrameOrThrow(frame));
+  const golden = (suffix: string) => join(WEB_SCREENSHOT_GOLDEN_DIR, `${name}${suffix}.png`);
   return {
     name,
     spec,
     frame,
     fixture: join(FIXTURES, WEB_SCREENSHOT_SPECS[spec]!),
-    golden: join(WEB_SCREENSHOT_GOLDEN_DIR, `${name}.png`),
-    landscapeGolden: join(WEB_SCREENSHOT_GOLDEN_DIR, `${name}--landscape.png`),
-    ...(settings ? { settings } : {}),
+    orientations,
+    golden: golden(""),
+    ...(orientations.length > 1 ? { landscapeGolden: golden("--landscape") } : {}),
+    ...(settings ? { settings: settings.input } : {}),
   };
 }
 
@@ -121,12 +145,18 @@ export function webScreenshotCases(): WebScreenshotCase[] {
     ...Object.keys(WEB_SCREENSHOT_SPECS).flatMap((spec) =>
       WEB_SCREENSHOT_FRAMES.map((frame) => screenshotCase(spec, frame)),
     ),
-    ...Object.keys(WEB_SCREENSHOT_SETTINGS).flatMap((setting) =>
+    ...Object.entries(WEB_SCREENSHOT_SETTINGS).flatMap(([setting, input]) =>
       WEB_SCREENSHOT_FRAMES.map((frame) =>
-        screenshotCase(WEB_SCREENSHOT_SETTINGS_SPEC, frame, setting),
+        screenshotCase(WEB_SCREENSHOT_SETTINGS_SPEC, frame, { name: setting, input: input(frame) }),
       ),
     ),
+    ...WEB_SCREENSHOT_FORM_FACTOR_FRAMES.map((frame) => screenshotCase(FORM_FACTOR_SPEC, frame)),
   ];
+}
+
+/** Every golden a case owns. */
+export function webScreenshotGoldens(entry: WebScreenshotCase): string[] {
+  return [entry.golden, ...(entry.landscapeGolden ? [entry.landscapeGolden] : [])];
 }
 
 /**
@@ -158,7 +188,7 @@ export async function webScreenshotPage(entry: WebScreenshotCase): Promise<strin
 export function webSpecPage(
   spec: unknown,
   name: string,
-  frame: (typeof WEB_SCREENSHOT_FRAMES)[number] = "pixel-9",
+  frame: string = "pixel-9",
   settings: Pick<PrototypeWebPageInput, "locale" | "textSize"> = {},
 ): string {
   return buildPrototypeWebPage({
@@ -176,4 +206,46 @@ export function pngSize(png: Buffer): { width: number; height: number } {
     throw new Error("not a PNG");
   }
   return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
+}
+
+/**
+ * Browser engines the check runs in (#16459). Every engine runs the behavioural assertions; only
+ * `WEB_SCREENSHOT_GOLDEN_ENGINE` is compared with (or rewrites) the goldens, which are trusted
+ * only from the CI Linux Chromium build.
+ */
+export const WEB_SCREENSHOT_ENGINES = ["chromium", "firefox", "webkit"] as const;
+export type WebScreenshotEngine = (typeof WEB_SCREENSHOT_ENGINES)[number];
+export const WEB_SCREENSHOT_GOLDEN_ENGINE: WebScreenshotEngine = "chromium";
+
+function isWebScreenshotEngine(name: string): name is WebScreenshotEngine {
+  return (WEB_SCREENSHOT_ENGINES as readonly string[]).includes(name);
+}
+
+/**
+ * The engines named by a comma-separated list (`AUTOMOBILE_PROTOTYPE_WEB_ENGINES`), in canonical
+ * order without duplicates. Unset or blank means every engine; an unknown name throws.
+ */
+export function webScreenshotEngines(value: string | undefined): WebScreenshotEngine[] {
+  const names = (value ?? "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0);
+  if (names.length === 0) {
+    return [...WEB_SCREENSHOT_ENGINES];
+  }
+  const unknown = names.filter((name) => !isWebScreenshotEngine(name));
+  if (unknown.length > 0) {
+    throw new Error(
+      `unknown browser engine(s): ${unknown.join(", ")} (expected ${WEB_SCREENSHOT_ENGINES.join(", ")})`,
+    );
+  }
+  return WEB_SCREENSHOT_ENGINES.filter((engine) => names.includes(engine));
+}
+
+/**
+ * Where a captured screenshot is written under the output directory: the golden engine's at the
+ * top level, so adopting goldens stays a flat copy, and every other engine's under its own name.
+ */
+export function webScreenshotOutputPath(engine: WebScreenshotEngine, file: string): string {
+  return engine === WEB_SCREENSHOT_GOLDEN_ENGINE ? file : join(engine, file);
 }

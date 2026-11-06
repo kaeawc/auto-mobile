@@ -196,7 +196,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Audit the accessibility of the current screen. engine wcag (default on Android; Android only) runs the host-side WCAG checks (contrast, touch targets, labels, headings) with every audit feature flag off and reports violations with the element from this observation; scope.container limits it to one element's subtree; baseline record saves the violations under a name and compare reports baselineDiff (new, fixed, unchanged), and only new violations count toward failOn; failOn error|warning makes the call fail when findings reach that severity, for plan assertions (default never). engine platform (default on iOS) runs the platform's own engine: on iOS 17+ (Simulator and physical) XCUITest performAccessibilityAudit reports contrast, hitRegion, dynamicType, textClipped, sufficientDescription, trait and elementDetection issues, each with the element's accessibility identifier as elementId (usable with tapOn/highlight) and bounds; it sees real hit regions, Dynamic Type support and clipped text. checks and maxIssues apply to the platform engine, scope, baseline and failOn to wcag; passing one to the other engine is an error. The Android platform engine (Accessibility Test Framework) is not available yet and returns errorCode unsupported_platform, as does wcag on iOS; a runner that predates the iOS command returns errorCode unsupported_capability.",
+    "description": "Audit the accessibility of the current screen. engine wcag (default on Android; Android only) runs the host-side WCAG checks (contrast, touch targets, labels, headings) with every audit feature flag off and reports violations with the element from this observation; an appId that is not in the foreground is an error; scope.container limits it to one element's subtree; baseline record saves the violations under a name and compare reports baselineDiff (new, fixed, unchanged), and only new violations count toward failOn; failOn error|warning makes the call fail when findings reach that severity, for plan assertions (default never). engine platform (default on iOS) runs the platform's own engine: on iOS 17+ (Simulator and physical) XCUITest performAccessibilityAudit reports contrast, hitRegion, dynamicType, textClipped, sufficientDescription, trait and elementDetection issues, each with the element's accessibility identifier as elementId (usable with tapOn/highlight) and bounds; it sees real hit regions, Dynamic Type support and clipped text. checks and maxIssues apply to the platform engine, scope, baseline and failOn to wcag; passing one to the other engine is an error. The Android platform engine (Accessibility Test Framework) is not available yet and returns errorCode unsupported_platform, as does wcag on iOS; a runner that predates the iOS command returns errorCode unsupported_capability.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -962,7 +962,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Deprecated: use accessibilityAudit (engine wcag) for accessibility and performanceAudit for performance and memory; this tool returns the same results and will be removed. Audit the current screen on demand, with every audit feature flag off and without changing flag state. kinds: accessibility (WCAG: contrast, touch targets, labels, headings; default), performance (UI jank and touch latency of the foreground app), memory (a memory snapshot of appId). Violations carry the element from this observation. scope.container limits the accessibility audit to one element's subtree. baseline record saves the accessibility violations under a name; compare reports baselineDiff (new, fixed, unchanged), and only new violations count toward failOn. failOn error|warning makes the call fail when findings reach that severity, for plan assertions; default never. Android only.",
+    "description": "Deprecated: use accessibilityAudit (engine wcag) for accessibility and performanceAudit for performance and memory; this tool returns the same results and will be removed. Audit the current screen on demand, with every audit feature flag off and without changing flag state. kinds: accessibility (WCAG: contrast, touch targets, labels, headings; default), performance (UI jank and touch latency of the foreground app), memory (a memory snapshot of appId). Violations carry the element from this observation; accessibility of an appId that is not in the foreground is an error. scope.container limits the accessibility audit to one element's subtree. baseline record saves the accessibility violations under a name; compare reports baselineDiff (new, fixed, unchanged), and only new violations count toward failOn. failOn error|warning makes the call fail when findings reach that severity or a requested kind is unsupported, for plan assertions; default never. Android only.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -25316,7 +25316,7 @@
     "annotations": {
       "destructiveHint": false
     },
-    "description": "Pass/fail performance checks of an app on the current screen, against the configured thresholds. kinds: performance (UI jank, frame time and touch latency of the foreground app; appId must be in the foreground) and memory (a memory snapshot of appId); default both. Each reports passed with its metrics and violations. failOn error|warning makes the call fail when a check does not pass, for plan assertions; default never. For raw captures use performanceTrace, captureTrace, measureStartup or heapDump. Android only.",
+    "description": "Pass/fail performance checks of an app on the current screen, against the configured thresholds. kinds: performance (UI jank, frame time and touch latency of the foreground app; appId must be in the foreground) and memory (a memory snapshot of appId); default both. Each reports passed with its metrics and violations. failOn error|warning makes the call fail when a check does not pass or cannot run (performance of an appId not in the foreground is listed under unsupported), for plan assertions; default never. For raw captures use performanceTrace, captureTrace, measureStartup or heapDump. Android only.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -25338,7 +25338,7 @@
           "pattern": "^[A-Za-z0-9._-]+$"
         },
         "failOn": {
-          "description": "Fail the call when a check does not pass: error or warning (default never: report only)",
+          "description": "Fail the call when a check does not pass or cannot run: error or warning (default never: report only)",
           "type": "string",
           "enum": ["error", "warning", "never"]
         },

@@ -52,6 +52,19 @@ describe("performanceAudit tool (#17279)", () => {
     });
   });
 
+  test("failOn fails when a background appId leaves performance unsupported (#17281)", async () => {
+    const response = await registeredHandler(
+      createPerformanceAuditTool(() => performanceScenarioEngines()),
+    )(AUDIT_ANDROID, { appId: "com.other", failOn: "error" });
+
+    expect(response.isError).toBe(true);
+    expect(response.structuredContent).toEqual({
+      ...PINNED_BACKGROUND_PERFORMANCE,
+      success: false,
+      failed: true,
+    });
+  });
+
   test("runs both kinds by default", async () => {
     const engines = performanceScenarioEngines();
     const response = await registeredHandler(createPerformanceAuditTool(() => engines))(

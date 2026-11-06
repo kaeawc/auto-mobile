@@ -115,8 +115,12 @@ function foreignArgs(engine: AccessibilityAuditEngine, args: AccessibilityAuditA
   return foreign.filter((name) => args[name] !== undefined);
 }
 
-function wcagInput(args: AccessibilityAuditArgs): WcagAccessibilityAuditInput {
+function wcagInput(
+  args: AccessibilityAuditArgs,
+  signal: AbortSignal | undefined,
+): WcagAccessibilityAuditInput {
   return {
+    ...(signal ? { signal } : {}),
     ...(args.appId ? { appId: args.appId } : {}),
     ...(args.scope?.container ? { container: args.scope.container } : {}),
     ...(args.baseline ? { baseline: args.baseline } : {}),
@@ -150,7 +154,7 @@ export function createAccessibilityAuditTool(
   return defineDeviceTool({
     name: "accessibilityAudit",
     description:
-      "Audit the accessibility of the current screen. engine wcag (default on Android; Android only) runs the host-side WCAG checks (contrast, touch targets, labels, headings) with every audit feature flag off and reports violations with the element from this observation; scope.container limits it to one element's subtree; baseline record saves the violations under a name and compare reports baselineDiff (new, fixed, unchanged), and only new violations count toward failOn; failOn error|warning makes the call fail when findings reach that severity, for plan assertions (default never). engine platform (default on iOS) runs the platform's own engine: on iOS 17+ (Simulator and physical) XCUITest performAccessibilityAudit reports contrast, hitRegion, dynamicType, textClipped, sufficientDescription, trait and elementDetection issues, each with the element's accessibility identifier as elementId (usable with tapOn/highlight) and bounds; it sees real hit regions, Dynamic Type support and clipped text. checks and maxIssues apply to the platform engine, scope, baseline and failOn to wcag; passing one to the other engine is an error. The Android platform engine (Accessibility Test Framework) is not available yet and returns errorCode unsupported_platform, as does wcag on iOS; a runner that predates the iOS command returns errorCode unsupported_capability.",
+      "Audit the accessibility of the current screen. engine wcag (default on Android; Android only) runs the host-side WCAG checks (contrast, touch targets, labels, headings) with every audit feature flag off and reports violations with the element from this observation; an appId that is not in the foreground is an error; scope.container limits it to one element's subtree; baseline record saves the violations under a name and compare reports baselineDiff (new, fixed, unchanged), and only new violations count toward failOn; failOn error|warning makes the call fail when findings reach that severity, for plan assertions (default never). engine platform (default on iOS) runs the platform's own engine: on iOS 17+ (Simulator and physical) XCUITest performAccessibilityAudit reports contrast, hitRegion, dynamicType, textClipped, sufficientDescription, trait and elementDetection issues, each with the element's accessibility identifier as elementId (usable with tapOn/highlight) and bounds; it sees real hit regions, Dynamic Type support and clipped text. checks and maxIssues apply to the platform engine, scope, baseline and failOn to wcag; passing one to the other engine is an error. The Android platform engine (Accessibility Test Framework) is not available yet and returns errorCode unsupported_platform, as does wcag on iOS; a runner that predates the iOS command returns errorCode unsupported_capability.",
     input: accessibilityAuditInput,
     handler: async (device, args, _progress, signal) => {
       const engine = args.engine ?? defaultAccessibilityAuditEngine(device);
@@ -169,7 +173,7 @@ export function createAccessibilityAuditTool(
       }
       const result =
         engine === "wcag"
-          ? await runWcagAccessibilityAudit(device, enginesFor(device), wcagInput(args))
+          ? await runWcagAccessibilityAudit(device, enginesFor(device), wcagInput(args, signal))
           : await audit.run(device, platformInput(args, signal));
       return withIsErrorOnFailure(createStructuredToolResponse(result), result.success);
     },

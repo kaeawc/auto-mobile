@@ -110,6 +110,21 @@ describe("audit tool output pins (#17279)", () => {
     expect(response.structuredContent).toEqual(PINNED_BACKGROUND_PERFORMANCE);
   });
 
+  test("a cancelled call does not record a baseline (#17281)", async () => {
+    const engines = accessibilityScenarioEngines();
+    const controller = new AbortController();
+    controller.abort(new Error("cancelled"));
+
+    await expect(
+      pinHandler(createAuditTool(() => engines))(
+        AUDIT_ANDROID,
+        { baseline: { name: "next", mode: "record" } },
+        controller.signal,
+      ),
+    ).rejects.toThrow("cancelled");
+    expect(engines.savedBaselines.has("next")).toBe(false);
+  });
+
   test("iOS reports every requested kind unsupported", async () => {
     const handler = pinHandler(createAuditTool(() => performanceScenarioEngines()));
 

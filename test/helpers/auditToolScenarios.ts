@@ -22,6 +22,7 @@ export type ToolResponse = { isError?: boolean; structuredContent?: Record<strin
 export type RegisteredHandler = (
   device: BootedDevice,
   args: Record<string, unknown>,
+  signal?: AbortSignal,
 ) => Promise<ToolResponse>;
 
 /** The device-aware handler a tool registers, called the way the registry calls it. */
@@ -34,8 +35,8 @@ export function registeredHandler(tool: { register(registrar: ToolRegistrar): vo
     },
   } as ToolRegistrar;
   tool.register(registrar);
-  const call: RegisteredHandler = (device, args) =>
-    Reflect.apply(handler!, undefined, [device, args]) as Promise<ToolResponse>;
+  const call: RegisteredHandler = (device, args, signal) =>
+    Reflect.apply(handler!, undefined, [device, args, undefined, signal]) as Promise<ToolResponse>;
   return call;
 }
 

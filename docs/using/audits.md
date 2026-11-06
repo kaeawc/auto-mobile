@@ -22,8 +22,10 @@ Passing an argument of the other engine fails the call with an `error` naming it
 `violations` (each with its element and `fingerprint`), `totalViolations`, `truncated`, `summary`,
 `screenId`, and `failed` when `failOn` matched. With `baseline` compare, `baselineDiff` lists `new`
 violations, `fixed` fingerprints and the `unchanged` count, and only new violations count toward
-`failOn`; a missing baseline is an error, so record one first. A `scope.container` that matches no
-element is an error.
+`failOn`; a missing baseline is an error, so record one first. A cancelled call never records a
+baseline. A `scope.container` that matches no
+element is an error. The audit reads the screen on display, so an `appId` that is not in the
+foreground is an error: bring the app to the foreground first, or omit `appId`.
 
 **platform** (iOS 17+, Simulator and physical) runs XCUITest `performAccessibilityAudit`. The
 result has `issues` (each with `check`, `summary`, `elementId` usable with `tapOn`, and `bounds`),
@@ -44,16 +46,17 @@ iOS runner predates the audit command: restart the daemon so it installs the cur
 
 Android only.
 
-| Parameter | Meaning                                                                                   |
-| --------- | ----------------------------------------------------------------------------------------- |
-| `kinds`   | `performance` and/or `memory` (default: both)                                             |
-| `appId`   | App to audit (default: the foreground app)                                                |
-| `failOn`  | `error` or `warning` fails the call when a check does not pass; `never` (default) reports |
+| Parameter | Meaning                                                                                                 |
+| --------- | ------------------------------------------------------------------------------------------------------- |
+| `kinds`   | `performance` and/or `memory` (default: both)                                                           |
+| `appId`   | App to audit (default: the foreground app)                                                              |
+| `failOn`  | `error` or `warning` fails the call when a check does not pass or cannot run; `never` (default) reports |
 
 `performance` measures UI jank, frame time and touch latency of the foreground app against the
 configured thresholds; when `appId` is not in the foreground it is listed under `unsupported`
-instead. `memory` takes a memory snapshot of `appId`. Each result has `passed`, its metrics and its
-violations; `failed` is set when `failOn` matched. For raw captures use `performanceTrace`,
+instead, and `failOn` `error` or `warning` then fails the call. `memory` takes a memory snapshot of
+`appId`. Each result has `passed`, its metrics and its violations; `failed` is set when `failOn`
+matched. For raw captures use `performanceTrace`,
 `captureTrace`, `measureStartup` or `heapDump`.
 
 ## audit (deprecated)

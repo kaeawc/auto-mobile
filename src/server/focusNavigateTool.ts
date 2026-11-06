@@ -122,6 +122,8 @@ export const focusNavigateTool = defineDeviceTool({
   },
   options: {
     ...PLAN_RELEVANT,
+    // `select` can navigate, so record the call like tapOn and sendKeys for navigateTo to replay.
+    recordsNavigation: true,
     defaultEnabled: false,
     outputSchema: focusNavigateResultSchema,
   },

@@ -54434,6 +54434,11 @@
                   "enum": ["pin", "none", "unset"],
                   "description": "Sets an AutoMobile test PIN, or removes the PIN; reset restores no lock screen. Keys bound to the lock screen are invalidated by a removal. 'unset' restores."
                 },
+                "biometricEnrollment": {
+                  "type": "string",
+                  "enum": ["add", "none", "unset"],
+                  "description": "Android emulators only: 'add' enrolls one more fingerprint through Settings and the emulator console (`adb emu finger touch`), which invalidates keys created with setInvalidatedByBiometricEnrollment(true). The first add needs a device with no lock screen and sets the AutoMobile test PIN. 'none' removes every fingerprint by clearing that PIN. Reset or 'unset' restores no lock screen and no fingerprints. Refused on physical devices and when the console is unavailable."
+                },
                 "disablePackage": {
                   "anyOf": [
                     {

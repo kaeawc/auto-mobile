@@ -1,10 +1,21 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parsePrototypeHex } from "../../../../src/features/prototype/prototypeContrast";
+import {
+  parsePrototypeHex,
+  prototypeRolePalette,
+} from "../../../../src/features/prototype/prototypeContrast";
 import type { WebChild, WebElement } from "../../../../src/features/prototype/web/webNodes";
+import {
+  childEntries,
+  preparedNode,
+  type WebRenderScope,
+} from "../../../../src/features/prototype/web/webRender";
 import { renderPrototypeStill } from "../../../../src/features/prototype/web/webStill";
-import { resolveWebStillAppearance } from "../../../../src/features/prototype/web/webStillAppearance";
+import {
+  resolveWebStillAppearance,
+  webAuthoredBackground,
+} from "../../../../src/features/prototype/web/webStillAppearance";
 
 const PURPLE = parsePrototypeHex("#6200EE")!;
 const PALE = parsePrototypeHex("#FAFAFA")!;
@@ -174,5 +185,55 @@ describe("prototype web still mode resolution (#16654)", () => {
       mode: "light",
     });
     expect(screenOf(drawn.element).style["background-color"]).toBe("rgba(0,0,0,1)");
+  });
+});
+
+describe("webAuthoredBackground work (#17267)", () => {
+  const scope: WebRenderScope = {
+    style: { mode: "light", palette: prototypeRolePalette({}, "light"), parentAxis: "column" },
+    condition: { state: {}, platform: "android" },
+    data: {},
+    spec: {},
+    format: { locale: "en-US", timeZone: "UTC", nowMs: 0 },
+    instances: [],
+    inBox: false,
+    unsupported: [],
+    screenWidth: 412,
+    screenHeight: 915,
+    layers: [],
+  };
+
+  /** A leaf whose `style` getter counts every read: each preparation reads it a fixed number of times. */
+  function countedLeaf(): { node: Record<string, unknown>; reads: () => number } {
+    let reads = 0;
+    const node: Record<string, unknown> = { type: "box", testTag: "{item.id}" };
+    Object.defineProperty(node, "style", {
+      enumerable: true,
+      get: () => {
+        reads += 1;
+        return { background: "#101010" };
+      },
+    });
+    return { node, reads: () => reads };
+  }
+
+  test("each node on a repeat-bound leading chain is prepared once", () => {
+    const leaf = countedLeaf();
+    const root = {
+      type: "column",
+      repeat: { as: "item", items: [{ id: "a" }, { id: "b" }] },
+      children: [leaf.node],
+    };
+    // One preparation of the leaf in the first row's scope, exactly as the walk reaches it.
+    const prepared = preparedNode(root, scope, "root")!;
+    const first = childEntries(prepared.styled, prepared.scope, "root")[0]!;
+    const before = leaf.reads();
+    preparedNode(first.node, first.scope, first.path);
+    const once = leaf.reads() - before;
+    expect(once).toBeGreaterThan(0);
+
+    const start = leaf.reads();
+    expect(webAuthoredBackground(root, scope, "root")).toEqual(parsePrototypeHex("#101010"));
+    expect(leaf.reads() - start).toBe(once);
   });
 });

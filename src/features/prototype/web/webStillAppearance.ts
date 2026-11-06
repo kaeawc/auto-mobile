@@ -8,6 +8,8 @@ import { record } from "../prototypeTemplate";
 import { pagerPage } from "./webCollections";
 import { bound, childEntries, preparedNode, type WebRenderScope } from "./webRender";
 
+type PreparedWebNode = NonNullable<ReturnType<typeof preparedNode>>;
+
 /** Below this luminance a screen colour reads as dark, as on Android (`DARK_LUMINANCE_CEILING`). */
 const DARK_LUMINANCE_CEILING = 0.179;
 /** A background at least this opaque is the screen colour the author painted. */
@@ -91,7 +93,11 @@ export function webAuthoredBackground(
   scope: WebRenderScope,
   path: string,
 ): Rgba | undefined {
-  const prepared = preparedNode(node, scope, path);
+  return preparedBackground(preparedNode(node, scope, path), path);
+}
+
+/** The walk over an already prepared node, so each node on the chain is prepared once. */
+function preparedBackground(prepared: PreparedWebNode | undefined, path: string): Rgba | undefined {
   if (!prepared) {
     return undefined;
   }
@@ -103,11 +109,15 @@ export function webAuthoredBackground(
   if (styled.type === "pager") {
     const pages = Array.isArray(styled.children) ? styled.children : [];
     const page = pagerPage(styled, local, { bound });
-    return webAuthoredBackground(pages[page], local, `${path}.children[${page}]`);
+    const pagePath = `${path}.children[${page}]`;
+    return preparedBackground(preparedNode(pages[page], local, pagePath), pagePath);
   }
   // A repeat's template counts only through the rows it draws, bound to each row.
-  const first = childEntries(styled, local, path).find(
-    (entry) => preparedNode(entry.node, entry.scope, entry.path) !== undefined,
-  );
-  return first ? webAuthoredBackground(first.node, first.scope, first.path) : undefined;
+  for (const entry of childEntries(styled, local, path)) {
+    const child = preparedNode(entry.node, entry.scope, entry.path);
+    if (child) {
+      return preparedBackground(child, entry.path);
+    }
+  }
+  return undefined;
 }

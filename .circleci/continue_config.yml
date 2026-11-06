@@ -154,17 +154,23 @@ commands:
       - run:
           name: "Install ripgrep"
           command: |
-            if ! command -v rg >/dev/null 2>&1; then
-              bash .github/actions/setup-ripgrep/install-ripgrep.sh --install-dir "${HOME}/.local/bin"
-              echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${BASH_ENV}"
-            fi
+            mkdir -p ci-logs
+            {
+              if ! command -v rg >/dev/null 2>&1; then
+                bash .github/actions/setup-ripgrep/install-ripgrep.sh --install-dir "${HOME}/.local/bin"
+                echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${BASH_ENV}"
+              fi
+            } 2>&1 | tee -a ci-logs/setup.log
       - run:
           name: "Install dependencies"
           # install-bun-deps.sh only puts node_modules/.bin on $GITHUB_PATH, so
           # expose it here for bare `turbo` calls in later steps.
           command: |
-            bash scripts/ci/install-bun-deps.sh
-            echo "export PATH=\"${PWD}/node_modules/.bin:\${PATH}\"" >> "${BASH_ENV}"
+            mkdir -p ci-logs
+            {
+              bash scripts/ci/install-bun-deps.sh
+              echo "export PATH=\"${PWD}/node_modules/.bin:\${PATH}\"" >> "${BASH_ENV}"
+            } 2>&1 | tee -a ci-logs/setup.log
       - run:
           name: "Build AutoMobile"
           environment:
@@ -172,10 +178,14 @@ commands:
             TURBO_NO_UPDATE_NOTIFIER: "1"
             DO_NOT_TRACK: "1"
             NO_COLOR: "1"
-          command: bunx turbo run build --output-logs=errors-only
+          command: |
+            mkdir -p ci-logs
+            { bunx turbo run build --output-logs=errors-only; } 2>&1 | tee -a ci-logs/setup.log
       - run:
           name: "Globally Install AutoMobile"
-          command: bun add -g .
+          command: |
+            mkdir -p ci-logs
+            { bun add -g .; } 2>&1 | tee -a ci-logs/setup.log
 
   # Post-merge coalescing (#11010): halt (successfully) when a newer main commit
   # changes the same path group, because that commit's pipeline runs this job on
@@ -245,37 +255,57 @@ jobs:
       - checkout_without_lfs
       - run:
           name: "Install fast validation dependencies"
-          command: scripts/ci/install-fast-validation-deps.sh
+          command: |
+            mkdir -p ci-logs
+            { scripts/ci/install-fast-validation-deps.sh; } 2>&1 | tee -a ci-logs/fast-validation.log
       - run:
           name: "Install uv and hadolint"
           command: |
-            curl -LsSf https://astral.sh/uv/install.sh | sh
-            echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${BASH_ENV}"
-            sudo curl -fsSL -o /usr/local/bin/hadolint \
-              https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64
-            sudo chmod +x /usr/local/bin/hadolint
+            mkdir -p ci-logs
+            {
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+              echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${BASH_ENV}"
+              sudo curl -fsSL -o /usr/local/bin/hadolint \
+                https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64
+              sudo chmod +x /usr/local/bin/hadolint
+            } 2>&1 | tee -a ci-logs/fast-validation.log
       - setup_auto_mobile_npm_package
       - run:
           name: "Check formatting"
-          command: bun run format:check
+          command: |
+            mkdir -p ci-logs
+            { bun run format:check; } 2>&1 | tee -a ci-logs/fast-validation.log
       - run:
           name: "Run hadolint"
-          command: hadolint --config .hadolint.yaml --failure-threshold error Dockerfile
+          command: |
+            mkdir -p ci-logs
+            { hadolint --config .hadolint.yaml --failure-threshold error Dockerfile; } 2>&1 | tee -a ci-logs/fast-validation.log
       - run:
           name: "Run fast validation checks"
           environment:
             INSTALL_KTFMT_WHEN_MISSING: "true"
             KTFMT_ONLY_TOUCHED_FILES: "false"
           command: |
-            scripts/all_fast_validate_checks.sh \
-              --only yaml,lfs-pointers,scripts-referenced,schema-copy-drift,tool-definitions,prototype-spec-models,protoviewer-notices,privacy-manifests,store-listing,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,android-parity-budgets,shared-process-allowlist,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock,debug-tags,datetime-now-literal,markdown-bash \
-              --max-parallel 4
+            mkdir -p ci-logs
+            {
+              scripts/all_fast_validate_checks.sh \
+                --only yaml,lfs-pointers,scripts-referenced,schema-copy-drift,tool-definitions,prototype-spec-models,protoviewer-notices,privacy-manifests,store-listing,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,android-parity-budgets,shared-process-allowlist,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock,debug-tags,datetime-now-literal,markdown-bash \
+                --max-parallel 4
+            } 2>&1 | tee -a ci-logs/fast-validation.log
       - run:
           name: "Run offline lychee link check"
-          command: scripts/all_fast_validate_checks.sh --only lychee-offline
+          command: |
+            mkdir -p ci-logs
+            { scripts/all_fast_validate_checks.sh --only lychee-offline; } 2>&1 | tee -a ci-logs/fast-validation.log
       - run:
           name: "Check iOS version constant is in sync with package.json"
-          command: bash scripts/versioning/generate-ios-version.sh --check
+          command: |
+            mkdir -p ci-logs
+            { bash scripts/versioning/generate-ios-version.sh --check; } 2>&1 | tee -a ci-logs/fast-validation.log
+      - store_artifacts:
+          when: always
+          path: ci-logs
+          destination: ci-logs
       - store_artifacts:
           when: on_fail
           path: scratch
@@ -337,23 +367,36 @@ jobs:
             TURBO_NO_UPDATE_NOTIFIER: "1"
             DO_NOT_TRACK: "1"
             NO_COLOR: "1"
-          command: bunx turbo run lint --output-logs=errors-only --log-order=grouped
+          command: |
+            mkdir -p ci-logs
+            { bunx turbo run lint --output-logs=errors-only --log-order=grouped; } 2>&1 | tee -a ci-logs/build-and-test.log
       - run:
           name: "Check stdlib-first dependency decisions"
           command: |
-            STDLIB_FIRST_BASE_REF="$(git merge-base origin/main HEAD)" bun run check:stdlib-first
+            mkdir -p ci-logs
+            {
+              STDLIB_FIRST_BASE_REF="$(git merge-base origin/main HEAD)" bun run check:stdlib-first
+            } 2>&1 | tee -a ci-logs/build-and-test.log
       - run:
           name: "Run Typecheck Gate"
-          command: bun run typecheck
+          command: |
+            mkdir -p ci-logs
+            { bun run typecheck; } 2>&1 | tee -a ci-logs/build-and-test.log
       - run:
           name: "Run Test Typecheck Gate"
-          command: bun run typecheck:test
+          command: |
+            mkdir -p ci-logs
+            { bun run typecheck:test; } 2>&1 | tee -a ci-logs/build-and-test.log
       - run:
           name: "Run Bun MCP startup smoke"
-          command: bun run test:startup:bun
+          command: |
+            mkdir -p ci-logs
+            { bun run test:startup:bun; } 2>&1 | tee -a ci-logs/build-and-test.log
       - run:
           name: "Run Bun image runtime smoke"
-          command: bun run test:image:bun
+          command: |
+            mkdir -p ci-logs
+            { bun run test:image:bun; } 2>&1 | tee -a ci-logs/build-and-test.log
       - run:
           name: "Run complete unit lane"
           no_output_timeout: 20m
@@ -362,14 +405,23 @@ jobs:
             AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720"
             AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS: "1560"
             AUTOMOBILE_UNIT_JUNIT_DIR: scratch/timing-unit-reports
-          command: bash scripts/test-ts.sh unit
+          command: |
+            mkdir -p ci-logs
+            { bash scripts/test-ts.sh unit; } 2>&1 | tee -a ci-logs/build-and-test.log
       - run:
           name: "Enforce 100ms budget for changed unit tests"
           environment:
             BUN_TEST_TIMING_REPORT_DIR: scratch/timing-unit-reports
             BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS: "360"
           command: |
-            BUN_TEST_TIMING_BASE_REF="$(git merge-base origin/main HEAD)" bash scripts/validate-bun-test-timings.sh
+            mkdir -p ci-logs
+            {
+              BUN_TEST_TIMING_BASE_REF="$(git merge-base origin/main HEAD)" bash scripts/validate-bun-test-timings.sh
+            } 2>&1 | tee -a ci-logs/build-and-test.log
+      - store_artifacts:
+          when: always
+          path: ci-logs
+          destination: ci-logs
       - store_artifacts:
           when: always
           path: scratch/timing-unit-reports

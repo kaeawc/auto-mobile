@@ -1,5 +1,6 @@
 import type { DaemonCoreServices, DaemonLifecycleState } from "./DaemonCoreState";
 import { logger } from "../../utils/logger";
+import { notifyAdbTransportRecovered } from "../../utils/android-cmdline-tools/adbTransportRecoveredSignal";
 import type { Platform } from "../../models";
 import { MultiPlatformDeviceManager } from "../../devices/deviceUtils";
 import { type Session } from "../sessionManager";
@@ -515,6 +516,11 @@ export class DaemonDisconnect {
     });
     // Recovery logs its own failures and is bounded per serial.
     await deviceManager.recoverAndroidOfflineDevices(transports);
+    // Offline recovery reports each reconnected transport; state keyed by the canonical serial
+    // (e.g. adb reverse mappings, #17168) also needs the device reconnected through an alias.
+    dispatchTargets
+      .filter((id) => !transports.includes(id))
+      .forEach((id) => notifyAdbTransportRecovered(id, "adb_reconnect"));
     return true;
   }
 

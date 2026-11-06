@@ -905,6 +905,11 @@
     "press": {
       "scale": 0.9,
       "alpha": 0.8
+    },
+    "attentionLoop": {
+      "effect": "spin",
+      "periodMs": 800,
+      "iterations": 2
     }
   },
   "actionRequestFilled": {
@@ -1028,5 +1033,10 @@
   "windowLayoutDirection": {
     "placement": { "type": "fullscreen" },
     "layoutDirection": "rtl"
+  },
+  "loop": {
+    "effect": "pulse",
+    "periodMs": 1200,
+    "iterations": "infinite"
   }
 }

@@ -12,8 +12,8 @@ non-iOS Apple platform (`NonIosApplePlatform`): an Apple TV simulator is `platfo
 everything below that says "watch" applies to it unless a section names watchOS specifically.
 `tvos` supports `listDevices`, `listDeviceImages`, `provisionDevice`, `deleteDevice`,
 `startDevice`, `setActiveDevice`, `killDevice`, `installApp`, `uninstallApp`, `launchApp`,
-`terminateApp`, `listApps`, `observe`, `tapOn`, `pressButton`, `videoRecording` and
-`compareScreenshot`. Discovery and selection require an explicit
+`terminateApp`, `listApps`, `observe`, `tapOn`, `pressButton`, `openLink`, `getDeepLinks`,
+`videoRecording` and `compareScreenshot`. Discovery and selection require an explicit
 tvOS request. Boot uses simctl readiness and the simulator gate; start binds at `booted`
 readiness after best-effort tvOS runner startup, without iOS keyboard, biometric or prototype setup.
 The tvOS runner uses `request_hierarchy` through the iOS hierarchy converter, preserving focus

@@ -43,6 +43,8 @@ unavailable runtime fails, lists the available runtimes and repeats the install 
 | `sendKeys`          | Types text into the focused field.                                           |
 | `videoRecording`    | Records the screen; `audio` is not supported.                                |
 | `compareScreenshot` | Compares the full screen; `target` and `mask` need a runner (see below).     |
+| `openLink`          | Opens a URL with the app that declares its scheme.                           |
+| `getDeepLinks`      | Lists the URL schemes an installed app declares.                             |
 
 <!-- apple-tv-supported-tools:end -->
 
@@ -170,6 +172,16 @@ with `type` commands. Text is appended to the field.
 
 - `operation: "replace"`, key commands, clear commands and selectors are refused.
 - To change existing text, edit it on the on-screen keyboard with `pressButton`, then type.
+
+## Open a deep link
+
+`openLink` opens a URL on the Apple TV, such as `myapp://episode/42`, and the app that declares the
+scheme shows that screen. Call `observe` afterwards to see where it landed.
+
+- `getDeepLinks` with the app's bundle ID lists the custom URL schemes the installed app declares.
+- The call fails when no installed app handles the URL. Apple TV has no web browser, so an
+  `http` or `https` URL opens only if an app claims it.
+- `waitFor`, `settled`, `acceptOpenAlert` and `chooserAppPackage` are refused.
 
 ## Out of scope
 

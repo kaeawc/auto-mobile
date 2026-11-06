@@ -14,13 +14,23 @@ import {
   ProgressCallback,
   type DisplayFenceDependencies,
 } from "./BaseVisualChange";
-import { BootedDevice, ObserveResult, PressButtonResult } from "../../models";
+import { BootedDevice, PressButtonResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
 import { resolveIosHomeBackend } from "../../utils/ios-cmdline-tools/IosHomeBackend";
 import { isNavigationPressButton, resolveAndroidKeyCode } from "./pressButtonPolicy";
+import { holdDurationOf, prepareAndroidKeyevent, rejectUnsupportedHold } from "./androidKeyHold";
+import {
+  acceptAndroidHomeAlreadyOnLauncher,
+  acceptIosHomeAlreadyOnSpringboard,
+  acceptVerifiedAlreadyOpenSwitcher,
+  isIosHomePressOnSpringboard,
+  isIosSpringboardFallbackPress,
+  isVerifiedAlreadyOpenSwitcher,
+  unsupportedButtonResult,
+} from "./pressButtonOutcomes";
 import {
   androidSystemActionRefusal,
   isAndroidSystemActionButton,
@@ -44,14 +54,7 @@ const IOS_OPTIONAL_HARDWARE_BUTTONS: ReadonlySet<string> = new Set(["action", "c
 const IOS_RUNNER_NOT_SUPPORTED_PREFIX = "Feature not supported";
 
 export function unsupportedIosButtonResult(button: string, error: string): PressButtonResult {
-  return {
-    success: false,
-    button,
-    keyCode: -1,
-    code: "unsupported_button",
-    retryable: false,
-    error,
-  };
+  return unsupportedButtonResult(button, error);
 }
 
 /** CtrlProxy slices a button press uses; each defaults to the device's real client. */
@@ -77,9 +80,11 @@ function rejectStepsOnPlainButton(button: string, call: unknown): undefined {
   return undefined;
 }
 
-/** `ActionCall` for pressButton: also carries the rotary step count (#14920). */
+/** `ActionCall` for pressButton: also carries the rotary step count (#14920) and hold duration (#16734). */
 export interface PressButtonCall extends ActionCall {
   steps?: number;
+  /** Hold the button down this long (ms): a long press of D-pad center on Android. */
+  durationMs?: number;
 }
 
 /** A dispatched press whose outcome was never confirmed: replaying it could apply it twice. */
@@ -98,99 +103,6 @@ function indeterminatePressResult(
   };
 }
 
-/** True when an iOS Home press starts from a verified SpringBoard, so "no visual change" is fine. */
-export function isIosHomePressOnSpringboard(
-  platform: string,
-  button: string,
-  observation: ObserveResult | undefined,
-): boolean {
-  const hierarchy = observation?.viewHierarchy;
-  return (
-    platform === "ios" &&
-    button.toLowerCase() === "home" &&
-    hierarchy?.packageName === "com.apple.springboard" &&
-    hierarchy.fallbackToSpringboard !== true &&
-    !hierarchy.hierarchy?.error
-  );
-}
-
-/**
- * True when the pre-press tree was SpringBoard reached through the runner's foreground fallback.
- * On the real home screen the runner always reports `fallbackToSpringboard: true` (#14954), so
- * the flag cannot veto a Home press; the post-press SpringBoard check decides instead.
- */
-export function isIosSpringboardFallbackPress(
-  platform: string,
-  button: string,
-  observation: ObserveResult | undefined,
-): boolean {
-  const hierarchy = observation?.viewHierarchy;
-  return (
-    platform === "ios" &&
-    button.toLowerCase() === "home" &&
-    hierarchy?.packageName === "com.apple.springboard" &&
-    hierarchy.fallbackToSpringboard === true &&
-    !hierarchy.hierarchy?.error
-  );
-}
-
-/**
- * A Home press that began on a fallback SpringBoard and still ends on a healthy SpringBoard
- * without a visual change was already home: report success instead of "No visual change".
- */
-export function acceptIosHomeAlreadyOnSpringboard(
-  result: { success: boolean; error?: string; observation?: ObserveResult },
-  startedOnFallbackSpringboard: boolean,
-): void {
-  const after = result.observation?.viewHierarchy;
-  if (
-    startedOnFallbackSpringboard &&
-    !result.success &&
-    result.error === "No visual change observed" &&
-    after?.packageName === "com.apple.springboard" &&
-    !after.hierarchy?.error
-  ) {
-    result.success = true;
-    delete result.error;
-  }
-}
-
-/** A successful Android Home dispatch already verified the launcher foreground (#15028). */
-export function acceptAndroidHomeAlreadyOnLauncher(
-  result: { success: boolean; error?: string },
-  context: { platform: string; button: string; pressSucceeded: boolean },
-): void {
-  if (
-    context.platform === "android" &&
-    context.button.toLowerCase() === "home" &&
-    context.pressSucceeded &&
-    !result.success &&
-    result.error === "No visual change observed"
-  ) {
-    result.success = true;
-    delete result.error;
-  }
-}
-
-/** The runner verified the App Switcher is already open, so the press is a no-op success. */
-export function isVerifiedAlreadyOpenSwitcher(reply: {
-  success: boolean;
-  recentAppsRoute?: string;
-}): boolean {
-  return reply.success && reply.recentAppsRoute === "already-open";
-}
-
-/** A verified already-open switcher needs no visual change: turn "No visual change" into success. */
-export function acceptVerifiedAlreadyOpenSwitcher(
-  result: { success: boolean; error?: string },
-  verifiedAlreadyOpen: boolean,
-): void {
-  if (verifiedAlreadyOpen && result.error === "No visual change observed") {
-    result.success = true;
-    delete result.error;
-  }
-}
-
 /** Display-fence collaborators, CtrlProxy overrides and the iOS/dispatch seams; all optional. */
 export type PressButtonCollaborators = DisplayFenceDependencies &
   PressButtonCtrlProxyOverrides & {
@@ -206,6 +118,8 @@ interface PressDispatchOptions {
   onDispatch?: () => void;
   /** Receives the runner's iOS recent-apps route so callers can accept a verified no-op. */
   onRecentAppsRoute?: (route: string | undefined) => void;
+  /** Android key hold in ms (#16734); only select accepts it. */
+  durationMs?: number;
 }
 
 export class PressButton extends BaseVisualChange {
@@ -301,6 +215,8 @@ export class PressButton extends BaseVisualChange {
     signalArg?: AbortSignal,
   ): Promise<PressButtonResult> {
     const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
+    const durationMs = holdDurationOf(progressOrCall);
+    rejectUnsupportedHold(this.device.platform, button, durationMs);
     if (this.device.platform === "tvos") {
       if (typeof progressOrCall === "object" && progressOrCall.steps !== undefined) {
         unsupportedTvosAction("remote press with steps");
@@ -357,6 +273,7 @@ export class PressButton extends BaseVisualChange {
           ? this.pressRotary(rotary, button, rotarySteps ?? 1, signal)
           : this.press(button, {
               signal,
+              durationMs,
               onRecentAppsRoute: (recentAppsRoute) => {
                 verifiedAlreadyOpen = isVerifiedAlreadyOpenSwitcher({
                   success: true,
@@ -423,12 +340,15 @@ export class PressButton extends BaseVisualChange {
       signal,
       onDispatch,
       onRecentAppsRoute,
+      durationMs,
     }: {
       timeoutMs?: number;
       frameContext?: string;
       signal?: AbortSignal;
       onDispatch?: () => void;
       onRecentAppsRoute?: (route: string | undefined) => void;
+      /** Android only: hold the key down this long (long press of select). */
+      durationMs?: number;
     } = {},
   ): Promise<PressButtonResult> {
     throwIfAborted(signal);
@@ -447,6 +367,7 @@ export class PressButton extends BaseVisualChange {
             frameContext,
             signal,
             onDispatch: markDispatch,
+            durationMs,
           });
         case "ios":
           return await this.executeiOSButtonPress(button, {
@@ -505,7 +426,7 @@ export class PressButton extends BaseVisualChange {
     button: string,
     dispatch: PressDispatchOptions,
   ): Promise<PressButtonResult> {
-    const { timeoutMs, frameContext, signal, onDispatch } = dispatch;
+    const { timeoutMs, frameContext, signal, onDispatch, durationMs } = dispatch;
     const normalized = button.toLowerCase();
     if (IOS_OPTIONAL_HARDWARE_BUTTONS.has(normalized)) {
       return unsupportedIosButtonResult(
@@ -531,6 +452,15 @@ export class PressButton extends BaseVisualChange {
     // the (optional) global-action attempt and the ADB fallback so the caller's
     // timeout is not exceeded by the sum of the two per-transport defaults.
     const deadlineMs = timeoutMs !== undefined ? this.timer.now() + timeoutMs : undefined;
+    const keyevent = await prepareAndroidKeyevent(button, keyCode, durationMs, {
+      adb: this.adb,
+      timer: this.timer,
+      remainingMs: () => this.remainingMs(deadlineMs),
+      signal,
+    });
+    if ("refusal" in keyevent) {
+      return keyevent.refusal;
+    }
     const globalActionResult = await this.tryAndroidGlobalAction(
       { button, normalized, keyCode },
       deadlineMs,
@@ -567,7 +497,7 @@ export class PressButton extends BaseVisualChange {
         adbBudget,
         (fenced, dispatched) =>
           Promise.resolve().then(() =>
-            this.adb.execute(["shell", "input", "keyevent", String(keyCode)], {
+            this.adb.execute(keyevent.argv, {
               timeoutMs: adbBudget,
               noRetry: true,
               signal: combineWithAmbientAbort(fenced),
@@ -608,6 +538,16 @@ export class PressButton extends BaseVisualChange {
       throw error;
     }
 
+    return this.androidKeyPressOutcome(button, keyCode, durationMs, { deadlineMs, signal });
+  }
+
+  /** The dispatched keyevent's result; a Home press is verified against the launcher first. */
+  private async androidKeyPressOutcome(
+    button: string,
+    keyCode: number,
+    durationMs: number | undefined,
+    { deadlineMs, signal }: { deadlineMs: number | undefined; signal: AbortSignal | undefined },
+  ): Promise<PressButtonResult> {
     // "home" is verified end-to-end (issue #6147): neither the accessibility
     // global action above nor this ADB keyevent are trustworthy on their own
     // self-reported success, on API 28 specifically. Other buttons (back,
@@ -619,7 +559,7 @@ export class PressButton extends BaseVisualChange {
     // launcher lookup, and retries) rather than letting getActive fall back to
     // its 5s default and overrun the keyed device-input op (issue #6289).
     if (
-      normalized === "home" &&
+      button.toLowerCase() === "home" &&
       !(await this.verifyAndroidHomeForeground({
         signal,
         timeoutMs: this.remainingMs(deadlineMs),
@@ -633,7 +573,12 @@ export class PressButton extends BaseVisualChange {
           "Home press did not background the foreground app: the ADB KEYCODE_HOME keyevent did not produce a launcher foreground window",
       };
     }
-    return { success: true, button, keyCode };
+    return {
+      success: true,
+      button,
+      keyCode,
+      ...(durationMs === undefined ? {} : { durationMs }),
+    };
   }
 
   /**

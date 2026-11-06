@@ -44,6 +44,8 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "startDevice",
     "setActiveDevice",
     "killDevice",
+    "openLink",
+    "getDeepLinks",
     // simctl io recordVideo / screenshot capture (#16725).
     "videoRecording",
     "compareScreenshot",

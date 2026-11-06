@@ -12,7 +12,8 @@ and `killDevice` use `simctl`; boot binds a session at `booted` readiness.
 on demand. Provisioning still accepts only readiness `none`. The runner reports
 hierarchy and focus, taps uniquely identified window and ornament elements, and
 appends text to a focused field; screenshots use `simctl`. iOS inventories exclude
-xrOS runtimes. All other device tools remain disabled.
+xrOS runtimes. `installApp`, `uninstallApp`, `launchApp`, `terminateApp` and
+`listApps` use `simctl`. All other device tools remain disabled.
 
 ## Environment
 

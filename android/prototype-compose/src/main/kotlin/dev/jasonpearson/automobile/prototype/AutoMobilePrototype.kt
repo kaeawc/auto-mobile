@@ -172,7 +172,13 @@ private fun EmbeddedBackHandling(
   } else {
     val rootBack = LocalPrototypeRootBack.current
     BackHandler(enabled = enabled) {
-      if (rootBack != null) rootBack() else scope.launch { dispatch(PrototypeInteraction.Back) }
+      // hasPoppableStack is not snapshot state, so this branch can outlive a push: check at
+      // delivery time and let the renderer pop a nested stack before the host handles root Back.
+      if (rootBack != null && !runtime.hasPoppableStack()) {
+        rootBack()
+      } else {
+        scope.launch { dispatch(PrototypeInteraction.Back) }
+      }
     }
   }
 }

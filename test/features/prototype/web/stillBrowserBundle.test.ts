@@ -11,8 +11,10 @@ import { fileURLToPath } from "node:url";
 // The still's mode resolution from role overrides and the authored background (#16654) grew it past
 // 150 KB / 49 KB: measured 150,452 / 49,246 bytes.
 // Foldable frames, posture and the hinge drawing (#16632) on top: measured 155,482 / 50,526 bytes.
-const MAX_MINIFIED_BYTES = 156_500;
-const MAX_GZIP_BYTES = 51_000;
+// Owner set 175 KB minified (#17275) after #16677/#16678 measured 157,052 / 51,031 bytes, leaving
+// room for the remaining prototype-web queue instead of a raise per merge; gzip scaled to match.
+const MAX_MINIFIED_BYTES = 175_000;
+const MAX_GZIP_BYTES = 57_000;
 
 /** Server-only modules the renderer once reached; any of them back in the closure is a regression. */
 const FORBIDDEN_INPUTS = [

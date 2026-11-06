@@ -117,7 +117,8 @@ call fails with `unsupported_button` and sends no key.
 
 `explore` walks a TV app the same way: it moves focus to each element and selects it, recording the
 screens and transitions in the navigation graph. `navigateTo` replays those steps with D-pad moves.
-See [Navigation graph](navigation-graph.md).
+Both are available only when the server runs with `--embedded-sdk` and the app embeds the
+AutoMobile SDK; see [Navigation graph](navigation-graph.md#availability).
 
 `focusNavigate` matches a target on the focused element or on a node inside its bounds, so a label
 on a child view of the focused row counts. A large focused container that holds the target also

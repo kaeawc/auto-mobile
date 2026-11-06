@@ -47,7 +47,17 @@ verbatim capture is `test/fixtures/visionos-xcuitest/probe-capture.json`.
 
 Runner logs include repeated `AXLoading` errors for a missing
 `SpringBoardUIServices` accessibility bundle in the runtime. They did not fail
-the run.
+the run. The daemon forwards the runner's stdout and stderr to its debug log.
+
+## Runner readiness and budgets
+
+The runner binds its socket only after it has activated the target app, and
+sends its `connected` handshake on each accepted connection. Startup treats that
+handshake as ready (5 s per connection attempt, retried within a 60 s startup
+limit); it does not request a hierarchy. The first hierarchy for a built-in app
+such as Settings or Safari took about 8 s, so a hierarchy-based readiness check
+timed out on every attempt (#17199). Hierarchy requests default to a 20 s budget;
+taps and text input keep 5 s.
 
 ## Decision
 

@@ -32,11 +32,19 @@ export function visionosProbeHierarchy(snapshots = capture.snapshotBefore): Visi
 export class FakeVisionosRunnerClient implements VisionosRunnerClient {
   readonly commands: VisionosCommand[] = [];
   readonly hierarchyTimeouts: Array<number | undefined> = [];
+  connectedWaits = 0;
   closed = false;
   failure?: Error;
   constructor(readonly tree = visionosProbeHierarchy()) {}
   isUsable(): boolean {
     return !this.closed && !this.failure;
+  }
+  async waitUntilConnected(signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
+    this.connectedWaits++;
+    if (this.failure) {
+      throw this.failure;
+    }
   }
   async request(command: VisionosCommand, signal?: AbortSignal): Promise<unknown> {
     signal?.throwIfAborted();

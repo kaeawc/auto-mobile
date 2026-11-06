@@ -19,6 +19,7 @@ import { createKillDeviceResponse } from "../../src/server/deviceToolsShutdown";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { createLifecycleHandlers } from "../../src/server/deviceToolsLifecycle";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { useEmptyVideoRecordings } from "../helpers/emptyVideoRecordings";
 
 const runtimeId = "com.apple.CoreSimulator.SimRuntime.tvOS-26-5";
 const capturedTv = fixtureJson.devices[runtimeId][0];
@@ -165,6 +166,7 @@ describe("Apple TV killDevice routing", () => {
       },
     });
     manager.setBootedDevices("tvos", [{ ...labelledIos, platform: "tvos" }]);
+    await useEmptyVideoRecordings(h.timer);
     setDeviceToolsDependencies({
       deviceManagerFactory: () => manager,
       timer: h.timer,

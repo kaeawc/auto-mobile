@@ -98,6 +98,113 @@ describe("FocusNavigate", () => {
     expect(result.path).toHaveLength(1);
   });
 
+  test("a label prefers an exact match over a focused node that only contains it", async () => {
+    const grid = new FakeGrid(0);
+    grid.elements[0] = { ...tile(0), text: "Movies Plus" };
+    const result = await navigator(grid).execute({ until: { label: "Movies" } });
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 1 });
+    expect(grid.presses).toEqual(["arrow_right"]);
+    expect(result.focusedElement?.text).toBe("Movies");
+  });
+
+  test("firstMatch moves off a focused later duplicate to the first match", async () => {
+    const grid = new FakeGrid(4);
+    grid.elements[1] = { ...tile(1), text: "Play" };
+    grid.elements[4] = { ...tile(4), text: "Play" };
+    const result = await navigator(grid).execute({ until: { label: "Play" }, firstMatch: true });
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 1 });
+    expect(grid.presses).toEqual(["arrow_up"]);
+    expect(result.focusedElement?.bounds).toEqual(tile(1).bounds);
+  });
+
+  test("firstMatch ranks a smaller duplicate ahead of a larger one earlier in the hierarchy", async () => {
+    const grid = new FakeGrid(1);
+    grid.elements[1] = { ...tile(1), text: "Play" };
+    const small = { left: 210, top: 110, right: 260, bottom: 160 };
+    grid.elements[5] = { ...tile(5), text: "Play", bounds: small };
+    const result = await navigator(grid).execute({ until: { label: "Play" }, firstMatch: true });
+    expect(result.success).toBe(true);
+    expect(result.focusedElement?.bounds).toEqual(small);
+    expect(grid.presses.length).toBeGreaterThan(0);
+  });
+
+  test("pinTarget steers to the bounds it resolves, ignoring the until fields", async () => {
+    const grid = new FakeGrid(0);
+    const result = await navigator(grid).execute({
+      until: { label: "no such label" },
+      pinTarget: () => tile(2).bounds,
+    });
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 2 });
+    expect(result.focusedElement?.bounds).toEqual(tile(2).bounds);
+  });
+
+  test("a pinned actionable child must own focus, not its focused parent row", async () => {
+    // Hand-built: a focused row holding its own label and an independently clickable Delete button.
+    const row: Element = {
+      bounds: { left: 0, top: 0, right: 300, bottom: 100 },
+      "content-desc": "Open item",
+      focusable: true,
+      clickable: true,
+    };
+    const label: Element = { bounds: { left: 0, top: 0, right: 150, bottom: 100 }, text: "Item" };
+    const remove: Element = {
+      bounds: { left: 200, top: 0, right: 300, bottom: 100 },
+      text: "Delete",
+      focusable: true,
+      clickable: true,
+    };
+    const grid = new FakeGrid(0);
+    grid.elements = [row, label, remove];
+    grid.moves = { 0: { arrow_right: 2 } };
+
+    const toDelete = await navigator(grid).execute({
+      until: { label: "Delete" },
+      pinTarget: () => remove.bounds,
+    });
+    expect(toDelete).toMatchObject({ success: true, steps: 1 });
+    expect(grid.presses).toEqual(["arrow_right"]);
+
+    grid.focusIndex = 0;
+    const toLabel = await navigator(grid).execute({
+      until: { label: "Item" },
+      pinTarget: () => label.bounds,
+    });
+    expect(toLabel).toMatchObject({ success: true, steps: 0 });
+  });
+
+  test("pinTarget null means nothing on the screen is the target", async () => {
+    const grid = new FakeGrid(1);
+    const result = await navigator(grid).execute({
+      until: { label: "Movies" },
+      pinTarget: () => null,
+      maxSteps: 2,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("without firstMatch a focused duplicate is accepted, as focusNavigate always has", async () => {
+    const grid = new FakeGrid(4);
+    grid.elements[1] = { ...tile(1), text: "Play" };
+    grid.elements[4] = { ...tile(4), text: "Play" };
+    const result = await navigator(grid).execute({ until: { label: "Play" } });
+    expect(result).toMatchObject({ success: true, steps: 0 });
+  });
+
+  test("a label compares normalized whitespace, as the touch resolver does", async () => {
+    const grid = new FakeGrid(0);
+    grid.elements[0] = { ...tile(0), text: "Movies Plus" };
+    grid.elements[1] = { ...tile(1), text: " Movies " };
+    const result = await navigator(grid).execute({ until: { label: "Movies" } });
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 1 });
+    expect(elementMatchesTarget({ ...tile(2), text: "Sign\nin" }, { label: "sign in" })).toBe(true);
+  });
+
+  test("a label still accepts a containing match when no exact one is on screen", async () => {
+    const grid = new FakeGrid(1);
+    const result = await navigator(grid).execute({ until: { label: "Movi" } });
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 0 });
+  });
+
   test("recognises the inline TV Settings child label without pressing keys", async () => {
     const grid = new FakeGrid(0);
     grid.elements = [
@@ -402,5 +509,21 @@ describe("elementMatchesTarget", () => {
     expect(elementMatchesTarget(tile(1), { resourceId: "tile_2" })).toBe(false);
     expect(elementMatchesTarget(tile(1), { text: "MOV" })).toBe(true);
     expect(elementMatchesTarget(tile(1), { text: "Movies", resourceId: "tile_2" })).toBe(false);
+  });
+
+  test("elementId matches the native resource id or an id-less node's synthetic view-id", () => {
+    const idLess: Element = { bounds: tile(0).bounds, "view-id": "s2-7f3a" };
+    expect(elementMatchesTarget(tile(1), { elementId: "app:id/tile_1" })).toBe(true);
+    expect(elementMatchesTarget(tile(1), { elementId: "tile_1" })).toBe(true);
+    expect(elementMatchesTarget(idLess, { elementId: "s2-7f3a" })).toBe(true);
+    expect(elementMatchesTarget(idLess, { elementId: "s2-0000" })).toBe(false);
+  });
+
+  test("label matches text or content-desc, as tapOn's text selector does", () => {
+    const icon: Element = { bounds: tile(0).bounds, "content-desc": "Search" };
+    expect(elementMatchesTarget(tile(1), { label: "movies" })).toBe(true);
+    expect(elementMatchesTarget(icon, { label: "search" })).toBe(true);
+    expect(elementMatchesTarget(icon, { label: "Music" })).toBe(false);
+    expect(elementMatchesTarget(tile(1), { label: "Movies", resourceId: "tile_2" })).toBe(false);
   });
 });

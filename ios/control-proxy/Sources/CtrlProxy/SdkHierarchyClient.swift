@@ -143,6 +143,28 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
         return await postHighlight(path: SdkRoute.highlight.path, body: body)
     }
 
+    public func performAccessibilityFocus(_ request: RequestAccessibilityFocus) async -> SdkAccessibilityFocusReply? {
+        let selector = RequestAccessibilityFocus(
+            resourceId: request.resourceId, text: request.text, contentDesc: request.contentDesc
+        )
+        guard let body = try? JSONEncoder().encode(selector) else { return nil }
+        do {
+            let (data, response) = try await SdkEndpointResolver.requestData(
+                for: jsonPost(path: SdkRoute.accessibilityFocus.path, body: body),
+                transport: transport, resolver: endpointResolver
+            )
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
+            return try JSONDecoder().decode(SdkAccessibilityFocusReply.self, from: data)
+        } catch let error as SdkEndpointError {
+            Self.logEndpointError(error)
+            return nil
+        } catch {
+            Logger(subsystem: "dev.jasonpearson.automobile", category: "SdkHierarchyClient")
+                .warning("Accessibility focus bridge unavailable: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
     public func performMagicTap() async -> Bool? {
         do {
             let (data, response) = try await SdkEndpointResolver.requestData(

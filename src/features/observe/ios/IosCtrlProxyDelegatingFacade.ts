@@ -758,6 +758,12 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
   }
 
   /** Invoke Magic Tap directly through the foreground app's in-app SDK. */
+  async requestAccessibilityFocus(
+    ...args: Parameters<CtrlProxyVoiceOver["requestAccessibilityFocus"]>
+  ): ReturnType<CtrlProxyVoiceOver["requestAccessibilityFocus"]> {
+    return this.voiceOver.requestAccessibilityFocus(...args);
+  }
+
   async requestMagicTap(
     ...args: Parameters<CtrlProxyVoiceOver["requestMagicTap"]>
   ): ReturnType<CtrlProxyVoiceOver["requestMagicTap"]> {

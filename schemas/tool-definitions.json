@@ -335,13 +335,13 @@
       "destructiveHint": false,
       "idempotentHint": true
     },
-    "description": "Set or clear Android TalkBack focus by resourceId, text, or contentDesc.",
+    "description": "Set accessibility focus on Android (TalkBack) and iOS (VoiceOver) by resourceId, text, or contentDesc. Clearing focus is supported on Android only.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "action": {
-          "description": "set default or clear TalkBack focus",
+          "description": "set default or clear accessibility focus (clear is Android-only)",
           "type": "string",
           "enum": ["set", "clear"]
         },
@@ -384,6 +384,16 @@
         },
         "error": {
           "type": "string"
+        },
+        "errorCode": {
+          "type": "string",
+          "enum": [
+            "voiceover_off",
+            "sdk_unavailable",
+            "element_not_found",
+            "invalid_selector",
+            "unsupported"
+          ]
         },
         "warning": {
           "type": "string"

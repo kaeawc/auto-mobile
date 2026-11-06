@@ -295,6 +295,23 @@ describe("buildPrototypeWebPageWithImages", () => {
     expect(orientations).toEqual([false, true]);
   });
 
+  test("an asset cache that fails to read keeps the placeholder page", async () => {
+    const input = page([feed("a", "b")]);
+    const unreadable: PrototypeWebAssetSource = {
+      get: async (id) => {
+        if (id === "a") {
+          throw new Error("EACCES: permission denied");
+        }
+        return { mimeType: "image/png", bytes: Uint8Array.of(1) };
+      },
+    };
+    const built = await buildPrototypeWebPageWithImages(input, unreadable, encoder(30));
+    expect(built.inlinedImages).toEqual(["b"]);
+    expect(built.unsupportedNodes.map((node) => [node.asset, node.reason])).toEqual([
+      ["a", "assetNotInlined"],
+    ]);
+  });
+
   test("a page that draws no image is built once, without asking for bytes", async () => {
     const assets = source([]);
     const spec = { id: "t", root: { type: "text", text: "hi" } };

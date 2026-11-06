@@ -170,6 +170,30 @@ describe("an image with an inlinable asset", () => {
     }
   });
 
+  test("a translucent tint draws its opaque colour and scales the image's alpha", () => {
+    const rendered = still({
+      type: "image",
+      asset: "photo",
+      filter: { tint: "#80FF0000" },
+    });
+    const group = find(rendered.element, (e) => "data-image-alpha" in e.attrs)[0]!;
+    expect(group.style).toEqual({ position: "absolute", inset: "0", opacity: "0.502" });
+    expect(find(group, (e) => "data-image" in e.attrs)).toHaveLength(1);
+    const tint = find(group, (e) => "data-image-tint" in e.attrs)[0]!;
+    expect(tint.style["background-color"]).toBe("rgba(255,0,0,1)");
+  });
+
+  test("a fully transparent tint hides the image, as Modulate does", () => {
+    const rendered = still({ type: "image", asset: "photo", filter: { tint: "#00FFFFFF" } });
+    const group = find(rendered.element, (e) => "data-image-alpha" in e.attrs)[0]!;
+    expect(group.style.opacity).toBe("0");
+  });
+
+  test("an opaque tint adds no alpha group", () => {
+    const rendered = still({ type: "image", asset: "photo", filter: { tint: "#ff0000" } });
+    expect(find(rendered.element, (e) => "data-image-alpha" in e.attrs)).toEqual([]);
+  });
+
   test("binds a repeat item's asset id", () => {
     const rendered = still({
       type: "column",

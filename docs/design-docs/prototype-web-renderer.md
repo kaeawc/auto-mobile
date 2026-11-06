@@ -468,9 +468,10 @@ the host, so the page's script only switches between views it was given and neve
   colour and an `aspect-ratio` on an axis it leaves to wrap read the slot's `-bg` and `-ar`, and it
   holds an image layer (the slot's image as a centred background, `contain`, `cover` or
   `100% 100%` for `fit`, `crop` and `fill`, with `saturate()` for `filter.saturation`) and, for
-  `filter.tint`, a tint layer that multiplies the tint over the image masked by it, shown only when
-  `-on` is set, as Android's saturation colour matrix then its `Modulate` tint layer; a corner
-  radius clips both. Item images (nav items) are not inlined. Any other node draws a
+  `filter.tint`, a tint layer that multiplies the tint's opaque colour over the image masked by it,
+  shown only when `-on` is set, as Android's saturation colour matrix then its `Modulate` tint
+  layer. `Modulate` multiplies alpha too, so a translucent tint wraps both layers in a group at the
+  tint's alpha (a fully transparent tint hides the image); a corner radius clips both. Item images (nav items) are not inlined. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
 - **Skins.** `webSkin.ts` holds one skin per platform; the frame's platform picks it and the
   `skin` option overrides it. A skin replaces the renderers of the components its platform draws

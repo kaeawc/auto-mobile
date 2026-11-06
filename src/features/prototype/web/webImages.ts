@@ -1,6 +1,7 @@
 import { record, type Raw } from "../prototypeTemplate";
 import { el, type WebElement } from "./webNodes";
-import { cssColor, type WebStyleContext } from "./webStyle";
+import { resolvePrototypeColor } from "../prototypeContrast";
+import { cssColor, rgbaCss, type WebStyleContext } from "./webStyle";
 import type { NodeRenderer, WebRenderScope } from "./webRender";
 
 /** How an image fits its box, as both devices read `contentScale` (default `fit`). */
@@ -108,6 +109,8 @@ export function webImageBoxCss(
  * The drawn image and its filter: the image saturates first, then a separate tint layer
  * multiplies it (Android's `BlendMode.Modulate` on an offscreen layer), masked by the image so
  * transparent pixels stay clear. The tint layer is invisible until the page inlines the asset.
+ * `Modulate` multiplies alpha too, so the tint draws its opaque colour and a translucent tint
+ * wraps both layers in a group at the tint's alpha (`#00FFFFFF` hides the image, as on Android).
  */
 export function webImageLayers(slot: number, node: Raw, context: WebStyleContext): WebElement[] {
   const image = `var(${webImageVar(slot)})`;
@@ -128,7 +131,10 @@ export function webImageLayers(slot: number, node: Raw, context: WebStyleContext
       },
     }),
   ];
-  const tint = filter?.tint === undefined ? undefined : cssColor(filter.tint, context);
+  const tint =
+    filter?.tint === undefined
+      ? undefined
+      : resolvePrototypeColor(filter.tint, context.mode, context.palette);
   if (tint) {
     layers.push(
       el("div", {
@@ -136,7 +142,7 @@ export function webImageLayers(slot: number, node: Raw, context: WebStyleContext
         style: {
           position: "absolute",
           inset: "0",
-          "background-color": tint,
+          "background-color": rgbaCss({ ...tint, a: 1 }),
           "mix-blend-mode": "multiply",
           "mask-image": image,
           "mask-size": size,
@@ -146,6 +152,11 @@ export function webImageLayers(slot: number, node: Raw, context: WebStyleContext
         },
       }),
     );
+  }
+  if (tint && tint.a < 1) {
+    // Opacity isolates the group, so the tint multiplies only the image beneath it.
+    const style = { position: "absolute", inset: "0", opacity: String(Number(tint.a.toFixed(3))) };
+    return [el("div", { attrs: { "data-image-alpha": "" }, style }, layers)];
   }
   return layers;
 }

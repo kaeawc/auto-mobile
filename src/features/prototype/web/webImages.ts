@@ -59,6 +59,17 @@ function fixedDp(value: unknown): number | undefined {
 
 const sized = (value: unknown) => value === "fill" || fixedDp(value) !== undefined;
 
+/**
+ * The placeholder's 48px minimum on each axis the node does not fix in dp: an authored size wins
+ * over the image's default minimum on both devices, so a 24 dp icon stays 24 dp.
+ */
+function webImageMinimum(style: Raw): Record<string, string> {
+  return {
+    ...(fixedDp(style.width) === undefined ? { "min-width": "48px" } : {}),
+    ...(fixedDp(style.height) === undefined ? { "min-height": "48px" } : {}),
+  };
+}
+
 export function webImageDraw(asset: string, node: Raw): WebImageDraw {
   const style = record(node.style) ?? {};
   const widthDp = fixedDp(style.width);
@@ -84,8 +95,7 @@ export function webImageBoxCss(
   const style = record(node.style) ?? {};
   return {
     "background-color": `var(${webImageVar(slot, "-bg")}, ${placeholder})`,
-    "min-height": "48px",
-    "min-width": "48px",
+    ...webImageMinimum(style),
     position: "relative",
     isolation: "isolate",
     ...(sized(style.width) && sized(style.height)
@@ -228,8 +238,7 @@ export function webImageRenderer({ base, bound }: WebImageRendererHelpers): Node
     if (asset === undefined || slot === undefined) {
       const { attrs, style } = base(node, scope, {
         "background-color": placeholder,
-        "min-height": "48px",
-        "min-width": "48px",
+        ...webImageMinimum(record(node.style) ?? {}),
       });
       return el("div", { attrs: { ...attrs, role: "img" }, style });
     }

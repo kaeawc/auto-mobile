@@ -125,10 +125,42 @@ describe("buildPrototypeWebPage with images", () => {
   });
 });
 
+describe("budget order for a stack's other screens (#17241)", () => {
+  test("charges each screen's images before the next screen's markup", () => {
+    const stack = {
+      id: "stacked",
+      root: {
+        type: "stack",
+        start: "a",
+        screens: {
+          a: { type: "text", text: "start" },
+          b: { type: "image", asset: "pb", style: { width: { dp: 100 }, height: { dp: 100 } } },
+          c: { type: "text", text: "x".repeat(4000) },
+        },
+      },
+    };
+    const images = [{ id: "pb", bytes: new Uint8Array(3000), width: 4, height: 3 }];
+    const whole = buildPrototypeWebPage(page([stack], { images }));
+    expect(whole.inlinedImages).toEqual(["pb"]);
+    // One byte short: either screen c's markup or b's image goes. Screen b comes first, so its
+    // image is charged before c is considered.
+    const built = buildPrototypeWebPage(
+      page([stack], { images, maxBytes: Buffer.byteLength(whole.html) - 1 }),
+    );
+    expect(built.inlinedImages).toEqual(["pb"]);
+    expect([...built.html.matchAll(/data-screen="([^"]*)"/g)].map((match) => match[1])).toEqual([
+      "a",
+      "a",
+      "b",
+      "b",
+    ]);
+  });
+});
+
 describe("encodePrototypeWebImages", () => {
   test("skips assets without image bytes and keeps request order", async () => {
     const assets = source(["b", "font", "a"]);
-    const images = await encodePrototypeWebImages(
+    const { images } = await encodePrototypeWebImages(
       [
         { id: "a", boxes: [] },
         { id: "missing", boxes: [] },
@@ -148,7 +180,7 @@ describe("encodePrototypeWebImages", () => {
       },
     };
     expect(
-      await encodePrototypeWebImages([{ id: "a", boxes: [] }], source(["a"]), failing),
+      (await encodePrototypeWebImages([{ id: "a", boxes: [] }], source(["a"]), failing)).images,
     ).toEqual([]);
   });
 
@@ -168,13 +200,14 @@ describe("encodePrototypeWebImages", () => {
           bytes: id === "big" ? Uint8Array.of(1, 2) : Uint8Array.of(1),
         },
     };
-    const images = await encodePrototypeWebImages(
+    const { images, overBudget } = await encodePrototypeWebImages(
       ["big", "small"].map((id) => ({ id, boxes: [] })),
       bigFirst,
       sized,
-      100,
+      { maxBytes: 100 },
     );
     expect(images.map((image) => image.id)).toEqual(["small"]);
+    expect([...overBudget]).toEqual(["big"]);
   });
 });
 
@@ -206,6 +239,60 @@ describe("buildPrototypeWebPageWithImages", () => {
       "assetOverBudget",
       "assetOverBudget",
     ]);
+  });
+
+  test("an image whose data URI alone exceeds the page is reported assetOverBudget (#17241)", async () => {
+    const input = page([feed("huge", "small")]);
+    const maxBytes = Buffer.byteLength(buildPrototypeWebPage(input).html) + 4000;
+    const sized: PrototypeWebImageEncoder = {
+      encode: async (bytes) => ({
+        bytes: new Uint8Array(bytes.length === 2 ? maxBytes : 30),
+        width: 4,
+        height: 3,
+      }),
+    };
+    const assets: PrototypeWebAssetSource = {
+      get: async (id) => ({
+        mimeType: "image/png",
+        bytes: id === "huge" ? Uint8Array.of(1, 2) : Uint8Array.of(1),
+      }),
+    };
+    const built = await buildPrototypeWebPageWithImages({ ...input, maxBytes }, assets, sized);
+    expect(built.inlinedImages).toEqual(["small"]);
+    expect(built.unsupportedNodes).toEqual([
+      {
+        type: "image",
+        id: "huge",
+        path: "root.children[0]",
+        reason: "assetOverBudget",
+        asset: "huge",
+      },
+    ]);
+    // With nothing else to inline, the placeholder page still reports why.
+    const alone = page([feed("huge")]);
+    const placeholders = await buildPrototypeWebPageWithImages(
+      { ...alone, maxBytes },
+      assets,
+      sized,
+    );
+    expect(placeholders.unsupportedNodes.map((node) => node.reason)).toEqual(["assetOverBudget"]);
+  });
+
+  test("asks the encoder to apply EXIF orientation only for an iOS frame (#17241)", async () => {
+    const orientations: boolean[] = [];
+    const recording: PrototypeWebImageEncoder = {
+      encode: async (_bytes, _boxes, options) => {
+        orientations.push(options.applyExifOrientation);
+        return { bytes: new Uint8Array(3), width: 4, height: 3 };
+      },
+    };
+    await buildPrototypeWebPageWithImages(page([feed("a")]), source(["a"]), recording);
+    await buildPrototypeWebPageWithImages(
+      page([feed("a")], { frame: "iphone-16" }),
+      source(["a"]),
+      recording,
+    );
+    expect(orientations).toEqual([false, true]);
   });
 
   test("a page that draws no image is built once, without asking for bytes", async () => {

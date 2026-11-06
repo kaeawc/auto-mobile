@@ -226,6 +226,22 @@ describe("web page images from the host asset cache (#16533)", () => {
     expect(await cachedPrototypeWebAssets(() => [], cache)(["a"]).get("hero")).toBeUndefined();
   });
 
+  test("an asset id two devices cached with different bytes stays a placeholder (#17241)", async () => {
+    const bytes: Record<string, Uint8Array> = { pixel: Uint8Array.of(1), sim: Uint8Array.of(2) };
+    const differing = {
+      get: async (serial: string, id: string) =>
+        id === "hero" ? { id, mimeType: "image/png" as const, bytes: bytes[serial]! } : undefined,
+    };
+    const devices: Record<string, string[]> = { a: ["pixel"], b: ["sim"] };
+    const assets = cachedPrototypeWebAssets((id) => devices[id] ?? [], differing);
+    // Variant a's page also shows variant b: one slot per id cannot hold both images.
+    expect(await assets(["a", "b"]).get("hero")).toBeUndefined();
+    expect((await assets(["a"]).get("hero"))?.bytes).toEqual(Uint8Array.of(1));
+    // The same bytes on both devices are one image.
+    bytes.sim = Uint8Array.of(1);
+    expect((await assets(["a", "b"]).get("hero"))?.bytes).toEqual(Uint8Array.of(1));
+  });
+
   test("the web resource inlines a cached asset the page draws", async () => {
     const before = ResourceRegistry.snapshotForTesting();
     ResourceRegistry.clearServersForTesting();

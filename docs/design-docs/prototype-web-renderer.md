@@ -123,14 +123,18 @@ it inlined per variant.
 - **Images.** `buildPrototypeWebPageWithImages` (`webImageEncoding.ts`) builds the page once to
   learn every bound asset an `image` draws and its boxes, reads each asset's bytes from a
   `PrototypeWebAssetSource`, re-encodes it with sharp (`loadSharp`) to WebP quality 80 at the
-  largest size the frame draws it, and builds again with the encoded images. A box is the frame
+  largest size the frame draws it, and builds again with the encoded images. An iOS frame applies
+  the EXIF orientation first, as `UIImage(data:)` does; an Android frame keeps the stored pixels,
+  as `BitmapFactory` ignores the tag. A box is the frame
   density times the node's fixed dp size; `crop` and `fill` must cover their fixed axes, `fit` and
   unfixed axes fit inside the screen's long side; the image is never enlarged. A missing, non-image
-  or undecodable asset (logged), or one whose data URI alone exceeds the page, is skipped; the page
-  budget decides which of the rest fit. An image draws more markup than a placeholder, so when the
+  or undecodable asset (logged) is skipped, and one whose data URI alone exceeds the page is
+  reported `assetOverBudget`; the page budget decides which of the rest fit. An image draws more markup than a placeholder, so when the
   second build's always-kept views no longer fit, the first build stands, its images reported
   `assetOverBudget`. The resource reads assets from the host asset cache of each device currently
   showing one of the variants (Android caches its uploads); without one, images stay placeholders.
+  Asset ids are chosen per device and the page holds one image per id, so an id two of those
+  devices cached with different bytes stays a placeholder.
   It snapshots the shown variant's revisions before encoding, so a revision landing meanwhile does
   not change the page's `_meta`.
 - **Image budget.** Each image is one `:root` rule in the head defining `--pa-<slot>` (its
@@ -430,7 +434,8 @@ the host, so the page's script only switches between views it was given and neve
   headline, the month row with its arrows, and that month (else today's from the still's clock) in
   a Sunday-first grid of 48 px cells, the bound day filled `primary` and today ringed. An `image` binds its asset id (a
   light/dark pair picks the mode's side, then placeholders bind as text does); without a slot for it
-  it draws a `surfaceVariant` placeholder with reason `assetNotInlined`. With one, the placeholder
+  it draws a `surfaceVariant` placeholder, at least 48 px on each axis the node does not fix in dp,
+  with reason `assetNotInlined`. With one, the placeholder
   colour and an `aspect-ratio` on an axis it leaves to wrap read the slot's `-bg` and `-ar`, and it
   holds an image layer (the slot's image as a centred background, `contain`, `cover` or
   `100% 100%` for `fit`, `crop` and `fill`, with `saturate()` for `filter.saturation`) and, for

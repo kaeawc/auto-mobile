@@ -89,7 +89,6 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   getAppPermissions: READ_ONLY,
   inspectPackageSigning: READ_ONLY,
   getDeepLinks: READ_ONLY,
-  accessibilityAudit: READ_ONLY,
   getDeviceState: READ_ONLY,
   getIosSimulatorCapabilities: READ_ONLY,
   getNavigationGraph: READ_ONLY,
@@ -112,6 +111,8 @@ const EXCLUDED_TOOLS: Record<string, string> = {
 /** The hand-kept PLAN_RELEVANT_TOOLS list the `planRelevant` trait replaced (#11825). */
 const FORMER_PLAN_RELEVANT_TOOLS = [
   "accessibility",
+  // Added after the list was frozen: a wcag audit runs as a plan assertion step (#17279).
+  "accessibilityAudit",
   // Added after the list was frozen: a semantic accessibility action replays as a plan step (#14077).
   "accessibilityAction",
   // Added after the list was frozen: an audit runs as a plan assertion step (#14075).
@@ -140,6 +141,8 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "multiTouch",
   "observe",
   "openLink",
+  // Added after the list was frozen: a performance check runs as a plan assertion step (#17279).
+  "performanceAudit",
   "phoneCall",
   "pinchOn",
   "postNotification",

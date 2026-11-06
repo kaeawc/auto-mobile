@@ -45,7 +45,7 @@ import {
   DefaultCtrlProxyCodesignVerifier,
 } from "../utils/ios-cmdline-tools/CtrlProxyCodesignVerifier";
 import { sortedReaddir } from "../utils/io";
-import { matchesXctestrunPlatform } from "./IosXctestrunPlatform";
+import { matchesXctestrunSelection } from "./IosXctestrunPlatform";
 import { ENV, readEnvBool, readEnvRaw, readEnvTrimmed } from "../config/env";
 
 export {
@@ -345,10 +345,12 @@ export class IosCtrlProxyBuilder {
    */
   public async getXctestrunPath(
     platform?: IOSCtrlProxyPlatform | "watchSimulator" | "tvSimulator" | "visionSimulator",
+    options: { scheme?: string } = {},
   ): Promise<string | null> {
     // Local discovery/prefetch follows the simulator default of build-product paths.
     platform ??= this.isLocalBuildMode() ? "simulator" : undefined;
-    const cacheKey = platform || "any";
+    const { scheme } = options;
+    const cacheKey = [platform || "any", scheme].filter(Boolean).join(":");
     const cachedPath = this.cachedXctestrunPath.get(cacheKey);
     // Local rebuilds can leave the old xctestrun alongside a newer filename.
     if (cachedPath && !this.isLocalBuildMode()) {
@@ -375,7 +377,11 @@ export class IosCtrlProxyBuilder {
       }
 
       // The release-mode default remains iOS-only even when local watch products share this dir.
-      const candidates = xctestrunFiles.filter((file) => matchesXctestrunPlatform(file, platform));
+      // A scheme restricts reuse to that scheme's plan: another project's plan in a shared
+      // derived-data root may lack the test bundle the caller will run.
+      const candidates = xctestrunFiles.filter((file) =>
+        matchesXctestrunSelection(file, platform, scheme),
+      );
 
       if (candidates.length === 0) {
         return null;

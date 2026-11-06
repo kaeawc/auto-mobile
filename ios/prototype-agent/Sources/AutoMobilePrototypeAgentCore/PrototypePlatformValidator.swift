@@ -224,6 +224,7 @@ enum PrototypePlatformValidator {
         /// The root `sensors` block: the sensors the device listens to (#14327).
         var sensors: JSONValue?
         var previews: Set<String> = []
+        var webViews: Set<String> = []
     }
 
     /// Throws the first platform rule the spec breaks, at the host validator's path.
@@ -254,6 +255,7 @@ enum PrototypePlatformValidator {
         declared.sensors = sensors
         declared.players = PrototypeMedia.players(media).union(PrototypeMedia.inlinePlayers(root))
         declared.previews = PrototypeCameraPreview.ids(root)
+        declared.webViews = PrototypeWebView.ids(root)
         if let handlers { try validateHandlers(handlers, declared: declared, state: state) }
         for (handler, path) in PrototypeChannels.handlers(declared.channels) {
             if case let .array(actions) = handler { try PrototypeRequestValidator.validateList(
@@ -461,7 +463,9 @@ enum PrototypePlatformValidator {
                 }
                 guard !opaqueKeys.contains(key) else { continue }
                 let memberPath = PrototypeLimits.dataMemberPath(path, key: key)
-                if textKeys.contains(key), case let .string(text) = member {
+                // A webView url binds placeholders like the host's webView visitor (#16573).
+                let webViewURL = key == "url" && fields["type"] == .string("webView")
+                if textKeys.contains(key) || webViewURL, case let .string(text) = member {
                     for pointer in placeholders(text) {
                         try read(pointer, path: memberPath, declared: declared)
                     }
@@ -573,6 +577,7 @@ enum PrototypePlatformValidator {
         )
         try PrototypeMedia.call(action, path: path, players: declared.players)
         try PrototypeCameraPreview.call(action, path: path, previews: declared.previews)
+        try PrototypeWebView.call(action, path: path, webViews: declared.webViews)
         if call == "permissions.request" {
             try requestedPermissions(args, path: path, declared: declared.permissions)
         }

@@ -53,13 +53,22 @@ final class VisionCommandPolicyTests: XCTestCase {
 
     func testEnteredValueIsReportedExceptForSecureFieldsAndPlaceholders() {
         let field = VisionElementTraits.traits(for: .textInput, isEnabled: true)
-        XCTAssertEqual(field.enteredValue("hello", label: "Name"), "hello")
-        XCTAssertNil(field.enteredValue("Name", label: "Name"))
-        XCTAssertNil(field.enteredValue("", label: "Name"))
-        XCTAssertNil(field.enteredValue(nil, label: "Name"))
+        XCTAssertEqual(field.enteredValue("hello", placeholder: "Name"), "hello")
+        XCTAssertNil(field.enteredValue("Name", placeholder: "Name"))
+        XCTAssertNil(field.enteredValue("", placeholder: "Name"))
+        XCTAssertNil(field.enteredValue(nil, placeholder: "Name"))
+        // Text equal to the accessibility label, but not the placeholder, is still typed content.
+        XCTAssertEqual(field.enteredValue("Name", placeholder: nil), "Name")
         let secure = VisionElementTraits.traits(for: .secureTextInput, isEnabled: true)
         XCTAssertEqual(secure.focusable, "true")
-        XCTAssertNil(secure.enteredValue("hunter2", label: "Password"))
+        XCTAssertNil(secure.enteredValue("hunter2", placeholder: nil))
+    }
+
+    func testAppendTextRejectsDeleteKeySequences() {
+        XCTAssertTrue(VisionCommandPolicy.containsDeleteKey("ab\u{8}"))
+        XCTAssertTrue(VisionCommandPolicy.containsDeleteKey("\u{7F}"))
+        XCTAssertTrue(VisionCommandPolicy.containsDeleteKey("x\u{F728}"))
+        XCTAssertFalse(VisionCommandPolicy.containsDeleteKey("hello world\n"))
     }
 
     func testHandshakeAdvertisesOnlyTheVisionWindowSubset() throws {

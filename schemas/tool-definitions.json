@@ -192,24 +192,29 @@
   },
   {
     "name": "accessibilityAudit",
-    "title": "Audit Native Accessibility",
+    "title": "Audit Accessibility",
     "annotations": {
-      "destructiveHint": false
+      "destructiveHint": true
     },
-    "description": "Run the platform's own accessibility audit engine on the current screen. iOS (iOS 17+, Simulator and physical) runs XCUITest performAccessibilityAudit and reports contrast, hitRegion, dynamicType, textClipped, sufficientDescription, trait and elementDetection issues, each with the element's accessibility identifier as elementId (usable with tapOn/highlight) and bounds. Unlike the host-side WCAG audit, the platform engine sees real hit regions, Dynamic Type support and clipped text. Android (Accessibility Test Framework) is not available yet and returns errorCode unsupported_platform; a runner that predates this command returns errorCode unsupported_capability.",
+    "description": "Audit the accessibility of the current screen. engine wcag (default on Android; Android only) runs the host-side WCAG checks (contrast, touch targets, labels, headings) with every audit feature flag off and reports violations with the element from this observation; an appId that is not in the foreground is an error; scope.container limits it to one element's subtree; baseline record saves the violations under a name and compare reports baselineDiff (new, fixed, unchanged), and only new violations count toward failOn; failOn error|warning makes the call fail when findings reach that severity, for plan assertions (default never). engine platform (default on iOS) runs the platform's own engine: on iOS 17+ (Simulator and physical) XCUITest performAccessibilityAudit reports contrast, hitRegion, dynamicType, textClipped, sufficientDescription, trait and elementDetection issues, each with the element's accessibility identifier as elementId (usable with tapOn/highlight) and bounds; it sees real hit regions, Dynamic Type support and clipped text. checks and maxIssues apply to the platform engine, scope, baseline and failOn to wcag; passing one to the other engine is an error. The Android platform engine (Accessibility Test Framework) is not available yet and returns errorCode unsupported_platform, as does wcag on iOS; a runner that predates the iOS command returns errorCode unsupported_capability.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "engine": {
+          "description": "platform (XCUITest) or wcag (host-side checks); default wcag on Android, platform on iOS",
+          "type": "string",
+          "enum": ["platform", "wcag"]
+        },
         "appId": {
-          "description": "Bundle id of the app to audit (default: the foreground app)",
+          "description": "Package or bundle id of the app to audit (default: the foreground app)",
           "type": "string",
           "minLength": 1,
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9._-]+$"
         },
         "checks": {
-          "description": "Checks to run (default: all)",
+          "description": "platform engine: checks to run (default: all)",
           "type": "array",
           "items": {
             "type": "string",
@@ -226,10 +231,57 @@
           }
         },
         "maxIssues": {
-          "description": "Most issues to return (default 50); truncated reports a clip",
+          "description": "platform engine: most issues to return (default 50); truncated reports a clip",
           "type": "integer",
           "minimum": 1,
           "maximum": 500
+        },
+        "scope": {
+          "description": "wcag engine: limit the audit to one container's subtree",
+          "type": "object",
+          "properties": {
+            "container": {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "description": "Container resource id",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "text": {
+                  "description": "Container text or content-desc",
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": ["container"],
+          "additionalProperties": false
+        },
+        "baseline": {
+          "description": "wcag engine: named accessibility baseline",
+          "type": "object",
+          "properties": {
+            "name": {
+              "description": "Baseline name",
+              "type": "string",
+              "minLength": 1
+            },
+            "mode": {
+              "description": "record saves; compare reports the diff",
+              "type": "string",
+              "enum": ["compare", "record"]
+            }
+          },
+          "required": ["name", "mode"],
+          "additionalProperties": false
+        },
+        "failOn": {
+          "description": "wcag engine: fail the call at this violation severity (default never: report only)",
+          "type": "string",
+          "enum": ["error", "warning", "never"]
         },
         "platform": {
           "type": "string",
@@ -258,7 +310,13 @@
         },
         "engine": {
           "type": "string",
-          "enum": ["xcuitest", "atf"]
+          "enum": ["xcuitest", "atf", "wcag"]
+        },
+        "failed": {
+          "type": "boolean"
+        },
+        "appId": {
+          "type": "string"
         },
         "issues": {
           "type": "array",
@@ -307,14 +365,56 @@
         "totalIssues": {
           "type": "number"
         },
-        "truncated": {
-          "type": "boolean"
-        },
         "unsupportedChecks": {
           "type": "array",
           "items": {
             "type": "string"
           }
+        },
+        "violations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "totalViolations": {
+          "type": "number"
+        },
+        "summary": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        },
+        "screenId": {
+          "type": "string"
+        },
+        "baselineDiff": {
+          "type": "object",
+          "properties": {
+            "new": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            "fixed": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "unchanged": {
+              "type": "number"
+            }
+          },
+          "required": ["new", "fixed", "unchanged"],
+          "additionalProperties": false
+        },
+        "baselineRecorded": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
         },
         "errorCode": {
           "type": "string",
@@ -324,8 +424,26 @@
           "type": "string"
         }
       },
-      "required": ["success", "engine", "issues", "totalIssues", "truncated", "unsupportedChecks"],
-      "additionalProperties": {}
+      "required": ["success", "engine"],
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string"
+            },
+            "severity": {
+              "type": "string"
+            },
+            "fingerprint": {
+              "type": "string"
+            }
+          },
+          "required": ["type", "severity", "fingerprint"],
+          "additionalProperties": {}
+        }
+      }
     }
   },
   {
@@ -335,13 +453,13 @@
       "destructiveHint": false,
       "idempotentHint": true
     },
-    "description": "Set or clear Android TalkBack focus by resourceId, text, or contentDesc.",
+    "description": "Set accessibility focus on Android (TalkBack) and iOS (VoiceOver) by resourceId, text, or contentDesc. Clearing focus is supported on Android only.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "action": {
-          "description": "set default or clear TalkBack focus",
+          "description": "set default or clear accessibility focus (clear is Android-only)",
           "type": "string",
           "enum": ["set", "clear"]
         },
@@ -384,6 +502,16 @@
         },
         "error": {
           "type": "string"
+        },
+        "errorCode": {
+          "type": "string",
+          "enum": [
+            "voiceover_off",
+            "sdk_unavailable",
+            "element_not_found",
+            "invalid_selector",
+            "unsupported"
+          ]
         },
         "warning": {
           "type": "string"
@@ -834,7 +962,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Audit the current screen on demand, with every audit feature flag off and without changing flag state. kinds: accessibility (WCAG: contrast, touch targets, labels, headings; default), performance (UI jank and touch latency of the foreground app), memory (a memory snapshot of appId). Violations carry the element from this observation. scope.container limits the accessibility audit to one element's subtree. baseline record saves the accessibility violations under a name; compare reports baselineDiff (new, fixed, unchanged), and only new violations count toward failOn. failOn error|warning makes the call fail when findings reach that severity, for plan assertions; default never. Android only.",
+    "description": "Deprecated: use accessibilityAudit (engine wcag) for accessibility and performanceAudit for performance and memory; this tool returns the same results and will be removed. Audit the current screen on demand, with every audit feature flag off and without changing flag state. kinds: accessibility (WCAG: contrast, touch targets, labels, headings; default), performance (UI jank and touch latency of the foreground app), memory (a memory snapshot of appId). Violations carry the element from this observation; accessibility of an appId that is not in the foreground is an error. scope.container limits the accessibility audit to one element's subtree. baseline record saves the accessibility violations under a name; compare reports baselineDiff (new, fixed, unchanged), and only new violations count toward failOn. failOn error|warning makes the call fail when findings reach that severity or a requested kind is unsupported, for plan assertions; default never. Android only.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -961,24 +1089,10 @@
           "additionalProperties": {}
         },
         "performance": {
-          "type": "object",
-          "properties": {
-            "passed": {
-              "type": "boolean"
-            }
-          },
-          "required": ["passed"],
-          "additionalProperties": {}
+          "$ref": "#/$defs/__schema1"
         },
         "memory": {
-          "type": "object",
-          "properties": {
-            "passed": {
-              "type": "boolean"
-            }
-          },
-          "required": ["passed"],
-          "additionalProperties": {}
+          "$ref": "#/$defs/__schema1"
         },
         "baselineDiff": {
           "type": "object",
@@ -1035,6 +1149,16 @@
             }
           },
           "required": ["type", "severity", "fingerprint"],
+          "additionalProperties": {}
+        },
+        "__schema1": {
+          "type": "object",
+          "properties": {
+            "passed": {
+              "type": "boolean"
+            }
+          },
+          "required": ["passed"],
           "additionalProperties": {}
         }
       }
@@ -2197,7 +2321,7 @@
               "minLength": 1
             },
             "rect": {
-              "description": "Platform-native screen rectangle: Android pixels, iOS points",
+              "description": "Platform-native screen rectangle: Android pixels, iOS and tvOS points",
               "type": "object",
               "properties": {
                 "left": {
@@ -2232,7 +2356,7 @@
                 "minLength": 1
               },
               "rect": {
-                "description": "Platform-native screen rectangle: Android pixels, iOS points",
+                "description": "Platform-native screen rectangle: Android pixels, iOS and tvOS points",
                 "type": "object",
                 "properties": {
                   "left": {
@@ -6213,7 +6337,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": ["android", "ios", "tvos"]
         },
         "deviceId": {
           "type": "string"
@@ -6538,7 +6662,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Automatically interact with the app to discover screens and record transitions in the navigation graph",
+    "description": "Automatically interact with the app to discover screens and record transitions in the navigation graph; on Android TV it moves D-pad focus and selects instead of tapping (touch if the TV check cannot read the device)",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -9325,7 +9449,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Move D-pad focus to an element on a focus-driven UI such as Android TV or Apple TV. Observes, and until the focused element matches `until` (text, contentDesc or resourceId) presses the D-pad arrow (Siri Remote direction on Apple TV) that moves toward the nearest match, or `direction` when given. When a press leaves focus unchanged, the next arrow toward the match is tried. Returns the path of focused elements and a status: focused, max_steps (default 30) or stuck (every arrow toward the match left focus unchanged; two unchanged presses with `direction`). Activate the result with sendKeys key enter on Android TV, or pressButton select on Apple TV.",
+    "description": "Move D-pad focus to an element on a focus-driven UI such as Android TV or Apple TV. Observes, and until the focused element matches `until` (text, contentDesc, resourceId, or label/elementId resolved to the element tapOn would tap) presses the D-pad arrow (Siri Remote direction on Apple TV) that moves toward the nearest match, or `direction` when given. When a press leaves focus unchanged, or presses in one direction keep moving focus without getting closer, the other arrows are tried so focus can leave a list or slider that traps it. Returns the path of focused elements and a status: focused, max_steps (default 30) or stuck (every arrow from the focused element was tried; two unchanged presses with `direction`). With `select`, presses enter (select on Apple TV) once focused (`selected` reports whether it did); otherwise activate the result with sendKeys key enter on Android TV, or pressButton select on Apple TV.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -9345,6 +9469,14 @@
             "resourceId": {
               "description": "Resource ID of the element to focus",
               "type": "string"
+            },
+            "label": {
+              "description": "Text or content-desc of the element to focus, resolved as tapOn's text",
+              "type": "string"
+            },
+            "elementId": {
+              "description": "Element ID of the element to focus, resolved as tapOn's elementId",
+              "type": "string"
             }
           },
           "additionalProperties": false
@@ -9359,6 +9491,10 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 100
+        },
+        "select": {
+          "description": "Press enter (D-pad select) once the target is focused (default false)",
+          "type": "boolean"
         },
         "settleMs": {
           "description": "Wait after each press before observing (default 200)",
@@ -9416,11 +9552,14 @@
           },
           "additionalProperties": {}
         },
+        "selected": {
+          "type": "boolean"
+        },
         "message": {
           "type": "string"
         }
       },
-      "required": ["success", "status", "steps", "path"],
+      "required": ["success", "status", "steps", "path", "selected"],
       "additionalProperties": {}
     }
   },
@@ -9575,6 +9714,7 @@
               "network",
               "observe",
               "openLink",
+              "performanceAudit",
               "performanceTrace",
               "phoneCall",
               "pinchOn",
@@ -9739,6 +9879,7 @@
               "network",
               "observe",
               "openLink",
+              "performanceAudit",
               "performanceTrace",
               "phoneCall",
               "pinchOn",
@@ -18320,7 +18461,7 @@
     "annotations": {
       "readOnlyHint": true
     },
-    "description": "List device images",
+    "description": "List device images; when `truncated` is true the result was over 64 KiB and `images` is partial: read `artifact.resourceUri` or the resource_link for the full list",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -18332,6 +18473,11 @@
         "sessionUuid": {
           "description": "Session used for inventory admission",
           "type": "string"
+        },
+        "detail": {
+          "description": "compact (default): host-scoped capabilities once under `host`, shared `capabilityProfiles`, null fields omitted; full: every image carries its own `capabilityInventory` and null fields",
+          "type": "string",
+          "enum": ["compact", "full"]
         }
       },
       "required": ["platform"],
@@ -18339,6 +18485,7 @@
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "A response over 64 KiB is spilled: the full result goes to `artifact` and a resource_link, and the inline result keeps count, configuredInventory, capabilityProfiles, host, truncated and imagesReturned",
       "type": "object",
       "properties": {
         "message": {
@@ -18710,18 +18857,7 @@
                     "enum": ["Booting", "Shutting Down"]
                   }
                 },
-                "required": [
-                  "deviceId",
-                  "connectionId",
-                  "deviceSessionUuid",
-                  "lifecycle",
-                  "readiness",
-                  "poolStatus",
-                  "session",
-                  "serviceStatus",
-                  "locked",
-                  "orientation"
-                ],
+                "required": ["lifecycle", "readiness"],
                 "additionalProperties": false
               },
               "display": {
@@ -18811,37 +18947,7 @@
               "capabilityInventory": {
                 "anyOf": [
                   {
-                    "type": "object",
-                    "properties": {
-                      "schemaVersion": {
-                        "type": "number"
-                      },
-                      "capabilities": {
-                        "type": "array",
-                        "items": {
-                          "type": "object",
-                          "properties": {
-                            "id": {
-                              "type": "string"
-                            },
-                            "state": {
-                              "type": "string",
-                              "enum": ["supported", "unsupported", "unknown"]
-                            },
-                            "reason": {
-                              "$ref": "#/$defs/__schema0"
-                            },
-                            "source": {
-                              "$ref": "#/$defs/__schema0"
-                            }
-                          },
-                          "required": ["id", "state", "reason", "source"],
-                          "additionalProperties": false
-                        }
-                      }
-                    },
-                    "required": ["schemaVersion", "capabilities"],
-                    "additionalProperties": false
+                    "$ref": "#/$defs/__schema2"
                   },
                   {
                     "type": "null"
@@ -18881,31 +18987,18 @@
               },
               "availabilityError": {
                 "$ref": "#/$defs/__schema0"
+              },
+              "capabilityProfile": {
+                "description": "Key into `capabilityProfiles`; the image's capabilities, plus `host.capabilities`",
+                "type": "string"
               }
             },
-            "required": [
-              "identity",
-              "name",
-              "platform",
-              "isVirtual",
-              "source",
-              "formFactor",
-              "deviceType",
-              "model",
-              "architecture",
-              "osVersion",
-              "apiLevel",
-              "runtimeId",
-              "runtime",
-              "display",
-              "capabilityInventory",
-              "image",
-              "availabilityError"
-            ],
+            "required": ["identity", "name", "platform", "isVirtual", "formFactor", "runtime"],
             "additionalProperties": false
           }
         },
         "count": {
+          "description": "Total configured images; equals images.length unless `truncated` is true",
           "type": "number"
         },
         "platform": {
@@ -18913,6 +19006,35 @@
           "enum": ["android", "ios", "tvos", "visionos"]
         },
         "configuredInventory": {},
+        "capabilityProfiles": {
+          "description": "Compact detail: capability inventories shared by images, by `capabilityProfile`",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema2"
+          }
+        },
+        "host": {
+          "description": "Compact detail: host-scoped capabilities (host audio) that apply to every image with a `capabilityProfile`",
+          "type": "object",
+          "properties": {
+            "capabilities": {
+              "$ref": "#/$defs/__schema3"
+            }
+          },
+          "required": ["capabilities"],
+          "additionalProperties": false
+        },
+        "truncated": {
+          "description": "Present only when the response was spilled to `artifact`: true when `images` holds fewer than `count` entries; read `artifact.resourceUri` (or the resource_link) for the full list",
+          "type": "boolean"
+        },
+        "imagesReturned": {
+          "description": "Present only when spilled: number of entries inline in `images`",
+          "type": "number"
+        },
         "artifact": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
           "type": "object",
@@ -18966,6 +19088,42 @@
               "type": "null"
             }
           ]
+        },
+        "__schema2": {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "type": "number"
+            },
+            "capabilities": {
+              "$ref": "#/$defs/__schema3"
+            }
+          },
+          "required": ["schemaVersion", "capabilities"],
+          "additionalProperties": false
+        },
+        "__schema3": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": ["supported", "unsupported", "unknown"]
+              },
+              "reason": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "source": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            "required": ["id", "state", "reason", "source"],
+            "additionalProperties": false
+          }
         }
       }
     },
@@ -21212,7 +21370,7 @@
     "annotations": {
       "readOnlyHint": true
     },
-    "description": "Android synthetic s2- element ids are valid only for the observation that returned them; re-observe before using an id after the screen changes. The default skeleton lists only actionable rows; read static text (status labels, validation errors) from context. Without layer, waitFor text and textAny, and for: appear/textEquals with only text, also match rows in both arrays when no hierarchy node carries the text (textEquals stays exact and case-sensitive). Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. On an Apple Watch simulator (platform: 'watchos' or a watch session), observe keeps the screenshot and returns hierarchy-derived elements in XCTest points when a watch runner is connected (project: 'full' includes viewHierarchy). Without a connected runner it returns screenshot-only with physical screenSize and hierarchyUnavailable; advanced observe options are refused. On an Apple TV simulator (platform: 'tvos' or an Apple TV session), observe returns a screenshot and runner hierarchy with focusedElement when connected (project: 'full' includes viewHierarchy); without a runner it returns screenshot-only with hierarchyUnavailable. Use pressButton for focus navigation; advanced observe options are refused. On an Apple Vision Pro simulator (platform 'visionos'), observe returns a screenshot and the window-app runner hierarchy with focusedElement (project: 'full' includes viewHierarchy); the runner starts on demand; when it cannot start or be reached, observe returns screenshot-only with hierarchyUnavailable unless project is set, which then is refused. Advanced observe options are refused. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Each screenshot path is kept for at least 10 minutes after the response that returned it unless evicted early under capacity pressure, so a returned path is not guaranteed to survive until its expiresAt; expiresAt metadata uses the host clock. Returning cached paths extends their lifetime. At the shared 128 MiB / 4096-file cap, new captures are never refused: the least recently returned screenshots are evicted early, unreferenced ones first and then referenced ones, to admit them. Release and device removal leave files until their guarantees expire. Restart uses a ten-minute process-start grace; other processes can only honor the ten-minute mtime floor. Capacity uses a per-process in-memory inventory reconciled on sweeps and near either cap. Concurrent processes can exceed the aggregate cap before reconciliation; discovered files count against subsequent admission. Expired files are swept at initial inventory, near capacity and every minute while idle. Copy files needed beyond the guarantee.",
+    "description": "Android synthetic s2- element ids are valid only for the observation that returned them; re-observe before using an id after the screen changes. The default skeleton lists only actionable rows; read static text (status labels, validation errors) from context. Without layer, waitFor text and textAny, and for: appear/textEquals with only text, also match rows in both arrays when no hierarchy node carries the text (textEquals stays exact and case-sensitive). Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. On an Apple Watch simulator (platform: 'watchos' or a watch session), observe keeps the screenshot and returns hierarchy-derived elements in XCTest points when a watch runner is connected (project: 'full' includes viewHierarchy). Without a connected runner it returns screenshot-only with physical screenSize and hierarchyUnavailable; advanced observe options are refused. On an Apple TV simulator (platform: 'tvos' or an Apple TV session), observe returns a screenshot and runner hierarchy with focusedElement when connected (project: 'full' includes viewHierarchy); without a runner it returns screenshot-only with hierarchyUnavailable. Use pressButton for focus navigation; advanced observe options are refused. On an Apple Vision Pro simulator (platform 'visionos'), observe returns a screenshot and the window-app runner hierarchy with focusedElement (project: 'full' includes viewHierarchy); the runner starts on demand, except that a deviceId read of a device another session holds only connects to an already-running runner; when it cannot start or be reached, observe returns screenshot-only with hierarchyUnavailable unless project is set, which then is refused. Advanced observe options are refused. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Each screenshot path is kept for at least 10 minutes after the response that returned it unless evicted early under capacity pressure, so a returned path is not guaranteed to survive until its expiresAt; expiresAt metadata uses the host clock. Returning cached paths extends their lifetime. At the shared 128 MiB / 4096-file cap, new captures are never refused: the least recently returned screenshots are evicted early, unreferenced ones first and then referenced ones, to admit them. Release and device removal leave files until their guarantees expire. Restart uses a ten-minute process-start grace; other processes can only honor the ten-minute mtime floor. Capacity uses a per-process in-memory inventory reconciled on sweeps and near either cap. Concurrent processes can exceed the aggregate cap before reconciliation; discovered files count against subsequent admission. Expired files are swept at initial inventory, near capacity and every minute while idle. Copy files needed beyond the guarantee.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -25153,6 +25311,104 @@
     }
   },
   {
+    "name": "performanceAudit",
+    "title": "Audit Performance",
+    "annotations": {
+      "destructiveHint": false
+    },
+    "description": "Pass/fail performance checks of an app on the current screen, against the configured thresholds. kinds: performance (UI jank, frame time and touch latency of the foreground app; appId must be in the foreground) and memory (a memory snapshot of appId); default both. Each reports passed with its metrics and violations. failOn error|warning makes the call fail when a check does not pass or cannot run (performance of an appId not in the foreground is listed under unsupported), for plan assertions; default never. For raw captures use performanceTrace, captureTrace, measureStartup or heapDump. Android only.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "kinds": {
+          "description": "Checks to run (default: performance and memory)",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["performance", "memory"]
+          }
+        },
+        "appId": {
+          "description": "Package to audit (default: the foreground app)",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "failOn": {
+          "description": "Fail the call when a check does not pass or cannot run: error or warning (default never: report only)",
+          "type": "string",
+          "enum": ["error", "warning", "never"]
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios", "tvos", "visionos"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "failed": {
+          "type": "boolean"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "performance": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "memory": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "unsupported": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "failed"],
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "properties": {
+            "passed": {
+              "type": "boolean"
+            }
+          },
+          "required": ["passed"],
+          "additionalProperties": {}
+        }
+      }
+    }
+  },
+  {
     "name": "performanceTrace",
     "title": "Record Trace",
     "annotations": {
@@ -27610,7 +27866,7 @@
       "destructiveHint": false,
       "idempotentHint": true
     },
-    "description": "Android: manage adb reverse mappings so the app or browser on the device reaches a host server at localhost:<port>. ensure adds mappings this session owns; list, verify and remove manage them. verify with probe:true also connects from the device to each mapped port: reachable (the host server accepted), unreachable (probeReason closed: nothing listens on the host; refused; timeout) or probe_unsupported. Owned mappings lost to an adb or device restart are restored on the next call and removed when the session ends. Ports below 1024 are refused. iOS returns not_applicable.",
+    "description": "Android: manage adb reverse mappings so the app or browser on the device reaches a host server at localhost:<port>. ensure adds mappings this session owns; list, verify and remove manage them. verify with probe:true also connects from the device to each mapped port: reachable (the host server accepted), unreachable (probeReason closed: nothing listens on the host; refused; timeout) or probe_unsupported; probe:{http:{path,expectStatus}} checks the HTTP response instead. list reports hostListening for each tcp: host port. ensure with reclaimStale:true replaces a stale mapping whose host port refuses. Conflicts carry conflictKind. list and verify report each port's deviceListener. Owned mappings lost to an adb or device restart are restored on the next call and removed when the session ends. Ports below 1024 are refused. iOS returns not_applicable.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -27646,7 +27902,64 @@
           }
         },
         "probe": {
-          "description": "verify only: also connect to each mapped port from the device (about 1 s each, run together) and report reachable, unreachable or probe_unsupported",
+          "description": "verify only. true: connect to each mapped port from the device (about 1 s each, run together) and report reachable, unreachable or probe_unsupported. {http}: send a GET from the device through each mapping and check the status (and body); reports httpStatus and probeReason http_status, http_body or no_http_response when it does not match",
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "http": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "description": "Request path sent from the device, e.g. /health",
+                      "type": "string",
+                      "maxLength": 512,
+                      "pattern": "^\\/[\\x21-\\x7e]*$"
+                    },
+                    "expectStatus": {
+                      "description": "Status codes that count as reachable",
+                      "minItems": 1,
+                      "maxItems": 16,
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "minimum": 100,
+                        "maximum": 599
+                      }
+                    },
+                    "hostHeader": {
+                      "description": "Host header; default localhost:<devicePort>",
+                      "type": "string",
+                      "maxLength": 255,
+                      "pattern": "^[A-Za-z0-9.\\-:\\[\\]]+$"
+                    },
+                    "expectBodyContains": {
+                      "description": "Text the response body must contain",
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "timeoutMs": {
+                      "description": "Device-side wait for the response, whole seconds (default 2000)",
+                      "type": "integer",
+                      "minimum": 1000,
+                      "maximum": 10000
+                    }
+                  },
+                  "required": ["path", "expectStatus"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["http"],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "reclaimStale": {
+          "description": "ensure only: replace a mapping no live session owns when its tcp: host port refuses a loopback connect (needs a session that holds the device). The result marks it reclaimed",
           "type": "boolean"
         },
         "platform": {
@@ -27710,6 +28023,10 @@
               "owned": {
                 "type": "boolean"
               },
+              "owner": {
+                "type": "string",
+                "enum": ["prototype"]
+              },
               "status": {
                 "type": "string",
                 "enum": [
@@ -27718,6 +28035,7 @@
                   "restored",
                   "missing",
                   "removed",
+                  "released",
                   "gone",
                   "foreign",
                   "reachable",
@@ -27727,10 +28045,99 @@
               },
               "probeReason": {
                 "type": "string",
-                "enum": ["closed", "refused", "timeout", "unsupported"]
+                "enum": [
+                  "closed",
+                  "refused",
+                  "timeout",
+                  "unsupported",
+                  "http_status",
+                  "http_body",
+                  "no_http_response"
+                ]
+              },
+              "httpStatus": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
               },
               "probeDetail": {
                 "type": "string"
+              },
+              "hostListening": {
+                "type": "boolean"
+              },
+              "reclaimed": {
+                "type": "object",
+                "properties": {
+                  "host": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": ["host_refused"]
+                  }
+                },
+                "required": ["host", "reason"],
+                "additionalProperties": false
+              },
+              "deviceListener": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "none"
+                      }
+                    },
+                    "required": ["kind"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "reverse"
+                      }
+                    },
+                    "required": ["kind"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "process"
+                      },
+                      "uid": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "package": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["kind", "uid"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "unsupported"
+                      },
+                      "detail": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["kind", "detail"],
+                    "additionalProperties": false
+                  }
+                ]
               }
             },
             "required": ["devicePort", "host", "owned", "status"],
@@ -27765,7 +28172,13 @@
         },
         "errorCode": {
           "type": "string",
-          "enum": ["port_reverse_conflict", "port_reverse_not_owned", "port_reverse_port_refused"]
+          "enum": [
+            "port_reverse_conflict",
+            "port_reverse_not_owned",
+            "port_reverse_port_refused",
+            "port_reverse_reclaim_failed",
+            "port_reverse_device_port_in_use"
+          ]
         },
         "ports": {
           "type": "array",
@@ -27774,10 +28187,37 @@
             "minimum": -9007199254740991,
             "maximum": 9007199254740991
           }
+        },
+        "conflictKind": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "conflicts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "devicePort": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "conflictKind": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            "required": ["devicePort"],
+            "additionalProperties": false
+          }
         }
       },
       "required": ["message", "success", "status", "action", "deviceId"],
-      "additionalProperties": {}
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "string",
+          "enum": ["other_session", "external_live", "external_unknown", "prototype"]
+        }
+      }
     }
   },
   {
@@ -27919,7 +28359,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Press a device or navigation button. On tvOS, use up/down/left/right to navigate focus, select, menu, home or playPause; long press and steps are unsupported. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware. Android-only system actions: lock, power_dialog, quick_settings, screenshot, split_screen (raw system toggle; windowMode places a chosen app) and dismiss_notification_shade; each needs the API level and CtrlProxy APK that supports it and otherwise returns unsupported_system_action. Android Automotive only: rotary_rotate_cw / rotary_rotate_ccw (steps detents), rotary_nudge_up/down/left/right and rotary_select drive a rotary controller; other devices refuse them. lock leaves the device locked (wakeAndUnlock); power_dialog and quick_settings stay open until back/home.",
+    "description": "Press a device or navigation button. On tvOS, use up/down/left/right to navigate focus, select, menu, home or playPause; long press and steps are unsupported. On Android (TV remotes), up/down/left/right/select send D-pad keys and playPause, fastForward, rewind, next and previous send media keys; select with durationMs is a long press of D-pad center (API 35+). On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware. Android-only system actions: lock, power_dialog, quick_settings, screenshot, split_screen (raw system toggle; windowMode places a chosen app) and dismiss_notification_shade; each needs the API level and CtrlProxy APK that supports it and otherwise returns unsupported_system_action. Android Automotive only: rotary_rotate_cw / rotary_rotate_ccw (steps detents), rotary_nudge_up/down/left/right and rotary_select drive a rotary controller; other devices refuse them. lock leaves the device locked (wakeAndUnlock); power_dialog and quick_settings stay open until back/home.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -27933,6 +28373,10 @@
             "right",
             "select",
             "playPause",
+            "fastForward",
+            "rewind",
+            "next",
+            "previous",
             "home",
             "back",
             "menu",
@@ -27962,6 +28406,12 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 50
+        },
+        "durationMs": {
+          "description": "Hold select (D-pad center) down this long in ms (100-10000) for a long press; Android API 35+ only.",
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 10000
         },
         "platform": {
           "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
@@ -32471,6 +32921,35 @@
                       "required": ["key", "as"],
                       "additionalProperties": false
                     },
+                    "attentionLoop": {
+                      "type": "object",
+                      "properties": {
+                        "effect": {
+                          "type": "string",
+                          "enum": ["pulse", "spin"]
+                        },
+                        "periodMs": {
+                          "type": "integer",
+                          "minimum": 400,
+                          "maximum": 4000
+                        },
+                        "iterations": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "infinite"
+                            },
+                            {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 20
+                            }
+                          ]
+                        }
+                      },
+                      "required": ["effect", "periodMs"],
+                      "additionalProperties": false
+                    },
                     "keyframes": {
                       "type": "object",
                       "properties": {
@@ -33069,6 +33548,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -33211,6 +33693,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -33307,6 +33792,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -33397,6 +33885,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -33505,6 +33996,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -33605,6 +34099,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -33728,6 +34225,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -33890,6 +34390,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -34036,6 +34539,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -34186,6 +34692,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -34262,6 +34771,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -34537,6 +35049,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -34644,6 +35159,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -34737,6 +35255,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -34827,6 +35348,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -34906,6 +35430,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -34997,6 +35524,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -35107,6 +35637,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -35210,6 +35743,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -35351,6 +35887,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -35453,6 +35992,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -35543,6 +36085,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -35638,6 +36183,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -35724,6 +36272,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -35815,6 +36366,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -35915,6 +36469,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -36020,6 +36577,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -36101,6 +36661,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -36181,6 +36744,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -36268,6 +36834,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -36451,6 +37020,119 @@
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
                     "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "sharedKey": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/sharedKey"
+                    },
+                    "press": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/press"
+                    },
+                    "shared": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
+                    "keyframes": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "animate": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/animate"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["webView"]
+                    },
+                    "url": {
+                      "type": "string",
+                      "maxLength": 2048,
+                      "pattern": "^https:\\/\\/[^\\u0000-\\u0020\\u007F-\\u009F]+$(?![\\s\\S])"
+                    },
+                    "allowedOrigins": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "maxLength": 256,
+                        "pattern": "^https:\\/\\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*(?::(?!443(?![\\s\\S]))(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?$(?![\\s\\S])"
+                      },
+                      "minItems": 1,
+                      "maxItems": 8
+                    },
+                    "javaScript": {
+                      "type": "boolean"
+                    },
+                    "navigationStateKey": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                    },
+                    "titleKey": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                    },
+                    "canGoBackKey": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                    },
+                    "onNavigate": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "onBlockedNavigation": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    }
+                  },
+                  "required": ["type", "url", "allowedOrigins"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/android"
+                    },
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
+                    "id": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
                     },
                     "testTag": {
@@ -36479,6 +37161,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -36705,6 +37390,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -36793,6 +37481,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -36897,6 +37588,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -37026,6 +37720,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -37084,7 +37781,7 @@
                       "additionalProperties": false
                     },
                     "dismiss": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/35/properties/confirm"
+                      "$ref": "#/properties/spec/properties/root/anyOf/36/properties/confirm"
                     },
                     "child": {
                       "$ref": "#/properties/spec/properties/root"
@@ -37147,6 +37844,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -37167,7 +37867,7 @@
                       "enum": ["tooltip"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/35/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/36/properties/openWhen"
                     },
                     "text": {
                       "type": "string",
@@ -37263,6 +37963,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -37287,7 +37990,7 @@
                       "enum": ["start", "end"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/35/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/36/properties/openWhen"
                     },
                     "scrim": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/background"
@@ -37356,6 +38059,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -37376,7 +38082,7 @@
                       "enum": ["menu"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/35/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/36/properties/openWhen"
                     },
                     "items": {
                       "type": "array",
@@ -37386,10 +38092,10 @@
                             "type": "object",
                             "properties": {
                               "label": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/35/properties/confirm/properties/label"
+                                "$ref": "#/properties/spec/properties/root/anyOf/36/properties/confirm/properties/label"
                               },
                               "onTap": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/35/properties/confirm/properties/onTap"
+                                "$ref": "#/properties/spec/properties/root/anyOf/36/properties/confirm/properties/onTap"
                               },
                               "icon": {
                                 "$ref": "#/properties/spec/properties/root/anyOf/1/properties/swipeActions/properties/start/items/properties/icon"
@@ -37479,6 +38185,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -37499,14 +38208,14 @@
                       "enum": ["snackbar"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/35/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/36/properties/openWhen"
                     },
                     "text": {
                       "type": "string",
                       "minLength": 1
                     },
                     "action": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/35/properties/confirm"
+                      "$ref": "#/properties/spec/properties/root/anyOf/36/properties/confirm"
                     },
                     "durationMs": {
                       "type": "integer",
@@ -37570,6 +38279,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -37666,6 +38378,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -37754,6 +38469,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -37855,10 +38573,10 @@
                       "maxItems": 1
                     },
                     "header": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/42/properties/children/items"
+                      "$ref": "#/properties/spec/properties/root/anyOf/43/properties/children/items"
                     },
                     "footer": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/42/properties/children/items"
+                      "$ref": "#/properties/spec/properties/root/anyOf/43/properties/children/items"
                     }
                   },
                   "required": ["type", "repeat", "children"],
@@ -37918,6 +38636,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -37943,7 +38664,7 @@
                       "default": "vertical"
                     },
                     "refresh": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/42/properties/refresh"
+                      "$ref": "#/properties/spec/properties/root/anyOf/43/properties/refresh"
                     },
                     "fadeEdges": {
                       "type": "object",
@@ -38048,6 +38769,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -38184,6 +38908,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -38237,7 +38964,7 @@
                                 "maxItems": 32
                               },
                               "onBack": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/45/properties/routes/allOf/0/additionalProperties/properties/onEnter"
+                                "$ref": "#/properties/spec/properties/root/anyOf/46/properties/routes/allOf/0/additionalProperties/properties/onEnter"
                               }
                             },
                             "additionalProperties": false
@@ -38303,6 +39030,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -38421,6 +39151,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -38451,7 +39184,7 @@
                     "items": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/46/properties/items/items"
+                        "$ref": "#/properties/spec/properties/root/anyOf/47/properties/items/items"
                       },
                       "minItems": 2,
                       "maxItems": 5
@@ -38521,6 +39254,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "attentionLoop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/attentionLoop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -38541,7 +39277,7 @@
                       "enum": ["bottomSheet"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/35/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/36/properties/openWhen"
                     },
                     "detents": {
                       "type": "array",
@@ -39606,7 +40342,7 @@
                             "enum": ["video", "audio"]
                           },
                           "source": {
-                            "$ref": "#/properties/spec/properties/root/anyOf/31/properties/source"
+                            "$ref": "#/properties/spec/properties/root/anyOf/32/properties/source"
                           },
                           "queue": {
                             "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
@@ -42486,6 +43222,7 @@
               "network",
               "observe",
               "openLink",
+              "performanceAudit",
               "performanceTrace",
               "phoneCall",
               "pinchOn",
@@ -43303,7 +44040,7 @@
                   "type": "boolean"
                 },
                 "indexMedia": {
-                  "description": "Request Android media indexing for media files",
+                  "description": "Request an Android MediaStore scan of every written file so media apps and the system document picker can list it",
                   "default": false,
                   "type": "boolean"
                 }
@@ -53480,6 +54217,122 @@
               ],
               "description": "Integrity signals (Android): maximally-detectable enables su-binary, superuser-apk and selinux-permissive; minimally-detectable disables them. Or { preset?, signals?: { <signal-id>: 'on' | 'off' } }, with at least one field and signals overriding the preset. Needs root and writable /system for files. Image-fixed signals and missing-otacerts report unsupported. Results include per-signal status and post-apply active readings. 'unset' restores prior state; existing image/rootState files are never removed."
             },
+            "statusBar": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "unset"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "time": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 32
+                    },
+                    "batteryLevel": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100
+                    },
+                    "batteryState": {
+                      "type": "string",
+                      "enum": ["charging", "charged", "discharging"]
+                    },
+                    "cellularBars": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 4
+                    },
+                    "wifiBars": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 3
+                    },
+                    "dataNetwork": {
+                      "type": "string",
+                      "enum": ["wifi", "5g", "lte", "4g", "3g", "hide"]
+                    },
+                    "operatorName": {
+                      "type": "string",
+                      "maxLength": 64
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Override the status bar ({ time?, batteryLevel?, batteryState?, cellularBars?, wifiBars?, dataNetwork?, operatorName? }, at least one). iOS Simulator only so far; reset clears every override. Or unset."
+            },
+            "privacy": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "unset"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "appId": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9._-]+$",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "service": {
+                      "type": "string",
+                      "enum": [
+                        "calendar",
+                        "contacts-limited",
+                        "contacts",
+                        "location",
+                        "location-always",
+                        "photos-add",
+                        "photos",
+                        "media-library",
+                        "microphone",
+                        "motion",
+                        "reminders",
+                        "siri"
+                      ]
+                    },
+                    "action": {
+                      "type": "string",
+                      "enum": ["grant", "revoke"]
+                    }
+                  },
+                  "required": ["appId", "service", "action"],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Grant or revoke one privacy service for an installed app ({ appId, service, action }). iOS Simulator only so far; reset restores the app's earlier decisions for that service and its pair (photos/photos-add, location/location-always, contacts/contacts-limited): granted, denied, or not yet asked. Refused when that decision cannot be restored, such as limited Photos access. Or unset."
+            },
+            "location": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "unset"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "latitude": {
+                      "type": "number",
+                      "minimum": -90,
+                      "maximum": 90
+                    },
+                    "longitude": {
+                      "type": "number",
+                      "minimum": -180,
+                      "maximum": 180
+                    }
+                  },
+                  "required": ["latitude", "longitude"],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Simulate the device location ({ latitude, longitude }). iOS Simulator only so far; reset clears the simulated location. Or unset."
+            },
             "faults": {
               "type": "object",
               "properties": {
@@ -55322,6 +56175,7 @@
             "network",
             "observe",
             "openLink",
+            "performanceAudit",
             "performanceTrace",
             "phoneCall",
             "pinchOn",
@@ -55448,6 +56302,7 @@
               "network",
               "observe",
               "openLink",
+              "performanceAudit",
               "performanceTrace",
               "phoneCall",
               "pinchOn",
@@ -63876,7 +64731,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Tap an element by text/content-desc, resource-id, or Android test tag; use sibling for adjacent controls.",
+    "description": "Tap an element by text/content-desc, resource-id, or Android test tag; use sibling for adjacent controls. On an Android device without a touchscreen (TV), a plain text or elementId tap (no sibling, container, index or other touch-only option) moves D-pad focus to the match and presses enter only once focus reaches it.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -65167,6 +66022,43 @@
             }
           },
           "required": ["reachable", "traversalOrder", "focusTrapDetected"],
+          "additionalProperties": {}
+        },
+        "inputMethod": {
+          "description": "Present when the Android device has no touchscreen and the D-pad was used instead of a touch tap; enter is pressed only after focus reaches the target",
+          "type": "string",
+          "const": "dpad"
+        },
+        "focusNavigation": {
+          "description": "The D-pad focus walk, when inputMethod is dpad",
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["focused", "max_steps", "stuck"]
+            },
+            "steps": {
+              "type": "number"
+            },
+            "path": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            },
+            "focusedElement": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "required": ["status", "steps", "path"],
           "additionalProperties": {}
         },
         "debug": {}

@@ -6,6 +6,8 @@ import { AppleTvSimulatorBoot } from "../../src/utils/ios-cmdline-tools/AppleTvS
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { toolJson } from "../helpers/toolResponse";
+import { useEmptyVideoRecordings } from "../helpers/emptyVideoRecordings";
+import { resetVideoRecordingManagerDependencies } from "../../src/daemon/videoRecordingManager";
 import { settleByFakeEvents } from "../helpers/fakeTimerStepping";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
@@ -61,6 +63,7 @@ describe("deleteDevice on an Apple TV simulator", () => {
     DaemonState.getInstance().reset();
     sessionManager?.stopCleanupTimer();
     sessionManager = undefined;
+    resetVideoRecordingManagerDependencies();
   };
   beforeEach(cleanup);
   afterEach(cleanup);
@@ -100,6 +103,7 @@ describe("deleteDevice on an Apple TV simulator", () => {
       }
     };
     const timer = new FakeTimer();
+    await useEmptyVideoRecordings(timer);
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "daemon-session", {

@@ -145,11 +145,14 @@ export class VisionosRunnerLifecycle {
     sessions: VisionosRunnerSessions;
   }): string | undefined {
     this.observeSessions(sessions);
+    const entry = this.runners.get(deviceId);
     if (!sessions.hasSession(ownerSession)) {
-      this.stop(deviceId);
+      // A runner another live session already owns must outlive this caller's ended session.
+      if (!entry?.ownerSession) {
+        this.stop(deviceId);
+      }
       return "the visionos session ended before runner startup";
     }
-    const entry = this.runners.get(deviceId);
     if (entry) {
       entry.ownerSession = ownerSession;
     }
@@ -221,21 +224,27 @@ function getDefaultBuilder(): VisionosRunnerBuilder {
   return defaultBuilderFactory();
 }
 
+type VisionosArtifactBuilder = ConstructorParameters<typeof VisionosRunnerArtifacts>[0]["builder"];
+/** Lazily adapts the registered process builder for artifact resolution, forwarding every argument. */
+export function createVisionosArtifactBuilder(
+  getBuilder: () => VisionosArtifactBuilder,
+): VisionosArtifactBuilder {
+  return {
+    getXctestrunPath: (platform, options) => getBuilder().getXctestrunPath(platform, options),
+    getConfig: () => getBuilder().getConfig(),
+    runExclusiveOnDerivedData: (task) => {
+      const builder = getBuilder();
+      return builder.runExclusiveOnDerivedData ? builder.runExclusiveOnDerivedData(task) : task();
+    },
+  };
+}
+
 let defaultLifecycle: VisionosRunnerLifecycle | undefined;
 export function getVisionosRunnerLifecycle(): VisionosRunnerLifecycle {
   if (!defaultLifecycle) {
     defaultLifecycle = new VisionosRunnerLifecycle({
       artifacts: new VisionosRunnerArtifacts({
-        builder: {
-          getXctestrunPath: (platform) => getDefaultBuilder().getXctestrunPath(platform),
-          getConfig: () => getDefaultBuilder().getConfig(),
-          runExclusiveOnDerivedData: (task) => {
-            const builder = getDefaultBuilder();
-            return builder.runExclusiveOnDerivedData
-              ? builder.runExclusiveOnDerivedData(task)
-              : task();
-          },
-        },
+        builder: createVisionosArtifactBuilder(getDefaultBuilder),
       }),
       launcher: new XcodebuildVisionosRunnerLauncher({
         writeRunnerEnvironment: (file, env, deviceId) =>
@@ -296,7 +305,8 @@ function attachVisionosRunnerToSession(
 ): void {
   const ownerSession = getToolSelectionContext()?.routingSessionUuid;
   const sessions = defaultDaemonContext.sessionManager();
-  if (ownerSession && sessions?.hasSession(ownerSession)) {
+  // An ended routing session still reaches attach, which stops the unowned runner this call started.
+  if (ownerSession && sessions) {
     const unavailable = (lifecycle ?? defaultLifecycle)?.attach({
       deviceId,
       ownerSession,

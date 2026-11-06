@@ -1393,7 +1393,13 @@ jobs:
           # The macOS runner has three shared cores; shell-heavy files can be
           # descheduled behind their parallel peers despite no real I/O.
           AUTOMOBILE_BATS_MAX_FILE_SECONDS: "240"
+          # Runner-aware lane budget (#17274): RUNNER_ENVIRONMENT picks it. The
+          # base 420 s is the Namespace calibration; GitHub-hosted ubuntu-latest
+          # runs the same suite slower (66 runs: p50 388 s, p95 417 s, max 440 s),
+          # so it gets p95 plus a small margin. Keep it a regression guard: raise
+          # it only from fresh measurements, never to clear a single red run.
           AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS: "420"
+          AUTOMOBILE_BATS_UNIT_BUDGET_GITHUB_HOSTED_SECONDS: "450"
         run: scripts/ci/run-bats.sh unit
 
       # Folded in from the former bats-integration-tests job (~40s of work that

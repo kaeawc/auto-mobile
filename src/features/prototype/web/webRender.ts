@@ -16,7 +16,6 @@ import {
   GRID_AREA,
   JUSTIFY_SELF,
   MIN_HEIGHT,
-  MIN_WIDTH,
   PADDING_BOTTOM,
   PADDING_INLINE,
   POINTER_EVENTS,
@@ -77,6 +76,7 @@ import {
   type WebStyleContext,
 } from "./webStyle";
 import { safeAreaCss, safeAreaEdges } from "./webInsets";
+import { webImageRenderer, type WebImageDraw } from "./webImages";
 import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
 import { textRuns } from "./webText";
 import {
@@ -95,10 +95,19 @@ export interface UnsupportedWebNode {
   readonly id?: string;
   readonly path: string;
   /**
-   * `shaderFallback`: the node drew without its `style.shader`, as a device that cannot run the
-   * shader does. `iconMissing`: an icon name with no glyph drew the placeholder.
+   * `assetNotInlined`: the host has no bytes for the asset; `assetOverBudget`: it has them, but the
+   * page's 2 MiB budget left no room for them. `shaderFallback`: the node drew without its
+   * `style.shader`, as a device that cannot run the shader does. `iconMissing`: an icon name with no
+   * glyph drew the placeholder.
    */
-  readonly reason: "unsupportedType" | "assetNotInlined" | "shaderFallback" | "iconMissing";
+  readonly reason:
+    | "unsupportedType"
+    | "assetNotInlined"
+    | "assetOverBudget"
+    | "shaderFallback"
+    | "iconMissing";
+  /** The asset an `image` node draws, once bound. */
+  readonly asset?: string;
 }
 
 /** Everything one render pass reads, plus where it records placeholders. */
@@ -137,6 +146,10 @@ export interface WebRenderScope {
   readonly stacks?: WebStackScreens[];
   /** What the window draws above the whole tree (an open sheet, dialog or snackbar), in tree order. */
   readonly layers: WebElement[];
+  /** Encoded assets the page may inline, by asset id, to the CSS slot that would hold them. */
+  readonly imageSlots?: ReadonlyMap<string, number>;
+  /** Collects every image drawn with a bound asset, so the page can size and inline it. */
+  readonly imageDraws?: WebImageDraw[];
   /** Safe-area edges an ancestor already applied. */
   readonly consumedInsets?: readonly string[];
   /** Safe-area edges the node being rendered applies, consumed for its descendants. */
@@ -156,6 +169,7 @@ export interface WebRenderKit {
   readonly disabledState: typeof disabledState;
   readonly renderNode: typeof renderWebNode;
   readonly safeAreaEdges: typeof safeAreaEdges;
+  readonly fieldErrored: typeof fieldErrored;
 }
 
 /** `{key}` reads state; `{derived:name}` reads a top-level derived value, as on the devices. */
@@ -274,15 +288,11 @@ export type WebCellDecorator = (
   authored: Raw,
 ) => WebElement | undefined;
 
-export function children(
-  node: Raw,
-  scope: WebRenderScope,
-  path: string,
-  cell?: WebCellDecorator,
-): WebChild[] {
+/** The children a container draws, each in its own scope and path: a repeat's once per row. */
+export function childEntries(node: Raw, scope: WebRenderScope, path: string): WebChildEntry[] {
   const list = Array.isArray(node.children) ? node.children : [];
   return rowScopes(node, scope).flatMap((itemScope) =>
-    list.flatMap((entry, at) => renderOrSkip(entry, itemScope, `${path}.children[${at}]`, cell)),
+    list.map((entry, at) => ({ node: entry, scope: itemScope, path: `${path}.children[${at}]` })),
   );
 }
 
@@ -305,6 +315,23 @@ function rowScopes(node: Raw, scope: WebRenderScope): WebRenderScope[] {
     };
     return child(scope, { instances: [...scope.instances, instance] });
   });
+}
+
+export interface WebChildEntry {
+  readonly node: unknown;
+  readonly scope: WebRenderScope;
+  readonly path: string;
+}
+
+export function children(
+  node: Raw,
+  scope: WebRenderScope,
+  path: string,
+  cell?: WebCellDecorator,
+): WebChild[] {
+  return childEntries(node, scope, path).flatMap((entry) =>
+    renderOrSkip(entry.node, entry.scope, entry.path, cell),
+  );
 }
 
 function renderOrSkip(
@@ -483,20 +510,7 @@ const icon: NodeRenderer = (node, scope, path) => {
   ]);
 };
 
-const image: NodeRenderer = (node, scope, path) => {
-  scope.unsupported.push({
-    type: "image",
-    ...(typeof node.id === "string" ? { id: node.id } : {}),
-    path,
-    reason: "assetNotInlined",
-  });
-  const { attrs, style } = base(node, scope, {
-    [BACKGROUND_COLOR]: cssColor("surfaceVariant", scope.style) ?? "#e7e0ec",
-    [MIN_HEIGHT]: "48px",
-    [MIN_WIDTH]: "48px",
-  });
-  return el("div", { attrs: { ...attrs, role: "img" }, style });
-};
+const image = webImageRenderer({ base, bound });
 
 /**
  * A control whose enabledWhen is decidably false draws disabled (Material's 0.38 opacity) and
@@ -674,10 +688,14 @@ function fieldCaption(node: Raw, error: boolean, scope: WebRenderScope): WebElem
   ];
 }
 
+/** Whether a field's `errorWhen` decidably holds, which shows its error as on both devices. */
+function fieldErrored(node: Raw, scope: WebRenderScope): boolean {
+  return node.errorWhen !== undefined && decide(node.errorWhen, presentation(scope)) === true;
+}
+
 const textField: NodeRenderer = (node, scope, path) => {
   const { shown, empty } = fieldValue(node, scope);
-  const error =
-    node.errorWhen !== undefined && decide(node.errorWhen, presentation(scope)) === true;
+  const error = fieldErrored(node, scope);
   const disabled = disabledState(node, scope);
   const { attrs, style } = base(node, scope, {
     display: FLEX,
@@ -857,6 +875,7 @@ const KIT: WebRenderKit = {
   disabledState,
   renderNode: renderWebNode,
   safeAreaEdges,
+  fieldErrored,
 };
 
 const materialButton = materialButtonRenderer(KIT);
@@ -888,6 +907,11 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
 };
 
 const WEB_LAYER_RENDERERS = { ...webSheetLayers(KIT), ...webModalLayers(KIT) };
+
+/** Whether `type` draws only in the window's layer while its `openWhen` holds, never in place. */
+export function isWebLayerType(type: unknown): boolean {
+  return Object.hasOwn(WEB_LAYER_RENDERERS, String(type));
+}
 
 const WEB_SKINS = webSkins(KIT);
 
@@ -948,7 +972,7 @@ function resolvedStyle(node: Raw, scope: WebRenderScope): Raw | undefined {
  * (through the devices' own contract), a pager's locals set before its own conditions run, its
  * `visibleWhen` (undefined when hidden) and its `styleWhen` merged. One path, so the two agree.
  */
-function preparedNode(
+export function preparedNode(
   node: unknown,
   scope: WebRenderScope,
   path: string,

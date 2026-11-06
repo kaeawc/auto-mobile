@@ -67,6 +67,7 @@ use native controls. No rendering changes accompany this default.
 | timePicker      | native   | material | —     |
 | topAppBar       | material | material | —     |
 | videoPlayer     | material | material | —     |
+| webView         | neutral  | neutral  | —     |
 
 Before a node becomes `native`, simulator verification must establish the testability contract:
 its `testTag` and every `<testTag>.<part>` remain reachable by `observe` and `tapOn`, observed bounds
@@ -1268,6 +1269,12 @@ Motion v3 requirements, including node `press` and layout `animate`, are detecte
 does not advertise `prototype_motion_v3`; the host refuses motion v3 features until iOS advertises
 that capability.
 
+Node `attentionLoop: {effect: "pulse" | "spin", periodMs, iterations?}` is validated against the shared
+contract, including integer period 400–4000 ms, finite iterations 1–20 or `"infinite"`, the
+eight-node expanded-tree limit, and identity rest-pose conflicts in style and conditional styles.
+The agent renders no attention loops and does not advertise `prototype_loops_v1`; the host
+refuses a loop spec against it. Shimmer does not consume the attention-loop limit.
+
 ### Motion tokens
 
 `animate.tempo: "fast" | "default" | "slow"` requires `prototype_motion_tokens_v1`
@@ -1322,3 +1329,21 @@ native effect or default fallback; explicit fadeEdges still apply on every iOS v
 Reduce Transparency and Increase Contrast use system behaviour. Tests assert
 structure and bounds with pinned settings; group morphing and the visual result
 still require an iOS 26 simulator check. Android rendering is a separate slice.
+
+## Disposable apps (#14184, host core only)
+
+The host core in `src/features/prototype/disposableApp/` is shared with Android. See "Disposable
+apps" in `docs/design-docs/plat/android/prototype-ux.md` for the registry, template choice, TTL and
+removal rules. iOS stamping (#14186) is not wired yet. The iOS-specific parts are:
+
+- **Identity.** The bundle id is `dev.jasonpearson.automobile.app.<slug>-<sha256(slug) 8 hex>`. It
+  keeps the slug's hyphens, the same pattern `prototypeBundleId` uses for saved Viewer copies under
+  `dev.jasonpearson.automobile.proto.`.
+- **Info.plist.** Usage descriptions come from `requires.permissions`: each entry's `purpose` is
+  written under its usage key. The table is `DISPOSABLE_APP_IOS_USAGE_KEYS`, which the saved-Viewer
+  installer also reads. `notifications` and `nearbyWifi` have no usage key. `UIBackgroundModes`
+  comes from `requires.background`: `audio` and `microphone` map to `audio`, `location` to
+  `location`, `call` to `voip`, `connectedDevice` to `bluetooth-central`, `transfer` to
+  `processing` and `remoteNotification` to `remote-notification`. `camera` has no iOS background
+  mode.
+- **Signer.** A simulator does not report a signer, so removal relies on the reserved prefix alone.

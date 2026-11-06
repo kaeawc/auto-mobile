@@ -11,3 +11,4 @@ test/bats/linux-qualification-workflow.bats
 test/lint/validToolsRegistryParity.test.ts
 test/lint/staleRepoPathReferences.test.ts
 test/scripts/setupUvCacheGlob.test.ts
+test/server/toolDefinitionsJvmRegexPatterns.test.ts

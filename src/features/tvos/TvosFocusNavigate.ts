@@ -1,6 +1,7 @@
 /**
  * `focusNavigate` on tvOS (#16722): the shared FocusNavigate loop, observing through the tvOS
- * runner's hierarchy and moving with Siri Remote directional presses. The focus engine remembers
+ * runner's hierarchy and moving with Siri Remote directional presses (`select` presses the remote's
+ * select button). The focus engine remembers
  * the last item per row and column, so the loop re-reads focus after every press instead of
  * planning a path from geometry.
  */
@@ -9,6 +10,7 @@ import type { Element } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
 import type { Timer } from "../../utils/SystemTimer";
 import {
+  FOCUS_NAVIGATE_SELECT_KEY,
   FocusNavigate,
   focusNavigateTargetError,
   type FocusKeyPresser,
@@ -27,6 +29,7 @@ const REMOTE_DIRECTIONS: Partial<Record<InputKeyName, TVRemoteButton>> = {
   arrow_down: "down",
   arrow_left: "left",
   arrow_right: "right",
+  [FOCUS_NAVIGATE_SELECT_KEY]: "select",
 };
 
 const parser = new DefaultElementParser();
@@ -35,7 +38,10 @@ function isFocused(element: Element): boolean {
   return element.focused === true || element.focused === "true";
 }
 
-/** Reads the runner hierarchy; the focused element is the first focused node in it. */
+/**
+ * Reads the runner hierarchy; the focused element is the first focused node in it. The hierarchy
+ * is returned too, so a `label` or `elementId` target pins to the element tapOn would tap.
+ */
 export function createTvosFocusObserver(
   client: Pick<TvosRunnerClient, "hierarchy">,
 ): FocusObserver {
@@ -43,12 +49,12 @@ export function createTvosFocusObserver(
     read: async (signal) => {
       const hierarchy = normalizeTvosHierarchy(await client.hierarchy(signal));
       const elements = parser.flattenViewHierarchy(hierarchy).map(({ element }) => element);
-      return { focused: elements.find(isFocused) ?? null, elements };
+      return { focused: elements.find(isFocused) ?? null, elements, hierarchy };
     },
   };
 }
 
-/** Sends D-pad arrows as Siri Remote directional presses; other keys are refused. */
+/** Sends D-pad arrows as Siri Remote directions and enter as select; other keys are refused. */
 export function createTvosFocusKeyPresser(
   client: Pick<TvosRunnerClient, "request">,
 ): FocusKeyPresser {

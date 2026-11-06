@@ -158,6 +158,7 @@ export class WatchAppManager {
       call.signal?.throwIfAborted();
       await this.simctl.uninstallApp(appId, this.device.deviceId, { signal: call.signal });
     }
+    this.targetApps.terminated(this.device.deviceId, appId);
     return { success: true, packageName: appId, keepData: false, wasInstalled };
   }
 
@@ -198,6 +199,18 @@ export class WatchAppManager {
 
   /** `simctl terminate` on the watch; an app with no running process is already terminated. */
   async terminate(appId: string, call: { signal?: AbortSignal } = {}): Promise<TerminateAppResult> {
+    const result = await this.terminateProcess(appId, call);
+    if (result.success) {
+      // Any effective success means the app no longer runs, so the runner must not keep targeting it.
+      this.targetApps.terminated(this.device.deviceId, appId);
+    }
+    return result;
+  }
+
+  private async terminateProcess(
+    appId: string,
+    call: { signal?: AbortSignal },
+  ): Promise<TerminateAppResult> {
     if (!(await this.isInstalled(appId, call.signal))) {
       return {
         success: true,
@@ -210,7 +223,6 @@ export class WatchAppManager {
     call.signal?.throwIfAborted();
     try {
       await this.simctl.terminateApp(appId, this.device.deviceId, { signal: call.signal });
-      this.targetApps.terminated(this.device.deviceId, appId);
       return { success: true, packageName: appId, wasInstalled: true, wasRunning: true };
     } catch (error) {
       const message = errorMessage(error);

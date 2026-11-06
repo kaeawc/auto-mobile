@@ -16,10 +16,15 @@ import {
 import type { TvosCommand, TvosRunnerClient } from "../../../src/features/tvos/TvosRunnerClient";
 import { TvosRunnerRegistry } from "../../../src/features/tvos/TvosRunnerRegistry";
 import type { TvosHierarchy } from "../../../src/features/tvos/TvosHierarchy";
+import { SelectorDpadTargetResolver } from "../../../src/features/action/DpadTargetResolver";
+import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
+import type { ElementBounds } from "../../../src/models/ElementBounds";
 import { ActionableError } from "../../../src/models/ActionableError";
 import type { Element } from "../../../src/models/Element";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FocusAwareFakeTvosRunnerClient } from "../../fakes/FocusAwareFakeTvosRunnerClient";
+
+const targetResolver = new SelectorDpadTargetResolver(new ResolverElementSelector());
 
 // Hand-reconstructed layout shared by both platforms: a 3x2 grid of 100px tiles.
 const COLS = 3;
@@ -43,9 +48,15 @@ class GridModel {
   /** Tiles whose entry is blocked, so a move toward them leaves focus in place. */
   readonly blocked = new Set<number>();
   readonly moves: FocusNavigateDirection[] = [];
+  /** Tiles that were focused when select (enter on Android TV) was pressed. */
+  readonly selections: string[] = [];
 
   constructor(start: number | null) {
     this.focusIndex = start;
+  }
+
+  select(): void {
+    this.selections.push(this.focusIndex === null ? "none" : LABELS[this.focusIndex]);
   }
 
   move(direction: FocusNavigateDirection): void {
@@ -97,6 +108,10 @@ class AndroidGrid implements FocusObserver, FocusKeyPresser {
   }
 
   async press(key: InputKeyName): Promise<{ success: boolean }> {
+    if (key === "enter") {
+      this.grid.select();
+      return { success: true };
+    }
     this.grid.move(ARROWS[key]!);
     return { success: true };
   }
@@ -115,7 +130,9 @@ class TvosGridRunner implements TvosRunnerClient {
   async request(command: TvosCommand, signal?: AbortSignal): Promise<unknown> {
     signal?.throwIfAborted();
     this.commands.push(command);
-    if (command.type === "request_press_button") {
+    if (command.type === "request_press_button" && command.action === "select") {
+      this.grid.select();
+    } else if (command.type === "request_press_button") {
       this.grid.move(command.action as FocusNavigateDirection);
     }
     return command.type === "request_hierarchy" ? this.snapshot() : undefined;
@@ -221,11 +238,21 @@ describe.each(PLATFORMS)("focusNavigate contract on %s", (_platform, create) => 
     expect(grid.moves).toEqual(["down", "right", "down"]);
   });
 
-  test("ends stuck when every direction toward the target leaves focus unchanged", async () => {
+  test("escapes around a blocked direction through the other arrows", async () => {
     const { grid, run } = harness(0);
     grid.blocked.add(1);
     const result = await run({ until: { text: "Music" } });
-    expect(result).toMatchObject({ success: false, status: "stuck", steps: 1 });
+    expect(result).toMatchObject({ success: true, status: "focused" });
+    expect(grid.moves[0]).toBe("right");
+  });
+
+  test("ends stuck when every arrow from the focused element leaves focus unchanged", async () => {
+    const { grid, run } = harness(0);
+    grid.blocked.add(1);
+    grid.blocked.add(3);
+    const result = await run({ until: { text: "Music" } });
+    expect(result).toMatchObject({ success: false, status: "stuck", steps: 4 });
+    expect([...grid.moves].sort()).toEqual(["down", "left", "right", "up"]);
     expect(result.focusedElement?.text).toBe("Home");
     expect(result.message).toContain("Observe before retrying");
   });
@@ -255,6 +282,28 @@ describe.each(PLATFORMS)("focusNavigate contract on %s", (_platform, create) => 
     const { grid, run } = harness(0);
     await expect(run({ until: {} })).rejects.toBeInstanceOf(ActionableError);
     expect(grid.moves).toEqual([]);
+  });
+
+  test("with select, presses select once the target is focused", async () => {
+    const { grid, run } = harness(0);
+    const result = await run({ until: { text: "Search" }, select: true });
+    expect(result).toMatchObject({ success: true, status: "focused", selected: true });
+    expect(grid.selections).toEqual(["Search"]);
+  });
+
+  test("with select, a failed walk does not press select", async () => {
+    const { grid, run } = harness(0);
+    const result = await run({ until: { text: "Search" }, maxSteps: 1, select: true });
+    expect(result).toMatchObject({ success: false, status: "max_steps", selected: false });
+    expect(grid.selections).toEqual([]);
+  });
+
+  test("without select, focus lands and nothing is selected", async () => {
+    const { grid, run } = harness(0);
+    const result = await run({ until: { text: "Search" } });
+    expect(result.success).toBe(true);
+    expect(result.selected).toBeUndefined();
+    expect(grid.selections).toEqual([]);
   });
 
   test("an aborted signal stops before pressing", async () => {
@@ -319,14 +368,14 @@ describe("tvOS focusNavigate over the captured runner hierarchy", () => {
     const client = new FocusAwareFakeTvosRunnerClient();
     client.ignorePresses = true;
     const result = await arrange(client)({ until: { resourceId: "B22" } });
-    expect(result).toMatchObject({ success: false, status: "stuck", steps: 2 });
-    expect(client.commands).toEqual([
-      hierarchy,
-      press("down"),
-      hierarchy,
-      press("right"),
-      hierarchy,
-    ]);
+    expect(result).toMatchObject({ success: false, status: "stuck", steps: 4 });
+    // Every remote direction is tried once, each followed by a fresh hierarchy read.
+    expect(client.commands.filter((_, index) => index % 2 === 0)).toEqual(Array(5).fill(hierarchy));
+    const pressed = client.commands
+      .filter((command) => command.type === "request_press_button")
+      .map((command) => command.action);
+    expect(pressed.slice(0, 2)).toEqual(["down", "right"]);
+    expect([...pressed].sort()).toEqual(["down", "left", "right", "up"]);
   });
 
   test("requires a connected runner", async () => {
@@ -336,7 +385,26 @@ describe("tvOS focusNavigate over the captured runner hierarchy", () => {
     ).rejects.toThrow("Start and connect the tvos XCUITest runner");
   });
 
-  test("the remote presser refuses keys that are not directions", async () => {
+  test("pins a label target to the element tapOn would tap on the runner hierarchy", async () => {
+    const client = new FocusAwareFakeTvosRunnerClient();
+    const pinned: Array<ElementBounds | null | undefined> = [];
+    const result = await arrange(client)({
+      until: { label: "B21" },
+      firstMatch: true,
+      pinTarget: (screen) => {
+        const bounds = screen.hierarchy
+          ? targetResolver.resolve(screen, { label: "B21" })
+          : undefined;
+        pinned.push(bounds);
+        return bounds;
+      },
+    });
+    expect(result).toMatchObject({ success: true, status: "focused" });
+    expect(pinned.length).toBeGreaterThan(0);
+    expect(pinned.every((bounds) => bounds !== undefined && bounds !== null)).toBe(true);
+  });
+
+  test("the remote presser sends enter as the select button", async () => {
     const commands: TvosCommand[] = [];
     const presser = createTvosFocusKeyPresser({
       request: async (command) => {
@@ -344,9 +412,21 @@ describe("tvOS focusNavigate over the captured runner hierarchy", () => {
         return undefined;
       },
     });
-    expect(await presser.press("enter")).toEqual({
+    expect(await presser.press("enter")).toEqual({ success: true });
+    expect(commands).toEqual([{ type: "request_press_button", action: "select" }]);
+  });
+
+  test("the remote presser refuses keys that are not directions or select", async () => {
+    const commands: TvosCommand[] = [];
+    const presser = createTvosFocusKeyPresser({
+      request: async (command) => {
+        commands.push(command);
+        return undefined;
+      },
+    });
+    expect(await presser.press("tab")).toEqual({
       success: false,
-      error: "tvOS focusNavigate cannot press enter.",
+      error: "tvOS focusNavigate cannot press tab.",
     });
     expect(commands).toEqual([]);
   });

@@ -30,7 +30,13 @@ registry.
   `requiredPrototypeCapabilities(spec)` computed by this host, so the web library can refuse a spec
   it cannot draw whole ([Prototype web library](prototype-web-library.md)). Variant, revision and
   errors are the web resource's; there is no `frame`. `_meta` is the web resource's without
-  `frame`, its `sha256` hashing the envelope text.
+  `frame`, its `sha256` hashing the envelope text. When any glyph the spec names resolves, the envelope
+  carries `glyphs` (additive within version 1) and, when any has no glyph, `iconMissing`, built by
+  `prototypeEmbedGlyphs` from the same `PrototypeIconGlyphSource` as the still. The keys are
+  collected statically from the contract over the component-expanded spec, not from a render: every `iconName` slot in its object's
+  `iconVariant` (else `filled`), the glyphs a control draws with no `iconName` slot (filter chip and segment checks, the select arrow, the date picker's month arrows), plus every iconName-valid string in `state` or `data` in `filled`
+  and each variant an icon node uses, because a state change can hand that name to any icon. A
+  value is the allow-listed shapes as SVG markup. iOS-skin glyphs are not included.
 - **Single-file formats.** `automobile:prototype/{id}/compose{?frame,revision}` (`text/x-kotlin`)
   and `automobile:prototype/{id}/swiftui{?frame,revision}` (`text/x-swift`) are read by
   `readPrototypeSourceResource` in `src/features/prototype/prototypeSourceResource.ts`. They render
@@ -83,20 +89,28 @@ registry.
 document, its `sha256`, the frame used, the unsupported nodes of the first view and the revisions
 it inlined per variant.
 
-- **Views.** Every inlined revision of every variant is pre-rendered in portrait and landscape,
-  once per screen of its outermost stack when that stack has more than one screen (start first,
-  then the others in key order; such views carry `data-screen`). The first view is the chosen
-  variant's chosen revision (default: latest) in portrait, on its start screen; the rest are
-  `hidden`. Every view renders in the input's `locale` and `textSize`, passed to the still.
-- **Controls.** Only six: rotate (portrait/landscape; absent for watch and TV frames, which
-  never rotate), zoom and pan (fit, 50–400 %, wheel, drag,
-  double-click to fit), the opt-in 3D view ([Prototype web 3D device view](prototype-web-3d.md);
-  posture and hinge controls only for a frame with a hinge and postures), a variant select (only with more than one variant), a screen select (only
+- **Views.** Every inlined revision of every variant is pre-rendered in each orientation the frame
+  has (portrait and landscape; portrait only for a watch; landscape only for a TV or car) and in
+  every posture of a foldable frame (such views carry `data-posture`), once per screen of the
+  outermost stack each orientation and posture draws when that stack has more than one screen
+  (start first, then the others in key order; such views carry `data-screen`), since a
+  `visibleWhen` can show a different stack in each. The first view is the chosen variant's chosen
+  revision (default: latest) in the frame's first orientation (`data-orientation` on `body`), in
+  the frame's default posture, on its start screen; the rest are `hidden`. Views are kept or
+  dropped by screen index: every orientation and posture's start together, then each one's next
+  screen together. Every view renders in the input's `locale` and `textSize`, passed to the still.
+- **Controls.** Only seven: rotate (portrait/landscape; absent for watch, TV and car frames, which
+  have one orientation), a layout posture select (`layout-posture`, only for a frame with postures,
+  in registry order; switching shows that posture's views and fits the new view), zoom and pan
+  (fit, 50–400 %, wheel, drag, double-click to fit), the opt-in 3D view
+  ([Prototype web 3D device view](prototype-web-3d.md); posture and hinge controls only for a frame
+  with a hinge and postures), a variant select (only with more than one variant), a screen select (only
   when some revision in the page has more than one screen view) and the revision history (newest
   first, `r<N> · show|patch`; only when some variant has more than one revision in the page). The
   screen select lists the shown revision's own screen views and is hidden with fewer than two, so
   it never offers a view the page lacks; switching variant or revision keeps the chosen screen
-  when the new revision has it, else shows that revision's start. Controls are buttons and a select with labels. A toolbar note says the preview is
+  when the new revision has it, else shows that revision's start. Rotating or changing posture
+  relists the shown view's own screens. Controls are buttons and a select with labels. A toolbar note says the preview is
   static: taps do nothing, and the controls switch pre-rendered views. Below 720 px wide the
   history sits under the stage, so the stage keeps the width.
 - **Script.** `prototypeWebPageRuntime`, then `prototypeWeb3dRuntime`, are inlined from their
@@ -112,60 +126,124 @@ it inlined per variant.
   landscape view. A second rotate finishes the running turn first. `prefers-reduced-motion:
   reduce` skips the animation.
 - **No network.** The CSP is `default-src 'none'`, the script pinned by its SHA-256, inline
-  styles, and `data:` images and fonts. The page references no external URL.
+  styles, and `data:` images and fonts. The page references no external URL, and declares an
+  empty `data:` icon so no browser requests `/favicon.ico` against that CSP.
 - **Budget.** The page is at most 2 MiB. The start screen of each variant's latest revision and
   of the revision shown first are always kept, then their other screens while they fit; older
   revisions are added newest first while their start screen and history entry fit, each followed
   by its other screens while they fit. The shell (head, toolbar with every screen of the shown
   revision, full history list and script) is measured first. If the kept start screens alone do
   not fit, the build fails with an `ActionableError` naming the largest view.
+- **Images.** `buildPrototypeWebPageWithImages` (`webImageEncoding.ts`) builds the page once to
+  learn every bound asset an `image` draws and its boxes, reads each asset's bytes from a
+  `PrototypeWebAssetSource`, re-encodes it with sharp (`loadSharp`) to WebP quality 80 at the
+  largest size the frame draws it, and builds again with the encoded images. An iOS frame applies
+  the EXIF orientation first, as `UIImage(data:)` does; an Android frame keeps the stored pixels,
+  as `BitmapFactory` ignores the tag. A box is the frame
+  density times the node's fixed dp size; `crop` and `fill` must cover their fixed axes, `fit` and
+  unfixed axes fit inside the screen's long side; the image is never enlarged. A missing, non-image
+  or undecodable asset (logged) is skipped, and one whose data URI alone exceeds the page is
+  reported `assetOverBudget`; the page budget decides which of the rest fit. An image draws more markup than a placeholder, so when the
+  second build's always-kept views no longer fit, the first build stands, its images reported
+  `assetOverBudget`. The resource reads assets from the host asset cache of each device currently
+  showing one of the variants (Android caches its uploads); without one, images stay placeholders.
+  Asset ids are chosen per device and the page holds one image per id, so an id two of those
+  devices cached with different bytes stays a placeholder.
+  It snapshots the shown variant's revisions before encoding, so a revision landing meanwhile does
+  not change the page's `_meta`.
+- **Image budget.** Each image is one `:root` rule in the head defining `--pa-<slot>` (its
+  `data:image/webp` URI), `-bg` (transparent), `-ar` (its aspect ratio) and `-on` (1); views only
+  reference the slot, so view bytes do not depend on which images fit and every orientation and
+  revision shares one copy. A rule is charged once, in this order: the images of the shown
+  revision's start screen, then of the other pinned start screens, then each screen's images right
+  after that screen is kept. An image that does not fit is never retried and draws its
+  placeholder; it is reported `assetOverBudget`, and one with no bytes `assetNotInlined`.
 - **Determinism.** The same input yields byte-identical HTML.
 
 ## Browser check
 
 `test/features/prototype/web/webScreenshots.integration.test.ts` loads the page of each reference
-spec in headless Chromium: `reference-checkout` plus `template-feed-detail`,
+spec in headless Chromium, Firefox and WebKit: `reference-checkout` plus `template-feed-detail`,
 `pager-indicator-dots`, `grid-fixed-columns-span`, `material-controls`, `component-gallery`,
-`doc-example-2` and `native-controls` (every button variant and two sliders), each in `pixel-9` and `iphone-16`, portrait (the list is
+`doc-example-2`, `native-controls` (every button variant and two sliders) and `image-gallery`
+(its assets are `test/fixtures/prototype-web/assets/<id>.png`), each in `pixel-9` and `iphone-16`, portrait,
+and `reference-checkout` alone in each watch, TV and car frame (the list is
 `webScreenshotCases.ts`). Playwright (`playwright-core`) is a devDependency of this check only;
 nothing at runtime drives a browser.
 
 - **Assertions.** The page is served from one fixed URL and every other request is aborted and
   fails the case, on top of the page's own CSP. No console error, page error or
-  `securitypolicyviolation` event may occur. Exactly one view is shown, in portrait, with a
-  non-zero size; the stage carries the runtime's fitted scale and the zoom label shows it; halfway
+  `securitypolicyviolation` event may occur. Exactly one view is shown, with a non-zero size, in
+  the frame's first orientation; the stage carries the runtime's fitted scale and
+  the zoom label shows it; a watch, TV or car page has no rotate control; on other frames, halfway
   through rotate both views are shown and turned, and the finished turn shows only the landscape
   view, wider than tall; with reduced motion, rotate starts no animation; a page with a screen select shows exactly the picked
   screen's view; the 3D toggle turns the shown view to the three-quarter pose, an arrow key on the
   focused viewport orbits it, and toggling back restores the shown view's DOM byte for byte. The
   browser clock is fixed at 9:41 UTC, so the live status bar clock matches the stills; a separate
-  case installs a running clock and checks the clock advances each minute.
-- **Settings cases.** `reference-checkout` also renders in both frames at the largest text size
+  case installs a running clock and checks the clock advances each minute. Another checks that
+  only an overflowing scroll fades, or, in an engine without scroll-driven animations, that every
+  scroll does. Every engine runs these assertions; CSS 3D and clipping differ between engines, so
+  a page that only works in Chromium fails here.
+- **Settings cases.** `reference-checkout` also renders in both phone frames at the largest text size
   (`fontScale` 2, `accessibility-extra-extra-extra-large`) and in the `ar` locale (RTL), golden
   `<spec>--<frame>--<setting>.png` (and `--landscape.png` after it).
-- **Goldens.** Two PNGs per case in `test/fixtures/prototype-web/screenshots/`
-  (`<spec>--<frame>.png` in portrait and `<spec>--<frame>--landscape.png` at the end of the
-  turn, plain git blobs, not LFS), taken at 800×800 CSS px, device scale factor 1,
+- **Goldens.** Compared only in Chromium, the one engine whose CI build they are trusted from.
+  One PNG per orientation of the case's frame in `test/fixtures/prototype-web/screenshots/`
+  (`<spec>--<frame>.png` as the page opens and, on a frame that rotates,
+  `<spec>--<frame>--landscape.png` at the end of the turn; plain git blobs, not LFS), taken at
+  800×800 CSS px, device scale factor 1,
   with every font forced to `"DejaVu Sans", sans-serif` and the caret hidden. No font is bundled. A
   case matches when at most 0.1 % of pixels differ by more than pixelmatch's 0.1 colour distance; a
   different size never matches. A unit test keeps the directory in step with the case list.
 - **Running.** `bash scripts/prototype/web-screenshots.sh` runs it (the integration lane skips it
-  without `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1`); `--update` rewrites the goldens. It needs the
-  Chromium build of the pinned `playwright-core`:
-  `node_modules/.bin/playwright-core install --only-shell chromium`. Every case that reaches
-  capture writes `<case>.png`, and a pixel mismatch also `<case>.diff.png`, to
-  `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS_OUT` (default `scratch/prototype-web-screenshots/`).
+  without `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1`); `--update` rewrites the goldens, and
+  `--engine <chromium|firefox|webkit>` (repeatable) limits the engines. It needs the browser builds
+  of the pinned `playwright-core`:
+  `node_modules/.bin/playwright-core install --only-shell chromium firefox webkit`. Every case that
+  reaches capture writes `<case>.png`, and a Chromium pixel mismatch also `<case>.diff.png`, to
+  `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS_OUT` (default `scratch/prototype-web-screenshots/`);
+  Firefox and WebKit captures go to its `firefox/` and `webkit/` subdirectories.
 - **CI.** The advisory `Prototype Web Screenshots` workflow runs it on Linux nightly, on dispatch,
   and on pull requests that touch the web renderer, its reference fixtures, the check, or
   `package.json`/`bun.lock`. It is not a required check. Goldens are trusted only from that Linux
   Chromium build, whose text anti-aliasing other machines may not match, so a local run can fail on
   pixels alone; when the runner renders differently, the job uploads the
-  `prototype-web-screenshots` artifact, and adopting it means reviewing its PNGs and copying those
-  other than `*.diff.png` into the golden directory.
+  `prototype-web-screenshots` artifact on every run, and adopting it means reviewing its top-level
+  PNGs and copying those other than `*.diff.png` into the golden directory.
+
+## Android parity check
+
+`test/features/prototype/web/webAndroidParity.integration.test.ts` measures how far the still is
+from the Android renderer. For each Roborazzi golden in
+`android/control-proxy/src/test/resources/screenshots/prototype/`, `webAndroidParityCases.ts`
+either rebuilds the spec the Kotlin case renders (fixture, `night`/`notnight` mode, state
+overrides, `themeFrom` and the case's JSON edit) or lists the golden with a reason; host window
+chrome and content-sized floating captures are listed, not compared. Every compared spec is placed
+fullscreen, because the goldens draw the root and theme without the window's placement.
+
+- **Rendering.** The still is drawn `chromeless` on the `small-phone` frame (360×640 dp, the
+  goldens' `w360dp-h640dp-mdpi`, so one dp is one pixel) into a bare document with no page shell,
+  at device scale factor 1 with the same forced font as the page check. Chromeless drops the
+  bezel, bars, cutout, corner radius, safe-area insets and window background, because the goldens
+  capture the content path with no window and are transparent where nothing draws; the screenshot
+  omits the page background to match. A golden smaller than the screen is compared with the
+  screen's top-left region of its size.
+- **Budgets.** `test/fixtures/prototype-web/android-parity-budgets.json` maps each compared golden
+  to the most pixels that may differ by more than pixelmatch's 0.1 colour distance. A case fails
+  when it differs in more than its budget plus 256 pixels or 1 %, whichever is larger: hosted
+  runners do not all rasterize alike, so the same commit's counts move slightly between CI runs.
+  The allowance never reaches the golden's pixel count, so a screenshot that differs everywhere
+  fails. Budgets only shrink: `--update` lowers each to what was measured and
+  records a missing one, and raises one only with `--allow-grow`. The counts are measured by the
+  CI Chromium build; every run logs them on one `android parity diff pixels:` line. A unit test
+  keeps the case table, the skip list and the budget keys in step with the golden directory.
+- **Output.** `<golden>.png` and, when any pixel differs, `<golden>.diff.png` go to
+  `android-parity/` under the output directory, uploaded with the page check's artifact.
 
 ## Still renderer
 
-`renderPrototypeStill(spec, {frame, orientation, mode, screen, locale, textSize})` in
+`renderPrototypeStill(spec, {frame, orientation, posture, mode, screen, locale, textSize, chromeless})` in
 `src/features/prototype/web/webStill.ts` draws the spec as a still screen and returns an element
 tree plus `unsupportedNodes` and `stack` (the outermost stack's screens in key order, its
 start and the screen drawn). It renders on
@@ -257,9 +335,17 @@ the host, so the page's script only switches between views it was given and neve
   device scheme to read, so it falls through to the seed or the baseline, as iOS and Android
   below API 31 do. The accessibility lint still treats a seed or device scheme as unknown. Both
   devices paint nothing behind a window, so the app below shows through; the still has no app
-  below, so the screen paints the theme's `background` role (else `surface`). An explicit `theme.mode` of
-  `light` or `dark` wins over the caller's `mode`; `system` or no mode uses the caller's, then
-  light.
+  below, so the screen paints the theme's `background` role (else `surface`).
+- **Mode.** The still resolves light or dark in the devices' order: an explicit `theme.mode`;
+  with no mode, the luminance of the flat `theme.colors.background` (else `surface`) override,
+  then of the first opaque hex background on the root's leading chain (the first child that
+  draws in place, so a hidden node or a closed sheet is passed over; a pager's current page, a
+  scroll's `child`, a stack's drawn screen; role and `{light, dark}` backgrounds are passed
+  over); last the
+  caller's `mode`, then light. `theme.mode: "system"` goes straight to the caller's. As on
+  Android, an authored colour of the resolved mode's polarity replaces `background`, `surface`
+  and `surfaceContainer`/`Low`/`High`/`Highest` unless a seed or device source derives the scheme;
+  role overrides still win over it.
 - **Coverage.** Supported nodes: `box`, `row`, `column`, `stack`, `scroll`, `text`, `spacer`,
   `divider`, `icon`, `button`, `topAppBar`, `textField`, `switch`, `checkbox`, `card`,
   `listItem` (with its leading icon and its trailing switch, checkbox or icon), `pager`, `grid`,
@@ -352,7 +438,11 @@ the host, so the page's script only switches between views it was given and neve
   centre), so CSS resolves them against the box as rendered. A width or height the parent sizes
   (`fill`, a `weight` on the parent's main axis, a stretched width, the fullscreen root) cannot be
   known when rendering, so the framing and perspective use the screen's size on that axis, the most
-  the box can take. That keeps a camera's true zoom at any box size; a fit (`fit`, or every point
+  the box can take. Each axis is then held within its `min*`/`max*` (the min wins, as in CSS), and an
+  `aspectRatio` sizes the open axis from the other: in a column the height follows the width (the
+  200 px default is dropped so the ratio applies); in a row, a box or the root an open width follows
+  the height. A ratio with no width, height or weight takes the width it is offered, capped at
+  `maxHeight × ratio`, as the style sizes it. That keeps a camera's true zoom at any box size; a fit (`fit`, or every point
   when there is no camera) instead chose its zoom to span 80% of that size, so its pins scale by
   `min(100cqw / width, 100cqh / height)` (the box a size container) and its SVG, `100cqw` × `100cqh` about the
   same centre so padding moves pins and lines alike, takes the fitted size as a `meet` viewBox and a non-scaling stroke: a box rendered narrower than the
@@ -400,8 +490,25 @@ the host, so the page's script only switches between views it was given and neve
   256 px hour dial (a 24-hour dial adds an inner 12–23 ring) with the bound hour under a `primary`
   selector. A date picker is 360 px of `surfaceContainerHigh`: "Select date", the bound date as its
   headline, the month row with its arrows, and that month (else today's from the still's clock) in
-  a Sunday-first grid of 48 px cells, the bound day filled `primary` and today ringed. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
+  a Sunday-first grid of 48 px cells, the bound day filled `primary` and today ringed. An `image` binds its asset id (a
+  light/dark pair picks the mode's side, then placeholders bind as text does); without a slot for it
+  it draws a `surfaceVariant` placeholder, at least 48 px on each axis the node does not fix in dp,
+  with reason `assetNotInlined`. With one, the placeholder
+  colour and an `aspect-ratio` on an axis it leaves to wrap read the slot's `-bg` and `-ar`, and it
+  holds an image layer (the slot's image as a centred background, `contain`, `cover` or
+  `100% 100%` for `fit`, `crop` and `fill`, with `saturate()` for `filter.saturation`) and, for
+  `filter.tint`, a tint layer that multiplies the tint's opaque colour over the image masked by it,
+  shown only when `-on` is set, as Android's saturation colour matrix then its `Modulate` tint
+  layer. `Modulate` multiplies alpha too, so a translucent tint wraps both layers in a group at the
+  tint's alpha (a fully transparent tint hides the image); a corner radius clips both. Item images (nav items) are not inlined. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
+- **Posture.** A foldable frame draws the panel its `posture` lights (default `opened`, else its
+  first posture; a frame without postures takes none, and an unknown posture is an error listing
+  the frame's): `closed` draws the cover panel. The spec lays out on that panel in the drawn
+  orientation, minus an occluding hinge's width, shown in the two segments either side of the
+  hinge (the second copy `aria-hidden` and inert); a seamless fold lays out across the whole
+  panel and draws a crease shaded by its `hingeDegrees`, none when flat. Landscape turns the
+  hinge with the panel, so a flip's hinge runs top to bottom there.
 - **Skins.** `webSkin.ts` holds one skin per platform; the frame's platform picks it and the
   `skin` option overrides it. A skin replaces the renderers of the components its platform draws
   natively (`designCoverage` `native` in `schemas/prototype-spec-contract.json`), and those of the
@@ -428,8 +535,20 @@ the host, so the page's script only switches between views it was given and neve
   (medium) or `.largeTitle` (large) line below the row, framed at 48 or 88 px with an
   `enterAlways` or `exitUntilCollapsed` `onScroll`; `card` is `surfaceContainerHigh` when
   filled, else `surface`, with an `outlineVariant` outline when outlined. Like the iOS renderer,
-  the skin ignores `ios.navigationTitle` and `ios.sheet.sizing`. `textField`, `bottomNav`, `tabBar`
-  and `bottomSheet` still draw the shared renderer.
+  the skin ignores `ios.navigationTitle` and `ios.sheet.sizing`. `textField` with a label,
+  variant, supporting text or `maxLength` puts its `.footnote` `onSurfaceVariant` label 4 px above
+  an input padded 12 px (`filled`: a `surfaceContainerHighest` fill with 4 px top corners over a
+  1 px `outline` line; `outlined`: a 1 px 4 px-radius `outline` stroke; red on an error) and a
+  `.caption` row of supporting text and the `count/max` counter below; otherwise it is a
+  rounded-border input. The label never floats, an empty field shows only its placeholder, icons sit
+  4 px beside the field and the error message is a red `.caption` line below it. `bottomNav`
+  spaces items 8 px on `surfaceContainer`, padded 12 px above and 4 px below, each a 64x32
+  `secondaryContainer` capsule over a `.caption` label (semibold when selected, else medium) in at
+  least 64 px. `tabBar` has no background or divider: each tab is its icon over a `.caption` label,
+  2 px apart, at least 44 px tall (64 px when it minimizes), the selected one in a capsule. An
+  iOS `bottomSheet` centres its child 8 px below a 36x5 handle 6 px from the top, on `surface`
+  with a 16 px radius. `timePicker`, `datePicker` and `pasteButton`
+  are still placeholders on both skins.
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a
   generic status bar, the cutout (an `island` draws as a pill, a punch hole as a circle) and the
   navigation chrome: Android's handle (`data-nav="handle"`) or three generic button marks, which move to
@@ -440,8 +559,19 @@ the host, so the page's script only switches between views it was given and neve
   the browser's local time in the same `h:mm` 12-hour form, re-armed at each minute boundary. An iPhone with an island centres the clock and the marks in the
   ears beside it; Android puts them at the start and end. Its content is light or dark: `window.statusBar`
   `light` or `dark` picks it, and `auto` or none takes whichever of white or black contrasts more with the
-  app's top colour, which is the first opaque background spanning the screen along the content's leading
-  children (a top app bar), else the screen background. Landscape swaps the screen size, uses
+  app's top colour, else the screen background. The top colour is sampled only when the window's content
+  starts behind the status bar (a fullscreen window or a `top` sheet; a bottom sheet or floating window
+  keeps the screen background). It is the innermost opaque background along the content's leading children (a top app bar). The walk
+  follows a child only when its container places it at the top (a column's first child under a start
+  arrangement or growing, a box or row child aligned to the top, or one filling the height) and is not
+  narrowed by an explicit width or maximum width below the screen's (a maximum height likewise keeps a
+  growing child from filling), and a
+  background counts only on a child spanning its container's width, read on that container's axes. In a
+  `box` the walk samples the children that span it and reach its top, from the last painted to the first,
+  and the first with an opaque top colour wins. Element opacity multiplies down the walk, so a background
+  counts only when it is opaque after that opacity, and a fully transparent subtree is skipped. The walk
+  stops at an element with top padding (authored or the top safe area), whose children start below its
+  top edge. Landscape swaps the screen size, uses
   the landscape safe areas, and moves the cutout from the top edge to the left edge. A frame whose
   landscape top inset is 0 (an iPhone) draws no status bar in landscape. `safeAreaPadding` adds the inset on each named edge to the node's padding; like
   `windowInsetsPadding`, an edge an ancestor already applied adds nothing more, and an inset adds to a component's own

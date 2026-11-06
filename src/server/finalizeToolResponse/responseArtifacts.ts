@@ -220,13 +220,102 @@ function spillOversizedPayload(
 ): Record<string, unknown> {
   // The request-local writer shares the complete rendering with the size probe.
   const artifact = writeJsonArtifact(ctx, "ToolResponse", payload);
-  const spilled = { ...pickInlineResidue(ctx, payload), ...artifact };
+  const spilled = {
+    ...withInventorySpillShape(ctx, payload, pickInlineResidue(ctx, payload)),
+    ...artifact,
+  };
   // The per-field cap is counted in UTF-16 code units, so multi-byte text can
   // still serialize past the ceiling across every retained field. Fall back to
   // markers-only, whose size does not depend on the input at all.
   return exceedsInlineLimit(spilled, hasStructured, serialization)
-    ? { ...markerResidue(ctx, payload), ...artifact }
+    ? { ...withInventorySpillShape(ctx, payload, markerResidue(ctx, payload)), ...artifact }
     : spilled;
+}
+
+/**
+ * Inventory tools whose callers validate the inline result for completeness
+ * (#17235). The generic residue cuts the required list to a prefix while the
+ * total `count` survives, and drops the optional `configuredInventory`, so a
+ * spilled inventory contradicted its own contract. For these tools the spill
+ * keeps the named summary fields and states how many list entries are inline.
+ */
+interface InventorySpillShape {
+  listKey: string;
+  returnedKey: string;
+  summaryKeys: readonly string[];
+  /** A summary map that inline entries refer to by key; it keeps only referenced entries. */
+  referencedMap?: { mapKey: string; refKey: string };
+}
+
+const INVENTORY_SPILL_SHAPES: Readonly<Record<string, InventorySpillShape>> = {
+  listDeviceImages: {
+    listKey: "images",
+    returnedKey: "imagesReturned",
+    // Inline compact images refer to these by key, so they stay with the images (#17256).
+    summaryKeys: ["configuredInventory", "host"],
+    referencedMap: { mapKey: "capabilityProfiles", refKey: "capabilityProfile" },
+  },
+};
+
+/**
+ * Keeps the longest prefix of the inline list whose referenced map entries fit the per-field
+ * cap, and only those entries, so every inline reference resolves (#17256). Replacing the map
+ * with a truncation marker would leave inline entries pointing at nothing.
+ */
+function withReferencedEntries(
+  inlineList: readonly unknown[],
+  map: Record<string, unknown>,
+  refKey: string,
+): { list: unknown[]; entries: Record<string, unknown> } {
+  const entries: Record<string, unknown> = {};
+  const list: unknown[] = [];
+  for (const item of inlineList) {
+    const ref = isRecord(item) ? item[refKey] : undefined;
+    if (typeof ref === "string" && !(ref in entries)) {
+      const candidate = { ...entries, [ref]: map[ref] };
+      if (JSON.stringify(candidate).length > INLINE_RESIDUE_FIELD_LIMIT) {
+        break;
+      }
+      entries[ref] = map[ref];
+    }
+    list.push(item);
+  }
+  return { list, entries };
+}
+
+function withInventorySpillShape(
+  ctx: FinalizeToolResponseContext,
+  payload: Record<string, unknown>,
+  residue: Record<string, unknown>,
+): Record<string, unknown> {
+  const shape = INVENTORY_SPILL_SHAPES[ctx.name];
+  const fullList = shape ? payload[shape.listKey] : undefined;
+  if (!shape || !Array.isArray(fullList)) {
+    return residue;
+  }
+  const residueList = residue[shape.listKey];
+  let inlineList: unknown[] = Array.isArray(residueList) ? residueList : [];
+  const referenced = shape.referencedMap;
+  const map = referenced ? payload[referenced.mapKey] : undefined;
+  let referencedEntries: Record<string, unknown> = {};
+  if (referenced && isRecord(map)) {
+    const kept = withReferencedEntries(inlineList, map, referenced.refKey);
+    inlineList = kept.list;
+    referencedEntries = { [referenced.mapKey]: kept.entries };
+  }
+  const returned = inlineList.length;
+  return {
+    ...residue,
+    ...Object.fromEntries(
+      shape.summaryKeys
+        .filter((key) => payload[key] !== undefined)
+        .map((key) => [key, boundResidueField(payload[key])]),
+    ),
+    ...referencedEntries,
+    [shape.listKey]: inlineList,
+    truncated: returned < fullList.length,
+    [shape.returnedKey]: returned,
+  };
 }
 
 function inlineResidueKeys(ctx: FinalizeToolResponseContext): readonly string[] {

@@ -10,15 +10,28 @@ export type VisionosCommand =
   | { type: "request_tap_element"; identifier: string }
   | { type: "request_append_text"; text: string };
 
+/** Default budget for commands other than hierarchy, and for the connected handshake. */
+export const VISIONOS_REQUEST_TIMEOUT_MS = 5000;
+/**
+ * Default hierarchy budget. A runner automating a system app (Settings, Safari) can take about
+ * 8 s to answer its first snapshot (#17199), so the 5 s command budget is too short.
+ */
+export const VISIONOS_HIERARCHY_TIMEOUT_MS = 20_000;
+
 export interface VisionosRunnerClient {
   /** Registered clients remain reusable until a permanent connection failure or close. */
   isUsable(): boolean;
+  /**
+   * Resolve once the runner's `connected` handshake arrives. It is sent when the socket is
+   * accepted, so it proves the runner is serving without paying for a hierarchy snapshot.
+   */
+  waitUntilConnected(signal?: AbortSignal, options?: { timeoutMs?: number }): Promise<void>;
   request(
     command: VisionosCommand,
     signal?: AbortSignal,
     options?: { timeoutMs?: number },
   ): Promise<unknown>;
-  hierarchy(signal?: AbortSignal): Promise<VisionosHierarchy>;
+  hierarchy(signal?: AbortSignal, options?: { timeoutMs?: number }): Promise<VisionosHierarchy>;
   close(): void;
 }
 
@@ -57,6 +70,12 @@ function expectedReplyType(requestType: string): string {
     : `${requestType.slice("request_".length)}_result`;
 }
 
+function defaultTimeoutMs(command: VisionosCommand): number {
+  return command.type === "request_hierarchy"
+    ? VISIONOS_HIERARCHY_TIMEOUT_MS
+    : VISIONOS_REQUEST_TIMEOUT_MS;
+}
+
 export class WebSocketVisionosRunnerClient implements VisionosRunnerClient {
   private readonly socket: VisionosSocket;
   private readonly pending = new Map<string, Pending>();
@@ -90,6 +109,23 @@ export class WebSocketVisionosRunnerClient implements VisionosRunnerClient {
 
   isUsable(): boolean {
     return this.failure === undefined;
+  }
+
+  async waitUntilConnected(signal?: AbortSignal, options?: { timeoutMs?: number }): Promise<void> {
+    await raceWithDeadline(
+      async () => {
+        await this.ready;
+        if (this.failure) {
+          throw this.failure;
+        }
+      },
+      {
+        timer: this.options.timer ?? defaultTimer,
+        timeoutMs: options?.timeoutMs ?? this.options.timeoutMs ?? VISIONOS_REQUEST_TIMEOUT_MS,
+        signal,
+        label: "Visionos runner connected handshake",
+      },
+    );
   }
 
   private fail(error: ActionableError): void {
@@ -145,11 +181,19 @@ export class WebSocketVisionosRunnerClient implements VisionosRunnerClient {
       return;
     }
     if (response.type === "error" || response.success === false) {
+      const runnerError = String(response.error ?? "Visionos command failed");
+      if (runnerError.includes("kAXErrorAPIDisabled")) {
+        pending.reject(
+          new VisionosRunnerError(
+            "The visionOS simulator's accessibility API is disabled, so no hierarchy can be read for the built-in app. Re-create the Apple Vision Pro simulator or boot it with accessibility enabled, then observe again.",
+            "accessibility_api_disabled",
+            { cause: runnerError },
+          ),
+        );
+        return;
+      }
       pending.reject(
-        new VisionosRunnerError(
-          String(response.error ?? "Visionos command failed"),
-          String(response.errorCode ?? "command_failed"),
-        ),
+        new VisionosRunnerError(runnerError, String(response.errorCode ?? "command_failed")),
       );
     } else if (
       response.type === expectedReplyType(pending.type) &&
@@ -166,10 +210,13 @@ export class WebSocketVisionosRunnerClient implements VisionosRunnerClient {
     options?: { timeoutMs?: number },
   ): Promise<unknown> {
     const timer = this.options.timer ?? defaultTimer;
-    const timeoutMs = options?.timeoutMs ?? this.options.timeoutMs ?? 5000;
+    const timeoutMs = options?.timeoutMs ?? this.options.timeoutMs ?? defaultTimeoutMs(command);
     // One budget covers both handshake and command; correlation entries are removed even on abort.
     const requestId = String(++this.sequence);
     const cancellation = new AbortController();
+    const isInput = command.type !== "request_hierarchy";
+    let sent = false;
+    let replied = false;
     const requestSignal = signal
       ? AbortSignal.any([signal, cancellation.signal])
       : cancellation.signal;
@@ -188,20 +235,44 @@ export class WebSocketVisionosRunnerClient implements VisionosRunnerClient {
             );
           }
           return new Promise<unknown>((resolve, reject) => {
-            this.pending.set(requestId, { type: command.type, resolve, reject });
+            this.pending.set(requestId, {
+              type: command.type,
+              resolve: (value) => {
+                replied = true;
+                resolve(value);
+              },
+              reject: (error) => {
+                replied = true;
+                reject(error);
+              },
+            });
             this.socket.send(JSON.stringify({ ...command, requestId }));
+            sent = true;
           });
         },
         { timer, timeoutMs, signal: requestSignal, label: `Visionos runner ${command.type}` },
       );
+    } catch (error) {
+      // The runner has no cancel message: an input that was sent and never answered may still run.
+      if (sent && !replied && isInput && !signal?.aborted) {
+        throw new VisionosRunnerError(
+          `Visionos runner ${command.type} got no reply within ${timeoutMs}ms and may still be applied; observe before retrying.`,
+          "input_outcome_unknown",
+          { cause: error },
+        );
+      }
+      throw error;
     } finally {
       cancellation.abort();
       this.pending.delete(requestId);
     }
   }
 
-  async hierarchy(signal?: AbortSignal): Promise<VisionosHierarchy> {
-    const data = await this.request({ type: "request_hierarchy" }, signal);
+  async hierarchy(
+    signal?: AbortSignal,
+    options?: { timeoutMs?: number },
+  ): Promise<VisionosHierarchy> {
+    const data = await this.request({ type: "request_hierarchy" }, signal, options);
     if (!isVisionosHierarchy(data)) {
       throw new ActionableError("Invalid visionos hierarchy; reconnect the runner.");
     }

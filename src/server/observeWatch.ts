@@ -1,9 +1,14 @@
 import { normalizeVisionosHierarchy } from "../features/visionos/VisionosHierarchy";
 import { requireVisionosRunner } from "../features/visionos/VisionosRunnerLifecycle";
+import { visionosRunners } from "../features/visionos/VisionosRunnerRegistry";
+import { defaultDaemonContext } from "../daemon/daemonContext";
+import { holderOf } from "../daemon/deviceBinding";
+import { isSessionlessDeviceRead } from "../features/toolSelection/toolSelectionContext";
 /** Apple simulator observation: a retained screenshot and platform-specific runner hierarchy. */
 import { findFocusedElement } from "../features/observe/HierarchyFocus";
 import { normalizeTvosHierarchy } from "../features/tvos/TvosHierarchy";
 import { tvosRunners } from "../features/tvos/TvosRunnerRegistry";
+import { captureTvosRunnerScreenshot } from "../features/tvos/TvosScreenshot";
 import { ObserveElementsBuilder } from "../features/observe/ObserveElementsBuilder";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../models";
 import type { WatchRunnerClient } from "../features/watch/WatchRunnerClient";
@@ -61,6 +66,8 @@ export interface WatchObserveDependencies {
   runner?: WatchRunnerClient;
   /** Starts or reuses the visionOS window-app runner; defaults to the shared runner lifecycle. */
   visionosRunner?: (deviceId: string, signal?: AbortSignal) => Promise<VisionosRunnerClient>;
+  /** Whether this call reads a device another session holds; defaults to the pool's holder. */
+  heldDeviceRead?: (deviceId: string) => boolean;
   idGenerator?: IdGenerator;
   timer?: Timer;
   fileWriter?: ScreenshotFileWriter;
@@ -197,6 +204,26 @@ async function visionosHierarchyForObserve(
   return { hierarchy: normalizeVisionosHierarchy(hierarchy) };
 }
 
+/** A sessionless deviceId read of a device some session holds (#10830): connect-only. */
+function isReadOfHeldDevice(deviceId: string): boolean {
+  if (!isSessionlessDeviceRead()) {
+    return false;
+  }
+  const pool = defaultDaemonContext.devicePool();
+  return pool ? !!holderOf(pool.getDevice(deviceId)) : false;
+}
+
+/** Reuses an already-connected runner; never starts xcodebuild, which would foreground an app. */
+async function connectedVisionosRunner(deviceId: string): Promise<VisionosRunnerClient> {
+  const runner = visionosRunners.get(deviceId);
+  if (!runner?.isUsable()) {
+    throw new ActionableError(
+      `Device ${deviceId} is held by another session and has no connected visionOS runner; a deviceId read only connects to a running runner.`,
+    );
+  }
+  return runner;
+}
+
 async function watchHierarchyForObserve(
   device: BootedDevice,
   args: ObserveArgs,
@@ -204,11 +231,12 @@ async function watchHierarchyForObserve(
   dependencies: WatchObserveDependencies,
 ): Promise<HierarchyOutcome> {
   if (screenshotOnlyPlatform(device) === "visionos") {
+    const heldRead = (dependencies.heldDeviceRead ?? isReadOfHeldDevice)(device.deviceId);
     return visionosHierarchyForObserve(
       device,
       args,
       signal,
-      dependencies.visionosRunner ?? requireVisionosRunner,
+      dependencies.visionosRunner ?? (heldRead ? connectedVisionosRunner : requireVisionosRunner),
     );
   }
   return {
@@ -351,13 +379,5 @@ function defaultWatchScreenshotSource(device: BootedDevice): WatchScreenshotSour
 }
 
 const runnerTvosScreenshotSource: WatchScreenshotSource = {
-  capture: async (device, _display, signal) => {
-    const data = await tvosRunners
-      .require(device.deviceId)
-      .request({ type: "request_screenshot" }, signal);
-    if (typeof data !== "string") {
-      throw new ActionableError("Invalid tvOS screenshot; reconnect the runner.");
-    }
-    return Buffer.from(data, "base64");
-  },
+  capture: (device, _display, signal) => captureTvosRunnerScreenshot(device, signal),
 };

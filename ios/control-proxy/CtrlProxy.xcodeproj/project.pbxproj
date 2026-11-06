@@ -41,6 +41,7 @@
 		171C8CC9FCA3E9A46B62C75E /* CommandHandler+Actions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F4FAF1DFEC886E79DFF11A8 /* CommandHandler+Actions.swift */; };
 		17F34EE924AACD1F2236E0FE /* ObservationInsetsInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8C585B8B37573C6C778DBCD /* ObservationInsetsInfo.swift */; };
 		18BA4A3C328F7524C54416DF /* SdkDatabaseInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D00292B2519A871F9517787 /* SdkDatabaseInfo.swift */; };
+		190680B598710B5D02E0AF1C /* AccessibilityFocusResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 028F8512E64EB593D8560C46 /* AccessibilityFocusResponse.swift */; };
 		190A49FBFEFD04B92C8B9331 /* WebSocketConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F80838AEECF282D516408B4 /* WebSocketConnection.swift */; };
 		1A52CCDA5894A07EADFCE007 /* GesturePerformer+DestructiveKeyPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37FEBF829256879FDFD46682 /* GesturePerformer+DestructiveKeyPolicy.swift */; };
 		1AAC91C029BABD11A33B64D0 /* GesturePerformer+CaretMemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = EED23FD4D9FDA0854ABE22F1 /* GesturePerformer+CaretMemo.swift */; };
@@ -165,6 +166,7 @@
 		6FF0F35FC0724639386B17FA /* HierarchyResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED816029B619901840F85F49 /* HierarchyResult.swift */; };
 		70A19370D8369B2D646124F3 /* WindowInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23F8C19D28AB79883D06FA84 /* WindowInfo.swift */; };
 		70D31ADD9D3844113B3C1A68 /* Data+SHA1.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39455F0AC269C6DF516061C0 /* Data+SHA1.swift */; };
+		71ADCEA9A7423E30D120DFFF /* SpringBoardPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85FF0A05F82D34309527733C /* SpringBoardPanel.swift */; };
 		71FF9B8E7B7C04C380B5E8A2 /* CommandHandler+MagicTap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62C2962F9934DD21D34CE5A2 /* CommandHandler+MagicTap.swift */; };
 		743E0819215F8BA9DAB9CE4D /* SdkDatabaseFetching.swift in Sources */ = {isa = PBXBuildFile; fileRef = D249EC998B62FD013AC1069A /* SdkDatabaseFetching.swift */; };
 		75F74653C446CF3CD95D783A /* GesturePerformer+Errors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D4195430525F5A49BF1898 /* GesturePerformer+Errors.swift */; };
@@ -317,6 +319,7 @@
 		E77BAF0FF263D39F857ECF0D /* RequestClearPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = C599F44DAEA9347F57E2EA28 /* RequestClearPreferences.swift */; };
 		E8F113D37BB16F3B4B7E3BF8 /* AutoMobileSdkWire in Frameworks */ = {isa = PBXBuildFile; productRef = C1E6CDB33DAFA5ED65F297C5 /* AutoMobileSdkWire */; };
 		E93197831C865702BEE30C3D /* GesturePerformer+Swipes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0DC26DB7CFFAD3674AFC4F /* GesturePerformer+Swipes.swift */; };
+		E9891B02F59AC07461233BA7 /* CommandHandler+AccessibilityFocus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 482BE25F35BD4E4F806DC1B5 /* CommandHandler+AccessibilityFocus.swift */; };
 		E98D6FB8D62CF72A0FB8B05E /* CommandError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F0B1F0C936331F2645EDDD1 /* CommandError.swift */; };
 		E992700775DDA638A5042CC1 /* ConnectionRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D27AA9CA2C69B0C8F96EE82 /* ConnectionRegistry.swift */; };
 		EB72F90746AA22362DC36339 /* MagicTapResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BBDF4A1EB4CC196D9A60259 /* MagicTapResponse.swift */; };
@@ -421,6 +424,7 @@
 		011B4C6282C2F13E13E5EB68 /* GesturePerformer+PressKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GesturePerformer+PressKey.swift"; sourceTree = "<group>"; };
 		023BECF751C62B3304D14AC6 /* SystemTimer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemTimer.swift; sourceTree = "<group>"; };
 		0269B7A98D34895DFDDB1C32 /* CtrlProxyWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CtrlProxyWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		028F8512E64EB593D8560C46 /* AccessibilityFocusResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityFocusResponse.swift; sourceTree = "<group>"; };
 		034DC5B8A3A4FCE46CD89568 /* HierarchyDebouncer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyDebouncer.swift; sourceTree = "<group>"; };
 		03D4195430525F5A49BF1898 /* GesturePerformer+Errors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GesturePerformer+Errors.swift"; sourceTree = "<group>"; };
 		042DBF9517697DC4EA6E7FA6 /* RangeReplaceableCollection+MaxSizeEnforcement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RangeReplaceableCollection+MaxSizeEnforcement.swift"; sourceTree = "<group>"; };
@@ -493,6 +497,7 @@
 		42D26190A5DE3B34BE1848EC /* ListTablesResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListTablesResponse.swift; sourceTree = "<group>"; };
 		45A959BB45DFAD18169148FD /* CommandHandler+NetworkMocking.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CommandHandler+NetworkMocking.swift"; sourceTree = "<group>"; };
 		476EF7BB7052D4D6B34B8C7D /* DefaultVoiceOverStateProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultVoiceOverStateProvider.swift; sourceTree = "<group>"; };
+		482BE25F35BD4E4F806DC1B5 /* CommandHandler+AccessibilityFocus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CommandHandler+AccessibilityFocus.swift"; sourceTree = "<group>"; };
 		48DEED5C2D528F921F904360 /* ConnectedEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectedEvent.swift; sourceTree = "<group>"; };
 		48EF872AF218FF56BD23BEC5 /* HierarchyExtracting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyExtracting.swift; sourceTree = "<group>"; };
 		4961453A91D102CDCB77556A /* ElementLocator+ForegroundApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ElementLocator+ForegroundApp.swift"; sourceTree = "<group>"; };
@@ -567,6 +572,7 @@
 		80E5ED3D4A2CFE516DD39B00 /* GesturePerformer+Orientation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GesturePerformer+Orientation.swift"; sourceTree = "<group>"; };
 		837CF68121A4C4E037079302 /* KeyboardWait.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardWait.swift; sourceTree = "<group>"; };
 		84BD14DE24A3F18128896619 /* SdkKeychainClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkKeychainClient.swift; sourceTree = "<group>"; };
+		85FF0A05F82D34309527733C /* SpringBoardPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpringBoardPanel.swift; sourceTree = "<group>"; };
 		86E304C3C42FE1AECFDB293B /* SemanticLinkActivation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SemanticLinkActivation.swift; sourceTree = "<group>"; };
 		87BF50949E1F545C8F299839 /* CommandHandler+DeviceControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CommandHandler+DeviceControl.swift"; sourceTree = "<group>"; };
 		88C3D99504BD81F450558C24 /* AutoMobileVisionTestApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoMobileVisionTestApp.swift; sourceTree = "<group>"; };
@@ -804,6 +810,7 @@
 		5AF95F3864C6D1D1CAEA2957 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				028F8512E64EB593D8560C46 /* AccessibilityFocusResponse.swift */,
 				BB3D7FDE2BDA51768404C5A5 /* CommandPayload.swift */,
 				9EEFE0EECF6D5098C2E0B1A3 /* ConnectedEvent.swift */,
 				381CCBCD5C6DD358413093DA /* CurrentFocusResponse.swift */,
@@ -1036,6 +1043,7 @@
 				7F0B1F0C936331F2645EDDD1 /* CommandError.swift */,
 				77305F40F85694E983987E68 /* CommandHandler.swift */,
 				EE7FA458DAC40E12AE86DA3C /* CommandHandler+Accessibility.swift */,
+				482BE25F35BD4E4F806DC1B5 /* CommandHandler+AccessibilityFocus.swift */,
 				4F4FAF1DFEC886E79DFF11A8 /* CommandHandler+Actions.swift */,
 				D5DB65AB7DE8791FAB4FE85F /* CommandHandler+Database.swift */,
 				87BF50949E1F545C8F299839 /* CommandHandler+DeviceControl.swift */,
@@ -1146,6 +1154,7 @@
 				3EB1E06878A9A325A53E9EF8 /* SdkPreferenceClient.swift */,
 				86E304C3C42FE1AECFDB293B /* SemanticLinkActivation.swift */,
 				D7073280136076204B2B9D82 /* ServerListening.swift */,
+				85FF0A05F82D34309527733C /* SpringBoardPanel.swift */,
 				A49030ABC56E34792661140F /* StorageError.swift */,
 				91CF5D144055F297EABC7669 /* StructuralHasher.swift */,
 				8C2070F123FFADE82821E8ED /* SystemTimeProvider.swift */,
@@ -1549,6 +1558,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				190680B598710B5D02E0AF1C /* AccessibilityFocusResponse.swift in Sources */,
 				D48AD6F142B904DF3C8172D6 /* AppStateExpectation.swift in Sources */,
 				0228EE761B6F08DEFF2D6F67 /* AppStateWait.swift in Sources */,
 				E49F5A63637E53CC6EDB146F /* AppStateWaiter.swift in Sources */,
@@ -1560,6 +1570,7 @@
 				A245A6CA3776E2A271D0E379 /* CaretMovePressClassification.swift in Sources */,
 				DE4AFE6A0A43A66CDDFFD619 /* CommandError.swift in Sources */,
 				0E36260B360CCACB7542B8C5 /* CommandHandler+Accessibility.swift in Sources */,
+				E9891B02F59AC07461233BA7 /* CommandHandler+AccessibilityFocus.swift in Sources */,
 				171C8CC9FCA3E9A46B62C75E /* CommandHandler+Actions.swift in Sources */,
 				7C18DDF110A0A139168FE843 /* CommandHandler+Database.swift in Sources */,
 				8205722625176FF5AF3ECD65 /* CommandHandler+DeviceControl.swift in Sources */,
@@ -1755,6 +1766,7 @@
 				B870CC90A8FDD3A25B707C88 /* SetNetworkErrorSimulationResponse.swift in Sources */,
 				803D552FCC00B338D16F4274 /* SetNetworkFaultRulesResponse.swift in Sources */,
 				C1DD9EBCA26225DD336B6F6E /* SetNetworkMockRulesResponse.swift in Sources */,
+				71ADCEA9A7423E30D120DFFF /* SpringBoardPanel.swift in Sources */,
 				7A98DF087CB10423B614E2B0 /* StorageCapabilitiesResponse.swift in Sources */,
 				23BC1F0B23CAE51C3A878B0F /* StorageEntriesResponse.swift in Sources */,
 				BEF9637ADC36E8FBBFCDA004 /* StorageEntry.swift in Sources */,

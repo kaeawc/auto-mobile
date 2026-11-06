@@ -15,3 +15,15 @@ export function withActionableWebInput<T>(read: () => T): T {
     throw error;
   }
 }
+
+/** `withActionableWebInput` for an async entry point: maps a rejection the same way. */
+export async function withActionableWebInputAsync<T>(read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (error) {
+    if (error instanceof PrototypeWebInputError) {
+      throw new ActionableError(error.message, { cause: error });
+    }
+    throw error;
+  }
+}

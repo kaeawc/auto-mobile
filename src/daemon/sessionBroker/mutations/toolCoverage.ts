@@ -211,7 +211,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
     "notJournaled",
   ),
   ...tools(
-    ["audit", "accessibilityAudit"],
+    ["audit", "accessibilityAudit", "performanceAudit"],
     "Observes the screen and reads app metrics; accessibility baselines are stored on the host, so there is no persistent device setting to journal (#14359).",
     "notJournaled",
   ),

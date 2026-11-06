@@ -1,13 +1,4 @@
-/**
- * SetAccessibilityFocus - sets or clears the Android TalkBack accessibility-focus cursor.
- *
- * Resolves a text / contentDesc / resourceId selector to a resource-id, then asks the
- * CtrlProxy AccessibilityService to perform ACTION_ACCESSIBILITY_FOCUS ("focus") or
- * ACTION_CLEAR_ACCESSIBILITY_FOCUS ("clear_focus") on the matched node.
- *
- * Android only: iOS has no VoiceOver-focus backend wired, so the tool errors clearly
- * rather than silently no-op'ing.
- */
+/** Sets Android TalkBack focus or posts iOS VoiceOver focus through the in-app SDK. */
 
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
@@ -21,6 +12,11 @@ import {
 import type { ElementResolver } from "../utility/ElementResolver";
 import { matchesCtrlProxyResourceId } from "../utility/SearchableNode";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
+import type {
+  CtrlProxyAccessibilityFocusResult,
+  AccessibilityFocusSelector,
+} from "../observe/ios/types";
+import { toActionableError } from "../../models/ActionableError";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import type { FocusActionOutcome } from "../observe/android/CtrlProxyFocus";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
@@ -58,11 +54,18 @@ function unconfirmedWarning(
     : `${acknowledged} the resulting focus state could not be read back to confirm it (${readError}).`;
 }
 
+export interface IosAccessibilityFocusService {
+  requestAccessibilityFocus(
+    selector: AccessibilityFocusSelector,
+  ): Promise<CtrlProxyAccessibilityFocusResult>;
+}
+
 export interface SetAccessibilityFocusDependencies {
   resolver?: Pick<ElementResolver, "resolve">;
   observeScreen?: ObserveScreen;
   /** Factory so production resolves the live CtrlProxy client lazily; fakes inject directly. */
   serviceFactory?: (device: BootedDevice) => AccessibilityFocusService;
+  iosServiceFactory?: (device: BootedDevice) => IosAccessibilityFocusService;
   /** Paces the bounded read-back polling; fakes inject a FakeTimer. */
   timer?: Timer;
 }
@@ -72,21 +75,27 @@ export class SetAccessibilityFocus {
   private readonly target: AccessibilityTargetResolver;
   private readonly serviceFactory: (device: BootedDevice) => AccessibilityFocusService;
   private readonly timer: Timer;
+  private readonly iosServiceFactory: (device: BootedDevice) => IosAccessibilityFocusService;
 
   constructor(device: BootedDevice, deps: SetAccessibilityFocusDependencies = {}) {
     this.device = device;
     this.target = new AccessibilityTargetResolver(device, "accessibility focus", deps);
     this.timer = deps.timer ?? defaultTimer;
+    this.iosServiceFactory =
+      deps.iosServiceFactory ??
+      (() => {
+        throw new ActionableError(
+          "iOS VoiceOver focus is not configured: no iOS runner client was provided.",
+        );
+      });
     this.serviceFactory =
       deps.serviceFactory ??
       ((d: BootedDevice) => AndroidCtrlProxyClient.getInstance(d, defaultAdbClientFactory));
   }
 
   async execute(options: SetAccessibilityFocusOptions): Promise<SetAccessibilityFocusResult> {
-    if (this.device.platform !== "android") {
-      throw new ActionableError(
-        "accessibilityFocus is only supported on Android (TalkBack). iOS VoiceOver focus is not yet implemented.",
-      );
+    if (this.device.platform === "ios") {
+      return this.executeIos(options);
     }
 
     const action = options.action ?? "set";
@@ -129,6 +138,51 @@ export class SetAccessibilityFocus {
       warning,
       ...(alreadySatisfied ? { alreadySatisfied } : {}),
     };
+  }
+
+  private async executeIos(
+    options: SetAccessibilityFocusOptions,
+  ): Promise<SetAccessibilityFocusResult> {
+    if (options.action === "clear") {
+      return {
+        success: false,
+        errorCode: "unsupported",
+        error: "There is no reliable SDK equivalent for clearing VoiceOver focus on iOS.",
+      };
+    }
+    const { resourceId, text, contentDesc } = options;
+    if (!resourceId && !text && !contentDesc) {
+      return {
+        success: false,
+        errorCode: "invalid_selector",
+        error:
+          "accessibilityFocus requires a selector: provide one of resourceId, text, or contentDesc.",
+      };
+    }
+    try {
+      const result = await this.iosServiceFactory(this.device).requestAccessibilityFocus({
+        resourceId,
+        text,
+        contentDesc,
+      });
+      if (!result.success) {
+        return {
+          success: false,
+          errorCode: result.errorCode,
+          error:
+            result.errorCode === "voiceover_off"
+              ? "VoiceOver is off. Enable it with accessibility {voiceover:true} before setting focus."
+              : (result.error ?? "Failed to set VoiceOver focus."),
+        };
+      }
+      return {
+        success: true,
+        confirmed: false,
+        warning: "VoiceOver focus was posted; the focus read-back is not implemented on iOS.",
+      };
+    } catch (error) {
+      throw toActionableError(error, "Failed to set VoiceOver focus");
+    }
   }
 
   /**

@@ -305,9 +305,11 @@ runtime permission prompt covering the screen. The result reports it through
 `warning` and `blockingPrompt` (`kind`, `package`, `activity`) when detected;
 AutoMobile does not dismiss it. Use `observe` to inspect it, then `tapOn` to
 answer the allow or deny button, or set a `systemAlerts` policy to answer
-permission prompts around each interaction. Android also supports the
-default-off debug tool `accessibilityFocus` for setting or clearing TalkBack
-focus. Check text alternatives, content descriptions or accessibility labels,
+permission prompts around each interaction. The default-off debug tool
+`accessibilityFocus` sets focus on Android (TalkBack) and iOS (VoiceOver).
+iOS requires VoiceOver enabled and the AutoMobile in-app SDK in the foreground
+app; focus read-back is unavailable. Clearing focus is supported only on Android.
+Check text alternatives, content descriptions or accessibility labels,
 focus order, contrast, and tap-target size as part of the assertions; support
 for toggling services varies by device type and OS version.
 

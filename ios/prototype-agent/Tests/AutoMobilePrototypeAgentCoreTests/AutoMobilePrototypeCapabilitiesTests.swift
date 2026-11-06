@@ -78,6 +78,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             // Contract only; map backends are advertised once their renderers can serve them (#14302).
             "prototype_platform_map_google_v1",
             "prototype_platform_map_maplibre_v1",
+            // Contract only; the web view runtimes and the ProtoViewer import rule are owed (#14312).
+            "prototype_platform_webview_v1",
             // Contract only; the location runtimes are owed (#14325, #14326).
             "prototype_platform_location_v1",
             // Contract only; the system media picker and camera runtimes are owed (#14197).
@@ -113,6 +115,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             // #15131: custom AGSL shaders are Android-only by owner decision.
             "prototype_custom_shaders_v1",
             "prototype_choreography_v1",
+            "prototype_loops_v1", // Attention loops are Android only until #14684.
             "prototype_motion_v3", // Motion v2 does not include motion v3 or window choreography.
             "prototype_window_motion_v1",
             "prototype_platform_haptics_v1", "prototype_platform_sound_v1",

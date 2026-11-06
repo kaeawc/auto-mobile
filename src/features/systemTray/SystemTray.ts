@@ -11,6 +11,7 @@ import { createNotificationUIDetector } from "./createNotificationUIDetector";
 import { WatchSystemTray } from "./WatchSystemTray";
 import {
   getSystemTrayDependencies,
+  notificationNotFoundError,
   waitForNotificationMatch,
   clearMatchingSystemTrayNotifications,
   clearIosSystemTrayNotifications,
@@ -453,7 +454,7 @@ export class SystemTray {
     );
 
     if (!match) {
-      throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
+      throw notificationNotFoundError(device, observation, awaitTimeoutMs);
     }
 
     await captureSystemTrayTerminalEvidence(device, observation, signal);
@@ -476,7 +477,7 @@ export class SystemTray {
     });
 
     if (!initialMatch.match) {
-      throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
+      throw notificationNotFoundError(device, initialMatch.observation, awaitTimeoutMs);
     }
 
     const { observation: baseline, match } = await expandAndRematchIfCollapsed(
@@ -541,7 +542,7 @@ export class SystemTray {
     });
 
     if (!initialMatch.match) {
-      throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
+      throw notificationNotFoundError(device, initialMatch.observation, awaitTimeoutMs);
     }
 
     const { match, observation: swipeObservation } = await expandAndRematchIfCollapsed(

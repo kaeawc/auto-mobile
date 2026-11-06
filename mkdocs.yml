@@ -152,11 +152,14 @@ nav:
       - "Apple Watch": using/apple-watch.md
       - "Environment variables": using/environment-variables.md
       - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
+      - "Apple Vision Pro simulator": using/visionos-simulator.md
       - "Screen control": using/screen-control.md
       - "Performance traces": using/performance-trace.md
+      - "Accessibility and performance audits": using/audits.md
       - "Emulator and simulator audio": using/emulator-audio.md
       - "Headless host audio setup": using/headless-audio.md
       - "Device ownership": using/device-ownership.md
+      - "Listing device images": using/device-images.md
       - "Usage skill": using/usage-skill.md
       - "Managed Macs and CI runners": using/managed-macs.md
       - "WebRTC Streaming": webrtc-streaming.md
@@ -176,6 +179,7 @@ nav:
       - "iOS simctl and devicectl boundary": design-docs/plat/ios/simctl-devicectl-boundary.md
       - "iOS SDK contract suite": design-docs/plat/ios/sdk-contract-suite.md
       - "tvOS XCUITest spike": design-docs/plat/tvos/xcuitest-spike.md
+      - "tvOS explore and plan replay": design-docs/plat/tvos/focus-explore.md
       - "watchOS XCUITest spike": design-docs/plat/watchos/xcuitest-spike.md
       - "visionOS XCUITest capability boundary": design-docs/plat/visionos/xcuitest-capabilities.md
       - "iOS iproxy tunnel client": design-docs/plat/ios/iproxy-tunnel-client.md
@@ -220,6 +224,7 @@ nav:
       - "CI attestation signing envelope": design-docs/ci/attestation-envelope.md
       - "CI attestation GitHub App transport": design-docs/ci/attestation-github-app-transport.md
       - "CircleCI macOS migration": design-docs/ci/circleci-macos-migration.md
+      - "CircleCI Linux shadow lane": design-docs/ci/circleci-linux-shadow-lane.md
       - "macOS CI capacity plan": design-docs/ci/macos-capacity-plan.md
       - "macOS-only iOS tests": design-docs/ci/macos-only-tests.md
       - "Interaction loop": design-docs/mcp/interaction-loop.md

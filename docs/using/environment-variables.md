@@ -490,6 +490,7 @@ shutdown then stops it after active device sessions are released.
 | `AUTOMOBILE_PORT_RANGE_END`, `AUTO_MOBILE_PORT_RANGE_END`     | Last CtrlProxy host port (inclusive), at least the start. Takes precedence over size; invalid values fall back to 100 ports.                                                                | unset              |
 | `AUTOMOBILE_PORT_RANGE_SIZE`, `AUTO_MOBILE_PORT_RANGE_SIZE`   | Number of CtrlProxy host ports; positive integer, used only without an end.                                                                                                                 | `100`              |
 | `AUTOMOBILE_PORT_REVERSE_ALLOWED_PORTS`                       | Ports `portReverse` may map, device and host side: comma-separated ports or inclusive ranges, e.g. `3000-3999,8080`. Any invalid entry allows nothing. Ports below 1024 are always refused. | unset (1024-65535) |
+| `AUTOMOBILE_PORT_REVERSE_RECONCILE_INTERVAL_MS`               | Milliseconds between periodic re-checks that re-add owned `portReverse` mappings removed outside AutoMobile; integer of at least 1000. Anything else is ignored with a warning.             | `30000` ms         |
 
 </div>
 

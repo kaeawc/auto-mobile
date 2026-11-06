@@ -25,6 +25,8 @@ version: 2.1
 # - Post-merge Swift coverage: merge.yml triggers a `run-swift-coverage-main`
 #   pipeline for coverage-input changes and downloads the badge.
 # - Nightly: a scheduled pipeline on main with `run-nightly-macos: true`.
+# - Linux Node mirrors (advisory): `run-main-linux` (same detect job and mapping
+#   file) post-merge, and `run-nightly-linux: true` from its own scheduled pipeline.
 #
 # Other pushes never spin up a macOS executor. The heavier macOS jobs live in
 # continue_config.yml; docs/design-docs/ci/macos-capacity-plan.md maps every
@@ -50,6 +52,10 @@ parameters:
     default: false
   # Set to true by the owner-configured nightly scheduled pipeline (CircleCI UI).
   run-nightly-macos:
+    type: boolean
+    default: false
+  # Set by the owner-configured Linux nightly scheduled pipeline (CircleCI UI).
+  run-nightly-linux:
     type: boolean
     default: false
 
@@ -236,6 +242,43 @@ jobs:
           configuration_path: .circleci/continue_config.yml
           parameters: /tmp/nightly-macos-parameters.json
 
+  continue-nightly-linux:
+    docker:
+      - image: cimg/base:current
+    environment:
+      GIT_LFS_SKIP_SMUDGE: "1"
+    steps:
+      # Keep this checkout identical to `checkout_without_lfs` in continue_config.yml.
+      - run:
+          name: "Checkout without Git LFS"
+          command: |
+            set -euo pipefail
+            # Neutralize the lfs filter so no git operation in this job invokes git-lfs.
+            git config --global filter.lfs.process ""
+            git config --global filter.lfs.smudge ""
+            git config --global filter.lfs.clean ""
+            git config --global filter.lfs.required false
+            # Public repo: clone over HTTPS so no checkout SSH key is needed. Blobless
+            # keeps it cheap; the default branch (main) comes along for path-filtering.
+            git clone --filter=blob:none --no-checkout \
+              "https://github.com/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}.git" .
+            # Fetch the exact commit so fork PR heads (not on any origin branch) resolve.
+            git fetch --filter=blob:none origin "${CIRCLE_SHA1}"
+            git checkout --force --detach "${CIRCLE_SHA1}"
+            # Fail loudly if any LFS-tracked path holds real content instead of a pointer.
+            git ls-files -z ':(attr:filter=lfs)' | while IFS= read -r -d '' path; do
+              if ! head -c 40 "${path}" | grep -q '^version https://git-lfs'; then
+                echo "LFS content was downloaded for ${path}; checkout must stay LFS-free" >&2
+                exit 1
+              fi
+            done
+      - run:
+          name: "Select nightly Linux jobs"
+          command: echo '{"run-nightly-linux":true}' > /tmp/nightly-linux-parameters.json
+      - continuation/continue:
+          configuration_path: .circleci/continue_config.yml
+          parameters: /tmp/nightly-linux-parameters.json
+
 workflows:
   detect-ios-changes:
     jobs:
@@ -263,6 +306,7 @@ workflows:
       and:
         - not: << pipeline.parameters.run-swift-coverage-main >>
         - not: << pipeline.parameters.run-nightly-macos >>
+        - not: << pipeline.parameters.run-nightly-linux >>
     jobs:
       - detect-main-macos-changes:
           filters:
@@ -284,3 +328,11 @@ workflows:
     when: << pipeline.parameters.run-nightly-macos >>
     jobs:
       - continue-nightly-macos
+
+  # Nightly Linux Node jobs (nightly.yml's advisory Node jobs). The schedule is
+  # configured in the CircleCI UI: Project Settings → Triggers → scheduled trigger
+  # on main with pipeline parameter run-nightly-linux=true.
+  nightly-linux:
+    when: << pipeline.parameters.run-nightly-linux >>
+    jobs:
+      - continue-nightly-linux

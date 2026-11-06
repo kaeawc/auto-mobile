@@ -8,6 +8,7 @@ import {
   WEB_SCREENSHOT_VIEWPORT,
   webScreenshotCases,
   webScreenshotEngines,
+  webScreenshotGoldens,
   webScreenshotOutputPath,
 } from "./webScreenshotCases";
 
@@ -16,19 +17,34 @@ import {
 const cases = webScreenshotCases();
 
 describe("prototype web screenshot goldens (#16346)", () => {
-  test("every case has a fixture and viewport-sized portrait and landscape goldens", () => {
-    // Fourteen specs in two frames, plus the largest text and RTL settings in both (#16552).
-    expect(cases.length).toBe(32);
+  test("every case has a fixture and a viewport-sized golden per orientation", () => {
+    // Fourteen specs in two frames, the largest text and RTL settings in both (#16552), and one
+    // spec in each watch, TV and car frame (#16446).
+    expect(cases.length).toBe(37);
     for (const entry of cases) {
       expect(existsSync(entry.fixture)).toBe(true);
-      expect(pngSize(readFileSync(entry.golden))).toEqual(WEB_SCREENSHOT_VIEWPORT);
-      expect(pngSize(readFileSync(entry.landscapeGolden))).toEqual(WEB_SCREENSHOT_VIEWPORT);
+      const goldens = webScreenshotGoldens(entry);
+      expect(goldens.length).toBe(entry.orientations.length);
+      for (const golden of goldens) {
+        expect(pngSize(readFileSync(golden))).toEqual(WEB_SCREENSHOT_VIEWPORT);
+      }
     }
+  });
+
+  test("one reference spec covers each watch, TV and car frame, in its only orientation (#16446)", () => {
+    const single = cases.filter((entry) => entry.orientations.length === 1);
+    expect(single.map((entry) => [entry.frame, entry.orientations[0]])).toEqual([
+      ["wearos-small-round", "portrait"],
+      ["apple-watch", "portrait"],
+      ["android-tv-1080p", "landscape"],
+      ["apple-tv", "landscape"],
+      ["car-1024p-landscape", "landscape"],
+    ]);
   });
 
   test("the golden directory holds no golden without a case", () => {
     const expected = cases
-      .flatMap((entry) => [basename(entry.golden), basename(entry.landscapeGolden)])
+      .flatMap((entry) => webScreenshotGoldens(entry).map((golden) => basename(golden)))
       .sort();
     expect(readdirSync(WEB_SCREENSHOT_GOLDEN_DIR).sort()).toEqual(expected);
   });

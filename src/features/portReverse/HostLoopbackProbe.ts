@@ -72,7 +72,8 @@ export const tcpHostLoopbackProbe: HostLoopbackProbe = {
  * knows, so nothing is reclaimed and `hostListening` is left out.
  */
 export function hostLoopbackProbeFor(env: NodeJS.ProcessEnv = process.env): HostLoopbackProbe {
-  return adbServerScope(env).startsWith("tcp-localhost-")
+  // The whole endpoint must be loopback: `tcp-localhost-<port>` and nothing else.
+  return /^tcp-localhost-\d+$/.test(adbServerScope(env))
     ? tcpHostLoopbackProbe
     : unknownHostLoopbackProbe;
 }

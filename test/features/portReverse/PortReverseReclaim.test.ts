@@ -4,6 +4,7 @@ import {
   PortReverseManager,
   type PortReverseTarget,
 } from "../../../src/features/portReverse/PortReverseManager";
+import { DeviceLostError } from "../../../src/models/DeviceLostError";
 import { FakeAdbReverseCommands } from "../../fakes/FakeAdbReverseCommands";
 import { FakeHostLoopbackProbe } from "../../fakes/FakeHostLoopbackProbe";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -243,5 +244,35 @@ describe("PortReverseManager list hostListening", () => {
       [6000, undefined],
     ]);
     expect("hostListening" in (mappings[2] ?? {})).toBe(false);
+  });
+});
+
+describe("PortReverseManager reclaim device loss", () => {
+  test("device loss during the re-list or the removal propagates as itself", async () => {
+    const { adb, host, manager, target } = setup();
+    const lost = new DeviceLostError("emulator-5554", "gone");
+    adb.mappings.set(3000, "tcp:4000");
+    host.onProbe = () => {
+      adb.failList = true;
+    };
+    const originalList = adb.list.bind(adb);
+    adb.list = async () => {
+      if (adb.failList) {
+        throw lost;
+      }
+      return originalList();
+    };
+    await expect(
+      manager.ensure(target(), [{ devicePort: 3000, hostPort: 3000 }], reclaim),
+    ).rejects.toBe(lost);
+    adb.failList = false;
+    host.onProbe = undefined;
+    adb.remove = async () => {
+      throw lost;
+    };
+    await expect(
+      manager.ensure(target(), [{ devicePort: 3000, hostPort: 3000 }], reclaim),
+    ).rejects.toBe(lost);
+    expect(adb.mappings.get(3000)).toBe("tcp:4000");
   });
 });

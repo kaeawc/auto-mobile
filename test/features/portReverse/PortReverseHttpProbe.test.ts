@@ -58,6 +58,13 @@ describe("PortReverseManager verify HTTP probe", () => {
       httpStatus: 200,
     });
     expect(adb.httpRequests[0]?.request.hostHeader).toBe("api.local");
+    adb.httpOutcomes.set(3000, [
+      { kind: "response", status: 200, body: '{"name":"mock-backend"}' },
+    ]);
+    expect(await probeOne(manager, target, { probe: { http: spec } })).toMatchObject({
+      status: "reachable",
+      httpStatus: 200,
+    });
   });
 
   test("no HTTP response is unreachable with no_http_response, after one retry", async () => {

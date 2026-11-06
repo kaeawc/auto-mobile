@@ -3,6 +3,7 @@ import type {
   AdbReverseEntry,
 } from "../../utils/android-cmdline-tools/adbReverse";
 import { rethrowDeviceTransportUnavailable } from "../../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
+import { DeviceLostError } from "../../models/DeviceLostError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { toActionableError } from "../../models/ActionableError";
@@ -695,6 +696,10 @@ export class PortReverseManager {
   ): Promise<PortReverseReclaim | undefined> {
     const port = tcp(stale.devicePort);
     const fail = async (detail: string, cause?: unknown): Promise<never> => {
+      // A lost device is the call's failure, never a reclaim failure the caller could retry.
+      if (cause instanceof DeviceLostError) {
+        throw cause;
+      }
       await this.rollback(target.deviceId, state, added);
       if (cause !== undefined) {
         rethrowDeviceTransportUnavailable(cause);

@@ -21,6 +21,12 @@ describe("hostLoopbackProbeFor", () => {
     expect(hostLoopbackProbeFor({ ADB_SERVER_SOCKET: "tcp:build-host:5037" })).toBe(
       unknownHostLoopbackProbe,
     );
+    expect(
+      hostLoopbackProbeFor({ ADB_SERVER_SOCKET: "tcp:localhost-remote.example.com:5037" }),
+    ).toBe(unknownHostLoopbackProbe);
+    expect(hostLoopbackProbeFor({ ANDROID_ADB_SERVER_ADDRESS: "localhost-build" })).toBe(
+      unknownHostLoopbackProbe,
+    );
     expect(hostLoopbackProbeFor({ ADB_SERVER_SOCKET: "localfilesystem:/tmp/adb" })).toBe(
       unknownHostLoopbackProbe,
     );

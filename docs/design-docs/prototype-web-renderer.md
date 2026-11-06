@@ -335,9 +335,15 @@ the host, so the page's script only switches between views it was given and neve
   device scheme to read, so it falls through to the seed or the baseline, as iOS and Android
   below API 31 do. The accessibility lint still treats a seed or device scheme as unknown. Both
   devices paint nothing behind a window, so the app below shows through; the still has no app
-  below, so the screen paints the theme's `background` role (else `surface`). An explicit `theme.mode` of
-  `light` or `dark` wins over the caller's `mode`; `system` or no mode uses the caller's, then
-  light.
+  below, so the screen paints the theme's `background` role (else `surface`).
+- **Mode.** The still resolves light or dark in the devices' order: an explicit `theme.mode`;
+  with no mode, the luminance of the flat `theme.colors.background` (else `surface`) override,
+  then of the first opaque hex background on the root's leading chain (the first visible child,
+  a pager's current page; role and `{light, dark}` backgrounds are passed over); last the
+  caller's `mode`, then light. `theme.mode: "system"` goes straight to the caller's. As on
+  Android, an authored colour of the resolved mode's polarity replaces `background`, `surface`
+  and `surfaceContainer`/`Low`/`High`/`Highest` unless a seed or device source derives the scheme;
+  role overrides still win over it.
 - **Coverage.** Supported nodes: `box`, `row`, `column`, `stack`, `scroll`, `text`, `spacer`,
   `divider`, `icon`, `button`, `topAppBar`, `textField`, `switch`, `checkbox`, `card`,
   `listItem` (with its leading icon and its trailing switch, checkbox or icon), `pager`, `grid`,

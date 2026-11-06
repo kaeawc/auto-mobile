@@ -29,6 +29,16 @@ Branch on `reason`, not on error text: `BRIDGE_NOT_INSTALLED`, `DISABLED`,
 `deviceLocked: locked` reports the device lock state but does not block metadata
 reads. Deletion can report per-alias `locked` and `authentication_required` outcomes.
 
+A metadata read checks that each present key created with
+`setUserAuthenticationRequired(true)` can still be used. If that key has been
+permanently invalidated (for example by a new fingerprint enrollment) or needs
+authentication first, the whole read returns `authentication_required` /
+`AUTHENTICATION_REQUIRED` with no `entries`, even when other aliases in the scope
+are healthy; query one `alias` to find the affected key. Authenticate through the
+app's normal flow, or delete and re-create an invalidated key. Other keys, and keys
+whose usability cannot be checked, report presence and category as before, so `ok`
+does not prove that a key is usable.
+
 ## Android scoped deletion
 
 Call `resetKeychain` with `appId`, an explicit device target (`deviceId`, `device`,

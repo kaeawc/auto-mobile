@@ -122,4 +122,7 @@ internal class FaultingKeystoreBackend(
     KeystoreFaultPlan.apply(alias, budget)
     backend.deleteAlias(alias)
   }
+
+  // containsAlias already applied this alias's fault for the same metadata read.
+  override fun verifyUsable(alias: String) = backend.verifyUsable(alias)
 }

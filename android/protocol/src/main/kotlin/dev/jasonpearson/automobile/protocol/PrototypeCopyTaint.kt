@@ -87,7 +87,8 @@ internal object PrototypeCopyTaint {
               pointer
                 ?.takeIf {
                   action.path.startsWith("${node.path}.children[") &&
-                    repeat != null && repeat.text("as") != null &&
+                    repeat != null &&
+                    repeat.text("as") != null &&
                     PrototypeDataPointer.isValid(it)
                 }
                 ?.let { Copy(into, "data", it) }

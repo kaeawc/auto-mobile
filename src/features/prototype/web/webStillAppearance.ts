@@ -9,6 +9,7 @@ import { pagerPage } from "./webCollections";
 import {
   bound,
   childEntries,
+  isWebLayerType,
   preparedNode,
   type WebChildEntry,
   type WebRenderScope,
@@ -92,7 +93,7 @@ function decideMode(
  * The first opaque hex background on the tree's leading chain: the root, then the child it draws
  * first, and so on, as both devices find the screen colour the author painted. A pager follows its
  * current page, a scroll its `child` and a stack the screen it draws. A node that draws nothing in
- * place is skipped: a hidden one, or a sheet whose `openWhen` does not hold. A role or
+ * place is skipped: a hidden one, or a sheet, dialog or snackbar whose `openWhen` does not hold. A role or
  * `{light, dark}` background depends on the mode, so the search goes on past it.
  */
 export function webAuthoredBackground(
@@ -124,14 +125,17 @@ function chainBackground(
   return next ? chainBackground(next.node, next.scope, next.path, stillOutermost) : undefined;
 }
 
-/** The prepared node when it draws in place: not hidden and not a closed sheet. */
+/** The prepared node when it draws: not hidden and not a closed window layer. */
 function drawnNode(
   node: unknown,
   scope: WebRenderScope,
   path: string,
 ): ReturnType<typeof preparedNode> {
   const prepared = preparedNode(node, scope, path);
-  return prepared?.styled.type === "bottomSheet" && !sheetOpen(prepared.styled, prepared.scope)
+  // A closed sheet, dialog or snackbar draws nothing; an open one draws in the window's layer.
+  return prepared &&
+    isWebLayerType(prepared.styled.type) &&
+    !sheetOpen(prepared.styled, prepared.scope)
     ? undefined
     : prepared;
 }
@@ -151,6 +155,7 @@ function leadingChild(
     }
     case "scroll":
     case "bottomSheet":
+    case "dialog":
       return { node: styled.child, scope, path: `${path}.child` };
     case "stack": {
       const screen = stackScreen(styled, scope, outermostStack);

@@ -242,4 +242,25 @@ describe("prototype web still mode resolution (#16654)", () => {
     const open = renderPrototypeStill(sheeted(true), { frame: "pixel-9", mode: "light" });
     expect(screenOf(open.element).style["background-color"]).toBe("rgba(0,0,0,1)");
   });
+
+  test("a closed dialog or snackbar is not the first drawn child (#16670)", () => {
+    const layered = (layer: Record<string, unknown>) => ({
+      id: "layer",
+      state: { open: false },
+      root: {
+        type: "scroll",
+        child: column([
+          { ...layer, openWhen: { key: "open", equals: true }, style: { background: "#000000" } },
+          text("body", { background: "#FAFAFA" }),
+        ]),
+      },
+    });
+    for (const layer of [
+      { type: "dialog", title: "Delete?", confirm: { label: "Delete" } },
+      { type: "snackbar", text: "Saved" },
+    ]) {
+      const element = renderPrototypeStill(layered(layer), { frame: "pixel-9", mode: "dark" });
+      expect(screenOf(element.element).style["background-color"]).toBe("rgba(250,250,250,1)");
+    }
+  });
 });

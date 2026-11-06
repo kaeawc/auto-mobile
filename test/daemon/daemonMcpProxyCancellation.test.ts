@@ -1,7 +1,7 @@
 import { Client } from "@modelcontextprotocol/client";
 import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
 import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/server";
-import { describe, expect, spyOn, test } from "bun:test";
+import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client/client";
@@ -69,6 +69,20 @@ async function setup() {
   };
   return { client, proxy, socket, messages, respond, close, timer, daemonClient };
 }
+
+// The first proxy connect + tool round trip in a process pays one-time SDK/schema JIT, which is
+// most of the first test's time. Pay it once here, outside any timed test body (#17208).
+beforeAll(async () => {
+  const { client, socket, respond, close } = await setup();
+  try {
+    const result = client.callTool({ name: "tapOn", arguments: {} });
+    await flush();
+    respond(socket.getWrittenMessages(daemonRequestFrameSchema)[0].id);
+    await result;
+  } finally {
+    await close();
+  }
+});
 
 describe("MCP proxy cancellation", () => {
   test("SDK cancellation forwards exactly one mapped cancel frame and no response; siblings finish", async () => {

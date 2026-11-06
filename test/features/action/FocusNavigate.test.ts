@@ -356,13 +356,21 @@ describe("FocusNavigate", () => {
     expect(grid.presses).toEqual(["arrow_down"]);
   });
 
-  test("exits stuck once the only direction toward the target did not move focus", async () => {
+  test("goes around when the only direction toward the target did not move focus", async () => {
     const grid = new FakeGrid(0);
     grid.blocked.add(1);
     const result = await navigator(grid).execute({ until: { text: "Music" } });
-    expect(result).toMatchObject({ success: false, status: "stuck", steps: 1 });
-    expect(result.message).toContain("Focus did not move after 1 press;");
-    expect(result.focusedElement?.text).toBe("Home");
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 7 });
+    // Right and up are dead ends from Home; down leaves the row and the walk comes back up.
+    expect(grid.presses).toEqual([
+      "arrow_right",
+      "arrow_up",
+      "arrow_down",
+      "arrow_right",
+      "arrow_up",
+      "arrow_right",
+      "arrow_up",
+    ]);
   });
 
   test("an explicit direction still exits stuck after two unmoved presses", async () => {
@@ -471,13 +479,13 @@ describe("FocusNavigate blocked directions", () => {
     expect(result.steps).toBe(grid.presses.length);
   });
 
-  test("reports stuck when every direction toward the target is blocked", async () => {
+  test("reports stuck when every direction is blocked", async () => {
     const grid = launcherGrid();
     grid.moves = { 0: {} };
     const result = await navigator(grid).execute({ until: { text: "Settings, button" } });
-    expect(result).toMatchObject({ success: false, status: "stuck", steps: 2 });
-    expect(grid.presses).toEqual(["arrow_right", "arrow_up"]);
-    expect(result.message).toContain("Focus did not move after 2 presses;");
+    expect(result).toMatchObject({ success: false, status: "stuck", steps: 4 });
+    expect(grid.presses).toEqual(["arrow_right", "arrow_up", "arrow_down", "arrow_left"]);
+    expect(result.message).toContain("Focus did not move after 4 presses;");
     expect(result.focusedElement?.text).toBe("Add app to favorites");
   });
 
@@ -490,20 +498,21 @@ describe("FocusNavigate blocked directions", () => {
     expect(grid.presses).toEqual(["arrow_right", "arrow_up", "arrow_right"]);
   });
 
-  test("remembers a dead direction when returning to the same focused element", async () => {
+  test("does not repeat a direction already pressed from the same focused element", async () => {
     const grid = launcherGrid();
     grid.moves = { 0: { arrow_up: 1 }, 1: { arrow_right: 0 } };
     const result = await navigator(grid).execute({
       until: { text: "Settings, button" },
       maxSteps: 4,
     });
-    expect(grid.presses).toEqual(["arrow_right", "arrow_up", "arrow_right", "arrow_up"]);
+    // Back on the first element, right and up were already pressed there: down is next.
+    expect(grid.presses).toEqual(["arrow_right", "arrow_up", "arrow_right", "arrow_down"]);
     expect(result).toEqual({
       success: false,
       status: "max_steps",
       steps: 4,
-      path: [grid.elements[0], grid.elements[1], grid.elements[0], grid.elements[1]],
-      focusedElement: grid.elements[1],
+      path: [grid.elements[0], grid.elements[1], grid.elements[0]],
+      focusedElement: grid.elements[0],
       message: "Reached maxSteps (4); the target was not focused. Observe before retrying.",
     });
   });
@@ -512,9 +521,9 @@ describe("FocusNavigate blocked directions", () => {
     const grid = new FakeGrid(0);
     grid.elements = [box("Low", 50, 450), box("High", 50, 50), box("Target", 1050, 250)];
     grid.moves = { 0: { arrow_up: 1 }, 1: { arrow_down: 0 } };
-    const result = await navigator(grid).execute({ until: { text: "Target" }, maxSteps: 6 });
-    expect(result).toMatchObject({ status: "max_steps", steps: 6 });
-    expect(grid.presses).toHaveLength(6);
+    const result = await navigator(grid).execute({ until: { text: "Target" }, maxSteps: 4 });
+    expect(result).toMatchObject({ status: "max_steps", steps: 4 });
+    expect(grid.presses).toHaveLength(4);
   });
 });
 

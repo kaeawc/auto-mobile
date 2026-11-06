@@ -184,11 +184,9 @@ export class PortReverseManager {
   /** This manager's side of the ownership view shared with prototypes: owned or awaiting removal. */
   private readonly holder: AdbReverseHolder = {
     kind: "session",
-    holds: (deviceId, devicePort) => {
+    heldHostPort: (deviceId, devicePort) => {
       const state = this.devices.get(deviceId);
-      return (
-        state !== undefined && (state.owned.has(devicePort) || state.pendingRemoval.has(devicePort))
-      );
+      return state?.owned.get(devicePort)?.hostPort ?? state?.pendingRemoval.get(devicePort);
     },
   };
 
@@ -216,6 +214,10 @@ export class PortReverseManager {
     state.ensuring.set(owner, (state.ensuring.get(owner) ?? 0) + 1);
     const run = this.enqueue(state, async (): Promise<PortReverseResult> => {
       const wanted = uniqueRequests(requests);
+      // A prototype's removal of a wanted port in flight is waited for, so it is judged as gone.
+      for (const request of wanted) {
+        await this.ownership.settled(target.deviceId, request.devicePort);
+      }
       // Conflicts are judged on the device as it is, before any restore: a refused request changes
       // nothing on the device.
       const view = await this.view(target.deviceId, state);
@@ -225,38 +227,20 @@ export class PortReverseManager {
           holdsDevice: target.holdsDevice === true,
           view,
           owned: state.owned,
-          heldElsewhere: (port) => this.heldElsewhere(target.deviceId, port),
+          heldElsewhere: (port) => this.heldElsewhere(target.deviceId, port)?.kind,
         },
         wanted,
         { hostProbe: this.hostProbe, reclaimStale: options?.reclaimStale === true },
       );
-      // A prototype's mapping already pointing where asked is shared, not re-added (#17253).
-      for (const request of wanted.filter((r) => shared.includes(r.devicePort))) {
-        state.owned.set(request.devicePort, { hostPort: request.hostPort, owner });
-        this.audit(
-          `share ${tcp(request.devicePort)} -> ${tcp(request.hostPort)} device=${target.deviceId} session=${owner} with prototype`,
-        );
+      this.share(target, state, wanted, shared);
+      try {
+        return await this.applyEnsure(target, state, wanted, { view, reclaimable });
+      } catch (error) {
+        // All-or-nothing: the shared claims go back too; a port the prototype released meanwhile
+        // has no other holder left, so it is removed like this call's own adds.
+        await this.rollback(target.deviceId, state, shared);
+        throw error;
       }
-      const report = await this.restoreFor(target, state, view);
-      const added: number[] = [];
-      const mappings: PortReverseMapping[] = [];
-      for (const request of wanted) {
-        const stale = reclaimable.get(request.devicePort);
-        if (stale !== undefined) {
-          const reclaimed = await this.reclaim(target, state, stale, added);
-          await this.add(target, state, request, added);
-          mappings.push({ ...ownedMapping(request, "added"), ...(reclaimed ? { reclaimed } : {}) });
-          continue;
-        }
-        if (view.has(request.devicePort)) {
-          const status = report.restored.includes(request.devicePort) ? "restored" : "present";
-          mappings.push(ownedMapping(request, status));
-          continue;
-        }
-        await this.add(target, state, request, added);
-        mappings.push(ownedMapping(request, "added"));
-      }
-      return this.acknowledge(state, target.owner, { mappings, ...report });
     });
     return run.finally(() => {
       const left = (state.ensuring.get(owner) ?? 1) - 1;
@@ -266,6 +250,51 @@ export class PortReverseManager {
         state.ensuring.set(owner, left);
       }
     });
+  }
+
+  /** A prototype's mapping already pointing where asked is shared, not re-added (#17253). */
+  private share(
+    target: PortReverseTarget,
+    state: DeviceState,
+    wanted: readonly PortReverseRequest[],
+    shared: readonly number[],
+  ): void {
+    for (const request of wanted.filter((r) => shared.includes(r.devicePort))) {
+      state.owned.set(request.devicePort, { hostPort: request.hostPort, owner: target.owner });
+      this.audit(
+        `share ${tcp(request.devicePort)} -> ${tcp(request.hostPort)} device=${target.deviceId} session=${target.owner} with prototype`,
+      );
+    }
+  }
+
+  /** Restores, reclaims and adds what `ensure` judged free of conflicts. */
+  private async applyEnsure(
+    target: PortReverseTarget,
+    state: DeviceState,
+    wanted: readonly PortReverseRequest[],
+    judged: { view: DeviceView; reclaimable: ReadonlyMap<number, AdbReverseEntry> },
+  ): Promise<PortReverseResult> {
+    const { view, reclaimable } = judged;
+    const report = await this.restoreFor(target, state, view);
+    const added: number[] = [];
+    const mappings: PortReverseMapping[] = [];
+    for (const request of wanted) {
+      const stale = reclaimable.get(request.devicePort);
+      if (stale !== undefined) {
+        const reclaimed = await this.reclaim(target, state, stale, added);
+        await this.add(target, state, request, added);
+        mappings.push({ ...ownedMapping(request, "added"), ...(reclaimed ? { reclaimed } : {}) });
+        continue;
+      }
+      if (view.has(request.devicePort)) {
+        const status = report.restored.includes(request.devicePort) ? "restored" : "present";
+        mappings.push(ownedMapping(request, status));
+        continue;
+      }
+      await this.add(target, state, request, added);
+      mappings.push(ownedMapping(request, "added"));
+    }
+    return this.acknowledge(state, target.owner, { mappings, ...report });
   }
 
   /** Every reverse on the device, each marked whether this session owns it. */
@@ -576,7 +605,7 @@ export class PortReverseManager {
         continue;
       }
       try {
-        await state.adb.remove(devicePort);
+        await this.ownership.removing(deviceId, devicePort, state.adb.remove(devicePort));
         state.pendingRemoval.delete(devicePort);
         view.delete(devicePort);
         this.audit(`remove ${tcp(devicePort)} -> ${tcp(hostPort)} device=${deviceId} (retried)`);
@@ -904,7 +933,7 @@ export class PortReverseManager {
       return { ...current, owned: false, owner: "prototype", status: "released" };
     }
     try {
-      await state.adb.remove(devicePort);
+      await this.ownership.removing(deviceId, devicePort, state.adb.remove(devicePort));
     } catch (error) {
       rethrowDeviceTransportUnavailable(error);
       throw toActionableError(
@@ -975,7 +1004,7 @@ export class PortReverseManager {
     const owned = state.owned.get(entry.devicePort)?.owner === owner;
     const status = report.restored.includes(entry.devicePort) ? "restored" : "present";
     const prototype =
-      !owned && this.heldElsewhere(deviceId, entry.devicePort) === "prototype"
+      !owned && this.heldElsewhere(deviceId, entry.devicePort)?.kind === "prototype"
         ? { owner: "prototype" as const }
         : {};
     return { ...entry, owned, ...prototype, status };

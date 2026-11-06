@@ -88,8 +88,12 @@ export class FakeAdbReverseCommands implements AdbReverseCommands {
     this.mappings.set(devicePort, `tcp:${hostPort}`);
   }
 
+  /** While set, a removal is recorded in `calls` but waits for this promise before it is applied. */
+  removeGate?: Promise<void>;
+
   async remove(devicePort: number) {
     this.calls.push(`remove ${devicePort}`);
+    await this.removeGate;
     if (this.failRemove.has(devicePort)) {
       throw new Error("adb: error: transport busy");
     }

@@ -20,7 +20,8 @@ const setup = () => {
   const sessions = new PortReverseManager(() => {}, undefined, undefined, ownership);
   const prototypes = new PrototypeAdbReverseManager(ownership);
   const prototypeAdb: PrototypeReverseAdb = {
-    listReversedPorts: async () => new Set((await adb.list()).map((entry) => entry.devicePort)),
+    listReverses: async () =>
+      new Map((await adb.list()).map((entry) => [entry.devicePort, entry.hostPort])),
     addReverse: (port) => adb.add(port, port, { noRebind: true }),
     removeReverse: (port) => adb.remove(port),
   };
@@ -42,6 +43,14 @@ const setup = () => {
 
 const removals = (adb: FakeAdbReverseCommands) =>
   adb.calls.filter((call) => call.startsWith("remove"));
+
+/** Lets queued work run until the fake records `call` (bounded, no timers). */
+const until = async (adb: FakeAdbReverseCommands, call: string) => {
+  for (let turn = 0; turn < 100 && !adb.calls.includes(call); turn++) {
+    await Promise.resolve();
+  }
+  expect(adb.calls).toContain(call);
+};
 
 describe("shared adb reverse ownership", () => {
   test("session remove keeps a mapping a prototype relies on; the prototype's release removes it", async () => {
@@ -136,5 +145,67 @@ describe("shared adb reverse ownership", () => {
     await prototypes.releaseAll(DEVICE);
     expect(adb.mappings.get(18704)).toBe("tcp:18704");
     expect(removals(adb)).toEqual([]);
+  });
+
+  test("a prototype shown during a session's removal re-adds the port instead of joining it", async () => {
+    const { adb, sessions, prototypes, target, show } = setup();
+    await sessions.ensure(target(), [{ devicePort: 18705, hostPort: 18705 }]);
+    let open = () => {};
+    adb.removeGate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    const removing = sessions.remove(target(), [18705]);
+    await until(adb, "remove 18705");
+    const showing = show("p", 18705);
+    await until(adb, "list");
+    open();
+    const [removed, report] = await Promise.all([removing, showing]);
+
+    expect(removed.mappings[0]?.status).toBe("removed");
+    expect(report.reverseFailures).toEqual([]);
+    expect(adb.mappings.get(18705)).toBe("tcp:18705");
+    expect(prototypes.ownedPorts(DEVICE)).toEqual([18705]);
+  });
+
+  test("a failed ensure gives back the prototype port it shared", async () => {
+    const { adb, sessions, prototypes, target, show } = setup();
+    await show("p", 18705);
+    adb.failAdd.add(18706);
+
+    await expect(
+      sessions.ensure(target(), [
+        { devicePort: 18705, hostPort: 18705 },
+        { devicePort: 18706, hostPort: 18706 },
+      ]),
+    ).rejects.toThrow();
+    expect(sessions.ownedPorts(DEVICE)).toEqual([]);
+    expect(adb.mappings.get(18705)).toBe("tcp:18705");
+
+    await prototypes.release(DEVICE, "p");
+    expect(adb.mappings.has(18705)).toBe(false);
+  });
+
+  test("a prototype does not join a session port re-pointed outside AutoMobile", async () => {
+    const { adb, sessions, prototypes, target, show } = setup();
+    await sessions.ensure(target(), [{ devicePort: 18705, hostPort: 18705 }]);
+    adb.mappings.set(18705, "tcp:9000");
+    await show("p", 18705);
+    expect(prototypes.ownedPorts(DEVICE)).toEqual([]);
+
+    expect((await sessions.remove(target(), [18705])).mappings[0]?.status).toBe("foreign");
+    await prototypes.release(DEVICE, "p");
+    expect(adb.mappings.get(18705)).toBe("tcp:9000");
+    expect(removals(adb)).toEqual([]);
+  });
+
+  test("a prototype adds a session port the device lost rather than joining it", async () => {
+    const { adb, prototypes, target, sessions, show } = setup();
+    await sessions.ensure(target(), [{ devicePort: 18705, hostPort: 18705 }]);
+    adb.mappings.delete(18705);
+
+    const report = await show("p", 18705);
+    expect(report.reverseFailures).toEqual([]);
+    expect(adb.mappings.get(18705)).toBe("tcp:18705");
+    expect(prototypes.ownedPorts(DEVICE)).toEqual([18705]);
   });
 });

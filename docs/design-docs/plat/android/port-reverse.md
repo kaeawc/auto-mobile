@@ -45,14 +45,19 @@ manager (#12530) also uses.
   succeeds or the mapping is gone or re-pointed. `--remove-all` is never used.
 - The prototype manager and this one keep separate owner maps but share one
   ownership view (`AdbReverseOwnership`), where each answers from its own state
-  whether it holds a device port (#17253). A prototype needing a port a session
-  holds joins it without an add; `ensure` on a prototype-held port to the same
-  host port joins it (status `present`), and to another host port is a
-  `prototype` conflict. Neither manager removes a port the other still holds:
-  `remove` of a shared port drops the session's ownership and reports
-  `released` with `owner: "prototype"`, and the last holder removes the mapping.
-  A session's pending removal counts as a hold, and is dropped without removing
-  when a prototype holds the port. The view is in memory and per process.
+  whether it holds a device port and to which host port (#17253). A prototype
+  joins a session's port only when `--list` shows it still mapped to the
+  session's host port; a lost one is added, a re-pointed one left alone.
+  `ensure` on a prototype-held port to the same host port joins it (status
+  `present`), and to another host port is a `prototype` conflict; a failed
+  `ensure` gives its joined ports back with its adds. Neither manager removes a
+  port the other still holds: `remove` of a shared port drops the session's
+  ownership and reports `released` with `owner: "prototype"`, and the last
+  holder removes the mapping. Every removal is tracked in the view while in
+  flight, and the other manager waits for it before joining or judging that
+  port, so nobody joins a mapping being deleted. A session's pending removal
+  counts as a hold, and is dropped without removing when a prototype holds the
+  port. The view is in memory and per process.
 
 ## Device listeners
 

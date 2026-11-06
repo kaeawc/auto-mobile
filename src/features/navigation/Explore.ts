@@ -702,7 +702,7 @@ export class Explore extends BaseVisualChange {
 
       // Validate selection also handles empty leaf screens and missing elements.
       if (mode === "validate" && this.graphTraversalState) {
-        return this.selectValidateElement(safeCandidates);
+        return this.selectValidateElement(safeCandidates, viewHierarchy);
       }
 
       if (safeCandidates.length === 0 || !viewHierarchy) {
@@ -726,7 +726,7 @@ export class Explore extends BaseVisualChange {
       );
     });
   }
-  private selectValidateElement(candidates: Element[]): Element | null {
+  private selectValidateElement(candidates: Element[], hierarchy: ObserveResult["viewHierarchy"]) {
     const selection = {
       stopReason: this.stopReason,
       currentTargetEdge: this.currentTargetEdge,
@@ -739,6 +739,7 @@ export class Explore extends BaseVisualChange {
         graphTraversalState: this.graphTraversalState,
         navigationManager: this.navigationManager,
         timer: this.timer,
+        hierarchy,
       },
       selection,
     );

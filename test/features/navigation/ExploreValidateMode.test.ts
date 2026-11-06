@@ -1,5 +1,6 @@
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
-import { Element } from "../../../src/models";
+import { Element, type ViewHierarchyResult } from "../../../src/models";
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import {
   NavigationGraphManager,
   type NavigationEdge,
@@ -589,6 +590,40 @@ describe("ExploreValidateMode", () => {
 
       expect(findElementMatchingEdge([first, second], edge)?.element).toBe(second);
       expect(resolveEdgeTarget([first], edge)).toMatchObject({ status: "not-found" });
+    });
+
+    test("resolves a lone elementId focusNavigate target as the pinned replay does", () => {
+      const bounds = { left: 0, top: 0, right: 200, bottom: 80 };
+      // Hand-built Compose node: its native id omits the package namespace the recording used.
+      const save = createMockElement({ text: "Save", "resource-id": "save", bounds });
+      const hierarchy: ViewHierarchyResult = {
+        hierarchy: {
+          node: createFlatNodeForTest({
+            bounds,
+            text: "Save",
+            "resource-id": "save",
+            clickable: true,
+            focusable: true,
+          }),
+        },
+      };
+      const edge = interactionEdge("focusNavigate", {
+        until: { elementId: "com.example:id/save" },
+        select: true,
+      });
+
+      expect(resolveEdgeTarget([save], edge, hierarchy)).toMatchObject({
+        status: "matched",
+        element: save,
+      });
+      const elsewhere = interactionEdge("focusNavigate", {
+        until: { elementId: "com.example:id/missing" },
+        select: true,
+      });
+      expect(resolveEdgeTarget([save], elsewhere, hierarchy)).toEqual({
+        status: "not-found",
+        bestScore: 0,
+      });
     });
 
     test("falls back to scoring when the multi-field target is a label inside a row", () => {

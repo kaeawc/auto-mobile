@@ -123,4 +123,11 @@ describe("pinnedFocusOptions", () => {
     expect(pinnedFocusOptions({ resourceId: "app:id/play" }, resolver)).toEqual({});
     expect(pinnedFocusOptions({ text: "Play" }, resolver)).toEqual({});
   });
+
+  test("does not pin a target that combines its label or elementId with other fields", () => {
+    // The resolver reads one field; pinning would drop the rest of the conjunction.
+    expect(pinnedFocusOptions({ label: "More", resourceId: "app:id/right" }, resolver)).toEqual({});
+    expect(pinnedFocusOptions({ elementId: "app:id/more", text: "More" }, resolver)).toEqual({});
+    expect(pinnedFocusOptions({ label: "More", labelExact: true }, resolver)).toEqual({});
+  });
 });

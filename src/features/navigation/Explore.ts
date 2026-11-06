@@ -682,6 +682,7 @@ export class Explore extends BaseVisualChange {
       consecutiveBackCount: this.consecutiveBackCount,
       consecutiveNoChangeCount: this.consecutiveNoChangeCount,
       maxConsecutiveNoChange: Explore.MAX_CONSECUTIVE_NO_CHANGE,
+      interactionsPerformed: this.interactionCount,
       loopDetection: this.loopDetection,
       getCurrentScreen: () => this.navigationManager.getCurrentScreen(),
     });

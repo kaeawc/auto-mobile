@@ -89,6 +89,54 @@ test("correlates taps and typing and propagates runner refusal", async () => {
   client.close();
 });
 
+test("maps a disabled visionOS accessibility API to an actionable error", async () => {
+  const { socket, client } = fixture();
+  socket.receive(connected);
+  const pending = client.request({ type: "request_tap_element", identifier: "orn" });
+  await drainMicrotasks(2);
+  socket.receive({
+    type: "error",
+    requestId: socket.sent[0].requestId,
+    error: "Error getting main window kAXErrorAPIDisabled",
+  });
+  const failure = await pending.then(
+    () => undefined,
+    (error: unknown) => error as { cause?: unknown; errorCode?: string; message?: string },
+  );
+  expect(failure?.errorCode).toBe("accessibility_api_disabled");
+  expect(failure?.message).toContain("accessibility");
+  expect(failure?.cause).toBe("Error getting main window kAXErrorAPIDisabled");
+  client.close();
+});
+
+test("preserves ordinary runner errors and resolves successful responses", async () => {
+  const { socket, client } = fixture();
+  socket.receive(connected);
+  const failed = client.request({ type: "request_tap_element", identifier: "orn" });
+  await drainMicrotasks(2);
+  socket.receive({
+    type: "error",
+    requestId: socket.sent[0].requestId,
+    error: "element not found",
+  });
+  const failure = await failed.then(
+    () => undefined,
+    (error: unknown) => error as { errorCode?: string; message?: string },
+  );
+  expect(failure?.errorCode).toBe("command_failed");
+  expect(failure?.message).toBe("element not found");
+
+  const succeeded = client.request({ type: "request_tap_element", identifier: "orn" });
+  await drainMicrotasks(2);
+  socket.receive({
+    type: "tap_element_result",
+    requestId: socket.sent[1].requestId,
+    success: true,
+  });
+  expect(await succeeded).toBeUndefined();
+  client.close();
+});
+
 test("a sent input that times out is reported as an unknown outcome, a hierarchy is not", async () => {
   const { socket, timer, client } = fixture();
   socket.receive(connected);

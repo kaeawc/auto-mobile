@@ -291,3 +291,15 @@ test("infers a vertical list from its rows, not the labels at their edges", () =
   ];
   expect(listAdvanceDirection(container, [...row(0), ...row(200)])).toBe("down");
 });
+
+test("infers a vertical list when an enclosing screen node is in the flattened hierarchy", () => {
+  const container = { left: 0, top: 300, right: 1920, bottom: 800 };
+  const root: Element = { bounds: { left: 0, top: 0, right: 1920, bottom: 1080 } };
+  const rows: Element[] = [300, 450, 600].map((top) => ({
+    bounds: { left: 0, top, right: 1920, bottom: top + 150 },
+    text: `Row ${top}`,
+  }));
+  expect(listAdvanceDirection(container, rows)).toBe("down");
+  // The root's centre lies inside the list, but it encloses the list and is not one of its rows.
+  expect(listAdvanceDirection(container, [root, { bounds: container }, ...rows])).toBe("down");
+});

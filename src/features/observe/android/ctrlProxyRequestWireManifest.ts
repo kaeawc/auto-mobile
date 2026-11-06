@@ -45,6 +45,7 @@ export const CTRL_PROXY_REQUEST_FIELDS: {
     scope: "optional",
     alias: "optional",
   },
+  export_attestation: { type: "required", requestId: "required" },
   discover_keystore: {
     type: "required",
     requestId: "required",

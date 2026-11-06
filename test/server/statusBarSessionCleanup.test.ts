@@ -3,12 +3,14 @@ import {
   forgetStatusBarOverrideForRemovedDevice,
   registerStatusBarSessionCleanup,
 } from "../../src/daemon/statusBarSessionCleanup";
+import { StatusBarRequestRejectedError } from "../../src/features/utility/StatusBarOverride";
 import { StatusBarOverrideRegistry } from "../../src/features/utility/StatusBarOverrideRegistry";
 import type { BootedDevice } from "../../src/models";
+import { createStatusBarHandler, type StatusBarArgs } from "../../src/server/statusBarTools";
 import { FakeSessionCleanupManager } from "../fakes/FakeSessionCleanupManager";
 import { FakeStatusBarController } from "../fakes/FakeStatusBarController";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { drainUntil } from "../helpers/fakeTimerStepping";
+import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
 
 const DEVICE: BootedDevice = { name: "Pixel", platform: "android", deviceId: "emulator-5554" };
 
@@ -81,6 +83,7 @@ describe("registerStatusBarSessionCleanup (#14105)", () => {
     void manager.pendingCleanups[0]!.cleanup.then(() => {
       settled = true;
     });
+    await drainUntil(() => controller.clears === 1, { description: "release clear started" });
     timer.advanceTime(9_999);
     expect(controller.lastClearSignal?.aborted).toBe(false);
     timer.advanceTime(1);
@@ -92,6 +95,103 @@ describe("registerStatusBarSessionCleanup (#14105)", () => {
     registry.record(DEVICE, "session-1", { time: "9:41" });
     forgetStatusBarOverrideForRemovedDevice(DEVICE.deviceId, registry);
     expect(registry.get(DEVICE.deviceId)).toBeNull();
+  });
+});
+
+describe("release-time clear ordered against a sessionless override on the device (#17084)", () => {
+  let registry: StatusBarOverrideRegistry;
+  let manager: FakeSessionCleanupManager;
+  let controller: FakeStatusBarController;
+  let timer: FakeTimer;
+  let handler: ReturnType<typeof createStatusBarHandler>;
+
+  const sessionless = (args: Partial<StatusBarArgs>) =>
+    handler(DEVICE, { action: "override", ...args } as StatusBarArgs);
+  const hold = (gates: Promise<void>[]) => {
+    const gate = Promise.withResolvers<void>();
+    gates.push(gate.promise);
+    return gate;
+  };
+
+  beforeEach(() => {
+    registry = new StatusBarOverrideRegistry();
+    manager = new FakeSessionCleanupManager();
+    controller = new FakeStatusBarController();
+    timer = new FakeTimer();
+    registerStatusBarSessionCleanup(manager, { registry, controllerFor: () => controller, timer });
+    handler = createStatusBarHandler({
+      controllerFor: () => controller,
+      registry,
+      sessionManager: () => undefined,
+    });
+  });
+
+  test("a sessionless override issued during the release clear runs after it and stays recorded", async () => {
+    registry.record(DEVICE, "session-1", { time: "9:41" });
+    const clearGate = hold(controller.clearGates);
+    manager.release("session-1", DEVICE.deviceId);
+    await drainUntil(() => controller.clears === 1, { description: "release clear started" });
+    const override = sessionless({ batteryLevel: 50 });
+    await drainMicrotasks(50);
+    expect(controller.overrides).toEqual([]);
+    clearGate.resolve();
+    await override;
+    await manager.settle();
+    expect(controller.overrides).toEqual([{ batteryLevel: 50 }]);
+    expect(registry.get(DEVICE.deviceId)).toEqual({
+      device: DEVICE,
+      sessionId: null,
+      overrides: { batteryLevel: 50 },
+    });
+  });
+
+  test("a release during a refused sessionless override clears the session's restored record", async () => {
+    registry.record(DEVICE, "session-1", { time: "9:41" });
+    const overrideGate = hold(controller.overrideGates);
+    const refused = sessionless({ time: "1234" });
+    await drainUntil(() => controller.overrides.length === 1, { description: "override sent" });
+    expect(registry.get(DEVICE.deviceId)?.sessionId).toBeNull();
+    manager.release("session-1", DEVICE.deviceId);
+    expect(manager.pendingCleanups.map((entry) => entry.deviceId)).toEqual([DEVICE.deviceId]);
+    await drainMicrotasks(50);
+    expect(controller.clears).toBe(0);
+    overrideGate.reject(new StatusBarRequestRejectedError("refused"));
+    await expect(refused).rejects.toThrow("refused");
+    await manager.settle();
+    expect(controller.clears).toBe(1);
+    expect(registry.get(DEVICE.deviceId)).toBeNull();
+  });
+
+  test("a release during an applied sessionless override leaves the new owner's record", async () => {
+    registry.record(DEVICE, "session-1", { time: "9:41" });
+    const overrideGate = hold(controller.overrideGates);
+    const applied = sessionless({ batteryLevel: 50 });
+    await drainUntil(() => controller.overrides.length === 1, { description: "override sent" });
+    manager.release("session-1", DEVICE.deviceId);
+    overrideGate.resolve();
+    await applied;
+    await manager.settle();
+    expect(controller.clears).toBe(0);
+    expect(registry.get(DEVICE.deviceId)?.sessionId).toBeNull();
+  });
+
+  test("the release cap covers the wait behind a hung override; the late turn sends nothing", async () => {
+    registry.record(DEVICE, "session-1", { time: "9:41" });
+    const overrideGate = hold(controller.overrideGates);
+    const refused = sessionless({ time: "1234" });
+    await drainUntil(() => controller.overrides.length === 1, { description: "override sent" });
+    manager.release("session-1", DEVICE.deviceId);
+    let settled = false;
+    void manager.pendingCleanups[0]!.cleanup.then(() => {
+      settled = true;
+    });
+    timer.advanceTime(10_000);
+    await drainUntil(() => settled, { description: "status bar clear cap" });
+    overrideGate.reject(new StatusBarRequestRejectedError("refused"));
+    await expect(refused).rejects.toThrow("refused");
+    await drainMicrotasks(50);
+    expect(controller.clears).toBe(0);
+    expect(registry.get(DEVICE.deviceId)?.sessionId).toBe("session-1");
   });
 });
 

@@ -30,6 +30,15 @@ export const accessibilityFocusResultSchema = z
   .object({
     success: z.boolean(),
     error: z.string().optional(),
+    errorCode: z
+      .enum([
+        "voiceover_off",
+        "sdk_unavailable",
+        "element_not_found",
+        "invalid_selector",
+        "unsupported",
+      ])
+      .optional(),
     warning: z.string().optional(),
     focusedElement: elementSchema.optional(),
     confirmed: z.boolean().optional(),

@@ -14,11 +14,32 @@ let package = Package(
             name: "CtrlProxy",
             targets: ["CtrlProxy"]
         ),
+        .executable(
+            name: "AXBridge",
+            targets: ["AXBridge"]
+        ),
     ],
     dependencies: [
         .package(path: "../sdk-wire"),
     ],
     targets: [
+        .target(
+            name: "AXBridgeCore",
+            path: "Sources/AXBridgeCore",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .executableTarget(
+            name: "AXBridge",
+            dependencies: ["AXBridgeCore"],
+            path: "Sources/AXBridge",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
+            name: "AXBridgeCoreTests",
+            dependencies: ["AXBridgeCore"],
+            path: "Tests/AXBridgeCoreTests",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
         .target(
             name: "ObjCExceptionCatcher",
             path: "Sources/ObjCExceptionCatcher",
@@ -48,6 +69,24 @@ let package = Package(
             name: "TVCommandPolicyTests",
             dependencies: ["TVCommandPolicy", "CtrlProxy"],
             path: "Tests/TVCommandPolicyTests",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .target(
+            name: "VisionCommandPolicy",
+            path: "Tests/CtrlProxyVisionUITests",
+            exclude: [
+                "CtrlProxyVisionUITests.swift",
+                "VisionCommandRouter.swift",
+                "VisionWebSocketServer.swift",
+                "VisionCommandRouterSmokeTests.swift",
+            ],
+            sources: ["VisionCommandPolicy.swift", "ConnectedEvent.swift"],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
+            name: "VisionCommandPolicyTests",
+            dependencies: ["VisionCommandPolicy"],
+            path: "Tests/VisionCommandPolicyTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         // Shared test doubles + fixtures for the implementation. NOT a dependency of the

@@ -1,0 +1,45 @@
+[
+  {
+    "name": "dismiss ends the prototype and skips later actions",
+    "spec": {
+      "id": "trace-dismiss",
+      "window": { "placement": { "type": "fullscreen" } },
+      "state": { "count": 0 },
+      "root": { "type": "text", "text": "Dismiss" }
+    },
+    "steps": [
+      {
+        "actions": [
+          { "type": "increment", "key": "count" },
+          { "type": "dismiss" },
+          { "type": "increment", "key": "count" }
+        ],
+        "expect": { "shown": false }
+      }
+    ]
+  },
+  {
+    "name": "dismiss cancels pending timers",
+    "spec": {
+      "id": "trace-dismiss-timer",
+      "window": { "placement": { "type": "fullscreen" } },
+      "state": { "fired": false },
+      "root": { "type": "text", "text": "Dismiss" }
+    },
+    "steps": [
+      {
+        "actions": [
+          {
+            "type": "startTimer",
+            "id": "later",
+            "afterMs": 100,
+            "actions": [{ "type": "setState", "key": "fired", "value": true }]
+          }
+        ],
+        "expect": { "shown": true, "state": { "fired": false } }
+      },
+      { "actions": [{ "type": "dismiss" }], "expect": { "shown": false } },
+      { "advanceMs": 500, "expect": { "shown": false } }
+    ]
+  }
+]

@@ -17,6 +17,16 @@ final class PrototypeEmitContextTests: XCTestCase {
         let contextTruncated: Bool?
     }
 
+    /// A marker-tap fixture: Swift's node model has no `onMarkerTap`, so the spec stays raw JSON.
+    private struct MarkerTapFixture: Decodable {
+        let spec: JSONValue
+        let state: [String: JSONValue]
+        let pages: [String: Int]
+        let data: [String: JSONValue]
+        let handlerContext: [String: JSONValue]
+        let expected: Expected
+    }
+
     private struct Invalid: Decodable {
         let spec: JSONValue
         let expectedPath: String
@@ -71,6 +81,22 @@ final class PrototypeEmitContextTests: XCTestCase {
         }
         let context = try XCTUnwrap(node.onTap?.first?.context)
         let result = context.resolve(FakeInputs(values: state, pages: fixture.pages, model: fixture.data))
+        XCTAssertEqual(result.context, fixture.expected.context)
+        XCTAssertEqual(result.contextTruncated, fixture.expected.contextTruncated)
+    }
+
+    func testMarkerTapEmitCarriesMarkerId() throws {
+        let fixture = try JSONDecoder().decode(
+            MarkerTapFixture.self, from: load("emit-context/resolve/map-marker-tap.json")
+        )
+        guard case let .array(actions)? = fixture.spec.objectFields?["root"]?.objectFields?["onMarkerTap"],
+              let raw = actions.first?.objectFields?["context"]
+        else { return XCTFail("map-marker-tap fixture has no onMarkerTap emit context") }
+        let context = try JSONDecoder().decode(PrototypeEmitContext.self, from: JSONEncoder().encode(raw))
+        let result = context.resolve(
+            FakeInputs(values: fixture.state, pages: fixture.pages, model: fixture.data),
+            handlerContext: fixture.handlerContext
+        )
         XCTAssertEqual(result.context, fixture.expected.context)
         XCTAssertEqual(result.contextTruncated, fixture.expected.contextTruncated)
     }
@@ -216,8 +242,8 @@ final class PrototypeEmitContextTests: XCTestCase {
         ).filter { $0.pathExtension == "json" }.map { $0.deletingPathExtension().lastPathComponent }.sorted()
         XCTAssertEqual(resolve, [
             "arbitrary-names", "data-object-array", "data-repeat-row-3", "empty", "exact-budget",
-            "first-too-large", "literal-json", "literal-payload", "missing-null", "name-order-truncation",
-            "page", "prefix-truncation", "repeat-row-3", "state-after-set", "utf8-byte-budget",
+            "first-too-large", "literal-json", "literal-payload", "map-marker-tap", "missing-null",
+            "name-order-truncation", "page", "prefix-truncation", "repeat-row-3", "state-after-set", "utf8-byte-budget",
             "utf8-name-order-truncation",
         ])
     }

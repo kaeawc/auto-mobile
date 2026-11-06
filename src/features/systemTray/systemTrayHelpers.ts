@@ -20,6 +20,7 @@ export {
   ensureSystemTrayOpen,
   ensureSystemTrayClosed,
   waitForNotificationMatch,
+  notificationNotFoundError,
   tapElement,
   swipeElement,
 } from "./helpers/runtime";

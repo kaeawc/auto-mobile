@@ -28,7 +28,11 @@ STUB
   cat > "$XCRUN_BIN" <<'STUB'
 #!/usr/bin/env bash
 printf 'xcrun %s\n' "$*" >> "$CALLS"
-[[ "$*" == "simctl install test-udid $PROTOTYPE_SMOKE_APP_BUNDLE" ]]
+case "$*" in
+  "simctl install test-udid $PROTOTYPE_SMOKE_APP_BUNDLE") ;;
+  "simctl spawn test-udid "*) echo "stub output for: $*" ;;
+  *) exit 1 ;;
+esac
 STUB
   cat > "$TEST_DIR/bin/auto-mobile" <<'STUB'
 #!/usr/bin/env bash
@@ -56,7 +60,9 @@ tool="$1"; shift
 [[ "$1 $2" == '--deviceId test-udid' ]] || exit 2
 shift 2
 case "$tool:$*" in
-  'launchApp:--platform ios --appId com.example.deeplinkdemo --prototype true') echo '{"success":true}';;
+  'launchApp:--platform ios --appId com.example.deeplinkdemo --prototype true')
+    [[ "${MODE:-}" != launch-fails ]] || { echo '{"success":false,"error":"No prototype agent is listening on 127.0.0.1:8767"}'; exit 1; }
+    echo '{"success":true}';;
   'prototype:--action show --spec '*)
     [[ "${MODE:-}" != unsupported ]] || { echo '{"success":false,"errorCode":"unsupported_capability"}'; exit 1; }
     [[ "${MODE:-}" != platform ]] || { echo '{"success":false,"errorCode":"unsupported_platform"}'; exit 1; }
@@ -97,6 +103,23 @@ run_smoke() { run bash "$ROOT/scripts/ios/prototype-mcp-smoke.sh" test-udid; }
   [[ "$(tail -2 "$CALLS")" == *'release-session smoke-session'*'--action status' ]]
   [ "$(grep -c '^xcrun ' "$CALLS")" -eq 1 ]
   grep -q -- '--appId com.example.deeplinkdemo --prototype true' "$CALLS"
+}
+
+@test "launchApp failure saves the app log and launchd state before exiting 1" {
+  export MODE=launch-fails PROTOTYPE_SMOKE_DIAG_DIR="$TEST_DIR/diag"
+  run_smoke
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'error: launchApp:'*'diagnostics: saved'* ]]
+  grep -q 'simctl spawn test-udid log show --last 2m --predicate process == "DeepLinkDemo"' "$TEST_DIR/diag/app-log.txt"
+  grep -q 'simctl spawn test-udid launchctl list' "$TEST_DIR/diag/launchctl-list.txt"
+  [ -f "$TEST_DIR/released" ]
+}
+
+@test "other step failures do not collect launch diagnostics" {
+  export MODE=show-fails PROTOTYPE_SMOKE_DIAG_DIR="$TEST_DIR/diag"
+  run_smoke
+  [ "$status" -eq 1 ]
+  [ ! -e "$TEST_DIR/diag" ]
 }
 
 @test "show failure exits 1 and releases" {

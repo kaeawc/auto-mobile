@@ -2,14 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import {
-  buildRawVideoFfmpegArgs,
-  clampCaptureFps,
+  buildDeviceEncodeSettings,
+  buildEncodedCopyFfmpegArgs,
   IosPhysicalVideoCaptureBackend,
-  MAX_CAPTURE_FPS,
-  packFrame,
   parseCaptureDeviceList,
-  SOFTWARE_H264_ENCODER,
-  VIDEOTOOLBOX_H264_ENCODER,
   type CaptureDeviceInfo,
   type CaptureDeviceLister,
   type PhysicalIosCaptureHelper,
@@ -18,7 +14,7 @@ import {
   VideoCaptureFinalizationError,
   type VideoCaptureConfig,
 } from "../../../src/features/video/VideoRecorderService";
-import type { DecodedFrame } from "../../../src/features/screen-stream/frameProtocol";
+import type { DecodedEncodedVideo } from "../../../src/features/screen-stream/frameProtocol";
 import type {
   FfmpegClient,
   FfmpegProbeRequest,
@@ -106,7 +102,6 @@ class FakeFfmpegClient implements FfmpegClient {
   readonly processes: FakeFfmpegProcess[] = [];
   probeError: Error | null = null;
   probeRequest?: FfmpegProbeRequest;
-  encoders: string[] = [VIDEOTOOLBOX_H264_ENCODER, SOFTWARE_H264_ENCODER];
 
   start(request: FfmpegStartRequest): FfmpegStartedProcess {
     this.startRequests.push(request);
@@ -124,7 +119,7 @@ class FakeFfmpegClient implements FfmpegClient {
     if (this.probeError) {
       throw this.probeError;
     }
-    return { version: "7.1", encoders: this.encoders };
+    return { version: "7.1", encoders: [] };
   }
 
   pipe(): void {
@@ -168,25 +163,16 @@ class FakeCaptureHelper extends EventEmitter implements PhysicalIosCaptureHelper
     this.emit("exit", info);
   }
 
-  /**
-   * Capture timestamps advance by more than one 15fps interval by default, so a
-   * plain `emitFrame()` is admitted by the pacing gate. Pass `timestampMs`
-   * explicitly to exercise a device pushing frames faster than the request.
-   */
-  private clockMs = 0;
-
-  emitFrame(
-    width: number,
-    height: number,
-    bytesPerRow = width * 4,
-    fill = 0xaa,
-    timestampMs?: number,
+  /** Annex-B access unit as the helper's `--encode h264` mode delivers it. */
+  emitRecord(
+    keyframe = true,
+    payload: Buffer = Buffer.from([0, 0, 0, 1, keyframe ? 0x65 : 0x41]),
   ): void {
-    this.clockMs += 100;
-    this.emit("frame", {
-      header: { width, height, bytesPerRow, timestampMs: timestampMs ?? this.clockMs },
-      pixels: Buffer.alloc(bytesPerRow * height, fill),
-    } satisfies DecodedFrame);
+    this.emit("encodedVideo", {
+      keyframe,
+      presentationTimestampMs: 1,
+      payload,
+    } satisfies DecodedEncodedVideo);
   }
 }
 
@@ -228,7 +214,7 @@ interface Harness {
   ffmpeg: FakeFfmpegClient;
   helper: FakeCaptureHelper;
   lister: FakeDeviceLister;
-  helperOptions: { binaryPath: string; deviceId?: string }[];
+  helperOptions: { binaryPath: string; deviceId?: string; encode?: unknown }[];
 }
 
 function makeHarness(
@@ -244,7 +230,7 @@ function makeHarness(
   const ffmpeg = new FakeFfmpegClient();
   const helper = new FakeCaptureHelper();
   const lister = new FakeDeviceLister(options.devices ?? [captureDevice(PHYSICAL_UDID)]);
-  const helperOptions: { binaryPath: string; deviceId?: string }[] = [];
+  const helperOptions: { binaryPath: string; deviceId?: string; encode?: unknown }[] = [];
   const helperPath =
     options.helperPath === undefined ? "/helpers/screen-capture-helper" : options.helperPath;
 
@@ -256,6 +242,7 @@ function makeHarness(
       helperOptions.push({
         binaryPath: created.binaryPath,
         deviceId: created.target.kind === "device" ? created.target.deviceId : undefined,
+        encode: created.target.kind === "device" ? created.target.encode : undefined,
       });
       return helper;
     },
@@ -269,7 +256,7 @@ function makeHarness(
 }
 
 describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
-  test("records a physical iOS device by piping helper BGRA frames into ffmpeg rawvideo", async function () {
+  test("requests helper-side H.264 encoding and stream-copies its records into an MP4", async function () {
     const harness = makeHarness();
 
     const handle = await harness.backend.start(makeConfig());
@@ -277,30 +264,25 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     expect(harness.helperOptions[0]).toEqual({
       binaryPath: "/helpers/screen-capture-helper",
       deviceId: PHYSICAL_UDID,
+      encode: { codec: "h264", bitrate: { kind: "explicitBps", bps: 1_000_000 } },
     });
-    // ffmpeg cannot be spawned before a frame pins the raw geometry.
+    // ffmpeg joins the stream at a keyframe, so nothing is spawned before one.
     expect(harness.ffmpeg.startRequests.length).toBe(0);
 
-    harness.helper.emitFrame(4, 2);
-    harness.helper.emitFrame(4, 2);
+    harness.helper.emitRecord(true, Buffer.from([1, 2, 3]));
+    harness.helper.emitRecord(false, Buffer.from([4, 5]));
     expect(harness.ffmpeg.startRequests.length).toBe(1);
     expect(harness.ffmpeg.startRequests[0].args).toEqual([
+      "-use_wallclock_as_timestamps",
+      "1",
       "-f",
-      "rawvideo",
-      "-pixel_format",
-      "bgra",
-      "-video_size",
-      "4x2",
-      "-framerate",
-      "15",
+      "h264",
       "-i",
       "pipe:0",
       "-c:v",
-      VIDEOTOOLBOX_H264_ENCODER,
-      "-b:v",
-      "1000k",
-      "-pix_fmt",
-      "yuv420p",
+      "copy",
+      "-fps_mode",
+      "passthrough",
       "-movflags",
       "+faststart",
       "-y",
@@ -310,7 +292,9 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     const result = await harness.backend.stop(handle);
 
     expect(harness.helper.stopped).toBe(1);
-    expect(harness.ffmpeg.processes[0].bytesWritten).toBe(2 * 4 * 2 * 4);
+    expect(Buffer.concat(harness.ffmpeg.processes[0].written)).toEqual(
+      Buffer.from([1, 2, 3, 4, 5]),
+    );
     expect(result).toMatchObject({
       recordingId: "rec-1",
       outputPath: "/tmp/archive/rec-1/video.mp4",
@@ -319,99 +303,89 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     });
   });
 
-  // A static screen delivers no frames, so without trailing padding the file
-  // ends at the last frame's slot however long the recording actually ran.
-  test("pads the stall between the last frame and stop", async function () {
-    let clockMs = 10_000;
-    const harness = makeHarness({ now: () => clockMs });
-    const handle = await harness.backend.start(makeConfig({ fps: 10 }));
+  test("drops records that precede the first keyframe", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig());
 
-    harness.helper.emitFrame(2, 2, 8, 0x11, 0);
-    clockMs += 500; // screen static for half a second before stop
-
+    harness.helper.emitRecord(false, Buffer.from([9]));
+    expect(harness.ffmpeg.startRequests.length).toBe(0);
+    harness.helper.emitRecord(true, Buffer.from([1]));
+    harness.helper.emitRecord(false, Buffer.from([2]));
     await harness.backend.stop(handle);
 
-    const frameBytes = 2 * 2 * 4;
-    const written = harness.ffmpeg.processes[0].written.reduce((n, c) => n + c.length, 0);
-    // The frame itself plus five 100ms slots of held picture.
-    expect(written / frameBytes).toBe(6);
+    expect(Buffer.concat(harness.ffmpeg.processes[0].written)).toEqual(Buffer.from([1, 2]));
   });
 
-  // Only the 2-frame budget fits synchronously, so with real frame sizes most of
-  // the trailing padding is still queued when stop() runs. Discarding it there
-  // would shorten the recording by exactly that padding.
-  test("drains queued trailing padding before closing the encoder", async function () {
-    let clockMs = 10_000;
-    const harness = makeHarness({ now: () => clockMs });
-    const handle = await harness.backend.start(makeConfig({ fps: 10 }));
+  test("names undecodable helper output when no record ever arrived", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig());
+    harness.helper.emit("malformed", { reason: "header_unsupported_record" });
 
-    // 64KB frames: the 2-frame budget cannot absorb the padding in one flush.
-    harness.helper.emitFrame(128, 128, 128 * 4, 0x11, 0);
-    const encoder = harness.ffmpeg.processes[0];
-    // Stop consuming so queued writes genuinely accumulate, as a busy encoder does.
-    encoder.stdin.pause();
-    clockMs += 500;
+    await expect(harness.backend.stop(handle)).rejects.toThrow("header_unsupported_record");
+  });
 
-    const stopPromise = harness.backend.stop(handle);
-    await new Promise((resolve) => setImmediate(resolve));
-    const frameBytes = 128 * 128 * 4;
-    // Only the budget made it in synchronously; the rest is still owed.
-    expect(encoder.written.reduce((n, c) => n + c.length, 0) / frameBytes).toBeLessThan(6);
+  test("does not spawn the muxer once a stop was requested", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig());
+    harness.helper.onStop = () => harness.helper.emitRecord();
 
-    encoder.stdin.resume();
-    const result = await stopPromise;
+    await expect(harness.backend.stop(handle)).rejects.toThrow("No frames were captured");
+    expect(harness.ffmpeg.startRequests).toHaveLength(0);
+  });
 
-    const written = encoder.written.reduce((n, c) => n + c.length, 0);
-    // 1 frame + five 100ms slots, none lost to the buffer budget.
-    expect(written / frameBytes).toBe(6);
+  test("works with an ffmpeg that lists no H.264 encoders because it only copies", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig());
+    harness.helper.emitRecord();
+
+    const result = await harness.backend.stop(handle);
+
     expect(result.codec).toBe("h264");
   });
+});
 
-  test("caps trailing padding for a very long final stall", async function () {
-    let clockMs = 10_000;
-    const harness = makeHarness({ now: () => clockMs });
-    const handle = await harness.backend.start(makeConfig({ fps: 10 }));
-
-    harness.helper.emitFrame(2, 2, 8, 0x11, 0);
-    clockMs += 60_000; // a minute of stillness must not write 600 duplicates
-
-    await harness.backend.stop(handle);
-
-    const frameBytes = 2 * 2 * 4;
-    const written = harness.ffmpeg.processes[0].written.reduce((n, c) => n + c.length, 0);
-    // 1 frame + the 2s cap at 10fps.
-    expect(written / frameBytes).toBe(21);
+describe("buildDeviceEncodeSettings", function () {
+  test("carries the recording bitrate down as an explicit target", function () {
+    expect(buildDeviceEncodeSettings(makeConfig({ targetBitrateKbps: 2500 }))).toEqual({
+      codec: "h264",
+      bitrate: { kind: "explicitBps", bps: 2_500_000 },
+    });
   });
 
-  // The helper SIGTERMs its capture process and waits out a grace period, so
-  // sampling the clock after that await would encode the shutdown latency as
-  // trailing video — up to 30 extra frames at the default 15fps.
-  test("pads to the stop request, not to the end of the helper's shutdown", async function () {
-    let clockMs = 10_000;
-    const harness = makeHarness({ now: () => clockMs });
-    const handle = await harness.backend.start(makeConfig({ fps: 10 }));
-    // A slow helper: two seconds of shutdown grace after stop is requested.
-    harness.helper.onStop = () => {
-      clockMs += 2000;
-    };
-
-    harness.helper.emitFrame(2, 2, 8, 0x11, 0);
-    clockMs += 500; // real stall the user saw, before stop was requested
-
-    await harness.backend.stop(handle);
-
-    const frameBytes = 2 * 2 * 4;
-    const written = harness.ffmpeg.processes[0].written.reduce((n, c) => n + c.length, 0);
-    // The frame plus the five 100ms slots of real stall — the shutdown grace
-    // period contributes nothing.
-    expect(written / frameBytes).toBe(6);
+  test("turns a requested resolution into a cap on the longer edge", function () {
+    expect(
+      buildDeviceEncodeSettings(makeConfig({ resolution: { width: 480, height: 640 } })),
+    ).toMatchObject({ maxLongSide: 640 });
   });
 
+  test("rounds an odd longer edge down to the even value the helper requires", function () {
+    expect(
+      buildDeviceEncodeSettings(makeConfig({ resolution: { width: 1179, height: 2557 } })),
+    ).toMatchObject({ maxLongSide: 2556 });
+  });
+});
+
+describe("buildEncodedCopyFfmpegArgs", function () {
+  test("caps the recording at maxDuration", function () {
+    const args = buildEncodedCopyFfmpegArgs(makeConfig({ maxDurationSeconds: 12 }));
+    expect(args[args.indexOf("-t") + 1]).toBe("12");
+    expect(args.slice(-2)).toEqual(["-y", "/tmp/archive/rec-1/video.mp4"]);
+  });
+
+  test("never re-encodes", function () {
+    const args = buildEncodedCopyFfmpegArgs(makeConfig());
+    expect(args).toContain("copy");
+    expect(args).not.toContain("-vf");
+    expect(args).not.toContain("-b:v");
+  });
+});
+
+describe("IosPhysicalVideoCaptureBackend - lifecycle", function () {
   test("reports the stop boundary rather than the encoder's delayed exit", async function () {
     let clockMs = 10_000;
     const harness = makeHarness({ now: () => clockMs });
     const handle = await harness.backend.start(makeConfig());
-    harness.helper.emitFrame(2, 2);
+    harness.helper.emitRecord();
     harness.helper.onStop = () => {
       clockMs += 2_000;
     };
@@ -421,10 +395,35 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     expect(result.endedAt).toBe(new Date(10_000).toISOString());
   });
 
+  test("sheds records while the muxer stalls and resumes at the next keyframe", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig());
+    harness.helper.emitRecord();
+    const stdin = harness.ffmpeg.processes[0].stdin;
+    stdin.pause();
+    const big = Buffer.alloc(1024 * 1024, 1);
+    for (let i = 0; i < 64; i++) {
+      harness.helper.emitRecord(false, big);
+    }
+    // Bounded: a stalled muxer must not retain the whole stream in the daemon.
+    expect(stdin.writableLength).toBeLessThan(32 * 1024 * 1024);
+
+    stdin.resume();
+    await new Promise((resolve) => setImmediate(resolve));
+    const before = harness.ffmpeg.processes[0].written.length;
+    harness.helper.emitRecord(false, big);
+    expect(harness.ffmpeg.processes[0].written.length).toBe(before);
+    harness.helper.emitRecord(true, big);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(harness.ffmpeg.processes[0].written.length).toBeGreaterThan(before);
+
+    await harness.backend.stop(handle);
+  });
+
   test("stop closes ffmpeg stdin so the moov atom is finalized instead of killing the encoder", async function () {
     const harness = makeHarness();
     const handle = await harness.backend.start(makeConfig());
-    harness.helper.emitFrame(2, 2);
+    harness.helper.emitRecord();
 
     await harness.backend.stop(handle);
 
@@ -432,378 +431,6 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     expect(encoder.stdin.writableEnded).toBe(true);
     expect(encoder.killSignals).toEqual([]);
     expect(encoder.exitCode).toBe(0);
-  });
-
-  test("strips row padding so each written frame is exactly width*height*4 bytes", async function () {
-    const harness = makeHarness();
-    const handle = await harness.backend.start(makeConfig());
-
-    // AVFoundation aligns bytesPerRow up; the padded tail must not reach ffmpeg.
-    harness.helper.emitFrame(3, 2, 32);
-
-    expect(harness.ffmpeg.processes[0].bytesWritten).toBe(3 * 2 * 4);
-    await harness.backend.stop(handle);
-  });
-
-  test("drops frames whose geometry differs from the locked capture size", async function () {
-    const harness = makeHarness();
-    const handle = await harness.backend.start(makeConfig());
-
-    // Timestamps stay inside one 15fps slot of each other so the pacing gate
-    // neither drops nor pads anything, isolating the geometry behavior.
-    harness.helper.emitFrame(4, 2, 16, 0xaa, 0);
-    harness.helper.emitFrame(2, 4, 8, 0xaa, 35); // rotation mid-recording
-    harness.helper.emitFrame(4, 2, 16, 0xaa, 70);
-
-    expect(harness.ffmpeg.startRequests.length).toBe(1);
-    expect(harness.ffmpeg.processes[0].bytesWritten).toBe(2 * 4 * 2 * 4);
-    await harness.backend.stop(handle);
-  });
-
-  test("drops frames instead of buffering without bound while the encoder is behind", async function () {
-    const harness = makeHarness();
-    const handle = await harness.backend.start(makeConfig());
-    harness.helper.emitFrame(4, 2);
-
-    const encoder = harness.ffmpeg.processes[0];
-    encoder.stdin.pause();
-    encoder.stdin.cork();
-    // Overfill the encoder's stdin so it reports needing a drain.
-    while (!encoder.stdin.writableNeedDrain) {
-      encoder.stdin.write(Buffer.alloc(64 * 1024));
-    }
-    const bufferedBefore = encoder.stdin.writableLength;
-
-    harness.helper.emitFrame(4, 2);
-
-    expect(encoder.stdin.writableLength).toBe(bufferedBefore);
-    encoder.stdin.uncork();
-    encoder.stdin.resume();
-    await harness.backend.stop(handle);
-  });
-
-  // AVFoundation device capture is not fps-throttled by the helper, so a 60fps
-  // device feeding a `-framerate 15` rawvideo stream would play back 4x slow.
-  test("paces an unthrottled device down to the requested fps", async function () {
-    const harness = makeHarness();
-    const handle = await harness.backend.start(makeConfig({ fps: 10 }));
-
-    // 20 frames at 60fps spans ~317ms of capture; at 10fps (100ms slots) that
-    // admits the frames at t≈0, 100, 200 and 300 — four, not twenty.
-    for (let i = 0; i < 20; i++) {
-      harness.helper.emitFrame(4, 2, 16, 0xaa, i * 16.67);
-    }
-
-    const framePayloadBytes = 4 * 2 * 4;
-    expect(harness.ffmpeg.processes[0].bytesWritten / framePayloadBytes).toBe(4);
-    await harness.backend.stop(handle);
-  });
-
-  // Capture timestamps are integer milliseconds, so a 30fps source reports
-  // 0, 33, 66, 100... Rebasing the deadline on each admitted frame discards the
-  // sub-slot lateness and compounds it, settling well below the requested rate
-  // while ffmpeg still labels the output 15fps — the file plays fast and short.
-  test("holds the requested rate against integer-millisecond capture timestamps", async function () {
-    const harness = makeHarness();
-    const handle = await harness.backend.start(makeConfig({ fps: 15 }));
-
-    // 10 frames of a 30fps source spanning 300ms.
-    for (let i = 0; i < 10; i++) {
-      harness.helper.emitFrame(4, 2, 16, 0xaa, Math.round(i * (1000 / 30)));
-    }
-
-    const framePayloadBytes = 4 * 2 * 4;
-    // 300ms at 15fps is ~5 frames. Deadline rebasing yielded 4 and drifted
-    // further the longer the recording ran.
-    expect(harness.ffmpeg.processes[0].bytesWritten / framePayloadBytes).toBe(5);
-    await harness.backend.stop(handle);
-  });
-
-  // `-framerate` gives every written frame a contiguous fixed-rate timestamp, so
-  // skipping the idle slots would compress real time and end a duration-capped
-  // recording early. The gap is padded with repeats, bounded at 2s so a long
-  // stall cannot write unbounded copies of a multi-megabyte frame.
-  test("pads a capture gap so the encoded timeline keeps wall-clock duration", async function () {
-    const harness = makeHarness();
-    const handle = await harness.backend.start(makeConfig({ fps: 10 }));
-
-    harness.helper.emitFrame(4, 2, 16, 0xaa, 0);
-    // Device idled for 5s (static screen), then resumed at 60fps.
-    for (let i = 0; i < 5; i++) {
-      harness.helper.emitFrame(4, 2, 16, 0xaa, 5000 + i * 16.67);
-    }
-
-    const framePayloadBytes = 4 * 2 * 4;
-    const written = harness.ffmpeg.processes[0].bytesWritten / framePayloadBytes;
-    // 1 initial + 20 gap-fill repeats (the 2s cap at 10fps) + 1 resumed frame;
-    // the 60fps tail after it is paced out.
-    expect(written).toBe(22);
-    await harness.backend.stop(handle);
-  });
-
-  test("pads a short gap in full without hitting the cap", async function () {
-    const harness = makeHarness();
-    const handle = await harness.backend.start(makeConfig({ fps: 10 }));
-
-    harness.helper.emitFrame(4, 2, 16, 0xaa, 0);
-    harness.helper.emitFrame(4, 2, 16, 0xaa, 500); // 400ms of missed slots
-
-    const framePayloadBytes = 4 * 2 * 4;
-    // 1 initial + 4 repeats for the missed 100ms slots + the frame itself.
-    expect(harness.ffmpeg.processes[0].bytesWritten / framePayloadBytes).toBe(6);
-    await harness.backend.stop(handle);
-  });
-
-  // Slots before the new frame arrived showed the OLD picture; filling them with
-  // the new one would move a visual transition earlier than it happened.
-  test("pads gap slots with the previous frame, not the newly arrived one", async function () {
-    const harness = makeHarness();
-    const handle = await harness.backend.start(makeConfig({ fps: 10 }));
-
-    harness.helper.emitFrame(2, 2, 8, 0x11, 0);
-    harness.helper.emitFrame(2, 2, 8, 0x22, 500);
-
-    const encoder = harness.ffmpeg.processes[0];
-    const frames = Buffer.concat(encoder.written);
-    const frameBytes = 2 * 2 * 4;
-    expect(frames.length / frameBytes).toBe(6);
-    // Slots 0..4 carry the old picture; only the final slot is the new frame.
-    for (let slot = 0; slot < 5; slot++) {
-      const start = slot * frameBytes;
-      expect(frames.subarray(start, start + frameBytes).every((b) => b === 0x11)).toBe(true);
-    }
-    const last = frames.subarray(5 * frameBytes);
-    expect(last.every((b) => b === 0x22)).toBe(true);
-    await harness.backend.stop(handle);
-  });
-
-  // A frame dropped for congestion must not consume its pacing slot, or the
-  // timeline silently compresses by exactly the congested interval.
-  test("owes a skipped slot when a frame is dropped under backpressure", async function () {
-    const harness = makeHarness();
-    const handle = await harness.backend.start(makeConfig({ fps: 10 }));
-    harness.helper.emitFrame(2, 2, 8, 0x11, 0);
-
-    const encoder = harness.ffmpeg.processes[0];
-    encoder.stdin.pause();
-    encoder.stdin.cork();
-    while (!encoder.stdin.writableNeedDrain) {
-      encoder.stdin.write(Buffer.alloc(64 * 1024));
-    }
-    const congestedBytes = encoder.stdin.writableLength;
-
-    // Two due frames arrive while ffmpeg is behind and are dropped.
-    harness.helper.emitFrame(2, 2, 8, 0x22, 100);
-    harness.helper.emitFrame(2, 2, 8, 0x33, 200);
-    expect(encoder.stdin.writableLength).toBe(congestedBytes);
-
-    encoder.stdin.uncork();
-    encoder.stdin.resume();
-    // Draining is asynchronous: wait for the filler plus the one real frame to
-    // actually reach the encoder rather than for a scheduler turn.
-    const realFrameBytes = 2 * 2 * 4;
-    await encoder.waitForBytes(congestedBytes + realFrameBytes);
-    const drainedBytes = encoder.written.reduce((n, c) => n + c.length, 0);
-
-    // The next frame pads the two slots the congestion owed, then its own.
-    harness.helper.emitFrame(2, 2, 8, 0x44, 300);
-    const frameBytes = 2 * 2 * 4;
-    const writtenAfter = encoder.written.reduce((n, c) => n + c.length, 0) - drainedBytes;
-    expect(writtenAfter / frameBytes).toBe(3);
-    await harness.backend.stop(handle);
-  });
-
-  // A pipe's default high-water mark is 16KB while one real BGRA frame is
-  // megabytes, so `writableNeedDrain` is true after EVERY write. Treating that
-  // as congestion would drop nearly every frame of a real recording — and the
-  // small payloads used elsewhere in this file would never reveal it.
-  test("keeps recording when a single frame exceeds the stream high-water mark", async function () {
-    const harness = makeHarness();
-    const handle = await harness.backend.start(makeConfig({ fps: 10 }));
-
-    // 128x128 BGRA = 64KB per frame, four times the default 16KB watermark.
-    harness.helper.emitFrame(128, 128, 128 * 4, 0x11, 0);
-    const encoder = harness.ffmpeg.processes[0];
-    encoder.stdin.pause();
-
-    harness.helper.emitFrame(128, 128, 128 * 4, 0x22, 100);
-    // One buffered frame already trips the stream's own backpressure signal...
-    expect(encoder.stdin.writableNeedDrain).toBe(true);
-
-    // ...but it is not congestion by the frame-based budget, so the next frame
-    // is still encoded rather than dropped.
-    harness.helper.emitFrame(128, 128, 128 * 4, 0x33, 200);
-
-    const frameBytes = 128 * 128 * 4;
-    expect(encoder.stdin.writableLength / frameBytes).toBe(2);
-    encoder.stdin.resume();
-    await harness.backend.stop(handle);
-  });
-
-  // The buffered-frame budget only measures what the stream itself holds. When
-  // the encoder consumes one buffered write, `writableLength` drops back under
-  // the budget while older padding is STILL queued — admitting the next live
-  // frame there lets a slow encoder grow the queue faster than it drains.
-  test("drops live frames while earlier padding is still queued", async function () {
-    const harness = makeHarness({ now: () => 1_000 });
-    const handle = await harness.backend.start(makeConfig({ fps: 10 }));
-
-    harness.helper.emitFrame(128, 128, 128 * 4, 0x11, 0);
-    const encoder = harness.ffmpeg.processes[0];
-    const frameBytes = 128 * 128 * 4;
-    encoder.stdin.pause();
-
-    // 500ms at 10fps owes 4 pads plus the frame; the 2-frame budget leaves the
-    // remainder queued.
-    harness.helper.emitFrame(128, 128, 128 * 4, 0x22, 500);
-
-    // The encoder consumes one buffered write. `drain` has not fired yet, so the
-    // queue is still non-empty while the buffered-frame budget looks free again.
-    expect(encoder.stdin.read(frameBytes)?.length).toBe(frameBytes);
-    expect(encoder.stdin.writableLength).toBeLessThan(frameBytes * 2);
-
-    // A live frame arriving in that window must be dropped, not appended.
-    harness.helper.emitFrame(128, 128, 128 * 4, 0x33, 600);
-
-    encoder.stdin.resume();
-    await harness.backend.stop(handle);
-
-    // 1 + 4 pads + 1: the dropped frame adds nothing, and its slot stays owed.
-    expect(encoder.bytesWritten / frameBytes).toBe(6);
-    expect(encoder.written.some((chunk) => chunk[0] === 0x33)).toBe(false);
-  });
-
-  test("releases gap padding on drain instead of truncating it synchronously", async function () {
-    const harness = makeHarness();
-    const handle = await harness.backend.start(makeConfig({ fps: 10 }));
-
-    harness.helper.emitFrame(128, 128, 128 * 4, 0x11, 0);
-    const encoder = harness.ffmpeg.processes[0];
-    encoder.stdin.pause();
-    encoder.stdin.cork();
-
-    // 500ms gap at 10fps owes 4 pads plus the frame; the 2-frame budget cannot
-    // take them all at once, so the remainder must survive as queued work.
-    harness.helper.emitFrame(128, 128, 128 * 4, 0x22, 500);
-    const frameBytes = 128 * 128 * 4;
-    const bufferedNow = encoder.stdin.writableLength / frameBytes;
-    expect(bufferedNow).toBeLessThan(6);
-
-    encoder.stdin.uncork();
-    encoder.stdin.resume();
-    // 1 + 4 pads + 1: wait for the queue to actually land, not for one turn.
-    await encoder.waitForBytes(6 * frameBytes);
-
-    // Everything owed reaches the encoder once it drains, and nothing extra.
-    const written = encoder.written.reduce((n, c) => n + c.length, 0);
-    expect(written / frameBytes).toBe(6);
-    await harness.backend.stop(handle);
-  });
-
-  // fps has no upper bound in the recording config, and gap fill is owed on
-  // EVERY source frame: at an absurd rate each ordinary frame would enqueue
-  // another batch of multi-megabyte duplicates for the whole recording, so the
-  // rate is clamped once at start rather than bounded per gap.
-  test("clamps an unsupported capture fps to the device ceiling", async function () {
-    const harness = makeHarness();
-    const handle = await harness.backend.start(makeConfig({ fps: 1_000_000 }));
-
-    harness.helper.emitFrame(2, 2, 8, 0x11, 0);
-    harness.helper.emitFrame(2, 2, 8, 0x22, 100);
-
-    // The encoder is labelled with the rate the pacing actually used, or the
-    // encoded timeline would not match its own timestamps.
-    const args = harness.ffmpeg.startRequests[0].args;
-    expect(args[args.indexOf("-framerate") + 1]).toBe(String(MAX_CAPTURE_FPS));
-
-    const frameBytes = 2 * 2 * 4;
-    const written = harness.ffmpeg.processes[0].written.reduce((n, c) => n + c.length, 0);
-    // 1 initial + the four 16.67ms slots the 100ms gap skipped + the frame.
-    expect(written / frameBytes).toBe(6);
-    await harness.backend.stop(handle);
-  });
-
-  test("clamps a non-finite fps request rather than pacing on NaN", function () {
-    expect(clampCaptureFps(Number.NaN)).toBe(MAX_CAPTURE_FPS);
-    expect(clampCaptureFps(0)).toBe(MAX_CAPTURE_FPS);
-    expect(clampCaptureFps(-30)).toBe(MAX_CAPTURE_FPS);
-    expect(clampCaptureFps(15)).toBe(15);
-    expect(clampCaptureFps(MAX_CAPTURE_FPS + 1)).toBe(MAX_CAPTURE_FPS);
-  });
-
-  test("honors resolution and maxDuration like the simulator path", async function () {
-    const harness = makeHarness();
-    const handle = await harness.backend.start(
-      makeConfig({ resolution: { width: 640, height: 480 }, maxDurationSeconds: 12 }),
-    );
-    harness.helper.emitFrame(4, 2);
-
-    const args = harness.ffmpeg.startRequests[0].args;
-    expect(args).toContain("-vf");
-    expect(args[args.indexOf("-vf") + 1]).toBe("scale=640:480");
-    expect(args[args.indexOf("-t") + 1]).toBe("12");
-    await harness.backend.stop(handle);
-  });
-
-  // yuv420p subsamples chroma 2x2, so an odd edge makes ffmpeg refuse the encode.
-  // Real iPhone panels are odd (1179x2556), which would fail every recording.
-  test("scales an odd native capture size to even dimensions for yuv420p", async function () {
-    const harness = makeHarness();
-    const handle = await harness.backend.start(makeConfig());
-
-    harness.helper.emitFrame(1179, 2555, 1179 * 4);
-
-    const args = harness.ffmpeg.startRequests[0].args;
-    // The raw input keeps the true byte geometry; only the output is evened.
-    expect(args[args.indexOf("-video_size") + 1]).toBe("1179x2555");
-    expect(args[args.indexOf("-vf") + 1]).toBe("scale=1178:2554");
-    await harness.backend.stop(handle);
-  });
-
-  test("leaves an already-even capture size unscaled", async function () {
-    const harness = makeHarness();
-    const handle = await harness.backend.start(makeConfig());
-
-    harness.helper.emitFrame(4, 2);
-
-    expect(harness.ffmpeg.startRequests[0].args).not.toContain("-vf");
-    await harness.backend.stop(handle);
-  });
-
-  test("rounds an odd requested resolution down to even", async function () {
-    const harness = makeHarness();
-    const handle = await harness.backend.start(
-      makeConfig({ resolution: { width: 641, height: 481 } }),
-    );
-    harness.helper.emitFrame(4, 2);
-
-    const args = harness.ffmpeg.startRequests[0].args;
-    expect(args[args.indexOf("-vf") + 1]).toBe("scale=640:480");
-    expect(handle.effectiveConfig?.resolution).toEqual({ width: 640, height: 480 });
-    await harness.backend.stop(handle);
-  });
-
-  test("falls back to software H.264 when ffmpeg lacks VideoToolbox", async function () {
-    const harness = makeHarness();
-    harness.ffmpeg.encoders = ["libx264"];
-
-    const handle = await harness.backend.start(makeConfig());
-    harness.helper.emitFrame(4, 2);
-
-    const args = harness.ffmpeg.startRequests[0].args;
-    expect(args[args.indexOf("-c:v") + 1]).toBe(SOFTWARE_H264_ENCODER);
-    expect(args).toContain("-preset");
-    await harness.backend.stop(handle);
-  });
-
-  test("start rejects when ffmpeg exposes no usable H.264 encoder", async function () {
-    const harness = makeHarness();
-    harness.ffmpeg.encoders = ["mpeg4"];
-
-    await expect(harness.backend.start(makeConfig())).rejects.toThrow(
-      "neither h264_videotoolbox nor libx264",
-    );
-    expect(harness.helper.started).toBe(0);
   });
 
   test("start rejects an already-aborted recording without spawning the helper", async function () {
@@ -845,7 +472,7 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     // A helper that emits a frame (spawning ffmpeg) and then fails to start.
     helper.start = () => {
       helper.started += 1;
-      helper.emitFrame(4, 2);
+      helper.emitRecord();
       throw new Error("helper refused to start");
     };
     const backend = new IosPhysicalVideoCaptureBackend({
@@ -878,18 +505,17 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     expect(harness.helper.stopped).toBe(1);
   });
 
-  test("start force-stops an encoder spawned while cancelled helper shutdown settles", async function () {
+  test("start does not spawn the muxer for a record that lands while cancelled helper shutdown settles", async function () {
     const controller = new AbortController();
     const harness = makeHarness();
     harness.helper.on("started", () => controller.abort());
-    harness.helper.onStop = () => harness.helper.emitFrame(4, 2);
+    harness.helper.onStop = () => harness.helper.emitRecord();
 
     await expect(
       harness.backend.start(makeConfig({ abortSignal: controller.signal })),
     ).rejects.toThrow("cancelled during shutdown");
 
-    expect(harness.ffmpeg.processes).toHaveLength(1);
-    expect(harness.ffmpeg.processes[0].killSignals).toEqual(["SIGKILL"]);
+    expect(harness.ffmpeg.processes).toHaveLength(0);
   });
 
   test("start rejects on a non-macOS host before spawning anything", async function () {
@@ -959,7 +585,7 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
       const harness = makeHarness({ sizeBytes: failure === "zero bytes" ? 0 : 4096 });
       const handle = await harness.backend.start(makeConfig());
       if (failure !== "no frames") {
-        harness.helper.emitFrame(4, 2);
+        harness.helper.emitRecord();
       }
       if (failure === "encoder failure") {
         harness.ffmpeg.processes[0].exit(1);
@@ -1041,7 +667,7 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
   test("forceStop kills the encoder without waiting for finalization", async function () {
     const harness = makeHarness();
     const handle = await harness.backend.start(makeConfig());
-    harness.helper.emitFrame(2, 2);
+    harness.helper.emitRecord();
 
     await harness.backend.forceStop(handle);
 
@@ -1052,7 +678,7 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
   test("forceStop kills the encoder even when helper shutdown rejects", async function () {
     const harness = makeHarness();
     const handle = await harness.backend.start(makeConfig());
-    harness.helper.emitFrame(2, 2);
+    harness.helper.emitRecord();
     harness.helper.onStop = () => {
       throw new Error("helper shutdown failed");
     };
@@ -1067,7 +693,7 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     timer.enableAutoAdvance();
     const harness = makeHarness({ timer });
     const handle = await harness.backend.start(makeConfig());
-    harness.helper.emitFrame(2, 2);
+    harness.helper.emitRecord();
     const encoder = harness.ffmpeg.processes[0];
     encoder.kill = (signal?: NodeJS.Signals | number) => {
       encoder.killSignals.push(signal);
@@ -1081,7 +707,7 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
   test("stop rejects a recording the capture helper aborted mid-stream", async function () {
     const harness = makeHarness();
     const handle = await harness.backend.start(makeConfig());
-    harness.helper.emitFrame(4, 2);
+    harness.helper.emitRecord();
     // Device unplugged: the helper exits on its own while ffmpeg finalizes fine.
     harness.helper.emit("stderr", "error: iOS device capture failed");
     harness.helper.exitWith({ code: 3, signal: null });
@@ -1098,7 +724,7 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
   test("a SIGTERM exit caused by our own stop is not treated as a helper failure", async function () {
     const harness = makeHarness();
     const handle = await harness.backend.start(makeConfig());
-    harness.helper.emitFrame(4, 2);
+    harness.helper.emitRecord();
 
     const result = await harness.backend.stop(handle);
 
@@ -1109,7 +735,7 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
   test("stop rejects when the helper was killed by a signal before shutdown", async function () {
     const harness = makeHarness();
     const handle = await harness.backend.start(makeConfig());
-    harness.helper.emitFrame(4, 2);
+    harness.helper.emitRecord();
     // An external kill / crash looks identical in shape to our own SIGTERM.
     harness.helper.exitWith({ code: null, signal: "SIGABRT" });
 
@@ -1121,7 +747,7 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
   test("stop rejects when the helper errored after frames had already arrived", async function () {
     const harness = makeHarness();
     const handle = await harness.backend.start(makeConfig());
-    harness.helper.emitFrame(4, 2);
+    harness.helper.emitRecord();
     harness.helper.emit("error", new Error("capture session lost"));
 
     await expect(harness.backend.stop(handle)).rejects.toThrow(
@@ -1132,7 +758,7 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
   test("stop rejects a recording whose encoder exited nonzero", async function () {
     const harness = makeHarness();
     const handle = await harness.backend.start(makeConfig());
-    harness.helper.emitFrame(4, 2);
+    harness.helper.emitRecord();
 
     const encoder = harness.ffmpeg.processes[0];
     encoder.stderr.write("No space left on device");
@@ -1186,41 +812,6 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
         backendHandle: { kind: "hybrid" },
       }),
     ).rejects.toThrow("Missing backend handle for physical iOS");
-  });
-});
-
-describe("packFrame", function () {
-  test("returns the original buffer when there is no row padding", function () {
-    const frame: DecodedFrame = {
-      header: { width: 2, height: 2, bytesPerRow: 8, timestampMs: 0 },
-      pixels: Buffer.alloc(16, 1),
-    };
-    expect(packFrame(frame)).toBe(frame.pixels);
-  });
-
-  test("copies only the visible bytes of each padded row", function () {
-    const pixels = Buffer.alloc(2 * 12);
-    pixels.fill(0x11, 0, 8); // row 0 visible
-    pixels.fill(0xff, 8, 12); // row 0 padding
-    pixels.fill(0x22, 12, 20); // row 1 visible
-    pixels.fill(0xff, 20, 24); // row 1 padding
-
-    const packed = packFrame({
-      header: { width: 2, height: 2, bytesPerRow: 12, timestampMs: 0 },
-      pixels,
-    });
-
-    expect(packed.length).toBe(16);
-    expect(packed.subarray(0, 8).every((byte) => byte === 0x11)).toBe(true);
-    expect(packed.subarray(8, 16).every((byte) => byte === 0x22)).toBe(true);
-  });
-});
-
-describe("buildRawVideoFfmpegArgs", function () {
-  test("pins the raw input format ahead of the input so ffmpeg can parse the pipe", function () {
-    const args = buildRawVideoFfmpegArgs(makeConfig(), 828, 1792, VIDEOTOOLBOX_H264_ENCODER);
-    expect(args.indexOf("-f")).toBeLessThan(args.indexOf("-i"));
-    expect(args[args.indexOf("-video_size") + 1]).toBe("828x1792");
   });
 });
 

@@ -73,6 +73,10 @@ describe("prototype web page (#16346)", () => {
     expect(page.html).not.toMatch(/@import|url\((?!data:)/);
   });
 
+  test("declares an empty icon, so no browser fetches /favicon.ico against the CSP (#16459)", () => {
+    expect(page.html).toContain('<link rel="icon" href="data:,">');
+  });
+
   test("zooming out never enlarges a preview fitted below 50%", () => {
     expect(prototypeWebZoomScale(0.38, 0.38 / 1.25)).toBe(0.38);
     expect(prototypeWebZoomScale(1, 0.2)).toBe(0.5);
@@ -170,8 +174,9 @@ describe("prototype web page (#16346)", () => {
     );
   });
 
-  test("offers only rotate, zoom and pan, a variant switcher and revision history", () => {
+  test("offers only rotate, zoom and pan, the 3D toggle, a variant switcher and revision history", () => {
     expect(controls(page.html)).toEqual([
+      "3d",
       "revisions",
       "rotate",
       "screen",
@@ -208,7 +213,7 @@ describe("prototype web page (#16346)", () => {
   });
 
   test("reports the unsupported nodes of the view shown first", () => {
-    expect(page.unsupportedNodes.map((node) => node.type)).toEqual(["progress"]);
+    expect(page.unsupportedNodes.map((node) => node.type)).toEqual(["menu"]);
   });
 
   test("drops older revisions to stay within the budget, keeping each variant's latest", () => {

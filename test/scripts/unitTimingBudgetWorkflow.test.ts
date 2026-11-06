@@ -121,6 +121,8 @@ test("timing budget uploads its summary after enforcement even on failure", () =
 const mergeJobs = loadJobs(".github/workflows/merge.yml");
 const coverage = mergeJobs["ts-code-coverage"];
 const coverageSteps = coverage.steps ?? [];
+const coveragePart = mergeJobs["ts-coverage-part"];
+const coveragePartSteps = coveragePart.steps ?? [];
 
 test("merge coverage owns the Ubuntu unit gate and plain isolated timing verdict", () => {
   expect(mergeJobs["node-unit-tests"].strategy?.matrix?.os).toEqual(["windows-latest"]);
@@ -132,22 +134,28 @@ test("merge coverage owns the Ubuntu unit gate and plain isolated timing verdict
     windows.steps?.find((s) => s.uses === "actions/checkout@v6")?.with?.["fetch-depth"],
   ).toBeUndefined();
   expect(windows.steps?.some((s) => s.env?.AUTOMOBILE_UNIT_JUNIT_DIR)).toBe(false);
-  expect(coverage["timeout-minutes"]).toBe(45);
+  // The badge and gate job joins the instrumented parts (#16377).
+  expect(coverage.needs).toBe("ts-coverage-part");
+  expect(coverage["timeout-minutes"]).toBe(20);
   expect(coverage["runs-on"]).toBe("ubuntu-latest");
-  expect(coverage.permissions).toEqual({ actions: "write", contents: "read" });
+  expect(coverage.permissions).toEqual({ contents: "read" });
   expect(coverageSteps.find((s) => s.uses === "actions/checkout@v6")?.with?.["fetch-depth"]).toBe(
     2,
   );
-  const lane = coverageSteps.findIndex((s) => s.run?.includes("ci/run-ts-coverage.sh"));
-  const timing = coverageSteps.findIndex((s) => s.run?.includes("validate-bun-test-timings.sh"));
-  expect(lane).toBeGreaterThanOrEqual(0);
-  expect(coverageSteps[lane].env).toEqual({
-    AUTOMOBILE_TEST_MODE: "true",
-    AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720",
-    AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS: "1560",
+  expect(coverageSteps.some((s) => s.run?.includes("ci/run-ts-coverage.sh"))).toBe(false);
+  const download = coverageSteps.findIndex((s) => s.uses === "actions/download-artifact@v7");
+  expect(coverageSteps[download]?.with).toEqual({
+    pattern: "ts-coverage-part-*",
+    path: "coverage-parts",
   });
+  const merge = coverageSteps.findIndex((s) => s.run?.includes("ci/merge-ts-coverage-parts.sh"));
+  expect(merge).toBeGreaterThan(download);
+  expect(coverageSteps[merge].run).toBe(
+    "bash scripts/ci/merge-ts-coverage-parts.sh 2 coverage-parts coverage",
+  );
+  const timing = coverageSteps.findIndex((s) => s.run?.includes("validate-bun-test-timings.sh"));
   const badge = coverageSteps.findIndex((s) => s.name === "Upload Coverage Badge");
-  expect(badge).toBeGreaterThan(lane);
+  expect(badge).toBeGreaterThan(merge);
   expect(timing).toBeGreaterThan(badge);
   expect(coverageSteps[timing].if).toBeUndefined();
   expect(coverageSteps[timing].env).toEqual({
@@ -162,7 +170,38 @@ test("merge coverage owns the Ubuntu unit gate and plain isolated timing verdict
   expect(coverageSteps[diagnostics].if).toBe("always()");
   expect(coverageSteps[diagnostics].with?.path).toContain("coverage/shards/**");
   expect(coverageSteps[diagnostics].with?.path).toContain("scratch/bun-test-report.recheck.d/**");
-  const dispatch = coverageSteps.at(-1);
+});
+
+test("merge coverage parts run the instrumented lane in two interleaved halves", () => {
+  expect(coveragePart.strategy?.matrix?.part).toEqual([1, 2]);
+  expect(coveragePart.strategy?.["fail-fast"]).toBe(false);
+  expect(coveragePart["runs-on"]).toBe("ubuntu-latest");
+  expect(coveragePart.permissions).toEqual({ actions: "write", contents: "read" });
+  // 1560s lane cap + 480s setup/upload headroom fits the job timeout.
+  expect(1560 + 480).toBeLessThan(Number(coveragePart["timeout-minutes"]) * 60);
+  const lane = coveragePartSteps.findIndex((s) => s.run?.includes("ci/run-ts-coverage.sh"));
+  expect(lane).toBeGreaterThanOrEqual(0);
+  // The per-shard budget stays at 720s; the split, not a larger budget, buys headroom.
+  expect(coveragePartSteps[lane].env).toEqual({
+    AUTOMOBILE_TEST_MODE: "true",
+    AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720",
+    AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS: "1560",
+    AUTOMOBILE_COVERAGE_PART: "${{ matrix.part }}",
+    AUTOMOBILE_COVERAGE_PARTS: "2",
+  });
+  const upload = coveragePartSteps.findIndex(
+    (s) => s.with?.name === "ts-coverage-part-${{ matrix.part }}",
+  );
+  expect(upload).toBeGreaterThan(lane);
+  expect(coveragePartSteps[upload].if).toBeUndefined();
+  expect(coveragePartSteps[upload].with?.path).toContain("coverage/shards/*.xml");
+  expect(coveragePartSteps[upload].with?.path).toContain("coverage/shards/calibration-*.tsv");
+  const diagnostics = coveragePartSteps.findIndex(
+    (s) => s.with?.name === "ts-coverage-diagnostics-part-${{ matrix.part }}",
+  );
+  expect(coveragePartSteps[diagnostics]?.if).toBe("always()");
+  expect(coveragePartSteps[diagnostics]?.with?.path).toContain("ci-logs/ts-coverage.log");
+  const dispatch = coveragePartSteps.at(-1);
   expect(dispatch?.run).toBe(
     'bash scripts/ci/rerun-contended-runner.sh dispatch "$GITHUB_STEP_SUMMARY" "$RUN_ID" "$RUN_ATTEMPT"',
   );

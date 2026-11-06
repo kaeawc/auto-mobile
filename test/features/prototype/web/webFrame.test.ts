@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { deviceFrameOrThrow } from "../../../../src/features/prototype/web/deviceFrames";
 import {
   frameOrientations,
+  renderChromelessScreen,
   renderDeviceFrame,
   screenSize,
 } from "../../../../src/features/prototype/web/webFrame";
@@ -163,5 +164,26 @@ test("a TV's landscape screen is its 1080p panel at its density", () => {
   expect(screenSize(deviceFrameOrThrow("apple-tv"), "landscape")).toEqual({
     width: 1920,
     height: 1080,
+  });
+});
+
+test("a chromeless screen is the screen alone: no bezel, bars, radius, insets or background", () => {
+  const screen = renderChromelessScreen(
+    deviceFrameOrThrow("pixel-9"),
+    "portrait",
+    { dark: false, textColor: "#000", background: "#fff" },
+    el("div"),
+  );
+  expect(screen.attrs["data-chrome"]).toBe("screen");
+  expect(screen.children).toHaveLength(1);
+  expect(chrome(screen, "statusBar")).toBeUndefined();
+  expect(chrome(screen, "navBar")).toBeUndefined();
+  expect(screen.style).toMatchObject({
+    width: "411px",
+    height: "923px",
+    "border-radius": "0px",
+    "background-color": "transparent",
+    "--safe-top": "0px",
+    "--safe-bottom": "0px",
   });
 });

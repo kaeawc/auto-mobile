@@ -36,7 +36,28 @@ call_cli() {
   rm -f "$stdout_file" "$stderr_file"
 }
 result_json() { jq -c 'if .content? then ([.content[] | select(.type == "text") | .text | (fromjson? // empty)][0] // {}) else . end' <<< "$1" 2>/dev/null || printf '{}\n'; }
-step_error() { echo "error: $1: $2" >&2; exit 1; }
+on_step_error=""
+step_error() {
+  echo "error: $1: $2" >&2
+  if [[ -n "$on_step_error" ]]; then "$on_step_error" || true; fi
+  exit 1
+}
+# A launchApp failure leaves no trace of whether the app crashed, was never started
+# with injection, or bound late (#17160). Save the app's recent simulator log, its
+# launchd state and any crash reports beside the lane's own log so the CI artifact
+# can tell them apart. Best-effort: a missing log never masks the real error.
+collect_launch_diagnostics() {
+  local diag_dir exe_name
+  diag_dir="${PROTOTYPE_SMOKE_DIAG_DIR:-${script_dir}/../../scratch/prototype-mcp-smoke-lane/diagnostics}"
+  mkdir -p "$diag_dir" || return 0
+  exe_name="$(plutil -extract CFBundleExecutable raw -o - "$app_bundle/Info.plist" 2>/dev/null || basename "$app_bundle" .app)"
+  "$xcrun_bin" simctl spawn "$device_id" log show --last 2m --predicate "process == \"$exe_name\"" > "$diag_dir/app-log.txt" 2>&1 || true
+  "$xcrun_bin" simctl spawn "$device_id" launchctl list > "$diag_dir/launchctl-list.txt" 2>&1 || true
+  if compgen -G "$HOME/Library/Logs/DiagnosticReports/${exe_name}*" > /dev/null; then
+    cp -- "$HOME/Library/Logs/DiagnosticReports/${exe_name}"* "$diag_dir/" || true
+  fi
+  echo "diagnostics: saved ${exe_name} log, launchctl list and crash reports to $diag_dir" >&2
+}
 check_cli() {
   local step="$1" code
   parsed="$(result_json "$cli_stdout")"
@@ -76,7 +97,10 @@ bundle_id="$(plutil -extract CFBundleIdentifier raw -o - "$app_bundle/Info.plist
 "$xcrun_bin" simctl install "$device_id" "$app_bundle" || step_error install 'simctl install failed'
 echo 'ok: install'
 call_tool launchApp --platform ios --appId "$bundle_id" --prototype true
-check_cli launchApp; echo 'ok: launchApp'
+on_step_error=collect_launch_diagnostics
+check_cli launchApp
+on_step_error=""
+echo 'ok: launchApp'
 call_prototype show --spec "$spec"; echo 'ok: show'
 call_tool tapOn --selector '{"text":"MCP smoke tap"}'
 check_cli tapOn; echo 'ok: tapOn'

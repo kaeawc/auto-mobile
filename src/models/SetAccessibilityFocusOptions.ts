@@ -1,19 +1,18 @@
 /**
- * Options for setting/clearing accessibility focus (TalkBack cursor) on a specific element.
- * Backs the `accessibilityFocus` MCP tool. Android only (TalkBack); iOS VoiceOver-focus
- * is not yet supported.
+ * Options for Android TalkBack or iOS VoiceOver focus on a specific element.
+ * Clearing is supported only on Android.
  */
 export interface SetAccessibilityFocusOptions {
   /**
-   * Whether to set or clear the accessibility (TalkBack) focus cursor.
+   * Whether to set or clear accessibility focus (TalkBack or VoiceOver).
    * Defaults to "set".
    */
   action?: "set" | "clear";
 
   /**
    * Target element selectors (at least one must be specified).
-   * All selectors are resolved locally to a unique native resource-id before
-   * the action is sent to the accessibility service.
+   * Android resolves selectors locally to a unique native resource-id.
+   * iOS uses the first matching accessibility element in the foreground app SDK.
    */
   text?: string; // Text content of the element
   resourceId?: string; // Resource ID of the element (e.g., "com.app:id/button")

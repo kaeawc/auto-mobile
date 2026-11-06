@@ -656,7 +656,8 @@ export interface SkeletonProjectionResult {
  * row's window covers it, using the same hit test as the tap path (issue #10481). Every
  * node-hosting AutoMobile prototype window above the row joins those covers, opaque, translucent,
  * sheet or floating alike (owner decision 2026-10-08, #10715): the prototype is touchable within its
- * bounds, so a tap there lands in the prototype, and default-layer tapOn refuses the row. A row with
+ * bounds, so a tap there lands in the prototype, and default-layer tapOn refuses the row. So does a
+ * control drawn over the row in its own window, which tapOn avoids on Android (#17059). A row with
  * an exposed part stays actionable, as tapOn taps that part. Like tapOn, the test runs on the
  * row's bounds clipped to the screen, so an off-screen remainder never counts as exposed.
  */
@@ -681,6 +682,8 @@ function markAppRowsCoveredByApplicationWindow(
       bounds &&
       isFullyCoveredByApplicationWindow(hierarchy, acc.target, bounds, {
         ownWindows: "touch",
+        // Like tapOn, a control drawn over the row in its own window covers it too (#17059).
+        views: true,
         index: coverIndex,
       })
     ) {

@@ -14,11 +14,14 @@ import {
   type NativePrototypeSources,
 } from "../features/prototype/nativePrototype";
 import {
+  PROTOTYPE_EJECT_TEMPLATE,
+  PROTOTYPE_EJECT_URI,
   PROTOTYPE_NATIVE_ASSET_TEMPLATE,
   PROTOTYPE_NATIVE_ASSET_URI,
   PROTOTYPE_NATIVE_TEMPLATE,
   PROTOTYPE_NATIVE_URI,
 } from "../features/prototype/nativePrototypeUris";
+import { readPrototypeEject } from "../features/prototype/prototypeEject";
 import { defaultSavedPrototypeMirror } from "../features/prototype/savedPrototypeMirror";
 import { getMcpServerVersion, releaseVersion } from "../utils/mcpVersion";
 import {
@@ -49,13 +52,23 @@ import {
 import {
   prototypeVariantIds,
   readPrototypeWebResource,
+  type PrototypeWebImageSources,
   type PrototypeWebResourceQuery,
 } from "../features/prototype/web/prototypeWebResource";
+import {
+  SharpPrototypeWebImageEncoder,
+  type PrototypeWebAssetSource,
+} from "../features/prototype/web/webImageEncoding";
+import {
+  defaultPrototypeAssetCache,
+  type PrototypeAssetCache,
+} from "../features/prototype/prototypeAssetCache";
 import {
   readPrototypeEmbedResource,
   type PrototypeEmbedResourceQuery,
 } from "../features/prototype/web/prototypeEmbedResource";
 import { logger } from "../utils/logger";
+import { errorMessage } from "../models/describeUnknownError";
 import { decodeSegmentOrThrow } from "./resourceUriSegments";
 import type { ResourceContent } from "./resourceRegistry";
 
@@ -75,12 +88,64 @@ export function defaultNativePrototypeSources(): NativePrototypeSources {
 export interface PrototypeWebSources {
   readonly revisions: PrototypeSpecRevisionSource;
   readonly rendererVersion: () => string;
+  /** Asset bytes and the encoder for the web page's images; without it images stay placeholders. */
+  readonly images?: PrototypeWebImageSources;
+}
+
+/**
+ * Asset bytes the host cached when it uploaded them to a device showing one of the variants
+ * (Android caches uploads per device). Asset ids are chosen per device and the page holds one
+ * image per id, so when two devices cached different bytes under the id, it stays a placeholder
+ * rather than drawing one device's image in another's variant. A device whose cache cannot be read
+ * is skipped.
+ */
+export function cachedPrototypeWebAssets(
+  devicesShowing: (id: string) => readonly string[],
+  cache: Pick<PrototypeAssetCache, "get">,
+): (variantIds: readonly string[]) => PrototypeWebAssetSource {
+  return (variantIds) => ({
+    get: async (assetId) => {
+      const devices = [...new Set(variantIds.flatMap((id) => devicesShowing(id)))];
+      let found: Awaited<ReturnType<PrototypeAssetCache["get"]>>;
+      for (const device of devices) {
+        let asset: Awaited<ReturnType<PrototypeAssetCache["get"]>>;
+        try {
+          asset = await cache.get(device, assetId);
+        } catch (error) {
+          // Another device may still have the asset; without one the image keeps its placeholder.
+          logger.warn(
+            `[PROTOTYPE] Asset cache read failed for ${assetId} on ${device}: ${errorMessage(error)}`,
+            error,
+          );
+          continue;
+        }
+        if (!asset) {
+          continue;
+        }
+        if (found && !Buffer.from(found.bytes).equals(Buffer.from(asset.bytes))) {
+          logger.warn(
+            `[PROTOTYPE] Devices showing ${variantIds.join(", ")} cached different bytes for asset ${assetId}; the web page keeps its placeholder.`,
+          );
+          return undefined;
+        }
+        found ??= asset;
+      }
+      return found;
+    },
+  });
 }
 
 export function defaultPrototypeWebSources(): PrototypeWebSources {
   return {
     revisions: daemonPrototypeSpecRevisions(),
     rendererVersion: () => releaseVersion(getMcpServerVersion()),
+    images: {
+      assets: cachedPrototypeWebAssets(
+        (id) => daemonPrototypeShownSpecs()?.devicesShowing(id) ?? [],
+        defaultPrototypeAssetCache(),
+      ),
+      encoder: new SharpPrototypeWebImageEncoder(),
+    },
   };
 }
 
@@ -99,8 +164,16 @@ function readUri(
   return query ? `${uri}?${query}` : uri;
 }
 
-function readWeb(sources: PrototypeWebSources, query: PrototypeWebResourceQuery): ResourceContent {
-  const web = readPrototypeWebResource(sources.revisions, query, sources.rendererVersion());
+async function readWeb(
+  sources: PrototypeWebSources,
+  query: PrototypeWebResourceQuery,
+): Promise<ResourceContent> {
+  const web = await readPrototypeWebResource(
+    sources.revisions,
+    query,
+    sources.rendererVersion(),
+    sources.images,
+  );
   const { frame, revision, variant } = query;
   return {
     uri: readUri(query.id, "web", { frame, revision, variant }),
@@ -150,7 +223,7 @@ interface PerIdFormat {
   readonly title: string;
   description(id: string): string;
   readonly mimeType: string;
-  read(sources: PrototypeWebSources, id: string): ResourceContent;
+  read(sources: PrototypeWebSources, id: string): ResourceContent | Promise<ResourceContent>;
 }
 
 const sourceFormat = (format: PrototypeSourceFormat, label: string): PerIdFormat => ({
@@ -349,8 +422,8 @@ export function prototypeWebNotificationsSettled(): Promise<void> {
 
 /**
  * Registers the `prototype` authoring guide, its icon lookup (#11052), the native-code
- * resources (#13729), the per-prototype web page and Compose/SwiftUI files (#16345) and the
- * per-prototype embed envelope (#16452).
+ * resources (#13729), the eject scaffold (#14129), the per-prototype web page and
+ * Compose/SwiftUI files (#16345) and the per-prototype embed envelope (#16452).
  */
 export function registerPrototypeResources(
   nativeSources: NativePrototypeSources = defaultNativePrototypeSources(),
@@ -393,6 +466,21 @@ export function registerPrototypeResources(
         uri: query ? `${PROTOTYPE_NATIVE_URI}?${query}` : PROTOTYPE_NATIVE_URI,
         mimeType: "application/json",
         text: JSON.stringify(native, null, 2),
+      };
+    },
+  });
+
+  ResourceRegistry.registerTemplate(PROTOTYPE_EJECT_TEMPLATE, "Prototype ejected to app code", {
+    description:
+      "A one-shot Jetpack Compose or SwiftUI scaffold of the prototype that the app owns, with no renderer dependency: layout, text, buttons, fields, lists and stack navigation, TODO stubs for the rest",
+    mimeType: "application/json",
+    handler: async (params: Record<string, string>) => {
+      const ejected = await readPrototypeEject(params, nativeSources);
+      const query = new URLSearchParams(params).toString();
+      return {
+        uri: query ? `${PROTOTYPE_EJECT_URI}?${query}` : PROTOTYPE_EJECT_URI,
+        mimeType: "application/json",
+        text: JSON.stringify(ejected, null, 2),
       };
     },
   });

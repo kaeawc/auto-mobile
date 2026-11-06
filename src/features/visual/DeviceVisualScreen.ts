@@ -14,12 +14,25 @@ import { DisplayConfig, type DisplayConfigResult } from "../utility/DisplayConfi
 import { ElementResolver } from "../utility/ElementResolver";
 import type { VisualScreen } from "./CompareScreenshot";
 import type { VisualDeviceProfile } from "./VisualDeviceProfile";
+import { captureTvosScreenshot, type TvosScreenshotCapture } from "../tvos/TvosScreenshot";
+import { tvosRunners } from "../tvos/TvosRunnerRegistry";
+import { readImageHeaderDimensions } from "../../utils/screenshot/imageHeaderDimensions";
 
 export interface DeviceVisualScreenDependencies {
   hierarchyCaptureFactory?: (device: BootedDevice) => HierarchyCapture;
   screenshotFactory?: (device: BootedDevice) => Pick<ScreenshotService, "execute">;
   readFile?: (filePath: string) => Promise<Buffer>;
+  /** Apple TV screen capture; defaults to the runner's screenshot, else `simctl io screenshot`. */
+  tvosScreenshot?: TvosScreenshotCapture;
+  /** Whether a tvOS runner (and so a view hierarchy) is connected for the device. */
+  tvosRunnerConnected?: (deviceId: string) => boolean;
 }
+
+/** Why an Apple TV comparison without a runner can compare only the full screen. */
+export const TVOS_REGIONS_NEED_RUNNER_MESSAGE =
+  "compareScreenshot target and mask regions on tvOS need the tvOS runner's view hierarchy, " +
+  "and no runner is connected. Call startDevice to prepare the runner, or compare the full " +
+  "screen without target or mask.";
 
 type EdgeInsets = { top: number; right: number; bottom: number; left: number };
 
@@ -81,6 +94,64 @@ async function captureScreenshotPng(
   return (deps.readFile ?? fs.readFile)(screenshot.path);
 }
 
+/** The PNG's pixel size, read from its header. */
+function pngSize(png: Buffer): { width: number; height: number } {
+  const size = readImageHeaderDimensions(png);
+  if (!size || size.width <= 0 || size.height <= 0) {
+    throw new ActionableError("compareScreenshot could not read the tvOS screenshot's size");
+  }
+  return { width: size.width, height: size.height };
+}
+
+/**
+ * An Apple TV screen (#16725). Apple TV has no system bars. With the tvOS runner connected the
+ * hierarchy places element ids and point rectangles; without it only the full screen compares.
+ */
+async function captureTvosVisualScreen(
+  device: BootedDevice,
+  deps: DeviceVisualScreenDependencies,
+): Promise<VisualScreen & { hierarchy: Partial<ViewHierarchyResult> }> {
+  const connected = (deps.tvosRunnerConnected ?? ((id) => tvosRunners.get(id) !== undefined))(
+    device.deviceId,
+  );
+  const screenshot = deps.tvosScreenshot ?? captureTvosScreenshot;
+  if (!connected) {
+    const png = await screenshot(device);
+    const screenSize = pngSize(png);
+    return {
+      png,
+      hierarchy: {},
+      geometry: { platform: "ios", screenSize, rasterOrientation: "display" },
+      systemBars: [],
+      resolveElement: () => {
+        throw new ActionableError(TVOS_REGIONS_NEED_RUNNER_MESSAGE);
+      },
+      regionsUnavailable: TVOS_REGIONS_NEED_RUNNER_MESSAGE,
+    };
+  }
+  const capture = deps.hierarchyCaptureFactory?.(device) ?? createDeviceHierarchyCapture(device);
+  const snapshot = await capture.capture({ freshness: "fresh" });
+  const { screenWidth, screenHeight } = snapshot.hierarchy;
+  if (!screenWidth || !screenHeight) {
+    throw new ActionableError(
+      "compareScreenshot requires screen dimensions from a fresh hierarchy",
+    );
+  }
+  const png = await screenshot(device);
+  return {
+    png,
+    hierarchy: snapshot.hierarchy,
+    // Runner bounds are points, like iOS; the scale comes from the screenshot's pixel size.
+    geometry: {
+      platform: "ios",
+      screenSize: { width: screenWidth, height: screenHeight },
+      rasterOrientation: "display",
+    },
+    systemBars: [],
+    resolveElement: (elementId) => resolveElementBounds(snapshot, elementId),
+  };
+}
+
 /**
  * One fresh hierarchy plus screenshot of the device (#14083), the same capture `snapshotOf` uses,
  * so element ids and rectangles resolve against the screen the pixels came from.
@@ -88,7 +159,10 @@ async function captureScreenshotPng(
 export async function captureDeviceVisualScreen(
   device: BootedDevice,
   deps: DeviceVisualScreenDependencies = {},
-): Promise<VisualScreen & { hierarchy: ViewHierarchyResult }> {
+): Promise<VisualScreen & { hierarchy: Partial<ViewHierarchyResult> }> {
+  if (device.platform === "tvos") {
+    return captureTvosVisualScreen(device, deps);
+  }
   const platform = requireAndroidOrIosPlatform(device.platform, "Visual screenshot comparison");
   const capture = deps.hierarchyCaptureFactory?.(device) ?? createDeviceHierarchyCapture(device);
   const snapshot = await capture.capture({
@@ -130,6 +204,11 @@ export async function readVisualDeviceProfile(
   backend: Pick<ImageBackend, "metadata">,
   readSettings: DisplaySettingsReader = defaultDisplaySettingsReader,
 ): Promise<VisualDeviceProfile> {
+  // Apple TV has no display settings reader: its profile is its screenshot size alone.
+  if (device.platform === "tvos") {
+    const { width, height } = await backend.metadata(screen.png);
+    return { platform: "tvos", width, height, density: null, fontScale: null, theme: null };
+  }
   const [{ width, height }, settings] = await Promise.all([
     backend.metadata(screen.png),
     readSettings(device),

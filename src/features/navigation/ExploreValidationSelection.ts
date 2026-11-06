@@ -1,4 +1,4 @@
-import { Element } from "../../models";
+import { Element, type ViewHierarchyResult } from "../../models";
 import { logger } from "../../utils/logger";
 import { type NavigationEdge, type NavigationGraphService } from "./NavigationGraphManager";
 import { Timer } from "../../utils/SystemTimer";
@@ -11,6 +11,20 @@ import {
   selectNextEdgeToTraverse,
 } from "./ExploreValidateMode";
 
+/**
+ * Skip a validate-mode target edge whose element could not be acted on (no tap or focus target, or
+ * a swipe on a D-pad device): nothing was dispatched, so retrying it would never succeed.
+ */
+export function skipUndispatchedEdge(
+  state: GraphTraversalState | null,
+  edge: NavigationEdge | null,
+  timer: Timer,
+): void {
+  if (state && edge) {
+    markEdgeSkipped(state, edge, "its element has no target the input mode can act on", timer);
+  }
+}
+
 export interface ExploreValidationSelection {
   stopReason: string;
   currentTargetEdge: NavigationEdge | null;
@@ -21,6 +35,8 @@ interface ValidationSelectionContext {
   graphTraversalState: GraphTraversalState | null;
   navigationManager: NavigationGraphService;
   timer: Timer;
+  /** The screen's hierarchy, so a recorded D-pad target resolves as its replay pins it. */
+  hierarchy?: ViewHierarchyResult;
 }
 function targetValidateEdge(
   selection: ExploreValidationSelection,
@@ -61,7 +77,7 @@ export function selectValidateElement(
       return null;
     }
 
-    const resolution = resolveEdgeTarget(candidates, targetEdge);
+    const resolution = resolveEdgeTarget(candidates, targetEdge, context.hierarchy);
     if (resolution.status === "not-validatable") {
       // A property of the recorded edge, not of the app: skip it and try the next one.
       markEdgeSkipped(state, targetEdge, resolution.reason, context.timer);

@@ -266,7 +266,8 @@ private fun ObserveLayoutConnection(
     LaunchedEffect(streamClient) {
       streamClient.deviceEvents.collect { event ->
         when (event) {
-          is DeviceStreamEvent.DeviceSessionSuperseded -> Unit
+          is DeviceStreamEvent.DeviceSessionSuperseded,
+          is DeviceStreamEvent.DeviceSessionEnded -> Unit
           is DeviceStreamEvent.DeviceConnectionLost -> {
             dashboardLog.warn("Device connection lost for ${event.deviceId}: ${event.error}")
             state.disconnect()

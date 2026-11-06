@@ -3,10 +3,19 @@ import {
   DEVICE_FRAMES,
   deviceFrameOrThrow,
   defaultDeviceFrameId,
-  deviceFrameProblems,
-  parseDeviceFrames,
+  normalizeDeviceFrame,
 } from "../../../../src/features/prototype/web/deviceFrames";
-import registry from "../../../../src/features/prototype/web/deviceFrames.json";
+import {
+  deviceFrameProblems,
+  orphanDeviceFrameSources,
+  parseDeviceFrames,
+  type DeviceFrameEntry,
+  withDeviceFrameSources,
+} from "../../../../src/features/prototype/web/deviceFrameSchema";
+import rawRegistry from "../../../../src/features/prototype/web/deviceFrames.json";
+import sources from "../../../../src/features/prototype/web/deviceFrameSources.json";
+
+const registry = withDeviceFrameSources(rawRegistry, sources);
 
 const frame = (overrides: Record<string, unknown> = {}) => ({
   ...structuredClone(registry.frames[0]),
@@ -17,6 +26,21 @@ describe("device frame registry (#16346)", () => {
   test("every checked-in frame is valid", () => {
     expect(deviceFrameProblems(registry)).toEqual([]);
     expect(DEVICE_FRAMES.length).toBe(registry.frames.length);
+  });
+
+  test("keeps each frame's source in the sources file, not the registry (#16809)", () => {
+    expect(rawRegistry.frames.filter((entry) => "source" in entry)).toEqual([]);
+    expect(orphanDeviceFrameSources(rawRegistry, sources)).toEqual([]);
+    expect(orphanDeviceFrameSources(rawRegistry, { ...sources, "nokia-3310": {} })).toEqual([
+      "sources.nokia-3310: names no frame",
+    ]);
+  });
+
+  test("a frame with no sources entry is invalid", () => {
+    const rest = Object.fromEntries(
+      Object.entries(sources).filter(([id]) => id !== rawRegistry.frames[0].id),
+    );
+    expect(parseDeviceFrames(withDeviceFrameSources(rawRegistry, rest)).success).toBe(false);
   });
 
   test("ships at least one Android and one iOS frame, with platform defaults", () => {
@@ -126,6 +150,17 @@ describe("device frame schema v2 (#16444)", () => {
     }
     expect(parsed.data.frames[0].panels.map((panel) => panel.role)).toEqual(["inner", "cover"]);
     expect(parsed.data.frames[0].hinge?.panel).toBe("inner");
+  });
+
+  test("the zod-free registry normalizes exactly as the schema parses (#16451)", () => {
+    const entries = [...registry.frames, foldable(), frame({ formFactor: "watch", mask: "round" })];
+    const parsed = parseDeviceFrames({ frames: entries });
+    if (!parsed.success) {
+      throw new Error(parsed.error.message);
+    }
+    expect((entries as DeviceFrameEntry[]).map(normalizeDeviceFrame)).toEqual(parsed.data.frames);
+    const unsourced = parsed.data.frames.map(({ source: _source, ...rest }) => rest);
+    expect(DEVICE_FRAMES).toEqual(unsourced.slice(0, registry.frames.length));
   });
 
   test("accepts a round rotary watch and a dpad TV", () => {
@@ -269,14 +304,19 @@ describe("watch, TV and car frames (#16446)", () => {
   });
 
   test("watches and TVs have no system bars; every new frame says where its geometry came from", () => {
+    // Provenance lives in the sources file, merged in by frame id (#16809).
+    const screenKind = (id: string) => {
+      const source = registry.frames.find((frame) => frame.id === id)?.source;
+      return source && "kinds" in source ? source.kinds.screen : undefined;
+    };
     for (const id of ["wearos-small-round", "apple-watch", "android-tv-1080p", "apple-tv"]) {
       expect(byId(id)).toMatchObject({ statusBarDp: 0, navBar: { type: "none" } });
     }
-    expect(byId("wearos-small-round").source.kinds?.screen).toBe("avdProfile");
-    expect(byId("apple-watch").source.kinds?.screen).toBe("simulatorProfile");
-    expect(byId("android-tv-1080p").source.kinds?.screen).toBe("avdProfile");
-    expect(byId("apple-tv").source.kinds?.screen).toBe("simulatorProfile");
-    expect(byId("car-1024p-landscape").source.kinds?.screen).toBe("avdProfile");
+    expect(screenKind("wearos-small-round")).toBe("avdProfile");
+    expect(screenKind("apple-watch")).toBe("simulatorProfile");
+    expect(screenKind("android-tv-1080p")).toBe("avdProfile");
+    expect(screenKind("apple-tv")).toBe("simulatorProfile");
+    expect(screenKind("car-1024p-landscape")).toBe("avdProfile");
   });
 
   test("a landscape-only frame records its geometry in portrait", () => {

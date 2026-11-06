@@ -7,7 +7,8 @@ export type IosSdkCapability =
   | "network_error_simulation"
   | "database"
   | "highlight"
-  | "magic_tap";
+  | "magic_tap"
+  | "accessibility_focus";
 
 /**
  * A capability waiter was created under one probe generation, but a hierarchy

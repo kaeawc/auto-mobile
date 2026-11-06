@@ -373,7 +373,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
 
   ToolRegistry.registerDeviceAware(
     "tapOn",
-    "Tap an element by text/content-desc, resource-id, or Android test tag; use sibling for adjacent controls. On an Android device without a touchscreen (TV), a text or elementId tap moves D-pad focus to the match and presses enter.",
+    "Tap an element by text/content-desc, resource-id, or Android test tag; use sibling for adjacent controls. On an Android device without a touchscreen (TV), a plain text or elementId tap (no sibling, container, index or other touch-only option) moves D-pad focus to the match and presses enter only once focus reaches it.",
     tapOnSchema,
     {
       handler: (device, args, progress, signal) =>
@@ -520,7 +520,6 @@ export type {
   SystemAlertTap,
   TapAnyElementLike,
   TapAtElementLike,
-  TapOnDpadFallbackLike,
   TapOnElementLike,
 } from "./interactionTools/dependencies";
 

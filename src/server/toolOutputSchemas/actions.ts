@@ -258,7 +258,7 @@ export const tapOnResultSchema = z
       .literal("dpad")
       .optional()
       .describe(
-        "Present when the Android device has no touchscreen: focus was moved with the D-pad and enter was pressed instead of a touch tap",
+        "Present when the Android device has no touchscreen and the D-pad was used instead of a touch tap; enter is pressed only after focus reaches the target",
       ),
     focusNavigation: z
       .object({
@@ -269,7 +269,7 @@ export const tapOnResultSchema = z
       })
       .passthrough()
       .optional()
-      .describe("The D-pad focus walk that preceded enter, when inputMethod is dpad"),
+      .describe("The D-pad focus walk, when inputMethod is dpad"),
     debug: z.any().optional(),
   })
   .passthrough();

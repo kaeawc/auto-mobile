@@ -97,6 +97,9 @@ export class CachedTouchscreenFeature implements TouchscreenFeature {
       }
     }
     if (value === null) {
+      logger.warn(
+        `[TouchscreenFeature] unrecognized pm has-feature output for ${deviceId}; keeping touch input`,
+      );
       this.cache.delete(deviceId);
       return null;
     }

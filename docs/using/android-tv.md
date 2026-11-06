@@ -5,7 +5,8 @@ it uses for a phone, plus D-pad focus navigation. This guide covers creating one
 and what is out of scope.
 
 > Use the `android-tv` image for TV apps. Touch gestures need a device with a touchscreen;
-> otherwise, use D-pad navigation. `tapOn` falls back to D-pad navigation on its own.
+> otherwise, use D-pad navigation. On a TV without a touchscreen, a plain `tapOn` by `text` or
+> `elementId` moves focus and presses `enter` for you; see [Navigating a TV app](#navigating-a-tv-app).
 
 ## Install a TV system image
 

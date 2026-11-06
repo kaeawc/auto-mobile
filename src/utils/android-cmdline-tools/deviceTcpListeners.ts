@@ -15,8 +15,12 @@ const FILE_MARKER = "automobile-proc-file=";
 /** `st` column value for TCP_LISTEN. */
 const LISTEN_STATE = "0A";
 
-/** The device shell script: each file is preceded by a marker so a missing file reads as empty. */
-export const DEVICE_LISTENERS_SCRIPT = `for f in /proc/net/tcp /proc/net/tcp6; do echo "${FILE_MARKER}$f"; cat "$f" 2>&1; done`;
+/**
+ * The device shell script: each file is preceded by a marker so a missing file reads as empty, and
+ * a file that cannot be read never fails the command (`|| true`), so the parser decides whether any
+ * table was readable.
+ */
+export const DEVICE_LISTENERS_SCRIPT = `for f in /proc/net/tcp /proc/net/tcp6; do echo "${FILE_MARKER}$f"; cat "$f" 2>&1 || true; done`;
 
 /**
  * Whether a `/proc/net/tcp{,6}` local address (hex, as the kernel prints it) is a wildcard or

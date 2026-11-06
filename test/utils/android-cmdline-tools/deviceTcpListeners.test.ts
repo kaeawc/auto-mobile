@@ -69,6 +69,10 @@ describe("device TCP listeners", () => {
     });
     expect((await reverse.listeners()).kind).toBe("ok");
     expect(await reverse.packageForUid(10123)).toBe(APP);
+    // A file that cannot be read must not fail the command: the parser decides.
+    expect(DEVICE_LISTENERS_SCRIPT).toBe(
+      'for f in /proc/net/tcp /proc/net/tcp6; do echo "automobile-proc-file=$f"; cat "$f" 2>&1 || true; done',
+    );
     expect(commands).toEqual([
       `shell sh -c '${DEVICE_LISTENERS_SCRIPT}'`,
       "shell pm list packages -U",

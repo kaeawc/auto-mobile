@@ -1,6 +1,7 @@
 import type { AdbReverseCommands } from "../../utils/android-cmdline-tools/adbReverse";
 import { rethrowDeviceTransportUnavailable } from "../../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import type { DeviceListenerTable } from "../../utils/android-cmdline-tools/deviceTcpListeners";
+import { DeviceLostError } from "../../models/DeviceLostError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { PortReverseError } from "./PortReverseError";
@@ -18,11 +19,19 @@ export type DeviceListener =
 
 type Adb = Pick<AdbReverseCommands, "listeners" | "packageForUid">;
 
+/** A lost device or transport is the call's failure, never a diagnostic that reads as "unknown". */
+function rethrowDeviceLoss(error: unknown): void {
+  if (error instanceof DeviceLostError) {
+    throw error;
+  }
+  rethrowDeviceTransportUnavailable(error);
+}
+
 async function readTable(adb: Adb, deviceId: string): Promise<DeviceListenerTable> {
   try {
     return await adb.listeners();
   } catch (error) {
-    rethrowDeviceTransportUnavailable(error);
+    rethrowDeviceLoss(error);
     logger.warn(
       `[portReverse] reading device listeners on ${deviceId} failed: ${errorMessage(error)}`,
     );
@@ -34,7 +43,7 @@ async function lookupPackage(adb: Adb, uid: number, deviceId: string) {
   try {
     return await adb.packageForUid(uid);
   } catch (error) {
-    rethrowDeviceTransportUnavailable(error);
+    rethrowDeviceLoss(error);
     logger.warn(
       `[portReverse] package lookup for uid ${uid} on ${deviceId} failed: ${errorMessage(error)}`,
     );

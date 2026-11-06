@@ -4,6 +4,7 @@ import {
   PortReverseManager,
   type PortReverseTarget,
 } from "../../../src/features/portReverse/PortReverseManager";
+import { DeviceLostError } from "../../../src/models/DeviceLostError";
 import { FakeAdbReverseCommands } from "../../fakes/FakeAdbReverseCommands";
 
 const setup = () => {
@@ -80,5 +81,17 @@ describe("PortReverseManager deviceListener", () => {
     const error = await rejection(manager.ensure(target, [{ devicePort: 9000, hostPort: 9000 }]));
     expect(error).not.toBeInstanceOf(PortReverseError);
     expect(String(error)).toContain("cannot bind");
+  });
+
+  test("device loss while reading listeners or a package fails the call", async () => {
+    const { adb, manager, target } = setup();
+    const lost = new DeviceLostError("emulator-5554", "gone");
+    adb.listenersError = lost;
+    await expect(manager.verify(target, [9000])).rejects.toBe(lost);
+    adb.listenersError = undefined;
+    adb.processListeners.set(9000, 10123);
+    adb.packageError = lost;
+    await expect(manager.list(target)).resolves.toBeDefined();
+    await expect(manager.verify(target, [9000])).rejects.toBe(lost);
   });
 });

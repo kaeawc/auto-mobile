@@ -121,8 +121,14 @@ export class FakeAdbReverseCommands implements AdbReverseCommands {
     return { kind: "ok", listeners };
   }
 
+  /** When set, a package lookup rejects with it. */
+  packageError: Error | undefined;
+
   async packageForUid(uid: number): Promise<string | undefined> {
     this.diagnosticCalls.push(`package ${uid}`);
+    if (this.packageError !== undefined) {
+      throw this.packageError;
+    }
     return this.packages.get(uid);
   }
 

@@ -131,10 +131,11 @@ describeBrowser("prototype web still against the Android goldens (#16534)", () =
           }
           measured[entry.golden] = result.diffPixels;
           const budget = budgets[entry.golden];
-          if (!UPDATE) {
-            if (budget === undefined) {
-              throw new Error(`${entry.golden}: no budget; record one with --update`);
-            }
+          if (budget === undefined && !UPDATE) {
+            throw new Error(`${entry.golden}: no budget; record one with --update`);
+          }
+          // An update keeps a budget it may not raise, so it still fails a case over that budget.
+          if (budget !== undefined && !(UPDATE && ALLOW_GROW)) {
             expect(result.diffPixels).toBeLessThanOrEqual(
               parityAllowance(budget, clip.width * clip.height),
             );

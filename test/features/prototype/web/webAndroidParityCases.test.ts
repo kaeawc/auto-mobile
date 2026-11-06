@@ -76,11 +76,15 @@ describe("prototype web parity with the Android goldens (#16534)", () => {
       readFileSync(androidParityFixturePath("theme-modes-colors"), "utf8"),
     );
     const children = (
-      androidParitySpec(entry).root as { children: { type: string; detents?: string[] }[] }
+      androidParitySpec(entry).root as {
+        children: { type: string; detents?: string[]; scrim?: unknown }[];
+      }
     ).children;
     expect(children.length).toBe(original.root.children.length - 1);
     const sheets = children.filter((child) => child.type === "bottomSheet");
-    expect(sheets.length).toBeGreaterThan(0);
+    // The role-scrim sheet is the one kept.
+    expect(sheets.length).toBe(1);
+    expect(sheets[0]?.scrim).toBe("scrim");
     expect(sheets.every((sheet) => sheet.detents?.join() === "half")).toBe(true);
   });
 

@@ -76,7 +76,7 @@ struct GestureCoordinateGeometry: Equatable, Sendable {
     var applicationDisplayId: UInt64? = nil
     /// The observed frame cannot be re-read live (a two-panel SpringBoard's inner panel, whose
     /// live application frame is the cover's), so the cached geometry is used as observed.
-    var pinnedToObservation: Bool = false
+    var pinnedToObservation = false
 
     /// A letterboxed app at the main-screen origin is not evidence of another panel (#16259).
     nonisolated func isAppOnMainScreen(applicationDisplayId: UInt64?) -> Bool {

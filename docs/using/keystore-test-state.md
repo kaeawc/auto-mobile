@@ -91,13 +91,13 @@ delay alone does not make it report `BRIDGE_UNAVAILABLE`. `KEY_STORE_EXCEPTION`,
 `PROVIDER_EXCEPTION`, and `USER_NOT_AUTHENTICATED` simulate the named failure on
 those same operations.
 
-`STRONGBOX_UNAVAILABLE` affects key generation only. The app must call
-`KeystoreTestState.checkKeyGeneration(spec)` with its `KeyGenParameterSpec`
-immediately before generating the key. When the spec's alias is armed and the spec
-requests StrongBox (`setIsStrongBoxBacked(true)`), the call throws
-`StrongBoxUnavailableException`, as key generation does on a device without
-StrongBox, so the app's fallback runs. A spec without StrongBox, an unarmed alias,
-API levels below 28, and release builds never throw. Metadata and deletion ignore
+`STRONGBOX_UNAVAILABLE` affects key generation only, and only in an app that runs
+the debug SDK's key-generation check with its key spec immediately before
+generating a key ([integration](../design-docs/plat/android/keystore-strongbox-fault.md)).
+When the alias is armed and the spec requests StrongBox, generation fails with
+`StrongBoxUnavailableException`, as it does on a device without StrongBox, so the
+app's fallback runs. Keys that do not request StrongBox, unarmed aliases, API
+levels below 28, and release builds are unaffected. Metadata and deletion ignore
 this kind.
 
 Setting a fault replaces the previous fault for each selected alias. These calls

@@ -280,3 +280,5 @@ test/fixtures/protoviewer-artifact-policy/** text eol=lf
 fastlane/metadata/** text eol=lf
 test/fixtures/android-avd-effective-ram/* text eol=lf
 test/fixtures/prototype-a11y/*.json text eol=lf
+
+test/fixtures/android-stamp/AndroidManifest.xml text eol=lf

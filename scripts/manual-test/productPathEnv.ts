@@ -162,6 +162,11 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
     kind: "input",
     reason: "Read-only viewer template archive.",
   },
+  {
+    name: "AUTOMOBILE_ANDROID_PROTOTYPE_APP_TEMPLATE",
+    kind: "input",
+    reason: "Read-only disposable-app template directory.",
+  },
 ];
 /** Non-path product reads, derived from the same AST scan as docs conformance.
  * URLs, hashes, identities, lists, numeric settings and flags are values, not filesystem paths.

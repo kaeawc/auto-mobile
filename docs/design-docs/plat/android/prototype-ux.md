@@ -4914,12 +4914,12 @@ capability requirements still apply; iOS advertises the token capability but
 continues to refuse those broader features until its corresponding capabilities
 are available.
 
-## Disposable apps (#14184, host core only)
+## Disposable apps
 
 A disposable app installs one spec as its own app, with its own package, label, icon, permissions
 and foreground-service types. The host core lives in `src/features/prototype/disposableApp/`.
-Template stamping (#14185) and the `prototype installApp`, `listApps` and `uninstallApp` actions
-are not wired yet.
+The Android stamper packages a spec into a signed APK; the `prototype installApp`, `listApps`
+and `uninstallApp` actions remain separate from this artifact pipeline.
 
 - **Identity.** The package is `dev.jasonpearson.automobile.app.<slug>_<sha256(slug) 8 hex>`.
   Hyphens in the slug become underscores because Android package segments allow only
@@ -4943,3 +4943,26 @@ are not wired yet.
   from the host's disposable-app key: one requested id is refused with an error, and in a bulk
   removal the package is reported under `skipped`. Each removal is logged at `warn`. An app that
   is already gone from the device still has its registry record cleared.
+
+### Template packaging and stamping
+
+The release template package contains an unsigned, unminified APK, the merged text
+manifest, stamp points, capability metadata, and template identity plus APK SHA-256.
+The host loads a local flavor through `AUTOMOBILE_ANDROID_PROTOTYPE_APP_TEMPLATE`
+and checks its checksum; a released download is not available yet.
+
+Stamping preserves the compiled code and resource table. The host changes the
+package, provider authorities, literal label, exact permission set (always including
+INTERNET), and explicitly enabled components in structured XML. App-owned resource
+references retain the template resource namespace with private-resource access.
+`aapt2 link` resolves those names back to binary resource ids, avoiding unsafe
+binary-manifest string replacement. The spec and assets are baked under
+`assets/prototype/` at stamp time. Icon customization is refused until adaptive
+icon replacement is implemented.
+
+Template signatures are removed before assembly. The resource table stays stored;
+zipalign aligns it before apksigner signs with v2/v3 using a persistent host-owned
+PKCS12 identity. Verification checks the resulting signer before publishing the
+content-addressed cache artifact. The signer certificate SHA-256 is available to
+the installation signing guard. Cache identity covers the template, stamp inputs,
+asset bytes, and signer; cache hits check the saved artifact digest.

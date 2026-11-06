@@ -52,6 +52,9 @@ include(":prototype-compose")
 // Saved-prototype store and device HTTP transport, split from CtrlProxy for ProtoViewer (#13617).
 include(":prototype-saved")
 
+// Standalone template APK for disposable prototype apps (#14185).
+include(":prototype-app-shell")
+
 include(":protoviewer")
 
 include(":junit-runner")

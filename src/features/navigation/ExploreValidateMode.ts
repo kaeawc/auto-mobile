@@ -16,6 +16,7 @@ import {
 } from "../action/FocusNavigate";
 import type { ToolCallInteraction } from "../../utils/interfaces/NavigationGraph";
 import type { ViewHierarchyResult } from "../../models";
+import type { ElementBounds } from "../../models/ElementBounds";
 import { boundsEqual } from "../../utils/bounds";
 import {
   isPinnableFocusTarget,
@@ -517,7 +518,7 @@ function resolveFocusEdgeTarget(
     ? focusEdgeTargetResolver.resolve({ focused: null, elements, hierarchy }, until)
     : undefined;
   if (pinned !== undefined) {
-    const element = pinned ? elements.find((e) => boundsEqual(e.bounds, pinned)) : undefined;
+    const element = pinned ? candidateOwning(elements, pinned) : undefined;
     return element
       ? { status: "matched", element, confidence: FOCUS_TARGET_CONFIDENCE }
       : { status: "not-found", bestScore: 0 };
@@ -530,6 +531,25 @@ function resolveFocusEdgeTarget(
   return element
     ? { status: "matched", element, confidence: FOCUS_TARGET_CONFIDENCE }
     : { status: "not-found", bestScore: 0 };
+}
+
+/**
+ * The candidate at `bounds`, else the smallest one containing them: a resolved static child is
+ * not a candidate itself, but focus on its actionable owner counts as focus on it.
+ */
+function candidateOwning(elements: Element[], bounds: ElementBounds): Element | undefined {
+  const exact = elements.find((element) => boundsEqual(element.bounds, bounds));
+  if (exact) {
+    return exact;
+  }
+  const owners = elements.filter(
+    ({ bounds: b }) =>
+      b.left <= bounds.left &&
+      b.top <= bounds.top &&
+      b.right >= bounds.right &&
+      b.bottom >= bounds.bottom,
+  );
+  return owners.sort((a, b) => boundsArea(a) - boundsArea(b))[0];
 }
 
 /** The first element `focusNavigate` would accept for `until` on this screen, exact labels first. */

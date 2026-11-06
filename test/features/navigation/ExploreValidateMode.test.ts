@@ -626,6 +626,43 @@ describe("ExploreValidateMode", () => {
       });
     });
 
+    test("maps a pinned static child to the actionable row that owns it", () => {
+      const rowBounds = { left: 0, top: 0, right: 400, bottom: 100 };
+      const labelBounds = { left: 20, top: 20, right: 200, bottom: 80 };
+      const screen = createMockElement({
+        "resource-id": "app:id/screen",
+        bounds: { left: 0, top: 0, right: 1000, bottom: 1000 },
+      });
+      const row = createMockElement({ text: "", "resource-id": "app:id/row", bounds: rowBounds });
+      // Hand-built: a clickable row whose only id-bearing child is a static label.
+      const hierarchy: ViewHierarchyResult = {
+        hierarchy: {
+          node: createFlatNodeForTest({
+            bounds: rowBounds,
+            "resource-id": "app:id/row",
+            clickable: true,
+            focusable: true,
+            node: [
+              createFlatNodeForTest({
+                bounds: labelBounds,
+                text: "Movies",
+                "resource-id": "app:id/label",
+              }),
+            ],
+          }),
+        },
+      };
+      const edge = interactionEdge("focusNavigate", {
+        until: { elementId: "app:id/label" },
+        select: true,
+      });
+
+      expect(resolveEdgeTarget([screen, row], edge, hierarchy)).toMatchObject({
+        status: "matched",
+        element: row,
+      });
+    });
+
     test("falls back to scoring when the multi-field target is a label inside a row", () => {
       const row = createMockElement({ text: "Movies", "resource-id": "app:id/row" });
       const edge = interactionEdge("focusNavigate", {

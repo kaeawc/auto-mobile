@@ -68,10 +68,10 @@ describe("DefaultAndroidBuildToolsLocator", () => {
     fileSystem.setFile("/sdk/platforms/android-37/android.jar", "");
     const locator = new DefaultAndroidBuildToolsLocator(fileSystem, systemDetection);
     expect(await locator.findStampTools()).toEqual({
-      aapt2: "/sdk/build-tools/37.0.0/aapt2",
-      zipalign: "/sdk/build-tools/37.0.0/zipalign",
-      apksigner: "/sdk/build-tools/37.0.0/apksigner",
-      androidJar: "/sdk/platforms/android-37/android.jar",
+      aapt2: join("/sdk/build-tools", "37.0.0", "aapt2"),
+      zipalign: join("/sdk/build-tools", "37.0.0", "zipalign"),
+      apksigner: join("/sdk/build-tools", "37.0.0", "apksigner"),
+      androidJar: join("/sdk/platforms", "android-37", "android.jar"),
     });
   });
 });

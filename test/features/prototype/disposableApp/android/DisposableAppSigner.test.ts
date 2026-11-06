@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { join } from "node:path";
 import { HostKeystoreSigner } from "../../../../../src/features/prototype/disposableApp/android/DisposableAppSigner";
 import { FakeFileSystem } from "../../../../fakes/FakeFileSystem";
 import { FakeHostCommandExecutor } from "../../../../fakes/FakeHostCommandExecutor";
@@ -20,7 +21,7 @@ test("creates PKCS12 lazily once and passes password files to keytool and apksig
   expect(calls.filter((call) => call.args.includes("-genkeypair"))).toHaveLength(1);
   expect(calls[0]?.args).toContain("PKCS12");
   expect(calls[0]?.args).toContain("-storepass:file");
-  expect(calls[1]?.args).toContain("file:/temporary-test/key/password");
+  expect(calls[1]?.args).toContain(`file:${join("/temporary-test/key", "password")}`);
   expect(calls[1]?.args).toContain("--v2-signing-enabled");
   expect(calls[1]?.args).toContain("--v3-signing-enabled");
   const password = await fs.readFileBuffer("/temporary-test/key/password");

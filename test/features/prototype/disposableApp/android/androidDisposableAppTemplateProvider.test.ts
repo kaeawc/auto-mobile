@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { join } from "node:path";
 import {
   AndroidDisposableAppTemplateProvider,
   asDisposableAppTemplate,
@@ -35,7 +36,7 @@ test("resolves a parent flavor directory and adapts for template selection", asy
     [variable]: "/templates",
   });
   const template = await provider.resolve();
-  expect(template.apkPath).toBe("/templates/base/template.apk");
+  expect(template.apkPath).toBe(join("/templates", "base", "template.apk"));
   expect(
     selectDisposableAppTemplate({ root: { type: "column" } }, [asDisposableAppTemplate(template)])
       .name,

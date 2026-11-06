@@ -1,6 +1,7 @@
 import com.android.build.api.artifact.SingleArtifact
 import java.security.MessageDigest
 import org.gradle.api.DefaultTask
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.Property
@@ -12,8 +13,6 @@ import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
-
-import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 
 plugins {
   id("automobile.android-application")
@@ -116,7 +115,8 @@ abstract class PackageStampTemplate : DefaultTask() {
 
   @TaskAction
   fun packageTemplate() {
-    val apk = apkDirectory.get().asFile.walkTopDown().filter { it.extension == "apk" }.toList().single()
+    val apk =
+      apkDirectory.get().asFile.walkTopDown().filter { it.extension == "apk" }.toList().single()
     val output = outputDirectory.get().asFile
     output.deleteRecursively()
     output.mkdirs()
@@ -124,18 +124,25 @@ abstract class PackageStampTemplate : DefaultTask() {
     mergedManifest.get().asFile.copyTo(output.resolve("AndroidManifest.xml"))
     stampPoints.get().asFile.copyTo(output.resolve("stamp-points.json"))
     capabilities.get().asFile.copyTo(output.resolve("capabilities.json"))
-    val digest = MessageDigest.getInstance("SHA-256").digest(apk.readBytes()).joinToString("") { "%02x".format(it) }
-    output.resolve("template.json").writeText(
-      """{"template":"${templateName.get()}","applicationId":"${templateApplicationId.get()}","apkSha256":"$digest"}
-"""
-    )
+    val digest =
+      MessageDigest.getInstance("SHA-256").digest(apk.readBytes()).joinToString("") {
+        "%02x".format(it)
+      }
+    output
+      .resolve("template.json")
+      .writeText(
+        """{"template":"${templateName.get()}","applicationId":"${templateApplicationId.get()}","apkSha256":"$digest"}
+""",
+      )
   }
 }
 
 androidComponents {
   onVariants(selector().withBuildType("release")) { variant ->
     val flavor = variant.flavorName ?: error("Stamp templates require a flavor")
-    tasks.register<PackageStampTemplate>("package${flavor.replaceFirstChar { it.uppercaseChar() }}StampTemplate") {
+    tasks.register<PackageStampTemplate>(
+      "package${flavor.replaceFirstChar { it.uppercaseChar() }}StampTemplate",
+    ) {
       group = "build"
       description = "Packages the unsigned $flavor APK and text manifest for host stamping."
       apkDirectory.set(variant.artifacts.get(SingleArtifact.APK))

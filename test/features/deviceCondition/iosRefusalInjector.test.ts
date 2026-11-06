@@ -26,6 +26,14 @@ describe("iOS refusals (#14073)", () => {
       "faults.storage",
       "faults.memoryPressure",
       "faults.readOnlyFilesystem",
+      "faults.battery",
+      "faults.corruptAppFile",
+      "faults.revokePermission",
+      "faults.lockScreen",
+      "faults.disablePackage",
+      "faults.killApp",
+      "faults.trimMemory",
+      "faults.clearPackageData",
     ] satisfies DeviceConditionKey[]) {
       const injector = resolveIosRefusalInjector(ios, key);
       await expect(injector?.apply("on")).rejects.toThrow(/Android device or emulator/);
@@ -34,7 +42,18 @@ describe("iOS refusals (#14073)", () => {
 
   test("an Android device, or a key iOS can satisfy, falls through", () => {
     expect(resolveIosRefusalInjector(android, "rootState")).toBeUndefined();
-    expect(resolveIosRefusalInjector(ios, "faults.battery")).toBeUndefined();
+    expect(resolveIosRefusalInjector(ios, "statusBar")).toBeUndefined();
+    expect(resolveIosRefusalInjector(ios, "privacy")).toBeUndefined();
+    expect(resolveIosRefusalInjector(ios, "location")).toBeUndefined();
+  });
+
+  test("a refused fault with a shared-key alternative names it", async () => {
+    await expect(
+      resolveIosRefusalInjector(ios, "faults.revokePermission")?.apply("apply"),
+    ).rejects.toThrow(/use privacy/);
+    await expect(resolveIosRefusalInjector(ios, "faults.battery")?.apply("low")).rejects.toThrow(
+      /use statusBar/,
+    );
   });
 
   test("through the controller the refusal is reported unsupported and owes no reset", async () => {

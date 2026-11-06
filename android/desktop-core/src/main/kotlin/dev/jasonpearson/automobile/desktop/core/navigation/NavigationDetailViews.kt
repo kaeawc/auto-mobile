@@ -22,6 +22,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.components.Link
@@ -121,9 +123,12 @@ fun ScreenNodeRow(screen: ScreenNode, onClick: () -> Unit) {
 @Composable
 fun TransitionRow(
   transition: ScreenTransition,
-  onClick: () -> Unit,
+  // Opens the transition's detail. With [onScreenClick] the screen names are links, so this shows
+  // as a separate Details link (the way to the navigate action, #16953); null shows none.
+  onClick: (() -> Unit)?,
   currentScreen: String? = null, // Current screen name - won't be a link
   onScreenClick: ((String) -> Unit)? = null, // Optional: click on screen name to navigate
+  verification: EdgeVerification = EdgeVerification.Verified,
 ) {
   val colors = SharedTheme.globalColors
   val triggerIcon =
@@ -140,7 +145,7 @@ fun TransitionRow(
       Modifier.fillMaxWidth()
         .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
         .then(
-          if (onScreenClick == null)
+          if (onScreenClick == null && onClick != null)
             Modifier.clickable(onClick = onClick).pointerHoverIcon(PointerIcon.Hand)
           else Modifier,
         )
@@ -150,9 +155,38 @@ fun TransitionRow(
   ) {
     TransitionPath(transition, currentScreen, onScreenClick, triggerIcon, Modifier.weight(1f))
 
+    if (verification == EdgeVerification.UnverifiedForActiveBuild) {
+      UnverifiedEdgeTag(transition)
+    }
+
     TransitionStatistics(transition)
+
+    onClick
+      ?.takeIf { onScreenClick != null }
+      ?.let {
+        Link(
+          "Details",
+          onClick = it,
+          modifier =
+            Modifier.padding(start = 8.dp).semantics {
+              contentDescription =
+                "Transition details: ${transition.fromScreen} → ${transition.toScreen}"
+            },
+        )
+      }
   }
 }
+
+/**
+ * Host-provided inputs for [ScreenDetailView]: the screenshot loader and the pane's active context,
+ * used to flag transitions that are unverified for the active build (#4987).
+ */
+data class ScreenDetailEnvironment(
+  val screenshotLoader: ScreenshotLoader? = null,
+  val activeContext: NavigationActiveContext? = null,
+  // Opens a transition's detail by id; null leaves the rows without a Details link.
+  val onTransitionSelected: ((String) -> Unit)? = null,
+)
 
 @Composable
 fun ScreenDetailView(
@@ -160,8 +194,9 @@ fun ScreenDetailView(
   transitions: List<ScreenTransition>,
   onBack: () -> Unit,
   onScreenSelected: (String) -> Unit, // Navigate to another screen by name
-  screenshotLoader: ScreenshotLoader? = null,
+  environment: ScreenDetailEnvironment = ScreenDetailEnvironment(),
 ) {
+  val activeContext = environment.activeContext
   val colors = SharedTheme.globalColors
   val scrollState = rememberScrollState()
   val outgoing = transitions.filter { it.fromScreen == screen.name }
@@ -175,7 +210,7 @@ fun ScreenDetailView(
 
     Spacer(Modifier.height(20.dp))
 
-    ScreenScreenshot(screen, screenshotLoader)
+    ScreenScreenshot(screen, environment.screenshotLoader)
 
     Spacer(Modifier.height(20.dp))
 
@@ -187,9 +222,27 @@ fun ScreenDetailView(
 
     Spacer(Modifier.height(20.dp))
 
-    ScreenTransitionList("Outgoing Transitions", outgoing, screen.name, onScreenSelected)
+    ScreenTransitionList(
+      ScreenTransitionListOptions(
+        "Outgoing Transitions",
+        outgoing,
+        screen.name,
+        onScreenSelected,
+        activeContext,
+        environment.onTransitionSelected,
+      ),
+    )
     if (outgoing.isNotEmpty()) Spacer(Modifier.height(12.dp))
-    ScreenTransitionList("Incoming Transitions", incoming, screen.name, onScreenSelected)
+    ScreenTransitionList(
+      ScreenTransitionListOptions(
+        "Incoming Transitions",
+        incoming,
+        screen.name,
+        onScreenSelected,
+        activeContext,
+        environment.onTransitionSelected,
+      ),
+    )
   }
 }
 
@@ -207,6 +260,8 @@ fun TransitionDetailView(
   transition: ScreenTransition,
   onBack: () -> Unit,
   onScreenSelected: (String) -> Unit, // Navigate to a screen by name
+  verification: EdgeVerification = EdgeVerification.Verified,
+  navigateAction: TransitionNavigateAction? = null,
 ) {
   val colors = SharedTheme.globalColors
   val scrollState = rememberScrollState()
@@ -217,6 +272,12 @@ fun TransitionDetailView(
 
     // Header
     Text("Transition Detail", fontSize = 16.sp)
+    if (verification == EdgeVerification.UnverifiedForActiveBuild) {
+      UnverifiedEdgeTag(transition, Modifier.padding(top = 6.dp))
+    }
+    navigateAction?.let {
+      TransitionNavigateActionView(transition, it, verification, Modifier.padding(top = 8.dp))
+    }
     Row(
       horizontalArrangement = Arrangement.spacedBy(8.dp),
       verticalAlignment = Alignment.CenterVertically,
@@ -256,6 +317,29 @@ fun TransitionDetailView(
       color = colors.text.normal.copy(alpha = 0.6f),
     )
   }
+}
+
+/**
+ * Marks an edge reached only by another build: a hint, not a verified path for the active build
+ * (#4987). Navigating along it would be speculative.
+ */
+@Composable
+internal fun UnverifiedEdgeTag(transition: ScreenTransition, modifier: Modifier = Modifier) {
+  val colors = SharedTheme.globalColors
+  Text(
+    NavigationBuildLens.UNVERIFIED_LABEL,
+    fontSize = 10.sp,
+    color = colors.text.normal.copy(alpha = 0.6f),
+    modifier =
+      modifier
+        .background(colors.text.normal.copy(alpha = 0.08f), RoundedCornerShape(3.dp))
+        .padding(horizontal = 4.dp, vertical = 1.dp)
+        .semantics {
+          contentDescription =
+            "${transition.fromScreen} → ${transition.toScreen} — " +
+              NavigationBuildLens.UNVERIFIED_LABEL
+        },
+  )
 }
 
 @Composable

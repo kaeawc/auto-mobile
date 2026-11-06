@@ -6,6 +6,8 @@
 # - publish-protoviewer-play.yml builds the AAB exactly once and only promotes afterwards;
 # - PLAY_SERVICE_ACCOUNT_JSON is read only in jobs of the protected Play environments.
 
+load yq-helpers
+
 SCRIPT="scripts/release/protoviewer-play.sh"
 WORKFLOW=".github/workflows/publish-protoviewer-play.yml"
 BUILD_WORKFLOW=".github/workflows/build-protoviewer-apk.yml"
@@ -28,10 +30,11 @@ setup() {
   export PLAY_RETRY_DELAYS="0 0"
 }
 
-# Workflow YAML as JSON, with either yq flavour (mikefarah on runners, python-yq locally).
+# Workflow YAML as JSON, with either yq flavour (mikefarah on runners, python-yq locally),
+# so this file uses only the shared guard's CI detection, not its mikefarah check.
 workflow_json() {
   command -v yq >/dev/null 2>&1 || {
-    [[ -z "${CI:-}" ]] || { echo "yq is required in CI" >&2; return 1; }
+    ! yq_guard_fails_closed || { echo "yq is required in CI" >&2; return 1; }
     skip "yq not installed"
   }
   yq -o=json '.' "$1" 2>/dev/null || yq '.' "$1"

@@ -1,11 +1,13 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { DaemonOptions } from "../../src/daemon/types";
 import {
   runCliCommand,
   setDaemonProxyFactoryForTesting,
   resetDaemonProxyFactoryForTesting,
 } from "../../src/cli";
+import { initializeCliTools } from "../../src/cli/cliToolRegistration";
 import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
+import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
 /**
  * Regression test for issue #4247: the CLI parses `--embedded-sdk` and
@@ -23,6 +25,14 @@ import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDi
 describe("runCliCommand daemon-option threading (issue #4247)", () => {
   const constructedWith: Array<DaemonOptions | undefined> = [];
   let isolatedCliDataDir: IsolatedCliDataDir;
+
+  // Registering every CLI tool the first time costs over 100 ms cold; pay it here, outside the
+  // timed tests, and leave the registry as this suite found it.
+  beforeAll(() => {
+    const restoreTools = preserveToolRegistry();
+    initializeCliTools();
+    restoreTools();
+  });
 
   beforeEach(() => {
     isolatedCliDataDir = isolateCliDataDir();

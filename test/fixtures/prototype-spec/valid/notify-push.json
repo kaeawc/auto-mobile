@@ -1,0 +1,56 @@
+{
+  "id": "np",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "data": {
+    "messages": []
+  },
+  "requires": {
+    "platform": ["notifications"],
+    "permissions": [
+      {
+        "name": "notifications",
+        "purpose": "Tell you about new messages"
+      }
+    ]
+  },
+  "notifications": {
+    "channels": [
+      {
+        "id": "chat",
+        "name": "Chat",
+        "importance": "high"
+      }
+    ]
+  },
+  "platform": {
+    "on": {
+      "notifications.push": [
+        {
+          "type": "appendData",
+          "path": "/data/messages",
+          "value": {
+            "event": "/data"
+          }
+        },
+        {
+          "type": "setState",
+          "key": "lastSender",
+          "value": {
+            "event": "/data/sender"
+          }
+        }
+      ]
+    }
+  },
+  "root": {
+    "type": "text",
+    "text": "Messages"
+  },
+  "state": {
+    "lastSender": ""
+  }
+}

@@ -69,6 +69,35 @@ are not built in: add those files yourself (a saved prototype serves their bytes
 Revisions, errors, `_meta` (without `variants`) and subscriptions work as for the web page below,
 and `resources/list` lists both files for every prototype shown in this daemon session.
 
+## Eject to code you own
+
+The resources above keep the renderer library and the spec in your app. To replace a prototype
+with screens you write and style by hand, read `automobile:prototype/eject?id=<id>` (same `id`,
+`platform` and `deviceId` parameters as the native resource) once and edit the result. Nothing is
+regenerated or synced back to the spec afterwards.
+
+The result is JSON:
+
+| Field        | Meaning                                                                                                                                   |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `files`      | One file: `app/src/main/java/prototypes/eject/<Type>.kt` (Jetpack Compose, Material 3) or `<Type>.swift` (SwiftUI). No library is needed. |
+| `scaffolded` | Node types written as real code.                                                                                                          |
+| `remaining`  | What is left for you, by spec path: `node` (an unsupported node), `action` (an action other than stack navigation) or `binding`.          |
+| `notes`      | Limits of the scaffold for this prototype.                                                                                                |
+
+`box`, `row`, `column`, `card`, `scroll`, `spacer`, `divider`, `text`, `button`, `textField`,
+`list`, `listItem` and `stack` become native code. Stack screens become their own functions or
+views, and `push`, `replace`, `pop` and `popToRoot` drive a back stack in the generated state
+class, which also holds text field values (seeded from string `state`). Every other node becomes a
+placeholder, marked with an `(eject)` comment, that keeps its `testTag` and children. Styles, conditions, data
+placeholders such as `{item.name}` and other actions stay as written or as `(eject)` comments;
+a list shows as many rows as its data had. Explicit theme color roles become a Material 3 color
+scheme or SwiftUI colors; a seeded scheme is not exported.
+
+Every `testTag` is kept as `Modifier.testTag` or `.accessibilityIdentifier`, with `{index}` bound
+to the row index, so tests and flows recorded against the prototype can target the ejected
+screens.
+
 ## Where the files go
 
 Copy each `files[].path` and `assets[].path` exactly as the resource returns it. The host file reads
@@ -158,7 +187,10 @@ Use this object as the spec's `window`. The option changes only the prototype's 
 not change the device locale or translate text. It is supported on iOS and requires
 `prototype_layout_direction_v1`. Android refuses specs that set it; remove the option to show there.
 Other optional window controls are `keepScreenOn`, `brightness`, `orientation` and `statusBar`;
-these require `prototype_platform_window_controls_v1` and are refused when unsupported.
+these require `prototype_platform_window_controls_v1` and are refused when unsupported. On Android,
+these controls and the `hideKeyboard` action are available through CtrlProxy overlays, not the embedded
+renderer. Overlay orientation is best effort; inspect reports the requested `orientation` and reports
+`statusBar: "unsupported"` when a status bar style was requested.
 
 ## Capability errors
 
@@ -203,6 +235,12 @@ names the oldest kept revision. The result's `_meta` reports `revision`, `device
 device's own counter for that patch), `revisions`, `variants`, `frame`, `sha256` and
 `rendererVersion`.
 
+Images draw the assets uploaded with the prototype to an Android device that is still showing it,
+re-encoded at the size the frame draws them. The page stays under 2 MiB: the revision shown first
+gets its images before older revisions, and an image that does not fit, or whose asset the server
+does not have (iOS uploads, or no device showing the prototype any more), draws a grey placeholder.
+Upload the assets again with the next show to bring them back.
+
 `resources/list` lists `automobile:prototype/<id>/web` for every prototype shown in this daemon
 session. Subscribe to that URI, without parameters, to be told about every new revision; a
 subscription to a URI with `revision=` is never notified again.
@@ -221,13 +259,23 @@ To take a prototype's spec together with what it needs from a renderer, read
   "format": "automobile-prototype-embed",
   "version": 1,
   "requires": ["..."],
-  "spec": { "...": "..." }
+  "spec": { "...": "..." },
+  "glyphs": { "filled/home": "<path d=\"...\"></path>" },
+  "iconMissing": ["filled/..."]
 }
 ```
 
 `spec` is the prototype's spec and `requires` lists the renderer capabilities it needs, as this
 server computed them. Keep the two together: a renderer that lacks a listed capability should
 refuse the spec rather than draw part of it. A `version` other than `1` is a newer format.
+
+`glyphs` is present when the spec names an icon that has a glyph. It maps `<variant>/<name>` to the Material Icons
+glyph's shapes, as SVG markup for a `0 0 24 24` viewBox, so a renderer needs no icon set of its
+own. It covers every icon the spec's icon fields name, in the icon's `variant` (else `filled`), the glyphs controls draw on their own (a filter chip's or segment's selection check, a select's dropdown arrow and a date picker's month arrows),
+and every icon name that appears as a string in `state` or `data`, in `filled` and in each variant
+the spec's icons use, so an icon whose name changes with state still has its glyph. A variant
+without that glyph carries the `filled` one. `iconMissing` lists the keys with no glyph at all;
+draw a placeholder for them. iOS-style glyphs are not included yet.
 
 `revision` and `variant` work as for the web page; there is no `frame`. Errors, listing and
 subscriptions also match the web page, and `_meta` reports the same fields except `frame`.

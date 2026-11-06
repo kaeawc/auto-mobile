@@ -21,10 +21,12 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -368,26 +370,46 @@ class VideoStreamClientTest {
 
   @Test
   fun `a relay heartbeat packet bumps lastActivityMs without decoding it as video`() = runBlocking {
-    // The whole payload plus the trailing heartbeat can arrive in a single socket read, so the two
-    // are processed synchronously back to back. Asserting on lastActivityMs starting at its 0L
-    // reset value, rather than racing a before/after snapshot around the first-frame wait, is what
-    // makes this deterministic.
+    // The payload decodes to several frames, so polling the replay cache for "a" frame could catch
+    // one mid-burst. Instead the relay writes the payload, the heartbeat, then closes, and the test
+    // waits for the reader's orderly-close state: it is published only after every packet was
+    // processed. The injected clock makes the heartbeat's stamp an exact value.
+    val payload = sampleH264()
+    val payloadFrames =
+      H264Decoder().use { decoder ->
+        var count = 0L
+        decoder.decode(payload) { count++ }
+        count
+      }
+    assertTrue(payloadFrames > 0, "sample.h264 must decode to at least one frame")
     val server =
-      relay(
-        RelaySpec(payload = sampleH264(), heartbeatMs = 1_000, sendHeartbeatAfterPayload = true),
-      )
+      relay(RelaySpec(payload = payload, heartbeatMs = 1_000, sendHeartbeatAfterPayload = true))
     val client =
-      VideoStreamClient(VideoStreamClient.Options(socketPathValue = server.socketPath.toString()))
+      VideoStreamClient(
+        VideoStreamClient.Options(
+          socketPathValue = server.socketPath.toString(),
+          nowMs = { HEARTBEAT_CLOCK_MS },
+        ),
+      )
 
-    client.connect("emulator-5554")
-    val frame = server.awaitFirstFrameFrom(client)
-    waitUntil { client.lastActivityMs.value != 0L }
+    try {
+      client.connect("emulator-5554")
+      val stopped =
+        withTimeout(10_000) {
+          client.state.first {
+            it !is VideoStreamState.Connecting && it !is VideoStreamState.Streaming
+          }
+        }
+      assertEquals(VideoStreamState.Unavailable("Live mirroring stopped"), stopped)
 
-    // The heartbeat must not have been mistaken for a decodable frame: the replay cache still holds
-    // the same latest decoded frame.
-    assertEquals(frame.sequence, client.frames.replayCache.first().sequence)
-
-    client.dispose()
+      assertEquals(HEARTBEAT_CLOCK_MS, client.lastActivityMs.value)
+      // The heartbeat must not have been mistaken for a decodable frame: the client emitted exactly
+      // the frames the payload alone decodes to, and the replay cache holds the last of them.
+      assertEquals(payloadFrames, client.emittedFrameSequence.value)
+      assertEquals(payloadFrames, client.frames.replayCache.single().sequence)
+    } finally {
+      client.dispose()
+    }
   }
 
   @Test
@@ -852,5 +874,9 @@ class VideoStreamClientTest {
       Files.deleteIfExists(socketPath)
       Files.deleteIfExists(tempDir)
     }
+  }
+
+  private companion object {
+    const val HEARTBEAT_CLOCK_MS = 42_000L
   }
 }

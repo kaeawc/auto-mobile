@@ -60,7 +60,7 @@ export interface NativePrototype {
   notes: string[];
 }
 
-interface ResolvedPrototype {
+export interface ResolvedPrototype {
   deviceId: string;
   spec: ShownSpecJson;
   saved?: MirroredSavedPrototype;
@@ -75,9 +75,9 @@ const MIME_EXTENSIONS: Record<PrototypeAssetMimeType, string> = {
   "application/vnd.automobile.agsl": "agsl",
 };
 
-function required(value: string | undefined, name: string): string {
+function required(value: string | undefined, name: string, uri = PROTOTYPE_NATIVE_URI): string {
   if (value === undefined || value.length === 0) {
-    throw new ActionableError(`${PROTOTYPE_NATIVE_URI} needs ${name}.`);
+    throw new ActionableError(`${uri} needs ${name}.`);
   }
   return value;
 }
@@ -357,15 +357,28 @@ export function rejectUnexportableSpec(
   }
 }
 
+/**
+ * The prototype and platform a read of `uri` names: the shown spec (or the saved one) on the one
+ * device showing it, or on `deviceId`. Shared with `automobile:prototype/eject` (#14129).
+ */
+export async function resolveExportTarget(
+  params: Record<string, string | undefined>,
+  sources: NativePrototypeSources,
+  uri = PROTOTYPE_NATIVE_URI,
+): Promise<{ id: string; platform: NativePrototypePlatform; resolved: ResolvedPrototype }> {
+  const id = required(params.id, "id", uri);
+  const requested = parsePlatform(params.platform);
+  const resolved = await resolvePrototype(sources, id, params.deviceId);
+  const platform = await resolvePlatform(sources, requested, resolved);
+  return { id, platform, resolved };
+}
+
 /** Builds the native-code payload for one prototype. */
 export async function readNativePrototype(
   params: Record<string, string | undefined>,
   sources: NativePrototypeSources,
 ): Promise<NativePrototype> {
-  const id = required(params.id, "id");
-  const requested = parsePlatform(params.platform);
-  const resolved = await resolvePrototype(sources, id, params.deviceId);
-  const platform = await resolvePlatform(sources, requested, resolved);
+  const { id, platform, resolved } = await resolveExportTarget(params, sources);
   rejectUnexportableSpec(resolved.spec, platform);
   const version = sources.libraryVersion();
   const capabilities = requiredPrototypeCapabilities(resolved.spec);

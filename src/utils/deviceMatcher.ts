@@ -12,6 +12,7 @@ import type {
 } from "../models/DeviceMatchCriteria";
 import { CTRL_PROXY_APK_MIN_SDK, parseAndroidApiLevelBound } from "./androidVersionBounds";
 import { defaultRandom, type Random } from "./Random";
+import { androidSystemImageTagsFor, wearProfileScreenRound } from "../models/formFactor";
 
 export type DisplayInventoryClassification = "multi" | "single" | "unavailable";
 
@@ -240,12 +241,15 @@ export function matchesDeviceCriteria(
     screenHeight?: number;
     isRunning?: boolean;
     runtimeId?: string;
+    deviceType?: string;
   },
   criteria: DeviceMatchCriteria,
 ): boolean {
   return (
     matchesPlatform(item, criteria) &&
     matchesPlayStore(item, criteria) &&
+    matchesVehicleMotion(item, criteria) &&
+    matchesScreenRound(item, criteria) &&
     matchesVersionRange(item, criteria) &&
     matchesName(item, criteria) &&
     matchesFormFactor(item, criteria) &&
@@ -264,6 +268,36 @@ function matchesPlayStore(item: { runtimeId?: string }, criteria: DeviceMatchCri
   }
   const tag = item.runtimeId ? parseAndroidSystemImageRuntime(item.runtimeId)?.tag : undefined;
   return tag !== undefined && isPlayStoreSystemImageTag(tag);
+}
+
+/**
+ * `requires.vehicle.motion` (#16742) holds only for a non-Play automotive image: Play Store car
+ * images are `user` builds whose car service refuses driving-state injection. A device whose
+ * image is unknown cannot show it.
+ */
+function matchesVehicleMotion(
+  item: { runtimeId?: string },
+  criteria: DeviceMatchCriteria,
+): boolean {
+  if (criteria.requires?.vehicle?.motion !== "supported") {
+    return true;
+  }
+  const tag = item.runtimeId ? parseAndroidSystemImageRuntime(item.runtimeId)?.tag : undefined;
+  return tag !== undefined && isMotionCapableAutomotiveTag(tag);
+}
+
+/**
+ * `requires.screenRound` holds only for a Wear profile whose id names that shape, booted or not, so
+ * a square request never reuses a round watch. A device whose profile is unknown cannot show it.
+ */
+function matchesScreenRound(item: { deviceType?: string }, criteria: DeviceMatchCriteria): boolean {
+  const wanted = criteria.requires?.screenRound;
+  return wanted === undefined || wearProfileScreenRound(item.deviceType) === wanted;
+}
+
+/** A car image whose `userdebug` build can simulate driving state: automotive and not Play Store. */
+export function isMotionCapableAutomotiveTag(tag: string): boolean {
+  return androidSystemImageTagsFor("automotive").includes(tag) && !isPlayStoreSystemImageTag(tag);
 }
 
 function matchesRequiredDisplays(
@@ -566,8 +600,10 @@ export class DefaultDeviceMatcher implements DeviceMatcher {
 }
 
 /**
- * Requirements no new device can satisfy: display capabilities (unknown until a device exists) and
- * `requires.playStore` off Android, where a created simulator would still not match (#14302).
+ * Requirements no new device can satisfy: display capabilities (unknown until a device exists),
+ * `requires.playStore` off Android, where a created simulator would still not match (#14302), and
+ * `requires.vehicle` outside an automotive Android request (#16742), and `requires.screenRound`
+ * outside a Wear OS Android request.
  */
 export function assertCreatableRequirements(
   criteria: DeviceMatchCriteria,
@@ -579,6 +615,28 @@ export function assertCreatableRequirements(
   if (criteria.requires?.playStore === true && criteria.platform !== "android") {
     throw new ActionableError(
       "requires.playStore applies to Android emulators only: no device was created. Remove it for an iOS request.",
+    );
+  }
+  assertCreatableVehicleRequirement(criteria);
+  if (
+    criteria.requires?.screenRound !== undefined &&
+    (criteria.platform !== "android" || criteria.formFactor !== "watch")
+  ) {
+    throw new ActionableError(
+      "requires.screenRound applies to Wear OS emulators only: no device was created. " +
+        "Pass platform 'android' and formFactor 'watch', or remove requires.screenRound.",
+    );
+  }
+}
+
+function assertCreatableVehicleRequirement(criteria: DeviceMatchCriteria): void {
+  if (criteria.requires?.vehicle?.motion === undefined) {
+    return;
+  }
+  if (criteria.platform !== "android" || criteria.formFactor !== "automotive") {
+    throw new ActionableError(
+      "requires.vehicle applies to Android Automotive emulators only: no device was created. " +
+        "Pass platform 'android' and formFactor 'automotive', or remove requires.vehicle.",
     );
   }
 }

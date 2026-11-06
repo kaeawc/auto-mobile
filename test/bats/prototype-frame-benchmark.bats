@@ -244,3 +244,7 @@ STUB
   [ -n "$asset_path" ]
   [ ! -e "$asset_path" ]
 }
+@test "spec: top content clears the status bar (#16482)" {
+  run jq -e '.root.children[0].safeAreaPadding == {"edges":["top"],"types":["systemBars"]}' "$ROOT/benchmark/prototype-frame/spec.json"
+  [ "$status" -eq 0 ]
+}

@@ -15,9 +15,13 @@ import { observeToolResultSchema } from "../../../src/server/toolOutputSchemas";
 import { createStructuredToolResponse, getStructuredPayload } from "../../../src/utils/toolUtils";
 import { buildObserveResult } from "../../helpers/observeFixture";
 
-test.each([ANDROID_PROTOVIEWER_PACKAGE, IOS_PROTOVIEWER_BUNDLE_ID])(
-  "recognizes the exact ProtoViewer host %s",
-  (host) => expect(isImportedPrototypeHost(host)).toBe(true),
+test.each([
+  ANDROID_PROTOVIEWER_PACKAGE,
+  IOS_PROTOVIEWER_BUNDLE_ID,
+  `${ANDROID_PROTOVIEWER_PACKAGE}.dev`,
+  `${IOS_PROTOVIEWER_BUNDLE_ID}.dev`,
+])("recognizes the exact ProtoViewer host %s (store and dev builds)", (host) =>
+  expect(isImportedPrototypeHost(host)).toBe(true),
 );
 
 test.each([
@@ -27,6 +31,8 @@ test.each([
   "dev.jasonpearson.automobile.ctrlproxy",
   "dev.jasonpearson.automobile.prototype-viewer",
   `${ANDROID_PROTOVIEWER_PACKAGE}.clone`,
+  `${ANDROID_PROTOVIEWER_PACKAGE}.dev.clone`,
+  `${ANDROID_PROTOVIEWER_PACKAGE}.devx`,
   `other.${IOS_PROTOVIEWER_BUNDLE_ID}`,
 ])("does not identify another host as imported: %s", (host) => {
   expect(isImportedPrototypeHost(host)).toBe(false);

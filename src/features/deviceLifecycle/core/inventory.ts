@@ -324,6 +324,7 @@ export async function configuredImagesForBootedDevices(
 
 export interface ListDeviceImagesArgs {
   platform: Platform;
+  detail?: "compact" | "full";
 }
 
 export interface ListDevicesArgs {

@@ -1,0 +1,26 @@
+{
+  "id": "webview-limits",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["webview"]
+  },
+  "root": {
+    "type": "webView",
+    "url": "https://a7.example.com:65535",
+    "javaScript": true,
+    "allowedOrigins": [
+      "https://a0.example.com",
+      "https://a1.example.com",
+      "https://a2.example.com",
+      "https://a3.example.com",
+      "https://a4.example.com",
+      "https://a5.example.com",
+      "https://a6.example.com",
+      "https://a7.example.com:65535"
+    ]
+  }
+}

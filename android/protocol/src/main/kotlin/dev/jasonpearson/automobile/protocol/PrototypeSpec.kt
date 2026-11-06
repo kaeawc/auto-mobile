@@ -175,9 +175,7 @@ data class PrototypeWindow(
   /** Blur or tonal fill behind the window (`prototype_backdrop_v1`, #15126). */
   val backdrop: PrototypeBackdrop? = null,
   val transition: String? = null,
-  /**
-   * Window controls (`prototype_platform_window_controls_v1`, #14320); no runtime applies them yet.
-   */
+  /** Overlay-scoped window controls (`prototype_platform_window_controls_v1`, #14320). */
   val keepScreenOn: Boolean? = null,
   /** Protocol parity only; Android does not advertise or apply layout direction. */
   val layoutDirection: String? = null,
@@ -407,6 +405,7 @@ data class PrototypePasteButtonNode(
   override val scrollTransition: PrototypeScrollTransition? = null,
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val keyframes: JsonObject? = null,
+  override val attentionLoop: PrototypeLoop? = null,
   val into: String,
   override val ios: PrototypeIosNamespace? = null,
   override val android: PrototypeAndroidNamespace? = null,

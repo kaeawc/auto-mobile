@@ -132,7 +132,7 @@ function harness(platform: Platform, daemon: boolean, simctlAvailable = true) {
   );
   const scan: ConnectedPlatformScan = {
     devices: [],
-    scanned: { android: true, ios: simctlAvailable, watchos: false, tvos: false },
+    scanned: { android: true, ios: simctlAvailable, watchos: false, tvos: false, visionos: false },
   };
   const options: DeviceReadyOptions = {
     intent: "read",

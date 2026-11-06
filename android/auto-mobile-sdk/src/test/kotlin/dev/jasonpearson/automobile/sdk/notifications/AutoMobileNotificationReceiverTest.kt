@@ -2,10 +2,13 @@ package dev.jasonpearson.automobile.sdk.notifications
 
 import dev.jasonpearson.automobile.sdk.NotificationAction
 import dev.jasonpearson.automobile.sdk.NotificationPostResult
+import java.io.File
+import javax.xml.parsers.DocumentBuilderFactory
 import kotlin.test.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.w3c.dom.Element
 
 /**
  * Pins [AutoMobileNotificationReceiver.parseActions] against the malformed-entry cases that the
@@ -19,6 +22,32 @@ import org.robolectric.RobolectricTestRunner
 class AutoMobileNotificationReceiverTest {
 
   private val receiver = AutoMobileNotificationReceiver()
+
+  @Test
+  fun `debug notification receiver is exported and requires the platform dump permission`() {
+    // Gradle runs SDK unit tests with the SDK module as their working directory.
+    val manifest = File(System.getProperty("user.dir"), "src/debug/AndroidManifest.xml")
+    val document =
+      DocumentBuilderFactory.newInstance().run {
+        isNamespaceAware = true
+        newDocumentBuilder().parse(manifest)
+      }
+    val androidNamespace = "http://schemas.android.com/apk/res/android"
+    val receivers = document.getElementsByTagName("receiver")
+    val notificationReceiver =
+      (0 until receivers.length)
+        .map { receivers.item(it) as Element }
+        .single {
+          it.getAttributeNS(androidNamespace, "name") ==
+            "dev.jasonpearson.automobile.sdk.notifications.AutoMobileNotificationReceiver"
+        }
+
+    assertEquals("true", notificationReceiver.getAttributeNS(androidNamespace, "exported"))
+    assertEquals(
+      "android.permission.DUMP",
+      notificationReceiver.getAttributeNS(androidNamespace, "permission"),
+    )
+  }
 
   @Test
   fun `parseActions returns actions in array order`() {

@@ -138,6 +138,40 @@ describe("FocusNavigate", () => {
     expect(result.focusedElement?.bounds).toEqual(tile(2).bounds);
   });
 
+  test("a pinned actionable child must own focus, not its focused parent row", async () => {
+    // Hand-built: a focused row holding its own label and an independently clickable Delete button.
+    const row: Element = {
+      bounds: { left: 0, top: 0, right: 300, bottom: 100 },
+      "content-desc": "Open item",
+      focusable: true,
+      clickable: true,
+    };
+    const label: Element = { bounds: { left: 0, top: 0, right: 150, bottom: 100 }, text: "Item" };
+    const remove: Element = {
+      bounds: { left: 200, top: 0, right: 300, bottom: 100 },
+      text: "Delete",
+      focusable: true,
+      clickable: true,
+    };
+    const grid = new FakeGrid(0);
+    grid.elements = [row, label, remove];
+    grid.moves = { 0: { arrow_right: 2 } };
+
+    const toDelete = await navigator(grid).execute({
+      until: { label: "Delete" },
+      pinTarget: () => remove.bounds,
+    });
+    expect(toDelete).toMatchObject({ success: true, steps: 1 });
+    expect(grid.presses).toEqual(["arrow_right"]);
+
+    grid.focusIndex = 0;
+    const toLabel = await navigator(grid).execute({
+      until: { label: "Item" },
+      pinTarget: () => label.bounds,
+    });
+    expect(toLabel).toMatchObject({ success: true, steps: 0 });
+  });
+
   test("pinTarget null means nothing on the screen is the target", async () => {
     const grid = new FakeGrid(1);
     const result = await navigator(grid).execute({

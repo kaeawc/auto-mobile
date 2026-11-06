@@ -12,6 +12,7 @@ import type { ElementBounds } from "../../models/ElementBounds";
 import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
 import { DefaultTextMatcher } from "../utility/TextMatcher";
 import { normalize } from "../utility/ElementResolverMatching";
+import { isTruthyFlag } from "../utility/elementProperties";
 import { matchesCtrlProxyResourceId } from "../utility/SearchableNode";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { boundsArea, boundsEqual, intersectBounds } from "../../utils/bounds";
@@ -311,6 +312,10 @@ function pathEntry(element: Element, descendant?: Element): FocusPathEntry {
   };
 }
 
+function isActionable(element: Element): boolean {
+  return isTruthyFlag(element.clickable) || isTruthyFlag(element.focusable);
+}
+
 /** Match each contained node independently, preserving the focused container's identity. */
 function describeFocus(
   screen: FocusScreen,
@@ -327,7 +332,12 @@ function describeFocus(
         return intersection !== null && boundsEqual(intersection, element.bounds);
       })
     : [];
-  const matchingDescendant = contained.find((element) => elementMatchesTarget(element, target));
+  // A pinned target is the control a touch tap would act on; an independently actionable child
+  // (a Delete button in a focused row) must own focus itself, not borrow its parent's.
+  const matchingDescendant = contained.find(
+    (element) =>
+      elementMatchesTarget(element, target) && !(target.atBounds && isActionable(element)),
+  );
   const matches = Boolean(focused && (elementMatchesTarget(focused, target) || matchingDescendant));
   const label =
     matchingDescendant ??

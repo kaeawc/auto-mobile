@@ -36,9 +36,11 @@ internal data class AliasMetadata(
  * Caller authorization belongs to the provider; mutations also enforce opt-in and the injected
  * mutation gate here. Backend/probe fakes keep this boundary deterministic. deviceLocked=locked
  * comes only from the injected device lock probe and does not block reads. AndroidKeyStore swallows
- * metadata lookup failures; debug fault injection can exercise the metadata failure mappings.
- * Deletion maps failures per alias. present=false means not present or not observable, including an
- * indistinguishable Keystore daemon failure.
+ * metadata lookup failures, so a present key is also checked with [KeystoreBackend.verifyUsable]:
+ * an auth-bound key that is invalidated or needs authentication reports authentication_required.
+ * Debug fault injection can exercise the other metadata failure mappings. Deletion maps failures
+ * per alias. present=false means not present or not observable, including an indistinguishable
+ * Keystore daemon failure.
  */
 internal class KeystoreStateHandler(
   private val backend: KeystoreBackend,
@@ -189,17 +191,16 @@ internal class KeystoreStateHandler(
       KeystoreResponse.Ok(
         (if (alias == null) aliases.sorted() else listOf(alias)).map { name ->
           val present = backend.containsAlias(name)
-          AliasMetadata(
-            name,
-            present,
-            if (present) backend.entryCategory(name) else EntryCategory.UNKNOWN,
-          )
+          val category = if (present) backend.entryCategory(name) else EntryCategory.UNKNOWN
+          // Presence and category never throw for an invalidated key on a real device (#17294).
+          if (present) backend.verifyUsable(name)
+          AliasMetadata(name, present, category)
         },
       )
     } catch (error: Exception) {
       Log.w("KeystoreTestState", "Keystore metadata read failed", error)
-      // Reserved mappings exercised by injected-backend contract tests, not the real SPI.
       when (error) {
+        // Raised by the usability check on a real device, or by an injected fault.
         is UserNotAuthenticatedException,
         is KeyPermanentlyInvalidatedException -> KeystoreResponse.AuthenticationRequired
         // An unrecoverable entry while the device is verifiably locked can be reported as locked.

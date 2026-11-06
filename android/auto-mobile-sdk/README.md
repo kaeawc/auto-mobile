@@ -376,7 +376,9 @@ and call `unregister()` when the scope owner ends. Disabled by default, reset on
 SDK shutdown. The debug-only `${applicationId}.automobile.keystore` provider accepts
 `discover` and `metadata` (required `scope`, optional exact `alias`). It runs in the
 app's own security context, grants no cross-app access, and never returns key
-material, certificates, or credential bytes. `call("delete", ...)` accepts `scope`
+material, certificates, or credential bytes. `metadata` returns
+`authentication_required` when a present auth-bound key is invalidated or needs
+authentication. `call("delete", ...)` accepts `scope`
 and/or `alias` extras. An alias alone must be declared in some scope; with a scope
 it must belong to that scope. A scope alone selects every registered alias in it.
 Empty selectors are refused before accessing Keystore. Deletion additionally

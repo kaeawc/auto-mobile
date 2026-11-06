@@ -59,12 +59,14 @@ test("launches only the service test with the requested port and binds the exact
     "-only-testing:CtrlProxyVisionUITests/CtrlProxyVisionUITests/testRunService",
   ]);
   expect(launch.options?.env).toEqual({ ...process.env, TEST_RUNNER_AM_PORT: "8765" });
-  expect(launch.options?.stdio).toBe("ignore");
+  expect(launch.options?.stdio).toEqual(["ignore", "pipe", "pipe"]);
   expect(launch.options?.signal).toBeUndefined();
   expect(environments).toEqual([{ AM_PORT: "8765" }]);
   expect(child.killed).toBe(false);
   expect(urls).toEqual(["ws://127.0.0.1:8765/ws"]);
   expect(visionosRunners.get(options.deviceId)).toBe(client);
+  expect(client.connectedWaits).toBe(1);
+  expect(client.commands).toEqual([]);
   expect(timer.getSleepHistory()).toEqual([]);
   stop();
   expect(child.killed).toBe(true);
@@ -182,8 +184,8 @@ test("startup cancellation stops its child and cannot register after readiness r
   const child = new FakeChildProcess(timer);
   const xcodebuild = new FakeStreamingXcodebuild(child);
   const client = new FakeVisionosRunnerClient();
-  const ready = Promise.withResolvers<typeof client.tree>();
-  client.hierarchy = async () => await ready.promise;
+  const ready = Promise.withResolvers<void>();
+  client.waitUntilConnected = async () => await ready.promise;
   const request = new AbortController();
   const pending = new XcodebuildVisionosRunnerLauncher({
     xcodebuild,
@@ -198,11 +200,51 @@ test("startup cancellation stops its child and cannot register after readiness r
   await drainUntil(() => xcodebuild.launches.length === 1, { description: "runner spawn" });
   request.abort();
   expect(await failure).toBe("cancelled");
-  ready.resolve(client.tree);
+  ready.resolve();
   await Promise.resolve();
   expect(child.killed).toBe(true);
   expect(client.closed).toBe(true);
   expect(visionosRunners.get(options.deviceId)).toBeUndefined();
   expect(xcodebuild.launches[0]?.options?.signal).toBeUndefined();
   expect(timer.getSleepHistory()).toEqual([]);
+});
+
+test("readiness waits on the handshake, not a slow system-app hierarchy (#17199)", async () => {
+  // Issue #17199: against Safari the runner listened within ~5 s but its first hierarchy reply
+  // took 8.2 s, so a hierarchy-based readiness check timed out on every retry until 60 s.
+  const timer = new FakeTimer();
+  const child = new FakeChildProcess(timer);
+  const xcodebuild = new FakeStreamingXcodebuild(child);
+  const client = new FakeVisionosRunnerClient();
+  client.hierarchy = async () => {
+    await timer.sleep(8200);
+    return client.tree;
+  };
+  const pending = new XcodebuildVisionosRunnerLauncher({
+    writeRunnerEnvironment: async (file) => file,
+    xcodebuild,
+    timer,
+    connect: () => client,
+  }).launch({ ...options, deviceId: "visionos-safari", bundleId: "com.apple.mobilesafari" });
+  ({ stop } = await pending);
+  expect(visionosRunners.require("visionos-safari")).toBe(client);
+  expect(client.connectedWaits).toBe(1);
+  expect(client.commands).toEqual([]);
+  expect(timer.getSleepHistory()).toEqual([]);
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+  expect(child.killed).toBe(false);
+});
+
+test("runner output is drained so a chatty xcodebuild cannot block on a full pipe", async () => {
+  const timer = new FakeTimer();
+  const child = new FakeChildProcess(timer);
+  const xcodebuild = new FakeStreamingXcodebuild(child);
+  ({ stop } = await new XcodebuildVisionosRunnerLauncher({
+    writeRunnerEnvironment: async (file) => file,
+    xcodebuild,
+    timer,
+    connect: () => new FakeVisionosRunnerClient(),
+  }).launch({ ...options, deviceId: "visionos-output" }));
+  expect(child.stdout.listenerCount("data")).toBe(1);
+  expect(child.stderr.listenerCount("data")).toBe(1);
 });

@@ -117,6 +117,17 @@ describe("FocusNavigate", () => {
     expect(result.focusedElement?.bounds).toEqual(tile(1).bounds);
   });
 
+  test("firstMatch ranks a smaller duplicate ahead of a larger one earlier in the hierarchy", async () => {
+    const grid = new FakeGrid(1);
+    grid.elements[1] = { ...tile(1), text: "Play" };
+    const small = { left: 210, top: 110, right: 260, bottom: 160 };
+    grid.elements[5] = { ...tile(5), text: "Play", bounds: small };
+    const result = await navigator(grid).execute({ until: { label: "Play" }, firstMatch: true });
+    expect(result.success).toBe(true);
+    expect(result.focusedElement?.bounds).toEqual(small);
+    expect(grid.presses.length).toBeGreaterThan(0);
+  });
+
   test("without firstMatch a focused duplicate is accepted, as focusNavigate always has", async () => {
     const grid = new FakeGrid(4);
     grid.elements[1] = { ...tile(1), text: "Play" };

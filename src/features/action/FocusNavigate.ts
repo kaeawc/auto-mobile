@@ -13,7 +13,8 @@ import { DefaultTextMatcher } from "../utility/TextMatcher";
 import { normalize } from "../utility/ElementResolverMatching";
 import { matchesCtrlProxyResourceId } from "../utility/SearchableNode";
 import { throwIfAborted } from "../../utils/toolUtils";
-import { boundsEqual, intersectBounds } from "../../utils/bounds";
+import { boundsArea, boundsEqual, intersectBounds } from "../../utils/bounds";
+import { compareSelectionRank } from "../utility/selectionRank";
 import type { Timer } from "../../utils/SystemTimer";
 import type { InputKeyName } from "./InputKey";
 
@@ -81,8 +82,8 @@ export interface FocusNavigateOptions {
   settleMs?: number;
   signal?: AbortSignal;
   /**
-   * Only the first match in hierarchy order on each read counts, as tapOn's default selection
-   * does, so focus already resting on a later duplicate is not accepted.
+   * Only the first-ranked match on each read counts, as tapOn's default selection does, so focus
+   * already resting on another duplicate is not accepted. See {@link firstMatchTarget}.
    */
   firstMatch?: boolean;
 }
@@ -205,13 +206,25 @@ function resolveTarget(screen: FocusScreen, options: FocusNavigateOptions): Focu
   return options.firstMatch ? firstMatchTarget(screen, exact) : exact;
 }
 
-/** Pin `target` to the first element on this screen that matches it, in hierarchy order. */
+/**
+ * Pin `target` to the first match on this screen as tapOn's `first` selection ranks it: smallest
+ * area, then hierarchy order (the same {@link compareSelectionRank} ordering tvOS tapOn uses).
+ */
 export function firstMatchTarget(
   screen: FocusScreen,
   target: FocusNavigateTarget,
 ): FocusNavigateTarget {
-  const first = screen.elements.find((element) => elementMatchesTarget(element, target));
-  return first ? { ...target, atBounds: first.bounds } : target;
+  const [first] = screen.elements
+    .filter((element) => elementMatchesTarget(element, target))
+    .map((element, order) => ({
+      element,
+      windowRank: 0,
+      area: boundsArea(element.bounds),
+      order,
+      interactive: false,
+    }))
+    .sort((a, b) => compareSelectionRank(a, b));
+  return first ? { ...target, atBounds: first.element.bounds } : target;
 }
 
 function center(bounds: ElementBounds): { x: number; y: number } {

@@ -20,8 +20,9 @@ manager (#12530) also uses.
   whose port `--list` then shows is reported as a conflict. A later failed add
   rolls back this call's earlier adds through the same re-checked removal.
 - A conflict is classified per port as `other_session` (owned by another live
-  session), `external_live` (unowned and a host loopback connect to its `tcp:`
-  target succeeds) or `external_unknown` (anything else unowned). The owned map
+  session), `prototype` (held by a prototype, to another host port),
+  `external_live` (unowned and a host loopback connect to its `tcp:` target
+  succeeds) or `external_unknown` (anything else unowned). The owned map
   is in memory, so after a daemon restart every surviving mapping is external.
   A clash with the caller's own mapping has no kind.
 - `ensure {reclaimStale: true}` replaces an unowned mapping only when the call is
@@ -42,9 +43,16 @@ manager (#12530) also uses.
   `adb reverse --remove` takes no host argument, so a re-point between that read
   and the removal cannot be detected. Ownership is dropped only once removal
   succeeds or the mapping is gone or re-pointed. `--remove-all` is never used.
-- The prototype manager and this one keep separate owner maps. Each treats the
-  other's mappings as pre-existing: prototypes skip them (and add with
-  `--no-rebind`), and `portReverse` reports them as conflicts.
+- The prototype manager and this one keep separate owner maps but share one
+  ownership view (`AdbReverseOwnership`), where each answers from its own state
+  whether it holds a device port (#17253). A prototype needing a port a session
+  holds joins it without an add; `ensure` on a prototype-held port to the same
+  host port joins it (status `present`), and to another host port is a
+  `prototype` conflict. Neither manager removes a port the other still holds:
+  `remove` of a shared port drops the session's ownership and reports
+  `released` with `owner: "prototype"`, and the last holder removes the mapping.
+  A session's pending removal counts as a hold, and is dropped without removing
+  when a prototype holds the port. The view is in memory and per process.
 
 ## Device listeners
 

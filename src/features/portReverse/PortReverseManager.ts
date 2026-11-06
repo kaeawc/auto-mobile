@@ -8,6 +8,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { toActionableError } from "../../models/ActionableError";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { AdbReverseOwnership, type AdbReverseHolder } from "./AdbReverseOwnership";
 import { unknownHostLoopbackProbe, type HostLoopbackProbe } from "./HostLoopbackProbe";
 import { PortReverseError } from "./PortReverseError";
 import { assertNoConflicts } from "./portReverseConflicts";
@@ -29,7 +30,8 @@ export interface PortReverseRequest {
  * session did not create, so it was left in place. Only `verify` with `probe` reports the last three
  * for a mapping that is on the device: `reachable` (a device-side connect reached a host server
  * that kept it open), `unreachable` (see `probeReason`), `probe_unsupported` (the device shell
- * cannot run the connect, so nothing is guessed).
+ * cannot run the connect, so nothing is guessed). `released`: `remove` (or a release) ended this
+ * session's ownership but left the mapping on the device because a prototype still uses it.
  */
 export type PortReverseStatus =
   | "added"
@@ -37,6 +39,7 @@ export type PortReverseStatus =
   | "restored"
   | "missing"
   | "removed"
+  | "released"
   | "gone"
   | "foreign"
   | "reachable"
@@ -70,6 +73,8 @@ export interface PortReverseMapping {
   host: string;
   /** This session created the mapping and will remove it on release. */
   owned: boolean;
+  /** Set when this session does not own the mapping and a prototype's request relies on it. */
+  owner?: "prototype";
   status: PortReverseStatus;
   /** Set with `unreachable` and `probe_unsupported`. */
   probeReason?: PortProbeReason;
@@ -165,8 +170,10 @@ const defaultAudit: PortReverseAudit = (event) => logger.info(`[portReverse] ${e
 
 /**
  * Owns client-requested `adb reverse` mappings per device and session (#17099). A mapping belongs
- * to the session that created it: another session's, or one made outside this manager (a user's,
- * another tool's, a prototype's), is reported as a conflict and never overwritten or removed. Every
+ * to the session that created it: another session's, or one made outside AutoMobile (a user's,
+ * another tool's), is reported as a conflict and never overwritten or removed. A prototype's
+ * mapping is shared through {@link AdbReverseOwnership} when it already points where asked, and a
+ * port both hold stays until the last of them releases it (#17253). Every
  * call first re-applies the device's owned mappings that `adb reverse --list` no longer shows (an
  * adb server restart, `adb reconnect`, an adbd restart or an emulator restart drops them) and
  * reports what it restored. Removal re-checks `--list` and removes a port only while it still maps
@@ -174,12 +181,25 @@ const defaultAudit: PortReverseAudit = (event) => logger.info(`[portReverse] ${e
  */
 export class PortReverseManager {
   private readonly devices = new Map<string, DeviceState>();
+  /** This manager's side of the ownership view shared with prototypes: owned or awaiting removal. */
+  private readonly holder: AdbReverseHolder = {
+    kind: "session",
+    holds: (deviceId, devicePort) => {
+      const state = this.devices.get(deviceId);
+      return (
+        state !== undefined && (state.owned.has(devicePort) || state.pendingRemoval.has(devicePort))
+      );
+    },
+  };
 
   constructor(
     private readonly audit: PortReverseAudit = defaultAudit,
     private readonly timer: Timer = defaultTimer,
     private readonly hostProbe: HostLoopbackProbe = unknownHostLoopbackProbe,
-  ) {}
+    private readonly ownership: AdbReverseOwnership = new AdbReverseOwnership(),
+  ) {
+    ownership.register(this.holder);
+  }
 
   /**
    * Idempotently adds each mapping; throws `port_reverse_conflict` and changes nothing on a clash.
@@ -199,11 +219,24 @@ export class PortReverseManager {
       // Conflicts are judged on the device as it is, before any restore: a refused request changes
       // nothing on the device.
       const view = await this.view(target.deviceId, state);
-      const reclaimable = await assertNoConflicts(
-        { owner: target.owner, holdsDevice: target.holdsDevice === true, view, owned: state.owned },
+      const { reclaimable, shared } = await assertNoConflicts(
+        {
+          owner: target.owner,
+          holdsDevice: target.holdsDevice === true,
+          view,
+          owned: state.owned,
+          heldElsewhere: (port) => this.heldElsewhere(target.deviceId, port),
+        },
         wanted,
         { hostProbe: this.hostProbe, reclaimStale: options?.reclaimStale === true },
       );
+      // A prototype's mapping already pointing where asked is shared, not re-added (#17253).
+      for (const request of wanted.filter((r) => shared.includes(r.devicePort))) {
+        state.owned.set(request.devicePort, { hostPort: request.hostPort, owner });
+        this.audit(
+          `share ${tcp(request.devicePort)} -> ${tcp(request.hostPort)} device=${target.deviceId} session=${owner} with prototype`,
+        );
+      }
       const report = await this.restoreFor(target, state, view);
       const added: number[] = [];
       const mappings: PortReverseMapping[] = [];
@@ -242,7 +275,7 @@ export class PortReverseManager {
       const { view, report } = await this.reconciled(target, state);
       const mappings = await Promise.all(
         [...view.values()].map(async (entry) => ({
-          ...this.describe(target.owner, state, entry, report),
+          ...this.describe(target, state, entry, report),
           ...(await this.hostListening(entry)),
         })),
       );
@@ -277,7 +310,7 @@ export class PortReverseManager {
       const mappings = [...new Set(asked)].map((devicePort) => {
         const entry = view.get(devicePort);
         if (entry !== undefined) {
-          return this.describe(target.owner, state, entry, report);
+          return this.describe(target, state, entry, report);
         }
         const owned = state.owned.get(devicePort);
         return {
@@ -534,7 +567,10 @@ export class PortReverseManager {
   /** Retries released mappings whose removal failed, while they still map where AutoMobile set them. */
   private async retryPendingRemovals(deviceId: string, state: DeviceState, view: DeviceView) {
     for (const [devicePort, hostPort] of [...state.pendingRemoval]) {
-      if (view.get(devicePort)?.hostPort !== hostPort) {
+      if (
+        view.get(devicePort)?.hostPort !== hostPort ||
+        this.heldElsewhere(deviceId, devicePort) !== undefined
+      ) {
         // Gone, or re-pointed by someone else: nothing of ours is left to remove.
         state.pendingRemoval.delete(devicePort);
         continue;
@@ -859,6 +895,14 @@ export class PortReverseManager {
       state.owned.delete(devicePort);
       return { ...current, owned: false, status: "foreign" };
     }
+    if (this.heldElsewhere(deviceId, devicePort) !== undefined) {
+      // A prototype still uses it: only this session's claim ends; the prototype removes it last.
+      state.owned.delete(devicePort);
+      this.audit(
+        `release ${tcp(devicePort)} -> ${tcp(mapping.hostPort)} device=${deviceId} session=${mapping.owner} (kept for prototype)`,
+      );
+      return { ...current, owned: false, owner: "prototype", status: "released" };
+    }
     try {
       await state.adb.remove(devicePort);
     } catch (error) {
@@ -923,14 +967,23 @@ export class PortReverseManager {
   }
 
   private describe(
-    owner: string,
+    { deviceId, owner }: Pick<PortReverseTarget, "deviceId" | "owner">,
     state: DeviceState,
     entry: AdbReverseEntry,
     report: PortReverseRestoreReport,
   ): PortReverseMapping {
     const owned = state.owned.get(entry.devicePort)?.owner === owner;
     const status = report.restored.includes(entry.devicePort) ? "restored" : "present";
-    return { ...entry, owned, status };
+    const prototype =
+      !owned && this.heldElsewhere(deviceId, entry.devicePort) === "prototype"
+        ? { owner: "prototype" as const }
+        : {};
+    return { ...entry, owned, ...prototype, status };
+  }
+
+  /** The other AutoMobile manager (a prototype) holding the port, from the shared view. */
+  private heldElsewhere(deviceId: string, devicePort: number) {
+    return this.ownership.heldByOther(this.holder, deviceId, devicePort);
   }
 }
 

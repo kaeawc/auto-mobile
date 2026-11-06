@@ -27800,6 +27800,10 @@
               "owned": {
                 "type": "boolean"
               },
+              "owner": {
+                "type": "string",
+                "enum": ["prototype"]
+              },
               "status": {
                 "type": "string",
                 "enum": [
@@ -27808,6 +27812,7 @@
                   "restored",
                   "missing",
                   "removed",
+                  "released",
                   "gone",
                   "foreign",
                   "reachable",
@@ -27987,7 +27992,7 @@
       "$defs": {
         "__schema0": {
           "type": "string",
-          "enum": ["other_session", "external_live", "external_unknown"]
+          "enum": ["other_session", "external_live", "external_unknown", "prototype"]
         }
       }
     }

@@ -16,7 +16,9 @@ setup() {
   mkdir -p .circleci ios docs
   printf '%s\n' \
     'ios/.* run-main-ios true' \
-    'android/desktop-app/.* run-main-desktop true' > .circleci/main-macos-paths.txt
+    'android/desktop-app/.* run-main-desktop true' \
+    'src/.* run-main-linux true' \
+    'tsconfig[^/]*\.json run-main-linux true' > .circleci/main-macos-paths.txt
   commit_file README.md base
 }
 
@@ -73,6 +75,19 @@ commit_file() {
   commit_file docs/x.md three > /dev/null
   run bash "${script}" run-main-ios
   [ "$status" -eq 0 ]
+}
+
+@test "coalesces the Linux Node group on its own paths" {
+  CIRCLE_SHA1="$(commit_file src/a.ts one)"
+  export CIRCLE_SHA1
+  commit_file ios/b.swift two > /dev/null
+  run bash "${script}" run-main-linux
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no commit after"* ]]
+  commit_file tsconfig.test-1.json three > /dev/null
+  run bash "${script}" run-main-linux
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"also changes tsconfig.test-1.json"* ]]
 }
 
 @test "runs when newer main commits touch only other path groups" {

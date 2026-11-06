@@ -26,6 +26,34 @@ core count, so the executor pins `AUTOMOBILE_UNIT_TEST_WORKERS` and
 ShellCheck 0.9.0 (the version the shell validators baseline) and Ruby (the
 dependabot validator).
 
+## Post-merge (main)
+
+Workflow `main-linux`, selected by `run-main-linux`. The setup job
+`detect-main-macos-changes` diffs `HEAD~1..HEAD` against the `run-main-linux`
+lines of `.circleci/main-macos-paths.txt` (`src/`, `test/`, `scripts/`,
+`benchmark/`, `schemas/`, package and TypeScript config, `.circleci/`). Jobs:
+`linux-fast-validation`, `linux-node-checks`, `linux-node-host-integration-tests`
+(the ubuntu leg of merge.yml's `node-host-integration-tests`) and
+`linux-benchmark-context-thresholds` (merge.yml's `benchmark-context-thresholds`:
+`bun run benchmark-context` fails on an exceeded threshold; the report is stored
+as an artifact).
+
+Each job first runs `scripts/ci/circleci-main-superseded.sh run-main-linux` and
+halts when a newer main commit touches the same group, so a merge burst runs once
+for the latest commit.
+
+## Nightly
+
+Workflow `nightly-linux`, selected by `run-nightly-linux`, runs `linux-nightly-node`,
+which mirrors nightly.yml's advisory Node jobs as steps that each run
+`when: always`: the randomized unit lane (seed is `$CIRCLE_BUILD_NUM`), the pinned
+Claude Code elicitation conformance test (same npm-packed binary and version as
+nightly.yml, exposed as `AUTOMOBILE_CLAUDE_BIN`) and the auto-advance race guard.
+
+One-time owner step: CircleCI > Project Settings > Triggers > add a scheduled
+trigger on `main` with pipeline parameter `run-nightly-linux` = `true`. The
+trigger is not created by the repository.
+
 ## Not mirrored
 
 `bats-tests` stays on GitHub only. The suite depends on the GitHub runner image's

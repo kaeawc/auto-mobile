@@ -1,11 +1,15 @@
 version: 2.1
 
-# AutoMobile — CircleCI is used ONLY for macOS/iOS runners.
+# AutoMobile — CircleCI runs the macOS/iOS lanes and a Linux shadow lane.
 #
-# Everything else (Node/TypeScript, Android/Gradle, Python, docs) stays on
-# GitHub Actions, where it runs free and fast on Linux. CircleCI is one of three
-# macOS capacity pools (#11010, #11011, #11012); see
-# docs/design-docs/ci/macos-capacity-plan.md for which job runs where.
+# macOS: CircleCI is one of three macOS capacity pools (#11010, #11011, #11012);
+# see docs/design-docs/ci/macos-capacity-plan.md for which job runs where.
+#
+# Linux shadow lane: every PR that changes a file also runs mirrors of the GitHub
+# Node/shell validation jobs (`linux-*` in continue_config.yml) through the `.*`
+# mapping below. They are not required checks; see
+# docs/design-docs/ci/circleci-linux-shadow-lane.md. Android, Gradle and emulator
+# work stays on GitHub Actions.
 #
 # DYNAMIC CONFIG (setup workflow): this file is a cheap Linux "setup" pipeline
 # that continues to .circleci/continue_config.yml only when macOS work is needed.
@@ -109,6 +113,7 @@ jobs:
             \.swiftformat run-ios true
             \.swiftlint\.yml run-ios true
             \.circleci/.* run-ios true
+            .* run-linux true
       - path-filtering/generate-config
       - continuation/continue:
           configuration_path: /tmp/generated-config.yml

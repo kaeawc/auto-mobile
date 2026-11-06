@@ -14,34 +14,78 @@ export function watchNodes(root: ViewHierarchyNode): ViewHierarchyNode[] {
   return [root, ...getDirectChildNodes(root).flatMap(watchNodes)];
 }
 
-function isWearNode(node: ViewHierarchyNode): boolean {
+function ownPackage(node: ViewHierarchyNode): string | undefined {
   const props = getNodeProperties(node);
-  return (props?.package ?? props?.packageName) === WEAR_SYSTEM_UI;
+  const pkg = props?.package ?? props?.packageName;
+  return typeof pkg === "string" && pkg.length > 0 ? pkg : undefined;
+}
+
+/**
+ * Every node owned by Wear SystemUI. A uiautomator dump stamps `package` on each node, but a
+ * CtrlProxy capture carries none: a node inherits its window's `packageName`, then the capture's
+ * (#17222). An explicit node package always wins, so a foreign subtree is never claimed.
+ */
+function wearOwnedNodes(hierarchy?: ViewHierarchyResult): Set<ViewHierarchyNode> {
+  const owned = new Set<ViewHierarchyNode>();
+  if (!hierarchy) {
+    return owned;
+  }
+  const windowPackages = new Map(
+    (hierarchy.windows ?? []).flatMap((window) =>
+      window.id !== undefined && window.packageName ? [[window.id, window.packageName]] : [],
+    ),
+  );
+  const visit = (node: ViewHierarchyNode, inherited: string | undefined): void => {
+    const windowId = getNodeProperties(node)?.windowId;
+    const owner =
+      ownPackage(node) ??
+      (typeof windowId === "number" ? windowPackages.get(windowId) : undefined) ??
+      inherited;
+    if (owner === WEAR_SYSTEM_UI) {
+      owned.add(node);
+    }
+    for (const child of getDirectChildNodes(node)) {
+      visit(child, owner);
+    }
+  };
+  for (const root of getHierarchyRoots(hierarchy)) {
+    visit(root, hierarchy.packageName);
+  }
+  return owned;
 }
 
 export function isWearHierarchy(hierarchy?: ViewHierarchyResult): boolean {
-  return !!hierarchy && getHierarchyRoots(hierarchy).some(isWearNode);
+  const owned = wearOwnedNodes(hierarchy);
+  return !!hierarchy && getHierarchyRoots(hierarchy).some((root) => owned.has(root));
 }
 
-export function watchStreamRoot(hierarchy?: ViewHierarchyResult): ViewHierarchyNode | undefined {
+const isTrayContainer = (node: ViewHierarchyNode): boolean => {
+  const searchable = toSearchable(getNodeProperties(node) ?? {});
+  return (
+    searchable.nativeId === `${WEAR_SYSTEM_UI}:id/trayview_container` &&
+    searchable.categories.scrollable
+  );
+};
+
+function findStreamRoot(
+  hierarchy: ViewHierarchyResult | undefined,
+  owned: Set<ViewHierarchyNode>,
+): ViewHierarchyNode | undefined {
   return (
     hierarchy &&
     getHierarchyRoots(hierarchy)
       .flatMap(watchNodes)
       .find(
         (node) =>
-          isWearNode(node) &&
+          owned.has(node) &&
           toSearchable(getNodeProperties(node) ?? {}).label === "Notifications" &&
-          watchNodes(node).some((child) => {
-            const props = getNodeProperties(child);
-            const searchable = toSearchable(props ?? {});
-            return (
-              searchable.nativeId === `${WEAR_SYSTEM_UI}:id/trayview_container` &&
-              searchable.categories.scrollable
-            );
-          }),
+          watchNodes(node).some(isTrayContainer),
       )
   );
+}
+
+export function watchStreamRoot(hierarchy?: ViewHierarchyResult): ViewHierarchyNode | undefined {
+  return findStreamRoot(hierarchy, wearOwnedNodes(hierarchy));
 }
 
 export interface WatchNotification {
@@ -81,17 +125,16 @@ function readWatchCard(node: ViewHierarchyNode): WatchNotification | undefined {
   };
 }
 
-function isWatchCardCandidate(node: ViewHierarchyNode): boolean {
-  return isWearNode(node) && isClickableElementProperties(getNodeProperties(node) ?? {});
-}
-
 export function watchNotifications(hierarchy?: ViewHierarchyResult): WatchNotification[] {
-  const root = watchStreamRoot(hierarchy);
+  const owned = wearOwnedNodes(hierarchy);
+  const root = findStreamRoot(hierarchy, owned);
   if (!root) {
     return [];
   }
   return watchNodes(root)
-    .filter(isWatchCardCandidate)
+    .filter(
+      (node) => owned.has(node) && isClickableElementProperties(getNodeProperties(node) ?? {}),
+    )
     .map(readWatchCard)
     .filter((card): card is WatchNotification => card !== undefined);
 }
@@ -157,7 +200,8 @@ export function watchExpandedTarget(
   if (!hierarchy || watchStreamRoot(hierarchy)) {
     return undefined;
   }
-  const roots = getHierarchyRoots(hierarchy).filter(isWearNode);
+  const owned = wearOwnedNodes(hierarchy);
+  const roots = getHierarchyRoots(hierarchy).filter((root) => owned.has(root));
   const targets = roots
     .map((root) =>
       new ResolverElementSelector().select(

@@ -25,6 +25,42 @@ import {
 const START = 1_800_000_000_000;
 const window = scoringWindow(START, START, START + 17 * 60_000, START + 24 * 60_000);
 
+// Keep read-backs in sync with successful writes, including cleanup restores.
+class SurvivalAdbExecutor extends FakeAdbExecutor {
+  override async executeCommand(
+    command: string,
+    options?: Parameters<FakeAdbExecutor["executeCommand"]>[1],
+  ) {
+    const result = await super.executeCommand(command, options);
+    const bucket = command.match(/^shell am set-standby-bucket (\S+) (\S+)$/);
+    if (bucket) {
+      const value = bucket[2] === "restricted" ? "45" : bucket[2] === "rare" ? "40" : bucket[2];
+      this.setCommandResponse(
+        `shell am get-standby-bucket ${bucket[1]}`,
+        createExecResult(value, ""),
+      );
+    }
+    const appOp = command.match(/^shell appops set (--uid )?(\S+) (\S+) (\S+)$/);
+    if (appOp) {
+      const [, uid = "", packageName, op, mode] = appOp;
+      this.setCommandResponse(
+        `shell appops get ${uid}${packageName} ${op}`,
+        createExecResult(`${uid ? "Uid mode: " : ""}${op}: ${mode}`, ""),
+      );
+    }
+    const hibernation = command.match(
+      /^shell cmd app_hibernation set-state --user 0 (\S+) (true|false)$/,
+    );
+    if (hibernation) {
+      this.setCommandResponse(
+        `shell cmd app_hibernation get-state --user 0 ${hibernation[1]}`,
+        createExecResult(hibernation[2], ""),
+      );
+    }
+    return result;
+  }
+}
+
 describe("survival scoring", () => {
   test("each event ran at its expected first interval, including the grace boundary", () => {
     const firstEvents = SURVIVAL_EVENT_IDS.map((eventId) => ({
@@ -152,7 +188,7 @@ function harnessFakes() {
       anchor = fakeTimer.now();
     },
   };
-  const shell = new FakeAdbExecutor();
+  const shell = new SurvivalAdbExecutor();
   shell.setAndroidApiLevel(EXPECTED_SCORES_API_LEVEL);
   shell.setCommandResponse(
     "shell getprop ro.build.version.sdk",
@@ -164,8 +200,14 @@ function harnessFakes() {
   );
   shell.setCommandResponse("install ", createExecResult("Success", ""));
   shell.setCommandResponse("shell dumpsys battery", createExecResult("AC powered: true", ""));
-  shell.setCommandResponse("shell am get-standby-bucket", createExecResult("10", ""));
-  shell.setCommandResponse("shell appops get", createExecResult("No operations.", ""));
+  shell.setCommandResponse(
+    `shell am get-standby-bucket '${FIXTURE_PACKAGE}'`,
+    createExecResult("10", ""),
+  );
+  shell.setCommandResponse(
+    `shell cmd app_hibernation get-state --user 0 '${FIXTURE_PACKAGE}'`,
+    createExecResult("false", ""),
+  );
   // notifications-off reads the runtime grant (#17106); the captured dump shows it already revoked.
   shell.setCommandResponse(
     "shell dumpsys package",

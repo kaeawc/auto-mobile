@@ -66,6 +66,7 @@ export const PROTOTYPE_EJECT_MAPPING = {
   map: "stub",
   castButton: "stub",
   cameraPreview: "stub",
+  webView: "stub",
 } as const satisfies Record<PrototypeNodeType, EjectTarget | "stub">;
 
 /** The node types the scaffold writes real code for. */

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import fixture from "../../fixtures/prototype-spec/library-sensitive/repeat-item-copy.json";
 import {
   type DataWrite,
   prototypeSensitiveSinkErrors,
@@ -62,6 +63,27 @@ function propagate(seed: string, writes: DataWrite[]) {
 }
 
 describe("sensitive copy-taint propagation", () => {
+  test.each(["setData", "appendData", "prependData", "upsertData"])(
+    "%s copies a tainted repeat item to a request outside the repeat",
+    (type) => {
+      const spec = structuredClone(fixture.spec);
+      const write = spec.root.children[1].children?.[0].onTap[0];
+      if (!write) {
+        throw new Error("Missing repeat item write in shared fixture");
+      }
+      write.type = type;
+      expect(prototypeSensitiveSinkErrors(spec)).toEqual([
+        { path: fixture.expectedPath, message: fixture.expectedMessage },
+      ]);
+    },
+  );
+
+  test("an item over unrelated rows leaves its copy untainted", () => {
+    const spec = structuredClone(fixture.spec);
+    spec.root.children[0].into = "/data/other";
+    expect(prototypeSensitiveSinkErrors(spec)).toEqual([]);
+  });
+
   test("a reverse-ordered chain of copies taints its far end", () => {
     expect(prototypeSensitiveSinkErrors(chainSpec(`data:/c${COPIES}`))).toEqual(PERSISTED);
   });

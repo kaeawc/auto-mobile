@@ -5,6 +5,7 @@ import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLim
 import {
   parseActiveNotificationKeysForApp,
   parseDumpsysNotificationRecords,
+  type DumpsysNotificationRecord,
 } from "./notificationDumpsys";
 import { readActiveNotificationKeysForApp } from "./helpers/listing";
 import { createNotificationUIDetector } from "./createNotificationUIDetector";
@@ -49,14 +50,62 @@ const listedCard = (card: WatchNotification, appId?: string) => ({
 });
 const cardIdentity = (card: WatchNotification) =>
   JSON.stringify([card.appLabel, card.title, card.body]);
-const pageSignature = (observation: ObserveResult) =>
+const visibleCards = (observation: ObserveResult, key: (card: WatchNotification) => unknown) =>
   JSON.stringify([
-    watchNotifications(observation.viewHierarchy).map((card) => [
-      cardIdentity(card),
-      card.element.bounds,
-    ]),
+    watchNotifications(observation.viewHierarchy).map((card) => [key(card), card.element.bounds]),
     watchClearAll(observation.viewHierarchy)?.bounds,
   ]);
+/** Every visible card's full identity; the forward scan never drops a distinct card. */
+const pageSignature = (observation: ObserveResult) => visibleCards(observation, cardIdentity);
+/** Card layout without bodies, which an ongoing card rewrites in place (progress, position). */
+const cardPositions = (observation: ObserveResult) =>
+  visibleCards(observation, (card) => [card.appLabel, card.title]);
+const identityCount = (cards: WatchNotification[], card: WatchNotification) =>
+  cards.filter((other) => cardIdentity(other) === cardIdentity(card)).length;
+/**
+ * Whether an active record shows this card: the card's title is one of the record's titles, and
+ * each body line appears in one of its bodies (a trailing ellipsis from truncation is ignored).
+ */
+const recordShowsCard = (record: DumpsysNotificationRecord, card: WatchNotification) =>
+  card.title !== null &&
+  record.titles.includes(card.title) &&
+  (card.body ?? "")
+    .split("\n")
+    .map((line) => line.replace(/(?:…|\.\.\.)$/, ""))
+    .filter((line) => line.length > 0)
+    .every((line) => record.bodies.some((body) => body.includes(line)));
+/** Fallback dismissal check from visible cards alone, when no active inventory is readable. */
+const visiblyRemoved = (card: WatchNotification, before: ObserveResult, after: ObserveResult) => {
+  const sameCard = (other: WatchNotification) =>
+    other.appLabel === card.appLabel && other.title === card.title;
+  const visibleBefore = watchNotifications(before.viewHierarchy);
+  const visibleAfter = watchNotifications(after.viewHierarchy);
+  return (
+    // Identical duplicates are legal: one identical card must disappear, not all of them.
+    identityCount(visibleAfter, card) < identityCount(visibleBefore, card) &&
+    // An ongoing card that refuses the swipe may still rewrite its body (progress, position),
+    // so a surviving same-app/title card is not a removal.
+    visibleAfter.filter(sameCard).length < visibleBefore.filter(sameCard).length
+  );
+};
+
+const toggleMessage = (action: "open" | "close", changed: boolean, skipped: boolean): string => {
+  if (skipped) {
+    return `Watch notification stream was already ${action === "open" ? "open" : "closed"}`;
+  }
+  if (changed) {
+    return `${action === "open" ? "Opened" : "Closed"} watch notification stream`;
+  }
+  return action === "open"
+    ? "Watch notification stream did not appear after the open gesture"
+    : "Watch notification stream is still showing after Back";
+};
+
+/** A watch action's outcome plus the observation terminal evidence is captured from. */
+export interface WatchSystemTrayResult {
+  outcome: SystemTrayOutcome;
+  observation: ObserveResult | undefined;
+}
 
 interface WatchScope {
   criteria: SystemTrayNotificationArgs;
@@ -138,7 +187,7 @@ export class WatchSystemTray {
     return resolveUniqueTrayAppLabel(this.device, criteria.appId, appIds, { signal: this.signal });
   }
 
-  async execute(args: SystemTrayArgs): Promise<SystemTrayOutcome> {
+  async execute(args: SystemTrayArgs): Promise<WatchSystemTrayResult> {
     const timeout = resolveSystemTrayAwaitTimeout(args.awaitTimeout);
     if (args.action === "open" || args.action === "close") {
       return this.toggle(args.action, timeout);
@@ -151,6 +200,7 @@ export class WatchSystemTray {
     const initial = await this.read();
     const initiallyOpen = !!watchStreamRoot(initial.viewHierarchy);
     let result: SystemTrayOutcome | undefined;
+    let restored: ObserveResult | undefined;
     try {
       const opened = await ensureSystemTrayOpen(this.device, timeout, {
         signal: this.signal,
@@ -162,43 +212,49 @@ export class WatchSystemTray {
         );
       }
       const deadline = getSystemTrayDependencies().timer.now() + timeout;
-      let observation = opened.observation ?? (await this.read());
-      if (initiallyOpen) {
-        // The scan only moves toward the end, so a stream left scrolled down must start at the top.
-        observation = await this.rewind(observation, deadline);
-      }
-      result = await this.run(args, { criteria, label, deadline, dismissedCount: 0 }, observation);
-      return result;
+      const observation = opened.observation ?? (await this.read());
+      // The scan only moves toward the end, so a stream left scrolled down must start at the top.
+      const top = initiallyOpen ? await this.rewind(observation, deadline) : observation;
+      result = top
+        ? await this.run(args, { criteria, label, deadline, dismissedCount: 0 }, top)
+        : outcome(
+            {
+              code: "notification_not_found",
+              message:
+                "Could not scroll the watch notification stream back to its top before the scan limit or deadline",
+              observation,
+            },
+            false,
+          );
     } finally {
       const controller = new AbortController();
-      const restored = await raceWithDeadline(
-        () => this.restore(initiallyOpen, controller.signal),
-        {
-          timer: getSystemTrayDependencies().timer,
-          timeoutMs: timeout,
-          label: "Watch notification stream restoration",
-          onTimeout: () => controller.abort(),
-        },
-      );
+      restored = await raceWithDeadline(() => this.restore(initiallyOpen, controller.signal), {
+        timer: getSystemTrayDependencies().timer,
+        timeoutMs: timeout,
+        label: "Watch notification stream restoration",
+        onTimeout: () => controller.abort(),
+      });
       if (result) {
         result.payload.observation = restored;
       }
     }
+    return { outcome: result, observation: restored };
   }
 
-  private async toggle(action: "open" | "close", timeout: number): Promise<SystemTrayOutcome> {
+  private async toggle(action: "open" | "close", timeout: number): Promise<WatchSystemTrayResult> {
     const result =
       action === "open"
         ? await ensureSystemTrayOpen(this.device, timeout, { signal: this.signal })
         : await ensureSystemTrayClosed(this.device, timeout, undefined, this.signal);
-    const success = result.skipped || ("opened" in result ? result.opened : result.closed);
-    return outcome(
-      {
-        message: `${action === "open" ? "Opened" : "Closed"} watch notification stream`,
-        ...result,
-      },
-      success,
-    );
+    const changed = "opened" in result ? result.opened : result.closed;
+    const success = result.skipped || changed;
+    return {
+      outcome: outcome(
+        { message: toggleMessage(action, changed, result.skipped), ...result },
+        success,
+      ),
+      observation: result.observation,
+    };
   }
 
   private async restore(initiallyOpen: boolean, signal: AbortSignal): Promise<ObserveResult> {
@@ -248,7 +304,7 @@ export class WatchSystemTray {
   ): Promise<SystemTrayOutcome> {
     const { criteria, label, deadline } = scope;
     let cards: WatchNotification[] = [];
-    let previousPage = "";
+    let previous: ObserveResult | undefined;
     for (let page = 0; page < MAX_STREAM_PAGES; page++) {
       if (!watchStreamRoot(observation.viewHierarchy)) {
         throw new ActionableError("Watch notification stream is not readable.");
@@ -264,22 +320,22 @@ export class WatchSystemTray {
       if (args.action !== "list" && matching[0]) {
         return this.act(args, matching[0], observation, scope);
       }
-      const signature = JSON.stringify(
-        visible.map((card) => [cardIdentity(card), card.element.bounds]),
-      );
+      // Strict: a different ongoing card that scrolled in must never be mistaken for this page.
+      const unmoved =
+        previous !== undefined && pageSignature(previous) === pageSignature(observation);
       // Preserve identical cards within a page. Cross-page overlap is deliberately conservative:
       // without captured stable IDs, keep duplicates rather than silently lose notifications.
-      if (signature !== previousPage) {
+      if (!unmoved) {
         cards = [...cards, ...matching];
       }
-      const atEnd = signature === previousPage || !!watchClearAll(observation.viewHierarchy);
+      const atEnd = unmoved || !!watchClearAll(observation.viewHierarchy);
       if (atEnd && ["list", "clearAll"].includes(args.action)) {
         return this.scanResult(args, scope, cards, observation);
       }
       if (getSystemTrayDependencies().timer.now() >= deadline) {
         break;
       }
-      previousPage = signature;
+      previous = observation;
       observation = await this.nextPage(observation, atEnd, deadline);
     }
     return outcome(
@@ -353,12 +409,48 @@ export class WatchSystemTray {
     );
   }
 
-  /** Scroll toward the top until the visible page stops changing. */
-  private async rewind(observation: ObserveResult, deadline: number): Promise<ObserveResult> {
-    let previous = pageSignature(observation);
+  /**
+   * Whether a swipe moved the stream from `before` to `after`. When only a body differs, re-read
+   * without scrolling: a stable body is a different card from the same app and title at the same
+   * snapped bounds ("moved"); a body that keeps changing on its own is "ambiguous", since it is
+   * either an ongoing card updating in place or a different ongoing card that scrolled in.
+   */
+  private async swipeProgress(
+    before: ObserveResult,
+    after: ObserveResult,
+    deadline: number,
+  ): Promise<"moved" | "unmoved" | "ambiguous"> {
+    if (pageSignature(before) === pageSignature(after)) {
+      return "unmoved";
+    }
+    if (cardPositions(before) !== cardPositions(after)) {
+      return "moved";
+    }
+    await sleep(
+      Math.min(POLL_MS, Math.max(0, deadline - getSystemTrayDependencies().timer.now())),
+      this.signal,
+    );
+    const settled = await this.read();
+    return cardPositions(settled) === cardPositions(after) &&
+      pageSignature(settled) !== pageSignature(after)
+      ? "ambiguous"
+      : "moved";
+  }
+
+  /**
+   * Scroll toward the top until the visible cards stop moving, or `undefined` when the top was not
+   * reached. Overshooting the top is harmless, so an ambiguous page only ends the rewind when the
+   * next swipe is ambiguous too.
+   */
+  private async rewind(
+    observation: ObserveResult,
+    deadline: number,
+  ): Promise<ObserveResult | undefined> {
+    let previous = observation;
+    let ambiguous = 0;
     for (let page = 0; page < MAX_STREAM_PAGES; page++) {
       if (getSystemTrayDependencies().timer.now() >= deadline) {
-        break;
+        return undefined;
       }
       const { width, height } = observation.screenSize;
       await this.command(
@@ -369,13 +461,14 @@ export class WatchSystemTray {
         this.signal,
       );
       observation = await this.read();
-      const signature = pageSignature(observation);
-      if (signature === previous) {
-        break;
+      const progress = await this.swipeProgress(previous, observation, deadline);
+      ambiguous = progress === "ambiguous" ? ambiguous + 1 : 0;
+      if (progress === "unmoved" || ambiguous >= 2) {
+        return observation;
       }
-      previous = signature;
+      previous = observation;
     }
-    return observation;
+    return undefined;
   }
 
   private async nextPage(
@@ -441,25 +534,8 @@ export class WatchSystemTray {
     observation: ObserveResult,
     scope: WatchScope,
   ): Promise<SystemTrayOutcome> {
-    const { left, top, right, bottom } = card.element.bounds;
-    // Wear dismisses a card with a horizontal swipe. This gesture still needs device verification.
-    await this.command(
-      `shell input swipe ${Math.floor((left + right) / 2)} ${Math.floor((top + bottom) / 2)} ${right - 1} ${Math.floor((top + bottom) / 2)} 300`,
-    );
-    await sleep(POLL_MS, this.signal);
-    const next = await this.read();
-    const sameCard = (other: WatchNotification) =>
-      other.appLabel === card.appLabel && other.title === card.title;
-    const before = watchNotifications(observation.viewHierarchy).filter(sameCard).length;
-    if (
-      !watchStreamRoot(next.viewHierarchy) ||
-      watchNotifications(next.viewHierarchy).some(
-        (remaining) => cardIdentity(remaining) === cardIdentity(card),
-      ) ||
-      // An ongoing card that refuses the swipe may still rewrite its body (progress, position),
-      // so a surviving same-app/title card is not a removal.
-      watchNotifications(next.viewHierarchy).filter(sameCard).length >= before
-    ) {
+    const { next, removed } = await this.swipeAway(card, observation, args.notification?.appId);
+    if (!removed) {
       return outcome(
         {
           code: "dismissal_unconfirmed",
@@ -486,6 +562,64 @@ export class WatchSystemTray {
       return this.run(args, { ...scope, dismissedCount: scope.dismissedCount + 1 }, next);
     }
     return outcome({ message: "Dismissed notification", dismissedCount: 1, observation: next });
+  }
+
+  /** Swipe `card` away and report whether its removal is confirmed. */
+  private async swipeAway(
+    card: WatchNotification,
+    observation: ObserveResult,
+    appId: string | undefined,
+  ): Promise<{ next: ObserveResult; removed: boolean }> {
+    const { left, top, right, bottom } = card.element.bounds;
+    const before = appId ? await this.inventory(appId, card) : undefined;
+    // Wear dismisses a card with a horizontal swipe. This gesture still needs device verification.
+    await this.command(
+      `shell input swipe ${Math.floor((left + right) / 2)} ${Math.floor((top + bottom) / 2)} ${right - 1} ${Math.floor((top + bottom) / 2)} 300`,
+    );
+    await sleep(POLL_MS, this.signal);
+    const next = await this.read();
+    if (!watchStreamRoot(next.viewHierarchy)) {
+      return { next, removed: false };
+    }
+    const after = appId && before ? await this.inventory(appId, card) : undefined;
+    if (!before || !after || before.matching === 0) {
+      return { next, removed: visiblyRemoved(card, observation, next) };
+    }
+    // An identical card scrolling into view cannot fake a removed key, a refused card that
+    // rewrites its text keeps its key, and another notification of the app expiring meanwhile
+    // removes a key but not one showing the swiped card's title and body.
+    return {
+      next,
+      removed:
+        before.keys.some((key) => !after.keys.includes(key)) && after.matching < before.matching,
+    };
+  }
+
+  /**
+   * The app's active notification keys, and how many of its active records show the card's title
+   * and body, or `undefined` when the dump is not trustworthy enough for before/after accounting.
+   */
+  private async inventory(
+    appId: string,
+    card: WatchNotification,
+  ): Promise<{ keys: string[]; matching: number } | undefined> {
+    const { stdout } = await awaitWhileRequestIsLive(
+      getSystemTrayDependencies()
+        .adbFactory(this.device)
+        .executeCommand("shell dumpsys notification --noredact", {
+          maxBuffer: DUMPSYS_MAX_BUFFER,
+          signal: this.signal,
+        }),
+      this.signal,
+    );
+    const keys = parseActiveNotificationKeysForApp(stdout, appId);
+    if (!keys) {
+      return undefined;
+    }
+    const matching = parseDumpsysNotificationRecords(stdout).filter(
+      (record) => record.pkg === appId && recordShowsCard(record, card),
+    ).length;
+    return { keys, matching };
   }
 
   private async verifyClearAll(

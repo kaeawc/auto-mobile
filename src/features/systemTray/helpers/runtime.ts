@@ -1,5 +1,6 @@
 /** Tray observation, gestures, and notification wait orchestration. */
 
+import { ActionableError } from "../../../models/ActionableError";
 import { getDeviceDataStreamServer } from "../../../daemon/deviceDataStreamSocketServer";
 import {
   BootedDevice,
@@ -480,11 +481,47 @@ export const hasMatchableNotificationContent = (
   if (!viewHierarchy || !detector.isTrayOpen(viewHierarchy, deviceLock)) {
     return false;
   }
-  return !(
-    detector.device.platform === "ios" &&
+  return !isIosTrayOverAppContentUnavailable(detector.device, observation);
+};
+
+/**
+ * Whether an iOS observation shows Notification Center open over a foreground app whose tree the
+ * runner still reports (iOS 26.5): the lock flags say the cover sheet is up, but the hierarchy is
+ * the app's, so no notification row can be read or matched from it.
+ */
+export const isIosTrayOverAppContentUnavailable = (
+  device: BootedDevice,
+  observation: ObserveResult,
+): boolean => {
+  const { viewHierarchy, deviceLock } = observation;
+  return (
+    device.platform === "ios" &&
+    !!viewHierarchy &&
     hasIosAppNotificationCoverSheet(viewHierarchy, deviceLock) &&
     !hasIosCoverSheetNotificationCenter(viewHierarchy)
   );
+};
+
+/**
+ * The error for a notification wait that ended without a match. When the final observation is an
+ * iOS tray open over an app-owned hierarchy, a plain "not found" is a false negative the caller
+ * cannot act on, so name the cause and the recovery instead (#17200).
+ */
+export const notificationNotFoundError = (
+  device: BootedDevice,
+  observation: ObserveResult,
+  awaitTimeoutMs: number,
+): ActionableError => {
+  if (isIosTrayOverAppContentUnavailable(device, observation)) {
+    const app = observation.viewHierarchy?.packageName;
+    return new ActionableError(
+      `Notification not found after ${awaitTimeoutMs}ms: Notification Center is open over ` +
+        `${app ? `the foreground app (${app})` : "a foreground app"}, and iOS does not expose ` +
+        `notification content to automation there. Press home (pressButton "home"), then retry ` +
+        `this systemTray action from the home screen.`,
+    );
+  }
+  return new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
 };
 
 interface DiagSignatures {

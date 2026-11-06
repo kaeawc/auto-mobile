@@ -1,10 +1,18 @@
-/** Apple simulator observation: a retained screenshot, plus a connected watchOS or tvOS runner's hierarchy. */
+import { normalizeVisionosHierarchy } from "../features/visionos/VisionosHierarchy";
+import { requireVisionosRunner } from "../features/visionos/VisionosRunnerLifecycle";
+import { visionosRunners } from "../features/visionos/VisionosRunnerRegistry";
+import { defaultDaemonContext } from "../daemon/daemonContext";
+import { holderOf } from "../daemon/deviceBinding";
+import { isSessionlessDeviceRead } from "../features/toolSelection/toolSelectionContext";
+/** Apple simulator observation: a retained screenshot and platform-specific runner hierarchy. */
 import { findFocusedElement } from "../features/observe/HierarchyFocus";
 import { normalizeTvosHierarchy } from "../features/tvos/TvosHierarchy";
 import { tvosRunners } from "../features/tvos/TvosRunnerRegistry";
+import { captureTvosRunnerScreenshot } from "../features/tvos/TvosScreenshot";
 import { ObserveElementsBuilder } from "../features/observe/ObserveElementsBuilder";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../models";
 import type { WatchRunnerClient } from "../features/watch/WatchRunnerClient";
+import type { VisionosRunnerClient } from "../features/visionos/VisionosRunnerClient";
 import { WatchRunnerError } from "../features/watch/WatchRunnerError";
 import { watchRunners } from "../features/watch/WatchRunnerRegistry";
 import { normalizeWatchHierarchy } from "../features/watch/WatchHierarchy";
@@ -38,6 +46,7 @@ import { screenshotFileName } from "../utils/screenshot/screenshotFormats";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 import { createObserveResponse, type ObserveResponse } from "./observeResponse";
 import type { ObserveArgs } from "./observeTools";
 
@@ -55,6 +64,10 @@ export const simctlWatchScreenshotSource: WatchScreenshotSource = {
 export interface WatchObserveDependencies {
   screenshots?: WatchScreenshotSource;
   runner?: WatchRunnerClient;
+  /** Starts or reuses the visionOS window-app runner; defaults to the shared runner lifecycle. */
+  visionosRunner?: (deviceId: string, signal?: AbortSignal) => Promise<VisionosRunnerClient>;
+  /** Whether this call reads a device another session holds; defaults to the pool's holder. */
+  heldDeviceRead?: (deviceId: string) => boolean;
   idGenerator?: IdGenerator;
   timer?: Timer;
   fileWriter?: ScreenshotFileWriter;
@@ -159,24 +172,91 @@ async function captureWatchPng(
   return { png, ...size };
 }
 
+/** The visionOS hierarchy, or a reason when the runner cannot be started or reached. */
+type HierarchyOutcome = { hierarchy?: ViewHierarchyResult; unavailableReason?: string };
+
+async function visionosHierarchyForObserve(
+  device: BootedDevice,
+  args: ObserveArgs,
+  signal: AbortSignal | undefined,
+  startRunner: NonNullable<WatchObserveDependencies["visionosRunner"]>,
+): Promise<HierarchyOutcome> {
+  const displayKey = watchDisplay(device).ref.key;
+  // Refuse options neither path supports before paying for runner startup.
+  assertWatchObserveOptions(args, displayKey, "visionos", true);
+  let hierarchy;
+  try {
+    const runner = await startRunner(device.deviceId, signal);
+    hierarchy = await runner.hierarchy(signal);
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
+    const reason = errorMessage(error);
+    logger.warn(
+      `[VisionosRunner] observe on ${device.deviceId} could not retrieve the runner hierarchy: ${reason}`,
+      error,
+    );
+    // Without a runner the hierarchy-only options (project) cannot be honoured either.
+    assertWatchObserveOptions(args, displayKey, "visionos", false);
+    return { unavailableReason: reason };
+  }
+  return { hierarchy: normalizeVisionosHierarchy(hierarchy) };
+}
+
+/** A sessionless deviceId read of a device some session holds (#10830): connect-only. */
+function isReadOfHeldDevice(deviceId: string): boolean {
+  if (!isSessionlessDeviceRead()) {
+    return false;
+  }
+  const pool = defaultDaemonContext.devicePool();
+  return pool ? !!holderOf(pool.getDevice(deviceId)) : false;
+}
+
+/** Reuses an already-connected runner; never starts xcodebuild, which would foreground an app. */
+async function connectedVisionosRunner(deviceId: string): Promise<VisionosRunnerClient> {
+  const runner = visionosRunners.get(deviceId);
+  if (!runner?.isUsable()) {
+    throw new ActionableError(
+      `Device ${deviceId} is held by another session and has no connected visionOS runner; a deviceId read only connects to a running runner.`,
+    );
+  }
+  return runner;
+}
+
 async function watchHierarchyForObserve(
+  device: BootedDevice,
+  args: ObserveArgs,
+  signal: AbortSignal | undefined,
+  dependencies: WatchObserveDependencies,
+): Promise<HierarchyOutcome> {
+  if (screenshotOnlyPlatform(device) === "visionos") {
+    const heldRead = (dependencies.heldDeviceRead ?? isReadOfHeldDevice)(device.deviceId);
+    return visionosHierarchyForObserve(
+      device,
+      args,
+      signal,
+      dependencies.visionosRunner ?? (heldRead ? connectedVisionosRunner : requireVisionosRunner),
+    );
+  }
+  return {
+    hierarchy: await appleRunnerHierarchy(device, args, signal, dependencies.runner),
+  };
+}
+
+async function appleRunnerHierarchy(
   device: BootedDevice,
   args: ObserveArgs,
   signal: AbortSignal | undefined,
   injectedRunner?: WatchRunnerClient,
 ): Promise<ViewHierarchyResult | undefined> {
   const platform = screenshotOnlyPlatform(device);
-  if (platform === "visionos") {
-    assertWatchObserveOptions(args, watchDisplay(device).ref.key, platform);
-    return undefined;
-  }
   if (platform === "tvos") {
     const runner = tvosRunners.get(device.deviceId);
     assertWatchObserveOptions(args, watchDisplay(device).ref.key, platform, runner !== undefined);
     return runner ? normalizeTvosHierarchy(await runner.hierarchy(signal)) : undefined;
   }
-  const runner =
-    platform === "watchos" ? (injectedRunner ?? watchRunners.get(device.deviceId)) : undefined;
+  const runner = injectedRunner ?? watchRunners.get(device.deviceId);
   assertWatchObserveOptions(args, watchDisplay(device).ref.key, platform, runner !== undefined);
   try {
     return runner ? normalizeWatchHierarchy(await runner.hierarchy(signal)) : undefined;
@@ -190,7 +270,7 @@ async function watchHierarchyForObserve(
   }
 }
 
-/** Capture an Apple simulator screenshot, adding hierarchy for a connected watchOS or tvOS runner. */
+/** Capture an Apple simulator screenshot, adding the platform runner hierarchy. */
 export async function observeWatch(
   device: BootedDevice,
   args: ObserveArgs,
@@ -199,7 +279,12 @@ export async function observeWatch(
 ): Promise<ObserveResponse<WatchObservation | ObserveResult>> {
   const platform = screenshotOnlyPlatform(device);
   const display = watchDisplay(device);
-  const viewHierarchy = await watchHierarchyForObserve(device, args, signal, dependencies.runner);
+  const { hierarchy: viewHierarchy, unavailableReason } = await watchHierarchyForObserve(
+    device,
+    args,
+    signal,
+    dependencies,
+  );
   const timer = dependencies.timer ?? defaultTimer;
   const idGenerator = dependencies.idGenerator ?? defaultIdGenerator;
   const protection = dependencies.pathProtection ?? screenshotPathProtection;
@@ -247,7 +332,7 @@ export async function observeWatch(
     screenshotCapturedAt: new Date(capturedAt).toISOString(),
   };
   return createObserveResponse(
-    watchObservationPayload(capture, platform, viewHierarchy),
+    watchObservationPayload(capture, platform, viewHierarchy, unavailableReason),
     args.includeScreenshotImage,
     { signal, protection },
   );
@@ -257,17 +342,24 @@ function watchObservationPayload(
   capture: Omit<WatchObservation, "hierarchyUnavailable">,
   platform: AppleScreenshotOnlyPlatform,
   viewHierarchy?: ViewHierarchyResult,
+  unavailableReason?: string,
 ): WatchObservation | ObserveResult {
   if (!viewHierarchy) {
+    const message = HIERARCHY_UNAVAILABLE_MESSAGES[platform];
     return {
       ...capture,
-      hierarchyUnavailable: { platform, message: HIERARCHY_UNAVAILABLE_MESSAGES[platform] },
+      hierarchyUnavailable: {
+        platform,
+        message: unavailableReason
+          ? `${message} Runner unavailable: ${unavailableReason}`
+          : message,
+      },
     };
   }
   return {
     ...capture,
     viewHierarchy,
-    ...(platform === "tvos"
+    ...(platform === "tvos" || platform === "visionos"
       ? { focusedElement: findFocusedElement(viewHierarchy) ?? undefined }
       : {}),
     elements: new ObserveElementsBuilder().build(viewHierarchy, "ios"),
@@ -287,13 +379,5 @@ function defaultWatchScreenshotSource(device: BootedDevice): WatchScreenshotSour
 }
 
 const runnerTvosScreenshotSource: WatchScreenshotSource = {
-  capture: async (device, _display, signal) => {
-    const data = await tvosRunners
-      .require(device.deviceId)
-      .request({ type: "request_screenshot" }, signal);
-    if (typeof data !== "string") {
-      throw new ActionableError("Invalid tvOS screenshot; reconnect the runner.");
-    }
-    return Buffer.from(data, "base64");
-  },
+  capture: (device, _display, signal) => captureTvosRunnerScreenshot(device, signal),
 };

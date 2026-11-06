@@ -197,9 +197,12 @@ test/features/observe/cache/FileSystemObserveCacheStore.integration.test.ts | sa
 test/features/observe/ios/IOSCtrlProxyClient.stream.integration.test.ts | safe | FakeWebSocket/FakeSocket; fake sock path never bound L43
 test/features/observe/ios/ctrlProxyWireParity.integration.test.ts | safe | read-only scan of repo sources L21/L28
 test/features/observe/ios/sdkMultiScene.integration.test.ts | safe | fixture replay with fake WebSocket, FakeTimer and fake observation data sources; no sockets or devices
+test/features/portReverse/HostLoopbackProbe.integration.test.ts | safe | loopback 127.0.0.1 ephemeral port server via createServer().listen(0)
 test/features/prototype/PrototypeChannelExecutor.integration.test.ts | safe | ws server and Bun.serve on 127.0.0.1 port 0; loopback only
 test/features/prototype/PrototypeHttpExecutor.integration.test.ts | safe | Bun.serve on 127.0.0.1 port 0 L4; loopback only
 test/features/prototype/prototypeBundleFuzz.integration.test.ts | safe | seeded pure-function fuzz of the bundle reader over in-memory buffers; no I/O, ports or shared paths
+test/features/prototype/web/webAndroidParity.integration.test.ts | unsafe | launches headless Chromium via playwright-core and writes parity budgets or scratch/ screenshots; opt-in via AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1
+test/features/prototype/web/webImageEncoding.integration.test.ts | safe | encodes in-memory images with sharp and reads only a committed fixture; no paths, processes or network
 test/features/prototype/web/webScreenshots.integration.test.ts | unsafe | launches headless Chromium via playwright-core and writes goldens or scratch/ screenshots; opt-in via AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1
 test/features/screen-stream/ScreenCaptureHelperProvider.integration.test.ts | safe | fake downloader/checksum/timer; cache in tmpdir L36/L49
 test/features/shared/GenericThresholdManager.integration.test.ts | safe | createTestDatabase; static threshold calculation only L220

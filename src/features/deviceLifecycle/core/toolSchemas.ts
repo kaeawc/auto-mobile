@@ -37,6 +37,16 @@ export const listDeviceImagesOutputSchema = z.object({
   count: z.number(),
   platform: platformSchema,
   configuredInventory: z.unknown(),
+  truncated: z
+    .boolean()
+    .optional()
+    .describe(
+      "Present only when the response was spilled to `artifact`: true when `images` holds fewer than `count` entries; read the artifact for the full list",
+    ),
+  imagesReturned: z
+    .number()
+    .optional()
+    .describe("Present only when spilled: number of entries inline in `images`"),
 });
 
 const bootCapacitySchema = z.object({

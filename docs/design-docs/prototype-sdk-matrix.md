@@ -91,5 +91,6 @@ the report carries no separate backend field:
   `backend` value whose capability is absent, with the field path, as they do for
   per-call capabilities. ProtoViewer `bundle.json` `requires` lists the same strings.
 
-No module defines a non-default backend yet, so no gate exists. The module that
-adds the first one adds its table entry and gate.
+The `map` module lists `google` and `maplibre` (#14309). The TypeScript gates are
+generated from the table; the Kotlin and Swift strict scanners read the same table
+for the node that carries `backend`.

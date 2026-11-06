@@ -285,6 +285,7 @@ for xcodeproj in "${SELECTED_XCODEPROJ_DIRS[@]}"; do
 
     # Build each scheme for its simulator platform, defaulting to iOS when the
     # settings probe fails or does not identify a supported platform family.
+    # visionOS schemes are skipped when no visionOS Simulator destination exists.
     BUILD_SUCCESS=true
     while IFS= read -r scheme; do
         if [ -n "${scheme}" ]; then
@@ -297,7 +298,30 @@ for xcodeproj in "${SELECTED_XCODEPROJ_DIRS[@]}"; do
                     iphone*) DESTINATION="generic/platform=iOS Simulator" ;;
                     watch*) DESTINATION="generic/platform=watchOS Simulator" ;;
                     appletv*) DESTINATION="generic/platform=tvOS Simulator" ;;
+                    xr*) DESTINATION="generic/platform=visionOS Simulator" ;;
                 esac
+                # Without the visionOS SDK installed PLATFORM_NAME may not resolve,
+                # but the raw SDKROOT still names xros; route it to the skip probe
+                # below instead of the iOS fallback, which cannot build it.
+                SDK_ROOT=$(printf '%s\n' "${CAPTURED_OUTPUT}" | awk '$1 == "SDKROOT" && $2 == "=" { print $3; exit }')
+                case "${SDK_ROOT}" in
+                    xr*) DESTINATION="generic/platform=visionOS Simulator" ;;
+                esac
+            fi
+            # visionOS needs its own simulator platform, which not every CI Mac has
+            # installed. Build a visionOS scheme only when xcodebuild offers a
+            # visionOS Simulator destination for it; otherwise skip it (not fail).
+            if [ "${DESTINATION}" = "generic/platform=visionOS Simulator" ]; then
+                capture_run_cmd merge xcodebuild -project "${xcodeproj}" -scheme "${scheme}" -showdestinations
+                if [ "${CAPTURED_STATUS}" -ne 0 ] || ! printf '%s\n' "${CAPTURED_OUTPUT}" | grep -q "platform:visionOS Simulator"; then
+                    if [ "${CAPTURED_STATUS}" -ne 0 ]; then
+                        echo -e "    ${YELLOW}⚠${NC} Skipping ${scheme}: -showdestinations exited ${CAPTURED_STATUS}"
+                        printf '%s\n' "${CAPTURED_OUTPUT}"
+                    else
+                        echo -e "    ${YELLOW}⚠${NC} Skipping ${scheme}: no visionOS Simulator destination available (install the visionOS platform in Xcode to build it)"
+                    fi
+                    continue
+                fi
             fi
             print_info "Using destination for ${scheme}: ${DESTINATION}"
             capture_run_cmd merge xcodebuild \

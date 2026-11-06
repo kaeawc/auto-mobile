@@ -335,6 +335,7 @@ There are no iOS prototype screenshot baselines to re-record.
 | timePicker      | native   | material | —     |
 | topAppBar       | material | material | —     |
 | videoPlayer     | material | material | —     |
+| webView         | neutral  | neutral  | —     |
 
 ### Light and dark values
 
@@ -1258,6 +1259,28 @@ Test-budget note: the repository's 100 ms per-test unit budget is measured only 
 reporter (`scripts/test-ts.sh`, `scripts/validate-bun-test-timings.sh`). It does not cover Gradle or
 Robolectric tests, so the Compose and host tests for this feature are not held to it. iOS accepts the structural contract but does not
 advertise this capability, so host preflight refuses either authored field.
+
+### Attention loops (`prototype_loops_v1`)
+
+(Android only, requires `prototype_loops_v1`) Any node accepts
+`attentionLoop: {effect: "pulse" | "spin", periodMs: 400–4000, iterations?: 1–20 | "infinite"}`.
+The period and finite count are integers; omitted iterations means infinite. Pulse scales
+1 → 1.08 → 1 per period; spin turns 0 → 360 degrees. Drawing changes without changing
+layout, reported bounds or touch targets. A pulse node must omit `style.scale`; a spin node
+must omit `style.rotation`, including every `styleWhen` style. At most eight expanded nodes
+may carry loops, including repeat instances; shimmer does not consume that limit.
+Finite loops settle at identity and contribute to settling motion while running. Infinite
+loops and shimmer contribute only to the intentional loop count. Reduced motion, motion
+none and animator scale 0 leave loops at rest. On Android each observe metadata read renews
+a 1500 ms capture hold: attention loops draw identity and shimmer draws no band during it,
+so captures within the hold are identical when the rest of the scene is unchanged.
+
+The runtime renews its capture hold in the controller’s window-metadata read path, alongside
+`prototypeMotion`. The hold uses an injected monotonic clock and a 1500 ms deadline; repeated
+reads extend it. Compose reads the deadline during drawing and invalidates the loop layer on
+renewal. Animation time continues through a hold, so a finite loop still completes on schedule.
+The first expanded node beyond `MAX_PROTOTYPE_LOOPS = 8` fails at `<node path>.attentionLoop` with
+`Loop node limit exceeded`. Conflicting rest transforms fail at the same path.
 
 ### One-shot keyframes
 
@@ -2524,6 +2547,21 @@ calls `media.next`, `previous` (restarts after 3 s), `skipTo` (`itemId`), `setSh
 `{endOfItem: true}`), need `prototype_platform_media_queue_v1`. Per-player state adds
 `currentItemId`, `currentIndex`, `rate`, `sleepRemainingMs`, `shuffle` and `repeat`, and
 `media.itemChanged` reports an item change. No runtime advertises the capability yet.
+
+Queue semantics are a pure state machine (`PrototypeQueue`) that Kotlin and Swift both replay against
+`test/fixtures/prototype-media-queue`; the host only validates. Renderers report `ended`, the
+playhead, clock ticks and queue edits, and map the state onto their engine:
+
+- The play order is the queue order, or a Fisher-Yates shuffle driven by an injected `Random` that
+  keeps the current item first. Turning shuffle off restores queue order.
+- `next` ignores repeat `one`; an item ending replays under it. Past the last item, repeat `all`
+  wraps and `off` stops on that item. `previous` restarts after 3 s, and at the first item wraps
+  under `all` or otherwise restarts.
+- A `{ms}` sleep timer counts down on the renderer's clock and pauses at zero; `{endOfItem}` pauses
+  when the current item ends instead of advancing.
+- When a data action edits the queue, play order keeps its relative order and appends new items.
+  Removing the current item moves to the next surviving one, or with none left wraps under `all`
+  or stops on the last item. `skipTo` an unknown id fails with `item_not_found`.
 
 **Live camera (#14202, calls only).** The `camera` module also drives an in-app viewfinder:
 `camera.takePhoto` writes an image item to `into`, `camera.startRecording` (optional `audio` boolean and
@@ -3903,7 +3941,8 @@ against the current `/data`, so a request response or data action flips it.
 Style `shimmer: true` draws a highlight band sweeping across a `box`, `row`, `column` or `card`
 over its background and inside its clip; any other node type is rejected at
 `<path>.style.shimmer`. The node reports state description "Loading". With `motion: "none"` or
-animator scale 0 no band is drawn, so screenshots see the plain placeholder. A `repeat` of literal
+animator scale 0 no band is drawn. Android also hides the band during the bounded capture hold
+renewed by each window-metadata read, so screenshots see the plain placeholder. A `repeat` of literal
 placeholder rows makes a skeleton list. The iOS agent advertises the capability too (#14689): it
 sweeps the same band (1.2 s, 35% white, clipped to the node's corner shape) over the node, reads
 "Loading" to VoiceOver with the updates-frequently trait, draws no band under `motion: "none"` or
@@ -4043,6 +4082,10 @@ The `map` node (#14309, contract only: no renderer draws it and no runtime adver
 - `camera` is a literal `{lat, lng, zoom, bearing?, tilt?}` (lat -90 to 90, lng -180 to 180, zoom 0 to
   22, bearing 0 to 360, tilt 0 to 60) or `{data}`, a `/data` pointer to such an object. `fit` is `none`,
   `markers` or `route`; `mapStyle` is `plain` (default) or `streets`.
+- `backend` is `auto` (default), `google` or `maplibre`. `auto` needs only `prototype_platform_map_v1`; any
+  other value also needs `prototype_platform_map_<backend>_v1`, which the `map` module's `backends` table
+  lists. `show`, `patch` and `replaceNode` refuse a backend whose capability the runtime does not advertise,
+  at `<node>.backend`.
 - `markers` draws one marker per item of the `/data` array at `path`, bound under `as`. `id`, `lat`, `lng`,
   `title` (also the accessibility label) and the optional `heading` (degrees clockwise from north) are
   templates resolved per item. `icon` is a Material icon name. `animateMs` (0 to 2000) eases a moved marker.
@@ -4063,6 +4106,51 @@ The `map` node (#14309, contract only: no renderer draws it and no runtime adver
   simulation can deliver them.
 - Checked when the map is drawn, not at validation: at most 500 markers and 2000 polyline points in total,
   and marker ids unique within the resolved data.
+
+## Web content (#14312)
+
+The `webView` node (contract only: no renderer draws it and no runtime advertises
+`prototype_platform_webview_v1`) shows an https page and needs `webview` in `requires.platform`:
+
+```json
+{
+  "type": "webView",
+  "url": "https://example.com/post/{data:/selected/slug}",
+  "allowedOrigins": ["https://example.com"],
+  "navigationStateKey": "articleNav",
+  "titleKey": "articleTitle",
+  "canGoBackKey": "articleCanGoBack",
+  "onNavigate": [{ "type": "setData", "path": "/data/lastUrl", "value": { "value": "{url}" } }],
+  "onBlockedNavigation": [{ "type": "emit", "name": "openExternally" }]
+}
+```
+
+- `url` is `https://` only (pattern `webViewUrl`, at most 2048 characters), with placeholders allowed after the
+  literal scheme. There is no inline `html` field and no script field: a spec carries no markup or code.
+- `allowedOrigins` holds 1 to 8 unique exact origins, `https://host[:port]` in lowercase with no path and no
+  default `:443` (pattern `webOrigin`). Every host must be a DNS name: `localhost`, `*.localhost` and any host a
+  URL parser reads as an IP address (a last label that is decimal or `0x` hexadecimal, or a bracketed IPv6
+  literal) are refused. Refusing every IP literal, not only private ranges, keeps the three validators equal:
+  JavaScript, the JVM and Swift disagree on numeric host spellings such as `2130706433`.
+- When the URL's authority is literal, `https://<authority>` (lowercased, an explicit `:443` dropped) must be
+  one of `allowedOrigins`. A templated authority is checked by the runtime once it resolves.
+- The `url` binds placeholders like any text field, so its `{platform:…}` reads must be declared, and in a
+  library spec it is a request sink: a secure text field's value cannot be bound into it.
+- `navigationStateKey` (`loading`, `loaded`, `error` or `blocked`) and `titleKey` name declared string state;
+  `canGoBackKey` names declared boolean state. All three bind component props like other node state keys, and
+  every state write re-checks their types.
+- A `webView` `id` uses the state-key pattern, the grammar of the `webview.*` `node` argument that names it.
+- `javaScript` defaults to `false`; `true` is accepted and never comes with a bridge. Page subresources cannot
+  be checked at a resolved address the way `request` is, so an imported (ProtoViewer) prototype may show a
+  `webView` only while network for imported prototypes is on; ProtoViewer does not enforce that yet, which is
+  one reason no runtime advertises the capability.
+- `onNavigate` and `onBlockedNavigation` are action lists. `{type: "platform", call: "webview.back"}` and
+  `webview.reload` take `args: {node}`; a literal `node` must be the id of a `webView` node ("Unknown webView").
+  The `webview` module has no state; its `webview.navigate` event exists so a simulation can deliver it.
+- Runtimes check every top-frame and subframe navigation against `allowedOrigins` before it starts and block
+  loopback, link-local, `10.0.2.2` and the daemon ports by URL host. They never add a JavaScript bridge or user
+  script (`addJavascriptInterface`, `evaluateJavascript`, `WKUserContentController.add(_:name:)`), and keep
+  cookies and web storage per prototype.
 
 ## Charts (#14209, not device-verified)
 
@@ -4823,3 +4911,33 @@ changes and retains effects; motion off snaps everything. Existing motion v2/v3
 capability requirements still apply; iOS advertises the token capability but
 continues to refuse those broader features until its corresponding capabilities
 are available.
+
+## Disposable apps (#14184, host core only)
+
+A disposable app installs one spec as its own app, with its own package, label, icon, permissions
+and foreground-service types. The host core lives in `src/features/prototype/disposableApp/`.
+Template stamping (#14185) and the `prototype installApp`, `listApps` and `uninstallApp` actions
+are not wired yet.
+
+- **Identity.** The package is `dev.jasonpearson.automobile.app.<slug>_<sha256(slug) 8 hex>`.
+  Hyphens in the slug become underscores because Android package segments allow only
+  `[A-Za-z0-9_]`. A slug is lowercase hyphen-separated words of at most 48 characters that start
+  with a letter. The prefix is never agent-chosen, so a disposable app cannot replace a real app.
+- **Permissions** come only from the spec's root `requires`. `INTERNET` is always declared.
+  Each canonical permission maps to its manifest permissions (`location` maps to fine and coarse;
+  `photosAdd` maps to none). Each `requires.background` kind adds `FOREGROUND_SERVICE` and its
+  `FOREGROUND_SERVICE_<TYPE>` permission; `remoteNotification` adds none. The permission mode is
+  `prompt` (the default), `grantDeclared`, or `{grant, deny}`, which may name only declared
+  permissions and must not name one in both lists.
+- **Template.** The host picks the smallest flavor whose capabilities cover
+  `requiredPrototypeCapabilities(spec)`. If none does, it refuses and names the missing capabilities
+  and the closest flavor.
+- **Registry.** `disposable-apps.json` under the AutoMobile data dir is keyed by device id. Each
+  record holds appId, slug, platform, label, spec sha256, template, signer, installedAt and
+  expiresAt. Writes are serialized and atomic. A corrupt file or record is skipped with a warning.
+- **Lifecycle.** `ttlHours` defaults to 72, accepts 0 to 720, and 0 means no expiry. Re-installing
+  a slug updates the app in place and keeps its storage unless `reset` is set. The expiry sweep and
+  uninstall refuse ids outside the prefix. They also refuse installed packages whose signer differs
+  from the host's disposable-app key: one requested id is refused with an error, and in a bulk
+  removal the package is reported under `skipped`. Each removal is logged at `warn`. An app that
+  is already gone from the device still has its registry record cleared.

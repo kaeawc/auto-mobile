@@ -11,6 +11,10 @@ import {
   type DeviceConditionInjector,
 } from "./DeviceConditionController";
 import { resolveIosRefusalInjector } from "./iosRefusalInjector";
+import {
+  resolveIosSimulatorConditionInjector,
+  type IosSimulatorConditionDeps,
+} from "./iosSimulatorConditionInjectors";
 import { resolveLifecycleFaultInjector } from "./lifecycleFaultInjectors";
 import { resolveAppFileFaultInjector } from "./appFileFaultInjectors";
 import { resolveClockFaultInjector } from "./clockFaultInjectors";
@@ -234,13 +238,17 @@ export class DeviceConditionRegistry {
  * (#14063), process-lifecycle fault injectors (#14068) and device-wide read-only shared storage and storage fault injectors
  * (#14066), permission and package-state fault injectors (#14069) and process fault injectors
  * (#14068), app-file corruption (#14066) and clock skew (#14069) on an Android device, and the
- * iOS refusals (#14073), plus per-signal integrity presets (#16246).
+ * iOS refusals and the simctl-backed shared statusBar/privacy/location keys (#14073), plus
+ * per-signal integrity presets (#16246).
  * Returns undefined for a key with no injector, which the controller reports as
  * `unsupported` rather than silently dropping.
  */
 export function createDefaultInjectorResolver(
   deps: ReadOnlyFilesystemInjectorDeps &
-    MemoryPressureOptions & { stubBuilder?: MagiskStubBuilder } = {},
+    MemoryPressureOptions & {
+      stubBuilder?: MagiskStubBuilder;
+      ios?: IosSimulatorConditionDeps;
+    } = {},
 ): DeviceConditionInjectorResolver {
   const adbFactory = deps.adbFactory ?? defaultAdbClientFactory;
   // Factory-local caches keep injected adb clients separate from the production instances.
@@ -281,6 +289,7 @@ export function createDefaultInjectorResolver(
     (device, key) => resolveAppFileFaultInjector(device, key, { adbFactory }),
     (device, key) => resolveClockFaultInjector(device, key, { adbFactory }),
     (device, key) => resolveVehicleStateInjector(device, key, { adbFactory }),
+    (device, key) => resolveIosSimulatorConditionInjector(device, key, deps.ios),
   ];
   return (owner, key) => {
     if (!owner.device) {

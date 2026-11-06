@@ -28,6 +28,8 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "observe",
   ]),
   tvos: new Set<string>([
+    "explore",
+    "executePlan",
     "sendKeys",
     "tapOn",
     "pressButton",
@@ -44,8 +46,13 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "startDevice",
     "setActiveDevice",
     "killDevice",
+    "openLink",
+    "getDeepLinks",
+    // simctl io recordVideo / screenshot capture (#16725).
+    "videoRecording",
+    "compareScreenshot",
   ]),
-  // simctl lifecycle, app management and screenshot-only observation.
+  // simctl lifecycle and app management; observe, tapOn and sendKeys go through the window-app XCUITest runner.
   visionos: new Set<string>([
     "installApp",
     "uninstallApp",
@@ -53,6 +60,8 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "terminateApp",
     "listApps",
     "observe",
+    "tapOn",
+    "sendKeys",
     "listDevices",
     "listDeviceImages",
     "provisionDevice",

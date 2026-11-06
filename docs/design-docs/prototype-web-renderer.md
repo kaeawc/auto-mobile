@@ -112,21 +112,47 @@ it inlined per variant.
   landscape view. A second rotate finishes the running turn first. `prefers-reduced-motion:
   reduce` skips the animation.
 - **No network.** The CSP is `default-src 'none'`, the script pinned by its SHA-256, inline
-  styles, and `data:` images and fonts. The page references no external URL.
+  styles, and `data:` images and fonts. The page references no external URL, and declares an
+  empty `data:` icon so no browser requests `/favicon.ico` against that CSP.
 - **Budget.** The page is at most 2 MiB. The start screen of each variant's latest revision and
   of the revision shown first are always kept, then their other screens while they fit; older
   revisions are added newest first while their start screen and history entry fit, each followed
   by its other screens while they fit. The shell (head, toolbar with every screen of the shown
   revision, full history list and script) is measured first. If the kept start screens alone do
   not fit, the build fails with an `ActionableError` naming the largest view.
+- **Images.** `buildPrototypeWebPageWithImages` (`webImageEncoding.ts`) builds the page once to
+  learn every bound asset an `image` draws and its boxes, reads each asset's bytes from a
+  `PrototypeWebAssetSource`, re-encodes it with sharp (`loadSharp`) to WebP quality 80 at the
+  largest size the frame draws it, and builds again with the encoded images. An iOS frame applies
+  the EXIF orientation first, as `UIImage(data:)` does; an Android frame keeps the stored pixels,
+  as `BitmapFactory` ignores the tag. A box is the frame
+  density times the node's fixed dp size; `crop` and `fill` must cover their fixed axes, `fit` and
+  unfixed axes fit inside the screen's long side; the image is never enlarged. A missing, non-image
+  or undecodable asset (logged) is skipped, and one whose data URI alone exceeds the page is
+  reported `assetOverBudget`; the page budget decides which of the rest fit. An image draws more markup than a placeholder, so when the
+  second build's always-kept views no longer fit, the first build stands, its images reported
+  `assetOverBudget`. The resource reads assets from the host asset cache of each device currently
+  showing one of the variants (Android caches its uploads); without one, images stay placeholders.
+  Asset ids are chosen per device and the page holds one image per id, so an id two of those
+  devices cached with different bytes stays a placeholder.
+  It snapshots the shown variant's revisions before encoding, so a revision landing meanwhile does
+  not change the page's `_meta`.
+- **Image budget.** Each image is one `:root` rule in the head defining `--pa-<slot>` (its
+  `data:image/webp` URI), `-bg` (transparent), `-ar` (its aspect ratio) and `-on` (1); views only
+  reference the slot, so view bytes do not depend on which images fit and every orientation and
+  revision shares one copy. A rule is charged once, in this order: the images of the shown
+  revision's start screen, then of the other pinned start screens, then each screen's images right
+  after that screen is kept. An image that does not fit is never retried and draws its
+  placeholder; it is reported `assetOverBudget`, and one with no bytes `assetNotInlined`.
 - **Determinism.** The same input yields byte-identical HTML.
 
 ## Browser check
 
 `test/features/prototype/web/webScreenshots.integration.test.ts` loads the page of each reference
-spec in headless Chromium: `reference-checkout` plus `template-feed-detail`,
+spec in headless Chromium, Firefox and WebKit: `reference-checkout` plus `template-feed-detail`,
 `pager-indicator-dots`, `grid-fixed-columns-span`, `material-controls`, `component-gallery`,
-`doc-example-2` and `native-controls` (every button variant and two sliders), each in `pixel-9` and `iphone-16`, portrait (the list is
+`doc-example-2`, `native-controls` (every button variant and two sliders) and `image-gallery`
+(its assets are `test/fixtures/prototype-web/assets/<id>.png`), each in `pixel-9` and `iphone-16`, portrait (the list is
 `webScreenshotCases.ts`). Playwright (`playwright-core`) is a devDependency of this check only;
 nothing at runtime drives a browser.
 
@@ -139,33 +165,68 @@ nothing at runtime drives a browser.
   screen's view; the 3D toggle turns the shown view to the three-quarter pose, an arrow key on the
   focused viewport orbits it, and toggling back restores the shown view's DOM byte for byte. The
   browser clock is fixed at 9:41 UTC, so the live status bar clock matches the stills; a separate
-  case installs a running clock and checks the clock advances each minute.
+  case installs a running clock and checks the clock advances each minute. Another checks that
+  only an overflowing scroll fades, or, in an engine without scroll-driven animations, that every
+  scroll does. Every engine runs these assertions; CSS 3D and clipping differ between engines, so
+  a page that only works in Chromium fails here.
 - **Settings cases.** `reference-checkout` also renders in both frames at the largest text size
   (`fontScale` 2, `accessibility-extra-extra-extra-large`) and in the `ar` locale (RTL), golden
   `<spec>--<frame>--<setting>.png` (and `--landscape.png` after it).
-- **Goldens.** Two PNGs per case in `test/fixtures/prototype-web/screenshots/`
+- **Goldens.** Compared only in Chromium, the one engine whose CI build they are trusted from.
+  Two PNGs per case in `test/fixtures/prototype-web/screenshots/`
   (`<spec>--<frame>.png` in portrait and `<spec>--<frame>--landscape.png` at the end of the
   turn, plain git blobs, not LFS), taken at 800×800 CSS px, device scale factor 1,
   with every font forced to `"DejaVu Sans", sans-serif` and the caret hidden. No font is bundled. A
   case matches when at most 0.1 % of pixels differ by more than pixelmatch's 0.1 colour distance; a
   different size never matches. A unit test keeps the directory in step with the case list.
 - **Running.** `bash scripts/prototype/web-screenshots.sh` runs it (the integration lane skips it
-  without `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1`); `--update` rewrites the goldens. It needs the
-  Chromium build of the pinned `playwright-core`:
-  `node_modules/.bin/playwright-core install --only-shell chromium`. Every case that reaches
-  capture writes `<case>.png`, and a pixel mismatch also `<case>.diff.png`, to
-  `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS_OUT` (default `scratch/prototype-web-screenshots/`).
+  without `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1`); `--update` rewrites the goldens, and
+  `--engine <chromium|firefox|webkit>` (repeatable) limits the engines. It needs the browser builds
+  of the pinned `playwright-core`:
+  `node_modules/.bin/playwright-core install --only-shell chromium firefox webkit`. Every case that
+  reaches capture writes `<case>.png`, and a Chromium pixel mismatch also `<case>.diff.png`, to
+  `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS_OUT` (default `scratch/prototype-web-screenshots/`);
+  Firefox and WebKit captures go to its `firefox/` and `webkit/` subdirectories.
 - **CI.** The advisory `Prototype Web Screenshots` workflow runs it on Linux nightly, on dispatch,
   and on pull requests that touch the web renderer, its reference fixtures, the check, or
   `package.json`/`bun.lock`. It is not a required check. Goldens are trusted only from that Linux
   Chromium build, whose text anti-aliasing other machines may not match, so a local run can fail on
   pixels alone; when the runner renders differently, the job uploads the
-  `prototype-web-screenshots` artifact, and adopting it means reviewing its PNGs and copying those
-  other than `*.diff.png` into the golden directory.
+  `prototype-web-screenshots` artifact on every run, and adopting it means reviewing its top-level
+  PNGs and copying those other than `*.diff.png` into the golden directory.
+
+## Android parity check
+
+`test/features/prototype/web/webAndroidParity.integration.test.ts` measures how far the still is
+from the Android renderer. For each Roborazzi golden in
+`android/control-proxy/src/test/resources/screenshots/prototype/`, `webAndroidParityCases.ts`
+either rebuilds the spec the Kotlin case renders (fixture, `night`/`notnight` mode, state
+overrides, `themeFrom` and the case's JSON edit) or lists the golden with a reason; host window
+chrome and content-sized floating captures are listed, not compared. Every compared spec is placed
+fullscreen, because the goldens draw the root and theme without the window's placement.
+
+- **Rendering.** The still is drawn `chromeless` on the `small-phone` frame (360×640 dp, the
+  goldens' `w360dp-h640dp-mdpi`, so one dp is one pixel) into a bare document with no page shell,
+  at device scale factor 1 with the same forced font as the page check. Chromeless drops the
+  bezel, bars, cutout, corner radius, safe-area insets and window background, because the goldens
+  capture the content path with no window and are transparent where nothing draws; the screenshot
+  omits the page background to match. A golden smaller than the screen is compared with the
+  screen's top-left region of its size.
+- **Budgets.** `test/fixtures/prototype-web/android-parity-budgets.json` maps each compared golden
+  to the most pixels that may differ by more than pixelmatch's 0.1 colour distance. A case fails
+  when it differs in more than its budget plus 256 pixels or 1 %, whichever is larger: hosted
+  runners do not all rasterize alike, so the same commit's counts move slightly between CI runs.
+  The allowance never reaches the golden's pixel count, so a screenshot that differs everywhere
+  fails. Budgets only shrink: `--update` lowers each to what was measured and
+  records a missing one, and raises one only with `--allow-grow`. The counts are measured by the
+  CI Chromium build; every run logs them on one `android parity diff pixels:` line. A unit test
+  keeps the case table, the skip list and the budget keys in step with the golden directory.
+- **Output.** `<golden>.png` and, when any pixel differs, `<golden>.diff.png` go to
+  `android-parity/` under the output directory, uploaded with the page check's artifact.
 
 ## Still renderer
 
-`renderPrototypeStill(spec, {frame, orientation, mode, screen, locale, textSize})` in
+`renderPrototypeStill(spec, {frame, orientation, mode, screen, locale, textSize, chromeless})` in
 `src/features/prototype/web/webStill.ts` draws the spec as a still screen and returns an element
 tree plus `unsupportedNodes` and `stack` (the outermost stack's screens in key order, its
 start and the screen drawn). It renders on
@@ -400,7 +461,17 @@ the host, so the page's script only switches between views it was given and neve
   256 px hour dial (a 24-hour dial adds an inner 12–23 ring) with the bound hour under a `primary`
   selector. A date picker is 360 px of `surfaceContainerHigh`: "Select date", the bound date as its
   headline, the month row with its arrows, and that month (else today's from the still's clock) in
-  a Sunday-first grid of 48 px cells, the bound day filled `primary` and today ringed. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
+  a Sunday-first grid of 48 px cells, the bound day filled `primary` and today ringed. An `image` binds its asset id (a
+  light/dark pair picks the mode's side, then placeholders bind as text does); without a slot for it
+  it draws a `surfaceVariant` placeholder, at least 48 px on each axis the node does not fix in dp,
+  with reason `assetNotInlined`. With one, the placeholder
+  colour and an `aspect-ratio` on an axis it leaves to wrap read the slot's `-bg` and `-ar`, and it
+  holds an image layer (the slot's image as a centred background, `contain`, `cover` or
+  `100% 100%` for `fit`, `crop` and `fill`, with `saturate()` for `filter.saturation`) and, for
+  `filter.tint`, a tint layer that multiplies the tint's opaque colour over the image masked by it,
+  shown only when `-on` is set, as Android's saturation colour matrix then its `Modulate` tint
+  layer. `Modulate` multiplies alpha too, so a translucent tint wraps both layers in a group at the
+  tint's alpha (a fully transparent tint hides the image); a corner radius clips both. Item images (nav items) are not inlined. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
 - **Skins.** `webSkin.ts` holds one skin per platform; the frame's platform picks it and the
   `skin` option overrides it. A skin replaces the renderers of the components its platform draws

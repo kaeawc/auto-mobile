@@ -31,19 +31,32 @@ interface Position {
   label: string;
 }
 
-/** The unwrapped observe payload, or the failure message the observe returned instead. */
+/**
+ * The unwrapped observe payload, or the failure message the observe returned instead. A `waitFor`
+ * timeout is an `isError` envelope that still carries the last observation (#16889): that is an
+ * unmet expectation, not a failure to observe, so its payload goes to the timeout branch instead
+ * of surfacing the envelope's text (the whole serialized observation) as an error (#17196).
+ */
 function observePayload(
   response: unknown,
 ): { payload: Record<string, unknown> } | { error: string } {
   const result = classifyToolResult(response, "observe");
-  if ("failure" in result && result.failure) {
+  if (result.kind !== "payload") {
+    return {
+      error:
+        result.kind === "uninterpretable"
+          ? result.failure.error
+          : "observe returned no observation",
+    };
+  }
+  const payload = getStructuredPayload<Record<string, unknown>>(result.payload) ?? result.payload;
+  if (waitForTimeoutError(payload, "observe") !== null) {
+    return { payload };
+  }
+  if (result.failure) {
     const failure = result.failure;
     return { error: typeof failure.error === "string" ? failure.error : "observe failed" };
   }
-  if (result.kind !== "payload") {
-    return { error: "observe returned no observation" };
-  }
-  const payload = getStructuredPayload<Record<string, unknown>>(result.payload) ?? result.payload;
   if (payload.success === false) {
     return { error: typeof payload.error === "string" ? payload.error : "observe failed" };
   }

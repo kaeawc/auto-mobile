@@ -137,6 +137,7 @@ export class CommandRunner {
     const warnings = results.filter((result) => result.warning).map((result) => result.warning);
     if (failure) {
       const staleDisplay = results[failure.index]?.staleDisplay;
+      const errorCode = results[failure.index]?.errorCode;
       return {
         success: false,
         completedCommands: results.filter((result) => result.success).length,
@@ -144,6 +145,7 @@ export class CommandRunner {
         commands: results,
         observation,
         error: failure.error,
+        ...(errorCode === undefined ? {} : { errorCode }),
         ...(results[failure.index]?.retryable === false ? { retryable: false } : {}),
         ...(staleDisplay ? { staleDisplay } : {}),
         ...(warnings.length ? { warning: warnings.join(" ") } : {}),

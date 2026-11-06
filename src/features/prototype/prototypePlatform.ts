@@ -17,6 +17,11 @@ import {
   prototypeVideoPlayerError,
 } from "./prototypeMedia";
 import { prototypeMapError } from "./prototypeMap";
+import {
+  prototypeWebViewCallError,
+  prototypeWebViewError,
+  prototypeWebViewIds,
+} from "./prototypeWebView";
 import { prototypeShareArgumentsError } from "./prototypeShare";
 import { prototypeAuthBlockError, prototypeAuthCallError } from "./prototypeAuth";
 import { prototypeCommerceBlockError, prototypeCommerceCallError } from "./prototypeCommerce";
@@ -112,6 +117,11 @@ export interface PrototypePlatformStateEntry {
 export interface PrototypePlatformModule {
   capability: string;
   deviceCapability?: string;
+  /**
+   * Non-default SDK backends a node of this module may name in `backend` (#14302), each with the
+   * capability a runtime advertises only while that backend works on the device.
+   */
+  backends?: Record<string, { capability: string }>;
   /** A test-only module (`test`) that no production runtime advertises. */
   placeholder?: boolean;
   /** Shared runtime call budget; the host validates metadata but does not count calls. */
@@ -244,7 +254,7 @@ const sortedKeys = (value: Raw): string[] =>
 export type PrototypePlatformUse =
   | { kind: "requires"; path: string }
   | { kind: "declared"; path: string; module: string }
-  | { kind: "node"; path: string; module: string }
+  | { kind: "node"; path: string; module: string; backend?: unknown }
   | { kind: "handlers"; path: string }
   | { kind: "handler"; path: string; event: string; userGesture: boolean }
   | { kind: "call"; path: string; action: Raw; userGesture: boolean }
@@ -427,11 +437,13 @@ export function prototypePlatformUses(spec: unknown): PrototypePlatformUse[] {
     );
   }
   placeholderUses(root, uses);
-  // A map node draws through the map module (#14309), so its gate names the node. Only node
-  // positions count: a map-shaped value in a request field or payload is data.
+  // A map or webView node draws through its module (#14309, #14312), so its gate names the node.
+  // Only node positions count: a map-shaped value in a request field or payload is data.
   walkPrototypeNodes(root, (node, path) => {
     if (node.type === "map") {
-      uses.push({ kind: "node", path, module: "map" });
+      uses.push({ kind: "node", path, module: "map", backend: node.backend });
+    } else if (node.type === "webView") {
+      uses.push({ kind: "node", path, module: "webview" });
     }
   });
   return uses;
@@ -509,6 +521,7 @@ interface PlatformContext {
   players: ReadonlySet<string>;
   root: Raw;
   previews: ReadonlySet<string>;
+  webViews: ReadonlySet<string>;
 }
 
 function callError(
@@ -748,6 +761,7 @@ function platformContext(root: Raw): PlatformContext {
     players: prototypeMediaPlayers(root),
     root,
     previews: prototypeCameraPreviewIds(root),
+    webViews: prototypeWebViewIds(root),
     declared: strings(requires.platform),
     permissions: new Set(
       (Array.isArray(requires.permissions) ? requires.permissions : []).map(
@@ -811,6 +825,7 @@ const ROOT_BLOCK_CHECKS: readonly ((
   prototypeMediaQueueError,
   prototypeVideoPlayerError,
   prototypeMapError,
+  prototypeWebViewError,
   prototypeMediaCaptionsError,
   prototypeCastButtonError,
   prototypeCameraPreviewError,
@@ -868,6 +883,7 @@ function channelUseError(
         prototypeCommerceCallError(use.action, use.path, root) ??
         prototypeNotificationsCallError(use.action, use.path, root) ??
         prototypeMediaCallError(use.action, use.path, context.players) ??
-        prototypeCameraCallError(use.action, use.path, context.previews))
+        prototypeCameraCallError(use.action, use.path, context.previews) ??
+        prototypeWebViewCallError(use.action, use.path, context.webViews))
     : undefined;
 }

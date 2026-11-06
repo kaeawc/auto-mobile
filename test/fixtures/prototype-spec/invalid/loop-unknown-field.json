@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "loops",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Attention",
+      "attentionLoop": {
+        "effect": "pulse",
+        "periodMs": 800,
+        "unknown": true
+      }
+    }
+  },
+  "expectedPath": "root.attentionLoop.unknown",
+  "expectedMessage": "Unknown field"
+}

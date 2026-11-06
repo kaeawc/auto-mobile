@@ -315,7 +315,10 @@ export class ToolRegistryClass {
                 ? (defaultDaemonContext.sessionManager()?.getDeviceForSession(sessionUuid) ??
                   undefined)
                 : undefined));
-        await flushPendingImeRestoreBeforeTool(options.keepsImeRestorePending, deviceId);
+        await flushPendingImeRestoreBeforeTool(
+          options.keepsImeRestorePending || options.flushesImeRestoreAfterAdmission,
+          deviceId,
+        );
         const response = await handler(args, progress, signal);
         if (isDeviceBindingTool(name)) {
           // Ingress binds and heartbeats the session these results name after the handler

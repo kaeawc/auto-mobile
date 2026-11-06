@@ -1,7 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
-import android.annotation.SuppressLint
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
 import android.view.Display
@@ -165,6 +165,7 @@ data class PrototypeRequest(
   val onHostBack: (suspend () -> Unit)? = null,
   /** `window.backdrop` as resolved for this show (#15126); null without one. */
   val backdrop: PrototypeBackdropPlan? = null,
+  val windowControls: PrototypeWindowControls = PrototypeWindowControls(),
   val content: @Composable () -> Unit = { PrototypeTestContent() },
 ) {
   val focusable: Boolean
@@ -224,6 +225,9 @@ interface PrototypeHost : PrototypeHostLifecycle, PrototypeClipboardHost {
   /** Changes Back focusability without changing text-field or keyboard state. */
   suspend fun setStackBackEnabled(enabled: Boolean): Boolean
 
+  /** Hides this prototype's IME and clears its text focus, retaining navigation focusability. */
+  suspend fun hideKeyboard()
+
   /** Changes whole-view alpha in place; throws IllegalArgumentException outside 0..100. */
   suspend fun setOpacity(percent: Int)
 
@@ -268,12 +272,12 @@ interface PrototypeHost : PrototypeHostLifecycle, PrototypeClipboardHost {
  * path (relayout, replace, touch-through). Service wiring uses it to schedule the controller's
  * restore-or-abandon pass promptly instead of waiting for an unrelated event. Same constraints.
  *
- * While a text field is visible or a stack can pop the window is focusable. Back first navigates
- * through the controller; without navigation it dismisses the prototype through the request's
- * `onHostDismiss` on [backScope], the same `user`-reason path as the fullscreen dismiss row. Back
- * arrives as a key event below API 33 and as an OnBackInvokedCallback (registered through
+ * On TV, while a text field is visible, or while a stack can pop the window is focusable. Back
+ * first navigates through the controller; without navigation it dismisses the prototype through the
+ * request's `onHostDismiss` on [backScope], the same `user`-reason path as the fullscreen dismiss
+ * row. Back arrives as a key event below API 33 and as an OnBackInvokedCallback (registered through
  * [backRegistrarFactory] only while focusable) from API 33; both call one target. Without a visible
- * text field or navigated stack the window is not focusable and never sees Back at all.
+ * text field or navigated stack a non-TV window is not focusable and never sees Back at all.
  *
  * [context] must be the service/display context used for the default display; [densityProvider]
  * defaults to its resources. A request for any other display takes its context, WindowManager and
@@ -312,9 +316,17 @@ class DefaultPrototypeHost(
   private val isViewAttached: (View) -> Boolean = { it.isAttachedToWindow },
   /** Must finish before the transport's 5000ms request timeout. */
   private val firstRenderTimeoutMillis: Long = 2_000L,
+  private val windowControls: PrototypeWindowControlApplier = AndroidPrototypeWindowControlApplier,
+  private val keyboard: PrototypeKeyboard = AndroidPrototypeKeyboard,
   /** Tests supply a deterministic waiter instead of driving real Compose frames. */
   private val firstRenderWaiter: PrototypeFirstRenderWaiter = CoroutinePrototypeFirstRenderWaiter,
 ) : PrototypeHost {
+  private val tvNavigation =
+    context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+
+  private val PrototypeRequest.windowFocusable: Boolean
+    get() = focusable || tvNavigation
+
   private class Window(
     val view: PrototypeComposeView,
     val back: PrototypeBackBinding,
@@ -407,7 +419,7 @@ class DefaultPrototypeHost(
       old.anchoredOrigin = previous.origin
       update(old, checkNotNull(previous.params))
       applyContent(old)
-      old.back.sync(old.request.focusable)
+      old.back.sync(old.request.windowFocusable)
     } else if (failed != null && failed !== old && window === failed) {
       retire(failed)
       window = old
@@ -468,11 +480,13 @@ class DefaultPrototypeHost(
           sdkInt,
           request.layer,
           imeLift(request),
-          hasStackBack = request.hasStackBack,
+          // D-pad navigation uses the existing Back-only key focus mode, without attaching the IME.
+          hasStackBack = request.hasStackBack || tvNavigation,
           opaque = prototypeWindowOpaque(request),
           surfaceId = request.surfaceId,
           blurBehindRadiusPx = backdropBlurPx(request, target.density()),
         )
+      windowControls.apply(params, request.windowControls)
       target.constrainDismissWindow(params, request)
       if (touchThroughToken != null) {
         params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
@@ -513,7 +527,7 @@ class DefaultPrototypeHost(
         error,
       )
     }
-    current.back.sync(request.focusable)
+    current.back.sync(request.windowFocusable)
     return true
   }
 
@@ -574,7 +588,7 @@ class DefaultPrototypeHost(
     window = added
     placement = request.placement
     owner.resume()
-    added.back.sync(request.focusable)
+    added.back.sync(request.windowFocusable)
     return true
   }
 
@@ -686,11 +700,12 @@ class DefaultPrototypeHost(
         sdkInt,
         current.request.layer,
         imeLift(current.request),
-        hasStackBack = current.request.hasStackBack,
+        hasStackBack = current.request.hasStackBack || tvNavigation,
         opaque = prototypeWindowOpaque(current.request),
         surfaceId = current.request.surfaceId,
         blurBehindRadiusPx = backdropBlurPx(current.request, current.target.density()),
       )
+    windowControls.apply(params, current.request.windowControls)
     current.anchoredOrigin?.let { applyAnchoredOrigin(params, it) }
     current.target.constrainDismissWindow(params, current.request)
     if (touchThroughToken != null)
@@ -707,7 +722,7 @@ class DefaultPrototypeHost(
     if (!visible) hideKeyboard(current.view)
     current.request = previous.copy(hasTextField = visible)
     val applied = relayoutOnMain(current)
-    if (applied) current.back.sync(current.request.focusable) else current.request = previous
+    if (applied) current.back.sync(current.request.windowFocusable) else current.request = previous
     applied
   }
 
@@ -717,7 +732,7 @@ class DefaultPrototypeHost(
     if (previous.hasStackBack == enabled) return@onMain true
     current.request = previous.copy(hasStackBack = enabled)
     val applied = relayoutOnMain(current)
-    if (applied) current.back.sync(current.request.focusable) else current.request = previous
+    if (applied) current.back.sync(current.request.windowFocusable) else current.request = previous
     applied
   }
 
@@ -748,15 +763,20 @@ class DefaultPrototypeHost(
     }
   }
 
-  /** Still focused here: ask the keyboard to go before the window stops being focusable. */
-  @SuppressLint("NewApi")
+  override suspend fun hideKeyboard() = mainThread.onMain {
+    window?.let { hideKeyboard(it.view) }
+    Unit
+  }
+
+  /** Still focused here: ask the keyboard to go before clearing the prototype's focus. */
   private fun hideKeyboard(view: View) {
-    if (sdkInt >= 30) view.windowInsetsController?.hide(android.view.WindowInsets.Type.ime())
+    keyboard.hideIme(view)
+    keyboard.clearFocus(view)
   }
 
   private fun backDecision(event: KeyEvent): PrototypeBackDecision =
     prototypeBackDecision(
-      window?.request?.focusable == true,
+      window?.request?.windowFocusable == true,
       event.keyCode,
       event.action,
       event.isCanceled,
@@ -764,7 +784,7 @@ class DefaultPrototypeHost(
 
   /** The one Back target for the key-event path and the predictive-back callback. */
   private fun dismissFromBack() {
-    val request = window?.request?.takeIf { it.focusable } ?: return
+    val request = window?.request?.takeIf { it.windowFocusable } ?: return
     backScope.launch { (request.onHostBack ?: request.onHostDismiss)() }
   }
 
@@ -830,6 +850,8 @@ class DefaultPrototypeHost(
   private fun beginExit(current: Window): Boolean {
     val params = WindowManager.LayoutParams().apply { copyFrom(current.params) }
     params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+    // An exiting overlay can stay attached for its fade, but must release its window controls now.
+    windowControls.apply(params, PrototypeWindowControls())
     if (!update(current, params)) return false
     current.visible.value = false
     current.back.release()
@@ -1021,9 +1043,9 @@ enum class PrototypeBackDecision {
 }
 
 /**
- * Back reaches the prototype only while its window is focusable, which is exactly while a text
- * field is visible or stack navigation can pop. Dispatch fires once, on the up half of an
- * uncanceled press.
+ * Back reaches the prototype only while its window is focusable: on TV, while a text field is
+ * visible, or while stack navigation can pop. Dispatch fires once, on the up half of an uncanceled
+ * press.
  */
 fun prototypeBackDecision(
   focusable: Boolean,

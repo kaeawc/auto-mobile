@@ -46,7 +46,7 @@ export interface TestExecutionRecord {
   timestamp: number;
   deviceId?: string | null;
   deviceName?: string | null;
-  devicePlatform?: "android" | "ios" | null;
+  devicePlatform?: "android" | "ios" | "tvos" | null;
   deviceType?: "emulator" | "simulator" | "device" | null;
   appVersion?: string | null;
   gitCommit?: string | null;

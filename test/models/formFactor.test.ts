@@ -5,6 +5,7 @@ import {
   androidSystemImageTagsFor,
   defaultAndroidProfileIdFor,
   formFactorFrom,
+  isNonGeometricFormFactor,
 } from "../../src/models/formFactor";
 import { BINDING_DEFAULT_ANDROID_DEVICE_TYPES_BY_FAMILY } from "../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecResolver";
 
@@ -33,10 +34,15 @@ describe("formFactorFrom non-handheld form factors", () => {
     ["android-tv", "tv"],
     ["google-tv", "tv"],
     ["google-tv-ps16k", "tv"],
+    ["android-wear-signed", "watch"],
     ["android-wear", "watch"],
     ["android-wear-cn", "watch"],
     ["android-automotive", "automotive"],
     ["android-automotive-playstore", "automotive"],
+    ["google-xr", "xr-headset"],
+    ["android-xr-v3-playstore", "xr-headset"],
+    ["android-xr-preview-playstore", "xr-headset"],
+    ["ai-glasses", "xr-glasses"],
   ] as const)(
     "classifies system-image tag %s as %s before geometry",
     (systemImageTag, expected) => {
@@ -53,6 +59,10 @@ describe("formFactorFrom non-handheld form factors", () => {
     ["wearos_rect", "watch"],
     ["wearos_square", "watch"],
     ["automotive_1024p_landscape", "automotive"],
+    ["xr_headset_device", "xr-headset"],
+    ["xr_glasses_device", "xr-glasses"],
+    ["ai_glasses_device", "xr-glasses"],
+    ["ai_glasses_displayless", "xr-glasses"],
   ] as const)("classifies profile %s as %s when there is no tag", (deviceType, expected) => {
     expect(formFactorFrom({ deviceType, ...tabletGeometry })).toBe(expected);
     expect(formFactorFrom({ deviceType, ...phoneGeometry })).toBe(expected);
@@ -64,6 +74,26 @@ describe("formFactorFrom non-handheld form factors", () => {
 
   test("passes a non-handheld hint through", () => {
     expect(formFactorFrom({ hint: "watch" })).toBe("watch");
+    expect(formFactorFrom({ hint: "xr-headset" })).toBe("xr-headset");
+    expect(formFactorFrom({ hint: "xr-glasses" })).toBe("xr-glasses");
+  });
+
+  test("an XR tag wins over a phone-shaped profile and handheld geometry (#16838)", () => {
+    expect(formFactorFrom({ systemImageTag: "google-xr", deviceType: "pixel_8" })).toBe(
+      "xr-headset",
+    );
+    expect(androidProfileFormFactor({ systemImageTag: "ai-glasses", ...phoneGeometry })).toBe(
+      "xr-glasses",
+    );
+  });
+
+  test("isNonGeometricFormFactor names exactly the image-fixed form factors", () => {
+    for (const formFactor of ["tv", "watch", "automotive", "xr-headset", "xr-glasses"]) {
+      expect(isNonGeometricFormFactor(formFactor)).toBe(true);
+    }
+    for (const formFactor of ["phone", "tablet", "foldable", "unknown"]) {
+      expect(isNonGeometricFormFactor(formFactor)).toBe(false);
+    }
   });
 
   test.each([
@@ -115,7 +145,7 @@ describe("non-handheld provisioning defaults", () => {
     "utf8",
   );
 
-  test.each(["tv", "watch", "automotive"] as const)(
+  test.each(["tv", "watch", "automotive", "xr-headset", "xr-glasses"] as const)(
     "the %s default profile is an avdmanager profile id of that form factor",
     (formFactor) => {
       const profileId = defaultAndroidProfileIdFor(formFactor);
@@ -126,11 +156,23 @@ describe("non-handheld provisioning defaults", () => {
 
   test("the broker's family defaults are the shared provisioning defaults", () => {
     expect(BINDING_DEFAULT_ANDROID_DEVICE_TYPES_BY_FAMILY.tv).toBe("tv_1080p");
-    for (const formFactor of ["tv", "watch", "automotive"] as const) {
+    for (const formFactor of ["tv", "watch", "automotive", "xr-headset", "xr-glasses"] as const) {
       expect(BINDING_DEFAULT_ANDROID_DEVICE_TYPES_BY_FAMILY[formFactor]).toBe(
         defaultAndroidProfileIdFor(formFactor),
       );
     }
+  });
+
+  test("Wear tags are listed best first and each classifies as watch", () => {
+    expect(androidSystemImageTagsFor("watch")).toEqual([
+      "android-wear-signed",
+      "android-wear",
+      "android-wear-cn",
+    ]);
+    for (const tag of androidSystemImageTagsFor("watch")) {
+      expect(formFactorFrom({ systemImageTag: tag })).toBe("watch");
+    }
+    expect(defaultAndroidProfileIdFor("watch", false)).toBe("wearos_square");
   });
 
   test("TV image tags are listed best first and each classifies as tv", () => {

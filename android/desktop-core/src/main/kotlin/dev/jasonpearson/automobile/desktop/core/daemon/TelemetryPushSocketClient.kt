@@ -20,6 +20,7 @@ import java.nio.file.Path
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.min
+import kotlin.random.Random
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -47,7 +48,7 @@ internal fun interface TelemetryRetryDelay {
   suspend fun wait(delayMs: Long)
 }
 
-private class ChannelTelemetrySocket(path: String) : TelemetrySocket {
+internal class ChannelTelemetrySocket(path: String) : TelemetrySocket {
   private val channel = SocketChannel.open(UnixDomainSocketAddress.of(path))
   private val reader =
     BufferedReader(InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8))
@@ -75,6 +76,10 @@ internal data class TelemetryPushSocketOptions(
   val beforeSocketPublish: () -> Unit = {},
   val sessionUuidProvider: (() -> String?)? = null,
   val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
+  /** Where the blocking `readLine()` parks: a dedicated thread, never a `Dispatchers.IO` slot. */
+  val readerThreads: StreamReaderDispatcherFactory = DedicatedStreamReaderThreads,
+  /** Jitter source for the reconnect backoff; a test pins it for deterministic delays. */
+  val random: Random = Random.Default,
 )
 
 class TelemetryPushSocketClient
@@ -103,6 +108,7 @@ internal constructor(
 
   companion object {
     internal const val MAX_RECONNECT_ATTEMPTS = 5
+    internal const val READER_THREAD_NAME = "telemetry-push-reader"
     internal const val DEVICE_NOT_LIVE_MESSAGE = "Device session is not registered on the daemon"
     private const val DEVICE_NOT_LIVE_MARKER = "does not identify a live device session"
 
@@ -127,10 +133,6 @@ internal constructor(
 
   private val _shouldReconnect: Boolean
     get() = _state.value.shouldReconnect
-
-  // Retry configuration
-  private val initialRetryDelayMs = 1000L
-  private val maxRetryDelayMs = 30000L
 
   // Flow for live telemetry events — replay caches recent events for late collectors (e.g. tab
   // re-open)
@@ -242,7 +244,7 @@ internal constructor(
           )
         return
       }
-      val delayMs = calculateTelemetryBackoff(attempt, initialRetryDelayMs, maxRetryDelayMs)
+      val delayMs = telemetryBackoffMs(attempt, options.random)
       _state.value = ConnectionState.Reconnecting(attempt, delayMs)
       retryDelay.wait(delayMs)
     }
@@ -295,12 +297,21 @@ internal constructor(
     scope.coroutineContext[Job]?.cancel()
   }
 
-  private suspend fun readMessages(currentSocket: TelemetrySocket, onHealthy: () -> Unit) {
+  private suspend fun readMessages(currentSocket: TelemetrySocket, onHealthy: () -> Unit) =
+    options.readerThreads.create(READER_THREAD_NAME).use { readerThread ->
+      readMessagesOn(readerThread, currentSocket, onHealthy)
+    }
+
+  private suspend fun readMessagesOn(
+    readerThread: kotlinx.coroutines.CoroutineDispatcher,
+    currentSocket: TelemetrySocket,
+    onHealthy: () -> Unit,
+  ) {
     try {
       log.info("Starting telemetry push message read loop")
 
       while (_shouldReconnect) {
-        val line = runInterruptible(options.ioDispatcher) { currentSocket.readLine() } ?: break
+        val line = runInterruptible(readerThread) { currentSocket.readLine() } ?: break
         currentCoroutineContext().ensureActive()
         if (line.isBlank()) continue
 
@@ -347,13 +358,16 @@ internal constructor(
     }
 }
 
-private fun calculateTelemetryBackoff(
-  attempt: Int,
-  initialRetryDelayMs: Long,
-  maxRetryDelayMs: Long,
-): Long {
-  val exponentialDelay = initialRetryDelayMs * (1L shl min(attempt - 1, 10))
-  val cappedDelay = min(exponentialDelay, maxRetryDelayMs)
-  val jitter = (cappedDelay * 0.1 * Math.random()).toLong()
+/**
+ * Telemetry reconnect delay for [attempt] (1-based): exponential from 1 s, capped at 30 s, plus up
+ * to 10% jitter.
+ */
+internal fun telemetryBackoffMs(attempt: Int, random: Random): Long {
+  val exponentialDelay = TELEMETRY_INITIAL_RETRY_MS * (1L shl min(attempt - 1, 10))
+  val cappedDelay = min(exponentialDelay, TELEMETRY_MAX_RETRY_MS)
+  val jitter = (cappedDelay * 0.1 * random.nextDouble()).toLong()
   return cappedDelay + jitter
 }
+
+private const val TELEMETRY_INITIAL_RETRY_MS = 1_000L
+private const val TELEMETRY_MAX_RETRY_MS = 30_000L

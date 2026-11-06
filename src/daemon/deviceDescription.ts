@@ -5,6 +5,7 @@ import {
   staticFactsFrom,
   displayFrom,
   capabilityInventory,
+  vehicleFrom,
 } from "../utils/deviceDescriptionProjection";
 import type {
   DeviceDescription,
@@ -212,6 +213,7 @@ function describeBooted(options: BootedDescriptionOptions): DeviceDescription {
     display: displayFrom(merged),
     ...(merged.displays?.panels.length ? { displays: merged.displays } : {}),
     capabilityInventory: capabilityInventory(merged, isVirtual),
+    ...vehicleFrom(merged, staticFacts.formFactor, isVirtual),
     image: imageLinkWithConfiguredFallback(admittedImage, configured),
     availabilityError: device.platform === "ios" ? (merged.availabilityError ?? null) : null,
     runtime: describeBootedRuntime(options),
@@ -373,6 +375,8 @@ const formFactorSchema = z.enum([
   "tv",
   "watch",
   "automotive",
+  "xr-headset",
+  "xr-glasses",
   "unknown",
 ]);
 const lifecycleSchema = z
@@ -490,7 +494,16 @@ export const deviceDescriptionSchema = z
           z
             .object({
               key: z.string(),
-              role: z.enum(["inner", "cover", "rear", "external", "overlay", "unknown"]),
+              role: z.enum([
+                "inner",
+                "cover",
+                "rear",
+                "external",
+                "cluster",
+                "overlay",
+                "virtual",
+                "unknown",
+              ]),
               sizePx: z.object({ width: z.number(), height: z.number() }).strict(),
               scale: z.number().optional(),
             })
@@ -518,6 +531,13 @@ export const deviceDescriptionSchema = z
       })
       .strict()
       .nullable(),
+    vehicle: z
+      .object({
+        motion: z.enum(["supported", "unsupported", "unknown"]),
+        nightMode: z.enum(["supported", "unsupported", "unknown"]),
+      })
+      .strict()
+      .optional(),
     image: z
       .object({ path: nullableString, target: nullableString, basedOn: nullableString })
       .strict(),

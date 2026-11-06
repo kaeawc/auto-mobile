@@ -16,11 +16,14 @@ import {
   FOCUS_NAVIGATE_STATUSES,
   FocusNavigate,
   type FocusKeyPresser,
-  type FocusObserver,
 } from "../features/action/FocusNavigate";
-import { findFocusedElement } from "../features/observe/HierarchyFocus";
-import { DefaultElementParser } from "../features/utility/ElementParser";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
+import { createFocusNavigateObserver } from "../features/action/FocusNavigateObserver";
+import {
+  pinnedFocusOptions,
+  SelectorDpadTargetResolver,
+} from "../features/action/DpadTargetResolver";
+import { ResolverElementSelector } from "../features/utility/ResolverElementSelector";
 
 const focusNavigateInput = z.object({
   until: z
@@ -28,6 +31,14 @@ const focusNavigateInput = z.object({
       text: z.string().optional().describe("Text of the element to focus (case-insensitive)"),
       contentDesc: z.string().optional().describe("Content-desc of the element to focus"),
       resourceId: z.string().optional().describe("Resource ID of the element to focus"),
+      label: z
+        .string()
+        .optional()
+        .describe("Text or content-desc of the element to focus, resolved as tapOn's text"),
+      elementId: z
+        .string()
+        .optional()
+        .describe("Element ID of the element to focus, resolved as tapOn's elementId"),
     })
     .strict()
     .describe("The element focus should land on; every field given must match"),
@@ -42,6 +53,10 @@ const focusNavigateInput = z.object({
     .max(FOCUS_NAVIGATE_MAX_STEPS_LIMIT)
     .optional()
     .describe(`Maximum D-pad presses (default ${FOCUS_NAVIGATE_DEFAULT_MAX_STEPS})`),
+  select: z
+    .boolean()
+    .optional()
+    .describe("Press enter (D-pad select) once the target is focused (default false)"),
   settleMs: z
     .number()
     .int()
@@ -60,51 +75,36 @@ export const focusNavigateResultSchema = z
     steps: z.number(),
     path: z.array(z.record(z.string(), z.unknown())),
     focusedElement: z.record(z.string(), z.unknown()).optional(),
+    // Required, so a spilled response keeps it inline beside success and status.
+    selected: z.boolean(),
     message: z.string().optional(),
   })
   .passthrough();
 
-const parser = new DefaultElementParser();
+export { createFocusNavigateObserver };
 
-function createObserver(device: BootedDevice): FocusObserver {
-  const screen = new RealObserveScreen(device, defaultAdbClientFactory);
+export function createFocusKeyPresser(device: BootedDevice): FocusKeyPresser {
+  const input = new InputKey(device, { adbFactory: defaultAdbClientFactory, timer: defaultTimer });
   return {
-    read: async (signal) => {
-      const result = await screen.execute({
-        hierarchyOnly: true,
-        skipScreenshot: true,
-        skipCache: true,
-        freshness: "fresh",
-        signal,
-      });
-      if (!result.viewHierarchy) {
-        throw new ActionableError(result.error ?? "The hierarchy read returned no view hierarchy");
-      }
-      return {
-        focused: result.focusedElement ?? findFocusedElement(result.viewHierarchy, parser),
-        elements: parser.flattenViewHierarchy(result.viewHierarchy).map(({ element }) => element),
-      };
-    },
+    press: (key, signal) => input.press(key, undefined, undefined, signal ? { signal } : {}),
   };
 }
 
-function createKeyPresser(device: BootedDevice): FocusKeyPresser {
-  const input = new InputKey(device, { adbFactory: defaultAdbClientFactory, timer: defaultTimer });
-  return { press: (key) => input.press(key) };
-}
+/** `label` and `elementId` targets resolve to the element tapOn would tap. */
+const targetResolver = new SelectorDpadTargetResolver(new ResolverElementSelector());
 
 export const focusNavigateTool = defineDeviceTool({
   name: "focusNavigate",
   description:
-    "Move D-pad focus to an element on a focus-driven UI such as Android TV. Observes, and until the focused element matches `until` (text, contentDesc or resourceId) presses the D-pad arrow that moves toward the nearest match, or `direction` when given. When a press leaves focus unchanged, the next arrow toward the match is tried. Returns the path of focused elements and a status: focused, max_steps (default 30) or stuck (every arrow toward the match left focus unchanged; two unchanged presses with `direction`). Activate the result with sendKeys key enter.",
+    "Move D-pad focus to an element on a focus-driven UI such as Android TV. Observes, and until the focused element matches `until` (text, contentDesc, resourceId, or label/elementId resolved to the element tapOn would tap) presses the D-pad arrow that moves toward the nearest match, or `direction` when given. When a press leaves focus unchanged, or presses in one direction keep moving focus without getting closer, the other arrows are tried so focus can leave a list or slider that traps it. Returns the path of focused elements and a status: focused, max_steps (default 30) or stuck (every arrow from the focused element was tried; two unchanged presses with `direction`). With `select`, presses enter once focused (`selected` reports whether it did); otherwise activate the result with sendKeys key enter.",
   input: focusNavigateInput,
   handler: async (device, args, _progress, signal) => {
     if (device.platform !== "android") {
       throw new ActionableError("focusNavigate is only supported on Android.");
     }
     const navigate = new FocusNavigate(
-      createObserver(device),
-      createKeyPresser(device),
+      createFocusNavigateObserver(new RealObserveScreen(device, defaultAdbClientFactory)),
+      createFocusKeyPresser(device),
       defaultTimer,
     );
     const result = await navigate.execute({
@@ -112,12 +112,18 @@ export const focusNavigateTool = defineDeviceTool({
       ...(args.direction !== undefined ? { direction: args.direction } : {}),
       ...(args.maxSteps !== undefined ? { maxSteps: args.maxSteps } : {}),
       ...(args.settleMs !== undefined ? { settleMs: args.settleMs } : {}),
+      ...(args.select !== undefined ? { select: args.select } : {}),
+      ...pinnedFocusOptions(args.until, targetResolver),
       ...(signal ? { signal } : {}),
     });
-    return withIsErrorOnFailure(createStructuredToolResponse(result), result.success);
+    // `selected` is always reported, so callers never have to infer it from `select`.
+    const response = { ...result, selected: result.selected ?? false };
+    return withIsErrorOnFailure(createStructuredToolResponse(response), result.success);
   },
   options: {
     ...PLAN_RELEVANT,
+    // `select` can navigate, so record the call like tapOn and sendKeys for navigateTo to replay.
+    recordsNavigation: true,
     defaultEnabled: false,
     outputSchema: focusNavigateResultSchema,
   },

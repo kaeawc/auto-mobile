@@ -99,6 +99,9 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     // executePlanToolResultsCapture.test.ts / executePlanCleanupToolResults.test.ts read the
     // captured executePlan envelopes the JUnit runner contract tests also consume (#10110).
     "android/junit-runner/src/test/resources/captured/**",
+    // executePlanToolResultsCapture.test.ts pins XCTestRunner's copy of the failed-expectation
+    // envelope (#16817).
+    "ios/XCTestRunner/Sources/XCTestRunnerTests/Resources/Captured/**",
     // ownerTokenClientInventory.test.ts reads the Swift owner-token compatibility pins.
     "ios/XCTestRunner/Sources/XCTestRunner/MCP/AutoMobileDaemonClient.swift",
     "ios/XCTestRunner/Sources/XCTestRunner/MCP/StreamableHTTPMCPClient.swift",

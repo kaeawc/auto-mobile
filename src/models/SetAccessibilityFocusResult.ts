@@ -1,10 +1,18 @@
 import { Element } from "./Element";
 
 /**
- * Result of an accessibilityFocus (set/clear TalkBack cursor) operation.
+ * Result of an accessibilityFocus (TalkBack or VoiceOver cursor) operation.
  * Returned by the `accessibilityFocus` MCP tool.
  */
+export type AccessibilityFocusErrorCode =
+  | "voiceover_off"
+  | "sdk_unavailable"
+  | "element_not_found"
+  | "invalid_selector"
+  | "unsupported";
+
 export interface SetAccessibilityFocusResult {
+  errorCode?: AccessibilityFocusErrorCode;
   /**
    * Whether the operation succeeded
    */

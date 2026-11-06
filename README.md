@@ -59,6 +59,13 @@ brew install kaeawc/tap/auto-mobile
 
 or follow the [installation guide](docs/index.md#install).
 
+Using Claude Code? Install the AutoMobile plugin from this repository's marketplace:
+
+```text title="Claude Code plugin (click to copy)"
+/plugin marketplace add kaeawc/auto-mobile
+/plugin install auto-mobile@auto-mobile-marketplace
+```
+
 ## Documentation
 
 - **[Full Documentation](docs/index.md)** - Complete guide with examples

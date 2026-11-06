@@ -3,6 +3,7 @@ import Foundation
 
 /// Foreground-app-scoped capabilities exposed by the optional in-app AutoMobile SDK.
 public enum SdkCapability: String, CaseIterable, Codable, Sendable {
+    case accessibilityFocus = "accessibility_focus"
     case magicTap = "magic_tap"
     case hierarchy
     case networkMocking = "network_mocking"

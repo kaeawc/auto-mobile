@@ -206,6 +206,8 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     alias: String?,
   ) = Unit
 
+  override suspend fun exportAttestation(requestId: String?) = Unit
+
   override suspend fun discoverKeystore(requestId: String?, packageName: String) = Unit
 
   override suspend fun getSdkCapabilities(requestId: String?, packageName: String, userId: Int?) =
@@ -531,6 +533,9 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     scope: String?,
     alias: String?,
   ) = record("resetKeystore", requestId, packageName, scope, alias)
+
+  override suspend fun exportAttestation(requestId: String?) =
+    record("exportAttestation", requestId)
 
   override suspend fun discoverKeystore(requestId: String?, packageName: String) =
     record("discoverKeystore", requestId, packageName)

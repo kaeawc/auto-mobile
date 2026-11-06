@@ -1,12 +1,12 @@
 import Foundation
 
 /// Library-only R2 data flow, matching prototypeSensitiveSinkErrors (#15635).
-/// Literal payloads stay opaque; only request/channel wire fields are sinks.
+/// Literal payloads stay opaque; request/channel wire fields and storage keys are sinks.
 enum PrototypeSensitiveSinkRules {
     private struct Field {
         let text: String
         let path: String
-        var dataPointer = false
+        var pointerSource: String?
         var itemBinding = false
     }
 
@@ -25,8 +25,18 @@ enum PrototypeSensitiveSinkRules {
     )
         -> [PrototypeLoadError]
     {
-        let taints = sensitivePointers(spec)
-        guard !taints.isEmpty else { return [] }
+        let seeds = sensitivePointers(spec)
+        let declared = PrototypeStrictBindings.array(spec["requires"]?.objectFields?["platform"])
+        let platformTaints = PrototypeContractValidator.platformModules.flatMap { module, raw in
+            (raw.objectFields?["state"]?.objectFields ?? [:]).compactMap { key, entry -> String? in
+                entry.objectFields?["sensitive"] == .bool(true) && declared.contains(.string(module)) ?
+                    "/\(module)/\(key)" : nil
+            }
+        }
+        guard !seeds.isEmpty || !platformTaints.isEmpty else { return [] }
+        guard let taints = propagateCopies(seeds, platformTaints: platformTaints, nodes: nodes, actions: actions) else {
+            return [.invalidSpec(path: "$", message: "Secure copy taint analysis exceeds 4000000 overlap checks")]
+        }
         let sinks = sinkFields(spec, actions: actions).sorted {
             $0.path.utf16.lexicographicallyPrecedes($1.path.utf16)
         }
@@ -56,7 +66,7 @@ enum PrototypeSensitiveSinkRules {
             let rowRead = taintedRows.contains { scope in
                 field.path.hasPrefix("\(scope.path).children[") &&
                     (field.itemBinding || (
-                        !field.dataPointer && PrototypeRepeat.segments(
+                        field.pointerSource == nil && PrototypeRepeat.segments(
                             field.text,
                             alias: scope.alias
                         )
@@ -66,20 +76,107 @@ enum PrototypeSensitiveSinkRules {
             // Typed pointers are literal at runtime. Derived text has no host-side instance,
             // so bound()'s empty result falls back to the authored data placeholders.
             let texts: [String]
-            if field.dataPointer || !validRepeats {
+            if field.pointerSource != nil || !validRepeats {
                 texts = [field.text]
             } else {
                 let bound = repeats.bound([.init(value: ["stateKey": .string(field.text)], path: field.path)])
                 texts = bound.isEmpty ? [field.text] : bound.compactMap { $0.value["stateKey"]?.stringValue }
             }
-            let pointers = field.dataPointer ? [field.text] : texts.flatMap(dataPlaceholders)
-            if rowRead || pointers.contains(where: { pointer in
-                taints.contains { overlaps($0, pointer, pointerIndexWildcard: !field.dataPointer) }
-            }) {
-                errors.append(.invalidSpec(path: field.path, message: "Sensitive value cannot be bound into a request"))
+            func reaches(_ source: String, taints: [String]) -> Bool {
+                let pointers = field.pointerSource == nil ? texts.flatMap {
+                    source == "data" ? dataPlaceholders($0) : PrototypePlatformValidator.placeholders($0)
+                } : (field.pointerSource == source ? [field.text] : [])
+                return pointers.contains { pointer in
+                    taints.contains { overlaps($0, pointer, pointerIndexWildcard: field.pointerSource == nil) }
+                }
+            }
+            if rowRead || reaches("data", taints: taints) || reaches("platform", taints: platformTaints) {
+                errors.append(.invalidSpec(
+                    path: field.path,
+                    message: field.path.hasPrefix("storage.keys[") ? "Sensitive value cannot be persisted" :
+                        "Sensitive value cannot be bound into a request"
+                ))
             }
         }
         return errors
+    }
+
+    /// A data action copying a tainted read into `/data` taints its destination, transitively. A
+    /// worklist over copies bucketed by their source's first segment keeps long chains linear;
+    /// nil means the check cap was exceeded, so callers fail closed.
+    private static func propagateCopies(
+        _ seeds: [String], platformTaints: [String], nodes: [PrototypeLocatedValue], actions: [PrototypeLocatedValue]
+    )
+        -> [String]?
+    {
+        let writes: Set<String> = ["setData", "appendData", "prependData", "upsertData"]
+        let copies = actions.flatMap { action -> [(into: String, source: String, from: String)] in
+            guard let type = action.value["type"]?.stringValue, writes.contains(type),
+                  let into = action.value["path"]?.stringValue.flatMap(PrototypeDataWrite.pointer(ofPath:)),
+                  let read = action.value["value"]?.objectFields else { return [] }
+            for source in ["data", "platform"] {
+                if let from = read[source]?.stringValue { return [(into, source, from)] }
+            }
+            if read["item"]?.stringValue != nil {
+                return nodes.compactMap { node -> (into: String, source: String, from: String)? in
+                    let repeated = node.value["repeat"]?.objectFields
+                    if action.path.hasPrefix("\(node.path).children["),
+                       repeated?["as"]?.stringValue != nil,
+                       let from = repeated?["items"]?.objectFields?["path"]?.stringValue,
+                       PrototypeDataPointer.isValid(from)
+                    {
+                        return (into, "data", from)
+                    }
+                    return nil
+                }
+            }
+            return []
+        }
+        func firstSegment(_ pointer: String) -> String {
+            String(pointer.dropFirst().split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)[0])
+        }
+        var taints = seeds
+        var known = Set(seeds)
+        var queue = seeds
+        func mark(_ pointer: String) {
+            if known.insert(pointer).inserted {
+                taints.append(pointer)
+                queue.append(pointer)
+            }
+        }
+        var checks = 0
+        var buckets: [String: [(into: String, from: String)]] = [:]
+        for copy in copies {
+            if copy.source == "data" {
+                buckets[firstSegment(copy.from), default: []].append((copy.into, copy.from))
+            } else {
+                checks += platformTaints.count
+                if platformTaints.contains(where: { overlaps($0, copy.from, pointerIndexWildcard: false) }) {
+                    mark(copy.into)
+                }
+            }
+        }
+        var cursor = 0
+        while cursor < queue.count {
+            let taint = queue[cursor]
+            cursor += 1
+            let key = firstSegment(taint)
+            // A leading {index} taint segment matches any source segment.
+            for name in key == "{index}" ? Array(buckets.keys) : [key] {
+                var rest: [(into: String, from: String)] = []
+                for copy in buckets[name] ?? [] {
+                    checks += 1
+                    if overlaps(taint, copy.from, pointerIndexWildcard: false) {
+                        mark(copy.into)
+                    } else {
+                        rest.append(copy)
+                    }
+                }
+                buckets[name] = rest
+            }
+            if checks > 4_000_000 { return nil }
+        }
+        return checks > 4_000_000 ? nil : taints
     }
 
     private static func sinkFields(_ spec: [String: JSONValue], actions: [PrototypeLocatedValue]) -> [Field] {
@@ -87,8 +184,10 @@ enum PrototypeSensitiveSinkRules {
         func binding(_ raw: JSONValue?, path: String, text: Bool = false) {
             if text, let value = raw?.stringValue { fields.append(.init(text: value, path: path)) }
             guard let form = raw?.objectFields, form["state"] == nil else { return }
-            if let pointer = form["data"]?.stringValue {
-                fields.append(.init(text: pointer, path: path, dataPointer: true))
+            for source in ["data", "platform"] {
+                if let pointer = form[source]?.stringValue {
+                    fields.append(.init(text: pointer, path: path, pointerSource: source))
+                }
             }
             if form["item"]?.stringValue != nil {
                 fields.append(.init(text: "", path: path, itemBinding: true))
@@ -119,6 +218,17 @@ enum PrototypeSensitiveSinkRules {
             let at = PrototypeLimits.dataMemberPath("channels", key: id)
             binding(raw.objectFields?["url"], path: "\(at).url", text: true)
             entries(raw.objectFields?["headers"], path: "\(at).headers", text: true)
+        }
+        for (index, key) in PrototypeStrictBindings.array(spec["storage"]?.objectFields?["keys"]).enumerated() {
+            if let key = key.stringValue, key.hasPrefix("data:"),
+               PrototypeDataPointer.isValid(String(key.dropFirst(5)))
+            {
+                fields.append(.init(
+                    text: String(key.dropFirst(5)),
+                    path: "storage.keys[\(index)]",
+                    pointerSource: "data"
+                ))
+            }
         }
         return fields
     }

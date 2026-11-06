@@ -36,6 +36,7 @@ public enum ResponseType: String, CaseIterable, Sendable {
     case currentFocusResult = "current_focus_result"
     case traversalOrderResult = "traversal_order_result"
     case highlightResponse = "highlight_response"
+    case accessibilityFocusResult = "accessibility_focus_result"
     case magicTapResult = "magic_tap_result"
     case accessibilityAuditResult = "accessibility_audit_result"
     case sdkTriggerResult = "sdk_trigger_result"

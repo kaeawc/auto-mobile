@@ -10,6 +10,7 @@ import {
 } from "../../../src/features/action/FocusNavigate";
 import type { InputKeyName } from "../../../src/features/action/InputKey";
 import type { Element } from "../../../src/models/Element";
+import { runWithToolDispatchReporter } from "../../../src/utils/ToolDispatchContext";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 // Hand-reconstructed layout (not captured from a TV image): a 2x3 grid of 100px tiles.
@@ -96,6 +97,150 @@ describe("FocusNavigate", () => {
     expect(result).toMatchObject({ success: true, status: "focused", steps: 0 });
     expect(grid.presses).toEqual([]);
     expect(result.path).toHaveLength(1);
+  });
+
+  test("a label prefers an exact match over a focused node that only contains it", async () => {
+    const grid = new FakeGrid(0);
+    grid.elements[0] = { ...tile(0), text: "Movies Plus" };
+    const result = await navigator(grid).execute({ until: { label: "Movies" } });
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 1 });
+    expect(grid.presses).toEqual(["arrow_right"]);
+    expect(result.focusedElement?.text).toBe("Movies");
+  });
+
+  test("firstMatch moves off a focused later duplicate to the first match", async () => {
+    const grid = new FakeGrid(4);
+    grid.elements[1] = { ...tile(1), text: "Play" };
+    grid.elements[4] = { ...tile(4), text: "Play" };
+    const result = await navigator(grid).execute({ until: { label: "Play" }, firstMatch: true });
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 1 });
+    expect(grid.presses).toEqual(["arrow_up"]);
+    expect(result.focusedElement?.bounds).toEqual(tile(1).bounds);
+  });
+
+  test("firstMatch ranks a smaller duplicate ahead of a larger one earlier in the hierarchy", async () => {
+    const grid = new FakeGrid(1);
+    grid.elements[1] = { ...tile(1), text: "Play" };
+    const small = { left: 210, top: 110, right: 260, bottom: 160 };
+    grid.elements[5] = { ...tile(5), text: "Play", bounds: small };
+    const result = await navigator(grid).execute({ until: { label: "Play" }, firstMatch: true });
+    expect(result.success).toBe(true);
+    expect(result.focusedElement?.bounds).toEqual(small);
+    expect(grid.presses.length).toBeGreaterThan(0);
+  });
+
+  test("pinTarget steers to the bounds it resolves, ignoring the until fields", async () => {
+    const grid = new FakeGrid(0);
+    const result = await navigator(grid).execute({
+      until: { label: "no such label" },
+      pinTarget: () => tile(2).bounds,
+    });
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 2 });
+    expect(result.focusedElement?.bounds).toEqual(tile(2).bounds);
+  });
+
+  test("a pinned actionable child must own focus, not its focused parent row", async () => {
+    // Hand-built: a focused row holding its own label and an independently clickable Delete button.
+    const row: Element = {
+      bounds: { left: 0, top: 0, right: 300, bottom: 100 },
+      "content-desc": "Open item",
+      focusable: true,
+      clickable: true,
+    };
+    const label: Element = { bounds: { left: 0, top: 0, right: 150, bottom: 100 }, text: "Item" };
+    const remove: Element = {
+      bounds: { left: 200, top: 0, right: 300, bottom: 100 },
+      text: "Delete",
+      focusable: true,
+      clickable: true,
+    };
+    const grid = new FakeGrid(0);
+    grid.elements = [row, label, remove];
+    grid.moves = { 0: { arrow_right: 2 } };
+
+    const toDelete = await navigator(grid).execute({
+      until: { label: "Delete" },
+      pinTarget: () => remove.bounds,
+    });
+    expect(toDelete).toMatchObject({ success: true, steps: 1 });
+    expect(grid.presses).toEqual(["arrow_right"]);
+
+    grid.focusIndex = 0;
+    const toLabel = await navigator(grid).execute({
+      until: { label: "Item" },
+      pinTarget: () => label.bounds,
+    });
+    expect(toLabel).toMatchObject({ success: true, steps: 0 });
+  });
+
+  test("pinTarget null means nothing on the screen is the target", async () => {
+    const grid = new FakeGrid(1);
+    const result = await navigator(grid).execute({
+      until: { label: "Movies" },
+      pinTarget: () => null,
+      maxSteps: 2,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("without firstMatch a focused duplicate is accepted, as focusNavigate always has", async () => {
+    const grid = new FakeGrid(4);
+    grid.elements[1] = { ...tile(1), text: "Play" };
+    grid.elements[4] = { ...tile(4), text: "Play" };
+    const result = await navigator(grid).execute({ until: { label: "Play" } });
+    expect(result).toMatchObject({ success: true, steps: 0 });
+  });
+
+  test("a label compares normalized whitespace, as the touch resolver does", async () => {
+    const grid = new FakeGrid(0);
+    grid.elements[0] = { ...tile(0), text: "Movies Plus" };
+    grid.elements[1] = { ...tile(1), text: " Movies " };
+    const result = await navigator(grid).execute({ until: { label: "Movies" } });
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 1 });
+    expect(elementMatchesTarget({ ...tile(2), text: "Sign\nin" }, { label: "sign in" })).toBe(true);
+  });
+
+  test("a label still accepts a containing match when no exact one is on screen", async () => {
+    const grid = new FakeGrid(1);
+    const result = await navigator(grid).execute({ until: { label: "Movi" } });
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 0 });
+  });
+
+  test("select presses enter once focus lands on the target", async () => {
+    const grid = new FakeGrid(0);
+    const result = await navigator(grid).execute({ until: { text: "Search" }, select: true });
+    expect(result).toMatchObject({ success: true, status: "focused", selected: true });
+    expect(grid.presses.at(-1)).toBe("enter");
+    expect(grid.presses.filter((key) => key === "enter")).toHaveLength(1);
+  });
+
+  test("select reports dispatch when the select key goes out, not at the first arrow", async () => {
+    const grid = new FakeGrid(0);
+    const pressesAtDispatch: number[] = [];
+    const result = await runWithToolDispatchReporter(
+      () => pressesAtDispatch.push(grid.presses.length),
+      () => navigator(grid).execute({ until: { text: "Search" }, select: true }),
+    );
+    expect(result.selected).toBe(true);
+    // Reported once, after every arrow press and just before enter.
+    expect(pressesAtDispatch).toEqual([grid.presses.length - 1]);
+  });
+
+  test("select does not press enter when the target is never focused", async () => {
+    const grid = new FakeGrid(0);
+    grid.blocked = new Set([1, 3]);
+    const result = await navigator(grid).execute({ until: { text: "Search" }, select: true });
+    expect(result.success).toBe(false);
+    expect(result.selected).toBe(false);
+    expect(grid.presses).not.toContain("enter");
+  });
+
+  test("a refused select key fails the call", async () => {
+    const grid = new FakeGrid(1);
+    grid.failPress = "key refused";
+    await expect(
+      navigator(grid).execute({ until: { text: "Movies" }, select: true }),
+    ).rejects.toThrow("key refused");
   });
 
   test("recognises the inline TV Settings child label without pressing keys", async () => {
@@ -211,13 +356,21 @@ describe("FocusNavigate", () => {
     expect(grid.presses).toEqual(["arrow_down"]);
   });
 
-  test("exits stuck once the only direction toward the target did not move focus", async () => {
+  test("goes around when the only direction toward the target did not move focus", async () => {
     const grid = new FakeGrid(0);
     grid.blocked.add(1);
     const result = await navigator(grid).execute({ until: { text: "Music" } });
-    expect(result).toMatchObject({ success: false, status: "stuck", steps: 1 });
-    expect(result.message).toContain("Focus did not move after 1 press;");
-    expect(result.focusedElement?.text).toBe("Home");
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 7 });
+    // Right and up are dead ends from Home; down leaves the row and the walk comes back up.
+    expect(grid.presses).toEqual([
+      "arrow_right",
+      "arrow_up",
+      "arrow_down",
+      "arrow_right",
+      "arrow_up",
+      "arrow_right",
+      "arrow_up",
+    ]);
   });
 
   test("an explicit direction still exits stuck after two unmoved presses", async () => {
@@ -326,13 +479,13 @@ describe("FocusNavigate blocked directions", () => {
     expect(result.steps).toBe(grid.presses.length);
   });
 
-  test("reports stuck when every direction toward the target is blocked", async () => {
+  test("reports stuck when every direction is blocked", async () => {
     const grid = launcherGrid();
     grid.moves = { 0: {} };
     const result = await navigator(grid).execute({ until: { text: "Settings, button" } });
-    expect(result).toMatchObject({ success: false, status: "stuck", steps: 2 });
-    expect(grid.presses).toEqual(["arrow_right", "arrow_up"]);
-    expect(result.message).toContain("Focus did not move after 2 presses;");
+    expect(result).toMatchObject({ success: false, status: "stuck", steps: 4 });
+    expect(grid.presses).toEqual(["arrow_right", "arrow_up", "arrow_down", "arrow_left"]);
+    expect(result.message).toContain("Focus did not move after 4 presses;");
     expect(result.focusedElement?.text).toBe("Add app to favorites");
   });
 
@@ -345,20 +498,21 @@ describe("FocusNavigate blocked directions", () => {
     expect(grid.presses).toEqual(["arrow_right", "arrow_up", "arrow_right"]);
   });
 
-  test("remembers a dead direction when returning to the same focused element", async () => {
+  test("does not repeat a direction already pressed from the same focused element", async () => {
     const grid = launcherGrid();
     grid.moves = { 0: { arrow_up: 1 }, 1: { arrow_right: 0 } };
     const result = await navigator(grid).execute({
       until: { text: "Settings, button" },
       maxSteps: 4,
     });
-    expect(grid.presses).toEqual(["arrow_right", "arrow_up", "arrow_right", "arrow_up"]);
+    // Back on the first element, right and up were already pressed there: down is next.
+    expect(grid.presses).toEqual(["arrow_right", "arrow_up", "arrow_right", "arrow_down"]);
     expect(result).toEqual({
       success: false,
       status: "max_steps",
       steps: 4,
-      path: [grid.elements[0], grid.elements[1], grid.elements[0], grid.elements[1]],
-      focusedElement: grid.elements[1],
+      path: [grid.elements[0], grid.elements[1], grid.elements[0]],
+      focusedElement: grid.elements[0],
       message: "Reached maxSteps (4); the target was not focused. Observe before retrying.",
     });
   });
@@ -367,9 +521,9 @@ describe("FocusNavigate blocked directions", () => {
     const grid = new FakeGrid(0);
     grid.elements = [box("Low", 50, 450), box("High", 50, 50), box("Target", 1050, 250)];
     grid.moves = { 0: { arrow_up: 1 }, 1: { arrow_down: 0 } };
-    const result = await navigator(grid).execute({ until: { text: "Target" }, maxSteps: 6 });
-    expect(result).toMatchObject({ status: "max_steps", steps: 6 });
-    expect(grid.presses).toHaveLength(6);
+    const result = await navigator(grid).execute({ until: { text: "Target" }, maxSteps: 4 });
+    expect(result).toMatchObject({ status: "max_steps", steps: 4 });
+    expect(grid.presses).toHaveLength(4);
   });
 });
 
@@ -402,5 +556,21 @@ describe("elementMatchesTarget", () => {
     expect(elementMatchesTarget(tile(1), { resourceId: "tile_2" })).toBe(false);
     expect(elementMatchesTarget(tile(1), { text: "MOV" })).toBe(true);
     expect(elementMatchesTarget(tile(1), { text: "Movies", resourceId: "tile_2" })).toBe(false);
+  });
+
+  test("elementId matches the native resource id or an id-less node's synthetic view-id", () => {
+    const idLess: Element = { bounds: tile(0).bounds, "view-id": "s2-7f3a" };
+    expect(elementMatchesTarget(tile(1), { elementId: "app:id/tile_1" })).toBe(true);
+    expect(elementMatchesTarget(tile(1), { elementId: "tile_1" })).toBe(true);
+    expect(elementMatchesTarget(idLess, { elementId: "s2-7f3a" })).toBe(true);
+    expect(elementMatchesTarget(idLess, { elementId: "s2-0000" })).toBe(false);
+  });
+
+  test("label matches text or content-desc, as tapOn's text selector does", () => {
+    const icon: Element = { bounds: tile(0).bounds, "content-desc": "Search" };
+    expect(elementMatchesTarget(tile(1), { label: "movies" })).toBe(true);
+    expect(elementMatchesTarget(icon, { label: "search" })).toBe(true);
+    expect(elementMatchesTarget(icon, { label: "Music" })).toBe(false);
+    expect(elementMatchesTarget(tile(1), { label: "Movies", resourceId: "tile_2" })).toBe(false);
   });
 });

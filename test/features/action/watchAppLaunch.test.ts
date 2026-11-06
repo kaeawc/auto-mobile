@@ -32,8 +32,14 @@ async function arrange({ install = true } = {}) {
     plist,
     dataWipe: {
       containerOwnership: simulatorOwnership,
-      rm: async (target) => {
-        removed.push(String(target));
+      appDataFs: {
+        lstat: async () => ({ isDirectory: () => true }),
+        access: async () => {},
+        readdir: async () => ["data"],
+        mkdir: async () => {},
+        rm: async (target) => {
+          removed.push(target);
+        },
       },
     },
   });
@@ -103,7 +109,7 @@ describe("WatchAppManager launch", () => {
 
     const container = simulatorDataContainer(UDID);
     expect(removed.sort()).toEqual(
-      ["Documents", "Library", "tmp"].map((folder) => path.join(container, folder)),
+      ["Documents", "Library", "tmp"].map((folder) => path.join(container, folder, "data")),
     );
     // The strict stop, then the wipe backend's own (lenient) terminate finding nothing to stop.
     expect(simctl.commands.slice(1)).toEqual([
@@ -123,8 +129,14 @@ describe("WatchAppManager launch", () => {
       plist: new FakeWatchBundleIds(),
       dataWipe: {
         containerOwnership: simulatorOwnership,
-        rm: async () => {
-          throw new Error("EACCES: permission denied");
+        appDataFs: {
+          lstat: async () => ({ isDirectory: () => true }),
+          access: async () => {},
+          readdir: async () => ["data"],
+          mkdir: async () => {},
+          rm: async () => {
+            throw new Error("EACCES: permission denied");
+          },
         },
       },
     });

@@ -49,7 +49,8 @@ manager (#12530) also uses.
   joins a session's port only when `--list` shows it still mapped to the
   session's host port; a lost one is added, a re-pointed one left alone.
   `ensure` on a prototype-held port to the same host port joins it (status
-  `present`), and to another host port is a `prototype` conflict; a failed
+  `present`) while it still maps where the prototype set it, and to another
+  host port is a `prototype` conflict; a re-pointed one is external. A failed
   `ensure` gives its joined ports back with its adds. Neither manager removes a
   port the other still holds: `remove` of a shared port drops the session's
   ownership and reports `released` with `owner: "prototype"`, and the last

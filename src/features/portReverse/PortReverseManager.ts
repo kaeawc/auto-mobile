@@ -227,7 +227,7 @@ export class PortReverseManager {
           holdsDevice: target.holdsDevice === true,
           view,
           owned: state.owned,
-          heldElsewhere: (port) => this.heldElsewhere(target.deviceId, port)?.kind,
+          heldElsewhere: (port) => this.heldElsewhere(target.deviceId, port),
         },
         wanted,
         { hostProbe: this.hostProbe, reclaimStale: options?.reclaimStale === true },
@@ -1003,8 +1003,9 @@ export class PortReverseManager {
   ): PortReverseMapping {
     const owned = state.owned.get(entry.devicePort)?.owner === owner;
     const status = report.restored.includes(entry.devicePort) ? "restored" : "present";
+    const hold = owned ? undefined : this.heldElsewhere(deviceId, entry.devicePort);
     const prototype =
-      !owned && this.heldElsewhere(deviceId, entry.devicePort)?.kind === "prototype"
+      hold?.kind === "prototype" && hold.hostPort === entry.hostPort
         ? { owner: "prototype" as const }
         : {};
     return { ...entry, owned, ...prototype, status };

@@ -1,5 +1,5 @@
 import type { AdbReverseEntry } from "../../utils/android-cmdline-tools/adbReverse";
-import type { AdbReverseHolderKind } from "./AdbReverseOwnership";
+import type { AdbReverseHold } from "./AdbReverseOwnership";
 import type { HostLoopbackProbe, HostLoopbackState } from "./HostLoopbackProbe";
 import {
   PortReverseError,
@@ -23,7 +23,7 @@ export interface ConflictContext {
   /** Device port -> the session that owns AutoMobile's mapping there. */
   owned: ReadonlyMap<number, { hostPort: number; owner: string }>;
   /** The other AutoMobile manager (a prototype) holding the device port, if any (#17253). */
-  heldElsewhere: (devicePort: number) => AdbReverseHolderKind | undefined;
+  heldElsewhere: (devicePort: number) => AdbReverseHold | undefined;
 }
 
 /** Stale mappings `ensure` may replace, and prototype-held ones it may share as they are. */
@@ -132,8 +132,9 @@ async function conflictFor(
 }
 
 /**
- * A mapping no session owns but a prototype holds: shared when it already points where asked, else
- * a `prototype` conflict. Undefined for any other port.
+ * A mapping no session owns but a prototype holds and that still points where the prototype set it:
+ * shared when that is where asked, else a `prototype` conflict. Undefined for any other port,
+ * including a prototype's port re-pointed outside AutoMobile, which is judged as external.
  */
 function prototypeFinding(
   context: ConflictContext,
@@ -141,7 +142,8 @@ function prototypeFinding(
   live: AdbReverseEntry | undefined,
   request: ConflictRequest,
 ): Finding {
-  if (owned !== undefined || live === undefined || !context.heldElsewhere(request.devicePort)) {
+  const hold = owned === undefined ? context.heldElsewhere(request.devicePort) : undefined;
+  if (hold === undefined || live === undefined || hold.hostPort !== live.hostPort) {
     return undefined;
   }
   if (live.hostPort === request.hostPort) {

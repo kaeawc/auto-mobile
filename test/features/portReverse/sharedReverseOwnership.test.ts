@@ -208,4 +208,16 @@ describe("shared adb reverse ownership", () => {
     expect(adb.mappings.get(18705)).toBe("tcp:18705");
     expect(prototypes.ownedPorts(DEVICE)).toEqual([18705]);
   });
+
+  test("ensure does not share a prototype port re-pointed outside AutoMobile", async () => {
+    const { adb, sessions, target, show } = setup();
+    await show("p", 18705);
+    adb.mappings.set(18705, "tcp:9000");
+
+    await expect(
+      sessions.ensure(target(), [{ devicePort: 18705, hostPort: 9000 }]),
+    ).rejects.toThrow("not created by AutoMobile");
+    expect(sessions.ownedPorts(DEVICE)).toEqual([]);
+    expect(adb.mappings.get(18705)).toBe("tcp:9000");
+  });
 });

@@ -186,7 +186,7 @@ that entry:
 
 | Entry          | Contents                           | Minified | Gzip   |
 | -------------- | ---------------------------------- | -------- | ------ |
-| core (`mount`) | renderer, frame registry, `mount`  | 148 KB   | 49 KB  |
+| core (`mount`) | renderer, frame registry, `mount`  | 150 KB   | 49 KB  |
 | `element`      | core plus the custom element       | 153 KB   | 49 KB  |
 | `interactive`  | the action runtime, on top of core | +40 KB   | +12 KB |
 

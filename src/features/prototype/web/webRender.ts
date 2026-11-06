@@ -288,15 +288,11 @@ export type WebCellDecorator = (
   authored: Raw,
 ) => WebElement | undefined;
 
-export function children(
-  node: Raw,
-  scope: WebRenderScope,
-  path: string,
-  cell?: WebCellDecorator,
-): WebChild[] {
+/** The children a container draws, each in its own scope and path: a repeat's once per row. */
+export function childEntries(node: Raw, scope: WebRenderScope, path: string): WebChildEntry[] {
   const list = Array.isArray(node.children) ? node.children : [];
   return rowScopes(node, scope).flatMap((itemScope) =>
-    list.flatMap((entry, at) => renderOrSkip(entry, itemScope, `${path}.children[${at}]`, cell)),
+    list.map((entry, at) => ({ node: entry, scope: itemScope, path: `${path}.children[${at}]` })),
   );
 }
 
@@ -319,6 +315,23 @@ function rowScopes(node: Raw, scope: WebRenderScope): WebRenderScope[] {
     };
     return child(scope, { instances: [...scope.instances, instance] });
   });
+}
+
+export interface WebChildEntry {
+  readonly node: unknown;
+  readonly scope: WebRenderScope;
+  readonly path: string;
+}
+
+export function children(
+  node: Raw,
+  scope: WebRenderScope,
+  path: string,
+  cell?: WebCellDecorator,
+): WebChild[] {
+  return childEntries(node, scope, path).flatMap((entry) =>
+    renderOrSkip(entry.node, entry.scope, entry.path, cell),
+  );
 }
 
 function renderOrSkip(
@@ -954,7 +967,7 @@ function resolvedStyle(node: Raw, scope: WebRenderScope): Raw | undefined {
  * (through the devices' own contract), a pager's locals set before its own conditions run, its
  * `visibleWhen` (undefined when hidden) and its `styleWhen` merged. One path, so the two agree.
  */
-function preparedNode(
+export function preparedNode(
   node: unknown,
   scope: WebRenderScope,
   path: string,

@@ -119,7 +119,7 @@ function text(element: Element, key: "text" | "content-desc" | "resource-id"): s
 }
 
 /** A row's identity: what names it, never its bounds, which a recycled row reuses. */
-function rowIdentity(element: Element): string | null {
+export function rowIdentity(element: Element): string | null {
   const parts = [
     text(element, "resource-id"),
     text(element, "text"),
@@ -128,7 +128,7 @@ function rowIdentity(element: Element): string | null {
   return parts.some((part) => part.length > 0) ? parts.join("|") : null;
 }
 
-function centreInside(bounds: ElementBounds | undefined, container: ElementBounds): boolean {
+export function centreInside(bounds: ElementBounds | undefined, container: ElementBounds): boolean {
   if (!bounds) {
     return false;
   }

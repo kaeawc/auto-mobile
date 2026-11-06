@@ -5,11 +5,15 @@ import {
   ExploreElementActions,
   type FocusListAdvancer,
 } from "../../../src/features/navigation/ExploreElementActions";
+import { RevealedListRows } from "../../../src/features/navigation/RevealedListRows";
 import { FocusListAdvance } from "../../../src/features/action/FocusListAdvance";
 import { createFocusNavigateObserver } from "../../../src/features/action/FocusNavigateObserver";
 import type { InputKeyName } from "../../../src/features/action/InputKey";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
-import type { FocusNavigateOptions } from "../../../src/features/action/FocusNavigate";
+import {
+  FocusNavigate,
+  type FocusNavigateOptions,
+} from "../../../src/features/action/FocusNavigate";
 import { Explore } from "../../../src/features/navigation/Explore";
 import type { ExploreResult } from "../../../src/features/navigation/ExploreTypes";
 import type { ObserveScreenExecuteOptions } from "../../../src/features/observe/interfaces/ObserveScreen";
@@ -289,6 +293,7 @@ describe("Explore on a focus-driven TV app", () => {
       timer,
       focusNavigator: () => ({ execute: (options) => tv.select(options) }),
       focusListAdvancer: unusedListAdvancer,
+      revealedRows: new RevealedListRows(),
       runRecorded: (_toolName, _args, _observation, run) => run(),
     });
     const element: Element = {
@@ -325,6 +330,7 @@ test("validate keeps a recorded focusNavigate that did not select from pressing 
       },
     }),
     focusListAdvancer: unusedListAdvancer,
+    revealedRows: new RevealedListRows(),
     runRecorded: (_toolName, _args, _observation, run) => run(),
   });
   const element: Element = {
@@ -369,6 +375,7 @@ test("validate replays a recorded focus walk that targets a scrollable container
         };
       },
     }),
+    revealedRows: new RevealedListRows(),
     runRecorded: (_toolName, _args, _observation, run) => run(),
   });
   const rail: Element = {
@@ -533,6 +540,130 @@ describe("Explore through a TV list that reveals rows only on D-pad advance", ()
     expect(screen.first).toBeGreaterThan(0);
     // Only an advance puts item 3 in the hierarchy, so selecting it proves the advance revealed it.
     expect(selected).toContain("app:id/item_3");
+  });
+});
+
+/**
+ * A virtualized TV rail: six cards side by side, three in the hierarchy at a time. Only pressing
+ * right past the last visible card scrolls the rail, so cards 3 to 5 appear only on advance.
+ * Down and left do nothing: the rail is the only focusable row.
+ */
+class FakeTvRailScreen extends FakeObserveScreen {
+  first = 0;
+  focus = 0;
+  readonly presses: InputKeyName[] = [];
+  private static readonly COUNT = 6;
+  private static readonly VISIBLE = 3;
+
+  /** Back to the screen's initial viewport, as a fresh arrival on it shows it. */
+  reset(): void {
+    this.first = 0;
+    this.focus = 0;
+    this.presses.length = 0;
+  }
+
+  private cardNode(index: number) {
+    const left = (index - this.first) * 300;
+    return {
+      $: {
+        class: "android.widget.FrameLayout",
+        text: `Show ${index}`,
+        "resource-id": `app:id/show_${index}`,
+        clickable: "true",
+        focusable: "true",
+        enabled: "true",
+        focused: index === this.focus ? "true" : "false",
+        bounds: `[${left},100][${left + 300},400]`,
+      },
+    };
+  }
+
+  private observation(): ObserveResult {
+    const cards = Array.from({ length: FakeTvRailScreen.VISIBLE }, (_, offset) =>
+      this.cardNode(this.first + offset),
+    );
+    const rail = {
+      $: {
+        class: "androidx.leanback.widget.HorizontalGridView",
+        "resource-id": "app:id/rail",
+        scrollable: "true",
+        focusable: "false",
+        enabled: "true",
+        bounds: "[0,100][900,400]",
+      },
+      node: cards,
+    };
+    return createObserveResultForTest({
+      viewHierarchy: createHierarchyForTest({ hierarchy: { node: rail }, packageName: APP }),
+    });
+  }
+
+  override async execute(_options?: ObserveScreenExecuteOptions): Promise<ObserveResult> {
+    return this.observation();
+  }
+
+  override async getMostRecentCachedObserveResult(): Promise<ObserveResult> {
+    return this.observation();
+  }
+
+  async press(key: InputKeyName): Promise<{ success: boolean }> {
+    this.presses.push(key);
+    if (key === "arrow_right" && this.focus < FakeTvRailScreen.COUNT - 1) {
+      this.focus += 1;
+      if (this.focus >= this.first + FakeTvRailScreen.VISIBLE) {
+        this.first += 1;
+      }
+    }
+    return { success: true };
+  }
+}
+
+describe("Explore through a TV rail that reveals cards only on D-pad advance", () => {
+  test("records the walk to a revealed card so it replays from the rail's initial viewport", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const graph = new FakeNavigationGraphManager();
+    graph.setCurrentAppId(APP);
+    await graph.recordNavigationEvent({
+      destination: "Shows",
+      source: "TEST",
+      arguments: {},
+      metadata: {},
+      timestamp: timer.now(),
+      sequenceNumber: 0,
+      applicationId: APP,
+    });
+    const screen = new FakeTvRailScreen();
+    const observer = createFocusNavigateObserver(screen);
+    const explore = new Explore(device, new FakeAdbExecutor(), timer, {
+      navigationManager: graph,
+      inputMode: async () => "dpad",
+      // The real walk and advance, over the production observer, against the fake rail.
+      focusNavigatorFactory: () => new FocusNavigate(observer, screen, timer),
+      focusListAdvancerFactory: () => new FocusListAdvance(observer, screen, timer),
+    });
+    explore.observeScreen = screen;
+
+    await explore.execute({ packageName: APP, strategy: "breadth-first", maxInteractions: 8 });
+
+    const recorded = Array.from(
+      { length: graph.getMethodCallCount("recordToolCall") },
+      (_, index) => graph.getMethodCallArgs("recordToolCall", index)!,
+    )
+      .filter(([toolName]) => toolName === "focusNavigate")
+      .map(([, args]) => args as FocusNavigateOptions);
+    // Only an advance puts show 3 in the hierarchy, so a walk to it proves the advance revealed it.
+    const toRevealed = recorded.find((args) => args.until.elementId === "app:id/show_3");
+    expect(toRevealed).toBeDefined();
+
+    // navigateTo replays the edge on a fresh arrival: the rail is back at its first cards.
+    screen.reset();
+    const replay = await new FocusNavigate(observer, screen, timer).execute(toRevealed!);
+
+    expect(replay.success).toBe(true);
+    expect(replay.focusedElement?.resourceId).toBe("app:id/show_3");
+    expect(replay.selected).toBe(true);
+    expect(screen.presses).toEqual(["arrow_right", "arrow_right", "arrow_right", "enter"]);
   });
 });
 

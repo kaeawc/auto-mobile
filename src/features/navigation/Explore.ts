@@ -28,6 +28,7 @@ import {
   focusDrivenActions,
   type FocusDrivenActions,
 } from "./ExploreElementActions";
+import { RevealedListRows } from "./RevealedListRows";
 import { drivesFocus, touchInputMode, type InputModeResolver } from "./focusDrivenInput";
 import { getElementKey } from "./ExploreElementExtraction";
 import { ExplorePermissionDialog } from "./ExplorePermissionDialog";
@@ -118,6 +119,7 @@ export class Explore extends BaseVisualChange {
   private readonly tapActionFactory?: DialogTapActionFactory;
   private readonly inputMode: InputModeResolver;
   private readonly focusActions: FocusDrivenActions;
+  private readonly revealedRows = new RevealedListRows();
 
   // Constants for safety limits
   static readonly MAX_CONSECUTIVE_NO_CHANGE = 40;
@@ -302,6 +304,7 @@ export class Explore extends BaseVisualChange {
     this.consecutiveBackCount = 0;
     this.consecutiveNoChangeCount = 0;
     this.permissionDialog.reset();
+    this.revealedRows.clear();
     this.stopReason = "";
     this.previousScreen = null;
     this.consecutiveOutOfAppCount = 0;
@@ -1045,6 +1048,7 @@ export class Explore extends BaseVisualChange {
       adb: this.adb,
       timer: this.timer,
       ...this.focusActions,
+      revealedRows: this.revealedRows,
       runRecorded: (toolName, args, observation, run) =>
         this.runRecorded(toolName, args, observation, run),
     });

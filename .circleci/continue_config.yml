@@ -337,7 +337,7 @@ jobs:
             TURBO_NO_UPDATE_NOTIFIER: "1"
             DO_NOT_TRACK: "1"
             NO_COLOR: "1"
-          command: turbo run lint --output-logs=errors-only --log-order=grouped
+          command: bunx turbo run lint --output-logs=errors-only --log-order=grouped
       - run:
           name: "Check stdlib-first dependency decisions"
           command: |

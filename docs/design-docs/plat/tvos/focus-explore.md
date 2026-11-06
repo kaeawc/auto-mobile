@@ -43,3 +43,18 @@ as the plan's platform hint and as a plan device's platform. Steps run through t
 platforms, so each step passes the per-platform tool gate (`applePlatformToolSupport.ts`): a
 step whose tool is not on the tvOS allowlist fails with that tool's refusal. Automatic plan video
 takes the iOS single-file path, which records an Apple TV through `simctl io recordVideo`.
+
+## Scrolled items replay through `tapOn`
+
+The crawl reaches some items by scrolling a row, but a transition records only the final `tapOn`,
+and replay starts from the screen's first viewport. Replay, not the crawl, closes that gap, so the
+graph keeps one edge per screen change:
+
+- `tvosTapOn` matches anywhere in the hierarchy, not only inside the screen bounds. On-screen
+  matches rank first, so `index` keeps its on-screen meaning; an off-screen match is approached
+  with the same directional moves, and the row scrolls as focus reaches it.
+- A row that has not scrolled may not hold the target's cell at all. With no match, `tvosTapOn`
+  sweeps the focused row right then left, steps down a row (then up once down is refused) and
+  sweeps again, re-reading after each press until the target appears. A press that leaves the
+  hierarchy unchanged was refused at an edge and ends that leg. The search has its own budget of
+  60 presses, separate from the 30 moves toward a found target, and never presses `select`.

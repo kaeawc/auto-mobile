@@ -8,6 +8,10 @@ import { tvosRunners } from "../../../src/features/tvos/TvosRunnerRegistry";
 import type { TvosCommand, TVRemoteButton } from "../../../src/features/tvos/TvosRunnerClient";
 import type { TapOnElementOptions } from "../../../src/models";
 import { FocusAwareFakeTvosRunnerClient } from "../../fakes/FocusAwareFakeTvosRunnerClient";
+import {
+  itemId,
+  ScrollingRowFakeTvosRunnerClient,
+} from "../../fakes/ScrollingRowFakeTvosRunnerClient";
 
 const deviceId = "focus-navigation";
 let client: FocusAwareFakeTvosRunnerClient;
@@ -140,22 +144,106 @@ test("index selects repeated captured text by smallest eligible area", async () 
   ]);
 });
 
-test.each([{ text: "missing" }, { elementId: "B01", text: "B02" }, { text: "B01", index: 1 }, {}])(
-  "no match fails without presses: %j",
+test.each([{ text: "missing" }, { elementId: "B01", text: "B02" }, { text: "B01", index: 1 }])(
+  "no match with no search budget fails without presses: %j",
   async (selector) => {
-    await expect(tvosTapOn(deviceId, { action: "tap", ...selector })).rejects.toThrow(
-      "No tvOS element matched",
-    );
+    await expect(
+      tvosTapOn(deviceId, { action: "tap", ...selector }, undefined, { maxSearchMoves: 0 }),
+    ).rejects.toThrow("No tvOS element matched after searching 0 focus moves");
     expect(client.commands).toEqual([hierarchy]);
   },
 );
 
-test("offscreen target is excluded", async () => {
-  client.buttons.find((button) => button["resource-id"] === "B22")!.bounds.left = -1;
-  await expect(tvosTapOn(deviceId, { action: "tap", elementId: "B22" })).rejects.toThrow(
-    "No tvOS element matched",
-  );
+test("an empty selector fails without searching", async () => {
+  await expect(tvosTapOn(deviceId, { action: "tap" })).rejects.toThrow("No tvOS element matched");
   expect(client.commands).toEqual([hierarchy]);
+});
+
+test("a missing target sweeps every row and then fails without selecting", async () => {
+  await expect(tvosTapOn(deviceId, { action: "tap", text: "missing" })).rejects.toThrow(
+    "No tvOS element matched after searching the screen",
+  );
+  const presses = client.commands.filter((command) => command.type === "request_press_button");
+  expect(presses.length).toBeLessThanOrEqual(60);
+  expect(presses).not.toContainEqual(press("select"));
+  expect(client.commands.at(-1)).toEqual(hierarchy);
+});
+
+test("the search stops at its move budget", async () => {
+  await expect(
+    tvosTapOn(deviceId, { action: "tap", text: "missing" }, undefined, { maxSearchMoves: 2 }),
+  ).rejects.toThrow("No tvOS element matched after searching 2 focus moves");
+  expect(client.commands).toEqual([
+    hierarchy,
+    press("right"),
+    hierarchy,
+    press("right"),
+    hierarchy,
+  ]);
+});
+
+test("a target partly outside the screen bounds is still reached", async () => {
+  client.buttons.find((button) => button["resource-id"] === "B22")!.bounds.left = -1;
+  const result = await tvosTapOn(deviceId, { action: "tap", elementId: "B22" });
+  expect(result.element?.["resource-id"]).toBe("B22");
+  expect(client.commands.at(-1)).toEqual(press("select"));
+});
+
+const pressesOf = (commands: TvosCommand[]): string[] =>
+  commands.flatMap((command) => (command.type === "request_press_button" ? [command.action] : []));
+
+function registerRow(
+  rows: number[],
+  prefetch: number,
+  label?: (row: number, column: number) => string,
+): ScrollingRowFakeTvosRunnerClient {
+  unregister();
+  const row = new ScrollingRowFakeTvosRunnerClient({ rows, prefetch, label });
+  unregister = tvosRunners.register(deviceId, row);
+  return row;
+}
+
+test("replays a row item in the second viewport that the hierarchy lists off screen", async () => {
+  // Four 400-point cells fit on a 1920-point screen; item 6 starts at 2640.
+  const row = registerRow([8], 2000);
+  const result = await tvosTapOn(deviceId, { action: "tap", elementId: itemId(0, 6) });
+  expect(result.element?.["resource-id"]).toBe(itemId(0, 6));
+  expect(pressesOf(row.commands)).toEqual([...Array(6).fill("right"), "select"]);
+  expect(row.focusedId).toBe(itemId(0, 6));
+});
+
+test("replays a row item in the second viewport that is not loaded yet", async () => {
+  const row = registerRow([8], 0);
+  const result = await tvosTapOn(deviceId, { action: "tap", elementId: itemId(0, 6) });
+  expect(result.element?.["resource-id"]).toBe(itemId(0, 6));
+  // Cells load as the row scrolls: the search moves right until item 6 appears, then navigation
+  // finishes the approach.
+  expect(pressesOf(row.commands)).toEqual([...Array(6).fill("right"), "select"]);
+  expect(row.focusedId).toBe(itemId(0, 6));
+});
+
+test("replays an unloaded item in a lower row by sweeping that row", async () => {
+  const row = registerRow([3, 8], 0);
+  const result = await tvosTapOn(deviceId, { action: "tap", text: "Item 1-6" });
+  expect(result.element?.["resource-id"]).toBe(itemId(1, 6));
+  expect(pressesOf(row.commands)).toEqual([
+    "right",
+    "right",
+    "right",
+    "left",
+    "left",
+    "left",
+    "down",
+    ...Array(6).fill("right"),
+    "select",
+  ]);
+});
+
+test("an on-screen match outranks an off-screen one for index 0", async () => {
+  const row = registerRow([8], 2000, () => "Same");
+  const result = await tvosTapOn(deviceId, { action: "tap", text: "Same" });
+  expect(result.element?.["resource-id"]).toBe(itemId(0, 0));
+  expect(pressesOf(row.commands)).toEqual(["select"]);
 });
 
 test("nothing focused fails without presses", async () => {
@@ -193,14 +281,14 @@ test("blocked primary direction falls back to the other axis", async () => {
 });
 
 test("move budget has a distinct error and no extra press", async () => {
-  await expect(tvosTapOn(deviceId, { action: "tap", text: "B22" }, undefined, 1)).rejects.toThrow(
-    "exceeded maxMoves (1)",
-  );
+  await expect(
+    tvosTapOn(deviceId, { action: "tap", text: "B22" }, undefined, { maxMoves: 1 }),
+  ).rejects.toThrow("exceeded maxMoves (1)");
   expect(client.commands).toEqual([hierarchy, press("down"), hierarchy]);
 });
 
 test("can select at the exact move budget", async () => {
-  await tvosTapOn(deviceId, { action: "tap", text: "B02" }, undefined, 1);
+  await tvosTapOn(deviceId, { action: "tap", text: "B02" }, undefined, { maxMoves: 1 });
   expect(client.commands).toEqual([hierarchy, press("right"), hierarchy, press("select")]);
 });
 

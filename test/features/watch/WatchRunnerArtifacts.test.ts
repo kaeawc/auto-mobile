@@ -5,7 +5,13 @@ import { WatchRunnerArtifacts } from "../../../src/features/watch/WatchRunnerArt
 import { createExecResult } from "../../../src/utils/execResult";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
 
-function fixture({ missingProject = false } = {}) {
+const PROJECT = path.join("ios", "control-proxy", "CtrlProxy.xcodeproj");
+
+function fixture({
+  missingProject = false,
+  projectRoot = "/repo",
+  presentProjects,
+}: { missingProject?: boolean; projectRoot?: string; presentProjects?: string[] } = {}) {
   let discovered: string | null = null;
   let afterBuild: string | null =
     "/derived/Build/Products/CtrlProxyWatch_watchsimulator26.0-arm64.xctestrun";
@@ -16,7 +22,7 @@ function fixture({ missingProject = false } = {}) {
   const artifacts = new WatchRunnerArtifacts({
     builder: {
       getConfig: () => ({
-        projectRoot: "/repo",
+        projectRoot,
         derivedDataPath: "/derived",
       }),
       getXctestrunPath: async (platform) => {
@@ -34,10 +40,11 @@ function fixture({ missingProject = false } = {}) {
     override: () => override,
     access: async (file) => {
       accesses.push(file);
-      if (missingProject) {
+      if (missingProject || (presentProjects && !presentProjects.includes(file))) {
         throw new Error("ENOENT");
       }
     },
+    projectLocator: { launchDirectory: () => "/launch", packageRoot: () => "/package" },
   });
   return {
     artifacts,
@@ -110,11 +117,49 @@ test("resolves a relative override against the daemon launch directory", async (
   }
 });
 
-test("a missing source project requires a prebuilt override without building", async () => {
+test("a missing source project names every searched path and each fix without building", async () => {
   const f = fixture({ missingProject: true });
-  await expect(f.artifacts.resolve()).rejects.toThrow("AUTOMOBILE_WATCH_RUNNER_XCTESTRUN");
-  expect(f.accesses).toEqual([path.join("/repo", "ios", "control-proxy", "CtrlProxy.xcodeproj")]);
+  const error = await f.artifacts.resolve().then(
+    () => undefined,
+    (rejection: unknown) => rejection,
+  );
+  const message = error instanceof Error ? error.message : String(error);
+  const checked = ["/repo", "/launch", "/package"].map((root) => path.join(root, PROJECT));
+  expect(f.accesses).toEqual(checked);
+  for (const searched of checked) {
+    expect(message).toContain(searched);
+  }
+  expect(message).toContain("not built in /derived");
+  expect(message).toContain("AUTOMOBILE_PROJECT_ROOT");
+  expect(message).toContain("xcodebuild build-for-testing");
+  expect(message).toContain("-scheme CtrlProxyWatch");
+  expect(message).toContain("-derivedDataPath /derived");
+  expect(message).toContain("AUTOMOBILE_WATCH_RUNNER_XCTESTRUN");
   expect(f.commands).toEqual([]);
+});
+
+// #17285: the detached daemon runs in the home directory, so the default project root
+// (the process working directory) misses a checkout the daemon was launched from.
+test("builds from the daemon launch checkout when the configured root lacks the project", async () => {
+  const launchProject = path.join("/launch", PROJECT);
+  const f = fixture({ projectRoot: "/home/user", presentProjects: [launchProject] });
+  expect(await f.artifacts.resolve()).toContain("watchsimulator");
+  expect(f.accesses).toEqual([path.join("/home/user", PROJECT), launchProject]);
+  expect(f.commands).toHaveLength(1);
+  expect(f.commands[0]?.slice(0, 5)).toEqual([
+    "build-for-testing",
+    "-project",
+    launchProject,
+    "-scheme",
+    "CtrlProxyWatch",
+  ]);
+});
+
+test("falls back to the AutoMobile package checkout running the daemon", async () => {
+  const packageProject = path.join("/package", PROJECT);
+  const f = fixture({ projectRoot: "/home/user", presentProjects: [packageProject] });
+  expect(await f.artifacts.resolve()).toContain("watchsimulator");
+  expect(f.commands[0]?.[2]).toBe(packageProject);
 });
 
 test("existing watch artifacts bypass both building and the derived-data lock", async () => {

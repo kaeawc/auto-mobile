@@ -706,6 +706,51 @@ jobs:
           path: scratch/test-ts-unit-shards
           destination: node-unit-test-diagnostics/test-ts-unit-shards
 
+  # Mirror of webrtc-integration-test ("WebRTC Publisher Integration (MediaMTX)").
+  # Overrides the linux executor's image with the -browsers variant (Node plus
+  # Chrome, which the WHEP decode step resolves); the other settings match it.
+  linux-webrtc-publisher-integration:
+    docker:
+      - image: cimg/openjdk:21.0-browsers
+    resource_class: large
+    environment:
+      GIT_LFS_SKIP_SMUDGE: "1"
+    steps:
+      - checkout_without_lfs
+      - run:
+          name: "Install FFmpeg and verify a browser is present"
+          command: |
+            mkdir -p ci-logs
+            {
+              bash scripts/ci/install-apt-packages.sh ffmpeg
+              ffmpeg -version | head -1
+              command -v google-chrome || command -v chromium || command -v chromium-browser
+            } 2>&1 | tee ci-logs/setup.log
+      - install_bun
+      - run:
+          name: "Install Bun dependencies"
+          command: |
+            bash scripts/ci/install-bun-deps.sh
+            echo "export PATH=\"${PWD}/node_modules/.bin:\${PATH}\"" >> "${BASH_ENV}"
+      - restore_cache:
+          keys:
+            - mediamtx-v1-{{ arch }}-{{ checksum "scripts/webrtc/run-mediamtx-publisher-integration.sh" }}
+      - run:
+          name: "Run MediaMTX WebRTC publisher integration test"
+          no_output_timeout: 15m
+          command: |
+            mkdir -p ci-logs
+            set -o pipefail
+            bun run test:integration:webrtc-mediamtx 2>&1 | tee ci-logs/webrtc-mediamtx.log
+      - save_cache:
+          key: mediamtx-v1-{{ arch }}-{{ checksum "scripts/webrtc/run-mediamtx-publisher-integration.sh" }}
+          paths:
+            - scratch/mediamtx
+      - store_artifacts:
+          path: ci-logs
+          destination: ci-logs
+          when: always
+
   # ── Post-merge (formerly merge.yml) and nightly sweeps ──────────────────────
   # Generate + drift-check + build every XcodeGen project. Post-merge it replaces
   # merge.yml's "Generate Xcode Projects" and "Build Xcode Projects"; nightly it is
@@ -1122,6 +1167,7 @@ workflows:
           requires:
             - linux-fast-validation
       - linux-bats-tests
+      - linux-webrtc-publisher-integration
 
   # Post-merge Linux Node mirrors (main only; path group run-main-linux). Each job
   # halts when a newer main commit touches the same group, so a merge burst runs

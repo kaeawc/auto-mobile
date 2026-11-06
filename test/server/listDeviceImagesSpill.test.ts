@@ -49,7 +49,18 @@ const configuredInventory = {
   observations: { ios: { complete: true } },
 };
 
-function finalizeInventory(imageCount: number, writer: RecordingArtifactWriter) {
+const capabilityProfiles = {
+  p1: { schemaVersion: 1, capabilities: [{ id: "ios.simulator.biometric", state: "supported" }] },
+};
+const host = {
+  capabilities: [{ id: "ios.simulator.audioInput", state: "supported", source: "host_audio" }],
+};
+
+function finalizeInventory(
+  imageCount: number,
+  writer: RecordingArtifactWriter,
+  compact: Record<string, unknown> = {},
+) {
   const images = generatedImages(imageCount);
   const ctx: FinalizeToolResponseContext = {
     name: "listDeviceImages",
@@ -63,6 +74,7 @@ function finalizeInventory(imageCount: number, writer: RecordingArtifactWriter) 
       count: images.length,
       platform: "ios",
       configuredInventory,
+      ...compact,
     }),
     ctx,
   );
@@ -90,6 +102,17 @@ describe("listDeviceImages oversized spill (#17235)", () => {
     expect(Buffer.byteLength(stringifyToolResponse(payload), "utf8")).toBeLessThanOrEqual(
       DEFAULT_OBSERVATION_INLINE_MAX_BYTES,
     );
+  });
+
+  test("keeps the compact capability profiles and host block the inline images refer to", () => {
+    const writer = new RecordingArtifactWriter();
+    const payload = finalizeInventory(34, writer, { capabilityProfiles, host });
+
+    expect(writer.writes).toHaveLength(1);
+    expect(payload.truncated).toBe(true);
+    expect(payload.capabilityProfiles).toEqual(capabilityProfiles);
+    expect(payload.host).toEqual(host);
+    expect(payload.configuredInventory).toEqual(configuredInventory);
   });
 
   test("an unspilled inventory is complete inline and carries no truncation marker", () => {

@@ -245,7 +245,8 @@ const INVENTORY_SPILL_SHAPES: Readonly<
   listDeviceImages: {
     listKey: "images",
     returnedKey: "imagesReturned",
-    summaryKeys: ["configuredInventory"],
+    // Inline compact images refer to these by key, so they stay with the images (#17256).
+    summaryKeys: ["configuredInventory", "capabilityProfiles", "host"],
   },
 };
 

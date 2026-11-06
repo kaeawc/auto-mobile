@@ -3,6 +3,7 @@ import { PortReverseManager } from "../../src/features/portReverse/PortReverseMa
 import type { BootedDevice } from "../../src/models";
 import {
   createPortReverseHandler,
+  portReverseSchema,
   subscribePortReverseCleanup,
   type PortReverseLifecycle,
 } from "../../src/server/portReverseTools";
@@ -187,5 +188,20 @@ describe("portReverse tool", () => {
       reclaimed: { host: "tcp:4000", reason: "host_refused" },
     });
     expect(held.mappings.get(3000)).toBe(3000);
+  });
+
+  test("verify accepts an HTTP probe and refuses an unsendable path", async () => {
+    const http = { path: "/metadata", expectStatus: [200] };
+    expect(portReverseSchema.safeParse({ action: "verify", probe: { http } }).success).toBe(true);
+    expect(
+      portReverseSchema.safeParse({ action: "verify", probe: { http: { ...http, path: "/a b" } } })
+        .success,
+    ).toBe(false);
+    const { executor, handler } = setup("session-a");
+    await handler(android, { action: "ensure", ports: [{ devicePort: 8080 }] });
+    const result = structured(await handler(android, { action: "verify", probe: { http } }));
+    // The fake executor prints nothing for a shell command, which no probe can read.
+    expect(result.mappings?.[0]).toMatchObject({ status: "probe_unsupported" });
+    expect(executor.commands.some((c) => c.includes("GET /metadata HTTP/1.0"))).toBe(true);
   });
 });

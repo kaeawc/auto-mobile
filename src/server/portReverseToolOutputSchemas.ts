@@ -17,7 +17,18 @@ const mappingSchema = z.object({
     "unreachable",
     "probe_unsupported",
   ]),
-  probeReason: z.enum(["closed", "refused", "timeout", "unsupported"]).optional(),
+  probeReason: z
+    .enum([
+      "closed",
+      "refused",
+      "timeout",
+      "unsupported",
+      "http_status",
+      "http_body",
+      "no_http_response",
+    ])
+    .optional(),
+  httpStatus: z.number().int().optional(),
   probeDetail: z.string().optional(),
   hostListening: z.boolean().optional(),
   reclaimed: z.object({ host: z.string(), reason: z.enum(["host_refused"]) }).optional(),

@@ -4,6 +4,10 @@ import type {
   PortProbeOutcome,
 } from "../../src/utils/android-cmdline-tools/adbReverse";
 import type { DeviceListenerTable } from "../../src/utils/android-cmdline-tools/deviceTcpListeners";
+import type {
+  PortHttpProbeOutcome,
+  PortHttpProbeRequest,
+} from "../../src/utils/android-cmdline-tools/portHttpProbe";
 
 /** adbd's uid on a user build; every reverse in `mappings` listens as it. */
 export const FAKE_ADBD_UID = 2000;
@@ -35,6 +39,24 @@ export class FakeAdbReverseCommands implements AdbReverseCommands {
     const next = queue.length > 1 ? queue.shift() : queue[0];
     if (next === "hang") {
       return new Promise<PortProbeOutcome>(() => {});
+    }
+    return next ?? { kind: "refused" };
+  }
+
+  /** Scripted HTTP probe outcomes per device port, consumed in order (the last one repeats). */
+  readonly httpOutcomes = new Map<number, (PortHttpProbeOutcome | "hang")[]>();
+  /** Every HTTP probe request, in order. */
+  readonly httpRequests: { devicePort: number; request: PortHttpProbeRequest }[] = [];
+
+  async httpProbe(
+    devicePort: number,
+    request: PortHttpProbeRequest,
+  ): Promise<PortHttpProbeOutcome> {
+    this.httpRequests.push({ devicePort, request });
+    const queue = this.httpOutcomes.get(devicePort) ?? [{ kind: "refused" }];
+    const next = queue.length > 1 ? queue.shift() : queue[0];
+    if (next === "hang") {
+      return new Promise<PortHttpProbeOutcome>(() => {});
     }
     return next ?? { kind: "refused" };
   }

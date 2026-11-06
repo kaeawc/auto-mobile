@@ -1,24 +1,19 @@
 import type {
   AdbReverseCommands,
   AdbReverseEntry,
-  PortProbeOutcome,
 } from "../../utils/android-cmdline-tools/adbReverse";
 import { rethrowDeviceTransportUnavailable } from "../../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
-import { DeviceLostError } from "../../models/DeviceLostError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { toActionableError } from "../../models/ActionableError";
-import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { unknownHostLoopbackProbe, type HostLoopbackProbe } from "./HostLoopbackProbe";
 import { PortReverseError } from "./PortReverseError";
 import { assertNoConflicts } from "./portReverseConflicts";
 import { deviceListeners, throwIfDevicePortHeld, type DeviceListener } from "./deviceListeners";
+import { httpProbePort, tcpProbePort, type PortReverseHttpProbe } from "./portReverseProbes";
 
-/** Per-port bound on a verify probe; ports are probed concurrently, so this bounds the whole call. */
-export const PORT_PROBE_TIMEOUT_MS = 2500;
-/** A peer that closes at once is asked again once: the first connect after a host restart can race. */
-const PORT_PROBE_ATTEMPTS = 2;
+export { PORT_PROBE_TIMEOUT_MS } from "./portReverseProbes";
 
 /** One device port to reverse to a host loopback port. */
 export interface PortReverseRequest {
@@ -50,9 +45,21 @@ export type PortReverseStatus =
 /**
  * Why a probe was `unreachable` or `probe_unsupported`. `closed`: the reverse accepted the connect
  * but the host side is not listening. `refused`: nothing listens on the device port. `timeout`: the
- * device did not answer the probe in time.
+ * device did not answer the probe in time. HTTP probe only: `http_status` (a status not in
+ * `expectStatus`), `http_body` (the body lacks `expectBodyContains`), `no_http_response` (the
+ * connection ended, or something answered, without an HTTP status line).
  */
-export type PortProbeReason = "closed" | "refused" | "timeout" | "unsupported";
+export type PortProbeReason =
+  | "closed"
+  | "refused"
+  | "timeout"
+  | "unsupported"
+  | "http_status"
+  | "http_body"
+  | "no_http_response";
+
+/** `verify`'s probe: `true` for a TCP connect, or an HTTP request whose response is checked. */
+export type PortReverseProbeOption = boolean | { http: PortReverseHttpProbe };
 
 export interface PortReverseMapping {
   devicePort: number;
@@ -65,8 +72,10 @@ export interface PortReverseMapping {
   status: PortReverseStatus;
   /** Set with `unreachable` and `probe_unsupported`. */
   probeReason?: PortProbeReason;
-  /** Device output that made the probe unsupported. */
+  /** Device output that made the probe unsupported, or what came back instead of HTTP. */
   probeDetail?: string;
+  /** HTTP probe: the response's status code. */
+  httpStatus?: number;
   /** `list` only: whether the `tcp:` host target accepts a loopback connect; absent when unknown. */
   hostListening?: boolean;
   /** `ensure` with `reclaimStale`: the stale mapping this call removed before adding its own. */
@@ -255,7 +264,11 @@ export class PortReverseManager {
    * `probe`, each mapping that is on the device is then connected to from the device, so it
    * reports `reachable`, `unreachable` or `probe_unsupported`; `missing` ports are not probed.
    */
-  verify(target: PortReverseTarget, ports?: readonly number[], options?: { probe?: boolean }) {
+  verify(
+    target: PortReverseTarget,
+    ports?: readonly number[],
+    options?: { probe?: PortReverseProbeOption },
+  ) {
     const state = this.stateFor(target);
     return this.enqueue(state, async (): Promise<PortReverseResult> => {
       const { view, report } = await this.reconciled(target, state);
@@ -275,9 +288,10 @@ export class PortReverseManager {
         };
       });
       const described = await this.withDeviceListeners(target, view, mappings);
-      if (options?.probe === true) {
+      const probe = options?.probe;
+      if (probe !== undefined && probe !== false) {
         const probed = await Promise.all(
-          described.map((mapping) => this.probeMapping(target, mapping)),
+          described.map((mapping) => this.probeMapping(target, mapping, probe)),
         );
         return this.acknowledge(state, target.owner, { mappings: probed, ...report });
       }
@@ -307,51 +321,17 @@ export class PortReverseManager {
   private async probeMapping(
     target: PortReverseTarget,
     mapping: PortReverseMapping,
+    probe: true | { http: PortReverseHttpProbe },
   ): Promise<PortReverseMapping> {
     if (mapping.status === "missing") {
       return mapping;
     }
-    const verdict = (
-      status: PortReverseStatus,
-      probeReason?: PortProbeReason,
-      probeDetail?: string,
-    ) => ({
-      ...mapping,
-      status,
-      ...(probeReason === undefined ? {} : { probeReason }),
-      ...(probeDetail === undefined ? {} : { probeDetail }),
-    });
-    for (let attempt = 1; attempt <= PORT_PROBE_ATTEMPTS; attempt++) {
-      let outcome: PortProbeOutcome;
-      try {
-        outcome = await raceWithDeadline(() => target.adb.probe(mapping.devicePort), {
-          timer: this.timer,
-          timeoutMs: PORT_PROBE_TIMEOUT_MS,
-          label: `portReverse probe tcp:${mapping.devicePort}`,
-          unref: true,
-        });
-      } catch (error) {
-        if (error instanceof DeviceLostError) {
-          throw error;
-        }
-        rethrowDeviceTransportUnavailable(error);
-        // A probe that hangs or fails says nothing about the mapping beyond "no answer".
-        logger.warn(
-          `[portReverse] probe of ${tcp(mapping.devicePort)} on ${target.deviceId} failed: ${errorMessage(error)}`,
-        );
-        return verdict("unreachable", "timeout");
-      }
-      if (outcome.kind === "held") {
-        return verdict("reachable");
-      }
-      if (outcome.kind === "refused") {
-        return verdict("unreachable", "refused");
-      }
-      if (outcome.kind === "unsupported") {
-        return verdict("probe_unsupported", "unsupported", outcome.detail);
-      }
-    }
-    return verdict("unreachable", "closed");
+    const pass = { deviceId: target.deviceId, devicePort: mapping.devicePort, timer: this.timer };
+    const verdict =
+      probe === true
+        ? await tcpProbePort(target.adb, pass)
+        : await httpProbePort(target.adb, pass, probe.http);
+    return { ...mapping, ...verdict };
   }
 
   /** Removes mappings this session owns; throws `port_reverse_not_owned` and changes nothing otherwise. */

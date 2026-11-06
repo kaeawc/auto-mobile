@@ -55,6 +55,22 @@ when exactly one has that uid. No readable table is `unsupported`; there is no
 reverse there, the table is read again and a `process` holder turns the failure
 into `port_reverse_device_port_in_use`; anything else keeps the adb error.
 
+## Verify probes
+
+`verify {probe: true}` runs one bounded `timeout nc` connect per port on the
+device and reads its exit status (`portProbeScript`). `probe: {http}` runs
+`portHttpProbeScript`: the request lines are `printf` arguments, never its
+format, so the path is sent verbatim, and the path and `Host` header are
+restricted to printable ASCII without spaces (`PROBE_PATH_PATTERN`,
+`PROBE_HOST_HEADER_PATTERN`) so no header can be injected. It sends HTTP/1.0
+with `Connection: close` and prints the same exit marker as the TCP probe, so a
+refused connect or a missing binary reads the same way. A status line at the
+start of the output is a response whatever the exit status; anything else
+without `Connection refused` is `no_http_response`, except silence until the
+device timeout (`timeout`). Both probes retry once on an empty close (the first
+connect after a host restart can race) and are bounded host-side by a
+`raceWithDeadline` on the injected timer.
+
 ## Restore
 
 Reverse listeners live in adbd, so an adb server restart, `adb reconnect`, an

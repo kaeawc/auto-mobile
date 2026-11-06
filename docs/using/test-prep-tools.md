@@ -107,6 +107,19 @@ mock backend), use `portReverse` instead of running `adb reverse` yourself:
   (the device did not answer). `probe_unsupported` means the device shell has no
   usable connect command; `probeDetail` holds what it printed. A host server
   that closes idle connections within a second reads as `closed`.
+  A TCP connect succeeds for any server, including the wrong one on a reused
+  host port. To check the right service answers, pass
+  `probe: { http: { path, expectStatus, hostHeader?, expectBodyContains?, timeoutMs? } }`:
+  the device sends `GET <path>` through each mapping and reports `httpStatus`.
+  A port is `reachable` when the status is in `expectStatus` (and the body
+  contains `expectBodyContains`, when given); otherwise `unreachable` with
+  `probeReason` `http_status` (another status), `http_body` (the text is
+  missing), `no_http_response` (the connection ended, or something answered,
+  without an HTTP response; `probeDetail` shows what came back), `refused` or
+  `timeout`. `path` must start with `/` and contain no spaces; `hostHeader`
+  defaults to `localhost:<devicePort>`; `timeoutMs` (1000-10000, default 2000)
+  is rounded up to whole seconds. Responses over 256 KB are not read and report
+  `timeout`.
 - `remove` deletes mappings your session created.
 
 AutoMobile owns the mappings it creates for your session. If one disappears

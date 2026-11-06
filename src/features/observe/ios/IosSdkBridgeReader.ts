@@ -5,7 +5,11 @@ import { logger } from "../../../utils/logger";
 import { serverConfig } from "../../../utils/ServerConfig";
 import { IOSCtrlProxyClient } from "./IOSCtrlProxyClient";
 import type { IosObservationBridgeState } from "./observationBridgeState";
-import type { IosSdkAction, IosSdkObservation } from "./sdkObservationBridge";
+import {
+  failOnIosSdkMultiScene,
+  type IosSdkAction,
+  type IosSdkObservation,
+} from "./sdkObservationBridge";
 import type { CtrlProxySdkActionResult, CtrlProxySdkObservationResult } from "./types";
 import type { ViewHierarchyResult } from "../../../models/ViewHierarchyResult";
 import type { ObservationBackend, ObservationFallbackReason } from "../../../models/ObserveResult";
@@ -88,21 +92,23 @@ export function createIosSdkBridgeReader(options: IosSdkBridgeReaderOptions): Io
       if (remaining() <= 0) {
         return { kind: "unavailable", detail: "search budget exhausted" };
       }
+      let reply: CtrlProxySdkObservationResult;
       try {
-        const reply = await client.requestSdkObservationForIos({
+        reply = await client.requestSdkObservationForIos({
           timeoutMs: remaining(),
           signal,
         });
-        if (reply.success && reply.observation) {
-          return { kind: "observation", observation: reply.observation };
-        }
-        const detail = failureDetail(reply);
-        logger.warn(`[iOS] SDK bridge snapshot unavailable for ${appId}: ${detail}`);
-        return { kind: "unavailable", detail };
       } catch (error) {
         logger.warn(`[iOS] SDK bridge snapshot failed for ${appId}: ${errorMessage(error)}`, error);
         return { kind: "unavailable", detail: errorMessage(error) };
       }
+      failOnIosSdkMultiScene(reply);
+      if (reply.success && reply.observation) {
+        return { kind: "observation", observation: reply.observation };
+      }
+      const detail = failureDetail(reply);
+      logger.warn(`[iOS] SDK bridge snapshot unavailable for ${appId}: ${detail}`);
+      return { kind: "unavailable", detail };
     },
   };
 }

@@ -13,7 +13,6 @@ import {
 } from "./simulatorUninstallBound";
 import { type IosInstalledAppRecord } from "./iosInstalledApp";
 import type { IosAppMetadataSource } from "../../models/IosAppMetadataSource";
-import { promises as fs } from "fs";
 import { type ClearAppDataResult } from "../../models";
 import { PhysicalIosDeviceBackend } from "./PhysicalIosDeviceBackend";
 import { SimulatorIosLaunchBackend } from "./SimulatorIosLaunchBackend";
@@ -251,11 +250,27 @@ export interface IosClearDataReinstaller {
   clearAppDataViaReinstall(deviceUdid: string, bundleId: string): Promise<void>;
 }
 
+export interface IosAppDataEntryStats {
+  isDirectory(): boolean;
+}
+
+export interface IosAppDataFileSystem {
+  /** Must not follow symlinks. */
+  lstat(path: string): Promise<IosAppDataEntryStats>;
+  access(path: string, mode: number): Promise<void>;
+  readdir(path: string): Promise<string[]>;
+  mkdir(
+    path: string,
+    options?: { recursive?: boolean; mode?: number },
+  ): Promise<string | undefined | void>;
+  rm(path: string, options: { recursive: boolean; force: boolean }): Promise<void>;
+}
+
 export interface IosClearDataBackendDeps {
   containerOwnership?: SimulatorContainerOwnershipOptions;
   simctl: Pick<SimCtlClient, "terminateApp" | "executeCommandArgs" | "listAppsOrThrow">;
   createReinstaller: () => IosClearDataReinstaller;
-  rm?: typeof fs.rm;
+  appDataFs?: IosAppDataFileSystem;
 }
 
 export function resolveIosClearDataBackend(

@@ -97,7 +97,7 @@ export interface ApiUsage {
   readonly line: number;
 }
 
-const blank = (text: string) => text.replace(/[^\n]/g, " ");
+const blank = (text: string) => text.replace(/[^\n]+/g, (run) => " ".repeat(run.length));
 
 /**
  * Appends one string literal starting at `start` to `out`, blanking the literal text but keeping
@@ -112,15 +112,15 @@ function stripSwiftString(
   const open = multiline ? 3 : 1;
   out.push(blank(source.slice(start, start + open)));
   let i = start + open;
-  const stops = multiline ? /\\\(|"""/g : /\\\(|"|\n/g;
+  // A lone `\` is an escape: the escaped character (`\"`, `\\`) is skipped whole. Matching it in
+  // the same scan keeps each literal linear instead of searching the rest of the file per step.
+  const stops = multiline ? /\\\(|\\|"""/g : /\\\(|\\|"|\n/g;
   while (i < source.length) {
     stops.lastIndex = i;
     const next = stops.exec(source);
-    // An escaped character (`\"`, `\\`) is skipped whole, so scan escapes explicitly.
-    const escape = source.indexOf("\\", i);
-    if (escape !== -1 && escape < (next?.index ?? source.length) && source[escape + 1] !== "(") {
-      out.push(blank(source.slice(i, escape + 2)));
-      i = escape + 2;
+    if (next?.[0] === "\\") {
+      out.push(blank(source.slice(i, next.index + 2)));
+      i = next.index + 2;
       continue;
     }
     if (!next) {
@@ -204,8 +204,15 @@ const SYMBOL_TO_CATEGORY = new Map(
 
 // A bare identifier, optionally module-qualified. `stat` and friends only count as calls
 // (`stat()` is the struct initializer, `lstat(path, &info)` the function) and never as a
-// member of an unrelated type (`cache.stat(...)`).
-const IDENTIFIER = /(?<![\w$])((?:(?:Darwin|Glibc|Foundation)\.)?)([A-Za-z_][A-Za-z0-9_]*)/g;
+// member of an unrelated type (`cache.stat(...)`). Only whole identifiers that are listed
+// symbols (plain identifiers, so no escaping) match, so the scan skips the far more numerous
+// unrelated identifiers instead of materializing each one.
+const IDENTIFIER = new RegExp(
+  String.raw`(?<![\w$])((?:(?:Darwin|Glibc|Foundation)\.)?)(` +
+    [...SYMBOL_TO_CATEGORY.keys()].join("|") +
+    String.raw`)(?![A-Za-z0-9_])`,
+  "g",
+);
 const CALL_ONLY = new Set(["stat", "fstat", "fstatat", "lstat"]);
 
 /** Finds required-reason API symbols in one Swift file. */

@@ -1,0 +1,33 @@
+{
+  "spec": {
+    "id": "map-maplibre-gate",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["map"]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "map",
+          "id": "map0",
+          "camera": {
+            "lat": 37.7749,
+            "lng": -122.4194,
+            "zoom": 13
+          },
+          "backend": "maplibre"
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_platform_v1", "prototype_platform_map_v1"]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_platform_map_maplibre_v1"
+}

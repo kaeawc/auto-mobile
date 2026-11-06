@@ -28,7 +28,7 @@ const finite = z.number().finite();
 const rectSchema = z
   .object({ left: finite, top: finite, right: finite, bottom: finite })
   .strict()
-  .describe("Platform-native screen rectangle: Android pixels, iOS points");
+  .describe("Platform-native screen rectangle: Android pixels, iOS and tvOS points");
 const regionSchema = z
   .object({
     elementId: z.string().min(1).optional().describe("Unique exposed element ID"),

@@ -35,14 +35,6 @@ export function parseStepParams(schema: z.ZodType, params: unknown): Record<stri
 }
 
 /**
- * Plan steps may carry `expectations` (accepted by the plan schema) but nothing evaluates them
- * yet (#9925). Say so on the step's warnings rather than let a plan author believe the
- * assertions were checked and passed.
- */
-export const UNEVALUATED_EXPECTATIONS_WARNING =
-  "This step declares `expectations`, but expectations are not evaluated yet; the step ran without checking them.";
-
-/**
  * Drop the `device` label from a `criticalSection` sub-step's params when the tool's schema does
  * not declare it. The section schema requires every sub-step to carry the owner label, and routing
  * uses the section's own device rather than this param, but a strict schema without a `device`

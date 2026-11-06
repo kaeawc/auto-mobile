@@ -1,6 +1,8 @@
 #!/usr/bin/env bats
 # Offline regression coverage for CircleCI artifact indexing/blob races (#8991).
 
+load yq-helpers
+
 SCRIPT="scripts/ci/fetch-circleci-swift-badge.sh"
 WORKFLOW=".github/workflows/merge.yml"
 
@@ -214,6 +216,7 @@ LEGACY
 }
 
 @test "merge.yml invokes the fetch helper and removes the one-shot download" {
+  require_mikefarah_yq
   # Use the repository's existing workflow parser to guard this specific step.
   run yq -r '.jobs."swift-code-coverage".steps[] | select(.name == "Run Swift coverage on CircleCI and download badge") | .run' "$WORKFLOW"
   [ "$status" -eq 0 ]

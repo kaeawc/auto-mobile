@@ -10,6 +10,7 @@ import {
 import { renderPrototypeStill } from "../../../../src/features/prototype/web/webStill";
 import { nodeCss } from "../../../../src/features/prototype/web/webStyle";
 import {
+  FADE_EDGES_PAGE_CSS,
   fadeEdgesCss,
   gradientCss,
   overContentLayers,
@@ -230,30 +231,48 @@ describe("glass (#16540)", () => {
 describe("fade edges (#16540)", () => {
   test("a still opens at the start, so only the trailing edge fades", () => {
     expect(fadeEdgesCss({ fadeEdges: { top: 8, bottom: 24 } }, context)).toEqual({
-      "mask-image": "linear-gradient(to top,rgba(0,0,0,0) 0,#000 min(24px,100%))",
+      attrs: { "data-fade": "y" },
+      style: { "--fade-mask": "linear-gradient(to top,rgba(0,0,0,0) 0,#000 min(24px,100%))" },
     });
-    expect(fadeEdgesCss({ fadeEdges: { top: 8 } }, context)).toEqual({});
+    expect(fadeEdgesCss({ fadeEdges: { top: 8 } }, context)).toEqual({ attrs: {}, style: {} });
     expect(fadeEdgesCss({ reverse: true, fadeEdges: { top: 8 } }, context)).toEqual({
-      "mask-image": "linear-gradient(to bottom,rgba(0,0,0,0) 0,#000 min(8px,100%))",
+      attrs: { "data-fade": "y" },
+      style: { "--fade-mask": "linear-gradient(to bottom,rgba(0,0,0,0) 0,#000 min(8px,100%))" },
     });
   });
 
   test("horizontal end fades the physical right, mirrored in RTL", () => {
     const node = { axis: "horizontal", fadeEdges: { end: 16 } };
-    expect(fadeEdgesCss(node, context)["mask-image"]).toStartWith("linear-gradient(to left,");
-    expect(fadeEdgesCss(node, { ...context, rtl: true })["mask-image"]).toStartWith(
+    const ltr = fadeEdgesCss(node, context);
+    expect(ltr.attrs).toEqual({ "data-fade": "x" });
+    expect(ltr.style["--fade-mask"]).toStartWith("linear-gradient(to left,");
+    expect(fadeEdgesCss(node, { ...context, rtl: true }).style["--fade-mask"]).toStartWith(
       "linear-gradient(to right,",
     );
   });
 
-  test("a still's scroll carries the mask", () => {
+  test("a still's scroll hands its mask to the page instead of always masking (#16606)", () => {
     const still = stillOf({
       type: "scroll",
       testTag: "list",
       fadeEdges: { bottom: 12 },
       child: { type: "text", text: "rows" },
     });
-    expect(tagged(still, "list").style["mask-image"]).toContain("#000 min(12px,100%)");
+    const list = tagged(still, "list");
+    expect(list.attrs["data-fade"]).toBe("y");
+    expect(list.style["--fade-mask"]).toContain("#000 min(12px,100%)");
+    expect(list.style["mask-image"]).toBeUndefined();
+  });
+
+  test("the page draws the mask only on a scroll timeline, keyed by axis (#16606)", () => {
+    expect(FADE_EDGES_PAGE_CSS).toContain(
+      "@keyframes prototype-fade{from,to{mask-image:var(--fade-mask)}}",
+    );
+    expect(FADE_EDGES_PAGE_CSS).toContain("animation-timeline:scroll(self y)");
+    expect(FADE_EDGES_PAGE_CSS).toContain("[data-fade=x]{animation-timeline:scroll(self x)}");
+    expect(FADE_EDGES_PAGE_CSS).toContain(
+      "@supports not (animation-timeline:scroll()){[data-fade]{mask-image:var(--fade-mask)}}",
+    );
   });
 });
 

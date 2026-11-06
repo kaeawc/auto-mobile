@@ -27,7 +27,7 @@ import { SessionToolSelectionService } from "../../src/features/toolSelection/Se
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { McpTestFixture, precompileMcpOutputSchemas } from "../fixtures/mcpTestFixture";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
-import { compileAjv2020, compileJsonSchema } from "../helpers/jsonSchemaCompile";
+import { compileJsonSchema, compileLargeAjv2020 } from "../helpers/jsonSchemaCompile";
 import { initializeCliTools } from "../../src/cli/cliToolRegistration";
 import { registerToolSelectionTools } from "../../src/server/toolSelectionTools";
 import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
@@ -50,6 +50,8 @@ import {
 import { FakeDeviceWindowCacheInvalidator } from "../fakes/FakeDeviceWindowCacheInvalidator";
 import { prototypePlatformCall } from "../../src/features/prototype/prototypePlatform";
 import { prototypeRequiredCapabilities } from "../../src/features/prototype/prototypeCapabilityGates";
+import sensitiveStorage from "../fixtures/prototype-spec/library-sensitive/storage-exact.json";
+import sensitivePlatform from "../fixtures/prototype-spec/library-sensitive/platform-url.json";
 
 const device: BootedDevice = { deviceId: "fake-prototype", platform: "android", name: "Fake" };
 const spec = {
@@ -366,6 +368,21 @@ describe("prototype MCP tool", () => {
         ...prototypeRequiredCapabilities(sensitiveSpec, "android").map((gate) => gate.capability),
       ]);
     });
+
+    test.each([sensitiveStorage, sensitivePlatform])(
+      "show warns at $expectedPath for sensitive storage or platform state",
+      async ({ spec: input, expectedPath, expectedMessage }) => {
+        client.setSupportedCommands([
+          PROTOTYPE_SHOW_IN_PLACE_CAPABILITY,
+          ...prototypeRequiredCapabilities(input, "android").map((gate) => gate.capability),
+        ]);
+        const { payload } = await call({ action: "show", spec: input });
+        expect(payload.success).toBe(true);
+        expect(payload.warning).toContain(
+          `${expectedPath}: ${expectedMessage}; this is a warning only and does not block the show.`,
+        );
+      },
+    );
 
     test.each([false, true])(
       "a sensitive request query warns on show (component: %p)",
@@ -1363,17 +1380,18 @@ describe("prototype discovery over MCP", () => {
 describe("prototype CLI and advertised schema registration", () => {
   let restore: () => void;
   let definition: ReturnType<typeof ToolRegistry.getToolDefinitions>[number];
-  let validate: ReturnType<typeof compileAjv2020>;
+  let validate: ReturnType<typeof compileLargeAjv2020>;
   beforeAll(() => {
     restore = preserveToolRegistry();
     ToolRegistry.clearTools();
     initializeCliTools();
     definition = ToolRegistry.getToolDefinitions().find((tool) => tool.name === "prototype")!;
-    compileJsonSchema(definition.inputSchema);
     compileJsonSchema(definition.outputSchema);
-    // The validator is an immutable shared fixture. Warm-up pays the engine's lazy compilation
-    // of generated validator code; verdicts are still computed and asserted in the test.
-    validate = compileAjv2020(definition.inputSchema);
+    // The validator is an immutable shared fixture, and compiling it also asserts the advertised
+    // input schema compiles. Its size makes Ajv's default ref inlining cost seconds (#16617).
+    // Warm-up pays the engine's lazy compilation of generated validator code; verdicts are
+    // still computed and asserted in the test.
+    validate = compileLargeAjv2020(definition.inputSchema);
     expect(
       validate({
         action: "show",

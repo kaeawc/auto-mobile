@@ -2,7 +2,8 @@
 # Build the dev-signed ProtoViewer library app (Core + Agent + ProtoViewer, no Loader.c).
 # Usage: scripts/ios/protoviewer-build.sh [output-dir]
 # Env: PROTOVIEWER_ARCHS (default "arm64 x86_64"), PROTOVIEWER_MIN_IOS (default 17.0).
-# Env: PROTOVIEWER_CLEARTEXT (default 1; set 0 to omit the dev cleartext opt-in).
+# Env: PROTOVIEWER_CLEARTEXT (default 1; set 0 to omit the dev cleartext opt-in). A cleartext
+# build is a dev build and takes the `.dev` bundle ID, so it never shares the store ID (#14144).
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -27,8 +28,10 @@ fi
 
 # Cleartext defaults on for this dev build; release-style builds set PROTOVIEWER_CLEARTEXT=0.
 cleartext_flags=()
+bundle_id_suffix=""
 if [[ "${PROTOVIEWER_CLEARTEXT:-1}" == 1 ]]; then
   cleartext_flags=(-D PROTOVIEWER_ALLOW_CLEARTEXT)
+  bundle_id_suffix=".dev"
 fi
 # One executable module, including Core + Agent Swift, never Loader.c or an asset catalog.
 swift_sources=()
@@ -57,6 +60,8 @@ lipo -create ${slices[@]+"${slices[@]}"} -output "${app}/ProtoViewer"
 lipo_verify_archs "${app}/ProtoViewer" "${archs[@]}"
 cp "${viewer_root}/Info.plist" "${app}/Info.plist"
 plutil -replace MinimumOSVersion -string "${min_ios}" "${app}/Info.plist"
+store_bundle_id="$(plutil -extract CFBundleIdentifier raw -o - "${app}/Info.plist")"
+plutil -replace CFBundleIdentifier -string "${store_bundle_id}${bundle_id_suffix}" "${app}/Info.plist"
 plutil -lint "${app}/Info.plist"
 # Required-reason API declarations ship at the bundle root (#14151); the privacy-manifest guard
 # (scripts/ios/check-privacy-manifests.ts) keeps them equal to the APIs these sources use.

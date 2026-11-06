@@ -44,8 +44,12 @@ object R8KeptClasses {
     }
   }
 
+  /**
+   * [mappingLines] is consumed once and never held: an app's R8 mapping can be hundreds of MB, so
+   * only the classes and members this check names are recorded (#17158).
+   */
   fun analyze(
-    mappingText: String,
+    mappingLines: Sequence<String>,
     manifestXml: String,
     namespace: String,
     classBytes: Sequence<ByteArray>,
@@ -79,22 +83,30 @@ object R8KeptClasses {
       keptSerializablePrefixes.any { name.replace('.', '/').startsWith(it) }
     }
     val serializers = keptSerializable.map { "$it\$\$serializer" }.filter { it in ownedClasses }
+    val sentinels = requiredMembers.distinct().sorted()
+    val checkedClasses =
+      (components + referencedClasses + keptSerializable + serializers).toHashSet().apply {
+        sentinels.forEach { add(it.substringBefore('#')) }
+      }
+    val checkedMembers = sentinels.toHashSet()
     val classes = mutableMapOf<String, String>()
     val methods = mutableMapOf<String, MutableSet<String>>()
     var owner: String? = null
-    for (line in mappingText.lineSequence()) {
+    for (line in mappingLines) {
       if (line.isBlank() || line.trimStart().startsWith('#')) continue
       if (!line.first().isWhitespace()) {
         val match = CLASS_MAPPING.matchEntire(line)
         requireNotNull(match) { "Invalid R8 class mapping: $line" }
         owner = match.groupValues[1]
-        classes[owner] = match.groupValues[2]
+        if (owner in checkedClasses) classes[owner] = match.groupValues[2]
       } else {
-        val match = METHOD_MAPPING.matchEntire(line.trim()) ?: continue
         val currentOwner = requireNotNull(owner) { "R8 member mapping without a class: $line" }
-        methods
-          .getOrPut("$currentOwner#${match.groupValues[1]}") { mutableSetOf() }
-          .add(match.groupValues[2])
+        if (currentOwner !in checkedClasses) continue
+        val match = METHOD_MAPPING.matchEntire(line.trim()) ?: continue
+        val member = "$currentOwner#${match.groupValues[1]}"
+        if (member in checkedMembers) {
+          methods.getOrPut(member) { mutableSetOf() }.add(match.groupValues[2])
+        }
       }
     }
     val violations = mutableListOf<String>()
@@ -110,7 +122,6 @@ object R8KeptClasses {
     referencedClasses.forEach { checkClass("manifest-referenced class", it) }
     keptSerializable.forEach { checkClass("@Serializable class", it) }
     serializers.forEach { checkClass("serializer", it) }
-    val sentinels = requiredMembers.distinct().sorted()
     for (sentinel in sentinels) {
       require(sentinel.count { it == '#' } == 1 && sentinel.substringAfter('#').isNotEmpty()) {
         "Invalid reflective member: $sentinel"

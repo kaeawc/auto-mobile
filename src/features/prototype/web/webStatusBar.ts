@@ -1,3 +1,31 @@
+import {
+  ABSOLUTE,
+  ALIGN_ITEMS,
+  ALIGN_SELF,
+  ARIA_HIDDEN,
+  BACKGROUND_COLOR,
+  BORDER_BOX,
+  BORDER_RADIUS,
+  BOX_SIZING,
+  CENTER,
+  COLUMN,
+  DATA_CHROME,
+  DATA_LEVEL,
+  DATA_STATUS,
+  FLEX,
+  FLEX_DIRECTION,
+  FONT_SIZE,
+  FONT_WEIGHT,
+  INLINE_FLEX,
+  JUSTIFY_CONTENT,
+  JUSTIFY_SELF,
+  MAX_HEIGHT,
+  MAX_WIDTH,
+  PADDING_TOP,
+  POINTER_EVENTS,
+  STRETCH,
+  Z_INDEX,
+} from "./webCss";
 import type { DeviceFrame } from "./deviceFrames";
 import { el, type WebChild, type WebElement } from "./webNodes";
 
@@ -86,7 +114,7 @@ function opacity(element: WebElement): number {
 
 /** A background that paints fully opaque once the element's composite opacity applies. */
 function opaqueBackground(element: WebElement, composite: number): string | undefined {
-  const background = element.style["background-color"];
+  const background = element.style[BACKGROUND_COLOR];
   const alpha = parseCssColor(background)?.a;
   return alpha !== undefined && alpha * composite === 1 ? background : undefined;
 }
@@ -103,8 +131,8 @@ function layoutOf(element: WebElement): Layout {
   if (style.display === "grid" && style["grid-template-areas"] === '"cell"') {
     return "box";
   }
-  if (style.display === "flex") {
-    return style["flex-direction"] === "column" ? "column" : "row";
+  if (style.display === FLEX) {
+    return style[FLEX_DIRECTION] === COLUMN ? "column" : "row";
   }
   return "flow";
 }
@@ -135,7 +163,7 @@ function spansWidth(
   siblings: number,
   screen: WebScreenSize | undefined,
 ): boolean {
-  const capped = caps(child.style["max-width"], screen?.width);
+  const capped = caps(child.style[MAX_WIDTH], screen?.width);
   return !capped && (child.style.width === "100%" || stretchesAcross(child, layout, siblings));
 }
 
@@ -144,14 +172,14 @@ function stretchesAcross(child: WebElement, layout: Layout, siblings: number): b
   const { style } = child;
   switch (layout) {
     case "box":
-      return style["justify-self"] === "stretch";
+      return style[JUSTIFY_SELF] === STRETCH;
     case "column":
-      return style["align-self"] === "stretch";
+      return style[ALIGN_SELF] === STRETCH;
     case "row":
       // A sole growing child fills the row's main axis.
       return siblings === 1 && grows(child);
     case "flow":
-      return style["align-self"] === "stretch" || style["justify-self"] === "stretch";
+      return style[ALIGN_SELF] === STRETCH || style[JUSTIFY_SELF] === STRETCH;
   }
 }
 
@@ -185,9 +213,7 @@ function grows(child: WebElement): boolean {
  * narrower than its container.
  */
 function narrowed(element: WebElement, screen: WebScreenSize | undefined): boolean {
-  return (
-    caps(element.style.width, screen?.width) || caps(element.style["max-width"], screen?.width)
-  );
+  return caps(element.style.width, screen?.width) || caps(element.style[MAX_WIDTH], screen?.width);
 }
 
 /**
@@ -207,12 +233,12 @@ function reachesTop(
   switch (layout) {
     case "box":
     case "row":
-      return startAligned(child.style["align-self"] ?? parent.style["align-items"]);
+      return startAligned(child.style[ALIGN_SELF] ?? parent.style[ALIGN_ITEMS]);
     case "column":
       // A growing child fills the column unless a maximum height holds it short.
       return (
-        (grows(child) && !caps(child.style["max-height"], screen?.height)) ||
-        MAIN_START.has(parent.style["justify-content"])
+        (grows(child) && !caps(child.style[MAX_HEIGHT], screen?.height)) ||
+        MAIN_START.has(parent.style[JUSTIFY_CONTENT])
       );
     case "flow":
       return true;
@@ -253,7 +279,7 @@ const MAX_DEPTH = 32;
 
 /** Whether the element has top padding: its `padding-top`, else the first `padding` value. */
 function paddedAtTop(element: WebElement): boolean {
-  const top = element.style["padding-top"] ?? element.style.padding?.trim().split(/\s+/)[0];
+  const top = element.style[PADDING_TOP] ?? element.style.padding?.trim().split(/\s+/)[0];
   return top !== undefined && !/^0(?:px)?$/.test(top.trim());
 }
 
@@ -316,12 +342,12 @@ const px = (value: number): string => `${Number(value.toFixed(3))}px`;
 
 function wifiMark(on: boolean, color: string): WebElement {
   return el("span", {
-    attrs: { "data-status": "wifi", "data-level": on ? "on" : "off" },
+    attrs: { [DATA_STATUS]: "wifi", [DATA_LEVEL]: on ? "on" : "off" },
     style: {
       display: "inline-block",
       width: "15px",
       height: "11px",
-      "background-color": color,
+      [BACKGROUND_COLOR]: color,
       // A generic fan: wide at the top, narrowing to a point at the bottom.
       "clip-path": "polygon(0 30%, 50% 0, 100% 30%, 50% 100%)",
       opacity: on ? "1" : "0.35",
@@ -334,8 +360,8 @@ function cellularMark(bars: number, color: string): WebElement {
   return el(
     "span",
     {
-      attrs: { "data-status": "cellular", "data-level": String(filled) },
-      style: { display: "inline-flex", "align-items": "flex-end", gap: "1.5px", height: "11px" },
+      attrs: { [DATA_STATUS]: "cellular", [DATA_LEVEL]: String(filled) },
+      style: { display: INLINE_FLEX, [ALIGN_ITEMS]: "flex-end", gap: "1.5px", height: "11px" },
     },
     [0, 1, 2, 3].map((index) =>
       el("span", {
@@ -343,8 +369,8 @@ function cellularMark(bars: number, color: string): WebElement {
           display: "inline-block",
           width: "3px",
           height: px(4 + index * 2.33),
-          "border-radius": "1px",
-          "background-color": color,
+          [BORDER_RADIUS]: "1px",
+          [BACKGROUND_COLOR]: color,
           opacity: index < filled ? "1" : "0.35",
         },
       }),
@@ -357,29 +383,29 @@ function batteryMark(percent: number, color: string): WebElement {
   return el(
     "span",
     {
-      attrs: { "data-status": "battery", "data-level": String(level) },
-      style: { display: "inline-flex", "align-items": "center", gap: "1px" },
+      attrs: { [DATA_STATUS]: "battery", [DATA_LEVEL]: String(level) },
+      style: { display: INLINE_FLEX, [ALIGN_ITEMS]: CENTER, gap: "1px" },
     },
     [
       el(
         "span",
         {
           style: {
-            display: "inline-flex",
+            display: INLINE_FLEX,
             width: "22px",
             height: "11px",
             padding: "1px",
             border: `1px solid ${color}`,
-            "border-radius": "3px",
-            "box-sizing": "border-box",
+            [BORDER_RADIUS]: "3px",
+            [BOX_SIZING]: BORDER_BOX,
           },
         },
         [
           el("span", {
             style: {
               width: `${level}%`,
-              "border-radius": "1.5px",
-              "background-color": color,
+              [BORDER_RADIUS]: "1.5px",
+              [BACKGROUND_COLOR]: color,
             },
           }),
         ],
@@ -388,8 +414,8 @@ function batteryMark(percent: number, color: string): WebElement {
         style: {
           width: "1.5px",
           height: "4px",
-          "border-radius": "0 1px 1px 0",
-          "background-color": color,
+          [BORDER_RADIUS]: "0 1px 1px 0",
+          [BACKGROUND_COLOR]: color,
         },
       }),
     ],
@@ -415,7 +441,7 @@ function sides(
     const ear = px(Math.max(0, (width - cutout.widthDp) / 2));
     return {
       container: { padding: "0" },
-      side: { width: ear, "justify-content": "center" },
+      side: { width: ear, [JUSTIFY_CONTENT]: CENTER },
     };
   }
   return { container: { padding: "0 16px" }, side: {} };
@@ -438,37 +464,37 @@ export function renderStatusBar(input: WebStatusBarInput): WebElement {
   const side = (children: WebChild[]) =>
     el(
       "span",
-      { style: { display: "flex", "align-items": "center", gap: "5px", ...layout.side } },
+      { style: { display: FLEX, [ALIGN_ITEMS]: CENTER, gap: "5px", ...layout.side } },
       children,
     );
   return el(
     "div",
     {
       attrs: {
-        "data-chrome": "statusBar",
+        [DATA_CHROME]: "statusBar",
         "data-status-content": content,
-        "aria-hidden": "true",
+        [ARIA_HIDDEN]: "true",
       },
       style: {
-        position: "absolute",
+        position: ABSOLUTE,
         left: "0",
         right: "0",
         top: "0",
         height: px(frame.statusBarDp),
-        display: "flex",
-        "align-items": "center",
-        "justify-content": "space-between",
+        display: FLEX,
+        [ALIGN_ITEMS]: CENTER,
+        [JUSTIFY_CONTENT]: "space-between",
         ...layout.container,
-        "box-sizing": "border-box",
+        [BOX_SIZING]: BORDER_BOX,
         color,
-        "font-size": ios ? "16px" : "14px",
-        "font-weight": ios ? "600" : "500",
-        "z-index": "2",
-        "pointer-events": "none",
+        [FONT_SIZE]: ios ? "16px" : "14px",
+        [FONT_WEIGHT]: ios ? "600" : "500",
+        [Z_INDEX]: "2",
+        [POINTER_EVENTS]: "none",
       },
     },
     [
-      side([el("span", { attrs: { "data-status": "clock" } }, [state.clock])]),
+      side([el("span", { attrs: { [DATA_STATUS]: "clock" } }, [state.clock])]),
       side([
         cellularMark(state.cellularBars, color),
         wifiMark(state.wifi, color),

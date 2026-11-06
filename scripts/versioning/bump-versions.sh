@@ -9,7 +9,7 @@ set -euo pipefail
 # bash [[ == ]] semantics, where `*` also matches `/`.
 managed_path_patterns=(
   ".claude-plugin/marketplace.json"
-  ".claude-plugin/plugin.json"
+  "plugins/auto-mobile/.claude-plugin/plugin.json"
   "android/gradle.properties"
   "android/*/build.gradle.kts"
   "docs/index.md"
@@ -237,7 +237,7 @@ PY
 }
 
 update_json_version_at "package.json" "$new_version" "$dry_run" "version"
-update_json_version_at ".claude-plugin/plugin.json" "$new_version" "$dry_run" "version"
+update_json_version_at "plugins/auto-mobile/.claude-plugin/plugin.json" "$new_version" "$dry_run" "version"
 
 # server.json carries the version at the top level and on every packages[]
 # entry the MCP registry reads.

@@ -117,6 +117,9 @@ call fails with `unsupported_button` and sends no key.
 
 `explore` walks a TV app the same way: it moves focus to each element and selects it, recording the
 screens and transitions in the navigation graph. `navigateTo` replays those steps with D-pad moves.
+To reach rows below the visible part of a list or rail, `explore` presses down (or right along a
+rail) until a new row scrolls into view, up to 12 presses, and stops when focus stops moving or
+leaves the list.
 Both are available only when the server runs with `--embedded-sdk` and the app embeds the
 AutoMobile SDK; see [Navigation graph](navigation-graph.md#availability).
 

@@ -434,6 +434,34 @@ describe("FocusNavigate", () => {
       navigator(new FakeGrid(0)).execute({ until: { text: "Music" }, signal: controller.signal }),
     ).rejects.toThrow();
   });
+
+  test("a cancel during the settle ends the walk without waiting it out or pressing again", async () => {
+    // Manual time: the walk parks in its settle until the test moves the clock.
+    const manual = new FakeTimer();
+    const grid = new FakeGrid(0);
+    const controller = new AbortController();
+    const walk = new FocusNavigate(grid, grid, manual).execute({
+      until: { text: "Search" },
+      settleMs: 5000,
+      signal: controller.signal,
+    });
+    const outcome = walk.then(
+      () => "resolved",
+      (error: unknown) => error,
+    );
+    for (let turn = 0; turn < 20 && manual.getPendingSleepCount() === 0; turn++) {
+      await Promise.resolve();
+    }
+    expect(manual.getPendingSleeps()).toEqual([5000]);
+    expect(grid.presses).toHaveLength(1);
+
+    controller.abort();
+
+    expect(await outcome).toBeInstanceOf(Error);
+    // Rejected with no fake time elapsed, so the bound is the press in flight, not the settle.
+    expect(manual.now()).toBe(0);
+    expect(grid.presses).toHaveLength(1);
+  });
 });
 
 function box(text: string, cx: number, cy: number): Element {

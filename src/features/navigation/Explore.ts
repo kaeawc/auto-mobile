@@ -24,9 +24,9 @@ import {
   planExplorationDryRun,
 } from "./ExploreDryRun";
 import {
-  defaultFocusSelectNavigator,
   ExploreElementActions,
-  type FocusSelectNavigator,
+  focusDrivenActions,
+  type FocusDrivenActions,
 } from "./ExploreElementActions";
 import { drivesFocus, touchInputMode, type InputModeResolver } from "./focusDrivenInput";
 import { getElementKey } from "./ExploreElementExtraction";
@@ -117,7 +117,7 @@ export class Explore extends BaseVisualChange {
   private sessionUuid?: string;
   private readonly tapActionFactory?: DialogTapActionFactory;
   private readonly inputMode: InputModeResolver;
-  private readonly focusNavigatorFactory: () => FocusSelectNavigator;
+  private readonly focusActions: FocusDrivenActions;
 
   // Constants for safety limits
   static readonly MAX_CONSECUTIVE_NO_CHANGE = 40;
@@ -134,6 +134,7 @@ export class Explore extends BaseVisualChange {
       tapActionFactory,
       inputMode = touchInputMode,
       focusNavigatorFactory,
+      focusListAdvancerFactory,
     }: ExploreSessionOptions & { navigationManager?: NavigationGraphService } = {},
   ) {
     super(device, { adb, timer });
@@ -143,9 +144,12 @@ export class Explore extends BaseVisualChange {
     this.sessionUuid = sessionUuid;
     this.tapActionFactory = tapActionFactory;
     this.inputMode = inputMode;
-    this.focusNavigatorFactory =
-      focusNavigatorFactory ??
-      (() => defaultFocusSelectNavigator(device, this.observeScreen, this.adbFactory, timer));
+    this.focusActions = focusDrivenActions(device, timer, {
+      observeScreen: () => this.observeScreen,
+      adbFactory: this.adbFactory,
+      focusNavigatorFactory,
+      focusListAdvancerFactory,
+    });
   }
 
   /**
@@ -853,15 +857,15 @@ export class Explore extends BaseVisualChange {
       tracked.lastInteractionScreen = currentScreen;
       this.exploredElements.set(elementKey, tracked);
 
-      const isScrollable = isTruthy(element.scrollable);
-
-      const success = drivesFocus(await this.inputMode(), this.currentTargetEdge?.interaction)
+      // The first call probes the device; a cancel must not wait out its adb timeouts.
+      const inputMode = await awaitWhileRequestIsLive(this.inputMode(), signal);
+      const success = drivesFocus(inputMode, this.currentTargetEdge?.interaction)
         ? await this.elementActions().focusSelectElement(element, observation, {
             signal,
             recorded: this.currentTargetEdge?.interaction,
           })
-        : isScrollable
-          ? await this.swipeContainer(element, observation, progress, signal)
+        : isTruthy(element.scrollable)
+          ? await this.elementActions().swipeContainer(element, observation, progress, signal)
           : await this.tapElement(element, observation, progress, signal);
       // Nothing dispatched: skip a validate edge rather than retry it; else reset the back count.
       if (success === null) {
@@ -874,16 +878,6 @@ export class Explore extends BaseVisualChange {
       logger.warn(`[Explore] Failed to interact with element: ${error}`);
       return false;
     }
-  }
-
-  /** Swipe a scrollable container; the swipeOn record needs a selector to replay it. */
-  private async swipeContainer(
-    element: Element,
-    observation: ObserveResult,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-  ): Promise<boolean> {
-    return this.elementActions().swipeContainer(element, observation, progress, signal);
   }
 
   /** Tap an element by selector, else its centre; null when it has no tap target. */
@@ -1050,7 +1044,7 @@ export class Explore extends BaseVisualChange {
       device: this.device,
       adb: this.adb,
       timer: this.timer,
-      focusNavigator: this.focusNavigatorFactory,
+      ...this.focusActions,
       runRecorded: (toolName, args, observation, run) =>
         this.runRecorded(toolName, args, observation, run),
     });

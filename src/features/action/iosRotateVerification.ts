@@ -3,6 +3,54 @@ import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
 
 type Orientation = "portrait" | "landscape" | "unknown";
 
+const IOS_ROTATION_UNSUPPORTED_ERROR =
+  "Rotation is not supported on this display (the screen size did not change)";
+const IOS_COVER_ROTATION_UNSUPPORTED_ERROR =
+  "Rotation is not supported on the cover panel (the screen size did not change). Open the device to its inner panel (unfold the hinge) and retry there, or keep the current orientation.";
+
+function coverPanelRefusalError(
+  previousObservation: ObserveResult | undefined,
+  runnerError: string | undefined,
+): string | undefined {
+  return previousObservation?.display.role === "cover" &&
+    runnerError === IOS_ROTATION_UNSUPPORTED_ERROR
+    ? IOS_COVER_ROTATION_UNSUPPORTED_ERROR
+    : undefined;
+}
+
+function verifyIosRunnerFailure(
+  normalized: RotateResult,
+  result: RotateResult,
+  context: {
+    requested: "portrait" | "landscape";
+    previous: Orientation;
+    current: Orientation;
+    previousObservation: ObserveResult | undefined;
+  },
+): RotateResult {
+  const { requested, previous, current, previousObservation } = context;
+  const coverError = coverPanelRefusalError(previousObservation, result.error);
+  if (coverError) {
+    return {
+      ...normalized,
+      success: false,
+      rotationPerformed: false,
+      error: coverError,
+    };
+  }
+  if (current === requested && previous !== "unknown" && previous !== requested) {
+    return {
+      ...normalized,
+      success: true,
+      rotationPerformed: true,
+      error: undefined,
+      warning: `The runner reported "${result.error ?? "Failed to rotate iOS device"}" although the observed display changed from ${previous} to ${current}.`,
+      message: `Successfully rotated from ${previous} to ${current}`,
+    };
+  }
+  return normalized;
+}
+
 export function normalizeIosOrientation(orientation: string | undefined): Orientation {
   switch (orientation) {
     case "portrait":
@@ -118,12 +166,14 @@ export function verifyIosRotation(
       current === "unknown" ? normalizeIosOrientation(result.currentOrientation) : current,
   };
   if (isUnverifiedIosRotationSize(result, requested, { previous, current }, previousObservation)) {
+    const error =
+      coverPanelRefusalError(previousObservation, IOS_ROTATION_UNSUPPORTED_ERROR) ??
+      "Rotation is not supported on this display (the screen size did not change). The runner reported a rotation but the screen size is unchanged.";
     return {
       ...normalized,
       success: false,
       rotationPerformed: false,
-      error:
-        "Rotation is not supported on this display (the screen size did not change). The runner reported a rotation but the screen size is unchanged.",
+      error,
       message: `Failed to rotate to ${requested}; the screen size did not change.`,
     };
   }
@@ -138,17 +188,12 @@ export function verifyIosRotation(
     };
   }
   if (!result.success) {
-    if (current === requested && previous !== "unknown" && previous !== requested) {
-      return {
-        ...normalized,
-        success: true,
-        rotationPerformed: true,
-        error: undefined,
-        warning: `The runner reported "${result.error ?? "Failed to rotate iOS device"}" although the observed display changed from ${previous} to ${current}.`,
-        message: `Successfully rotated from ${previous} to ${current}`,
-      };
-    }
-    return normalized;
+    return verifyIosRunnerFailure(normalized, result, {
+      requested,
+      previous,
+      current,
+      previousObservation,
+    });
   }
   return {
     ...normalized,
@@ -156,4 +201,13 @@ export function verifyIosRotation(
       ? `Successfully rotated from ${normalized.previousOrientation} to ${normalized.currentOrientation}`
       : `Device is already in ${normalized.currentOrientation} orientation`,
   };
+}
+
+export function restoreTargetIosOrientation(observation: ObserveResult | undefined): Orientation {
+  const { width, height } = observation?.screenSize ?? { width: 0, height: 0 };
+  // Duo inner panels can report a stale portrait rotation while drawn landscape (#17101).
+  if (width > 0 && height > 0 && width !== height) {
+    return width > height ? "landscape" : "portrait";
+  }
+  return observedIosOrientation(observation);
 }

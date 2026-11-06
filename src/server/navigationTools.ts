@@ -11,6 +11,13 @@ import {
 import { DefaultPathOptimizer } from "../features/navigation/DefaultPathOptimizer";
 import { DEFAULT_MAX_INTERACTIONS, Explore, ExploreOptions } from "../features/navigation/Explore";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
+import { deviceInputModeResolver } from "../features/navigation/focusDrivenInput";
+import {
+  assertTvosExploreOptions,
+  createTvosExploreDevice,
+  TvosExplore,
+  type TvosExploreDevice,
+} from "../features/tvos/TvosExplore";
 import { throwIfAborted, createStructuredToolResponse } from "../utils/toolUtils";
 import { Platform } from "../models";
 import { addDeviceTargetingToSchema, platformSchema } from "../utils/schemaHelpers";
@@ -212,6 +219,69 @@ export interface NavigationToolDependencies extends NavigateToHandlerDependencie
   installedAppsFactory?: (
     device: BootedDevice,
   ) => Pick<ListInstalledApps, "executeDetailedResult" | "executeIosDetailedResult">;
+  /** Reads and presses the Apple TV a tvOS explore crawls. */
+  tvosExploreDeviceFactory?: (device: BootedDevice) => TvosExploreDevice;
+}
+
+function exploreCompletionMessage(result: {
+  stopReason?: string;
+  interactionsPerformed: number;
+  screensDiscovered: number;
+  coverage: { percentage: number };
+}): string {
+  const completion = result.stopReason?.startsWith("Left target app (")
+    ? `Exploration stopped: ${result.stopReason}.`
+    : "Exploration completed:";
+  return `${completion} ${result.interactionsPerformed} interactions, ${result.screensDiscovered} new screens discovered, ${result.coverage.percentage}% coverage`;
+}
+
+/** explore on an Apple TV: a focus crawl with the remote instead of the touch explorer. */
+export function createTvosExploreHandler(
+  tvosExploreDeviceFactory: (device: BootedDevice) => TvosExploreDevice,
+  navigationManagerFactory: NavigationManagerFactory,
+) {
+  return async (device: BootedDevice, args: ExploreArgs, signal?: AbortSignal) => {
+    assertTvosExploreOptions(args);
+    throwIfAborted(signal);
+    const packageName = args.packageName?.trim();
+    const result = await new TvosExplore(
+      tvosExploreDeviceFactory(device),
+      navigationManagerFactory(args.sessionUuid),
+      device.deviceId,
+    ).execute(
+      {
+        maxInteractions: args.maxInteractions,
+        timeoutMs: args.timeoutMs,
+        ...(packageName ? { packageName } : {}),
+      },
+      signal,
+    );
+    return createStructuredToolResponse({ message: exploreCompletionMessage(result), ...result });
+  };
+}
+
+type ExploreHandler = (
+  device: BootedDevice,
+  args: ExploreArgs,
+  progress?: ProgressCallback,
+  signal?: AbortSignal,
+) => Promise<unknown>;
+
+/** Apple TV apps are crawled by focus; every other platform uses the touch explorer. */
+function byExplorePlatform(
+  tvos: ReturnType<typeof createTvosExploreHandler>,
+  touch: ExploreHandler,
+): ExploreHandler {
+  return async (device, args, progress, signal) => {
+    if (device.platform !== "tvos") {
+      return touch(device, args, progress, signal);
+    }
+    try {
+      return await tvos(device, args, signal);
+    } catch (error) {
+      throw toActionableError(error, `Failed to execute exploration`);
+    }
+  };
 }
 
 export function registerNavigationTools({
@@ -220,6 +290,7 @@ export function registerNavigationTools({
   prototypeFileReader = nodePrototypeAssetFileReader,
   installedAppsFactory = (device) =>
     new ListInstalledApps(device, undefined, null, { cacheEnabled: false }),
+  tvosExploreDeviceFactory = (device) => createTvosExploreDevice(device.deviceId),
 }: NavigationToolDependencies = {}) {
   // Get navigation graph handler
   const getNavigationGraphHandler = async (device: BootedDevice, args: GetNavigationGraphArgs) => {
@@ -333,6 +404,7 @@ export function registerNavigationTools({
       const explore = new Explore(device, null, undefined, {
         navigationManager: navigationManagerFactory(args.sessionUuid),
         sessionUuid: args.sessionUuid,
+        inputMode: deviceInputModeResolver(device),
       });
       const options: ExploreOptions = {
         maxInteractions: args.maxInteractions,
@@ -353,11 +425,8 @@ export function registerNavigationTools({
         });
       }
 
-      const completion = result.stopReason?.startsWith("Left target app (")
-        ? `Exploration stopped: ${result.stopReason}.`
-        : "Exploration completed:";
       return createStructuredToolResponse({
-        message: `${completion} ${result.interactionsPerformed} interactions, ${result.screensDiscovered} new screens discovered, ${result.coverage.percentage}% coverage`,
+        message: exploreCompletionMessage(result),
         ...result,
       });
     } catch (error) {
@@ -367,10 +436,13 @@ export function registerNavigationTools({
 
   ToolRegistry.registerDeviceAware(
     "explore",
-    "Automatically interact with the app to discover screens and record transitions in the navigation graph",
+    "Automatically interact with the app to discover screens and record transitions in the navigation graph; on Android TV it moves D-pad focus and selects instead of tapping (touch if the TV check cannot read the device)",
     exploreSchema,
     {
-      handler: exploreHandler,
+      handler: byExplorePlatform(
+        createTvosExploreHandler(tvosExploreDeviceFactory, navigationManagerFactory),
+        exploreHandler,
+      ),
       defaultEnabled: false,
       supportsProgress: true,
       embeddedSdkOnly: true,

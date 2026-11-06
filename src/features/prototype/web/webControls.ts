@@ -265,13 +265,13 @@ const sliderRenderer =
     ]);
   };
 
-interface NavItem {
+export interface NavItem {
   readonly label: string;
   readonly icon?: string;
   readonly image: boolean;
 }
 
-function navItems(node: Raw, scope: WebRenderScope, kit: WebRenderKit): NavItem[] {
+export function navItems(node: Raw, scope: WebRenderScope, kit: WebRenderKit): NavItem[] {
   const items = Array.isArray(node.items) ? node.items : [];
   return items.map((entry) => {
     const item = record(entry) ?? {};
@@ -287,7 +287,12 @@ function navItems(node: Raw, scope: WebRenderScope, kit: WebRenderKit): NavItem[
  * The selected item, as both devices pick it: the linked pager's page, else the state key's
  * number, else the first, clamped to the items.
  */
-function navSelection(node: Raw, count: number, scope: WebRenderScope, kit: WebRenderKit): number {
+export function navSelection(
+  node: Raw,
+  count: number,
+  scope: WebRenderScope,
+  kit: WebRenderKit,
+): number {
   const linked =
     typeof node.pager === "string" ? linkedPagerPage(node.pager, scope, kit) : undefined;
   const value = stateAt(node.stateKey, scope, kit);
@@ -300,7 +305,7 @@ function navSelection(node: Raw, count: number, scope: WebRenderScope, kit: WebR
  * An item's icon: its named icon, else (an image is not inlined, or none is given) Android's 24 px
  * surfaceVariant placeholder square.
  */
-function navIcon(item: NavItem, scope: WebRenderScope, kit: WebRenderKit): WebElement {
+export function navIcon(item: NavItem, scope: WebRenderScope, kit: WebRenderKit): WebElement {
   if (item.icon !== undefined) {
     return kit.icon({ type: "icon", name: item.icon }, scope, "");
   }
@@ -318,7 +323,7 @@ function navIcon(item: NavItem, scope: WebRenderScope, kit: WebRenderKit): WebEl
 }
 
 /** The bar's own edges, which an explicit width or height in the spec still overrides. */
-function barBase(node: Raw, scope: WebRenderScope, kit: WebRenderKit, extra: Css) {
+export function barBase(node: Raw, scope: WebRenderScope, kit: WebRenderKit, extra: Css) {
   return kit.base(filling(node, defaultFillAxes(node)), scope, { display: FLEX, ...extra });
 }
 
@@ -376,7 +381,12 @@ function bottomNavItem(item: NavItem, selected: boolean, scope: WebRenderScope, 
  * Android's NavigationBar pads its bottom edge by the system bar, as iOS does, on top of the
  * spec's own safeAreaPadding, unless an ancestor or that padding already took the bottom edge.
  */
-function withBottomInset(node: Raw, scope: WebRenderScope, kit: WebRenderKit, style: Css): Css {
+export function withBottomInset(
+  node: Raw,
+  scope: WebRenderScope,
+  kit: WebRenderKit,
+  style: Css,
+): Css {
   const taken =
     (scope.consumedInsets ?? []).includes("bottom") || kit.safeAreaEdges(node).includes("bottom");
   if (taken) {

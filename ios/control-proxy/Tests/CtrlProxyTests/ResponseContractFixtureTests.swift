@@ -117,6 +117,13 @@ final class ResponseContractFixtureTests: XCTestCase {
             )
         )
         try append(
+            "accessibility_focus_result",
+            AccessibilityFocusResponse(
+                requestId: requestId, success: false, errorCode: .voiceOverOff,
+                error: "VoiceOver is off", totalTimeMs: 17
+            )
+        )
+        try append(
             "magic_tap_result",
             MagicTapResponse(
                 requestId: requestId,

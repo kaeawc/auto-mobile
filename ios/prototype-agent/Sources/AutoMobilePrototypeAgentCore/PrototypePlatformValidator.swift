@@ -41,6 +41,42 @@ enum PrototypePlatformValidator {
         return modules[parts.module]?.calls[parts.member]?.capability
     }
 
+    /// The capability a `map` node's non-default `backend` needs on top of the module's (#14302),
+    /// or nil for the default `auto` backend or any value the table does not list.
+    private static func nodeBackendCapability(_ node: [String: JSONValue]) -> String? {
+        guard node["type"] == .string("map"), let backend = node["backend"]?.stringValue else {
+            return nil
+        }
+        return PrototypeContractValidator.platformModules["map"]?.objectFields?["backends"]?
+            .objectFields?[backend]?.objectFields?["capability"]?.stringValue
+    }
+
+    /// Backend capabilities of `map` nodes at node positions only, the twin of TypeScript's
+    /// `walkPrototypeNodes`: `root` and each component root, then `child`, `children`, `screens`,
+    /// adaptive slots and list `header`/`footer`. A map-shaped payload or `equals` literal is data.
+    static func backendCapabilities(_ spec: [String: JSONValue]) -> Set<String> {
+        var pending = [spec["root"]].compactMap { $0 }
+        for component in spec["components"]?.objectFields?.values ?? [:].values {
+            if let root = component.objectFields?["root"] { pending.append(root) }
+        }
+        var found = Set<String>()
+        while let next = pending.popLast() {
+            guard let node = next.objectFields else { continue }
+            if let capability = nodeBackendCapability(node) { found.insert(capability) }
+            let type = node["type"]?.stringValue
+            for (key, value) in node {
+                if key == "child" || (type == "adaptive" && PrototypeAdaptive.slots.contains(key)) ||
+                    (type == "list" && ["header", "footer"].contains(key))
+                {
+                    pending.append(value)
+                }
+                if key == "children", case let .array(children) = value { pending += children }
+                if key == "screens" { pending += Array(value.objectFields?.values ?? [:].values) }
+            }
+        }
+        return found
+    }
+
     /// The capability a handler for `event` needs on top of its module's, when its definition names one.
     static func eventCapability(_ event: String) -> String? {
         guard let parts = qualified(event) else { return nil }
@@ -188,6 +224,7 @@ enum PrototypePlatformValidator {
         /// The root `sensors` block: the sensors the device listens to (#14327).
         var sensors: JSONValue?
         var previews: Set<String> = []
+        var webViews: Set<String> = []
     }
 
     /// Throws the first platform rule the spec breaks, at the host validator's path.
@@ -218,6 +255,7 @@ enum PrototypePlatformValidator {
         declared.sensors = sensors
         declared.players = PrototypeMedia.players(media).union(PrototypeMedia.inlinePlayers(root))
         declared.previews = PrototypeCameraPreview.ids(root)
+        declared.webViews = PrototypeWebView.ids(root)
         if let handlers { try validateHandlers(handlers, declared: declared, state: state) }
         for (handler, path) in PrototypeChannels.handlers(declared.channels) {
             if case let .array(actions) = handler { try PrototypeRequestValidator.validateList(
@@ -425,7 +463,9 @@ enum PrototypePlatformValidator {
                 }
                 guard !opaqueKeys.contains(key) else { continue }
                 let memberPath = PrototypeLimits.dataMemberPath(path, key: key)
-                if textKeys.contains(key), case let .string(text) = member {
+                // A webView url binds placeholders like the host's webView visitor (#16573).
+                let webViewURL = key == "url" && fields["type"] == .string("webView")
+                if textKeys.contains(key) || webViewURL, case let .string(text) = member {
                     for pointer in placeholders(text) {
                         try read(pointer, path: memberPath, declared: declared)
                     }
@@ -537,6 +577,10 @@ enum PrototypePlatformValidator {
         )
         try PrototypeMedia.call(action, path: path, players: declared.players)
         try PrototypeCameraPreview.call(action, path: path, previews: declared.previews)
+        try PrototypeWebView.call(action, path: path, webViews: declared.webViews)
+        if call == "permissions.request" {
+            try requestedPermissions(args, path: path, declared: declared.permissions)
+        }
         if call == "share.open", let error = PrototypeShare.argumentsError(args, path: "\(path).args") {
             throw fail(error.path, error.message)
         }
@@ -550,6 +594,23 @@ enum PrototypePlatformValidator {
                 path,
                 "Side-effecting platform call \(call) needs a user gesture: move it into onTap, onLongPress, onDoubleTap or onSubmit"
             )
+        }
+    }
+
+    /// `permissions.request` may only ask for permissions declared in `requires.permissions`, since the
+    /// declaration carries the usage string and the manifest entry (#14297). A bound list is checked by
+    /// the runtime once it resolves.
+    private static func requestedPermissions(
+        _ args: [String: JSONValue], path: String, declared: Set<String>
+    ) throws {
+        guard case let .object(form)? = args["names"], case let .array(names)? = form["value"] else { return }
+        for (index, entry) in names.enumerated() {
+            if case let .string(name) = entry, !declared.contains(name) {
+                throw fail(
+                    "\(path).args.names.value[\(index)]",
+                    "Permission \(name) is not declared in requires.permissions"
+                )
+            }
         }
     }
 

@@ -1,0 +1,125 @@
+{
+  "id": "image-gallery",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "column",
+    "style": {
+      "width": "fill",
+      "height": "fill",
+      "background": "surface"
+    },
+    "children": [
+      {
+        "type": "topAppBar",
+        "title": "Gallery"
+      },
+      {
+        "type": "image",
+        "id": "hero",
+        "asset": "sunset",
+        "contentScale": "crop",
+        "style": {
+          "width": "fill",
+          "height": {
+            "dp": 200
+          },
+          "cornerRadius": 16
+        }
+      },
+      {
+        "type": "row",
+        "style": {
+          "padding": {
+            "top": 16,
+            "start": 16
+          }
+        },
+        "children": [
+          {
+            "type": "image",
+            "id": "fit",
+            "asset": "sea",
+            "style": {
+              "width": {
+                "dp": 120
+              },
+              "height": {
+                "dp": 120
+              }
+            }
+          },
+          {
+            "type": "spacer",
+            "style": {
+              "width": {
+                "dp": 8
+              }
+            }
+          },
+          {
+            "type": "image",
+            "id": "grey",
+            "asset": "sea",
+            "contentScale": "fill",
+            "filter": {
+              "saturation": 0
+            },
+            "style": {
+              "width": {
+                "dp": 120
+              },
+              "height": {
+                "dp": 80
+              }
+            }
+          },
+          {
+            "type": "spacer",
+            "style": {
+              "width": {
+                "dp": 8
+              }
+            }
+          },
+          {
+            "type": "image",
+            "id": "badge",
+            "asset": "badge",
+            "filter": {
+              "tint": "primary"
+            },
+            "style": {
+              "width": {
+                "dp": 64
+              },
+              "height": {
+                "dp": 64
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "image",
+        "id": "missing",
+        "asset": "not-uploaded",
+        "style": {
+          "width": {
+            "dp": 96
+          },
+          "height": {
+            "dp": 64
+          }
+        }
+      }
+    ],
+    "safeAreaPadding": {
+      "edges": ["top"],
+      "types": ["systemBars", "cutout"]
+    }
+  }
+}

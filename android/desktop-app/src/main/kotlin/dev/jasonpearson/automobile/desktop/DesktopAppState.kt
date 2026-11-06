@@ -9,6 +9,7 @@ import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.CoalescingRecoveryLauncher
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonBootstrapState
+import dev.jasonpearson.automobile.desktop.core.daemon.DaemonStreamHub
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionBinding
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionState
 import dev.jasonpearson.automobile.desktop.core.di.AutoMobileGraphProvider
@@ -39,6 +40,8 @@ internal class DesktopAppUiState(settings: SettingsProvider) {
   var showOnboarding by mutableStateOf(!settings.hasSeenOnboarding)
   var showBasicsChecklist by mutableStateOf(!settings.hasDismissedBasicsChecklist)
   val deviceObserved = DeviceObservedRecord(settings)
+  // The focused pane's control stream reports its device's foreground app for the window title.
+  val foregroundApps = ForegroundAppsByDevice()
 }
 
 internal data class AppDaemonSession(
@@ -73,6 +76,7 @@ internal data class DesktopAppRuntime(
   val workspace: AppWorkspaceServices,
   val picker: AppPickerServices,
   val recoveryLauncher: CoalescingRecoveryLauncher,
+  val streamHub: DaemonStreamHub,
 ) {
   val desktopSessionState
     get() = session.state

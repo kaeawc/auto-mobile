@@ -130,7 +130,7 @@ const executePlanResultSchema = z
         "All failing device tracks for multi-device plans, including abort consequences; ordered by cause, plan step index (-1 last), then plan device order. The first entry is the same failure as failedStep and omits failureObservation (see failedStep); abort consequences never carry failureObservation.",
       ),
     error: z.string().optional(),
-    platform: z.enum(["android", "ios"]).optional(),
+    platform: z.enum(["android", "ios", "tvos"]).optional(),
     deviceId: z.string().optional(),
     deviceMapping: z.record(z.string(), z.string()).optional(),
     debug: executePlanDebugSchema.optional(),

@@ -554,6 +554,8 @@ internal object PrototypeBindableFields {
         "snackbar" -> formComponent(node, path)
         "tooltip",
         "image" -> contentComponent(node, path)
+        // The url binds placeholders like TypeScript's webView visitor (#16573).
+        "webView" -> visitor.field(node, "url", path, PrototypeBindableKind.TEXT)
         else -> null
       }
 

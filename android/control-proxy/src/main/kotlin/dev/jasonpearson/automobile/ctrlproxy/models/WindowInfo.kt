@@ -55,4 +55,8 @@ data class WindowInfo(
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val prototypeMotion: PrototypeWindowMotion? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val truncationReasons: List<String>? = null,
+  /** Requested prototype orientation, best effort for overlays. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val prototypeOrientation: String? = null,
+  /** `unsupported` when a prototype status bar style was requested. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val prototypeStatusBar: String? = null,
 )

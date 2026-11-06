@@ -940,4 +940,20 @@ describe("provisionDevice on an Apple TV simulator", () => {
     expect(tv).toMatchObject({ boot: true });
     expect(tv.readiness).toBeUndefined();
   });
+
+  test("a created TV notifies resource subscribers; adopting it does not", async () => {
+    await arrange();
+    let notified = 0;
+    setDeviceToolsDependencies({
+      notifyResourcesChanged: async () => {
+        notified += 1;
+      },
+    });
+
+    await provision({ device: TV });
+    expect(notified).toBe(1);
+
+    await provision({ device: TV, boot: false });
+    expect(notified).toBe(1);
+  });
 });

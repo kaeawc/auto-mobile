@@ -7,6 +7,7 @@ import { TransitionalAdbBindWait } from "../transitionalAdbBindWait";
 import { IosLivenessRelist } from "./iosLivenessRelist";
 import { isAnonymousAcquisitionSession, type Session } from "../sessionManager";
 import { ActionableError } from "../../models";
+import { BootedDeviceDiscoveryIncompleteError } from "../../models/BootedDeviceDiscoveryIncompleteError";
 import { heldDeviceBindRefusal } from "../inputDeviceOwnership";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { didSourceSucceedForDevice } from "../../utils/discoverySource";
@@ -377,6 +378,38 @@ export class DevicePoolTargetDiscovery {
     }
   }
 
+  /**
+   * Non-iOS Apple simulators need their own fresh listing, for a pooled entry and a new one alike,
+   * before binding; an iOS snapshot cannot confirm either platform. A failed listing is the typed
+   * retryable refusal; only a complete listing without the device is absence.
+   */
+  private async takeNonIosAppleTargetSnapshot(
+    deviceId: string,
+    capturedEntry: PooledDevice | undefined,
+    targetPlatform: "watchos" | "tvos" | "visionos",
+    unavailableMessage: string,
+  ): Promise<TargetDeviceDiscoverySnapshot> {
+    const discovery = await this.callbacks.takeFreshPresenceDiscovery(targetPlatform);
+    if (!didSourceSucceedForDevice(discovery, targetPlatform, deviceId)) {
+      throw new BootedDeviceDiscoveryIncompleteError(
+        targetPlatform,
+        discovery.discoveryErrors?.[targetPlatform],
+        unavailableMessage,
+      );
+    }
+    if (!discovery.devices.some((device) => device.deviceId === deviceId)) {
+      throw new ActionableError(unavailableMessage);
+    }
+    return {
+      capturedEntry,
+      bootedDevices: discovery.devices,
+      iosLiveness:
+        targetPlatform === "tvos" || targetPlatform === "visionos"
+          ? await this.state.idleDeviceReaper.getIosLivenessSnapshot({ discovery })
+          : undefined,
+    };
+  }
+
   /** The pre-lock discovery evidence an exact bind judges its target by. */
   private async takeTargetSnapshot(
     deviceId: string,
@@ -394,23 +427,12 @@ export class DevicePoolTargetDiscovery {
       targetPlatform === "tvos" ||
       targetPlatform === "visionos"
     ) {
-      // Non-iOS Apple simulators need their own fresh listing, for a pooled entry and
-      // a new one alike, before binding; an iOS snapshot cannot confirm either platform.
-      const discovery = await this.callbacks.takeFreshPresenceDiscovery(targetPlatform);
-      if (
-        !didSourceSucceedForDevice(discovery, targetPlatform, deviceId) ||
-        !discovery.devices.some((device) => device.deviceId === deviceId)
-      ) {
-        throw new ActionableError(unavailableMessage);
-      }
-      return {
+      return await this.takeNonIosAppleTargetSnapshot(
+        deviceId,
         capturedEntry,
-        bootedDevices: discovery.devices,
-        iosLiveness:
-          targetPlatform === "tvos" || targetPlatform === "visionos"
-            ? await this.state.idleDeviceReaper.getIosLivenessSnapshot({ discovery })
-            : undefined,
-      };
+        targetPlatform,
+        unavailableMessage,
+      );
     }
     if (capturedEntry) {
       return {

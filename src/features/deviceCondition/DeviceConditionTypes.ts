@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { INTEGRITY_SIGNALS } from "./integritySignals";
 import { DEVICE_CLOCK_TOLERANCE_MS, MAX_DEVICE_CLOCK_ADVANCE_MS } from "../utility/DeviceClock";
+import { STATUS_BAR_BATTERY_STATES, STATUS_BAR_DATA_NETWORKS } from "../utility/StatusBarOverride";
 
 /**
  * Session-scoped device-condition fixtures (#14050, epic #14047): root, integrity
@@ -16,10 +17,16 @@ export const DEVICE_CONDITION_SCHEMA_VERSION = 1;
 /** Longest lease a single request may set; renewing re-arms it. */
 export const DEVICE_CONDITION_MAX_LEASE_SECONDS = 86_400;
 
-/** The condition keys an injector can own. Fault keys are `faults.<name>`. */
+/**
+ * The condition keys an injector can own. Fault keys are `faults.<name>`. `statusBar`, `privacy`
+ * and `location` are platform-neutral keys (#14073) any platform may implement.
+ */
 export type DeviceConditionKey =
   | "rootState"
   | "integrityState"
+  | "statusBar"
+  | "privacy"
+  | "location"
   | `faults.${string}`
   | `vehicle.${string}`;
 
@@ -88,6 +95,86 @@ export interface DeviceConditionPermissionTarget {
   permission: string;
 }
 
+/** An app identifier: a bundle ID or package name, dot-separated segments. */
+export const DEVICE_CONDITION_APP_ID_PATTERN = /^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+$/;
+
+/** Privacy services a `privacy` condition can grant or revoke (the simctl privacy service names). */
+export const DEVICE_CONDITION_PRIVACY_SERVICES = [
+  "calendar",
+  "contacts-limited",
+  "contacts",
+  "location",
+  "location-always",
+  "photos-add",
+  "photos",
+  "media-library",
+  "microphone",
+  "motion",
+  "reminders",
+  "siri",
+] as const;
+
+/** Status bar fields a `statusBar` condition overrides; at least one is required. */
+export interface DeviceConditionStatusBar {
+  time?: string;
+  batteryLevel?: number;
+  batteryState?: (typeof STATUS_BAR_BATTERY_STATES)[number];
+  cellularBars?: number;
+  wifiBars?: number;
+  dataNetwork?: (typeof STATUS_BAR_DATA_NETWORKS)[number];
+  operatorName?: string;
+}
+
+/** One app's decision for one privacy service. */
+export interface DeviceConditionPrivacyTarget {
+  appId: string;
+  service: (typeof DEVICE_CONDITION_PRIVACY_SERVICES)[number];
+  action: "grant" | "revoke";
+}
+
+/** A simulated device location. */
+export interface DeviceConditionLocation {
+  latitude: number;
+  longitude: number;
+}
+
+/** `statusBar` parameters; the injector re-validates its params with the same schema. */
+export const statusBarParamsSchema = () =>
+  z
+    .object({
+      time: z.string().min(1).max(32).optional(),
+      batteryLevel: z.number().int().min(0).max(100).optional(),
+      batteryState: z.enum(STATUS_BAR_BATTERY_STATES).optional(),
+      cellularBars: z.number().int().min(0).max(4).optional(),
+      wifiBars: z.number().int().min(0).max(3).optional(),
+      dataNetwork: z.enum(STATUS_BAR_DATA_NETWORKS).optional(),
+      operatorName: z.string().max(64).optional(),
+    })
+    .strict()
+    .refine(
+      (input) => Object.values(input).some((value) => value !== undefined),
+      "Provide at least one status bar field",
+    );
+
+/** `privacy` parameters; the injector re-validates its params with the same schema. */
+export const privacyParamsSchema = () =>
+  z
+    .object({
+      appId: z.string().regex(DEVICE_CONDITION_APP_ID_PATTERN),
+      service: z.enum(DEVICE_CONDITION_PRIVACY_SERVICES),
+      action: z.enum(["grant", "revoke"]),
+    })
+    .strict();
+
+/** `location` parameters; the injector re-validates its params with the same schema. */
+export const deviceLocationParamsSchema = () =>
+  z
+    .object({
+      latitude: z.number().min(-90).max(90),
+      longitude: z.number().min(-180).max(180),
+    })
+    .strict();
+
 export type DeviceConditionIntegrityPreset = "maximally-detectable" | "minimally-detectable";
 export type DeviceConditionSignalId = (typeof INTEGRITY_SIGNALS)[number]["id"];
 
@@ -132,6 +219,12 @@ export interface DeviceConditionInput {
     | DeviceConditionIntegrityPreset
     | DeviceConditionIntegrityParams
     | typeof DEVICE_CONDITION_UNSET;
+  /** Status bar override (#14073); iOS Simulator so far. */
+  statusBar?: DeviceConditionStatusBar | typeof DEVICE_CONDITION_UNSET;
+  /** Grant or revoke one app's privacy service (#14073); iOS Simulator so far. */
+  privacy?: DeviceConditionPrivacyTarget | typeof DEVICE_CONDITION_UNSET;
+  /** Simulated device location (#14073); iOS Simulator so far. */
+  location?: DeviceConditionLocation | typeof DEVICE_CONDITION_UNSET;
   /**
    * Power-domain fault injectors (#14063), each optional and each clearable with
    * `"unset"`. More fault families add their key here as they land. Kept as named
@@ -153,6 +246,8 @@ export interface DeviceConditionInput {
     corruptAppFile?: DeviceConditionCorruptTarget | typeof DEVICE_CONDITION_UNSET;
     /** Permission revocation (#14069); the one fault so far that takes an object. */
     revokePermission?: DeviceConditionPermissionTarget | typeof DEVICE_CONDITION_UNSET;
+    /** Lock-screen credential fault; removing it invalidates keys bound to the lock screen. */
+    lockScreen?: "pin" | "none" | typeof DEVICE_CONDITION_UNSET;
     /** Package state (#14069): disable an app until reset, or clear its data once. */
     disablePackage?: DeviceConditionPackageTarget | typeof DEVICE_CONDITION_UNSET;
     /** Process faults (#14068): end an app's process, or send it a trim-memory level, once. */
@@ -257,6 +352,24 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
       .describe(
         "Integrity signals (Android): maximally-detectable enables su-binary, superuser-apk and selinux-permissive; minimally-detectable disables them. Or { preset?, signals?: { <signal-id>: 'on' | 'off' } }, with at least one field and signals overriding the preset. Needs root and writable /system for files. Image-fixed signals and missing-otacerts report unsupported. Results include per-signal status and post-apply active readings. 'unset' restores prior state; existing image/rootState files are never removed.",
       ),
+    statusBar: z
+      .union([z.literal(DEVICE_CONDITION_UNSET), statusBarParamsSchema()])
+      .optional()
+      .describe(
+        "Override the status bar ({ time?, batteryLevel?, batteryState?, cellularBars?, wifiBars?, dataNetwork?, operatorName? }, at least one). iOS Simulator only so far; reset clears every override. Or unset.",
+      ),
+    privacy: z
+      .union([z.literal(DEVICE_CONDITION_UNSET), privacyParamsSchema()])
+      .optional()
+      .describe(
+        "Grant or revoke one privacy service for an installed app ({ appId, service, action }). iOS Simulator only so far; reset restores the app's earlier decisions for that service and its pair (photos/photos-add, location/location-always, contacts/contacts-limited): granted, denied, or not yet asked. Refused when that decision cannot be restored, such as limited Photos access. Or unset.",
+      ),
+    location: z
+      .union([z.literal(DEVICE_CONDITION_UNSET), deviceLocationParamsSchema()])
+      .optional()
+      .describe(
+        "Simulate the device location ({ latitude, longitude }). iOS Simulator only so far; reset clears the simulated location. Or unset.",
+      ),
     faults: z
       .object({
         battery: z
@@ -318,6 +431,12 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
           .optional()
           .describe(
             "Revoke one runtime permission from an installed app with `pm revoke` ({ package, permission }); reset re-grants it. Revoking kills the app's process, so it also restarts the app. Or unset.",
+          ),
+        lockScreen: z
+          .enum(["pin", "none", DEVICE_CONDITION_UNSET])
+          .optional()
+          .describe(
+            "Sets an AutoMobile test PIN, or removes the PIN; reset restores no lock screen. Keys bound to the lock screen are invalidated by a removal. 'unset' restores.",
           ),
         disablePackage: z
           .union([z.literal(DEVICE_CONDITION_UNSET), packageTargetSchema()])
@@ -397,44 +516,38 @@ export interface DeviceConditionChange {
   params?: Record<string, unknown>;
 }
 
+/** One field's change: a string value as is, an object as an "apply" carrying its params. */
+function changeFor(key: DeviceConditionKey, value: unknown): DeviceConditionChange | undefined {
+  if (typeof value === "string") {
+    return { key, value };
+  }
+  if (value !== null && typeof value === "object") {
+    return { key, value: DEVICE_CONDITION_APPLY, params: { ...value } };
+  }
+  return undefined;
+}
+
 /** Split a validated request into ordered changes; fields absent from the request are untouched. */
 export function deviceConditionChanges(input: DeviceConditionInput): DeviceConditionChange[] {
-  const changes: DeviceConditionChange[] = [];
-  if (input.rootState !== undefined) {
-    changes.push({ key: "rootState", value: input.rootState });
-  }
-  if (input.integrityState !== undefined) {
-    changes.push(
-      typeof input.integrityState === "string"
-        ? { key: "integrityState", value: input.integrityState }
-        : {
-            key: "integrityState",
-            value: DEVICE_CONDITION_APPLY,
-            params: { ...input.integrityState },
-          },
-    );
-  }
-  const faults = input.faults ?? {};
-  for (const name of Object.keys(faults).sort()) {
-    const value = (faults as Record<string, unknown>)[name];
-    if (typeof value === "string") {
-      changes.push({ key: `faults.${name}`, value });
-    } else if (value !== null && typeof value === "object") {
-      changes.push({
-        key: `faults.${name}`,
-        value: DEVICE_CONDITION_APPLY,
-        params: { ...value },
-      });
+  const fields: Array<[DeviceConditionKey, unknown]> = [
+    ["rootState", input.rootState],
+    ["integrityState", input.integrityState],
+    ["statusBar", input.statusBar],
+    ["privacy", input.privacy],
+    ["location", input.location],
+  ];
+  const groups: Array<[prefix: "faults" | "vehicle", values: Record<string, unknown>]> = [
+    ["faults", input.faults ?? {}],
+    ["vehicle", input.vehicle ?? {}],
+  ];
+  for (const [prefix, values] of groups) {
+    for (const name of Object.keys(values).sort()) {
+      fields.push([`${prefix}.${name}`, values[name]]);
     }
   }
-  const vehicle = input.vehicle ?? {};
-  for (const name of Object.keys(vehicle).sort()) {
-    const value = (vehicle as Record<string, unknown>)[name];
-    if (typeof value === "string") {
-      changes.push({ key: `vehicle.${name}`, value });
-    }
-  }
-  return changes;
+  return fields
+    .map(([key, value]) => changeFor(key, value))
+    .filter((change): change is DeviceConditionChange => change !== undefined);
 }
 
 /** True when the request asks for something: a reset or at least one condition field. */

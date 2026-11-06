@@ -40,4 +40,63 @@ class WindowTitleTest {
       windowTitle(WorkspaceUiState.Content(listOf(blank), blank.deviceId)),
     )
   }
+
+  @Test
+  fun `focused device's foreground app follows the device name`() {
+    val state = WorkspaceUiState.Content(listOf(pixel, iphone), focusedDeviceId = pixel.deviceId)
+    assertEquals(
+      "AutoMobile — Pixel 8 API 35 — com.example.app",
+      windowTitle(state, mapOf(pixel.deviceId to "com.example.app")),
+    )
+  }
+
+  @Test
+  fun `a blank foreground app is left out`() {
+    val state = WorkspaceUiState.Content(listOf(pixel), focusedDeviceId = pixel.deviceId)
+    assertEquals("AutoMobile — Pixel 8 API 35", windowTitle(state, mapOf(pixel.deviceId to " ")))
+  }
+
+  @Test
+  fun `the title follows the focused device's changing app`() {
+    val state = WorkspaceUiState.Content(listOf(pixel), focusedDeviceId = pixel.deviceId)
+    val apps = ForegroundAppsByDevice()
+
+    apps.report(pixel.deviceId, "com.example.first")
+    assertEquals(
+      "AutoMobile — Pixel 8 API 35 — com.example.first",
+      windowTitle(state, apps.apps.value),
+    )
+
+    apps.report(pixel.deviceId, "com.example.second")
+    assertEquals(
+      "AutoMobile — Pixel 8 API 35 — com.example.second",
+      windowTitle(state, apps.apps.value),
+    )
+  }
+
+  @Test
+  fun `focus moving to a device with no app yet shows that device alone`() {
+    val apps = mapOf(pixel.deviceId to "com.example.app")
+    val moved = WorkspaceUiState.Content(listOf(pixel, iphone), focusedDeviceId = iphone.deviceId)
+    assertEquals("AutoMobile — iPhone 16", windowTitle(moved, apps))
+  }
+
+  @Test
+  fun `an app with no focused device is not shown`() {
+    val apps = mapOf(pixel.deviceId to "com.example.app")
+    assertEquals("AutoMobile", windowTitle(WorkspaceUiState.Content(listOf(pixel), null), apps))
+    assertEquals("AutoMobile", windowTitle(WorkspaceUiState.Empty, apps))
+  }
+
+  @Test
+  fun `the tracker ignores a blank package and keeps each device's own app`() {
+    val apps = ForegroundAppsByDevice()
+    apps.report(pixel.deviceId, "com.example.app")
+    apps.report(pixel.deviceId, "")
+    apps.report(iphone.deviceId, "com.example.ios")
+    assertEquals(
+      mapOf(pixel.deviceId to "com.example.app", iphone.deviceId to "com.example.ios"),
+      apps.apps.value,
+    )
+  }
 }

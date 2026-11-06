@@ -8,8 +8,10 @@ import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { createNotificationUIDetector } from "./createNotificationUIDetector";
+import { WatchSystemTray } from "./WatchSystemTray";
 import {
   getSystemTrayDependencies,
+  notificationNotFoundError,
   waitForNotificationMatch,
   clearMatchingSystemTrayNotifications,
   clearIosSystemTrayNotifications,
@@ -296,6 +298,11 @@ export class SystemTray {
     const { signal } = this;
     try {
       throwIfAborted(signal);
+      if (this.device.platform === "android" && this.device.formFactor === "watch") {
+        const watch = await new WatchSystemTray(this.device, signal).execute(args);
+        await captureSystemTrayTerminalEvidence(this.device, watch.observation, signal);
+        return watch.outcome;
+      }
       const awaitTimeoutMs = resolveSystemTrayAwaitTimeout(args.awaitTimeout);
       switch (args.action) {
         case "open":
@@ -447,7 +454,7 @@ export class SystemTray {
     );
 
     if (!match) {
-      throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
+      throw notificationNotFoundError(device, observation, awaitTimeoutMs);
     }
 
     await captureSystemTrayTerminalEvidence(device, observation, signal);
@@ -470,7 +477,7 @@ export class SystemTray {
     });
 
     if (!initialMatch.match) {
-      throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
+      throw notificationNotFoundError(device, initialMatch.observation, awaitTimeoutMs);
     }
 
     const { observation: baseline, match } = await expandAndRematchIfCollapsed(
@@ -535,7 +542,7 @@ export class SystemTray {
     });
 
     if (!initialMatch.match) {
-      throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
+      throw notificationNotFoundError(device, initialMatch.observation, awaitTimeoutMs);
     }
 
     const { match, observation: swipeObservation } = await expandAndRematchIfCollapsed(

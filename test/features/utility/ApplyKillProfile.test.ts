@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { beforeEach, describe, expect, test } from "bun:test";
+import path from "node:path";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   applyKillProfile,
   parseAppOpMode,
@@ -42,6 +43,20 @@ describe("kill profiles (#14051)", () => {
     );
     adb.setCommandResponse("shell am get-standby-bucket", createExecResult("10\n", ""));
     adb.setCommandResponse("shell appops get", createExecResult("No operations.\n", ""));
+    adb.setCommandResponseSequence(`shell am get-standby-bucket ${Q}`, [
+      createExecResult("10\n", ""),
+      createExecResult("45\n", ""),
+    ]);
+    for (const op of ["RUN_ANY_IN_BACKGROUND", "WAKE_LOCK"] as const) {
+      adb.setCommandResponseSequence(`shell appops get ${Q} ${op}`, [
+        createExecResult("No operations.\n", ""),
+        createExecResult(`${op}: ignore\n`, ""),
+      ]);
+    }
+    adb.setCommandResponseSequence(`shell appops get --uid ${Q} SCHEDULE_EXACT_ALARM`, [
+      createExecResult("No operations.\n", ""),
+      createExecResult("Uid mode: SCHEDULE_EXACT_ALARM: deny\n", ""),
+    ]);
     registry = new KillProfileRestoreRegistry();
   });
 
@@ -55,6 +70,237 @@ describe("kill profiles (#14051)", () => {
             command,
           ),
       );
+
+  const fixture = (name: string) =>
+    createExecResult(
+      readFileSync(
+        path.join(process.cwd(), "test/fixtures/killProfile/api35", `api35-${name}.txt`),
+        "utf8",
+      ),
+      "",
+    );
+
+  test.each([
+    ["deskclock", "failed", "20"],
+    ["calendar", "failed", "20"],
+    ["maps", "applied", "45"],
+  ] as const)(
+    "API 35 %s standby bucket is %s only after read-back",
+    async (app, status, observed) => {
+      const appId = `com.example.${app}`;
+      adb.setAndroidApiLevel(35);
+      const forget = spyOn(registry, "forget");
+      adb.setCommandResponseSequence(`shell am get-standby-bucket '${appId}'`, [
+        fixture("deskclock-standby-before"),
+        fixture(`${app}-standby-after-restricted`),
+      ]);
+      const result = await applyKillProfile(emulator, appId, "samsung-sleeping", deps());
+      expect(result.steps[1].status).toBe(status);
+      expect(
+        adb
+          .getExecutedCommands()
+          .filter((command) => command === `shell am get-standby-bucket '${appId}'`),
+      ).toHaveLength(2);
+      if (status === "failed") {
+        expect(result.steps[1].reason).toBe(
+          `standby bucket reads back as ${observed}, expected 45`,
+        );
+      }
+      expect(forget).not.toHaveBeenCalled();
+      expect(registry.has(emulator.deviceId, `standbyBucket:${appId}`)).toBe(true);
+      expect(result.restore?.commands).toContain(`shell am set-standby-bucket '${appId}' 10`);
+      forget.mockRestore();
+    },
+  );
+
+  test.each([
+    ["deskclock", "failed", "default"],
+    ["calendar", "failed", "default"],
+    ["maps", "applied", "deny"],
+  ] as const)(
+    "API 35 %s exact alarm is %s only after uid read-back",
+    async (app, status, observed) => {
+      const appId = `com.example.${app}`;
+      adb.setAndroidApiLevel(35);
+      const forget = spyOn(registry, "forget");
+      adb.setCommandResponseSequence(`shell appops get --uid '${appId}' SCHEDULE_EXACT_ALARM`, [
+        fixture("deskclock-appop-before"),
+        fixture(`${app}-appop-after-deny`),
+      ]);
+      const result = await applyKillProfile(emulator, appId, "sony-stamina", deps());
+      expect(result.steps[2].status).toBe(status);
+      expect(
+        adb
+          .getExecutedCommands()
+          .filter(
+            (command) => command === `shell appops get --uid '${appId}' SCHEDULE_EXACT_ALARM`,
+          ),
+      ).toHaveLength(2);
+      if (status === "failed") {
+        expect(result.steps[2].reason).toContain(observed);
+      }
+      expect(forget).not.toHaveBeenCalled();
+      expect(registry.has(emulator.deviceId, `appOp:SCHEDULE_EXACT_ALARM:${appId}`)).toBe(true);
+      forget.mockRestore();
+    },
+  );
+
+  test("API 35 hibernation is applied after true reads back", async () => {
+    adb.setAndroidApiLevel(35);
+    const read = `shell cmd app_hibernation get-state --user 0 ${Q}`;
+    adb.setCommandResponseSequence(read, [
+      fixture("deskclock-hibernation-before"),
+      fixture("deskclock-hibernation-after-true"),
+    ]);
+    const result = await applyKillProfile(emulator, APP, "samsung-auto-disable", deps());
+    expect(result.steps[0].status).toBe("applied");
+    expect(adb.getExecutedCommands().filter((command) => command === read)).toHaveLength(2);
+  });
+
+  test("a hibernation mismatch fails and keeps its restore record", async () => {
+    adb.setCommandResponse(
+      `shell cmd app_hibernation get-state --user 0 ${Q}`,
+      fixture("deskclock-hibernation-before"),
+    );
+    const forget = spyOn(registry, "forget");
+    await expect(applyKillProfile(emulator, APP, "samsung-auto-disable", deps())).rejects.toThrow(
+      "hibernation reads back as false, expected true",
+    );
+    expect(forget).not.toHaveBeenCalled();
+    expect(registry.has(emulator.deviceId, `hibernation:${APP}`)).toBe(true);
+    forget.mockRestore();
+  });
+
+  test("a throwing standby read-back fails and keeps its restore record", async () => {
+    const forget = spyOn(registry, "forget");
+    const shell = new (class extends FakeAdbExecutor {
+      override async executeCommand(
+        command: string,
+        options?: Parameters<FakeAdbExecutor["executeCommand"]>[1],
+      ) {
+        const result = await adb.executeCommand(command, options);
+        if (command.includes("am set-standby-bucket")) {
+          adb.setCommandError("shell am get-standby-bucket", new Error("read-back disconnected"));
+        }
+        return result;
+      }
+    })();
+    const result = await applyKillProfile(emulator, APP, "samsung-sleeping", { shell, registry });
+    expect(result.steps[1]).toMatchObject({ status: "failed", reason: "read-back disconnected" });
+    expect(forget).not.toHaveBeenCalled();
+    expect(registry.has(emulator.deviceId, `standbyBucket:${APP}`)).toBe(true);
+    forget.mockRestore();
+  });
+
+  test.each([
+    [
+      "huawei-powergenie",
+      [
+        "shell am set-standby-bucket 'com.example.app' restricted",
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND ignore",
+        "shell appops set 'com.example.app' WAKE_LOCK ignore",
+      ],
+      [
+        "shell am set-standby-bucket 'com.example.app' 10",
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND default",
+        "shell appops set 'com.example.app' WAKE_LOCK default",
+      ],
+    ],
+    [
+      "vivo-autostart",
+      [
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND ignore",
+        "shell am set-standby-bucket 'com.example.app' restricted",
+      ],
+      [
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND default",
+        "shell am set-standby-bucket 'com.example.app' 10",
+      ],
+    ],
+    [
+      "realme-power-saver",
+      [
+        "shell dumpsys battery unplug",
+        "shell am set-standby-bucket 'com.example.app' restricted",
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND ignore",
+      ],
+      [
+        "shell dumpsys battery reset",
+        "shell am set-standby-bucket 'com.example.app' 10",
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND default",
+      ],
+    ],
+    [
+      "meizu-flyme-background",
+      [
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND ignore",
+        "shell appops set 'com.example.app' WAKE_LOCK ignore",
+      ],
+      [
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND default",
+        "shell appops set 'com.example.app' WAKE_LOCK default",
+      ],
+    ],
+    [
+      "asus-power-master",
+      [
+        "shell am set-standby-bucket 'com.example.app' restricted",
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND ignore",
+      ],
+      [
+        "shell am set-standby-bucket 'com.example.app' 10",
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND default",
+      ],
+    ],
+    [
+      "sony-stamina",
+      [
+        "shell dumpsys battery unplug",
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND ignore",
+        "shell appops set --uid 'com.example.app' SCHEDULE_EXACT_ALARM deny",
+      ],
+      [
+        "shell dumpsys battery reset",
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND default",
+        "shell appops set --uid 'com.example.app' SCHEDULE_EXACT_ALARM default",
+      ],
+    ],
+    [
+      "tecno-app-halt",
+      [
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND ignore",
+        "shell appops set 'com.example.app' WAKE_LOCK ignore",
+      ],
+      [
+        "shell appops set 'com.example.app' RUN_ANY_IN_BACKGROUND default",
+        "shell appops set 'com.example.app' WAKE_LOCK default",
+      ],
+    ],
+  ] as const)(
+    "%s applies only restorable restrictions and resets every step",
+    async (id, applied, restored) => {
+      const profile = KILL_PROFILES[id];
+      expect(profile.steps.some((step) => step.kind === "kill")).toBe(false);
+      expect(
+        profile.steps.every((step) =>
+          ["batteryUnplug", "standbyBucket", "appOp"].includes(step.kind),
+        ),
+      ).toBe(true);
+      expect(profile.version).toBe(1);
+      expect(profile.evidenceStatus).toBe("inferred");
+      expect(profile.evidenceNote).toContain("Not modelled yet (#16869):");
+      const result = await applyKillProfile(emulator, APP, id, deps());
+      expect(result.status).toBe("applied");
+      expect(writes()).toEqual([...applied]);
+      expect(result.restore?.commands).toEqual([...restored]);
+      expect(result.restore?.commands).toHaveLength(profile.steps.length);
+      adb.clearHistory();
+      const reset = await resetKillProfile(emulator, APP, {}, deps());
+      expect(reset).toMatchObject({ source: "recorded", status: "applied" });
+      expect(writes()).toEqual([...restored]);
+      expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([]);
+    },
+  );
 
   test("every catalog entry is versioned and evidenced", () => {
     for (const id of KILL_PROFILE_IDS) {
@@ -148,6 +394,9 @@ describe("kill profiles (#14051)", () => {
       "POST_NOTIFICATIONS still granted after pm revoke",
     );
     expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([]);
+    expect(
+      adb.getExecutedCommands().filter((command) => command === `shell dumpsys package ${Q}`),
+    ).toHaveLength(2);
   });
 
   test.each([
@@ -271,10 +520,10 @@ describe("kill profiles (#14051)", () => {
   test.each(["false", "true"])(
     "Samsung auto-disable restores captured hibernation %s",
     async (original) => {
-      adb.setCommandResponse(
-        `shell cmd app_hibernation get-state --user 0 ${Q}`,
+      adb.setCommandResponseSequence(`shell cmd app_hibernation get-state --user 0 ${Q}`, [
         createExecResult(`${original}\n`, ""),
-      );
+        createExecResult("true\n", ""),
+      ]);
       const result = await applyKillProfile(emulator, APP, "samsung-auto-disable", deps());
       expect(result).toMatchObject({
         status: "applied",
@@ -339,6 +588,7 @@ describe("kill profiles (#14051)", () => {
   test("Samsung deep sleeping denies wake locks after capturing the mode and resets it", async () => {
     adb.setCommandResponseSequence(`shell appops get ${Q} WAKE_LOCK`, [
       createExecResult("WAKE_LOCK: allow\n", ""),
+      createExecResult("WAKE_LOCK: ignore\n", ""),
     ]);
     const result = await applyKillProfile(emulator, APP, "samsung-deep-sleeping", deps());
     expect(result.status).toBe("applied");
@@ -504,8 +754,9 @@ describe("kill profiles (#14051)", () => {
 
   test("exact-alarm-denied sets the uid mode and restores the uid mode read first", async () => {
     // Sequences take precedence over the catch-all `shell appops get` response.
-    adb.setCommandResponseSequence("shell appops get --uid", [
+    adb.setCommandResponseSequence(`shell appops get --uid ${Q} SCHEDULE_EXACT_ALARM`, [
       createExecResult("Uid mode: SCHEDULE_EXACT_ALARM: allow\n", ""),
+      createExecResult("Uid mode: SCHEDULE_EXACT_ALARM: deny\n", ""),
     ]);
     const result = await applyKillProfile(emulator, APP, "exact-alarm-denied", deps());
     expect(writes()).toEqual([`shell appops set --uid ${Q} SCHEDULE_EXACT_ALARM deny`]);
@@ -583,6 +834,10 @@ describe("kill profiles (#14051)", () => {
   });
 
   test("a session owner makes the receipt restore on release", async () => {
+    adb.setCommandResponseSequence(`shell am get-standby-bucket ${Q}`, [
+      createExecResult("10\n", ""),
+      createExecResult("40\n", ""),
+    ]);
     const result = await applyKillProfile(emulator, APP, "motorola-adaptive", deps("session-1"));
     expect(result.restore).toEqual({
       commands: [`shell am set-standby-bucket ${Q} 10`],

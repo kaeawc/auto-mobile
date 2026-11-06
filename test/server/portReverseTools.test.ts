@@ -3,10 +3,13 @@ import { PortReverseManager } from "../../src/features/portReverse/PortReverseMa
 import type { BootedDevice } from "../../src/models";
 import {
   createPortReverseHandler,
+  portReverseSchema,
   subscribePortReverseCleanup,
   type PortReverseLifecycle,
 } from "../../src/server/portReverseTools";
 import { portReverseResultSchema } from "../../src/server/portReverseToolOutputSchemas";
+import { FakeHostLoopbackProbe } from "../fakes/FakeHostLoopbackProbe";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 const android: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "Pixel" };
 const ios: BootedDevice = { deviceId: "SIM-1", platform: "ios", name: "iPhone" };
@@ -40,7 +43,11 @@ const structured = (response: unknown) =>
 const setup = (sessionUuid?: string) => {
   const mappings = new Map<number, number>();
   const executor = fakeExecutor(mappings);
-  const manager = new PortReverseManager(() => undefined);
+  const manager = new PortReverseManager(
+    () => undefined,
+    new FakeTimer(),
+    new FakeHostLoopbackProbe(),
+  );
   const handler = createPortReverseHandler({
     manager,
     policy: {},
@@ -148,5 +155,53 @@ describe("portReverse tool", () => {
       ),
     ).rejects.toThrow();
     expect(mappings.size).toBe(0);
+  });
+
+  test("ensure reclaimStale reclaims for a session and refuses a sessionless caller", async () => {
+    const sessionless = setup();
+    sessionless.mappings.set(3000, 4000);
+    const refused = structured(
+      await sessionless.handler(android, {
+        action: "ensure",
+        ports: [{ devicePort: 3000 }],
+        reclaimStale: true,
+      }),
+    );
+    expect(refused).toMatchObject({
+      errorCode: "port_reverse_conflict",
+      conflictKind: "external_unknown",
+      conflicts: [{ devicePort: 3000, conflictKind: "external_unknown" }],
+    });
+    expect(sessionless.mappings.get(3000)).toBe(4000);
+
+    const held = setup("session-a");
+    held.mappings.set(3000, 4000);
+    const result = structured(
+      await held.handler(android, {
+        action: "ensure",
+        ports: [{ devicePort: 3000 }],
+        reclaimStale: true,
+      }),
+    );
+    expect(result.mappings?.[0]).toMatchObject({
+      status: "added",
+      reclaimed: { host: "tcp:4000", reason: "host_refused" },
+    });
+    expect(held.mappings.get(3000)).toBe(3000);
+  });
+
+  test("verify accepts an HTTP probe and refuses an unsendable path", async () => {
+    const http = { path: "/metadata", expectStatus: [200] };
+    expect(portReverseSchema.safeParse({ action: "verify", probe: { http } }).success).toBe(true);
+    expect(
+      portReverseSchema.safeParse({ action: "verify", probe: { http: { ...http, path: "/a b" } } })
+        .success,
+    ).toBe(false);
+    const { executor, handler } = setup("session-a");
+    await handler(android, { action: "ensure", ports: [{ devicePort: 8080 }] });
+    const result = structured(await handler(android, { action: "verify", probe: { http } }));
+    // The fake executor prints nothing for a shell command, which no probe can read.
+    expect(result.mappings?.[0]).toMatchObject({ status: "probe_unsupported" });
+    expect(executor.commands.some((c) => c.includes("GET /metadata HTTP/1.0"))).toBe(true);
   });
 });

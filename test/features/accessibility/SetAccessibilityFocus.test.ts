@@ -642,12 +642,91 @@ describe("SetAccessibilityFocus", () => {
     expect(result.warning).toBeUndefined();
   });
 
-  test("throws ActionableError on iOS (Android-only gating)", async () => {
-    const feature = makeFeature(iosDevice);
-    await expect(feature.execute({ action: "set", resourceId: "x" })).rejects.toThrow(
-      /only supported on Android/,
+  test("iOS without an injected client throws an actionable configuration error", async () => {
+    const feature = new SetAccessibilityFocus(iosDevice);
+    const result = feature.execute({ text: "Save" });
+    await expect(result).rejects.toBeInstanceOf(ActionableError);
+    await expect(result).rejects.toHaveProperty(
+      "message",
+      "iOS VoiceOver focus is not configured: no iOS runner client was provided.",
     );
-    expect(service.calls).toHaveLength(0);
+  });
+
+  test("iOS set forwards selectors and reports unconfirmed focus", async () => {
+    const calls: object[] = [];
+    const feature = new SetAccessibilityFocus(iosDevice, {
+      iosServiceFactory: () => ({
+        requestAccessibilityFocus: async (selector) => {
+          calls.push(selector);
+          return { success: true, totalTimeMs: 0 };
+        },
+      }),
+    });
+    expect(await feature.execute({ text: "Save", contentDesc: "Button" })).toEqual({
+      success: true,
+      confirmed: false,
+      warning: "VoiceOver focus was posted; the focus read-back is not implemented on iOS.",
+    });
+    expect(calls).toEqual([{ text: "Save", contentDesc: "Button", resourceId: undefined }]);
+  });
+
+  test("iOS clear returns unsupported without resolving a service or selector", async () => {
+    const feature = new SetAccessibilityFocus(iosDevice, {
+      iosServiceFactory: () => {
+        throw new Error("must not resolve client");
+      },
+    });
+    const result = await feature.execute({ action: "clear" });
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe("unsupported");
+    expect(result.error).toContain("no reliable");
+  });
+
+  test.each([
+    "voiceover_off",
+    "sdk_unavailable",
+    "element_not_found",
+    "invalid_selector",
+    "unsupported",
+  ] as const)("iOS preserves typed %s failures", async (errorCode) => {
+    const feature = new SetAccessibilityFocus(iosDevice, {
+      iosServiceFactory: () => ({
+        requestAccessibilityFocus: async () => ({
+          success: false,
+          errorCode,
+          error: "SDK error",
+          totalTimeMs: 0,
+        }),
+      }),
+    });
+    const result = await feature.execute({ resourceId: "save" });
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe(errorCode);
+    expect(result.error).toContain(
+      errorCode === "voiceover_off" ? "accessibility {voiceover:true}" : "SDK error",
+    );
+  });
+
+  test("iOS unexpected client failures surface as actionable errors", async () => {
+    const feature = new SetAccessibilityFocus(iosDevice, {
+      iosServiceFactory: () => ({
+        requestAccessibilityFocus: async () => {
+          throw new Error("connection lost");
+        },
+      }),
+    });
+    await expect(feature.execute({ text: "Save" })).rejects.toThrow(
+      "Failed to set VoiceOver focus: connection lost",
+    );
+  });
+
+  test("iOS missing selector returns invalid_selector without contacting the client", async () => {
+    const feature = new SetAccessibilityFocus(iosDevice, {
+      iosServiceFactory: () => {
+        throw new Error("must not resolve client");
+      },
+    });
+    expect((await feature.execute({})).errorCode).toBe("invalid_selector");
   });
   test("rejects an unknown native ID without contacting the service", async () => {
     observeScreen.setObserveResult(makeObserveResult(makeViewHierarchy([])));

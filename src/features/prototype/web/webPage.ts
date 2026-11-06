@@ -590,7 +590,7 @@ function pageHtml(
   { frame, views, history, screens, images = "" }: PageParts,
 ): string {
   const body = `<body data-variant="${escapeAttribute(first.variant.id)}" data-revision="${first.revision}" data-platform="${escapeAttribute(frame.platform)}"${prototypeWeb3dBodyAttributes(frame.fold)}>${toHtml(toolbar(input, first.variant, screens, frame))}<div data-main=""><div data-viewport="" aria-label="Device preview"><div data-stage="">${views}</div></div>${history ? toHtml(history) : ""}</div><script>${PROTOTYPE_WEB_RUNTIME}</script></body>`;
-  const head = `<head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${cspFor(PROTOTYPE_WEB_RUNTIME)}"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${toHtml(input.title)}</title><style>${PAGE_CSS}${images}</style></head>`;
+  const head = `<head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${cspFor(PROTOTYPE_WEB_RUNTIME)}"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"><title>${toHtml(input.title)}</title><style>${PAGE_CSS}${images}</style></head>`;
   return `<!doctype html><html lang="en">${head}${body}</html>\n`;
 }
 

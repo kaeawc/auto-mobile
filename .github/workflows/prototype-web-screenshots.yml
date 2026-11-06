@@ -1,8 +1,9 @@
 name: "Prototype Web Screenshots (Advisory)"
 
-# Headless Chromium check of the prototype web page's reference specs (#16346):
-# console errors, CSP violations, network requests, the runtime's fit and rotate,
-# and a pixel diff against the goldens in test/fixtures/prototype-web/screenshots/.
+# Headless browser check of the prototype web page's reference specs (#16346):
+# console errors, CSP violations, network requests, the runtime's fit and rotate in
+# Chromium, Firefox and WebKit (#16459), and, in Chromium only, a pixel diff
+# against the goldens in test/fixtures/prototype-web/screenshots/.
 # Advisory, never required, and not in the green-main ruleset. Linux only: the
 # goldens are rendered by the Chromium build that the pinned playwright-core
 # installs here. The actual screenshots and diffs are uploaded as the
@@ -57,12 +58,12 @@ jobs:
       - name: "Install dependencies"
         run: bash scripts/ci/install-bun-deps.sh
 
-      # The browser is a CI-only install of the build the locked playwright-core
+      # The browsers are a CI-only install of the builds the locked playwright-core
       # names; nothing installs a browser at package install time or at runtime.
-      - name: "Install headless Chromium"
-        run: node_modules/.bin/playwright-core install --with-deps --only-shell chromium
+      - name: "Install headless Chromium, Firefox and WebKit"
+        run: node_modules/.bin/playwright-core install --with-deps --only-shell chromium firefox webkit
 
-      - name: "Check the reference specs in headless Chromium"
+      - name: "Check the reference specs in headless Chromium, Firefox and WebKit"
         env:
           AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS_OUT: "${{ github.workspace }}/scratch/prototype-web-screenshots"
         run: bash scripts/prototype/web-screenshots.sh

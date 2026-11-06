@@ -76,7 +76,7 @@ export interface EncodedPrototypeWebImages {
 
 /**
  * Encodes the requested assets in order, skipping one the host has no image bytes for or cannot
- * decode, and setting aside one whose data URI alone exceeds the page, since the page could never
+ * read or decode, and setting aside one whose data URI alone exceeds the page, since the page could never
  * inline it. The rest are all kept: the page's budget, not the encoded total, decides which fit.
  */
 export async function encodePrototypeWebImages(
@@ -91,11 +91,11 @@ export async function encodePrototypeWebImages(
   const images: PrototypeWebImage[] = [];
   const overBudget = new Set<string>();
   for (const request of requests) {
-    const asset = await source.get(request.id);
-    if (!asset || !IMAGE_MIME_TYPES.has(asset.mimeType)) {
-      continue;
-    }
     try {
+      const asset = await source.get(request.id);
+      if (!asset || !IMAGE_MIME_TYPES.has(asset.mimeType)) {
+        continue;
+      }
       const encoded = await encoder.encode(asset.bytes, request.boxes, { applyExifOrientation });
       if (base64Bytes(encoded.bytes.byteLength) <= maxBytes) {
         images.push({ id: request.id, ...encoded });
@@ -105,7 +105,7 @@ export async function encodePrototypeWebImages(
     } catch (error) {
       // The page still renders: this asset keeps its placeholder with reason `assetNotInlined`.
       logger.warn(
-        `[PROTOTYPE] Could not encode asset ${request.id} for the web page: ${errorMessage(error)}`,
+        `[PROTOTYPE] Could not read or encode asset ${request.id} for the web page: ${errorMessage(error)}`,
         error,
       );
     }

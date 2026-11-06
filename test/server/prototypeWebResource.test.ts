@@ -242,6 +242,20 @@ describe("web page images from the host asset cache (#16533)", () => {
     expect((await assets(["a", "b"]).get("hero"))?.bytes).toEqual(Uint8Array.of(1));
   });
 
+  test("skips a device whose cache cannot be read", async () => {
+    const failing = {
+      get: async (serial: string, id: string) => {
+        if (serial === "sim") {
+          throw new Error("EACCES: permission denied");
+        }
+        return cache.get(serial, id);
+      },
+    };
+    const source = cachedPrototypeWebAssets(() => ["sim", "pixel"], failing)(["a"]);
+    expect((await source.get("hero"))?.mimeType).toBe("image/png");
+    expect(await source.get("other")).toBeUndefined();
+  });
+
   test("the web resource inlines a cached asset the page draws", async () => {
     const before = ResourceRegistry.snapshotForTesting();
     ResourceRegistry.clearServersForTesting();

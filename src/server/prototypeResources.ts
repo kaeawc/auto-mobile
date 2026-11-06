@@ -68,6 +68,7 @@ import {
   type PrototypeEmbedResourceQuery,
 } from "../features/prototype/web/prototypeEmbedResource";
 import { logger } from "../utils/logger";
+import { errorMessage } from "../models/describeUnknownError";
 import { decodeSegmentOrThrow } from "./resourceUriSegments";
 import type { ResourceContent } from "./resourceRegistry";
 
@@ -95,7 +96,8 @@ export interface PrototypeWebSources {
  * Asset bytes the host cached when it uploaded them to a device showing one of the variants
  * (Android caches uploads per device). Asset ids are chosen per device and the page holds one
  * image per id, so when two devices cached different bytes under the id, it stays a placeholder
- * rather than drawing one device's image in another's variant.
+ * rather than drawing one device's image in another's variant. A device whose cache cannot be read
+ * is skipped.
  */
 export function cachedPrototypeWebAssets(
   devicesShowing: (id: string) => readonly string[],
@@ -106,7 +108,17 @@ export function cachedPrototypeWebAssets(
       const devices = [...new Set(variantIds.flatMap((id) => devicesShowing(id)))];
       let found: Awaited<ReturnType<PrototypeAssetCache["get"]>>;
       for (const device of devices) {
-        const asset = await cache.get(device, assetId);
+        let asset: Awaited<ReturnType<PrototypeAssetCache["get"]>>;
+        try {
+          asset = await cache.get(device, assetId);
+        } catch (error) {
+          // Another device may still have the asset; without one the image keeps its placeholder.
+          logger.warn(
+            `[PROTOTYPE] Asset cache read failed for ${assetId} on ${device}: ${errorMessage(error)}`,
+            error,
+          );
+          continue;
+        }
         if (!asset) {
           continue;
         }

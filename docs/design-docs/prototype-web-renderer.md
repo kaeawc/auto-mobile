@@ -338,8 +338,10 @@ the host, so the page's script only switches between views it was given and neve
   below, so the screen paints the theme's `background` role (else `surface`).
 - **Mode.** The still resolves light or dark in the devices' order: an explicit `theme.mode`;
   with no mode, the luminance of the flat `theme.colors.background` (else `surface`) override,
-  then of the first opaque hex background on the root's leading chain (the first visible child,
-  a pager's current page; role and `{light, dark}` backgrounds are passed over); last the
+  then of the first opaque hex background on the root's leading chain (the first child that
+  draws in place, so a hidden node or a closed sheet is passed over; a pager's current page, a
+  scroll's `child`, a stack's drawn screen; role and `{light, dark}` backgrounds are passed
+  over); last the
   caller's `mode`, then light. `theme.mode: "system"` goes straight to the caller's. As on
   Android, an authored colour of the resolved mode's polarity replaces `background`, `surface`
   and `surfaceContainer`/`Low`/`High`/`Highest` unless a seed or device source derives the scheme;

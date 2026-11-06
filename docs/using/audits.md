@@ -23,7 +23,8 @@ Passing an argument of the other engine fails the call with an `error` naming it
 `screenId`, and `failed` when `failOn` matched. With `baseline` compare, `baselineDiff` lists `new`
 violations, `fixed` fingerprints and the `unchanged` count, and only new violations count toward
 `failOn`; a missing baseline is an error, so record one first. A `scope.container` that matches no
-element is an error.
+element is an error. The audit reads the screen on display, so an `appId` that is not in the
+foreground is an error: bring the app to the foreground first, or omit `appId`.
 
 **platform** (iOS 17+, Simulator and physical) runs XCUITest `performAccessibilityAudit`. The
 result has `issues` (each with `check`, `summary`, `elementId` usable with `tapOn`, and `bounds`),

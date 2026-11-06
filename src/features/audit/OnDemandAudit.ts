@@ -130,6 +130,37 @@ export function findAuditContainer(
   );
 }
 
+/**
+ * Why the observed screen cannot stand for `appId`, or undefined when it can. The WCAG audit reads
+ * the observed screen, so a requested app that is not in the foreground would be judged by another
+ * app's screen (#17281). An unknown foreground is not treated as a mismatch.
+ */
+function foregroundMismatch(observation: ObserveResult, appId: string): string | undefined {
+  const foreground = observation.activeWindow?.appId;
+  if (foreground === undefined || foreground === appId) {
+    return undefined;
+  }
+  return `The accessibility audit checks the foreground screen; ${appId} is not in the foreground (${foreground} is). Bring ${appId} to the foreground or omit appId.`;
+}
+
+/** The app to audit, or the failed result when there is none or it is not on screen. */
+function auditTarget(
+  kinds: ReadonlySet<AuditKind>,
+  requested: string | undefined,
+  observation: ObserveResult,
+): string | OnDemandAuditResult {
+  const appId = requested ?? observation.activeWindow?.appId;
+  if (!appId) {
+    return {
+      success: false,
+      failed: false,
+      error: "No foreground app to audit; launch the app or pass appId.",
+    };
+  }
+  const mismatch = kinds.has("accessibility") ? foregroundMismatch(observation, appId) : undefined;
+  return mismatch ? { success: false, failed: false, appId, error: mismatch } : appId;
+}
+
 const SEVERITY_FAILS: Record<AuditFailOn, ReadonlySet<WcagViolation["severity"]>> = {
   error: new Set(["error"]),
   warning: new Set(["error", "warning"]),
@@ -153,13 +184,9 @@ export class OnDemandAudit {
       };
     }
     const { result: observation, screenshotPath } = await this.engines.observe();
-    const appId = input.appId ?? observation.activeWindow?.appId;
-    if (!appId) {
-      return {
-        success: false,
-        failed: false,
-        error: "No foreground app to audit; launch the app or pass appId.",
-      };
+    const appId = auditTarget(kinds, input.appId, observation);
+    if (typeof appId !== "string") {
+      return appId;
     }
     const output: OnDemandAuditResult = { success: true, failed: false, appId };
     const reported = kinds.has("accessibility")

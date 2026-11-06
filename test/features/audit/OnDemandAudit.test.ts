@@ -142,6 +142,26 @@ describe("OnDemandAudit (#14075)", () => {
     expect(result.unsupported?.performance).toContain("not in the foreground");
   });
 
+  test("refuses an accessibility audit of an appId that is not in the foreground (#17281)", async () => {
+    engines.violations = [violation("small", "error")];
+
+    const result = await audit().run({ appId: "com.other", kinds: ["accessibility", "memory"] });
+
+    expect(engines.calls).toEqual(["observe"]);
+    expect(result.success).toBe(false);
+    expect(result.accessibility).toBeUndefined();
+    expect(result.error).toBe(
+      "The accessibility audit checks the foreground screen; com.other is not in the foreground (com.example is). Bring com.other to the foreground or omit appId.",
+    );
+  });
+
+  test("audits a requested appId that is in the foreground", async () => {
+    const result = await audit().run({ appId: "com.example" });
+
+    expect(engines.calls).toEqual(["observe", "accessibility:com.example:/tmp/shot.png"]);
+    expect(result.success).toBe(true);
+  });
+
   test("no foreground app and no appId is an error", async () => {
     engines.observed = { ...observation(), activeWindow: undefined };
 

@@ -122,8 +122,8 @@ function textMatches(expected: string | undefined, actual: string, exact: boolea
 }
 
 /**
- * Whether `element` is the target. Labels match case-insensitively as substrings unless `exact`;
- * a resource id matches the native id (or its `:id/` name) or the node's synthetic `view-id`.
+ * Whether `element` is the target. Labels match case-insensitively as substrings and ids by name
+ * unless `exact`; a resource id also matches the node's synthetic `view-id`.
  */
 export function elementMatchesTarget(
   element: Element,
@@ -140,15 +140,34 @@ export function elementMatchesTarget(
     textMatches(target.text, text, exact) &&
     textMatches(target.contentDesc, contentDesc, exact) &&
     labelMatches &&
-    (!target.resourceId ||
-      matchesCtrlProxyResourceId(stringProp(element, "resource-id"), target.resourceId) ||
-      stringProp(element, "view-id") === target.resourceId)
+    (!target.resourceId || resourceIdMatches(element, target.resourceId, exact))
   );
 }
 
 /**
- * The target predicate for one screen. Like `tapOn`, an exact label match on screen wins over
- * substring matches, so "Settings" never settles on a focused "Advanced Settings".
+ * Exactly: the native id or the synthetic `view-id` equals `resourceId`. Otherwise also by name,
+ * as `tapOn` resolves ids: `name` matches `pkg:id/name`, and `pkg:id/name` matches a native
+ * id that is just `name` (Compose).
+ */
+function resourceIdMatches(element: Element, resourceId: string, exact: boolean): boolean {
+  const nativeId = stringProp(element, "resource-id");
+  if (nativeId === resourceId || stringProp(element, "view-id") === resourceId) {
+    return true;
+  }
+  if (exact) {
+    return false;
+  }
+  const marker = resourceId.lastIndexOf(":id/");
+  const name = marker >= 0 ? resourceId.slice(marker + ":id/".length) : undefined;
+  return (
+    matchesCtrlProxyResourceId(nativeId, resourceId) || (name !== undefined && nativeId === name)
+  );
+}
+
+/**
+ * The target predicate for one screen. Like `tapOn`, an exact match on screen (label and id) wins
+ * over looser ones, so "Settings" never settles on a focused "Advanced Settings", nor
+ * `com.example:id/save` on a focused `com.other:id/save`.
  */
 export function screenTargetMatcher(
   elements: readonly Element[],

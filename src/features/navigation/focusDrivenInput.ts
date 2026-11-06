@@ -80,10 +80,8 @@ export function focusTargetFromSelector(
 ): FocusNavigateTarget | null {
   const resourceId = nonEmpty(selector.elementId);
   if (resourceId) {
-    // tapOn accepts `pkg:id/name` for a control whose native id is just `name` (Compose);
-    // focusNavigate matches a bare name against both, so keep only the name.
-    const marker = resourceId.lastIndexOf(":id/");
-    return { resourceId: marker >= 0 ? resourceId.slice(marker + ":id/".length) : resourceId };
+    // focusNavigate matches the qualified id exactly when it is on screen, else its bare name.
+    return { resourceId };
   }
   // tapOn's text selector matches the text or the content-desc; `label` keeps that.
   const label = nonEmpty(selector.text);

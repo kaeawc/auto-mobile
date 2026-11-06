@@ -5,7 +5,10 @@ import {
   focusTargetForElement,
   focusTargetFromSelector,
 } from "../../../src/features/navigation/focusDrivenInput";
-import { elementMatchesTarget } from "../../../src/features/action/FocusNavigate";
+import {
+  elementMatchesTarget,
+  screenTargetMatcher,
+} from "../../../src/features/action/FocusNavigate";
 import { extractNavigationElements } from "../../../src/features/navigation/ExploreElementExtraction";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import type { BootedDevice } from "../../../src/models";
@@ -54,7 +57,7 @@ describe("deviceInputModeResolver", () => {
 describe("focusTargetFromSelector", () => {
   test("prefers the element id, then text", () => {
     expect(focusTargetFromSelector({ elementId: "app:id/row", text: "Movies" })).toEqual({
-      resourceId: "row",
+      resourceId: "app:id/row",
     });
     expect(focusTargetFromSelector({ elementId: "save" })).toEqual({ resourceId: "save" });
     expect(focusTargetFromSelector({ text: "Movies" })).toEqual({ label: "Movies" });
@@ -64,13 +67,25 @@ describe("focusTargetFromSelector", () => {
 });
 
 describe("a namespaced recorded id", () => {
-  test("still matches a control whose native id is the bare name", () => {
-    const until = focusTargetFromSelector({ elementId: "com.example:id/save" });
-    const compose = { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, "resource-id": "save" };
-    const view = { ...compose, "resource-id": "com.example:id/save" };
-    expect(until).toEqual({ resourceId: "save" });
-    expect(elementMatchesTarget(compose, until!)).toBe(true);
-    expect(elementMatchesTarget(view, until!)).toBe(true);
+  const at = (id: string) => ({
+    bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+    "resource-id": id,
+  });
+
+  test("matches a control whose native id is the bare name", () => {
+    const until = focusTargetFromSelector({ elementId: "com.example:id/save" })!;
+    expect(until).toEqual({ resourceId: "com.example:id/save" });
+    expect(elementMatchesTarget(at("save"), until)).toBe(true);
+    expect(elementMatchesTarget(at("com.example:id/save"), until)).toBe(true);
+  });
+
+  test("prefers the exact qualified id over another namespace's same name", () => {
+    const until = { resourceId: "com.example:id/save" };
+    const other = at("com.other:id/save");
+    const isTarget = screenTargetMatcher([other, at("com.example:id/save")], until);
+    expect(isTarget(other)).toBe(false);
+    expect(screenTargetMatcher([other], until)(other)).toBe(false);
+    expect(screenTargetMatcher([at("save")], until)(at("save"))).toBe(true);
   });
 });
 
@@ -85,7 +100,7 @@ describe("dpadReplayInteraction", () => {
     });
     expect(replay("tapOn", { elementId: "app:id/row" })).toEqual({
       toolName: "focusNavigate",
-      args: { until: { resourceId: "row" }, select: true },
+      args: { until: { resourceId: "app:id/row" }, select: true },
     });
   });
 

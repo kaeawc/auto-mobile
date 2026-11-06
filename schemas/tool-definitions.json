@@ -192,24 +192,29 @@
   },
   {
     "name": "accessibilityAudit",
-    "title": "Audit Native Accessibility",
+    "title": "Audit Accessibility",
     "annotations": {
-      "destructiveHint": false
+      "destructiveHint": true
     },
-    "description": "Run the platform's own accessibility audit engine on the current screen. iOS (iOS 17+, Simulator and physical) runs XCUITest performAccessibilityAudit and reports contrast, hitRegion, dynamicType, textClipped, sufficientDescription, trait and elementDetection issues, each with the element's accessibility identifier as elementId (usable with tapOn/highlight) and bounds. Unlike the host-side WCAG audit, the platform engine sees real hit regions, Dynamic Type support and clipped text. Android (Accessibility Test Framework) is not available yet and returns errorCode unsupported_platform; a runner that predates this command returns errorCode unsupported_capability.",
+    "description": "Audit the accessibility of the current screen. engine wcag (default on Android; Android only) runs the host-side WCAG checks (contrast, touch targets, labels, headings) with every audit feature flag off and reports violations with the element from this observation; scope.container limits it to one element's subtree; baseline record saves the violations under a name and compare reports baselineDiff (new, fixed, unchanged), and only new violations count toward failOn; failOn error|warning makes the call fail when findings reach that severity, for plan assertions (default never). engine platform (default on iOS) runs the platform's own engine: on iOS 17+ (Simulator and physical) XCUITest performAccessibilityAudit reports contrast, hitRegion, dynamicType, textClipped, sufficientDescription, trait and elementDetection issues, each with the element's accessibility identifier as elementId (usable with tapOn/highlight) and bounds; it sees real hit regions, Dynamic Type support and clipped text. checks and maxIssues apply to the platform engine, scope, baseline and failOn to wcag; passing one to the other engine is an error. The Android platform engine (Accessibility Test Framework) is not available yet and returns errorCode unsupported_platform, as does wcag on iOS; a runner that predates the iOS command returns errorCode unsupported_capability.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "engine": {
+          "description": "platform (XCUITest) or wcag (host-side checks); default wcag on Android, platform on iOS",
+          "type": "string",
+          "enum": ["platform", "wcag"]
+        },
         "appId": {
-          "description": "Bundle id of the app to audit (default: the foreground app)",
+          "description": "Package or bundle id of the app to audit (default: the foreground app)",
           "type": "string",
           "minLength": 1,
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9._-]+$"
         },
         "checks": {
-          "description": "Checks to run (default: all)",
+          "description": "platform engine: checks to run (default: all)",
           "type": "array",
           "items": {
             "type": "string",
@@ -226,10 +231,57 @@
           }
         },
         "maxIssues": {
-          "description": "Most issues to return (default 50); truncated reports a clip",
+          "description": "platform engine: most issues to return (default 50); truncated reports a clip",
           "type": "integer",
           "minimum": 1,
           "maximum": 500
+        },
+        "scope": {
+          "description": "wcag engine: limit the audit to one container's subtree",
+          "type": "object",
+          "properties": {
+            "container": {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "description": "Container resource id",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "text": {
+                  "description": "Container text or content-desc",
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": ["container"],
+          "additionalProperties": false
+        },
+        "baseline": {
+          "description": "wcag engine: named accessibility baseline",
+          "type": "object",
+          "properties": {
+            "name": {
+              "description": "Baseline name",
+              "type": "string",
+              "minLength": 1
+            },
+            "mode": {
+              "description": "record saves; compare reports the diff",
+              "type": "string",
+              "enum": ["compare", "record"]
+            }
+          },
+          "required": ["name", "mode"],
+          "additionalProperties": false
+        },
+        "failOn": {
+          "description": "wcag engine: fail the call at this violation severity (default never: report only)",
+          "type": "string",
+          "enum": ["error", "warning", "never"]
         },
         "platform": {
           "type": "string",
@@ -258,7 +310,13 @@
         },
         "engine": {
           "type": "string",
-          "enum": ["xcuitest", "atf"]
+          "enum": ["xcuitest", "atf", "wcag"]
+        },
+        "failed": {
+          "type": "boolean"
+        },
+        "appId": {
+          "type": "string"
         },
         "issues": {
           "type": "array",
@@ -307,14 +365,56 @@
         "totalIssues": {
           "type": "number"
         },
-        "truncated": {
-          "type": "boolean"
-        },
         "unsupportedChecks": {
           "type": "array",
           "items": {
             "type": "string"
           }
+        },
+        "violations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "totalViolations": {
+          "type": "number"
+        },
+        "summary": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        },
+        "screenId": {
+          "type": "string"
+        },
+        "baselineDiff": {
+          "type": "object",
+          "properties": {
+            "new": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            "fixed": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "unchanged": {
+              "type": "number"
+            }
+          },
+          "required": ["new", "fixed", "unchanged"],
+          "additionalProperties": false
+        },
+        "baselineRecorded": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
         },
         "errorCode": {
           "type": "string",
@@ -324,8 +424,26 @@
           "type": "string"
         }
       },
-      "required": ["success", "engine", "issues", "totalIssues", "truncated", "unsupportedChecks"],
-      "additionalProperties": {}
+      "required": ["success", "engine"],
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string"
+            },
+            "severity": {
+              "type": "string"
+            },
+            "fingerprint": {
+              "type": "string"
+            }
+          },
+          "required": ["type", "severity", "fingerprint"],
+          "additionalProperties": {}
+        }
+      }
     }
   },
   {
@@ -844,7 +962,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Audit the current screen on demand, with every audit feature flag off and without changing flag state. kinds: accessibility (WCAG: contrast, touch targets, labels, headings; default), performance (UI jank and touch latency of the foreground app), memory (a memory snapshot of appId). Violations carry the element from this observation. scope.container limits the accessibility audit to one element's subtree. baseline record saves the accessibility violations under a name; compare reports baselineDiff (new, fixed, unchanged), and only new violations count toward failOn. failOn error|warning makes the call fail when findings reach that severity, for plan assertions; default never. Android only.",
+    "description": "Deprecated: use accessibilityAudit (engine wcag) for accessibility and performanceAudit for performance and memory; this tool returns the same results and will be removed. Audit the current screen on demand, with every audit feature flag off and without changing flag state. kinds: accessibility (WCAG: contrast, touch targets, labels, headings; default), performance (UI jank and touch latency of the foreground app), memory (a memory snapshot of appId). Violations carry the element from this observation. scope.container limits the accessibility audit to one element's subtree. baseline record saves the accessibility violations under a name; compare reports baselineDiff (new, fixed, unchanged), and only new violations count toward failOn. failOn error|warning makes the call fail when findings reach that severity, for plan assertions; default never. Android only.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -971,24 +1089,10 @@
           "additionalProperties": {}
         },
         "performance": {
-          "type": "object",
-          "properties": {
-            "passed": {
-              "type": "boolean"
-            }
-          },
-          "required": ["passed"],
-          "additionalProperties": {}
+          "$ref": "#/$defs/__schema1"
         },
         "memory": {
-          "type": "object",
-          "properties": {
-            "passed": {
-              "type": "boolean"
-            }
-          },
-          "required": ["passed"],
-          "additionalProperties": {}
+          "$ref": "#/$defs/__schema1"
         },
         "baselineDiff": {
           "type": "object",
@@ -1045,6 +1149,16 @@
             }
           },
           "required": ["type", "severity", "fingerprint"],
+          "additionalProperties": {}
+        },
+        "__schema1": {
+          "type": "object",
+          "properties": {
+            "passed": {
+              "type": "boolean"
+            }
+          },
+          "required": ["passed"],
           "additionalProperties": {}
         }
       }
@@ -9600,6 +9714,7 @@
               "network",
               "observe",
               "openLink",
+              "performanceAudit",
               "performanceTrace",
               "phoneCall",
               "pinchOn",
@@ -9764,6 +9879,7 @@
               "network",
               "observe",
               "openLink",
+              "performanceAudit",
               "performanceTrace",
               "phoneCall",
               "pinchOn",
@@ -25192,6 +25308,104 @@
       },
       "required": ["success", "url", "message"],
       "additionalProperties": {}
+    }
+  },
+  {
+    "name": "performanceAudit",
+    "title": "Audit Performance",
+    "annotations": {
+      "destructiveHint": false
+    },
+    "description": "Pass/fail performance checks of an app on the current screen, against the configured thresholds. kinds: performance (UI jank, frame time and touch latency of the foreground app; appId must be in the foreground) and memory (a memory snapshot of appId); default both. Each reports passed with its metrics and violations. failOn error|warning makes the call fail when a check does not pass, for plan assertions; default never. For raw captures use performanceTrace, captureTrace, measureStartup or heapDump. Android only.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "kinds": {
+          "description": "Checks to run (default: performance and memory)",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["performance", "memory"]
+          }
+        },
+        "appId": {
+          "description": "Package to audit (default: the foreground app)",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "failOn": {
+          "description": "Fail the call when a check does not pass: error or warning (default never: report only)",
+          "type": "string",
+          "enum": ["error", "warning", "never"]
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios", "tvos", "visionos"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "failed": {
+          "type": "boolean"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "performance": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "memory": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "unsupported": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "failed"],
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "properties": {
+            "passed": {
+              "type": "boolean"
+            }
+          },
+          "required": ["passed"],
+          "additionalProperties": {}
+        }
+      }
     }
   },
   {
@@ -43008,6 +43222,7 @@
               "network",
               "observe",
               "openLink",
+              "performanceAudit",
               "performanceTrace",
               "phoneCall",
               "pinchOn",
@@ -55960,6 +56175,7 @@
             "network",
             "observe",
             "openLink",
+            "performanceAudit",
             "performanceTrace",
             "phoneCall",
             "pinchOn",
@@ -56086,6 +56302,7 @@
               "network",
               "observe",
               "openLink",
+              "performanceAudit",
               "performanceTrace",
               "phoneCall",
               "pinchOn",

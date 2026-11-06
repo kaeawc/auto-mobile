@@ -18,6 +18,13 @@ import { matchesCtrlProxyResourceId } from "../utility/SearchableNode";
 export const AUDIT_KINDS = ["accessibility", "performance", "memory"] as const;
 export type AuditKind = (typeof AUDIT_KINDS)[number];
 
+/** The kinds the `performanceAudit` tool runs (#17279). */
+export const PERFORMANCE_AUDIT_KINDS = [
+  "performance",
+  "memory",
+] as const satisfies readonly AuditKind[];
+export type PerformanceAuditKind = (typeof PERFORMANCE_AUDIT_KINDS)[number];
+
 export const AUDIT_FAIL_ON = ["error", "warning", "never"] as const;
 export type AuditFailOn = (typeof AUDIT_FAIL_ON)[number];
 

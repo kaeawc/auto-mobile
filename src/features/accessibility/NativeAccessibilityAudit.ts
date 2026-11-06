@@ -57,7 +57,7 @@ const defaultSenderFactory: IosAccessibilityAuditSenderFactory = iosCtrlProxyCli
 
 const ANDROID_UNSUPPORTED_ERROR =
   "The native Android accessibility audit (Accessibility Test Framework) is not available yet. " +
-  "Use the host-side WCAG audit instead: enable the accessibility-audit feature flag and observe.";
+  "Use the host-side WCAG checks instead: accessibilityAudit with engine wcag, the Android default.";
 
 const OUTDATED_RUNNER_ERROR =
   "accessibilityAudit on iOS needs an AutoMobile iOS runner that supports " +

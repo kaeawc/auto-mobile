@@ -3586,7 +3586,7 @@ Every starter template passes this lint with zero findings, pinned by the templa
 
 ### On-device audit and RTL (#14126)
 
-The `audit` tool's `WcagAudit` reads the accessibility tree the Compose renderer projects, so it
+The `wcag` engine of `accessibilityAudit` (`WcagAudit`) reads the accessibility tree the Compose renderer projects, so it
 sees prototype nodes through that projection, not the spec:
 
 - A text field's `label` is a child text node with no class, drawn inside the `EditText`. The audit

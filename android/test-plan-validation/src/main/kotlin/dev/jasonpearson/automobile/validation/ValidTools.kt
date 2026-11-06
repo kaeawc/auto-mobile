@@ -98,6 +98,7 @@ object ValidTools {
         "terminateApp",
         "uninstallApp",
         "videoRecording",
+        "performanceAudit",
         "performanceTrace",
         "captureTrace",
         "heapDump",

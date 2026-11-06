@@ -940,6 +940,20 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
   },
   prototype_platform_map_google_v1: mapBackendFixture("google"),
   prototype_platform_map_maplibre_v1: mapBackendFixture("maplibre"),
+  prototype_platform_webview_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["webview"] },
+      root: {
+        ...base.root,
+        children: [
+          { type: "webView", url: "https://example.com", allowedOrigins: ["https://example.com"] },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_sensors_v1: {
     minimalSpec: {
       ...base,

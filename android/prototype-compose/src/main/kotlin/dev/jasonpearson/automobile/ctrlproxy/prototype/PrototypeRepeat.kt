@@ -83,6 +83,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeTooltipNode
 import dev.jasonpearson.automobile.protocol.PrototypeTopAppBarNode
 import dev.jasonpearson.automobile.protocol.PrototypeValidityKeys
 import dev.jasonpearson.automobile.protocol.PrototypeVideoPlayerNode
+import dev.jasonpearson.automobile.protocol.PrototypeWebViewNode
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -756,6 +757,16 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     // Contract only (#14309): no renderer draws a map yet.
     is PrototypeMapNode ->
+      copy(
+        semantics = semantics,
+        onAppear = onAppear,
+        onTap = onTap,
+        styleWhen = styleWhen,
+        shared = shared,
+        visibleWhen = visibleWhen,
+      )
+    // Contract only (#14312): no renderer draws a web view yet.
+    is PrototypeWebViewNode ->
       copy(
         semantics = semantics,
         onAppear = onAppear,

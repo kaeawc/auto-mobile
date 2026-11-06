@@ -335,6 +335,7 @@ There are no iOS prototype screenshot baselines to re-record.
 | timePicker      | native   | material | —     |
 | topAppBar       | material | material | —     |
 | videoPlayer     | material | material | —     |
+| webView         | neutral  | neutral  | —     |
 
 ### Light and dark values
 
@@ -4090,6 +4091,51 @@ The `map` node (#14309, contract only: no renderer draws it and no runtime adver
   simulation can deliver them.
 - Checked when the map is drawn, not at validation: at most 500 markers and 2000 polyline points in total,
   and marker ids unique within the resolved data.
+
+## Web content (#14312)
+
+The `webView` node (contract only: no renderer draws it and no runtime advertises
+`prototype_platform_webview_v1`) shows an https page and needs `webview` in `requires.platform`:
+
+```json
+{
+  "type": "webView",
+  "url": "https://example.com/post/{data:/selected/slug}",
+  "allowedOrigins": ["https://example.com"],
+  "navigationStateKey": "articleNav",
+  "titleKey": "articleTitle",
+  "canGoBackKey": "articleCanGoBack",
+  "onNavigate": [{ "type": "setData", "path": "/data/lastUrl", "value": { "value": "{url}" } }],
+  "onBlockedNavigation": [{ "type": "emit", "name": "openExternally" }]
+}
+```
+
+- `url` is `https://` only (pattern `webViewUrl`, at most 2048 characters), with placeholders allowed after the
+  literal scheme. There is no inline `html` field and no script field: a spec carries no markup or code.
+- `allowedOrigins` holds 1 to 8 unique exact origins, `https://host[:port]` in lowercase with no path and no
+  default `:443` (pattern `webOrigin`). Every host must be a DNS name: `localhost`, `*.localhost` and any host a
+  URL parser reads as an IP address (a last label that is decimal or `0x` hexadecimal, or a bracketed IPv6
+  literal) are refused. Refusing every IP literal, not only private ranges, keeps the three validators equal:
+  JavaScript, the JVM and Swift disagree on numeric host spellings such as `2130706433`.
+- When the URL's authority is literal, `https://<authority>` (lowercased, an explicit `:443` dropped) must be
+  one of `allowedOrigins`. A templated authority is checked by the runtime once it resolves.
+- The `url` binds placeholders like any text field, so its `{platform:…}` reads must be declared, and in a
+  library spec it is a request sink: a secure text field's value cannot be bound into it.
+- `navigationStateKey` (`loading`, `loaded`, `error` or `blocked`) and `titleKey` name declared string state;
+  `canGoBackKey` names declared boolean state. All three bind component props like other node state keys, and
+  every state write re-checks their types.
+- A `webView` `id` uses the state-key pattern, the grammar of the `webview.*` `node` argument that names it.
+- `javaScript` defaults to `false`; `true` is accepted and never comes with a bridge. Page subresources cannot
+  be checked at a resolved address the way `request` is, so an imported (ProtoViewer) prototype may show a
+  `webView` only while network for imported prototypes is on; ProtoViewer does not enforce that yet, which is
+  one reason no runtime advertises the capability.
+- `onNavigate` and `onBlockedNavigation` are action lists. `{type: "platform", call: "webview.back"}` and
+  `webview.reload` take `args: {node}`; a literal `node` must be the id of a `webView` node ("Unknown webView").
+  The `webview` module has no state; its `webview.navigate` event exists so a simulation can deliver it.
+- Runtimes check every top-frame and subframe navigation against `allowedOrigins` before it starts and block
+  loopback, link-local, `10.0.2.2` and the daemon ports by URL host. They never add a JavaScript bridge or user
+  script (`addJavascriptInterface`, `evaluateJavascript`, `WKUserContentController.add(_:name:)`), and keep
+  cookies and web storage per prototype.
 
 ## Charts (#14209, not device-verified)
 

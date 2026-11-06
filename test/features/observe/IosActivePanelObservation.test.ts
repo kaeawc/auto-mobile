@@ -44,6 +44,9 @@ function displays(panel: "inner" | "cover"): DevicectlDisplayInfo[] {
 const stale: Pick<ObserveResult, "screenSize"> = JSON.parse(
   readFileSync(join(fixtureDir, "ios-duo/observe-opened-reports-cover-17087b.json"), "utf8"),
 );
+const springboardAfterUnfold: Pick<ObserveResult, "activeWindow"> = JSON.parse(
+  readFileSync(join(fixtureDir, "ios-duo/observe-springboard-after-unfold-17046c.json"), "utf8"),
+);
 const device: BootedDevice = {
   name: "iPhone Duo",
   platform: "ios",
@@ -71,6 +74,7 @@ async function collect(
     size?: { width: number; height: number };
     target?: BootedDevice;
     sdkBridge?: IosSdkBridgeReader;
+    packageName?: string;
   } = {},
 ) {
   const target = options.target ?? device;
@@ -82,7 +86,11 @@ async function collect(
     screenWidth: size.width,
     screenHeight: size.height,
     rotation: options.rotation ?? 0,
-    ...(options.sdkBridge ? { packageName: "com.example.duo" } : {}),
+    ...(options.packageName
+      ? { packageName: options.packageName }
+      : options.sdkBridge
+        ? { packageName: "com.example.duo" }
+        : {}),
   };
   const hierarchyCollector = new FakeHierarchyCollector();
   hierarchyCollector.extractScreenSize = () => size;
@@ -244,4 +252,25 @@ test("active display bounds reuse the existing point-size panel matcher", async 
   const result = await collect(new FakeDisplaySource(listing));
   expect(result.display).toMatchObject({ key: "primary-1", role: "inner", posture: "opened" });
   expect(result.screenSize).toEqual({ width: 669, height: 951 });
+});
+test("the cover's home screen under an active inner panel is reported, not served (#17046)", async () => {
+  const packageName = springboardAfterUnfold.activeWindow!.appId;
+  const result = await collect(new FakeDisplaySource(displays("inner")), { packageName });
+  expect(result.viewHierarchy).toBeUndefined();
+  expect(result.errors).toEqual([
+    {
+      phase: "viewHierarchy",
+      message: expect.stringMatching(/home screen is not observable on the inner panel/),
+    },
+  ]);
+  expect(result.display).toMatchObject({ key: "primary-1", role: "inner" });
+});
+test("the home screen on the active cover panel and an app on the inner panel still observe", async () => {
+  const packageName = springboardAfterUnfold.activeWindow!.appId;
+  const cover = await collect(new FakeDisplaySource(displays("cover")), { packageName });
+  expect(cover.display).toMatchObject({ key: "primary", role: "cover" });
+  const app = await collect(new FakeDisplaySource(displays("inner")), {
+    packageName: "com.example.duo",
+  });
+  expect(app.display).toMatchObject({ key: "primary-1", role: "inner" });
 });

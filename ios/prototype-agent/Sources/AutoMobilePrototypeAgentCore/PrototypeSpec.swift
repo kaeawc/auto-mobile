@@ -876,6 +876,10 @@ final class PrototypeNode: Decodable {
     let stickToEnd: Bool?
     let atEndKey: String?
     let onStartReached: [PrototypeAction]?
+    /// A `webView`'s navigation, title and back state keys (#14312), re-checked after every state write.
+    let navigationStateKey: String?
+    let titleKey: String?
+    let canGoBackKey: String?
     /// Internal identity stamped after authored-spec validation.
     let repeatKey: String?
     let detents: [Detent]?
@@ -956,6 +960,7 @@ final class PrototypeNode: Decodable {
         case refresh, header, footer, spacing, contentPadding, onEndReached, endThreshold, maxItems
         case listRepeat = "repeat"
         case reverse, stickToEnd, atEndKey, onStartReached
+        case navigationStateKey, titleKey, canGoBackKey
         case repeatKey = "_repeatKey"
         case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
              routes,
@@ -1028,6 +1033,9 @@ final class PrototypeNode: Decodable {
         reverse = try container.decodeIfPresent(Bool.self, forKey: .reverse)
         stickToEnd = try container.decodeIfPresent(Bool.self, forKey: .stickToEnd)
         atEndKey = try container.decodeIfPresent(String.self, forKey: .atEndKey)
+        navigationStateKey = try container.decodeIfPresent(String.self, forKey: .navigationStateKey)
+        titleKey = try container.decodeIfPresent(String.self, forKey: .titleKey)
+        canGoBackKey = try container.decodeIfPresent(String.self, forKey: .canGoBackKey)
         onStartReached = try container.decodeIfPresent([PrototypeAction].self, forKey: .onStartReached)
         repeatKey = try container.decodeIfPresent(String.self, forKey: .repeatKey)
         axis = try container.decodeIfPresent(String.self, forKey: .axis)

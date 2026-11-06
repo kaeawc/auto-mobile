@@ -56,6 +56,7 @@ internal object PrototypePlatformRules {
     val players = PrototypeMedia.players(root, nodes)
     val notificationChannels = PrototypeNotificationRules.channels(root)
     val previews = PrototypeCameraPreview.ids(nodes)
+    val webViews = PrototypeWebView.ids(nodes)
     val background = requires.strings("background").toSet()
     val sensors = root.member("sensors")
   }
@@ -76,6 +77,7 @@ internal object PrototypePlatformRules {
       { root, _ -> PrototypeMediaQueue.error(root) },
       PrototypeMedia::videoPlayerError,
       PrototypeMap::error,
+      PrototypeWebView::error,
       PrototypeMediaCaptions::error,
       PrototypeMedia::castButtonError,
       PrototypeCameraPreview::error,
@@ -93,6 +95,7 @@ internal object PrototypePlatformRules {
       { action, path, _, declared ->
         PrototypeCameraPreview.callError(action, path, declared.previews)
       },
+      { action, path, _, declared -> PrototypeWebView.callError(action, path, declared.webViews) },
       { action, path, _, declared ->
         PrototypePermissionRules.callError(action, path, declared.permissions)
       },

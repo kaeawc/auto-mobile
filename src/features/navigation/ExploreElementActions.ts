@@ -130,7 +130,8 @@ export class ExploreElementActions {
    * Move D-pad focus to the element and select it, recorded as `focusNavigate` with
    * `select: true` so navigateTo replays the same D-pad walk; null when nothing names it.
    * A scrollable container is not selected: moving focus through it scrolls it. Validate mode
-   * passes its edge's recorded interaction, so a recorded `focusNavigate` replays its `until`.
+   * passes its edge's recorded interaction, so a recorded `focusNavigate` replays its `until`,
+   * walk options and `select` (a call that navigated on focus alone presses no enter).
    */
   async focusSelectElement(
     element: Element,

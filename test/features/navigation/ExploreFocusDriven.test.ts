@@ -234,6 +234,37 @@ describe("Explore on a focus-driven TV app", () => {
   });
 });
 
+test("validate keeps a recorded focusNavigate that did not select from pressing enter", async () => {
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const selections: FocusNavigateOptions[] = [];
+  const actions = new ExploreElementActions({
+    device,
+    adb: undefined,
+    timer,
+    focusNavigator: () => ({
+      execute: async (options) => {
+        selections.push(options);
+        return { success: true, status: "focused", steps: 1, path: [], message: "focused" };
+      },
+    }),
+    runRecorded: (_toolName, _args, _observation, run) => run(),
+  });
+  const element: Element = {
+    bounds: { left: 0, top: 0, right: 400, bottom: 100 },
+    "resource-id": "app:id/movies",
+  };
+  // Recorded from a public call that changed screen on focus alone.
+  const recorded = { until: { resourceId: "app:id/movies" }, direction: "right" };
+
+  expect(
+    await actions.focusSelectElement(element, observationOf("Home"), {
+      recorded: { toolName: "focusNavigate", args: recorded },
+    }),
+  ).toBe(true);
+  expect(selections[0]).toMatchObject({ until: recorded.until, select: false, direction: "right" });
+});
+
 describe("defaultFocusSelectNavigator", () => {
   test("forwards the abort signal to every D-pad key press", async () => {
     const focused: Element = {

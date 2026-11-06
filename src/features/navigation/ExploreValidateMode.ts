@@ -30,11 +30,18 @@ const focusEdgeTargetResolver: DpadTargetResolver = new SelectorDpadTargetResolv
   new ResolverElementSelector(),
 );
 
-/** The walk options (`direction`, `maxSteps`, `settleMs`) a recorded `focusNavigate` used. */
+/**
+ * The walk options (`direction`, `maxSteps`, `settleMs`) a recorded `focusNavigate` used, and
+ * whether it selected: a recorded call without `select` navigated on focus alone, so its replay
+ * must not press enter.
+ */
 export function recordedFocusWalkOptions(
   interaction: Pick<ToolCallInteraction, "toolName" | "args"> | undefined,
-): Pick<FocusNavigateOptions, "direction" | "maxSteps" | "settleMs"> {
-  const args = interaction?.toolName === "focusNavigate" ? (interaction.args ?? {}) : {};
+): Pick<FocusNavigateOptions, "direction" | "maxSteps" | "settleMs" | "select"> {
+  if (interaction?.toolName !== "focusNavigate") {
+    return {};
+  }
+  const args = interaction.args ?? {};
   const direction = FOCUS_NAVIGATE_DIRECTIONS.find((value) => value === args.direction);
   const positive = (value: unknown) =>
     typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
@@ -44,6 +51,7 @@ export function recordedFocusWalkOptions(
     ...(direction ? { direction } : {}),
     ...(maxSteps ? { maxSteps } : {}),
     ...(settleMs !== undefined ? { settleMs } : {}),
+    select: args.select === true,
   };
 }
 

@@ -75,3 +75,36 @@ test("missing SDK tools fail with setup advice", async () => {
   );
   await expect(tools.linkManifest("a", "b", "c")).rejects.toThrow("Install Android SDK");
 });
+test("verify runs a Windows apksigner.bat through the command processor", async () => {
+  const executor = new FakeHostCommandExecutor();
+  const batchLocator: AndroidStampToolsLocator = {
+    async findStampTools() {
+      return {
+        aapt2: "C:\\sdk\\aapt2.exe",
+        zipalign: "C:\\sdk\\zipalign.exe",
+        apksigner: "C:\\Android SDK\\apksigner.bat",
+        androidJar: "C:\\sdk\\android.jar",
+      };
+    },
+  };
+  executor.setDefaultResponse({
+    stdout: `Signer #1 certificate SHA-256 digest: ${"a".repeat(64)}\n`,
+    stderr: "",
+    toString: () => "",
+    trim: () => "",
+    includes: () => false,
+  });
+  await new DefaultAndroidStampToolchain(batchLocator, executor).verify(
+    "C:\\out\\signed.apk",
+    "a".repeat(64),
+  );
+  const call = executor.getExecutedCalls()[0];
+  expect(call?.command.toLowerCase()).toEndWith("cmd.exe");
+  expect(call?.args).toEqual([
+    "/d",
+    "/v:off",
+    "/s",
+    "/c",
+    '""C:\\Android SDK\\apksigner.bat" "verify" "--verbose" "--print-certs" "C:\\out\\signed.apk""',
+  ]);
+});

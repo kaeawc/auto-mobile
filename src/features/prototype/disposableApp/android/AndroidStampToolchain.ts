@@ -8,6 +8,7 @@ import {
   DefaultHostCommandExecutor,
   type HostCommandExecutor,
 } from "../../../../utils/HostCommandExecutor";
+import { windowsBatchInvocation } from "../../../../utils/android-cmdline-tools/SdkManagerClient";
 import type { DisposableAppSigner } from "./DisposableAppSigner";
 
 export interface AndroidStampToolchain {
@@ -52,12 +53,13 @@ export class DefaultAndroidStampToolchain implements AndroidStampToolchain {
     await signer.sign((await this.tools()).apksigner, input, output);
   }
   async verify(apk: string, expectedSigner: string): Promise<void> {
-    const result = await this.executor.executeCommand((await this.tools()).apksigner, [
+    const invocation = windowsBatchInvocation((await this.tools()).apksigner, [
       "verify",
       "--verbose",
       "--print-certs",
       apk,
     ]);
+    const result = await this.executor.executeCommand(invocation.command, invocation.args);
     const digest = result.stdout
       .split("\n")
       // apksigner names the line "Signer #1 ..." for v1/v2 and "V3.0 Signer: ..." for v3-only APKs.

@@ -124,17 +124,19 @@ abstract class PackageStampTemplate : DefaultTask() {
     mergedManifest.get().asFile.copyTo(output.resolve("AndroidManifest.xml"))
     stampPoints.get().asFile.copyTo(output.resolve("stamp-points.json"))
     capabilities.get().asFile.copyTo(output.resolve("capabilities.json"))
-    val digest =
-      MessageDigest.getInstance("SHA-256").digest(apk.readBytes()).joinToString("") {
-        "%02x".format(it)
-      }
+    val digest = sha256(apk.readBytes())
+    // Binds the capabilities sidecar to this APK so the host rejects a mismatched copy.
+    val capabilitiesDigest = sha256(output.resolve("capabilities.json").readBytes())
     output
       .resolve("template.json")
       .writeText(
-        """{"template":"${templateName.get()}","applicationId":"${templateApplicationId.get()}","apkSha256":"$digest"}
+        """{"template":"${templateName.get()}","applicationId":"${templateApplicationId.get()}","apkSha256":"$digest","capabilitiesSha256":"$capabilitiesDigest"}
 """,
       )
   }
+
+  private fun sha256(bytes: ByteArray): String =
+    MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 }
 
 androidComponents {

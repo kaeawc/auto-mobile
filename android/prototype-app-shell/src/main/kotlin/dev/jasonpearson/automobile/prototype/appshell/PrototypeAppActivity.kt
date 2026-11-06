@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -16,6 +17,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import dev.jasonpearson.automobile.ctrlproxy.prototype.InternalAutoMobilePrototypeApi
+import dev.jasonpearson.automobile.ctrlproxy.prototype.LocalPrototypeRootBack
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
 import dev.jasonpearson.automobile.prototype.PrototypeAssets
 import dev.jasonpearson.automobile.prototype.PrototypeStorage
@@ -38,6 +41,7 @@ class PrototypeAppActivity : ComponentActivity() {
     }
   }
 
+  @OptIn(InternalAutoMobilePrototypeApi::class)
   @Composable
   private fun AppContent(
     loader: AppShellLoader,
@@ -60,20 +64,23 @@ class PrototypeAppActivity : ComponentActivity() {
     Surface(Modifier.fillMaxSize()) {
       val current = state
       if (current is AppShellState.Ready) {
-        key(generation) {
-          AutoMobilePrototype(
-            spec = current.spec,
-            assets = prototypeAssets,
-            storage = loader.storage,
-            handleBack = true,
-            onDismiss = {
-              // The renderer consumes Back at depth > 1 before emitting a dismissal.
-              if (appShellBackAction(depth = 1) == AppShellBackAction.MOVE_TASK_TO_BACK) {
-                moveTaskToBack(true)
-                generation++
-              }
-            },
-          )
+        // Root Back only backgrounds the task, so the renderer and its unsaved state stay alive.
+        CompositionLocalProvider(LocalPrototypeRootBack provides { moveTaskToBack(true) }) {
+          key(generation) {
+            AutoMobilePrototype(
+              spec = current.spec,
+              assets = prototypeAssets,
+              storage = loader.storage,
+              handleBack = true,
+              onDismiss = {
+                // Any other user dismissal ends the session; remount so returning is not blank.
+                if (appShellBackAction(depth = 1) == AppShellBackAction.MOVE_TASK_TO_BACK) {
+                  moveTaskToBack(true)
+                  generation++
+                }
+              },
+            )
+          }
         }
       } else AppShellStatus(current) { moveTaskToBack(true) }
     }

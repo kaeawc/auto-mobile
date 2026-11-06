@@ -76,6 +76,10 @@ function rewriteAttributes(node: XmlNode, input: AndroidManifestStampInput): voi
 
 function rewriteAttributeValue(value: string, input: AndroidManifestStampInput): string {
   // Attribute values only: XML structure is traversed through xml2js, never regex.
+  if (value === "@null" || value === "@empty") {
+    // Special values, not resources; a package-qualified form would fail to link.
+    return value;
+  }
   if (value.startsWith("@") && !value.startsWith("@0x") && !value.includes(":")) {
     return `@*${input.templatePackage}:${value.slice(1)}`;
   }

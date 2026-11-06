@@ -58,3 +58,14 @@ test("preserves explicitly qualified template resource ownership", async () => {
     ),
   ).toContain(`@*${templatePackage}:mipmap/ic_launcher`);
 });
+test("keeps the special @null and @empty values unqualified", async () => {
+  const xml = templateXml
+    .replace('android:icon="@mipmap/ic_launcher"', 'android:icon="@null"')
+    .replace('android:resource="@0x7f080000"', 'android:resource="@empty"');
+  const parsed = await parseStringPromise(await stampAndroidManifest(xml, input));
+  const app = parsed.manifest.application[0];
+  expect(app.$["android:icon"]).toBe("@null");
+  expect(
+    app["meta-data"].map((node: { $: Record<string, string> }) => node.$["android:resource"]),
+  ).toContain("@empty");
+});

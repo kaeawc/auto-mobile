@@ -43,14 +43,12 @@ export class AndroidDisposableAppTemplateProvider implements AndroidDisposableAp
       const metadata: unknown = JSON.parse(
         await this.fs.readFile(join(directory, "template.json")),
       );
-      const caps: unknown = JSON.parse(
-        await this.fs.readFile(join(directory, "capabilities.json")),
-      );
-      if (!isMetadata(metadata) || metadata.template !== flavor || !isCapabilities(caps)) {
+      if (!isMetadata(metadata) || metadata.template !== flavor) {
         throw new ActionableError(
           "Invalid Android template metadata or flavor. Repackage the template.",
         );
       }
+      const caps = await this.readCapabilities(directory, metadata);
       const apkPath = join(directory, "template.apk");
       const bytes = await this.fs.readFileBuffer(apkPath);
       const apkSha256 = createHash("sha256").update(bytes).digest("hex");
@@ -75,10 +73,33 @@ export class AndroidDisposableAppTemplateProvider implements AndroidDisposableAp
       );
     }
   }
+  /** The sidecar must be the one packaged with this APK, so selection never over-promises. */
+  private async readCapabilities(
+    directory: string,
+    metadata: TemplateMetadata,
+  ): Promise<{ capabilities: string[] }> {
+    const bytes = await this.fs.readFileBuffer(join(directory, "capabilities.json"));
+    const caps: unknown = JSON.parse(bytes.toString("utf8"));
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    if (
+      digest !== metadata.capabilitiesSha256 ||
+      !isCapabilities(caps) ||
+      caps.template !== metadata.template
+    ) {
+      throw new ActionableError(
+        "Android template capabilities do not match its APK. Repackage the template.",
+      );
+    }
+    return caps;
+  }
 }
-function isMetadata(
-  value: unknown,
-): value is { template: string; applicationId: string; apkSha256: string } {
+interface TemplateMetadata {
+  template: string;
+  applicationId: string;
+  apkSha256: string;
+  capabilitiesSha256: string;
+}
+function isMetadata(value: unknown): value is TemplateMetadata {
   return (
     typeof value === "object" &&
     value !== null &&
@@ -87,13 +108,17 @@ function isMetadata(
     "applicationId" in value &&
     typeof value.applicationId === "string" &&
     "apkSha256" in value &&
-    typeof value.apkSha256 === "string"
+    typeof value.apkSha256 === "string" &&
+    "capabilitiesSha256" in value &&
+    typeof value.capabilitiesSha256 === "string"
   );
 }
-function isCapabilities(value: unknown): value is { capabilities: string[] } {
+function isCapabilities(value: unknown): value is { template: string; capabilities: string[] } {
   return (
     typeof value === "object" &&
     value !== null &&
+    "template" in value &&
+    typeof value.template === "string" &&
     "capabilities" in value &&
     Array.isArray(value.capabilities) &&
     value.capabilities.every((entry: unknown) => typeof entry === "string")

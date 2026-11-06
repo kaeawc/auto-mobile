@@ -8,23 +8,41 @@ import {
 import { DefaultFileSystem, type FileSystem } from "../../../../utils/filesystem/DefaultFileSystem";
 import { resolveAutoMobileBaseDir } from "../../../../utils/tempDir";
 import { defaultIdGenerator, type IdGenerator } from "../../../../utils/IdGenerator";
+import { FileSigningKeyLock, type SigningKeyLock } from "./SigningKeyLock";
+import { windowsBatchInvocation } from "../../../../utils/android-cmdline-tools/SdkManagerClient";
+
+export { FileSigningKeyLock, type SigningKeyLock } from "./SigningKeyLock";
 
 export interface DisposableAppSigner {
   signerSha256(): Promise<string>;
   sign(apksigner: string, input: string, output: string): Promise<void>;
 }
 
+export interface HostKeystoreSignerDependencies {
+  executor?: HostCommandExecutor;
+  fs?: FileSystem;
+  ids?: IdGenerator;
+  lock?: SigningKeyLock;
+}
+
 /** A persistent host identity; passwords are passed by private file, never literal argv. */
 export class HostKeystoreSigner implements DisposableAppSigner {
   private initialization?: Promise<void>;
+  private readonly executor: HostCommandExecutor;
+  private readonly fs: FileSystem;
+  private readonly ids: IdGenerator;
+  private readonly lock: SigningKeyLock;
   constructor(
     private readonly directory = join(resolveAutoMobileBaseDir(), "prototype-android-key"),
-    private readonly executor: HostCommandExecutor = new DefaultHostCommandExecutor(),
-    private readonly fs: FileSystem = new DefaultFileSystem(),
-    private readonly ids: IdGenerator = defaultIdGenerator,
-  ) {}
+    deps: HostKeystoreSignerDependencies = {},
+  ) {
+    this.executor = deps.executor ?? new DefaultHostCommandExecutor();
+    this.fs = deps.fs ?? new DefaultFileSystem();
+    this.ids = deps.ids ?? defaultIdGenerator;
+    this.lock = deps.lock ?? new FileSigningKeyLock();
+  }
   private initialize(): Promise<void> {
-    this.initialization ??= this.generate().catch((error: unknown) => {
+    this.initialization ??= this.prepare().catch((error: unknown) => {
       this.initialization = undefined;
       throw toActionableError(
         error,
@@ -33,8 +51,12 @@ export class HostKeystoreSigner implements DisposableAppSigner {
     });
     return this.initialization;
   }
-  private async generate(): Promise<void> {
+  private async prepare(): Promise<void> {
     await this.fs.ensureDir(this.directory);
+    // Check for the key only while holding the lock: another signer may be mid-creation.
+    await this.lock.withLock(this.directory, () => this.generate());
+  }
+  private async generate(): Promise<void> {
     const key = join(this.directory, "host.p12");
     if (await this.fs.pathExists(key)) {
       if (!(await this.fs.pathExists(join(this.directory, "password")))) {
@@ -88,7 +110,7 @@ export class HostKeystoreSigner implements DisposableAppSigner {
   }
   async sign(apksigner: string, input: string, output: string): Promise<void> {
     await this.initialize();
-    await this.executor.executeCommand(apksigner, [
+    const invocation = windowsBatchInvocation(apksigner, [
       "sign",
       "--ks",
       join(this.directory, "host.p12"),
@@ -104,5 +126,6 @@ export class HostKeystoreSigner implements DisposableAppSigner {
       output,
       input,
     ]);
+    await this.executor.executeCommand(invocation.command, invocation.args);
   }
 }

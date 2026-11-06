@@ -6,7 +6,8 @@ import { IOSCtrlProxyManager } from "../../../ctrlProxy/IOSCtrlProxyManager";
 import { AndroidCtrlProxyManager } from "../../../ctrlProxy/CtrlProxyManager";
 import { unregisterDirectSessionsForStableIdentity } from "../../../utils/directSessionDeviceRegistry";
 import { type DevicePool, type PooledDevice } from "../../../daemon/devicePool";
-import { BootedDevice, ActionableError, isAndroidOrIosPlatform } from "../../../models";
+import { BootedDevice, ActionableError } from "../../../models";
+import { isVideoRecordingPlatform } from "../../../models/VideoRecordingPlatform";
 import { type Timer } from "../../../utils/SystemTimer";
 import { createPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { type DeviceToolsDependencies } from "../core/dependencies";
@@ -185,8 +186,8 @@ export async function stopVideoRecordingsBeforeShutdown(
       timeoutMs: context.timeoutMs,
     });
     const platform = context.device.platform;
-    // Video recording does not support watchOS yet, so a watch has no active recordings to stop.
-    if (!isAndroidOrIosPlatform(platform)) {
+    // Video recording does not support watchOS or visionOS, so neither has recordings to stop.
+    if (!isVideoRecordingPlatform(platform)) {
       return;
     }
     const activeRecordings = await runWithinShutdownDeadline(

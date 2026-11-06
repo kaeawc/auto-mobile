@@ -93,14 +93,17 @@ export function createFocusNavigateObserver(screen: Pick<ObserveScreen, "execute
       return {
         focused,
         elements: parser.flattenViewHierarchy(hierarchy).map(({ element }) => element),
+        hierarchy,
       };
     },
   };
 }
 
-function createKeyPresser(device: BootedDevice): FocusKeyPresser {
+export function createFocusKeyPresser(device: BootedDevice): FocusKeyPresser {
   const input = new InputKey(device, { adbFactory: defaultAdbClientFactory, timer: defaultTimer });
-  return { press: (key) => input.press(key) };
+  return {
+    press: (key, signal) => input.press(key, undefined, undefined, signal ? { signal } : {}),
+  };
 }
 
 export const focusNavigateTool = defineDeviceTool({
@@ -114,7 +117,7 @@ export const focusNavigateTool = defineDeviceTool({
     }
     const navigate = new FocusNavigate(
       createFocusNavigateObserver(new RealObserveScreen(device, defaultAdbClientFactory)),
-      createKeyPresser(device),
+      createFocusKeyPresser(device),
       defaultTimer,
     );
     const result = await navigate.execute({

@@ -187,7 +187,10 @@ export interface SendKeysCommandResult extends BaseActionResult {
   /** Device upper bound; this is not the verified committedGraphemes count. */
   committedUnits?: number;
   error?: string;
-  /** iOS runner's typed failure code for a key command (`runnerErrorCodes.ts`). */
+  /**
+   * Stable failure code: an iOS runner's typed code for a key command (`runnerErrorCodes.ts`), or
+   * `NO_FOCUSED_EDITABLE` when an Android `type` found no focused editable field.
+   */
   errorCode?: string;
   retryable?: boolean;
   verified?: boolean;
@@ -211,6 +214,8 @@ export interface SendKeysResult extends BaseActionResult {
   commands: SendKeysCommandResult[];
   observation?: ObserveResult;
   error?: string;
+  /** The failed command's stable `errorCode`, when it has one. */
+  errorCode?: string;
   retryable?: boolean;
   warning?: string;
   /** Observed editor/keyboard state changes after Android IME typing and restoration. */
@@ -343,6 +348,8 @@ export type TextActionResult = {
   caretPlaced?: boolean;
   resultingTextLength?: number;
   error?: string;
+  /** Stable failure code, e.g. `NO_FOCUSED_EDITABLE` when no editable field has focus. */
+  errorCode?: string;
   partialApplication?: boolean;
   imeTrace?: string[];
   imeFailure?: ImeFailureDiagnostic;

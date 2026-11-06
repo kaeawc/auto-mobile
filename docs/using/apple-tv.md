@@ -23,24 +23,28 @@ unavailable runtime fails, lists the available runtimes and repeats the install 
 
 <!-- apple-tv-supported-tools:start -->
 
-| Tool               | On an Apple TV                                                               |
-| ------------------ | ---------------------------------------------------------------------------- |
-| `listDevices`      | Lists booted Apple TV simulators.                                            |
-| `listDeviceImages` | Lists configured Apple TV simulators.                                        |
-| `provisionDevice`  | Adopts or creates an exact simulator, and boots it unless `boot: false`.     |
-| `startDevice`      | Boots an existing simulator by `deviceId` or `name` and starts its runner.   |
-| `setActiveDevice`  | Selects an Apple TV only when the call passes `platform: "tvos"`.            |
-| `killDevice`       | Shuts the simulator down and stops its runner.                               |
-| `deleteDevice`     | Deletes the simulator.                                                       |
-| `installApp`       | Installs a `.app` bundle built for the tvOS simulator.                       |
-| `uninstallApp`     | Uninstalls an app.                                                           |
-| `listApps`         | Lists installed apps.                                                        |
-| `launchApp`        | Launches an app; `prototype: true` is refused.                               |
-| `terminateApp`     | Terminates an app.                                                           |
-| `observe`          | Returns a screenshot, plus the hierarchy and `focusedElement` with a runner. |
-| `pressButton`      | Presses a Siri Remote button.                                                |
-| `tapOn`            | Moves focus to a matched element and selects it.                             |
-| `sendKeys`         | Types text into the focused field.                                           |
+| Tool                | On an Apple TV                                                               |
+| ------------------- | ---------------------------------------------------------------------------- |
+| `listDevices`       | Lists booted Apple TV simulators.                                            |
+| `listDeviceImages`  | Lists configured Apple TV simulators.                                        |
+| `provisionDevice`   | Adopts or creates an exact simulator, and boots it unless `boot: false`.     |
+| `startDevice`       | Boots an existing simulator by `deviceId` or `name` and starts its runner.   |
+| `setActiveDevice`   | Selects an Apple TV only when the call passes `platform: "tvos"`.            |
+| `killDevice`        | Shuts the simulator down and stops its runner.                               |
+| `deleteDevice`      | Deletes the simulator.                                                       |
+| `installApp`        | Installs a `.app` bundle built for the tvOS simulator.                       |
+| `uninstallApp`      | Uninstalls an app.                                                           |
+| `listApps`          | Lists installed apps.                                                        |
+| `launchApp`         | Launches an app; `prototype: true` is refused.                               |
+| `terminateApp`      | Terminates an app.                                                           |
+| `observe`           | Returns a screenshot, plus the hierarchy and `focusedElement` with a runner. |
+| `pressButton`       | Presses a Siri Remote button.                                                |
+| `tapOn`             | Moves focus to a matched element and selects it.                             |
+| `sendKeys`          | Types text into the focused field.                                           |
+| `videoRecording`    | Records the screen; `audio` is not supported.                                |
+| `compareScreenshot` | Compares the full screen; `target` and `mask` need a runner (see below).     |
+| `openLink`          | Opens a URL with the app that declares its scheme.                           |
+| `getDeepLinks`      | Lists the URL schemes an installed app declares.                             |
 
 <!-- apple-tv-supported-tools:end -->
 
@@ -120,6 +124,20 @@ With a connected runner, `observe` returns a screenshot, the hierarchy and `focu
 `hierarchyUnavailable`; call `startDevice` again to prepare automation. Advanced observe options
 are refused.
 
+## Record and compare the screen
+
+`videoRecording` records an Apple TV simulator's screen like an iOS Simulator's, up to 3600
+seconds. Focus rings, parallax and focus scaling are visible in the recording.
+
+`compareScreenshot` records and compares named screenshot baselines. An Apple TV baseline is kept
+per screenshot size; density, font scale and theme are always `null` in its profile.
+
+- Without a runner, only the full screen is compared. A `target` or `mask` is refused; call
+  `startDevice` to prepare the runner.
+- With a runner, `target` and `mask` take an `elementId` or a `rect` in points, the units the
+  hierarchy reports.
+- Apple TV has no system bars, so `ignoreSystemBars` has no effect.
+
 ## Navigate with focus
 
 Apple TV apps have no touch input. Focus moves between elements, and the Siri Remote selects the
@@ -154,6 +172,16 @@ with `type` commands. Text is appended to the field.
 
 - `operation: "replace"`, key commands, clear commands and selectors are refused.
 - To change existing text, edit it on the on-screen keyboard with `pressButton`, then type.
+
+## Open a deep link
+
+`openLink` opens a URL on the Apple TV, such as `myapp://episode/42`, and the app that declares the
+scheme shows that screen. Call `observe` afterwards to see where it landed.
+
+- `getDeepLinks` with the app's bundle ID lists the custom URL schemes the installed app declares.
+- The call fails when no installed app handles the URL. Apple TV has no web browser, so an
+  `http` or `https` URL opens only if an app claims it.
+- `waitFor`, `settled`, `acceptOpenAlert` and `chooserAppPackage` are refused.
 
 ## Out of scope
 

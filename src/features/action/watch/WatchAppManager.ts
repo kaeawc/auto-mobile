@@ -24,6 +24,7 @@ import type { InstallAppCall } from "../InstallAppTypes";
 import type { LaunchAppCall } from "../LaunchAppTypes";
 import { PACKAGE_NOT_INSTALLED_ERROR } from "../LaunchPackageRemovedError";
 import type { UninstallAppCall } from "../UninstallApp";
+import { visionosTargetApps, type VisionosTargetApps } from "../../visionos/VisionosTargetApps";
 
 /** The simctl calls a watch app manager makes; nothing else on the client is reachable. */
 export type WatchAppsSimctl = Pick<
@@ -83,6 +84,7 @@ export class WatchAppManager {
   /** The daemon chdirs at startup, so a relative path names the directory it was launched in. */
   private readonly resolveArtifactPath: (artifactPath: string) => string;
   private readonly dataWipe: WatchDataWipe;
+  private readonly targetApps: VisionosTargetApps;
 
   constructor(
     private readonly device: BootedDevice,
@@ -92,7 +94,9 @@ export class WatchAppManager {
       resolveArtifactPath = (artifactPath) =>
         resolvePathFromDaemonLaunchWorkingDirectory(artifactPath),
       dataWipe = {},
+      targetApps = visionosTargetApps,
     }: {
+      targetApps?: VisionosTargetApps;
       simctl?: WatchAppsSimctl;
       plist?: WatchBundleIdReader;
       resolveArtifactPath?: (artifactPath: string) => string;
@@ -103,6 +107,7 @@ export class WatchAppManager {
     this.plist = plist;
     this.resolveArtifactPath = resolveArtifactPath;
     this.dataWipe = dataWipe;
+    this.targetApps = targetApps;
   }
 
   // Preserve the existing watchOS/tvOS wording; visionOS names its own platform.
@@ -153,6 +158,7 @@ export class WatchAppManager {
       call.signal?.throwIfAborted();
       await this.simctl.uninstallApp(appId, this.device.deviceId, { signal: call.signal });
     }
+    this.targetApps.terminated(this.device.deviceId, appId);
     return { success: true, packageName: appId, keepData: false, wasInstalled };
   }
 
@@ -182,6 +188,10 @@ export class WatchAppManager {
       { launchArguments: call.launchArguments },
       this.device.deviceId,
     );
+    if (launched.success && this.device.platform === "visionos") {
+      // The visionOS runner automates the app the session launched last.
+      this.targetApps.launched(this.device.deviceId, appId);
+    }
     return launched.success
       ? { success: true, packageName: appId, pid: launched.pid }
       : { success: false, packageName: appId, error: launched.error };
@@ -189,6 +199,18 @@ export class WatchAppManager {
 
   /** `simctl terminate` on the watch; an app with no running process is already terminated. */
   async terminate(appId: string, call: { signal?: AbortSignal } = {}): Promise<TerminateAppResult> {
+    const result = await this.terminateProcess(appId, call);
+    if (result.success) {
+      // Any effective success means the app no longer runs, so the runner must not keep targeting it.
+      this.targetApps.terminated(this.device.deviceId, appId);
+    }
+    return result;
+  }
+
+  private async terminateProcess(
+    appId: string,
+    call: { signal?: AbortSignal },
+  ): Promise<TerminateAppResult> {
     if (!(await this.isInstalled(appId, call.signal))) {
       return {
         success: true,

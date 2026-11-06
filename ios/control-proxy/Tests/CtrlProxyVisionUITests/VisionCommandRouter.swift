@@ -84,6 +84,11 @@ final class VisionCommandRouter {
                 guard !request.text.isEmpty, request.frameContext == nil else {
                     throw CommandError.invalidParameter("text", "supply non-empty append text without frameContext")
                 }
+                guard !VisionCommandPolicy.containsDeleteKey(request.text),
+                      !request.text.contains(XCUIKeyboardKey.delete.rawValue)
+                else {
+                    throw CommandError.invalidParameter("text", "append text must not contain the delete key")
+                }
                 var focusedFields: [XCUIElement] = []
                 let textTypes: [XCUIElement.ElementType] = [.textField, .secureTextField, .textView, .searchField]
                 for candidate in application.descendants(matching: .any).allElementsBoundByIndex {
@@ -132,7 +137,7 @@ final class VisionCommandRouter {
         let traits = VisionElementTraits.traits(for: kind(of: snapshot.elementType), isEnabled: snapshot.isEnabled)
         return UIElementInfo(
             text: snapshot.label,
-            value: traits.enteredValue(snapshot.value, label: snapshot.label),
+            value: traits.enteredValue(snapshot.value, placeholder: snapshot.placeholderValue),
             resourceId: snapshot.identifier,
             className: String(snapshot.elementType.rawValue),
             bounds: ElementBounds(clamping: snapshot.frame),

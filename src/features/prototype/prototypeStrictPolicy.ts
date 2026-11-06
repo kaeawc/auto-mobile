@@ -420,6 +420,7 @@ function secureLibraryError(spec: unknown): PrototypeValidationError | undefined
     return undefined;
   }
   const { requests, fields } = libraryFields(spec, nodes);
+  // A web view loads its url from the page host, so the url is a request sink (#16573).
   requests.push(...webViewPaths(nodes));
   const sharePaths = shareLibraryFields(spec, fields);
   fields.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));

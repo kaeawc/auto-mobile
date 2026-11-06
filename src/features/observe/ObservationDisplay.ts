@@ -415,6 +415,14 @@ function liveIosPanel(
   return panels.find((candidate) => candidate.key === selected?.name);
 }
 
+/** The panel whose pixel size the runner's hierarchy was captured at, when it names exactly one. */
+export function runnerIosPanel(
+  panels: readonly DisplayPanel[],
+  hierarchy: Pick<ViewHierarchyResult, "pixelWidth" | "pixelHeight"> | undefined,
+): DisplayPanel | undefined {
+  return panels.length > 1 ? liveIosPanel(panels, hierarchy) : undefined;
+}
+
 function iosPanelPosture(role: DisplayPanel["role"] | undefined): Posture {
   return POSTURE_PANEL_ROLES.find(([, panelRole]) => panelRole === role)?.[0] ?? "unknown";
 }

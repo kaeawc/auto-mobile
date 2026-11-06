@@ -2,7 +2,7 @@ import { classifyToolResult } from "../../utils/toolEnvelopePayload";
 import { BootedDevice, isViewHierarchyResult, type ViewHierarchyResult } from "../../models";
 import { NavigationGraphManager } from "../../features/navigation/NavigationGraphManager";
 import { UIStateExtractor } from "../../features/navigation/UIStateExtractor";
-import { RealObserveScreen } from "../../features/observe/ObserveScreen";
+import { createActionObserveScreen } from "../../features/observe/ObserveScreen";
 import { RealSettleObserve } from "../../features/observe/SettleObserve";
 import type { SettleObserve } from "../../features/observe/interfaces/SettleObserve";
 import { settleEmbeddedObservationInResponse } from "../embeddedObservationSettle";
@@ -162,7 +162,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler, PlainT
       retention,
     ) => new JsonToolOutputArtifactWriter({ outputDirectory, timer, retention }),
     private readonly createSettleObserve: SettleObserveFactory = (device, timer) =>
-      new RealSettleObserve(new RealObserveScreen(device), timer),
+      new RealSettleObserve(createActionObserveScreen(device), timer),
   ) {}
 
   private getArtifactWriter(outputDirectory: string, timer: Timer): ObservationArtifactWriter {

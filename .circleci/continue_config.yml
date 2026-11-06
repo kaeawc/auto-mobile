@@ -501,10 +501,16 @@ jobs:
           environment:
             AUTOMOBILE_BATS_MAX_FILE_SECONDS: "240"
             AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS: "420"
-          command: scripts/ci/run-bats.sh unit
+          command: |
+            mkdir -p ci-logs
+            scripts/ci/run-bats.sh unit 2>&1 | tee ci-logs/bats-unit.log
       - run:
           name: "Run BATS Integration Tests"
           command: scripts/ci/run-bats.sh integration
+      - store_artifacts:
+          when: always
+          path: ci-logs
+          destination: ci-logs
       - store_artifacts:
           when: always
           path: scratch/bats-unit-joblog.tsv

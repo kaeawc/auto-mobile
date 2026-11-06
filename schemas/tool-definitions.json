@@ -27625,7 +27625,7 @@
       "destructiveHint": false,
       "idempotentHint": true
     },
-    "description": "Android: manage adb reverse mappings so the app or browser on the device reaches a host server at localhost:<port>. ensure adds mappings this session owns; list, verify and remove manage them. verify with probe:true also connects from the device to each mapped port: reachable (the host server accepted), unreachable (probeReason closed: nothing listens on the host; refused; timeout) or probe_unsupported. list reports hostListening for each tcp: host port. ensure with reclaimStale:true replaces a stale mapping whose host port refuses. Conflicts carry conflictKind. Owned mappings lost to an adb or device restart are restored on the next call and removed when the session ends. Ports below 1024 are refused. iOS returns not_applicable.",
+    "description": "Android: manage adb reverse mappings so the app or browser on the device reaches a host server at localhost:<port>. ensure adds mappings this session owns; list, verify and remove manage them. verify with probe:true also connects from the device to each mapped port: reachable (the host server accepted), unreachable (probeReason closed: nothing listens on the host; refused; timeout) or probe_unsupported. list reports hostListening for each tcp: host port. ensure with reclaimStale:true replaces a stale mapping whose host port refuses. Conflicts carry conflictKind. list and verify report each port's deviceListener. Owned mappings lost to an adb or device restart are restored on the next call and removed when the session ends. Ports below 1024 are refused. iOS returns not_applicable.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -27767,6 +27767,65 @@
                 },
                 "required": ["host", "reason"],
                 "additionalProperties": false
+              },
+              "deviceListener": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "none"
+                      }
+                    },
+                    "required": ["kind"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "reverse"
+                      }
+                    },
+                    "required": ["kind"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "process"
+                      },
+                      "uid": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "package": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["kind", "uid"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "unsupported"
+                      },
+                      "detail": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["kind", "detail"],
+                    "additionalProperties": false
+                  }
+                ]
               }
             },
             "required": ["devicePort", "host", "owned", "status"],
@@ -27805,7 +27864,8 @@
             "port_reverse_conflict",
             "port_reverse_not_owned",
             "port_reverse_port_refused",
-            "port_reverse_reclaim_failed"
+            "port_reverse_reclaim_failed",
+            "port_reverse_device_port_in_use"
           ]
         },
         "ports": {

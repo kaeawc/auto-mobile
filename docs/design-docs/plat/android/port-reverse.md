@@ -42,6 +42,19 @@ manager (#12530) also uses.
   other's mappings as pre-existing: prototypes skip them (and add with
   `--no-rebind`), and `portReverse` reports them as conflicts.
 
+## Device listeners
+
+`list` and `verify` read `/proc/net/tcp` and `/proc/net/tcp6` in one shell call
+(each file after a marker line, so a missing file is just an unreadable section)
+and keep LISTEN rows whose local address is wildcard or loopback (`0.0.0.0`,
+`127/8`, `::`, `::1`, `::ffff:127/8`), the sockets that stop adbd binding the
+reverse. A listened port that `--list` shows is `reverse`; any other is
+`process` with the row's uid, and `pm list packages -U` names the package only
+when exactly one has that uid. No readable table is `unsupported`; there is no
+`netstat` fallback yet. When an `ensure` add fails and `--list` shows no
+reverse there, the table is read again and a `process` holder turns the failure
+into `port_reverse_device_port_in_use`; anything else keeps the adb error.
+
 ## Restore
 
 Reverse listeners live in adbd, so an adb server restart, `adb reconnect`, an

@@ -4,7 +4,8 @@ export type PortReverseErrorCode =
   | "port_reverse_conflict"
   | "port_reverse_not_owned"
   | "port_reverse_port_refused"
-  | "port_reverse_reclaim_failed";
+  | "port_reverse_reclaim_failed"
+  | "port_reverse_device_port_in_use";
 
 /**
  * Who holds a conflicting device port. `other_session`: another live AutoMobile session owns it.

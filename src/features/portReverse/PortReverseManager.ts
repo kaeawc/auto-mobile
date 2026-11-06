@@ -13,6 +13,7 @@ import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { unknownHostLoopbackProbe, type HostLoopbackProbe } from "./HostLoopbackProbe";
 import { PortReverseError } from "./PortReverseError";
 import { assertNoConflicts } from "./portReverseConflicts";
+import { deviceListeners, throwIfDevicePortHeld, type DeviceListener } from "./deviceListeners";
 
 /** Per-port bound on a verify probe; ports are probed concurrently, so this bounds the whole call. */
 export const PORT_PROBE_TIMEOUT_MS = 2500;
@@ -70,6 +71,8 @@ export interface PortReverseMapping {
   hostListening?: boolean;
   /** `ensure` with `reclaimStale`: the stale mapping this call removed before adding its own. */
   reclaimed?: PortReverseReclaim;
+  /** `list`/`verify`: what listens on the device port. */
+  deviceListener?: DeviceListener;
 }
 
 /** A stale mapping `ensure` removed: its host spec, and why it was judged dead. */
@@ -239,7 +242,9 @@ export class PortReverseManager {
         }
       }
       return this.acknowledge(state, target.owner, {
-        mappings: mappings.sort((a, b) => a.devicePort - b.devicePort),
+        mappings: (await this.withDeviceListeners(target, view, mappings)).sort(
+          (a, b) => a.devicePort - b.devicePort,
+        ),
         ...report,
       });
     });
@@ -269,13 +274,32 @@ export class PortReverseManager {
           status: "missing" as const,
         };
       });
+      const described = await this.withDeviceListeners(target, view, mappings);
       if (options?.probe === true) {
         const probed = await Promise.all(
-          mappings.map((mapping) => this.probeMapping(target, mapping)),
+          described.map((mapping) => this.probeMapping(target, mapping)),
         );
         return this.acknowledge(state, target.owner, { mappings: probed, ...report });
       }
-      return this.acknowledge(state, target.owner, { mappings, ...report });
+      return this.acknowledge(state, target.owner, { mappings: described, ...report });
+    });
+  }
+
+  /** Adds each mapping's `deviceListener`, from one read of the device's listener table. */
+  private async withDeviceListeners(
+    target: PortReverseTarget,
+    view: DeviceView,
+    mappings: readonly PortReverseMapping[],
+  ): Promise<PortReverseMapping[]> {
+    const listeners = await deviceListeners(
+      target.adb,
+      target.deviceId,
+      mappings.map((mapping) => mapping.devicePort),
+      new Set(view.keys()),
+    );
+    return mappings.map((mapping) => {
+      const deviceListener = listeners.get(mapping.devicePort);
+      return deviceListener === undefined ? mapping : { ...mapping, deviceListener };
     });
   }
 
@@ -759,6 +783,7 @@ export class PortReverseManager {
       await this.rollback(target.deviceId, state, added);
       await this.throwIfTakenMeanwhile(target, state, request);
       rethrowDeviceTransportUnavailable(error);
+      await throwIfDevicePortHeld(state.adb, target.deviceId, request.devicePort);
       throw toActionableError(
         error,
         `adb reverse ${tcp(request.devicePort)} ${tcp(request.hostPort)} failed on ${target.deviceId}`,

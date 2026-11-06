@@ -223,7 +223,7 @@ const portReverseTool = defineDeviceTool({
     "reachable (the host server accepted), unreachable (probeReason closed: nothing listens on the " +
     "host; refused; timeout) or probe_unsupported. list reports hostListening for each tcp: host " +
     "port. ensure with reclaimStale:true replaces a stale mapping whose host port refuses. " +
-    "Conflicts carry conflictKind. Owned mappings lost to an adb or device restart are restored on the next call " +
+    "Conflicts carry conflictKind. list and verify report each port's deviceListener. Owned mappings lost to an adb or device restart are restored on the next call " +
     "and removed when the session ends. Ports below 1024 are refused. iOS returns not_applicable.",
   input: portReverseInput,
   options: { defaultEnabled: false, outputSchema: portReverseResultSchema },

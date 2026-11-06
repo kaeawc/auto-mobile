@@ -1,4 +1,10 @@
 import { shellQuote } from "../shellQuote";
+import {
+  DEVICE_LISTENERS_SCRIPT,
+  packageForUid,
+  parseDeviceListeners,
+  type DeviceListenerTable,
+} from "./deviceTcpListeners";
 import type { AdbExecutor } from "./interfaces/AdbExecutor";
 
 /** One `adb reverse --list` row: the device-side TCP port and the host-side target. */
@@ -36,6 +42,10 @@ export interface AdbReverseCommands {
   add(devicePort: number, hostPort: number, options?: { noRebind?: boolean }): Promise<void>;
   /** `adb reverse --remove tcp:<devicePort>`. Never `--remove-all`. */
   remove(devicePort: number): Promise<void>;
+  /** LISTEN sockets on device loopback or wildcard addresses, by port. */
+  listeners(): Promise<DeviceListenerTable>;
+  /** The one package installed with `uid`, or undefined (none, or a shared uid). */
+  packageForUid(uid: number): Promise<string | undefined>;
 }
 
 export const ADB_REVERSE_TIMEOUT_MS = 5000;
@@ -152,6 +162,20 @@ export function createAdbReverseCommands(
     },
     async remove(devicePort) {
       await adb.executeCommand(`reverse --remove tcp:${devicePort}`, options);
+    },
+    async listeners() {
+      const result = await adb.executeCommand(
+        `shell sh -c ${shellQuote(DEVICE_LISTENERS_SCRIPT)}`,
+        { ...options, noRetry: true },
+      );
+      return parseDeviceListeners(result.stdout);
+    },
+    async packageForUid(uid) {
+      const result = await adb.executeCommand("shell pm list packages -U", {
+        ...options,
+        noRetry: true,
+      });
+      return packageForUid(result.stdout, uid);
     },
   };
 }

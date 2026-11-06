@@ -3,6 +3,10 @@ import type {
   AdbReverseEntry,
   PortProbeOutcome,
 } from "../../src/utils/android-cmdline-tools/adbReverse";
+import type { DeviceListenerTable } from "../../src/utils/android-cmdline-tools/deviceTcpListeners";
+
+/** adbd's uid on a user build; every reverse in `mappings` listens as it. */
+export const FAKE_ADBD_UID = 2000;
 
 /** An in-memory device: `mappings` is what `adb reverse --list` would print, keyed by device port. */
 export class FakeAdbReverseCommands implements AdbReverseCommands {
@@ -53,6 +57,9 @@ export class FakeAdbReverseCommands implements AdbReverseCommands {
     if (this.failAdd.has(devicePort)) {
       throw new Error("adb: error: cannot bind");
     }
+    if (this.processListeners.has(devicePort)) {
+      throw new Error(`adb: error: cannot bind listener: Address already in use`);
+    }
     if (options?.noRebind && this.mappings.has(devicePort)) {
       throw new Error("adb: error: cannot rebind existing socket");
     }
@@ -65,6 +72,36 @@ export class FakeAdbReverseCommands implements AdbReverseCommands {
       throw new Error("adb: error: transport busy");
     }
     this.mappings.delete(devicePort);
+  }
+
+  /** Device ports held by other device processes, by uid (reverses are added from `mappings`). */
+  readonly processListeners = new Map<number, number>();
+  /** Installed packages by uid, as `pm list packages -U` would show them. */
+  readonly packages = new Map<number, string>();
+  /** When set, the listener table reads as this instead. */
+  listenerTable: DeviceListenerTable | undefined;
+  /** When set, reading the listener table rejects with it. */
+  listenersError: Error | undefined;
+  /** Listener-table reads and package lookups, kept out of `calls`. */
+  readonly diagnosticCalls: string[] = [];
+
+  async listeners(): Promise<DeviceListenerTable> {
+    this.diagnosticCalls.push("listeners");
+    if (this.listenersError !== undefined) {
+      throw this.listenersError;
+    }
+    if (this.listenerTable !== undefined) {
+      return this.listenerTable;
+    }
+    const listeners = new Map<number, number[]>();
+    this.mappings.forEach((_host, port) => listeners.set(port, [FAKE_ADBD_UID]));
+    this.processListeners.forEach((uid, port) => listeners.set(port, [uid]));
+    return { kind: "ok", listeners };
+  }
+
+  async packageForUid(uid: number): Promise<string | undefined> {
+    this.diagnosticCalls.push(`package ${uid}`);
+    return this.packages.get(uid);
   }
 
   /** Simulates a transport drop: adbd restarted and every reverse is gone. */

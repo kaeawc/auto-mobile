@@ -27,7 +27,14 @@ describe("PortReverseManager verify probe", () => {
     adb.probeOutcomes.set(8080, [{ kind: "held" }]);
     const result = await manager.verify(target, undefined, { probe: true });
     expect(result.mappings).toEqual([
-      { devicePort: 8080, host: "tcp:8080", hostPort: 8080, owned: true, status: "reachable" },
+      {
+        devicePort: 8080,
+        host: "tcp:8080",
+        hostPort: 8080,
+        owned: true,
+        status: "reachable",
+        deviceListener: { kind: "reverse" },
+      },
     ]);
   });
 

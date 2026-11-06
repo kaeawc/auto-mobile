@@ -21,6 +21,18 @@ const mappingSchema = z.object({
   probeDetail: z.string().optional(),
   hostListening: z.boolean().optional(),
   reclaimed: z.object({ host: z.string(), reason: z.enum(["host_refused"]) }).optional(),
+  deviceListener: z
+    .discriminatedUnion("kind", [
+      z.object({ kind: z.literal("none") }),
+      z.object({ kind: z.literal("reverse") }),
+      z.object({
+        kind: z.literal("process"),
+        uid: z.number().int(),
+        package: z.string().optional(),
+      }),
+      z.object({ kind: z.literal("unsupported"), detail: z.string() }),
+    ])
+    .optional(),
 });
 
 const conflictKind = z.enum(["other_session", "external_live", "external_unknown"]);
@@ -44,6 +56,7 @@ export const portReverseResultSchema = z
         "port_reverse_not_owned",
         "port_reverse_port_refused",
         "port_reverse_reclaim_failed",
+        "port_reverse_device_port_in_use",
       ])
       .optional(),
     ports: z.array(z.number().int()).optional(),

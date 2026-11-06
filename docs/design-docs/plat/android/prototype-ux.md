@@ -2548,6 +2548,21 @@ calls `media.next`, `previous` (restarts after 3 s), `skipTo` (`itemId`), `setSh
 `currentItemId`, `currentIndex`, `rate`, `sleepRemainingMs`, `shuffle` and `repeat`, and
 `media.itemChanged` reports an item change. No runtime advertises the capability yet.
 
+Queue semantics are a pure state machine (`PrototypeQueue`) that Kotlin and Swift both replay against
+`test/fixtures/prototype-media-queue`; the host only validates. Renderers report `ended`, the
+playhead, clock ticks and queue edits, and map the state onto their engine:
+
+- The play order is the queue order, or a Fisher-Yates shuffle driven by an injected `Random` that
+  keeps the current item first. Turning shuffle off restores queue order.
+- `next` ignores repeat `one`; an item ending replays under it. Past the last item, repeat `all`
+  wraps and `off` stops on that item. `previous` restarts after 3 s, and at the first item wraps
+  under `all` or otherwise restarts.
+- A `{ms}` sleep timer counts down on the renderer's clock and pauses at zero; `{endOfItem}` pauses
+  when the current item ends instead of advancing.
+- When a data action edits the queue, play order keeps its relative order and appends new items.
+  Removing the current item moves to the next surviving one, or with none left wraps under `all`
+  or stops on the last item. `skipTo` an unknown id fails with `item_not_found`.
+
 **Live camera (#14202, calls only).** The `camera` module also drives an in-app viewfinder:
 `camera.takePhoto` writes an image item to `into`, `camera.startRecording` (optional `audio` boolean and
 `maxDurationMs` 1-600000) and `camera.stopRecording` (writes a video item to `into`). Each takes

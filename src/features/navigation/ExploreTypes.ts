@@ -1,6 +1,9 @@
 import type { ObserveResult } from "../../models";
 import type { ExportedGraph } from "../../utils/interfaces/NavigationGraph";
 import type { NavigationEdge } from "./NavigationGraphManager";
+import type { DialogTapActionFactory } from "./ExploreBlockerDetection";
+import type { FocusSelectNavigator } from "./ExploreElementActions";
+import type { InputModeResolver } from "./focusDrivenInput";
 
 /**
  * Exploration strategies for explore
@@ -161,4 +164,14 @@ export interface GraphTraversalState {
   edgeValidationResults: Map<string, EdgeValidationResult>;
   totalNodesInGraph: number;
   totalEdgesInGraph: number;
+}
+
+/** The session an exploration records under and the dialog-tap seam its blocker handlers use. */
+export interface ExploreSessionOptions {
+  sessionUuid?: string;
+  tapActionFactory?: DialogTapActionFactory;
+  /** Touch, or D-pad focus and select on a TV (#16737); touch when omitted. */
+  inputMode?: InputModeResolver;
+  /** The D-pad focus walk used in D-pad mode; a fake drives it in tests. */
+  focusNavigatorFactory?: () => FocusSelectNavigator;
 }

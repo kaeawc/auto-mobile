@@ -15,6 +15,7 @@ import { normalize } from "../utility/ElementResolverMatching";
 import { isTruthyFlag } from "../utility/elementProperties";
 import { matchesCtrlProxyResourceId } from "../utility/SearchableNode";
 import { throwIfAborted } from "../../utils/toolUtils";
+import { reportToolDispatched } from "../../utils/ToolDispatchContext";
 import { boundsArea, boundsEqual, intersectBounds } from "../../utils/bounds";
 import { compareSelectionRank } from "../utility/selectionRank";
 import type { Timer } from "../../utils/SystemTimer";
@@ -93,6 +94,8 @@ export interface FocusNavigateOptions {
   direction?: FocusNavigateDirection;
   maxSteps?: number;
   settleMs?: number;
+  /** Press the D-pad select key (enter) once focus lands on the target. */
+  select?: boolean;
   signal?: AbortSignal;
   /**
    * Only the first-ranked match on each read counts, as tapOn's default selection does, so focus
@@ -115,8 +118,13 @@ export interface FocusNavigateResult {
   /** Focused elements in the order observed; consecutive repeats are collapsed. */
   path: FocusPathEntry[];
   focusedElement?: FocusPathEntry;
+  /** With `select`: whether the select key was sent to the focused target. */
+  selected?: boolean;
   message?: string;
 }
+
+/** The key that activates the focused element; TV views treat enter as D-pad center. */
+export const FOCUS_NAVIGATE_SELECT_KEY = "enter" satisfies InputKeyName;
 
 const DIRECTION_KEYS = {
   up: "arrow_up",
@@ -566,7 +574,7 @@ export class FocusNavigate {
         path,
       });
       if (done) {
-        return done;
+        return await this.finish(done, options.select === true, signal);
       }
       if (!direction) {
         throw new ActionableError("focusNavigate has no direction to press");
@@ -635,6 +643,28 @@ export class FocusNavigate {
       return stalled;
     }
     return untried[0];
+  }
+
+  /** With `select`, activate a focused target with the select key; a refused key fails the call. */
+  private async finish(
+    done: FocusNavigateResult,
+    select: boolean,
+    signal: AbortSignal | undefined,
+  ): Promise<FocusNavigateResult> {
+    if (!select) {
+      return done;
+    }
+    if (!done.success) {
+      return { ...done, selected: false };
+    }
+    throwIfAborted(signal);
+    // The select key, not the first arrow, is what can navigate: time the recorded call from it.
+    reportToolDispatched();
+    const pressed = await this.keys.press(FOCUS_NAVIGATE_SELECT_KEY, signal);
+    if (!pressed.success) {
+      throw new ActionableError(pressed.error ?? "Failed to press the D-pad select key");
+    }
+    return { ...done, selected: true };
   }
 
   private async press(

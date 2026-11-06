@@ -10,6 +10,7 @@ import {
 } from "../../../src/features/action/FocusNavigate";
 import type { InputKeyName } from "../../../src/features/action/InputKey";
 import type { Element } from "../../../src/models/Element";
+import { runWithToolDispatchReporter } from "../../../src/utils/ToolDispatchContext";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 // Hand-reconstructed layout (not captured from a TV image): a 2x3 grid of 100px tiles.
@@ -203,6 +204,43 @@ describe("FocusNavigate", () => {
     const grid = new FakeGrid(1);
     const result = await navigator(grid).execute({ until: { label: "Movi" } });
     expect(result).toMatchObject({ success: true, status: "focused", steps: 0 });
+  });
+
+  test("select presses enter once focus lands on the target", async () => {
+    const grid = new FakeGrid(0);
+    const result = await navigator(grid).execute({ until: { text: "Search" }, select: true });
+    expect(result).toMatchObject({ success: true, status: "focused", selected: true });
+    expect(grid.presses.at(-1)).toBe("enter");
+    expect(grid.presses.filter((key) => key === "enter")).toHaveLength(1);
+  });
+
+  test("select reports dispatch when the select key goes out, not at the first arrow", async () => {
+    const grid = new FakeGrid(0);
+    const pressesAtDispatch: number[] = [];
+    const result = await runWithToolDispatchReporter(
+      () => pressesAtDispatch.push(grid.presses.length),
+      () => navigator(grid).execute({ until: { text: "Search" }, select: true }),
+    );
+    expect(result.selected).toBe(true);
+    // Reported once, after every arrow press and just before enter.
+    expect(pressesAtDispatch).toEqual([grid.presses.length - 1]);
+  });
+
+  test("select does not press enter when the target is never focused", async () => {
+    const grid = new FakeGrid(0);
+    grid.blocked = new Set([1, 3]);
+    const result = await navigator(grid).execute({ until: { text: "Search" }, select: true });
+    expect(result.success).toBe(false);
+    expect(result.selected).toBe(false);
+    expect(grid.presses).not.toContain("enter");
+  });
+
+  test("a refused select key fails the call", async () => {
+    const grid = new FakeGrid(1);
+    grid.failPress = "key refused";
+    await expect(
+      navigator(grid).execute({ until: { text: "Movies" }, select: true }),
+    ).rejects.toThrow("key refused");
   });
 
   test("recognises the inline TV Settings child label without pressing keys", async () => {

@@ -358,7 +358,12 @@ for module_path in "${modules[@]+"${modules[@]}"}"; do
       detekt_tasks+=("${module_path}:detektMain" "${module_path}:detektTest")
     fi
     if grep -Eq 'alias\(libs\.plugins\.android\.(application|library)\)|id\("automobile\.android-(library|application)"\)' "${module_dir}/build.gradle.kts"; then
-      compile_tasks+=("${module_path}:compileDebugKotlin")
+      if [[ "${module_path}" == ":prototype-app-shell" ]]; then
+        # Template flavors (`base`, later `media`, ...) make the unflavored task name ambiguous.
+        compile_tasks+=("${module_path}:compileBaseDebugKotlin")
+      else
+        compile_tasks+=("${module_path}:compileDebugKotlin")
+      fi
     else
       compile_tasks+=("${module_path}:compileKotlin")
     fi

@@ -57,4 +57,21 @@ describe("DefaultAndroidBuildToolsLocator", () => {
 
     expect(tool).toEqual({ tool: "aapt2", path: join("/sdk/build-tools", "34.0.0", "aapt2") });
   });
+  test("finds stamp tools together and chooses the newest installed platform", async () => {
+    systemDetection.setPlatform("darwin");
+    systemDetection.setEnvVar("ANDROID_HOME", "/sdk");
+    systemDetection.addExistingFile("/sdk");
+    for (const tool of ["aapt2", "zipalign", "apksigner"]) {
+      fileSystem.setFile(`/sdk/build-tools/37.0.0/${tool}`, "");
+    }
+    fileSystem.setFile("/sdk/platforms/android-9/android.jar", "");
+    fileSystem.setFile("/sdk/platforms/android-37/android.jar", "");
+    const locator = new DefaultAndroidBuildToolsLocator(fileSystem, systemDetection);
+    expect(await locator.findStampTools()).toEqual({
+      aapt2: "/sdk/build-tools/37.0.0/aapt2",
+      zipalign: "/sdk/build-tools/37.0.0/zipalign",
+      apksigner: "/sdk/build-tools/37.0.0/apksigner",
+      androidJar: "/sdk/platforms/android-37/android.jar",
+    });
+  });
 });

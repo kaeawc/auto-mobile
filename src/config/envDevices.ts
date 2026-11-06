@@ -105,6 +105,12 @@ export const DEVICES_ENV = {
     default: "off",
     doc: "Forbid the prototype-agent release download (1/true).",
   },
+  ANDROID_PROTOTYPE_APP_TEMPLATE: {
+    name: "AUTOMOBILE_ANDROID_PROTOTYPE_APP_TEMPLATE",
+    kind: "path",
+    default: "unset",
+    doc: "Packaged Android disposable app template directory or parent of flavor directories.",
+  },
   IOS_PROTOTYPE_VIEWER: {
     name: "AUTOMOBILE_IOS_PROTOTYPE_VIEWER",
     kind: "path",

@@ -1,4 +1,4 @@
-import { join } from "path";
+import { join, dirname } from "path";
 import { FileSystem, DefaultFileSystem } from "../filesystem/DefaultFileSystem";
 import { SystemDetection, DefaultSystemDetection } from "../system/SystemDetection";
 import { logger } from "../logger";
@@ -50,6 +50,36 @@ export class DefaultAndroidBuildToolsLocator implements AndroidBuildToolsLocator
     }
 
     return this.findToolInBuildTools("aapt");
+  }
+
+  async findStampTools(): Promise<AndroidStampTools | null> {
+    const aapt = (await this.findToolInBuildTools("aapt2")) ?? (await this.findToolInPath("aapt2"));
+    if (!aapt || aapt.tool !== "aapt2") {
+      return null;
+    }
+    const directory = dirname(aapt.path);
+    const windows = this.systemDetection.getCurrentPlatform() === "win32";
+    const zipalign = join(directory, windows ? "zipalign.exe" : "zipalign");
+    const apksigner = join(directory, windows ? "apksigner.bat" : "apksigner");
+    if (!this.fileSystem.existsSync(zipalign) || !this.fileSystem.existsSync(apksigner)) {
+      return null;
+    }
+    for (const root of this.getSdkRoots()) {
+      const platforms = join(root, "platforms");
+      if (!this.fileSystem.existsSync(platforms)) {
+        continue;
+      }
+      const versions = (await this.fileSystem.readdir(platforms)).sort((a, b) =>
+        b.localeCompare(a, undefined, { numeric: true }),
+      );
+      for (const version of versions) {
+        const androidJar = join(platforms, version, "android.jar");
+        if (this.fileSystem.existsSync(androidJar)) {
+          return { aapt2: aapt.path, zipalign, apksigner, androidJar };
+        }
+      }
+    }
+    return null;
   }
 
   private async findToolInPath(tool: AaptToolName): Promise<AaptToolLocation | null> {
@@ -147,4 +177,14 @@ export class DefaultAndroidBuildToolsLocator implements AndroidBuildToolsLocator
       .map((part) => Number.parseInt(part.replace(/\D/g, ""), 10))
       .map((value) => (Number.isNaN(value) ? 0 : value));
   }
+}
+
+export interface AndroidStampTools {
+  aapt2: string;
+  zipalign: string;
+  apksigner: string;
+  androidJar: string;
+}
+export interface AndroidStampToolsLocator {
+  findStampTools(): Promise<AndroidStampTools | null>;
 }

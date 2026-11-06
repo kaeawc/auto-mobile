@@ -8,8 +8,8 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { scoreSelectedElementMatch } from "./ExploreElementScoring";
 import {
-  elementMatchesTarget,
   FOCUS_NAVIGATE_DIRECTIONS,
+  screenTargetMatcher,
   type FocusNavigateOptions,
   type FocusNavigateTarget,
 } from "../action/FocusNavigate";
@@ -360,9 +360,6 @@ function describeInteractionTarget(edge: NavigationEdge): TargetDescriptors {
     return { reason: "no interaction was recorded for the edge, so there is no action to replay" };
   }
   const { toolName } = interaction;
-  if (toolName === "focusNavigate") {
-    return focusTargetDescriptors(interaction);
-  }
   const selector = interactionSelector(toolName, interaction.args ?? {});
   if (!selector) {
     return {
@@ -376,25 +373,6 @@ function describeInteractionTarget(edge: NavigationEdge): TargetDescriptors {
     };
   }
   return { descriptors };
-}
-
-/**
- * A recorded D-pad select (#16737) keeps `focusNavigate`'s matching: `text` matches only the
- * text, `contentDesc` only the content-desc, and `label` either one.
- */
-function focusTargetDescriptors(interaction: ToolCallInteraction): TargetDescriptors {
-  const until = recordedFocusTarget(interaction);
-  if (!until) {
-    return {
-      reason: 'recorded "focusNavigate" interaction has no until target to match on screen',
-    };
-  }
-  const descriptor: TargetDescriptor = {
-    ...(until.text || until.label ? { text: until.text ?? until.label } : {}),
-    ...(until.contentDesc || until.label ? { contentDesc: until.contentDesc ?? until.label } : {}),
-    ...(until.resourceId ? { resourceId: until.resourceId } : {}),
-  };
-  return { descriptors: [descriptor] };
 }
 
 /** An edge recorded as a Back press (`pressButton { button: "back" }`). */
@@ -499,27 +477,33 @@ function bestDescriptorMatch(
   return best;
 }
 
+/** Confidence of a recorded D-pad target found with `focusNavigate`'s own matcher. */
+const FOCUS_TARGET_CONFIDENCE = 0.9;
+
 /**
- * A recorded `focusNavigate` whose `until` names several fields requires all of them on one
- * element; when some candidate satisfies every field, score only those, else the candidates
- * matching every field but the resource id (the label of a row's child).
+ * Resolve a recorded `focusNavigate` (#16737) with `focusNavigate`'s own matcher, so validation
+ * finds exactly what the replay will select: every `until` field on one element, exact labels
+ * and ids first, synthetic `view-id`s included. When the target is a label inside a clickable
+ * row (a contained node that carries its own id), the row matching the label alone is used.
  */
-function focusTargetCandidates(elements: Element[], edge: NavigationEdge): Element[] {
+function resolveFocusEdgeTarget(elements: Element[], edge: NavigationEdge): EdgeTargetResolution {
   const until = recordedFocusTarget(edge.interaction);
-  const fields = until ? Object.values(until).filter((value) => value) : [];
-  if (!until || fields.length < 2) {
-    return elements;
+  if (!until) {
+    return notValidatable(
+      edge,
+      'recorded "focusNavigate" interaction has no until target to match on screen',
+    );
   }
-  const matching = elements.filter((element) => elementMatchesTarget(element, until));
-  if (matching.length > 0) {
-    return matching;
-  }
-  // The target may be a label inside a clickable row (focusNavigate matches contained nodes),
-  // which is not itself a candidate and carries its own id: keep rows matching the label alone.
   const label: FocusNavigateTarget = { ...until, resourceId: undefined };
-  return label.text || label.contentDesc || label.label
-    ? elements.filter((element) => elementMatchesTarget(element, label))
-    : [];
+  const hasLabel = Boolean(label.text || label.contentDesc || label.label);
+  const element =
+    elements.find(screenTargetMatcher(elements, until)) ??
+    (until.resourceId && hasLabel
+      ? elements.find(screenTargetMatcher(elements, label))
+      : undefined);
+  return element
+    ? { status: "matched", element, confidence: FOCUS_TARGET_CONFIDENCE }
+    : { status: "not-found", bestScore: 0 };
 }
 
 /**
@@ -533,12 +517,15 @@ export function resolveEdgeTarget(elements: Element[], edge: NavigationEdge): Ed
   if (edge.interaction?.toolName === "tapAt") {
     return resolveCoordinateTap(elements, edge, edge.interaction.args ?? {});
   }
+  if (edge.interaction?.toolName === "focusNavigate") {
+    return resolveFocusEdgeTarget(elements, edge);
+  }
   const target = describeInteractionTarget(edge);
   if ("reason" in target) {
     return notValidatable(edge, target.reason);
   }
 
-  const best = bestDescriptorMatch(focusTargetCandidates(elements, edge), target.descriptors);
+  const best = bestDescriptorMatch(elements, target.descriptors);
   if (best && best.confidence >= MIN_CONFIDENCE) {
     logger.debug(
       `[Explore] Matched element for edge ${edge.from}->${edge.to} with confidence ${best.confidence.toFixed(2)}`,

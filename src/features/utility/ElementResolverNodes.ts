@@ -12,6 +12,7 @@ import { isEditableElementProperties } from "./elementProperties";
 import type { Element } from "../../models/Element";
 import { hasVisibleScreenPart } from "./ElementGeometry";
 import { normalize } from "./ElementResolverMatching";
+import { isSystemUiStatusBarId } from "../../utils/androidStatusBar";
 import type {
   ElementReference,
   ElementResolution,
@@ -240,6 +241,26 @@ export function isWithin(
       return true;
     }
     parent = nodes[parent]?.parentIndex;
+  }
+  return false;
+}
+
+/**
+ * Whether the node is SystemUI status-bar chrome (clock, battery, signal icons) or sits inside
+ * it. `observe` folds that chrome into one summary row, so a client never picks a label from it;
+ * a substring of its content-desc (`Battery` in `Battery charging, 77 percent.`) is not the
+ * element a text selector names (#17198).
+ */
+export function isStatusBarChrome(
+  node: SearchableEntry,
+  nodes: readonly SearchableEntry[],
+): boolean {
+  let current: SearchableEntry | undefined = node;
+  while (current) {
+    if (isSystemUiStatusBarId(current.nativeId)) {
+      return true;
+    }
+    current = current.parentIndex === undefined ? undefined : nodes[current.parentIndex];
   }
   return false;
 }

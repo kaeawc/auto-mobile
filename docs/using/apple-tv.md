@@ -189,8 +189,8 @@ every item it can focus on a screen, observes after every remote press, records 
 - It stops at either limit, when the first screen has nothing left to select, or when the app
   cannot be brought back after leaving it (`stopReason`).
 - A recorded transition replays as `tapOn` with the item's identifier, or its text when it has
-  no identifier, or as `pressButton select` when it has neither; going back replays as
-  `pressButton menu`.
+  no identifier; going back replays as `pressButton menu`. A screen opened from an item with
+  neither is still recorded, but `navigateTo` cannot replay that transition and says so.
 
 ## Run a plan
 

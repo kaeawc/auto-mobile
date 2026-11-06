@@ -3,6 +3,7 @@ import type { Element } from "../../models";
 import type { ExploreResult } from "../navigation/ExploreTypes";
 import type { NavigationGraphService } from "../navigation/NavigationGraphService";
 import { ScreenFingerprint } from "../navigation/ScreenFingerprint";
+import type { NavigationToolCallHandle } from "../../utils/interfaces/NavigationGraph";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { isTvosHierarchy, normalizeTvosHierarchy } from "./TvosHierarchy";
@@ -92,11 +93,19 @@ function focusKey(element: Element | undefined): string {
   ]);
 }
 
+interface ReplayCall {
+  tool: string;
+  args: Record<string, unknown>;
+}
+
 /**
  * The replayable public call a select on `focused` stands for. The identifier wins over the text:
- * two controls can share a label but not, in a well-formed app, an identifier.
+ * two controls can share a label but not, in a well-formed app, an identifier. A control with
+ * neither gets no call: a bare `select` would replay whichever control has focus, so two such
+ * controls would record the same call for different destinations. Its transition is still
+ * recorded, and replay refuses it as having no recorded action rather than open the wrong screen.
  */
-function selectCall(focused: Element | undefined): { tool: string; args: Record<string, unknown> } {
+function selectCall(focused: Element | undefined): ReplayCall | undefined {
   if (focused?.["resource-id"]) {
     return {
       tool: "tapOn",
@@ -106,7 +115,7 @@ function selectCall(focused: Element | undefined): { tool: string; args: Record<
   if (focused?.text) {
     return { tool: "tapOn", args: { action: "tap", selector: { text: focused.text } } };
   }
-  return { tool: "pressButton", args: { button: "select" } };
+  return undefined;
 }
 
 /** The first move toward the nearest focus position that is unselected or has an untried move. */
@@ -290,7 +299,7 @@ export class TvosExplore {
   ): Promise<{ read: TvosScreenRead; screen?: ScreenState; stopReason?: string }> {
     screen.selected.add(focusKey(before.focused));
     const call = selectCall(before.focused);
-    const after = await this.recorded(call.tool, call.args, "select", signal);
+    const after = await this.recorded(call, "select", signal);
     if (after.read.packageName !== appId) {
       return this.returnToApp(after.read, appId, after.withdraw, signal);
     }
@@ -313,7 +322,11 @@ export class TvosExplore {
     if (!parent) {
       return { read: before, stopReason: "No unexplored focus on the root screen" };
     }
-    const after = await this.recorded("pressButton", { button: "menu" }, "menu", signal);
+    const after = await this.recorded(
+      { tool: "pressButton", args: { button: "menu" } },
+      "menu",
+      signal,
+    );
     if (after.read.packageName !== appId) {
       after.withdraw();
       return { read: after.read, stopReason: `Left target app (${after.read.packageName})` };
@@ -343,12 +356,14 @@ export class TvosExplore {
 
   /** Press `button` while the graph holds the call that replays it, then re-read the screen. */
   private async recorded(
-    tool: string,
-    args: Record<string, unknown>,
+    call: ReplayCall | undefined,
     button: "select" | "menu",
     signal?: AbortSignal,
   ): Promise<{ read: TvosScreenRead; withdraw: () => void }> {
-    const handle = this.graph.recordToolCall(tool, args, undefined, this.deviceId);
+    // No call to record: there is nothing to withdraw either.
+    const handle: NavigationToolCallHandle = call
+      ? this.graph.recordToolCall(call.tool, call.args, undefined, this.deviceId)
+      : () => undefined;
     try {
       handle.markDispatched?.();
       await this.device.press(button, signal);

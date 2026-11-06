@@ -132,6 +132,35 @@ describe("TvosExplore", () => {
     expect(rejected).toEqual([]);
   });
 
+  test("controls with neither identifier nor text record their screens without a replay call", async () => {
+    const app = new FakeTvosExploreApp(
+      {
+        home: [
+          { id: "icon-a", col: 0, row: 0, opens: "alpha", anonymous: true },
+          { id: "icon-b", col: 1, row: 0, opens: "beta", anonymous: true },
+        ],
+        alpha: [],
+        beta: [],
+      },
+      "home",
+    );
+    const { graph, explore } = arrange(app);
+    await explore.execute({});
+    const reached = graph.events.map((event, index) => [
+      event.destination,
+      graph.edgeCalls[index]?.tool,
+    ]);
+    // A bare select would replay whichever control has focus; record no call instead.
+    expect(reached).toEqual([
+      ["tvos-fp-home", undefined],
+      ["tvos-fp-alpha", undefined],
+      ["tvos-fp-home", "pressButton"],
+      ["tvos-fp-beta", undefined],
+      ["tvos-fp-home", "pressButton"],
+    ]);
+    expect(graph.calls.map((call) => call.args)).toEqual([{ button: "menu" }, { button: "menu" }]);
+  });
+
   test("stops at maxInteractions", async () => {
     const { graph, explore } = arrange();
     const result = await explore.execute({ maxInteractions: 1 });

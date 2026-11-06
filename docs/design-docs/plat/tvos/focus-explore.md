@@ -23,10 +23,12 @@ neither touch nor, in general, the SDK.
   the first move toward it. With nothing left, press `menu` back to the parent; on the first
   screen, stop.
 - **Recording.** Each `select` and `menu` press runs while the navigation graph holds the public
-  call that replays it (`tapOn` by identifier, else by text, else `pressButton select`;
-  `pressButton menu`). The identifier wins because two controls can share a
-  label. The screen the press reaches is written with `recordNavigationEvent`; a press that
-  reaches no new screen withdraws its call.
+  call that replays it (`tapOn` by identifier, else by text; `pressButton menu`). The identifier
+  wins because two controls can share a label. A control with neither gets no call: a bare
+  `select` replays whatever holds focus, so two such controls would record one call for two
+  destinations. Its edge is still written, and `navigateTo` refuses an edge with no recorded
+  action instead of opening the wrong screen. The screen the press reaches is written with
+  `recordNavigationEvent`; a press that reaches no new screen withdraws its call.
 - **Termination.** Moves need no budget of their own: every move either tries an untried
   direction or follows a known move toward one, and a landing that contradicts a known move
   overwrites it, so known moves cannot cycle without new information. A new focus position is

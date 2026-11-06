@@ -32,6 +32,13 @@ export const ANDROID_PARITY_FRAME = "small-phone";
 export const ANDROID_PARITY_VIEWPORT = { width: 360, height: 640 } as const;
 
 /**
+ * Pins only the screen's default stack to DejaVu Sans, so a capture does not depend on what
+ * `system-ui` resolves to, while an authored family such as a serif theme keeps its own font.
+ */
+export const ANDROID_PARITY_FONT_CSS =
+  '[data-chrome="screen"]{font-family:"DejaVu Sans",sans-serif!important}*{caret-color:transparent!important}';
+
+/**
  * Hosted runners do not all rasterize alike: one spec has moved by up to ~180 pixels between CI
  * runs of the same commit, while one machine repeats its counts exactly. A case fails only beyond
  * this allowance over its budget, so the budget tracks the renderer gap, not the runner. It stays

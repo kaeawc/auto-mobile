@@ -7,12 +7,13 @@ import {
   ANDROID_GOLDEN_DIR,
   ANDROID_PARITY_BUDGETS,
   ANDROID_PARITY_CASES,
+  ANDROID_PARITY_FONT_CSS,
   ANDROID_PARITY_VIEWPORT,
   androidParityHtml,
   parityAllowance,
   readAndroidParityBudgets,
 } from "./webAndroidParityCases";
-import { pngSize, WEB_SCREENSHOT_FONT_CSS } from "./webScreenshotCases";
+import { pngSize } from "./webScreenshotCases";
 
 /**
  * The web still, chromeless, against the Android renderer's goldens (#16534). Opt-in like the
@@ -106,7 +107,7 @@ describeBrowser("prototype web still against the Android goldens (#16534)", () =
             await route.abort("blockedbyclient");
           });
           await page.goto(PAGE_URL, { waitUntil: "load" });
-          await page.addStyleTag({ content: WEB_SCREENSHOT_FONT_CSS });
+          await page.addStyleTag({ content: ANDROID_PARITY_FONT_CSS });
           await page.evaluate(() => document.fonts.ready.then(() => undefined));
           const actual = await page.screenshot({
             animations: "disabled",

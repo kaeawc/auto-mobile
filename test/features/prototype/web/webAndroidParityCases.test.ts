@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   ANDROID_GOLDEN_DIR,
   ANDROID_PARITY_CASES,
+  ANDROID_PARITY_FONT_CSS,
   ANDROID_PARITY_SKIPS,
   ANDROID_PARITY_VIEWPORT,
   androidParityFixturePath,
@@ -112,6 +113,15 @@ describe("prototype web parity with the Android goldens (#16534)", () => {
   test("icons draw the production Material glyphs, not placeholders", () => {
     const entry = ANDROID_PARITY_CASES.find((c) => c.golden === "fullscreen_all_nodes")!;
     expect(androidParityHtml(entry)).toContain("<svg");
+  });
+
+  test("the capture font pins the screen default but keeps an authored serif family", () => {
+    expect(ANDROID_PARITY_FONT_CSS).not.toContain("*{font-family");
+    expect(ANDROID_PARITY_FONT_CSS).toContain('[data-chrome="screen"]{font-family:');
+    const entry = ANDROID_PARITY_CASES.find(
+      (c) => c.golden === "theme_typography_shapes_slider_chip_card",
+    )!;
+    expect(androidParityHtml(entry)).toContain("font-family:serif");
   });
 
   test("the page is the chromeless still alone, transparent and inset-free", () => {

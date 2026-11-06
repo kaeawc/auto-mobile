@@ -109,27 +109,53 @@ export function focusNavigateTargetError(target: FocusNavigateTarget): string | 
     : "focusNavigate requires until.text, until.contentDesc, until.label or until.resourceId";
 }
 
-function stringProp(element: Element, key: "text" | "content-desc" | "resource-id"): string {
+function stringProp(
+  element: Element,
+  key: "text" | "content-desc" | "resource-id" | "view-id",
+): string {
   const value = element[key];
   return typeof value === "string" ? value : "";
 }
 
-function textMatches(expected: string | undefined, actual: string): boolean {
-  return !expected || textMatcher.createTextMatcher(expected)(actual);
+function textMatches(expected: string | undefined, actual: string, exact: boolean): boolean {
+  return !expected || textMatcher.createTextMatcher(expected, !exact)(actual);
 }
 
-export function elementMatchesTarget(element: Element, target: FocusNavigateTarget): boolean {
+/**
+ * Whether `element` is the target. Labels match case-insensitively as substrings unless `exact`;
+ * a resource id matches the native id (or its `:id/` name) or the node's synthetic `view-id`.
+ */
+export function elementMatchesTarget(
+  element: Element,
+  target: FocusNavigateTarget,
+  exact: boolean = false,
+): boolean {
   const text = stringProp(element, "text");
   const contentDesc = stringProp(element, "content-desc");
   const labelMatches =
-    !target.label || textMatches(target.label, text) || textMatches(target.label, contentDesc);
+    !target.label ||
+    textMatches(target.label, text, exact) ||
+    textMatches(target.label, contentDesc, exact);
   return (
-    textMatches(target.text, text) &&
-    textMatches(target.contentDesc, contentDesc) &&
+    textMatches(target.text, text, exact) &&
+    textMatches(target.contentDesc, contentDesc, exact) &&
     labelMatches &&
     (!target.resourceId ||
-      matchesCtrlProxyResourceId(stringProp(element, "resource-id"), target.resourceId))
+      matchesCtrlProxyResourceId(stringProp(element, "resource-id"), target.resourceId) ||
+      stringProp(element, "view-id") === target.resourceId)
   );
+}
+
+/**
+ * The target predicate for one screen. Like `tapOn`, an exact label match on screen wins over
+ * substring matches, so "Settings" never settles on a focused "Advanced Settings".
+ */
+export function screenTargetMatcher(
+  elements: readonly Element[],
+  target: FocusNavigateTarget,
+): (element: Element) => boolean {
+  const exact = elements.some((element) => elementMatchesTarget(element, target, true));
+  return (element) => elementMatchesTarget(element, target, exact);
 }
 
 function center(bounds: ElementBounds): { x: number; y: number } {
@@ -213,8 +239,9 @@ function describeFocus(
         return intersection !== null && boundsEqual(intersection, element.bounds);
       })
     : [];
-  const matchingDescendant = contained.find((element) => elementMatchesTarget(element, target));
-  const matches = Boolean(focused && (elementMatchesTarget(focused, target) || matchingDescendant));
+  const isTarget = screenTargetMatcher(screen.elements, target);
+  const matchingDescendant = contained.find(isTarget);
+  const matches = Boolean(focused && (isTarget(focused) || matchingDescendant));
   const label =
     matchingDescendant ??
     contained.find(
@@ -363,9 +390,7 @@ export class FocusNavigate {
     options: FocusNavigateOptions,
     blocked: ReadonlySet<FocusNavigateDirection>,
   ): FocusNavigateDirection | undefined {
-    const matches = screen.elements.filter((element) =>
-      elementMatchesTarget(element, options.until),
-    );
+    const matches = screen.elements.filter(screenTargetMatcher(screen.elements, options.until));
     return directionsToward(screen.focused, matches).find((direction) => !blocked.has(direction));
   }
 

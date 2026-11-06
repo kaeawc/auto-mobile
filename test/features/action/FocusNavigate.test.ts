@@ -119,6 +119,19 @@ describe("FocusNavigate", () => {
     expect(pressesAtDispatch).toEqual([grid.presses.length - 1]);
   });
 
+  test("prefers an exact label on screen over a focused substring match", async () => {
+    const grid = new FakeGrid(0);
+    grid.elements = [
+      { ...tile(0), text: "Advanced Settings" },
+      { ...tile(1), text: "Settings" },
+      ...grid.elements.slice(2),
+    ];
+    const result = await navigator(grid).execute({ until: { label: "Settings" }, select: true });
+    expect(result).toMatchObject({ success: true, selected: true, steps: 1 });
+    expect(grid.presses).toEqual(["arrow_right", "enter"]);
+    expect(result.focusedElement?.text).toBe("Settings");
+  });
+
   test("select does not press enter when the target is never focused", async () => {
     const grid = new FakeGrid(0);
     grid.blocked = new Set([1, 3]);
@@ -441,6 +454,12 @@ describe("elementMatchesTarget", () => {
     expect(elementMatchesTarget(tile(1), { resourceId: "tile_2" })).toBe(false);
     expect(elementMatchesTarget(tile(1), { text: "MOV" })).toBe(true);
     expect(elementMatchesTarget(tile(1), { text: "Movies", resourceId: "tile_2" })).toBe(false);
+  });
+
+  test("a resource id also matches the synthetic view-id", () => {
+    const synthetic: Element = { ...tile(1), "resource-id": undefined, "view-id": "node-7" };
+    expect(elementMatchesTarget(synthetic, { resourceId: "node-7" })).toBe(true);
+    expect(elementMatchesTarget(synthetic, { resourceId: "node-8" })).toBe(false);
   });
 
   test("label matches the text or the content-desc", () => {

@@ -46,16 +46,17 @@ iOS runner predates the audit command: restart the daemon so it installs the cur
 
 Android only.
 
-| Parameter | Meaning                                                                                   |
-| --------- | ----------------------------------------------------------------------------------------- |
-| `kinds`   | `performance` and/or `memory` (default: both)                                             |
-| `appId`   | App to audit (default: the foreground app)                                                |
-| `failOn`  | `error` or `warning` fails the call when a check does not pass; `never` (default) reports |
+| Parameter | Meaning                                                                                                 |
+| --------- | ------------------------------------------------------------------------------------------------------- |
+| `kinds`   | `performance` and/or `memory` (default: both)                                                           |
+| `appId`   | App to audit (default: the foreground app)                                                              |
+| `failOn`  | `error` or `warning` fails the call when a check does not pass or cannot run; `never` (default) reports |
 
 `performance` measures UI jank, frame time and touch latency of the foreground app against the
 configured thresholds; when `appId` is not in the foreground it is listed under `unsupported`
-instead. `memory` takes a memory snapshot of `appId`. Each result has `passed`, its metrics and its
-violations; `failed` is set when `failOn` matched. For raw captures use `performanceTrace`,
+instead, and `failOn` `error` or `warning` then fails the call. `memory` takes a memory snapshot of
+`appId`. Each result has `passed`, its metrics and its violations; `failed` is set when `failOn`
+matched. For raw captures use `performanceTrace`,
 `captureTrace`, `measureStartup` or `heapDump`.
 
 ## audit (deprecated)

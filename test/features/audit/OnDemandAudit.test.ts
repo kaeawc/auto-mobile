@@ -178,6 +178,20 @@ describe("OnDemandAudit (#14075)", () => {
     expect(result.success).toBe(true);
   });
 
+  test("failOn counts a requested check that could not run (#17281)", async () => {
+    const input = { kinds: ["performance", "memory"] as const, appId: "com.other" };
+
+    const reported = await audit().run(input);
+    expect(reported.failed).toBe(false);
+    expect(reported.success).toBe(true);
+
+    const failing = await audit().run({ ...input, failOn: "error" });
+    expect(failing.unsupported?.performance).toContain("not in the foreground");
+    expect(failing.memory?.passed).toBe(true);
+    expect(failing.failed).toBe(true);
+    expect(failing.success).toBe(false);
+  });
+
   test("no foreground app and no appId is an error", async () => {
     engines.observed = { ...observation(), activeWindow: undefined };
 

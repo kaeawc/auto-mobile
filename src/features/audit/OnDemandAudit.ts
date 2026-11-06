@@ -314,6 +314,9 @@ export class OnDemandAudit {
     const failing = SEVERITY_FAILS[failOn];
     return (
       reported.some((violation) => failing.has(violation.severity)) ||
+      // A requested check that could not run (a background app's performance) cannot pass, so
+      // an assertion on it fails rather than succeeding silently (#17281).
+      Object.keys(output.unsupported ?? {}).length > 0 ||
       output.performance?.passed === false ||
       output.memory?.passed === false
     );

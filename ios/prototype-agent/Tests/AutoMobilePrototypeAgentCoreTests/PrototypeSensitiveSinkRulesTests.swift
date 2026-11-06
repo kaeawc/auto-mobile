@@ -305,6 +305,7 @@ final class PrototypeSensitiveSinkRulesTests: XCTestCase {
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "json" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
         XCTAssertFalse(files.isEmpty)
+        XCTAssertTrue(files.contains { $0.lastPathComponent == "repeat-item-copy.json" })
         for file in files {
             let fixture = try XCTUnwrap(JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: file)).objectFields)
             let value = try XCTUnwrap(fixture["spec"]?.objectFields)
@@ -327,6 +328,17 @@ final class PrototypeSensitiveSinkRulesTests: XCTestCase {
                 try validate(value, path: path, message: XCTUnwrap(fixture["expectedMessage"]?.stringValue))
             } else if file.lastPathComponent.hasPrefix("platform-") {
                 try validate(value, path: nil)
+            }
+            if file.lastPathComponent == "repeat-item-copy.json" {
+                var clean = value
+                var root = try XCTUnwrap(clean["root"]?.objectFields)
+                var children = PrototypeStrictBindings.array(root["children"])
+                var source = try XCTUnwrap(children[0].objectFields)
+                source["into"] = .string("/data/other")
+                children[0] = .object(source)
+                root["children"] = .array(children)
+                clean["root"] = .object(root)
+                try validate(clean, path: nil)
             }
         }
     }

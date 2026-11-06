@@ -128,6 +128,26 @@ describe("FocusNavigate", () => {
     expect(grid.presses.length).toBeGreaterThan(0);
   });
 
+  test("pinTarget steers to the bounds it resolves, ignoring the until fields", async () => {
+    const grid = new FakeGrid(0);
+    const result = await navigator(grid).execute({
+      until: { label: "no such label" },
+      pinTarget: () => tile(2).bounds,
+    });
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 2 });
+    expect(result.focusedElement?.bounds).toEqual(tile(2).bounds);
+  });
+
+  test("pinTarget null means nothing on the screen is the target", async () => {
+    const grid = new FakeGrid(1);
+    const result = await navigator(grid).execute({
+      until: { label: "Movies" },
+      pinTarget: () => null,
+      maxSteps: 2,
+    });
+    expect(result.success).toBe(false);
+  });
+
   test("without firstMatch a focused duplicate is accepted, as focusNavigate always has", async () => {
     const grid = new FakeGrid(4);
     grid.elements[1] = { ...tile(1), text: "Play" };

@@ -93,6 +93,7 @@ export function createFocusNavigateObserver(screen: Pick<ObserveScreen, "execute
       return {
         focused,
         elements: parser.flattenViewHierarchy(hierarchy).map(({ element }) => element),
+        hierarchy,
       };
     },
   };

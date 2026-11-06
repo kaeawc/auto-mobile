@@ -9,6 +9,7 @@
 import { ActionableError } from "../../models/ActionableError";
 import type { Element } from "../../models/Element";
 import type { ElementBounds } from "../../models/ElementBounds";
+import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
 import { DefaultTextMatcher } from "../utility/TextMatcher";
 import { normalize } from "../utility/ElementResolverMatching";
 import { matchesCtrlProxyResourceId } from "../utility/SearchableNode";
@@ -45,14 +46,19 @@ export interface FocusNavigateTarget {
    * id-less node (`s2-…`).
    */
   elementId?: string;
-  /** Only the element at these bounds counts; see {@link firstMatchTarget}. */
-  atBounds?: ElementBounds;
+  /**
+   * Only the element at these bounds counts; null means nothing on this screen is the target.
+   * See {@link firstMatchTarget} and {@link FocusNavigateOptions.pinTarget}.
+   */
+  atBounds?: ElementBounds | null;
 }
 
 /** One screen read: the focused element (if any) and every element that could match. */
 export interface FocusScreen {
   focused: Element | null;
   elements: readonly Element[];
+  /** The read's hierarchy, for callers that resolve the target with tapOn's own selector. */
+  hierarchy?: ViewHierarchyResult;
 }
 
 export interface FocusObserver {
@@ -86,6 +92,12 @@ export interface FocusNavigateOptions {
    * already resting on another duplicate is not accepted. See {@link firstMatchTarget}.
    */
   firstMatch?: boolean;
+  /**
+   * Resolve the target on each read: its bounds, null when nothing on the screen is the target,
+   * or undefined to fall back to matching `until` here. tapOn's D-pad path resolves with the
+   * touch selector so both inputs pick the same element.
+   */
+  pinTarget?: (screen: FocusScreen) => ElementBounds | null | undefined;
 }
 
 export interface FocusNavigateResult {
@@ -178,6 +190,9 @@ function idFieldsMatch(element: Element, target: FocusNavigateTarget): boolean {
 }
 
 export function elementMatchesTarget(element: Element, target: FocusNavigateTarget): boolean {
+  if (target.atBounds === null) {
+    return false;
+  }
   if (target.atBounds && !boundsEqual(element.bounds, target.atBounds)) {
     return false;
   }
@@ -202,6 +217,10 @@ export function exactFirstTarget(
 
 /** The target for one screen read: exact-first, then pinned to the first match when asked. */
 function resolveTarget(screen: FocusScreen, options: FocusNavigateOptions): FocusNavigateTarget {
+  const pinned = options.pinTarget?.(screen);
+  if (pinned !== undefined) {
+    return { atBounds: pinned };
+  }
   const exact = exactFirstTarget(screen, options.until);
   return options.firstMatch ? firstMatchTarget(screen, exact) : exact;
 }

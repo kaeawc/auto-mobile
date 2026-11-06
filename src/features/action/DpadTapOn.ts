@@ -9,8 +9,10 @@ import type {
   FocusNavigateOptions,
   FocusNavigateResult,
   FocusNavigateTarget,
+  FocusScreen,
 } from "./FocusNavigate";
 import { throwIfAborted } from "../../utils/toolUtils";
+import type { DpadTargetResolver } from "./DpadTargetResolver";
 
 /** tapOn options only a touch tap serves: each changes which element is tapped, or when. */
 const TOUCH_ONLY_OPTIONS = [
@@ -104,12 +106,16 @@ export class DpadTapOn {
   constructor(
     private readonly navigator: DpadTapOnNavigator,
     private readonly keys: FocusKeyPresser,
+    private readonly resolver?: DpadTargetResolver,
   ) {}
 
   async execute(target: FocusNavigateTarget, signal?: AbortSignal): Promise<DpadTapOnResult> {
     const navigation = await this.navigator.execute({
       until: target,
       firstMatch: true,
+      ...(this.resolver
+        ? { pinTarget: (screen: FocusScreen) => this.resolver?.resolve(screen, target) }
+        : {}),
       ...(signal ? { signal } : {}),
     });
     const { success, message, ...focusNavigation } = navigation;

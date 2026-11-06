@@ -1,4 +1,6 @@
 import { DpadTapOn } from "../../features/action/DpadTapOn";
+import { SelectorDpadTargetResolver } from "../../features/action/DpadTargetResolver";
+import { ResolverElementSelector } from "../../features/utility/ResolverElementSelector";
 import { FocusNavigate } from "../../features/action/FocusNavigate";
 import { RealObserveScreen } from "../../features/observe/ObserveScreen";
 import type { BootedDevice } from "../../models";
@@ -24,7 +26,8 @@ export function defaultTapOnDpadFallbackFactory(device: BootedDevice): TapOnDpad
         keys,
         defaultTimer,
       );
-      return new DpadTapOn(navigator, keys).execute(target, signal);
+      const resolver = new SelectorDpadTargetResolver(new ResolverElementSelector());
+      return new DpadTapOn(navigator, keys, resolver).execute(target, signal);
     },
   };
 }

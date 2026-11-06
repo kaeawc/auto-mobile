@@ -105,9 +105,9 @@ on a child view of the focused row counts. A large focused container that holds 
 counts as focused.
 
 On a TV without a touchscreen, `tapOn` with a `text` or `elementId` selector moves D-pad focus to
-the match and presses `enter`, so one flow can tap on both Android TV and tvOS. As with a touch
-tap, an element whose whole text is the `text` you pass wins over one whose text only contains it.
-When several elements match, the first one on screen is selected, even if focus is on another. The result then has
+the match and presses `enter`, so one flow can tap on both Android TV and tvOS. The selector picks
+the same element a touch tap would, including a text field found by its placeholder and the first
+of several matches, even when focus is on another one. The result then has
 `inputMethod: "dpad"` and a `focusNavigation` object with the focus `status`, `steps` and `path`.
 If focus cannot reach the match, the call fails without pressing `enter`; observe and retry, or
 move closer with `focusNavigate`. Other selectors (`testTag`, `textAny`, `accessibilityLink`),

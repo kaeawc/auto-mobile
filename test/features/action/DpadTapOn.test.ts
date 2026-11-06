@@ -99,6 +99,21 @@ describe("DpadTapOn", () => {
     });
   });
 
+  test("a resolver pins each read's target to the element a touch tap would pick", async () => {
+    const navigator = new FakeNavigator(focused);
+    const seen: Array<{ label?: string }> = [];
+    const resolver = {
+      resolve: (_screen: unknown, target: { label?: string }) => {
+        seen.push(target);
+        return ROW.bounds;
+      },
+    };
+    await new DpadTapOn(navigator, new FakeKeys(), resolver).execute({ label: "Movies" });
+    const pin = navigator.calls[0]?.pinTarget;
+    expect(pin?.({ focused: null, elements: [] })).toEqual(ROW.bounds);
+    expect(seen).toEqual([{ label: "Movies" }]);
+  });
+
   test("does not press enter when the request is cancelled during the last read", async () => {
     const controller = new AbortController();
     const navigator: DpadTapOnNavigator = {

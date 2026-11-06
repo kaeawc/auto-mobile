@@ -239,16 +239,49 @@ function spillOversizedPayload(
  * spilled inventory contradicted its own contract. For these tools the spill
  * keeps the named summary fields and states how many list entries are inline.
  */
-const INVENTORY_SPILL_SHAPES: Readonly<
-  Record<string, { listKey: string; returnedKey: string; summaryKeys: readonly string[] }>
-> = {
+interface InventorySpillShape {
+  listKey: string;
+  returnedKey: string;
+  summaryKeys: readonly string[];
+  /** A summary map that inline entries refer to by key; it keeps only referenced entries. */
+  referencedMap?: { mapKey: string; refKey: string };
+}
+
+const INVENTORY_SPILL_SHAPES: Readonly<Record<string, InventorySpillShape>> = {
   listDeviceImages: {
     listKey: "images",
     returnedKey: "imagesReturned",
     // Inline compact images refer to these by key, so they stay with the images (#17256).
-    summaryKeys: ["configuredInventory", "capabilityProfiles", "host"],
+    summaryKeys: ["configuredInventory", "host"],
+    referencedMap: { mapKey: "capabilityProfiles", refKey: "capabilityProfile" },
   },
 };
+
+/**
+ * Keeps the longest prefix of the inline list whose referenced map entries fit the per-field
+ * cap, and only those entries, so every inline reference resolves (#17256). Replacing the map
+ * with a truncation marker would leave inline entries pointing at nothing.
+ */
+function withReferencedEntries(
+  inlineList: readonly unknown[],
+  map: Record<string, unknown>,
+  refKey: string,
+): { list: unknown[]; entries: Record<string, unknown> } {
+  const entries: Record<string, unknown> = {};
+  const list: unknown[] = [];
+  for (const item of inlineList) {
+    const ref = isRecord(item) ? item[refKey] : undefined;
+    if (typeof ref === "string" && !(ref in entries)) {
+      const candidate = { ...entries, [ref]: map[ref] };
+      if (JSON.stringify(candidate).length > INLINE_RESIDUE_FIELD_LIMIT) {
+        break;
+      }
+      entries[ref] = map[ref];
+    }
+    list.push(item);
+  }
+  return { list, entries };
+}
 
 function withInventorySpillShape(
   ctx: FinalizeToolResponseContext,
@@ -260,8 +293,17 @@ function withInventorySpillShape(
   if (!shape || !Array.isArray(fullList)) {
     return residue;
   }
-  const inlineList = Array.isArray(residue[shape.listKey]) ? residue[shape.listKey] : [];
-  const returned = (inlineList as unknown[]).length;
+  const residueList = residue[shape.listKey];
+  let inlineList: unknown[] = Array.isArray(residueList) ? residueList : [];
+  const referenced = shape.referencedMap;
+  const map = referenced ? payload[referenced.mapKey] : undefined;
+  let referencedEntries: Record<string, unknown> = {};
+  if (referenced && isRecord(map)) {
+    const kept = withReferencedEntries(inlineList, map, referenced.refKey);
+    inlineList = kept.list;
+    referencedEntries = { [referenced.mapKey]: kept.entries };
+  }
+  const returned = inlineList.length;
   return {
     ...residue,
     ...Object.fromEntries(
@@ -269,6 +311,7 @@ function withInventorySpillShape(
         .filter((key) => payload[key] !== undefined)
         .map((key) => [key, boundResidueField(payload[key])]),
     ),
+    ...referencedEntries,
     [shape.listKey]: inlineList,
     truncated: returned < fullList.length,
     [shape.returnedKey]: returned,

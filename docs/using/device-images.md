@@ -42,8 +42,9 @@ you need that per-image shape; it is several times larger.
 
 A result over 64 KiB is written to a tool-output file. The inline result then
 has `artifact` (with `resourceUri`) and a `resource_link` content block, and
-keeps `count`, `platform`, `configuredInventory`, `capabilityProfiles` and
-`host`. It adds:
+keeps `count`, `platform`, `configuredInventory` and `host`. `capabilityProfiles`
+holds the profiles that the inline images name, so every inline
+`capabilityProfile` resolves. It adds:
 
 - `truncated`: `true` when `images` holds fewer than `count` entries.
 - `imagesReturned`: the number of entries inline in `images`.

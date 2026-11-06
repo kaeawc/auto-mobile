@@ -297,6 +297,109 @@ final class PrototypeSensitiveSinkRulesTests: XCTestCase {
         try validate(value, path: nil)
     }
 
+    private func copySpec(first: String, second: String, source: String = "platform", from: String = "/auth/userId")
+        throws -> [String: JSONValue]
+    {
+        func copy(_ destination: String, source: String, from: String) -> JSONValue {
+            .object([
+                "type": .string("setData"), "path": .string("/data\(destination)"),
+                "value": .object([source: .string(from)]),
+            ])
+        }
+        return try [
+            "id": .string("copy-utf16"),
+            "window": json(#"{"placement":{"type":"fullscreen"}}"#),
+            "requires": json(#"{"platform":["auth"]}"#),
+            "root": .object(["type": .string("column"), "children": .array([
+                .object([
+                    "type": .string("button"), "label": .string("Unused copy"),
+                    "onTap": .array([copy(first, source: "platform", from: "/auth/userId")]),
+                ]),
+                .object([
+                    "type": .string("button"), "label": .string("Send"),
+                    "onTap": .array([
+                        copy(second, source: source, from: from),
+                        .object([
+                            "type": .string("request"), "url": .string("https://example.com/submit"),
+                            "via": .string("device"), "method": .string("POST"),
+                            "body": .object(["data": .string(second)]),
+                        ]),
+                    ]),
+                ]),
+            ])]),
+        ]
+    }
+
+    func testCanonicalEquivalentCopyDestinationsStayDistinct() throws {
+        let value = try copySpec(first: "/\u{00E9}", second: "/e\u{0301}")
+        try validate(value, path: "root.children[1].onTap[1].body")
+    }
+
+    func testCombiningAccentAfterSlashRetainsParentCopyTaint() throws {
+        let value = try copySpec(first: "/foo/\u{0301}bar", second: "/out", source: "data", from: "/foo")
+        try validate(value, path: "root.children[1].onTap[1].body")
+    }
+
+    func testPlainSlashRetainsParentCopyTaint() throws {
+        let value = try copySpec(first: "/foo/bar", second: "/out", source: "data", from: "/foo")
+        try validate(value, path: "root.children[1].onTap[1].body")
+    }
+
+    func testManyTaintsAndUnrelatedBindingsCostBoundedOverlapChecks() throws {
+        let taints = 3000
+        let unrelated = 5000
+        let copiesPerButton = 30
+        let queriesPerRequest = 15
+        let requestsPerButton = 30
+        let copyButtons = taints / copiesPerButton
+        let copies: [JSONValue] = (0 ..< copyButtons).map { button in
+            .object([
+                "type": .string("button"), "label": .string("Copy \(button)"),
+                "onTap": .array((0 ..< copiesPerButton).map { offset in
+                    .object([
+                        "type": .string("setData"),
+                        "path": .string("/data/copy\(button * copiesPerButton + offset)"),
+                        "value": .object(["platform": .string("/auth/userId")]),
+                    ])
+                }),
+            ])
+        }
+        let requestCount = (unrelated + queriesPerRequest - 1) / queriesPerRequest
+        let requests: [JSONValue] = (0 ..< requestCount).map { request in
+            var query: [String: JSONValue] = [:]
+            for offset in 0 ..< min(queriesPerRequest, unrelated - request * queriesPerRequest) {
+                let index = request * queriesPerRequest + offset
+                query["q\(index)"] = .object(["data": .string("/unrelated\(index)")])
+            }
+            if request == 0 { query["secret"] = .object(["data": .string("/copy\(taints - 1)")]) }
+            return .object([
+                "type": .string("request"), "url": .string("https://example.com/submit"),
+                "via": .string("device"), "query": .object(query),
+            ])
+        }
+        let sends: [JSONValue] = stride(from: 0, to: requestCount, by: requestsPerButton).map { start in
+            .object([
+                "type": .string("button"), "label": .string("Send \(start)"),
+                "onTap": .array(Array(requests[start ..< min(start + requestsPerButton, requestCount)])),
+            ])
+        }
+        let value: [String: JSONValue] = try [
+            "id": .string("sensitive-sink-scan"),
+            "window": json(#"{"placement":{"type":"fullscreen"}}"#),
+            "requires": json(#"{"platform":["auth"]}"#),
+            "root": .object(["type": .string("column"), "children": .array(copies + sends)]),
+        ]
+        let context = try PrototypeContractValidator.inspect(.object(value))
+        let result = PrototypeSensitiveSinkRules.scan(
+            value, nodes: context.locatedNodes, actions: context.actions,
+            repeats: PrototypeStrictRepeats(data: nil)
+        )
+        XCTAssertEqual(result.errors, [.invalidSpec(
+            path: "root.children[\(copyButtons)].onTap[0].query.secret", message: message
+        )])
+        XCTAssertLessThanOrEqual(result.checks, 8 * (unrelated + 1) + taints)
+    }
+
     func testSharedLibraryFixtures() throws {
         let directory = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

@@ -62,6 +62,9 @@ function isUnvalidatedPlan(raw: unknown): raw is Plan {
 /**
  * Validates a plan structure and enforces multi-device rules.
  */
+/** Platforms a plan device may name: Android, iOS, and Apple TV (remote-driven steps only). */
+const PLAN_DEVICE_PLATFORMS: ReadonlySet<string> = new Set(["android", "ios", "tvos"]);
+
 export class PlanValidator {
   /**
    * Validates a plan and throws ActionableError if invalid.
@@ -161,7 +164,7 @@ export class PlanValidator {
         `Invalid device label: ${JSON.stringify(device.label)}. Device labels must be non-empty strings.`,
       );
     }
-    if (!device.platform || (device.platform !== "android" && device.platform !== "ios")) {
+    if (!device.platform || !PLAN_DEVICE_PLATFORMS.has(device.platform)) {
       throw new ActionableError(
         `Invalid device platform for ${device.label}: ${JSON.stringify(device.platform)}.`,
       );

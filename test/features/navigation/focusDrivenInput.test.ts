@@ -5,6 +5,7 @@ import {
   focusTargetForElement,
   focusTargetFromSelector,
 } from "../../../src/features/navigation/focusDrivenInput";
+import { elementMatchesTarget } from "../../../src/features/action/FocusNavigate";
 import { extractNavigationElements } from "../../../src/features/navigation/ExploreElementExtraction";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import type { BootedDevice } from "../../../src/models";
@@ -53,11 +54,23 @@ describe("deviceInputModeResolver", () => {
 describe("focusTargetFromSelector", () => {
   test("prefers the element id, then text", () => {
     expect(focusTargetFromSelector({ elementId: "app:id/row", text: "Movies" })).toEqual({
-      resourceId: "app:id/row",
+      resourceId: "row",
     });
+    expect(focusTargetFromSelector({ elementId: "save" })).toEqual({ resourceId: "save" });
     expect(focusTargetFromSelector({ text: "Movies" })).toEqual({ label: "Movies" });
     expect(focusTargetFromSelector({ text: "  " })).toBeNull();
     expect(focusTargetFromSelector({ x: 1, y: 2 })).toBeNull();
+  });
+});
+
+describe("a namespaced recorded id", () => {
+  test("still matches a control whose native id is the bare name", () => {
+    const until = focusTargetFromSelector({ elementId: "com.example:id/save" });
+    const compose = { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, "resource-id": "save" };
+    const view = { ...compose, "resource-id": "com.example:id/save" };
+    expect(until).toEqual({ resourceId: "save" });
+    expect(elementMatchesTarget(compose, until!)).toBe(true);
+    expect(elementMatchesTarget(view, until!)).toBe(true);
   });
 });
 
@@ -72,7 +85,7 @@ describe("dpadReplayInteraction", () => {
     });
     expect(replay("tapOn", { elementId: "app:id/row" })).toEqual({
       toolName: "focusNavigate",
-      args: { until: { resourceId: "app:id/row" }, select: true },
+      args: { until: { resourceId: "row" }, select: true },
     });
   });
 

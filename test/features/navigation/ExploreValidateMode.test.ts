@@ -591,6 +591,16 @@ describe("ExploreValidateMode", () => {
       expect(resolveEdgeTarget([first], edge)).toMatchObject({ status: "not-found" });
     });
 
+    test("falls back to scoring when the multi-field target is a label inside a row", () => {
+      const row = createMockElement({ text: "Movies", "resource-id": "app:id/row" });
+      const edge = interactionEdge("focusNavigate", {
+        until: { resourceId: "app:id/label", text: "Movies" },
+        select: true,
+      });
+
+      expect(resolveEdgeTarget([row], edge)).toMatchObject({ status: "matched", element: row });
+    });
+
     test("never taps the selected tab when the recorded target is absent", () => {
       const edge = interactionEdge(
         "tapOn",

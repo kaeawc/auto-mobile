@@ -501,14 +501,25 @@ function bestDescriptorMatch(
 
 /**
  * A recorded `focusNavigate` whose `until` names several fields requires all of them on one
- * element; keep only the elements that satisfy every field before scoring alternatives.
+ * element; when some candidate satisfies every field, score only those, else the candidates
+ * matching every field but the resource id (the label of a row's child).
  */
 function focusTargetCandidates(elements: Element[], edge: NavigationEdge): Element[] {
   const until = recordedFocusTarget(edge.interaction);
   const fields = until ? Object.values(until).filter((value) => value) : [];
-  return until && fields.length > 1
-    ? elements.filter((element) => elementMatchesTarget(element, until))
-    : elements;
+  if (!until || fields.length < 2) {
+    return elements;
+  }
+  const matching = elements.filter((element) => elementMatchesTarget(element, until));
+  if (matching.length > 0) {
+    return matching;
+  }
+  // The target may be a label inside a clickable row (focusNavigate matches contained nodes),
+  // which is not itself a candidate and carries its own id: keep rows matching the label alone.
+  const label: FocusNavigateTarget = { ...until, resourceId: undefined };
+  return label.text || label.contentDesc || label.label
+    ? elements.filter((element) => elementMatchesTarget(element, label))
+    : [];
 }
 
 /**

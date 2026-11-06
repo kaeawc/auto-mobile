@@ -319,6 +319,39 @@ test("validate keeps a recorded focusNavigate that did not select from pressing 
   expect(selections[0]).toMatchObject({ until: recorded.until, select: false, direction: "right" });
 });
 
+test("validate replays a recorded focus walk that targets a scrollable container", async () => {
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const selections: FocusNavigateOptions[] = [];
+  const actions = new ExploreElementActions({
+    device,
+    adb: undefined,
+    timer,
+    focusNavigator: () => ({
+      execute: async (options) => {
+        selections.push(options);
+        return { success: true, status: "focused", steps: 1, path: [], message: "focused" };
+      },
+    }),
+    runRecorded: (_toolName, _args, _observation, run) => run(),
+  });
+  const rail: Element = {
+    bounds: { left: 0, top: 0, right: 400, bottom: 100 },
+    "resource-id": "app:id/rail",
+    scrollable: true,
+  };
+  const recorded = { until: { resourceId: "app:id/rail" } };
+
+  expect(
+    await actions.focusSelectElement(rail, observationOf("Rails"), {
+      recorded: { toolName: "focusNavigate", args: recorded },
+    }),
+  ).toBe(true);
+  expect(selections[0]).toMatchObject({ until: recorded.until, select: false });
+  // A newly discovered scrollable container is still left alone.
+  expect(await actions.focusSelectElement(rail, observationOf("Rails"))).toBeNull();
+});
+
 describe("defaultFocusSelectNavigator", () => {
   test("forwards the abort signal to every D-pad key press", async () => {
     const focused: Element = {

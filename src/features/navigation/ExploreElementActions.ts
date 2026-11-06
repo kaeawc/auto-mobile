@@ -129,9 +129,10 @@ export class ExploreElementActions {
   /**
    * Move D-pad focus to the element and select it, recorded as `focusNavigate` with
    * `select: true` so navigateTo replays the same D-pad walk; null when nothing names it.
-   * A scrollable container is not selected: moving focus through it scrolls it. Validate mode
-   * passes its edge's recorded interaction, so a recorded `focusNavigate` replays its `until`,
-   * walk options and `select` (a call that navigated on focus alone presses no enter).
+   * A newly discovered scrollable container is not selected: moving focus through it scrolls
+   * it. Validate mode passes its edge's recorded interaction, so a recorded `focusNavigate`
+   * replays its `until`, walk options and `select` (a call that navigated on focus alone
+   * presses no enter), even on a scrollable container.
    */
   async focusSelectElement(
     element: Element,
@@ -141,7 +142,9 @@ export class ExploreElementActions {
       recorded,
     }: { signal?: AbortSignal; recorded?: Pick<ToolCallInteraction, "toolName" | "args"> } = {},
   ): Promise<boolean | null> {
-    if (isTruthy(element.scrollable)) {
+    // A recorded focus walk may target a scrollable container (focus alone can navigate), so only
+    // a newly discovered action skips one.
+    if (isTruthy(element.scrollable) && recorded?.toolName !== "focusNavigate") {
       logger.debug("[Explore] D-pad mode: skipping scrollable container; focus moves scroll it");
       return null;
     }

@@ -490,6 +490,16 @@ jobs:
             test "$(git -C /tmp/bats-core rev-parse HEAD)" = "eb7f42f8d608ac693d7a4b67474f6714ea68cfc5"
             sudo /tmp/bats-core/install.sh /usr/local
             command -v shellcheck >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y shellcheck; }
+      - run:
+          name: "Install yq and ripgrep"
+          # Several wiring tests require mikefarah yq >= 4.49.1 and skip or fail
+          # without it; the GitHub runner image ships both yq and ripgrep.
+          command: |
+            mkdir -p "${HOME}/.local/bin"
+            curl -fsSL -o "${HOME}/.local/bin/yq" https://github.com/mikefarah/yq/releases/download/v4.49.2/yq_linux_amd64
+            chmod +x "${HOME}/.local/bin/yq"
+            bash .github/actions/setup-ripgrep/install-ripgrep.sh --install-dir "${HOME}/.local/bin"
+            echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${BASH_ENV}"
       - install_bun
       - run:
           name: "Install Bun dependencies"

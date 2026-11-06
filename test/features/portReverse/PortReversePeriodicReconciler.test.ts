@@ -8,6 +8,7 @@ import {
   type PortReverseReconcilePass,
 } from "../../../src/features/portReverse/PortReversePeriodicReconciler";
 import { subscribePortReversePeriodicReconcile } from "../../../src/server/portReverseTools";
+import { MAX_SETTIMEOUT_DELAY_MS } from "../../../src/utils/SystemTimer";
 import { FakeAdbReverseCommands } from "../../fakes/FakeAdbReverseCommands";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
@@ -143,6 +144,24 @@ describe("PortReversePeriodicReconciler", () => {
     adbFor("d1").mappings.clear();
     await advance(INTERVAL_MS);
     expect(adbFor("d1").mappings.get(8080)).toBe("tcp:8080");
+  });
+
+  test("an interval past the timer's maximum is clamped, never handed to setTimeout", async () => {
+    const timer = new FakeTimer();
+    const manager = new PortReverseManager(() => undefined);
+    const reconciler = new PortReversePeriodicReconciler({
+      manager,
+      timer,
+      intervalMs: 2_592_000_000,
+    });
+    subscribePortReversePeriodicReconcile(manager, reconciler);
+    const adb = new FakeAdbReverseCommands();
+    await manager.ensure({ deviceId: "d1", owner: "s1", adb }, [
+      { devicePort: 8080, hostPort: 8080 },
+    ]);
+
+    expect(timer.getPendingTimeouts()).toEqual([MAX_SETTIMEOUT_DELAY_MS]);
+    await reconciler.dispose();
   });
 
   test("dispose cancels the timer, waits for a running pass, and never re-arms", async () => {

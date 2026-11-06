@@ -1,7 +1,7 @@
 import { runOutsideRequestContext } from "../../utils/AbortContext";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
-import type { Timer } from "../../utils/SystemTimer";
+import { MAX_SETTIMEOUT_DELAY_MS, type Timer } from "../../utils/SystemTimer";
 import type { PortReverseManager, PortReverseRestoreFailure } from "./PortReverseManager";
 
 /** Default wait between periodic reconcile passes. */
@@ -49,7 +49,11 @@ export class PortReversePeriodicReconciler {
   private disposed = false;
 
   constructor(private readonly deps: PortReversePeriodicReconcilerDeps) {
-    this.intervalMs = Math.max(1, deps.intervalMs ?? PORT_REVERSE_RECONCILE_INTERVAL_MS);
+    // A delay past the timer's maximum silently becomes 1 ms, which would poll adb continuously.
+    this.intervalMs = Math.min(
+      MAX_SETTIMEOUT_DELAY_MS,
+      Math.max(1, deps.intervalMs ?? PORT_REVERSE_RECONCILE_INTERVAL_MS),
+    );
     this.maxDevicesPerPass = Math.max(
       1,
       deps.maxDevicesPerPass ?? PORT_REVERSE_RECONCILE_MAX_DEVICES_PER_PASS,

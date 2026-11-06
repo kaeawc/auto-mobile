@@ -19,6 +19,7 @@ import {
   projectConfiguredDeviceInventory,
 } from "../utils/configuredDeviceInventory";
 import { describeDevice, projectConfiguredImage } from "../daemon/deviceDescription";
+import { compactDeviceImages } from "./listDeviceImagesCompaction";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { logger } from "../utils/logger";
@@ -213,7 +214,7 @@ export function createListingHandlers() {
 
       return createStructuredToolResponse({
         message: `Found ${images.length} configured ${args.platform} device images`,
-        images,
+        ...(args.detail === "full" ? { images } : compactDeviceImages(images)),
         count: images.length,
         platform: args.platform,
         configuredInventory,

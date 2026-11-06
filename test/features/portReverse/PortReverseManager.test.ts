@@ -92,7 +92,14 @@ describe("PortReverseManager", () => {
     ]);
     const listed = await manager.list(target());
     expect(listed.mappings).toEqual([
-      { devicePort: 6000, host: "tcp:7777", hostPort: 7777, owned: false, status: "present" },
+      {
+        devicePort: 6000,
+        host: "tcp:7777",
+        hostPort: 7777,
+        owned: false,
+        status: "present",
+        deviceListener: { kind: "reverse" },
+      },
     ]);
     expect(adb.mappings.get(6000)).toBe("tcp:7777");
   });

@@ -492,6 +492,18 @@ describe("prototype web map across the 180° line (#16593)", () => {
     ]);
   });
 
+  test("a tilted, turned camera near 180° keeps points and routes on the copy beside it", () => {
+    const view = { center: mercator(0, 179), worldSize: 256 * 2 ** 1 };
+    const turned = { bearing: 90, tilt: 30 };
+    const eye = eyeDistance(300);
+    const east = projectOffset(mercator(0, -179), view, eye, turned)!;
+    expect(Math.abs(east.x)).toBeLessThan(1);
+    expect(Math.abs(east.y)).toBeLessThan(10);
+    const [run, ...rest] = projectLine([mercator(0, 178), mercator(0, -178)], view, eye, turned);
+    expect(rest).toEqual([]);
+    expect(Math.abs(run![1]!.y - run![0]!.y)).toBeLessThan(20);
+  });
+
   test("fitting markers on both sides of 180° frames them around it", () => {
     const points = [mercator(0, 179), mercator(0, -179)];
     const view = fitFraming(points, size)!;

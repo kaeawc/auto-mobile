@@ -17,8 +17,16 @@ import { prototypeRolePalette, type PrototypeColorMode } from "../prototypeContr
 import { prototypeDrawnPalette } from "../prototypeSeedScheme";
 import { record, type Raw } from "../prototypeTemplate";
 import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "./deviceFrames";
+import { PrototypeWebInputError } from "./prototypeWebInputError";
 import type { PrototypeIconGlyphSource } from "./webIconGlyphs";
-import { renderDeviceFrame, screenSize, type WebOrientation } from "./webFrame";
+import {
+  frameOrientations,
+  renderChromelessScreen,
+  renderDeviceFrame,
+  screenSize,
+  type WebOrientation,
+} from "./webFrame";
+import { markInitialFocus } from "./webFocus";
 import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
@@ -26,7 +34,12 @@ import type { WebSkinId } from "./webSkin";
 import type { WebStackScreens } from "./webStack";
 import type { WebImageDraw } from "./webImages";
 import { localeLayoutDirection, stillLocale } from "./webLocale";
-import { appTopColor, statusBarContentFor, type WebStatusBarContent } from "./webStatusBar";
+import {
+  appTopColor,
+  statusBarContentFor,
+  type WebScreenSize,
+  type WebStatusBarContent,
+} from "./webStatusBar";
 import { cssColor, fontPx, themeTypography, type WebStyleContext } from "./webStyle";
 import { stillTextScale, type StillTextSize } from "./webTextScale";
 
@@ -36,12 +49,18 @@ export interface PrototypeStillOptions {
   readonly platform?: "android" | "ios";
   /** The platform skin components draw in; defaults to the frame's platform. */
   readonly skin?: WebSkinId;
+  /** One of the frame's orientations; defaults to its first (landscape for a TV or car). */
   readonly orientation?: WebOrientation;
   readonly mode?: PrototypeColorMode;
   /** The clock derived relative times read; fixed so the same input renders the same bytes. */
   readonly nowMs?: number;
   /** A screen of the outermost stack to draw instead of its start; an unknown id draws the start. */
   readonly screen?: string;
+  /**
+   * Draws the frame's screen alone, without the device or its insets: the content path a
+   * renderer's goldens capture (#16534).
+   */
+  readonly chromeless?: boolean;
   /** Asset ids the page can inline, to their CSS slots; any other asset draws a placeholder. */
   readonly imageSlots?: ReadonlyMap<string, number>;
   /**
@@ -237,10 +256,10 @@ function stillScope(
   expanded: unknown,
   options: PrototypeStillOptions,
   frame: DeviceFrame,
-  locale: string,
+  { orientation, locale }: { orientation: WebOrientation; locale: string },
 ): WebRenderScope {
   const spec = record(expanded) ?? {};
-  const size = screenSize(frame, options.orientation ?? "portrait");
+  const size = screenSize(frame, orientation);
   const screenDp = { widthDp: size.width, heightDp: size.height };
   const mode = colorMode(spec, options);
   // The skin decides every look the devices draw differently, glass included.
@@ -300,24 +319,54 @@ function screenBackground(style: WebStyleContext): string {
 }
 
 /**
- * `window.statusBar` light or dark picks the content style; `auto` or none follows the app's top
- * colour (a fullscreen window's), as both platforms' edge-to-edge defaults do.
+ * Whether the window's content starts at the top of the screen, behind the status bar: a
+ * fullscreen window or a top sheet. A bottom sheet or floating window leaves the status area on
+ * the screen background.
  */
-function stillStatusBarContent(
-  spec: unknown,
-  content: WebElement,
-  background: string,
-  dark: boolean,
-): WebStatusBarContent {
+function coversStatusArea(spec: unknown): boolean {
+  const placement = record(record(record(spec)?.window)?.placement);
+  const type = placement?.type;
+  return (
+    type === undefined || type === "fullscreen" || (type === "sheet" && placement?.edge === "top")
+  );
+}
+
+/**
+ * `window.statusBar` light or dark picks the content style; `auto` or none follows the app's top
+ * colour (a fullscreen window's or top sheet's), as both platforms' edge-to-edge defaults do.
+ */
+interface StatusBarSample {
+  readonly content: WebElement;
+  readonly background: string;
+  readonly dark: boolean;
+  readonly screen: WebScreenSize;
+}
+
+function stillStatusBarContent(spec: unknown, sample: StatusBarSample): WebStatusBarContent {
+  const { content, background, dark, screen } = sample;
   const authored = record(record(spec)?.window)?.statusBar;
   if (authored === "light" || authored === "dark") {
     return authored;
   }
-  // A sheet or floating window leaves the status area on the screen background.
-  const placement = record(record(record(spec)?.window)?.placement)?.type;
-  const fullscreen = placement === undefined || placement === "fullscreen";
-  const top = fullscreen ? appTopColor(content, background) : background;
+  const top = coversStatusArea(spec) ? appTopColor(content, background, screen) : background;
   return statusBarContentFor(top, dark ? "light" : "dark");
+}
+
+/** The requested orientation, which the frame must support, else the frame's default. */
+function stillOrientation(
+  frame: DeviceFrame,
+  requested: WebOrientation | undefined,
+): WebOrientation {
+  const supported = frameOrientations(frame);
+  if (requested === undefined) {
+    return supported[0]!;
+  }
+  if (!supported.includes(requested)) {
+    throw new PrototypeWebInputError(
+      `Device frame "${frame.id}" has no ${requested} view. Its orientations: ${supported.join(", ")}`,
+    );
+  }
+  return requested;
 }
 
 export function renderPrototypeStill(
@@ -330,24 +379,37 @@ export function renderPrototypeStill(
   const locale = stillLocale(options.locale);
   // Components expand, then string tables resolve for the host locale, as on devices.
   const expanded = resolvePrototypeStrings(prototypeSpecForDevice(spec), [locale]);
-  const scope = stillScope(expanded, options, frame, locale);
+  const orientation = stillOrientation(frame, options.orientation);
+  const scope = stillScope(expanded, options, frame, { orientation, locale });
   const root = renderWebNode(sizedRoot(expanded), scope, "root");
   const dark = scope.style.mode === "dark";
   const textColor = cssColor("onSurface", scope.style) ?? (dark ? "#e6e0e9" : "#1d1b20");
   const background = screenBackground(scope.style);
-  const content = placed(expanded, root, scope.layers, locale);
-  const element = renderDeviceFrame(
-    frame,
-    options.orientation ?? "portrait",
-    {
-      dark,
-      textColor,
-      background,
-      statusBarContent: stillStatusBarContent(expanded, content, background, dark),
-      ...(scope.style.textScale ? { fontSize: fontPx(14, scope.style) } : {}),
-    },
-    content,
-  );
+  const placedContent = placed(expanded, root, scope.layers, locale);
+  // A d-pad device always has a focused item, so a TV still shows where focus starts.
+  const content = frame.input === "dpad" ? markInitialFocus(placedContent) : placedContent;
+  const paint = {
+    dark,
+    textColor,
+    background,
+    ...(scope.style.textScale ? { fontSize: fontPx(14, scope.style) } : {}),
+  };
+  const element = options.chromeless
+    ? renderChromelessScreen(frame, orientation, paint, content)
+    : renderDeviceFrame(
+        frame,
+        orientation,
+        {
+          ...paint,
+          statusBarContent: stillStatusBarContent(expanded, {
+            content,
+            background,
+            dark,
+            screen: screenSize(frame, orientation),
+          }),
+        },
+        content,
+      );
   const stack = scope.stacks?.[0];
   return {
     element,

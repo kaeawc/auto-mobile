@@ -23,6 +23,7 @@ import type { ShownSpecJson } from "./PrototypeShownSpecs";
 import type { PrototypeSpecRevisionSource } from "./prototypeSpecRevisions";
 import { prototypeResourceUri } from "./prototypeWebUris";
 import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "./web/deviceFrames";
+import { frameOrientations, screenSize } from "./web/webFrame";
 import { parsePrototypeRevision } from "./web/prototypeWebResource";
 import { withActionableWebInput } from "./web/prototypeWebInputActionable";
 
@@ -121,6 +122,12 @@ function header(
   ];
 }
 
+/** The preview in the frame's default orientation, so a TV or car preview is landscape. */
+function previewSize(frame: DeviceFrame) {
+  const { width, height } = screenSize(frame, frameOrientations(frame)[0]!);
+  return { name: frame.label, widthDp: width, heightDp: height };
+}
+
 /** One prototype revision as a single Compose or SwiftUI file sized for a device frame. */
 export function readPrototypeSourceResource(
   source: PrototypeSpecRevisionSource,
@@ -162,11 +169,7 @@ function buildSourceResource(
         frame,
         version: rendererVersion,
       }),
-      preview: {
-        name: frame.label,
-        widthDp: frame.screen.widthDp,
-        heightDp: frame.screen.heightDp,
-      },
+      preview: previewSize(frame),
     },
   });
   const { deviceRevision } = shown;

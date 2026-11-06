@@ -43,6 +43,8 @@ unavailable runtime fails, lists the available runtimes and repeats the install 
 | `sendKeys`         | Types text into the focused field.                                           |
 | `explore`          | Crawls the foreground app by focus and records its screens.                  |
 | `executePlan`      | Replays a plan of Apple TV steps.                                            |
+| `openLink`         | Opens a URL with the app that declares its scheme.                           |
+| `getDeepLinks`     | Lists the URL schemes an installed app declares.                             |
 
 <!-- apple-tv-supported-tools:end -->
 
@@ -181,6 +183,16 @@ every item it can focus on a screen, observes after every remote press, records 
 table fails the plan with the same error the tool returns on its own. A plan may declare
 `platform: tvos`, and a device in its `devices` list may use `platform: tvos`. Apple TV plans are
 not video-recorded.
+
+## Open a deep link
+
+`openLink` opens a URL on the Apple TV, such as `myapp://episode/42`, and the app that declares the
+scheme shows that screen. Call `observe` afterwards to see where it landed.
+
+- `getDeepLinks` with the app's bundle ID lists the custom URL schemes the installed app declares.
+- The call fails when no installed app handles the URL. Apple TV has no web browser, so an
+  `http` or `https` URL opens only if an app claims it.
+- `waitFor`, `settled`, `acceptOpenAlert` and `chooserAppPackage` are refused.
 
 ## Out of scope
 

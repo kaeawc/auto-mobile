@@ -18,7 +18,7 @@ export interface VisionosRunnerClient {
     signal?: AbortSignal,
     options?: { timeoutMs?: number },
   ): Promise<unknown>;
-  hierarchy(signal?: AbortSignal): Promise<VisionosHierarchy>;
+  hierarchy(signal?: AbortSignal, options?: { timeoutMs?: number }): Promise<VisionosHierarchy>;
   close(): void;
 }
 
@@ -170,6 +170,9 @@ export class WebSocketVisionosRunnerClient implements VisionosRunnerClient {
     // One budget covers both handshake and command; correlation entries are removed even on abort.
     const requestId = String(++this.sequence);
     const cancellation = new AbortController();
+    const isInput = command.type !== "request_hierarchy";
+    let sent = false;
+    let replied = false;
     const requestSignal = signal
       ? AbortSignal.any([signal, cancellation.signal])
       : cancellation.signal;
@@ -188,20 +191,44 @@ export class WebSocketVisionosRunnerClient implements VisionosRunnerClient {
             );
           }
           return new Promise<unknown>((resolve, reject) => {
-            this.pending.set(requestId, { type: command.type, resolve, reject });
+            this.pending.set(requestId, {
+              type: command.type,
+              resolve: (value) => {
+                replied = true;
+                resolve(value);
+              },
+              reject: (error) => {
+                replied = true;
+                reject(error);
+              },
+            });
             this.socket.send(JSON.stringify({ ...command, requestId }));
+            sent = true;
           });
         },
         { timer, timeoutMs, signal: requestSignal, label: `Visionos runner ${command.type}` },
       );
+    } catch (error) {
+      // The runner has no cancel message: an input that was sent and never answered may still run.
+      if (sent && !replied && isInput && !signal?.aborted) {
+        throw new VisionosRunnerError(
+          `Visionos runner ${command.type} got no reply within ${timeoutMs}ms and may still be applied; observe before retrying.`,
+          "input_outcome_unknown",
+          { cause: error },
+        );
+      }
+      throw error;
     } finally {
       cancellation.abort();
       this.pending.delete(requestId);
     }
   }
 
-  async hierarchy(signal?: AbortSignal): Promise<VisionosHierarchy> {
-    const data = await this.request({ type: "request_hierarchy" }, signal);
+  async hierarchy(
+    signal?: AbortSignal,
+    options?: { timeoutMs?: number },
+  ): Promise<VisionosHierarchy> {
+    const data = await this.request({ type: "request_hierarchy" }, signal, options);
     if (!isVisionosHierarchy(data)) {
       throw new ActionableError("Invalid visionos hierarchy; reconnect the runner.");
     }

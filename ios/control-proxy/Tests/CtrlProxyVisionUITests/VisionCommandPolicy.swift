@@ -10,6 +10,15 @@ enum VisionCommandPolicy {
         supportedCommands.contains(command)
     }
 
+    /// Keyboard-key sequences `typeText` interprets as deletion (XCUIKeyboardKey.delete is U+0008
+    /// on iOS-family platforms and U+007F on macOS; forwardDelete is U+F728). Append-only text
+    /// must not erase content already in the field.
+    static let deleteKeySequences: [Character] = ["\u{8}", "\u{7F}", "\u{F728}"]
+
+    static func containsDeleteKey(_ text: String) -> Bool {
+        text.contains { deleteKeySequences.contains($0) }
+    }
+
     /// The window app under automation: the daemon-supplied bundle id, else nil (demo app).
     static func targetBundleId(environment: [String: String]) -> String? {
         guard let value = environment["AM_BUNDLE_ID"]?
@@ -55,9 +64,10 @@ struct VisionElementTraits: Equatable {
         }
     }
 
-    /// The entered text when it differs from the label (placeholder) and may be exposed.
-    func enteredValue(_ raw: Any?, label: String) -> String? {
-        guard exposesValue, let text = raw as? String, !text.isEmpty, text != label else {
+    /// The entered text when it differs from the placeholder and may be exposed. A field whose
+    /// accessibility label equals what the user typed still reports it.
+    func enteredValue(_ raw: Any?, placeholder: String?) -> String? {
+        guard exposesValue, let text = raw as? String, !text.isEmpty, text != placeholder else {
             return nil
         }
         return text

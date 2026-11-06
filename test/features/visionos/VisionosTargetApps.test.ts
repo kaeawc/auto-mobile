@@ -38,7 +38,7 @@ describe("WatchAppManager target app", () => {
     const targetApps = new InMemoryVisionosTargetApps();
     const manager = new WatchAppManager(device, { simctl, plist, targetApps });
     await manager.install(APP_PATH);
-    return { manager, targetApps };
+    return { manager, targetApps, simctl };
   }
   const LAUNCH = { clearAppData: false, coldBoot: false };
 
@@ -47,6 +47,52 @@ describe("WatchAppManager target app", () => {
     await manager.launch(A, LAUNCH);
     expect(targetApps.get(DEVICE)).toBe(A);
     await manager.terminate(A);
+    expect(targetApps.get(DEVICE)).toBeUndefined();
+  });
+
+  test("a terminate of an app that already exited clears the target", async () => {
+    const { manager, targetApps, simctl } = await arrange("visionos");
+    await manager.launch(A, LAUNCH);
+    // The app exits on its own, so simctl finds nothing to terminate.
+    await simctl.terminateApp(A, DEVICE);
+    const result = await manager.terminate(A);
+    expect(result).toMatchObject({ success: true, wasRunning: false });
+    expect(targetApps.get(DEVICE)).toBeUndefined();
+  });
+
+  test("a terminate of an app no longer installed clears the target", async () => {
+    const { manager, targetApps, simctl } = await arrange("visionos");
+    await manager.launch(A, LAUNCH);
+    await simctl.uninstallApp(A, DEVICE);
+    const result = await manager.terminate(A);
+    expect(result).toMatchObject({ success: true, wasInstalled: false });
+    expect(targetApps.get(DEVICE)).toBeUndefined();
+  });
+
+  test("a failed terminate keeps the target", async () => {
+    const { manager, targetApps, simctl } = await arrange("visionos");
+    await manager.launch(A, LAUNCH);
+    simctl.terminateError = new Error("simctl terminate: device is busy");
+    const result = await manager.terminate(A);
+    expect(result.success).toBe(false);
+    expect(targetApps.get(DEVICE)).toBe(A);
+  });
+
+  test("uninstalling the target clears it and uninstalling another app does not", async () => {
+    const { manager, targetApps } = await arrange("visionos");
+    await manager.launch(A, LAUNCH);
+    await manager.uninstall(B);
+    expect(targetApps.get(DEVICE)).toBe(A);
+    await manager.uninstall(A);
+    expect(targetApps.get(DEVICE)).toBeUndefined();
+  });
+
+  test("uninstalling a target that is already gone still clears it", async () => {
+    const { manager, targetApps, simctl } = await arrange("visionos");
+    await manager.launch(A, LAUNCH);
+    await simctl.uninstallApp(A, DEVICE);
+    const result = await manager.uninstall(A);
+    expect(result).toMatchObject({ success: true, wasInstalled: false });
     expect(targetApps.get(DEVICE)).toBeUndefined();
   });
 

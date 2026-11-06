@@ -49,6 +49,14 @@ test("DeviceHierarchyCapture reads the visionOS runner through its fake", async 
   expect(timer.getSleepHistory()).toEqual([]);
 });
 
+test("DeviceHierarchyCapture passes the capture timeout to the visionOS runner read", async () => {
+  await createDeviceHierarchyCapture(device, { timer: new FakeTimer() }).capture({
+    freshness: "fresh",
+    timeoutMs: 1234,
+  });
+  expect(client.hierarchyTimeouts).toEqual([1234]);
+});
+
 test.each<TapOnElementOptions>([
   { action: "focus", elementId: "field" },
   { action: "longPress", elementId: "B01" },
@@ -102,6 +110,19 @@ test("validates the entire typing batch before any input", async () => {
   ).rejects.toThrow("focused field");
   expect(client.commands).toEqual([]);
 });
+
+test.each(["\u0008", "ab\u007f", ""])(
+  "rejects append text containing a delete key before any input (%#)",
+  async (text) => {
+    await expect(
+      visionosSendKeys(device.deviceId, [
+        { action: "type", text: "hello" },
+        { action: "type", text },
+      ]),
+    ).rejects.toThrow("delete key");
+    expect(client.commands).toEqual([]);
+  },
+);
 
 test("typing reports runner errors and cancellation causes no input", async () => {
   await expect(

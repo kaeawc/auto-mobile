@@ -49,7 +49,6 @@ import {
   type ForegroundObserver,
 } from "./foregroundOverlay";
 import { ReplayBlockedError } from "./ReplayBlockedError";
-import { dpadReplayInteraction, type InputModeResolver } from "./focusDrivenInput";
 
 // Back presses need time to update the screen before the next press.
 const NAVIGATION_BACK_PRESS_SETTLE_MS = 300;
@@ -135,8 +134,6 @@ export interface NavigateToDependencies {
   scrollSearcher?: ReplayScrollSearcher;
   uiStateSetupFactory?: UIStateSetupFactory;
   internalToolCaller?: InternalToolCaller;
-  /** Touch, or D-pad on a TV (#16737): `tapOn` edges then replay as focus-and-select. */
-  inputMode?: InputModeResolver;
 }
 
 /**
@@ -156,8 +153,6 @@ export class NavigateTo {
   private foregroundObserverProvider: () => ForegroundObserver;
   private scrollSearcher: ReplayScrollSearcher;
   private uiStateSetupFactory: UIStateSetupFactory;
-  /** Absent means touch: recorded calls replay unchanged. */
-  private readonly inputMode?: InputModeResolver;
 
   private static readonly MAX_TIMEOUT_MS = 30000; // 30 seconds
   /** Swipes a replayed tapOn may spend looking for an off-screen target (#10154). */
@@ -176,7 +171,6 @@ export class NavigateTo {
   ) {
     this.uiStateSetupFactory = dependencies.uiStateSetupFactory ?? defaultUIStateSetupFactory;
     this.internalTools = dependencies.internalToolCaller ?? registeredInternalToolCaller;
-    this.inputMode = dependencies.inputMode;
     const {
       uiStateSetup = null,
       screenWaiter = null,
@@ -938,22 +932,6 @@ export class NavigateTo {
     };
   }
 
-  /** On a TV a recorded `tapOn` replays as D-pad focus and select; otherwise unchanged. */
-  private async replayableInteraction(
-    interaction: ToolCallInteraction,
-  ): Promise<ToolCallInteraction> {
-    if (interaction.toolName !== "tapOn" || (await this.inputMode?.()) !== "dpad") {
-      return interaction;
-    }
-    const replayed = dpadReplayInteraction(interaction);
-    if (replayed !== interaction) {
-      logger.info(
-        `[NAVIGATE_TO] Replaying tapOn with D-pad focus: ${JSON.stringify(replayed.args)}`,
-      );
-    }
-    return replayed;
-  }
-
   private async replayStep(
     edge: NavigationEdge,
     options: NavigateToOptions,
@@ -984,12 +962,12 @@ export class NavigateTo {
       }
 
       // Replay the tool call
-      const interaction = await this.replayableInteraction({
+      const interaction = {
         ...edge.interaction,
         args: stripNavigationToolParams(edge.interaction.args),
-      });
+      };
       await this.replayToolCall(edge, interaction, options, { progress: run, signal });
-      executedPath.push(`${interaction.toolName}(${JSON.stringify(interaction.args)})`);
+      executedPath.push(`${edge.interaction.toolName}(${JSON.stringify(interaction.args)})`);
     } else if (edge.edgeType === "back") {
       logger.info(`[NAVIGATE_TO] Edge ${edge.from} → ${edge.to} is a Back edge, using back button`);
       await this.pressBack(signal);

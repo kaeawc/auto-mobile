@@ -8,8 +8,9 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { scoreSelectedElementMatch } from "./ExploreElementScoring";
 import {
+  elementMatchesTarget,
+  exactFirstTarget,
   FOCUS_NAVIGATE_DIRECTIONS,
-  screenTargetMatcher,
   type FocusNavigateOptions,
   type FocusNavigateTarget,
 } from "../action/FocusNavigate";
@@ -482,8 +483,7 @@ const FOCUS_TARGET_CONFIDENCE = 0.9;
 
 /**
  * Resolve a recorded `focusNavigate` (#16737) with `focusNavigate`'s own matcher, so validation
- * finds exactly what the replay will select: every `until` field on one element, exact labels
- * and ids first, synthetic `view-id`s included. When the target is a label inside a clickable
+ * finds what the replay will select: every `until` field on one element, exact labels first. When the target is a label inside a clickable
  * row (a contained node that carries its own id), the row matching the label alone is used.
  */
 function resolveFocusEdgeTarget(elements: Element[], edge: NavigationEdge): EdgeTargetResolution {
@@ -497,13 +497,17 @@ function resolveFocusEdgeTarget(elements: Element[], edge: NavigationEdge): Edge
   const label: FocusNavigateTarget = { ...until, resourceId: undefined };
   const hasLabel = Boolean(label.text || label.contentDesc || label.label);
   const element =
-    elements.find(screenTargetMatcher(elements, until)) ??
-    (until.resourceId && hasLabel
-      ? elements.find(screenTargetMatcher(elements, label))
-      : undefined);
+    findFocusTarget(elements, until) ??
+    (until.resourceId && hasLabel ? findFocusTarget(elements, label) : undefined);
   return element
     ? { status: "matched", element, confidence: FOCUS_TARGET_CONFIDENCE }
     : { status: "not-found", bestScore: 0 };
+}
+
+/** The first element `focusNavigate` would accept for `until` on this screen, exact labels first. */
+function findFocusTarget(elements: Element[], until: FocusNavigateTarget): Element | undefined {
+  const target = exactFirstTarget({ focused: null, elements }, until);
+  return elements.find((element) => elementMatchesTarget(element, target));
 }
 
 /**

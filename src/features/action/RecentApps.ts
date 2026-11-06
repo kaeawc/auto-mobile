@@ -7,11 +7,11 @@ import {
   type DisplayFenceDependencies,
 } from "./BaseVisualChange";
 import { ActionableError, BootedDevice, RecentAppsResult, ObserveResult } from "../../models";
+import { PressButton } from "./PressButton";
 import {
-  PressButton,
   acceptVerifiedAlreadyOpenSwitcher,
   isVerifiedAlreadyOpenSwitcher,
-} from "./PressButton";
+} from "./pressButtonOutcomes";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../observe/android";

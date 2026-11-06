@@ -591,20 +591,6 @@ describe("ExploreValidateMode", () => {
       expect(resolveEdgeTarget([first], edge)).toMatchObject({ status: "not-found" });
     });
 
-    test("finds a focusNavigate target by its synthetic view-id", () => {
-      const movies = createMockElement({
-        text: "Movies",
-        "resource-id": undefined,
-        "view-id": "node-7",
-      });
-      const edge = interactionEdge("focusNavigate", { until: { resourceId: "node-7" } });
-
-      expect(resolveEdgeTarget([homeTab(), movies], edge)).toMatchObject({
-        status: "matched",
-        element: movies,
-      });
-    });
-
     test("falls back to scoring when the multi-field target is a label inside a row", () => {
       const row = createMockElement({ text: "Movies", "resource-id": "app:id/row" });
       const edge = interactionEdge("focusNavigate", {

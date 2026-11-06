@@ -1,10 +1,9 @@
 /**
- * Focus-driven (D-pad) input for explore and navigateTo on Android TV (#16737).
+ * Focus-driven (D-pad) input for explore on Android TV (#16737).
  *
  * A TV app is walked the way a remote walks it: focus moves with the D-pad arrows and the
  * focused element is activated with select. Explore records that as one `focusNavigate`
- * call with `select: true`, so navigateTo replays the same D-pad moves; a `tapOn` edge
- * recorded elsewhere is replayed on a TV as the equivalent focus-and-select.
+ * call with `select: true`, so navigateTo replays the same D-pad moves.
  */
 
 import type { BootedDevice, Element, ViewHierarchyResult } from "../../models";
@@ -17,13 +16,11 @@ import {
   type DeviceTraits,
 } from "../../utils/android-cmdline-tools/deviceTraits";
 import { errorMessage } from "../../utils/describeUnknownError";
-import type { ToolCallInteraction } from "../../utils/interfaces/NavigationGraph";
 import { logger } from "../../utils/logger";
 import type { FocusNavigateTarget } from "../action/FocusNavigate";
 import { enrichElementWithChildProperties, tapSelectorFor } from "./ExploreElementExtraction";
-import { asRecord } from "./ExploreValidateMode";
 
-/** How explore and navigateTo address an element: by touch, or by D-pad focus and select. */
+/** How explore addresses an element: by touch, or by D-pad focus and select. */
 export type InteractionInputMode = "touch" | "dpad";
 
 /** Resolves the device's input mode once it is needed; touch unless the device is a TV. */
@@ -70,24 +67,6 @@ export function deviceInputModeResolver(
   return () => (resolved ??= read());
 }
 
-function nonEmpty(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
-}
-
-/** The focus target a recorded `tapOn` selector (`elementId` or `text`) names. */
-export function focusTargetFromSelector(
-  selector: Record<string, unknown>,
-): FocusNavigateTarget | null {
-  const resourceId = nonEmpty(selector.elementId);
-  if (resourceId) {
-    // focusNavigate matches the qualified id exactly when it is on screen, else its bare name.
-    return { resourceId };
-  }
-  // tapOn's text selector matches the text or the content-desc; `label` keeps that.
-  const label = nonEmpty(selector.text);
-  return label ? { label } : null;
-}
-
 /**
  * The focus target explore moves to for `element`: its resource id, else the label its tap
  * selector uses, matched on the property that label came from. Null when nothing names it, or
@@ -106,7 +85,10 @@ export function focusTargetForElement(
     return null;
   }
   if ("elementId" in selector) {
-    return { resourceId: selector.elementId };
+    // A synthetic `view-id` (an id-less node) is not a resource id focusNavigate can match.
+    return element["resource-id"] === selector.elementId
+      ? { resourceId: selector.elementId }
+      : null;
   }
   const enriched = enrichElementWithChildProperties(element);
   const fromText = element.text === selector.text || enriched.text === selector.text;
@@ -119,35 +101,4 @@ export function focusSelectArgs(until: FocusNavigateTarget): {
   select: true;
 } {
   return { until, select: true };
-}
-
-/** `tapOn` arguments a D-pad select reproduces exactly. */
-const PLAIN_TAP_ARGS: ReadonlySet<string> = new Set(["selector", "action", "elementId", "text"]);
-
-/**
- * The D-pad replay of a recorded interaction on a TV: a plain `tapOn` by element id or text
- * becomes `focusNavigate` to that element with select (text as `label`, which also matches the
- * content-desc as tapOn does). Every other call (including a `focusNavigate` explore recorded,
- * a long press, a `container` scope, an occurrence `index`, or a coordinate tap) replays
- * unchanged.
- */
-export function dpadReplayInteraction<T extends Pick<ToolCallInteraction, "toolName" | "args">>(
-  interaction: T,
-): T {
-  if (interaction.toolName !== "tapOn") {
-    return interaction;
-  }
-  const { args } = interaction;
-  const selector = asRecord(args.selector) ?? args;
-  // Only a plain tap converts: a container scope, occurrence index, duration (a long press)
-  // or any other qualifier has no focusNavigate equivalent, so that call replays unchanged.
-  const plainArgs = Object.keys(args).every((key) => PLAIN_TAP_ARGS.has(key));
-  const plainSelector = Object.keys(selector).every((key) => PLAIN_TAP_ARGS.has(key));
-  if (!plainArgs || !plainSelector || (args.action !== undefined && args.action !== "tap")) {
-    return interaction;
-  }
-  const until = focusTargetFromSelector(selector);
-  return until
-    ? { ...interaction, toolName: "focusNavigate", args: focusSelectArgs(until) }
-    : interaction;
 }

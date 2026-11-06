@@ -138,7 +138,6 @@ function createDefaultNavigateTo(
     navigationManager,
     pathOptimizer: new DefaultPathOptimizer(navigationManager),
     sessionUuid: args.sessionUuid,
-    inputMode: deviceInputModeResolver(device),
   });
 }
 
@@ -272,7 +271,7 @@ export function registerNavigationTools({
   // Register with the tool registry
   ToolRegistry.registerDeviceAware(
     "navigateTo",
-    "Navigate to a learned screen by replaying recorded transitions from the navigation graph; on Android TV a plain tapOn by element id or text replays as D-pad focus moves and select; other recorded actions replay unchanged",
+    "Navigate to a learned screen by replaying recorded transitions from the navigation graph",
     navigateToSchema,
     {
       handler: createNavigateToHandler({ navigateToFactory, navigationManagerFactory }),

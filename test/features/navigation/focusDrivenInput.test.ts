@@ -1,14 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   deviceInputModeResolver,
-  dpadReplayInteraction,
   focusTargetForElement,
-  focusTargetFromSelector,
 } from "../../../src/features/navigation/focusDrivenInput";
-import {
-  elementMatchesTarget,
-  screenTargetMatcher,
-} from "../../../src/features/action/FocusNavigate";
 import { extractNavigationElements } from "../../../src/features/navigation/ExploreElementExtraction";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import type { BootedDevice } from "../../../src/models";
@@ -51,80 +45,6 @@ describe("deviceInputModeResolver", () => {
   test("an unreadable build falls back to touch", async () => {
     const traits = new FakeDeviceTraits(new Error("adb offline"));
     expect(await resolverFor(android, traits)()).toBe("touch");
-  });
-});
-
-describe("focusTargetFromSelector", () => {
-  test("prefers the element id, then text", () => {
-    expect(focusTargetFromSelector({ elementId: "app:id/row", text: "Movies" })).toEqual({
-      resourceId: "app:id/row",
-    });
-    expect(focusTargetFromSelector({ elementId: "save" })).toEqual({ resourceId: "save" });
-    expect(focusTargetFromSelector({ text: "Movies" })).toEqual({ label: "Movies" });
-    expect(focusTargetFromSelector({ text: "  " })).toBeNull();
-    expect(focusTargetFromSelector({ x: 1, y: 2 })).toBeNull();
-  });
-});
-
-describe("a namespaced recorded id", () => {
-  const at = (id: string) => ({
-    bounds: { left: 0, top: 0, right: 10, bottom: 10 },
-    "resource-id": id,
-  });
-
-  test("matches a control whose native id is the bare name", () => {
-    const until = focusTargetFromSelector({ elementId: "com.example:id/save" })!;
-    expect(until).toEqual({ resourceId: "com.example:id/save" });
-    expect(elementMatchesTarget(at("save"), until)).toBe(true);
-    expect(elementMatchesTarget(at("com.example:id/save"), until)).toBe(true);
-  });
-
-  test("prefers the exact qualified id over another namespace's same name", () => {
-    const until = { resourceId: "com.example:id/save" };
-    const other = at("com.other:id/save");
-    const isTarget = screenTargetMatcher([other, at("com.example:id/save")], until);
-    expect(isTarget(other)).toBe(false);
-    expect(screenTargetMatcher([other], until)(other)).toBe(false);
-    expect(screenTargetMatcher([at("save")], until)(at("save"))).toBe(true);
-  });
-});
-
-describe("dpadReplayInteraction", () => {
-  const replay = (toolName: string, args: Record<string, unknown>) =>
-    dpadReplayInteraction({ toolName, args });
-
-  test("rewrites a public and an explore-flat tapOn into focusNavigate with select", () => {
-    expect(replay("tapOn", { selector: { text: "Movies" }, action: "tap" })).toEqual({
-      toolName: "focusNavigate",
-      args: { until: { label: "Movies" }, select: true },
-    });
-    expect(replay("tapOn", { elementId: "app:id/row" })).toEqual({
-      toolName: "focusNavigate",
-      args: { until: { resourceId: "app:id/row" }, select: true },
-    });
-  });
-
-  test("leaves other actions and tools unchanged", () => {
-    const unchanged: Array<{ toolName: string; args: Record<string, unknown> }> = [
-      { toolName: "tapOn", args: { selector: { text: "Row" }, action: "longPress" } },
-      { toolName: "tapAt", args: { x: 1, y: 2 } },
-      { toolName: "focusNavigate", args: { until: { text: "Row" }, select: true } },
-      { toolName: "tapOn", args: { x: 1, y: 2 } },
-      { toolName: "tapOn", args: { selector: { text: "Row" }, duration: 800 } },
-      { toolName: "tapOn", args: { selector: { text: "More" }, index: 1, action: "tap" } },
-      { toolName: "tapOn", args: { text: "More", index: 1 } },
-      {
-        toolName: "tapOn",
-        args: { selector: { elementId: "app:id/more" }, container: { elementId: "app:id/row_2" } },
-      },
-      {
-        toolName: "tapOn",
-        args: { selector: { elementId: "app:id/more", container: { text: "Row 2" } } },
-      },
-    ];
-    for (const interaction of unchanged) {
-      expect(dpadReplayInteraction(interaction)).toBe(interaction);
-    }
   });
 });
 

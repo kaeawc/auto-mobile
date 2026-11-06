@@ -25,10 +25,6 @@ const focusNavigateInput = z.object({
     .object({
       text: z.string().optional().describe("Text of the element to focus (case-insensitive)"),
       contentDesc: z.string().optional().describe("Content-desc of the element to focus"),
-      label: z
-        .string()
-        .optional()
-        .describe("Text or content-desc of the element to focus (either may match)"),
       resourceId: z.string().optional().describe("Resource ID of the element to focus"),
     })
     .strict()
@@ -72,15 +68,19 @@ export const focusNavigateResultSchema = z
   })
   .passthrough();
 
-function createKeyPresser(device: BootedDevice): FocusKeyPresser {
+export { createFocusNavigateObserver };
+
+export function createFocusKeyPresser(device: BootedDevice): FocusKeyPresser {
   const input = new InputKey(device, { adbFactory: defaultAdbClientFactory, timer: defaultTimer });
-  return { press: (key, signal) => input.press(key, undefined, undefined, { signal }) };
+  return {
+    press: (key, signal) => input.press(key, undefined, undefined, signal ? { signal } : {}),
+  };
 }
 
 export const focusNavigateTool = defineDeviceTool({
   name: "focusNavigate",
   description:
-    "Move D-pad focus to an element on a focus-driven UI such as Android TV. Observes, and until the focused element matches `until` (text, contentDesc, label or resourceId) presses the D-pad arrow that moves toward the nearest match, or `direction` when given. When a press leaves focus unchanged, the next arrow toward the match is tried. Returns the path of focused elements and a status: focused, max_steps (default 30) or stuck (every arrow toward the match left focus unchanged; two unchanged presses with `direction`). With `select`, presses enter once focused (`selected` reports whether it did); otherwise activate the result with sendKeys key enter.",
+    "Move D-pad focus to an element on a focus-driven UI such as Android TV. Observes, and until the focused element matches `until` (text, contentDesc or resourceId) presses the D-pad arrow that moves toward the nearest match, or `direction` when given. When a press leaves focus unchanged, the next arrow toward the match is tried. Returns the path of focused elements and a status: focused, max_steps (default 30) or stuck (every arrow toward the match left focus unchanged; two unchanged presses with `direction`). With `select`, presses enter once focused (`selected` reports whether it did); otherwise activate the result with sendKeys key enter.",
   input: focusNavigateInput,
   handler: async (device, args, _progress, signal) => {
     if (device.platform !== "android") {
@@ -88,7 +88,7 @@ export const focusNavigateTool = defineDeviceTool({
     }
     const navigate = new FocusNavigate(
       createFocusNavigateObserver(new RealObserveScreen(device, defaultAdbClientFactory)),
-      createKeyPresser(device),
+      createFocusKeyPresser(device),
       defaultTimer,
     );
     const result = await navigate.execute({
@@ -99,7 +99,9 @@ export const focusNavigateTool = defineDeviceTool({
       ...(args.select !== undefined ? { select: args.select } : {}),
       ...(signal ? { signal } : {}),
     });
-    return withIsErrorOnFailure(createStructuredToolResponse(result), result.success);
+    // `selected` is always reported, so callers never have to infer it from `select`.
+    const response = { ...result, selected: result.selected ?? false };
+    return withIsErrorOnFailure(createStructuredToolResponse(response), result.success);
   },
   options: {
     ...PLAN_RELEVANT,

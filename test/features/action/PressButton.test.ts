@@ -9,12 +9,12 @@ import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
 import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
 import { describe, expect, spyOn, test } from "bun:test";
 import { createExecResult } from "../../../src/utils/execResult";
+import { PressButton } from "../../../src/features/action/PressButton";
 import {
-  PressButton,
   acceptIosHomeAlreadyOnSpringboard,
   isIosHomePressOnSpringboard,
   isIosSpringboardFallbackPress,
-} from "../../../src/features/action/PressButton";
+} from "../../../src/features/action/pressButtonOutcomes";
 import type { ObserveResult } from "../../../src/models";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";

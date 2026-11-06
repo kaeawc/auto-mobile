@@ -8,6 +8,7 @@ import type {
   VideoRecordingHighlightEntry,
   VideoRecordingMetadata,
 } from "../models";
+import type { VideoRecordingPlatform } from "../models/VideoRecordingPlatform";
 import { parseVideoRecordingConfig } from "../models/VideoRecordingConfigParsing";
 import type {
   Database,
@@ -35,7 +36,7 @@ export interface VideoRecordingRecord extends VideoRecordingMetadata {
   captureTeardown?: VideoCaptureTeardownDescriptor;
   recorderDaemonSessionId?: string;
   deviceId: string;
-  platform: "android" | "ios";
+  platform: VideoRecordingPlatform;
   status: VideoRecordingStatus;
   /**
    * Daemon session that started the recording (issue #4752). Absent for legacy
@@ -92,7 +93,7 @@ export interface VideoRecordingQuery extends VideoRecordingOwnerScope {
   ownDaemonSessionId?: string;
   status?: VideoRecordingStatus | VideoRecordingStatus[];
   deviceId?: string;
-  platform?: "android" | "ios";
+  platform?: VideoRecordingPlatform;
   limit?: number;
   orderByLastAccessed?: "asc" | "desc";
   orderByStartedAt?: "asc" | "desc";
@@ -215,7 +216,7 @@ function toRecord(row: DbVideoRecording): VideoRecordingRecord {
     recorderDaemonSessionId: row.recorder_daemon_session_id ?? undefined,
     captureTeardown: parseCaptureTeardown(row.capture_teardown_json),
     deviceId: row.device_id,
-    platform: row.platform as "android" | "ios",
+    platform: row.platform as VideoRecordingPlatform,
     status: row.status as VideoRecordingStatus,
     outputName: row.output_name ?? undefined,
     fileName: row.file_name,

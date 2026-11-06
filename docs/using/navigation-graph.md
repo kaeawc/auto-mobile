@@ -119,9 +119,8 @@ lacks.
 
 `navigateTo` finds the shortest known path from the current screen and replays
 the recorded action for each step, checking that each step lands on the
-expected screen. On an Android TV a recorded `tapOn` of just an element id or text
-is replayed as D-pad focus moves and select; a tap scoped by a container or
-an occurrence index, or a long press, replays as recorded.
+expected screen. Steps `explore` recorded on an Android TV replay as the same D-pad
+focus moves and select.
 
 | Field           | Meaning                                                             |
 | --------------- | ------------------------------------------------------------------- |

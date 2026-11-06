@@ -342,8 +342,8 @@ simulator. Install a `.app` bundle built for the visionOS simulator;
 `launchApp` refuses `prototype: true`. With the visionOS runner active,
 `observe` returns the window app's accessibility hierarchy, including
 ornaments, `tapOn` taps an element by a unique accessibility identifier, and
-`sendKeys` types into the focused text field. Set `CTRL_PROXY_IOS_BUNDLE_ID` to
-the window app to automate. If the runner is unavailable, `observe` returns a
+`sendKeys` types into the focused text field. These act on the app you last
+started with `launchApp`; launch a different app and the next call follows it. If the runner is unavailable, `observe` returns a
 screenshot-only observation with `hierarchyUnavailable`; read the screenshot.
 Coordinate gestures and other input tools are not supported.
 

@@ -3,7 +3,8 @@ export class VisionosRunnerError extends ActionableError {
   constructor(
     message: string,
     readonly errorCode: string,
+    options?: { cause?: unknown },
   ) {
-    super(message);
+    super(message, options);
   }
 }

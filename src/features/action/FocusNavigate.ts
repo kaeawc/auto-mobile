@@ -9,11 +9,15 @@
 import { ActionableError } from "../../models/ActionableError";
 import type { Element } from "../../models/Element";
 import type { ElementBounds } from "../../models/ElementBounds";
+import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
+import { DefaultTextMatcher } from "../utility/TextMatcher";
 import { normalize } from "../utility/ElementResolverMatching";
+import { isTruthyFlag } from "../utility/elementProperties";
 import { matchesCtrlProxyResourceId } from "../utility/SearchableNode";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { reportToolDispatched } from "../../utils/ToolDispatchContext";
-import { boundsEqual, intersectBounds } from "../../utils/bounds";
+import { boundsArea, boundsEqual, intersectBounds } from "../../utils/bounds";
+import { compareSelectionRank } from "../utility/selectionRank";
 import type { Timer } from "../../utils/SystemTimer";
 import type { InputKeyName } from "./InputKey";
 
@@ -34,15 +38,29 @@ export type FocusNavigateStatus = (typeof FOCUS_NAVIGATE_STATUSES)[number];
 export interface FocusNavigateTarget {
   text?: string;
   contentDesc?: string;
-  /** Matches the text or the content-desc, as `tapOn`'s text selector does. */
-  label?: string;
   resourceId?: string;
+  /** Matches an element whose text or content-desc matches, as tapOn's text selector does. */
+  label?: string;
+  /** Require `label` to equal the text or content-desc; see {@link exactFirstTarget}. */
+  labelExact?: boolean;
+  /**
+   * tapOn's elementId: the native resource-id, or the synthetic `view-id` an observation gives an
+   * id-less node (`s2-…`).
+   */
+  elementId?: string;
+  /**
+   * Only the element at these bounds counts; null means nothing on this screen is the target.
+   * See {@link firstMatchTarget} and {@link FocusNavigateOptions.pinTarget}.
+   */
+  atBounds?: ElementBounds | null;
 }
 
 /** One screen read: the focused element (if any) and every element that could match. */
 export interface FocusScreen {
   focused: Element | null;
   elements: readonly Element[];
+  /** The read's hierarchy, for callers that resolve the target with tapOn's own selector. */
+  hierarchy?: ViewHierarchyResult;
 }
 
 export interface FocusObserver {
@@ -73,6 +91,17 @@ export interface FocusNavigateOptions {
   /** Press the D-pad select key (enter) once focus lands on the target. */
   select?: boolean;
   signal?: AbortSignal;
+  /**
+   * Only the first-ranked match on each read counts, as tapOn's default selection does, so focus
+   * already resting on another duplicate is not accepted. See {@link firstMatchTarget}.
+   */
+  firstMatch?: boolean;
+  /**
+   * Resolve the target on each read: its bounds, null when nothing on the screen is the target,
+   * or undefined to fall back to matching `until` here. tapOn's D-pad path resolves with the
+   * touch selector so both inputs pick the same element.
+   */
+  pinTarget?: (screen: FocusScreen) => ElementBounds | null | undefined;
 }
 
 export interface FocusNavigateResult {
@@ -83,8 +112,8 @@ export interface FocusNavigateResult {
   /** Focused elements in the order observed; consecutive repeats are collapsed. */
   path: FocusPathEntry[];
   focusedElement?: FocusPathEntry;
-  /** True only when `select` was requested and the select key was sent to the focused target. */
-  selected: boolean;
+  /** With `select`: whether the select key was sent to the focused target. */
+  selected?: boolean;
   message?: string;
 }
 
@@ -98,13 +127,19 @@ const DIRECTION_KEYS = {
   right: "arrow_right",
 } as const satisfies Record<FocusNavigateDirection, InputKeyName>;
 
+const textMatcher = new DefaultTextMatcher();
+
 export function focusNavigateTargetError(target: FocusNavigateTarget): string | undefined {
-  const given = [target.text, target.contentDesc, target.label, target.resourceId].some(
-    (value) => value !== undefined && value.length > 0,
-  );
+  const given = [
+    target.text,
+    target.contentDesc,
+    target.resourceId,
+    target.label,
+    target.elementId,
+  ].some((value) => value !== undefined && value.length > 0);
   return given
     ? undefined
-    : "focusNavigate requires until.text, until.contentDesc, until.label or until.resourceId";
+    : "focusNavigate requires until.text, until.contentDesc or until.resourceId";
 }
 
 function stringProp(
@@ -115,70 +150,109 @@ function stringProp(
   return typeof value === "string" ? value : "";
 }
 
-/** Labels compare as `tapOn`'s resolver compares text: trimmed, whitespace collapsed, any case. */
-function textMatches(expected: string | undefined, actual: string, exact: boolean): boolean {
-  if (!expected) {
-    return true;
-  }
-  const query = normalize(expected);
-  const value = normalize(actual);
-  return value.length > 0 && (exact ? value === query : value.includes(query));
-}
-
 /**
- * Whether `element` is the target. Labels match case-insensitively as substrings and ids by name
- * unless `exact`; a resource id also matches the node's synthetic `view-id`.
+ * Label matching normalized as tapOn's touch resolver does (quotes, trimmed, whitespace collapsed,
+ * case-insensitive), so ` Movies ` equals `Movies` and a wrapped `Sign\nin` matches `Sign in`.
  */
-export function elementMatchesTarget(
-  element: Element,
-  target: FocusNavigateTarget,
-  exact: boolean = false,
-): boolean {
-  const text = stringProp(element, "text");
-  const contentDesc = stringProp(element, "content-desc");
-  const labelMatches =
-    !target.label ||
-    textMatches(target.label, text, exact) ||
-    textMatches(target.label, contentDesc, exact);
-  return (
-    textMatches(target.text, text, exact) &&
-    textMatches(target.contentDesc, contentDesc, exact) &&
-    labelMatches &&
-    (!target.resourceId || resourceIdMatches(element, target.resourceId, exact))
-  );
-}
-
-/**
- * Exactly: the native id or the synthetic `view-id` equals `resourceId`. Otherwise also by name,
- * as `tapOn` resolves ids: `name` matches `pkg:id/name`, and `pkg:id/name` matches a native
- * id that is just `name` (Compose).
- */
-function resourceIdMatches(element: Element, resourceId: string, exact: boolean): boolean {
-  const nativeId = stringProp(element, "resource-id");
-  if (nativeId === resourceId || stringProp(element, "view-id") === resourceId) {
-    return true;
-  }
-  if (exact) {
+function labelMatches(label: string, exact: boolean, fields: readonly string[]): boolean {
+  const query = normalize(label);
+  if (!query) {
     return false;
   }
-  const marker = resourceId.lastIndexOf(":id/");
-  const name = marker >= 0 ? resourceId.slice(marker + ":id/".length) : undefined;
+  return fields.some((field) => {
+    const value = normalize(field);
+    return value.length > 0 && (exact ? value === query : value.includes(query));
+  });
+}
+
+/** Text-field checks: text, contentDesc and label. Each given field must match. */
+function textFieldsMatch(element: Element, target: FocusNavigateTarget): boolean {
+  if (target.text && !textMatcher.createTextMatcher(target.text)(stringProp(element, "text"))) {
+    return false;
+  }
+  if (
+    target.contentDesc &&
+    !textMatcher.createTextMatcher(target.contentDesc)(stringProp(element, "content-desc"))
+  ) {
+    return false;
+  }
   return (
-    matchesCtrlProxyResourceId(nativeId, resourceId) || (name !== undefined && nativeId === name)
+    !target.label ||
+    labelMatches(target.label, Boolean(target.labelExact), [
+      stringProp(element, "text"),
+      stringProp(element, "content-desc"),
+    ])
   );
 }
 
+/** Identity checks: elementId (native or synthetic view-id) and resourceId. */
+function idFieldsMatch(element: Element, target: FocusNavigateTarget): boolean {
+  const resourceId = stringProp(element, "resource-id");
+  if (
+    target.elementId &&
+    !matchesCtrlProxyResourceId(resourceId, target.elementId) &&
+    stringProp(element, "view-id") !== target.elementId
+  ) {
+    return false;
+  }
+  return !target.resourceId || matchesCtrlProxyResourceId(resourceId, target.resourceId);
+}
+
+export function elementMatchesTarget(element: Element, target: FocusNavigateTarget): boolean {
+  if (target.atBounds === null) {
+    return false;
+  }
+  if (target.atBounds && !boundsEqual(element.bounds, target.atBounds)) {
+    return false;
+  }
+  return textFieldsMatch(element, target) && idFieldsMatch(element, target);
+}
+
 /**
- * The target predicate for one screen. Like `tapOn`, an exact match on screen (label and id) wins
- * over looser ones, so "Settings" never settles on a focused "Advanced Settings", nor
- * `com.example:id/save` on a focused `com.other:id/save`.
+ * Exact matches win over containing ones, as in tapOn's touch resolver: when an element on this
+ * screen has `label` as its whole text or content-desc, a node that merely contains it (`Movies
+ * Plus` for `Movies`) is not the target.
  */
-export function screenTargetMatcher(
-  elements: readonly Element[],
+export function exactFirstTarget(
+  screen: FocusScreen,
   target: FocusNavigateTarget,
-): (element: Element) => boolean {
-  const exact = elements.some((element) => elementMatchesTarget(element, target, true));
-  return (element) => elementMatchesTarget(element, target, exact);
+): FocusNavigateTarget {
+  if (!target.label || target.labelExact) {
+    return target;
+  }
+  const exact = { ...target, labelExact: true };
+  return screen.elements.some((element) => elementMatchesTarget(element, exact)) ? exact : target;
+}
+
+/** The target for one screen read: exact-first, then pinned to the first match when asked. */
+function resolveTarget(screen: FocusScreen, options: FocusNavigateOptions): FocusNavigateTarget {
+  const pinned = options.pinTarget?.(screen);
+  if (pinned !== undefined) {
+    return { atBounds: pinned };
+  }
+  const exact = exactFirstTarget(screen, options.until);
+  return options.firstMatch ? firstMatchTarget(screen, exact) : exact;
+}
+
+/**
+ * Pin `target` to the first match on this screen as tapOn's `first` selection ranks it: smallest
+ * area, then hierarchy order (the same {@link compareSelectionRank} ordering tvOS tapOn uses).
+ */
+export function firstMatchTarget(
+  screen: FocusScreen,
+  target: FocusNavigateTarget,
+): FocusNavigateTarget {
+  const [first] = screen.elements
+    .filter((element) => elementMatchesTarget(element, target))
+    .map((element, order) => ({
+      element,
+      windowRank: 0,
+      area: boundsArea(element.bounds),
+      order,
+      interactive: false,
+    }))
+    .sort((a, b) => compareSelectionRank(a, b));
+  return first ? { ...target, atBounds: first.element.bounds } : target;
 }
 
 function center(bounds: ElementBounds): { x: number; y: number } {
@@ -246,18 +320,11 @@ function pathEntry(element: Element, descendant?: Element): FocusPathEntry {
   };
 }
 
+function isActionable(element: Element): boolean {
+  return isTruthyFlag(element.clickable) || isTruthyFlag(element.focusable);
+}
+
 /** Match each contained node independently, preserving the focused container's identity. */
-/** True when `inner`'s bounds lie entirely within `outer`'s. */
-function containsBounds(outer: Element, inner: Element): boolean {
-  const intersection = intersectBounds(outer.bounds, inner.bounds);
-  return intersection !== null && boundsEqual(intersection, inner.bounds);
-}
-
-/** The first element on screen that is the target, in hierarchy order, as `tapOn` picks it. */
-function firstTarget(screen: FocusScreen, target: FocusNavigateTarget): Element | undefined {
-  return screen.elements.find(screenTargetMatcher(screen.elements, target));
-}
-
 function describeFocus(
   screen: FocusScreen,
   target: FocusNavigateTarget,
@@ -265,18 +332,21 @@ function describeFocus(
   const { focused } = screen;
   // The observer supplies flattened nodes, so require full bounds containment, not overlap.
   const contained = focused
-    ? screen.elements.filter((element) => element !== focused && containsBounds(focused, element))
+    ? screen.elements.filter((element) => {
+        if (element === focused) {
+          return false;
+        }
+        const intersection = intersectBounds(focused.bounds, element.bounds);
+        return intersection !== null && boundsEqual(intersection, element.bounds);
+      })
     : [];
-  const first = firstTarget(screen, target);
-  const matchingDescendant = first && contained.includes(first) ? first : undefined;
-  // Like an unindexed tapOn, the target is the first match: a later duplicate that happens to
-  // be focused does not count. With no match in the element list, the focused node decides.
-  const matches = Boolean(
-    focused &&
-    (first
-      ? containsBounds(focused, first)
-      : screenTargetMatcher(screen.elements, target)(focused)),
+  // A pinned target is the control a touch tap would act on; an independently actionable child
+  // (a Delete button in a focused row) must own focus itself, not borrow its parent's.
+  const matchingDescendant = contained.find(
+    (element) =>
+      elementMatchesTarget(element, target) && !(target.atBounds && isActionable(element)),
   );
+  const matches = Boolean(focused && (elementMatchesTarget(focused, target) || matchingDescendant));
   const label =
     matchingDescendant ??
     contained.find(
@@ -367,14 +437,15 @@ export class FocusNavigate {
       throwIfAborted(signal);
       const screen = await this.observer.read(signal);
       const { focused } = screen;
-      const { focusedElement, matches } = describeFocus(screen, options.until);
+      const until = resolveTarget(screen, options);
+      const { focusedElement, matches } = describeFocus(screen, until);
       const key = focusKey(focused);
       if (progress.observe(key) && focusedElement) {
         path.push(focusedElement);
       }
       const { unchanged, blocked } = progress;
 
-      const direction = options.direction ?? this.nextDirection(screen, options, blocked);
+      const direction = options.direction ?? this.nextDirection(screen, until, blocked);
       const exhausted = options.direction ? unchanged >= FOCUS_NAVIGATE_STUCK_PRESSES : !direction;
       const done = this.exitFor(focusedElement, matches, {
         steps,
@@ -402,7 +473,7 @@ export class FocusNavigate {
   ): FocusNavigateResult | undefined {
     const { steps, stuck, maxSteps, path } = progress;
     if (matches) {
-      return { success: true, status: "focused", steps, path, focusedElement, selected: false };
+      return { success: true, status: "focused", steps, path, focusedElement };
     }
     if (stuck > 0) {
       return this.stopped("stuck", steps, path, {
@@ -422,13 +493,11 @@ export class FocusNavigate {
   /** The best direction toward the target that has not already failed to move focus. */
   private nextDirection(
     screen: FocusScreen,
-    options: FocusNavigateOptions,
+    until: FocusNavigateTarget,
     blocked: ReadonlySet<FocusNavigateDirection>,
   ): FocusNavigateDirection | undefined {
-    const first = firstTarget(screen, options.until);
-    return directionsToward(screen.focused, first ? [first] : []).find(
-      (direction) => !blocked.has(direction),
-    );
+    const matches = screen.elements.filter((element) => elementMatchesTarget(element, until));
+    return directionsToward(screen.focused, matches).find((direction) => !blocked.has(direction));
   }
 
   /** With `select`, activate a focused target with the select key; a refused key fails the call. */
@@ -437,8 +506,11 @@ export class FocusNavigate {
     select: boolean,
     signal: AbortSignal | undefined,
   ): Promise<FocusNavigateResult> {
-    if (!select || !done.success) {
+    if (!select) {
       return done;
+    }
+    if (!done.success) {
+      return { ...done, selected: false };
     }
     throwIfAborted(signal);
     // The select key, not the first arrow, is what can navigate: time the recorded call from it.
@@ -471,7 +543,6 @@ export class FocusNavigate {
       status,
       steps,
       path,
-      selected: false,
       ...(focusedElement ? { focusedElement } : {}),
       message: `${message}; the target was not focused. Observe before retrying.`,
     };

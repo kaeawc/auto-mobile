@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { PrototypeEvent } from "../observe/android/ctrlProxyProtocol";
+import { decodePrototypeCastEvent, type PrototypeCastEvent } from "./prototypeCastEvents";
 import { prototypeJsonSchema, type PrototypeJson } from "./prototypeJson";
 import {
   PROTOTYPE_PLATFORM_DELIVERED_EVENT_NAME,
@@ -106,4 +107,18 @@ export function prototypePlatformDeliveredEventOf(
   }
   const payload = deliveredPayloadSchema.safeParse(event.payload);
   return payload.success ? payload.data : undefined;
+}
+
+/**
+ * The typed `cast.*` event (#14239) an event reports, or undefined for any other event, a
+ * malformed payload, data cut to the emit budget (`truncated`) or cast data of the wrong shape.
+ */
+export function prototypeCastEventOf(
+  event: Pick<PrototypeEvent, "kind" | "name" | "payload">,
+): PrototypeCastEvent | undefined {
+  const delivered = prototypePlatformDeliveredEventOf(event);
+  if (delivered === undefined || delivered.truncated === true) {
+    return undefined;
+  }
+  return decodePrototypeCastEvent(delivered.event, delivered.data);
 }

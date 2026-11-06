@@ -175,8 +175,9 @@ describe("prototype web page (#16346)", () => {
     );
   });
 
-  test("offers only rotate, zoom and pan, a variant switcher and revision history", () => {
+  test("offers only rotate, zoom and pan, the 3D toggle, a variant switcher and revision history", () => {
     expect(controls(page.html)).toEqual([
+      "3d",
       "revisions",
       "rotate",
       "screen",
@@ -213,7 +214,7 @@ describe("prototype web page (#16346)", () => {
   });
 
   test("reports the unsupported nodes of the view shown first", () => {
-    expect(page.unsupportedNodes.map((node) => node.type)).toEqual(["progress"]);
+    expect(page.unsupportedNodes.map((node) => node.type)).toEqual(["menu"]);
   });
 
   test("drops older revisions to stay within the budget, keeping each variant's latest", () => {

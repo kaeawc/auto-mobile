@@ -19,7 +19,12 @@ export function isAlreadyStoppedDeviceError(
     );
   }
   // An Apple Watch simulator stops through the same simctl shutdown as an iPhone one.
-  if (platform === "ios" || platform === "watchos" || platform === "tvos") {
+  if (
+    platform === "ios" ||
+    platform === "watchos" ||
+    platform === "tvos" ||
+    platform === "visionos"
+  ) {
     return isIosSimulatorAlreadyStoppedError(error);
   }
   return false;

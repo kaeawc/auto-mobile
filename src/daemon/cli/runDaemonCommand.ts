@@ -34,9 +34,11 @@ import {
   DAEMON_LIVENESS_OWNER_IS_PROXY_CODE,
   DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
   DAEMON_LIVENESS_OWNER_UNOWNED_CODE,
+  idleTimeoutMsFromError,
   releaseReasonFromError,
 } from "../types";
 import { parseDaemonArgs } from "./daemonArgs";
+import { parseSetFeatureFlagArgs, setDaemonFeatureFlag } from "./featureFlagCommand";
 import { readBooleanFlag, splitFlagToken } from "../../utils/flagTokens";
 import { describeForeignForwardLeaseHolders } from "../forwardLeaseHolders";
 import {
@@ -444,8 +446,14 @@ async function runDaemonDiagnosticsCommand(
 }
 
 /** " (released: <reason>[, idle])", or "" when the daemon gave neither. */
-function releasedLabel(reason: string | undefined, idle: boolean): string {
-  const label = [reason, idle ? "idle" : undefined].filter(Boolean).join(", ");
+function releasedLabel(reason: string | undefined, idle: boolean, idleTimeoutMs?: number): string {
+  const label = [
+    reason,
+    idle ? "idle" : undefined,
+    idleTimeoutMs === undefined ? undefined : `idle timeout ${idleTimeoutMs} ms`,
+  ]
+    .filter(Boolean)
+    .join(", ");
   return label ? ` (released: ${label})` : "";
 }
 
@@ -467,6 +475,8 @@ export class DaemonCommandRefusal extends ActionableError {
   readonly releaseReason?: string;
   /** True when the daemon released the session at its idle window (#10832). */
   readonly idle?: true;
+  /** A `cli-idle-timeout` session's idle window, when the daemon reported it (#16937). */
+  readonly idleTimeoutMs?: number;
   readonly details?: Record<string, unknown>;
   readonly detail: string;
 
@@ -481,12 +491,13 @@ export class DaemonCommandRefusal extends ActionableError {
     const retryAfterMs = field("retryAfterMs");
     const releaseReason = releaseReasonFromError(error);
     const idle = field("idle") === true;
+    const idleTimeoutMs = idleTimeoutMsFromError(error);
     const detail = errorMessage(error);
     const typedCode =
       typeof code === "string" || typeof code === "number" ? String(code) : undefined;
     const typedNextAction = typeof nextAction === "string" ? nextAction : undefined;
     super(
-      `${context}: ${detail}${releasedLabel(releaseReason, idle)}` +
+      `${context}: ${detail}${releasedLabel(releaseReason, idle, idleTimeoutMs)}` +
         `${typedCode ? ` [${typedCode}]` : ""}${typedNextAction ? ` Next: ${typedNextAction}` : ""}`,
       { cause: error },
     );
@@ -497,6 +508,7 @@ export class DaemonCommandRefusal extends ActionableError {
     this.retryAfterMs = typeof retryAfterMs === "number" ? retryAfterMs : undefined;
     this.releaseReason = releaseReason;
     this.idle = idle ? true : undefined;
+    this.idleTimeoutMs = idleTimeoutMs;
     this.details = recordOrUndefined(field("details"));
   }
 }
@@ -513,6 +525,7 @@ function daemonQueryFailureJson(error: unknown): Record<string, unknown> {
     retryAfterMs: error.retryAfterMs,
     releaseReason: error.releaseReason,
     idle: error.idle,
+    idleTimeoutMs: error.idleTimeoutMs,
     details: error.details,
   };
   return {
@@ -673,6 +686,30 @@ async function queryActiveSessions(args: string[], manager: DaemonManager): Prom
   }
 }
 
+/**
+ * Set a feature flag on the running daemon (#16882): the headless path for a flag the IDE
+ * plugin's settings page otherwise owns, such as `device-condition`.
+ */
+async function setFeatureFlagCommand(args: string[], manager: DaemonManager): Promise<void> {
+  const { json, rest } = takeJsonFlag(args);
+  try {
+    const parsed = parseSetFeatureFlagArgs(rest.filter((arg) => arg !== ""));
+    let result: unknown;
+    try {
+      result = await setDaemonFeatureFlag(parsed, manager.createClient());
+    } catch (error) {
+      throw new DaemonCommandRefusal(`Failed to set feature flag ${parsed.key}`, error);
+    }
+    if (json) {
+      console.log(JSON.stringify({ ok: true, flag: result }));
+      return;
+    }
+    console.log(`Feature flag ${parsed.key} is now ${parsed.enabled ? "enabled" : "disabled"}`);
+  } catch (error) {
+    exitWithDaemonQueryFailure(error, json);
+  }
+}
+
 async function queryDaemonCapabilities(args: string[], manager: DaemonManager): Promise<void> {
   try {
     const result = await queryExistingDaemonCapabilities(args, () => manager.createClient());
@@ -824,7 +861,7 @@ function heartbeatFailureMessage(sessionId: string, error: unknown): string {
 function releasedSuffix(error: unknown): string {
   const reason = releaseReasonFromError(error);
   const idle = recordOrUndefined(error)?.idle === true;
-  return reason ? releasedLabel(reason, idle) : "";
+  return reason ? releasedLabel(reason, idle, idleTimeoutMsFromError(error)) : "";
 }
 
 async function recordDaemonHeartbeat(args: string[], manager: DaemonManager): Promise<void> {
@@ -931,6 +968,7 @@ const NAMESPACE_GUARDED_DAEMON_COMMANDS = new Set([
   "restart-admitted",
   "restart-acceptance-session",
   "release-session",
+  "set-feature-flag",
   "abandon-session-request",
   "release-broker-session",
   "release-liveness-ownership",
@@ -981,6 +1019,7 @@ export async function runDaemonCommand(
     "active-sessions": () => queryActiveSessions(args, manager),
     "session-info": () => querySessionInfo(args, manager),
     "release-session": () => releaseDaemonSession(args, manager),
+    "set-feature-flag": () => setFeatureFlagCommand(args, manager),
     "session-request-status": () =>
       runSessionBrokerCommand("session-request-status", args, manager),
     "abandon-session-request": () =>

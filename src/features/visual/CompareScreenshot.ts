@@ -1,3 +1,4 @@
+import { ActionableError } from "../../models/ActionableError";
 import type { ElementBounds } from "../../models/ElementBounds";
 import type { ImageBackend } from "../../utils/image/backend/ImageBackend";
 import { cropSnapshot } from "../observe/screenshot/snapshotCrop";
@@ -6,7 +7,7 @@ import { assertBaselineName, type VisualBaselineStore } from "./VisualBaselineSt
 import { profileDifferences, type VisualDeviceProfile } from "./VisualDeviceProfile";
 import { diffPngs, type PixelRect } from "./VisualDiff";
 
-/** A region in platform-native screen units (Android pixels, iOS points). */
+/** A region in platform-native screen units (Android pixels, iOS and tvOS points). */
 export interface VisualRegion {
   elementId?: string;
   rect?: ElementBounds;
@@ -29,6 +30,8 @@ export interface VisualScreen {
   resolveElement(elementId: string): ElementBounds;
   /** Native rectangles the system bars occupy. */
   systemBars: readonly ElementBounds[];
+  /** Set when this capture cannot place a target or mask region; the message says why. */
+  regionsUnavailable?: string;
 }
 
 export interface CompareScreenshotDependencies<S extends VisualScreen = VisualScreen> {
@@ -71,6 +74,9 @@ function screenBounds(geometry: SnapshotGeometry): ElementBounds {
 }
 
 function regionBounds(region: VisualRegion, screen: VisualScreen): ElementBounds {
+  if (screen.regionsUnavailable !== undefined) {
+    throw new ActionableError(screen.regionsUnavailable);
+  }
   if (region.rect) {
     return region.rect;
   }

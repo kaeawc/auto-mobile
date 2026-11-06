@@ -9,6 +9,8 @@ import {
   type BrowserType,
   type Page,
 } from "playwright-core";
+import { toHtml } from "../../../../src/features/prototype/web/webNodes";
+import { renderPrototypeStill } from "../../../../src/features/prototype/web/webStill";
 import { diffPngs } from "../../../../src/features/visual/VisualDiff";
 import {
   WEB_SCREENSHOT_FONT_CSS,
@@ -173,6 +175,81 @@ async function finishAnimations(page: Page): Promise<void> {
   );
 }
 
+interface Device3dState {
+  readonly pressed: string | null;
+  readonly wrapped: boolean;
+  readonly transform: string;
+}
+
+function device3dState(page: Page): Promise<Device3dState> {
+  return page.evaluate(() => {
+    const orbit = document.querySelector<HTMLElement>("[data-orbit]");
+    return {
+      pressed: document.querySelector('[data-control="3d"]')?.getAttribute("aria-pressed") ?? null,
+      wrapped: document.body.hasAttribute("data-device3d"),
+      transform: orbit?.style.transform ?? "",
+    };
+  });
+}
+
+function shownViewHtml(page: Page): Promise<string> {
+  return page.evaluate(
+    () => document.querySelector<HTMLElement>("[data-view]:not([hidden])")?.outerHTML ?? "",
+  );
+}
+
+/**
+ * 2D → 3D → 2D (#16458): the toggle transitions into the three-quarter pose, arrow keys orbit the
+ * focused viewport, a rotate keeps the orbit, and leaving 3D restores the shown view's DOM byte
+ * for byte.
+ */
+async function checkDevice3d(page: Page): Promise<void> {
+  const before = await shownViewHtml(page);
+  await page.click('[data-control="3d"]');
+  await page.waitForFunction(() =>
+    document.querySelector<HTMLElement>("[data-orbit]")?.style.transform.includes("rotateY(30deg)"),
+  );
+  expect(await device3dState(page)).toMatchObject({ pressed: "true", wrapped: true });
+  await page.focus("[data-viewport]");
+  await page.keyboard.press("ArrowRight");
+  expect((await device3dState(page)).transform).toContain("rotateY(35deg)");
+  // Rotating in 3D turns the views inside the orbiting box, so the orbit holds through the turn.
+  if (await page.$('[data-control="rotate"]')) {
+    await page.click('[data-control="rotate"]');
+    const orbiting = await page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>("[data-view]:not([hidden])")).every(
+        (view) => view.closest("[data-orbit]") !== null,
+      ),
+    );
+    expect(orbiting).toBe(true);
+    expect((await device3dState(page)).transform).toContain("rotateY(35deg)");
+    await finishAnimations(page);
+    await page.click('[data-control="rotate"]');
+    await finishAnimations(page);
+  }
+  // A plain drag still pans in screen space with the device turned around (185° yaw).
+  await page.focus("[data-viewport]");
+  for (let step = 0; step < 10; step++) {
+    await page.keyboard.press("Shift+ArrowRight");
+  }
+  expect((await device3dState(page)).transform).toContain("rotateY(185deg)");
+  const centreX = () =>
+    page.evaluate(() => {
+      const box = document.querySelector("[data-view]:not([hidden]) > *")?.getBoundingClientRect();
+      return box ? box.left + box.width / 2 : 0;
+    });
+  const before3dPan = await centreX();
+  await page.mouse.move(400, 500);
+  await page.mouse.down();
+  await page.mouse.move(460, 500, { steps: 4 });
+  await page.mouse.up();
+  expect((await centreX()) - before3dPan).toBeGreaterThan(30);
+  await page.click('[data-control="3d"]');
+  await page.waitForFunction(() => !document.querySelector("[data-orbit]"));
+  expect(await device3dState(page)).toEqual({ pressed: "false", wrapped: false, transform: "" });
+  expect(await shownViewHtml(page)).toBe(before);
+}
+
 function writeOutput(engine: WebScreenshotEngine, name: string, png: Buffer): void {
   const path = join(OUT_DIR, webScreenshotOutputPath(engine, name));
   mkdirSync(dirname(path), { recursive: true });
@@ -221,7 +298,7 @@ for (const engine of ENGINES) {
       test(
         entry.name,
         async () => {
-          const { page, ...problems } = await openPage(browser, webScreenshotPage(entry));
+          const { page, ...problems } = await openPage(browser, await webScreenshotPage(entry));
           try {
             const first = await shownView(page);
             expect(first.count).toBe(1);
@@ -280,6 +357,8 @@ for (const engine of ENGINES) {
               expect(picked).toEqual([screens.at(-1)]);
             }
 
+            await checkDevice3d(page);
+
             const violations = await page.evaluate((): string[] =>
               Reflect.get(globalThis, "__cspViolations"),
             );
@@ -310,7 +389,7 @@ for (const engine of ENGINES) {
       "the status bar clock follows the browser clock (#16585)",
       async () => {
         const [entry] = webScreenshotCases();
-        const { page } = await openPage(browser, webScreenshotPage(entry!), (opened) =>
+        const { page } = await openPage(browser, await webScreenshotPage(entry!), (opened) =>
           opened.clock.install({ time: "2026-01-01T13:07:30Z" }),
         );
         const clocks = () =>
@@ -329,6 +408,196 @@ for (const engine of ENGINES) {
       },
       CASE_TIMEOUT_MS,
     );
+
+    test("a fitted map stretched in a narrow column keeps both pins inside the box (#16679)", async () => {
+      const markers = {
+        path: "/ends",
+        as: "end",
+        lat: "{end.lat}",
+        lng: "{end.lng}",
+        title: "{end.name}",
+      };
+      const map = (fit: string, extra: Record<string, unknown>) => ({
+        type: "map",
+        fit,
+        markers,
+        polylines: [{ path: "/ends", width: 4 }],
+        ...extra,
+      });
+      const reference = JSON.parse(
+        readFileSync(
+          join(import.meta.dir, "../../../fixtures/prototype-web/reference-checkout.json"),
+          "utf8",
+        ),
+      ) as Record<string, unknown>;
+      const { element } = renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          style: { width: { dp: 200 } },
+          children: [
+            map("markers", {}),
+            map("route", { style: { height: { dp: 120 } } }),
+            // Padding shrinks the content box the pins scale by; the route must scale with them.
+            map("markers", { style: { padding: { start: 40, top: 10 } } }),
+          ],
+        },
+        data: {
+          ends: [
+            { name: "West", lat: 0, lng: -1 },
+            { name: "East", lat: 0.5, lng: 1 },
+          ],
+        },
+      });
+      const page = await browser.newPage({
+        viewport: WEB_SCREENSHOT_VIEWPORT,
+        deviceScaleFactor: 1,
+      });
+      try {
+        await page.setContent(`<!doctype html><html><body>${toHtml(element)}</body></html>`);
+        const boxes = await page.$$eval('[data-node="map"]', (maps) =>
+          maps.map((map) => {
+            const box = map.getBoundingClientRect();
+            // A pin's point is where it is placed (`left`/`top`), before its transform moves the drawing.
+            const tips = Array.from(map.querySelectorAll<HTMLElement>('[data-part="marker"]')).map(
+              (pin) => ({
+                x: box.left + map.clientLeft + pin.offsetLeft,
+                y: box.top + map.clientTop + pin.offsetTop,
+              }),
+            );
+            const polyline = map.querySelector("polyline");
+            const line = polyline?.getBoundingClientRect();
+            // The route's ends in page px, to meet the pin tips.
+            const matrix = polyline?.getScreenCTM();
+            const ends = Array.from(polyline?.points ?? [])
+              .filter((_, index, all) => index === 0 || index === all.length - 1)
+              .map((point) => point.matrixTransform(matrix ?? undefined))
+              .map(({ x, y }) => ({ x, y }));
+            return {
+              box: { left: box.left, right: box.right, top: box.top, bottom: box.bottom },
+              tips,
+              ends,
+              line: line && {
+                left: line.left,
+                right: line.right,
+                top: line.top,
+                bottom: line.bottom,
+              },
+            };
+          }),
+        );
+        expect(boxes).toHaveLength(3);
+        for (const { box, tips, line, ends } of boxes) {
+          expect(box.right - box.left).toBeCloseTo(200, 0);
+          expect(tips).toHaveLength(2);
+          for (const tip of tips) {
+            expect(tip.x).toBeGreaterThan(box.left);
+            expect(tip.x).toBeLessThan(box.right);
+            expect(tip.y).toBeGreaterThan(box.top);
+            expect(tip.y).toBeLessThan(box.bottom);
+          }
+          // The route runs between the pins, so it is inside the box too (its round caps aside).
+          expect(line!.left).toBeGreaterThan(box.left);
+          expect(line!.right).toBeLessThan(box.right);
+          // Each pin's tip sits on its end of the route.
+          for (const [index, end] of ends.entries()) {
+            expect(Math.abs(end.x - tips[index]!.x)).toBeLessThan(1);
+            expect(Math.abs(end.y - tips[index]!.y)).toBeLessThan(1);
+          }
+          expect(ends).toHaveLength(2);
+        }
+      } finally {
+        await page.close();
+      }
+    });
+
+    test("row aspect ratios lay out at the widths Android's sizeIn-then-aspectRatio gives (#16795)", async () => {
+      const box = (testTag: string, style: Record<string, unknown>) => ({
+        type: "box",
+        testTag,
+        style: { background: "primary", ...style },
+      });
+      const text = (testTag: string, value: string) => ({ type: "text", testTag, text: value });
+      const row = (width: number, children: unknown[]) => ({
+        type: "row",
+        style: { width: { dp: width } },
+        children,
+      });
+      const square = (prefix: string) => box(`${prefix}-square`, { aspectRatio: 1, maxWidth: 100 });
+      const reference = JSON.parse(
+        readFileSync(
+          join(import.meta.dir, "../../../fixtures/prototype-web/reference-checkout.json"),
+          "utf8",
+        ),
+      ) as Record<string, unknown>;
+      const { element } = renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          style: { width: "fill" },
+          children: [
+            // The capped square keeps its 100 and the later sibling gives up its minWidth (#16772).
+            row(100, [
+              square("narrow"),
+              box("narrow-later", { width: { dp: 40 }, minWidth: 40, height: { dp: 10 } }),
+            ]),
+            // With width to spare the later sibling still renders at least its minWidth.
+            row(200, [
+              square("wide"),
+              box("wide-later", { width: { dp: 20 }, minWidth: 40, height: { dp: 10 } }),
+            ]),
+            // A capped ratio between two texts grows to its cap (#16681).
+            row(200, [
+              text("between-start", "a"),
+              box("between-capped", { aspectRatio: 2, maxWidth: 100 }),
+              text("between-end", "b"),
+            ]),
+            // An unsized ratio after a capped one takes what the cap and the text leave (#16681).
+            row(300, [
+              box("after-capped", { aspectRatio: 2, maxWidth: 100 }),
+              text("after-text", "a"),
+              box("after-unsized", { aspectRatio: 1 }),
+              text("after-end", "b"),
+            ]),
+          ],
+        },
+      });
+      const page = await browser.newPage({
+        viewport: WEB_SCREENSHOT_VIEWPORT,
+        deviceScaleFactor: 1,
+      });
+      try {
+        await page.setContent(`<!doctype html><html><body>${toHtml(element)}</body></html>`);
+        const widths = await page.$$eval("[data-testid]", (nodes) =>
+          Object.fromEntries(
+            nodes.map((node) => [
+              node.getAttribute("data-testid") ?? "",
+              node.getBoundingClientRect().width,
+            ]),
+          ),
+        );
+        const width = (testTag: string) => {
+          expect(widths).toHaveProperty(testTag);
+          return widths[testTag]!;
+        };
+        expect(width("narrow-square")).toBeCloseTo(100, 0);
+        expect(width("narrow-later")).toBeCloseTo(0, 0);
+        expect(width("wide-square")).toBeCloseTo(100, 0);
+        expect(width("wide-later")).toBeCloseTo(40, 0);
+
+        expect(width("between-capped")).toBeCloseTo(100, 0);
+        expect(width("between-start")).toBeGreaterThan(0);
+        expect(width("between-end")).toBeGreaterThan(0);
+
+        const afterText = width("after-text");
+        expect(width("after-capped")).toBeCloseTo(100, 0);
+        expect(afterText).toBeGreaterThan(0);
+        expect(width("after-unsized")).toBeCloseTo(300 - 100 - afterText, 0);
+        expect(width("after-end")).toBeCloseTo(0, 0);
+      } finally {
+        await page.close();
+      }
+    });
   });
 }
 
@@ -365,6 +634,25 @@ for (const engine of ENGINES) {
               webSpecPage({ ...base, window }, "fade-edges"),
             );
             try {
+              // Without scroll-driven animations (Firefox today) the page keeps the fade always on.
+              const followsOverflow = await page.evaluate(() =>
+                CSS.supports("animation-timeline", "scroll()"),
+              );
+              // The mask comes from a scroll-driven animation whose `scroll(self)` timeline resolves on
+              // a frame after load (#17143), so wait until every overflowing scroll draws it.
+              await page.waitForFunction(() => {
+                const overflowing = Array.from(
+                  document.querySelectorAll<HTMLElement>("[data-view]:not([hidden]) [data-fade]"),
+                ).filter((scroll) =>
+                  scroll.dataset.fade === "x"
+                    ? scroll.scrollWidth > scroll.clientWidth
+                    : scroll.scrollHeight > scroll.clientHeight,
+                );
+                return (
+                  overflowing.length > 0 &&
+                  overflowing.every((scroll) => getComputedStyle(scroll).maskImage !== "none")
+                );
+              });
               const masks = await page.evaluate(() =>
                 Object.fromEntries(
                   Array.from(
@@ -373,10 +661,6 @@ for (const engine of ENGINES) {
                 ),
               );
               const trailing = direction === "rtl" ? "to right" : "to left";
-              // Without scroll-driven animations (Firefox today) the page keeps the fade always on.
-              const followsOverflow = await page.evaluate(() =>
-                CSS.supports("animation-timeline", "scroll()"),
-              );
               if (followsOverflow) {
                 expect(masks["vertical-fits"]).toBe("none");
                 expect(masks["horizontal-fits"]).toBe("none");

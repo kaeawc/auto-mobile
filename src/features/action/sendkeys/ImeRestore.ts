@@ -273,6 +273,12 @@ export class ImeRestore {
     priorImeId: string | null,
     wasEnabled: boolean,
     subtype: ImeSubtypeSnapshot,
+    /**
+     * Ownership of the device for a deferred restore run by a session release (#16580). The
+     * ambient request signal is dropped below, so this is the only way a forced release can stop
+     * the restore: every later device write checks it and none is dispatched once it aborts.
+     */
+    fence?: AbortSignal,
   ): Promise<void> {
     if (priorImeId === this.commitImeId) {
       // The commit IME was already the keyboard, so nothing was switched away from (#10409).
@@ -282,8 +288,8 @@ export class ImeRestore {
     try {
       // Cleanup must complete even when the ambient request signal has been cancelled.
       await runOutsideRequestContext(async () => {
-        await this.restoreComponentAndSubtype(catalog, priorImeId, subtype);
-        await this.verifyRestoredIme(catalog, priorImeId, wasEnabled);
+        await this.restoreComponentAndSubtype(catalog, priorImeId, subtype, fence);
+        await this.verifyRestoredIme(catalog, priorImeId, wasEnabled, fence);
       });
     } catch (error) {
       const snapshot: SendKeysImeRecoverySnapshot | undefined =
@@ -312,19 +318,20 @@ export class ImeRestore {
     catalog: AndroidImeCatalog,
     priorImeId: string | null,
     subtype: ImeSubtypeSnapshot,
+    fence?: AbortSignal,
   ): Promise<void> {
     let componentError: unknown;
     try {
       if (priorImeId !== null) {
         // The caller already holds the per-device lock; select() would deadlock.
-        await catalog.selectWithinLock(priorImeId);
+        await catalog.selectWithinLock(priorImeId, fence);
       }
     } catch (error) {
       componentError = error;
     }
     try {
       // Restore subtype after component, including when component selection fails.
-      await catalog.restoreSubtypeWithinLock(priorImeId ?? AUTO_MOBILE_IME_ID, subtype);
+      await catalog.restoreSubtypeWithinLock(priorImeId ?? AUTO_MOBILE_IME_ID, subtype, fence);
     } catch (error) {
       if (componentError !== undefined) {
         throw new AggregateError(
@@ -343,15 +350,16 @@ export class ImeRestore {
     catalog: AndroidImeCatalog,
     priorImeId: string | null,
     wasEnabled: boolean,
+    fence?: AbortSignal,
   ): Promise<void> {
     if (priorImeId !== null) {
-      const after = await catalog.list();
+      const after = await catalog.list(fence);
       if (after.activeImeId !== priorImeId) {
         throw new Error(`Expected ${priorImeId}, got ${after.activeImeId ?? "none"}.`);
       }
     }
     if (!wasEnabled) {
-      await this.disableCommitIme();
+      await this.disableCommitIme(fence);
     }
     const enabled = await this.readCommitImeEnabled();
     if (!enabled.success || enabled.enabled !== wasEnabled) {
@@ -363,10 +371,13 @@ export class ImeRestore {
     return AUTO_MOBILE_IME_ID;
   }
 
-  async disableCommitIme(): Promise<void> {
+  async disableCommitIme(fence?: AbortSignal): Promise<void> {
     // This removes the companion from the keyboard picker; activateCommitIme re-enables it next time.
+    fence?.throwIfAborted();
     const result = await this.host.adb.executeCommand(
       `shell ime disable${this.imeUserFlag()} ${this.commitImeId}`,
+      // Fence up to dispatch only: once `ime disable` runs, let it finish so the state is known.
+      { beforeDispatch: async () => fence?.throwIfAborted() },
     );
     if (result.stderr.trim()) {
       throw new Error(`Failed to disable the text-commit IME: ${result.stderr.trim()}`);

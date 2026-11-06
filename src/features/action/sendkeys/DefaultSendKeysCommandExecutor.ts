@@ -15,7 +15,8 @@ import { ImeRestore, type SendKeysImeRecoverySnapshot } from "./ImeRestore";
 import type { ImeCommitRouting, AndroidTypeOptions } from "./ImeTypes";
 import {
   ANDROID_FOCUSED_INPUT_ERROR,
-  ANDROID_TYPE_FOCUSED_INPUT_ERROR,
+  ANDROID_TYPE_FOCUS_FAILURE,
+  type FocusedInputFailure,
 } from "./AndroidTypingConstants";
 import { ImeSpanService, isImeRestorationFailure } from "./ImeSpan";
 import type { PendingImeRestoreRegistry } from "./PendingImeRestore";
@@ -26,6 +27,8 @@ import { EventOnlyTyper } from "./EventOnlyTyper";
 import { PasswordRouting } from "./PasswordRouting";
 import { createSendKeysTextClient } from "./CtrlProxyTextClient";
 import {
+  caughtErrorCodeFields,
+  errorCodeFields,
   getAutoImeFallback,
   graphemeCodePoints,
   hasFocusedPasswordField,
@@ -194,7 +197,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         {
           deviceId: device.deviceId,
           verifySafeImeRecovery: (snapshot, signal) => this.verifySafeImeRecovery(snapshot, signal),
-          restoreIme: (prior, wasEnabled, subtype) => this.restoreIme(prior, wasEnabled, subtype),
+          restoreIme: (...args) => this.restoreIme(...args),
           getPinnedUser: () => this.session.imeUserId,
           setPinnedUser: (userId) => {
             this.session.imeUserId = userId;
@@ -223,7 +226,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       observer: { execute: (options) => this.observer.execute(options) },
       getKeyEventPlan: (char, signal) => this.getKeyEventPlan(char, signal),
       requireFocusedAndroidInput: (signal, display) =>
-        this.requireFocusedAndroidInput(signal, ANDROID_TYPE_FOCUSED_INPUT_ERROR, display),
+        this.requireFocusedAndroidInput(signal, ANDROID_TYPE_FOCUS_FAILURE, display),
       executeKeyEventPlanSafely: (plan, mutated, signal) =>
         this.executeKeyEventPlanSafely(plan, mutated, signal),
       verifyKeyEventLetterCase: (text, typed, signal, { display, before } = {}) =>
@@ -239,8 +242,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       preExistingFieldText: (hierarchy, operation) => preExistingFieldText(hierarchy, operation),
       markPartialAfterMutation: (result) => markPartialAfterMutation(result),
       insertText: (text, options, signal) => this.insertText(text, options, signal),
-      requireFocusedAndroidInput: (signal, error, display) =>
-        this.requireFocusedAndroidInput(signal, error, display),
+      requireFocusedAndroidInput: (signal, failure, display) =>
+        this.requireFocusedAndroidInput(signal, failure, display),
       readPrecedingState: (needed) => this.readPrecedingState(needed),
       executeKeyEventPlanSafely: (plan, mutated, signal) =>
         this.executeKeyEventPlanSafely(plan, mutated, signal),
@@ -280,8 +283,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         clearAndVerifyAndroid: (signal, display, clear, passwordField) =>
           this.clearAndVerifyAndroid(signal, display, clear, passwordField),
         withTextWarnings: (result, warnings) => this.withTextWarnings(result, warnings),
-        requireFocusedAndroidInput: (signal, error, display) =>
-          this.requireFocusedAndroidInput(signal, error, display),
+        requireFocusedAndroidInput: (signal, failure, display) =>
+          this.requireFocusedAndroidInput(signal, failure, display),
         readFocusedText: (observation) => this.readFocusedText(observation),
         readFocusedTextSnapshot: (observation) => this.readFocusedTextSnapshot(observation),
       },
@@ -354,8 +357,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       markPartialAfterPriorMutation: (result, mutated) =>
         markPartialAfterPriorMutation(result, mutated),
       insertText: (text, options, signal) => this.insertText(text, options, signal),
-      requireFocusedAndroidInput: (signal, error, display) =>
-        this.requireFocusedAndroidInput(signal, error, display),
+      requireFocusedAndroidInput: (signal, failure, display) =>
+        this.requireFocusedAndroidInput(signal, failure, display),
       readPrecedingState: (needed) => this.readPrecedingState(needed),
       executeKeyEventPlanSafely: (plan, mutated, signal) =>
         this.executeKeyEventPlanSafely(plan, mutated, signal),
@@ -472,6 +475,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         success: result.success,
         ...(result.retryable === false ? { retryable: false } : {}),
         error: result.error,
+        ...errorCodeFields(result),
         ...this.textWarningFields(result),
         ...(result.partialApplication ? { partialApplication: true } : {}),
         committedGraphemes: result.committedGraphemes,
@@ -493,6 +497,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         ...this.imeResultFields(baseResult.resolvedMode),
         success: false,
         error: errorMessage(error),
+        ...caughtErrorCodeFields(error),
         ...this.imeTraceFields(),
       };
     }
@@ -952,8 +957,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     priorImeId: string | null,
     wasEnabled: boolean,
     subtype: ImeSubtypeSnapshot,
+    fence?: AbortSignal,
   ): Promise<void> {
-    return this.imeRestore.restoreIme(priorImeId, wasEnabled, subtype);
+    return this.imeRestore.restoreIme(priorImeId, wasEnabled, subtype, fence);
   }
   private get commitImeId(): string {
     return this.imeRestore.commitImeId;
@@ -1024,13 +1030,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
   private requireFocusedAndroidInput(
     signal?: AbortSignal,
-    error: string = ANDROID_FOCUSED_INPUT_ERROR,
+    failure: FocusedInputFailure = { error: ANDROID_FOCUSED_INPUT_ERROR },
     display?: string,
   ): Promise<
     | { success: true; hierarchy: NonNullable<ObserveResult["viewHierarchy"]> }
-    | { success: false; error: string }
+    | ({ success: false } & FocusedInputFailure)
   > {
-    return this.keyEventSupport.requireFocusedAndroidInput(signal, error, display);
+    return this.keyEventSupport.requireFocusedAndroidInput(signal, failure, display);
   }
 
   private getEventAllKeyEventPlan(grapheme: string): Promise<KeyEventPlan | null> {

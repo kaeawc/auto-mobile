@@ -4,6 +4,11 @@ import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/working
 /** `simctl push` refuses payloads over 4 KiB, matching the APNs limit. */
 export const SIMCTL_PUSH_PAYLOAD_LIMIT_BYTES = 4096;
 
+/** Whether serialized push JSON exceeds the 4 KiB APNs limit (also the prototype push limit). */
+export function exceedsPushPayloadLimit(json: string): boolean {
+  return Buffer.byteLength(json, "utf8") > SIMCTL_PUSH_PAYLOAD_LIMIT_BYTES;
+}
+
 /**
  * Custom top-level key carrying the requested image URL (#14097). A Notification Service
  * Extension in the app reads it (with `aps.mutable-content: 1`) to download and attach the image.
@@ -109,7 +114,7 @@ export function buildIosPushPayload(
     aps,
     [SIMULATOR_TARGET_BUNDLE_KEY]: bundleId,
   });
-  if (Buffer.byteLength(json, "utf8") > SIMCTL_PUSH_PAYLOAD_LIMIT_BYTES) {
+  if (exceedsPushPayloadLimit(json)) {
     return {
       ok: false,
       error: `APNs payload exceeds the ${SIMCTL_PUSH_PAYLOAD_LIMIT_BYTES}-byte simctl push limit.`,

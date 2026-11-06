@@ -29,6 +29,12 @@ export interface PrototypeEmitContextInputs {
   state: Readonly<Record<string, PrototypeJson>>;
   pages: Readonly<Record<string, number>>;
   data?: PrototypeJson;
+  /**
+   * Names the runtime adds for the handler that ran the emit, after the authored entries and under
+   * the same byte budget: `markerId` for a map's `onMarkerTap` (#16492). Validators refuse an
+   * authored entry under one of these names.
+   */
+  handlerContext?: Readonly<Record<string, PrototypeJson>>;
 }
 export interface ResolvedEmitContext {
   context: Record<string, PrototypeJson>;
@@ -62,6 +68,7 @@ export function resolveEmitContext(
             : binding.value;
     return [name, (value ?? null) as PrototypeJson];
   });
+  entries.push(...Object.entries(inputs.handlerContext ?? {}));
   const context = Object.fromEntries(entries);
   if (Buffer.byteLength(JSON.stringify(context), "utf8") <= MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES) {
     return { context };

@@ -14,7 +14,9 @@
 #               Windows: AUTOMOBILE_INTEGRATION_TEST_WORKERS concurrent
 #               processes (default 3; 1 keeps the single-process lane).
 #   stress      Explicit test/stress/** tests.
-#   coverage    Complete unit lane with LCOV coverage.
+#   coverage    Unit lane with LCOV coverage, minus test/lint and test/scripts.
+#               AUTOMOBILE_COVERAGE_PART/AUTOMOBILE_COVERAGE_PARTS run one
+#               interleaved slice of it (CI splits it across jobs).
 #   all         Unit, host integration, then stress.
 #
 # AUTOMOBILE_UNIT_RANDOM_SEED=N runs the complete unit lane in one shared
@@ -798,7 +800,7 @@ launch_queued_unit_shard() {
 run_unit_shard_attempt() {
   local shard_pgid_file="${AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE:-}"
   if [[ "$shard_mode" == coverage ]]; then
-    export AUTOMOBILE_WATCHDOG_LABEL="coverage shard ${shard}/${worker_count}"
+    export AUTOMOBILE_WATCHDOG_LABEL="coverage shard ${shard}/${coverage_shard_total}"
   fi
   shard_started="$(date +%s)"
   timing_log="$shard_root/timing-shard-${shard}.ndjson"
@@ -1052,7 +1054,7 @@ finish_unit_shard() {
     fi
     if [[ "$shard_mode" == coverage ]]; then
       printf 'Coverage test run exceeded its %ss wall-clock budget (shard %d/%d).\n' \
-        "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "$shard" "$worker_count" >&2
+        "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "$shard" "$coverage_shard_total" >&2
     fi
     printf 'TIMEOUT: %s shard %d exceeded its wall-clock budget%s\n' "$shard_mode" "$number" "$suffix" >&2
     rc=124
@@ -1060,7 +1062,7 @@ finish_unit_shard() {
     # Name every failing shard, even beside a timeout, so a real test failure
     # is never hidden behind another shard's infra exit; 124 keeps precedence.
     if [[ "$shard_mode" == coverage ]]; then
-      printf 'FAIL: coverage shard %d/%d exited with status %d%s\n' "$number" "$worker_count" "$status" "$suffix" >&2
+      printf 'FAIL: coverage shard %d/%d exited with status %d%s\n' "$number" "$coverage_shard_total" "$status" "$suffix" >&2
     else
       printf 'FAIL: %s shard %d exited with status %d%s\n' "$shard_mode" "$number" "$status" "$suffix" >&2
     fi
@@ -1195,7 +1197,10 @@ run_unit_shards() {
   local coverage_chunks=()
   local shard_portable_timeout=1
   if [[ "$shard_mode" == coverage ]]; then
-    shard_start=1
+    # A coverage part numbers its shards after the earlier parts' (#16377), so
+    # every part's chunk reports and calibration labels stay distinct when the
+    # merge job joins them for the timing gate.
+    shard_start=$((coverage_shard_offset + 1))
     shard_root="$coverage_root/shards"
   fi
   local lane_start lane_elapsed physical_cores lane_cap="" attempts_note
@@ -1799,20 +1804,50 @@ case "$mode" in
       validate_positive_integer "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" \
         "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS"
     fi
+    # CI splits the lane across AUTOMOBILE_COVERAGE_PARTS jobs (#16377): part P
+    # takes every PARTS-th discovered file from offset P-1, and its shards
+    # round-robin that slice, so the jobs together interleave like one
+    # PARTS x SHARDS lane. The merge job joins the parts' LCOV and JUnit.
+    coverage_parts="${AUTOMOBILE_COVERAGE_PARTS:-1}"
+    coverage_part="${AUTOMOBILE_COVERAGE_PART:-1}"
+    validate_positive_integer "AUTOMOBILE_COVERAGE_PARTS" "$coverage_parts"
+    validate_positive_integer "AUTOMOBILE_COVERAGE_PART" "$coverage_part"
+    if [[ "$coverage_part" -gt "$coverage_parts" ]]; then
+      echo "AUTOMOBILE_COVERAGE_PART must be at most AUTOMOBILE_COVERAGE_PARTS (${coverage_parts}), got: ${coverage_part}" >&2
+      exit 2
+    fi
     coverage_files=()
     if [[ "${#unit_test_paths[@]}" -gt 0 ]]; then
       coverage_files=("${unit_test_paths[@]}")
     else
+      # Repository lint and script tests scan files rather than exercise src/,
+      # so they add little coverage; they still run uninstrumented in the unit
+      # lanes (#16377).
       while IFS= read -r file; do
-        coverage_files+=("$file")
+        case "$file" in
+          test/lint/* | test/scripts/*) ;;
+          *) coverage_files+=("$file") ;;
+        esac
       done < <(discover_unit_test_files)
+    fi
+    if [[ "$coverage_parts" -gt 1 ]]; then
+      coverage_part_files=()
+      for ((index = coverage_part - 1; index < ${#coverage_files[@]}; index += coverage_parts)); do
+        coverage_part_files+=("${coverage_files[$index]}")
+      done
+      coverage_files=(${coverage_part_files[@]+"${coverage_part_files[@]}"})
     fi
     if [[ "${#coverage_files[@]}" -eq 0 ]]; then
       echo "No unit test files discovered" >&2
       exit 1
     fi
+    coverage_shard_offset=$(((coverage_part - 1) * coverage_shards))
+    coverage_shard_total=$((coverage_parts * coverage_shards))
     if [[ "$coverage_shards" -gt "${#coverage_files[@]}" ]]; then
       coverage_shards="${#coverage_files[@]}"
+    fi
+    if [[ "$coverage_parts" -eq 1 ]]; then
+      coverage_shard_total="$coverage_shards"
     fi
     # Everything but the per-chunk --config/--reporter flags, which the chunker adds.
     coverage_prefix=(
@@ -1838,10 +1873,10 @@ case "$mode" in
     if [[ "${TEST_TS_PRINT_CMD:-}" == 1 ]]; then exit 0; fi
     coverage_lcov_files=()
     coverage_junit_files=()
-    for ((coverage_shard = 1; coverage_shard <= coverage_shards; coverage_shard += 1)); do
+    for ((coverage_shard = coverage_shard_offset + 1; coverage_shard <= coverage_shard_offset + coverage_shards; coverage_shard += 1)); do
       coverage_manifest="${coverage_root}/shards/shard-${coverage_shard}.chunks"
       if [[ ! -f "$coverage_manifest" ]]; then
-        echo "FAIL: coverage shard ${coverage_shard}/${coverage_shards} wrote no chunk manifest" >&2
+        echo "FAIL: coverage shard ${coverage_shard}/${coverage_shard_total} wrote no chunk manifest" >&2
         exit 1
       fi
       coverage_chunk_total="$(< "$coverage_manifest")"

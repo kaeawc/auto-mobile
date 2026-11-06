@@ -101,6 +101,14 @@ class PrototypeLazyListRuntimeTest {
     )
   }
 
+  /**
+   * [listSpec] plus an unrendered `/data/tags` list, so a write there skips the list's row rules.
+   */
+  private fun tagsSpec(): PrototypeSpec {
+    val spec = listSpec()
+    return spec.copy(data = JsonObject(spec.data.orEmpty() + ("tags" to json("""["b"]"""))))
+  }
+
   private fun appendRequest() =
     PrototypeRequestAction(
       url = "http://localhost:8080/feed",
@@ -158,24 +166,21 @@ class PrototypeLazyListRuntimeTest {
   }
 
   @Test
-  fun oversizedPrependPageOmitsOnlyTheEventValue() = runTest {
+  fun oversizedPrependRowOmitsOnlyTheEventValue() = runTest {
     val runtime = runtime(listSpec())
-    val page =
-      JsonArray(
-        (2..40).map { index ->
-          buildJsonObject {
-            put("id", index)
-            put("title", "x".repeat(500))
-          }
-        },
-      )
+    val row = buildJsonObject {
+      put("id", 2)
+      put("title", "x".repeat(1500))
+      put("body", "y".repeat(1500))
+      put("note", "z".repeat(1500))
+    }
     runtime.handle(
       PrototypeInteraction.Tap(
-        listOf(PrototypePrependDataAction("/data/items", buildJsonObject { put("value", page) })),
+        listOf(PrototypePrependDataAction("/data/items", buildJsonObject { put("value", row) })),
       ),
     )
     assertEquals(
-      listOf(2, 3),
+      listOf(2, 0),
       runtime.data("items")!!.jsonArray.map {
         it.jsonObject.getValue("id").jsonPrimitive.int
       },
@@ -188,6 +193,31 @@ class PrototypeLazyListRuntimeTest {
   }
 
   @Test
+  fun `prependData inserts a scalar value as one row`() = runTest {
+    val runtime = runtime(tagsSpec())
+    runtime.handle(
+      PrototypeInteraction.Tap(
+        listOf(PrototypePrependDataAction("/data/tags", json("""{"value":"a"}""").jsonObject)),
+      ),
+    )
+    assertEquals(json("""["a","b"]"""), runtime.data("tags"))
+    assertTrue(warnings.isEmpty())
+    val payload = events.single().payload!!.jsonObject
+    assertEquals(JsonArray(listOf(JsonPrimitive("a"))), payload.getValue("value"))
+  }
+
+  @Test
+  fun `prependData inserts an array value as one row`() = runTest {
+    val runtime = runtime(tagsSpec())
+    runtime.handle(
+      PrototypeInteraction.Tap(
+        listOf(PrototypePrependDataAction("/data/tags", json("""{"value":["x"]}""").jsonObject)),
+      ),
+    )
+    assertEquals(json("""[["x"],"b"]"""), runtime.data("tags"))
+  }
+
+  @Test
   fun `prependData trims in one revision and reports the replay limit`() = runTest {
     val runtime = runtime(listSpec())
     runtime.handle(
@@ -195,7 +225,7 @@ class PrototypeLazyListRuntimeTest {
         listOf(
           PrototypePrependDataAction(
             "/data/items",
-            json("""{"value":[{"id":2,"title":"Third"}]}""").jsonObject,
+            json("""{"value":{"id":2,"title":"Third"}}""").jsonObject,
           ),
         ),
       ),
@@ -356,7 +386,7 @@ class PrototypeLazyListRuntimeTest {
         listOf(
           PrototypePrependDataAction(
             "/data/items",
-            json("""{"value":[{"id":0,"title":"Duplicate"}]}""").jsonObject,
+            json("""{"value":{"id":0,"title":"Duplicate"}}""").jsonObject,
           ),
         ),
       ),

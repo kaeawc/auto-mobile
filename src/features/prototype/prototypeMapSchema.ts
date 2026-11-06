@@ -58,6 +58,8 @@ export function prototypeMapSchema<T extends z.ZodRawShape, A extends z.ZodTypeA
       ...common,
       type: z.enum(["map"]),
       mapStyle: z.enum(["plain", "streets"]).optional(),
+      // `auto` needs only the module capability; any other backend its own (#14302).
+      backend: z.enum(["auto", "google", "maplibre"]).optional(),
       camera: mapCameraSchema.optional(),
       fit: z.enum(["none", "markers", "route"]).optional(),
       markers: mapMarkersSchema.optional(),

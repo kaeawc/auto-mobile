@@ -24,17 +24,108 @@ final class DisplayTargetedGestureTests: XCTestCase {
         return provider
     }
 
-    func testDoubleTapUsesOneCoordinateProviderCallWithoutSingleTouchSynthesis() throws {
-        for geometry in [folded, unfolded] {
+    func testFoldedDoubleTapUsesOneCoordinateProviderCallWithoutSynthesis() throws {
+        let provider = provider(geometry: folded)
+        let factory = try DisplayGestureFactory(provider: provider)
+        let result = try factory.deliver(start: point, press: 0.05, doubleTap: true)
+        XCTAssertNotNil(result.coordinate)
+        XCTAssertEqual(provider.doubleTaps, 1)
+        XCTAssertEqual(provider.selections.count, 1)
+        XCTAssertTrue(provider.tapDurations.isEmpty)
+        XCTAssertTrue(provider.touches.isEmpty)
+    }
+
+    func testInnerPanelDoubleTapUsesSamePortraitPointAsSingleTap() throws {
+        // SpringBoard's live frame remains cover-sized; use the cached inner-panel observation.
+        var geometry = unfolded
+        geometry.pinnedToObservation = true
+        let requested = GesturePoint(x: 103, y: 95)
+        let expected = GesturePoint(x: 95, y: 848)
+        let cases: [(Bool, GesturePoint?)] = [(false, nil), (true, nil), (true, requested)]
+        for (doubleTap, end) in cases {
             let provider = provider(geometry: geometry)
-            let factory = try DisplayGestureFactory(provider: provider)
-            let result = try factory.deliver(start: point, press: 0.05, doubleTap: true)
-            XCTAssertNotNil(result.coordinate)
-            XCTAssertEqual(provider.doubleTaps, 1)
-            XCTAssertEqual(provider.selections.count, 1)
+            var waits: [TimeInterval] = []
+            let factory = try DisplayGestureFactory(
+                provider: provider, doubleTapWait: {
+                    XCTAssertEqual(provider.touches.count, 1)
+                    waits.append($0)
+                }
+            )
+            var beforeCount = 0
+            let result = try factory.deliver(
+                start: requested, end: end, press: 0.02, doubleTap: doubleTap
+            ) { candidate in
+                beforeCount += 1
+                XCTAssertTrue(provider.touches.isEmpty)
+                XCTAssertEqual(candidate.route, .displayTargetedRecord)
+                XCTAssertEqual(candidate.synthesizedPoint, expected)
+            }
+            XCTAssertEqual(beforeCount, 1)
+            XCTAssertEqual(result.route, .displayTargetedRecord)
+            XCTAssertEqual(result.selection.strategy, .displayTargeted)
+            XCTAssertEqual(result.synthesizedPoint, expected)
+            XCTAssertNil(result.coordinate)
+            XCTAssertEqual(provider.touches.count, doubleTap ? 2 : 1)
+            for touch in provider.touches {
+                XCTAssertEqual(touch.start, expected)
+                XCTAssertEqual(touch.end, expected)
+                XCTAssertEqual(touch.displayId, inner.displayId)
+                XCTAssertEqual(touch.pressDuration, 0.02)
+            }
+            XCTAssertEqual(waits, doubleTap ? [0.05] : [])
+            XCTAssertEqual(provider.doubleTaps, 0)
+            XCTAssertTrue(provider.selections.isEmpty)
             XCTAssertTrue(provider.tapDurations.isEmpty)
-            XCTAssertTrue(provider.touches.isEmpty)
         }
+    }
+
+    func testDoubleTapUnavailableFirstSynthesisUsesCoordinateDoubleTapWithoutWaiting() throws {
+        let provider = provider()
+        provider.symbolsAvailable = false
+        var waits: [TimeInterval] = []
+        let factory = try DisplayGestureFactory(provider: provider, doubleTapWait: { waits.append($0) })
+        let result = try factory.deliver(
+            start: point, press: 0.05, doubleTap: true
+        )
+        XCTAssertEqual(result.route, .xcuiCoordinate)
+        XCTAssertEqual(result.selection.strategy, .appRelative)
+        XCTAssertEqual(result.fallbackFrom, .displayTargeted)
+        XCTAssertEqual(provider.touches.count, 1)
+        XCTAssertEqual(provider.doubleTaps, 1)
+        XCTAssertEqual(provider.selections.count, 1)
+        XCTAssertTrue(provider.tapDurations.isEmpty)
+        XCTAssertTrue(waits.isEmpty)
+    }
+
+    func testDoubleTapUnavailableSecondSynthesisThrowsWithoutCoordinateFallback() throws {
+        let provider = provider()
+        provider.synthesisResults = [true, false]
+        var waits: [TimeInterval] = []
+        let factory = try DisplayGestureFactory(provider: provider, doubleTapWait: { waits.append($0) })
+        XCTAssertThrowsError(try factory.deliver(
+            start: point, press: 0.05, doubleTap: true
+        ))
+        XCTAssertEqual(provider.touches.count, 2)
+        XCTAssertEqual(waits, [0.05])
+        XCTAssertEqual(provider.doubleTaps, 0)
+        XCTAssertTrue(provider.selections.isEmpty)
+    }
+
+    func testDoubleTapFlagOnDragSynthesizesOneDragWithoutWaiting() throws {
+        let provider = provider()
+        var waits: [TimeInterval] = []
+        let factory = try DisplayGestureFactory(provider: provider, doubleTapWait: { waits.append($0) })
+        let result = try factory.deliver(
+            start: point, end: GesturePoint(x: 500, y: 250), press: 0.05, move: 0.3,
+            doubleTap: true
+        )
+        XCTAssertEqual(result.route, .displayTargetedRecord)
+        XCTAssertEqual(provider.touches.count, 1)
+        XCTAssertEqual(provider.touches.first?.start, GesturePoint(x: 202, y: 508))
+        XCTAssertEqual(provider.touches.first?.end, GesturePoint(x: 250, y: 451))
+        XCTAssertEqual(provider.touches.first?.moveDuration, 0.3)
+        XCTAssertTrue(waits.isEmpty)
+        XCTAssertTrue(provider.selections.isEmpty)
     }
 
     private struct DisplayChoiceCase {

@@ -275,6 +275,18 @@ export type ObserveResult = {
    */
   isScreenRound?: boolean;
 
+  /** CarService state, present only on automotive devices. Unavailable reads omit their fields. */
+  automotive?: {
+    drivingState?: "parked" | "idling" | "moving";
+    uxRestrictions?: {
+      requiresDistractionOptimization: boolean;
+      activeRestrictions: number;
+    };
+    foregroundActivity?: { distractionOptimized: boolean };
+    /** DO is required and a known foreground activity is not distraction optimized. */
+    blocked: boolean;
+  };
+
   /** System UI insets */
   systemInsets: SystemInsets;
 
@@ -294,6 +306,13 @@ export type ObserveResult = {
    * contain no audio (#13627).
    */
   diagnostics?: AudioInputDiagnostic[];
+
+  /**
+   * Car App Library template stacks the foreground app reported through the AutoMobile Android SDK
+   * route (#16751), present only on the `observe` tool's own result and only when the app enabled
+   * the route. Templates are what the app returned, not what the host rendered.
+   */
+  carAppTemplates?: import("./CarAppTemplates").CarAppTemplates;
 
   /**
    * Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise,

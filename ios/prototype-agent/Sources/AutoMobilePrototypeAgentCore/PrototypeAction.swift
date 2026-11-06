@@ -22,6 +22,8 @@ struct PrototypeAction: Decodable, Sendable {
     /// repeat row at expansion (#12519).
     let path: String?
     let key: String?
+    /// `upsertData`'s cap on the array it writes.
+    let maxItems: Int?
     /// `setState`'s literal; for `setData`/`appendData`/`prependData` the binding object (`{value}`, `{state}`,
     /// `{data}`), with `item`/`index` already bound to `{value}` by repeat expansion.
     let value: JSONValue?
@@ -55,7 +57,7 @@ struct PrototypeAction: Decodable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case type, name, payload, context, pager, page, stack, screen, transition, source, path, key, value, scroll, to,
              animated, call, args, params, force
-        case id, afterMs, everyMs, maxRuns, actions
+        case id, afterMs, everyMs, maxRuns, actions, maxItems
         case incrementAmount = "by"
         case requireValid, method, url, headers, query, progressKey, body, into, append, statusKey, via, timeoutMs,
              onSuccess,
@@ -76,8 +78,10 @@ struct PrototypeAction: Decodable, Sendable {
         actions: [PrototypeAction]? = nil, transition: PrototypeStackTransition? = nil, source: String? = nil,
         scroll: String? = nil, to: JSONValue? = nil, animated: Bool? = nil,
         call: String? = nil, args: [String: JSONValue]? = nil,
-        params: [String: JSONValue]? = nil, force: Bool? = nil, stackPath: [PrototypeRouteEntry]? = nil
+        params: [String: JSONValue]? = nil, force: Bool? = nil, stackPath: [PrototypeRouteEntry]? = nil,
+        maxItems: Int? = nil
     ) {
+        self.maxItems = maxItems
         self.scroll = scroll
         self.to = to
         self.animated = animated
@@ -165,7 +169,8 @@ struct PrototypeAction: Decodable, Sendable {
             args: container.decodeIfPresent([String: JSONValue].self, forKey: .args),
             params: container.decodeIfPresent([String: JSONValue].self, forKey: .params),
             force: container.decodeIfPresent(Bool.self, forKey: .force),
-            stackPath: type == "setStack" ? container.decode([PrototypeRouteEntry].self, forKey: .path) : nil
+            stackPath: type == "setStack" ? container.decode([PrototypeRouteEntry].self, forKey: .path) : nil,
+            maxItems: container.decodeIfPresent(Int.self, forKey: .maxItems)
         )
     }
 

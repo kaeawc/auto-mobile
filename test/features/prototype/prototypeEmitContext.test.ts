@@ -33,6 +33,7 @@ interface Fixture {
   data: PrototypeJson;
   precedingActions: { type: "setState"; key: string; value: PrototypeJson }[];
   repeatIndex?: number;
+  handlerContext?: Record<string, PrototypeJson>;
   expected: { context: Record<string, PrototypeJson>; contextTruncated?: true };
 }
 const directory = join(import.meta.dir, "../../fixtures/prototype-spec/emit-context/resolve");
@@ -65,19 +66,26 @@ describe("emit context reference fixtures", () => {
       } else if (node.type === "pager") {
         node = (node.children as Raw[])[0];
       }
-      const action = (node.onTap as Raw[])[0];
+      const action = ((node.onMarkerTap ?? node.onTap) as Raw[])[0];
       const bindings = action.context as Record<
         string,
         Exclude<PrototypeEmitContextBinding, { item: string } | { index: true } | { match: string }>
       >;
       expect(
-        resolveEmitContext(bindings, { state, pages: fixture.pages, data: fixture.data }),
+        resolveEmitContext(bindings, {
+          state,
+          pages: fixture.pages,
+          data: fixture.data,
+          handlerContext: fixture.handlerContext,
+        }),
       ).toEqual(fixture.expected);
       const authored =
         fixture.spec.root.type === "column" || fixture.spec.root.type === "pager"
           ? (fixture.spec.root.children as Raw[])[0]
           : fixture.spec.root;
-      expect(action.payload).toEqual((authored.onTap as Raw[])[0].payload);
+      expect(action.payload).toEqual(
+        ((authored.onMarkerTap ?? authored.onTap) as Raw[])[0].payload,
+      );
     });
   }
 });

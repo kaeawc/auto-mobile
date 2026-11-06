@@ -11,7 +11,7 @@ import {
   type InstallAppResult,
   type TerminateAppResult,
 } from "../models";
-import type { Platform } from "../models/Platform";
+import { NON_IOS_APPLE_PLATFORM_LABELS, type Platform } from "../models/Platform";
 import type { UninstallAppResult } from "../models/UninstallAppResult";
 import { queryInstalledApps, type AppsQueryResourceContent } from "./appResources";
 import { normalizeIosApps } from "./appResourcesNormalization";
@@ -23,16 +23,23 @@ import {
 import type { AppsQueryOptions, AppsQueryType } from "./appResourcesTypes";
 import type { LaunchAppExecutor } from "./appToolsLaunch";
 
-/** Builds the app manager for a watch or Apple TV; tests pass a factory over a fake simctl. */
+/** Builds the app manager for a watch, Apple TV or Vision Pro; tests pass a factory over a fake simctl. */
 export type WatchAppManagerFactory = (device: BootedDevice) => WatchAppManager;
+export type WatchRunnerRetarget = (
+  deviceId: string,
+  bundleId: string,
+  signal?: AbortSignal,
+) => Promise<string | undefined>;
 
 const defaultWatchAppManager: WatchAppManagerFactory = (device) => new WatchAppManager(device);
 
-function isSimctlAppPlatform(platform: Platform | undefined): platform is "watchos" | "tvos" {
-  return platform === "watchos" || platform === "tvos";
+function isSimctlAppPlatform(
+  platform: Platform | undefined,
+): platform is "watchos" | "tvos" | "visionos" {
+  return platform === "watchos" || platform === "tvos" || platform === "visionos";
 }
 
-/** installApp's executor: a watch or Apple TV goes to simctl, every other device keeps InstallApp. */
+/** installApp's executor: a watch, Apple TV or Vision Pro goes to simctl, every other device keeps InstallApp. */
 export function createPlatformInstallApp(
   device: BootedDevice,
   watchApps: WatchAppManagerFactory = defaultWatchAppManager,
@@ -44,7 +51,7 @@ export function createPlatformInstallApp(
   return { execute: (artifactPath, call) => manager.install(artifactPath, call) };
 }
 
-/** uninstallApp's executor: a watch or Apple TV goes to simctl, every other device keeps UninstallApp. */
+/** uninstallApp's executor: a watch, Apple TV or Vision Pro goes to simctl, every other device keeps UninstallApp. */
 export function createPlatformUninstallApp(
   device: BootedDevice,
   watchApps: WatchAppManagerFactory = defaultWatchAppManager,
@@ -56,19 +63,33 @@ export function createPlatformUninstallApp(
   return { execute: (appId, call) => manager.uninstall(appId, call) };
 }
 
-/** launchApp's executor: a watch or Apple TV goes to simctl, every other device keeps LaunchApp. */
+/** launchApp's executor: a watch, Apple TV or Vision Pro goes to simctl, every other device keeps LaunchApp. */
 export function createPlatformLaunchApp(
   device: BootedDevice,
   watchApps: WatchAppManagerFactory = defaultWatchAppManager,
+  retarget: WatchRunnerRetarget = async () => undefined,
 ): LaunchAppExecutor {
   if (!isSimctlAppPlatform(device.platform)) {
     return new LaunchApp(device);
   }
   const manager = watchApps(device);
-  return { execute: (appId, call) => manager.launch(appId, call) };
+  return {
+    execute: async (appId, call) => {
+      const result = await manager.launch(appId, call);
+      if (result.success && device.platform === "watchos") {
+        const reason = await retarget(device.deviceId, appId, call?.signal);
+        if (reason !== undefined) {
+          throw new ActionableError(
+            `launchApp started the app ${appId}, but the watch runner could not retarget to it: ${reason}`,
+          );
+        }
+      }
+      return result;
+    },
+  };
 }
 
-/** terminateApp's executor: a watch or Apple TV goes to simctl, every other device keeps TerminateApp. */
+/** terminateApp's executor: a watch, Apple TV or Vision Pro goes to simctl, every other device keeps TerminateApp. */
 export function createPlatformTerminateApp(
   device: BootedDevice,
   watchApps: WatchAppManagerFactory = defaultWatchAppManager,
@@ -80,13 +101,13 @@ export function createPlatformTerminateApp(
   return { execute: (appId, call) => manager.terminate(appId, call) };
 }
 
-/** A watch or tvOS app cannot host the prototype agent; refuse before anything is prepared or injected. */
+/** A watchOS, tvOS or visionOS app cannot host the prototype agent; refuse before anything is prepared or injected. */
 export function assertWatchLaunchSupported(
   device: BootedDevice,
   args: { prototype?: boolean },
 ): void {
   if (isSimctlAppPlatform(device.platform) && args.prototype) {
-    const label = device.platform === "watchos" ? "watchOS" : "tvOS";
+    const label = NON_IOS_APPLE_PLATFORM_LABELS[device.platform];
     throw new ActionableError(
       `launchApp prototype:true is not supported on ${label}: the prototype agent runs only in ` +
         "iOS simulator apps. Launch without prototype.",
@@ -94,7 +115,7 @@ export function assertWatchLaunchSupported(
   }
 }
 
-/** listApps' query: a watch or Apple TV is listed straight from simctl, every other device keeps the cache. */
+/** listApps' query: a watch, Apple TV or Vision Pro is listed straight from simctl, every other device keeps the cache. */
 export function createPlatformQueryInstalledApps(
   watchApps: WatchAppManagerFactory = defaultWatchAppManager,
 ): typeof queryInstalledApps {
@@ -113,13 +134,13 @@ export function createPlatformQueryInstalledApps(
 }
 
 /**
- * The listApps result for a watch or Apple TV, in the same shape as Android and iOS. simctl's records carry
+ * The listApps result for a watch, Apple TV or Vision Pro, in the same shape as Android and iOS. simctl's records carry
  * the same ApplicationType field as an iPhone simulator's, so the iOS normalization applies; an
  * omitted type degrades from launchable to user when no record reports launchability.
  */
 async function queryWatchApps(
   manager: WatchAppManager,
-  options: AppsQueryOptions & { deviceId: string; platform: "watchos" | "tvos" },
+  options: AppsQueryOptions & { deviceId: string; platform: "watchos" | "tvos" | "visionos" },
   signal?: AbortSignal,
 ): Promise<AppsQueryResourceContent> {
   const { queryApps } = normalizeIosApps(await manager.listRecords(signal), false);
@@ -127,7 +148,7 @@ async function queryWatchApps(
   const launchabilityUnknown = isLaunchabilityUnknown(queryApps);
   if (options.type === "launchable" && launchabilityUnknown) {
     throw new Error(
-      `Cannot filter by type=launchable for ${options.platform === "watchos" ? "watch" : "Apple TV"} ${options.deviceId}: simctl's app listing ` +
+      `Cannot filter by type=launchable for ${options.platform === "watchos" ? "watch" : options.platform === "tvos" ? "Apple TV" : NON_IOS_APPLE_PLATFORM_LABELS[options.platform]} ${options.deviceId}: simctl's app listing ` +
         "reported no ApplicationType, so launchability is unknown. Use type=user, type=system or type=all.",
     );
   }

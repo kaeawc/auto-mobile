@@ -47,10 +47,12 @@ export interface WorkflowJob {
   "runs-on"?: string | string[] | Record<string, unknown>;
   defaults?: { run?: { "working-directory"?: string } };
   strategy?: {
+    "fail-fast"?: boolean;
     matrix?: {
       os?: string[];
       config?: { runner?: string }[];
       runner?: string[];
+      part?: number[];
     };
   };
   "timeout-minutes"?: number;

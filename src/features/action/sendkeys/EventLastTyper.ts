@@ -1,5 +1,5 @@
 import type { TypingSession } from "./TypingSession";
-import { ANDROID_TYPE_FOCUSED_INPUT_ERROR } from "./AndroidTypingConstants";
+import { ANDROID_TYPE_FOCUS_FAILURE, type FocusedInputFailure } from "./AndroidTypingConstants";
 import type { AndroidModeTyper, AndroidModeTypeRequest } from "./AndroidModeTyper";
 import type {
   SendKeysTextClient,
@@ -39,11 +39,11 @@ export interface EventLastTyperHost {
   ): Promise<TextActionResult>;
   requireFocusedAndroidInput(
     signal?: AbortSignal,
-    error?: string,
+    failure?: FocusedInputFailure,
     display?: string,
   ): Promise<
     | { success: true; hierarchy: NonNullable<ObserveResult["viewHierarchy"]> }
-    | { success: false; error: string }
+    | ({ success: false } & FocusedInputFailure)
   >;
   readPrecedingState(needed: boolean): Promise<InsertTextState | undefined>;
   executeKeyEventPlanSafely(
@@ -103,7 +103,7 @@ export class EventLastTyper implements AndroidModeTyper {
     }
     const focusResult = await this.host.requireFocusedAndroidInput(
       signal,
-      ANDROID_TYPE_FOCUSED_INPUT_ERROR,
+      ANDROID_TYPE_FOCUS_FAILURE,
       display,
     );
     if (!focusResult.success) {

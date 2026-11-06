@@ -249,7 +249,7 @@ describe("MCP client config templates and entrypoints", () => {
   });
 
   test(".claude-plugin/plugin.json launches the server with no argv after the package", () => {
-    const plugin = JSON.parse(readRepoFile(".claude-plugin/plugin.json")) as {
+    const plugin = JSON.parse(readRepoFile("plugins/auto-mobile/.claude-plugin/plugin.json")) as {
       mcpServers: Record<string, { command: string; args: string[] }>;
     };
     const server = plugin.mcpServers["auto-mobile"];

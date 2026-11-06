@@ -6,6 +6,8 @@ import org.gradle.api.artifacts.VersionCatalogsExtension
 import org.gradle.api.tasks.testing.Test
 import org.gradle.kotlin.dsl.getByType
 
+pluginManager.apply("automobile.robolectric-android-all")
+
 val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
 val robolectricMaxSdk = libs.findVersion("build-robolectric-maxSdk").get().requiredVersion.toInt()
 

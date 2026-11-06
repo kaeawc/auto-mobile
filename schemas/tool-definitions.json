@@ -47204,7 +47204,7 @@
       "destructiveHint": true,
       "idempotentHint": true
     },
-    "description": "Reset secure test state. Android deletes app-declared scope/alias under app opt-in and SDK mutation authorization; confirm is not needed, but confirm:false refuses. iOS Simulator resets EVERY app's Keychain and requires confirm:true. Physical iOS is unsupported. Requires explicit device targeting.",
+    "description": "Reset secure test state. Android deletes app-declared scope/alias under app opt-in and SDK mutation authorization; confirm is not needed, but confirm:false refuses. On Android, action injectFault/clearFaults arms or clears a debug-SDK Keystore fault (kind, delayMs for DELAY) on the same declared selectors instead of deleting. iOS Simulator resets EVERY app's Keychain and requires confirm:true. Physical iOS is unsupported. Requires explicit device targeting.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -47217,17 +47217,39 @@
           "pattern": "^[A-Za-z0-9._-]+$"
         },
         "scope": {
-          "description": "Android declared scope to reset; required unless alias is given.",
+          "description": "Android declared scope to reset or fault; required unless alias is given.",
           "type": "string",
           "minLength": 1
         },
         "alias": {
-          "description": "Android declared alias to delete; with scope, must belong to it.",
+          "description": "Android declared alias to delete or fault; with scope, must belong to it.",
           "type": "string",
           "minLength": 1
         },
+        "action": {
+          "description": "Default reset. Android only: injectFault arms a debug-SDK Keystore fault on the selected declared aliases until clearFaults or app restart; clearFaults removes them.",
+          "type": "string",
+          "enum": ["reset", "injectFault", "clearFaults"]
+        },
+        "kind": {
+          "description": "injectFault only, required: the fault each Keystore use of the alias raises.",
+          "type": "string",
+          "enum": [
+            "KEY_STORE_EXCEPTION",
+            "PROVIDER_EXCEPTION",
+            "USER_NOT_AUTHENTICATED",
+            "DELAY",
+            "STRONGBOX_UNAVAILABLE"
+          ]
+        },
+        "delayMs": {
+          "description": "injectFault with kind DELAY only, required: delay per Keystore operation.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
         "confirm": {
-          "description": "Required true on iOS Simulator, which erases EVERY app's Keychain. Android does not need confirm (app opt-in, declared aliases and the SDK mutation gate authorize deletion), but confirm: false refuses the reset.",
+          "description": "Required true on iOS Simulator, which erases EVERY app's Keychain. Android does not need confirm (app opt-in, declared aliases and the SDK mutation gate authorize it), but confirm: false refuses the action.",
           "type": "boolean"
         },
         "platform": {
@@ -47307,7 +47329,8 @@
                 "DECLARED_UNSUPPORTED",
                 "SCOPE_NOT_DECLARED",
                 "MUTATION_NOT_ALLOWED",
-                "EMPTY_SELECTOR"
+                "EMPTY_SELECTOR",
+                "INVALID_FAULT"
               ]
             },
             {
@@ -47377,6 +47400,20 @@
               "type": "null"
             }
           ]
+        },
+        "requestedKind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action": {
+          "type": "string",
+          "enum": ["injectFault", "clearFaults"]
         }
       },
       "required": [

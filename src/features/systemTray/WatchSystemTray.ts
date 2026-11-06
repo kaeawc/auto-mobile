@@ -89,6 +89,18 @@ const visiblyRemoved = (card: WatchNotification, before: ObserveResult, after: O
   );
 };
 
+const toggleMessage = (action: "open" | "close", changed: boolean, skipped: boolean): string => {
+  if (skipped) {
+    return `Watch notification stream was already ${action === "open" ? "open" : "closed"}`;
+  }
+  if (changed) {
+    return `${action === "open" ? "Opened" : "Closed"} watch notification stream`;
+  }
+  return action === "open"
+    ? "Watch notification stream did not appear after the open gesture"
+    : "Watch notification stream is still showing after Back";
+};
+
 /** A watch action's outcome plus the observation terminal evidence is captured from. */
 export interface WatchSystemTrayResult {
   outcome: SystemTrayOutcome;
@@ -234,13 +246,11 @@ export class WatchSystemTray {
       action === "open"
         ? await ensureSystemTrayOpen(this.device, timeout, { signal: this.signal })
         : await ensureSystemTrayClosed(this.device, timeout, undefined, this.signal);
-    const success = result.skipped || ("opened" in result ? result.opened : result.closed);
+    const changed = "opened" in result ? result.opened : result.closed;
+    const success = result.skipped || changed;
     return {
       outcome: outcome(
-        {
-          message: `${action === "open" ? "Opened" : "Closed"} watch notification stream`,
-          ...result,
-        },
+        { message: toggleMessage(action, changed, result.skipped), ...result },
         success,
       ),
       observation: result.observation,

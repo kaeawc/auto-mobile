@@ -152,6 +152,7 @@ nav:
       - "Apple Watch": using/apple-watch.md
       - "Environment variables": using/environment-variables.md
       - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
+      - "Apple Vision Pro simulator": using/visionos-simulator.md
       - "Screen control": using/screen-control.md
       - "Performance traces": using/performance-trace.md
       - "Emulator and simulator audio": using/emulator-audio.md

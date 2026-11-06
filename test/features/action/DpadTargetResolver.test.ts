@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { SelectorDpadTargetResolver } from "../../../src/features/action/DpadTargetResolver";
+import {
+  pinnedFocusOptions,
+  SelectorDpadTargetResolver,
+} from "../../../src/features/action/DpadTargetResolver";
 import type { FocusScreen } from "../../../src/features/action/FocusNavigate";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import type { ElementSelectionResult, ViewHierarchyResult } from "../../../src/models";
@@ -93,5 +96,38 @@ describe("SelectorDpadTargetResolver", () => {
       expect.objectContaining(FIELD_BOUNDS),
     );
     expect(resolver.resolve(screen(searchField), { label: "Settings" })).toBeNull();
+  });
+});
+
+describe("pinnedFocusOptions", () => {
+  const pinned = { left: 0, top: 50, right: 100, bottom: 100 };
+  const resolver = {
+    calls: [] as unknown[],
+    resolve(s: FocusScreen, t: unknown) {
+      this.calls.push([s, t]);
+      return pinned;
+    },
+  };
+
+  test("pins a label or elementId target to the element the resolver picks", () => {
+    for (const until of [{ label: "Play" }, { elementId: "app:id/play" }]) {
+      const options = pinnedFocusOptions(until, resolver);
+      expect(options.firstMatch).toBe(true);
+      const read = screen(searchField);
+      expect(options.pinTarget?.(read)).toEqual(pinned);
+      expect(resolver.calls.at(-1)).toEqual([read, until]);
+    }
+  });
+
+  test("leaves focusNavigate's own matching for other targets", () => {
+    expect(pinnedFocusOptions({ resourceId: "app:id/play" }, resolver)).toEqual({});
+    expect(pinnedFocusOptions({ text: "Play" }, resolver)).toEqual({});
+  });
+
+  test("does not pin a target that combines its label or elementId with other fields", () => {
+    // The resolver reads one field; pinning would drop the rest of the conjunction.
+    expect(pinnedFocusOptions({ label: "More", resourceId: "app:id/right" }, resolver)).toEqual({});
+    expect(pinnedFocusOptions({ elementId: "app:id/more", text: "More" }, resolver)).toEqual({});
+    expect(pinnedFocusOptions({ label: "More", labelExact: true }, resolver)).toEqual({});
   });
 });

@@ -75,14 +75,15 @@ async function collect(
     target?: BootedDevice;
     sdkBridge?: IosSdkBridgeReader;
     packageName?: string;
+    pixels?: { width: number; height: number };
   } = {},
 ) {
   const target = options.target ?? device;
   const size = options.size ?? stale.screenSize;
   const hierarchy: ViewHierarchyResult = {
     hierarchy: {},
-    pixelWidth: 1398,
-    pixelHeight: 2034,
+    pixelWidth: options.pixels?.width ?? 1398,
+    pixelHeight: options.pixels?.height ?? 2034,
     screenWidth: size.width,
     screenHeight: size.height,
     rotation: options.rotation ?? 0,
@@ -273,4 +274,25 @@ test("the home screen on the active cover panel and an app on the inner panel st
     packageName: "com.example.duo",
   });
   expect(app.display).toMatchObject({ key: "primary-1", role: "inner" });
+});
+const springboardInnerHome: Pick<
+  ObserveResult,
+  "activeWindow" | "screenSize" | "rotation" | "skeleton"
+> = JSON.parse(
+  readFileSync(join(fixtureDir, "ios-duo/observe-springboard-inner-home-17046d.json"), "utf8"),
+);
+test("the runner's inner-panel home screen is observed, not dropped (#17046)", async () => {
+  // The captured observe of the unfolded home screen: the runner now reports the inner panel's
+  // own tree (landscape 951x669 points, 2853x2007 pixels), so it agrees with the live panel.
+  const { screenSize, rotation, activeWindow } = springboardInnerHome;
+  const result = await collect(new FakeDisplaySource(displays("inner")), {
+    packageName: activeWindow!.appId,
+    size: { width: screenSize.width, height: screenSize.height },
+    pixels: { width: screenSize.width * 3, height: screenSize.height * 3 },
+    rotation,
+  });
+  expect(result.viewHierarchy).toBeDefined();
+  expect(result.errors).toBeUndefined();
+  expect(result.display).toMatchObject({ key: "primary-1", role: "inner" });
+  expect(springboardInnerHome.skeleton?.map((element) => element.label)).toContain("Settings");
 });

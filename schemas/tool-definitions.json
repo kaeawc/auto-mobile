@@ -43811,7 +43811,7 @@
                   "type": "boolean"
                 },
                 "indexMedia": {
-                  "description": "Request Android media indexing for media files",
+                  "description": "Request an Android MediaStore scan of every written file so media apps and the system document picker can list it",
                   "default": false,
                   "type": "boolean"
                 }

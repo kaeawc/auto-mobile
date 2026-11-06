@@ -263,16 +263,19 @@ class DefaultSharedStorageService implements SharedStorageService {
       onBeforeCommit,
     });
     onPushed?.();
-    const mediaIndexing = shouldIndexMedia(destinationPath, request.indexMedia ?? true)
-      ? await indexMediaFile(adb, destination, destinationPath, {
-          userId,
-          timer: this.timer,
-          signal: request.signal,
-        })
-      : {
-          status: "notRequested" as const,
-          reason: indexingNotRequestedReason(destinationPath, request.indexMedia ?? true),
-        };
+    // Every file is scanned, documents included: the system document picker lists Downloads from
+    // MediaStore, so a file the scanner has not seen is invisible there (#17264).
+    const mediaIndexing =
+      (request.indexMedia ?? true)
+        ? await indexMediaFile(adb, destination, destinationPath, {
+            userId,
+            timer: this.timer,
+            signal: request.signal,
+          })
+        : {
+            status: "notRequested" as const,
+            reason: "media indexing was disabled by indexMedia=false",
+          };
     return { destinationPath, byteCount: file.source.byteCount, mediaIndexing };
   }
 
@@ -480,7 +483,10 @@ async function rollbackStagedFiles(context: {
   writtenPaths: string[];
   backups: ReadonlyMap<string, string>;
   userId: number;
-  /** Rescan restored media files so MediaStore stops describing the overwritten bytes. */
+  /**
+   * Rescan every rolled-back file so MediaStore stops describing the overwritten bytes, or drops
+   * the row of a file this batch created and the rollback deleted.
+   */
   rescanRestored: boolean;
   timer: Timer;
 }): Promise<RollbackOutcome> {
@@ -512,9 +518,7 @@ async function rollbackStagedFiles(context: {
     },
     sharedStorageRollbackBudget(writtenPaths, backups),
   );
-  const toRescan = rescanRestored
-    ? result.rolledBack.filter((path) => backups.has(path) && shouldIndexMedia(path, true))
-    : [];
+  const toRescan = rescanRestored ? result.rolledBack : [];
   const reindexFailures = await rescanRestoredFiles(adb, userId, toRescan, destinationDirectory);
   // A saved copy of a file this batch never reached still sits beside an untouched original.
   await discardHiddenFiles(
@@ -535,7 +539,7 @@ async function rollbackStagedFiles(context: {
 interface RollbackOutcome {
   rolledBack: string[];
   failures: string[];
-  /** Restored files whose MediaStore rescan was not confirmed; the restore itself succeeded. */
+  /** Rolled-back files whose MediaStore rescan was not confirmed; the rollback itself succeeded. */
   reindexFailures: string[];
 }
 
@@ -572,7 +576,7 @@ function sharedStorageRollbackBudget(
 }
 
 /**
- * Best-effort MediaStore rescan of restored files, one bounded command per chunk, detached from
+ * Best-effort MediaStore rescan of rolled-back files, one bounded command per chunk, detached from
  * the caller's cancellation. Returns the files whose rescan was not confirmed; never throws.
  */
 async function rescanRestoredFiles(
@@ -810,13 +814,15 @@ async function indexMediaFile(
   { userId, timer, signal }: { userId: number; timer: Timer; signal?: AbortSignal },
 ): Promise<{ status: "completed" }> {
   await execute(adb, `shell ${mediaScanCommand(userId, destination)}`, signal);
-  const collection = mediaCollectionFor(destinationPath);
+  const collection = mediaStoreCollectionFor(destinationPath);
   const apiLevel = await readAndroidDeviceApiLevel(adb);
   const modernQuery = apiLevel === null || apiLevel >= 29;
   const downloadsPrefix = `/${DOWNLOADS_DIRECTORY}/`;
   const downloadsIndex = destination.indexOf(downloadsPrefix);
   if (downloadsIndex < 0) {
-    throw new ActionableError(`Android media fixture is outside Downloads: ${destination}`);
+    throw new ActionableError(
+      `Android shared-storage fixture is outside Downloads: ${destination}`,
+    );
   }
   const deviceRelativePath = destination.slice(downloadsIndex + downloadsPrefix.length);
   const deviceRelativeDirectory = posix.dirname(deviceRelativePath);
@@ -829,7 +835,7 @@ async function indexMediaFile(
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const result = await executeResult(
       adb,
-      `shell content query --user ${userId} --uri content://media/${volume}/${collection}/media --projection _id --where ${shellQuote(selection)}`,
+      `shell content query --user ${userId} --uri ${mediaStoreUri(volume, collection)} --projection _id --where ${shellQuote(selection)}`,
       signal,
     );
     if (/^Row:/m.test(result.stdout)) {
@@ -874,32 +880,34 @@ async function executeResult(
   }
 }
 
-function mediaCollectionFor(path: string): "images" | "video" | "audio" {
-  if (/\.(bmp|gif|heic|jpeg|jpg|png|webp)$/i.test(path)) {
+type MediaStoreCollection = "images" | "video" | "audio" | "file";
+
+/**
+ * Media files are confirmed in their media-library collection; every other file (pdf, txt, doc,
+ * ...) in the generic `file` collection, which holds every scanned file and backs the document
+ * picker's Downloads root.
+ */
+function mediaStoreCollectionFor(path: string): MediaStoreCollection {
+  if (/\.(avif|bmp|gif|heic|jpeg|jpg|png|tif|tiff|webp)$/i.test(path)) {
     return "images";
   }
-  if (/\.(mkv|mov|mp4|webm)$/i.test(path)) {
+  if (/\.(m4v|mkv|mov|mp4|webm)$/i.test(path)) {
     return "video";
   }
-  return "audio";
+  if (/\.(aac|aiff|flac|m4a|mp3|ogg|wav)$/i.test(path)) {
+    return "audio";
+  }
+  return "file";
+}
+
+function mediaStoreUri(volume: string, collection: MediaStoreCollection): string {
+  return collection === "file"
+    ? `content://media/${volume}/file`
+    : `content://media/${volume}/${collection}/media`;
 }
 
 function sqlString(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
-}
-
-function shouldIndexMedia(path: string, indexMedia: boolean): boolean {
-  return (
-    indexMedia &&
-    /\.(aac|bmp|flac|gif|heic|jpeg|jpg|m4a|mkv|mov|mp3|mp4|ogg|png|wav|webm|webp)$/i.test(path)
-  );
-}
-
-function indexingNotRequestedReason(path: string, indexMedia: boolean): string {
-  if (!indexMedia) {
-    return "media indexing was disabled by indexMedia=false";
-  }
-  return `media indexing was not requested for ${path}; Android document pickers discover files directly from Downloads`;
 }
 
 function downloadsDirectory(userId: number, namespace: string): string {

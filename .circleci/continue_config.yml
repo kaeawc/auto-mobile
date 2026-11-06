@@ -487,26 +487,33 @@ jobs:
           name: "Install BATS, ShellCheck, jq, yq and ripgrep"
           # The GitHub runner image ships newer jq/yq (several wiring tests need
           # mikefarah yq >= 4.49.1), ShellCheck 0.9.0 and ripgrep; the CircleCI
-          # image's versions differ.
+          # image's versions differ. Everything goes into /usr/local/bin, never
+          # onto PATH through BASH_ENV: CircleCI sources BASH_ENV in every bash,
+          # which would re-prepend those directories ahead of the stub binaries
+          # the tests put first on PATH and run the real tools instead.
           command: |
             git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
             test "$(git -C /tmp/bats-core rev-parse HEAD)" = "eb7f42f8d608ac693d7a4b67474f6714ea68cfc5"
             sudo /tmp/bats-core/install.sh /usr/local
-            mkdir -p "${HOME}/.local/bin"
             curl -fsSL https://github.com/koalaman/shellcheck/releases/download/v0.9.0/shellcheck-v0.9.0.linux.x86_64.tar.xz | tar -xJ -C /tmp
-            install -m 0755 /tmp/shellcheck-v0.9.0/shellcheck "${HOME}/.local/bin/shellcheck"
-            curl -fsSL -o "${HOME}/.local/bin/yq" https://github.com/mikefarah/yq/releases/download/v4.49.2/yq_linux_amd64
-            curl -fsSL -o "${HOME}/.local/bin/jq" https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64
-            chmod +x "${HOME}/.local/bin/yq" "${HOME}/.local/bin/jq"
-            bash .github/actions/setup-ripgrep/install-ripgrep.sh --install-dir "${HOME}/.local/bin"
+            sudo install -m 0755 /tmp/shellcheck-v0.9.0/shellcheck /usr/local/bin/shellcheck
+            sudo curl -fsSL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.49.2/yq_linux_amd64
+            sudo curl -fsSL -o /usr/local/bin/jq https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64
+            sudo chmod +x /usr/local/bin/yq /usr/local/bin/jq
+            sudo bash .github/actions/setup-ripgrep/install-ripgrep.sh --install-dir /usr/local/bin
             sudo apt-get update -qq && sudo apt-get install -y -qq parallel
-            echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${BASH_ENV}"
-      - install_bun
+      - run:
+          name: "Install Bun"
+          command: |
+            bun_version="$(jq -r '.packageManager | sub("^bun@"; "")' package.json)"
+            curl -fsSL https://bun.sh/install | bash -s "bun-v${bun_version}"
+            sudo ln -sf "${HOME}/.bun/bin/bun" /usr/local/bin/bun
+            sudo ln -sf "${HOME}/.bun/bin/bun" /usr/local/bin/bunx
       - run:
           name: "Install Bun dependencies"
           command: |
             bash scripts/ci/install-bun-deps.sh
-            echo "export PATH=\"${PWD}/node_modules/.bin:\${PATH}\"" >> "${BASH_ENV}"
+            for tool in node_modules/.bin/*; do sudo ln -sf "${PWD}/${tool}" "/usr/local/bin/$(basename "${tool}")"; done
       - run:
           name: "Run BATS Unit Tests"
           environment:
@@ -534,7 +541,7 @@ jobs:
               printf '\n=== %s\n' "$f"
               timeout 150 bats --print-output-on-failure "$f" 2>&1 | grep -vE '^ok ' | head -60
             done < ci-logs/failing-files.txt > ci-logs/bats-failure-detail.txt 2>&1 || true
-            { for t in jq yq rg shellcheck parallel bats xcrun xmllint; do printf '%s: ' "$t"; (command -v "$t" >/dev/null && "$t" --version 2>&1 | head -1) || echo missing; done; } > ci-logs/tools.txt
+            { for t in jq yq rg shellcheck parallel bats python3 xcrun xmllint; do printf '%s: ' "$t"; (command -v "$t" >/dev/null && "$t" --version 2>&1 | head -1) || echo missing; done; } > ci-logs/tools.txt
       - store_artifacts:
           when: always
           path: ci-logs

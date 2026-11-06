@@ -58,6 +58,13 @@ const portReverseInput = z.object({
       "verify only: also connect to each mapped port from the device (about 1 s each, run " +
         "together) and report reachable, unreachable or probe_unsupported",
     ),
+  reclaimStale: z
+    .boolean()
+    .optional()
+    .describe(
+      "ensure only: replace a mapping no live session owns when its tcp: host port refuses a " +
+        "loopback connect (needs a session that holds the device). The result marks it reclaimed",
+    ),
 });
 
 type PortReverseAction = z.infer<typeof portReverseInput>["action"];
@@ -117,6 +124,7 @@ async function run(
     action: PortReverseAction;
     ports?: { devicePort: number; hostPort?: number }[];
     probe?: boolean;
+    reclaimStale?: boolean;
   },
   policy: PortReversePolicy,
 ): Promise<PortReverseResult> {
@@ -151,7 +159,7 @@ async function run(
     policy,
     requests.flatMap((r) => [r.devicePort, r.hostPort]),
   );
-  return manager.ensure(target, requests);
+  return manager.ensure(target, requests, { reclaimStale: args.reclaimStale === true });
 }
 
 export function createPortReverseHandler(
@@ -171,13 +179,13 @@ export function createPortReverseHandler(
         status: "not_applicable" as const,
       });
     }
+    const session = args.sessionUuid ?? (deps.sessionUuid ?? routedSessionUuid)();
     const target: PortReverseTarget = {
       deviceId: device.deviceId,
-      owner:
-        args.sessionUuid ??
-        (deps.sessionUuid ?? routedSessionUuid)() ??
-        SESSIONLESS_PORT_REVERSE_OWNER,
+      owner: session ?? SESSIONLESS_PORT_REVERSE_OWNER,
       adb: createAdbReverseCommands((deps.adbFactory ?? defaultAdbClientFactory).create(device)),
+      // A session-routed call runs on the device bound to that session.
+      holdsDevice: session !== undefined,
     };
     try {
       const result = await run(deps.manager, target, args, deps.policy);
@@ -213,7 +221,9 @@ const portReverseTool = defineDeviceTool({
     "server at localhost:<port>. ensure adds mappings this session owns; list, verify and remove " +
     "manage them. verify with probe:true also connects from the device to each mapped port: " +
     "reachable (the host server accepted), unreachable (probeReason closed: nothing listens on the " +
-    "host; refused; timeout) or probe_unsupported. Owned mappings lost to an adb or device restart are restored on the next call " +
+    "host; refused; timeout) or probe_unsupported. list reports hostListening for each tcp: host " +
+    "port. ensure with reclaimStale:true replaces a stale mapping whose host port refuses. " +
+    "Conflicts carry conflictKind. Owned mappings lost to an adb or device restart are restored on the next call " +
     "and removed when the session ends. Ports below 1024 are refused. iOS returns not_applicable.",
   input: portReverseInput,
   options: { defaultEnabled: false, outputSchema: portReverseResultSchema },

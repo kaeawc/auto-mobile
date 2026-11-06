@@ -27625,7 +27625,7 @@
       "destructiveHint": false,
       "idempotentHint": true
     },
-    "description": "Android: manage adb reverse mappings so the app or browser on the device reaches a host server at localhost:<port>. ensure adds mappings this session owns; list, verify and remove manage them. verify with probe:true also connects from the device to each mapped port: reachable (the host server accepted), unreachable (probeReason closed: nothing listens on the host; refused; timeout) or probe_unsupported. Owned mappings lost to an adb or device restart are restored on the next call and removed when the session ends. Ports below 1024 are refused. iOS returns not_applicable.",
+    "description": "Android: manage adb reverse mappings so the app or browser on the device reaches a host server at localhost:<port>. ensure adds mappings this session owns; list, verify and remove manage them. verify with probe:true also connects from the device to each mapped port: reachable (the host server accepted), unreachable (probeReason closed: nothing listens on the host; refused; timeout) or probe_unsupported. list reports hostListening for each tcp: host port. ensure with reclaimStale:true replaces a stale mapping whose host port refuses. Conflicts carry conflictKind. Owned mappings lost to an adb or device restart are restored on the next call and removed when the session ends. Ports below 1024 are refused. iOS returns not_applicable.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -27662,6 +27662,10 @@
         },
         "probe": {
           "description": "verify only: also connect to each mapped port from the device (about 1 s each, run together) and report reachable, unreachable or probe_unsupported",
+          "type": "boolean"
+        },
+        "reclaimStale": {
+          "description": "ensure only: replace a mapping no live session owns when its tcp: host port refuses a loopback connect (needs a session that holds the device). The result marks it reclaimed",
           "type": "boolean"
         },
         "platform": {
@@ -27746,6 +27750,23 @@
               },
               "probeDetail": {
                 "type": "string"
+              },
+              "hostListening": {
+                "type": "boolean"
+              },
+              "reclaimed": {
+                "type": "object",
+                "properties": {
+                  "host": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": ["host_refused"]
+                  }
+                },
+                "required": ["host", "reason"],
+                "additionalProperties": false
               }
             },
             "required": ["devicePort", "host", "owned", "status"],
@@ -27780,7 +27801,12 @@
         },
         "errorCode": {
           "type": "string",
-          "enum": ["port_reverse_conflict", "port_reverse_not_owned", "port_reverse_port_refused"]
+          "enum": [
+            "port_reverse_conflict",
+            "port_reverse_not_owned",
+            "port_reverse_port_refused",
+            "port_reverse_reclaim_failed"
+          ]
         },
         "ports": {
           "type": "array",
@@ -27789,10 +27815,37 @@
             "minimum": -9007199254740991,
             "maximum": 9007199254740991
           }
+        },
+        "conflictKind": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "conflicts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "devicePort": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "conflictKind": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            "required": ["devicePort"],
+            "additionalProperties": false
+          }
         }
       },
       "required": ["message", "success", "status", "action", "deviceId"],
-      "additionalProperties": {}
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "string",
+          "enum": ["other_session", "external_live", "external_unknown"]
+        }
+      }
     }
   },
   {

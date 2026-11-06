@@ -19,6 +19,20 @@ manager (#12530) also uses.
   refused request changes nothing. It adds with `--no-rebind`; a refused add
   whose port `--list` then shows is reported as a conflict. A later failed add
   rolls back this call's earlier adds through the same re-checked removal.
+- A conflict is classified per port as `other_session` (owned by another live
+  session), `external_live` (unowned and a host loopback connect to its `tcp:`
+  target succeeds) or `external_unknown` (anything else unowned). The owned map
+  is in memory, so after a daemon restart every surviving mapping is external.
+  A clash with the caller's own mapping has no kind.
+- `ensure {reclaimStale: true}` replaces an unowned mapping only when the call is
+  session-routed (the session holds the device), the host spec is `tcp:H`, and
+  `HostLoopbackProbe` finds both 127.0.0.1:H and [::1]:H absent (the adb server
+  tries IPv4 then IPv6, so either accepting means live; a timeout or unexpected
+  error is unknown and never reclaims). It re-reads `--list` just before
+  `--remove` and leaves a port that changed meanwhile (`port_reverse_reclaim_failed`,
+  after rolling back this call's adds), then audit-logs the reclaim and adds the
+  requested mapping with `--no-rebind`. The probe runs on the daemon's host, so a
+  remote adb server's host is not what is checked.
 - `remove` refuses ports the session does not own, then re-reads `--list` and
   removes a port only while it still maps to the host port AutoMobile set.
   `adb reverse --remove` takes no host argument, so a re-point between that read

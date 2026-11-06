@@ -10,7 +10,9 @@ import { logger } from "../../utils/logger";
 import { toActionableError } from "../../models/ActionableError";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { unknownHostLoopbackProbe, type HostLoopbackProbe } from "./HostLoopbackProbe";
 import { PortReverseError } from "./PortReverseError";
+import { assertNoConflicts } from "./portReverseConflicts";
 
 /** Per-port bound on a verify probe; ports are probed concurrently, so this bounds the whole call. */
 export const PORT_PROBE_TIMEOUT_MS = 2500;
@@ -64,6 +66,24 @@ export interface PortReverseMapping {
   probeReason?: PortProbeReason;
   /** Device output that made the probe unsupported. */
   probeDetail?: string;
+  /** `list` only: whether the `tcp:` host target accepts a loopback connect; absent when unknown. */
+  hostListening?: boolean;
+  /** `ensure` with `reclaimStale`: the stale mapping this call removed before adding its own. */
+  reclaimed?: PortReverseReclaim;
+}
+
+/** A stale mapping `ensure` removed: its host spec, and why it was judged dead. */
+export interface PortReverseReclaim {
+  host: string;
+  reason: "host_refused";
+}
+
+export interface PortReverseEnsureOptions {
+  /**
+   * Remove a mapping no live session owns when its `tcp:` host target refuses a loopback connect,
+   * then add the requested one. Needs a caller that holds the device (`holdsDevice`).
+   */
+  reclaimStale?: boolean;
 }
 
 export interface PortReverseRestoreFailure {
@@ -87,6 +107,8 @@ export interface PortReverseTarget {
   /** The holder key: the session UUID, or a fixed key for sessionless calls. */
   owner: string;
   adb: AdbReverseCommands;
+  /** The call comes from a session the device is bound to; required to reclaim a stale mapping. */
+  holdsDevice?: boolean;
 }
 
 interface OwnedMapping {
@@ -143,10 +165,19 @@ export class PortReverseManager {
   constructor(
     private readonly audit: PortReverseAudit = defaultAudit,
     private readonly timer: Timer = defaultTimer,
+    private readonly hostProbe: HostLoopbackProbe = unknownHostLoopbackProbe,
   ) {}
 
-  /** Idempotently adds each mapping; throws `port_reverse_conflict` and changes nothing on a clash. */
-  ensure(target: PortReverseTarget, requests: readonly PortReverseRequest[]) {
+  /**
+   * Idempotently adds each mapping; throws `port_reverse_conflict` and changes nothing on a clash.
+   * With `reclaimStale`, a clash with a stale mapping (see {@link PortReverseEnsureOptions}) is
+   * removed and replaced instead.
+   */
+  ensure(
+    target: PortReverseTarget,
+    requests: readonly PortReverseRequest[],
+    options?: PortReverseEnsureOptions,
+  ) {
     const state = this.stateFor(target);
     const { owner } = target;
     state.ensuring.set(owner, (state.ensuring.get(owner) ?? 0) + 1);
@@ -155,11 +186,22 @@ export class PortReverseManager {
       // Conflicts are judged on the device as it is, before any restore: a refused request changes
       // nothing on the device.
       const view = await this.view(target.deviceId, state);
-      this.assertNoConflicts(target.owner, state, view, wanted);
+      const reclaimable = await assertNoConflicts(
+        { owner: target.owner, holdsDevice: target.holdsDevice === true, view, owned: state.owned },
+        wanted,
+        { hostProbe: this.hostProbe, reclaimStale: options?.reclaimStale === true },
+      );
       const report = await this.restoreFor(target, state, view);
       const added: number[] = [];
       const mappings: PortReverseMapping[] = [];
       for (const request of wanted) {
+        const stale = reclaimable.get(request.devicePort);
+        if (stale !== undefined) {
+          const reclaimed = await this.reclaim(target, state, stale, added);
+          await this.add(target, state, request, added);
+          mappings.push({ ...ownedMapping(request, "added"), ...(reclaimed ? { reclaimed } : {}) });
+          continue;
+        }
         if (view.has(request.devicePort)) {
           const status = report.restored.includes(request.devicePort) ? "restored" : "present";
           mappings.push(ownedMapping(request, status));
@@ -185,8 +227,11 @@ export class PortReverseManager {
     const state = this.stateFor(target);
     return this.enqueue(state, async (): Promise<PortReverseResult> => {
       const { view, report } = await this.reconciled(target, state);
-      const mappings = [...view.values()].map((entry) =>
-        this.describe(target.owner, state, entry, report),
+      const mappings = await Promise.all(
+        [...view.values()].map(async (entry) => ({
+          ...this.describe(target.owner, state, entry, report),
+          ...(await this.hostListening(entry)),
+        })),
       );
       for (const [devicePort, mapping] of state.owned) {
         if (mapping.owner === target.owner && !view.has(devicePort)) {
@@ -633,24 +678,68 @@ export class PortReverseManager {
     }
   }
 
-  private assertNoConflicts(
-    owner: string,
+  /**
+   * Removes a stale mapping found by this call's `--list`, after reading `--list` again: a port
+   * that changed meanwhile is someone's live mapping and is left in place. Returns what was
+   * reclaimed, or undefined when the mapping had already gone.
+   */
+  private async reclaim(
+    target: PortReverseTarget,
     state: DeviceState,
-    view: DeviceView,
-    wanted: readonly PortReverseRequest[],
-  ): void {
-    const conflicts = wanted.flatMap((request) => {
-      const reason = conflictReason(owner, state.owned.get(request.devicePort), view, request);
-      return reason === undefined ? [] : [{ port: request.devicePort, reason }];
-    });
-    if (conflicts.length > 0) {
+    stale: AdbReverseEntry,
+    added: number[],
+  ): Promise<PortReverseReclaim | undefined> {
+    const port = tcp(stale.devicePort);
+    const fail = async (detail: string, cause?: unknown): Promise<never> => {
+      await this.rollback(target.deviceId, state, added);
+      if (cause !== undefined) {
+        rethrowDeviceTransportUnavailable(cause);
+      }
       throw new PortReverseError(
-        "port_reverse_conflict",
-        `Cannot reverse ports already in use: ${conflicts.map((c) => c.reason).join("; ")}. ` +
-          "Existing mappings were left in place; remove them first or choose another port.",
-        conflicts.map((c) => c.port),
+        "port_reverse_reclaim_failed",
+        `Could not reclaim the stale ${port} -> ${stale.host} on ${target.deviceId}: ${detail}`,
+        [stale.devicePort],
+      );
+    };
+    let current: AdbReverseEntry | undefined;
+    try {
+      current = (await state.adb.list()).find((entry) => entry.devicePort === stale.devicePort);
+    } catch (error) {
+      logger.warn(
+        `[portReverse] re-list before reclaiming ${port} on ${target.deviceId} failed: ${errorMessage(error)}`,
+      );
+      return fail(
+        `adb reverse --list failed (${errorMessage(error)}); it was left in place.`,
+        error,
       );
     }
+    if (current === undefined) {
+      return undefined;
+    }
+    if (current.host !== stale.host) {
+      return fail(`it now maps to ${current.host}, so it was left in place.`);
+    }
+    try {
+      await state.adb.remove(stale.devicePort);
+    } catch (error) {
+      logger.warn(
+        `[portReverse] removing stale ${port} on ${target.deviceId} failed: ${errorMessage(error)}`,
+      );
+      return fail(`adb reverse --remove failed (${errorMessage(error)}).`, error);
+    }
+    this.audit(
+      `reclaim ${port} -> ${stale.host} device=${target.deviceId} session=${target.owner} reason=host_refused`,
+    );
+    return { host: stale.host, reason: "host_refused" };
+  }
+
+  /** `hostListening` for a `tcp:` mapping whose host target answered either way. */
+  private async hostListening(entry: AdbReverseEntry): Promise<{ hostListening?: boolean }> {
+    if (entry.hostPort === undefined) {
+      return {};
+    }
+    const state = await this.hostProbe.probe(entry.hostPort);
+    return state === "unknown" ? {} : { hostListening: state === "listening" };
   }
 
   private async add(
@@ -707,6 +796,7 @@ export class PortReverseManager {
         "port_reverse_conflict",
         `${tcp(request.devicePort)} on ${target.deviceId} was mapped to ${current.host} by someone else during this call; it was left in place.`,
         [request.devicePort],
+        [{ devicePort: request.devicePort, conflictKind: "external_unknown" }],
       );
     }
   }
@@ -832,30 +922,6 @@ export class PortReverseManager {
     const status = report.restored.includes(entry.devicePort) ? "restored" : "present";
     return { ...entry, owned, status };
   }
-}
-
-function conflictReason(
-  owner: string,
-  owned: OwnedMapping | undefined,
-  view: DeviceView,
-  request: PortReverseRequest,
-): string | undefined {
-  if (owned !== undefined) {
-    if (owned.owner !== owner) {
-      return `${tcp(request.devicePort)} is owned by another session`;
-    }
-    if (owned.hostPort !== request.hostPort) {
-      return `${tcp(request.devicePort)} already maps to ${tcp(owned.hostPort)} for this session`;
-    }
-    const live = view.get(request.devicePort);
-    return live === undefined || live.hostPort === owned.hostPort
-      ? undefined
-      : `${tcp(request.devicePort)} was re-pointed to ${live.host} outside AutoMobile`;
-  }
-  const current = view.get(request.devicePort);
-  return current === undefined
-    ? undefined
-    : `${tcp(request.devicePort)} already maps to ${current.host}, not created by AutoMobile`;
 }
 
 function entryFor(request: PortReverseRequest): AdbReverseEntry {

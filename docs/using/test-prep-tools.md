@@ -81,8 +81,16 @@ mock backend), use `portReverse` instead of running `adb reverse` yourself:
 
 - `ensure` with `ports: [{ devicePort, hostPort? }]` adds each mapping
   (`hostPort` defaults to `devicePort`). Calling it again is a no-op.
+  With `reclaimStale: true`, a mapping left behind by a crashed session, a
+  daemon restart or another tool is replaced instead of reported as a conflict,
+  but only when your session holds the device, no running session owns the
+  mapping, its host side is `tcp:<H>`, and nothing on your machine accepts a
+  connection on port `H`. That mapping's result carries
+  `reclaimed: { host, reason: "host_refused" }`.
 - `list` returns every reverse on the device; `owned: true` marks the ones
-  your session created.
+  your session created, and `hostListening` says whether a server on your
+  machine accepts connections on each mapping's `tcp:` host port (absent when
+  it could not be checked).
 - `verify` reports whether ports (default: all of yours) are mapped now. With
   `probe: true` it also connects to each mapped port from the device (about a
   second, all ports at once) and reports `reachable` (your host server accepted
@@ -107,11 +115,12 @@ connected keeps them until you run `adb reverse --remove`.
 
 Errors come back with `errorCode`:
 
-| `errorCode`                 | Meaning and what to do                                                                                                                        |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `port_reverse_conflict`     | The device port is already mapped by someone else or to another host port. Nothing changed; pick another port or remove the existing mapping. |
-| `port_reverse_not_owned`    | `remove` named a port your session did not create. Nothing was removed.                                                                       |
-| `port_reverse_port_refused` | A port is below 1024 or outside `AUTOMOBILE_PORT_REVERSE_ALLOWED_PORTS`, or `ports` was missing.                                              |
+| `errorCode`                   | Meaning and what to do                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `port_reverse_conflict`       | The device port is already mapped by someone else or to another host port. Nothing changed; pick another port or remove the existing mapping. `conflicts` lists each port's `conflictKind` (also given at the top level when every port has the same one): `other_session` (another running session owns it), `external_live` (made outside AutoMobile and its host port accepts connections) or `external_unknown` (made outside AutoMobile and its host port was not shown to be live; retry with `reclaimStale: true` to replace it if it is stale). |
+| `port_reverse_reclaim_failed` | `reclaimStale` found a stale mapping but could not remove it, or it changed just before removal. The mapping was left as it was and nothing else changed.                                                                                                                                                                                                                                                                                                                                                                                               |
+| `port_reverse_not_owned`      | `remove` named a port your session did not create. Nothing was removed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `port_reverse_port_refused`   | A port is below 1024 or outside `AUTOMOBILE_PORT_REVERSE_ALLOWED_PORTS`, or `ports` was missing.                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 On iOS the tool returns `status: "not_applicable"`: a simulator shares the
 host's network, so `localhost:<port>` already reaches your machine.

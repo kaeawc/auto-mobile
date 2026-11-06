@@ -19,7 +19,11 @@ const mappingSchema = z.object({
   ]),
   probeReason: z.enum(["closed", "refused", "timeout", "unsupported"]).optional(),
   probeDetail: z.string().optional(),
+  hostListening: z.boolean().optional(),
+  reclaimed: z.object({ host: z.string(), reason: z.enum(["host_refused"]) }).optional(),
 });
+
+const conflictKind = z.enum(["other_session", "external_live", "external_unknown"]);
 
 /** Every portReverse outcome; `failed` is returned with `isError`. */
 export const portReverseResultSchema = z
@@ -35,8 +39,17 @@ export const portReverseResultSchema = z
       .array(z.object({ devicePort: z.number().int(), error: z.string() }))
       .optional(),
     errorCode: z
-      .enum(["port_reverse_conflict", "port_reverse_not_owned", "port_reverse_port_refused"])
+      .enum([
+        "port_reverse_conflict",
+        "port_reverse_not_owned",
+        "port_reverse_port_refused",
+        "port_reverse_reclaim_failed",
+      ])
       .optional(),
     ports: z.array(z.number().int()).optional(),
+    conflictKind: conflictKind.optional(),
+    conflicts: z
+      .array(z.object({ devicePort: z.number().int(), conflictKind: conflictKind.optional() }))
+      .optional(),
   })
   .passthrough();

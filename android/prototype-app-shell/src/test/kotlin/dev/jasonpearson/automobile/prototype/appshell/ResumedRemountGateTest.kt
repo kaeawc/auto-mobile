@@ -7,12 +7,12 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class ResumedRemountGateTest {
-  private val owner =
+  private val owner: LifecycleOwner =
     object : LifecycleOwner {
       override val lifecycle: Lifecycle
         get() = registry
     }
-  private val registry = LifecycleRegistry.createUnsafe(owner)
+  private val registry: LifecycleRegistry = LifecycleRegistry.createUnsafe(owner)
   private var onAppearRuns = 0
   private val gate = ResumedRemountGate { onAppearRuns++ }
 

@@ -111,6 +111,22 @@ describe("OnDemandAudit (#14075)", () => {
     expect(compared.failed).toBe(false);
   });
 
+  test("a call cancelled during the audit does not record a baseline (#17281)", async () => {
+    engines.violations = [violation("small", "error")];
+    const controller = new AbortController();
+    const audited = engines.accessibility.bind(engines);
+    engines.accessibility = async (...args) => {
+      const result = await audited(...args);
+      controller.abort(new Error("cancelled"));
+      return result;
+    };
+
+    await expect(
+      audit().run({ baseline: { name: "home", mode: "record" }, signal: controller.signal }),
+    ).rejects.toThrow("cancelled");
+    expect(engines.savedBaselines.has("home")).toBe(false);
+  });
+
   test("comparing against a missing baseline is an error", async () => {
     const result = await audit().run({ baseline: { name: "none", mode: "compare" } });
 

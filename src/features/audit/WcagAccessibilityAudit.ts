@@ -20,6 +20,7 @@ export interface WcagAccessibilityAuditInput {
   container?: AuditContainer;
   baseline?: { name: string; mode: "compare" | "record" };
   failOn?: AuditFailOn;
+  signal?: AbortSignal;
 }
 
 export interface WcagAccessibilityAuditResult {

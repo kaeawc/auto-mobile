@@ -44,6 +44,8 @@ export interface OnDemandAuditInput {
   container?: AuditContainer;
   baseline?: { name: string; mode: "compare" | "record" };
   failOn?: AuditFailOn;
+  /** The call's cancellation; a cancelled call never records a baseline. */
+  signal?: AbortSignal;
 }
 
 export interface AuditBaselineStore {
@@ -246,18 +248,21 @@ export class OnDemandAudit {
       summary: audit.summary,
       screenId: audit.screenId,
     };
-    return this.applyBaseline(violations, input.baseline, output);
+    return this.applyBaseline(violations, input, output);
   }
 
   private async applyBaseline(
     violations: WcagViolation[],
-    baseline: OnDemandAuditInput["baseline"],
+    { baseline, signal }: Pick<OnDemandAuditInput, "baseline" | "signal">,
     output: OnDemandAuditResult,
   ): Promise<WcagViolation[]> {
     if (!baseline) {
       return violations;
     }
     if (baseline.mode === "record") {
+      // The audit may outlive a cancelled call; persisting then would replace a baseline the
+      // caller abandoned (#17281).
+      signal?.throwIfAborted();
       await this.engines.baselines.saveBaseline(baseline.name, violations);
       output.baselineRecorded = baseline.name;
       return violations;

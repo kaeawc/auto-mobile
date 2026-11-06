@@ -115,8 +115,12 @@ function foreignArgs(engine: AccessibilityAuditEngine, args: AccessibilityAuditA
   return foreign.filter((name) => args[name] !== undefined);
 }
 
-function wcagInput(args: AccessibilityAuditArgs): WcagAccessibilityAuditInput {
+function wcagInput(
+  args: AccessibilityAuditArgs,
+  signal: AbortSignal | undefined,
+): WcagAccessibilityAuditInput {
   return {
+    ...(signal ? { signal } : {}),
     ...(args.appId ? { appId: args.appId } : {}),
     ...(args.scope?.container ? { container: args.scope.container } : {}),
     ...(args.baseline ? { baseline: args.baseline } : {}),
@@ -169,7 +173,7 @@ export function createAccessibilityAuditTool(
       }
       const result =
         engine === "wcag"
-          ? await runWcagAccessibilityAudit(device, enginesFor(device), wcagInput(args))
+          ? await runWcagAccessibilityAudit(device, enginesFor(device), wcagInput(args, signal))
           : await audit.run(device, platformInput(args, signal));
       return withIsErrorOnFailure(createStructuredToolResponse(result), result.success);
     },

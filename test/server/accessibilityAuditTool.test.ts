@@ -107,6 +107,21 @@ describe("accessibilityAudit wcag engine (#17279)", () => {
     expect(engines.savedBaselines.get("next")?.length).toBe(3);
   });
 
+  test("a cancelled call does not record a baseline (#17281)", async () => {
+    const engines = accessibilityScenarioEngines();
+    const controller = new AbortController();
+    controller.abort(new Error("cancelled"));
+
+    await expect(
+      auditHandler(toolWith(engines))(
+        AUDIT_ANDROID,
+        { baseline: { name: "next", mode: "record" } },
+        controller.signal,
+      ),
+    ).rejects.toThrow("cancelled");
+    expect(engines.savedBaselines.has("next")).toBe(false);
+  });
+
   test("on iOS is unsupported_platform without observing", async () => {
     const engines = accessibilityScenarioEngines();
     const response = await auditHandler(toolWith(engines))(AUDIT_IOS, { engine: "wcag" });

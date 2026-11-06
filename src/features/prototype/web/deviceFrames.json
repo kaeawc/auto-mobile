@@ -201,6 +201,78 @@
         "landscape": { "top": 48, "bottom": 64, "left": 0, "right": 0 }
       },
       "frame": { "bezelDp": 10, "color": "#202124" }
+    },
+    {
+      "id": "pixel-fold",
+      "platform": "android",
+      "label": "Pixel Fold",
+      "formFactor": "foldable",
+      "screen": { "widthDp": 841, "heightDp": 701, "density": 2.625 },
+      "cornerRadiusDp": 20,
+      "cutout": { "type": "none" },
+      "statusBarDp": 32,
+      "navBar": { "type": "gesture", "heightDp": 24 },
+      "safeArea": {
+        "portrait": { "top": 32, "bottom": 24, "left": 0, "right": 0 },
+        "landscape": { "top": 32, "bottom": 24, "left": 0, "right": 0 }
+      },
+      "panels": [
+        {
+          "role": "cover",
+          "screen": { "widthDp": 411, "heightDp": 797, "density": 2.625 },
+          "cornerRadiusDp": 32,
+          "cutout": { "type": "punchHole", "centerXDp": 205.5, "centerYDp": 24, "radiusDp": 12 },
+          "statusBarDp": 48,
+          "navBar": { "type": "gesture", "heightDp": 24 },
+          "safeArea": {
+            "portrait": { "top": 48, "bottom": 24, "left": 0, "right": 0 },
+            "landscape": { "top": 48, "bottom": 24, "left": 48, "right": 0 }
+          }
+        }
+      ],
+      "hinge": { "axis": "vertical", "positionDp": 420.5, "widthDp": 0, "occluding": false },
+      "postures": [
+        { "posture": "closed", "panel": "cover", "hingeDegrees": 0 },
+        { "posture": "half_opened", "panel": "inner", "hingeDegrees": 90 },
+        { "posture": "opened", "panel": "inner", "hingeDegrees": 180 }
+      ],
+      "frame": { "bezelDp": 10, "color": "#1b1b1b" }
+    },
+    {
+      "id": "flip-foldable",
+      "platform": "android",
+      "label": "Flip foldable",
+      "formFactor": "foldable",
+      "screen": { "widthDp": 411, "heightDp": 1004, "density": 2.625 },
+      "cornerRadiusDp": 24,
+      "cutout": { "type": "punchHole", "centerXDp": 205.5, "centerYDp": 24, "radiusDp": 12 },
+      "statusBarDp": 48,
+      "navBar": { "type": "gesture", "heightDp": 24 },
+      "safeArea": {
+        "portrait": { "top": 48, "bottom": 24, "left": 0, "right": 0 },
+        "landscape": { "top": 48, "bottom": 24, "left": 48, "right": 0 }
+      },
+      "panels": [
+        {
+          "role": "cover",
+          "screen": { "widthDp": 262, "heightDp": 272, "density": 2.75 },
+          "cornerRadiusDp": 24,
+          "cutout": { "type": "none" },
+          "statusBarDp": 24,
+          "navBar": { "type": "none" },
+          "safeArea": {
+            "portrait": { "top": 24, "bottom": 0, "left": 0, "right": 0 },
+            "landscape": { "top": 24, "bottom": 0, "left": 0, "right": 0 }
+          }
+        }
+      ],
+      "hinge": { "axis": "horizontal", "positionDp": 502, "widthDp": 0, "occluding": false },
+      "postures": [
+        { "posture": "closed", "panel": "cover", "hingeDegrees": 0 },
+        { "posture": "half_opened", "panel": "inner", "hingeDegrees": 90 },
+        { "posture": "opened", "panel": "inner", "hingeDegrees": 180 }
+      ],
+      "frame": { "bezelDp": 10, "color": "#1b1b1b" }
     }
   ]
 }

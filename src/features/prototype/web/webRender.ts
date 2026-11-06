@@ -908,6 +908,11 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
 
 const WEB_LAYER_RENDERERS = { ...webSheetLayers(KIT), ...webModalLayers(KIT) };
 
+/** Whether `type` draws only in the window's layer while its `openWhen` holds, never in place. */
+export function isWebLayerType(type: unknown): boolean {
+  return Object.hasOwn(WEB_LAYER_RENDERERS, String(type));
+}
+
 const WEB_SKINS = webSkins(KIT);
 
 function placeholder(node: Raw, scope: WebRenderScope, path: string): WebElement {

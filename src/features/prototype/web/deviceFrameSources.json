@@ -51,5 +51,17 @@
     "screen": "automotive_1024p_landscape hardware profile: 1024 x 768 px at mdpi (density 1), recorded in portrait; not yet measured on an emulator",
     "insets": "Estimated head-unit status and navigation bars; not yet measured on an emulator",
     "kinds": { "screen": "avdProfile", "insets": "avdProfile" }
+  },
+  "pixel-fold": {
+    "screen": "pixel_fold hardware profile: inner 2208 x 1840 px, cover 1080 x 2092 px, both at 420 dpi (density 2.625); not yet measured on an emulator",
+    "insets": "Estimated; status bar, navigation bar and cover cutout not yet measured on an emulator",
+    "hinge": "Seamless fold at the inner panel's centre, from the public spec; position and width not yet measured on an emulator",
+    "kinds": { "screen": "avdProfile", "insets": "publicSpec", "hinge": "publicSpec" }
+  },
+  "flip-foldable": {
+    "screen": "SDK horizontal-fold foldable profile: inner 1080 x 2636 px at 420 dpi (density 2.625); cover 720 x 748 px at density 2.75 from a public flip-phone spec; not yet measured on an emulator",
+    "insets": "Estimated; status bar, navigation bar and cutouts not yet measured on an emulator",
+    "hinge": "Seamless fold at the inner panel's centre, from the public spec; position and width not yet measured on an emulator",
+    "kinds": { "screen": "avdProfile", "insets": "publicSpec", "hinge": "publicSpec" }
   }
 }

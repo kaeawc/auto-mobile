@@ -9,7 +9,7 @@
 import { ActionableError } from "../../models/ActionableError";
 import type { Element } from "../../models/Element";
 import type { ElementBounds } from "../../models/ElementBounds";
-import { DefaultTextMatcher } from "../utility/TextMatcher";
+import { normalize } from "../utility/ElementResolverMatching";
 import { matchesCtrlProxyResourceId } from "../utility/SearchableNode";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { reportToolDispatched } from "../../utils/ToolDispatchContext";
@@ -98,8 +98,6 @@ const DIRECTION_KEYS = {
   right: "arrow_right",
 } as const satisfies Record<FocusNavigateDirection, InputKeyName>;
 
-const textMatcher = new DefaultTextMatcher();
-
 export function focusNavigateTargetError(target: FocusNavigateTarget): string | undefined {
   const given = [target.text, target.contentDesc, target.label, target.resourceId].some(
     (value) => value !== undefined && value.length > 0,
@@ -117,8 +115,14 @@ function stringProp(
   return typeof value === "string" ? value : "";
 }
 
+/** Labels compare as `tapOn`'s resolver compares text: trimmed, whitespace collapsed, any case. */
 function textMatches(expected: string | undefined, actual: string, exact: boolean): boolean {
-  return !expected || textMatcher.createTextMatcher(expected, !exact)(actual);
+  if (!expected) {
+    return true;
+  }
+  const query = normalize(expected);
+  const value = normalize(actual);
+  return value.length > 0 && (exact ? value === query : value.includes(query));
 }
 
 /**

@@ -456,6 +456,12 @@ describe("elementMatchesTarget", () => {
     expect(elementMatchesTarget(tile(1), { text: "Movies", resourceId: "tile_2" })).toBe(false);
   });
 
+  test("labels compare with tapOn's whitespace normalization", () => {
+    const wrapped: Element = { ...tile(1), text: "  Watch\n now " };
+    expect(elementMatchesTarget(wrapped, { label: "Watch now" }, true)).toBe(true);
+    expect(elementMatchesTarget(wrapped, { text: "watch now" })).toBe(true);
+  });
+
   test("a resource id also matches the synthetic view-id", () => {
     const synthetic: Element = { ...tile(1), "resource-id": undefined, "view-id": "node-7" };
     expect(elementMatchesTarget(synthetic, { resourceId: "node-7" })).toBe(true);

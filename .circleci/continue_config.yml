@@ -517,6 +517,85 @@ jobs:
             AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "300"
           command: bash scripts/test-ts.sh stress
 
+  linux-bats-tests:
+    executor: linux
+    steps:
+      - checkout_without_lfs
+      - run:
+          name: "Install BATS, ShellCheck, jq, yq and ripgrep"
+          # The GitHub runner image ships newer jq/yq (several wiring tests need
+          # mikefarah yq >= 4.49.1), ShellCheck 0.9.0 and ripgrep; the CircleCI
+          # image's versions differ. Everything goes into /usr/local/bin, never
+          # onto PATH through BASH_ENV: CircleCI sources BASH_ENV in every bash,
+          # which would re-prepend those directories ahead of the stub binaries
+          # the tests put first on PATH and run the real tools instead.
+          command: |
+            git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
+            test "$(git -C /tmp/bats-core rev-parse HEAD)" = "eb7f42f8d608ac693d7a4b67474f6714ea68cfc5"
+            sudo /tmp/bats-core/install.sh /usr/local
+            curl -fsSL https://github.com/koalaman/shellcheck/releases/download/v0.9.0/shellcheck-v0.9.0.linux.x86_64.tar.xz | tar -xJ -C /tmp
+            sudo install -m 0755 /tmp/shellcheck-v0.9.0/shellcheck /usr/local/bin/shellcheck
+            sudo curl -fsSL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.49.2/yq_linux_amd64
+            sudo curl -fsSL -o /usr/local/bin/jq https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64
+            sudo chmod +x /usr/local/bin/yq /usr/local/bin/jq
+            sudo bash .github/actions/setup-ripgrep/install-ripgrep.sh --install-dir /usr/local/bin
+            # gawk: the image's mawk does not support {n} interval expressions.
+            sudo apt-get update -qq && sudo apt-get install -y -qq parallel gawk
+            # Tests parse TOML with python3's tomllib (3.11+); the image has 3.10.
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+            "${HOME}/.local/bin/uv" python install 3.12
+            sudo ln -sf "$("${HOME}/.local/bin/uv" python find 3.12)" /usr/local/bin/python3
+            python3 --version
+      - run:
+          name: "Install Bun"
+          command: |
+            bun_version="$(jq -r '.packageManager | sub("^bun@"; "")' package.json)"
+            curl -fsSL https://bun.sh/install | bash -s "bun-v${bun_version}"
+            sudo ln -sf "${HOME}/.bun/bin/bun" /usr/local/bin/bun
+            sudo ln -sf "${HOME}/.bun/bin/bun" /usr/local/bin/bunx
+      - run:
+          name: "Install Bun dependencies"
+          command: |
+            bash scripts/ci/install-bun-deps.sh
+            for tool in node_modules/.bin/*; do sudo ln -sf "${PWD}/${tool}" "/usr/local/bin/$(basename "${tool}")"; done
+      - run:
+          name: "Run BATS Unit Tests"
+          environment:
+            AUTOMOBILE_BATS_MAX_FILE_SECONDS: "240"
+            AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS: "420"
+          command: |
+            mkdir -p ci-logs
+            set -o pipefail
+            scripts/ci/run-bats.sh unit 2>&1 | tee ci-logs/bats-unit.log
+      - run:
+          name: "Run BATS Integration Tests"
+          when: always
+          command: |
+            mkdir -p ci-logs
+            set -o pipefail
+            scripts/ci/run-bats.sh integration 2>&1 | tee ci-logs/bats-integration.log
+      - run:
+          name: "Summarize BATS failures"
+          when: always
+          command: |
+            mkdir -p ci-logs
+            { grep -hE '^(\[[^]]+\][[:space:]]+)?not ok' ci-logs/*.log || true; } > ci-logs/bats-failures.txt
+            # Re-run each failing file alone with its command output printed.
+            awk '/^not ok/ {bad=1} /^BATS file duration:/ {if (bad) print $NF; bad=0}' ci-logs/bats-unit.log > ci-logs/failing-files.txt || true
+            while read -r f; do
+              printf '\n=== %s\n' "$f"
+              timeout 150 bats --print-output-on-failure "$f" 2>&1 | grep -vE '^ok ' | head -60
+            done < ci-logs/failing-files.txt > ci-logs/bats-failure-detail.txt 2>&1 || true
+            { for t in jq yq rg shellcheck parallel awk bats python3 xcrun xmllint; do printf '%s: ' "$t"; (command -v "$t" >/dev/null && "$t" --version 2>&1 | head -1) || echo missing; done; } > ci-logs/tools.txt
+      - store_artifacts:
+          when: always
+          path: ci-logs
+          destination: ci-logs
+      - store_artifacts:
+          when: always
+          path: scratch/bats-unit-joblog.tsv
+          destination: bats-unit-joblog/bats-unit-joblog.tsv
+
   # Post-merge mirror of merge.yml's `benchmark-context-thresholds`: the benchmark
   # exits non-zero when a configured MCP context threshold is exceeded. The report
   # is kept even then; the artifact upload there needs a GitHub token.
@@ -1042,6 +1121,7 @@ workflows:
       - linux-node-host-integration-tests:
           requires:
             - linux-fast-validation
+      - linux-bats-tests
 
   # Post-merge Linux Node mirrors (main only; path group run-main-linux). Each job
   # halts when a newer main commit touches the same group, so a merge burst runs

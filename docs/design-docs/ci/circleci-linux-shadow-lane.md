@@ -54,13 +54,13 @@ One-time owner step: CircleCI > Project Settings > Triggers > add a scheduled
 trigger on `main` with pipeline parameter `run-nightly-linux` = `true`. The
 trigger is not created by the repository.
 
-## Not mirrored
+## BATS
 
-`bats-tests` stays on GitHub only. The suite depends on the GitHub runner image's
-tool versions (jq, yq, ShellCheck, Android and Xcode stubs, timing-sensitive
-files sized for that runner), and on the CircleCI Docker image about thirty files
-fail on tool differences or exceed their time caps. Mirroring it needs a
-purpose-built image.
+`linux-bats-tests` runs `scripts/ci/run-bats.sh unit` then `integration`. The
+CircleCI image lacks the GitHub runner image's tool versions, so the job installs
+BATS 1.14.0, ShellCheck 0.9.0, jq 1.7.1, yq 4.49.2, ripgrep and GNU parallel
+before running. Logs go to the `ci-logs/` artifacts (`bats-failures.txt` lists
+every `not ok`).
 
 ## Differences from the GitHub jobs
 

@@ -6,6 +6,7 @@ import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { isWatchHierarchy, type WatchHierarchy } from "./WatchHierarchy";
 
 export type WatchCommand =
+  | { type: "type"; text: string }
   | { type: "hierarchy" | "home" }
   | { type: "tap"; identifier: string }
   | { type: "tap"; x: number; y: number }

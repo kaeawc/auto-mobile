@@ -329,3 +329,9 @@ test("tvOS opts into observe", () => {
   expect(APPLE_PLATFORM_SUPPORTED_TOOLS.tvos.has("observe")).toBe(true);
   expect(() => assertToolSupportsDevicePlatform("observe", appleTv)).not.toThrow();
 });
+
+test("watchOS opts into sendKeys", () => {
+  expect(APPLE_PLATFORM_SUPPORTED_TOOLS.watchos.has("sendKeys")).toBe(true);
+  expect(() => assertToolSupportsDevicePlatform("sendKeys", watch)).not.toThrow();
+  expect(() => assertRequestedPlatformSupported("sendKeys", { platform: "watchos" })).not.toThrow();
+});

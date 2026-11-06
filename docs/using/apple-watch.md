@@ -78,6 +78,7 @@ Besides the device management above, these tools accept a watch:
 - `observe`
 - `tapOn`
 - `tapAt`
+- `sendKeys`
 - `swipeOn`
 - `pressButton`
 - `rotateCrown`
@@ -124,6 +125,11 @@ Every other tool refuses a watch before doing anything, with:
   is refused. `clearAppData` wipes the app's Documents, Library and tmp before launch.
 - `terminateApp` succeeds with `wasRunning: false` when the app was not running.
 
+`sendKeys` accepts non-empty text only and appends to the focused field. Focus a field with
+`tapOn` first, or provide a selector with an exact `elementId` or `text` to focus it before typing.
+On watchOS a focused field opens the keyboard, and the text is typed through that keyboard. Input
+fails when no text field or keyboard is up. Commands that clear, replace or press keys are refused.
+
 ## Limits
 
 - No physical Apple Watch and no paired iPhone (see above).
@@ -132,6 +138,6 @@ Every other tool refuses a watch before doing anything, with:
   if that restart fails even though the app itself launched. A runner AutoMobile did not start
   keeps its target. For any app other than the runner's target, `observe` is screenshot-only and
   `tapOn` and `swipeOn` with `lookFor` cannot match elements.
-- No text input, pinch, multi-touch or drag.
+- No pinch, multi-touch or drag.
 - Prototypes do not run on a watch. To mock up a watch screen, use a watch-sized prototype spec on a
   phone instead (see [Watch-sized mockups](../tools.md#watch-sized-mockups)).

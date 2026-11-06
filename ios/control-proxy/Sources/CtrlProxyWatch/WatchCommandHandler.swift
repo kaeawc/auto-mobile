@@ -11,6 +11,7 @@ protocol WatchGesturePerformer {
     func tap(x: Double, y: Double) throws
     func tap(identifier: String) throws
     func swipe(_ direction: WatchSwipeDirection) throws
+    func typeText(_ text: String) throws
     func home() throws
     func rotateCrown(delta: Double, velocity: Double) throws
 }
@@ -71,7 +72,7 @@ struct WatchResponse: Codable {
 
 @MainActor
 final class WatchCommandHandler {
-    nonisolated static let supportedCommands = ["hierarchy", "tap", "swipe", "home", "crown"]
+    nonisolated static let supportedCommands = ["hierarchy", "tap", "swipe", "home", "crown", "type"]
 
     private let snapshotSource: any WatchSnapshotSource
     private let gestures: any WatchGesturePerformer
@@ -106,6 +107,12 @@ final class WatchCommandHandler {
             case "swipe":
                 let swipe = try JSONDecoder().decode(Swipe.self, from: data)
                 try gestures.swipe(swipe.direction)
+            case "type":
+                let input = try JSONDecoder().decode(TextInput.self, from: data)
+                guard let text = input.text, !text.isEmpty else {
+                    throw WatchCommandError.invalidRequest("type requires non-empty text")
+                }
+                try gestures.typeText(text)
             case "home":
                 try gestures.home()
             case "crown":
@@ -145,6 +152,10 @@ final class WatchCommandHandler {
 
     private struct Swipe: Decodable {
         let direction: WatchSwipeDirection
+    }
+
+    private struct TextInput: Decodable {
+        let text: String?
     }
 
     private struct Crown: Decodable {

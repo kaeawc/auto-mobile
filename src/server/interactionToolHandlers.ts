@@ -751,7 +751,7 @@ export const createSendKeysHandler =
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
-    if (device.platform === "tvos" || device.platform === "visionos") {
+    if (device.platform !== "android" && device.platform !== "ios") {
       const result = await sendKeysToAppleRunner(device, args.commands, args.selector, {
         ...args,
         signal,

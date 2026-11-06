@@ -61,12 +61,12 @@ parameters:
     default: false
 
 executors:
-  # Shadow Linux lane (4 vCPU / 8 GB, 20 credits/min). `cimg/openjdk` carries the
-  # JDK 21 that Fast Validation's ktfmt check needs; the other jobs use it too so
-  # every Linux job shares one image.
+  # Shadow Linux lane (4 vCPU / 8 GB, 20 credits/min). The `-node` variant carries
+  # the JDK 21 that Fast Validation's ktfmt check needs plus the npm that the
+  # pinned-graph and unpacked-size checks shell out to; every Linux job shares it.
   linux:
     docker:
-      - image: cimg/openjdk:21.0
+      - image: cimg/openjdk:21.0-node
     resource_class: large
     environment:
       GIT_LFS_SKIP_SMUDGE: "1"
@@ -282,6 +282,12 @@ jobs:
           command: |
             mkdir -p ci-logs
             { hadolint --config .hadolint.yaml --failure-threshold error Dockerfile; } 2>&1 | tee -a ci-logs/fast-validation.log
+      - run:
+          name: "Install pinned Claude Code"
+          command: |
+            export CLAUDE_CODE_INSTALL_DIR="${HOME}/claude-code"
+            scripts/ci/install-claude-code.sh
+            echo "export PATH=\"${CLAUDE_CODE_INSTALL_DIR}:\${PATH}\"" >> "${BASH_ENV}"
       - run:
           name: "Run fast validation checks"
           environment:

@@ -19,7 +19,7 @@ mapping, so any PR that changes a file runs the lane.
 | `linux-node-host-integration-tests` | `node-host-integration-tests` |
 | `linux-bats-tests`                  | `bats-tests`                  |
 
-All run on the `linux` executor (`cimg/openjdk:21.0`, `large`: 4 vCPU, 8 GB).
+All run on the `linux` executor (`cimg/openjdk:21.0-node`, `large`: 4 vCPU, 8 GB).
 
 ## Differences from the GitHub jobs
 

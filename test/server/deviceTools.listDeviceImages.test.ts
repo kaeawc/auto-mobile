@@ -164,7 +164,8 @@ describe("listDeviceImages", function () {
     expect(toolStructured(response)).toEqual(payload);
     expect(imagesOf(payload)).toHaveLength(1);
     expect(at(imagesOf(payload)[0], "identity", "stableId")).toBe("iphone-17-pro-udid");
-    expect(at(imagesOf(payload)[0], "capabilityInventory")).toEqual({
+    expect(at(imagesOf(payload)[0], "capabilityProfile")).toBe("p1");
+    expect(at(payload, "capabilityProfiles", "p1")).toEqual({
       schemaVersion: 1,
       capabilities: [
         {
@@ -272,7 +273,7 @@ describe("listDeviceImages", function () {
       target: "Google APIs",
       basedOn: "Android 16",
     });
-    expect(at(image, "availabilityError")).toBeNull();
+    expect(image).not.toHaveProperty("availabilityError");
     expect(image).not.toHaveProperty("path");
     expect(image).not.toHaveProperty("iosVersion");
   });

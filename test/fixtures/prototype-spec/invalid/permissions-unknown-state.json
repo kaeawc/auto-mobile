@@ -1,0 +1,9 @@
+{
+  "spec": {
+    "id": "p2",
+    "window": { "placement": { "type": "fullscreen" } },
+    "requires": { "platform": ["permissions"] },
+    "root": { "type": "text", "text": "Torch {platform:/permissions/flashlight}" }
+  },
+  "expectedPath": "root.text"
+}

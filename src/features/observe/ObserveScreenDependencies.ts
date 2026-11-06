@@ -1,3 +1,4 @@
+import type { IosSdkBridgeReader } from "./ios/IosSdkBridgeReader";
 import type { WindowIdentityFreshnessResolver } from "./WindowIdentityFreshness";
 import type { ScreenshotPathProtection } from "./ScreenshotPathProtection";
 import type { SelectedDisplayReadPolicy } from "./SelectedDisplayRead";
@@ -29,6 +30,7 @@ export interface ObserveScreenDependencies {
   deviceReadOnly?: boolean;
   /** Tool-level display request retained through waitFor polls. */
   display?: string;
+  sdkBridge?: () => IosSdkBridgeReader;
   // Data sources
   viewHierarchy?: ViewHierarchy;
   hierarchyCapture?: HierarchyCapture;

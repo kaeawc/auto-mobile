@@ -59,7 +59,7 @@
             layers.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             view.addSubview(layers.view)
             layers.didMove(toParent: self)
-            model.onEndEditing = { [weak self] in self?.view.endEditing(true) }
+            model.onEndEditing = { [weak self] in self?.view.window?.endEditing(true) }
             model.onSessionChange = { [weak self] session in
                 self?.apply(session)
             }
@@ -143,6 +143,7 @@
                 if model.safeInsets != window.safeAreaInsets { model.safeInsets = window.safeAreaInsets }
             }
             syncAppearance()
+            model.applyWindowControls()
         }
 
         private func syncAppearanceObservation() {

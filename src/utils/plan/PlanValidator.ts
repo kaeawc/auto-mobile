@@ -62,6 +62,9 @@ function isUnvalidatedPlan(raw: unknown): raw is Plan {
 /**
  * Validates a plan structure and enforces multi-device rules.
  */
+/** Platforms a plan device may name: Android, iOS, and Apple TV (remote-driven steps only). */
+const PLAN_DEVICE_PLATFORMS: ReadonlySet<string> = new Set(["android", "ios", "tvos"]);
+
 export class PlanValidator {
   /**
    * Validates a plan and throws ActionableError if invalid.
@@ -161,7 +164,7 @@ export class PlanValidator {
         `Invalid device label: ${JSON.stringify(device.label)}. Device labels must be non-empty strings.`,
       );
     }
-    if (!device.platform || (device.platform !== "android" && device.platform !== "ios")) {
+    if (!device.platform || !PLAN_DEVICE_PLATFORMS.has(device.platform)) {
       throw new ActionableError(
         `Invalid device platform for ${device.label}: ${JSON.stringify(device.platform)}.`,
       );
@@ -472,9 +475,9 @@ export class PlanValidator {
 
   /**
    * Validates that no step authors the reserved `__lockNamespace` field
-   * (inline or under `params`). It is injected internally by PlanExecutor
-   * at runtime to scope a plan's lock state, and an authored plan must
-   * never set it: two participants authoring different truthy
+   * (inline or under `params`). PlanExecutor scopes a plan's lock state
+   * itself, passing the namespace to the step as call context (#15663), and
+   * an authored plan must never try to set it: two participants authoring different truthy
    * `__lockNamespace` values for the same lock would pass every per-lock
    * feasibility check yet wait in separate namespaced barriers/critical
    * sections at runtime until timeout, since CriticalSectionCoordinator

@@ -188,7 +188,11 @@ export class NativeAndroidSnapshotResetPort implements AndroidSnapshotResetPort 
             clockChangedByUs: true,
             rootedByUs: root.rootedByUs,
           },
-          { hostClock: this.dependencies.timer, invalidate: this.dependencies.invalidate },
+          {
+            hostClock: this.dependencies.timer,
+            invalidate: this.dependencies.invalidate,
+            mutationSignal: signal,
+          },
         );
       },
     );

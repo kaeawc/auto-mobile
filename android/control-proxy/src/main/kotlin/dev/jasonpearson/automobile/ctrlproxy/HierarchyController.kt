@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import android.view.Display
 import android.view.accessibility.AccessibilityNodeInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.DisplayCutoutInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
@@ -266,7 +267,11 @@ internal class HierarchyController(
       snapshotOptions: HierarchySnapshotOptions,
     ): ViewHierarchy? {
 
+      snapshotOptions.missingAccessibilityWindows = null
       if (allWindows.isNullOrEmpty() && rootNode == null) {
+        if (snapshotOptions.displayId != null && targetDisplayId != Display.DEFAULT_DISPLAY) {
+          snapshotOptions.missingAccessibilityWindows = MissingAccessibilityWindows(targetDisplayId)
+        }
         Log.w(TAG, "No windows or root node available for extraction")
         return null
       }
@@ -448,7 +453,10 @@ internal class HierarchyController(
         commandJob?.ensureActive()
         serviceScope.coroutineContext[Job]?.ensureActive()
         host.broadcastHierarchyExtractFrame(
-          HierarchyExtractErrorFrames.nullResultFrame(requestId),
+          HierarchyExtractErrorFrames.nullResultFrame(
+            requestId,
+            cancellableOptions.missingAccessibilityWindows,
+          ),
           externallyCorrelated = false,
         )
       }

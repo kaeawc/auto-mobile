@@ -23,8 +23,22 @@ const ANDROID_ONLY_FAULT_KEYS: ReadonlySet<string> = new Set([
   "faults.memoryPressure",
   "faults.readOnlyFilesystem",
   "faults.clockSkew",
+  "faults.battery",
+  "faults.corruptAppFile",
+  "faults.revokePermission",
+  "faults.lockScreen",
+  "faults.disablePackage",
+  "faults.killApp",
+  "faults.trimMemory",
+  "faults.clearPackageData",
   "vehicle.motion",
   "vehicle.nightMode",
+]);
+
+/** The shared key that covers part of an Android-only fault on the iOS Simulator. */
+const IOS_ALTERNATIVES: ReadonlyMap<string, string> = new Map([
+  ["faults.battery", "statusBar (batteryLevel, batteryState) to change the displayed battery"],
+  ["faults.revokePermission", "privacy ({ appId, service, action: 'revoke' })"],
 ]);
 
 function refusalFor(key: DeviceConditionKey): string | undefined {
@@ -32,7 +46,9 @@ function refusalFor(key: DeviceConditionKey): string | undefined {
     return `unsupported on iOS Simulator: '${key}' needs a bootloader, verified boot or a jailbroken device, and the simulator is a simulated runtime with none of them. Use real jailbroken hardware, or an Android emulator fixture.`;
   }
   if (ANDROID_ONLY_FAULT_KEYS.has(key)) {
-    return `unsupported on iOS Simulator: '${key}' drives an Android system service the simulator does not have. Use an Android device or emulator.`;
+    const alternative = IOS_ALTERNATIVES.get(key);
+    const hint = alternative === undefined ? "" : ` On the iOS Simulator, use ${alternative}.`;
+    return `unsupported on iOS Simulator: '${key}' drives an Android system service the simulator does not have. Use an Android device or emulator.${hint}`;
   }
   return undefined;
 }

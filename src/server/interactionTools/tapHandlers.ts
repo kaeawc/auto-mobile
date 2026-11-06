@@ -29,6 +29,8 @@ import type {
   TapAtElementLike,
 } from "./dependencies";
 import { hitTestSchema } from "./tapSchemas";
+import { dpadTapOnTarget, type DpadTapOnResult } from "../../features/action/DpadTapOn";
+import { defaultTapOnDpadFallbackFactory } from "./tapOnDpadFallback";
 
 /**
  * Build the tapOn success message so it says *what* it matched, not just
@@ -264,6 +266,35 @@ function resolveTapOnAction(
   return args.action ?? (hasDuration ? "longPress" : "tap");
 }
 
+/**
+ * On an Android device that declares no touchscreen (Android TV), tapOn moves D-pad focus to the
+ * match and presses enter (#16733). Undefined leaves the touch path in charge: another platform, a
+ * device with (or of unknown) touchscreen, or a request only a touch tap can serve.
+ */
+async function tapOnByDpad(
+  device: BootedDevice,
+  args: TapOnArgs,
+  action: NonNullable<TapOnArgs["action"]>,
+  { signal, deps = {} }: Pick<InteractionHandlerOptions, "signal" | "deps">,
+): Promise<DpadTapOnResult | undefined> {
+  if (device.platform !== "android") {
+    return undefined;
+  }
+  // A test that fakes the touch tap without faking this path must not probe a real device.
+  const factory =
+    deps.tapOnDpadFallbackFactory ??
+    (deps.tapOnElementFactory ? undefined : defaultTapOnDpadFallbackFactory);
+  const target = factory ? dpadTapOnTarget({ ...args, action }) : undefined;
+  if (!factory || !target) {
+    return undefined;
+  }
+  const fallback = factory(device);
+  if ((await fallback.hasTouchscreen(signal)) !== false) {
+    return undefined;
+  }
+  return await fallback.tap(target, signal);
+}
+
 export async function tapOnHandler(
   device: BootedDevice,
   args: TapOnArgs,
@@ -271,6 +302,29 @@ export async function tapOnHandler(
 ) {
   const action = resolveTapOnAction(args);
   RecompositionTracker.getInstance().recordInteraction(device.deviceId);
+  const payload: TapOnPayload =
+    (await tapOnByDpad(device, args, action, { signal, deps })) ??
+    (await tapOnByTouch(device, args, action, { progress, signal, deps }));
+  const response: StructuredToolResponse<typeof payload> & { isError?: true } =
+    createStructuredToolResponse(payload);
+  return payload.success ? response : { ...response, isError: true as const };
+}
+
+type TouchTapOnPayload = Awaited<ReturnType<typeof tapOnByTouch>>;
+
+/** Either path's payload; the D-pad one leaves the touch-only fields absent, so both share keys. */
+type TapOnPayload =
+  | TouchTapOnPayload
+  | (DpadTapOnResult & {
+      [K in Exclude<keyof TouchTapOnPayload, keyof DpadTapOnResult>]?: undefined;
+    });
+
+async function tapOnByTouch(
+  device: BootedDevice,
+  args: TapOnArgs,
+  action: NonNullable<TapOnArgs["action"]>,
+  { progress, signal, deps = {} }: InteractionHandlerOptions,
+) {
   const tapOnTextCommand = (deps.tapOnElementFactory ?? defaultTapOnElementFactory)(device);
   const result = await tapOnTextCommand.execute(
     {
@@ -312,10 +366,7 @@ export async function tapOnHandler(
         args.selector.text ?? args.selector.textAny?.[0],
       )}${result.warnings?.length ? `. Warning: ${result.warnings.join("; ")}` : ""}`
     : `Failed to tap: ${result.error || "unknown error"}${searchSummary ? ` (${searchSummary})` : ""}`;
-  const payload = { message, observation: result.observation, ...result };
-  const response: StructuredToolResponse<typeof payload> & { isError?: true } =
-    createStructuredToolResponse(payload);
-  return result.success ? response : { ...response, isError: true as const };
+  return { message, observation: result.observation, ...result };
 }
 
 /**

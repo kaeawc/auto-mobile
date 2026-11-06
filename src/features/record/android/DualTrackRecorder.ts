@@ -17,11 +17,7 @@ import { defaultAdbClientFactory } from "../../../utils/android-cmdline-tools/Ad
 import { discoverInputNodes } from "./InputNodeDiscovery";
 import { queryDensity, queryDisplaySize } from "./AxisRanges";
 import { normalizedAxis } from "../normalizedAxis";
-import {
-  ROTATION_UNKNOWN_CAVEAT,
-  ScreenGeometryTimeline,
-  followWithPenTimelines,
-} from "./ScreenGeometryTimeline";
+import { ROTATION_UNKNOWN_CAVEAT, ScreenGeometryTimeline } from "./ScreenGeometryTimeline";
 import {
   createAdbGeometryProbe,
   DisplayGeometryTracker,
@@ -30,7 +26,9 @@ import {
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { LONG_PRESS_MIN_MS, LONG_PRESS_MAX_MS } from "../../action/tapAtGesture";
 import { GetEventReader } from "./GetEventReader";
+import { KernelTimeLineMerge } from "./KernelTimeLineMerge";
 import { PenHotplugReader } from "./PenHotplugReader";
+import { createPenGestureReader } from "./createPenGestureReader";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 
@@ -695,6 +693,7 @@ export class DualTrackRecorder {
       caveats,
     );
     this.geometry = new DisplayGeometryTracker(timeline, probe, this.timer);
+    const lineMerge = new KernelTimeLineMerge({ timer: this.timer });
     const primary = new GetEventReader({
       adb,
       touchNode: node,
@@ -702,33 +701,24 @@ export class DualTrackRecorder {
       scaler: timeline,
       density,
       timer: this.timer,
+      lineMerge,
     });
     const reader = new PenHotplugReader({
       adb,
       primary: { node, reader: primary },
       penNodes: touch ? pen : pen.slice(1),
-      createPenReader: (penNode) => {
-        const [{ scaler, stopFollowing }] = followWithPenTimelines(
-          timeline,
-          [penNode],
-          { rotation, display },
-          { startedAt: this.timer.now(), caveats },
-        );
-        const penReader = new GetEventReader({
+      createPenReader: (penNode) =>
+        createPenGestureReader({
           adb,
-          touchNode: penNode,
-          scaler,
+          penNode,
+          timeline,
+          rotation,
+          display,
+          caveats,
           density,
           timer: this.timer,
-        });
-        return {
-          start: (onGesture, onError) => penReader.start(onGesture, onError),
-          stop: () => {
-            penReader.stop();
-            stopFollowing();
-          },
-        };
-      },
+          lineMerge,
+        }),
     });
     return withTimelineGeometry(reader, timeline, this.timer);
   }

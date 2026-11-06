@@ -1,5 +1,5 @@
-import { ActionableError } from "../../../models";
 import type { DeviceFrame, DeviceFramePanel } from "./deviceFrames";
+import { PrototypeWebInputError } from "./prototypeWebInputError";
 import type { WebOrientation } from "./webFrame";
 
 /**
@@ -65,7 +65,7 @@ export function frameInPosture(frame: DeviceFrame, posture?: string): WebPosture
   const entry = frame.postures.find((candidate) => candidate.posture === chosen);
   if (!entry) {
     const valid = framePostures(frame);
-    throw new ActionableError(
+    throw new PrototypeWebInputError(
       valid.length === 0
         ? `Device frame "${frame.id}" has no postures; omit posture.`
         : `Device frame "${frame.id}" has no posture "${chosen}". Valid postures: ${valid.join(", ")}`,

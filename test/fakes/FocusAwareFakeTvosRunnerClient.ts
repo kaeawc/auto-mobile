@@ -14,6 +14,8 @@ interface CapturedNode {
 /** Moves only captured grid nodes, deriving neighbours from their captured frames. */
 export class FocusAwareFakeTvosRunnerClient extends FakeTvosRunnerClient {
   readonly buttons: CapturedNode[] = [];
+  /** Every captured node, for tests that change content outside the grid. */
+  readonly nodes: CapturedNode[] = [];
   ignorePresses = false;
   readonly blockedActions = new Set<string>();
   afterPress?: () => void;
@@ -22,6 +24,7 @@ export class FocusAwareFakeTvosRunnerClient extends FakeTvosRunnerClient {
     const tree = structuredClone(capture.data);
     super(tree);
     const visit = (node: CapturedNode): void => {
+      this.nodes.push(node);
       if (/^B\d\d$/.test(node["resource-id"])) {
         this.buttons.push(node);
       }

@@ -18,7 +18,9 @@
     "reservedEmail": "^[A-Za-z0-9._%+-]+@(?:[A-Za-z0-9-]+\\.)*(?:example\\.test|example\\.com|[A-Za-z0-9-]+\\.invalid)$(?![\\s\\S])",
     "mediaUrl": "^https?://[^\\u0000-\\u0020\\u007F-\\u009F]+$(?![\\s\\S])",
     "decimalAmount": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,2})?$(?![\\s\\S])",
-    "isoPeriod": "^P[1-9][0-9]{0,2}[DWMY]$(?![\\s\\S])"
+    "isoPeriod": "^P[1-9][0-9]{0,2}[DWMY]$(?![\\s\\S])",
+    "webViewUrl": "^https://[^\\u0000-\\u0020\\u007F-\\u009F]+$(?![\\s\\S])",
+    "webOrigin": "^https://[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*(?::(?!443(?![\\s\\S]))(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?$(?![\\s\\S])"
   },
   "limits": {
     "MIN_PROTOTYPE_TIMER_MS": 100,
@@ -91,7 +93,19 @@
     "MAX_PROTOTYPE_KEYFRAME_NODES": 16,
     "MAX_PROTOTYPE_MEDIA_PLAYERS": 4,
     "MAX_PROTOTYPE_VIDEO_NODES": 64,
-    "MAX_PROTOTYPE_ACTIVE_DECODERS": 3
+    "MAX_PROTOTYPE_ACTIVE_DECODERS": 3,
+    "MAX_PROTOTYPE_LOOPS": 8,
+    "MAX_PROTOTYPE_NOTIFICATION_CHANNELS": 8,
+    "MAX_PROTOTYPE_NOTIFICATION_ACTIONS": 3,
+    "MAX_PROTOTYPE_NOTIFICATION_ID_LENGTH": 128,
+    "MAX_PROTOTYPE_NOTIFICATION_TITLE_LENGTH": 128,
+    "MAX_PROTOTYPE_NOTIFICATION_BODY_LENGTH": 1024,
+    "MAX_PROTOTYPE_NOTIFICATION_DATA_BYTES": 1024,
+    "MAX_PROTOTYPE_NOTIFICATION_REPLY_BYTES": 1024,
+    "MAX_PROTOTYPE_NOTIFICATION_BYTES": 4096,
+    "MAX_PROTOTYPE_NOTIFICATION_BADGE": 9999,
+    "MAX_PROTOTYPE_NOTIFICATIONS_ACTIVE": 24,
+    "MAX_PROTOTYPE_NOTIFICATION_UPDATES_PER_SECOND": 4
   },
   "definitions": {
     "authAccount": {
@@ -3580,6 +3594,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -3863,6 +3884,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -4139,6 +4167,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -4388,6 +4423,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -4660,6 +4702,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -4924,6 +4973,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -5210,6 +5266,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           },
           "exactlyOne": ["text", "spans"]
@@ -5489,6 +5552,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -5760,6 +5830,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -5982,6 +6059,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -6360,6 +6444,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           },
           "dependents": {
@@ -6625,6 +6716,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -6887,6 +6985,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -7136,6 +7241,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -7407,6 +7519,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -7654,6 +7773,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -7918,6 +8044,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -8203,6 +8336,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -8451,6 +8591,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -8722,6 +8869,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -8965,6 +9119,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -9218,6 +9379,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -9459,6 +9627,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -9731,6 +9906,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -9962,6 +10144,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -10190,6 +10379,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -10434,6 +10630,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -10707,6 +10910,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -10949,6 +11159,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -11202,6 +11419,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -11472,6 +11696,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -11726,6 +11957,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -12015,6 +12253,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -12316,6 +12561,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -12584,6 +12836,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           },
           "binding": true
@@ -12845,6 +13104,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -13116,6 +13382,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -13408,6 +13681,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -13615,6 +13895,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -13880,6 +14167,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -14154,6 +14448,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -14410,6 +14711,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -14730,6 +15038,13 @@
                 "name": "keyframes"
               },
               "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
             }
           }
         },
@@ -14945,6 +15260,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             }
@@ -15169,6 +15491,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             },
@@ -15466,6 +15795,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             },
@@ -15788,10 +16124,24 @@
               },
               "optional": true
             },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
+            },
             "mapStyle": {
               "rule": {
                 "kind": "enum",
                 "values": ["plain", "streets"]
+              },
+              "optional": true
+            },
+            "backend": {
+              "rule": {
+                "kind": "enum",
+                "values": ["auto", "google", "maplibre"]
               },
               "optional": true
             },
@@ -15859,6 +16209,309 @@
                     "optional": false
                   }
                 }
+              },
+              "optional": true
+            }
+          }
+        },
+        "webView": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["webView"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "enum",
+                    "values": [
+                      "none",
+                      "fade",
+                      "expand",
+                      "slide",
+                      "slideStart",
+                      "slideEnd",
+                      "scale",
+                      "blurReplace"
+                    ]
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "type": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [
+                            "none",
+                            "fade",
+                            "expand",
+                            "slide",
+                            "slideStart",
+                            "slideEnd",
+                            "scale",
+                            "blurReplace"
+                          ]
+                        },
+                        "optional": false
+                      },
+                      "delayMs": {
+                        "rule": {
+                          "kind": "number",
+                          "integer": true,
+                          "min": 0,
+                          "max": 600
+                        },
+                        "optional": true
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
+              },
+              "optional": true
+            },
+            "url": {
+              "rule": {
+                "kind": "string",
+                "pattern": "webViewUrl",
+                "max": 2048
+              },
+              "optional": false
+            },
+            "allowedOrigins": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "string",
+                  "pattern": "webOrigin",
+                  "max": 256
+                },
+                "min": 1,
+                "max": 8,
+                "unique": true
+              },
+              "optional": false
+            },
+            "javaScript": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
+            },
+            "navigationStateKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "titleKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "canGoBackKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "onNavigate": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "onBlockedNavigation": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
               },
               "optional": true
             }
@@ -16083,6 +16736,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             },
@@ -16326,6 +16986,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "keyframes"
+              },
+              "optional": true
+            },
+            "attentionLoop": {
+              "rule": {
+                "kind": "ref",
+                "name": "loop"
               },
               "optional": true
             },
@@ -23163,6 +23830,34 @@
           "optional": false
         }
       }
+    },
+    "loop": {
+      "kind": "object",
+      "fields": {
+        "effect": {
+          "rule": {
+            "kind": "enum",
+            "values": ["pulse", "spin"]
+          },
+          "optional": false
+        },
+        "periodMs": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 400,
+            "max": 4000
+          },
+          "optional": false
+        },
+        "iterations": {
+          "rule": {
+            "kind": "ref",
+            "name": "iconEffectRepeat"
+          },
+          "optional": true
+        }
+      }
     }
   },
   "eventKinds": [
@@ -24173,7 +24868,8 @@
           "value": {
             "kind": "string",
             "max": 64
-          }
+          },
+          "sensitive": true
         }
       }
     },
@@ -24215,7 +24911,8 @@
           "value": {
             "kind": "json",
             "maxDepth": 1
-          }
+          },
+          "sensitive": true
         },
         "servicesEnabled": {
           "platforms": ["android", "ios"],
@@ -24349,13 +25046,59 @@
     },
     "map": {
       "capability": "prototype_platform_map_v1",
+      "backends": {
+        "google": {
+          "capability": "prototype_platform_map_google_v1"
+        },
+        "maplibre": {
+          "capability": "prototype_platform_map_maplibre_v1"
+        }
+      },
       "calls": {},
       "events": {
         "markerTap": {
           "sensitive": false,
-          "userInitiated": true
+          "userInitiated": true,
+          "emitContext": ["markerId"]
         },
         "cameraIdle": {
+          "sensitive": false
+        }
+      },
+      "state": {}
+    },
+    "webview": {
+      "capability": "prototype_platform_webview_v1",
+      "calls": {
+        "back": {
+          "args": {
+            "node": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        },
+        "reload": {
+          "args": {
+            "node": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {
+        "navigate": {
           "sensitive": false
         }
       },
@@ -24954,7 +25697,8 @@
         "dismissed": {
           "sensitive": false
         },
-        "scheduledFired": { "sensitive": false }
+        "scheduledFired": { "sensitive": false },
+        "push": { "sensitive": false, "capability": "prototype_platform_push_v1" }
       },
       "state": {
         "badge": {
@@ -25546,6 +26290,19 @@
             "values": ["googleCast", "airplay"]
           }
         },
+        "protocols": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "array",
+            "item": {
+              "kind": "enum",
+              "values": ["googleCast", "airplay"]
+            },
+            "min": 0,
+            "max": 2,
+            "unique": true
+          }
+        },
         "player": {
           "platforms": ["android", "ios"],
           "value": {
@@ -25560,6 +26317,247 @@
             "kind": "number",
             "min": 0,
             "max": 1
+          }
+        }
+      }
+    },
+    "permissions": {
+      "capability": "prototype_platform_permissions_v1",
+      "calls": {
+        "request": {
+          "args": {
+            "names": {
+              "optional": false,
+              "value": {
+                "kind": "array",
+                "item": {
+                  "kind": "enum",
+                  "values": [
+                    "camera",
+                    "microphone",
+                    "location",
+                    "locationBackground",
+                    "notifications",
+                    "photos",
+                    "photosAdd",
+                    "contacts",
+                    "calendar",
+                    "bluetooth",
+                    "nearbyWifi",
+                    "motion",
+                    "speech"
+                  ]
+                },
+                "min": 1,
+                "max": 16,
+                "unique": true
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {
+        "changed": {
+          "sensitive": false
+        }
+      },
+      "state": {
+        "camera": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "microphone": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "location": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "locationBackground": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "notifications": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "photos": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "photosAdd": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "contacts": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "calendar": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "bluetooth": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "nearbyWifi": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "motion": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
+          }
+        },
+        "speech": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "granted",
+              "denied",
+              "blocked",
+              "notDetermined",
+              "limited",
+              "restricted",
+              "unavailable"
+            ]
           }
         }
       }
@@ -25817,6 +26815,10 @@
       "android": "material"
     },
     "map": {
+      "ios": "neutral",
+      "android": "neutral"
+    },
+    "webView": {
       "ios": "neutral",
       "android": "neutral"
     },

@@ -56,10 +56,11 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
   test("has an own handler for every typed wire variant", () => {
     // The `satisfies WebSocketMessageHandlers` clause is the union-wide compile-time check.
     // There is no separate runtime list of the union's string literals.
-    expect(Object.keys(client.testHooks.webSocketMessageHandlers())).toHaveLength(63);
+    expect(Object.keys(client.testHooks.webSocketMessageHandlers())).toHaveLength(64);
     expect(Object.hasOwn(client.testHooks.webSocketMessageHandlers(), "custom_event")).toBe(false);
     for (const type of [
       "keystore_discovery",
+      "attestation_chain",
       "keystore_reset",
       "sdk_capabilities",
       "network_event",

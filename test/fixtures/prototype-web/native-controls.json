@@ -1,0 +1,143 @@
+{
+  "id": "native-controls",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "theme": {
+    "colors": {
+      "primary": "#3f51b5"
+    }
+  },
+  "state": {
+    "volume": 0.3,
+    "brightness": 72
+  },
+  "root": {
+    "type": "column",
+    "safeAreaPadding": {
+      "edges": ["top", "bottom"],
+      "types": ["systemBars", "cutout"]
+    },
+    "style": {
+      "padding": {
+        "start": 16,
+        "end": 16,
+        "top": 16,
+        "bottom": 16
+      }
+    },
+    "children": [
+      {
+        "type": "button",
+        "label": "Filled",
+        "testTag": "filled"
+      },
+      {
+        "type": "spacer",
+        "style": {
+          "height": {
+            "dp": 8
+          }
+        }
+      },
+      {
+        "type": "button",
+        "label": "Tonal",
+        "variant": "tonal",
+        "testTag": "tonal"
+      },
+      {
+        "type": "spacer",
+        "style": {
+          "height": {
+            "dp": 8
+          }
+        }
+      },
+      {
+        "type": "button",
+        "label": "Elevated",
+        "variant": "elevated",
+        "testTag": "elevated"
+      },
+      {
+        "type": "spacer",
+        "style": {
+          "height": {
+            "dp": 8
+          }
+        }
+      },
+      {
+        "type": "button",
+        "label": "Outlined",
+        "variant": "outlined",
+        "testTag": "outlined"
+      },
+      {
+        "type": "spacer",
+        "style": {
+          "height": {
+            "dp": 8
+          }
+        }
+      },
+      {
+        "type": "button",
+        "label": "Text",
+        "variant": "text",
+        "testTag": "text"
+      },
+      {
+        "type": "spacer",
+        "style": {
+          "height": {
+            "dp": 8
+          }
+        }
+      },
+      {
+        "type": "button",
+        "label": "Glass",
+        "testTag": "glass",
+        "ios": {
+          "buttonStyle": "glassProminent"
+        }
+      },
+      {
+        "type": "spacer",
+        "style": {
+          "height": {
+            "dp": 16
+          }
+        }
+      },
+      {
+        "type": "slider",
+        "label": "Volume",
+        "stateKey": "volume",
+        "testTag": "volume",
+        "min": 0,
+        "max": 1
+      },
+      {
+        "type": "spacer",
+        "style": {
+          "height": {
+            "dp": 8
+          }
+        }
+      },
+      {
+        "type": "slider",
+        "label": "Brightness",
+        "stateKey": "brightness",
+        "min": 0,
+        "max": 100,
+        "testTag": "brightness"
+      }
+    ]
+  }
+}

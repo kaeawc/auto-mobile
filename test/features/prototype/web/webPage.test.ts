@@ -7,7 +7,6 @@ import {
   largestPinnedView,
   MAX_PROTOTYPE_WEB_RUNTIME_BYTES,
   PROTOTYPE_WEB_RUNTIME,
-  prototypeWebFrameRotates,
   type PrototypeWebPageInput,
 } from "../../../../src/features/prototype/web/webPage";
 import {
@@ -73,6 +72,10 @@ describe("prototype web page (#16346)", () => {
     expect(page.html.match(/<script/g)).toHaveLength(1);
     expect(page.html).not.toMatch(/\s(src|href)="(?!data:|#)/);
     expect(page.html).not.toMatch(/@import|url\((?!data:)/);
+  });
+
+  test("declares an empty icon, so no browser fetches /favicon.ico against the CSP (#16459)", () => {
+    expect(page.html).toContain('<link rel="icon" href="data:,">');
   });
 
   test("zooming out never enlarges a preview fitted below 50%", () => {
@@ -173,8 +176,9 @@ describe("prototype web page (#16346)", () => {
     );
   });
 
-  test("offers only rotate, zoom and pan, a variant switcher and revision history", () => {
+  test("offers only rotate, zoom and pan, the 3D toggle, a variant switcher and revision history", () => {
     expect(controls(page.html)).toEqual([
+      "3d",
       "revisions",
       "rotate",
       "screen",
@@ -196,7 +200,7 @@ describe("prototype web page (#16346)", () => {
     // The reference checkout's stack has two screens, so its revision has two views per orientation.
     expect(page.html.match(/data-view=""/g)).toHaveLength(8);
     expect(page.html).toContain(
-      '<body data-variant="a" data-revision="2" data-platform="android">',
+      '<body data-variant="a" data-revision="2" data-platform="android" data-orientation="portrait">',
     );
     expect(page.html.match(/data-view="" hidden=""/g)).toHaveLength(7);
   });
@@ -211,7 +215,7 @@ describe("prototype web page (#16346)", () => {
   });
 
   test("reports the unsupported nodes of the view shown first", () => {
-    expect(page.unsupportedNodes.map((node) => node.type)).toEqual(["progress"]);
+    expect(page.unsupportedNodes.map((node) => node.type)).toEqual(["menu"]);
   });
 
   test("drops older revisions to stay within the budget, keeping each variant's latest", () => {
@@ -241,7 +245,7 @@ describe("prototype web page (#16346)", () => {
     const pinned = buildPrototypeWebPage({ ...three, revision: 1, maxBytes });
     expect(pinned.inlinedRevisions.a).toEqual([3, 1]);
     expect(pinned.html).toContain(
-      '<body data-variant="a" data-revision="1" data-platform="android">',
+      '<body data-variant="a" data-revision="1" data-platform="android" data-orientation="portrait">',
     );
     expect(Buffer.byteLength(pinned.html)).toBeLessThanOrEqual(maxBytes);
   });
@@ -562,15 +566,33 @@ describe("prototype web page rotation (#16545)", () => {
     }
   });
 
-  test("watches and TVs never rotate", () => {
-    expect(["phone", "tablet", "foldable", "automotive"].map(prototypeWebFrameRotates)).toEqual([
-      true,
-      true,
-      true,
-      true,
-    ]);
-    expect(prototypeWebFrameRotates("watch")).toBe(false);
-    expect(prototypeWebFrameRotates("tv")).toBe(false);
+  test("a watch has only a portrait view and no rotate control (#16446)", () => {
+    const html = buildPrototypeWebPage({ ...input, frame: "wearos-small-round" }).html;
+    expect(html).not.toContain('data-control="rotate"');
+    expect(html).not.toContain('data-orientation="landscape"');
+    expect(html).toMatch(
+      /data-orientation="portrait" data-revision="2"[^>]*data-variant="a" data-view="">/,
+    );
+  });
+
+  test("a TV or car opens in landscape, its only view, with no rotate control (#16446)", () => {
+    for (const frame of ["android-tv-1080p", "apple-tv", "car-1024p-landscape"]) {
+      const html = buildPrototypeWebPage({ ...input, frame }).html;
+      expect(html).not.toContain('data-control="rotate"');
+      expect(html).not.toContain('data-orientation="portrait"');
+      expect(html).toMatch(/<body [^>]*data-orientation="landscape"/);
+      // The first view is shown: no `hidden` on the single landscape view of the latest revision.
+      expect(html).toMatch(
+        /data-orientation="landscape" data-revision="2"[^>]*data-variant="a" data-view="">/,
+      );
+    }
+  });
+
+  test("a phone keeps both orientations, opens in portrait and offers rotate", () => {
+    const html = buildPrototypeWebPage(input).html;
+    expect(html).toContain('data-control="rotate"');
+    expect(html).toMatch(/<body [^>]*data-orientation="portrait"/);
+    expect(html).toContain('data-orientation="landscape"');
   });
 
   test("tells the runtime the frame's platform and inlines the rotation rule", () => {
@@ -605,7 +627,7 @@ describe("prototype web page postures (#16445)", () => {
       "half_opened/portrait",
       "half_opened/landscape",
     ]);
-    expect(html).toContain('data-platform="android" data-posture="opened">');
+    expect(html).toContain('data-orientation="portrait" data-posture="opened" data-hinge-axis=');
     // Only the first view drops `hidden`.
     expect(html.match(/data-view=""(?! hidden)/g)).toHaveLength(1);
     expect(html).toMatch(/data-posture="opened" data-revision="1" data-variant="a" data-view="">/);
@@ -614,7 +636,7 @@ describe("prototype web page postures (#16445)", () => {
   test("the toolbar offers the frame's postures in registry order, the shown one selected", () => {
     const { html } = buildPrototypeWebPage(foldInput("flip-foldable"));
     const picker = html.match(
-      /<select aria-label="Posture" data-control="posture">(.*?)<\/select>/,
+      /<select aria-label="Layout posture" data-control="layout-posture">(.*?)<\/select>/,
     )?.[1];
     expect(picker).toBe(
       '<option value="closed">Closed</option><option value="half_opened">Half opened</option><option selected="" value="opened">Opened</option>',
@@ -662,11 +684,11 @@ describe("prototype web page postures (#16445)", () => {
   test("a frame without postures has no posture picker, attribute or posture views", () => {
     const { html } = buildPrototypeWebPage(foldInput("pixel-9"));
     expect(html).not.toContain("data-posture");
-    expect(html).not.toContain('data-control="posture"');
+    expect(html).not.toContain('<select aria-label="Layout posture"');
   });
 
   test("the runtime matches a view by variant, revision, orientation and posture", () => {
-    expect(PROTOTYPE_WEB_RUNTIME).toContain('pick("posture")');
+    expect(PROTOTYPE_WEB_RUNTIME).toContain('pick("layout-posture")');
     const key = { variant: "a", revision: "1", orientation: "portrait", posture: "closed" };
     const view = { ...key };
     expect(prototypeWebViewMatches(view, key)).toBe(true);

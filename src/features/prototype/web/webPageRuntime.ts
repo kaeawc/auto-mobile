@@ -229,14 +229,15 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
   const pick = (name: string) => doc.querySelector<HTMLElement>(`[data-control="${name}"]`);
   const variantSelect = pick("variant") as HTMLSelectElement | null;
   const screenSelect = pick("screen") as HTMLSelectElement | null;
-  const postureSelect = pick("posture") as HTMLSelectElement | null;
+  const postureSelect = pick("layout-posture") as HTMLSelectElement | null;
   const revisionList = pick("revisions");
   const zoomLabel = pick("zoom-level");
   const bodyData = (name: string) => doc.body.dataset[name] ?? "";
   const state = {
     variant: bodyData("variant"),
     revision: bodyData("revision"),
-    orientation: "portrait" as "portrait" | "landscape",
+    // The frame's first orientation: landscape for a TV or car, which never leaves it.
+    orientation: bodyData("orientation") as "portrait" | "landscape",
     posture: bodyData("posture"),
     // The first apply sets the shown view's screen.
     screen: "",

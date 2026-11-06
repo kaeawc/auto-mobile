@@ -68,6 +68,22 @@ describe("FileVisualBaselineStore (#14083)", () => {
     );
   });
 
+  test("an Apple TV profile round-trips and lists beside other profiles (#16725)", async () => {
+    const store = new FileVisualBaselineStore(() => "/root", memoryFs());
+    const tv: VisualDeviceProfile = {
+      platform: "tvos",
+      width: 3840,
+      height: 2160,
+      density: null,
+      fontScale: null,
+      theme: null,
+    };
+    const written = await store.write("home", tv, Buffer.from("tv"), "t0");
+    expect(written.path).toBe(underRoot("home", "tvos-3840x2160-dna-fna-na.png"));
+    expect((await store.read("home", tv))?.profile).toEqual(tv);
+    expect(await store.otherProfiles("home", LIGHT)).toEqual([tv]);
+  });
+
   test("a missing baseline reads as null and has no other profiles", async () => {
     const store = new FileVisualBaselineStore(() => "/root", memoryFs());
     expect(await store.read("login", LIGHT)).toBeNull();

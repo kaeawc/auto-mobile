@@ -41,6 +41,21 @@ describe("captured devicectl display info", () => {
     expect(log.messages).toEqual([]);
   });
 
+  test.each([
+    ["info-displays-duo-cover-active.json", "LCD", "LCD-1"],
+    ["info-displays-duo-inner-active.json", "LCD-1", "LCD"],
+  ])("captured %s identifies the active panel", (fixture, active, inactive) => {
+    const parsed = parseDevicectlDisplayInfo(loadDevicectlListFixture(fixture), new FakeLogger());
+    expect(parsed.kind).toBe("ok");
+    if (parsed.kind !== "ok") {
+      throw new Error("Expected captured display listing");
+    }
+    expect(
+      parsed.displays.filter((display) => display.active).map((display) => display.name),
+    ).toEqual([active]);
+    expect(parsed.displays.find((display) => display.name === inactive)?.active).toBe(false);
+  });
+
   test("captured unrelated lockstate 1001 is command-failed with shared structured failure metadata", () => {
     const capture = loadDevicectlListFixture("info-lockstate-booted-simulator-1001.json");
     const log = new FakeLogger();
@@ -159,6 +174,7 @@ describe("DERIVED in-memory mutations of captured display info", () => {
     ["pointScale", "3"],
     ["pointScale", 1e400],
     ["primary", "true"],
+    ["active", "true"],
     ["name", 1],
     ["backlightState", {}],
     ["currentOrientation", false],

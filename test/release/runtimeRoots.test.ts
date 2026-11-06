@@ -13,9 +13,12 @@ describe("runtimeRootsInSource", () => {
       export { helper } from "exported-runtime";
       const legacy = require("legacy-runtime");
       const loaded = import("dynamic-runtime");
+      const file = import.meta.resolve("@scope/resolved-runtime/package.json");
+      const other = meta.resolve("not-import-meta");
     `;
 
     expect(runtimeRootsInSource("migration.ts", source)).toEqual([
+      "@scope/resolved-runtime",
       "dynamic-runtime",
       "exported-runtime",
       "kysely",
@@ -25,14 +28,14 @@ describe("runtimeRootsInSource", () => {
 });
 
 describe("deriveRootsFromDist", () => {
-  test("uses only bundle dynamic imports and all copied-source runtime imports", () => {
+  test("uses only bundle dynamic imports and resolves, and all copied-source runtime imports", () => {
     const dist = mkdtempSync(path.join(os.tmpdir(), "automobile-runtime-roots-"));
     try {
       mkdirSync(path.join(dist, "src"), { recursive: true });
       mkdirSync(path.join(dist, "db", "migrations"), { recursive: true });
       writeFileSync(
         path.join(dist, "src/index.js"),
-        `const image = import("jimp"); const text = "import('ignored')";`,
+        `const image = import("jimp"); const text = "import('ignored')"; import.meta.resolve("glyphs/package.json");`,
       );
       writeFileSync(
         path.join(dist, "db/migrations/runtime.ts"),
@@ -43,7 +46,7 @@ describe("deriveRootsFromDist", () => {
         `// import { x } from "comment-only"; import "@img/sharp-linux-x64"; import "node:fs";`,
       );
 
-      expect(deriveRootsFromDist(dist)).toEqual(["jimp", "kysely"]);
+      expect(deriveRootsFromDist(dist)).toEqual(["glyphs", "jimp", "kysely"]);
     } finally {
       rmSync(dist, { recursive: true, force: true });
     }

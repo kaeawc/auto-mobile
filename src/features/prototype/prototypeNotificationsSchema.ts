@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
+import { MAX_PROTOTYPE_NOTIFICATION_CHANNELS } from "./prototypeNotificationLimits";
 
 /** One notification channel (#14280): an id the posts reference, a label and an importance. */
 function notificationChannelSchema() {
@@ -21,7 +22,12 @@ function notificationChannelSchema() {
  */
 export function prototypeNotificationsSchema() {
   return z
-    .object({ channels: z.array(notificationChannelSchema()).min(1).max(8) })
+    .object({
+      channels: z
+        .array(notificationChannelSchema())
+        .min(1)
+        .max(MAX_PROTOTYPE_NOTIFICATION_CHANNELS),
+    })
     .strict()
     .describe(
       "Notification channels for notifications.post (prototype_platform_notifications_v1); unique ids",

@@ -3,14 +3,26 @@ package dev.jasonpearson.automobile.desktop.core.daemon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.runComposeUiTest
+import dev.jasonpearson.automobile.desktop.core.control.DeviceControlSession
+import dev.jasonpearson.automobile.desktop.core.control.RememberDeviceControlOptions
+import dev.jasonpearson.automobile.desktop.core.control.TestSnapshotSpec
+import dev.jasonpearson.automobile.desktop.core.control.rememberDeviceControlSession
+import dev.jasonpearson.automobile.desktop.core.control.testSnapshot
+import dev.jasonpearson.automobile.desktop.domain.DevicePoint
+import java.util.concurrent.Executors
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -22,6 +34,10 @@ import kotlinx.coroutines.runBlocking
  * real handlers. The replay fails if this client sends a frame the fixture did not record (a
  * client-only wire change, as #8911 was), and the fixture drift check fails if the daemon's answer
  * changes; either way both sides are regenerated and re-checked together.
+ *
+ * Every tap goes through the production control path, `rememberDeviceControlSession` over the real
+ * `InputAllocatingClient` and the session's `DesktopInputAllocation` (#11443), so the replay also
+ * proves the client claims the device before input reaches the daemon.
  *
  * Owner decisions 2026-10-08: watching allocates nothing, the first tap allocates the device, later
  * taps refresh it, and an idle release drops back to watching without re-binding.
@@ -267,6 +283,34 @@ class DesktopWireFixtureCompositionTest {
   }
 
   @Test
+  fun `a daemon restart inside the idle window keeps the session and binding with no re-bind`() =
+    runComposeUiTest {
+      // #16973: the restarted daemon rehydrates the session, so the client must neither rotate
+      // its session nor re-send the bind; the next tap goes straight to the daemon.
+      val replay = Replay("daemon-restart-rehydrates", listOf(pixel))
+      replay.start(this)
+      repeat(replay.fixture.ticks("heartbeat-watching")) { tick() }
+      assertTrue(tap(replay, pixel.deviceId))
+      repeat(replay.fixture.ticks("heartbeat")) { tick() }
+      repeat(replay.fixture.ticks("heartbeat-after-restart")) { tick() }
+
+      replay.transport.assertReplayed(throughLabel = "heartbeat-after-restart")
+      assertEquals("emulator-5554", replay.state().boundDeviceId)
+      assertEquals(null, replay.state().idleReleasedDeviceId)
+      assertEquals(null, replay.state().releaseReason)
+
+      assertTrue(tap(replay, pixel.deviceId))
+      repeat(replay.fixture.ticks("heartbeat-after-tap")) { tick() }
+
+      replay.transport.assertReplayed()
+      assertEquals("emulator-5554", replay.state().boundDeviceId)
+      assertEquals(
+        replay.fixture.sessions.getValue("desktop-1"),
+        replay.state().sessionUuidProvider(),
+      )
+    }
+
+  @Test
   fun `a heartbeat-expired session watches under a fresh session instead of re-binding`() =
     runComposeUiTest {
       val replay = Replay("heartbeat-expiry", listOf(pixel))
@@ -333,30 +377,55 @@ class DesktopWireFixtureCompositionTest {
     }
 
   /**
-   * One pane tap as the input clients send it: allocate first, then send `input/tap` only when the
-   * allocation succeeded. Returns whether the tap was sent.
+   * One pane tap through the production control path (#11443): the host's
+   * [rememberDeviceControlSession] wraps the replay's client in the real [InputAllocatingClient],
+   * which blocks on the session's real [DesktopInputAllocation] before `input/tap` reaches the
+   * transport. The dispatch runs on the control worker thread, as it does in the app, while this
+   * thread drives the composition that completes the allocation. Returns whether the tap was sent.
+   *
+   * So a client that skips the allocation (mutant n/K2) or a control session handed the raw
+   * provider (mutant K3) sends a tap the fixture did not record, or no bind before it, and the
+   * replay diverges.
+   *
+   * No wall-clock polling decides the frame count: this thread waits, advancing no frames, until
+   * the worker has either finished the tap or is parked inside the allocation (it entered the real
+   * [DesktopInputAllocation] and is blocked on its gate). Only then does the composition get
+   * exactly [SETTLE_FRAMES] frames, as every tap did before, so the heartbeat schedule matches the
+   * fixture.
    */
   private fun ComposeUiTest.tap(replay: Replay, deviceId: String): Boolean {
-    val allocation = replay.state().requestInput(deviceId)
-    settle()
-    assertTrue(allocation.isCompleted, "allocating $deviceId did not finish")
-    val allowed = runBlocking { allocation.await() }
-    if (allowed) {
-      val tap =
-        replay
-          .client()
-          .inputTap(
-            input =
-              TapInput(
-                x = 540.0,
-                y = 1200.0,
-                platform = "android",
-                deviceId = deviceId,
-              ),
-          )
-      assertTrue(tap.success, "tap on $deviceId: ${tap.error}")
+    val outcome = replay.expectTap()
+    val entered = replay.expectAllocation()
+    assertTrue(replay.control().tap(testSnapshot(TestSnapshotSpec(deviceId = deviceId)), TAP_POINT))
+    awaitWorker("tap on $deviceId never reached the allocation or the transport") {
+      outcome.isCompleted || (entered.isCompleted && CONTROL_WORKER_THREAD.isParked())
     }
-    return allowed
+    repeat(SETTLE_FRAMES) { mainClock.advanceTimeByFrame() }
+    awaitWorker("tap on $deviceId did not finish within $SETTLE_FRAMES frames") {
+      outcome.isCompleted
+    }
+    return when (val result = runBlocking { outcome.await() }) {
+      is TapOutcome.Sent -> {
+        assertTrue(result.result.success, "tap on $deviceId: ${result.result.error}")
+        true
+      }
+      is TapOutcome.Dropped -> {
+        assertEquals(INPUT_NOT_ALLOCATED_ERROR, result.error, "tap on $deviceId")
+        false
+      }
+    }
+  }
+
+  /**
+   * Blocks this thread (advancing no frames) until the control worker reaches [done]; the deadline
+   * only turns a hang into a failure and never changes how many frames a tap gets.
+   */
+  private fun awaitWorker(failure: String, done: () -> Boolean) {
+    val deadline = System.nanoTime() + WORKER_DEADLINE_NANOS
+    while (!done()) {
+      check(System.nanoTime() < deadline) { failure }
+      Thread.onSpinWait()
+    }
   }
 
   /**
@@ -372,7 +441,33 @@ class DesktopWireFixtureCompositionTest {
    * Lets a pane change, an input or a session rotation recompose and restart the session effect.
    */
   private fun ComposeUiTest.settle() {
-    repeat(3) { mainClock.advanceTimeByFrame() }
+    repeat(SETTLE_FRAMES) { mainClock.advanceTimeByFrame() }
+  }
+
+  private sealed interface TapOutcome {
+    /** The allocation allowed the tap and the client sent it; the daemon's answer. */
+    data class Sent(val result: InputActionResult) : TapOutcome
+
+    /** The tap never reached the transport; the error the pane showed. */
+    data class Dropped(val error: String) : TapOutcome
+  }
+
+  /**
+   * The replay's daemon client as the control session's provider yields it. The fixture daemon has
+   * no observation stream, so the recorded `input/tap` frames carry no `frameContext`; this drops
+   * the snapshot's context before the frame is built. It sits UNDER the production allocation
+   * wrapper, so it cannot send anything the allocation did not allow.
+   *
+   * Like the app's per-action client (`inputSessionUuidProvider`), it resolves the desktop session
+   * when the tap is sent, not when it was enqueued: the allocation can rotate to a fresh session
+   * between the two.
+   */
+  private class FixtureInputClient(
+    private val current: () -> McpDaemonClient,
+    private val onSent: (InputActionResult) -> Unit,
+  ) : AutoMobileClient by current() {
+    override fun inputTap(input: TapInput): InputActionResult =
+      current().inputTap(input.copy(frameContext = null)).also(onSent)
   }
 
   private inner class Replay(
@@ -385,11 +480,27 @@ class DesktopWireFixtureCompositionTest {
     val panes: MutableState<List<DesktopDaemonSessionBinding>> = mutableStateOf(panes)
     val visible = mutableStateOf(true)
     private var state: DesktopDaemonSessionState? = null
+    private var control: DeviceControlSession? = null
     private var minted = 0
+    @Volatile private var pendingTap: CompletableDeferred<TapOutcome>? = null
+    @Volatile private var pendingAllocation: CompletableDeferred<Unit>? = null
+    private val controlScope = CoroutineScope(SupervisorJob() + CONTROL_WORKER)
+    // Stable across recompositions: a new provider resets the control session's queue.
+    private val inputClientProvider: () -> AutoMobileClient = {
+      FixtureInputClient(::client) { pendingTap?.complete(TapOutcome.Sent(it)) }
+    }
 
     fun state(): DesktopDaemonSessionState = requireNotNull(state)
 
+    fun control(): DeviceControlSession = requireNotNull(control)
+
     fun client(): McpDaemonClient = requireNotNull(state().session).client
+
+    fun expectTap(): CompletableDeferred<TapOutcome> =
+      CompletableDeferred<TapOutcome>().also { pendingTap = it }
+
+    fun expectAllocation(): CompletableDeferred<Unit> =
+      CompletableDeferred<Unit>().also { pendingAllocation = it }
 
     fun start(test: ComposeUiTest, shown: MutableState<Boolean> = mutableStateOf(true)) {
       test.setContent { if (shown.value) state = host() }
@@ -398,7 +509,38 @@ class DesktopWireFixtureCompositionTest {
     }
 
     @Composable
-    private fun host(): DesktopDaemonSessionState =
+    private fun host(): DesktopDaemonSessionState {
+      val session = hostSession()
+      // The session's real allocation, observed only to know when the worker has entered it.
+      val allocation = session.inputAllocation
+      val observed =
+        remember(allocation) {
+          DesktopInputAllocation { deviceId ->
+            pendingAllocation?.complete(Unit)
+            allocation.awaitInputAllowed(deviceId)
+          }
+        }
+      control =
+        rememberDeviceControlSession(
+          session.copy(inputAllocation = observed),
+          RememberDeviceControlOptions(
+            scope = controlScope,
+            clientProvider = inputClientProvider,
+            platform = { "android" },
+            nowMs = { 1_000L },
+            publishError = { error ->
+              if (error != null) pendingTap?.complete(TapOutcome.Dropped(error))
+            },
+            streamingEnabled = false,
+            uiContext = testDispatcher,
+            ioDispatcher = CONTROL_WORKER,
+          ),
+        )
+      return session
+    }
+
+    @Composable
+    private fun hostSession(): DesktopDaemonSessionState =
       rememberDesktopDaemonSession(
         DesktopDaemonSessionOptions(
           socketPath = "in-memory",
@@ -418,5 +560,22 @@ class DesktopWireFixtureCompositionTest {
   private companion object {
     const val HEARTBEAT_MS = 2_000L
     const val FRAME_MS = 16L
+    const val SETTLE_FRAMES = 3
+    val WORKER_DEADLINE_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(10)
+    val TAP_POINT = DevicePoint(x = 540, y = 1200, inBounds = true)
+
+    /** The control session's dispatch thread: the app runs input off the UI thread too. */
+    val CONTROL_WORKER_THREAD = java.util.concurrent.atomic.AtomicReference<Thread?>(null)
+    val CONTROL_WORKER =
+      Executors.newSingleThreadExecutor { runnable ->
+          Thread(runnable, "wire-replay-control")
+            .apply { isDaemon = true }
+            .also { CONTROL_WORKER_THREAD.set(it) }
+        }
+        .asCoroutineDispatcher()
+
+    /** The worker is parked: inside the allocation, that is its gate wait. */
+    fun java.util.concurrent.atomic.AtomicReference<Thread?>.isParked(): Boolean =
+      get()?.state.let { it == Thread.State.WAITING || it == Thread.State.TIMED_WAITING }
   }
 }

@@ -10,9 +10,12 @@ import {
   isWithin,
   matchedSourceNode,
 } from "../utility/ElementResolver";
+import { normalize as normalizeMatchText } from "../utility/ElementResolverMatching";
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
 import type { ResolverSelector } from "../../models/elementSelectorSchemas";
 import { normalizeQuotes } from "../utility/TextMatcher";
+import { hasVisibleScreenPart, screenSizeForOffscreenCheck } from "../utility/ElementGeometry";
+import type { ScreenSize } from "../../models/ScreenSize";
 
 const waitHierarchyProjection = new SearchableHierarchy();
 
@@ -137,10 +140,12 @@ function ownsSelectorText(
   if (!selected) {
     return false;
   }
-  const query = normalizeQuotes(text).toLowerCase();
-  return Object.values(selected.textSources).some((value) =>
-    normalizeQuotes(value).toLowerCase().includes(query),
-  );
+  return Object.values(selected.textSources).some((value) => containsSelectorText(value, text));
+}
+
+/** The substring rule `narrowToSelectorText` applies to a `text` given beside `elementId`. */
+function containsSelectorText(value: string, text: string): boolean {
+  return normalizeQuotes(value).toLowerCase().includes(normalizeQuotes(text).toLowerCase());
 }
 
 /**
@@ -270,15 +275,182 @@ function textWaitCandidates(
   );
 }
 
-function boundedChosenAncestor(result: ElementResolution, source: SearchableEntry) {
-  const chosen = result.chosen;
-  if (!chosen?.bounds || !chosen.element || !result.snapshotNodes) {
+/**
+ * The bounded node that stands in for an unbounded `source`: `target`, the match `source` belongs
+ * to, when it is bounded and `source` is `target` or sits within it.
+ */
+function boundedTargetAncestor(
+  result: ElementResolution,
+  source: SearchableEntry,
+  target: SearchableEntry | null | undefined,
+) {
+  if (!target?.bounds || !target.element || !result.snapshotNodes) {
     return undefined;
   }
-  return chosen === source || isWithin(source, chosen, result.snapshotNodes) ? chosen : undefined;
+  return target === source || isWithin(source, target, result.snapshotNodes) ? target : undefined;
 }
 
-function boundedMatchedSource(result: ElementResolution | undefined, selector: ConditionSelector) {
+/**
+ * Whether `source` matched the selector text only through text an off-screen hoisted
+ * descendant contributes to (#17007). Such a composite label ("7:00 Alarm" from a visible
+ * " Alarm" row and an off-screen "7:00" child) does not show the text, so a wait must not
+ * accept it. Text the node carries itself, a label folded only from visible descendants and
+ * a visible descendant's own label still match. Selector resolution for actions is unchanged.
+ */
+function matchesOnlyThroughOffScreenHoist(
+  source: SearchableEntry,
+  selector: ConditionSelector,
+  { matchMode, screenSize }: HoistCheck,
+): boolean {
+  const hoisted = source.hoistedSources ?? [];
+  const visible = (part: SearchableEntry) => hasVisibleScreenPart(part.bounds, screenSize);
+  if (hoisted.every(visible)) {
+    return false;
+  }
+  const texts = visibleBackedTexts(source, visible, { selector, matchMode });
+  return !matchesAnyText(texts, selector, matchMode);
+}
+
+interface HoistCheck {
+  matchMode: MatchMode;
+  screenSize: ScreenSize | undefined;
+}
+
+/**
+ * The texts `source` is searchable by that no off-screen hoisted descendant contributes to: its
+ * own captured text (also trimmed), its composed label when a visible descendant supplies the
+ * folded part, and the label of each visible hoisted descendant.
+ */
+function visibleBackedTexts(
+  source: SearchableEntry,
+  visible: (part: SearchableEntry) => boolean,
+  comparison: { selector: ConditionSelector; matchMode: MatchMode },
+): string[] {
+  const labelBacked = foldedPartIsVisible(source, visible, comparison);
+  const own = Object.values(source.textSources);
+  return [
+    ...own,
+    // The resolver also searches the row's trimmed own text (" Alarm" as "Alarm").
+    ...own.map((value) => value.trim()),
+    ...(labelBacked && source.displayedLabel !== undefined ? [source.displayedLabel] : []),
+    ...(source.hoistedSources ?? []).flatMap((part) =>
+      visible(part) && part.label !== undefined ? [part.label] : [],
+    ),
+  ];
+}
+
+/**
+ * Whether a visible descendant supplies the part folded into `source`'s label. The fold keeps one
+ * of the parts that differ only in whitespace (" 7:00" and "7:00 "), and the resolver normalizes
+ * the composed label the same way for each (#17026), so any visible descendant whose label is
+ * equivalent under the selector's normalization supplies it. Regex and `elementId` text keep
+ * whitespace, so there only a label that differs at most in quotes and case is equivalent; a
+ * regex wait folds case the way its own pattern does (#17044).
+ */
+function foldedPartIsVisible(
+  source: SearchableEntry,
+  visible: (part: SearchableEntry) => boolean,
+  { selector, matchMode }: { selector: ConditionSelector; matchMode: MatchMode },
+): boolean {
+  const folded = source.hoistedLabelSources?.[0]?.label;
+  if (folded === undefined) {
+    return true;
+  }
+  const equivalentToFolded = labelEquivalence(selector, matchMode)(folded);
+  return (source.hoistedSources ?? []).some(
+    (other) => visible(other) && other.label !== undefined && equivalentToFolded(other.label),
+  );
+}
+
+/**
+ * For a folded part, whether another label is equivalent to it under the wait's comparison. A
+ * regex wait compares through a `RegExp` with the wait's flags, because non-Unicode `/i` folds
+ * case differently from `toLowerCase()` ("\u212A" lowercases to "k" but `/K/i` rejects it).
+ */
+function labelEquivalence(
+  { caseSensitive, elementId }: ConditionSelector,
+  matchMode: MatchMode,
+): (folded: string) => (label: string) => boolean {
+  if (elementId === undefined && matchMode === "regex") {
+    return (folded) => {
+      const exact = new RegExp(
+        `^${RegExp.escape(normalizeQuotes(folded))}$`,
+        caseSensitive ? "" : "i",
+      );
+      return (label) => exact.test(normalizeQuotes(label));
+    };
+  }
+  const normalize =
+    elementId !== undefined
+      ? (label: string) => normalizeQuotes(label).toLowerCase()
+      : (label: string) => normalizeMatchText(label, caseSensitive);
+  return (folded) => {
+    const part = normalize(folded);
+    return (label) => normalize(label) === part;
+  };
+}
+
+/**
+ * Whether any of `texts` satisfies the selector text the way the wait compared it. With
+ * `elementId` the resolver's match mode describes the id lookup; the text was applied by
+ * `narrowToSelectorText`'s substring rule (#17026), so that rule is used here too.
+ */
+function matchesAnyText(
+  texts: readonly string[],
+  { text, caseSensitive, elementId }: ConditionSelector,
+  matchMode: MatchMode,
+): boolean {
+  if (text === undefined) {
+    return true;
+  }
+  if (elementId !== undefined) {
+    return texts.some((value) => containsSelectorText(value, text));
+  }
+  if (matchMode === "regex") {
+    // The resolver already compiled this pattern for the same match, so it is valid here.
+    const regex = new RegExp(normalizeQuotes(text), caseSensitive ? "" : "i");
+    return texts.some((value) => regex.test(normalizeQuotes(value)));
+  }
+  const query = normalizeMatchText(text, caseSensitive);
+  return texts.some((value) => {
+    const actual = normalizeMatchText(value, caseSensitive);
+    return matchMode === "exact" ? actual === query : actual.includes(query);
+  });
+}
+
+function boundedSource(
+  result: ElementResolution,
+  source: SearchableEntry,
+  target: SearchableEntry | null | undefined,
+) {
+  return source.bounds && source.element ? source : boundedTargetAncestor(result, source, target);
+}
+
+/**
+ * The screen size the plain `waitFor` judges visibility against: capture metadata first,
+ * then the observation's size. Unknown leaves every bounded source eligible.
+ */
+function waitScreenSize(observation: ObserveResult): ScreenSize | undefined {
+  return observation.viewHierarchy
+    ? screenSizeForOffscreenCheck(observation.viewHierarchy, {
+        observationScreenSize: observation.screenSize,
+        display: observation.viewHierarchy,
+      })
+    : undefined;
+}
+
+/**
+ * The bounded source a positive wait accepts. It needs a visible part on screen, as in the plain
+ * `waitFor` (#17023), and must not match only through a hoisted label with an off-screen
+ * contributor (#17007). An unscoped wait then takes any other matched source that qualifies, so
+ * a second visible match still counts. A scoped wait (index or selection strategy) keeps the
+ * resolver's single choice. `disappear` negates this, so a source that fails it counts as gone.
+ */
+function boundedMatchedSource(
+  result: ElementResolution | undefined,
+  selector: ConditionSelector,
+  screenSize: ScreenSize | undefined,
+) {
   if (!result) {
     return undefined;
   }
@@ -286,10 +458,26 @@ function boundedMatchedSource(result: ElementResolution | undefined, selector: C
   if (!source) {
     return undefined;
   }
-  if (source.bounds && source.element) {
-    return source;
+  const check = { matchMode: result.matchMode, screenSize };
+  const accepted = (node: SearchableEntry, target: SearchableEntry | null) => {
+    if (matchesOnlyThroughOffScreenHoist(node, selector, check)) {
+      return undefined;
+    }
+    const bounded = boundedSource(result, node, target);
+    return bounded && hasVisibleScreenPart(bounded.bounds, screenSize) ? bounded : undefined;
+  };
+  const chosen = accepted(source, result.chosen);
+  if (chosen || usesScopedWait(selector)) {
+    return chosen;
   }
-  return boundedChosenAncestor(result, source);
+  // Each alternative is judged against its own match's target, not the resolver's choice (#17042).
+  return result.matches
+    .flatMap(({ sourceNodes, node }) =>
+      (sourceNodes ?? [node]).map((other) => ({ other, target: node })),
+    )
+    .filter(({ other }) => other !== source)
+    .map(({ other, target }) => accepted(other, target))
+    .find((other) => other !== undefined);
 }
 
 export function appear(
@@ -311,7 +499,7 @@ export function appear(
       result,
       fallback: sources.flatMap((node) => (node.element ? [node.element] : [])),
     });
-    const source = boundedMatchedSource(result, selector);
+    const source = boundedMatchedSource(result, selector, waitScreenSize(observation));
     return {
       matched: Boolean(source),
       matchedElement: source?.element,
@@ -339,7 +527,10 @@ export function disappear(
     if (failure) {
       return failure;
     }
-    return { matched: !boundedMatchedSource(result, selector), candidates: elements(result) };
+    return {
+      matched: !boundedMatchedSource(result, selector, waitScreenSize(observation)),
+      candidates: elements(result),
+    };
   };
 }
 

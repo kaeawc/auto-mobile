@@ -645,6 +645,18 @@
       }
     },
     {
+      "name" : "accessibility_focus_result",
+      "wire" : {
+        "error" : "VoiceOver is off",
+        "errorCode" : "voiceover_off",
+        "requestId" : "fixture-request-id",
+        "success" : false,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "accessibility_focus_result"
+      }
+    },
+    {
       "name" : "magic_tap_result",
       "wire" : {
         "available" : true,
@@ -717,6 +729,40 @@
           "reason" : "stale_observation",
           "status" : "rejected"
         },
+        "success" : false,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "sdk_action_result"
+      }
+    },
+    {
+      "name" : "sdk_observation_multi_scene",
+      "wire" : {
+        "available" : true,
+        "error" : "The app has 2 connected scenes (scene-a, scene-b). SDK observation needs one scene; XCTest does not stand in for this result.",
+        "failure" : "multi_scene",
+        "requestId" : "fixture-request-id",
+        "scenes" : [
+          "scene-a",
+          "scene-b"
+        ],
+        "success" : false,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "sdk_observation_result"
+      }
+    },
+    {
+      "name" : "sdk_action_multi_scene",
+      "wire" : {
+        "available" : true,
+        "error" : "The app has 2 connected scenes (scene-a, scene-b). SDK observation needs one scene; XCTest does not stand in for this result.",
+        "failure" : "multi_scene",
+        "requestId" : "fixture-request-id",
+        "scenes" : [
+          "scene-a",
+          "scene-b"
+        ],
         "success" : false,
         "timestamp" : 1700000000000,
         "totalTimeMs" : 17,
@@ -1419,6 +1465,7 @@
   ],
   "responseTypes" : [
     "accessibility_audit_result",
+    "accessibility_focus_result",
     "action_result",
     "appearance_result",
     "append_text_result",

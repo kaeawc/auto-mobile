@@ -479,53 +479,6 @@ jobs:
             AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "300"
           command: bash scripts/test-ts.sh stress
 
-  linux-bats-tests:
-    executor: linux
-    steps:
-      - checkout_without_lfs
-      - run:
-          name: "Install BATS and ShellCheck"
-          command: |
-            git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
-            test "$(git -C /tmp/bats-core rev-parse HEAD)" = "eb7f42f8d608ac693d7a4b67474f6714ea68cfc5"
-            sudo /tmp/bats-core/install.sh /usr/local
-            command -v shellcheck >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y shellcheck; }
-      - run:
-          name: "Install yq and ripgrep"
-          # Several wiring tests require mikefarah yq >= 4.49.1 and skip or fail
-          # without it; the GitHub runner image ships both yq and ripgrep.
-          command: |
-            mkdir -p "${HOME}/.local/bin"
-            curl -fsSL -o "${HOME}/.local/bin/yq" https://github.com/mikefarah/yq/releases/download/v4.49.2/yq_linux_amd64
-            chmod +x "${HOME}/.local/bin/yq"
-            bash .github/actions/setup-ripgrep/install-ripgrep.sh --install-dir "${HOME}/.local/bin"
-            echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${BASH_ENV}"
-      - install_bun
-      - run:
-          name: "Install Bun dependencies"
-          command: |
-            bash scripts/ci/install-bun-deps.sh
-            echo "export PATH=\"${PWD}/node_modules/.bin:\${PATH}\"" >> "${BASH_ENV}"
-      - run:
-          name: "Run BATS Unit Tests"
-          environment:
-            AUTOMOBILE_BATS_MAX_FILE_SECONDS: "240"
-            AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS: "420"
-          command: |
-            mkdir -p ci-logs
-            scripts/ci/run-bats.sh unit 2>&1 | tee ci-logs/bats-unit.log
-      - run:
-          name: "Run BATS Integration Tests"
-          command: scripts/ci/run-bats.sh integration
-      - store_artifacts:
-          when: always
-          path: ci-logs
-          destination: ci-logs
-      - store_artifacts:
-          when: always
-          path: scratch/bats-unit-joblog.tsv
-          destination: bats-unit-joblog/bats-unit-joblog.tsv
-
   # ── Post-merge (formerly merge.yml) and nightly sweeps ──────────────────────
   # Generate + drift-check + build every XcodeGen project. Post-merge it replaces
   # merge.yml's "Generate Xcode Projects" and "Build Xcode Projects"; nightly it is
@@ -941,7 +894,6 @@ workflows:
       - linux-node-host-integration-tests:
           requires:
             - linux-fast-validation
-      - linux-bats-tests
 
   # PR path: exactly one macOS job (#11010). When `run-ios` is false (no iOS
   # changes) the workflow has no jobs and no macOS executor is used.

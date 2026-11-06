@@ -26,6 +26,14 @@ core count, so the executor pins `AUTOMOBILE_UNIT_TEST_WORKERS` and
 ShellCheck 0.9.0 (the version the shell validators baseline) and Ruby (the
 dependabot validator).
 
+## Not mirrored
+
+`bats-tests` stays on GitHub only. The suite depends on the GitHub runner image's
+tool versions (jq, yq, ShellCheck, Android and Xcode stubs, timing-sensitive
+files sized for that runner), and on the CircleCI Docker image about thirty files
+fail on tool differences or exceed their time caps. Mirroring it needs a
+purpose-built image.
+
 ## Differences from the GitHub jobs
 
 - No change detection: each job always runs its full set, where GitHub gates

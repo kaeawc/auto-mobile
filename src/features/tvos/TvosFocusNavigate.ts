@@ -1,9 +1,8 @@
 /**
  * `focusNavigate` on tvOS (#16722): the shared FocusNavigate loop, observing through the tvOS
  * runner's hierarchy and moving with Siri Remote directional presses (`select` presses the remote's
- * select button). The focus engine remembers
- * the last item per row and column, so the loop re-reads focus after every press instead of
- * planning a path from geometry.
+ * select button). The focus engine remembers the last item per row and column, so the loop
+ * re-reads focus after every press instead of planning a path from geometry.
  */
 
 import type { Element } from "../../models";

@@ -666,11 +666,6 @@ export class PlanExecutionOrchestrator {
   private async startVideoRecording(plan: Plan): Promise<VideoState> {
     const videoOutputPrefix = `test-${plan.name}-${this.timer.now()}`;
     const state: VideoState = {};
-    if (this.platform === "tvos") {
-      // Apple TV plans have no automatic recording: videoRecording is not a tvOS tool.
-      return state;
-    }
-
     try {
       this.perfLog("Starting automatic video recording for test");
       if (this.platform === "android") {

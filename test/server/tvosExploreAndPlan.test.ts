@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { Explore } from "../../src/features/navigation/Explore";
-import type { BootedDevice, PlanExecutionResult } from "../../src/models";
+import type { BootedDevice, PlanExecutionResult, VideoRecordingMetadata } from "../../src/models";
 import {
   APPLE_PLATFORM_SUPPORTED_TOOLS,
   assertToolSupportsDevicePlatform,
@@ -21,6 +21,26 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { toolJson } from "../helpers/toolResponse";
 
 isolateToolRegistry();
+
+const tvRecording: VideoRecordingMetadata = {
+  recordingId: "tv-rec",
+  filePath: "/fake/tv.mp4",
+  fileName: "tv.mp4",
+  format: "mp4",
+  sizeBytes: 1,
+  createdAt: "1970-01-01T00:00:00.000Z",
+  startedAt: "1970-01-01T00:00:00.000Z",
+  lastAccessedAt: "1970-01-01T00:00:00.000Z",
+  durationMs: 1_000,
+  config: {
+    qualityPreset: "medium",
+    targetBitrateKbps: 1000,
+    maxThroughputMbps: 1,
+    fps: 30,
+    maxArchiveSizeMb: 100,
+    format: "mp4",
+  },
+};
 
 const appleTv: BootedDevice = { platform: "tvos", deviceId: "TV-UDID", name: "Apple TV 4K" };
 
@@ -133,14 +153,16 @@ describe("executePlan on an Apple TV", () => {
     ).execute();
   }
 
-  test("replays the plan on the Apple TV without starting a video recording", async () => {
+  test("replays the plan on the Apple TV and records it like an iOS plan", async () => {
     const videoRecorder: VideoRecorder = {
-      startVideoRecording: mock(async () => {
-        throw new Error("tvOS plans are not recorded");
-      }),
-      stopVideoRecording: mock(async () => {
-        throw new Error("tvOS plans are not recorded");
-      }),
+      startVideoRecording: mock(async () => ({
+        recordingId: "tv-rec",
+        outputPath: tvRecording.filePath,
+        fileName: tvRecording.fileName,
+        startedAt: tvRecording.startedAt,
+        config: tvRecording.config,
+      })),
+      stopVideoRecording: mock(async () => ({ metadata: tvRecording, evictedRecordingIds: [] })),
     };
     const result = await run(appleTv, videoRecorder);
     expect(result).toMatchObject({
@@ -148,12 +170,35 @@ describe("executePlan on an Apple TV", () => {
       executedSteps: 2,
       platform: "tvos",
       deviceId: "TV-UDID",
+      videoFilePaths: [tvRecording.filePath],
+      videoRecordingIds: ["tv-rec"],
     });
-    expect(result.videoWarnings).toBeUndefined();
-    expect(videoRecorder.startVideoRecording).not.toHaveBeenCalled();
+    expect(videoRecorder.startVideoRecording).toHaveBeenCalledTimes(1);
+    const started = (videoRecorder.startVideoRecording as ReturnType<typeof mock>).mock
+      .calls[0]![0] as { device: BootedDevice; audio?: unknown };
+    expect(started.device).toEqual(appleTv);
+    // Apple TV recordings refuse audio, so the plan must never ask for it.
+    expect(started.audio).toBeUndefined();
     expect(execute).toHaveBeenCalledTimes(1);
     expect(execute.mock.calls[0]![2]).toBe("tvos");
     expect(execute.mock.calls[0]![3]).toBe("TV-UDID");
+  });
+
+  test("a recording that cannot start leaves a warning and the plan still runs", async () => {
+    const videoRecorder: VideoRecorder = {
+      startVideoRecording: mock(async () => {
+        throw new Error("simctl recordVideo failed");
+      }),
+      stopVideoRecording: mock(async () => {
+        throw new Error("never started");
+      }),
+    };
+    const result = await run(appleTv, videoRecorder);
+    expect(result.success).toBe(true);
+    expect(result.videoWarnings).toEqual([
+      "Failed to start automatic video recording: simctl recordVideo failed",
+    ]);
+    expect(videoRecorder.stopVideoRecording).not.toHaveBeenCalled();
   });
 
   test("still refuses a plan on an Apple Watch", () => {

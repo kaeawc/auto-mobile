@@ -40,4 +40,4 @@ neither touch nor, in general, the SDK.
 as the plan's platform hint and as a plan device's platform. Steps run through the same tool registry as on other
 platforms, so each step passes the per-platform tool gate (`applePlatformToolSupport.ts`): a
 step whose tool is not on the tvOS allowlist fails with that tool's refusal. Automatic plan video
-is skipped because no tvOS recorder exists.
+takes the iOS single-file path, which records an Apple TV through `simctl io recordVideo`.

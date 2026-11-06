@@ -198,7 +198,8 @@ every item it can focus on a screen, observes after every remote press, records 
 `tapOn`, `sendKeys`, `observe` and the app tools. A step whose tool is not in the supported-tools
 table fails the plan with the same error the tool returns on its own. A plan may declare
 `platform: tvos`, and a device in its `devices` list may use `platform: tvos`. Apple TV plans are
-not video-recorded.
+video-recorded like iOS plans; a recording that cannot start adds a `videoWarnings` entry and the
+plan still runs.
 
 ## Open a deep link
 

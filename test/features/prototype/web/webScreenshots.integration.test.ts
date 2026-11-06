@@ -233,6 +233,9 @@ async function checkDevice3d(page: Page): Promise<void> {
     await page.keyboard.press("Shift+ArrowRight");
   }
   expect((await device3dState(page)).transform).toContain("rotateY(185deg)");
+  // Each press restarts the orbit's transform transition; measure the settled pose, not a
+  // mid-turn one (#17260).
+  await finishAnimations(page);
   const centreX = () =>
     page.evaluate(() => {
       const box = document.querySelector("[data-view]:not([hidden]) > *")?.getBoundingClientRect();

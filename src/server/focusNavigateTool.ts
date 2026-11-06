@@ -16,7 +16,10 @@ import {
   FOCUS_NAVIGATE_STATUSES,
   FocusNavigate,
   type FocusKeyPresser,
+  type FocusNavigateOptions,
+  type FocusNavigateResult,
 } from "../features/action/FocusNavigate";
+import { tvosFocusNavigate } from "../features/tvos/TvosFocusNavigate";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { createFocusNavigateObserver } from "../features/action/FocusNavigateObserver";
 import {
@@ -93,21 +96,30 @@ export function createFocusKeyPresser(device: BootedDevice): FocusKeyPresser {
 /** `label` and `elementId` targets resolve to the element tapOn would tap. */
 const targetResolver = new SelectorDpadTargetResolver(new ResolverElementSelector());
 
+function runFocusNavigate(
+  device: BootedDevice,
+  options: FocusNavigateOptions,
+): Promise<FocusNavigateResult> {
+  if (device.platform === "tvos") {
+    return tvosFocusNavigate(device.deviceId, options, defaultTimer);
+  }
+  if (device.platform !== "android") {
+    throw new ActionableError("focusNavigate is only supported on Android and tvOS.");
+  }
+  return new FocusNavigate(
+    createFocusNavigateObserver(new RealObserveScreen(device, defaultAdbClientFactory)),
+    createFocusKeyPresser(device),
+    defaultTimer,
+  ).execute(options);
+}
+
 export const focusNavigateTool = defineDeviceTool({
   name: "focusNavigate",
   description:
-    "Move D-pad focus to an element on a focus-driven UI such as Android TV. Observes, and until the focused element matches `until` (text, contentDesc, resourceId, or label/elementId resolved to the element tapOn would tap) presses the D-pad arrow that moves toward the nearest match, or `direction` when given. When a press leaves focus unchanged, or presses in one direction keep moving focus without getting closer, the other arrows are tried so focus can leave a list or slider that traps it. Returns the path of focused elements and a status: focused, max_steps (default 30) or stuck (every arrow from the focused element was tried; two unchanged presses with `direction`). With `select`, presses enter once focused (`selected` reports whether it did); otherwise activate the result with sendKeys key enter.",
+    "Move D-pad focus to an element on a focus-driven UI such as Android TV or Apple TV. Observes, and until the focused element matches `until` (text, contentDesc, resourceId, or label/elementId resolved to the element tapOn would tap) presses the D-pad arrow (Siri Remote direction on Apple TV) that moves toward the nearest match, or `direction` when given. When a press leaves focus unchanged, or presses in one direction keep moving focus without getting closer, the other arrows are tried so focus can leave a list or slider that traps it. Returns the path of focused elements and a status: focused, max_steps (default 30) or stuck (every arrow from the focused element was tried; two unchanged presses with `direction`). With `select`, presses enter (select on Apple TV) once focused (`selected` reports whether it did); otherwise activate the result with sendKeys key enter on Android TV, or pressButton select on Apple TV.",
   input: focusNavigateInput,
   handler: async (device, args, _progress, signal) => {
-    if (device.platform !== "android") {
-      throw new ActionableError("focusNavigate is only supported on Android.");
-    }
-    const navigate = new FocusNavigate(
-      createFocusNavigateObserver(new RealObserveScreen(device, defaultAdbClientFactory)),
-      createFocusKeyPresser(device),
-      defaultTimer,
-    );
-    const result = await navigate.execute({
+    const result = await runFocusNavigate(device, {
       until: args.until,
       ...(args.direction !== undefined ? { direction: args.direction } : {}),
       ...(args.maxSteps !== undefined ? { maxSteps: args.maxSteps } : {}),

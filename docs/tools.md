@@ -58,7 +58,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🤌 <code>pinchOn</code>       | Pinch to zoom                                                                                                                                                                       |
 | 🖐️ <code>multiTouch</code>    | Simultaneous 2-5 finger tap, long press, or swipe at a screen point                                                                                                                 |
 | ⌨️ <code>sendKeys</code>      | Execute ordered typing, clear, raw-key, and semantic IME commands                                                                                                                   |
-| 🧭 <code>focusNavigate</code> | Move D-pad focus to an element on Android TV; stops `focused`, `max_steps` or `stuck`                                                                                               |
+| 🧭 <code>focusNavigate</code> | Move D-pad focus to an element on Android TV or Apple TV; stops `focused`, `max_steps` or `stuck`                                                                                   |
 | 🎛️ <code>setUIState</code>    | Set multiple form fields by desired state                                                                                                                                           |
 | 📝 <code>selectAllText</code> | Select all text in focused input                                                                                                                                                    |
 | 🔘 <code>pressButton</code>   | Press a device or navigation button                                                                                                                                                 |
@@ -180,16 +180,19 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🧾 <code>audit</code>               | Deprecated: use accessibilityAudit and performanceAudit                                                                                              |
 | 🧩 <code>setToolEnabled</code>      | Show or hide tools in discovery                                                                                                                      |
 
-## 📺 Android TV focus navigation
+## 📺 TV focus navigation
 
-`focusNavigate({ until, direction?, maxSteps?, settleMs? })` (#14947) drives focus-based UIs. It observes, and
-while the input-focused element (`focusedElement`) does not match `until` (`text`, `contentDesc` and/or `resourceId`) it
-presses the D-pad arrow toward the nearest match, or `direction` when given, then observes again. With no focused
-element or no match on screen it presses down. It returns the `path` of focused elements and a `status`: `focused`,
-`max_steps` (default 30, at most 100) or `stuck` (every direction toward the nearest match is blocked on the current element; an explicit `direction` stops after two unchanged presses). A direction that leaves focus unchanged is skipped for that element for the rest of the call, so steering tries the next-best axis. Activate the focused item
-afterwards with `sendKeys` key `enter`; Android treats `KEYCODE_ENTER` and `KEYCODE_DPAD_CENTER` both as select, so no
-separate `select` key exists. Android only; not yet verified on a TV image
-(see `docs/design-docs/plat/android/form-factors.md`).
+`focusNavigate({ until, direction?, maxSteps?, settleMs?, select? })` (#14947) drives focus-based UIs on Android TV and
+Apple TV. It observes, and while the input-focused element (`focusedElement`) does not match `until` (`text`,
+`contentDesc`, `resourceId`, or a lone `label`/`elementId` resolved to the element `tapOn` would tap) it presses the
+D-pad arrow toward the nearest match, or `direction` when given, then observes again. With no focused element or no
+match on screen it presses down. When a press leaves focus unchanged, or keeps moving focus without getting closer,
+the other arrows are tried. It returns the `path` of focused elements and a `status`: `focused`, `max_steps`
+(default 30, at most 100) or `stuck` (every arrow from the focused element was tried; an explicit `direction` stops
+after two unchanged presses). With `select: true` it presses enter once focused and reports `selected`. On Apple TV
+the arrows are Siri Remote directional presses, `select` presses the remote's select button, and focus is re-read
+after each press (see `docs/design-docs/plat/android/form-factors.md` and
+`docs/design-docs/plat/tvos/xcuitest-spike.md`).
 
 ## 📝 Notes
 

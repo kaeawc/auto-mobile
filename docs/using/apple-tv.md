@@ -40,6 +40,7 @@ unavailable runtime fails, lists the available runtimes and repeats the install 
 | `observe`           | Returns a screenshot, plus the hierarchy and `focusedElement` with a runner. |
 | `pressButton`       | Presses a Siri Remote button.                                                |
 | `tapOn`             | Moves focus to a matched element and selects it.                             |
+| `focusNavigate`     | Moves focus to a matched element; selects it only with `select: true`.       |
 | `sendKeys`          | Types text into the focused field.                                           |
 | `videoRecording`    | Records the screen; `audio` is not supported.                                |
 | `compareScreenshot` | Compares the full screen; `target` and `mask` need a runner (see below).     |
@@ -166,6 +167,13 @@ presses `select`.
   time and then up, until the match appears, for at most 60 moves.
 - No match after that search, a target that disappears, focus that stops moving, or more than 30
   moves toward the target fails the call. Observe, move closer with `pressButton`, and retry.
+
+`focusNavigate` takes the same `until`, `direction`, `maxSteps`, `settleMs` and `select`
+parameters and returns the same `path`, `status` (`focused`, `max_steps` or `stuck`) and
+`selected` as on Android TV. Directions are Siri Remote presses, and `select: true` presses the
+remote's `select` once the target is focused; without it, activate the focused element with
+`pressButton` `select`. With nothing focused it presses down first. A `label` or `elementId`
+target is matched to the element `tapOn` would select.
 
 The tvOS focus engine remembers the last focused item in each row or column, so the element a
 direction reaches can depend on where focus was before. Observe again rather than predicting focus

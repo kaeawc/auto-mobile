@@ -33,6 +33,7 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "executePlan",
     "sendKeys",
     "tapOn",
+    "focusNavigate",
     "pressButton",
     "observe",
     "installApp",

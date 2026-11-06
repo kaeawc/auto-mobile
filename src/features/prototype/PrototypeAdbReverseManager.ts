@@ -206,8 +206,8 @@ export class PrototypeAdbReverseManager {
     }
     await this.enqueue(state, async () => {
       for (const port of [...state.owned.keys()]) {
-        this.forget(state, port);
-        if (this.keptForSession(deviceId, port)) {
+        const joinedTo = this.forget(state, port);
+        if (this.keptForSession(deviceId, port) || (await this.repointed(state, port, joinedTo))) {
           continue;
         }
         // A gone device cannot answer, so a failed removal here is expected, not a warning.
@@ -302,8 +302,11 @@ export class PrototypeAdbReverseManager {
       if (holders === undefined || !holders.delete(prototypeId) || holders.size > 0) {
         continue;
       }
-      this.forget(state, port);
-      if (this.keptForSession(state.deviceId, port)) {
+      const joinedTo = this.forget(state, port);
+      if (
+        this.keptForSession(state.deviceId, port) ||
+        (await this.repointed(state, port, joinedTo))
+      ) {
         continue;
       }
       try {
@@ -380,9 +383,40 @@ export class PrototypeAdbReverseManager {
     return true;
   }
 
-  private forget(state: DeviceState, port: number): void {
+  /** Drops the port; returns the session host port it was joined at, if it was joined. */
+  private forget(state: DeviceState, port: number): number | undefined {
+    const joinedTo = state.joined.get(port);
     state.owned.delete(port);
     state.joined.delete(port);
+    return joinedTo;
+  }
+
+  /**
+   * A port joined from a session is someone else's once it no longer maps to that session's host
+   * port (re-pointed outside AutoMobile after the join), so it is left in place. A port this
+   * manager created is not re-checked; an unreadable `--list` falls back to removing, as before.
+   */
+  private async repointed(
+    state: DeviceState,
+    port: number,
+    joinedTo: number | undefined,
+  ): Promise<boolean> {
+    if (joinedTo === undefined) {
+      return false;
+    }
+    try {
+      const live = await state.adb.listReverses();
+      const kept = live.has(port) && live.get(port) !== joinedTo;
+      if (kept) {
+        logger.debug(`[prototype] reverse tcp:${port} on ${state.deviceId} was re-pointed; kept`);
+      }
+      return kept;
+    } catch (error) {
+      logger.warn(
+        `[prototype] adb reverse --list before removing tcp:${port} failed: ${errorMessage(error)}`,
+      );
+      return false;
+    }
   }
 
   /** Removes the reverse in view of the shared ownership, so a session can wait for it. */

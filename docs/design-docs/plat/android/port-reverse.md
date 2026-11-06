@@ -47,7 +47,9 @@ manager (#12530) also uses.
   ownership view (`AdbReverseOwnership`), where each answers from its own state
   whether it holds a device port and to which host port (#17253). A prototype
   joins a session's port only when `--list` shows it still mapped to the
-  session's host port; a lost one is added, a re-pointed one left alone.
+  session's host port; a lost one is added, a re-pointed one left alone, and
+  one re-pointed after the join is re-checked with `--list` and left in place
+  when the prototype releases it.
   `ensure` on a prototype-held port to the same host port joins it (status
   `present`) while it still maps where the prototype set it, and to another
   host port is a `prototype` conflict; a re-pointed one is external. A failed

@@ -259,4 +259,23 @@ describe("shared adb reverse ownership", () => {
     expect(adb.mappings.get(18705)).toBe("tcp:18705");
     expect(sessions.ownedPorts(DEVICE)).toEqual([18705, 18706]);
   });
+
+  test("a prototype's release leaves a joined port re-pointed after the join", async () => {
+    const { adb, sessions, prototypes, target, show } = setup();
+    await sessions.ensure(target(), [{ devicePort: 18705, hostPort: 18705 }]);
+    await show("p", 18705);
+    adb.mappings.set(18705, "tcp:9000");
+
+    expect((await sessions.remove(target(), [18705])).mappings[0]?.status).toBe("foreign");
+    await prototypes.release(DEVICE, "p");
+    expect(adb.mappings.get(18705)).toBe("tcp:9000");
+
+    await sessions.ensure(target(), [{ devicePort: 18706, hostPort: 18706 }]);
+    await show("q", 18706);
+    adb.mappings.set(18706, "tcp:9001");
+    expect((await sessions.remove(target(), [18706])).mappings[0]?.status).toBe("foreign");
+    await prototypes.releaseAll(DEVICE);
+    expect(adb.mappings.get(18706)).toBe("tcp:9001");
+    expect(removals(adb)).toEqual([]);
+  });
 });

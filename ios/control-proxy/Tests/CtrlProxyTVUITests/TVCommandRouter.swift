@@ -28,8 +28,8 @@ final class TVCommandRouter {
         case .host: return (application, hostId)
         case let .app(bundleId): return (XCUIApplication(bundleIdentifier: bundleId), bundleId)
         case .home:
-            return (XCUIApplication(bundleIdentifier: TVTargetResolver.homeScreenBundleId),
-                    TVTargetResolver.homeScreenBundleId)
+            let homeId = TVTargetResolver.homeScreenBundleId
+            return (XCUIApplication(bundleIdentifier: homeId), homeId)
         }
     }
 

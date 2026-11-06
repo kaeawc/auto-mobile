@@ -128,6 +128,27 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
         }
     }
 
+    func typeText(_ text: String) throws {
+        try performGesture {
+            let field = app.descendants(matching: .any).matching(NSPredicate(
+                format: "(elementType == %d OR elementType == %d OR elementType == %d) AND hasKeyboardFocus == true",
+                XCUIElement.ElementType.textField.rawValue,
+                XCUIElement.ElementType.secureTextField.rawValue,
+                XCUIElement.ElementType.searchField.rawValue
+            )).firstMatch
+            if field.exists {
+                field.typeText(text)
+                return
+            }
+            // watchOS presents a focused text field's input as a keyboard sheet that hides the field,
+            // so the field is no longer in the keyboard-focus query. Type into the presented keyboard.
+            guard app.keyboards.firstMatch.exists else {
+                throw WatchCommandError.commandFailed("No focused text field; tap the field first")
+            }
+            app.typeText(text)
+        }
+    }
+
     func home() throws {
         try performGesture { XCUIDevice.shared.press(.home) }
     }

@@ -52049,8 +52049,9 @@
           }
         },
         "platform": {
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "tvos", "visionos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",

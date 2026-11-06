@@ -2,6 +2,7 @@ import type { BootedDevice, Platform, TapOnElementOptions, TapOnElementResult } 
 import type { SendKeysCommand, SendKeysSelector, SendKeysFocusOptions } from "../action/SendKeys";
 import { tvosSendKeys } from "../tvos/TvosActions";
 import { tvosTapOn } from "../tvos/TvosFocusNavigation";
+import { watchSendKeys } from "../watch/WatchSendKeys";
 import { watchTapOn } from "../watch/WatchActions";
 import { visionosSendKeys, visionosTapOn } from "./VisionosActions";
 
@@ -28,13 +29,18 @@ export function tapOnAppleRunner(
   }
 }
 
-/** Only TV and Vision runners support typing into an already focused field. */
+/** Apple runners append text to a focused field. */
 export function sendKeysToAppleRunner(
   device: BootedDevice,
   commands: SendKeysCommand[],
   selector?: SendKeysSelector,
   options: SendKeysFocusOptions & { display?: string; signal?: AbortSignal } = {},
 ) {
-  const send = device.platform === "visionos" ? visionosSendKeys : tvosSendKeys;
+  const send =
+    device.platform === "watchos"
+      ? watchSendKeys
+      : device.platform === "visionos"
+        ? visionosSendKeys
+        : tvosSendKeys;
   return send(device.deviceId, commands, selector, options);
 }

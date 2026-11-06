@@ -6,25 +6,22 @@ name: "Prototype Web Screenshots (Advisory)"
 # against the goldens in test/fixtures/prototype-web/screenshots/.
 # Advisory, never required, and not in the green-main ruleset. Linux only: the
 # goldens are rendered by the Chromium build that the pinned playwright-core
-# installs here. On a mismatch the actual screenshots and diffs are uploaded as the
-# `prototype-web-screenshots` artifact; adopting them is copying its non-.diff PNGs
-# over the goldens (see docs/design-docs/prototype-web-renderer.md).
+# installs here. The actual screenshots and diffs are uploaded as the
+# `prototype-web-screenshots` artifact on every run; adopting them is copying its
+# top-level non-.diff PNGs over the goldens (see docs/design-docs/prototype-web-renderer.md).
+# The same run renders each spec with an Android golden chromeless and compares it
+# with that golden under a per-golden pixel budget (#16534); those screenshots and
+# diffs are under android-parity/ in the same artifact.
 on:
   pull_request:
     paths:
       - "src/features/prototype/web/**"
       - "src/features/visual/VisualDiff.ts"
       - "test/features/prototype/web/webScreenshot*"
+      - "test/features/prototype/web/webAndroidParity*"
+      - "android/control-proxy/src/test/resources/screenshots/prototype/**"
+      - "test/fixtures/prototype-spec/valid/**"
       - "test/fixtures/prototype-web/**"
-      - "test/fixtures/prototype-spec/valid/template-feed-detail.json"
-      - "test/fixtures/prototype-spec/valid/pager-indicator-dots.json"
-      - "test/fixtures/prototype-spec/valid/grid-fixed-columns-span.json"
-      - "test/fixtures/prototype-spec/valid/material-controls.json"
-      - "test/fixtures/prototype-spec/valid/component-gallery.json"
-      - "test/fixtures/prototype-spec/valid/doc-example-2.json"
-      - "test/fixtures/prototype-spec/valid/flow-basic.json"
-      - "test/fixtures/prototype-spec/valid/flow-max-lines-repeat.json"
-      - "test/fixtures/prototype-spec/valid/chart-variants.json"
       - "scripts/prototype/web-screenshots.sh"
       - ".github/workflows/prototype-web-screenshots.yml"
       - "package.json"
@@ -72,7 +69,7 @@ jobs:
         run: bash scripts/prototype/web-screenshots.sh
 
       - name: "Upload actual screenshots and diffs"
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: prototype-web-screenshots

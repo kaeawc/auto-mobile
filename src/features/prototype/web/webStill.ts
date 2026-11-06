@@ -18,7 +18,12 @@ import { prototypeDrawnPalette } from "../prototypeSeedScheme";
 import { record, type Raw } from "../prototypeTemplate";
 import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "./deviceFrames";
 import type { PrototypeIconGlyphSource } from "./webIconGlyphs";
-import { renderDeviceFrame, screenSize, type WebOrientation } from "./webFrame";
+import {
+  renderChromelessScreen,
+  renderDeviceFrame,
+  screenSize,
+  type WebOrientation,
+} from "./webFrame";
 import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
@@ -42,6 +47,11 @@ export interface PrototypeStillOptions {
   readonly nowMs?: number;
   /** A screen of the outermost stack to draw instead of its start; an unknown id draws the start. */
   readonly screen?: string;
+  /**
+   * Draws the frame's screen alone, without the device or its insets: the content path a
+   * renderer's goldens capture (#16534).
+   */
+  readonly chromeless?: boolean;
   /** Asset ids the page can inline, to their CSS slots; any other asset draws a placeholder. */
   readonly imageSlots?: ReadonlyMap<string, number>;
   /**
@@ -336,18 +346,21 @@ export function renderPrototypeStill(
   const textColor = cssColor("onSurface", scope.style) ?? (dark ? "#e6e0e9" : "#1d1b20");
   const background = screenBackground(scope.style);
   const content = placed(expanded, root, scope.layers, locale);
-  const element = renderDeviceFrame(
-    frame,
-    options.orientation ?? "portrait",
-    {
-      dark,
-      textColor,
-      background,
-      statusBarContent: stillStatusBarContent(expanded, content, background, dark),
-      ...(scope.style.textScale ? { fontSize: fontPx(14, scope.style) } : {}),
-    },
-    content,
-  );
+  const orientation = options.orientation ?? "portrait";
+  const paint = {
+    dark,
+    textColor,
+    background,
+    ...(scope.style.textScale ? { fontSize: fontPx(14, scope.style) } : {}),
+  };
+  const element = options.chromeless
+    ? renderChromelessScreen(frame, orientation, paint, content)
+    : renderDeviceFrame(
+        frame,
+        orientation,
+        { ...paint, statusBarContent: stillStatusBarContent(expanded, content, background, dark) },
+        content,
+      );
   const stack = scope.stacks?.[0];
   return {
     element,

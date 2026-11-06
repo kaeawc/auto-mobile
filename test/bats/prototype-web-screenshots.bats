@@ -18,6 +18,7 @@ setup() {
   printf 'run=%s\n' "${AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS}"
   printf 'update=%s\n' "${AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS_UPDATE}"
   printf 'engines=%s\n' "${AUTOMOBILE_PROTOTYPE_WEB_ENGINES}"
+  printf 'allow_grow=%s\n' "${AUTOMOBILE_PROTOTYPE_WEB_PARITY_ALLOW_GROW}"
 } > "${CALLS}"
 STUB
   chmod +x "${STUB_DIR}/bun"
@@ -28,10 +29,11 @@ STUB
 @test "web-screenshots: runs every engine against the goldens by default" {
   run bash "${SCRIPT}"
   [ "${status}" -eq 0 ]
-  grep -qx 'args=test test/features/prototype/web/webScreenshots.integration.test.ts' "${CALLS}"
+  grep -qx 'args=test test/features/prototype/web/webScreenshots.integration.test.ts test/features/prototype/web/webAndroidParity.integration.test.ts' "${CALLS}"
   grep -qx 'run=1' "${CALLS}"
   grep -qx 'update=0' "${CALLS}"
   grep -qx 'engines=' "${CALLS}"
+  grep -qx 'allow_grow=0' "${CALLS}"
 }
 
 @test "web-screenshots: --engine is repeatable and --update rewrites the goldens" {
@@ -53,4 +55,34 @@ STUB
   [ "${status}" -eq 2 ]
   [[ "${output}" == *"--engine needs a value"* ]]
   [ ! -e "${CALLS}" ]
+}
+
+@test "web-screenshots: the Android parity check runs only when Chromium does (#16534)" {
+  run bash "${SCRIPT}" --engine firefox --engine webkit
+  [ "${status}" -eq 0 ]
+  grep -qx 'args=test test/features/prototype/web/webScreenshots.integration.test.ts' "${CALLS}"
+  run bash "${SCRIPT}" --engine firefox --engine chromium
+  [ "${status}" -eq 0 ]
+  grep -q 'webAndroidParity.integration.test.ts' "${CALLS}"
+}
+
+@test "web-screenshots: --update --allow-grow lets a parity budget rise" {
+  run bash "${SCRIPT}" --update --allow-grow
+  [ "${status}" -eq 0 ]
+  grep -qx 'update=1' "${CALLS}"
+  grep -qx 'allow_grow=1' "${CALLS}"
+}
+
+@test "web-screenshots: --allow-grow without --update is a usage error" {
+  run bash "${SCRIPT}" --allow-grow
+  [ "${status}" -eq 2 ]
+  [[ "${output}" == *"--allow-grow needs --update"* ]]
+  [ ! -e "${CALLS}" ]
+}
+
+@test "web-screenshots: --help documents the parity budgets" {
+  run bash "${SCRIPT}" --help
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"android-parity-budgets.json"* ]]
+  [[ "${output}" == *"--allow-grow"* ]]
 }

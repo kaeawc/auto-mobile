@@ -192,12 +192,41 @@ nothing at runtime drives a browser.
   `package.json`/`bun.lock`. It is not a required check. Goldens are trusted only from that Linux
   Chromium build, whose text anti-aliasing other machines may not match, so a local run can fail on
   pixels alone; when the runner renders differently, the job uploads the
-  `prototype-web-screenshots` artifact, and adopting it means reviewing its PNGs and copying those
-  other than `*.diff.png` into the golden directory.
+  `prototype-web-screenshots` artifact on every run, and adopting it means reviewing its top-level
+  PNGs and copying those other than `*.diff.png` into the golden directory.
+
+## Android parity check
+
+`test/features/prototype/web/webAndroidParity.integration.test.ts` measures how far the still is
+from the Android renderer. For each Roborazzi golden in
+`android/control-proxy/src/test/resources/screenshots/prototype/`, `webAndroidParityCases.ts`
+either rebuilds the spec the Kotlin case renders (fixture, `night`/`notnight` mode, state
+overrides, `themeFrom` and the case's JSON edit) or lists the golden with a reason; host window
+chrome and content-sized floating captures are listed, not compared. Every compared spec is placed
+fullscreen, because the goldens draw the root and theme without the window's placement.
+
+- **Rendering.** The still is drawn `chromeless` on the `small-phone` frame (360×640 dp, the
+  goldens' `w360dp-h640dp-mdpi`, so one dp is one pixel) into a bare document with no page shell,
+  at device scale factor 1 with the same forced font as the page check. Chromeless drops the
+  bezel, bars, cutout, corner radius, safe-area insets and window background, because the goldens
+  capture the content path with no window and are transparent where nothing draws; the screenshot
+  omits the page background to match. A golden smaller than the screen is compared with the
+  screen's top-left region of its size.
+- **Budgets.** `test/fixtures/prototype-web/android-parity-budgets.json` maps each compared golden
+  to the most pixels that may differ by more than pixelmatch's 0.1 colour distance. A case fails
+  when it differs in more than its budget plus 256 pixels or 1 %, whichever is larger: hosted
+  runners do not all rasterize alike, so the same commit's counts move slightly between CI runs.
+  The allowance never reaches the golden's pixel count, so a screenshot that differs everywhere
+  fails. Budgets only shrink: `--update` lowers each to what was measured and
+  records a missing one, and raises one only with `--allow-grow`. The counts are measured by the
+  CI Chromium build; every run logs them on one `android parity diff pixels:` line. A unit test
+  keeps the case table, the skip list and the budget keys in step with the golden directory.
+- **Output.** `<golden>.png` and, when any pixel differs, `<golden>.diff.png` go to
+  `android-parity/` under the output directory, uploaded with the page check's artifact.
 
 ## Still renderer
 
-`renderPrototypeStill(spec, {frame, orientation, mode, screen, locale, textSize})` in
+`renderPrototypeStill(spec, {frame, orientation, mode, screen, locale, textSize, chromeless})` in
 `src/features/prototype/web/webStill.ts` draws the spec as a still screen and returns an element
 tree plus `unsupportedNodes` and `stack` (the outermost stack's screens in key order, its
 start and the screen drawn). It renders on

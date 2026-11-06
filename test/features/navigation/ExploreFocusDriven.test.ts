@@ -3,7 +3,11 @@ import { InputKey } from "../../../src/features/action/InputKey";
 import {
   defaultFocusSelectNavigator,
   ExploreElementActions,
+  type FocusListAdvancer,
 } from "../../../src/features/navigation/ExploreElementActions";
+import { FocusListAdvance } from "../../../src/features/action/FocusListAdvance";
+import { createFocusNavigateObserver } from "../../../src/features/action/FocusNavigateObserver";
+import type { InputKeyName } from "../../../src/features/action/InputKey";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import type { FocusNavigateOptions } from "../../../src/features/action/FocusNavigate";
 import { Explore } from "../../../src/features/navigation/Explore";
@@ -57,6 +61,13 @@ function observationOf(screen: string): ObserveResult {
     viewHierarchy: createHierarchyForTest({ hierarchy: { node }, packageName: APP }),
   });
 }
+
+/** For actions that never meet a newly discovered scrollable container. */
+const unusedListAdvancer = (): FocusListAdvancer => ({
+  execute: async () => {
+    throw new Error("no list advance expected");
+  },
+});
 
 /** A fake TV: observing shows the current screen; a D-pad select moves to the tile's screen. */
 class FakeTvApp extends FakeObserveScreen {
@@ -113,8 +124,10 @@ describe("Explore on a focus-driven TV app", () => {
   let graph: FakeNavigationGraphManager;
   let timer: FakeTimer;
   let tv: FakeTvApp;
+  let advances: { container: Element["bounds"] }[];
 
   beforeEach(async () => {
+    advances = [];
     graph = new FakeNavigationGraphManager();
     timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -128,6 +141,12 @@ describe("Explore on a focus-driven TV app", () => {
       navigationManager: graph,
       inputMode: async () => inputMode,
       focusNavigatorFactory: () => ({ execute: (options) => tv.select(options) }),
+      focusListAdvancerFactory: () => ({
+        execute: async ({ container }) => {
+          advances.push({ container });
+          return { success: false, status: "stuck", direction: "down", presses: 2, revealed: [] };
+        },
+      }),
     });
     explore.observeScreen = tv;
     return explore;
@@ -179,7 +198,7 @@ describe("Explore on a focus-driven TV app", () => {
     expect((await graph.exportGraph()).edges).toEqual([]);
   });
 
-  test("does not swipe a scrollable container in D-pad mode", async () => {
+  test("advances a scrollable container in D-pad mode instead of swiping or selecting it", async () => {
     const explore = exploreWith("dpad");
     const row: Element = {
       bounds: { left: 0, top: 0, right: 400, bottom: 100 },
@@ -188,6 +207,8 @@ describe("Explore on a focus-driven TV app", () => {
     };
     expect(await explore.performInteraction(row, observationOf("Home"))).toBe(false);
     expect(tv.selections).toEqual([]);
+    expect(advances).toEqual([{ container: row.bounds }]);
+    expect((await graph.exportGraph()).edges).toEqual([]);
   });
 
   test("validate skips a recorded swipe edge the D-pad cannot replay instead of retrying it", async () => {
@@ -267,6 +288,7 @@ describe("Explore on a focus-driven TV app", () => {
       adb: undefined,
       timer,
       focusNavigator: () => ({ execute: (options) => tv.select(options) }),
+      focusListAdvancer: unusedListAdvancer,
       runRecorded: (_toolName, _args, _observation, run) => run(),
     });
     const element: Element = {
@@ -302,6 +324,7 @@ test("validate keeps a recorded focusNavigate that did not select from pressing 
         return { success: true, status: "focused", steps: 1, path: [], message: "focused" };
       },
     }),
+    focusListAdvancer: unusedListAdvancer,
     runRecorded: (_toolName, _args, _observation, run) => run(),
   });
   const element: Element = {
@@ -323,6 +346,7 @@ test("validate replays a recorded focus walk that targets a scrollable container
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const selections: FocusNavigateOptions[] = [];
+  const advanced: Element["bounds"][] = [];
   const actions = new ExploreElementActions({
     device,
     adb: undefined,
@@ -331,6 +355,18 @@ test("validate replays a recorded focus walk that targets a scrollable container
       execute: async (options) => {
         selections.push(options);
         return { success: true, status: "focused", steps: 1, path: [], message: "focused" };
+      },
+    }),
+    focusListAdvancer: () => ({
+      execute: async ({ container }) => {
+        advanced.push(container);
+        return {
+          success: true,
+          status: "revealed",
+          direction: "right",
+          presses: 4,
+          revealed: ["app:id/tile|Show 5|"],
+        };
       },
     }),
     runRecorded: (_toolName, _args, _observation, run) => run(),
@@ -348,8 +384,11 @@ test("validate replays a recorded focus walk that targets a scrollable container
     }),
   ).toBe(true);
   expect(selections[0]).toMatchObject({ until: recorded.until, select: false });
-  // A newly discovered scrollable container is still left alone.
-  expect(await actions.focusSelectElement(rail, observationOf("Rails"))).toBeNull();
+  expect(advanced).toEqual([]);
+  // A newly discovered scrollable container is advanced through, not selected.
+  expect(await actions.focusSelectElement(rail, observationOf("Rails"))).toBe(true);
+  expect(advanced).toEqual([rail.bounds]);
+  expect(selections).toHaveLength(1);
 });
 
 describe("defaultFocusSelectNavigator", () => {
@@ -386,5 +425,147 @@ describe("defaultFocusSelectNavigator", () => {
     } finally {
       press.mockRestore();
     }
+  });
+});
+
+/**
+ * A virtualized TV list screen: five items, three rows in the hierarchy at a time. Only pressing
+ * down past the last visible row scrolls the window, so items 3 and 4 appear only on advance.
+ */
+class FakeTvListScreen extends FakeObserveScreen {
+  first = 0;
+  focus = 0;
+  readonly presses: InputKeyName[] = [];
+  private static readonly COUNT = 5;
+  private static readonly VISIBLE = 3;
+
+  private rowNode(index: number) {
+    const top = 100 + (index - this.first) * 100;
+    return {
+      $: {
+        class: "android.widget.FrameLayout",
+        text: `Item ${index}`,
+        "resource-id": `app:id/item_${index}`,
+        clickable: "true",
+        focusable: "true",
+        enabled: "true",
+        focused: index === this.focus ? "true" : "false",
+        bounds: `[0,${top}][400,${top + 100}]`,
+      },
+    };
+  }
+
+  private observation(): ObserveResult {
+    const rows = Array.from({ length: FakeTvListScreen.VISIBLE }, (_, offset) =>
+      this.rowNode(this.first + offset),
+    );
+    const list = {
+      $: {
+        class: "androidx.recyclerview.widget.RecyclerView",
+        "resource-id": "app:id/list",
+        scrollable: "true",
+        focusable: "false",
+        enabled: "true",
+        bounds: "[0,100][400,400]",
+      },
+      node: rows,
+    };
+    return createObserveResultForTest({
+      viewHierarchy: createHierarchyForTest({ hierarchy: { node: list }, packageName: APP }),
+    });
+  }
+
+  override async execute(_options?: ObserveScreenExecuteOptions): Promise<ObserveResult> {
+    return this.observation();
+  }
+
+  override async getMostRecentCachedObserveResult(): Promise<ObserveResult> {
+    return this.observation();
+  }
+
+  async press(key: InputKeyName): Promise<{ success: boolean }> {
+    this.presses.push(key);
+    if (key === "arrow_down" && this.focus < FakeTvListScreen.COUNT - 1) {
+      this.focus += 1;
+      if (this.focus >= this.first + FakeTvListScreen.VISIBLE) {
+        this.first += 1;
+      }
+    }
+    return { success: true };
+  }
+}
+
+describe("Explore through a TV list that reveals rows only on D-pad advance", () => {
+  test("advances the list and then selects a row that was not on the first screen", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const graph = new FakeNavigationGraphManager();
+    graph.setCurrentAppId(APP);
+    await graph.recordNavigationEvent({
+      destination: "Catalog",
+      source: "TEST",
+      arguments: {},
+      metadata: {},
+      timestamp: timer.now(),
+      sequenceNumber: 0,
+      applicationId: APP,
+    });
+    const screen = new FakeTvListScreen();
+    const selected: string[] = [];
+    const explore = new Explore(device, new FakeAdbExecutor(), timer, {
+      navigationManager: graph,
+      inputMode: async () => "dpad",
+      focusNavigatorFactory: () => ({
+        execute: async (options) => {
+          selected.push(options.until.elementId ?? options.until.label ?? "");
+          return { success: true, status: "focused", steps: 0, path: [], selected: true };
+        },
+      }),
+      // The real advance, over the production observer, against the fake list.
+      focusListAdvancerFactory: () =>
+        new FocusListAdvance(createFocusNavigateObserver(screen), screen, timer),
+    });
+    explore.observeScreen = screen;
+
+    await explore.execute({ packageName: APP, strategy: "breadth-first", maxInteractions: 8 });
+
+    expect(screen.presses).toContain("arrow_down");
+    expect(screen.first).toBeGreaterThan(0);
+    // Only an advance puts item 3 in the hierarchy, so selecting it proves the advance revealed it.
+    expect(selected).toContain("app:id/item_3");
+  });
+});
+
+describe("Explore cancellation in D-pad mode", () => {
+  test("a cancel while the input-mode probe is pending ends the run without waiting on it", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const graph = new FakeNavigationGraphManager();
+    graph.setCurrentAppId(APP);
+    const tv = new FakeTvApp(graph, timer);
+    await tv.navigateTo("Home");
+    const controller = new AbortController();
+    let probes = 0;
+    const explore = new Explore(device, new FakeAdbExecutor(), timer, {
+      navigationManager: graph,
+      // A traits read that never answers: only its adb timeout would end it on a device.
+      inputMode: () => {
+        probes++;
+        controller.abort();
+        return new Promise(() => {});
+      },
+      focusNavigatorFactory: () => ({ execute: (options) => tv.select(options) }),
+    });
+    explore.observeScreen = tv;
+
+    const result = (await explore.execute(
+      { packageName: APP, maxInteractions: 3 },
+      undefined,
+      controller.signal,
+    )) as ExploreResult;
+
+    expect(probes).toBe(1);
+    expect(tv.selections).toEqual([]);
+    expect(result.interactionsPerformed).toBe(0);
   });
 });

@@ -1,5 +1,17 @@
 import { shellQuote } from "../shellQuote";
+import {
+  DEVICE_LISTENERS_SCRIPT,
+  packageForUid,
+  parseDeviceListeners,
+  type DeviceListenerTable,
+} from "./deviceTcpListeners";
 import type { AdbExecutor } from "./interfaces/AdbExecutor";
+import {
+  parsePortHttpProbeOutput,
+  portHttpProbeScript,
+  type PortHttpProbeOutcome,
+  type PortHttpProbeRequest,
+} from "./portHttpProbe";
 
 /** One `adb reverse --list` row: the device-side TCP port and the host-side target. */
 export interface AdbReverseEntry {
@@ -30,12 +42,18 @@ export type PortProbeOutcome =
 export interface AdbReverseCommands {
   /** One bounded device-side connect to `127.0.0.1:<devicePort>`. */
   probe(devicePort: number): Promise<PortProbeOutcome>;
+  /** One bounded device-side HTTP GET to `127.0.0.1:<devicePort>`. */
+  httpProbe(devicePort: number, request: PortHttpProbeRequest): Promise<PortHttpProbeOutcome>;
   /** `adb reverse --list`. */
   list(): Promise<AdbReverseEntry[]>;
   /** `adb reverse [--no-rebind] tcp:<devicePort> tcp:<hostPort>`. */
   add(devicePort: number, hostPort: number, options?: { noRebind?: boolean }): Promise<void>;
   /** `adb reverse --remove tcp:<devicePort>`. Never `--remove-all`. */
   remove(devicePort: number): Promise<void>;
+  /** LISTEN sockets on device loopback or wildcard addresses, by port. */
+  listeners(): Promise<DeviceListenerTable>;
+  /** The one package installed with `uid`, or undefined (none, or a shared uid). */
+  packageForUid(uid: number): Promise<string | undefined>;
 }
 
 export const ADB_REVERSE_TIMEOUT_MS = 5000;
@@ -126,6 +144,11 @@ export function parsePortProbeOutput(stdout: string): PortProbeOutcome {
   return { kind: "unsupported", detail: detail || `exit ${exitText}` };
 }
 
+/** Host-side slack on an HTTP probe command beyond the device-side timeout: adb and process start. */
+export const PORT_HTTP_PROBE_COMMAND_SLACK_MS = 3000;
+/** Response bytes kept from an HTTP probe; a larger body fails the command, not the device. */
+const PORT_HTTP_PROBE_MAX_BUFFER = 256 * 1024;
+
 /** The adb reverse commands over a device's executor, each bounded by {@link ADB_REVERSE_TIMEOUT_MS}. */
 export function createAdbReverseCommands(
   adb: Pick<AdbExecutor, "executeCommand">,
@@ -142,6 +165,17 @@ export function createAdbReverseCommands(
       );
       return parsePortProbeOutput(result.stdout);
     },
+    async httpProbe(devicePort, request) {
+      const result = await adb.executeCommand(
+        `shell sh -c ${shellQuote(portHttpProbeScript(devicePort, request))}`,
+        {
+          timeoutMs: request.timeoutSeconds * 1000 + PORT_HTTP_PROBE_COMMAND_SLACK_MS,
+          maxBuffer: PORT_HTTP_PROBE_MAX_BUFFER,
+          noRetry: true,
+        },
+      );
+      return parsePortHttpProbeOutput(result.stdout);
+    },
     async list() {
       const result = await adb.executeCommand("reverse --list", options);
       return parseAdbReverseList(result.stdout);
@@ -152,6 +186,20 @@ export function createAdbReverseCommands(
     },
     async remove(devicePort) {
       await adb.executeCommand(`reverse --remove tcp:${devicePort}`, options);
+    },
+    async listeners() {
+      const result = await adb.executeCommand(
+        `shell sh -c ${shellQuote(DEVICE_LISTENERS_SCRIPT)}`,
+        { ...options, noRetry: true },
+      );
+      return parseDeviceListeners(result.stdout);
+    },
+    async packageForUid(uid) {
+      const result = await adb.executeCommand("shell pm list packages -U", {
+        ...options,
+        noRetry: true,
+      });
+      return packageForUid(result.stdout, uid);
     },
   };
 }

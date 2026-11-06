@@ -4,6 +4,7 @@ import { defaultPortReverseManager } from "../features/portReverse/defaultPortRe
 import { PortReverseError } from "../features/portReverse/PortReverseError";
 import {
   PortReverseManager,
+  type PortReverseProbeOption,
   type PortReverseResult,
   type PortReverseTarget,
 } from "../features/portReverse/PortReverseManager";
@@ -22,6 +23,10 @@ import {
   type AdbTransportRecoveredSignal,
 } from "../utils/android-cmdline-tools/adbTransportRecoveredSignal";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import {
+  PROBE_HOST_HEADER_PATTERN,
+  PROBE_PATH_PATTERN,
+} from "../utils/android-cmdline-tools/portHttpProbe";
 import {
   registerDeviceIncarnationListener,
   type DeviceIncarnationListener,
@@ -52,11 +57,59 @@ const portReverseInput = z.object({
     .optional()
     .describe("Required for ensure and remove; verify defaults to this session's ports"),
   probe: z
+    .union([
+      z.boolean(),
+      z
+        .object({
+          http: z
+            .object({
+              path: z
+                .string()
+                .max(512)
+                .regex(PROBE_PATH_PATTERN)
+                .describe("Request path sent from the device, e.g. /health"),
+              expectStatus: z
+                .array(z.number().int().min(100).max(599))
+                .min(1)
+                .max(16)
+                .describe("Status codes that count as reachable"),
+              hostHeader: z
+                .string()
+                .max(255)
+                .regex(PROBE_HOST_HEADER_PATTERN)
+                .optional()
+                .describe("Host header; default localhost:<devicePort>"),
+              expectBodyContains: z
+                .string()
+                .min(1)
+                .max(256)
+                .optional()
+                .describe("Text the response body must contain"),
+              timeoutMs: z
+                .number()
+                .int()
+                .min(1000)
+                .max(10000)
+                .optional()
+                .describe("Device-side wait for the response, whole seconds (default 2000)"),
+            })
+            .strict(),
+        })
+        .strict(),
+    ])
+    .optional()
+    .describe(
+      "verify only. true: connect to each mapped port from the device (about 1 s each, run " +
+        "together) and report reachable, unreachable or probe_unsupported. {http}: send a GET " +
+        "from the device through each mapping and check the status (and body); reports httpStatus " +
+        "and probeReason http_status, http_body or no_http_response when it does not match",
+    ),
+  reclaimStale: z
     .boolean()
     .optional()
     .describe(
-      "verify only: also connect to each mapped port from the device (about 1 s each, run " +
-        "together) and report reachable, unreachable or probe_unsupported",
+      "ensure only: replace a mapping no live session owns when its tcp: host port refuses a " +
+        "loopback connect (needs a session that holds the device). The result marks it reclaimed",
     ),
 });
 
@@ -116,7 +169,8 @@ async function run(
   args: {
     action: PortReverseAction;
     ports?: { devicePort: number; hostPort?: number }[];
-    probe?: boolean;
+    probe?: PortReverseProbeOption;
+    reclaimStale?: boolean;
   },
   policy: PortReversePolicy,
 ): Promise<PortReverseResult> {
@@ -131,7 +185,7 @@ async function run(
     return manager.verify(
       target,
       args.ports?.map((p) => p.devicePort),
-      { probe: args.probe === true },
+      args.probe === undefined ? undefined : { probe: args.probe },
     );
   }
   if (requests.length === 0) {
@@ -151,7 +205,7 @@ async function run(
     policy,
     requests.flatMap((r) => [r.devicePort, r.hostPort]),
   );
-  return manager.ensure(target, requests);
+  return manager.ensure(target, requests, { reclaimStale: args.reclaimStale === true });
 }
 
 export function createPortReverseHandler(
@@ -171,13 +225,13 @@ export function createPortReverseHandler(
         status: "not_applicable" as const,
       });
     }
+    const session = args.sessionUuid ?? (deps.sessionUuid ?? routedSessionUuid)();
     const target: PortReverseTarget = {
       deviceId: device.deviceId,
-      owner:
-        args.sessionUuid ??
-        (deps.sessionUuid ?? routedSessionUuid)() ??
-        SESSIONLESS_PORT_REVERSE_OWNER,
+      owner: session ?? SESSIONLESS_PORT_REVERSE_OWNER,
       adb: createAdbReverseCommands((deps.adbFactory ?? defaultAdbClientFactory).create(device)),
+      // A session-routed call runs on the device bound to that session.
+      holdsDevice: session !== undefined,
     };
     try {
       const result = await run(deps.manager, target, args, deps.policy);
@@ -213,7 +267,10 @@ const portReverseTool = defineDeviceTool({
     "server at localhost:<port>. ensure adds mappings this session owns; list, verify and remove " +
     "manage them. verify with probe:true also connects from the device to each mapped port: " +
     "reachable (the host server accepted), unreachable (probeReason closed: nothing listens on the " +
-    "host; refused; timeout) or probe_unsupported. Owned mappings lost to an adb or device restart are restored on the next call " +
+    "host; refused; timeout) or probe_unsupported; probe:{http:{path,expectStatus}} checks the " +
+    "HTTP response instead. list reports hostListening for each tcp: host " +
+    "port. ensure with reclaimStale:true replaces a stale mapping whose host port refuses. " +
+    "Conflicts carry conflictKind. list and verify report each port's deviceListener. Owned mappings lost to an adb or device restart are restored on the next call " +
     "and removed when the session ends. Ports below 1024 are refused. iOS returns not_applicable.",
   input: portReverseInput,
   options: { defaultEnabled: false, outputSchema: portReverseResultSchema },

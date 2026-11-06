@@ -70,6 +70,12 @@ export type SessionReleaseReasonLiteral =
   | "daemon-restart"
   | "expired";
 
+/**
+ * The reason the startup sweep gives a row whose daemon is no longer live: that daemon exited
+ * without handing its sessions off (`daemon-shutdown`), e.g. it was killed (#17255).
+ */
+export const UNCLEAN_DAEMON_EXIT_RELEASE_REASON: SessionReleaseReasonLiteral = "daemon-restart";
+
 /** One live idle-window end, whether a lookup or the sweep discovers it. */
 export const IDLE_WINDOW_RELEASE_REASON: SessionReleaseReasonLiteral = "cleanup-expired";
 

@@ -1068,6 +1068,39 @@ describe("HomeScreen", () => {
       );
 
       test.each([false, true])(
+        "treats the runner's not-foreground error with recorded query failures as unverified (simulator %s, #17201)",
+        async (simulator) => {
+          const { action, client } = createIosHomeScreen({
+            simulator,
+            simctl: { executeCommandArgs: async () => createExecResult("", "") },
+          });
+          // Captured on iOS 26.5 (iPhone 17 Pro simulator): the switcher dismissal raced the
+          // runner's AppSwitcherContentView query during its one-shot foreground check.
+          client.setPressHomeResult({
+            success: false,
+            totalTimeMs: 1,
+            error:
+              "Home press did not bring SpringBoard to the foreground\nRecorded command failure(s): Failed to get matching snapshot: No matches found for Element at index 3 from input {(\n    Other, identifier: 'AppSwitcherContentView',\n    Other, identifier: 'card:com.apple.Preferences:sceneID:com.apple.Preferences-default'\n)}",
+          });
+          const before = createObserveResult();
+          before.viewHierarchy = convertToViewHierarchyResult(iosSwitcherHierarchy());
+          const after = createObserveResult();
+          after.viewHierarchy = convertToViewHierarchyResult(iosHierarchy("com.apple.springboard"));
+          fakeObserveScreen.setObserveSequence([before, after]);
+          spyOn(client, "requestHierarchySync").mockImplementation(async () => ({
+            hierarchy:
+              client.getPressHomeRequestCount() === 0
+                ? iosSwitcherHierarchy()
+                : iosHierarchy("com.apple.springboard"),
+          }));
+
+          const result = await action.execute();
+          expect(result.success).toBe(true);
+          expect(client.getPressHomeRequestCount()).toBe(1);
+        },
+      );
+
+      test.each([false, true])(
         "fails when the app stays foreground after two runner presses (simulator %s)",
         async (simulator) => {
           const { action, client } = createIosHomeScreen({

@@ -6,6 +6,7 @@ import { DefaultElementParser } from "../utility/ElementParser";
 import { toSearchable } from "../utility/SearchableNode";
 import { FieldTypeDetector } from "./FieldTypeDetector";
 import type { TextActionResult } from "./SendKeys";
+import type { FocusedInputFailure } from "./sendkeys/AndroidTypingConstants";
 import {
   imeCommitSubsequenceMatches,
   imeCommitSuffixMatches,
@@ -296,7 +297,7 @@ interface ImeVerification {
   checkAbort(error?: unknown): void;
   lacksRequiredFocus(observation: ObserveResult): boolean;
   focusedText(observation: ObserveResult): string | undefined;
-  focusError: string;
+  focusError: FocusedInputFailure;
   /** A password field's value is masked, and the typed text must never appear in diagnostics. */
   passwordField?: boolean;
   /** Detects a focused password field in a read-back observation (explicit modes). */
@@ -415,7 +416,7 @@ async function verifyImeCommitReadBack(
       const context = { observedText, focusedFieldClass: focusedImeFieldClass(observation) };
       if (verification.lacksRequiredFocus(observation)) {
         return withImeFailure(
-          { ...result, success: false, partialApplication: true, error: verification.focusError },
+          { ...result, success: false, partialApplication: true, ...verification.focusError },
           text,
           "verification",
           context,

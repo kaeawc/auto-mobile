@@ -475,6 +475,11 @@ jobs:
         with:
           lfs: false
 
+      # validate_plugin.sh fails in CI without the Claude CLI (#16963).
+      - name: "Install pinned Claude Code"
+        timeout-minutes: 10
+        uses: "./.github/actions/install-claude-code"
+
       - name: "Validate Claude Plugin"
         shell: "bash"
         run: |

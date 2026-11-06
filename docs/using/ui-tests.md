@@ -165,6 +165,47 @@ without `for`. The top-level `layer` argument limits the wait to the `app` or
 
 </div>
 
+### Step expectations
+
+A step can check its own result. After the step's tool succeeds, each entry in
+its `expectations` is checked in order against a fresh observation of the same
+device. Elements are matched the same way `tapOn` matches them. The first
+expectation that does not hold fails the step, and therefore the plan. If the
+step is `optional`, the step is skipped instead and the plan continues.
+
+```yaml
+- tool: tapOn
+  id: counter_add
+  expectations:
+    - type: textEquals
+      selector: { testTag: counter_value }
+      text: "1"
+    - type: elementAbsent
+      selector: { text: Loading }
+      timeoutMs: 2000
+```
+
+| `type`           | Passes when                                                             | Needs      |
+| ---------------- | ----------------------------------------------------------------------- | ---------- |
+| `elementVisible` | an element matching `selector` is on screen                             | `selector` |
+| `elementAbsent`  | no element matches `selector`                                           | `selector` |
+| `textEquals`     | an element (matching `selector`, if given) shows exactly `text`         | `text`     |
+| `textContains`   | an element (matching `selector`, if given) shows text containing `text` | `text`     |
+
+`selector` accepts `testTag` (matched like the `tapOn` `testTag` selector),
+one id (`resourceId` or `elementId`), `text`, `contentDescription` and
+`className`; every field given must match the same element. For `textEquals` and
+`textContains`, put the expected value in `text`, not in `selector.text`. Each
+expectation waits up to `timeoutMs` for the condition (the `observe.waitFor`
+default when you omit it), so it tolerates a screen that is still settling.
+
+A failed expectation's error names it and lists what was on screen, for example
+`Expectation 1/2 (textEquals testTag="counter_value" text="1") failed: not
+satisfied after 5000ms; 1 near match(es); observed texts: "0"`. The step's
+`failureObservation` holds the full observation. An expectation with a missing
+or contradictory field fails the step without observing. An expectation `type`
+not in the table is not checked: the plan result carries a warning naming it.
+
 ### Plan parameters and special characters
 
 A `${paramName}` value reaches the tool exactly as your test supplied it, whatever
@@ -264,9 +305,11 @@ runtime permission prompt covering the screen. The result reports it through
 `warning` and `blockingPrompt` (`kind`, `package`, `activity`) when detected;
 AutoMobile does not dismiss it. Use `observe` to inspect it, then `tapOn` to
 answer the allow or deny button, or set a `systemAlerts` policy to answer
-permission prompts around each interaction. Android also supports the
-default-off debug tool `accessibilityFocus` for setting or clearing TalkBack
-focus. Check text alternatives, content descriptions or accessibility labels,
+permission prompts around each interaction. The default-off debug tool
+`accessibilityFocus` sets focus on Android (TalkBack) and iOS (VoiceOver).
+iOS requires VoiceOver enabled and the AutoMobile in-app SDK in the foreground
+app; focus read-back is unavailable. Clearing focus is supported only on Android.
+Check text alternatives, content descriptions or accessibility labels,
 focus order, contrast, and tap-target size as part of the assertions; support
 for toggling services varies by device type and OS version.
 

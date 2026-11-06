@@ -61,6 +61,23 @@ internal class ObservationMuxWire(
 
   fun pong() = StreamRequest(id = newId(), command = "pong")
 
+  /** A storage observer command for [key] on [channel]'s device. */
+  fun storage(
+    channel: MuxObservationChannel,
+    key: StorageSubscriptionKey,
+    subscribe: Boolean,
+    requestId: String = newId(),
+  ) =
+    StreamRequest(
+      id = requestId,
+      command = if (subscribe) "subscribe_storage" else "unsubscribe_storage",
+      deviceId = channel.deviceId,
+      deviceSessionUuid = channel.deviceSessionUuid,
+      sessionUuid = sessionUuidProvider?.invoke(),
+      packageName = key.packageName,
+      fileName = key.fileName,
+    )
+
   /**
    * Write [request]; false when the socket is broken (the reader then reports every device down).
    */

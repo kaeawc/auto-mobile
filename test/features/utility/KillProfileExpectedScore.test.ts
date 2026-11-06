@@ -26,8 +26,7 @@ describe("kill profile expected survival scores", () => {
     }
   });
 
-  // Enable once measured values land; placeholders are not claims about emulator behaviour.
-  test.skip("no expected value is TODO_MEASURE", () => {
+  test("no expected value is TODO_MEASURE", () => {
     for (const id of KILL_PROFILE_IDS) {
       for (const event of SURVIVAL_EVENT_IDS) {
         expect(KILL_PROFILE_EXPECTED_SCORES[id][event]).not.toBe("TODO_MEASURE");

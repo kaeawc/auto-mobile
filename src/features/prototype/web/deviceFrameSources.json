@@ -26,5 +26,30 @@
   "ipad-10": {
     "screen": "Public spec: 820 x 1180 pt at @2x",
     "insets": "UIKit safe area insets for this model; corner radius estimated"
+  },
+  "wearos-small-round": {
+    "screen": "wearos_small_round hardware profile: 384 x 384 px at xhdpi (density 2); not yet measured on an emulator",
+    "insets": "No system bars on a watch; not yet measured on an emulator",
+    "kinds": { "screen": "avdProfile", "insets": "avdProfile" }
+  },
+  "apple-watch": {
+    "screen": "Apple Watch Series 10 (46mm) simulator device type: 416 x 496 px at @2x; corner radius estimated",
+    "insets": "No system bars on a watch; not yet measured on a simulator",
+    "kinds": { "screen": "simulatorProfile", "insets": "simulatorProfile" }
+  },
+  "android-tv-1080p": {
+    "screen": "tv_1080p hardware profile: 1920 x 1080 px at xhdpi (density 2), recorded in portrait; not yet measured on an emulator",
+    "insets": "Android TV overscan margins (48 dp sides, 27 dp top and bottom); not yet measured on an emulator",
+    "kinds": { "screen": "avdProfile", "insets": "publicSpec" }
+  },
+  "apple-tv": {
+    "screen": "Apple TV 4K simulator device type: 1920 x 1080 pt at @2x, recorded in portrait; not yet measured on a simulator",
+    "insets": "tvOS safe area (60 pt top and bottom, 80 pt sides); not yet measured on a simulator",
+    "kinds": { "screen": "simulatorProfile", "insets": "publicSpec" }
+  },
+  "car-1024p-landscape": {
+    "screen": "automotive_1024p_landscape hardware profile: 1024 x 768 px at mdpi (density 1), recorded in portrait; not yet measured on an emulator",
+    "insets": "Estimated head-unit status and navigation bars; not yet measured on an emulator",
+    "kinds": { "screen": "avdProfile", "insets": "avdProfile" }
   }
 }

@@ -47,17 +47,19 @@ internal class MultiplexedObservationSocketClient(
   private val job = SupervisorJob(parentScope.coroutineContext[Job])
   private val table = ObservationMuxTable()
   private val wire = ObservationMuxWire(log, newRequestId, sessionUuidProvider)
+  private val storage = ObservationMuxStorage(table, wire, log)
   private val connection =
     ObservationMuxConnection(
       transport,
       table,
       wire,
-      ObservationMuxFrames(table, wire, log),
+      ObservationMuxFrames(table, wire, storage, log),
       parentScope + job,
       log,
     )
 
-  override fun stream(): ObservationStream = MuxObservationChannel(this)
+  override fun stream(): ObservationStream =
+    MuxObservationChannel(this, storage::isCurrentConnection)
 
   override fun close() {
     val (all, detached) =
@@ -110,23 +112,45 @@ internal class MultiplexedObservationSocketClient(
       return
     }
     wire.write(open, request)
+    // Re-register the device's remembered storage observers, so live updates survive a reconnect.
+    storage.reapply(channel)
   }
 
   fun disconnect(channel: MuxObservationChannel, dispose: Boolean) {
     val release =
-      synchronized(table.lock) {
-        if (dispose) channel.disposed = true
-        if (!channel.live) return@synchronized null
-        val released = table.leave(channel)
-        // Decide and detach in one step: a device connecting right after this release must open
-        // a fresh connection, not join the socket being shut down.
-        Triple(table.socket, released, if (table.channels.isEmpty()) table.detach() else null)
-      }
+      storage.releaseInOrder(
+        decide = {
+          synchronized(table.lock) {
+            if (dispose) channel.disposed = true
+            if (!channel.live) return@synchronized null
+            val released = table.leave(channel)
+            // Decide and detach in one step: a device connecting right after this release must
+            // open a fresh connection, not join the socket being shut down.
+            val detached = if (table.channels.isEmpty()) table.detach() else null
+            // A closing socket releases its observers on the daemon by itself; an open one is told.
+            val owed = if (detached == null) storage.release(channel) else emptyList()
+            channel.storage.connectionReset()
+            Release(table.socket ?: detached?.socket, released, owed, detached)
+          }
+        },
+        owed = { released ->
+          released?.socket?.let { ObservationMuxStorage.Owed(it, released.storage) }
+        },
+      )
+    if (dispose) channel.flows.closeStorage()
     channel.mutableState.value = ConnectionState.Disconnected()
-    val (open, released, detached) = release ?: return
-    if (open != null && released != null) wire.write(open, wire.unsubscribe(released))
-    detached?.let(connection::shutDown)
+    release ?: return
+    release.socket?.let { open ->
+      release.subscriptionId?.let { wire.write(open, wire.unsubscribe(it)) }
+    }
+    release.detached?.let(connection::shutDown)
   }
+
+  fun subscribeStorage(channel: MuxObservationChannel, key: StorageSubscriptionKey) =
+    storage.subscribe(channel, key)
+
+  fun unsubscribeStorage(channel: MuxObservationChannel, key: StorageSubscriptionKey) =
+    storage.unsubscribe(channel, key)
 
   fun setCadence(channel: MuxObservationChannel, cadence: ObservationCadence) {
     val (open, request) =
@@ -166,6 +190,14 @@ internal class MultiplexedObservationSocketClient(
       }
     wire.write(open, request)
   }
+
+  /** What a released device still owes the daemon, sent outside the lock. */
+  private class Release(
+    val socket: TelemetrySocket?,
+    val subscriptionId: String?,
+    val storage: List<StreamRequest>,
+    val detached: DetachedObservationConnection?,
+  )
 
   companion object {
     /** The desktop's production multiplexer: one observation socket for every observed device. */

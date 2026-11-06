@@ -7,13 +7,14 @@ import {
   type DeviceClockDependencies,
 } from "../../src/features/utility/DeviceClock";
 import {
+  EXPECTED_SCORES_API_LEVEL,
   KILL_PROFILE_EXPECTED_SCORES,
   SURVIVAL_EVENT_IDS,
   type ExpectedSurvivalScore,
   type SurvivalEventId,
 } from "../../src/features/utility/KillProfileExpectedScores";
 import { KillProfileRestoreRegistry } from "../../src/features/utility/KillProfileRestore";
-import type { KillProfile } from "../../src/features/utility/KillProfiles";
+import type { KillProfile, KillProfileId } from "../../src/features/utility/KillProfiles";
 import type { AdbCommandRunner } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { readAndroidDeviceApiLevel } from "../../src/utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import {
@@ -65,7 +66,17 @@ export interface SurvivalReport {
   bootProbe: "root-broadcast-excluding-stopped-packages";
   challenge: { primaryMs: number; recoveryMs: number; clockAdvanceMs: number; doze: true };
   results: SurvivalResult[];
+  /** Set when the device API differs from the one the expected scores were measured on. */
+  noBaseline?: string;
   aborted?: string;
+}
+
+/** Expected scores are only valid on the API they were measured on; elsewhere nothing is compared. */
+function withBaseline(result: SurvivalResult, api: number): SurvivalResult {
+  if (api === EXPECTED_SCORES_API_LEVEL) {
+    return result;
+  }
+  return { ...result, mismatches: [], pendingMeasurement: [...SURVIVAL_EVENT_IDS] };
 }
 
 export async function checkedCommand(shell: AdbCommandRunner, command: string): Promise<string> {
@@ -276,7 +287,7 @@ async function runProfile(
 }
 
 export async function runHarness(
-  options: { serial: string; avd: string; apk: string },
+  options: { serial: string; avd: string; apk: string; profiles?: readonly KillProfileId[] },
   deps: HarnessDeps,
 ): Promise<SurvivalReport> {
   const report: SurvivalReport = {
@@ -306,13 +317,18 @@ export async function runHarness(
         "Scoring every profile requires API 33+ (exact-alarm revocation and POST_NOTIFICATION app-op)",
       );
     }
+    if (api !== EXPECTED_SCORES_API_LEVEL) {
+      report.noBaseline = `no baseline for API ${api}; expected scores were measured on API ${EXPECTED_SCORES_API_LEVEL}, so nothing is compared`;
+    }
     const idle = await checkedCommand(deps.shell, "shell dumpsys deviceidle");
     if (/mForceIdle=true/.test(idle)) {
       throw new Error("Device already has forced Doze; release it before running the harness");
     }
-    for (const profile of SURVIVAL_MATRIX) {
+    for (const profile of SURVIVAL_MATRIX.filter(
+      (profile) => !options.profiles || options.profiles.includes(profile.id),
+    )) {
       deps.signal?.throwIfAborted();
-      report.results.push(await runProfile(device, profile, options.apk, deps));
+      report.results.push(withBaseline(await runProfile(device, profile, options.apk, deps), api));
     }
   } catch (error) {
     report.aborted = errorMessage(error);

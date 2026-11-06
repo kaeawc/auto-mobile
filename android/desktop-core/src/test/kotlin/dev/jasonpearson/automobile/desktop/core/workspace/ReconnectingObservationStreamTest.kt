@@ -7,7 +7,7 @@ import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamKey
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
-import dev.jasonpearson.automobile.desktop.core.daemon.FakeTelemetryPushClient
+import dev.jasonpearson.automobile.desktop.core.daemon.FakeTelemetryMultiplexer
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationHubConfig
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationReconnectPolicy
 import dev.jasonpearson.automobile.desktop.core.daemon.RECONNECT_INITIAL_DELAY_MS
@@ -287,7 +287,7 @@ class ReconnectingObservationStreamTest {
       val hubScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher())
       val hub =
         SharedDaemonStreamHub(
-          telemetryClientFactory = { FakeTelemetryPushClient() },
+          telemetry = FakeTelemetryMultiplexer(),
           scope = hubScope,
           observation =
             ObservationHubConfig(

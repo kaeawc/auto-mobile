@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import java.util.UUID
 import kotlin.random.Random
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -26,6 +27,8 @@ class ObservationHubConfig(
       backoffDelay = { attempt -> delay(jitteredReconnectBackoffMs(attempt, random)) },
       socketAvailable = { ObservationStreamClient.socketExists() },
     ),
+  /** Request ids for the acknowledgements the hub gives a lease joining an observed file. */
+  val newRequestId: () -> String = { UUID.randomUUID().toString() },
 )
 
 /** A screenshot/hierarchy cadence request; a null interval leaves that stream's default. */
@@ -39,6 +42,9 @@ internal data class ObservationCadence(
  * shared by every lease on that device, opened by the first lease and disposed with the last. The
  * hub owns reconnection, and merges the leases' cadence requests by taking the fastest (smallest)
  * interval requested for each stream.
+ *
+ * Storage intent is per lease, ref-counted per file on the device's shared stream by its
+ * [HubDeviceStorage].
  */
 internal class HubObservationStreams(
   private val config: ObservationHubConfig,
@@ -52,9 +58,10 @@ internal class HubObservationStreams(
   ) {
     // Guarded by the owning hub's lock.
     var cadence = ObservationCadence()
+    val storage = LeaseStorage()
   }
 
-  private class Device(val stream: ObservationStream) {
+  private class Device(val stream: ObservationStream, val storage: HubDeviceStorage) {
     var supervision: Job? = null
     var appliedCadence = ObservationCadence()
     // Counted at the reconnect call itself, so a drop and recovery that a conflating StateFlow
@@ -68,6 +75,16 @@ internal class HubObservationStreams(
     fun connect(key: DeviceStreamKey, reconnect: Boolean) =
       synchronized(connectLock) {
         if (retired) return@synchronized
+        if (reconnect) {
+          // A racing reconnect (the supervisor's and a manual retry both saw the drop) already
+          // revived the stream; resetting now would drop its fresh confirmations for good.
+          if (stream.isConnected()) return@synchronized
+          // The drop may never be collected (StateFlow conflates): forget confirmations here too.
+          storage.connectionReset()
+          // The replay still holds the pre-outage layout, and the stream reports connected before
+          // the resubscribe's initial frames arrive: drop it so no lease re-arms from it (#17041).
+          stream.resetLayoutReplayCache()
+        }
         stream.connect(deviceId = key.deviceId, deviceSessionUuid = key.deviceSessionUuid)
         if (reconnect) reconnects.update { it + 1 }
       }
@@ -100,10 +117,16 @@ internal class HubObservationStreams(
     val lease =
       synchronized(lock) {
         check(!closed) { "DaemonStreamHub is closed" }
-        val device = devices.getOrPut(key) { Device(config.streamFactory()).also { opened = it } }
+        val device =
+          devices.getOrPut(key) {
+            val stream = config.streamFactory()
+            Device(stream, HubDeviceStorage(stream, scope, config.newRequestId)).also {
+              opened = it
+            }
+          }
         Lease(key, device.stream, device.reconnects.asStateFlow()).also {
           leases.add(it)
-          publishSubscriptions()
+          _subscriptions.value = leases.countByKey()
         }
       }
     // Connect outside the lock: the real client opens its socket synchronously.
@@ -113,14 +136,21 @@ internal class HubObservationStreams(
 
   fun release(lease: Lease) {
     val key = lease.key
-    val idle =
+    val (device, idle) =
       synchronized(lock) {
         if (!leases.remove(lease)) return
-        publishSubscriptions()
-        if (leases.none { it.key == key }) devices.remove(key) else null
+        _subscriptions.value = leases.countByKey()
+        val device = devices[key]
+        device to if (leases.none { it.key == key }) devices.remove(key) else null
       }
+    // Disposing the shared stream releases every observer it held.
+    device?.storage?.release(lease.storage, streamDisposed = idle != null)
     if (idle != null) shutDown(key, idle) else applyCadence(key)
   }
+
+  /** [lease]'s device storage, while [lease] is held. */
+  fun storageFor(lease: Lease): HubDeviceStorage? =
+    synchronized(lock) { if (lease in leases) devices[lease.key]?.storage else null }
 
   fun setCadence(lease: Lease, cadence: ObservationCadence) {
     synchronized(lock) {
@@ -146,8 +176,9 @@ internal class HubObservationStreams(
     val open =
       synchronized(lock) {
         closed = true
+        leases.forEach { it.storage.close() }
         leases.clear()
-        publishSubscriptions()
+        _subscriptions.value = leases.countByKey()
         devices.toMap().also { devices.clear() }
       }
     open.forEach { (key, device) -> shutDown(key, device) }
@@ -165,8 +196,10 @@ internal class HubObservationStreams(
           stream.connectionState.collect { next ->
             // A stream being shut down may still report; only the live one publishes.
             synchronized(lock) { if (devices[key] === device) states.stateOf(key).value = next }
+            device.storage.connectionChanged(next)
           }
         }
+
         keepObservationConnected(stream, config.reconnect) { device.connect(key, reconnect = true) }
       }
       device
@@ -199,12 +232,10 @@ internal class HubObservationStreams(
       if (key !in devices) states[key]?.value = ConnectionState.Disconnected(null)
     }
   }
-
-  // Called under [lock].
-  private fun publishSubscriptions() {
-    _subscriptions.value = leases.groupingBy { it.key }.eachCount()
-  }
 }
+
+// Called under the owning hub's lock.
+private fun Collection<HubObservationStreams.Lease>.countByKey() = groupingBy { it.key }.eachCount()
 
 // Called under the owning hub's lock.
 private fun MutableMap<DeviceStreamKey, MutableStateFlow<ConnectionState>>.stateOf(

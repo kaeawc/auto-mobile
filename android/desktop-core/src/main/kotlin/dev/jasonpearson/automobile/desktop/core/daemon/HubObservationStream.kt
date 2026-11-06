@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.receiveAsFlow
 
 /**
  * An [ObservationStream] whose connection is owned and kept alive by a [DaemonStreamHub], so its
@@ -46,9 +47,9 @@ internal suspend fun countHubReconnects(
  * update flows are the shared stream's, so they are valid once [connect] has been called: read them
  * after connecting, as the workspace's reconnecting helper does.
  *
- * Storage is not shared: its updates and acknowledgements are unicast per pane, so the Storage
- * facet keeps its own stream. This view carries no storage traffic and rejects storage
- * subscriptions.
+ * Storage intent belongs to this view's lease: [subscribeStorage] / [unsubscribeStorage] are
+ * ref-counted on the shared stream by the hub, and the storage flows carry only the files this
+ * lease holds, losslessly (#17012). Releasing the lease releases its files.
  */
 internal class HubObservationStream(
   private val streams: HubObservationStreams,
@@ -79,9 +80,17 @@ internal class HubObservationStream(
   override val deviceEvents: SharedFlow<DeviceStreamEvent>
     get() = current()?.deviceEvents ?: idleFlow()
 
-  override val storageUpdates: Flow<StorageStreamUpdate> = emptyFlow()
-  override val storageSubscriptionResponses: Flow<StorageSubscriptionResponse> = emptyFlow()
-  override val storageReconciliationRequests: Flow<StorageSubscriptionKey> = emptyFlow()
+  override val storageUpdates: Flow<StorageStreamUpdate>
+    get() = held?.storage?.updates?.receiveAsFlow() ?: emptyFlow()
+
+  override val storageSubscriptionResponses: Flow<StorageSubscriptionResponse>
+    get() = held?.storage?.responses?.receiveAsFlow() ?: emptyFlow()
+
+  override val storageReconciliationRequests: Flow<StorageSubscriptionKey>
+    get() = held?.storage?.reconciliations?.receiveAsFlow() ?: emptyFlow()
+
+  private val held: HubObservationStreams.Lease?
+    get() = synchronized(lock) { lease }
 
   override val connectionState: StateFlow<ConnectionState> = streams.observationConnectionState(key)
 
@@ -128,8 +137,27 @@ internal class HubObservationStream(
     streams.setCadence(held, ObservationCadence(screenshotIntervalMs, hierarchyIntervalMs))
   }
 
+  /**
+   * The layout replay belongs to the shared stream, so a lease does not clear it while the stream
+   * is live: that would take the latest hierarchy and screenshot from every other lease on the
+   * device, and a lease joining a live stream makes no new daemon subscription, so no initial
+   * frames would follow (#17041). The replayed frame is the device session's current layout, kept
+   * fresh by the shared subscription. When the live stream has nothing to replay, ask for a fresh
+   * paired observation, so a collector on a static screen still gets one.
+   *
+   * A stream that is not connected holds a pre-outage layout that is stale for every lease, so it
+   * is cleared; the hub's resubscribe brings the daemon's initial frames.
+   */
   override fun resetLayoutReplayCache() {
-    current()?.resetLayoutReplayCache()
+    val stream = current() ?: return
+    if (!stream.isConnected()) {
+      stream.resetLayoutReplayCache()
+      return
+    }
+    val replayed =
+      stream.hierarchyUpdates.replayCache.isNotEmpty() &&
+        stream.screenshotUpdates.replayCache.isNotEmpty()
+    if (!replayed) stream.requestObservation(key.deviceId)
   }
 
   override fun requestNavigationGraph(appId: String?) {
@@ -140,11 +168,19 @@ internal class HubObservationStream(
     current()?.requestObservation(deviceId)
   }
 
-  override fun subscribeStorage(packageName: String, fileName: String) =
-    throw UnsupportedOperationException("Storage keeps its own observation stream")
+  override fun subscribeStorage(packageName: String, fileName: String) {
+    val lease = held ?: return
+    streams
+      .storageFor(lease)
+      ?.subscribe(lease.storage, StorageSubscriptionKey(packageName, fileName))
+  }
 
-  override fun unsubscribeStorage(packageName: String, fileName: String) =
-    throw UnsupportedOperationException("Storage keeps its own observation stream")
+  override fun unsubscribeStorage(packageName: String, fileName: String) {
+    val lease = held ?: return
+    streams
+      .storageFor(lease)
+      ?.unsubscribe(lease.storage, StorageSubscriptionKey(packageName, fileName))
+  }
 
   private companion object {
     // Never emits: the update flows before connect, or after the lease is released.

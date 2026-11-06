@@ -247,8 +247,9 @@ It needs the `hover_input_v1` runner capability, or, for a `stylus` hover, an `a
 root with a writable `/dev/uinput` (after `adb root` on an emulator or userdebug build). A device or runner without either, and iOS, are refused before
 anything is sent with the missing capability named, and a hover is never turned into a touch. CtrlProxy
 advertises the capability and injects the hover through its `UiAutomation` instrumentation (see the
-[stylus design note](design-docs/mcp/stylus-pressure-hover-injection.md#instrumentation-route-13097)); the semantics above
-are the documented intent and still need on-device confirmation (#13082).
+[stylus design note](design-docs/mcp/stylus-pressure-hover-injection.md#instrumentation-route-13097)). The tool type, source
+and hover actions above are confirmed on API 31 to 37 emulators; the stylus `AXIS_DISTANCE` value and physical pen
+devices are unverified.
 
 ### prototype
 

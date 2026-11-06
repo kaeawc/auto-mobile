@@ -23,24 +23,30 @@ unavailable runtime fails, lists the available runtimes and repeats the install 
 
 <!-- apple-tv-supported-tools:start -->
 
-| Tool               | On an Apple TV                                                               |
-| ------------------ | ---------------------------------------------------------------------------- |
-| `listDevices`      | Lists booted Apple TV simulators.                                            |
-| `listDeviceImages` | Lists configured Apple TV simulators.                                        |
-| `provisionDevice`  | Adopts or creates an exact simulator, and boots it unless `boot: false`.     |
-| `startDevice`      | Boots an existing simulator by `deviceId` or `name` and starts its runner.   |
-| `setActiveDevice`  | Selects an Apple TV only when the call passes `platform: "tvos"`.            |
-| `killDevice`       | Shuts the simulator down and stops its runner.                               |
-| `deleteDevice`     | Deletes the simulator.                                                       |
-| `installApp`       | Installs a `.app` bundle built for the tvOS simulator.                       |
-| `uninstallApp`     | Uninstalls an app.                                                           |
-| `listApps`         | Lists installed apps.                                                        |
-| `launchApp`        | Launches an app; `prototype: true` is refused.                               |
-| `terminateApp`     | Terminates an app.                                                           |
-| `observe`          | Returns a screenshot, plus the hierarchy and `focusedElement` with a runner. |
-| `pressButton`      | Presses a Siri Remote button.                                                |
-| `tapOn`            | Moves focus to a matched element and selects it.                             |
-| `sendKeys`         | Types text into the focused field.                                           |
+| Tool                | On an Apple TV                                                               |
+| ------------------- | ---------------------------------------------------------------------------- |
+| `listDevices`       | Lists booted Apple TV simulators.                                            |
+| `listDeviceImages`  | Lists configured Apple TV simulators.                                        |
+| `provisionDevice`   | Adopts or creates an exact simulator, and boots it unless `boot: false`.     |
+| `startDevice`       | Boots an existing simulator by `deviceId` or `name` and starts its runner.   |
+| `setActiveDevice`   | Selects an Apple TV only when the call passes `platform: "tvos"`.            |
+| `killDevice`        | Shuts the simulator down and stops its runner.                               |
+| `deleteDevice`      | Deletes the simulator.                                                       |
+| `installApp`        | Installs a `.app` bundle built for the tvOS simulator.                       |
+| `uninstallApp`      | Uninstalls an app.                                                           |
+| `listApps`          | Lists installed apps.                                                        |
+| `launchApp`         | Launches an app; `prototype: true` is refused.                               |
+| `terminateApp`      | Terminates an app.                                                           |
+| `observe`           | Returns a screenshot, plus the hierarchy and `focusedElement` with a runner. |
+| `pressButton`       | Presses a Siri Remote button.                                                |
+| `tapOn`             | Moves focus to a matched element and selects it.                             |
+| `sendKeys`          | Types text into the focused field.                                           |
+| `videoRecording`    | Records the screen; `audio` is not supported.                                |
+| `compareScreenshot` | Compares the full screen; `target` and `mask` need a runner (see below).     |
+| `explore`           | Crawls the foreground app by focus and records its screens.                  |
+| `executePlan`       | Replays a plan of Apple TV steps.                                            |
+| `openLink`          | Opens a URL with the app that declares its scheme.                           |
+| `getDeepLinks`      | Lists the URL schemes an installed app declares.                             |
 
 <!-- apple-tv-supported-tools:end -->
 
@@ -69,6 +75,8 @@ runtime and device type identifiers from `automobile:devices/images/tvos`:
 - An exact match is adopted; otherwise a simulator is created. Creation must be allowed; see
   `AUTOMOBILE_ALLOW_DEVICE_CREATE` in [Environment variables](environment-variables.md).
 - A name clash, a `deviceId` that names no Apple TV, or an incompatible runtime and model is refused.
+  A missing `spec` or field, or an identifier the host does not list, is refused with an example
+  and the accepted identifiers; a short form such as `Apple-TV-4K-3rd-generation-4K` names the full one.
 - With `boot` (the default) the simulator boots and a session binds at readiness `booted`. A
   simulator the call created is deleted again if booting or binding fails; if that deletion fails,
   the error says so and tells you to delete it with `deleteDevice`.
@@ -118,6 +126,20 @@ With a connected runner, `observe` returns a screenshot, the hierarchy and `focu
 `hierarchyUnavailable`; call `startDevice` again to prepare automation. Advanced observe options
 are refused.
 
+## Record and compare the screen
+
+`videoRecording` records an Apple TV simulator's screen like an iOS Simulator's, up to 3600
+seconds. Focus rings, parallax and focus scaling are visible in the recording.
+
+`compareScreenshot` records and compares named screenshot baselines. An Apple TV baseline is kept
+per screenshot size; density, font scale and theme are always `null` in its profile.
+
+- Without a runner, only the full screen is compared. A `target` or `mask` is refused; call
+  `startDevice` to prepare the runner.
+- With a runner, `target` and `mask` take an `elementId` or a `rect` in points, the units the
+  hierarchy reports.
+- Apple TV has no system bars, so `ignoreSystemBars` has no effect.
+
 ## Navigate with focus
 
 Apple TV apps have no touch input. Focus moves between elements, and the Siri Remote selects the
@@ -138,8 +160,12 @@ presses `select`.
   action is supported; other options are refused.
 - Focus must already be somewhere on screen. With nothing focused, press a direction with
   `pressButton` and observe.
-- A missing match, a target that disappears, focus that stops moving, or more than 30 moves fails
-  the call. Observe, move closer with `pressButton`, and retry.
+- A match outside the visible area, such as an item further along a row, is still reached: focus
+  moves toward it and the row scrolls. On-screen matches count first for `index`.
+- When nothing on screen matches yet, focus sweeps each row right and left, moving down a row at a
+  time and then up, until the match appears, for at most 60 moves.
+- No match after that search, a target that disappears, focus that stops moving, or more than 30
+  moves toward the target fails the call. Observe, move closer with `pressButton`, and retry.
 
 The tvOS focus engine remembers the last focused item in each row or column, so the element a
 direction reaches can depend on where focus was before. Observe again rather than predicting focus
@@ -152,6 +178,42 @@ with `type` commands. Text is appended to the field.
 
 - `operation: "replace"`, key commands, clear commands and selectors are refused.
 - To change existing text, edit it on the on-screen keyboard with `pressButton`, then type.
+
+## Explore an app
+
+`explore` is available when the server runs with `--embedded-sdk`, like the other
+[navigation graph](navigation-graph.md) tools; the Apple TV app itself does not need the SDK.
+Launch the app with `launchApp`, then call `explore` with `platform: "tvos"`. Explore selects
+every item it can focus on a screen, observes after every remote press, records each screen a
+`select` opens in the navigation graph, and presses `menu` to go back.
+
+- It accepts `maxInteractions` (default 200), `timeoutMs` (default 300000) and `packageName`.
+  `strategy`, `mode`, `resetToHome`, `resetInterval` and `dryRun` are refused.
+- With `packageName`, that app must already be in the foreground.
+- It stops at either limit, when the first screen has nothing left to select, or when the app
+  cannot be brought back after leaving it (`stopReason`).
+- A recorded transition replays as `tapOn` with the item's identifier, or its text when it has
+  no identifier; going back replays as `pressButton menu`. A screen opened from an item with
+  neither is still recorded, but `navigateTo` cannot replay that transition and says so.
+
+## Run a plan
+
+`executePlan` with `platform: "tvos"` runs plan steps that use Apple TV tools: `pressButton`,
+`tapOn`, `sendKeys`, `observe` and the app tools. A step whose tool is not in the supported-tools
+table fails the plan with the same error the tool returns on its own. A plan may declare
+`platform: tvos`, and a device in its `devices` list may use `platform: tvos`. Apple TV plans are
+video-recorded like iOS plans; a recording that cannot start adds a `videoWarnings` entry and the
+plan still runs.
+
+## Open a deep link
+
+`openLink` opens a URL on the Apple TV, such as `myapp://episode/42`, and the app that declares the
+scheme shows that screen. Call `observe` afterwards to see where it landed.
+
+- `getDeepLinks` with the app's bundle ID lists the custom URL schemes the installed app declares.
+- The call fails when no installed app handles the URL. Apple TV has no web browser, so an
+  `http` or `https` URL opens only if an app claims it.
+- `waitFor`, `settled`, `acceptOpenAlert` and `chooserAppPackage` are refused.
 
 ## Out of scope
 

@@ -543,6 +543,8 @@ final class PrototypeAgent: NSObject {
         model.safeInsets = window.safeAreaInsets
         model.windowOrigin = window.screenOrigin
         self.window = window
+        model.prototypeWindow = window
+        model.applyWindowControls()
         // A simulator appearance change re-resolves the shown prototype (#11222).
         // The window is attached from the main queue, which is the isolation UIKit asks for here.
         appearanceObservation = scene.registerForTraitChanges(

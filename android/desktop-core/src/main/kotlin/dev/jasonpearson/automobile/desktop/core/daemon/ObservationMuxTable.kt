@@ -47,6 +47,8 @@ internal class ObservationMuxTable {
   val subscribes = PendingRequests()
   // On-demand requests (`request_navigation_graph`, `request_observation`).
   val requests = PendingRequests()
+  // Storage observer commands, whose acknowledgements carry only the request id.
+  val storageRequests = PendingRequests()
   private val bySubscriptionId = HashMap<String, MuxObservationChannel>()
 
   fun target(subscriptionId: String?): MuxObservationChannel? =
@@ -107,6 +109,7 @@ internal class ObservationMuxTable {
     channel.requestId = null
     channel.cadenceDirty = false
     requests.drop(channel)
+    storageRequests.drop(channel)
     val released = channel.subscriptionId?.also { bySubscriptionId.remove(it) }
     channel.subscriptionId = null
     return released
@@ -117,7 +120,10 @@ internal class ObservationMuxTable {
     bySubscriptionId.clear()
     subscribes.clear()
     requests.clear()
+    storageRequests.clear()
     channels.forEach {
+      // The daemon releases a closed socket's storage observers; desired files are re-applied.
+      it.storage.connectionReset()
       it.subscriptionId = null
       it.requestId = null
       it.cadenceDirty = false

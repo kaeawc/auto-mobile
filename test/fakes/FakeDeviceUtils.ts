@@ -358,10 +358,15 @@ export class FakeDeviceUtils implements FakeDeviceUtilsContract {
         );
       });
     }
-    // As in production, "either" sweeps watches only when the caller opts in (#14908).
+    // As in production, "either" sweeps watches, TVs and headsets only when the caller opts in.
     const requested: Platform[] =
       platform === "either"
-        ? ["android", "ios", ...(options.includeWatchOs ? (["watchos"] as const) : [])]
+        ? [
+            "android",
+            "ios",
+            ...(options.includeWatchOs ? (["watchos"] as const) : []),
+            ...(options.includeAppleSimulatorPlatforms ?? []),
+          ]
         : [platform];
     const devices: BootedDevice[] = [];
     const succeededPlatforms = new Set<Platform>();

@@ -60,6 +60,7 @@ class LicensesActivityTest {
         UnconfinedTestDispatcher(),
         LibraryClock { 42 },
         settings = FakeSettingsStore(),
+        blocklist = FakeContentBlocklist(),
       )
     }
     val controller = Robolectric.buildActivity(LicensesActivity::class.java).setup()

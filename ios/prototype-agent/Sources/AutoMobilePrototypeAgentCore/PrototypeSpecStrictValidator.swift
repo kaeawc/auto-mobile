@@ -54,10 +54,12 @@ public enum PrototypeSpecStrictValidator {
             try PrototypeMediaQueue.validate(fields)
             try PrototypeMedia.validateNodes(fields, nodes: context.locatedNodes)
             try PrototypeMap.validateNodes(fields, nodes: context.locatedNodes)
+            try PrototypeWebView.validateNodes(fields, nodes: context.locatedNodes)
             try PrototypeMediaCaptions.validate(fields, nodes: context.locatedNodes)
             try PrototypeMedia.validateCastButtons(fields, nodes: context.locatedNodes)
             try PrototypeCameraPreview.validateNodes(fields, nodes: context.locatedNodes)
             try PrototypeTimerValidator.validate(context.actions)
+            try PrototypeLoops.validate(nodes: context.locatedNodes)
             try PrototypeStrictSemantics.vocabulary(context, data: modelData)
             try PrototypeLinkify.validate(root: root, nodes: context.locatedNodes)
             try PrototypeStrictSemantics.targets(context)
@@ -185,7 +187,11 @@ public enum PrototypeSpecStrictValidator {
                 append(value, path: PrototypeLimits.dataMemberPath("\(at).headers", key: name), request: true)
             }
         }
-        func shareStrings(_ raw: JSONValue, path: String) {
+        // A web view loads its url from the page host, so the url is a request sink (#16573).
+        for node in nodes where node.value["type"] == .string("webView") {
+            append(node.value["url"], path: "\(node.path).url", request: true)
+        }
+                func shareStrings(_ raw: JSONValue, path: String) {
             switch raw {
             case let .string(text): bindings.append((text, path, false, false))
             case let .array(array): for (index, entry) in array.enumerated() {

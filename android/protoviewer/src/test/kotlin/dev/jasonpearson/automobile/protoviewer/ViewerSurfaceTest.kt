@@ -43,6 +43,7 @@ class ViewerSurfaceTest {
         LibraryClock { 42 },
         settings = settings,
         localNetworkGrant = grant,
+        blocklist = FakeContentBlocklist(),
       )
     }
   }

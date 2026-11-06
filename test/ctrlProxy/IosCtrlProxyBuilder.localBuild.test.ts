@@ -315,6 +315,23 @@ describe("authoritative iOS local builds", () => {
     },
   );
 
+  test("a scheme restricts xctestrun discovery to that scheme's plans", async () => {
+    await placeLocalProducts();
+    const other = path.join(productsDir, "OtherProject_xrsimulator26.0-arm64.xctestrun");
+    const ours = path.join(productsDir, "AutoMobileVisionTest_xrsimulator26.0-arm64.xctestrun");
+    await fs.writeFile(other, "other");
+    expect(await builder.getXctestrunPath("visionSimulator")).toBe(other);
+    expect(
+      await builder.getXctestrunPath("visionSimulator", { scheme: "AutoMobileVisionTest" }),
+    ).toBe(null);
+    await fs.writeFile(ours, "ours");
+    await fs.utimes(ours, originalTimestamp, originalTimestamp);
+    await fs.utimes(other, rebuiltTimestamp, rebuiltTimestamp);
+    expect(
+      await builder.getXctestrunPath("visionSimulator", { scheme: "AutoMobileVisionTest" }),
+    ).toBe(ours);
+  });
+
   test.each(["simulator", "device"] as const)(
     "missing %s products give a platform-specific rebuild command",
     async (platform) => {

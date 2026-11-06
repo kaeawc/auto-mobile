@@ -267,7 +267,11 @@ class PrototypeController(
           palettes = listOf(prototypeShownPalette(shown)),
           appearance = shown.appearance,
         )
-        .copy(motion = runtime.motionActivity.snapshot())
+        .copy(
+          motion = runtime.motionActivity.snapshotForCapture(),
+          orientation = request.windowControls.orientation,
+          statusBar = request.windowControls.statusBarSupport,
+        )
     } catch (error: Exception) {
       Log.w("PrototypeController", "Prototype window metadata unavailable", error)
       null
@@ -617,6 +621,7 @@ class PrototypeController(
         .copy(
           displayId = displayId,
           chrome = prototypeWindowChrome(validated),
+          windowControls = validated.window.controls(),
           transition = validated.window.transition ?: "auto",
           motion = validated.motion,
           surfaceId = validated.id,
@@ -653,6 +658,7 @@ class PrototypeController(
           animateDismiss = it == PrototypeDismissReason.USER || it == PrototypeDismissReason.AGENT
         },
         requestDismiss = { removeSurface(runtime, animateDismiss) },
+        requestHideKeyboard = { surfaceHost.hideKeyboard() },
         previousPages =
           if (preservePages) previous?.runtime?.current?.pages.orEmpty() else emptyMap(),
         initialRevision = nextRevision(validated.id),
@@ -1160,6 +1166,8 @@ class PrototypeController(
       degradedEffects =
         prototypeEffectReport(runtime.renderModel(runtime.current).root, runtime.effectHealth),
       feedbackLog = runtime.feedbackLog.snapshot(),
+      orientation = surface.request.windowControls.orientation,
+      statusBar = surface.request.windowControls.statusBarSupport,
     )
   }
 

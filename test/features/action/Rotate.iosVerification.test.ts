@@ -110,6 +110,61 @@ describe("iOS observed rotation verification (#8778)", () => {
     expect(result.warning).toBeUndefined();
   });
 
+  test("does not restore a refused landscape rotate to stale portrait rotation (#17101)", async () => {
+    const envelope = JSON.parse(
+      readFileSync("test/fixtures/ios-rotate/observe-duo-inner-opened-playground.json", "utf8"),
+    ) as { content: Array<{ text: string }> };
+    const captured = JSON.parse(envelope.content[0]!.text) as {
+      rotation: number;
+      screenSize: { width: number; height: number };
+    };
+    observe.setObserveSequence([
+      { ...createObserveResult(captured.rotation), screenSize: captured.screenSize },
+    ]);
+    const spy = spyOn(runner, "requestRotate").mockResolvedValue(
+      runnerResult({
+        success: false,
+        rotationPerformed: false,
+        error: "Rotation is not supported on this display (the screen size did not change)",
+        value: 1,
+        previousOrientation: "portrait",
+        currentOrientation: "portrait",
+      }),
+    );
+    const result = await rotate.execute("landscape");
+    expect(result.success).toBe(false);
+    expect(spy.mock.calls.map((call) => call[0])).toEqual(["landscape"]);
+    expect(result.warning).toBeUndefined();
+  });
+
+  test("restores drawn landscape after a refused portrait rotate (#17101)", async () => {
+    const envelope = JSON.parse(
+      readFileSync("test/fixtures/ios-rotate/observe-duo-inner-opened-playground.json", "utf8"),
+    ) as { content: Array<{ text: string }> };
+    const captured = JSON.parse(envelope.content[0]!.text) as {
+      rotation: number;
+      screenSize: { width: number; height: number };
+    };
+    observe.setObserveSequence([
+      { ...createObserveResult(captured.rotation), screenSize: captured.screenSize },
+    ]);
+    const spy = spyOn(runner, "requestRotate")
+      .mockResolvedValueOnce(
+        runnerResult({
+          success: false,
+          rotationPerformed: false,
+          error: "Rotation is not supported on this display (the screen size did not change)",
+          value: 0,
+          previousOrientation: "portrait",
+          currentOrientation: "portrait",
+        }),
+      )
+      .mockResolvedValueOnce(runnerResult());
+    const result = await rotate.execute("portrait");
+    expect(result.success).toBe(false);
+    expect(spy.mock.calls.map((call) => call[0])).toEqual(["portrait", "landscape"]);
+  });
+
   test("accepts the daemon restore request shape after a failed landscape rotate", async () => {
     spyOn(runner, "requestRotate").mockResolvedValue(
       runnerResult({

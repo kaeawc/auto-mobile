@@ -1,6 +1,8 @@
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../describeUnknownError";
 import { logger } from "../logger";
+import { APPLE_PROVISION_SPEC_GUIDANCE } from "../provisionDeviceSpecSchemas";
+import { unknownSimulatorIdentifierMessage } from "./simulatorCatalogRefusal";
 import type { SimCtlClient } from "./SimCtlClient";
 import type {
   AppleVisionSimulatorCatalog,
@@ -29,6 +31,11 @@ export interface AppleVisionProvisionRequest {
 export interface AppleVisionProvisionOptions {
   /** The device creation gate's verdict; a headset that does not exist is created only when true. */
   allowCreate: boolean;
+  /**
+   * Refuses the create when the boot that follows would be refused for capacity, so a headset is
+   * never created only to be deleted again. Adopting an existing headset never runs it.
+   */
+  assertCapacityBeforeCreate?: (signal?: AbortSignal) => Promise<void>;
   /** Runs immediately before `simctl create`, after every check passed. */
   onBeforeCreate?: () => void;
   /** Lifecycle-fenced cleanup when the listing cannot confirm the newly created headset. */
@@ -87,6 +94,8 @@ export class AppleVisionSimulatorProvisioner {
       );
     }
     options.signal?.throwIfAborted();
+    await options.assertCapacityBeforeCreate?.(options.signal);
+    options.signal?.throwIfAborted();
     options.onBeforeCreate?.();
     return { headset: await this.create(request, options), created: true };
   }
@@ -111,9 +120,14 @@ export class AppleVisionSimulatorProvisioner {
     }
   }
 
-  /** The listed headset with this UDID, else undefined; a failed listing throws. */
+  /**
+   * The listed headset with this UDID, else undefined; a failed listing throws. The listing
+   * includes template-format names, so a headset that exists is never reported absent.
+   */
   async find(udid: string, signal?: AbortSignal): Promise<ListedAppleVision | undefined> {
-    return (await this.listed(signal)).find((headset) => headset.deviceId === udid);
+    return (await this.listed(signal, { includeTemplateNames: true })).find(
+      (headset) => headset.deviceId === udid,
+    );
   }
 
   /**
@@ -192,8 +206,11 @@ export class AppleVisionSimulatorProvisioner {
     }
   }
 
-  private async listed(signal: AbortSignal | undefined): Promise<ListedAppleVision[]> {
-    return (await this.inventory.listAppleVisionSimulators(signal)).filter(
+  private async listed(
+    signal: AbortSignal | undefined,
+    options?: { includeTemplateNames?: boolean },
+  ): Promise<ListedAppleVision[]> {
+    return (await this.inventory.listAppleVisionSimulators(signal, options)).filter(
       (headset): headset is ListedAppleVision => !!headset.deviceId,
     );
   }
@@ -206,16 +223,23 @@ export function assertAppleVisionSpecInCatalog(
 ): void {
   if (!catalog.deviceTypes.some((type) => type.identifier === spec.deviceType)) {
     throw new ActionableError(
-      `Unknown Apple Vision Pro device type '${spec.deviceType}'. Available: ` +
-        listOrNone(catalog.deviceTypes.map((type) => type.identifier)),
+      unknownSimulatorIdentifierMessage({
+        kind: "Apple Vision Pro device type",
+        requested: spec.deviceType,
+        identifiers: catalog.deviceTypes.map((type) => type.identifier),
+        catalog: APPLE_PROVISION_SPEC_GUIDANCE.visionos.catalog,
+      }),
     );
   }
   const runtime = catalog.runtimes.find((entry) => entry.identifier === spec.runtime);
   if (!runtime) {
     throw new ActionableError(
-      `Unknown visionOS runtime '${spec.runtime}'. Available: ` +
-        listOrNone(catalog.runtimes.map((entry) => entry.identifier)) +
-        ". Install it with `xcodebuild -downloadPlatform visionOS`.",
+      unknownSimulatorIdentifierMessage({
+        kind: "visionOS runtime",
+        requested: spec.runtime,
+        identifiers: catalog.runtimes.map((entry) => entry.identifier),
+        catalog: APPLE_PROVISION_SPEC_GUIDANCE.visionos.catalog,
+      }) + " Install a missing runtime with `xcodebuild -downloadPlatform visionOS`.",
     );
   }
   if (!runtime.isAvailable) {
@@ -248,8 +272,4 @@ function assertMatchesSpec(headset: ListedAppleVision, request: AppleVisionProvi
         (headset.availabilityError ? `: ${headset.availabilityError}` : ""),
     );
   }
-}
-
-function listOrNone(identifiers: string[]): string {
-  return identifiers.length > 0 ? identifiers.join(", ") : "none installed";
 }

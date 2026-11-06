@@ -48,6 +48,7 @@ fun LayoutFacet(options: LayoutFacetOptions) {
   with(options) {
     val observation =
       rememberPaneObservationState(column, observationStreamFactory, backoffDelay, socketAvailable)
+    ForegroundAppReporter(observation.stream, column.deviceId, onForegroundApp)
     val videoSource = remember(column.deviceId) { videoSourceFactory(column.deviceId) }
     // The relay's own heartbeat (issue #7549) makes the Streaming-stall watchdog safe on any
     // backend,

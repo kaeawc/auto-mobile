@@ -1,0 +1,50 @@
+{
+  "spec": {
+    "id": "notify-id-over-limit",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["notifications"],
+      "permissions": [
+        {
+          "name": "notifications",
+          "purpose": "Tell you about new messages"
+        }
+      ]
+    },
+    "notifications": {
+      "channels": [
+        {
+          "id": "messages",
+          "name": "Channel 1",
+          "importance": "min"
+        }
+      ]
+    },
+    "root": {
+      "type": "button",
+      "label": "Notify",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "notifications.post",
+          "args": {
+            "id": {
+              "value": "iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii"
+            },
+            "channel": {
+              "value": "messages"
+            },
+            "title": {
+              "value": "Ada"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].args.id.value"
+}

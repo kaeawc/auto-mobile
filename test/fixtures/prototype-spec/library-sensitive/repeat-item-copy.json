@@ -1,0 +1,40 @@
+{
+  "spec": {
+    "id": "repeat-item-copy",
+    "window": { "placement": { "type": "fullscreen" } },
+    "requires": { "platform": ["clipboard"] },
+    "data": { "rows": [{ "code": "authored" }], "copy": "" },
+    "root": {
+      "type": "column",
+      "children": [
+        { "type": "pasteButton", "into": "/data/rows/0/code" },
+        {
+          "type": "column",
+          "repeat": { "items": { "path": "/rows" }, "as": "row" },
+          "children": [
+            {
+              "type": "button",
+              "label": "Copy",
+              "onTap": [{ "type": "setData", "path": "/data/copy", "value": { "item": "code" } }]
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Send",
+          "onTap": [
+            {
+              "type": "request",
+              "url": "https://example.com/submit",
+              "via": "device",
+              "query": { "code": { "data": "/copy" } }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": { "library": true },
+  "expectedPath": "root.children[2].onTap[0].query.code",
+  "expectedMessage": "Sensitive value cannot be bound into a request"
+}

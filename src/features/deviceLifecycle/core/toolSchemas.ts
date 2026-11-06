@@ -12,6 +12,12 @@ export const listDeviceImagesSchema = z
   .object({
     platform: platformSchema,
     sessionUuid: z.string().optional().describe("Session used for inventory admission"),
+    detail: z
+      .enum(["compact", "full"])
+      .optional()
+      .describe(
+        "compact (default): host-scoped capabilities once under `host`, shared `capabilityProfiles`, null fields omitted; full: every image carries its own `capabilityInventory` and null fields",
+      ),
   })
   .strict();
 
@@ -31,13 +37,74 @@ export const listDevicesSchema = z
   })
   .strict();
 
-export const listDeviceImagesOutputSchema = z.object({
-  message: z.string(),
-  images: z.array(configuredImageSchema),
-  count: z.number(),
-  platform: platformSchema,
-  configuredInventory: z.unknown(),
+const configuredImageShape = configuredImageSchema.shape;
+const capabilityInventorySchema = configuredImageShape.capabilityInventory.unwrap();
+
+/**
+ * One `images` entry: the full description (`detail: "full"`), or the compact entry that omits
+ * null fields and refers to a shared `capabilityProfiles` entry by key (#17256).
+ */
+const listDeviceImagesEntrySchema = configuredImageSchema.extend({
+  source: configuredImageShape.source.optional(),
+  deviceType: configuredImageShape.deviceType.optional(),
+  model: configuredImageShape.model.optional(),
+  architecture: configuredImageShape.architecture.optional(),
+  osVersion: configuredImageShape.osVersion.optional(),
+  apiLevel: configuredImageShape.apiLevel.optional(),
+  runtimeId: configuredImageShape.runtimeId.optional(),
+  runtime: configuredImageShape.runtime.partial({
+    deviceId: true,
+    connectionId: true,
+    deviceSessionUuid: true,
+    poolStatus: true,
+    session: true,
+    serviceStatus: true,
+    locked: true,
+    orientation: true,
+  }),
+  display: configuredImageShape.display.optional(),
+  image: configuredImageShape.image.optional(),
+  capabilityInventory: configuredImageShape.capabilityInventory.optional(),
+  availabilityError: configuredImageShape.availabilityError.optional(),
+  capabilityProfile: z
+    .string()
+    .optional()
+    .describe("Key into `capabilityProfiles`; the image's capabilities, plus `host.capabilities`"),
 });
+
+export const listDeviceImagesOutputSchema = z
+  .object({
+    message: z.string(),
+    images: z.array(listDeviceImagesEntrySchema),
+    count: z
+      .number()
+      .describe("Total configured images; equals images.length unless `truncated` is true"),
+    platform: platformSchema,
+    configuredInventory: z.unknown(),
+    capabilityProfiles: z
+      .record(z.string(), capabilityInventorySchema)
+      .optional()
+      .describe("Compact detail: capability inventories shared by images, by `capabilityProfile`"),
+    host: z
+      .object({ capabilities: capabilityInventorySchema.shape.capabilities })
+      .optional()
+      .describe(
+        "Compact detail: host-scoped capabilities (host audio) that apply to every image with a `capabilityProfile`",
+      ),
+    truncated: z
+      .boolean()
+      .optional()
+      .describe(
+        "Present only when the response was spilled to `artifact`: true when `images` holds fewer than `count` entries; read `artifact.resourceUri` (or the resource_link) for the full list",
+      ),
+    imagesReturned: z
+      .number()
+      .optional()
+      .describe("Present only when spilled: number of entries inline in `images`"),
+  })
+  .describe(
+    "A response over 64 KiB is spilled: the full result goes to `artifact` and a resource_link, and the inline result keeps count, configuredInventory, capabilityProfiles, host, truncated and imagesReturned",
+  );
 
 const bootCapacitySchema = z.object({
   limit: z.number(),

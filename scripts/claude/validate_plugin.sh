@@ -156,9 +156,55 @@ fi
 
 echo "  ✓ Versions match: $package_version"
 
-# Use claude CLI if available for additional validation. Validate the
-# marketplace from the repository root and the plugin from its own root, the
-# directory the runtime loads it from.
+# The plugin directory wants the plugin's own README. `claude plugin validate
+# --profile directory` falls back to the repository README, so it cannot catch
+# a removed plugin README by itself (#16963).
+if [[ ! -f "$PLUGIN_DIR/README.md" ]]; then
+  echo "ERROR: Plugin README '$PLUGIN_DIR/README.md' not found"
+  exit 1
+fi
+echo "  ✓ $PLUGIN_DIR/README.md"
+
+# The icon is read straight from a marketplace clone, which does not fetch LFS
+# objects, so a pointer committed in its place ships as a broken icon (#16963).
+if ! python3 - "$PLUGIN_DIR" "$PLUGIN_JSON" <<'PY'
+import json
+import os
+import sys
+
+plugin_dir, manifest_path = sys.argv[1], sys.argv[2]
+with open(manifest_path, encoding="utf-8") as handle:
+    icon = json.load(handle).get("icon")
+if isinstance(icon, str) and icon.lower().endswith(".png"):
+    path = os.path.normpath(os.path.join(plugin_dir, icon))
+    try:
+        with open(path, "rb") as handle:
+            header = handle.read(8)
+    except OSError as exc:
+        sys.stderr.write(f"ERROR: plugin.json icon '{icon}' not readable at '{path}': {exc}\n")
+        sys.exit(1)
+    if header != b"\x89PNG\r\n\x1a\n":
+        sys.stderr.write(
+            f"ERROR: plugin.json icon '{path}' is not a PNG (an LFS pointer?); "
+            "commit the real image outside LFS\n"
+        )
+        sys.exit(1)
+    print(f"  ✓ {path} is a PNG")
+PY
+then
+  exit 1
+fi
+
+# CI must run the Claude CLI checks: a runner without the CLI fails instead of
+# silently skipping them. Locally a missing CLI skips with a note, and an older
+# CLI without --profile skips only the plugin directory checks.
+IN_CI=false
+if [[ "${CI:-}" == "true" || "${CI:-}" == "1" ]]; then
+  IN_CI=true
+fi
+
+# Validate the marketplace from the repository root and the plugin from its own
+# root, the directory the runtime loads it from.
 if command -v claude &>/dev/null; then
   echo "Running Claude CLI validation..."
   if ! claude plugin validate .; then
@@ -169,6 +215,19 @@ if command -v claude &>/dev/null; then
     echo "ERROR: Claude CLI plugin validation failed"
     exit 1
   fi
+  # The plugin directory profile also requires its README and icon.
+  validate_help="$(claude plugin validate --help 2>&1 || true)"
+  if [[ "$validate_help" == *"--profile"* ]]; then
+    if ! claude plugin validate --profile directory "$PLUGIN_DIR"; then
+      echo "ERROR: Claude CLI plugin directory profile validation failed"
+      exit 1
+    fi
+  else
+    echo "Note: Claude CLI has no 'plugin validate --profile', skipping the plugin directory checks"
+  fi
+elif [[ "$IN_CI" == "true" ]]; then
+  echo "ERROR: Claude CLI not installed; CI must run the Claude CLI plugin checks (install it with scripts/ci/install-claude-code.sh)"
+  exit 1
 else
   echo "Note: Claude CLI not installed, skipping advanced validation"
 fi

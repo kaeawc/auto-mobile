@@ -814,3 +814,26 @@ load yq-helpers
   run grep -n 'origin/${BASE_REF}' "$WF"
   [ "$status" -eq 1 ]
 }
+
+@test "app- and plugin-only changes run desktop-core's ShellReachabilityTest (#16964)" {
+  # ShellReachabilityTest's roots include desktop-app and ide-plugin main sources, which the
+  # desktop_core filter does not cover, so a narrow job runs it for those changes.
+  require_mikefarah_yq
+  local job="desktop-core-shell-reachability"
+  run yq -r ".jobs.\"$job\".if" "$WF"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"needs.detect-changes.outputs.desktop_app_changed == 'true'"* ]]
+  [[ "$output" == *"needs.detect-changes.outputs.ide_plugin_changed == 'true'"* ]]
+  run yq -r ".jobs.\"$job\".steps[] | select(.uses == \"./.github/actions/gradle-task-run\") | .with.\"gradle-tasks\" + \" \" + .with.\"gradle-flags\"" "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = ':desktop-core:test ["--tests", "*ShellReachabilityTest"]' ]
+  # The filters it relies on still cover the root source trees.
+  run yq -r '
+    .jobs."detect-changes".steps[]
+    | select(.id == "filter-ide-plugin" or .id == "filter-desktop-app")
+    | (.with.filters | from_yaml | to_entries[] | .value[])
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  [[ $'\n'"$output"$'\n' == *$'\n'"android/ide-plugin/**"$'\n'* ]]
+  [[ $'\n'"$output"$'\n' == *$'\n'"android/desktop-app/**"$'\n'* ]]
+}

@@ -72,7 +72,7 @@ interface ObservationStreamHub {
    * A facet's view of [key]'s shared observation stream (#16967): `connect` takes a lease,
    * `disconnect`/`dispose` release it, and one connection serves every facet on the device. The hub
    * reconnects a dropped connection itself, and runs it at the fastest cadence any lease requested.
-   * Storage traffic is not carried; the Storage facet keeps its own stream.
+   * Storage subscriptions are per lease and ref-counted per file on the shared stream.
    */
   fun observationStream(key: DeviceStreamKey): HubManagedObservationStream
 

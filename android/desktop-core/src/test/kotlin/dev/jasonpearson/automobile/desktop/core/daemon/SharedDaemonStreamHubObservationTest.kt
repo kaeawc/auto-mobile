@@ -33,7 +33,7 @@ class SharedDaemonStreamHubObservationTest {
     var socketAvailable = true
     val hub =
       SharedDaemonStreamHub(
-        telemetryClientFactory = { FakeTelemetryPushClient() },
+        telemetry = FakeTelemetryMultiplexer(),
         scope = scope,
         observation =
           ObservationHubConfig(
@@ -198,15 +198,95 @@ class SharedDaemonStreamHubObservationTest {
   }
 
   @Test
-  fun `storage stays on its own stream`() = runTest {
+  fun `a view's storage subscriptions ride its lease on the shared stream`() = runTest {
     val h = harness()
-    val view = h.hub.observationStream(phoneA).also { it.connect() }
+    val view = h.hub.observationStream(phoneA)
 
-    val rejected = runCatching { view.subscribeStorage("com.example", "prefs") }
+    // No lease yet: nothing to subscribe on.
+    view.subscribeStorage("com.example", "prefs")
+    view.connect()
+    view.subscribeStorage("com.example", "prefs")
 
-    assertTrue(rejected.exceptionOrNull() is UnsupportedOperationException)
-    assertTrue(h.streamFor(phoneA).storageSubscriptions.isEmpty())
+    assertEquals(
+      setOf(StorageSubscriptionKey("com.example", "prefs")),
+      h.streamFor(phoneA).storageSubscriptions,
+    )
   }
+
+  @Test
+  fun `device control joining a live stream keeps and arms from the shared layout replay`() =
+    runTest {
+      val h = harness()
+      val layout = h.hub.observationStream(phoneA).also { it.connect() }
+      val shared = h.streamFor(phoneA)
+      val hierarchy = HierarchyStreamUpdate(deviceId = "emulator-5554", timestamp = 1L, data = null)
+      val screenshot = ScreenshotStreamUpdate("emulator-5554", 1L, "AA==", 1, 1)
+      shared.emitHierarchy(hierarchy)
+      shared.emitScreenshot(screenshot)
+
+      // Control mounts on a static screen: no further frame will come.
+      val control = h.hub.observationStream(phoneA).also { it.connect() }
+      control.resetLayoutReplayCache()
+
+      assertEquals(hierarchy, control.hierarchyUpdates.first())
+      assertEquals(screenshot, control.screenshotUpdates.first())
+      assertEquals(listOf(hierarchy), layout.hierarchyUpdates.replayCache)
+      assertEquals(listOf(screenshot), layout.screenshotUpdates.replayCache)
+      assertEquals(0, shared.observationRequestCount)
+    }
+
+  @Test
+  fun `a lease resetting a live stream with no layout to replay asks for a fresh observation`() =
+    runTest {
+      val h = harness()
+      val storage = h.hub.observationStream(phoneA).also { it.connect() }
+      val control = h.hub.observationStream(phoneA).also { it.connect() }
+
+      control.resetLayoutReplayCache()
+
+      val shared = h.streamFor(phoneA)
+      assertEquals(1, shared.observationRequestCount)
+      assertEquals("emulator-5554", shared.lastObservationDeviceId)
+      assertTrue(storage.isConnected())
+    }
+
+  @Test
+  fun `a stream that is not connected drops its stale layout replay`() = runTest {
+    val h = harness()
+    val layout = h.hub.observationStream(phoneA).also { it.connect() }
+    val shared = h.streamFor(phoneA)
+    shared.emitHierarchy(
+      HierarchyStreamUpdate(deviceId = "emulator-5554", timestamp = 1L, data = null),
+    )
+    shared.emitConnectionState(ConnectionState.Disconnected("daemon restarted"))
+
+    layout.resetLayoutReplayCache()
+
+    assertTrue(layout.hierarchyUpdates.replayCache.isEmpty())
+    assertEquals(0, shared.observationRequestCount)
+  }
+
+  @Test
+  fun `a hub reconnect drops the pre-outage layout before the stream reports connected`() =
+    runTest {
+      val h = harness()
+      val layout = h.hub.observationStream(phoneA).also { it.connect() }
+      val shared = h.streamFor(phoneA)
+      shared.emitHierarchy(
+        HierarchyStreamUpdate(deviceId = "emulator-5554", timestamp = 1L, data = null),
+      )
+      shared.emitScreenshot(ScreenshotStreamUpdate("emulator-5554", 1L, "AA==", 1, 1))
+
+      shared.emitConnectionState(ConnectionState.Disconnected("Stream ended"))
+      h.backoffGates.send(Unit)
+      assertTrue(layout.isConnected())
+      // The reconnected facet resets before any replacement frame arrived.
+      layout.resetLayoutReplayCache()
+
+      assertTrue(layout.hierarchyUpdates.replayCache.isEmpty())
+      assertTrue(layout.screenshotUpdates.replayCache.isEmpty())
+      assertEquals(1, shared.observationRequestCount)
+    }
 
   @Test
   fun `closing the hub disposes every shared stream`() = runTest {
@@ -266,7 +346,7 @@ class SharedDaemonStreamHubObservationTest {
     val reconnectThread = Executors.newSingleThreadExecutor()
     val hub =
       SharedDaemonStreamHub(
-        telemetryClientFactory = { FakeTelemetryPushClient() },
+        telemetry = FakeTelemetryMultiplexer(),
         scope = CoroutineScope(SupervisorJob() + reconnectThread.asCoroutineDispatcher()),
         observation =
           ObservationHubConfig(

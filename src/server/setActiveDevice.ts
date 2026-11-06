@@ -250,7 +250,12 @@ async function requestedPoolDevice(
 ): Promise<PooledDevice> {
   let device = pool.getDevice(deviceId);
   if (!device) {
-    const outcome = await pool.refreshDevicesWithOutcome();
+    // An "either" refresh sweeps only the TV and Vision Pro families the pool already tracks.
+    const outcome = await pool.refreshDevicesWithOutcome(
+      platform === "tvos" || platform === "visionos"
+        ? { appleSimulatorPlatforms: [platform] }
+        : undefined,
+    );
     device = pool.getDevice(deviceId);
     const discoveryIncomplete = device
       ? undefined

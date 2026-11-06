@@ -78,11 +78,14 @@ const savedCopyMoves = (commands: string[]) =>
     (command) =>
       !command.includes(MARKER) && command.includes(" mv -f ") && command.includes(".bak"),
   );
+/** The best-effort rollback rescan of every rolled-back file, in rollback (reverse) order. */
+const rescanScript = (names: string[]) =>
+  `shell sh -c ${shellQuote(`rc=0; ${names.map((name) => `${SCAN} ${shellQuote(`file://${DIR}/${name}`)} >/dev/null || rc=1; `).join("")}exit $rc`)}`;
 const mutating = (commands: string[]) =>
   commands.filter((command) => / (rm|mv) /.test(command) || command.includes("sh -c"));
 
 describe("sharedStorageService rollback of overwritten files", () => {
-  test("restores an overwritten file, rescans it, and deletes only files the batch created", async () => {
+  test("restores an overwritten file, deletes only files the batch created, and rescans both", async () => {
     const { executor, stage } = setup([0]);
     executor.setCommandError("push /fixtures/third.png", new Error("push failed"));
 
@@ -100,17 +103,16 @@ describe("sharedStorageService rollback of overwritten files", () => {
       rollbackScript([q("second.png")], [`mv -f ${shellQuote(backup)} ${q("first.png")}`]),
     );
     expect(restoreIndex).toBeGreaterThan(-1);
-    // The rescan runs afterwards, as its own best-effort command.
-    expect(commands[restoreIndex + 1]).toBe(
-      `shell sh -c ${shellQuote(`rc=0; ${SCAN} ${shellQuote(`file://${DIR}/first.png`)} >/dev/null || rc=1; exit $rc`)}`,
-    );
+    // The rescan runs afterwards, as its own best-effort command. The deleted file is rescanned
+    // too, so MediaStore drops the row its own staging scan created.
+    expect(commands[restoreIndex + 1]).toBe(rescanScript(["second.png", "first.png"]));
     // The overwritten file is never passed to a plain delete; only the failed push's temp is.
     expect(commands.filter((command) => command.startsWith("shell rm -f"))).toEqual([
       `shell rm -f ${shellQuote(`${DIR}/.automobile-t-6.part`)}`,
     ]);
   });
 
-  test("restores without a MediaStore rescan for a non-media file", async () => {
+  test("restores and rescans a document file, which staging also indexed (#17264)", async () => {
     const { executor, stage } = setup([0]);
     executor.setCommandError("push /fixtures/second.txt", new Error("push failed"));
 
@@ -118,9 +120,11 @@ describe("sharedStorageService rollback of overwritten files", () => {
       "Rolled back: first.txt.",
     );
 
-    expect(mutating(executor.getExecutedCommands()).at(-1)).toBe(
+    const commands = mutating(executor.getExecutedCommands());
+    expect(commands.slice(-2)).toEqual([
       rollbackScript([], [`mv -f ${shellQuote(`${DIR}/.automobile-t-1.bak`)} ${q("first.txt")}`]),
-    );
+      rescanScript(["first.txt"]),
+    ]);
   });
 
   test("does not rescan restored media when indexing was opted out", async () => {
@@ -147,9 +151,10 @@ describe("sharedStorageService rollback of overwritten files", () => {
     const commands = executor.getExecutedCommands();
     // b.txt was never renamed over, so there is nothing to restore: no mv at all.
     expect(savedCopyMoves(commands)).toEqual([]);
-    expect(commands.slice(-3)).toEqual([
+    expect(commands.slice(-4)).toEqual([
       `shell rm -f ${shellQuote(`${DIR}/.automobile-t-4.part`)}`,
       `shell rm -f ${q("a.txt")}`,
+      rescanScript(["a.txt"]),
       `shell rm -f ${shellQuote(`${DIR}/.automobile-t-2.bak`)}`,
     ]);
   });
@@ -165,12 +170,13 @@ describe("sharedStorageService rollback of overwritten files", () => {
       "Rolled back: b.txt, a.txt. Rollback failures: none.",
     );
 
-    expect(mutating(executor.getExecutedCommands()).at(-1)).toBe(
+    expect(mutating(executor.getExecutedCommands()).slice(-2)).toEqual([
       rollbackScript(
         [q("a.txt")],
         [`mv -f ${shellQuote(`${DIR}/.automobile-t-2.bak`)} ${q("b.txt")}`],
       ),
-    );
+      rescanScript(["b.txt", "a.txt"]),
+    ]);
   });
 
   test("discards the saved copy of a file the batch never reached instead of restoring it", async () => {
@@ -328,9 +334,10 @@ describe("sharedStorageService rollback of overwritten files", () => {
         stage({ files: [fileAt("first.txt"), fileAt("second.txt"), fileAt("third.txt")] }),
       ).rejects.toThrow("Rolled back: second.txt, first.txt.");
 
-      expect(executor.getExecutedCommands().at(-1)).toBe(
+      expect(executor.getExecutedCommands().slice(-2)).toEqual([
         `shell rm -f ${q("second.txt")} ${q("first.txt")}`,
-      );
+        rescanScript(["second.txt", "first.txt"]),
+      ]);
     });
   });
 

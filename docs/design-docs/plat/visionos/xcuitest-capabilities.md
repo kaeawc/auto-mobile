@@ -5,11 +5,15 @@ page records what the runner can observe and act on, what it cannot, and the
 decision for the visionOS runner in #16852 (Part of #16851).
 
 AutoMobile models Vision Pro simulators as platform `visionos`, form factor
-`xr-headset`, with independent discovery and ownership claims. Only `listDevices`,
+`xr-headset`, with independent discovery and ownership claims. `listDevices`,
 `listDeviceImages`, `provisionDevice`, `deleteDevice`, `startDevice`, `setActiveDevice`
-and `killDevice` are enabled. Lifecycle operations use `simctl`; boot binds a session
-at `booted` readiness without starting an automation runner. iOS inventories exclude
-xrOS runtimes. Runner capability evidence below does not enable additional tools.
+and `killDevice` use `simctl`; boot binds a session at `booted` readiness.
+`observe`, `tapOn` and `sendKeys` prepare a separate window-app XCUITest runner
+on demand. Provisioning still accepts only readiness `none`. The runner reports
+hierarchy and focus, taps uniquely identified window and ornament elements, and
+appends text to a focused field; screenshots use `simctl`. iOS inventories exclude
+xrOS runtimes. `installApp`, `uninstallApp`, `launchApp`, `terminateApp` and
+`listApps` use `simctl`. All other device tools remain disabled.
 
 ## Environment
 
@@ -43,7 +47,17 @@ verbatim capture is `test/fixtures/visionos-xcuitest/probe-capture.json`.
 
 Runner logs include repeated `AXLoading` errors for a missing
 `SpringBoardUIServices` accessibility bundle in the runtime. They did not fail
-the run.
+the run. The daemon forwards the runner's stdout and stderr to its debug log.
+
+## Runner readiness and budgets
+
+The runner binds its socket only after it has activated the target app, and
+sends its `connected` handshake on each accepted connection. Startup treats that
+handshake as ready (5 s per connection attempt, retried within a 60 s startup
+limit); it does not request a hierarchy. The first hierarchy for a built-in app
+such as Settings or Safari took about 8 s, so a hierarchy-based readiness check
+timed out on every attempt (#17199). Hierarchy requests default to a 20 s budget;
+taps and text input keep 5 s.
 
 ## Decision
 

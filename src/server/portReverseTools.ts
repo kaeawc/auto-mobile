@@ -14,6 +14,12 @@ import {
   type PortReversePolicy,
 } from "../features/portReverse/PortReversePolicy";
 import { PortReverseRecoveryScheduler } from "../features/portReverse/PortReverseRecoveryScheduler";
+import {
+  PORT_REVERSE_RECONCILE_INTERVAL_MS,
+  PortReversePeriodicReconciler,
+} from "../features/portReverse/PortReversePeriodicReconciler";
+import { ENV } from "../config/env";
+import { readEnvInt } from "../utils/envNumbers";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import type { BootedDevice } from "../models";
 import { createAdbReverseCommands } from "../utils/android-cmdline-tools/adbReverse";
@@ -309,6 +315,28 @@ export function subscribePortReverseTransportRecovery(
   };
 }
 
+/**
+ * Arms the periodic reconcile whenever an ensure leaves a device holding owned mappings, so a
+ * mapping removed outside AutoMobile comes back without a client call (#17254).
+ */
+export function subscribePortReversePeriodicReconcile(
+  manager: Pick<PortReverseManager, "onOwnedMappings">,
+  reconciler: Pick<PortReversePeriodicReconciler, "wake" | "dispose">,
+): () => void {
+  const unsubscribe = manager.onOwnedMappings(() => reconciler.wake());
+  return () => {
+    unsubscribe();
+    void reconciler.dispose();
+  };
+}
+
+/** `AUTOMOBILE_PORT_REVERSE_RECONCILE_INTERVAL_MS`, or the default when unset or invalid. */
+export function portReverseReconcileIntervalFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+  return readEnvInt(ENV.PORT_REVERSE_RECONCILE_INTERVAL_MS, env, {
+    fallback: PORT_REVERSE_RECONCILE_INTERVAL_MS,
+  });
+}
+
 let daemonSubscribed = false;
 
 function daemonManager(): PortReverseManager {
@@ -322,6 +350,14 @@ function daemonManager(): PortReverseManager {
       adbTransportRecoveredSignal,
       new PortReverseRecoveryScheduler({ manager: defaultPortReverseManager, timer: defaultTimer }),
       defaultPortReverseManager,
+    );
+    subscribePortReversePeriodicReconcile(
+      defaultPortReverseManager,
+      new PortReversePeriodicReconciler({
+        manager: defaultPortReverseManager,
+        timer: defaultTimer,
+        intervalMs: portReverseReconcileIntervalFromEnv(),
+      }),
     );
   }
   return defaultPortReverseManager;

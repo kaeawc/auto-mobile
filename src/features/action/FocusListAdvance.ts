@@ -138,23 +138,28 @@ function centreInside(bounds: ElementBounds | undefined, container: ElementBound
 }
 
 /**
- * A node of the list itself: its centre lies inside the container, and it is neither the container
- * nor a node enclosing it. A full-screen ancestor's centre can fall inside a wide list, and as an
- * enclosing node it would otherwise stand in for every row.
+ * A node inside the list: its centre lies inside the container and it does not enclose the
+ * container. A full-screen ancestor's centre can fall inside a wide list; excluding it keeps it
+ * from standing in for every row. A node with the container's own bounds is kept here: it may be a
+ * card that fills a one-card-per-page rail, and the container itself never reads as revealed,
+ * because its identity is already on the first read.
  */
-function withinList(bounds: ElementBounds | undefined, container: ElementBounds): boolean {
-  return (
-    bounds !== undefined &&
-    centreInside(bounds, container) &&
-    !sameBounds(bounds, container) &&
-    !contains(bounds, container)
-  );
+function insideList(bounds: ElementBounds | undefined, container: ElementBounds): boolean {
+  return bounds !== undefined && centreInside(bounds, container) && !contains(bounds, container);
 }
 
-/** Named rows of the list (see {@link withinList}). */
+/**
+ * A row candidate for axis inference: inside the list and not the container's own box. A card that
+ * fills the rail is excluded too, which only loses an axis signal a single card cannot give.
+ */
+function withinList(bounds: ElementBounds | undefined, container: ElementBounds): boolean {
+  return bounds !== undefined && insideList(bounds, container) && !sameBounds(bounds, container);
+}
+
+/** Named nodes inside the list (see {@link insideList}). */
 function rowsInside(screen: FocusScreen, container: ElementBounds): string[] {
   return screen.elements
-    .filter((element) => withinList(element.bounds, container))
+    .filter((element) => insideList(element.bounds, container))
     .map(rowIdentity)
     .filter((identity): identity is string => identity !== null);
 }

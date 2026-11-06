@@ -303,3 +303,37 @@ test("infers a vertical list when an enclosing screen node is in the flattened h
   // The root's centre lies inside the list, but it encloses the list and is not one of its rows.
   expect(listAdvanceDirection(container, [root, { bounds: container }, ...rows])).toBe("down");
 });
+
+test("counts a new card in a one-card-per-page rail whose card fills the rail", async () => {
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const rail: ElementBounds = { left: 0, top: 0, right: 1000, bottom: 300 };
+  let page = 0;
+  const card = (): Element => ({
+    bounds: rail,
+    "resource-id": "app:id/card",
+    "content-desc": `Page ${page}`,
+    focusable: true,
+  });
+  const screen: FocusObserver & FocusKeyPresser = {
+    read: async () => ({
+      focused: card(),
+      elements: [{ bounds: rail, "resource-id": "app:id/pager", scrollable: true }, card()],
+    }),
+    press: async (key) => {
+      if (key === "arrow_right") {
+        page += 1;
+      }
+      return { success: true };
+    },
+  };
+  const result = await new FocusListAdvance(screen, screen, timer).execute({ container: rail });
+
+  expect(result).toMatchObject({
+    success: true,
+    status: "revealed",
+    direction: "right",
+    presses: 1,
+  });
+  expect(result.revealed).toEqual([expect.stringContaining("Page 1")]);
+});

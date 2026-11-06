@@ -4911,3 +4911,33 @@ changes and retains effects; motion off snaps everything. Existing motion v2/v3
 capability requirements still apply; iOS advertises the token capability but
 continues to refuse those broader features until its corresponding capabilities
 are available.
+
+## Disposable apps (#14184, host core only)
+
+A disposable app installs one spec as its own app, with its own package, label, icon, permissions
+and foreground-service types. The host core lives in `src/features/prototype/disposableApp/`.
+Template stamping (#14185) and the `prototype installApp`, `listApps` and `uninstallApp` actions
+are not wired yet.
+
+- **Identity.** The package is `dev.jasonpearson.automobile.app.<slug>_<sha256(slug) 8 hex>`.
+  Hyphens in the slug become underscores because Android package segments allow only
+  `[A-Za-z0-9_]`. A slug is lowercase hyphen-separated words of at most 48 characters that start
+  with a letter. The prefix is never agent-chosen, so a disposable app cannot replace a real app.
+- **Permissions** come only from the spec's root `requires`. `INTERNET` is always declared.
+  Each canonical permission maps to its manifest permissions (`location` maps to fine and coarse;
+  `photosAdd` maps to none). Each `requires.background` kind adds `FOREGROUND_SERVICE` and its
+  `FOREGROUND_SERVICE_<TYPE>` permission; `remoteNotification` adds none. The permission mode is
+  `prompt` (the default), `grantDeclared`, or `{grant, deny}`, which may name only declared
+  permissions and must not name one in both lists.
+- **Template.** The host picks the smallest flavor whose capabilities cover
+  `requiredPrototypeCapabilities(spec)`. If none does, it refuses and names the missing capabilities
+  and the closest flavor.
+- **Registry.** `disposable-apps.json` under the AutoMobile data dir is keyed by device id. Each
+  record holds appId, slug, platform, label, spec sha256, template, signer, installedAt and
+  expiresAt. Writes are serialized and atomic. A corrupt file or record is skipped with a warning.
+- **Lifecycle.** `ttlHours` defaults to 72, accepts 0 to 720, and 0 means no expiry. Re-installing
+  a slug updates the app in place and keeps its storage unless `reset` is set. The expiry sweep and
+  uninstall refuse ids outside the prefix. They also refuse installed packages whose signer differs
+  from the host's disposable-app key: one requested id is refused with an error, and in a bulk
+  removal the package is reported under `skipped`. Each removal is logged at `warn`. An app that
+  is already gone from the device still has its registry record cleared.

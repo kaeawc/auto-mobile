@@ -6,8 +6,13 @@ import { SwipeOnElement } from "../action/SwipeOnElement";
 import { TapAtCoordinate } from "../action/TapAtCoordinate";
 import { TapOnElement } from "../action/TapOnElement";
 import { Timer } from "../../utils/SystemTimer";
-import { FocusNavigate, type FocusKeyPresser } from "../action/FocusNavigate";
+import {
+  FocusNavigate,
+  type FocusKeyPresser,
+  type FocusNavigateTarget,
+} from "../action/FocusNavigate";
 import { FocusListAdvance } from "../action/FocusListAdvance";
+import type { RevealedListRows } from "./RevealedListRows";
 import {
   pinnedFocusOptions,
   SelectorDpadTargetResolver,
@@ -112,6 +117,8 @@ interface ExplorationActionContext extends FocusDrivenActions {
   device: BootedDevice;
   adb: AdbExecutor | undefined;
   timer: Timer;
+  /** Rows this exploration's list advances revealed; outlives each actions instance. */
+  revealedRows: RevealedListRows;
   /** Pins `label`/`elementId` targets to the element tapOn would tap; tapOn's resolver by default. */
   focusTargetResolver?: DpadTargetResolver;
   runRecorded<T extends { success: boolean }>(
@@ -218,7 +225,7 @@ export class ExploreElementActions {
       return null;
     }
     // Validate mode replays the recorded walk, its direction and bounds included.
-    const args = { ...focusSelectArgs(until), ...recordedFocusWalkOptions(recorded) };
+    const args = this.focusWalkArgs(until, element, observation, recorded);
     // The walk bypasses BaseVisualChange's action boundary, which flushes earlier evidence.
     await beginPostActionCaptureAction();
     const result = await this.context.runRecorded("focusNavigate", args, observation, () =>
@@ -241,10 +248,32 @@ export class ExploreElementActions {
   }
 
   /**
+   * The recorded walk to `until`: a recorded edge's own walk options, else explore's select, along
+   * the rail for a card an advance revealed in one, so the edge replays from the rail's initial
+   * viewport.
+   */
+  private focusWalkArgs(
+    until: FocusNavigateTarget,
+    element: Element,
+    observation: ObserveResult,
+    recorded: Pick<ToolCallInteraction, "toolName" | "args"> | undefined,
+  ) {
+    const direction = recorded
+      ? undefined
+      : this.context.revealedRows.railDirectionFor(element, observation);
+    return {
+      ...focusSelectArgs(until),
+      ...(direction ? { direction } : {}),
+      ...recordedFocusWalkOptions(recorded),
+    };
+  }
+
+  /**
    * The D-pad counterpart of swiping a scrollable container: press down a vertical list (right
    * along a rail) until a row that was not on screen appears, within a press bound. True when rows
-   * were revealed, false when the list is exhausted. The advance is not recorded: it scrolls in place, and the walk to a revealed row is recorded
-   * when explore selects that row.
+   * were revealed, false when the list is exhausted. The advance is not recorded: it scrolls in
+   * place, and the walk to a revealed row is recorded when explore selects that row, along the
+   * rail for a row revealed in a rail (see {@link RevealedListRows.railDirectionFor}).
    */
   private async advanceList(
     element: Element,
@@ -258,6 +287,9 @@ export class ExploreElementActions {
         ...(signal ? { signal } : {}),
       }),
     );
+    if (result.success) {
+      this.context.revealedRows.remember(element.bounds, result.direction, result.revealed);
+    }
     logger.info(
       result.success
         ? `[Explore] D-pad ${result.direction} through ${element["resource-id"] || element["class"]} revealed ${result.revealed.length} row(s) in ${result.presses} press(es)`

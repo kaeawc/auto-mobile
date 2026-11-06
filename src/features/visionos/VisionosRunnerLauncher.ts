@@ -8,6 +8,7 @@ import { WebSocketVisionosRunnerClient, type VisionosRunnerClient } from "./Visi
 import { visionosRunners } from "./VisionosRunnerRegistry";
 import type { IosCtrlProxyBuilder } from "../../ctrlProxy/IosCtrlProxyBuilder";
 import { rm } from "node:fs/promises";
+import type { HostChildProcess } from "../../utils/HostCommandExecutor";
 
 export interface VisionosRunnerLaunchOptions {
   deviceId: string;
@@ -26,6 +27,18 @@ interface VisionosStartup {
   exited: boolean;
   unregister: () => void;
 }
+/** Forward the runner's output to the debug log; the streams must be drained either way. */
+function logRunnerOutput(process: Pick<HostChildProcess, "stdout" | "stderr">): void {
+  for (const [name, stream] of [
+    ["stdout", process.stdout],
+    ["stderr", process.stderr],
+  ] as const) {
+    stream?.on("data", (chunk: Buffer | string) => {
+      logger.debug(`Visionos runner ${name}: ${String(chunk).trimEnd()}`);
+    });
+  }
+}
+
 /** Launch a prebuilt test bundle; the caller supplies its xctestrun and reserved localhost port. */
 export class XcodebuildVisionosRunnerLauncher implements VisionosRunnerLauncher {
   constructor(
@@ -92,7 +105,8 @@ export class XcodebuildVisionosRunnerLauncher implements VisionosRunnerLauncher 
           TEST_RUNNER_AM_PORT: String(options.port),
           ...(options.bundleId ? { TEST_RUNNER_AM_BUNDLE_ID: options.bundleId } : {}),
         },
-        stdio: "ignore",
+        // Runner output is only diagnostic; pipe it so it reaches the debug log (#17199).
+        stdio: ["ignore", "pipe", "pipe"],
         startupSignal: options.signal,
       },
     );
@@ -110,6 +124,7 @@ export class XcodebuildVisionosRunnerLauncher implements VisionosRunnerLauncher 
         process.kill("SIGTERM");
       }
     };
+    logRunnerOutput(process);
     process.once("exit", cleanup);
     process.once("error", cleanup);
     try {
@@ -139,7 +154,9 @@ export class XcodebuildVisionosRunnerLauncher implements VisionosRunnerLauncher 
       )(`ws://127.0.0.1:${options.port}/ws`);
       state.client = client;
       try {
-        await client.hierarchy(options.signal);
+        // The handshake proves the runner is serving. A hierarchy here would make readiness
+        // wait on the target app's first snapshot, which a system app can take >5 s to answer.
+        await client.waitUntilConnected(options.signal);
       } catch (error) {
         client.close();
         if (state.exited || options.signal?.aborted || error instanceof VisionosRunnerError) {

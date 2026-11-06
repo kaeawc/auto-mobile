@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
-import { WebSocketVisionosRunnerClient } from "../../../src/features/visionos/VisionosRunnerClient";
+import {
+  VISIONOS_HIERARCHY_TIMEOUT_MS,
+  VISIONOS_REQUEST_TIMEOUT_MS,
+  WebSocketVisionosRunnerClient,
+} from "../../../src/features/visionos/VisionosRunnerClient";
 import { normalizeVisionosHierarchy } from "../../../src/features/visionos/VisionosHierarchy";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { FakeWatchSocket } from "../../fakes/FakeWatchSocket";
@@ -137,5 +141,75 @@ test("unadvertised command and malformed hierarchy fail closed", async () => {
   await drainMicrotasks(2);
   socket.receive({ type: "hierarchy_update", requestId: socket.sent[0].requestId, data: {} });
   await expect(pending).rejects.toThrow("Invalid visionos hierarchy");
+  client.close();
+});
+
+test("the connected handshake alone makes the runner ready, with no hierarchy request", async () => {
+  const { socket, timer, client } = fixture();
+  const ready = client.waitUntilConnected();
+  socket.receive(connected);
+  await ready;
+  expect(socket.sent).toEqual([]);
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+  client.close();
+});
+
+test("a missing handshake fails readiness within the 5 s default budget", async () => {
+  const { timer, client } = fixture();
+  const ready = client.waitUntilConnected().then(
+    () => "ready",
+    (error: unknown) => String(error),
+  );
+  await drainMicrotasks(2);
+  timer.advanceTime(4999);
+  await drainMicrotasks(2);
+  timer.advanceTime(1);
+  expect(await ready).toContain("timed out");
+  client.close();
+});
+
+test("a refused connection fails readiness immediately so startup can retry", async () => {
+  const { socket, client } = fixture();
+  const ready = client.waitUntilConnected();
+  socket.disconnect();
+  await expect(ready).rejects.toThrow("disconnected");
+  expect(client.isUsable()).toBe(false);
+});
+
+test("a system-app hierarchy answered after 8.2 s fits the default hierarchy budget (#17199)", async () => {
+  const { socket, timer, client } = fixture();
+  socket.receive(connected);
+  const pending = client.hierarchy();
+  await drainMicrotasks(2);
+  timer.advanceTime(8200);
+  socket.receive({
+    type: "hierarchy_update",
+    requestId: socket.sent[0].requestId,
+    data: visionosProbeHierarchy(),
+  });
+  expect((await pending).packageName).toBe(visionosProbeHierarchy().packageName);
+  client.close();
+});
+
+test("hierarchy defaults to the 20 s budget while inputs keep 5 s", async () => {
+  const { socket, timer, client } = fixture();
+  socket.receive(connected);
+  const hierarchy = client.hierarchy().then(
+    () => "ok",
+    (error: unknown) => String(error),
+  );
+  const typing = client.request({ type: "request_append_text", text: "hello" }).then(
+    () => "ok",
+    (error: unknown) => (error as { errorCode?: string }).errorCode,
+  );
+  await drainMicrotasks(2);
+  expect(timer.getPendingTimeouts().sort((a, b) => a - b)).toEqual([
+    VISIONOS_REQUEST_TIMEOUT_MS,
+    VISIONOS_HIERARCHY_TIMEOUT_MS,
+  ]);
+  timer.advanceTime(VISIONOS_REQUEST_TIMEOUT_MS);
+  expect(await typing).toBe("input_outcome_unknown");
+  timer.advanceTime(VISIONOS_HIERARCHY_TIMEOUT_MS - VISIONOS_REQUEST_TIMEOUT_MS);
+  expect(await hierarchy).toContain("timed out");
   client.close();
 });

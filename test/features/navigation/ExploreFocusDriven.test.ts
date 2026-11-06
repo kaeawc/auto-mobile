@@ -37,6 +37,7 @@ const SCREENS: Record<string, { tiles: Tile[]; leadsTo: Record<string, string> }
   },
   Movies: { tiles: [{ id: "app:id/play", text: "Play" }], leadsTo: {} },
   Settings: { tiles: [], leadsTo: {} },
+  Rails: { tiles: [{ id: "app:id/rail", text: "Rail", scrollable: true }], leadsTo: {} },
 };
 
 function observationOf(screen: string): ObserveResult {
@@ -187,6 +188,32 @@ describe("Explore on a focus-driven TV app", () => {
     };
     expect(await explore.performInteraction(row, observationOf("Home"))).toBe(false);
     expect(tv.selections).toEqual([]);
+  });
+
+  test("validate skips a recorded swipe edge the D-pad cannot replay instead of retrying it", async () => {
+    await tv.navigateTo("Rails");
+    graph.addEdge({
+      from: "Rails",
+      to: "Movies",
+      edgeType: "tool",
+      timestamp: timer.now(),
+      interaction: {
+        toolName: "swipeOn",
+        args: { container: { elementId: "app:id/rail" }, direction: "up", speed: "slow" },
+        timestamp: timer.now(),
+      },
+    });
+    const explore = exploreWith("dpad");
+    const result = (await explore.execute({
+      packageName: APP,
+      mode: "validate",
+      maxInteractions: 5,
+    })) as ExploreResult;
+
+    expect(tv.selections).toEqual([]);
+    expect(result.graphTraversal?.edgeValidationResults).toEqual([
+      expect.objectContaining({ skipped: true }),
+    ]);
   });
 
   test("touch mode never drives the D-pad", async () => {

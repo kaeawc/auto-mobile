@@ -57,7 +57,7 @@ import {
   markEdgeTraversed,
   validateNavigation,
 } from "./ExploreValidateMode";
-import { selectValidateElement } from "./ExploreValidationSelection";
+import { selectValidateElement, skipUndispatchedEdge } from "./ExploreValidationSelection";
 import { registeredInternalToolCaller as toolCaller } from "./InternalToolCaller";
 import {
   NavigationGraphManager,
@@ -853,7 +853,6 @@ export class Explore extends BaseVisualChange {
       tracked.lastInteractionScreen = currentScreen;
       this.exploredElements.set(elementKey, tracked);
 
-      // Check if element is scrollable - perform swipe instead of tap
       const isScrollable = isTruthy(element.scrollable);
 
       const success =
@@ -865,9 +864,10 @@ export class Explore extends BaseVisualChange {
           : isScrollable
             ? await this.swipeContainer(element, observation, progress, signal)
             : await this.tapElement(element, observation, progress, signal);
-      // Reset consecutive back count since we did a swipe or tap (not when
-      // there was no tap target to dispatch).
-      if (success !== null) {
+      // Nothing dispatched: skip a validate edge rather than retry it; else reset the back count.
+      if (success === null) {
+        skipUndispatchedEdge(this.graphTraversalState, this.currentTargetEdge, this.timer);
+      } else {
         this.consecutiveBackCount = 0;
       }
       return success ?? false;

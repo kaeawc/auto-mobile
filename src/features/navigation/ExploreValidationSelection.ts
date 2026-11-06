@@ -11,6 +11,20 @@ import {
   selectNextEdgeToTraverse,
 } from "./ExploreValidateMode";
 
+/**
+ * Skip a validate-mode target edge whose element could not be acted on (no tap or focus target, or
+ * a swipe on a D-pad device): nothing was dispatched, so retrying it would never succeed.
+ */
+export function skipUndispatchedEdge(
+  state: GraphTraversalState | null,
+  edge: NavigationEdge | null,
+  timer: Timer,
+): void {
+  if (state && edge) {
+    markEdgeSkipped(state, edge, "its element has no target the input mode can act on", timer);
+  }
+}
+
 export interface ExploreValidationSelection {
   stopReason: string;
   currentTargetEdge: NavigationEdge | null;

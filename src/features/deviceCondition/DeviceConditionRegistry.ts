@@ -21,6 +21,7 @@ import { resolveClockFaultInjector } from "./clockFaultInjectors";
 import { resolvePackageFaultInjector } from "./packageFaultInjectors";
 import { resolvePermissionFaultInjector } from "./permissionFaultInjectors";
 import { resolveLockScreenFaultInjector } from "./lockScreenFaultInjectors";
+import { resolveBiometricEnrollmentInjector } from "./biometricEnrollmentInjector";
 import { resolvePowerFaultInjector } from "./powerFaultInjectors";
 import { resolveProcessFaultInjector } from "./processFaultInjectors";
 import {
@@ -284,6 +285,7 @@ export function createDefaultInjectorResolver(
       resolveReadOnlyFilesystemInjector(device, key, { adbFactory, cache: readOnlyCache }),
     (device, key) => resolvePermissionFaultInjector(device, key, { adbFactory }),
     (device, key) => resolveLockScreenFaultInjector(device, key, { adbFactory }),
+    (device, key) => resolveBiometricEnrollmentInjector(device, key, { adbFactory }),
     (device, key) => resolvePackageFaultInjector(device, key, { adbFactory }),
     (device, key) => resolveProcessFaultInjector(device, key, { adbFactory }),
     (device, key) => resolveAppFileFaultInjector(device, key, { adbFactory }),

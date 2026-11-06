@@ -14,7 +14,8 @@ export const TVOS_HIERARCHY_UNAVAILABLE_MESSAGE =
   "Absent hierarchy fields do not mean the screen is empty; read the screenshot instead.";
 
 export const VISIONOS_HIERARCHY_UNAVAILABLE_MESSAGE =
-  "No visionOS runner exists yet: this observation carries only a screenshot. " +
+  "The visionOS window-app runner is unavailable: this observation carries only a screenshot. " +
+  "The view hierarchy needs the runner. " +
   "Absent hierarchy fields do not mean the screen is empty; read the screenshot instead.";
 
 export interface WatchHierarchyUnavailable<

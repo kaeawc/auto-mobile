@@ -118,21 +118,47 @@ it inlined per variant.
   landscape view. A second rotate finishes the running turn first. `prefers-reduced-motion:
   reduce` skips the animation.
 - **No network.** The CSP is `default-src 'none'`, the script pinned by its SHA-256, inline
-  styles, and `data:` images and fonts. The page references no external URL.
+  styles, and `data:` images and fonts. The page references no external URL, and declares an
+  empty `data:` icon so no browser requests `/favicon.ico` against that CSP.
 - **Budget.** The page is at most 2 MiB. The start screen of each variant's latest revision and
   of the revision shown first are always kept, then their other screens while they fit; older
   revisions are added newest first while their start screen and history entry fit, each followed
   by its other screens while they fit. The shell (head, toolbar with every screen of the shown
   revision, full history list and script) is measured first. If the kept start screens alone do
   not fit, the build fails with an `ActionableError` naming the largest view.
+- **Images.** `buildPrototypeWebPageWithImages` (`webImageEncoding.ts`) builds the page once to
+  learn every bound asset an `image` draws and its boxes, reads each asset's bytes from a
+  `PrototypeWebAssetSource`, re-encodes it with sharp (`loadSharp`) to WebP quality 80 at the
+  largest size the frame draws it, and builds again with the encoded images. An iOS frame applies
+  the EXIF orientation first, as `UIImage(data:)` does; an Android frame keeps the stored pixels,
+  as `BitmapFactory` ignores the tag. A box is the frame
+  density times the node's fixed dp size; `crop` and `fill` must cover their fixed axes, `fit` and
+  unfixed axes fit inside the screen's long side; the image is never enlarged. A missing, non-image
+  or undecodable asset (logged) is skipped, and one whose data URI alone exceeds the page is
+  reported `assetOverBudget`; the page budget decides which of the rest fit. An image draws more markup than a placeholder, so when the
+  second build's always-kept views no longer fit, the first build stands, its images reported
+  `assetOverBudget`. The resource reads assets from the host asset cache of each device currently
+  showing one of the variants (Android caches its uploads); without one, images stay placeholders.
+  Asset ids are chosen per device and the page holds one image per id, so an id two of those
+  devices cached with different bytes stays a placeholder.
+  It snapshots the shown variant's revisions before encoding, so a revision landing meanwhile does
+  not change the page's `_meta`.
+- **Image budget.** Each image is one `:root` rule in the head defining `--pa-<slot>` (its
+  `data:image/webp` URI), `-bg` (transparent), `-ar` (its aspect ratio) and `-on` (1); views only
+  reference the slot, so view bytes do not depend on which images fit and every orientation and
+  revision shares one copy. A rule is charged once, in this order: the images of the shown
+  revision's start screen, then of the other pinned start screens, then each screen's images right
+  after that screen is kept. An image that does not fit is never retried and draws its
+  placeholder; it is reported `assetOverBudget`, and one with no bytes `assetNotInlined`.
 - **Determinism.** The same input yields byte-identical HTML.
 
 ## Browser check
 
 `test/features/prototype/web/webScreenshots.integration.test.ts` loads the page of each reference
-spec in headless Chromium: `reference-checkout` plus `template-feed-detail`,
-`pager-indicator-dots`, `grid-fixed-columns-span`, `material-controls`, `component-gallery` and
-`doc-example-2`, each in `pixel-9` and `iphone-16`, portrait (the list is
+spec in headless Chromium, Firefox and WebKit: `reference-checkout` plus `template-feed-detail`,
+`pager-indicator-dots`, `grid-fixed-columns-span`, `material-controls`, `component-gallery`,
+`doc-example-2`, `native-controls` (every button variant and two sliders) and `image-gallery`
+(its assets are `test/fixtures/prototype-web/assets/<id>.png`), each in `pixel-9` and `iphone-16`, portrait (the list is
 `webScreenshotCases.ts`). Playwright (`playwright-core`) is a devDependency of this check only;
 nothing at runtime drives a browser.
 
@@ -145,33 +171,68 @@ nothing at runtime drives a browser.
   screen's view; the 3D toggle turns the shown view to the three-quarter pose, an arrow key on the
   focused viewport orbits it, and toggling back restores the shown view's DOM byte for byte. The
   browser clock is fixed at 9:41 UTC, so the live status bar clock matches the stills; a separate
-  case installs a running clock and checks the clock advances each minute.
+  case installs a running clock and checks the clock advances each minute. Another checks that
+  only an overflowing scroll fades, or, in an engine without scroll-driven animations, that every
+  scroll does. Every engine runs these assertions; CSS 3D and clipping differ between engines, so
+  a page that only works in Chromium fails here.
 - **Settings cases.** `reference-checkout` also renders in both frames at the largest text size
   (`fontScale` 2, `accessibility-extra-extra-extra-large`) and in the `ar` locale (RTL), golden
   `<spec>--<frame>--<setting>.png` (and `--landscape.png` after it).
-- **Goldens.** Two PNGs per case in `test/fixtures/prototype-web/screenshots/`
+- **Goldens.** Compared only in Chromium, the one engine whose CI build they are trusted from.
+  Two PNGs per case in `test/fixtures/prototype-web/screenshots/`
   (`<spec>--<frame>.png` in portrait and `<spec>--<frame>--landscape.png` at the end of the
   turn, plain git blobs, not LFS), taken at 800×800 CSS px, device scale factor 1,
   with every font forced to `"DejaVu Sans", sans-serif` and the caret hidden. No font is bundled. A
   case matches when at most 0.1 % of pixels differ by more than pixelmatch's 0.1 colour distance; a
   different size never matches. A unit test keeps the directory in step with the case list.
 - **Running.** `bash scripts/prototype/web-screenshots.sh` runs it (the integration lane skips it
-  without `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1`); `--update` rewrites the goldens. It needs the
-  Chromium build of the pinned `playwright-core`:
-  `node_modules/.bin/playwright-core install --only-shell chromium`. Every case that reaches
-  capture writes `<case>.png`, and a pixel mismatch also `<case>.diff.png`, to
-  `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS_OUT` (default `scratch/prototype-web-screenshots/`).
+  without `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1`); `--update` rewrites the goldens, and
+  `--engine <chromium|firefox|webkit>` (repeatable) limits the engines. It needs the browser builds
+  of the pinned `playwright-core`:
+  `node_modules/.bin/playwright-core install --only-shell chromium firefox webkit`. Every case that
+  reaches capture writes `<case>.png`, and a Chromium pixel mismatch also `<case>.diff.png`, to
+  `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS_OUT` (default `scratch/prototype-web-screenshots/`);
+  Firefox and WebKit captures go to its `firefox/` and `webkit/` subdirectories.
 - **CI.** The advisory `Prototype Web Screenshots` workflow runs it on Linux nightly, on dispatch,
   and on pull requests that touch the web renderer, its reference fixtures, the check, or
   `package.json`/`bun.lock`. It is not a required check. Goldens are trusted only from that Linux
   Chromium build, whose text anti-aliasing other machines may not match, so a local run can fail on
   pixels alone; when the runner renders differently, the job uploads the
-  `prototype-web-screenshots` artifact, and adopting it means reviewing its PNGs and copying those
-  other than `*.diff.png` into the golden directory.
+  `prototype-web-screenshots` artifact on every run, and adopting it means reviewing its top-level
+  PNGs and copying those other than `*.diff.png` into the golden directory.
+
+## Android parity check
+
+`test/features/prototype/web/webAndroidParity.integration.test.ts` measures how far the still is
+from the Android renderer. For each Roborazzi golden in
+`android/control-proxy/src/test/resources/screenshots/prototype/`, `webAndroidParityCases.ts`
+either rebuilds the spec the Kotlin case renders (fixture, `night`/`notnight` mode, state
+overrides, `themeFrom` and the case's JSON edit) or lists the golden with a reason; host window
+chrome and content-sized floating captures are listed, not compared. Every compared spec is placed
+fullscreen, because the goldens draw the root and theme without the window's placement.
+
+- **Rendering.** The still is drawn `chromeless` on the `small-phone` frame (360×640 dp, the
+  goldens' `w360dp-h640dp-mdpi`, so one dp is one pixel) into a bare document with no page shell,
+  at device scale factor 1 with the same forced font as the page check. Chromeless drops the
+  bezel, bars, cutout, corner radius, safe-area insets and window background, because the goldens
+  capture the content path with no window and are transparent where nothing draws; the screenshot
+  omits the page background to match. A golden smaller than the screen is compared with the
+  screen's top-left region of its size.
+- **Budgets.** `test/fixtures/prototype-web/android-parity-budgets.json` maps each compared golden
+  to the most pixels that may differ by more than pixelmatch's 0.1 colour distance. A case fails
+  when it differs in more than its budget plus 256 pixels or 1 %, whichever is larger: hosted
+  runners do not all rasterize alike, so the same commit's counts move slightly between CI runs.
+  The allowance never reaches the golden's pixel count, so a screenshot that differs everywhere
+  fails. Budgets only shrink: `--update` lowers each to what was measured and
+  records a missing one, and raises one only with `--allow-grow`. The counts are measured by the
+  CI Chromium build; every run logs them on one `android parity diff pixels:` line. A unit test
+  keeps the case table, the skip list and the budget keys in step with the golden directory.
+- **Output.** `<golden>.png` and, when any pixel differs, `<golden>.diff.png` go to
+  `android-parity/` under the output directory, uploaded with the page check's artifact.
 
 ## Still renderer
 
-`renderPrototypeStill(spec, {frame, orientation, mode, screen, locale, textSize})` in
+`renderPrototypeStill(spec, {frame, orientation, mode, screen, locale, textSize, chromeless})` in
 `src/features/prototype/web/webStill.ts` draws the spec as a still screen and returns an element
 tree plus `unsupportedNodes` and `stack` (the outermost stack's screens in key order, its
 start and the screen drawn). It renders on
@@ -230,9 +291,9 @@ the host, so the page's script only switches between views it was given and neve
   `shadows` map to `box-shadow` with the authored blur as the CSS blur (sigma b/2), and `elevation`
   takes its `shadowColor` tint. A gradient border and inner shadows are absolutely placed layers
   after the node's children, so they paint over the content, inside its bounds, as Compose draws
-  them. `surface: "glass"` is a capsule unless `cornerRadius` shapes it: an iOS frame blurs and
-  saturates the backdrop under a translucent tint (else white) with a light rim, and an Android
-  frame draws the tonal fill (the tint, else `surfaceContainer`, at 0.85); an authored background
+  them. `surface: "glass"` is a capsule unless `cornerRadius` shapes it: the iOS skin blurs and
+  saturates the backdrop under a translucent tint (else white) with a light rim, and the Android
+  skin draws the tonal fill (the tint, else `surfaceContainer`, at 0.85); an authored background
   keeps its colour. `ios.glassGroup` draws nothing of its own. `scroll.fadeEdges` is a mask on the
   trailing edge only (the leading one in a `reverse` scroll), since a still opens at the scroll's
   start; horizontal start and end mirror in RTL. The still cannot measure overflow, so it hands the
@@ -269,10 +330,11 @@ the host, so the page's script only switches between views it was given and neve
 - **Coverage.** Supported nodes: `box`, `row`, `column`, `stack`, `scroll`, `text`, `spacer`,
   `divider`, `icon`, `button`, `topAppBar`, `textField`, `switch`, `checkbox`, `card`,
   `listItem` (with its leading icon and its trailing switch, checkbox or icon), `pager`, `grid`,
-  `carousel`, `bottomNav`, `tabBar`, `iconButton`, `chip`, `slider`, `radioGroup`, `select`,
-  `segmentedButton`, `searchBar`, `datePicker`, `timePicker`, `pasteButton`, `bottomSheet`,
-  `dialog`, `snackbar`, `videoPlayer`, `map`, `cameraPreview` and `castButton`. Where the devices differ,
-  the still follows Android, since Material 3 is the spec's baseline. A pager draws only its initial
+  `carousel`, `flow`, `list`, `bottomNav`, `tabBar`, `iconButton`, `chip`, `slider`, `radioGroup`,
+  `select`, `segmentedButton`, `searchBar`, `datePicker`, `timePicker`, `pasteButton`, `badge`,
+  `progress`, `fab`, `chart`, `adaptive`, `bottomSheet`, `dialog`, `snackbar`, `videoPlayer`, `map`,
+  `cameraPreview` and `castButton`, and a `row` or `listItem`'s `swipeActions`. Where the devices differ,
+  the skin decides (below); the descriptions here are the Android skin's. A pager draws only its initial
   page (its numeric `stateKey` value clamped to the pages and truncated, else the first) filling
   it unless it is `wrap` or a fixed `pageSize` sets that axis, inset by `peek`; neighbours a peek
   would reveal are not drawn. Its `dots` indicator is a row of 6 px dots, 8 px apart, the current one
@@ -284,7 +346,25 @@ the host, so the page's script only switches between views it was given and neve
   adaptive grid fits `floor((width + spacing) / (minWidth + spacing))` columns to the screen width,
   so its tracks and clamped spans agree. A carousel draws its items in a clipped row at `itemWidth`,
   `itemSpacing` apart, each masked with a 28 px corner, and keeps an empty slot for a hidden child; it does not resize items as multi-browse or
-  hero keylines do. A bottom nav is an 80 px `surfaceContainer` bar whose items draw their icon in a
+  hero keylines do. A flow places its children eagerly in lines, `spacing` apart, starting a new
+  line `runSpacing` below when `used + spacing + width` would exceed its width, hugs its widest line
+  and clamps to `maxLines` lines. A `list` draws its header, every repeated row up to `maxItems` and
+  its footer, `spacing` apart inside `contentPadding`, in a column (filling, scrolling vertically) or
+  a row (scrolling horizontally), at its opening scroll position. A badge is a 6 px `error` dot, or a 16 px `error` pill around its
+  text. A progress indicator is a 240x4 px bar or a 40 px ring on a `secondaryContainer` track, its
+  `primary` indicator at its numeric state over `max` (default 1) clamped to 0..1; unbound it is
+  indeterminate and a still rests it at 30 %. A FAB is 40, 56 or 96 px (`small`, regular, `large`)
+  on `primaryContainer`, or extended with its label; disabled it is a 12 % `onSurface` container. A
+  chart is inline SVG with Android's geometry: a 160 px plot filling the width (lines, filled areas
+  at 0.25 opacity, or grouped bars rising from zero) over its `yRange` or the auto range, a dashed
+  `outline` goal line, x labels below, or a 120 px ring of the latest value over the goal; series
+  without a `color` take `primary`, `tertiary`, `secondary`, `error` in turn, and the device summary
+  is its label unless one is authored. An `adaptive` scaffold lays out by the screen's width class
+  (compact below 600 px, expanded from 840 px): list-detail and supporting panes sit side by side
+  (a 360 px pane, a 24 px spacer) only when expanded, else the detail (after a selection, with Back)
+  or the open supporting pane (with Close) replaces the other; a navigation suite is a bottom bar,
+  a rail or a drawer by width class, each item drawing its label's first letter as its icon. Swipe
+  actions are drawn as hidden `start` and `end` panels, since a still shows the item closed. A bottom nav is an 80 px `surfaceContainer` bar whose items draw their icon in a
   64x32 pill (`secondaryContainer` when selected) over a 12 px label, and it pads its bottom edge by
   the safe area, as both devices' navigation bars do, unless an ancestor already applied it. A tab bar
   is a 48 px `surface` row (72 px when a tab has an icon) with an `outlineVariant` bottom divider; the
@@ -387,8 +467,46 @@ the host, so the page's script only switches between views it was given and neve
   256 px hour dial (a 24-hour dial adds an inner 12–23 ring) with the bound hour under a `primary`
   selector. A date picker is 360 px of `surfaceContainerHigh`: "Select date", the bound date as its
   headline, the month row with its arrows, and that month (else today's from the still's clock) in
-  a Sunday-first grid of 48 px cells, the bound day filled `primary` and today ringed. An `image` draws a placeholder with reason `assetNotInlined`. Any other node draws a
+  a Sunday-first grid of 48 px cells, the bound day filled `primary` and today ringed. An `image` binds its asset id (a
+  light/dark pair picks the mode's side, then placeholders bind as text does); without a slot for it
+  it draws a `surfaceVariant` placeholder, at least 48 px on each axis the node does not fix in dp,
+  with reason `assetNotInlined`. With one, the placeholder
+  colour and an `aspect-ratio` on an axis it leaves to wrap read the slot's `-bg` and `-ar`, and it
+  holds an image layer (the slot's image as a centred background, `contain`, `cover` or
+  `100% 100%` for `fit`, `crop` and `fill`, with `saturate()` for `filter.saturation`) and, for
+  `filter.tint`, a tint layer that multiplies the tint's opaque colour over the image masked by it,
+  shown only when `-on` is set, as Android's saturation colour matrix then its `Modulate` tint
+  layer. `Modulate` multiplies alpha too, so a translucent tint wraps both layers in a group at the
+  tint's alpha (a fully transparent tint hides the image); a corner radius clips both. Item images (nav items) are not inlined. Any other node draws a
   dashed placeholder labelled with its type and id, with reason `unsupportedType`.
+- **Skins.** `webSkin.ts` holds one skin per platform; the frame's platform picks it and the
+  `skin` option overrides it. A skin replaces the renderers of the components its platform draws
+  natively (`designCoverage` `native` in `schemas/prototype-spec-contract.json`), and those of the
+  Material components the iOS renderer draws with SwiftUI defaults; every other component draws
+  the shared Material 3 renderer on both. A node's `ios` namespace is read only in
+  the iOS skin and its `android` namespace only in the Android one. The Android skin replaces
+  nothing. The iOS skin draws `button` as the iOS renderer's SwiftUI styles at the regular control
+  size in the 17 px body style (scaled by the frame's Dynamic Type size), tinted with the theme's `primary`: `filled` is a 6 px-radius tint fill
+  under white text with 7x12 px padding, `tonal` the tint at 0.15 opacity under tint text,
+  `elevated` that with a 1 px shadow, `outlined` a 1 px tint capsule with 8x16 px padding, `text`
+  bare tint text; `ios.buttonStyle` draws `glassProminent` as a filled and `glass` as a tonal
+  capsule, without blur. Its `slider` is the system slider: its label 4 px above a 28 px row whose
+  4 px track is systemBlue up to the value and systemFill after it, under a white 28 px thumb whose
+  centre travels 14 px inside each end; the value is its state, else `min`, clamped and not
+  snapped. Its Material components follow the iOS renderer's SwiftUI views (text sizes are
+  body 17, subheadline 15, `.title3` 20, `.title` 28 and `.largeTitle` 34 px, scaled by the frame's
+  Dynamic Type size): `switch` is a body label filling a 44 px row before a 51x31 capsule track (`primary` on,
+  `surfaceContainerHighest` off) with a 27 px thumb; `checkbox` is a 17 px check square, filled
+  when checked, 8 px before its label; `listItem` has a body headline over a subheadline
+  `onSurfaceVariant` supporting line, 56 px tall or 72 px with one, and that switch track or check
+  square as its trailing control; `chip` is 32 px with 12 px padding in the medium subheadline style
+  and the content colour, in a 44 px target; `topAppBar` is a 64 px row padded 4 px with 48 px icon
+  buttons and a `.title3` semibold title (12 px in, 4 px after a navigation icon), or a `.title`
+  (medium) or `.largeTitle` (large) line below the row, framed at 48 or 88 px with an
+  `enterAlways` or `exitUntilCollapsed` `onScroll`; `card` is `surfaceContainerHigh` when
+  filled, else `surface`, with an `outlineVariant` outline when outlined. Like the iOS renderer,
+  the skin ignores `ios.navigationTitle` and `ios.sheet.sizing`. `textField`, `bottomNav`, `tabBar`
+  and `bottomSheet` still draw the shared renderer.
 - **Frame.** The screen has the frame's size for the orientation, its corner radius and bezel, a
   generic status bar, the cutout (an `island` draws as a pill, a punch hole as a circle) and the
   navigation chrome: Android's handle (`data-nav="handle"`) or three generic button marks, which move to

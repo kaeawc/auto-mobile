@@ -5,8 +5,10 @@ import java.io.IOException
 import java.util.logging.Level
 import java.util.logging.Logger
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 
 /*
  * The MCP host's channel into the library (#13621). The host pushes a canonical bundle into this
@@ -35,6 +37,14 @@ private const val MAX_LABEL_LENGTH = 120
 const val MCP_ORPHAN_MAX_AGE_MS = 10 * 60 * 1000L
 internal val REQUEST_ID = Regex("[A-Za-z0-9_-]{1,64}")
 private val logger: Logger = Logger.getLogger("ProtoViewerMcp")
+
+/**
+ * What this build reports to the MCP host in `mcp/capabilities.json` (#14156), so the host can
+ * refuse a spec this build cannot show before pushing it, and name the version to update from.
+ */
+data class McpAbout(val versionCode: Long, val versionName: String?, val capabilities: Set<String>)
+
+const val MCP_CAPABILITIES_FILE = "capabilities.json"
 
 sealed interface McpCommand {
   val request: String
@@ -74,6 +84,7 @@ class McpInbox(
   private val importer: LibraryBytesImporter,
   private val repository: LibraryRepository,
   private val nowMillis: () -> Long = System::currentTimeMillis,
+  private val about: McpAbout? = null,
 ) {
   /**
    * Runs the command and writes its result, except for an entry to open: that is returned so the
@@ -109,9 +120,35 @@ class McpInbox(
    * Creates `mcp/inbox` and `mcp/results` as this app. False when a folder is missing afterwards,
    * e.g. a shell-created `mcp`.
    */
-  fun ensureDirectories(): Boolean =
+  fun ensureDirectories(): Boolean {
     // Every folder is attempted, so a blocked inbox does not stop the results folder existing.
-    listOf(root, File(root, "inbox"), File(root, "results")).map(::ensureDirectory).all { it }
+    val ready =
+      listOf(root, File(root, "inbox"), File(root, "results")).map(::ensureDirectory).all { it }
+    publishCapabilities()
+    return ready
+  }
+
+  /**
+   * Rewrites `mcp/capabilities.json` for this build. Runs on every start and PREPARE, so after an
+   * update the host sees the new set; best effort, since the import still checks capabilities
+   * itself.
+   */
+  private fun publishCapabilities() {
+    val about = about ?: return
+    if (!root.isDirectory) return
+    val report = buildJsonObject {
+      put("versionCode", about.versionCode)
+      about.versionName?.let { put("versionName", it) }
+      putJsonArray("capabilities") {
+        about.capabilities.sorted().forEach { add(JsonPrimitive(it)) }
+      }
+    }
+    try {
+      publish(File(root, MCP_CAPABILITIES_FILE), report)
+    } catch (error: IOException) {
+      logger.log(Level.WARNING, "Cannot publish the MCP capabilities", error)
+    }
+  }
 
   /**
    * Deletes regular files in `mcp/inbox` and `mcp/results` not modified for
@@ -149,7 +186,7 @@ class McpInbox(
       val bytes =
         file.inputStream().use(::readImportLimited)
           ?: return rejected(command.request, "content", "Content exceeds byte limit")
-      return when (val imported = importer.importBytes(bytes, LibrarySource.mcp, label)) {
+      return when (val imported = importer.importBytes(bytes, LibrarySource.mcp, label, null)) {
         is LibraryImportResult.Imported -> entry("imported", command.request, imported.entry)
         is LibraryImportResult.Rejected ->
           rejected(
@@ -187,16 +224,20 @@ class McpInbox(
     }
   }
 
-  /** Written under a temporary name and renamed, so the host never reads a partial result. */
   private fun write(request: String, result: JsonObject) {
     val results = File(root, "results")
     if (!ensureDirectory(results)) throw IOException("Cannot create MCP results")
-    val temporary = File(results, ".$request.json.tmp")
-    temporary.writeText(result.toString())
-    if (!temporary.renameTo(File(results, "$request.json"))) {
-      temporary.delete()
-      throw IOException("Cannot publish the MCP result")
-    }
+    publish(File(results, "$request.json"), result)
+  }
+}
+
+/** Written under a temporary name and renamed, so the host never reads a partial file. */
+private fun publish(target: File, content: JsonObject) {
+  val temporary = File(target.parentFile, ".${target.name}.tmp")
+  temporary.writeText(content.toString())
+  if (!temporary.renameTo(target)) {
+    temporary.delete()
+    throw IOException("Cannot publish ${target.name}")
   }
 }
 

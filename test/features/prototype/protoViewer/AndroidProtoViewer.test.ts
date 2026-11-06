@@ -682,4 +682,99 @@ describe("AndroidProtoViewer", () => {
       `shell rm -f '${ROOT}/results/${REQUEST}.json'`,
     ]);
   });
+
+  describe("capability handshake (#14156)", () => {
+    const CAPS = `${ROOT}/capabilities.json`;
+    const CAPS_PROBE = `shell if [ -f '${CAPS}' ]; then cat '${CAPS}'; fi`;
+    const PLAY = `https://play.google.com/store/apps/details?id=${PACKAGE}`;
+    const report = (versionCode: number, capabilities: string[]) =>
+      JSON.stringify({ versionCode, versionName: `0.0.${versionCode}`, capabilities });
+    const installedVersion = (code: number) =>
+      adb.setCommandResponse(
+        "dumpsys package",
+        exec(
+          `Packages:\n  Package [${PACKAGE}]\n    versionCode=${code} minSdk=26 targetSdk=36\n    versionName=0.0.${code}\n`,
+        ),
+      );
+
+    test("reads the report the app published for the installed version", async () => {
+      adb.appCreatesFolders();
+      installedVersion(88);
+      adb.files.set(CAPS, report(88, ["prototype_routes_v1"]));
+
+      expect(await viewer.capabilities({ timeoutMs: 5000 })).toEqual({
+        version: "0.0.88",
+        capabilities: new Set(["prototype_routes_v1"]),
+        updateUrl: PLAY,
+      });
+      // Storage was ready and the report current: no app launch.
+      expect(shellCommands().some((command) => command.includes("am start"))).toBe(false);
+      expect(shellCommands()).toContain(CAPS_PROBE);
+    });
+
+    test("a report for another version (an update the app has not run since) is refreshed by PREPARE", async () => {
+      adb.appCreatesFolders();
+      installedVersion(89);
+      adb.files.set(CAPS, report(88, []));
+      adb.whenLaunched(({ action, request }) => {
+        expect(action).toBe("PREPARE");
+        adb.files.set(CAPS, report(89, ["prototype_dead_tap_v1"]));
+        adb.appWritesResult(request, { status: "prepared", request });
+      });
+
+      const read = await viewer.capabilities({ timeoutMs: 5000 });
+      expect(read?.version).toBe("0.0.89");
+      expect(read?.capabilities).toEqual(new Set(["prototype_dead_tap_v1"]));
+    });
+
+    test("a refresh request sends PREPARE even when the report matches", async () => {
+      adb.appCreatesFolders();
+      installedVersion(1);
+      adb.files.set(CAPS, report(1, []));
+      const launched: string[] = [];
+      adb.whenLaunched(({ action, request }) => {
+        launched.push(action);
+        adb.files.set(CAPS, report(1, ["prototype_dead_tap_v1"]));
+        adb.appWritesResult(request, { status: "prepared", request });
+      });
+
+      const read = await viewer.capabilities({ timeoutMs: 5000, refresh: true });
+      expect(launched).toEqual(["PREPARE"]);
+      expect(read?.capabilities).toEqual(new Set(["prototype_dead_tap_v1"]));
+    });
+
+    test("a build from before the handshake publishes nothing: undefined without another launch", async () => {
+      adb.appCreatesFolders();
+      installedVersion(80);
+
+      expect(await viewer.capabilities({ timeoutMs: 5000 })).toBeUndefined();
+      expect(shellCommands().some((command) => command.includes("am start"))).toBe(false);
+    });
+
+    test("a report still for another version after PREPARE is not trusted", async () => {
+      adb.appCreatesFolders();
+      installedVersion(90);
+      adb.files.set(CAPS, report(88, ["prototype_dead_tap_v1"]));
+      adb.whenLaunched(({ request }) =>
+        adb.appWritesResult(request, { status: "prepared", request }),
+      );
+
+      expect(await viewer.capabilities({ timeoutMs: 5000 })).toBeUndefined();
+    });
+
+    test("a malformed report is ignored", async () => {
+      adb.appCreatesFolders();
+      adb.files.set(CAPS, "{not json");
+      expect(await viewer.capabilities({ timeoutMs: 5000 })).toBeUndefined();
+      adb.files.set(CAPS, JSON.stringify({ versionCode: "x", capabilities: [] }));
+      expect(await viewer.capabilities({ timeoutMs: 5000 })).toBeUndefined();
+    });
+
+    test("a secondary user's report is unknown: no shell probe of app storage and no launch", async () => {
+      await selectSecondaryUser();
+
+      expect(await viewer.capabilities({ timeoutMs: 5000, refresh: true })).toBeUndefined();
+      expect(shellCommands()).toEqual([]);
+    });
+  });
 });

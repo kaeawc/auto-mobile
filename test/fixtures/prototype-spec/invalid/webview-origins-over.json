@@ -1,0 +1,101 @@
+{
+  "spec": {
+    "id": "webview-node",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "articleNav": "loading",
+      "articleTitle": "",
+      "articleCanGoBack": false
+    },
+    "data": {
+      "selected": {
+        "slug": "hello"
+      },
+      "lastUrl": ""
+    },
+    "requires": {
+      "platform": ["webview"]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "row",
+          "children": [
+            {
+              "type": "button",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "platform",
+                  "call": "webview.back",
+                  "args": {
+                    "node": {
+                      "value": "article"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "button",
+              "label": "Reload",
+              "onTap": [
+                {
+                  "type": "platform",
+                  "call": "webview.reload",
+                  "args": {
+                    "node": {
+                      "value": "article"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "webView",
+          "id": "article",
+          "url": "https://example.com/post/{data:/selected/slug}",
+          "allowedOrigins": [
+            "https://a0.example.com",
+            "https://a1.example.com",
+            "https://a2.example.com",
+            "https://a3.example.com",
+            "https://a4.example.com",
+            "https://a5.example.com",
+            "https://a6.example.com",
+            "https://a7.example.com",
+            "https://a8.example.com"
+          ],
+          "javaScript": false,
+          "navigationStateKey": "articleNav",
+          "titleKey": "articleTitle",
+          "canGoBackKey": "articleCanGoBack",
+          "onNavigate": [
+            {
+              "type": "setData",
+              "path": "/data/lastUrl",
+              "value": {
+                "value": "{url}"
+              }
+            }
+          ],
+          "onBlockedNavigation": [
+            {
+              "type": "emit",
+              "name": "openExternally"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].allowedOrigins",
+  "expectedMessage": "Array length out of range"
+}

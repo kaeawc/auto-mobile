@@ -1,4 +1,6 @@
+import { registerVisionosRunnerBuilder } from "../features/visionos/VisionosRunnerLifecycle";
 import { IosCtrlProxyBuilder } from "../ctrlProxy/IosCtrlProxyBuilder";
+import type { BootedDevice } from "../models";
 import { registerTvosRunnerBuilder } from "../features/tvos/TvosRunnerLifecycle";
 import { registerWatchRunnerBuilder } from "../features/watch/WatchRunnerLifecycle";
 import { clientAdvertisesMcpApps } from "./mcpAppsSupport";
@@ -215,6 +217,7 @@ let lastToolRegistration: { daemonMode: boolean; removalEpoch: number } | undefi
 export function registerMcpTools(daemonMode: boolean): void {
   registerWatchRunnerBuilder(() => IosCtrlProxyBuilder.getInstance());
   registerTvosRunnerBuilder(() => IosCtrlProxyBuilder.getInstance());
+  registerVisionosRunnerBuilder(() => IosCtrlProxyBuilder.getInstance());
   installDefaultProvisionedDeviceTransportFence();
   // Re-registering rebuilds every definition and drops the tool-schema cache, which a
   // stateless endpoint (one createMcpServer per request) would pay on every tools/list.
@@ -226,9 +229,11 @@ export function registerMcpTools(daemonMode: boolean): void {
     lastToolRegistration?.daemonMode !== daemonMode ||
     lastToolRegistration.removalEpoch !== removalEpoch
   ) {
+    const iosRunnerClient = (device: BootedDevice) => IOSCtrlProxyClient.getInstance(device);
     registerAllTools({
       daemonMode,
-      iosRunnerLocation: (device) => IOSCtrlProxyClient.getInstance(device),
+      iosRunnerLocation: iosRunnerClient,
+      iosAccessibilityFocus: iosRunnerClient,
       keystoreReset: (device) => AndroidCtrlProxyClient.getInstance(device),
     });
     lastToolRegistration = { daemonMode, removalEpoch: ToolRegistry.removalEpochForRegistration };

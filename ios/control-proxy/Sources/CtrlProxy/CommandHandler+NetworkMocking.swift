@@ -87,6 +87,9 @@ extension CommandHandler {
         if !serverInfo.capabilities.contains("network-fault-rules") {
             capabilities.removeAll { $0 == .networkFaultRules }
         }
+        if !serverInfo.capabilities.contains("accessibility-focus") {
+            capabilities.removeAll { $0 == .accessibilityFocus }
+        }
         if !serverInfo.capabilities.contains("magic-tap") {
             capabilities.removeAll { $0 == .magicTap }
         }

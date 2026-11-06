@@ -2492,6 +2492,28 @@ describe("videoRecordingManager", () => {
       expect(fakeBackend.startCalls.length).toBe(0);
     });
 
+    test("an Apple TV recording takes the simctl cap and is stored as tvos (#16725)", async () => {
+      const appleTv: BootedDevice = { name: "Apple TV 4K", platform: "tvos", deviceId: "tv-udid" };
+      await expect(
+        startVideoRecording({ device: appleTv, maxDurationSeconds: 3601 }),
+      ).rejects.toThrow("maxDuration must be <= 3600 seconds.");
+      const active = await startVideoRecording({ device: appleTv, maxDurationSeconds: 500 });
+      expect(fakeBackend.startCalls.map((call) => call.device?.platform)).toEqual(["tvos"]);
+      expect((await fakeRepository.getRecording(active.recordingId))?.platform).toBe("tvos");
+      expect(
+        (await listActiveVideoRecordings({ platform: "tvos" })).map((r) => r.recordingId),
+      ).toEqual([active.recordingId]);
+      await stopVideoRecording(active.recordingId);
+    });
+
+    test("an Apple TV recording with audio is refused before capture (#16725)", async () => {
+      const appleTv: BootedDevice = { name: "Apple TV 4K", platform: "tvos", deviceId: "tv-udid" };
+      await expect(startVideoRecording({ device: appleTv, audio: true })).rejects.toThrow(
+        "audio is not supported for Apple TV recordings; record without audio.",
+      );
+      expect(fakeBackend.startCalls.length).toBe(0);
+    });
+
     test("non-iOS recording above the 300s cap is still rejected (Android segments before the manager)", async () => {
       await expect(
         startVideoRecording({ device: testDevice, maxDurationSeconds: 301 }),

@@ -86,6 +86,7 @@ export class CtrlProxyRunnerRecovery {
     "rotate",
     "shake",
     "magic_tap_result",
+    "accessibility_focus_result",
   ]);
 
   /** A briefly open socket is not evidence that the runner recovered. */

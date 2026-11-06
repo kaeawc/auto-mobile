@@ -21,6 +21,7 @@ import {
   observeSystemTrayAfterTap,
   ensureSystemTrayClosed,
   ensureSystemTrayOpen,
+  notificationNotFoundError,
   tapElement,
   swipeElement,
   isMatchInCollapsedGroup,
@@ -55,7 +56,11 @@ import { BudgetedIosLockStateProbe } from "../../../src/features/observe/ios/Bud
 import { CachedIosLockStateProbe } from "../../../src/features/observe/ios/CachedIosLockStateProbe";
 import { applyIosLockStateReading } from "../../../src/features/observe/ios/IosLockStateProbe";
 import type { SystemTrayObserver } from "../../../src/features/systemTray/helpers/dependencies";
-import { ios26SettingsClosed, ios26TrayOpenSettings } from "./iosTrayObservationFixture";
+import {
+  ios26SettingsClosed,
+  ios26TrayOpenHome,
+  ios26TrayOpenSettings,
+} from "./iosTrayObservationFixture";
 import { SystemTray } from "../../../src/features/systemTray/SystemTray";
 import { createNotificationUIDetector } from "../../../src/features/systemTray/createNotificationUIDetector";
 import { getSystemTrayDependencies } from "../../../src/features/systemTray/helpers/dependencies";
@@ -4600,11 +4605,37 @@ describe("iOS systemTray open/close", () => {
             notification: { title: "General" },
             awaitTimeout: 500,
           }),
-        ).rejects.toThrow("Notification not found after 500ms");
+        ).rejects.toThrow(
+          "Notification not found after 500ms: Notification Center is open over the foreground " +
+            `app (${ios26TrayOpenSettings.viewHierarchy?.packageName}), and iOS does not expose ` +
+            'notification content to automation there. Press home (pressButton "home"), then ' +
+            "retry this systemTray action from the home screen.",
+        );
         expect(client.tapCalls).toHaveLength(0);
         expect(client.swipeCalls).toHaveLength(0);
       },
     );
+
+    test("notificationNotFoundError names the app-owned tray only for the iOS app cover sheet", () => {
+      // #17200: Notification Center open over Settings keeps the app tree, so not-found is unactionable.
+      expect(notificationNotFoundError(iosDevice, ios26TrayOpenSettings, 5000).message).toStartWith(
+        "Notification not found after 5000ms: Notification Center is open over",
+      );
+      // A closed tray over the same app, and the home-screen tray, keep the plain not-found.
+      expect(notificationNotFoundError(iosDevice, ios26SettingsClosed, 5000).message).toBe(
+        "Notification not found after 5000ms.",
+      );
+      expect(notificationNotFoundError(iosDevice, ios26TrayOpenHome, 5000).message).toBe(
+        "Notification not found after 5000ms.",
+      );
+      expect(
+        notificationNotFoundError(
+          { ...iosDevice, platform: "android" },
+          ios26TrayOpenSettings,
+          5000,
+        ).message,
+      ).toBe("Notification not found after 5000ms.");
+    });
 
     test("open keeps a slow shared lock probe alive across polls until it reports locked", async () => {
       const timer = new FakeTimer();

@@ -1,9 +1,14 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   buildPrototypeWebPage,
   type PrototypeWebPageInput,
 } from "../../../../src/features/prototype/web/webPage";
+import {
+  buildPrototypeWebPageWithImages,
+  SharpPrototypeWebImageEncoder,
+  type PrototypeWebAssetSource,
+} from "../../../../src/features/prototype/web/webImageEncoding";
 
 /**
  * The reference specs and frames the headless screenshot check renders (#16346), shared by the
@@ -29,8 +34,14 @@ export const WEB_SCREENSHOT_SPECS: Readonly<Record<string, string>> = {
   "material-controls": "prototype-spec/valid/material-controls.json",
   "component-gallery": "prototype-spec/valid/component-gallery.json",
   "doc-example-2": "prototype-spec/valid/doc-example-2.json",
+  "image-gallery": "prototype-web/image-gallery.json",
+  "flow-basic": "prototype-spec/valid/flow-basic.json",
+  "flow-max-lines-repeat": "prototype-spec/valid/flow-max-lines-repeat.json",
+  "chart-variants": "prototype-spec/valid/chart-variants.json",
   "status-bar-light-content": "prototype-web/status-bar-light-content.json",
   "status-bar-dark-content": "prototype-web/status-bar-dark-content.json",
+  // Every button variant and two sliders: Material on pixel-9, the native iOS skin on iphone-16.
+  "native-controls": "prototype-web/native-controls.json",
 };
 
 /**
@@ -49,6 +60,18 @@ export const WEB_SCREENSHOT_SETTINGS: Readonly<
         : { contentSize: "accessibility-extra-extra-extra-large" },
   }),
   rtl: () => ({ locale: "ar" }),
+};
+
+/** Image assets the cases draw: `<asset id>.png`; an id without a file stays a placeholder. */
+export const WEB_SCREENSHOT_ASSET_DIR = join(FIXTURES, "prototype-web/assets");
+
+export const webScreenshotAssets: PrototypeWebAssetSource = {
+  get: async (id) => {
+    const file = join(WEB_SCREENSHOT_ASSET_DIR, `${id}.png`);
+    return /^[a-z-]+$/.test(id) && existsSync(file)
+      ? { mimeType: "image/png", bytes: new Uint8Array(readFileSync(file)) }
+      : undefined;
+  },
 };
 
 /** The browser viewport, in CSS px at device scale factor 1, so a golden is exactly this size. */
@@ -106,10 +129,29 @@ export function webScreenshotCases(): WebScreenshotCase[] {
   ];
 }
 
-/** The page under test: the case's spec as the only revision of the only variant. */
-export function webScreenshotPage(entry: WebScreenshotCase): string {
+/**
+ * The page under test: the case's spec as the only revision of the only variant, its image assets
+ * inlined from the fixture asset directory.
+ */
+export async function webScreenshotPage(entry: WebScreenshotCase): Promise<string> {
   const spec: unknown = JSON.parse(readFileSync(entry.fixture, "utf8"));
-  return webSpecPage(spec, entry.spec, entry.frame, entry.settings);
+  const page = await buildPrototypeWebPageWithImages(
+    {
+      title: entry.spec,
+      frame: entry.frame,
+      ...entry.settings,
+      variants: [
+        {
+          id: entry.spec,
+          label: entry.spec,
+          revisions: [{ revision: 1, operation: "show", spec }],
+        },
+      ],
+    },
+    webScreenshotAssets,
+    new SharpPrototypeWebImageEncoder(),
+  );
+  return page.html;
 }
 
 /** A page showing one spec as the only revision of the only variant. */
@@ -134,4 +176,46 @@ export function pngSize(png: Buffer): { width: number; height: number } {
     throw new Error("not a PNG");
   }
   return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
+}
+
+/**
+ * Browser engines the check runs in (#16459). Every engine runs the behavioural assertions; only
+ * `WEB_SCREENSHOT_GOLDEN_ENGINE` is compared with (or rewrites) the goldens, which are trusted
+ * only from the CI Linux Chromium build.
+ */
+export const WEB_SCREENSHOT_ENGINES = ["chromium", "firefox", "webkit"] as const;
+export type WebScreenshotEngine = (typeof WEB_SCREENSHOT_ENGINES)[number];
+export const WEB_SCREENSHOT_GOLDEN_ENGINE: WebScreenshotEngine = "chromium";
+
+function isWebScreenshotEngine(name: string): name is WebScreenshotEngine {
+  return (WEB_SCREENSHOT_ENGINES as readonly string[]).includes(name);
+}
+
+/**
+ * The engines named by a comma-separated list (`AUTOMOBILE_PROTOTYPE_WEB_ENGINES`), in canonical
+ * order without duplicates. Unset or blank means every engine; an unknown name throws.
+ */
+export function webScreenshotEngines(value: string | undefined): WebScreenshotEngine[] {
+  const names = (value ?? "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0);
+  if (names.length === 0) {
+    return [...WEB_SCREENSHOT_ENGINES];
+  }
+  const unknown = names.filter((name) => !isWebScreenshotEngine(name));
+  if (unknown.length > 0) {
+    throw new Error(
+      `unknown browser engine(s): ${unknown.join(", ")} (expected ${WEB_SCREENSHOT_ENGINES.join(", ")})`,
+    );
+  }
+  return WEB_SCREENSHOT_ENGINES.filter((engine) => names.includes(engine));
+}
+
+/**
+ * Where a captured screenshot is written under the output directory: the golden engine's at the
+ * top level, so adopting goldens stays a flat copy, and every other engine's under its own name.
+ */
+export function webScreenshotOutputPath(engine: WebScreenshotEngine, file: string): string {
+  return engine === WEB_SCREENSHOT_GOLDEN_ENGINE ? file : join(engine, file);
 }

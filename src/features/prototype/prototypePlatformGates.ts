@@ -123,6 +123,19 @@ export function prototypePlatformCallCapabilityFields(spec: unknown, capability:
   );
 }
 
+/** Authored `backend` paths of the module's nodes that name `backend` (#14302). */
+export function prototypePlatformBackendFields(
+  spec: unknown,
+  name: string,
+  backend: string,
+): string[] {
+  return unique(
+    authoredUses(spec)
+      .filter((use) => use.kind === "node" && use.module === name && use.backend === backend)
+      .map((use) => `${use.path}.backend`),
+  );
+}
+
 /** The per-call and per-event capabilities in module order, each with what needs it. */
 const callCapabilities = (): { capability: string; calls: string[] }[] => {
   const byCapability = new Map<string, string[]>();
@@ -185,6 +198,12 @@ const PROTOTYPE_PLATFORM_MODULE_ONLY_GATES = Object.entries(PROTOTYPE_PLATFORM_M
       unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
         unsupported(fields, platform, definition.capability, `the ${name} platform module`),
     },
+    ...Object.entries(definition.backends ?? {}).map(([backend, { capability }]) => ({
+      capability,
+      fields: (spec: unknown) => prototypePlatformBackendFields(spec, name, backend),
+      unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
+        unsupported(fields, platform, capability, `the ${name} \`${backend}\` backend`),
+    })),
     ...(definition.deviceCapability
       ? [
           {

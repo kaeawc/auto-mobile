@@ -4,7 +4,7 @@ import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory"
 import { YamlPlanSerializer } from "../../src/utils/plan/PlanSerializer";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
-import { createStructuredToolResponse } from "../../src/utils/toolUtils";
+import { createStructuredToolResponse, withIsErrorOnFailure } from "../../src/utils/toolUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 /**
@@ -56,8 +56,12 @@ describe("PlanExecutor — step-level expectations", () => {
       }),
       async (params) => {
         observeCalls.push(params);
-        return createStructuredToolResponse(
-          observeAnswer((params.waitFor ?? {}) as Record<string, unknown>),
+        const answer = observeAnswer((params.waitFor ?? {}) as Record<string, unknown>);
+        // Like the real observe, a waitFor timeout is an isError envelope that still carries
+        // the last observation (#16889).
+        return withIsErrorOnFailure(
+          createStructuredToolResponse(answer),
+          answer.awaitTimeout !== true,
         );
       },
     );
@@ -217,6 +221,59 @@ steps:
     expect(result.failedStep?.error).toBe(
       'Expectation 1/1 (elementVisible text="Done") failed: could not observe the screen: device offline',
     );
+  });
+
+  test("an unmet expectation reports how long it waited, not the serialized observation (#17196)", async () => {
+    observeAnswer = () => ({ ...timedOut(["Settings", "Network"]), awaitDuration: 750 });
+    const plan = planWith(`      - type: textEquals
+        text: "Definitely Not Present 0091a"
+        timeoutMs: 750
+`);
+
+    const result = await run(plan, "android");
+
+    expect(result.success).toBe(false);
+    const error = result.failedStep?.error ?? "";
+    expect(error).toBe(
+      'Expectation 1/1 (textEquals text="Definitely Not Present 0091a") failed: not satisfied after 750ms; ' +
+        '1 near match(es); observed texts: "Settings", "Network"',
+    );
+    expect(error).not.toContain("could not observe");
+    expect(error).not.toContain("awaitTimeout");
+    expect(result.failedStep?.failureObservation?.visibleTextsSample).toEqual([
+      "Settings",
+      "Network",
+    ]);
+  });
+
+  test("an isError observe that is not a waitFor timeout still reports it could not observe", async () => {
+    ToolRegistry.register(
+      "observe",
+      "failing observe",
+      z.strictObject({
+        platform: z.string().optional(),
+        deviceId: z.string().optional(),
+        sessionUuid: z.string().optional(),
+        device: z.string().optional(),
+        waitFor: z.record(z.string(), z.unknown()).optional(),
+      }),
+      async () =>
+        withIsErrorOnFailure(
+          createStructuredToolResponse({ error: "hierarchy dump failed" }),
+          false,
+        ),
+    );
+    const plan = planWith(`      - type: elementVisible
+        selector: { text: Done }
+`);
+
+    const result = await run(plan, "android");
+
+    expect(result.success).toBe(false);
+    expect(result.failedStep?.error).toBe(
+      'Expectation 1/1 (elementVisible text="Done") failed: could not observe the screen: hierarchy dump failed',
+    );
+    expect(result.failedStep?.failureObservation).toBeUndefined();
   });
 
   test("a step without expectations never observes", async () => {

@@ -8,6 +8,7 @@ import { elementSchema, selectedElementSchema } from "./elements";
 import { observationBackendFields, observationOutputSchema } from "./observation";
 import { observationDiffMetadataSchema, tapEffectSchema } from "./observationMetadata";
 import { platformSchema } from "../../utils/schemaHelpers";
+import { FOCUS_NAVIGATE_STATUSES } from "../../features/action/FocusNavigate";
 
 /** A successful openurl may still need a foreground confirmation before the next action. */
 export const openLinkResultSchema = z
@@ -57,10 +58,18 @@ export const keyboardResultSchema = z
   })
   .passthrough();
 
+/** A command's stable failure code; the envelope repeats the failed command's code. */
+const sendKeysErrorCodeSchema = z
+  .string()
+  .describe(
+    "Stable failure code. NO_FOCUSED_EDITABLE: no editable field has focus; focus the field (tap it, or tapOn with focus), then retry sendKeys without a mode.",
+  );
+
 /** IME fields live on each command result, never on the sendKeys envelope. */
 export const sendKeysResultSchema = z
   .object({
     warnings: z.array(z.string()).optional(),
+    errorCode: sendKeysErrorCodeSchema.optional(),
     pinnedDisplay: pinnedDisplaySchema.optional(),
     displayInventory: displayInventoryUnavailableSchema.optional(),
     staleDisplay: staleDisplaySchema.optional(),
@@ -71,6 +80,7 @@ export const sendKeysResultSchema = z
             pinnedDisplay: pinnedDisplaySchema.optional(),
             displayInventory: displayInventoryUnavailableSchema.optional(),
             staleDisplay: staleDisplaySchema.optional(),
+            errorCode: sendKeysErrorCodeSchema.optional(),
             imeFailure: z
               .object({
                 stage: z.enum([
@@ -244,6 +254,22 @@ export const tapOnResultSchema = z
     selectionStarted: z.boolean().optional(),
     searchUntil: tapOnSearchUntilSchema.optional(),
     screenReaderNavigation: screenReaderNavigationSchema.optional(),
+    inputMethod: z
+      .literal("dpad")
+      .optional()
+      .describe(
+        "Present when the Android device has no touchscreen and the D-pad was used instead of a touch tap; enter is pressed only after focus reaches the target",
+      ),
+    focusNavigation: z
+      .object({
+        status: z.enum(FOCUS_NAVIGATE_STATUSES),
+        steps: z.number(),
+        path: z.array(z.record(z.string(), z.unknown())),
+        focusedElement: z.record(z.string(), z.unknown()).optional(),
+      })
+      .passthrough()
+      .optional()
+      .describe("The D-pad focus walk, when inputMethod is dpad"),
     debug: z.any().optional(),
   })
   .passthrough();

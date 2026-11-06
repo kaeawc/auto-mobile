@@ -71,12 +71,19 @@ describe("prototype web input errors reach the client unchanged (#16811)", () =>
     );
   });
 
-  test("an unknown frame surfaces from the page and both resource readers", () => {
+  test("an unknown frame surfaces from the page and both resource readers", async () => {
     const unknown = () => deviceFrameOrThrow("nokia-3310");
     expectSurfaced(unknown, page({ frame: "nokia-3310" }));
-    expectSurfaced(unknown, () =>
-      readPrototypeWebResource(revisions(), { id: "checkout", frame: "nokia-3310" }, "v"),
+    const outer = await readPrototypeWebResource(
+      revisions(),
+      { id: "checkout", frame: "nokia-3310" },
+      "v",
+    ).then(
+      () => undefined,
+      (error: unknown) => error,
     );
+    expect(outer).toBeInstanceOf(ActionableError);
+    expect((outer as Error).message).toBe((thrown(unknown) as Error).message);
     for (const format of ["compose", "swiftui"] as const) {
       expectSurfaced(unknown, () =>
         readPrototypeSourceResource(

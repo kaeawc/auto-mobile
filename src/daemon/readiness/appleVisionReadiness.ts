@@ -2,7 +2,7 @@ import type { PlatformDeviceManager } from "../../devices/deviceUtils";
 import { ActionableError, type BootedDevice } from "../../models";
 import type { DeviceReadyOptions } from "./DeviceReadinessContracts";
 
-/** Resolve a booted headset only for an explicitly named visionOS call; no automation runner applies. */
+/** Resolve a booted headset only for an explicitly named visionOS call; automation commands prepare their window-app runner after selection. */
 export async function resolveBootedAppleVisionForCall(
   devices: Pick<PlatformDeviceManager, "getBootedDevicesDetailed">,
   providedDeviceId: string | undefined,

@@ -46,6 +46,7 @@ import {
   executeWithAdbTransportRecovery,
   getAdbAbortError,
 } from "./adbTransportRecovery";
+import { notifyAdbTransportRecovered } from "./adbTransportRecoveredSignal";
 import {
   defaultAdbTransportRestartRegistry,
   isAdbTransportRestartCommand,
@@ -159,6 +160,15 @@ const execFileAsync: ExecFileAsync = async (
     { preserveError: true },
   );
 };
+
+/**
+ * The device a command's `-s` arguments address. Parts without the field (a stubbed
+ * `getBaseCommandParts`) fall back to the client's device.
+ */
+const commandDeviceId = (
+  parts: { deviceId?: string },
+  device: BootedDevice | null | undefined,
+): string | undefined => ("deviceId" in parts ? parts.deviceId : device?.deviceId);
 
 export class AdbClient implements AdbExecutor {
   readonly adbDeviceDiscovery: AdbDeviceDiscovery;
@@ -432,7 +442,7 @@ export class AdbClient implements AdbExecutor {
   async getBaseCommandParts(
     timeoutMs?: number,
     signal?: AbortSignal,
-  ): Promise<{ adbPath: string; baseArgs: string[] }> {
+  ): Promise<{ adbPath: string; baseArgs: string[]; deviceId?: string }> {
     const adbPath = await this.ensureAdbPath(timeoutMs, signal);
     const deviceId = this.device?.deviceId;
     const baseArgs: string[] = [];
@@ -441,7 +451,7 @@ export class AdbClient implements AdbExecutor {
       baseArgs.push("-s", this.transportRouting?.resolveTransport(deviceId) ?? deviceId);
     }
 
-    return { adbPath, baseArgs };
+    return { adbPath, baseArgs, deviceId };
   }
 
   /**
@@ -800,7 +810,10 @@ export class AdbClient implements AdbExecutor {
     } = options;
     const startTime = this.timer.now();
     const resolvedSignal = signal ?? getAbortSignal();
-    const { adbPath, baseArgs } = await this.getBaseCommandParts(timeoutMs, resolvedSignal);
+    const parts = await this.getBaseCommandParts(timeoutMs, resolvedSignal);
+    const { adbPath, baseArgs } = parts;
+    // The device the arguments were built for: recovery and its notification use the same one.
+    const deviceId = commandDeviceId(parts, this.device);
     const fullArgs = [...baseArgs, ...commandArgs];
     const command = logLabel ?? commandArgs.join(" ");
     const rawExec = async (remainingMs?: number): Promise<ExecResult> => {
@@ -826,7 +839,7 @@ export class AdbClient implements AdbExecutor {
           return rawExec(this.getRemainingTimeoutMs(timeoutMs, startTime, command));
         },
         {
-          deviceId: this.device?.deviceId,
+          deviceId,
           transportId: baseArgs[1],
           timer: this.timer,
           backoff: this.transportBackoff,
@@ -835,6 +848,7 @@ export class AdbClient implements AdbExecutor {
           signal: resolvedSignal,
           onExhausted: (error) =>
             this.notifyMissingDeviceIfNeeded(error, busyAtDispatch, baseArgs[1]),
+          onRecovered: () => notifyAdbTransportRecovered(deviceId, "transport_refusal"),
         },
       );
     let busyAtDispatch = { busy: false, generation: 0 };

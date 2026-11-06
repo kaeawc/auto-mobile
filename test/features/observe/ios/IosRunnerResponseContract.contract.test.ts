@@ -95,6 +95,12 @@ const typedResults: Record<string, Record<string, unknown>> = {
     unsupportedChecks: ["fixture-check"],
     totalTimeMs: 17,
   },
+  accessibility_focus_result: {
+    success: false,
+    errorCode: "voiceover_off",
+    error: "VoiceOver is off",
+    totalTimeMs: 17,
+  },
   magic_tap_result: {
     success: false,
     available: true,

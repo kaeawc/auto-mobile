@@ -66,6 +66,14 @@ const SPOTLIGHT_BUNDLE_ID = "com.apple.Spotlight";
 /** The runner's one-shot foreground check failure; keep in sync with CommandHandler+TextInput.swift. */
 const RUNNER_HOME_NOT_FOREGROUND_ERROR = "Home press did not bring SpringBoard to the foreground";
 
+/**
+ * The runner appends "Recorded command failure(s): ..." (an XCUITest query that lost a race with
+ * the switcher dismissal animation) to its error, so match the prefix, not the whole string (#17201).
+ */
+function isRunnerHomeNotForegroundError(error: string | undefined): boolean {
+  return error?.startsWith(RUNNER_HOME_NOT_FOREGROUND_ERROR) === true;
+}
+
 interface IosRunnerHomeOutcome {
   error?: string;
   unacknowledged: boolean;
@@ -90,6 +98,8 @@ export class HomeScreen extends BaseVisualChange {
    * request signal (issue #6289).
    */
   private static readonly HOME_KEYEVENT_TIMEOUT_MS = 3000;
+  private static readonly IOS_HOME_BUDGET_MS = 5000;
+  private static readonly IOS_SWITCHER_HOME_BUDGET_MS = 12000;
   private static readonly IOS_HOME_VERIFICATION_TIMEOUT_MS = 4000;
   private static readonly IOS_HOME_FIRST_PRESS_VERIFICATION_TIMEOUT_MS = 1000;
   private static readonly IOS_HOME_HIERARCHY_READ_TIMEOUT_MS = 1000;
@@ -374,6 +384,12 @@ export class HomeScreen extends BaseVisualChange {
     return launcherPackage;
   }
 
+  private static iosHomeBudgetMs(appSwitcherWasOpen: boolean | undefined): number {
+    return appSwitcherWasOpen
+      ? HomeScreen.IOS_SWITCHER_HOME_BUDGET_MS
+      : HomeScreen.IOS_HOME_BUDGET_MS;
+  }
+
   async executeIosHomeNavigation(options: IosHomeNavigationOptions = {}): Promise<void> {
     const { perf, timeoutMs, signal, onDispatch, appSwitcherWasOpen } = options;
     throwIfAborted(signal);
@@ -383,7 +399,8 @@ export class HomeScreen extends BaseVisualChange {
       return;
     }
 
-    const budgetMs = timeoutMs ?? 5000;
+    // Leaving the switcher takes up to two runner presses, each with its own verification window.
+    const budgetMs = timeoutMs ?? HomeScreen.iosHomeBudgetMs(appSwitcherWasOpen);
     const deadline = this.timer.now() + budgetMs;
     const attempts = await this.launchIosSpringboard(backend, deadline, budgetMs, {
       signal,
@@ -444,7 +461,7 @@ export class HomeScreen extends BaseVisualChange {
       this.tryIosRunnerHome(client, 5000, { perf, frameContext, signal, onDispatch }),
       signal,
     );
-    if (pressError && !(appSwitcherWasOpen && pressError === RUNNER_HOME_NOT_FOREGROUND_ERROR)) {
+    if (pressError && !(appSwitcherWasOpen && isRunnerHomeNotForegroundError(pressError))) {
       throw new ActionableError(pressError);
     }
     let hierarchy: CtrlProxyHierarchy;
@@ -522,7 +539,7 @@ export class HomeScreen extends BaseVisualChange {
     // The runner checks the foreground once, right after the press, and SpringBoard can take
     // about a second to settle after Spotlight (#14827). That error means "sent, unverified", so
     // fall through to polling. A dispatched press without an acknowledgement needs verification too.
-    if (error && !unacknowledged && error !== RUNNER_HOME_NOT_FOREGROUND_ERROR) {
+    if (error && !unacknowledged && !isRunnerHomeNotForegroundError(error)) {
       throw new ActionableError(error);
     }
     // A blocked press can consume the caller budget while preventing hierarchy reads.

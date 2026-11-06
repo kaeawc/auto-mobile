@@ -1,4 +1,5 @@
 import type { DevicectlDisplayInfoSource } from "../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
+import { createProductionDevicectlPanelScreenshotSource } from "../../utils/ios-cmdline-tools/DevicectlPanelScreenshotSource";
 import { IosSdkMultiSceneError } from "./ios/sdkObservationBridge";
 import { AllDisplaysObservation } from "./AllDisplaysObservation";
 import { SingleDisplayCaptureStage } from "./SingleDisplayCaptureStage";
@@ -981,4 +982,22 @@ export class RealObserveScreen implements ObserveScreen {
   private resolveObservationTimestampMs(result: ObserveResult): number | undefined {
     return result.viewHierarchy?.updatedAt;
   }
+}
+
+/**
+ * The observer an action tool takes its post-action observation with. On iOS it reads the live
+ * CoreDevice panel like `observe` does, so the two agree on which iPhone Duo panel is active
+ * (#17046); an observer built by hand has no panel source and falls back to the runner's size.
+ */
+export function createActionObserveScreen(
+  device: BootedDevice,
+  adbFactory?: AdbClientFactory,
+): RealObserveScreen {
+  return new RealObserveScreen(
+    device,
+    adbFactory,
+    device.platform === "ios"
+      ? { iosDisplayInfoSource: createProductionDevicectlPanelScreenshotSource() }
+      : undefined,
+  );
 }

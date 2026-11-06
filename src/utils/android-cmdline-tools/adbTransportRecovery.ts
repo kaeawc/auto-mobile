@@ -101,6 +101,8 @@ interface TransportRecoveryOptions {
   remainingMs: () => number | undefined;
   signal?: AbortSignal;
   onExhausted: (error: unknown) => void;
+  /** The operation succeeded after at least one transport refusal: the transport came back. */
+  onRecovered?: () => void;
 }
 
 function rethrowPostDispatchTransportFailure(
@@ -146,7 +148,11 @@ export async function executeWithAdbTransportRecovery<T>(
         ) {
           throw lastRefusal;
         }
-        return operation(attempt);
+        const result = await operation(attempt);
+        if (lastRefusal) {
+          options.onRecovered?.();
+        }
+        return result;
       },
       {
         maxAttempts: 5,

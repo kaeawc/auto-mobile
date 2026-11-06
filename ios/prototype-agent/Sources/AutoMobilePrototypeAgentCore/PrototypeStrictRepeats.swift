@@ -15,6 +15,7 @@ struct PrototypeStrictRepeats {
     var nodes = 0
     var images = 0
     var effects = PrototypeEffectUses()
+    var loopNodes = 0
     var keyframeNodes = 0
     var videoNodes = 0
 
@@ -273,6 +274,7 @@ struct PrototypeStrictRepeats {
         if keyframeNodes > PrototypeContractValidator.limit("MAX_PROTOTYPE_KEYFRAME_NODES") {
             throw PrototypeContractValidator.invalid("\(path).keyframes", "Keyframe node limit exceeded")
         }
+        try PrototypeLoops.charge(node, path: path, count: &loopNodes)
         if node["type"] == .string("videoPlayer") { videoNodes += 1 }
         if videoNodes > PrototypeContractValidator.limit("MAX_PROTOTYPE_VIDEO_NODES") {
             throw PrototypeContractValidator.invalid(path, "Video node limit exceeded")

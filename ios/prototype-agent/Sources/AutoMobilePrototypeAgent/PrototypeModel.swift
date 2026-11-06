@@ -139,6 +139,7 @@
             // After the model holds the new session: a changed stored key schedules the debounced write,
             // and a dismissal flushes it.
             storage?.sessionChanged(next)
+            applyWindowControls()
         }
 
         /// Writes any pending stored values now, for the app leaving the foreground or ending.
@@ -153,7 +154,42 @@
 
         var safeInsets = UIEdgeInsets.zero
         /// The content's actual window, including the embedded ProtoViewer host.
-        @ObservationIgnored weak var prototypeWindow: UIWindow?
+        @ObservationIgnored weak var prototypeWindow: UIWindow? {
+            // Commands drained before the window existed run as soon as it is attached.
+            didSet { viewCommandQueue.run([], in: prototypeWindow) }
+        }
+
+        @ObservationIgnored private var viewCommandQueue = PrototypeViewCommandQueue()
+        @ObservationIgnored private var windowControls: PrototypeWindowControlsRuntime?
+        @ObservationIgnored private weak var controlledWindow: UIWindow?
+
+        func applyWindowControls() {
+            guard session.isShown, let prototypeWindow else {
+                logWindowControls(windowControls?.apply(nil))
+                windowControls = nil
+                controlledWindow = nil
+                return
+            }
+            if controlledWindow !== prototypeWindow {
+                logWindowControls(windowControls?.apply(nil))
+                controlledWindow = prototypeWindow
+                windowControls = PrototypeWindowControlsRuntime(
+                    idleTimer: UIKitPrototypeIdleTimer(),
+                    screen: UIKitPrototypeScreen(screen: prototypeWindow.screen),
+                    chrome: UIKitPrototypeWindowChrome(window: prototypeWindow)
+                )
+            }
+            logWindowControls(windowControls?.apply(session.spec?.window.controls))
+        }
+
+        private func logWindowControls(_ result: [String: JSONValue]?) {
+            guard let result, !result.isEmpty else { return }
+            NSLog(
+                "[AutoMobilePrototypeAgent] window controls: %@",
+                String(describing: JSONValue.object(result).foundationObject)
+            )
+        }
+
         /// The prototype window's own (0, 0) on screen, in points; anchors are screen coordinates.
         var windowOrigin = CGPoint.zero
         /// The prototype window's size in points, for placing a sheet against the keyboard.
@@ -423,6 +459,7 @@
             let lifecycleEvents = next.takePlatformLifecycleEvents()
             let requestCommands = next.takeRequestCommands()
             let timerCommands = next.takeTimerCommands()
+            let viewCommands = next.takeViewCommands()
             listAnchors = PrototypeStackListAnchorStore()
             publish(next, replacingSpec: true)
             let timestamp = Int(Date().timeIntervalSince1970 * 1000)
@@ -445,6 +482,7 @@
             // An accepted show, including a same-id replace, is activity.
             if mode.expiresWhenIdle { idleTimer.arm() }
             onVisibilityChange?(true)
+            viewCommandQueue.run(viewCommands, in: prototypeWindow)
             apply(activity: false) { _ in [] }
         }
 
@@ -688,6 +726,7 @@
             let platformCommands = next.takePlatformCommands()
             let requestCommands = next.takeRequestCommands()
             let timerCommands = next.takeTimerCommands()
+            let viewCommands = next.takeViewCommands()
             publish(next)
             // A rejected edit (#11562) or no-op transition leaves the stored values unchanged;
             // redraw value-holding controls so they show those values instead of the refused input.
@@ -708,6 +747,7 @@
                 hitRects.removeAll()
                 onVisibilityChange?(false)
             }
+            viewCommandQueue.run(viewCommands, in: prototypeWindow)
             timers.perform(timerCommands)
             platformDriver.perform(platformCommands)
             requestDriver?.perform(requestCommands)

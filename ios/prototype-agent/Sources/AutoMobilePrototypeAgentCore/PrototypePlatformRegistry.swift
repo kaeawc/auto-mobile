@@ -101,6 +101,7 @@ public final class PrototypePlatformRegistry {
         sound: any PrototypeSoundPlayer,
         connectivity: any PrototypeConnectivitySource,
         links: any PrototypeLinkOpener,
+        settings: any PrototypeSettingsURLOpener,
         bundle: any PrototypeBundleReader = PrototypeMainBundleReader()
     )
         -> PrototypePlatformRegistry
@@ -110,6 +111,7 @@ public final class PrototypePlatformRegistry {
             PrototypeSoundModule(player: sound),
             PrototypeConnectivityModule(source: connectivity),
             PrototypeLinksModule(opener: links),
+            PrototypeSettingsModule(opener: settings),
         ], bundle: bundle)
     }
 
@@ -117,6 +119,7 @@ public final class PrototypePlatformRegistry {
         clipboard: any PrototypeClipboard,
         connectivity: any PrototypeConnectivitySource,
         links: any PrototypeLinkOpener,
+        settings: any PrototypeSettingsURLOpener,
         bundle: any PrototypeBundleReader = PrototypeMainBundleReader()
     )
         -> PrototypePlatformRegistry
@@ -125,6 +128,7 @@ public final class PrototypePlatformRegistry {
             PrototypeClipboardModule(clipboard: clipboard),
             PrototypeConnectivityModule(source: connectivity),
             PrototypeLinksModule(opener: links),
+            PrototypeSettingsModule(opener: settings),
         ], bundle: bundle)
     }
 

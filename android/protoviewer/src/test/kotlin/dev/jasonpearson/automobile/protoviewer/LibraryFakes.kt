@@ -129,6 +129,7 @@ internal class FakeLibraryRepository : LibraryRepository {
   val opened = mutableListOf<String>()
   val resets = mutableListOf<String>()
   var error: LibraryError? = null
+  var failDelete = false
 
   override fun list(): LibraryResult<List<LibraryEntry>> =
     error?.let { LibraryResult.Failure(it) }
@@ -142,6 +143,7 @@ internal class FakeLibraryRepository : LibraryRepository {
       ?: LibraryResult.Failure(LibraryError.NotFound)
 
   override fun delete(libraryId: String): LibraryResult<Unit> {
+    if (failDelete) return LibraryResult.Failure(LibraryError.Storage)
     prototypes.remove(libraryId)
     return LibraryResult.Success(Unit)
   }

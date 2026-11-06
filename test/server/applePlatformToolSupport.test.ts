@@ -96,7 +96,7 @@ describe("assertToolSupportsDevicePlatform", () => {
     );
   });
 
-  test("visionOS allows lifecycle, app tools and screenshot observation", () => {
+  test("visionOS allows lifecycle, app tools, observe and window-app input", () => {
     expect([...APPLE_PLATFORM_SUPPORTED_TOOLS.visionos].sort()).toEqual(
       [
         ...DEVICE_LIFECYCLE_TOOLS,
@@ -106,6 +106,8 @@ describe("assertToolSupportsDevicePlatform", () => {
         "terminateApp",
         "listApps",
         "observe",
+        "tapOn",
+        "sendKeys",
       ].sort(),
     );
     for (const tool of [
@@ -116,11 +118,13 @@ describe("assertToolSupportsDevicePlatform", () => {
       "terminateApp",
       "listApps",
       "observe",
+      "tapOn",
+      "sendKeys",
     ]) {
       expect(() => assertToolSupportsDevicePlatform(tool, visionPro)).not.toThrow();
       expect(() => assertRequestedPlatformSupported(tool, { platform: "visionos" })).not.toThrow();
     }
-    for (const tool of ["tapOn", "tapAt", "swipeOn", "sendKeys", "pressButton", "tapAny"]) {
+    for (const tool of ["pressButton", "tapAt", "swipeOn", "pinchOn", "tapAny"]) {
       expect(() => assertToolSupportsDevicePlatform(tool, visionPro)).toThrow(
         new ActionableError(unsupportedPlatformToolMessage(tool, "visionos")),
       );
@@ -231,8 +235,8 @@ describe("assertRequestedPlatformSupported", () => {
     expect(() => assertRequestedPlatformSupported("pinchOn", { platform: "watchos" })).toThrow(
       new ActionableError(unsupportedPlatformToolMessage("pinchOn", "watchos")),
     );
-    expect(() => assertRequestedPlatformSupported("tapOn", { platform: "visionos" })).toThrow(
-      new ActionableError(unsupportedPlatformToolMessage("tapOn", "visionos")),
+    expect(() => assertRequestedPlatformSupported("pressButton", { platform: "visionos" })).toThrow(
+      new ActionableError(unsupportedPlatformToolMessage("pressButton", "visionos")),
     );
   });
 
@@ -310,6 +314,15 @@ describe("a device-aware tool refuses a requested tvOS platform before session r
     expect(error).toEqual(new ActionableError(unsupportedPlatformToolMessage(tool, "tvos")));
     expect(handled).toEqual([]);
   });
+});
+
+test("tvOS opts into videoRecording and compareScreenshot (#16725)", () => {
+  for (const tool of ["videoRecording", "compareScreenshot"]) {
+    expect(() => assertToolSupportsDevicePlatform(tool, appleTv)).not.toThrow();
+    expect(() => assertRequestedPlatformSupported(tool, { platform: "tvos" })).not.toThrow();
+    expect(APPLE_PLATFORM_SUPPORTED_TOOLS.watchos.has(tool)).toBe(false);
+    expect(APPLE_PLATFORM_SUPPORTED_TOOLS.visionos.has(tool)).toBe(false);
+  }
 });
 
 test("tvOS opts into observe", () => {

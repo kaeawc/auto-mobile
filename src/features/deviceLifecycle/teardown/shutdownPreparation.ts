@@ -1,3 +1,4 @@
+import { stopVisionosRunner } from "../../visionos/VisionosRunnerLifecycle";
 import { logger } from "../../../utils/logger";
 import { deviceLifecycleServerHost } from "../deviceLifecycleServerHost";
 import { getToolSelectionContext } from "../../toolSelection/toolSelectionContext";
@@ -5,7 +6,8 @@ import { IOSCtrlProxyManager } from "../../../ctrlProxy/IOSCtrlProxyManager";
 import { AndroidCtrlProxyManager } from "../../../ctrlProxy/CtrlProxyManager";
 import { unregisterDirectSessionsForStableIdentity } from "../../../utils/directSessionDeviceRegistry";
 import { type DevicePool, type PooledDevice } from "../../../daemon/devicePool";
-import { BootedDevice, ActionableError, isAndroidOrIosPlatform } from "../../../models";
+import { BootedDevice, ActionableError } from "../../../models";
+import { isVideoRecordingPlatform } from "../../../models/VideoRecordingPlatform";
 import { type Timer } from "../../../utils/SystemTimer";
 import { createPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { type DeviceToolsDependencies } from "../core/dependencies";
@@ -19,6 +21,9 @@ export function stopWatchRunnerBeforeShutdown(
   device: BootedDevice,
   dependencies: DeviceToolsDependencies,
 ): void {
+  if (device.platform === "visionos") {
+    stopVisionosRunner(device.deviceId);
+  }
   if (device.platform === "tvos") {
     (dependencies.tvosRunnerLifecycleFactory ?? getTvosRunnerLifecycle)().stop(device.deviceId);
   }
@@ -70,7 +75,7 @@ export async function evictTeardownManagers(
       runtimeId ?? stableId,
     );
   } else if (platform === "visionos") {
-    // Vision Pro lifecycle uses simctl only; there is no automation runner to stop.
+    stopVisionosRunner(runtimeId ?? stableId);
   } else if (platform === "tvos") {
     (context.dependencies.tvosRunnerLifecycleFactory ?? getTvosRunnerLifecycle)().stop(
       runtimeId ?? stableId,
@@ -181,8 +186,8 @@ export async function stopVideoRecordingsBeforeShutdown(
       timeoutMs: context.timeoutMs,
     });
     const platform = context.device.platform;
-    // Video recording does not support watchOS yet, so a watch has no active recordings to stop.
-    if (!isAndroidOrIosPlatform(platform)) {
+    // Video recording does not support watchOS or visionOS, so neither has recordings to stop.
+    if (!isVideoRecordingPlatform(platform)) {
       return;
     }
     const activeRecordings = await runWithinShutdownDeadline(

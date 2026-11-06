@@ -117,6 +117,7 @@ struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
     let provider: Provider
     let geometry: GestureCoordinateGeometry?
     let inventory: GestureDisplayInventory?
+    let doubleTapWait: (TimeInterval) -> Void
 
     var mismatch: Bool {
         (geometry ?? provider.cachedGeometry)?.multiPanelMismatch == true
@@ -126,8 +127,14 @@ struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
         inventory?.target(for: geometry) ?? (nil, "notSampled")
     }
 
-    init(provider: Provider, forced: TapCoordinateStrategy? = nil) throws {
+    init(
+        provider: Provider, forced: TapCoordinateStrategy? = nil,
+        doubleTapWait: @escaping (TimeInterval) -> Void = { gap in
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: gap))
+        }
+    ) throws {
         self.provider = provider
+        self.doubleTapWait = doubleTapWait
         // Forced legacy inspects only the observation cache, without live geometry reads.
         var geometry = forced == .legacy ? provider.cachedGeometry : try provider.geometry()
         // Read the inventory on the raw size mismatch before deciding whether the app is on main.
@@ -189,8 +196,7 @@ struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
         var selected = selection(point: start, forced: forced)
         let endSelection = selection(point: end ?? start, forced: forced)
         var fallback: TapCoordinateStrategy?
-        // Double taps use the same coordinate fallback, never a single synthesized touch.
-        if !doubleTap, selected.strategy.targetsDisplay,
+        if selected.strategy.targetsDisplay,
            let displayId = target.displayId,
            let startPoint = point(start, selection: selected),
            let endPoint = point(end ?? start, selection: endSelection)
@@ -203,10 +209,17 @@ struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
                     synthesizedInterfaceOrientation: orientation, fallbackFrom: nil
                 )
                 beforeAction(candidate)
-                if try provider.synthesize(DisplayTouch(
-                    start: startPoint, end: endPoint, pressDuration: press, moveDuration: move,
-                    holdDuration: hold, displayId: displayId, interfaceOrientation: orientation
-                )) { return candidate }
+                // A nonzero drag is one gesture even when the caller sets the double-tap flag.
+                if try UnpinnedGestureSynthesis.tap(
+                    doubleTap: doubleTap && (end == nil || end == start),
+                    deliver: {
+                        try provider.synthesize(DisplayTouch(
+                            start: startPoint, end: endPoint, pressDuration: press, moveDuration: move,
+                            holdDuration: hold, displayId: displayId, interfaceOrientation: orientation
+                        ))
+                    },
+                    wait: doubleTapWait
+                ) { return candidate }
             }
             fallback = selected.strategy
         }

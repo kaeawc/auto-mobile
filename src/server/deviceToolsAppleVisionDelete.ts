@@ -1,3 +1,4 @@
+import { stopVisionosRunner } from "../features/visionos/VisionosRunnerLifecycle";
 import { notifyAppleSimulatorInventoryChanged } from "./appleSimulatorInventoryNotify";
 import {
   getDeviceToolsDependencies,
@@ -115,6 +116,7 @@ async function runAppleVisionDelete(
     if (pooled) {
       const device: BootedDevice = { name: pooled.name, platform: "visionos", deviceId: udid };
       await steps.assertCaller(device);
+      stopVisionosRunner(device.deviceId);
       await steps.stop(device, signal);
     }
     return createTeardownResponse(
@@ -132,6 +134,7 @@ async function runAppleVisionDelete(
   }
   const device: BootedDevice = { name: headset.name, platform: "visionos", deviceId: udid };
   await steps.assertCaller(device);
+  stopVisionosRunner(device.deviceId);
   const wasRunning = headset.isRunning === true;
   if (wasRunning || initializedDevicePool()?.getDevice(udid)) {
     await steps.stop(device, signal);
@@ -217,6 +220,7 @@ async function destroyUnderLease(
     // The lease is per process: a peer daemon may have claimed the headset since the first
     // caller check, so the caller checks (other-daemon claims included) run again here.
     await steps.assertCaller(device);
+    stopVisionosRunner(device.deviceId);
     signal.throwIfAborted();
     await provisioner.deleteAndConfirmAbsent(device.deviceId, signal);
   } finally {

@@ -237,3 +237,34 @@ test("visionOS observe propagates cancellation during runner startup without cap
   await expect(observed).rejects.toThrow("cancelled");
   expect(screenshots.calls).toEqual([]);
 });
+
+test("a read of a held visionOS device never starts a runner, but reuses a connected one", async () => {
+  const screenshots = new FakeVisionScreenshots();
+  const { dependencies } = visionDependencies(screenshots, async () => {
+    throw new Error("runner startup must not run");
+  });
+  // Drop the injected startup so the held-device default selects connect-only.
+  const heldDependencies = {
+    ...dependencies,
+    visionosRunner: undefined,
+    heldDeviceRead: () => true,
+  };
+
+  const response = await observeWatch(device, {}, undefined, heldDependencies);
+  const result = getStructuredPayload<{ hierarchyUnavailable?: { platform: string } }>(
+    readToolResponse(response),
+  )!;
+  expect(result.hierarchyUnavailable?.platform).toBe("visionos");
+  expect(screenshots.calls).toHaveLength(1);
+
+  const client = new FakeVisionosRunnerClient(visionosProbeHierarchy(probe.snapshotAfterImmersive));
+  const unregister = visionosRunners.register(device.deviceId, client);
+  try {
+    const connected = getStructuredPayload<ObserveResult>(
+      readToolResponse(await observeWatch(device, {}, undefined, heldDependencies)),
+    )!;
+    expect(connected.focusedElement).toMatchObject({ "resource-id": "field", focused: true });
+  } finally {
+    unregister();
+  }
+});

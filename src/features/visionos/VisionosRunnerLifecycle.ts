@@ -15,6 +15,7 @@ import {
   type VisionosRunnerLauncher,
 } from "./VisionosRunnerLauncher";
 import { visionosRunners } from "./VisionosRunnerRegistry";
+import { visionosTargetApps } from "./VisionosTargetApps";
 
 type VisionosRunnerSessions = Pick<
   SessionManager,
@@ -25,6 +26,8 @@ interface OwnedRunner {
   controller: AbortController;
   stop?: () => void;
   port?: number;
+  /** The window app the runner was started to automate; absent means its demo app. */
+  bundleId?: string;
 }
 
 /** Owns only runners launched here; a pre-registered runner is reused without taking ownership. */
@@ -39,8 +42,8 @@ export class VisionosRunnerLifecycle {
     private readonly dependencies: {
       artifacts: Pick<VisionosRunnerArtifacts, "resolve">;
       launcher: VisionosRunnerLauncher;
-      /** The user's window app, when known; absent keeps the runner on its demo app. */
-      targetBundleId?: () => string | undefined;
+      /** The device's window app, when known; absent keeps the runner on its demo app. */
+      targetBundleId?: (deviceId: string) => string | undefined;
       ports: { allocate(deviceId: string): number; release(deviceId: string, port: number): void };
     },
   ) {}
@@ -79,11 +82,12 @@ export class VisionosRunnerLifecycle {
     if (sessions) {
       this.observeSessions(sessions);
     }
-    if (visionosRunners.get(deviceId)?.isUsable()) {
+    if (visionosRunners.get(deviceId)?.isUsable() && !this.needsRestart(deviceId)) {
       return {};
     }
     this.stop(deviceId);
-    const entry: OwnedRunner = { controller: new AbortController() };
+    const bundleId = this.dependencies.targetBundleId?.(deviceId);
+    const entry: OwnedRunner = { controller: new AbortController(), bundleId };
     const signal = combineAbortSignals(request.signal, entry.controller.signal)!;
     this.runners.set(deviceId, entry);
     try {
@@ -94,7 +98,7 @@ export class VisionosRunnerLifecycle {
         deviceId,
         xctestrun,
         port: entry.port,
-        bundleId: this.dependencies.targetBundleId?.(),
+        bundleId,
         signal,
       });
       entry.stop = handle.stop;
@@ -121,6 +125,15 @@ export class VisionosRunnerLifecycle {
     }
   }
 
+  /**
+   * A runner this lifecycle started keeps its window app for its lifetime, so any change of
+   * target restarts it, including losing the target when that app is terminated.
+   */
+  needsRestart(deviceId: string): boolean {
+    const entry = this.runners.get(deviceId);
+    return entry !== undefined && entry.bundleId !== this.dependencies.targetBundleId?.(deviceId);
+  }
+
   /** Transfer only lifecycle-owned runners to the newly bound session. */
   attach({
     deviceId,
@@ -132,11 +145,14 @@ export class VisionosRunnerLifecycle {
     sessions: VisionosRunnerSessions;
   }): string | undefined {
     this.observeSessions(sessions);
+    const entry = this.runners.get(deviceId);
     if (!sessions.hasSession(ownerSession)) {
-      this.stop(deviceId);
+      // A runner another live session already owns must outlive this caller's ended session.
+      if (!entry?.ownerSession) {
+        this.stop(deviceId);
+      }
       return "the visionos session ended before runner startup";
     }
-    const entry = this.runners.get(deviceId);
     if (entry) {
       entry.ownerSession = ownerSession;
     }
@@ -208,21 +224,27 @@ function getDefaultBuilder(): VisionosRunnerBuilder {
   return defaultBuilderFactory();
 }
 
+type VisionosArtifactBuilder = ConstructorParameters<typeof VisionosRunnerArtifacts>[0]["builder"];
+/** Lazily adapts the registered process builder for artifact resolution, forwarding every argument. */
+export function createVisionosArtifactBuilder(
+  getBuilder: () => VisionosArtifactBuilder,
+): VisionosArtifactBuilder {
+  return {
+    getXctestrunPath: (platform, options) => getBuilder().getXctestrunPath(platform, options),
+    getConfig: () => getBuilder().getConfig(),
+    runExclusiveOnDerivedData: (task) => {
+      const builder = getBuilder();
+      return builder.runExclusiveOnDerivedData ? builder.runExclusiveOnDerivedData(task) : task();
+    },
+  };
+}
+
 let defaultLifecycle: VisionosRunnerLifecycle | undefined;
 export function getVisionosRunnerLifecycle(): VisionosRunnerLifecycle {
   if (!defaultLifecycle) {
     defaultLifecycle = new VisionosRunnerLifecycle({
       artifacts: new VisionosRunnerArtifacts({
-        builder: {
-          getXctestrunPath: (platform) => getDefaultBuilder().getXctestrunPath(platform),
-          getConfig: () => getDefaultBuilder().getConfig(),
-          runExclusiveOnDerivedData: (task) => {
-            const builder = getDefaultBuilder();
-            return builder.runExclusiveOnDerivedData
-              ? builder.runExclusiveOnDerivedData(task)
-              : task();
-          },
-        },
+        builder: createVisionosArtifactBuilder(getDefaultBuilder),
       }),
       launcher: new XcodebuildVisionosRunnerLauncher({
         writeRunnerEnvironment: (file, env, deviceId) =>
@@ -232,7 +254,9 @@ export function getVisionosRunnerLifecycle(): VisionosRunnerLifecycle {
             `${deviceId}-${defaultIdGenerator.next()}`,
           ),
       }),
-      targetBundleId: () => globalThis.process.env.CTRL_PROXY_IOS_BUNDLE_ID,
+      // The app the session launched on this device, else the optional env override.
+      targetBundleId: (deviceId) =>
+        visionosTargetApps.get(deviceId) ?? globalThis.process.env.CTRL_PROXY_IOS_BUNDLE_ID,
       ports: {
         allocate: (deviceId) =>
           PortManager.allocate(`visionos:${deviceId}`, {
@@ -254,10 +278,14 @@ export function stopVisionosRunners(): void {
 export async function requireVisionosRunner(
   deviceId: string,
   signal?: AbortSignal,
-  lifecycle?: Pick<VisionosRunnerLifecycle, "start" | "attach">,
+  lifecycle?: Pick<VisionosRunnerLifecycle, "start" | "attach"> &
+    Partial<Pick<VisionosRunnerLifecycle, "needsRestart">>,
 ) {
   signal?.throwIfAborted();
-  if (!visionosRunners.get(deviceId)?.isUsable()) {
+  if (
+    !visionosRunners.get(deviceId)?.isUsable() ||
+    (lifecycle ?? defaultLifecycle)?.needsRestart?.(deviceId)
+  ) {
     lifecycle ??= getVisionosRunnerLifecycle();
     const result = await lifecycle.start({ deviceId, signal });
     signal?.throwIfAborted();
@@ -277,7 +305,8 @@ function attachVisionosRunnerToSession(
 ): void {
   const ownerSession = getToolSelectionContext()?.routingSessionUuid;
   const sessions = defaultDaemonContext.sessionManager();
-  if (ownerSession && sessions?.hasSession(ownerSession)) {
+  // An ended routing session still reaches attach, which stops the unowned runner this call started.
+  if (ownerSession && sessions) {
     const unavailable = (lifecycle ?? defaultLifecycle)?.attach({
       deviceId,
       ownerSession,

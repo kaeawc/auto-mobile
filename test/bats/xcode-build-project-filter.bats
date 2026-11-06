@@ -46,7 +46,7 @@ case " $* " in
     case "${VISION_MODE:-available}" in
       available) echo '		{ platform:visionOS Simulator, id:dvtdevice-DVTiOSDeviceSimulatorPlaceholder-xrsimulator:placeholder, name:Any visionOS Simulator Device }' ;;
       missing) echo '		{ platform:iOS Simulator, id:dvtdevice-DVTiOSDeviceSimulatorPlaceholder-iphonesimulator:placeholder, name:Any iOS Simulator Device }' ;;
-      failure) echo 'xcodebuild: error: probe failed' >&2; exit 70 ;;
+      failure) echo 'xcodebuild: error: destination listing unavailable' >&2; exit 70 ;;
     esac
     ;;
   *' -showBuildSettings '*)
@@ -160,7 +160,8 @@ assert_build_destination() {
   setup_build_stubs
   export VISION_MODE=failure
   run_stubbed_build
-  [[ "$output" == *"Skipping AutoMobileVisionTest"* ]]
+  [[ "$output" == *"Skipping AutoMobileVisionTest: -showdestinations exited 70"* ]]
+  [[ "$output" == *"xcodebuild: error: destination listing unavailable"* ]]
   ! grep -F -- "-scheme AutoMobileVisionTest -destination" "$XCODE_BUILD_LOG"
 }
 

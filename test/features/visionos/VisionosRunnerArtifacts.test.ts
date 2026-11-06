@@ -2,10 +2,12 @@ import { expect, test } from "bun:test";
 import path from "node:path";
 import { Mutex } from "async-mutex";
 import { VisionosRunnerArtifacts } from "../../../src/features/visionos/VisionosRunnerArtifacts";
+import { createVisionosArtifactBuilder } from "../../../src/features/visionos/VisionosRunnerLifecycle";
 import { createExecResult } from "../../../src/utils/execResult";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
 
-function fixture({ missingProject = false } = {}) {
+function fixture({ missingProject = false, projectRoot = "/repo" } = {}) {
+  const schemes: Array<string | undefined> = [];
   let discovered: string | null = null;
   let afterBuild: string | null =
     "/derived/Build/Products/AutoMobileVisionTest_xrsimulator26.0-arm64.xctestrun";
@@ -16,11 +18,12 @@ function fixture({ missingProject = false } = {}) {
   const artifacts = new VisionosRunnerArtifacts({
     builder: {
       getConfig: () => ({
-        projectRoot: "/repo",
+        projectRoot,
         derivedDataPath: "/derived",
       }),
-      getXctestrunPath: async (platform) => {
+      getXctestrunPath: async (platform, options) => {
         platforms.push(platform!);
+        schemes.push(options?.scheme);
         return discovered;
       },
     },
@@ -43,6 +46,7 @@ function fixture({ missingProject = false } = {}) {
     artifacts,
     commands,
     platforms,
+    schemes,
     accesses,
     setDiscovered: (path: string) => {
       discovered = path;
@@ -76,6 +80,48 @@ test("builds the visionos scheme only when xrsimulator discovery is empty", asyn
   await f.artifacts.resolve();
   expect(f.commands).toHaveLength(1);
   expect(f.platforms.every((value) => value === "visionSimulator")).toBe(true);
+});
+
+test("only reuses and accepts xctestrun plans of the visionos scheme", async () => {
+  const f = fixture();
+  await f.artifacts.resolve();
+  expect(f.schemes).toEqual(["AutoMobileVisionTest", "AutoMobileVisionTest"]);
+});
+
+test("production builder adapter forwards the visionos scheme to the registered builder", async () => {
+  const calls: Array<{ platform: string | undefined; scheme: string | undefined }> = [];
+  const artifacts = new VisionosRunnerArtifacts({
+    builder: createVisionosArtifactBuilder(() => ({
+      getConfig: () => ({ projectRoot: "/repo", derivedDataPath: "/derived" }),
+      getXctestrunPath: async (platform, options) => {
+        calls.push({ platform, scheme: options?.scheme });
+        return options?.scheme === "AutoMobileVisionTest"
+          ? "/derived/Build/Products/AutoMobileVisionTest_xrsimulator26.0-arm64.xctestrun"
+          : "/derived/Build/Products/OtherScheme_xrsimulator26.0-arm64.xctestrun";
+      },
+    })),
+    override: () => undefined,
+  });
+  expect(await artifacts.resolve()).toContain("AutoMobileVisionTest_xrsimulator");
+  expect(calls).toEqual([{ platform: "visionSimulator", scheme: "AutoMobileVisionTest" }]);
+});
+
+test("resolves a relative project root against the daemon launch directory", async () => {
+  const previousLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
+  process.env[DAEMON_LAUNCH_CWD_ENV] = path.resolve("/launch");
+  try {
+    const f = fixture({ projectRoot: "checkout" });
+    await f.artifacts.resolve();
+    expect(f.accesses).toEqual([
+      path.join(path.resolve("/launch", "checkout"), "ios", "control-proxy", "CtrlProxy.xcodeproj"),
+    ]);
+  } finally {
+    if (previousLaunchCwd === undefined) {
+      delete process.env[DAEMON_LAUNCH_CWD_ENV];
+    } else {
+      process.env[DAEMON_LAUNCH_CWD_ENV] = previousLaunchCwd;
+    }
+  }
 });
 
 test("uses an explicit accessible xctestrun override without building", async () => {

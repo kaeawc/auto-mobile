@@ -268,7 +268,7 @@ class PrototypeController(
           appearance = shown.appearance,
         )
         .copy(
-          motion = runtime.motionActivity.snapshot(),
+          motion = runtime.motionActivity.snapshotForCapture(),
           orientation = request.windowControls.orientation,
           statusBar = request.windowControls.statusBarSupport,
         )

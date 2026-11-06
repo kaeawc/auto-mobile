@@ -44,6 +44,11 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "startDevice",
     "setActiveDevice",
     "killDevice",
+    "openLink",
+    "getDeepLinks",
+    // simctl io recordVideo / screenshot capture (#16725).
+    "videoRecording",
+    "compareScreenshot",
   ]),
   // simctl lifecycle and app management; observe, tapOn and sendKeys go through the window-app XCUITest runner.
   visionos: new Set<string>([

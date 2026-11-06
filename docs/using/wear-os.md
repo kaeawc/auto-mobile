@@ -125,7 +125,10 @@ system lists tested.
 ## Notifications
 
 On a watch, `systemTray` drives the Wear OS notification stream instead of the phone shade:
-`open` swipes the stream up from the bottom edge and `close` goes back. `list` and `clearAll`
+`open` swipes the stream up from the bottom edge and reports `opened: true` once the stream is on
+screen; `close` goes back and reports `closed: true` only after the stream is gone. Either fails
+when the screen does not change; when the stream is already in the requested state, it succeeds
+with `skipped: true`. `list` and `clearAll`
 require `notification.appId`; `find`, `tap`, `dismiss`, `list` and `clearAll` scroll the stream
 from its top, and an already-open stream is scrolled back to the top first and left open
 afterwards. If the top cannot be reached within `awaitTimeout`, the action fails with

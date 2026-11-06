@@ -370,7 +370,7 @@ export function registerNavigationTools({
 
   ToolRegistry.registerDeviceAware(
     "explore",
-    "Automatically interact with the app to discover screens and record transitions in the navigation graph; on Android TV it moves D-pad focus and selects instead of tapping",
+    "Automatically interact with the app to discover screens and record transitions in the navigation graph; on Android TV it moves D-pad focus and selects instead of tapping (touch if the TV check cannot read the device)",
     exploreSchema,
     {
       handler: exploreHandler,

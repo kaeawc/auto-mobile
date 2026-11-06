@@ -8,7 +8,7 @@ import { TapOnElement } from "../action/TapOnElement";
 import { Timer } from "../../utils/SystemTimer";
 import { FocusNavigate } from "../action/FocusNavigate";
 import type { ToolCallInteraction } from "../../utils/interfaces/NavigationGraph";
-import { recordedFocusTarget } from "./ExploreValidateMode";
+import { recordedFocusTarget, recordedFocusWalkOptions } from "./ExploreValidateMode";
 import { createFocusNavigateObserver } from "../action/FocusNavigateObserver";
 import { InputKey } from "../action/InputKey";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
@@ -144,7 +144,8 @@ export class ExploreElementActions {
       );
       return null;
     }
-    const args = focusSelectArgs(until);
+    // Validate mode replays the recorded walk, its direction and bounds included.
+    const args = { ...focusSelectArgs(until), ...recordedFocusWalkOptions(recorded) };
     // The walk bypasses BaseVisualChange's action boundary, which flushes earlier evidence.
     await beginPostActionCaptureAction();
     const result = await this.context.runRecorded("focusNavigate", args, observation, () =>

@@ -7,8 +7,30 @@ import type { EdgeValidationResult, GraphTraversalState } from "./ExploreTypes";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { scoreSelectedElementMatch } from "./ExploreElementScoring";
-import { elementMatchesTarget, type FocusNavigateTarget } from "../action/FocusNavigate";
+import {
+  elementMatchesTarget,
+  FOCUS_NAVIGATE_DIRECTIONS,
+  type FocusNavigateOptions,
+  type FocusNavigateTarget,
+} from "../action/FocusNavigate";
 import type { ToolCallInteraction } from "../../utils/interfaces/NavigationGraph";
+
+/** The walk options (`direction`, `maxSteps`, `settleMs`) a recorded `focusNavigate` used. */
+export function recordedFocusWalkOptions(
+  interaction: Pick<ToolCallInteraction, "toolName" | "args"> | undefined,
+): Pick<FocusNavigateOptions, "direction" | "maxSteps" | "settleMs"> {
+  const args = interaction?.toolName === "focusNavigate" ? (interaction.args ?? {}) : {};
+  const direction = FOCUS_NAVIGATE_DIRECTIONS.find((value) => value === args.direction);
+  const positive = (value: unknown) =>
+    typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
+  const maxSteps = positive(args.maxSteps);
+  const settleMs = positive(args.settleMs);
+  return {
+    ...(direction ? { direction } : {}),
+    ...(maxSteps ? { maxSteps } : {}),
+    ...(settleMs !== undefined ? { settleMs } : {}),
+  };
+}
 
 /** The `until` of a recorded `focusNavigate`, keeping only its string target fields. */
 export function recordedFocusTarget(

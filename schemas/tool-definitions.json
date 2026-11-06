@@ -6538,7 +6538,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Automatically interact with the app to discover screens and record transitions in the navigation graph; on Android TV it moves D-pad focus and selects instead of tapping",
+    "description": "Automatically interact with the app to discover screens and record transitions in the navigation graph; on Android TV it moves D-pad focus and selects instead of tapping (touch if the TV check cannot read the device)",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

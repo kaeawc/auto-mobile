@@ -200,7 +200,12 @@ describe("Explore on a focus-driven TV app", () => {
   });
 
   test("validate replays a recorded focusNavigate target instead of rebuilding one", async () => {
-    const recorded = { until: { resourceId: "app:id/movies", text: "Movies" }, select: true };
+    const recorded = {
+      until: { resourceId: "app:id/movies", text: "Movies" },
+      select: true,
+      direction: "down",
+      maxSteps: 7,
+    };
     const actions = new ExploreElementActions({
       device,
       adb: undefined,
@@ -218,7 +223,12 @@ describe("Explore on a focus-driven TV app", () => {
         recorded: { toolName: "focusNavigate", args: recorded },
       }),
     ).toBe(true);
-    expect(tv.selections[0].until).toEqual(recorded.until);
+    expect(tv.selections[0]).toMatchObject({
+      until: recorded.until,
+      select: true,
+      direction: "down",
+      maxSteps: 7,
+    });
   });
 });
 

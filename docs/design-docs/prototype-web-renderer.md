@@ -427,7 +427,8 @@ the host, so the page's script only switches between views it was given and neve
   the box can take. Each axis is then held within its `min*`/`max*` (the min wins, as in CSS), and an
   `aspectRatio` sizes the open axis from the other: in a column the height follows the width (the
   200 px default is dropped so the ratio applies); in a row, a box or the root an open width follows
-  the height. That keeps a camera's true zoom at any box size; a fit (`fit`, or every point
+  the height. A ratio with no width, height or weight takes the width it is offered, capped at
+  `maxHeight × ratio`, as the style sizes it. That keeps a camera's true zoom at any box size; a fit (`fit`, or every point
   when there is no camera) instead chose its zoom to span 80% of that size, so its pins scale by
   `min(100cqw / width, 100cqh / height)` (the box a size container) and its SVG, `100cqw` × `100cqh` about the
   same centre so padding moves pins and lines alike, takes the fitted size as a `meet` viewBox and a non-scaling stroke: a box rendered narrower than the

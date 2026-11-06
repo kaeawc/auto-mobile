@@ -584,23 +584,38 @@ export function mapSize(
   screen: { readonly width: number; readonly height: number },
   parentAxis?: "row" | "column",
 ): Size {
-  const { width, height, openWidth } = boundedAxes(style, screen, parentAxis);
   const ratio = positive(style?.aspectRatio);
+  const cap = freeRatioCap(style, ratio);
+  const { width, height, openWidth } = boundedAxes(style, screen, parentAxis, cap ?? Infinity);
   if (ratio !== undefined && heightFromRatio(style, parentAxis)) {
     return { width, height: bounded(width / ratio, style, "Height") };
   }
   // Outside a column, a ratio sizes an open width from the height, as CSS does in a row or a grid.
-  if (ratio !== undefined && openWidth && parentAxis !== "column") {
+  if (ratio !== undefined && openWidth && cap === undefined && parentAxis !== "column") {
     return { width: bounded(height * ratio, style, "Width"), height };
   }
   return { width, height };
+}
+
+/**
+ * With no width, height or weight, a ratio takes the width it is offered (`width: 100%`, or a row's
+ * leftover) up to `maxHeight × ratio`, as webStyle's aspectRatioFill sizes it: that cap, else
+ * undefined.
+ */
+function freeRatioCap(style: Raw | undefined, ratio: number | undefined): number | undefined {
+  const free = style?.width === undefined && style?.height === undefined;
+  if (ratio === undefined || !free || typeof style?.weight === "number") {
+    return undefined;
+  }
+  return (positive(style?.maxHeight) ?? Infinity) * ratio;
 }
 
 /** Each axis before any aspect ratio, within its min and max, and whether the width is left open. */
 function boundedAxes(
   style: Raw | undefined,
   screen: { readonly width: number; readonly height: number },
-  parentAxis?: "row" | "column",
+  parentAxis: "row" | "column" | undefined,
+  cap: number,
 ): Size & { readonly openWidth: boolean } {
   // A weight sets `flex: w w 0` on the parent's main axis, which overrides any size there.
   const weighted = typeof style?.weight === "number" ? parentAxis : undefined;
@@ -608,7 +623,7 @@ function boundedAxes(
   const height = bounded(baseHeight(style, screen.height, weighted === "column"), style, "Height");
   // A zero-size box shows nothing, so it frames against the fallback rather than dividing by zero.
   return {
-    width: bounded(dpWidth ?? screen.width, style, "Width") || screen.width,
+    width: bounded(dpWidth ?? Math.min(screen.width, cap), style, "Width") || screen.width,
     height: height || DEFAULT_MAP_HEIGHT,
     openWidth: dpWidth === undefined && style?.width !== "fill" && weighted !== "row",
   };

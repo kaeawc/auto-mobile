@@ -231,7 +231,23 @@ describe("prototype web map (#16539)", () => {
       width: 200,
       height: 100,
     });
-    expect(mapSize({ aspectRatio: 2 }, screen)).toEqual({ width: 400, height: 200 });
+    // With no width, height or weight, the ratio takes the width it is offered (a box's `100%`, a
+    // row's leftover), capped at maxHeight × ratio; the box keeps its 200 dp default height.
+    expect(mapSize({ aspectRatio: 2 }, screen)).toEqual({ width: 390, height: 200 });
+    expect(mapSize({ aspectRatio: 2 }, screen, "row")).toEqual({ width: 390, height: 200 });
+    expect(mapSize({ aspectRatio: 2, maxHeight: 100 }, screen)).toEqual({
+      width: 200,
+      height: 100,
+    });
+    // In a column the height then follows that capped width, as the box renders 200 × 100.
+    expect(mapSize({ aspectRatio: 2, maxHeight: 100 }, screen, "column")).toEqual({
+      width: 200,
+      height: 100,
+    });
+    expect(mapSize({ aspectRatio: 2, maxHeight: 100, maxWidth: 150 }, screen, "column")).toEqual({
+      width: 150,
+      height: 75,
+    });
     expect(mapSize({ width: { dp: 300 }, aspectRatio: 2 }, screen)).toEqual({
       width: 300,
       height: 200,

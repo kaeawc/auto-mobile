@@ -8,9 +8,10 @@ import { fileURLToPath } from "node:url";
 // The iOS skin's textField, bottomNav, tabBar and sheet account for the gzip growth past 46 KB.
 // The watch, TV and car frames and the TV focus ring (#16446) account for the growth past 48 KB.
 // The watch/TV/car frames (#16638) and the status bar top-colour walk (#16630) grew it past 148 KB.
-// The map's min/max and aspect-ratio sizing (#16678) grew the gzip past 49 KB (measured 49,062).
-const MAX_MINIFIED_BYTES = 150_000;
-const MAX_GZIP_BYTES = 49_100;
+// The map's min/max and aspect-ratio sizing (#16678) grew the gzip past 49 KB and the minified
+// bundle past 150 KB (measured 49,135 and 150,089).
+const MAX_MINIFIED_BYTES = 150_200;
+const MAX_GZIP_BYTES = 49_200;
 
 /** Server-only modules the renderer once reached; any of them back in the closure is a regression. */
 const FORBIDDEN_INPUTS = [

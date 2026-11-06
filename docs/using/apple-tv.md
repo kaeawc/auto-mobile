@@ -43,6 +43,8 @@ unavailable runtime fails, lists the available runtimes and repeats the install 
 | `sendKeys`          | Types text into the focused field.                                           |
 | `videoRecording`    | Records the screen; `audio` is not supported.                                |
 | `compareScreenshot` | Compares the full screen; `target` and `mask` need a runner (see below).     |
+| `explore`           | Crawls the foreground app by focus and records its screens.                  |
+| `executePlan`       | Replays a plan of Apple TV steps.                                            |
 | `openLink`          | Opens a URL with the app that declares its scheme.                           |
 | `getDeepLinks`      | Lists the URL schemes an installed app declares.                             |
 
@@ -172,6 +174,32 @@ with `type` commands. Text is appended to the field.
 
 - `operation: "replace"`, key commands, clear commands and selectors are refused.
 - To change existing text, edit it on the on-screen keyboard with `pressButton`, then type.
+
+## Explore an app
+
+`explore` is available when the server runs with `--embedded-sdk`, like the other
+[navigation graph](navigation-graph.md) tools; the Apple TV app itself does not need the SDK.
+Launch the app with `launchApp`, then call `explore` with `platform: "tvos"`. Explore selects
+every item it can focus on a screen, observes after every remote press, records each screen a
+`select` opens in the navigation graph, and presses `menu` to go back.
+
+- It accepts `maxInteractions` (default 200), `timeoutMs` (default 300000) and `packageName`.
+  `strategy`, `mode`, `resetToHome`, `resetInterval` and `dryRun` are refused.
+- With `packageName`, that app must already be in the foreground.
+- It stops at either limit, when the first screen has nothing left to select, or when the app
+  cannot be brought back after leaving it (`stopReason`).
+- A recorded transition replays as `tapOn` with the item's identifier, or its text when it has
+  no identifier; going back replays as `pressButton menu`. A screen opened from an item with
+  neither is still recorded, but `navigateTo` cannot replay that transition and says so.
+
+## Run a plan
+
+`executePlan` with `platform: "tvos"` runs plan steps that use Apple TV tools: `pressButton`,
+`tapOn`, `sendKeys`, `observe` and the app tools. A step whose tool is not in the supported-tools
+table fails the plan with the same error the tool returns on its own. A plan may declare
+`platform: tvos`, and a device in its `devices` list may use `platform: tvos`. Apple TV plans are
+video-recorded like iOS plans; a recording that cannot start adds a `videoWarnings` entry and the
+plan still runs.
 
 ## Open a deep link
 

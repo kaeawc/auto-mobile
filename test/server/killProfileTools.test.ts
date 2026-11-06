@@ -35,6 +35,10 @@ describe("killProfile tool (#14051)", () => {
     adb.setAndroidApiLevel(34);
     adb.setCommandResponse("shell pm path", createExecResult("package:/data/app/base.apk\n", ""));
     adb.setCommandResponse("shell appops get", createExecResult("No operations.\n", ""));
+    adb.setCommandResponseSequence(`shell appops get '${APP}' RUN_ANY_IN_BACKGROUND`, [
+      createExecResult("No operations.\n", ""),
+      createExecResult("RUN_ANY_IN_BACKGROUND: ignore\n", ""),
+    ]);
     registerKillProfileSessionCleanup(manager, { registry, shellFor: () => adb, timer });
     handler = createKillProfileHandler({
       sessionManager: () => manager,

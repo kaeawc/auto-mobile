@@ -7,7 +7,7 @@ import {
   type ViewHierarchyNode,
   type ViewHierarchyResult,
 } from "../../src/models/ViewHierarchyResult";
-import { createFocusNavigateObserver } from "../../src/server/focusNavigateTool";
+import { createFocusNavigateObserver } from "../../src/features/action/FocusNavigateObserver";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { capturedFloatingCoverHierarchy, observationOf } from "../helpers/prototypeWindowCapture";

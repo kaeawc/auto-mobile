@@ -98,7 +98,8 @@ appears in `listDevices` and can be asked for in a device `requires` clause or a
 ## Navigating a TV app
 
 TV apps are driven by focus, not touch. Use `focusNavigate` to move D-pad focus to an element and
-`sendKeys` with `enter` to activate the focused item.
+`sendKeys` with `enter` to activate the focused item, or pass `select: true` to `focusNavigate` to
+press `enter` once focus lands; the result's `selected` is `true` only when `enter` was pressed.
 `pressButton` handles back, home and the remote's keys:
 
 | Button                                                   | Sends                                  |
@@ -114,9 +115,16 @@ For a long press of D-pad center, for example to open a context menu, pass `dura
 `durationMs` takes 100 to 10000, works only with `select`, and needs API 35 or newer; otherwise the
 call fails with `unsupported_button` and sends no key.
 
+`explore` walks a TV app the same way: it moves focus to each element and selects it, recording the
+screens and transitions in the navigation graph. `navigateTo` replays those steps with D-pad moves.
+Both are available only when the server runs with `--embedded-sdk` and the app embeds the
+AutoMobile SDK; see [Navigation graph](navigation-graph.md#availability).
+
 `focusNavigate` matches a target on the focused element or on a node inside its bounds, so a label
 on a child view of the focused row counts. A large focused container that holds the target also
-counts as focused.
+counts as focused. To land on the exact control `tapOn` would tap, name the target
+with `until.label` or `until.elementId` alone: focus must then reach that control, and a focused
+row that only contains it does not count.
 
 On a TV without a touchscreen, `tapOn` with a `text` or `elementId` selector moves D-pad focus to
 the match and presses `enter`, so one flow can tap on both Android TV and tvOS. The selector picks

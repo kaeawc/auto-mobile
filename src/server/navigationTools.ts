@@ -11,6 +11,7 @@ import {
 import { DefaultPathOptimizer } from "../features/navigation/DefaultPathOptimizer";
 import { DEFAULT_MAX_INTERACTIONS, Explore, ExploreOptions } from "../features/navigation/Explore";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
+import { deviceInputModeResolver } from "../features/navigation/focusDrivenInput";
 import {
   assertTvosExploreOptions,
   createTvosExploreDevice,
@@ -403,6 +404,7 @@ export function registerNavigationTools({
       const explore = new Explore(device, null, undefined, {
         navigationManager: navigationManagerFactory(args.sessionUuid),
         sessionUuid: args.sessionUuid,
+        inputMode: deviceInputModeResolver(device),
       });
       const options: ExploreOptions = {
         maxInteractions: args.maxInteractions,
@@ -434,7 +436,7 @@ export function registerNavigationTools({
 
   ToolRegistry.registerDeviceAware(
     "explore",
-    "Automatically interact with the app to discover screens and record transitions in the navigation graph",
+    "Automatically interact with the app to discover screens and record transitions in the navigation graph; on Android TV it moves D-pad focus and selects instead of tapping (touch if the TV check cannot read the device)",
     exploreSchema,
     {
       handler: byExplorePlatform(

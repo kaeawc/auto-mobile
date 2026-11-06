@@ -479,6 +479,65 @@ jobs:
             AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "300"
           command: bash scripts/test-ts.sh stress
 
+  linux-bats-tests:
+    executor: linux
+    steps:
+      - checkout_without_lfs
+      - run:
+          name: "Install BATS, ShellCheck, jq, yq and ripgrep"
+          # The GitHub runner image ships newer jq/yq (several wiring tests need
+          # mikefarah yq >= 4.49.1), ShellCheck 0.9.0 and ripgrep; the CircleCI
+          # image's versions differ.
+          command: |
+            git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
+            test "$(git -C /tmp/bats-core rev-parse HEAD)" = "eb7f42f8d608ac693d7a4b67474f6714ea68cfc5"
+            sudo /tmp/bats-core/install.sh /usr/local
+            mkdir -p "${HOME}/.local/bin"
+            curl -fsSL https://github.com/koalaman/shellcheck/releases/download/v0.9.0/shellcheck-v0.9.0.linux.x86_64.tar.xz | tar -xJ -C /tmp
+            install -m 0755 /tmp/shellcheck-v0.9.0/shellcheck "${HOME}/.local/bin/shellcheck"
+            curl -fsSL -o "${HOME}/.local/bin/yq" https://github.com/mikefarah/yq/releases/download/v4.49.2/yq_linux_amd64
+            curl -fsSL -o "${HOME}/.local/bin/jq" https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64
+            chmod +x "${HOME}/.local/bin/yq" "${HOME}/.local/bin/jq"
+            bash .github/actions/setup-ripgrep/install-ripgrep.sh --install-dir "${HOME}/.local/bin"
+            sudo apt-get update -qq && sudo apt-get install -y -qq parallel
+            echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${BASH_ENV}"
+      - install_bun
+      - run:
+          name: "Install Bun dependencies"
+          command: |
+            bash scripts/ci/install-bun-deps.sh
+            echo "export PATH=\"${PWD}/node_modules/.bin:\${PATH}\"" >> "${BASH_ENV}"
+      - run:
+          name: "Run BATS Unit Tests"
+          environment:
+            AUTOMOBILE_BATS_MAX_FILE_SECONDS: "240"
+            AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS: "420"
+          command: |
+            mkdir -p ci-logs
+            set -o pipefail
+            scripts/ci/run-bats.sh unit 2>&1 | tee ci-logs/bats-unit.log
+      - run:
+          name: "Run BATS Integration Tests"
+          command: |
+            mkdir -p ci-logs
+            set -o pipefail
+            scripts/ci/run-bats.sh integration 2>&1 | tee ci-logs/bats-integration.log
+      - run:
+          name: "Summarize BATS failures"
+          when: always
+          command: |
+            mkdir -p ci-logs
+            { grep -hE '^(\[[^]]+\] +)?not ok' ci-logs/*.log || true; } > ci-logs/bats-failures.txt
+            { for t in jq yq rg shellcheck parallel bats xcrun xmllint; do printf '%s: ' "$t"; (command -v "$t" >/dev/null && "$t" --version 2>&1 | head -1) || echo missing; done; } > ci-logs/tools.txt
+      - store_artifacts:
+          when: always
+          path: ci-logs
+          destination: ci-logs
+      - store_artifacts:
+          when: always
+          path: scratch/bats-unit-joblog.tsv
+          destination: bats-unit-joblog/bats-unit-joblog.tsv
+
   # ── Post-merge (formerly merge.yml) and nightly sweeps ──────────────────────
   # Generate + drift-check + build every XcodeGen project. Post-merge it replaces
   # merge.yml's "Generate Xcode Projects" and "Build Xcode Projects"; nightly it is
@@ -894,6 +953,7 @@ workflows:
       - linux-node-host-integration-tests:
           requires:
             - linux-fast-validation
+      - linux-bats-tests
 
   # PR path: exactly one macOS job (#11010). When `run-ios` is false (no iOS
   # changes) the workflow has no jobs and no macOS executor is used.

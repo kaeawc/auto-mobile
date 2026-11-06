@@ -86,13 +86,18 @@ export function registerDeviceTools() {
 
   // Register with the tool registry
   registerDeviceResourceTools(getDeviceToolsDependencies);
-  ToolRegistry.register("listDeviceImages", "List device images", listDeviceImagesSchema, {
-    handler: listDeviceImagesHandler,
-    defaultEnabled: true,
-    outputSchema: listDeviceImagesOutputSchema,
-    readOnly: true,
-    hostInventory: true,
-  });
+  ToolRegistry.register(
+    "listDeviceImages",
+    "List device images; when `truncated` is true the result was over 64 KiB and `images` is partial: read `artifact.resourceUri` or the resource_link for the full list",
+    listDeviceImagesSchema,
+    {
+      handler: listDeviceImagesHandler,
+      defaultEnabled: true,
+      outputSchema: listDeviceImagesOutputSchema,
+      readOnly: true,
+      hostInventory: true,
+    },
+  );
 
   ToolRegistry.register(
     "listDevices",

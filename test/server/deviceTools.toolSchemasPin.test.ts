@@ -21,7 +21,7 @@ function fingerprint(schema: z.ZodType): string {
 
 describe("device tool schemas", () => {
   test.each([
-    ["listDeviceImagesSchema", listDeviceImagesSchema, "2e53503895b7d8fd"],
+    ["listDeviceImagesSchema", listDeviceImagesSchema, "6e36e4f0ac8620b8"],
     ["listDevicesSchema", listDevicesSchema, "925bd8b2750d047f"],
     ["listDevicesOutputSchema", listDevicesOutputSchema, "17cce0493f18f8c2"],
     ["killDeviceSchema", killDeviceSchema, "38ea51a687408052"],

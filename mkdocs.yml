@@ -158,6 +158,7 @@ nav:
       - "Emulator and simulator audio": using/emulator-audio.md
       - "Headless host audio setup": using/headless-audio.md
       - "Device ownership": using/device-ownership.md
+      - "Listing device images": using/device-images.md
       - "Usage skill": using/usage-skill.md
       - "Managed Macs and CI runners": using/managed-macs.md
       - "WebRTC Streaming": webrtc-streaming.md

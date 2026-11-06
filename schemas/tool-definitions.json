@@ -18345,7 +18345,7 @@
     "annotations": {
       "readOnlyHint": true
     },
-    "description": "List device images",
+    "description": "List device images; when `truncated` is true the result was over 64 KiB and `images` is partial: read `artifact.resourceUri` or the resource_link for the full list",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -18357,6 +18357,11 @@
         "sessionUuid": {
           "description": "Session used for inventory admission",
           "type": "string"
+        },
+        "detail": {
+          "description": "compact (default): host-scoped capabilities once under `host`, shared `capabilityProfiles`, null fields omitted; full: every image carries its own `capabilityInventory` and null fields",
+          "type": "string",
+          "enum": ["compact", "full"]
         }
       },
       "required": ["platform"],
@@ -18364,6 +18369,7 @@
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "A response over 64 KiB is spilled: the full result goes to `artifact` and a resource_link, and the inline result keeps count, configuredInventory, capabilityProfiles, host, truncated and imagesReturned",
       "type": "object",
       "properties": {
         "message": {
@@ -18735,18 +18741,7 @@
                     "enum": ["Booting", "Shutting Down"]
                   }
                 },
-                "required": [
-                  "deviceId",
-                  "connectionId",
-                  "deviceSessionUuid",
-                  "lifecycle",
-                  "readiness",
-                  "poolStatus",
-                  "session",
-                  "serviceStatus",
-                  "locked",
-                  "orientation"
-                ],
+                "required": ["lifecycle", "readiness"],
                 "additionalProperties": false
               },
               "display": {
@@ -18836,37 +18831,7 @@
               "capabilityInventory": {
                 "anyOf": [
                   {
-                    "type": "object",
-                    "properties": {
-                      "schemaVersion": {
-                        "type": "number"
-                      },
-                      "capabilities": {
-                        "type": "array",
-                        "items": {
-                          "type": "object",
-                          "properties": {
-                            "id": {
-                              "type": "string"
-                            },
-                            "state": {
-                              "type": "string",
-                              "enum": ["supported", "unsupported", "unknown"]
-                            },
-                            "reason": {
-                              "$ref": "#/$defs/__schema0"
-                            },
-                            "source": {
-                              "$ref": "#/$defs/__schema0"
-                            }
-                          },
-                          "required": ["id", "state", "reason", "source"],
-                          "additionalProperties": false
-                        }
-                      }
-                    },
-                    "required": ["schemaVersion", "capabilities"],
-                    "additionalProperties": false
+                    "$ref": "#/$defs/__schema2"
                   },
                   {
                     "type": "null"
@@ -18906,31 +18871,18 @@
               },
               "availabilityError": {
                 "$ref": "#/$defs/__schema0"
+              },
+              "capabilityProfile": {
+                "description": "Key into `capabilityProfiles`; the image's capabilities, plus `host.capabilities`",
+                "type": "string"
               }
             },
-            "required": [
-              "identity",
-              "name",
-              "platform",
-              "isVirtual",
-              "source",
-              "formFactor",
-              "deviceType",
-              "model",
-              "architecture",
-              "osVersion",
-              "apiLevel",
-              "runtimeId",
-              "runtime",
-              "display",
-              "capabilityInventory",
-              "image",
-              "availabilityError"
-            ],
+            "required": ["identity", "name", "platform", "isVirtual", "formFactor", "runtime"],
             "additionalProperties": false
           }
         },
         "count": {
+          "description": "Total configured images; equals images.length unless `truncated` is true",
           "type": "number"
         },
         "platform": {
@@ -18938,8 +18890,29 @@
           "enum": ["android", "ios", "tvos", "visionos"]
         },
         "configuredInventory": {},
+        "capabilityProfiles": {
+          "description": "Compact detail: capability inventories shared by images, by `capabilityProfile`",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema2"
+          }
+        },
+        "host": {
+          "description": "Compact detail: host-scoped capabilities (host audio) that apply to every image with a `capabilityProfile`",
+          "type": "object",
+          "properties": {
+            "capabilities": {
+              "$ref": "#/$defs/__schema3"
+            }
+          },
+          "required": ["capabilities"],
+          "additionalProperties": false
+        },
         "truncated": {
-          "description": "Present only when the response was spilled to `artifact`: true when `images` holds fewer than `count` entries; read the artifact for the full list",
+          "description": "Present only when the response was spilled to `artifact`: true when `images` holds fewer than `count` entries; read `artifact.resourceUri` (or the resource_link) for the full list",
           "type": "boolean"
         },
         "imagesReturned": {
@@ -18999,6 +18972,42 @@
               "type": "null"
             }
           ]
+        },
+        "__schema2": {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "type": "number"
+            },
+            "capabilities": {
+              "$ref": "#/$defs/__schema3"
+            }
+          },
+          "required": ["schemaVersion", "capabilities"],
+          "additionalProperties": false
+        },
+        "__schema3": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": ["supported", "unsupported", "unknown"]
+              },
+              "reason": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "source": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            "required": ["id", "state", "reason", "source"],
+            "additionalProperties": false
+          }
         }
       }
     },

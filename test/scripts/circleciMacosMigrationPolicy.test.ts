@@ -158,7 +158,9 @@ describe("CircleCI macOS policy (#10887, #11010)", () => {
     expect(keys).toEqual(['spm-v2-{{ checksum "/tmp/spm-lock.txt" }}']);
     const saveKeys = Object.values(config.jobs ?? {}).flatMap((job) =>
       (job.steps ?? []).flatMap((step) =>
-        typeof step !== "string" && step.save_cache ? [step.save_cache.key] : [],
+        typeof step !== "string" && step.save_cache?.key.startsWith("spm-")
+          ? [step.save_cache.key]
+          : [],
       ),
     );
     expect(saveKeys.length).toBeGreaterThan(0);

@@ -4,9 +4,18 @@ import {
   type PrototypeColorMode,
   type Rgba,
 } from "../prototypeContrast";
-import { record } from "../prototypeTemplate";
+import { record, type Raw } from "../prototypeTemplate";
 import { pagerPage } from "./webCollections";
-import { bound, childEntries, preparedNode, type WebRenderScope } from "./webRender";
+import {
+  bound,
+  childEntries,
+  isWebLayerType,
+  preparedNode,
+  type WebChildEntry,
+  type WebRenderScope,
+} from "./webRender";
+import { sheetOpen } from "./webSheet";
+import { stackScreen } from "./webStack";
 
 /** Below this luminance a screen colour reads as dark, as on Android (`DARK_LUMINANCE_CEILING`). */
 const DARK_LUMINANCE_CEILING = 0.179;
@@ -81,33 +90,100 @@ function decideMode(
 }
 
 /**
- * The first opaque hex background on the tree's leading chain: the root, then its first visible
- * child (a pager's current page), and so on, as both devices find the screen colour the author
- * painted. Hidden nodes paint nothing and are skipped; a role or `{light, dark}` background
- * depends on the mode, so the search goes on past it.
+ * The first opaque hex background on the tree's leading chain: the root, then the child it draws
+ * first, and so on, as both devices find the screen colour the author painted. A pager follows its
+ * current page, a scroll its `child` and a stack the screen it draws. A node that draws nothing in
+ * place is skipped: a hidden one, or a sheet, dialog or snackbar whose `openWhen` does not hold. A role or
+ * `{light, dark}` background depends on the mode, so the search goes on past it.
  */
 export function webAuthoredBackground(
   node: unknown,
   scope: WebRenderScope,
   path: string,
 ): Rgba | undefined {
-  const prepared = preparedNode(node, scope, path);
-  if (!prepared) {
-    return undefined;
-  }
+  // Only the outermost stack draws the still's chosen screen, as the stack renderer records it.
+  const root = drawnChild({ node, scope, path });
+  return root ? chainBackground(root, scope.stacks?.length === 0) : undefined;
+}
+
+type PreparedWebNode = NonNullable<ReturnType<typeof preparedNode>>;
+
+/** A node on the chain, prepared once and carried with its path into the next step. */
+interface DrawnChild {
+  readonly prepared: PreparedWebNode;
+  readonly path: string;
+}
+
+function chainBackground(
+  { prepared, path }: DrawnChild,
+  outermostStack: boolean,
+): Rgba | undefined {
   const { styled, scope: local } = prepared;
   const own = opaqueAuthoredBackground(record(styled.style)?.background);
   if (own) {
     return own;
   }
-  if (styled.type === "pager") {
-    const pages = Array.isArray(styled.children) ? styled.children : [];
-    const page = pagerPage(styled, local, { bound });
-    return webAuthoredBackground(pages[page], local, `${path}.children[${page}]`);
+  const next = leadingChild(styled, local, path, outermostStack);
+  const stillOutermost = outermostStack && styled.type !== "stack";
+  return next ? chainBackground(next, stillOutermost) : undefined;
+}
+
+/** The prepared node when it draws: not hidden and not a closed window layer. */
+function drawnNode(
+  node: unknown,
+  scope: WebRenderScope,
+  path: string,
+): ReturnType<typeof preparedNode> {
+  const prepared = preparedNode(node, scope, path);
+  // A closed sheet, dialog or snackbar draws nothing; an open one draws in the window's layer.
+  return prepared &&
+    isWebLayerType(prepared.styled.type) &&
+    !sheetOpen(prepared.styled, prepared.scope)
+    ? undefined
+    : prepared;
+}
+
+function drawnChild(entry: WebChildEntry): DrawnChild | undefined {
+  const prepared = drawnNode(entry.node, entry.scope, entry.path);
+  return prepared ? { prepared, path: entry.path } : undefined;
+}
+
+/** The child a container draws first, prepared in the scope and path the renderer gives it. */
+function leadingChild(
+  styled: Raw,
+  scope: WebRenderScope,
+  path: string,
+  outermostStack: boolean,
+): DrawnChild | undefined {
+  switch (styled.type) {
+    case "pager": {
+      const pages = Array.isArray(styled.children) ? styled.children : [];
+      const page = pagerPage(styled, scope, { bound });
+      return drawnChild({ node: pages[page], scope, path: `${path}.children[${page}]` });
+    }
+    case "scroll":
+    case "bottomSheet":
+    case "dialog":
+      return drawnChild({ node: styled.child, scope, path: `${path}.child` });
+    case "stack": {
+      const screen = stackScreen(styled, scope, outermostStack);
+      return screen === undefined
+        ? undefined
+        : drawnChild({
+            node: record(styled.screens)?.[screen],
+            scope,
+            path: `${path}.screens[${JSON.stringify(screen)}]`,
+          });
+    }
+    default:
+      // A repeat's template counts only through the rows it draws, bound to each row; the first
+      // that draws is prepared once and carried on, not prepared again by the next step.
+      for (const entry of childEntries(styled, scope, path)) {
+        const child = drawnChild(entry);
+        if (child) {
+          return child;
+        }
+      }
+      return undefined;
   }
-  // A repeat's template counts only through the rows it draws, bound to each row.
-  const first = childEntries(styled, local, path).find(
-    (entry) => preparedNode(entry.node, entry.scope, entry.path) !== undefined,
-  );
-  return first ? webAuthoredBackground(first.node, first.scope, first.path) : undefined;
 }

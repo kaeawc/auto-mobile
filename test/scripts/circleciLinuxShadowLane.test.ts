@@ -4,7 +4,10 @@ import { resolve } from "node:path";
 import { load } from "js-yaml";
 
 interface CircleConfig {
-  jobs?: Record<string, { executor?: string | { name: string } }>;
+  jobs?: Record<
+    string,
+    { executor?: string | { name: string }; docker?: { image: string }[]; resource_class?: string }
+  >;
   workflows?: Record<string, { when?: string; jobs?: unknown[] }>;
 }
 
@@ -24,7 +27,14 @@ test("Linux shadow jobs run in the run-linux workflow on the linux executor", ()
     linuxJobs.filter((name) => !notPr.has(name)).sort(),
   );
   for (const name of linuxJobs) {
-    const executor = continued.jobs?.[name]?.executor;
+    const job = continued.jobs?.[name];
+    if (job?.docker) {
+      // A job-level image override (e.g. the -browsers variant) keeps the JDK line and size.
+      expect(job.docker[0]?.image).toMatch(/^cimg\/openjdk:21\.0-/);
+      expect(job.resource_class).toBe("large");
+      continue;
+    }
+    const executor = job?.executor;
     expect(typeof executor === "string" ? executor : executor?.name).toBe("linux");
   }
 });

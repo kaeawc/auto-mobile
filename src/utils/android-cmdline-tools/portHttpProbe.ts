@@ -32,7 +32,7 @@ const MISSING_BINARY_EXITS = new Set([126, 127]);
 /** A path that may be sent: starts with `/`, printable ASCII, no spaces or controls. */
 export const PROBE_PATH_PATTERN = /^\/[\x21-\x7e]*$/;
 /** A Host header value that may be sent: a host name or IP literal, with an optional port. */
-export const PROBE_HOST_HEADER_PATTERN = /^[A-Za-z0-9.\-:[\]]+$/;
+export const PROBE_HOST_HEADER_PATTERN = /^[A-Za-z0-9.\-:\[\]]+$/;
 
 const isProbePath = (path: string): boolean => PROBE_PATH_PATTERN.test(path);
 const isProbeHostHeader = (host: string): boolean => PROBE_HOST_HEADER_PATTERN.test(host);

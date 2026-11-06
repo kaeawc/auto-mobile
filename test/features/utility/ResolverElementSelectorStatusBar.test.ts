@@ -122,6 +122,39 @@ describe("text selectors skip SystemUI status-bar chrome on a substring match (#
     expect(hitStatusBarBattery(result)).toBe(true);
   });
 
+  test.each([
+    "com.android.systemui:id/status_bar_notification",
+    "com.android.systemui:id/expandableNotificationRow",
+  ])("a notification row %s keeps substring matching for its text", (rowId) => {
+    const shade: ViewHierarchyResult = {
+      hierarchy: {
+        node: {
+          $: {
+            "resource-id": "com.android.systemui:id/notification_stack_scroller",
+            bounds: "[0,200][1080,2000]",
+          },
+          node: [
+            {
+              $: { "resource-id": rowId, clickable: "true", bounds: "[0,300][1080,500]" },
+              node: [
+                {
+                  $: {
+                    "resource-id": "android:id/title",
+                    text: "New message from Alice",
+                    bounds: "[40,320][1000,380]",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    };
+    const result = selectText(shade, "Alice");
+    expect(result.totalMatches).toBe(1);
+    expect(result.element).not.toBeNull();
+  });
+
   test("substring matches outside the status bar are unchanged", () => {
     const result = selectText(capture(), "Secur");
     expect(result.totalMatches).toBeGreaterThan(0);

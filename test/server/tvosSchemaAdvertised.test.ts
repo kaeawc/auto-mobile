@@ -20,6 +20,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import { restartStopHarness } from "../helpers/restartStopHarness";
 import { toolJson } from "../helpers/toolResponse";
+import { useEmptyVideoRecordings } from "../helpers/emptyVideoRecordings";
 
 isolateToolRegistry();
 
@@ -138,6 +139,7 @@ describe("killDevice Apple TV platform admission", () => {
 
   test("killDevice shuts down an Apple TV named only by its device", async () => {
     const { tv, simctl, timer } = arrange();
+    await useEmptyVideoRecordings(timer);
     const result = await createLifecycleHandlers().killDeviceHandler({
       device: { platform: "tvos", name: tv.name, deviceId: tv.udid },
     });

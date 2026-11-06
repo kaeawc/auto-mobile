@@ -22,6 +22,7 @@ import {
   watchNotifications,
   watchStreamRoot,
 } from "../../../src/features/systemTray/helpers/watchHierarchy";
+import { getHierarchyRoots } from "../../../src/features/systemTray/notificationHints";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -845,5 +846,131 @@ describe("Wear terminal evidence", () => {
     const result = await tray.execute({ action: "close", awaitTimeout: 500 });
     expect(result.isError).toBe(false);
     expect(observer.getCapturedScreenshotObservations()).toEqual([closed]);
+  });
+});
+
+// CtrlProxy's per-node model has no `package` field; ownership travels on the capture-level
+// `packageName` or on its window entry. Derived from the captured stream, not a new capture.
+function withoutNodePackages(view: ViewHierarchyResult): ViewHierarchyResult {
+  const copy = structuredClone(view);
+  for (const root of getHierarchyRoots(copy)) {
+    for (const node of watchNodes(root)) {
+      delete node.$?.package;
+    }
+  }
+  return copy;
+}
+const ctrlProxyStream = (owner: Partial<ViewHierarchyResult>): ObserveResult => ({
+  ...closed,
+  viewHierarchy: { ...withoutNodePackages(hierarchy), ...owner },
+});
+const sysuiStream = () => ctrlProxyStream({ packageName: "com.google.android.clockwork.sysui" });
+
+describe("Wear stream detection without per-node packages (#17222, #17223)", () => {
+  const detector = () =>
+    new AndroidNotificationUIDetector(watch, {
+      executeAdbCommand: async () => ({ stdout: "", stderr: "" }),
+      getDeviceTimestampMs: async () => 0,
+    });
+
+  test("detects the stream owned by the capture-level package", () => {
+    expect(detector().isTrayOpen(sysuiStream().viewHierarchy)).toBe(true);
+    expect(watchNotifications(sysuiStream().viewHierarchy)).toHaveLength(1);
+    expect(watchClearAll(sysuiStream().viewHierarchy)?.bounds).toEqual(
+      watchClearAll(hierarchy)?.bounds,
+    );
+  });
+
+  test("detects the stream owned by its window's package", () => {
+    const view = withoutNodePackages(hierarchy);
+    const [root] = getHierarchyRoots(view);
+    root.$ = { ...root.$, windowId: 7 };
+    const owned: ViewHierarchyResult = {
+      ...view,
+      packageName: "com.example.watchface",
+      windows: [{ id: 7, packageName: "com.google.android.clockwork.sysui" }],
+    };
+    expect(detector().isTrayOpen(owned)).toBe(true);
+  });
+
+  test("does not claim a stream another package or no package owns", () => {
+    expect(
+      detector().isTrayOpen(ctrlProxyStream({ packageName: "com.example.app" }).viewHierarchy),
+    ).toBe(false);
+    expect(detector().isTrayOpen(withoutNodePackages(hierarchy))).toBe(false);
+  });
+
+  test("open reports opened once the stream appears after the gesture", async () => {
+    const { tray, adb } = setup((commands) =>
+      commands.some((command) => command.startsWith("shell input swipe")) ? sysuiStream() : closed,
+    );
+    const result = await tray.execute({ action: "open", awaitTimeout: 500 });
+    expect(result.isError).toBe(false);
+    expect(result.payload).toMatchObject({
+      success: true,
+      opened: true,
+      skipped: false,
+      message: "Opened watch notification stream",
+    });
+    expect(adb.getExecutedCommands()).toContain("shell input swipe 192 370 192 119 900");
+  });
+
+  test("open on a visible stream skips the gesture and succeeds", async () => {
+    const { tray, adb } = setup(() => sysuiStream());
+    const result = await tray.execute({ action: "open", awaitTimeout: 500 });
+    expect(result.payload).toMatchObject({ success: true, opened: false, skipped: true });
+    expect(result.payload.message).toBe("Watch notification stream was already open");
+    expect(adb.getExecutedCommands().some((c) => c.startsWith("shell input swipe"))).toBe(false);
+  });
+
+  test("open fails with a matching message when the stream never appears", async () => {
+    const { tray } = setup(() => closed);
+    const result = await tray.execute({ action: "open", awaitTimeout: 500 });
+    expect(result.isError).toBe(true);
+    expect(result.payload).toMatchObject({ success: false, opened: false, skipped: false });
+    expect(result.payload.message).toBe(
+      "Watch notification stream did not appear after the open gesture",
+    );
+  });
+
+  test("close presses Back and reports closed only after the stream is gone", async () => {
+    const { tray, adb } = setup((commands) =>
+      commands.includes("shell input keyevent 4") ? closed : sysuiStream(),
+    );
+    const result = await tray.execute({ action: "close", awaitTimeout: 500 });
+    expect(result.isError).toBe(false);
+    expect(result.payload).toMatchObject({
+      success: true,
+      closed: true,
+      skipped: false,
+      message: "Closed watch notification stream",
+    });
+    expect(adb.getExecutedCommands()).toContain("shell input keyevent 4");
+  });
+
+  test("close fails when the stream is still showing after Back", async () => {
+    const { tray } = setup(() => sysuiStream());
+    const result = await tray.execute({ action: "close", awaitTimeout: 500 });
+    expect(result.isError).toBe(true);
+    expect(result.payload).toMatchObject({ success: false, closed: false, skipped: false });
+    expect(result.payload.message).toBe("Watch notification stream is still showing after Back");
+  });
+
+  test("close on the watch face skips without pressing Back", async () => {
+    const { tray, adb } = setup(() => closed);
+    const result = await tray.execute({ action: "close", awaitTimeout: 500 });
+    expect(result.payload).toMatchObject({ success: true, closed: false, skipped: true });
+    expect(adb.getExecutedCommands()).not.toContain("shell input keyevent 4");
+  });
+
+  test("find on a visible stream reads the card instead of failing to open", async () => {
+    const { tray } = setup(() => sysuiStream());
+    const result = await tray.execute({
+      action: "find",
+      notification: { title: "Wear", body: "-i" },
+      awaitTimeout: 500,
+    });
+    expect(result.isError).toBe(false);
+    expect(result.payload.bounds).toEqual({ left: 19, top: 92, right: 365, bottom: 260 });
   });
 });

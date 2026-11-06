@@ -175,9 +175,9 @@ describe("platform skins (#16531)", () => {
   });
 
   test("components the iOS skin leaves out draw as Material on both skins", () => {
-    const field = { type: "textField", label: "Name", stateKey: "n", testTag: "c" };
-    expect(rendered([field], { skin: "ios" }, "c")).toEqual(
-      rendered([field], { skin: "android" }, "c"),
+    const action = { type: "iconButton", icon: "add", testTag: "c" };
+    expect(rendered([action], { skin: "ios" }, "c")).toEqual(
+      rendered([action], { skin: "android" }, "c"),
     );
   });
 });
@@ -370,5 +370,208 @@ describe("iOS skin defaults for the Material components (#16599)", () => {
       "k",
     );
     expect(authored.style["background-color"]).toBe("rgba(255,0,0,1)");
+  });
+});
+
+describe("iOS skin text field, navigation bars and sheet (#16646)", () => {
+  const ios: PrototypeStillOptions = { skin: "ios" };
+  const field = (extra: Record<string, unknown>, state: Record<string, unknown> = {}) =>
+    rendered([{ type: "textField", stateKey: "n", testTag: "f", ...extra }], ios, "f", state);
+  const input = (element: WebElement) =>
+    find(element, (candidate) => candidate.attrs.role === "textbox")[0]!;
+  const slot = (element: WebElement, name: string) =>
+    find(element, (candidate) => candidate.attrs["data-slot"] === name)[0];
+
+  test("a text field's label sits above a filled input in .footnote, 4 pt apart, never inside", () => {
+    const filled = field({ label: "Name" }, { n: "Ada" });
+    expect(filled.style).toMatchObject({ "flex-direction": "column", gap: "4px" });
+    expect(filled.children[0]).toBe(slot(filled, "label")!);
+    expect(slot(filled, "label")!.style).toMatchObject({
+      "font-size": "13px",
+      color: "rgba(73,69,79,1)",
+    });
+    expect(input(filled).style).toMatchObject({
+      padding: "12px",
+      "font-size": "17px",
+      "border-radius": "4px 4px 0 0",
+      "border-bottom": "1px solid rgba(121,116,126,1)",
+      "background-color": "rgba(230,224,233,1)",
+    });
+    expect(textOf(input(filled))).toBe("Ada");
+    // An empty field shows only its placeholder; the label stays above it.
+    const empty = field({ label: "Name" });
+    expect(textOf(input(empty))).toBe("");
+    expect(textOf(input(field({ label: "Name", placeholder: "Your name" })))).toBe("Your name");
+    // An empty field keeps one body line, so typing into it moves nothing below it.
+    const line = (element: WebElement) => (input(element).children[0] as WebElement).style;
+    expect(line(empty)["min-height"]).toBe("22px");
+    expect(line(field({ label: "Notes", multiline: true, minLines: 3 }))["min-height"]).toBe(
+      "calc(3 * 22px)",
+    );
+  });
+
+  test("a field's line bounds follow the Dynamic Type body line", () => {
+    const notes = {
+      type: "textField",
+      label: "Notes",
+      stateKey: "n",
+      multiline: true,
+      maxLines: 2,
+      testTag: "f",
+    };
+    const scaled = rendered(
+      [notes],
+      { frame: "iphone-16", textSize: { contentSize: "accessibility-large" } },
+      "f",
+    );
+    const box = find(scaled, (candidate) => candidate.attrs.role === "textbox")[0]!;
+    const span = box.children[0] as WebElement;
+    const lineHeight = box.style["line-height"]!;
+    expect(Number.parseFloat(lineHeight)).toBeGreaterThan(22);
+    expect(span.style["max-height"]).toBe(`calc(2 * ${lineHeight})`);
+    expect(span.style["min-height"]).toBe(lineHeight);
+  });
+
+  test("an outlined field is a 1 pt 4 pt-radius outline stroke, red on an error", () => {
+    const outlined = input(field({ variant: "outlined" }));
+    expect(outlined.style).toMatchObject({
+      padding: "12px",
+      "border-radius": "4px",
+      border: "1px solid rgba(121,116,126,1)",
+    });
+    expect(outlined.style["background-color"]).toBeUndefined();
+    const errored = field(
+      { variant: "outlined", errorWhen: { key: "bad", equals: true }, errorText: "Required" },
+      { bad: true },
+    );
+    expect(input(errored).style.border).toBe("1px solid rgba(255,59,48,1)");
+    const alert = find(errored, (candidate) => candidate.attrs.role === "alert")[0]!;
+    expect(textOf(alert)).toBe("Required");
+    expect(alert.style).toMatchObject({ "font-size": "12px", color: "rgba(255,59,48,1)" });
+  });
+
+  test("supporting text and the counter share a .caption row; an error hides the supporting text", () => {
+    const counted = field({ label: "Bio", supportingText: "Short", maxLength: 4 }, { n: "Hello" });
+    const caption = slot(counted, "caption")!;
+    expect(caption.style).toMatchObject({ "font-size": "12px", color: "rgba(73,69,79,1)" });
+    expect(textOf(caption)).toBe("Short4/4");
+    expect(textOf(input(counted))).toBe("Hell");
+    const errored = field(
+      { supportingText: "Short", errorWhen: { key: "bad", equals: true } },
+      { bad: true },
+    );
+    expect(textOf(slot(errored, "caption")!)).toBe("");
+    expect(textOf(find(errored, (candidate) => candidate.attrs.role === "alert")[0]!)).toBe(
+      "Short",
+    );
+  });
+
+  test("without drawn chrome a field is a rounded-border input; icons sit beside the field", () => {
+    const plain = field({ placeholder: "Search" });
+    expect(slot(plain, "label")).toBeUndefined();
+    expect(input(plain).style).toMatchObject({ "border-radius": "5px", padding: "6px 7px" });
+    const secure = field({ label: "PIN", secure: true }, { n: "1234" });
+    expect(textOf(input(secure))).toBe("••••");
+    const iconed = field({
+      label: "Email",
+      leadingIcon: "mail",
+      trailingIcon: { icon: "close", label: "Clear", onTap: [{ type: "set", key: "n" }] },
+    });
+    const row = iconed.children[0] as WebElement;
+    expect(row.style).toMatchObject({ display: "flex", gap: "4px" });
+    expect(row.children).toHaveLength(3);
+    const clear = find(iconed, (candidate) => candidate.attrs.role === "button")[0]!;
+    expect(clear.attrs["aria-label"]).toBe("Clear");
+    expect(clear.style).toMatchObject({ width: "48px", height: "48px" });
+  });
+
+  const nav = (type: string, extra: Record<string, unknown> = {}) =>
+    rendered(
+      [
+        {
+          type,
+          stateKey: "tab",
+          testTag: "n",
+          items: [
+            { label: "Home", icon: "home" },
+            { label: "Search", icon: "search" },
+          ],
+          ...extra,
+        },
+      ],
+      ios,
+      "n",
+      { tab: 1 },
+    );
+  const tabs = (element: WebElement) =>
+    find(element, (candidate) => candidate.attrs.role === "tab");
+
+  test("a bottom nav spaces items 8 pt with a 64x32 capsule over a .caption label", () => {
+    const bar = nav("bottomNav");
+    expect(bar.style).toMatchObject({
+      gap: "8px",
+      "padding-inline": "8px",
+      "padding-top": "12px",
+      "min-height": "80px",
+      "background-color": "rgba(243,237,247,1)",
+    });
+    expect(bar.style["padding-bottom"]).toContain("4px");
+    const [home, search] = tabs(bar);
+    expect(search!.attrs["aria-selected"]).toBe("true");
+    expect(search!.style).toMatchObject({ gap: "4px", "min-height": "64px" });
+    expect(part(search!, "indicator").style).toMatchObject({ width: "64px", height: "32px" });
+    expect(part(search!, "indicator").style["background-color"]).toBeDefined();
+    expect(part(home!, "indicator").style["background-color"]).toBeUndefined();
+    const label = (tab: WebElement) => tab.children[1] as WebElement;
+    expect(label(search!).style).toMatchObject({ "font-size": "12px", "font-weight": "600" });
+    expect(label(home!).style["font-weight"]).toBe("500");
+    expect(search!.style.color).not.toBe(home!.style.color);
+  });
+
+  test("a tab bar has no divider or background, 44 pt tabs and a capsule on the selected one", () => {
+    const bar = nav("tabBar");
+    expect(bar.style["border-bottom"]).toBeUndefined();
+    expect(bar.style["background-color"]).toBeUndefined();
+    const [home, search] = tabs(bar);
+    expect(home!.style).toMatchObject({ gap: "2px", "min-height": "44px", "font-size": "12px" });
+    expect(home!.style["background-color"]).toBeUndefined();
+    expect(search!.style).toMatchObject({ "border-radius": "9999px" });
+    expect(search!.style["background-color"]).toBeDefined();
+    expect(tabs(nav("tabBar", { onScroll: "minimize" }))[0]!.style["min-height"]).toBe("64px");
+  });
+
+  test("a bottom sheet has a 36x5 handle 6 pt down, 8 pt spacing and a 16 pt radius", () => {
+    const sheet = (options: PrototypeStillOptions, extra: Record<string, unknown> = {}) =>
+      rendered(
+        [
+          {
+            type: "bottomSheet",
+            testTag: "sheet",
+            openWhen: { key: "open", equals: true },
+            child: { type: "text", text: "Details" },
+            ...extra,
+          },
+        ],
+        options,
+        "sheet",
+        { open: true },
+      );
+    const drawn = sheet(ios);
+    expect(drawn.style).toMatchObject({
+      gap: "8px",
+      "border-radius": "16px",
+      "align-items": "center",
+      "background-color": "rgba(254,247,255,1)",
+    });
+    expect(part(drawn, "handle").style).toMatchObject({
+      width: "36px",
+      height: "5px",
+      "margin-top": "6px",
+    });
+    // The iOS renderer ignores ios.sheet.sizing, so the skin does too.
+    expect(sheet(ios, { ios: { sheet: { sizing: "fitted" } } })).toEqual(drawn);
+    const android = sheet({ skin: "android" });
+    expect(part(android, "handle").style).toMatchObject({ width: "32px", height: "4px" });
+    expect(android.style["border-radius"]).toBeUndefined();
   });
 });

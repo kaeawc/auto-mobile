@@ -1,5 +1,6 @@
 import { tvosPress, unsupportedTvosAction } from "../tvos/TvosActions";
 import { watchPress, unsupportedWatchAction } from "../watch/WatchActions";
+import { isIosAppSwitcherVisible } from "../observe/ios/AppSwitcherSnapshotClassifier";
 import { getIosLockStateCache } from "../observe/ios/IosLockStateCacheRegistry";
 import type { IosLockStateInvalidator } from "../observe/ios/CachedIosLockStateProbe";
 import type { DispatchedRequestHold } from "../../daemon/dispatchedRequestHold";
@@ -120,6 +121,8 @@ interface PressDispatchOptions {
   onRecentAppsRoute?: (route: string | undefined) => void;
   /** Android key hold in ms (#16734); only select accepts it. */
   durationMs?: number;
+  /** iOS Home: the pre-press tree was the App Switcher, which arms HomeScreen's second press (#17201). */
+  appSwitcherWasOpen?: boolean;
 }
 
 export class PressButton extends BaseVisualChange {
@@ -274,6 +277,10 @@ export class PressButton extends BaseVisualChange {
           : this.press(button, {
               signal,
               durationMs,
+              appSwitcherWasOpen:
+                this.device.platform === "ios" &&
+                button.toLowerCase() === "home" &&
+                isIosAppSwitcherVisible(previousObservation.viewHierarchy?.hierarchy),
               onRecentAppsRoute: (recentAppsRoute) => {
                 verifiedAlreadyOpen = isVerifiedAlreadyOpenSwitcher({
                   success: true,
@@ -341,6 +348,7 @@ export class PressButton extends BaseVisualChange {
       onDispatch,
       onRecentAppsRoute,
       durationMs,
+      appSwitcherWasOpen,
     }: {
       timeoutMs?: number;
       frameContext?: string;
@@ -349,6 +357,7 @@ export class PressButton extends BaseVisualChange {
       onRecentAppsRoute?: (route: string | undefined) => void;
       /** Android only: hold the key down this long (long press of select). */
       durationMs?: number;
+      appSwitcherWasOpen?: boolean;
     } = {},
   ): Promise<PressButtonResult> {
     throwIfAborted(signal);
@@ -376,6 +385,7 @@ export class PressButton extends BaseVisualChange {
             signal,
             onDispatch: markDispatch,
             onRecentAppsRoute,
+            appSwitcherWasOpen,
           });
         default:
           throw unsupportedPlatformError(this.device.platform, "press buttons");
@@ -826,7 +836,7 @@ export class PressButton extends BaseVisualChange {
     button: string,
     dispatch: PressDispatchOptions,
   ): Promise<IOSDispatchResult<{ success: boolean; error?: string }>> {
-    const { timeoutMs, frameContext, signal, onDispatch } = dispatch;
+    const { timeoutMs, frameContext, signal, onDispatch, appSwitcherWasOpen } = dispatch;
     throwIfAborted(signal);
     switch (button) {
       case "home":
@@ -844,6 +854,7 @@ export class PressButton extends BaseVisualChange {
                 timeoutMs,
                 signal,
                 onDispatch,
+                appSwitcherWasOpen,
               }),
               signal,
             );
@@ -875,6 +886,7 @@ export class PressButton extends BaseVisualChange {
               frameContext,
               timeoutMs,
               signal,
+              appSwitcherWasOpen,
             });
           } finally {
             // HomeScreen can stop on cancellation before simctl settles; retain the key until then.

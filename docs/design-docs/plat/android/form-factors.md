@@ -60,6 +60,46 @@ The TV image is `system-images;android-36;android-tv;arm64-v8a` with profile `tv
 - Real no-touchscreen behaviour.
 - D-pad reach of prototype overlays (known gap).
 
+### TV fixture apps
+
+Two deterministic targets for TV checks and focus regression tests, with no network, no video decoding
+and no Google account. Each has `LAUNCHER` and `LEANBACK_LAUNCHER` entries, a banner, and declares
+touchscreen and leanback optional, so it installs on any TV or phone image. All text and ids come from
+each module's catalog object; changing them is a contract change.
+
+`android/tv-fixture` (`dev.jasonpearson.automobile.tvfixture`, launcher "AutoMobile TV Fixture") is
+Compose for TV (`androidx.tv:tv-material`). Compose test tags are exposed as resource ids.
+
+- Browse (`browse_rows`): the title, `Search` (`nav_search`) and `Player` (`nav_player`) buttons, the
+  status line (`fixture_status`, starts `Ready`) and the focus line (`fixture_focus`, `Focused: none`
+  until a card takes focus, then `Focused: Movies 03`). Below them the rows `row_featured`, `row_movies`
+  and `row_shows`, each a `LazyRow` of 12 cards (`card_movies_01`..`card_movies_12`, titled
+  `Movies 01`..`Movies 12`). About four and a half cards fit a 1080p row, so D-pad right past the last
+  visible card scrolls the next one into view. Focus starts on `Featured 01`, also after back.
+- Selecting a card opens its detail (`detail_title`, `detail_text` = `Detail for Movies 03`, focused
+  `Play` = `detail_play`) and sets the status to `Selected Movies 03`. `Play` opens the player.
+- Search (`search_field`, focused on entry): case-insensitive title match. `search_summary` reads
+  `Type to search`, `No results`, `1 result` or `N results`; matches are cards in `search_results`.
+- Player: `player_track` (`Track 1 of 3: Opening Titles`), `player_state` (`Paused`/`Playing`),
+  `player_position` (`0:00 / 3:00`), `player_last_command` (`Last command: none`) and the buttons
+  `player_previous`, `player_rewind`, `player_play_pause` (focused), `player_fast_forward`,
+  `player_next`. Nothing plays and the position never ticks: fast-forward and rewind move 10 s, clamped
+  to the track; next and previous change track, clamped to the 3-track playlist, and reset the position.
+- Media keys: the activity owns a framework `MediaSession` (active for the activity's lifetime, state
+  and metadata published on every change) and sets it as its window's media controller, so unhandled
+  media keys reach it on every screen, as do transport controls from another controller. Play/pause
+  (85, and headset hook 79), play (126), pause (127), stop (86), fast forward (90), rewind (89), next
+  (87) and previous (88) run the same command as the on-screen buttons on the first down event of a
+  press; `player_last_command` names it with `pressButton`'s button name (`playPause`, `fastForward`,
+  `rewind`, `next`, `previous`). A recreated activity starts the player over.
+
+`android/leanback-fixture` (`dev.jasonpearson.automobile.leanbackfixture`, launcher "AutoMobile
+Leanback Fixture") is View-based Leanback: a `BrowseSupportFragment` titled `AutoMobile Leanback` with a
+headers column (`Featured`, `Movies`, `Shows`) and one `ListRow` of 12 `ImageCardView` cards per header,
+titled as in the Compose fixture with the card id as the content text. Selecting a card opens
+`DetailActivity` (`detail_title`, `detail_text`). No search listener is set, so there is no search orb
+and nothing asks for audio.
+
 ## Wear OS: conditional go
 
 Hierarchy and tap path should match a phone's; the gaps are three Wear-specific inputs, none confirmed.

@@ -28,7 +28,7 @@ import {
   ExploreElementActions,
   type FocusSelectNavigator,
 } from "./ExploreElementActions";
-import { touchInputMode, type InputModeResolver } from "./focusDrivenInput";
+import { drivesFocus, touchInputMode, type InputModeResolver } from "./focusDrivenInput";
 import { getElementKey } from "./ExploreElementExtraction";
 import { ExplorePermissionDialog } from "./ExplorePermissionDialog";
 import { ExplorePlatformRecovery } from "./ExplorePlatformRecovery";
@@ -855,15 +855,14 @@ export class Explore extends BaseVisualChange {
 
       const isScrollable = isTruthy(element.scrollable);
 
-      const success =
-        (await this.inputMode()) === "dpad"
-          ? await this.elementActions().focusSelectElement(element, observation, {
-              signal,
-              recorded: this.currentTargetEdge?.interaction,
-            })
-          : isScrollable
-            ? await this.swipeContainer(element, observation, progress, signal)
-            : await this.tapElement(element, observation, progress, signal);
+      const success = drivesFocus(await this.inputMode(), this.currentTargetEdge?.interaction)
+        ? await this.elementActions().focusSelectElement(element, observation, {
+            signal,
+            recorded: this.currentTargetEdge?.interaction,
+          })
+        : isScrollable
+          ? await this.swipeContainer(element, observation, progress, signal)
+          : await this.tapElement(element, observation, progress, signal);
       // Nothing dispatched: skip a validate edge rather than retry it; else reset the back count.
       if (success === null) {
         skipUndispatchedEdge(this.graphTraversalState, this.currentTargetEdge, this.timer);

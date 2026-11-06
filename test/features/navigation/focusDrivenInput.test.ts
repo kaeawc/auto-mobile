@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  drivesFocus,
   deviceInputModeResolver,
   focusTargetForElement,
 } from "../../../src/features/navigation/focusDrivenInput";
@@ -45,6 +46,15 @@ describe("deviceInputModeResolver", () => {
   test("an unreadable build falls back to touch", async () => {
     const traits = new FakeDeviceTraits(new Error("adb offline"));
     expect(await resolverFor(android, traits)()).toBe("touch");
+  });
+});
+
+describe("drivesFocus", () => {
+  test("acts by focus on a D-pad device, and for a recorded focusNavigate on any device", () => {
+    expect(drivesFocus("dpad", undefined)).toBe(true);
+    expect(drivesFocus("touch", undefined)).toBe(false);
+    expect(drivesFocus("touch", { toolName: "tapOn" })).toBe(false);
+    expect(drivesFocus("touch", { toolName: "focusNavigate" })).toBe(true);
   });
 });
 

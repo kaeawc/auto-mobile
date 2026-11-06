@@ -216,6 +216,33 @@ describe("Explore on a focus-driven TV app", () => {
     ]);
   });
 
+  test("validate replays a recorded focusNavigate edge by focus on a touch device", async () => {
+    graph.addEdge({
+      from: "Home",
+      to: "Movies",
+      edgeType: "tool",
+      timestamp: timer.now(),
+      interaction: {
+        toolName: "focusNavigate",
+        args: { until: { resourceId: "app:id/movies" } },
+        timestamp: timer.now(),
+      },
+    });
+    const explore = exploreWith("touch");
+    let taps = 0;
+    explore.tapElement = async () => {
+      taps++;
+      return true;
+    };
+    await explore.execute({ packageName: APP, mode: "validate", maxInteractions: 3 });
+
+    expect(taps).toBe(0);
+    expect(tv.selections[0]).toMatchObject({
+      until: { resourceId: "app:id/movies" },
+      select: false,
+    });
+  });
+
   test("touch mode never drives the D-pad", async () => {
     const explore = exploreWith("touch");
     explore.tapElement = async () => true;

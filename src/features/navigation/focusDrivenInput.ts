@@ -28,6 +28,17 @@ export type InputModeResolver = () => Promise<InteractionInputMode>;
 
 export const touchInputMode: InputModeResolver = async () => "touch";
 
+/**
+ * Whether explore acts by D-pad focus: on a D-pad device, and for a recorded `focusNavigate` edge
+ * on any device, so validation replays that walk rather than tapping its target.
+ */
+export function drivesFocus(
+  mode: InteractionInputMode,
+  recorded: { toolName?: string } | undefined,
+): boolean {
+  return mode === "dpad" || recorded?.toolName === "focusNavigate";
+}
+
 /** Bound on each build-prop read of the TV probe. */
 const INPUT_MODE_TRAITS_TIMEOUT_MS = 3_000;
 

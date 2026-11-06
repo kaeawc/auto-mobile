@@ -169,6 +169,17 @@ test("a missing target sweeps every row and then fails without selecting", async
   expect(client.commands.at(-1)).toEqual(hierarchy);
 });
 
+test("the search still finds each edge while an unrelated label keeps changing", async () => {
+  const label = client.nodes.find((node) => node["resource-id"] === "last")!;
+  let tick = 0;
+  client.afterPress = () => {
+    label.text = `tick ${tick++}`;
+  };
+  await expect(tvosTapOn(deviceId, { action: "tap", text: "missing" })).rejects.toThrow(
+    "No tvOS element matched after searching the screen",
+  );
+});
+
 test("the search stops at its move budget", async () => {
   await expect(
     tvosTapOn(deviceId, { action: "tap", text: "missing" }, undefined, { maxSearchMoves: 2 }),
@@ -280,6 +291,31 @@ test("blocked primary direction falls back to the other axis", async () => {
   client.blockedActions.add("down");
   client.afterPress = () => client.blockedActions.clear();
   await tvosTapOn(deviceId, { action: "tap", text: "B22" });
+  expect(client.commands).toEqual([
+    hierarchy,
+    press("down"),
+    hierarchy,
+    press("right"),
+    hierarchy,
+    press("down"),
+    hierarchy,
+    press("down"),
+    hierarchy,
+    press("select"),
+  ]);
+});
+
+test("a refused press is detected while an unrelated label keeps changing", async () => {
+  const label = client.buttons.find((button) => button["resource-id"] === "B00")!;
+  let tick = 0;
+  client.blockedActions.add("down");
+  client.afterPress = () => {
+    label.text = `tick ${tick++}`;
+    if (client.buttons.find((button) => button.focused === "true")?.["resource-id"] !== "B01") {
+      client.blockedActions.clear();
+    }
+  };
+  await tvosTapOn(deviceId, { action: "tap", elementId: "B22" });
   expect(client.commands).toEqual([
     hierarchy,
     press("down"),

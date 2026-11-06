@@ -53,11 +53,13 @@ graph keeps one edge per screen change:
 - `tvosTapOn` matches anywhere in the hierarchy, not only inside the screen bounds. On-screen
   matches rank first, so `index` keeps its on-screen meaning; an off-screen match is approached
   with the same directional moves, and the row scrolls as focus reaches it. A scrolled row keeps
-  the focused cell at the viewport edge, so successive cells can share bounds; a press counts as
-  refused only when the whole hierarchy is unchanged, and refused directions are remembered per
-  hierarchy state, not per focused frame.
+  the focused cell at the viewport edge, so successive cells can share bounds. Progress is read
+  from a focus signature: the focused element's frame plus the frames and labels of every element
+  of the same kind (identifier and class), which shift when the row scrolls. A press that leaves
+  it unchanged was refused, and refused directions are remembered per signature. Elements of
+  another kind, such as a ticking status label, do not count as progress.
 - A row that has not scrolled may not hold the target's cell at all. With no match, `tvosTapOn`
   sweeps the focused row right then left, steps down a row (then up once down is refused) and
   sweeps again, re-reading after each press until the target appears. A press that leaves the
-  hierarchy unchanged was refused at an edge and ends that leg. The search has its own budget of
+  focus signature unchanged was refused at an edge and ends that leg. The search has its own budget of
   60 presses, separate from the 30 moves toward a found target, and never presses `select`.

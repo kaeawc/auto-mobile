@@ -113,6 +113,29 @@ interface ScreenRead {
   signature: string;
 }
 
+/** Identity without text, so cells of one row share a kind even when their labels differ. */
+function kindKey(element: Element): string {
+  return JSON.stringify([element["resource-id"], element["view-id"], element.className]);
+}
+
+/**
+ * Where focus is. A scrolled row keeps the focused cell at the viewport edge, so successive cells
+ * can share bounds; the scroll shows in the frames and labels of the cells of the same kind as the
+ * focused one. Elements of other kinds, such as a ticking status label, are left out.
+ */
+function focusSignature(all: Element[], focus: Element | undefined): string {
+  if (!focus) {
+    return "[]";
+  }
+  const key = kindKey(focus);
+  return JSON.stringify([
+    focusKey(focus),
+    all
+      .filter((element) => kindKey(element) === key)
+      .map((element) => [focusKey(element), element.text]),
+  ]);
+}
+
 function onScreen(element: Element, width: number, height: number): boolean {
   const { left, top, right, bottom } = element.bounds;
   return left >= 0 && top >= 0 && right <= width && bottom <= height;
@@ -134,10 +157,8 @@ async function readScreen(
   const all = new DefaultElementParser()
     .flattenViewHierarchy(hierarchy)
     .map(({ element }) => element);
-  const signature = JSON.stringify(
-    all.map((element) => [identityKey(element), focusKey(element), element.focused]),
-  );
   const focus = all.find((element) => element.focused === "true");
+  const signature = focusSignature(all, focus);
   const peers = identity ? all.filter((element) => identityKey(element) === identity.key) : [];
   if (identity && peers.length !== identity.count) {
     throw new ActionableError(
@@ -188,7 +209,7 @@ function requireFocus(read: ScreenRead): Element {
  * A row that has not scrolled yet may not contain the target at all: tvOS loads cells as focus
  * reaches them. Sweep the focused row right then left, then step down (or up once down is
  * refused) and sweep again, re-reading after every press, until the target appears. A press that
- * leaves the hierarchy unchanged was refused at an edge and ends that leg.
+ * leaves the focus signature unchanged was refused at an edge and ends that leg.
  */
 interface Lookup {
   client: TvosRunnerClient;
@@ -289,8 +310,7 @@ export async function tvosTapOn(
       await client.request({ type: "request_press_button", action: "select" }, signal);
       return { success: true, action: "tap", element: target };
     }
-    // A scrolled row keeps the focused cell at the same bounds, so focus positions are keyed by
-    // the whole hierarchy: only an unchanged hierarchy shows that the press was refused.
+    // A press that leaves the focus signature unchanged was refused at this focus position.
     const refused = blocked.get(state.signature) ?? new Set<Direction>();
     if (previous?.signature === state.signature) {
       refused.add(previous.direction);

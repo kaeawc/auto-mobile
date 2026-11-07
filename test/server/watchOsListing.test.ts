@@ -60,6 +60,8 @@ describe("watchOS listDevices (#17320)", () => {
       discovery: { complete: true },
       devices: [{ platform: "watchos", identity: { stableId: WATCH_UDID } }],
     });
+    // Configured-image enrichment reads the watch inventory, so a healthy listing is complete.
+    expect(result).not.toHaveProperty("enrichment");
     // MCP clients validate structuredContent against the advertised output schema.
     expect(listDevicesOutputSchema.safeParse(result).success).toBe(true);
   });

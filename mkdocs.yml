@@ -112,6 +112,7 @@ not_in_nav: |
   /release/device-claims-registry-migration.md
   /design-docs/plat/ios/xctestrunner/ci-integration.md
   /decisions/androidx-car-app-template-snapshots.md
+  /decisions/androidx-tv-fixture-libraries.md
   /decisions/androidx-wear-fixture-libraries.md
   /decisions/fastlane-supply-play-publishing.md
   /decisions/ios-user-files-provider.md
@@ -248,6 +249,7 @@ nav:
       - "Emulator gRPC audio": design-docs/plat/android/emulator-grpc-audio.md
       - "Device-condition capability probe": design-docs/plat/android/device-condition-capability-probe.md
       - "Device-condition attestation ceiling": design-docs/plat/android/device-condition-attestation-ceiling.md
+      - "Keystore StrongBox-unavailable fault": design-docs/plat/android/keystore-strongbox-fault.md
       - "Desktop App": design-docs/plat/android/desktop-app.md
       - "Pressure, hover and stylus input": design-docs/plat/pressure-hover-stylus-input.md
   - "Contributing": contributing.md

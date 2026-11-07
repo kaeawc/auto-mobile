@@ -22,6 +22,7 @@ import {
   watchClearAll,
   watchExpandedTarget,
   watchNotifications,
+  watchRevealedDismiss,
   watchStreamRoot,
   isWearHierarchy,
   type WatchNotification,
@@ -572,12 +573,19 @@ export class WatchSystemTray {
   ): Promise<{ next: ObserveResult; removed: boolean }> {
     const { left, top, right, bottom } = card.element.bounds;
     const before = appId ? await this.inventory(appId, card) : undefined;
-    // Wear dismisses a card with a horizontal swipe. This gesture still needs device verification.
+    // A horizontal swipe either dismisses the card or reveals its X button (Wear OS 7).
     await this.command(
       `shell input swipe ${Math.floor((left + right) / 2)} ${Math.floor((top + bottom) / 2)} ${right - 1} ${Math.floor((top + bottom) / 2)} 300`,
     );
     await sleep(POLL_MS, this.signal);
-    const next = await this.read();
+    let next = await this.read();
+    // Wear OS 7 only reveals the X and settings buttons; tapping the X dismisses the card.
+    const revealed = watchRevealedDismiss(next.viewHierarchy, card);
+    if (revealed) {
+      await this.tap(revealed, next);
+      await sleep(POLL_MS, this.signal);
+      next = await this.read();
+    }
     if (!watchStreamRoot(next.viewHierarchy)) {
       return { next, removed: false };
     }

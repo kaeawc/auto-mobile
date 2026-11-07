@@ -325,6 +325,12 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
     );
     expect(launched).toMatchObject({ success: true, packageName: BUNDLE });
     expect(launched.pid).toBe(watchSimctl.pidOf(watch.deviceId, BUNDLE));
+    expect(launched).not.toHaveProperty("verified");
+    expect(launched).not.toHaveProperty("verifyFailureReason");
+    expect(launched.verificationSkipped).toBe("platform");
+    expect(launched.message).toBe(
+      `Launched app ${BUNDLE} (foreground not verified: launchApp does not observe on this platform; call observe to confirm)`,
+    );
     expect(retargets).toEqual([{ deviceId: watch.deviceId, bundleId: BUNDLE }]);
 
     const cleared = toolJson(

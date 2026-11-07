@@ -84,7 +84,8 @@ export function createPlatformLaunchApp(
           );
         }
       }
-      return result;
+      // simctl launches are never observed, so verification is skipped, not failed (#17319).
+      return result.success ? { ...result, verificationSkipped: "platform" } : result;
     },
   };
 }

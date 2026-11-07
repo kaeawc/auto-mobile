@@ -27,6 +27,7 @@ const ANDROID_ONLY_FAULT_KEYS: ReadonlySet<string> = new Set([
   "faults.corruptAppFile",
   "faults.revokePermission",
   "faults.lockScreen",
+  "faults.biometricEnrollment",
   "faults.disablePackage",
   "faults.killApp",
   "faults.trimMemory",

@@ -404,16 +404,22 @@ function describeFocus(
   return { focusedElement: focused ? pathEntry(focused, label) : undefined, matches };
 }
 
-function focusKey(element: Element | null): string {
-  if (!element) {
+/**
+ * The focused element's identity across presses. A recycler row can keep fixed bounds while the
+ * list scrolls under it, so the contained label is part of the key: otherwise every press on such
+ * a list reads as "focus did not move" (#17315).
+ */
+function focusKey(entry: FocusPathEntry | undefined): string {
+  if (!entry) {
     return "";
   }
-  const { left, top, right, bottom } = element.bounds;
+  const { left, top, right, bottom } = entry.bounds;
   return [
-    stringProp(element, "resource-id"),
-    stringProp(element, "text"),
-    stringProp(element, "content-desc"),
+    entry.resourceId ?? "",
+    entry.text ?? "",
+    entry.contentDesc ?? "",
     `${left},${top},${right},${bottom}`,
+    entry.descendantLabel ?? "",
   ].join("|");
 }
 
@@ -558,7 +564,7 @@ export class FocusNavigate {
       const until = resolveTarget(screen, options);
       const { focusedElement, matches } = describeFocus(screen, until);
       const onScreen = screen.elements.filter((element) => elementMatchesTarget(element, until));
-      const key = focusKey(focused);
+      const key = focusKey(focusedElement);
       if (progress.observe(key, distanceToNearest(focused, onScreen)) && focusedElement) {
         path.push(focusedElement);
       }

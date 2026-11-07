@@ -56,7 +56,9 @@ Android only.
 configured thresholds; when `appId` is not in the foreground it is listed under `unsupported`
 instead, and `failOn` `error` or `warning` then fails the call. `memory` takes a memory snapshot of
 `appId`. Each result has `passed`, its metrics and its violations; `failed` is set when `failOn`
-matched. For raw captures use `performanceTrace`,
+matched. When the app rendered no frames during the check (an idle screen), the frame-time
+percentiles `p50Ms`–`p99Ms` are null and `metrics.frameTimeUnmeasured` says why; frame time is then
+not checked and does not fail the call. For raw captures use `performanceTrace`,
 `captureTrace`, `measureStartup` or `heapDump`.
 
 ## audit (deprecated)

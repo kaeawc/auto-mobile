@@ -47,6 +47,11 @@ include(":killprofile-fixture")
 // Deterministic Wear OS fixture app for watch checks (#16828).
 include(":wear-fixture")
 
+// Deterministic Android TV fixture apps, Compose for TV and Leanback, for TV checks (#16736).
+include(":tv-fixture")
+
+include(":leanback-fixture")
+
 include(":protocol")
 
 include(":prototype-compose")

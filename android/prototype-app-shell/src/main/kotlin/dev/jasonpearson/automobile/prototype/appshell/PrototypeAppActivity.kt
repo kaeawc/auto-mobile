@@ -13,8 +13,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.produceState
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import dev.jasonpearson.automobile.ctrlproxy.prototype.InternalAutoMobilePrototypeApi
@@ -28,9 +26,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class PrototypeAppActivity : ComponentActivity() {
+  private val generation = mutableIntStateOf(0)
+  private val remountGate = ResumedRemountGate { generation.intValue++ }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     installSplashScreen()
     super.onCreate(savedInstanceState)
+    lifecycle.addObserver(remountGate)
     val source = ApkPrototypeSource(assets)
     val loader = AppShellLoader(source, PrototypeStorage.fileBacked(this))
     val prototypeAssets = PrototypeAssets(image = source::readAsset, font = source::readAsset)
@@ -60,23 +62,23 @@ class PrototypeAppActivity : ComponentActivity() {
             }
           }
       }
-    var generation by remember { mutableIntStateOf(0) }
     Surface(Modifier.fillMaxSize()) {
       val current = state
       if (current is AppShellState.Ready) {
         // Root Back only backgrounds the task, so the renderer and its unsaved state stay alive.
         CompositionLocalProvider(LocalPrototypeRootBack provides { moveTaskToBack(true) }) {
-          key(generation) {
+          key(generation.intValue) {
             AutoMobilePrototype(
               spec = current.spec,
               assets = prototypeAssets,
               storage = loader.storage,
               handleBack = true,
               onDismiss = {
-                // Any other user dismissal ends the session; remount so returning is not blank.
+                // Any other user dismissal ends the session; remount so returning is not blank, but
+                // only once the activity resumes so onAppear never runs while backgrounding.
                 if (appShellBackAction(depth = 1) == AppShellBackAction.MOVE_TASK_TO_BACK) {
-                  moveTaskToBack(true)
-                  generation++
+                  if (moveTaskToBack(true)) remountGate.requestAfterBackgrounding()
+                  else generation.intValue++
                 }
               },
             )

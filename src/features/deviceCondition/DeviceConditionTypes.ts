@@ -248,6 +248,8 @@ export interface DeviceConditionInput {
     revokePermission?: DeviceConditionPermissionTarget | typeof DEVICE_CONDITION_UNSET;
     /** Lock-screen credential fault; removing it invalidates keys bound to the lock screen. */
     lockScreen?: "pin" | "none" | typeof DEVICE_CONDITION_UNSET;
+    /** Fingerprint enrollment fault (#17299); adding one invalidates enrollment-bound keys. */
+    biometricEnrollment?: "add" | "none" | typeof DEVICE_CONDITION_UNSET;
     /** Package state (#14069): disable an app until reset, or clear its data once. */
     disablePackage?: DeviceConditionPackageTarget | typeof DEVICE_CONDITION_UNSET;
     /** Process faults (#14068): end an app's process, or send it a trim-memory level, once. */
@@ -437,6 +439,12 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
           .optional()
           .describe(
             "Sets an AutoMobile test PIN, or removes the PIN; reset restores no lock screen. Keys bound to the lock screen are invalidated by a removal. 'unset' restores.",
+          ),
+        biometricEnrollment: z
+          .enum(["add", "none", DEVICE_CONDITION_UNSET])
+          .optional()
+          .describe(
+            "Android emulators only: 'add' enrolls one more fingerprint through Settings and the emulator console (`adb emu finger touch`), which invalidates keys created with setInvalidatedByBiometricEnrollment(true). The first add needs a device with no lock screen and sets the AutoMobile test PIN. 'none' removes every fingerprint by clearing that PIN. Reset or 'unset' restores no lock screen and no fingerprints. Refused on physical devices and when the console is unavailable.",
           ),
         disablePackage: z
           .union([z.literal(DEVICE_CONDITION_UNSET), packageTargetSchema()])

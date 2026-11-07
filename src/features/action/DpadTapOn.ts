@@ -48,8 +48,19 @@ export interface DpadTapOnRequest {
   display?: string;
 }
 
+/** How long a D-pad long press holds center when tapOn gives no `duration`. */
+export const DPAD_LONG_PRESS_DEFAULT_MS = 1000;
+
+function isLongPress(request: DpadTapOnRequest): boolean {
+  return request.action === "longPress";
+}
+
 function needsTouch(request: DpadTapOnRequest): boolean {
-  if ((request.action ?? "tap") !== "tap" || (request.duration ?? 0) > 0) {
+  const action = request.action ?? "tap";
+  if (action !== "tap" && action !== "longPress") {
+    return true;
+  }
+  if (action === "tap" && (request.duration ?? 0) > 0) {
     return true;
   }
   if (request.selectionStrategy !== undefined && request.selectionStrategy !== "first") {
@@ -86,15 +97,36 @@ export function dpadTapOnTarget(request: DpadTapOnRequest): FocusNavigateTarget 
   return selector.elementId ? { elementId: selector.elementId } : undefined;
 }
 
+/**
+ * The hold, in ms, a D-pad long press keeps center down, or undefined for a plain tap. Only
+ * meaningful for a request {@link dpadTapOnTarget} accepted.
+ */
+export function dpadTapOnHoldMs(request: DpadTapOnRequest): number | undefined {
+  if (!isLongPress(request)) {
+    return undefined;
+  }
+  return request.duration !== undefined && request.duration > 0
+    ? request.duration
+    : DPAD_LONG_PRESS_DEFAULT_MS;
+}
+
 export interface DpadTapOnResult {
   success: boolean;
-  action: "tap";
+  action: "tap" | "longPress";
   /** How the tap was delivered: focus moved with the D-pad, then enter pressed. */
   inputMethod: "dpad";
   /** The focus walk that preceded enter. */
   focusNavigation: Omit<FocusNavigateResult, "success" | "message">;
   message: string;
   error?: string;
+}
+
+/** Holds D-pad center down for a duration: the D-pad long press (`pressButton select durationMs`). */
+export interface DpadSelectHolder {
+  holdSelect(
+    durationMs: number,
+    signal?: AbortSignal,
+  ): Promise<{ success: boolean; error?: string }>;
 }
 
 export interface DpadTapOnNavigator {
@@ -107,9 +139,16 @@ export class DpadTapOn {
     private readonly navigator: DpadTapOnNavigator,
     private readonly keys: FocusKeyPresser,
     private readonly resolver?: DpadTargetResolver,
+    private readonly holder?: DpadSelectHolder,
   ) {}
 
-  async execute(target: FocusNavigateTarget, signal?: AbortSignal): Promise<DpadTapOnResult> {
+  /** `holdMs` long-presses center for that long instead of pressing enter. */
+  async execute(
+    target: FocusNavigateTarget,
+    signal?: AbortSignal,
+    holdMs?: number,
+  ): Promise<DpadTapOnResult> {
+    const action = holdMs === undefined ? "tap" : "longPress";
     const navigation = await this.navigator.execute({
       until: target,
       firstMatch: true,
@@ -124,7 +163,7 @@ export class DpadTapOn {
       const error = `No touchscreen, and D-pad focus did not reach ${described} (${navigation.status}): ${message ?? "the target was not focused"}`;
       return {
         success: false,
-        action: "tap",
+        action,
         inputMethod: "dpad",
         focusNavigation,
         message: error,
@@ -133,12 +172,16 @@ export class DpadTapOn {
     }
     // A request cancelled during the last read must not still activate the control.
     throwIfAborted(signal);
-    const pressed = await this.keys.press("enter", signal);
+    const pressed =
+      holdMs === undefined
+        ? await this.keys.press("enter", signal)
+        : await this.holdCenter(holdMs, signal);
+    const gesture = holdMs === undefined ? "pressing enter" : `holding center for ${holdMs} ms`;
     if (!pressed.success) {
-      const error = `No touchscreen; focused ${described} but pressing enter failed: ${pressed.error ?? "unknown error"}`;
+      const error = `No touchscreen; focused ${described} but ${gesture} failed: ${pressed.error ?? "unknown error"}`;
       return {
         success: false,
-        action: "tap",
+        action,
         inputMethod: "dpad",
         focusNavigation,
         message: error,
@@ -148,11 +191,25 @@ export class DpadTapOn {
     const presses = navigation.steps === 1 ? "1 D-pad press" : `${navigation.steps} D-pad presses`;
     return {
       success: true,
-      action: "tap",
+      action,
       inputMethod: "dpad",
       focusNavigation,
-      message: `No touchscreen: focused ${described} with ${presses}, then pressed enter`,
+      message: `No touchscreen: focused ${described} with ${presses}, then ${
+        holdMs === undefined ? "pressed enter" : `held center for ${holdMs} ms`
+      }`,
     };
+  }
+
+  private async holdCenter(
+    holdMs: number,
+    signal?: AbortSignal,
+  ): Promise<{ success: boolean; error?: string }> {
+    return (
+      (await this.holder?.holdSelect(holdMs, signal)) ?? {
+        success: false,
+        error: "this device cannot hold D-pad center",
+      }
+    );
   }
 }
 

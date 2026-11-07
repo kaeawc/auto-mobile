@@ -93,10 +93,16 @@ in that header, and the desktop app sends one id per app session. Tool-to-sessio
 bindings live in a daemon-scoped store rather than on any one server. The design (#4678, #11820) and resolved questions are in
 [SDK v2 and stateless daemon layer](sdk-v2-stateless-migration.md).
 
-Read-only tools do not consult the connection binding. A broker connection's grants
-(`BrokerConnectionScopes`) confine control and lifecycle calls only (owner decision Q6),
-and a read needs no session at all (#10965, #10982), so a `sessionUuid` on a read selects
-which session's device to read and grants nothing a sessionless read on that device
-lacks. It is therefore not a bearer capability: an unbound connection that names a live
-session's UUID on `observe` is admitted read-only, takes no control and records no
-activity. Control calls stay confined to the holder and to a bound connection's grants.
+A `sessionUuid` on a read is not a bearer capability (owner decision 2026-11-07, #13540).
+A `deviceReadOnly` call from a connection that names a live device session is admitted
+only when that connection holds the session binding: it acquired or restored the session
+(or its base), holds its autolock route, bound it to a device with `setActiveDevice` (a
+release-neutral read binding, cleared when the connection closes), was granted it by a
+broker binding, or declared the session's owner token. Any other connection is refused before admission with the
+non-retryable `read_session_not_bound` (`ReadSessionNotBoundError`, carrying the session
+and `missingBinding: "session"`). The check (`readSessionBindingRefusal`) runs in
+read-target resolution, so a refused read runs no readiness and records no activity. An id that
+names no live device session (an IDE observer session, #10968) still reads sessionlessly,
+and sessionless reads stay open (#10965). Calls with no connection identity (direct mode,
+and internal plan steps judged under their enclosing call) are not judged. Control calls
+keep their own owner and broker-grant refusals.

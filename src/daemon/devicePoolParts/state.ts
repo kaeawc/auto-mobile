@@ -84,6 +84,11 @@ export class DevicePoolState {
    */
   mcpSessionAcquiredDeviceSessions = new Map<string, Set<string>>();
   mcpSessionLivenessOwnerTokens = new Map<string, string>();
+  /**
+   * Sessions a connection bound by naming them on `setActiveDevice` (#13540). Release-neutral:
+   * it only lets that connection read under the session; it is not ownership.
+   */
+  mcpSessionReadBindings = new Map<string, Set<string>>();
   /** Releases a session after its owning connection closes and no owner remains (#10503). */
   ownerDisconnectRelease!: OwnerDisconnectRelease;
   mcpSessionRecoveryDevices: Map<string, McpSessionRecoveryLease> = new Map();

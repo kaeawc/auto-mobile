@@ -184,8 +184,9 @@ test("rival token cannot release a new mint and a tokenless release keeps today'
     token: "rival-token",
     client: (daemon) => new FakeDaemonClient({ daemon }),
   });
+  // A sessionUuid is not a bearer capability (#13540): the rival's read is refused.
   const named = await rival.callTool("observe", { sessionUuid: id });
-  expect(named).not.toMatchObject({ isError: true });
+  expect(JSON.stringify(named)).toContain("read_session_not_bound");
   const response = await s.daemonMethod(
     "daemon/releaseSession",
     { sessionId: id, livenessOwnerToken: "rival-token" },
@@ -239,9 +240,9 @@ test("naming a tokenless holder twice gains no token after its acquiring connect
     await s.idle(2_000);
     s.daemon.pool.releaseMcpSessionBindings("desktop-connection");
     for (let call = 0; call < 2; call++) {
-      expect(await s.proxy.callTool("observe", { sessionUuid: id })).not.toMatchObject({
-        isError: true,
-      });
+      // The proxy never held this session, so naming it on a read is refused (#13540).
+      const named = await s.proxy.callTool("observe", { sessionUuid: id });
+      expect(JSON.stringify(named)).toContain("read_session_not_bound");
     }
     await s.idle(18_001);
     expect(s.daemon.manager.hasSession(id)).toBe(true);
@@ -268,7 +269,12 @@ test("joining an existing ownerless session by id binds no acquisition token", a
   const { s, proxy } = await setup();
   const id = await s.acquireTokenless();
   s.daemon.pool.releaseMcpSessionBindings("desktop-connection");
-  expect(await proxy.callTool("observe", { sessionUuid: id })).not.toMatchObject({ isError: true });
+  // A read cannot join it (#13540: a sessionUuid is not a bearer capability); a control call can.
+  const read = await proxy.callTool("observe", { sessionUuid: id });
+  expect(JSON.stringify(read)).toContain("read_session_not_bound");
+  expect(await proxy.callTool("homeScreen", { sessionUuid: id })).not.toMatchObject({
+    isError: true,
+  });
   expect(
     await proxy.callTool("getAndroid", { deviceId: "emulator-5554", sessionUuid: id }),
   ).not.toMatchObject({ isError: true });

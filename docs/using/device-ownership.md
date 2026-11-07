@@ -55,6 +55,7 @@ Other refusals you may meet, and what to do:
 | `ambiguous_session_selector`                         | Several of your sessions match; pass `sessionUuid` or `deviceId`.                                                                                                               |
 | `ambiguous_device_target`                            | An unnamed call matched several devices; reads pass `deviceId`, control calls acquire a session and pass `sessionUuid`.                                                         |
 | `device_outside_bound_session`                       | The call names a `deviceId` other than the session's device.                                                                                                                    |
+| `read_session_not_bound` (not retryable)             | A read named a live session this connection does not hold. Read on the owning connection, or pass `deviceId` instead of `sessionUuid`.                                          |
 | `plan_execution_in_progress` (retryable)             | A plan is running; retry when it finishes. Reads stay allowed.                                                                                                                  |
 | `session_ownership_lost`, `no_active_device_session` | The session is gone for good (`retryable: false`, `nextAction: "acquire_new_session"`). Acquire a new session.                                                                  |
 | `session_released_during_creation`                   | The session was released before it finished creating. Acquire a new one.                                                                                                        |
@@ -177,7 +178,7 @@ Refusals do not count as session use and do not extend the session's idle window
 ### Reads and control
 
 Read-only calls never need a session and never count as activity, even for the
-holder. Anything that changes visible UI or starts a device-side process is
+holder. A read that names a session needs that session's binding (below). Anything that changes visible UI or starts a device-side process is
 control.
 
 - Reads include `observe`, `snapshotOf`, `hitTest`, `identifyInteractions`,
@@ -195,6 +196,13 @@ control.
 - A sessionless read that passes `deviceId` may boot that stopped device (an
   Android AVD name or an available iOS simulator UDID) and never creates one.
   Boot capacity limits still apply.
+- A read that passes the `sessionUuid` of a live device session must come from
+  the connection that acquired that session, bound it with `setActiveDevice`, or
+  was granted it by a broker binding, or present the session's owner token. Knowing the UUID is not enough: any
+  other connection gets the non-retryable `read_session_not_bound`, which names
+  the session. Read on the owning connection, or leave `sessionUuid` out and pass
+  `deviceId` for a sessionless read. A `sessionUuid` that names no device
+  session (such as an IDE observer session) still reads sessionlessly.
 - Ownership is a guard between cooperating clients, not a security boundary
   against other local processes.
 

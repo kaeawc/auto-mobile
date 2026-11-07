@@ -200,7 +200,10 @@ See [the ownership contract and per-tool readiness table](../../docs/using/devic
 for the owner decision 2026-10-12 (#11964).
 A `deviceReadOnly` call whose `sessionUuid` names no device session this
 daemon issued (the IDE injects its observer session UUID into every call) is
-handled as sessionless rather than refused as unissued (#10968). Reads also treat device-restart recovery reservations as held: running devices remain readable,
+handled as sessionless rather than refused as unissued (#10968). A `deviceReadOnly` call that names a live
+device session needs the session binding (owner decision 2026-11-07, #13540): the
+connection acquired, restored, `setActiveDevice`-bound or was broker-granted it, or declared its owner token;
+otherwise non-retryable `read_session_not_bound` (`readSessionBindingRefusal`). Reads also treat device-restart recovery reservations as held: running devices remain readable,
 while stopped reserved devices answer retryable `device_owned_by_other_session` with no boot;
 transient read discovery failure retries briefly before `discovery_incomplete`, never readiness (#11918).
 Read-only tools
@@ -308,10 +311,10 @@ on release. Policy lives in `src/daemon/wire/streamSubscriptionPolicy.ts`; tests
 Observer scope and cooperative ownership (owner decisions 2026-10-09, #10982):
 streams (`subscribe`, `request_observation`, video and WebRTC viewing) keep
 requiring the lightweight observer registration above, which is never a session;
-tools need nothing for read-only work. Ownership is a cooperative guard, not a
+tools need nothing for sessionless read-only work (a read naming a live session needs its binding, #13540). Ownership is a cooperative guard, not a
 local security boundary: `daemon/activeSessions` (`includeSessions`),
 `daemon/releaseSession` and `ide/setSessionToolEnabled` take no requester check on
-purpose, and no token gating is to be added. Reads are not activity, not even the
+purpose, and no further token gating is to be added. Reads are not activity, not even the
 owner's (#10964); a read on a held device is connect-only, on its own lane (#10969).
 A recording stops and finalizes on its session's release, capped near 120 s (#10957),
 and an owner-less one stops on acquisition (#10961). Acquisition refusals that can

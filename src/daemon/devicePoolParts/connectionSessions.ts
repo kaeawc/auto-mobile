@@ -94,6 +94,7 @@ type ConnectionSessionsState = Pick<
   | "mcpSessionOwnerCallsInFlight"
   | "mcpSessionUndeliveredMints"
   | "mcpSessionLivenessOwnerTokens"
+  | "mcpSessionReadBindings"
   | "mcpSessionRecoveryDevices"
   | "ownerConnectionIntervals"
 >;
@@ -351,6 +352,7 @@ export class DevicePoolConnectionSessions {
     this.state.mcpSessionUndeliveredMints.delete(mcpSessionId);
     this.state.mcpSessionAcquiredDeviceSessions.delete(mcpSessionId);
     this.state.mcpSessionLivenessOwnerTokens.delete(mcpSessionId);
+    this.state.mcpSessionReadBindings.delete(mcpSessionId);
     this.state.autolockManager.releaseMcpSessionBindings(mcpSessionId);
     this.state.mcpSessionRecoveryDevices.delete(mcpSessionId);
     for (const sessionId of acquired ?? []) {

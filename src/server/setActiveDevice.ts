@@ -343,6 +343,11 @@ async function bindRequestedDevice(input: {
     });
   }
   sessions.setDeviceReadiness(args.sessionUuid, "booted");
+  // #13540: this connection bound the session, so it may read under it (not ownership).
+  const bindingMcpSessionId = currentAutolockMcpSessionId();
+  if (bindingMcpSessionId) {
+    pool.recordMcpSessionReadBinding(bindingMcpSessionId, args.sessionUuid);
+  }
 }
 
 /** Where a session was bound, and its display pin, before a selection that may be undone. */

@@ -100,9 +100,10 @@ function measuredSize(element: WebElement, axis: Axis, vars: CssVars, depth: num
  */
 function measuredContent(element: WebElement, axis: Axis, vars: CssVars, depth: number): Len {
   const layout = layoutOf(element);
-  const children = element.children.filter(
-    (child) =>
-      typeof child !== "string" ? !outOfFlow(child) && child.style.display !== "none" : child.trim() !== "",
+  const children = element.children.filter((child) =>
+    typeof child !== "string"
+      ? !outOfFlow(child) && child.style.display !== "none"
+      : child.trim() !== "",
   );
   const elements = elementsOf(children);
   const unmeasurable =
@@ -123,9 +124,11 @@ function measuredContent(element: WebElement, axis: Axis, vars: CssVars, depth: 
     return undefined;
   }
   const known = sizes as number[];
-  const stacked = layout === (axis === "width" ? "row" : "column") || (layout === "flow" && axis === "height");
+  const stacked =
+    layout === (axis === "width" ? "row" : "column") || (layout === "flow" && axis === "height");
   const unknownRoom: WebRect = { left: 0, top: 0, width: undefined, height: undefined };
-  const gap = layout === "flow" ? 0 : mainGap(axis, { parent: element, content: unknownRoom, vars });
+  const gap =
+    layout === "flow" ? 0 : mainGap(axis, { parent: element, content: unknownRoom, vars });
   const extent = stacked
     ? known.reduce((sum, size) => sum + size, gap * (known.length - 1))
     : Math.max(...known);

@@ -10,7 +10,8 @@ import type {
   IosAccessibilityAuditRequest,
   RunnerAccessibilityAuditIssue,
 } from "../../../src/features/observe/ios/CtrlProxyAccessibilityAudit";
-import { verifiedForegroundApp } from "../../../src/features/accessibility/AuditForegroundRefusal";
+import { usableForegroundAppId } from "../../../src/features/observe/observationVerdict";
+import type { ObserveResult } from "../../../src/models";
 
 const ios: BootedDevice = {
   name: "iPhone 16",
@@ -220,14 +221,26 @@ describe("NativeAccessibilityAudit (#14086)", () => {
     expect(sender.requests).toHaveLength(1);
   });
 
-  test("a stale observation's foreground is unknown, not a mismatch", () => {
-    const activeWindow = { appId: "com.previous.app", activityName: "", layoutSeqSum: 0 };
+  test("an unverified foreground identity is unknown, not a mismatch", () => {
+    const observed = (extra: Partial<ObserveResult>): ObserveResult => ({
+      observationId: "o",
+      updatedAt: 0,
+      display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+      screenSize: { width: 0, height: 0 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      activeWindow: { appId: "com.apple.springboard", activityName: "", layoutSeqSum: 0 },
+      ...extra,
+    });
 
-    expect(verifiedForegroundApp({ activeWindow, freshness: { isFresh: false } })).toBeUndefined();
-    expect(verifiedForegroundApp({ activeWindow, freshness: { isFresh: true } })).toBe(
-      "com.previous.app",
-    );
-    expect(verifiedForegroundApp({ activeWindow })).toBe("com.previous.app");
+    expect(usableForegroundAppId(observed({}))).toBe("com.apple.springboard");
+    expect(usableForegroundAppId(observed({ freshness: { isFresh: false } }))).toBeUndefined();
+    expect(
+      usableForegroundAppId(
+        observed({
+          viewHierarchy: { hierarchy: { node: undefined }, fallbackToSpringboard: true },
+        }),
+      ),
+    ).toBeUndefined();
   });
 
   test("Android reports the native audit unsupported and points at the WCAG audit", async () => {

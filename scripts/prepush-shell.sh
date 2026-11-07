@@ -471,7 +471,7 @@ for path in "${changed_files[@]}"; do
   esac
 
   case "${path}" in
-    skills/**|.agents/skills/**|AGENTS.md|.claude-plugin/**)
+    skills/**|.agents/skills/**|AGENTS.md|.claude-plugin/**|plugins/**)
       add_check "codex-skills"
       add_check "claude-plugin"
       ;;

@@ -24,6 +24,7 @@ public protocol SdkHierarchyFetching: Sendable {
     /// Replace active network error simulation in the in-app SDK.
     func setNetworkErrorSimulation(_ config: NetworkErrorSimulationDTO) async -> Bool
     /// nil means transport failure; false means the SDK found no handler.
+    func performAccessibilityFocus(_ request: RequestAccessibilityFocus) async -> SdkAccessibilityFocusReply?
     func performMagicTap() async -> Bool?
     /// POST a trigger body to the SDK's `/trigger` route; nil means the SDK was unreachable.
     func sendTrigger(_ body: Data) async -> SdkTriggerReply?
@@ -103,6 +104,8 @@ extension SdkHierarchyFetching {
     public func pushMockRules(_ rules: [NetworkMockRuleDTO]) async -> SdkMockRulesOutcome {
         SdkMockRulesOutcome(ok: await setMockRules(rules))
     }
+
+    public func performAccessibilityFocus(_: RequestAccessibilityFocus) async -> SdkAccessibilityFocusReply? { nil }
 
     /// Older implementations have no Magic Tap bridge.
     public func performMagicTap() async -> Bool? { nil }

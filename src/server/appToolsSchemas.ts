@@ -1,3 +1,8 @@
+import {
+  KEYSTORE_FAULT_KINDS,
+  KEYSTORE_FAULT_MAX_DELAY_MS,
+  KEYSTORE_FAULT_MIN_DELAY_MS,
+} from "../features/storage/keystoreFault";
 import { z } from "zod/v4";
 import { APP_TRIM_MEMORY_LEVELS } from "../models/AppLifecycleResult";
 import {
@@ -403,17 +408,34 @@ export const resetKeychainSchema = withAppIdAliases(
           .string()
           .min(1)
           .optional()
-          .describe("Android declared scope to reset; required unless alias is given."),
+          .describe("Android declared scope to reset or fault; required unless alias is given."),
         alias: z
           .string()
           .min(1)
           .optional()
-          .describe("Android declared alias to delete; with scope, must belong to it."),
+          .describe("Android declared alias to delete or fault; with scope, must belong to it."),
+        action: z
+          .enum(["reset", "injectFault", "clearFaults"])
+          .optional()
+          .describe(
+            "Default reset. Android only: injectFault arms a debug-SDK Keystore fault on the selected declared aliases until clearFaults or app restart; clearFaults removes them.",
+          ),
+        kind: z
+          .enum(KEYSTORE_FAULT_KINDS)
+          .optional()
+          .describe("injectFault only, required: the fault each Keystore use of the alias raises."),
+        delayMs: z
+          .number()
+          .int()
+          .min(KEYSTORE_FAULT_MIN_DELAY_MS)
+          .max(KEYSTORE_FAULT_MAX_DELAY_MS)
+          .optional()
+          .describe("injectFault with kind DELAY only, required: delay per Keystore operation."),
         confirm: z
           .boolean()
           .optional()
           .describe(
-            "Required true on iOS Simulator, which erases EVERY app's Keychain. Android does not need confirm (app opt-in, declared aliases and the SDK mutation gate authorize deletion), but confirm: false refuses the reset.",
+            "Required true on iOS Simulator, which erases EVERY app's Keychain. Android does not need confirm (app opt-in, declared aliases and the SDK mutation gate authorize it), but confirm: false refuses the action.",
           ),
       })
       .strict(),

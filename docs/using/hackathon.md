@@ -54,6 +54,18 @@ Notes on running them:
   (`prototype` with `action: "awaitEvent"`). The onboarding, checkout and chat templates emit
   `signup_submit`, `order_placed` and `message_sent`, so the agent can respond live in a demo.
 
+### Camera and media concepts
+
+These single-flow concepts exercise device capture. A device without the named capability refuses
+them like any other template.
+
+| Concept                   | Shape                                                                                                                          |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `concept-voice-note.json` | Record, stop and review a voice note's duration. Needs `audioRecorder` and microphone permission; emits `voice_note_recorded`. |
+
+On an emulator or simulator, grant the microphone with `setAppPermissions` and feed a known WAV
+with `injectAudioInput` before tapping Record.
+
 ## Demo-day checklist
 
 - **Run offline.** A prototype with no `request` actions needs no network. Save it on the device so
@@ -61,6 +73,17 @@ Notes on running them:
   to the launcher. With ProtoViewer installed on an Android device or iOS simulator, `save`
   imports it into the ProtoViewer library, and `action: "open"` with the returned `libraryId`
   launches it. An iOS simulator gets a standalone app icon from `save`.
+- **Hand the prototype to judges and teammates.** `prototype` with `action: "share"` and the same
+  `spec` or `specPath` (plus `assets`) writes a `.automobile-proto` bundle on the laptop and
+  returns `share.bundlePath` and `share.sha256`. Upload that file unchanged to any static https
+  host you control (a release asset, a gist raw URL, object storage), then call `share` again with
+  `url` set to where it is served: the result adds `share.link`
+  (`automobile-proto://import?url=…&sha256=…`), `share.qrPngPath` and `share.qr` (the QR drawn in
+  the terminal). `url` must be https with no credentials or `#fragment`; a URL whose link is too
+  long for a phone camera to read is refused with `invalid_url`. AutoMobile uploads nothing, and
+  links do not expire. An Android ProtoViewer with URL import opens the scanned link after showing
+  the host and hash and refuses a download whose hash differs. Until then, and on iOS, send the
+  bundle file itself and open it in ProtoViewer.
 - **Stream to a projector.** Follow [WebRTC streaming](../webrtc-streaming.md) to send the device
   screen to a browser.
 - **Record the submission video.** `videoRecording` with `action: "start"` before you begin and

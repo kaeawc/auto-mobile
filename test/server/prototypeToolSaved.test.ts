@@ -161,6 +161,18 @@ describe("prototype saved actions", () => {
       dialog = home;
       proxy.setPinResult({ success: true, pin: { id: "demo", status: "already_pinned" } });
     });
+    // Owner decision 2026-10-22: physical devices restart by default exactly like emulators.
+    test.each([
+      ["emulator", { ...android, deviceId: "emulator-5554" }],
+      ["physical device", { ...android, deviceId: "R58M12ABCDE", deviceType: "physical" }],
+    ])("restarts the resolved launcher once on a %s by default", async (_kind, device) => {
+      adb.setCommandResponse(resolveHome, pixelHome);
+      const output = await call({ action: "save", spec, pin: true }, device);
+      expect(output).toMatchObject({ launcherRestarted: true, shortcutVisible: false });
+      expect(adb.getExecutedCommands().filter((c) => c.includes("am force-stop"))).toEqual([
+        "shell am force-stop com.google.android.apps.nexuslauncher",
+      ]);
+    });
     test("restarts the resolved launcher once when the shortcut is not showing", async () => {
       adb.setCommandResponse(resolveHome, pixelHome);
       const output = await save({ pin: true });

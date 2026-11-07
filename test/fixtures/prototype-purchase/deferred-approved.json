@@ -1,0 +1,66 @@
+{
+  "name": "A deferred purchase that is approved grants the subscription",
+  "products": [
+    {
+      "id": "pro_monthly",
+      "kind": "subscription"
+    },
+    {
+      "id": "no_ads",
+      "kind": "nonConsumable"
+    },
+    {
+      "id": "coins_100",
+      "kind": "consumable"
+    }
+  ],
+  "state": {
+    "entitlements": {},
+    "lastTransaction": null
+  },
+  "steps": [
+    {
+      "op": "purchase",
+      "productId": "pro_monthly",
+      "outcome": {
+        "result": {
+          "status": "deferred",
+          "transactionId": "d2"
+        }
+      },
+      "expect": {
+        "state": {
+          "entitlements": {},
+          "lastTransaction": {
+            "transactionId": "d2",
+            "productId": "pro_monthly",
+            "status": "deferred"
+          }
+        },
+        "into": {
+          "status": "deferred",
+          "transactionId": "d2"
+        },
+        "entitlementsChanged": false
+      }
+    },
+    {
+      "op": "resolve",
+      "transactionId": "d2",
+      "resolution": "approved",
+      "expect": {
+        "state": {
+          "entitlements": {
+            "pro_monthly": "active"
+          },
+          "lastTransaction": {
+            "transactionId": "d2",
+            "productId": "pro_monthly",
+            "status": "purchased"
+          }
+        },
+        "entitlementsChanged": true
+      }
+    }
+  ]
+}

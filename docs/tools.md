@@ -36,9 +36,9 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🆚 <code>compareScreenshot</code>    | Record or compare a named screenshot baseline            |
 | 👁️ <code>observe</code>              | Read the current screen, hierarchy, and screenshot       |
 | 🎯 <code>hitTest</code>              | Preview what a tap at a point would hit, without tapping |
-| 🧭 <code>explore</code>              | Automatically explore app to build navigation graph      |
-| 🗺️ <code>navigateTo</code>           | Navigate to screen using navigation graph                |
-| 🕸️ <code>getNavigationGraph</code>   | Get navigation graph for debugging                       |
+| 🧭 <code>explore</code>              | Explore the app to learn screens and transitions         |
+| 🗺️ <code>navigateTo</code>           | Replay learned transitions to reach a screen             |
+| 🕸️ <code>getNavigationGraph</code>   | List learned screens and transitions                     |
 | 🔎 <code>identifyInteractions</code> | Suggest likely interactions                              |
 | 🧪 <code>prototype</code>            | Show agent-authored UI on the device                     |
 | 🔦 <code>highlight</code>            | Draw a red hand-drawn circle around a UI element         |
@@ -58,7 +58,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🤌 <code>pinchOn</code>       | Pinch to zoom                                                                                                                                                                       |
 | 🖐️ <code>multiTouch</code>    | Simultaneous 2-5 finger tap, long press, or swipe at a screen point                                                                                                                 |
 | ⌨️ <code>sendKeys</code>      | Execute ordered typing, clear, raw-key, and semantic IME commands                                                                                                                   |
-| 🧭 <code>focusNavigate</code> | Move D-pad focus to an element on Android TV; stops `focused`, `max_steps` or `stuck`                                                                                               |
+| 🧭 <code>focusNavigate</code> | Move D-pad focus to an element on Android TV or Apple TV; stops `focused`, `max_steps` or `stuck`                                                                                   |
 | 🎛️ <code>setUIState</code>    | Set multiple form fields by desired state                                                                                                                                           |
 | 📝 <code>selectAllText</code> | Select all text in focused input                                                                                                                                                    |
 | 🔘 <code>pressButton</code>   | Press a device or navigation button                                                                                                                                                 |
@@ -68,34 +68,35 @@ A read never writes settings on a device another session holds. A sessionless re
 
 ## 📦 Apps, files & data
 
-| Tool                                  | What it does                                                                                   |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| 🗂️ <code>listApps</code>              | List installed apps                                                                            |
-| 🚀 <code>launchApp</code>             | Launch app by package name                                                                     |
-| 🛑 <code>terminateApp</code>          | Terminate app by package name                                                                  |
-| 💥 <code>crashApp</code>              | Intentionally crash a running app through the platform crash path                              |
-| 🔄 <code>appLifecycle</code>          | Background-kill an app to test state restoration (Android; iOS background and SIGKILL)         |
-| ⬇️ <code>installApp</code>            | Install app on device (.apk, split APKs, .apks, .aab, .app, or .ipa)                           |
-| 🗑️ <code>uninstallApp</code>          | Uninstall app by package name or bundle identifier                                             |
-| 🔏 <code>inspectPackageSigning</code> | Fresh read of one app's presence (installed/absent/unknown) and signing                        |
-| 🔗 <code>getDeepLinks</code>          | Query app deep links                                                                           |
-| 📥 <code>putAppFile</code>            | Write files into a bounded logical storage target                                              |
-| 🧹 <code>resetAppLogs</code>          | Reset named app log files                                                                      |
-| ⚙️ <code>getPreference</code>         | Read an Android system property, Android SharedPreferences key, or iOS UserDefaults key        |
-| ⚙️ <code>setPreference</code>         | Write a system property, SharedPreferences, or UserDefaults key                                |
-| 🗝️ <code>deleteKeychainItem</code>    | Delete one allowlisted app-owned iOS Keychain item (SDK opt-in, requires confirm)              |
-| 🔑 <code>setKeyValue</code>           | Set app key-value storage entry                                                                |
-| ❌ <code>removeKeyValue</code>        | Remove app key-value storage entry                                                             |
-| 🧼 <code>clearKeyValueFile</code>     | Clear app key-value storage file                                                               |
-| 🗄️ <code>listDataStores</code>        | List app Jetpack DataStore instances (Android, requires AutoMobile SDK adapter)                |
-| 🗄️ <code>getDataStore</code>          | Read entries from an app Jetpack DataStore instance (Android, requires AutoMobile SDK adapter) |
-| 🧮 <code>sqlQuery</code>              | Execute SQL on app SQLite database                                                             |
-| 🔐 <code>resetKeychain</code>         | Reset declared Android scope/alias; iOS Simulator clears all apps with confirm:true            |
-| 🔗 <code>setAppLinks</code>           | Android 12+: change an app's App Links state so https links open the app directly (or not)     |
-| ⏱️ <code>measureStartup</code>        | Measure cold/warm/hot app startup                                                              |
-| 📜 <code>getLogs</code>               | Read device logs with filters                                                                  |
-| 📡 <code>sendBroadcast</code>         | Send an Android broadcast to the app under test                                                |
-| 🛠️ <code>backgroundWork</code>        | Android: read and trigger an app's background work without waiting hours                       |
+| Tool                                  | What it does                                                                                     |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| 🗂️ <code>listApps</code>              | List installed apps                                                                              |
+| 🚀 <code>launchApp</code>             | Launch app by package name                                                                       |
+| 🛑 <code>terminateApp</code>          | Terminate app by package name                                                                    |
+| 💥 <code>crashApp</code>              | Intentionally crash a running app through the platform crash path                                |
+| 🔄 <code>appLifecycle</code>          | Background-kill an app to test state restoration (Android; iOS background and SIGKILL)           |
+| ⬇️ <code>installApp</code>            | Install app on device (.apk, split APKs, .apks, .aab, .app, or .ipa)                             |
+| 🗑️ <code>uninstallApp</code>          | Uninstall app by package name or bundle identifier                                               |
+| 🔏 <code>inspectPackageSigning</code> | Fresh read of one app's presence (installed/absent/unknown) and signing                          |
+| 🔗 <code>getDeepLinks</code>          | Query app deep links                                                                             |
+| 📥 <code>putAppFile</code>            | Write files into a bounded logical storage target                                                |
+| 🧹 <code>resetAppLogs</code>          | Reset named app log files                                                                        |
+| ⚙️ <code>getPreference</code>         | Read an Android system property, Android SharedPreferences key, or iOS UserDefaults key          |
+| ⚙️ <code>setPreference</code>         | Write a system property, SharedPreferences, or UserDefaults key                                  |
+| 🗝️ <code>deleteKeychainItem</code>    | Delete one allowlisted app-owned iOS Keychain item (SDK opt-in, requires confirm)                |
+| 🔑 <code>setKeyValue</code>           | Set app key-value storage entry                                                                  |
+| ❌ <code>removeKeyValue</code>        | Remove app key-value storage entry                                                               |
+| 🧼 <code>clearKeyValueFile</code>     | Clear app key-value storage file                                                                 |
+| 🗄️ <code>listDataStores</code>        | List app Jetpack DataStore instances (Android, requires AutoMobile SDK adapter)                  |
+| 🗄️ <code>getDataStore</code>          | Read entries from an app Jetpack DataStore instance (Android, requires AutoMobile SDK adapter)   |
+| 🧮 <code>sqlQuery</code>              | Execute SQL on app SQLite database                                                               |
+| 🔐 <code>resetKeychain</code>         | Reset declared Android scope/alias; iOS Simulator clears all apps with confirm:true              |
+| 🔗 <code>setAppLinks</code>           | Android 12+: change an app's App Links state so https links open the app directly (or not)       |
+| 🚦 <code>performanceAudit</code>      | Android: pass/fail jank, touch latency and memory checks with failOn ([audits](using/audits.md)) |
+| ⏱️ <code>measureStartup</code>        | Measure cold/warm/hot app startup                                                                |
+| 📜 <code>getLogs</code>               | Read device logs with filters                                                                    |
+| 📡 <code>sendBroadcast</code>         | Send an Android broadcast to the app under test                                                  |
+| 🛠️ <code>backgroundWork</code>        | Android: read and trigger an app's background work without waiting hours                         |
 
 ## 📱 Devices & system
 
@@ -113,6 +114,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🗑️ <code>deleteDevice</code>                | Stop and permanently delete a device, with verified platform-inventory absence          |
 | 💾 <code>deviceSnapshot</code>              | Capture or restore device snapshot                                                      |
 | 🔃 <code>rotate</code>                      | Rotate device orientation                                                               |
+| 🔁 <code>portReverse</code>                 | Android: own `adb reverse` so the device reaches a host server at `localhost:<port>`    |
 | 📐 <code>setPosture</code>                  | Set foldable / Duo posture                                                              |
 | 📶 <code>statusBar</code>                   | Pin status-bar time, battery, and signal for clean screenshots                          |
 | 🪟 <code>windowMode</code>                  | Fullscreen, PiP, or split-screen an Android task                                        |
@@ -169,25 +171,28 @@ A read never writes settings on a device another session holds. A sessionless re
 
 ## ♿ Accessibility & tooling
 
-| Tool                                | What it does                                                            |
-| ----------------------------------- | ----------------------------------------------------------------------- |
-| 🦮 <code>accessibility</code>       | Check or control accessibility services                                 |
-| 🎯 <code>accessibilityFocus</code>  | Set or clear Android TalkBack focus by resourceId, text, or contentDesc |
-| 🫶 <code>accessibilityAction</code> | Perform a TalkBack-style accessibility action (Android)                 |
-| ✅ <code>accessibilityAudit</code>  | Run the platform's own accessibility audit engine on the current screen |
-| 🧾 <code>audit</code>               | Audit the current screen on demand                                      |
-| 🧩 <code>setToolEnabled</code>      | Show or hide tools in discovery                                         |
+| Tool                                | What it does                                                                                                                                         |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🦮 <code>accessibility</code>       | Check or control accessibility services                                                                                                              |
+| 🎯 <code>accessibilityFocus</code>  | Set or clear Android TalkBack focus by resourceId, text, or contentDesc                                                                              |
+| 🫶 <code>accessibilityAction</code> | Perform a TalkBack-style accessibility action (Android)                                                                                              |
+| ✅ <code>accessibilityAudit</code>  | Audit accessibility: WCAG checks (Android default) or the platform engine (iOS default), with scope, baseline and failOn ([audits](using/audits.md)) |
+| 🧾 <code>audit</code>               | Deprecated: use accessibilityAudit and performanceAudit                                                                                              |
+| 🧩 <code>setToolEnabled</code>      | Show or hide tools in discovery                                                                                                                      |
 
-## 📺 Android TV focus navigation
+## 📺 TV focus navigation
 
-`focusNavigate({ until, direction?, maxSteps?, settleMs? })` (#14947) drives focus-based UIs. It observes, and
-while the input-focused element (`focusedElement`) does not match `until` (`text`, `contentDesc` and/or `resourceId`) it
-presses the D-pad arrow toward the nearest match, or `direction` when given, then observes again. With no focused
-element or no match on screen it presses down. It returns the `path` of focused elements and a `status`: `focused`,
-`max_steps` (default 30, at most 100) or `stuck` (every direction toward the nearest match is blocked on the current element; an explicit `direction` stops after two unchanged presses). A direction that leaves focus unchanged is skipped for that element for the rest of the call, so steering tries the next-best axis. Activate the focused item
-afterwards with `sendKeys` key `enter`; Android treats `KEYCODE_ENTER` and `KEYCODE_DPAD_CENTER` both as select, so no
-separate `select` key exists. Android only; not yet verified on a TV image
-(see `docs/design-docs/plat/android/form-factors.md`).
+`focusNavigate({ until, direction?, maxSteps?, settleMs?, select? })` (#14947) drives focus-based UIs on Android TV and
+Apple TV. It observes, and while the input-focused element (`focusedElement`) does not match `until` (`text`,
+`contentDesc`, `resourceId`, or a lone `label`/`elementId` resolved to the element `tapOn` would tap) it presses the
+D-pad arrow toward the nearest match, or `direction` when given, then observes again. With no focused element or no
+match on screen it presses down. When a press leaves focus unchanged, or keeps moving focus without getting closer,
+the other arrows are tried. It returns the `path` of focused elements and a `status`: `focused`, `max_steps`
+(default 30, at most 100) or `stuck` (every arrow from the focused element was tried; an explicit `direction` stops
+after two unchanged presses). With `select: true` it presses enter once focused and reports `selected`. On Apple TV
+the arrows are Siri Remote directional presses, `select` presses the remote's select button, and focus is re-read
+after each press (see `docs/design-docs/plat/android/form-factors.md` and
+`docs/design-docs/plat/tvos/xcuitest-spike.md`).
 
 ## 📝 Notes
 
@@ -246,8 +251,9 @@ It needs the `hover_input_v1` runner capability, or, for a `stylus` hover, an `a
 root with a writable `/dev/uinput` (after `adb root` on an emulator or userdebug build). A device or runner without either, and iOS, are refused before
 anything is sent with the missing capability named, and a hover is never turned into a touch. CtrlProxy
 advertises the capability and injects the hover through its `UiAutomation` instrumentation (see the
-[stylus design note](design-docs/mcp/stylus-pressure-hover-injection.md#instrumentation-route-13097)); the semantics above
-are the documented intent and still need on-device confirmation (#13082).
+[stylus design note](design-docs/mcp/stylus-pressure-hover-injection.md#instrumentation-route-13097)). The tool type, source
+and hover actions above are confirmed on API 31 to 37 emulators; the stylus `AXIS_DISTANCE` value and physical pen
+devices are unverified.
 
 ### prototype
 
@@ -318,4 +324,5 @@ of rows, a full-screen metric (one large number with a label and unit), a two-bu
 
 The mockup is a phone overlay sized like a watch. It does not simulate the Digital Crown, Always-On
 or wrist-down dimming, real watchOS or Wear OS fonts and controls, or the round Wear OS screen, and
-nothing runs on a watch. Check the final design on a real watch.
+nothing runs on a watch. Check the final design on a real watch. To drive a watch app itself, see
+[Apple Watch simulators](using/apple-watch.md).

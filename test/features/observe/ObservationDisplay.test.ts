@@ -416,6 +416,43 @@ describe("observation display stamp", () => {
     }
   });
 
+  test("an overlay display resolves to its logical id but never makes a phone multi-panel (#13138)", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "shell cmd display get-displays",
+      createExecResult(
+        [
+          "Displays:",
+          '  Display id 0: DisplayInfo{"Built-in Screen", displayId 0, real 1080 x 2400, type INTERNAL, uniqueId "local:4619827259835644672", app 1080 x 2400}',
+          '  Display id 2: DisplayInfo{"Overlay #1", displayId 2, real 1080 x 1920, type OVERLAY, uniqueId "overlay:1", app 1080 x 1920}',
+        ].join("\n"),
+        "",
+      ),
+    );
+    const device: BootedDevice = {
+      ...android,
+      deviceId: "phone-with-overlay",
+      displays: {
+        panels: [
+          { key: "4619827259835644672", role: "unknown", sizePx: { width: 1080, height: 2400 } },
+          { key: "overlay:1", role: "overlay", sizePx: { width: 1080, height: 1920 } },
+        ],
+        postures: ["unknown"],
+      },
+    };
+    const cache = new ObservedAndroidDisplayCache(new FakeTimer());
+    try {
+      expect(await cache.logicalIdForPanel(device, adb, "overlay:1")).toBe(2);
+      expect((await cache.panelForLogicalId(device, adb, 2))?.key).toBe("overlay:1");
+      expect(await cache.posture(device, adb)).toBe("unknown");
+      expect(adb.getExecutedCommands().some((command) => command.includes("device_state"))).toBe(
+        false,
+      );
+    } finally {
+      ObservedAndroidDisplayCache.release(device.deviceId);
+    }
+  });
+
   test("Android observe carries the forwarded raw capture through the real converter", async () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();

@@ -1,3 +1,7 @@
+import {
+  pendingImeRestores,
+  type PendingImeRestoreRegistry,
+} from "../../features/action/sendkeys/PendingImeRestore";
 import { runWithToolDispatchReporter } from "../../utils/ToolDispatchContext";
 import type { NavigationToolCallHandle } from "../../utils/interfaces/NavigationGraph";
 import { runSessionDisplayPin } from "../sessionDisplayPin";
@@ -579,10 +583,31 @@ function schemaAcceptsSessionDisplay(schema: unknown): boolean {
   return acceptsDisplay;
 }
 
+/** One restore hook for resolved device calls and plain tools naming a device/session. */
+export async function flushPendingImeRestoreBeforeTool(
+  keepsImeRestorePending: boolean | undefined,
+  deviceId: string | undefined,
+  registry: Pick<PendingImeRestoreRegistry, "flush"> = pendingImeRestores,
+): Promise<void> {
+  if (!deviceId || keepsImeRestorePending) {
+    return;
+  }
+  try {
+    await registry.flush(deviceId);
+  } catch (error) {
+    throw toActionableError(
+      error,
+      `Failed to restore the keyboard before tool dispatch on ${deviceId}`,
+    );
+  }
+}
+
 export function sessionDisplayPinnedHandler(input: {
   name: string;
   schema: unknown;
   handler: DeviceAwareToolHandler;
+  traits?: ToolTraits;
+  pendingImeRestores?: PendingImeRestoreRegistry;
 }): DeviceAwareToolHandler {
   const acceptsDisplay = schemaAcceptsSessionDisplay(input.schema);
   return (device, args, progress, signal) =>
@@ -594,7 +619,17 @@ export function sessionDisplayPinnedHandler(input: {
       sessionUuid:
         getToolSelectionContext()?.routingSessionUuid ??
         (typeof args.sessionUuid === "string" ? args.sessionUuid : undefined),
-      invoke: (effectiveArgs) => input.handler(device, effectiveArgs, progress, signal),
+      invoke: async (effectiveArgs) => {
+        // Both registry dispatch and callInternal(targetDevice) pass this resolved-device seam.
+        if (device.platform === "android") {
+          await flushPendingImeRestoreBeforeTool(
+            input.traits?.keepsImeRestorePending,
+            device.deviceId,
+            input.pendingImeRestores,
+          );
+        }
+        return input.handler(device, effectiveArgs, progress, signal);
+      },
     });
 }
 

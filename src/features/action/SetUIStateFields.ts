@@ -298,31 +298,51 @@ export class SetUIStateFields {
       return previousElement;
     }
 
+    return this.resolveEditedField(fieldSpec, observation, previousElement) ?? previousElement;
+  }
+
+  /**
+   * The previously matched field in a fresh observation. A text selector can name
+   * the field's old label/value, and after input that text may name a different
+   * node (a search-result row, #17197). On Android an unambiguous resource ID of
+   * the matched field identifies the field itself, so it is tried first; the
+   * selector is used when there is no ID or several nodes share it.
+   */
+  private resolveEditedField(
+    fieldSpec: FieldSpec,
+    observation: ObserveResult,
+    previousElement?: Element,
+  ): Element | null {
+    const viewHierarchy = observation.viewHierarchy;
+    if (!viewHierarchy) {
+      return null;
+    }
+    const screenSizeOptions = {
+      observationScreenSize: observation.screenSize,
+      display: viewHierarchy,
+    };
+    const resourceId = previousElement?.["resource-id"];
+    const textSelected = fieldSpec.selector.text !== undefined;
+    if (textSelected && resourceId && this.device.platform !== "ios") {
+      const byId = this.findUniqueByResourceId(viewHierarchy, resourceId, screenSizeOptions);
+      if (byId) {
+        return byId;
+      }
+    }
+
     const found = this.findElement(
-      {
-        ...fieldSpec.selector,
-        screenSizeOptions: {
-          observationScreenSize: observation.screenSize,
-          display: observation.viewHierarchy,
-        },
-      },
-      observation.viewHierarchy,
+      { ...fieldSpec.selector, screenSizeOptions },
+      viewHierarchy,
       fieldSpec.selected !== undefined,
     );
     if (found) {
       return found;
     }
-
-    const resourceId = previousElement["resource-id"];
-    if (fieldSpec.selector.text && resourceId) {
-      return (
-        this.findByResourceId(observation.viewHierarchy, resourceId, {
-          observationScreenSize: observation.screenSize,
-          display: observation.viewHierarchy,
-        }) ?? previousElement
-      );
+    // The text no longer identifies the field; an ambiguous ID still beats nothing.
+    if (textSelected && resourceId) {
+      return this.findByResourceId(viewHierarchy, resourceId, screenSizeOptions);
     }
-    return previousElement;
+    return null;
   }
 
   /**
@@ -418,6 +438,20 @@ export class SetUIStateFields {
         },
       ).element ?? null
     );
+  }
+
+  /** The node an ID names, or null when no node or several distinct nodes carry it. */
+  private findUniqueByResourceId(
+    viewHierarchy: ViewHierarchyResult,
+    resourceId: string,
+    screenSizeOptions?: ScreenSizeForOffscreenCheckOptions,
+  ): Element | null {
+    const selection = this.selector.select(
+      viewHierarchy,
+      { elementId: resourceId },
+      { ...INSPECT_INTENT, screenSizeOptions },
+    );
+    return selection.totalMatches === 1 ? selection.element : null;
   }
 
   private findAndroidTextElement(
@@ -854,28 +888,8 @@ export class SetUIStateFields {
       return { verified: false, observation };
     }
 
-    // Find the element again
-    let element = this.findElement(
-      {
-        ...fieldSpec.selector,
-        screenSizeOptions: {
-          observationScreenSize: observation.screenSize,
-          display: observation.viewHierarchy,
-        },
-      },
-      observation.viewHierarchy,
-      fieldSpec.selected !== undefined,
-    );
-    // A text selector can name the field's current label/value, which changes
-    // after input. Prefer the matched field's stable resource ID in the fresh
-    // hierarchy when the original text no longer identifies it.
-    const resourceId = previouslyMatchedElement?.["resource-id"];
-    if (!element && resourceId) {
-      element = this.findByResourceId(observation.viewHierarchy, resourceId, {
-        observationScreenSize: observation.screenSize,
-        display: observation.viewHierarchy,
-      });
-    }
+    // Verify the field that was edited, not whatever the selector's old text names now.
+    const element = this.resolveEditedField(fieldSpec, observation, previouslyMatchedElement);
     if (!element) {
       if (fieldType === "text") {
         return { verified: false, observation, unverifiable: true };

@@ -35,6 +35,7 @@ import type {
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { toolJson } from "../helpers/toolResponse";
 import { withWireConnection } from "../helpers/mcpConnection";
+import { drainUntil } from "../helpers/fakeTimerStepping";
 
 isolateToolRegistry();
 
@@ -153,6 +154,23 @@ describe("platform device preparation tools", () => {
     await expect(callTool("getAndroid", { deviceId: "emulator-5604" })).rejects.toMatchObject({
       message: "Device 'emulator-5604' not found. Available booted: none. Available images: none.",
     });
+  });
+
+  test("getApple absent-device error points to simulator provisioning and deletion", async () => {
+    const failure = await callTool("getApple", { udid: "sim-udid" }).catch(
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(ActionableError);
+    if (!(failure instanceof ActionableError)) {
+      throw new Error("Expected an actionable absent-device error");
+    }
+    expect(failure.message).toStartWith(
+      "Device 'sim-udid' not found. Available booted: none. Available images: none.",
+    );
+    expect(failure.message).toContain("provisionDevice");
+    expect(failure.message).toContain("enableTools");
+    expect(failure.message).toContain("deleteDevice");
   });
 
   async function awaitPromptly(promise: Promise<void>, label: string): Promise<void> {
@@ -1642,7 +1660,9 @@ describe("platform device preparation tools", () => {
     });
 
     try {
-      await Promise.resolve();
+      await drainUntil(() => timer.getPendingTimeouts().includes(10), {
+        description: "Android reset recovery boot deadline",
+      });
       timer.advanceTime(10);
       await expect(preparation).rejects.toThrow(/Timed out waiting for Android AVD reset recovery/);
     } finally {

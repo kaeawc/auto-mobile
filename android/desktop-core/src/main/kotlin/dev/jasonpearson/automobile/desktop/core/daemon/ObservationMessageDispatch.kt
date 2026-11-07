@@ -1,9 +1,5 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.serializer
 
 internal suspend fun ObservationStreamClient.handleMessage(message: String) {
@@ -19,10 +15,4 @@ internal suspend fun ObservationStreamClient.handleMessage(message: String) {
     "error" -> handleError(response)
     else -> log.warn("Unknown message type: ${response.type}")
   }
-}
-
-internal fun ObservationStreamClient.extractPackageName(data: JsonElement?): String? {
-  val obj = data as? JsonObject ?: return null
-  val packageNameElement = obj["packageName"] as? JsonPrimitive
-  return packageNameElement?.contentOrNull?.takeIf { it.isNotEmpty() }
 }

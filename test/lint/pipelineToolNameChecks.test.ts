@@ -141,6 +141,8 @@ const EXEMPT_TOOL_LISTS: Readonly<Record<string, string>> = {
   "src/daemon/deviceSessionResult.ts\tDEVICE_SESSION_ACQUISITION_TOOLS": "names hidden startDevice",
   "src/daemon/sessionBroker/lifecycleTools.ts\tBROKER_LIFECYCLE_TOOLS": "names hidden startDevice",
   "src/daemon/socketRequestAdmission.ts\tSOCKET_ROUTING_MUTATING_TOOLS": "names hidden startDevice",
+  "src/features/prototype/prototypePlatformDrivingTools.ts\tPROTOTYPE_PLATFORM_DRIVING_TOOLS":
+    "what the prototype guide tells an agent to call per platform module, pinned to the registry by a test",
   "src/models/deviceSessionRecovery.ts\tDEVICE_SESSION_RECOVERY_TOOLS":
     "what recovery guidance tells a client to call, pinned to the registry by a test",
   "src/server/deviceMutationLifecycleAdapters.ts\tAPP_FALLBACK_TOOLS":

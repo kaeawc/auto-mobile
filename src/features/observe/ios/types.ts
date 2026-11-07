@@ -11,6 +11,17 @@ import type { CtrlProxyReconnectStatus } from "../../../models/CtrlProxyReconnec
 import type { IosHierarchyUnavailableReason } from "../../../models/ViewHierarchyResult";
 import type { HighlightOperationResult } from "../../../models";
 import type {
+  IosSdkActionResult,
+  IosSdkBridgeFailure,
+  IosSdkObservation,
+} from "./sdkObservationBridge";
+import type {
+  IosSdkWebActionResult,
+  IosSdkWebFailure,
+  IosSdkWebSnapshot,
+  IosSdkWebViewEntry,
+} from "./sdkWebViewBridge";
+import type {
   PerfTiming,
   BaseResult,
   GestureTimingResult,
@@ -200,6 +211,7 @@ export interface WebSocketMessage {
   observation?: unknown;
   result?: unknown;
   failure?: string;
+  scenes?: unknown;
   /** sdk_web_snapshot_result (#5162): the relayed web snapshot, its web view and the registered web views. */
   snapshot?: unknown;
   webViewId?: string;
@@ -555,8 +567,9 @@ export interface CtrlProxySdkTriggerResult extends BaseResult {
 export interface CtrlProxySdkObservationResult extends BaseResult {
   /** False when no bridge answered; a runner that predates the command also sets `unsupported`. */
   available: boolean;
-  observation?: import("./sdkObservationBridge").IosSdkObservation;
-  failure?: import("./sdkObservationBridge").IosSdkBridgeFailure;
+  observation?: IosSdkObservation;
+  failure?: IosSdkBridgeFailure;
+  scenes?: string[];
   unsupported?: boolean;
 }
 
@@ -567,8 +580,9 @@ export interface CtrlProxySdkObservationResult extends BaseResult {
  */
 export interface CtrlProxySdkActionResult extends BaseResult {
   available: boolean;
-  result?: import("./sdkObservationBridge").IosSdkActionResult;
-  failure?: import("./sdkObservationBridge").IosSdkBridgeFailure;
+  result?: IosSdkActionResult;
+  failure?: IosSdkBridgeFailure;
+  scenes?: string[];
   unsupported?: boolean;
 }
 
@@ -577,10 +591,11 @@ export interface CtrlProxySdkWebSnapshotResult extends BaseResult {
   /** False when no web view answered; a runner that predates the command also sets `unsupported`. */
   available: boolean;
   webViewId?: string;
-  snapshot?: import("./sdkWebViewBridge").IosSdkWebSnapshot;
+  snapshot?: IosSdkWebSnapshot;
   /** The app's registered web views, when the runner read its SDK's `/health`. */
-  webViews?: import("./sdkWebViewBridge").IosSdkWebViewEntry[];
-  failure?: import("./sdkWebViewBridge").IosSdkWebFailure;
+  webViews?: IosSdkWebViewEntry[];
+  failure?: IosSdkWebFailure;
+  scenes?: string[];
   unsupported?: boolean;
 }
 
@@ -591,8 +606,9 @@ export interface CtrlProxySdkWebSnapshotResult extends BaseResult {
  */
 export interface CtrlProxySdkWebActionResult extends BaseResult {
   available: boolean;
-  result?: import("./sdkWebViewBridge").IosSdkWebActionResult;
-  failure?: import("./sdkWebViewBridge").IosSdkWebFailure;
+  result?: IosSdkWebActionResult;
+  failure?: IosSdkWebFailure;
+  scenes?: string[];
   unsupported?: boolean;
 }
 
@@ -603,4 +619,14 @@ export interface CtrlProxyMagicTapResult extends BaseResult {
   handled?: boolean;
   unsupported: boolean;
   requiresVoiceOver: false;
+}
+
+/** Selector resolved by the foreground app's SDK, using native accessibility metadata. */
+export type AccessibilityFocusSelector = Pick<
+  import("../../../models/SetAccessibilityFocusOptions").SetAccessibilityFocusOptions,
+  "resourceId" | "text" | "contentDesc"
+>;
+
+export interface CtrlProxyAccessibilityFocusResult extends BaseResult {
+  errorCode?: import("../../../models/SetAccessibilityFocusResult").AccessibilityFocusErrorCode;
 }

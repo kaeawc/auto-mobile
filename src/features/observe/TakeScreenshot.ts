@@ -33,6 +33,7 @@ import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { AndroidCtrlProxyClient } from "./android";
 import type { CtrlProxyScreenshotResult } from "./ios/types";
+import { captureIosPanelScreenshot } from "./ios/CtrlProxyScreenshot";
 import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
 import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -196,6 +197,8 @@ export class TakeScreenshot implements ScreenshotService {
   ): Promise<CtrlProxyScreenshotResult> {
     const client = IOSCtrlProxyClient.getExistingInstance(this.device.deviceId);
     if (client?.isConnected()) {
+      // The registered client may predate display discovery; give it this read's panel inventory.
+      client.adoptDisplayInventory(this.device.displays);
       return client.requestScreenshotForObserver(10000, signal);
     }
     if (resolveIosDeviceKind({ deviceId: this.device.deviceId }) === "simulator") {
@@ -224,12 +227,25 @@ export class TakeScreenshot implements ScreenshotService {
     signal?: AbortSignal,
   ): Promise<CtrlProxyScreenshotResult> {
     const observedPanel = displayTransitions.currentObservedPanel(this.device.deviceId)?.key;
-    const png = await new SimCtlClient(this.device).screenshot(
-      this.device.deviceId,
-      observedPanel ?? this.device.displays?.panels[0]?.key ?? "main",
+    const simctl = new SimCtlClient(this.device);
+    const firstPanelCapture = async (): Promise<CtrlProxyScreenshotResult> => {
+      const png = await simctl.screenshot(
+        this.device.deviceId,
+        observedPanel ?? this.device.displays?.panels[0]?.key ?? "main",
+        signal,
+      );
+      return { success: true, data: png.toString("base64"), format: "png" };
+    };
+    if ((this.device.displays?.panels.length ?? 0) < 2) {
+      return firstPanelCapture();
+    }
+    // The first panel is a Duo's cover, black while unfolded: select the active panel the way
+    // the runner client does, keeping the first-panel capture only as the fallback (#17373).
+    return captureIosPanelScreenshot(this.device, null, simctl, {
+      runnerCapture: firstPanelCapture,
       signal,
-    );
-    return { success: true, data: png.toString("base64"), format: "png" };
+      activePanelKey: observedPanel,
+    });
   }
   private readonly device: BootedDevice;
   private adb: AdbExecutor;
@@ -506,7 +522,7 @@ export class TakeScreenshot implements ScreenshotService {
         return "";
       }
       throw new ActionableError(
-        `Cannot screenshot Android display ${options.displayId}: no physical display id could be resolved from "cmd display get-displays". The display may have been disconnected; re-run observe to refresh the display list.`,
+        `Cannot screenshot Android display ${options.displayId}: no physical display id could be resolved from "cmd display get-displays". Overlay and virtual displays have no physical id, so screencap cannot capture them; otherwise the display may have been disconnected, so re-run observe to refresh the display list.`,
       );
     }
     const displayId = await this.physicalDisplayIdResolver.resolve(

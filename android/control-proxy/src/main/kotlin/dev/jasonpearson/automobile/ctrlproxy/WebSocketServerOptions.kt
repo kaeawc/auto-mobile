@@ -43,4 +43,9 @@ data class WebSocketServerOptions(
    * [WebSocketServerOptions.messageHandler].
    */
   val onPrototypeResponse: (String) -> Unit = {},
+  /**
+   * A host's `prototype_channel_opened`, `_frame` or `_closed` relays a `via: "host"` channel this
+   * device opened (#14269); routed before decoding, like [onPrototypeResponse].
+   */
+  val onPrototypeChannelFrame: (String) -> Unit = {},
 )

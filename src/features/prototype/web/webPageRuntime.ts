@@ -2,7 +2,8 @@
  * The prototype web page's only script (#16346). It runs in the browser, so it is self-contained:
  * no imports and no closure over module state, because the page inlines `toString()` of it. It
  * switches between views the host pre-rendered and never runs spec logic. UI state stays in
- * memory: no storage, cookies or URL changes.
+ * memory: no storage, cookies or URL changes. Rotate animates the turn between the two
+ * pre-rendered orientations unless the viewer prefers reduced motion.
  */
 /**
  * The scale a zoom step lands on: 50–400 %, except that a fitted scale already below 50 % is
@@ -46,16 +47,178 @@ export function prototypeWebScreenView<View extends { dataset: { screen?: string
   return views.find((view) => view.dataset.screen === screen) ?? views[0];
 }
 
+/** Where the viewer is among the pre-rendered views' dimensions besides the screen. */
+export interface PrototypeWebViewKey {
+  readonly variant: string;
+  readonly revision: string;
+  readonly orientation: string;
+  /** Empty for a frame without postures, whose views carry none. */
+  readonly posture: string;
+}
+
+/** Whether a view belongs to the key: its variant, revision, orientation and posture (#16445). */
+export function prototypeWebViewMatches(
+  dataset: { readonly [name: string]: string | undefined },
+  key: PrototypeWebViewKey,
+): boolean {
+  return (
+    dataset.variant === key.variant &&
+    dataset.revision === key.revision &&
+    dataset.orientation === key.orientation &&
+    (dataset.posture ?? "") === key.posture
+  );
+}
+
+/** One rotation turn: the keyframes of the view turning away and of the view turning in. */
+export interface PrototypeWebRotation {
+  readonly durationMs: number;
+  readonly easing: string;
+  readonly outgoing: Keyframe[];
+  readonly incoming: Keyframe[];
+}
+
+/**
+ * The turn into `to` (#16545). The frame turns 90° counterclockwise into landscape and back
+ * clockwise: the outgoing view turns away from upright while the incoming view, drawn in the new
+ * orientation, turns from a quarter turn back into place, so both track one frame. Android
+ * cross-fades the content over the whole turn; iOS re-lays the content out as the window's bounds
+ * animate, so the new layout takes over in the first quarter of the turn.
+ */
+export function prototypeWebRotation(
+  platform: string,
+  to: "portrait" | "landscape",
+): PrototypeWebRotation {
+  const sign = to === "landscape" ? 1 : -1;
+  const at = (degrees: number) => `translate(-50%, -50%) rotate(${degrees}deg)`;
+  const ios = platform === "ios";
+  const handover = ios ? 0.25 : 1;
+  return {
+    durationMs: ios ? 400 : 500,
+    easing: ios ? "ease-in-out" : "cubic-bezier(0.4, 0, 0.2, 1)",
+    outgoing: [
+      { transform: at(0), opacity: 1, offset: 0 },
+      ...(ios ? [{ transform: at(sign * -22.5), opacity: 0, offset: handover }] : []),
+      { transform: at(sign * -90), opacity: 0, offset: 1 },
+    ],
+    incoming: [
+      { transform: at(sign * 90), opacity: 0, offset: 0 },
+      ...(ios ? [{ transform: at(sign * 67.5), opacity: 1, offset: handover }] : []),
+      { transform: at(0), opacity: 1, offset: 1 },
+    ],
+  };
+}
+
+/**
+ * The status bar clock's text for a moment (#16585): local hours and minutes in the stills' fixed
+ * `9:41` form, so a page whose browser clock is frozen at 9:41 draws the same bytes as the still.
+ */
+export function prototypeWebClockText(now: Date): string {
+  const hours = now.getHours() % 12 || 12;
+  return `${hours}:${String(now.getMinutes()).padStart(2, "0")}`;
+}
+
+/** Milliseconds from `nowMs` to the next minute boundary, when the clock's text next changes. */
+export function prototypeWebClockDelay(nowMs: number): number {
+  return 60_000 - (((nowMs % 60_000) + 60_000) % 60_000);
+}
+
+/** The time source and timer the status bar clock runs on: the browser's in the page, a fake in tests. */
+export interface PrototypeWebClock {
+  now(): number;
+  schedule(run: () => void, ms: number): void;
+}
+
+/** The page's clock: the browser's own time and timers, since the page has no Timer seam to import. */
+export function prototypeWebBrowserClock(): PrototypeWebClock {
+  return {
+    now: () => Date.now(),
+    schedule: (run, ms) => void globalThis.setTimeout(run, ms),
+  };
+}
+
+/**
+ * Keeps every status bar clock (`[data-status="clock"]`) under `root` on the clock's local time:
+ * writes the text now and again at each minute boundary. Nothing is scheduled without a clock.
+ */
+export function prototypeWebStartClock(
+  root: { querySelectorAll(selector: string): Iterable<{ textContent: string | null }> },
+  clock: PrototypeWebClock,
+  format: {
+    readonly clockText: typeof prototypeWebClockText;
+    readonly clockDelay: typeof prototypeWebClockDelay;
+  },
+): void {
+  const marks = Array.from(root.querySelectorAll('[data-status="clock"]'));
+  if (marks.length === 0) {
+    return;
+  }
+  const tick = () => {
+    const now = clock.now();
+    const text = format.clockText(new Date(now));
+    marks.forEach((mark) => {
+      mark.textContent = text;
+    });
+    clock.schedule(tick, format.clockDelay(now));
+  };
+  tick();
+}
+
+/** The elements one turn moves. */
+export interface PrototypeWebTurnTargets {
+  readonly from: HTMLElement | undefined;
+  readonly shown: HTMLElement | undefined;
+  readonly stage: HTMLElement;
+  /** The stage's transform before the turn; its current transform is where the turn ends. */
+  readonly stageFrom: string;
+  /** The view shown when the turn ends; the outgoing view is hidden unless it is that view. */
+  readonly current: () => HTMLElement | undefined;
+}
+
+/**
+ * Starts one turn: the outgoing view stays visible and turns away, the shown view turns in, and
+ * the stage's fitted scale follows. Nothing animates when the view did not change or the viewer
+ * prefers reduced motion. Returns the turn's animations, so a later turn can finish them.
+ */
+export function prototypeWebAnimateTurn(
+  turn: PrototypeWebRotation,
+  targets: PrototypeWebTurnTargets,
+): Animation[] {
+  const { from, shown, stage, stageFrom, current } = targets;
+  const reduced = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+  if (!from || !shown || from === shown || reduced || !shown.animate) {
+    return [];
+  }
+  const timing = { duration: turn.durationMs, easing: turn.easing };
+  from.hidden = false;
+  const outgoing = from.animate(turn.outgoing, timing);
+  outgoing.onfinish = () => {
+    from.hidden = from !== current();
+  };
+  return [
+    outgoing,
+    shown.animate(turn.incoming, timing),
+    stage.animate([{ transform: stageFrom }, { transform: stage.style.transform }], timing),
+  ];
+}
+
 /** The pure rules the runtime is handed as arguments, so they are unit-tested and inlined with it. */
 export interface PrototypeWebRuntimeRules {
   readonly zoomScale: typeof prototypeWebZoomScale;
   readonly fitScale: typeof prototypeWebFitScale;
   readonly wheelFactor: typeof prototypeWebWheelFactor;
   readonly screenView: typeof prototypeWebScreenView;
+  readonly viewMatches: typeof prototypeWebViewMatches;
+  readonly rotation: typeof prototypeWebRotation;
+  readonly animateTurn: typeof prototypeWebAnimateTurn;
+  readonly clockText: typeof prototypeWebClockText;
+  readonly clockDelay: typeof prototypeWebClockDelay;
+  readonly startClock: typeof prototypeWebStartClock;
+  readonly browserClock: typeof prototypeWebBrowserClock;
 }
 
 export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
-  const { zoomScale, fitScale: fitted, wheelFactor, screenView } = rules;
+  const { zoomScale, fitScale: fitted, wheelFactor, screenView, viewMatches } = rules;
+  const { rotation, animateTurn } = rules;
   const doc = document;
   const stage = doc.querySelector<HTMLElement>("[data-stage]");
   const viewport = doc.querySelector<HTMLElement>("[data-viewport]");
@@ -66,12 +229,16 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
   const pick = (name: string) => doc.querySelector<HTMLElement>(`[data-control="${name}"]`);
   const variantSelect = pick("variant") as HTMLSelectElement | null;
   const screenSelect = pick("screen") as HTMLSelectElement | null;
+  const postureSelect = pick("layout-posture") as HTMLSelectElement | null;
   const revisionList = pick("revisions");
   const zoomLabel = pick("zoom-level");
+  const bodyData = (name: string) => doc.body.dataset[name] ?? "";
   const state = {
-    variant: doc.body.dataset.variant ?? "",
-    revision: doc.body.dataset.revision ?? "",
-    orientation: "portrait",
+    variant: bodyData("variant"),
+    revision: bodyData("revision"),
+    // The frame's first orientation: landscape for a TV or car, which never leaves it.
+    orientation: bodyData("orientation") as "portrait" | "landscape",
+    posture: bodyData("posture"),
     // The first apply sets the shown view's screen.
     screen: "",
     scale: 1,
@@ -79,13 +246,7 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
     y: 0,
     fit: true,
   };
-  const revisionViews = () =>
-    views.filter(
-      (view) =>
-        view.dataset.variant === state.variant &&
-        view.dataset.revision === state.revision &&
-        view.dataset.orientation === state.orientation,
-    );
+  const revisionViews = () => views.filter((view) => viewMatches(view.dataset, state));
   const current = () => screenView(revisionViews(), state.screen);
   // The picker lists the shown revision's own screens, so it never offers a view the page lacks.
   // A revision without the chosen screen shows its start, which becomes the chosen screen.
@@ -95,7 +256,8 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
     if (!screenSelect) {
       return;
     }
-    const key = `${state.variant} ${state.revision}`;
+    // Each orientation and posture can show a different stack, so it lists its own screens.
+    const key = `${state.variant} ${state.revision} ${state.orientation} ${state.posture}`;
     if (key !== listed) {
       listed = key;
       const screens = revisionViews().flatMap((view) => view.dataset.screen ?? []);
@@ -139,23 +301,32 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
     state.scale = zoomScale(state.scale, scale);
     apply();
   };
-  pick("rotate")?.addEventListener("click", () => {
-    state.orientation = state.orientation === "portrait" ? "landscape" : "portrait";
+  const fitView = () => {
     state.fit = true;
     apply();
+  };
+  // A new turn finishes the running one first, so turns never overlap.
+  let turning: Animation[] = [];
+  pick("rotate")?.addEventListener("click", () => {
+    turning.forEach((animation) => animation.finish());
+    const [from, stageFrom] = [current(), stage.style.transform];
+    state.orientation = state.orientation === "portrait" ? "landscape" : "portrait";
+    fitView();
+    const turn = rotation(doc.body.dataset.platform ?? "", state.orientation);
+    turning = animateTurn(turn, { from, shown: current(), stage, stageFrom, current });
   });
   pick("zoom-in")?.addEventListener("click", () => zoomTo(state.scale * 1.25));
   pick("zoom-out")?.addEventListener("click", () => zoomTo(state.scale / 1.25));
-  pick("zoom-fit")?.addEventListener("click", () => {
-    state.fit = true;
-    apply();
-  });
+  pick("zoom-fit")?.addEventListener("click", fitView);
   variantSelect?.addEventListener("change", () => {
     state.variant = variantSelect.value;
     const option = variantSelect.selectedOptions[0];
     state.revision = option?.dataset.latest ?? state.revision;
-    state.fit = true;
-    apply();
+    fitView();
+  });
+  postureSelect?.addEventListener("change", () => {
+    state.posture = postureSelect.value;
+    fitView();
   });
   screenSelect?.addEventListener("change", () => {
     state.screen = screenSelect.value;
@@ -197,10 +368,9 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
   viewport.addEventListener("pointerup", () => {
     drag = undefined;
   });
-  viewport.addEventListener("dblclick", () => {
-    state.fit = true;
-    apply();
-  });
+  viewport.addEventListener("dblclick", fitView);
   globalThis.addEventListener("resize", apply);
+  // Every view's status bar clock follows the browser clock (#16585).
+  rules.startClock(doc, rules.browserClock(), rules);
   apply();
 }

@@ -3,6 +3,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   logicalDisplayIdForPanel,
+  panelKeyForUniqueId,
+  virtualDisplayKey,
+  virtualDisplayOwnerPackage,
   parseAndroidDisplayInfos,
   parseSurfaceFlingerDisplayIds,
   parseTopFocusedDisplayId,
@@ -397,5 +400,71 @@ describe("parseTopFocusedDisplayId", () => {
   });
   test("is undefined when absent", () => {
     expect(parseTopFocusedDisplayId("")).toBeUndefined();
+  });
+});
+
+describe("overlay display keys (#13138)", () => {
+  const output = [
+    "Displays:",
+    '  Display id 0: DisplayInfo{"Built-in Screen", displayId 0, real 1080 x 2400, type INTERNAL, uniqueId "local:4619827259835644672", app 1080 x 2400}',
+    '  Display id 2: DisplayInfo{"Overlay #1", displayId 2, real 1080 x 1920, type OVERLAY, uniqueId "overlay:1", app 1080 x 1920}',
+  ].join("\n");
+
+  test("keeps the overlay prefix and strips physical prefixes", () => {
+    expect(panelKeyForUniqueId("overlay:1")).toBe("overlay:1");
+    expect(panelKeyForUniqueId("local:4619827259835644672")).toBe("4619827259835644672");
+    expect(panelKeyForUniqueId("virtual:com.example:a")).toBe("virtual:com.example:a");
+    expect(panelKeyForUniqueId("bare")).toBe("bare");
+  });
+
+  test("maps an overlay key to its logical display id", () => {
+    const infos = parseAndroidDisplayInfos(output);
+    expect(logicalDisplayIdForPanel(infos, "overlay:1")).toBe(2);
+    expect(logicalDisplayIdForPanel(infos, "1")).toBeUndefined();
+    expect(logicalDisplayIdForPanel(infos, "4619827259835644672")).toBe(0);
+  });
+});
+
+describe("virtual display keys (#16462)", () => {
+  test("keeps package and name of a generated virtual uniqueId", () => {
+    expect(virtualDisplayKey("virtual:com.example.app,10123,Presentation,0")).toBe(
+      "virtual:com.example.app:Presentation",
+    );
+    // Names may contain commas; only the uid and trailing index are dropped.
+    expect(virtualDisplayKey("virtual:com.example.app,10123,Cast, Living Room,2")).toBe(
+      "virtual:com.example.app:Cast, Living Room",
+    );
+    expect(panelKeyForUniqueId("virtual:com.example.app,10123,Presentation,0")).toBe(
+      "virtual:com.example.app:Presentation",
+    );
+  });
+
+  test("keeps an app-supplied virtual unique id whole", () => {
+    expect(virtualDisplayKey("virtual:com.example.app:projection")).toBe(
+      "virtual:com.example.app:projection",
+    );
+  });
+
+  test("is undefined for uniqueIds that are not app-created virtual displays", () => {
+    expect(virtualDisplayKey("virtual:4619827259835644672")).toBeUndefined();
+    expect(virtualDisplayKey("local:4619827259835644672")).toBeUndefined();
+    expect(virtualDisplayKey("overlay:1")).toBeUndefined();
+  });
+
+  test("names the owning package of a virtual key", () => {
+    expect(virtualDisplayOwnerPackage("virtual:com.example.app:Presentation")).toBe(
+      "com.example.app",
+    );
+    expect(virtualDisplayOwnerPackage("overlay:1")).toBeUndefined();
+  });
+
+  test("maps a virtual key to its logical display id", () => {
+    const infos = parseAndroidDisplayInfos(
+      [
+        '  Display id 0: DisplayInfo{"Built-in Screen", displayId 0, real 1080 x 2400, type INTERNAL, uniqueId "local:4619827259835644672", app 1080 x 2400}',
+        '  Display id 5: DisplayInfo{"Presentation", displayId 5, real 1280 x 720, type VIRTUAL, uniqueId "virtual:com.example.app,10123,Presentation,0", app 1280 x 720}',
+      ].join("\n"),
+    );
+    expect(logicalDisplayIdForPanel(infos, "virtual:com.example.app:Presentation")).toBe(5);
   });
 });

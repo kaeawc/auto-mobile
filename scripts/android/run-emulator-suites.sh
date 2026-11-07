@@ -22,6 +22,7 @@
 #                      (default: scripts/android/reset-daemon-before-retry.sh)
 #   PERMISSION_CMD     SDK/CtrlProxy permission contract check
 #   NAV_GRAPH_CMD      navigation-graph SDK event integration
+#   NAV_GRAPH_E2E_CMD  navigation-graph exploration and replay
 
 set -euo pipefail
 
@@ -39,6 +40,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 reset_daemon_cmd="${RESET_DAEMON_CMD:-${script_dir}/reset-daemon-before-retry.sh}"
 permission_cmd="${PERMISSION_CMD:-${script_dir}/verify-sdk-ctrl-proxy-permission-contract.sh}"
 nav_graph_cmd="${NAV_GRAPH_CMD:-${script_dir}/navigation-graph-sdk-event-integration.sh}"
+nav_graph_e2e_cmd="${NAV_GRAPH_E2E_CMD:-${script_dir}/navigation-graph-e2e.sh}"
 saved_prototype_smoke_cmd="${SAVED_PROTOTYPE_SMOKE_CMD:-${script_dir}/saved-prototype-smoke.sh}"
 playground_tools="navigateTo,getNavigationGraph,explore"
 
@@ -71,6 +73,7 @@ echo "=== Playground Automobile emulator suite ==="
   export AUTOMOBILE_ENABLED_TOOLS="$playground_tools"
   "$permission_cmd" "$ctrl_proxy_apk" \
     && "$nav_graph_cmd" \
+    && "$nav_graph_e2e_cmd" \
     && "$gradle_cmd" :playground:app:test --stacktrace --info
 ) || playground_status=$?
 

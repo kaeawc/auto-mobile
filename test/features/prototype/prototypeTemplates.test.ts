@@ -21,6 +21,9 @@ const TEMPLATES = [
   "template-dashboard.json",
 ];
 
+/** Camera and media concepts (#14196), listed in the hackathon guide beside the templates. */
+const CONCEPTS = ["concept-voice-note.json"];
+
 type Json = Record<string, unknown>;
 
 const read = (path: string): string => readFileSync(join(root, path), "utf8");
@@ -30,7 +33,7 @@ let guide = "";
 describe("prototype template gallery", () => {
   beforeAll(() => {
     guide = renderPrototypeGuide();
-    for (const name of TEMPLATES) {
+    for (const name of [...TEMPLATES, ...CONCEPTS]) {
       const text = readFileSync(join(validDirectory, name), "utf8");
       const result = validatePrototypeSpec(text);
       if (!result.success) {
@@ -67,6 +70,33 @@ describe("prototype template gallery", () => {
 
       test("is listed in the authoring guide and the hackathon guide", () => {
         expect(guide).toContain(`\`${name}\``);
+        expect(read("docs/using/hackathon.md")).toContain(`\`${name}\``);
+      });
+    });
+  }
+
+  test("the corpus holds exactly the documented concepts", () => {
+    const onDisk = readdirSync(validDirectory)
+      .filter((name) => name.startsWith("concept-"))
+      .sort();
+    expect(onDisk).toEqual([...CONCEPTS].sort());
+  });
+
+  for (const name of CONCEPTS) {
+    describe(name, () => {
+      test("id matches the file", () => {
+        expect(decoded.get(name)?.id).toBe(name.replace(/\.json$/, ""));
+      });
+
+      test("sets a testTag on every interactive node", () => {
+        expect(untaggedInteractiveNodes(decoded.get(name))).toEqual([]);
+      });
+
+      test("passes the accessibility lint with zero findings", () => {
+        expect(prototypeAccessibilityOutput(decoded.get(name))).toEqual({});
+      });
+
+      test("is listed in the hackathon guide", () => {
         expect(read("docs/using/hackathon.md")).toContain(`\`${name}\``);
       });
     });

@@ -79,7 +79,8 @@ export function createKillDeviceResponse(
     if (
       args.device.platform === "ios" ||
       args.device.platform === "watchos" ||
-      args.device.platform === "tvos"
+      args.device.platform === "tvos" ||
+      args.device.platform === "visionos"
     ) {
       return createStructuredToolResponse({
         message: `${args.device.platform} '${deviceDisplayName(args.device)}' already shut down`,

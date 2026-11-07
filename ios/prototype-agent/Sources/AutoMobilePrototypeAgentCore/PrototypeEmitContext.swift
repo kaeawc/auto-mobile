@@ -86,9 +86,14 @@ struct PrototypeEmitContext: Decodable {
         }
     }
 
-    func resolve(_ inputs: some PrototypeEmitContextInputs) -> PrototypeResolvedEmitContext {
+    /// `handlerContext` holds the names the runtime adds for the handler that ran the emit, such as
+    /// `markerId` for a map's `onMarkerTap` (#16492), under the same byte budget as authored entries.
+    /// Validators refuse an authored entry under one of these names.
+    func resolve(
+        _ inputs: some PrototypeEmitContextInputs, handlerContext: [String: JSONValue] = [:]
+    ) -> PrototypeResolvedEmitContext {
         // Resolve every entry before deciding whether truncation is needed.
-        let complete = bindings.mapValues { raw -> JSONValue in
+        var complete = bindings.mapValues { raw -> JSONValue in
             guard case let .object(binding) = raw else { return .null }
             if let key = binding["state"]?.stringValue { return inputs.state(key) ?? .null }
             if let id = binding["page"]?.stringValue { return inputs.page(id).map { .number(Double($0)) } ?? .null }
@@ -97,6 +102,7 @@ struct PrototypeEmitContext: Decodable {
             if let pointer = binding["event"]?.stringValue { return inputs.event(pointer) ?? .null }
             return binding["value"] ?? .null
         }
+        complete.merge(handlerContext) { _, added in added }
         if Self.fits(complete) { return PrototypeResolvedEmitContext(context: complete, contextTruncated: nil) }
         var prefix: [String: JSONValue] = [:]
         for name in complete.keys.sorted(by: { $0.utf8.lexicographicallyPrecedes($1.utf8) }) {

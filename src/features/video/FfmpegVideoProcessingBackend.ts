@@ -1,4 +1,5 @@
 import { platform } from "node:os";
+import { isSimctlVideoPlatform } from "../../models/VideoRecordingPlatform";
 import path from "node:path";
 import { readProcessGenerationTokenForPid } from "../../daemon/daemonFiles";
 import { ActionableError, type BootedDevice } from "../../models";
@@ -206,18 +207,21 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     if (!device) {
       throw new ActionableError("Device is required to start video recording.");
     }
-    const iosStartDeadlineMs =
-      device.platform === "ios" ? this.timer.now() + this.iosRecordingStartTimeoutMs : undefined;
+    // Apple TV simulators record through the same `simctl io recordVideo` path as iOS (#16725).
+    const simctlCapture = isSimctlVideoPlatform(device.platform);
+    const iosStartDeadlineMs = simctlCapture
+      ? this.timer.now() + this.iosRecordingStartTimeoutMs
+      : undefined;
     await this.ensureFfmpegAvailable(
       iosStartDeadlineMs,
-      device.platform === "ios" ? config.abortSignal : undefined,
+      simctlCapture ? config.abortSignal : undefined,
     );
 
     if (device.platform === "android") {
       return this.startAndroid(device, config);
     }
 
-    if (device.platform === "ios") {
+    if (simctlCapture) {
       return this.startIos(device, config, iosStartDeadlineMs!);
     }
 
@@ -547,7 +551,8 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     deadlineMs: number,
   ): Promise<string | undefined> {
     const remainingMs = deadlineMs - this.timer.now();
-    if (remainingMs <= 0) {
+    // An Apple TV has one external display and no Integrated screen; simctl's default captures it.
+    if (remainingMs <= 0 || device.platform === "tvos") {
       return undefined;
     }
     let displays: Awaited<ReturnType<VideoSimCtl["enumerateDisplays"]>>;

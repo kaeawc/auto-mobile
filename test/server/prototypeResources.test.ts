@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, test } from "bun:test";
+import { FakeTimer } from "../fakes/FakeTimer";
 import contract from "../../schemas/prototype-spec-contract.json";
 import { validatePrototypeSpec } from "../../src/features/prototype/prototypeValidation";
 import { PrototypeMockBackendRegistry } from "../../src/features/prototype/PrototypeMockBackendRegistry";
@@ -50,7 +51,9 @@ describe("automobile:prototype resource", () => {
     const templates = ResourceRegistry.getTemplateDefinitions().map((t) => t.uriTemplate);
     expect(templates).toContain("automobile:prototype/native{?id,platform,deviceId}");
     expect(templates).toContain("automobile:prototype/native/asset{?id,assetId,deviceId}");
+    expect(templates).toContain("automobile:prototype/eject{?id,platform,deviceId}");
     expect(renderPrototypeGuide()).toContain("automobile:prototype/native?id=<id>");
+    expect(renderPrototypeGuide()).toContain("automobile:prototype/eject?id=<id>");
   });
 
   test("limits table matches the contract", () => {
@@ -121,8 +124,9 @@ describe("automobile:prototype resource", () => {
     const blocks = [...renderPrototypeGuide().matchAll(/```json\n([\s\S]*?)```/g)].map((m) =>
       JSON.parse(m[1]),
     );
-    // The seventh block is the platform section's example, validated in prototypeGuidePlatform.test.ts.
-    expect(blocks).toHaveLength(7);
+    // The seventh and eighth blocks are the platform and media actions examples, validated in
+    // prototypeGuidePlatform.test.ts.
+    expect(blocks).toHaveLength(8);
     const [minimal, list, data, components, appearanceCall, mockCall] = blocks;
     expect(validatePrototypeSpec(data)).toMatchObject({ success: true });
     expect(validatePrototypeSpec(minimal).success).toBe(true);
@@ -134,7 +138,7 @@ describe("automobile:prototype resource", () => {
     expect(() =>
       new PrototypeMockBackendRegistry({
         ids: new CountingIdGenerator(),
-        timer: { sleep: async () => {} },
+        timer: new FakeTimer(),
       }).define(mockCall.backendId, mockCall.backend),
     ).not.toThrow();
     expect(validatePrototypeSpec(components)).toMatchObject({ success: true });

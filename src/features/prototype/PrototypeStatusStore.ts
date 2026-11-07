@@ -24,6 +24,10 @@ import {
   type ShownPrototypeAppearance,
 } from "./prototypeAppearance";
 import type { PrototypeWindowChrome } from "./prototypeWindowChrome";
+import {
+  prototypeDeviceStatusOf,
+  type PrototypeDeviceStatusMirror,
+} from "./prototypeDeviceStatusMirror";
 
 export type PrototypeMutation = "show" | "dismiss";
 export interface PrototypeLastResult {
@@ -52,6 +56,10 @@ export interface PrototypeLastResult {
    */
   suspended?: true;
   hiddenReason?: PrototypeHiddenReason;
+  /** Adopted prototypes only: the orientation the spec requested, as the device reports it. */
+  orientation?: "portrait" | "landscape" | "unlocked";
+  /** Adopted prototypes only: `unsupported` when a requested `statusBar` style cannot be applied over an overlay. */
+  statusBar?: "unsupported";
   displayId?: number;
   /** Host-resolved chrome for a successful fullscreen show; absent for adopted prototypes. */
   chrome?: PrototypeWindowChrome;
@@ -94,12 +102,24 @@ function adoptedFeedbackLog(prototype: AdoptedPrototype): Pick<PrototypeLastResu
   return prototype.feedbackLog ? { feedbackLog: structuredClone(prototype.feedbackLog) } : {};
 }
 
+/** The window-control diagnostics an adopted prototype's device reported. */
+function adoptedWindowControls(
+  prototype: AdoptedPrototype,
+): Pick<PrototypeLastResult, "orientation" | "statusBar"> {
+  return {
+    ...(prototype.orientation ? { orientation: prototype.orientation } : {}),
+    ...(prototype.statusBar ? { statusBar: prototype.statusBar } : {}),
+  };
+}
+
 export interface AdoptedPrototype {
   data?: PrototypeData;
   id: string;
   persistent?: boolean;
   suspended?: boolean;
   hiddenReason?: PrototypeHiddenReason;
+  orientation?: PrototypeLastResult["orientation"];
+  statusBar?: PrototypeLastResult["statusBar"];
   appearance?: ShownPrototypeAppearance;
   storage?: PrototypeStorageReport;
   timers?: PrototypeTimerReport[];
@@ -113,6 +133,8 @@ export interface AdoptedPrototype {
 export interface PrototypeStatus {
   prototypes: (PrototypeLastResult & Partial<PrototypeEventState>)[];
   lastResult?: PrototypeLastResult;
+  /** The last `battery|power|audio.changed` values the device delivered in this scope (#14316). */
+  platformStatus?: PrototypeDeviceStatusMirror;
 }
 export interface PrototypeScope {
   sessionUuid?: string;
@@ -178,6 +200,7 @@ interface StoredPrototypeStatus extends PrototypeScope {
   lastResult?: PrototypeLastResult;
   snapshots?: Map<string, PrototypeEventState>;
   pendingSnapshots?: Map<string, PrototypeEventState>;
+  platformStatus?: PrototypeDeviceStatusMirror;
 }
 
 /** Sets or, for undefined, removes the entry's reported data. */
@@ -280,6 +303,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
         presenceWithSnapshot(entry, entry.id ? stored?.snapshots?.get(entry.id) : undefined),
       ),
       ...(stored?.lastResult ? { lastResult: { ...stored.lastResult } } : {}),
+      ...(stored?.platformStatus ? { platformStatus: structuredClone(stored.platformStatus) } : {}),
     };
   }
 
@@ -328,6 +352,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       ...(prototype.persistent === undefined ? {} : { persistent: prototype.persistent }),
       ...(prototype.suspended === true ? { suspended: true as const } : {}),
       ...(prototype.hiddenReason ? { hiddenReason: prototype.hiddenReason } : {}),
+      ...adoptedWindowControls(prototype),
       ...(prototype.appearance ? { appearance: { ...prototype.appearance } } : {}),
       ...(prototype.storage ? { storage: structuredClone(prototype.storage) } : {}),
       ...prototypeDegradedEffectsField(prototype.degradedEffects),
@@ -370,6 +395,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       ...scope,
       shown: new Map<string, PrototypeLastResult>(),
     };
+    this.recordDeviceStatus(stored, event);
     stored.pendingSnapshots ??= new Map();
     const snapshot = eventSnapshot(event);
     stored.pendingSnapshots.set(event.id, snapshot);
@@ -382,6 +408,27 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       }
     }
     this.remember(key, stored);
+  }
+
+  /**
+   * A delivered status change replaces that module's mirrored values whatever prototype received it,
+   * unless it is older on the device clock: `inspect` replays buffered events grouped by prototype,
+   * not in delivery order.
+   */
+  private recordDeviceStatus(stored: StoredPrototypeStatus, event: PrototypeEvent): void {
+    const reading = prototypeDeviceStatusOf(event);
+    const current = reading ? stored.platformStatus?.[reading.module] : undefined;
+    if (reading && !(current && current.timestamp > event.timestamp)) {
+      stored.platformStatus = {
+        ...stored.platformStatus,
+        [reading.module]: {
+          values: reading.values,
+          timestamp: event.timestamp,
+          receivedAt: this.clock.now(),
+          ...(reading.simulated ? { simulated: true as const } : {}),
+        },
+      };
+    }
   }
 
   /**

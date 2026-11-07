@@ -7,6 +7,7 @@ import generatedDefinitions from "../../../schemas/tool-definitions.json";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import {
   listSystemTrayNotifications,
+  listSystemTrayNotificationsForClear,
   NotificationShadeNotOpenError,
   waitForNotificationMatch,
   resolveUniqueTrayAppLabel,
@@ -973,8 +974,18 @@ describe("systemTray list silent-section ownership", () => {
     ).rejects.toThrow(/com\.google\.android\.apps\.wellbeing.*could not be correlated/i);
   });
 
-  test("does not read dumpsys when every row carries an app header", async () => {
+  test("reads dumpsys once for header rows, only to name prototype tags", async () => {
     const { adb } = setup([page(row("one"))]);
+    const result = await list();
+    expect(result.notifications).toMatchObject([{ title: "one", ownership: "header" }]);
+    expect(result.notifications[0]).not.toHaveProperty("tag");
+    expect(adb.getExecutedCommands().filter((command) => command.includes("dumpsys"))).toEqual([
+      "shell dumpsys notification --noredact",
+    ]);
+  });
+
+  test("does not read dumpsys when the shade renders no row for the app", async () => {
+    const { adb } = setup([page(row("one", "Other"))]);
     await list();
     expect(adb.getExecutedCommands().some((command) => command.includes("dumpsys"))).toBe(false);
   });
@@ -2713,4 +2724,186 @@ test("matching identical notification titles prefers the topmost window before s
     awaitTimeoutMs: 1000,
   });
   expect(result.match?.candidate.element?.bounds.top).toBe(900);
+});
+
+// Prototype notifications are posted with a `proto:` tag, so a listed row can
+// be mapped back to the prototype notification id the posting app reports.
+describe("systemTray list prototype tags", () => {
+  const APP = "com.example.messages";
+  const execResult = (stdout: string) => ({
+    stdout,
+    stderr: "",
+    toString: () => stdout,
+    trim: () => stdout.trim(),
+    includes: (search: string) => stdout.includes(search),
+  });
+  const dumpsys = (...records: string[]) =>
+    ["Current Notification Manager state:", "  Notification List:", ...records].join("\n");
+  const record = (
+    tag: string,
+    title: string,
+    text: string,
+    { pkg = APP, id = 1, summary = false }: { pkg?: string; id?: number; summary?: boolean } = {},
+  ) =>
+    [
+      `    NotificationRecord(0x${id}: pkg=${pkg} user=UserHandle{0} id=${id} tag=${tag} key=0|${pkg}|${id}|${tag}|10164)`,
+      `      flags=${summary ? "0x200" : "0x0"}`,
+      "      extras={",
+      `        android.title=String (${title})`,
+      `        android.text=String (${text})`,
+      "      }",
+    ].join("\n");
+  const silentRow = (title: string) =>
+    node("com.android.systemui:id/expandableNotificationRow", "", [
+      node("android:id/title", title),
+      node("android:id/text", `Body of ${title}`),
+    ]);
+  const respond = (adb: FakeAdbExecutor, ...records: string[]) =>
+    adb.setCommandResponse("dumpsys notification", execResult(dumpsys(...records)));
+
+  test("tags a header row with the prototype record that rendered it", async () => {
+    const { adb } = setup([page(row("Upload done"), row("Plain"))]);
+    respond(
+      adb,
+      record("proto:upload", "Upload done", "Body of Upload done"),
+      record("null", "Plain", "Body of Plain", { id: 2 }),
+    );
+    const result = await list();
+    expect(result.notifications).toMatchObject([
+      { title: "Upload done", ownership: "header", tag: "proto:upload" },
+      { title: "Plain", ownership: "header" },
+    ]);
+    expect(result.notifications[1]).not.toHaveProperty("tag");
+  });
+
+  test("tags each child of a grouped pair and never the group summary", async () => {
+    const group = node("com.android.systemui:id/expandableNotificationRow", "", [
+      node("android:id/app_name_text", "Messages"),
+      node("com.android.systemui:id/notification_children_container", "", [
+        row("Alice", ""),
+        row("Bob", ""),
+      ]),
+    ]);
+    const { adb } = setup([page(group)]);
+    respond(
+      adb,
+      record("proto:chat", "Alice", "Body of Alice", { id: 9, summary: true }),
+      record("proto:alice", "Alice", "Body of Alice", { id: 1 }),
+      record("proto:bob", "Bob", "Body of Bob", { id: 2 }),
+    );
+    expect((await list()).notifications).toMatchObject([
+      { title: "Alice", inGroup: true, tag: "proto:alice" },
+      { title: "Bob", inGroup: true, tag: "proto:bob" },
+    ]);
+  });
+
+  test("tags a Silent-section row attributed through dumpsys", async () => {
+    const { adb } = setup([page(silentRow("Syncing"))]);
+    respond(adb, record("proto:sync", "Syncing", "Body of Syncing"));
+    expect((await list()).notifications).toMatchObject([
+      { title: "Syncing", ownership: "dumpsys", tag: "proto:sync" },
+    ]);
+  });
+
+  test("leaves the tag off when two prototype records render the same text", async () => {
+    const { adb } = setup([page(row("Same"))]);
+    respond(
+      adb,
+      record("proto:first", "Same", "Body of Same", { id: 1 }),
+      record("proto:second", "Same", "Body of Same", { id: 2 }),
+    );
+    expect((await list()).notifications[0]).not.toHaveProperty("tag");
+  });
+
+  test("leaves the tag off both rows when an untagged twin renders the same text", async () => {
+    const { adb } = setup([page(row("Twin"), row("Twin"))]);
+    respond(
+      adb,
+      record("proto:twin", "Twin", "Body of Twin", { id: 1 }),
+      record("null", "Twin", "Body of Twin", { id: 2 }),
+    );
+    const result = await list();
+    expect(result.notifications.map((notification) => notification.tag)).toEqual([
+      undefined,
+      undefined,
+    ]);
+  });
+
+  test("ignores another package's prototype record with the same text", async () => {
+    const { adb } = setup([page(row("Shared"))]);
+    respond(adb, record("proto:other", "Shared", "Body of Shared", { pkg: "com.example.other" }));
+    expect((await list()).notifications[0]).not.toHaveProperty("tag");
+  });
+
+  test("drops the tag of a cancelled prototype record even while its row lingers", async () => {
+    const { adb } = setup([page(row("Cancelled"), row("Kept"))]);
+    respond(adb, record("proto:kept", "Kept", "Body of Kept"));
+    const result = await list();
+    expect(result.notifications.map((notification) => notification.tag)).toEqual([
+      undefined,
+      "proto:kept",
+    ]);
+  });
+
+  // #16512: A and B render identical text; A is cancelled while the shade is
+  // paged, so the after dump names only B for the row retained from page one.
+  const cancelledMidScan = (adb: FakeAdbExecutor, ...extra: string[]) =>
+    adb.setCommandResponseSequence("dumpsys notification", [
+      execResult(
+        dumpsys(
+          record("proto:a", "Same", "Body of Same", { id: 1 }),
+          record("proto:b", "Same", "Body of Same", { id: 2 }),
+          ...extra,
+        ),
+      ),
+      execResult(dumpsys(record("proto:b", "Same", "Body of Same", { id: 2 }), ...extra)),
+    ]);
+
+  test("keeps a retained header row untagged when a competitor is cancelled mid-scan", async () => {
+    const { adb } = setup([page(row("Same")), page(row("Later"))]);
+    cancelledMidScan(adb, record("proto:later", "Later", "Body of Later", { id: 3 }));
+    const result = await list();
+    expect(result.swipes).toBe(1);
+    expect(result.notifications).toMatchObject([
+      { title: "Same", ownership: "header" },
+      { title: "Later", ownership: "header", tag: "proto:later" },
+    ]);
+    expect(result.notifications[0]).not.toHaveProperty("tag");
+    // One pre-swipe read for the header page and one after the scan.
+    expect(adb.getExecutedCommands().filter((command) => command.includes("dumpsys"))).toEqual([
+      "shell dumpsys notification --noredact",
+      "shell dumpsys notification --noredact",
+    ]);
+  });
+
+  test("keeps a retained header-less row untagged when a competitor is cancelled mid-scan", async () => {
+    const { adb } = setup([page(silentRow("Same")), page(silentRow("Later"))]);
+    cancelledMidScan(adb, record("proto:later", "Later", "Body of Later", { id: 3 }));
+    const result = await list();
+    expect(result.swipes).toBe(1);
+    expect(result.notifications).toMatchObject([
+      { title: "Same", ownership: "dumpsys" },
+      { title: "Later", ownership: "dumpsys", tag: "proto:later" },
+    ]);
+    expect(result.notifications[0]).not.toHaveProperty("tag");
+  });
+
+  test("does not read a tag snapshot before swiping when tags are not requested", async () => {
+    const { adb } = setup([page(row("Same")), page(row("Later"))]);
+    await listSystemTrayNotificationsForClear(device, APP, "Messages", { awaitTimeoutMs: 5000 });
+    expect(adb.getExecutedCommands().some((command) => command.includes("dumpsys"))).toBe(false);
+  });
+
+  test("lists header rows without tags when the dump cannot be read", async () => {
+    const { adb } = setup([page(row("one"))]);
+    adb.executeCommand = async (command) => {
+      if (command.includes("dumpsys notification")) {
+        throw new Error("dumpsys unavailable");
+      }
+      return execResult("");
+    };
+    const result = await list();
+    expect(result.notifications).toMatchObject([{ title: "one", ownership: "header" }]);
+    expect(result.notifications[0]).not.toHaveProperty("tag");
+  });
 });

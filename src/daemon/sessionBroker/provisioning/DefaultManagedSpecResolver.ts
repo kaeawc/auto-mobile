@@ -10,7 +10,11 @@ import {
   type ExactIosRuntimeCatalog,
   type ResolvedExactDeviceSpecification,
 } from "../../../devices/exactDeviceProvisioning";
-import { androidProfileFormFactor, defaultAndroidProfileIdFor } from "../../../models/formFactor";
+import {
+  androidProfileFormFactor,
+  defaultAndroidProfileIdFor,
+  isNonGeometricFormFactor,
+} from "../../../models/formFactor";
 import type { BindingDeviceFamily } from "../../../utils/provisionDeviceSpecSchemas";
 import {
   inferIosFormFactor,
@@ -86,6 +90,8 @@ export const BINDING_DEFAULT_ANDROID_DEVICE_TYPES_BY_FAMILY = {
   tv: defaultAndroidProfileIdFor("tv"),
   watch: defaultAndroidProfileIdFor("watch"),
   automotive: defaultAndroidProfileIdFor("automotive"),
+  "xr-headset": defaultAndroidProfileIdFor("xr-headset"),
+  "xr-glasses": defaultAndroidProfileIdFor("xr-glasses"),
 } as const satisfies Record<BindingDeviceFamily, string>;
 
 export type ManagedSpecResolution =
@@ -165,7 +171,7 @@ function unsupportedRuntimeFamily(spec: BindingRequestedSpec): string | undefine
   const tagFamily = androidProfileFormFactor({
     systemImageTag: parseAndroidSystemImageRuntime(spec.runtime)?.tag,
   });
-  return tagFamily === "tv" || tagFamily === "watch" || tagFamily === "automotive"
+  return isNonGeometricFormFactor(tagFamily)
     ? tagFamily === spec.deviceFamily
       ? undefined
       : `runtime '${spec.runtime}' is a ${tagFamily} image; it conflicts with deviceFamily '${spec.deviceFamily}'.`

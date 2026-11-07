@@ -44,6 +44,7 @@ function harness(
   timer.enableAutoAdvance();
   const executor = new DefaultSendKeysCommandExecutor(device, h.adbFactory, observer, {
     textClient: h.client,
+    pendingImeRestores: h.pendingImeRestores,
     timer,
     inputKey: { press: async () => ({ success: true }) },
   });
@@ -142,28 +143,39 @@ describe("IME trace opt-in", () => {
     expect(result.imeTrace).toEqual(lines.slice(-512));
   });
 
-  test.each(["command", "span"] as const)(
-    "%s restoration failure preserves the trace",
-    async (path) => {
-      setDebugModeEnabled(true);
-      const h = harness("hello");
-      h.adb.setCommandResponse("shell ime disable", createExecResult("", "disable failed"));
-      h.client.supportsImeTrace = async () => true;
-      h.client.commitViaIme = async () => ({
-        success: true,
-        insertedText: "hello",
-        imeTrace: ["seq=1 t=0 event=complete"],
-      });
-      const command = { action: "type", text: "hello", mode: "ime" } as const;
-      const result =
-        path === "command"
-          ? await h.executor.type(command)
-          : (await h.action.execute([command])).commands[0];
-      expect(result.success).toBe(false);
-      expect(result.imeFailure?.stage).toBe("restoration");
-      expect(result.imeTrace).toEqual(["seq=1 t=0 event=complete"]);
-    },
-  );
+  test("standalone restoration failure preserves the trace", async () => {
+    setDebugModeEnabled(true);
+    const h = harness("hello");
+    h.adb.setCommandResponse("shell ime disable", createExecResult("", "disable failed"));
+    h.client.supportsImeTrace = async () => true;
+    h.client.commitViaIme = async () => ({
+      success: true,
+      insertedText: "hello",
+      imeTrace: ["seq=1 t=0 event=complete"],
+    });
+    const result = await h.executor.type({ action: "type", text: "hello", mode: "ime" });
+    expect(result.success).toBe(false);
+    expect(result.imeFailure?.stage).toBe("restoration");
+    expect(result.imeTrace).toEqual(["seq=1 t=0 event=complete"]);
+  });
+
+  test("lazy restoration failure preserves the acknowledged command trace", async () => {
+    setDebugModeEnabled(true);
+    const h = harness("hello");
+    h.adb.setCommandResponse("shell ime disable", createExecResult("", "disable failed"));
+    h.client.supportsImeTrace = async () => true;
+    h.client.commitViaIme = async () => ({
+      success: true,
+      insertedText: "hello",
+      imeTrace: ["seq=1 t=0 event=complete"],
+    });
+    const result = (await h.action.execute([{ action: "type", text: "hello", mode: "ime" }]))
+      .commands[0];
+    expect(result.success).toBe(true);
+    expect(result.imeTrace).toEqual(["seq=1 t=0 event=complete"]);
+    await expect(h.pendingImeRestores.flush(device.deviceId)).rejects.toThrow("Could not restore");
+    expect(result.imeTrace).toEqual(["seq=1 t=0 event=complete"]);
+  });
 
   test("each type command receives only its own trace", async () => {
     setDebugModeEnabled(true);

@@ -206,7 +206,9 @@ internal object PrototypeStateChecks {
     var images = 0
     var effects = 0
     var animatedEffects = 0
+    var loopNodes = 0
     var keyframeNodes = 0
+    var videoNodes = 0
     var selectorDepth = 0
     var conditionDepth = 0
     var actionDepth = 0

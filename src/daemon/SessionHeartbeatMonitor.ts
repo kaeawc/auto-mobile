@@ -761,9 +761,14 @@ export class SessionHeartbeatMonitor {
     }
     // A returning owner gets the budget a live owner gets: the lease plus the suspect grace.
     // The release is terminal, and a proxy reconnecting to a restarted daemon must first find
-    // the socket and then deliver a heartbeat on its own cadence.
+    // the socket and then deliver a heartbeat on its own cadence. A session whose daemon exited
+    // uncleanly gets no more than the default lease (#17255): a long lease (a CLI session's idle
+    // window) would hold the device for minutes on behalf of a daemon that is gone.
+    const leaseMs = session.recoveredFromUncleanDaemonExit
+      ? Math.min(session.heartbeatTimeoutMs, this.defaultHeartbeatTimeoutMs)
+      : session.heartbeatTimeoutMs;
     const awaitingOwnerSince = session.awaitingOwnerSince ?? now;
-    return now - awaitingOwnerSince > session.heartbeatTimeoutMs + SUSPECT_GRACE_MS
+    return now - awaitingOwnerSince > leaseMs + SUSPECT_GRACE_MS
       ? "rehydration-owner-timeout"
       : undefined;
   }

@@ -85,14 +85,17 @@ internal object PrototypeStructuralWalk {
     context.nodes.add(Located(node, path))
     if (context.nodes.size > MAX_PROTOTYPE_NODES) return fail(path, "Node limit exceeded")
     if (depth + 1 > MAX_PROTOTYPE_DEPTH) return fail(path, "Tree depth limit exceeded")
-    if (node.text("type") == "image")
-      context.images += maxOf(1, prototypeImageSlotUses(node["asset"]))
+    context.images += prototypeNodeImageUses(node)
     if (context.images > MAX_PROTOTYPE_IMAGES) return fail(path, "Image limit exceeded")
     if (
       "keyframes" in node &&
         ++context.keyframeNodes > PrototypeSpecValidator.MAX_PROTOTYPE_KEYFRAME_NODES
     )
       return fail("$path.keyframes", "Keyframe node limit exceeded")
+    if ("attentionLoop" in node && ++context.loopNodes > PrototypeSpecValidator.MAX_PROTOTYPE_LOOPS)
+      return fail("$path.attentionLoop", "Loop node limit exceeded")
+    if (prototypeVideoNodeOverLimit(node) { ++context.videoNodes })
+      return fail(path, "Video node limit exceeded")
     PrototypeEffectRules.charge(node, path, context)?.let {
       return it
     }

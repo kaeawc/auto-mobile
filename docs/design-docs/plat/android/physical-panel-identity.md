@@ -35,7 +35,26 @@ the panel id, and pushed display transitions have never carried a panel key.
 - Discovery builds the panel inventory once from `dumpsys SurfaceFlinger --display-id`,
   `dumpsys display` (`DisplayDeviceInfo{... uniqueId="local:N", W x H ...}` records, one per
   physical panel whether or not it is active) and `cmd device_state print-states`. Roles come from
-  pixel area: the largest internal panel is `inner`, the smallest is `cover`.
+  pixel area: the largest internal panel is `inner`, the smallest is `cover`. When there are two
+  or more internal panels and no fold posture, `ro.build.characteristics` is read once. On an
+  `automotive` build, the first largest internal panel stays `inner` (the center display), every
+  other internal panel is `cluster` (the instrument cluster), and the inventory reports no
+  postures, so no message offers `setPosture` on a car. The cluster app's own virtual display
+  (`ClusterOsDouble-VD`) is reported under role `virtual`, as for any other app-created display.
+- Overlay displays (`overlay_display_devices`, `type OVERLAY`, `uniqueId="overlay:N"`) have no
+  SurfaceFlinger physical id, so they join the inventory after the physical panels under role
+  `overlay` with the whole `overlay:N` as key: a bare `N` could be mistaken for a logical display
+  id. They are addressable by key or role, but are not panels: `display: "all"`, posture
+  defaults, the inventory-order fallback and `requires.panels` skip them, and `screencap -d`
+  cannot capture them.
+- App-created virtual displays (`DisplayManager.createVirtualDisplay`, `type VIRTUAL`) join after
+  the overlays under role `virtual`, with the same non-panel rules. DisplayManager writes
+  `virtual:<package>,<uid>,<name>,<index>`; the key keeps only `virtual:<package>:<name>`
+  because uid and index change across reinstalls and recreations (an app-supplied
+  `virtual:<package>:<id>` is kept whole). Displays owned by `com.android.shell` or an AutoMobile
+  package are left out: the video server runs as shell and creates one per recording, which
+  would otherwise change the inventory, and every inventory-keyed cache, on each recording start
+  and stop. A key two live displays share is left out too, since it cannot target either.
 - Per observation, `ObservedAndroidDisplayCache` maps a logical display id to a panel with
   `cmd display get-displays` (one `Display id N: DisplayInfo{... uniqueId "local:N" ...}` line per
   active logical display), cached for 5 seconds and cleared by a display transition.

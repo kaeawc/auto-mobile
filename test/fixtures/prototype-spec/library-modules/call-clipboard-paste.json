@@ -1,0 +1,28 @@
+{
+  "spec": {
+    "id": "library-clipboard",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["clipboard"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "clipboard.paste"
+        }
+      ]
+    }
+  },
+  "options": {
+    "library": true
+  },
+  "expectedPath": "root.onTap[0]",
+  "expectedMessage": "Sensitive platform call clipboard.paste is unavailable in a library"
+}

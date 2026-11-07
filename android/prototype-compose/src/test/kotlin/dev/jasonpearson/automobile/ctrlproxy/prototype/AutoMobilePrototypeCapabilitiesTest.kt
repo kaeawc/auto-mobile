@@ -60,7 +60,7 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_connectivity_v1",
       // Contract only; the biometric prompt runtime is owed (#14328).
       "prototype_platform_biometric_v1",
-      // Contract only; the settings launcher runtime is owed (#14320).
+      // CtrlProxy registers the settings launcher (#14320); the embedded renderer does not.
       "prototype_platform_settings_v1",
       // CtrlProxy registers the URL opener (#14238); the embedded renderer leaves it to the app.
       "prototype_platform_links_v1",
@@ -71,6 +71,11 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_sensors_v1",
       // Contract only; the map renderers are owed (#14310, #14311).
       "prototype_platform_map_v1",
+      // Contract only; map backends are advertised once their renderers can serve them (#14302).
+      "prototype_platform_map_google_v1",
+      "prototype_platform_map_maplibre_v1",
+      // Contract only; the web view runtimes and the ProtoViewer import rule are owed (#14312).
+      "prototype_platform_webview_v1",
       // Contract only; the location runtimes are owed (#14325, #14326).
       "prototype_platform_location_v1",
       // Contract only; the system media picker and camera runtimes are owed (#14197).
@@ -78,10 +83,6 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_camera_v1",
       // Contract only; the fake store runtime is owed (#14314).
       "prototype_platform_commerce_v1",
-      // Contract only; the window controls runtime is owed (#14320).
-      "prototype_platform_window_controls_v1",
-      // Contract only; the keyboard dismiss runtime is owed (#14320).
-      "prototype_hide_keyboard_v1",
       // iOS-only; Android refuses per-prototype layout direction.
       "prototype_layout_direction_v1",
       // Contract only; the fake identity provider runtime is owed (#14303).
@@ -92,8 +93,12 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_audioRecorder_v1",
       // Contract only; the local notification runtime is owed (#14281).
       "prototype_platform_notifications_v1",
+      // Contract only; the disposable-app permission runtime is owed (#14298).
+      "prototype_platform_permissions_v1",
       // Contract only; the scheduled notification runtimes are owed (#14283).
       "prototype_platform_notifications_scheduled_v1",
+      // Contract only; push delivery to prototype apps is owed (#14286).
+      "prototype_platform_push_v1",
       // Contract only; the media players and video renderers are owed (#14255, #14256).
       "prototype_platform_media_v1",
       "prototype_platform_camera_capture_v1",
@@ -108,17 +113,25 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_mediaLibrary_save_v1",
     )
 
+  // These runtimes need CtrlProxy's overlay host; an embedded app owns its own window.
+  private val overlayCapabilities =
+    setOf("prototype_platform_window_controls_v1", "prototype_hide_keyboard_v1")
+
   @Test
   fun `shared spec capabilities are supported`() {
     assertTrue(
       "Exclusions must name current spec gates",
-      requiredCapabilities.containsAll(exclusions),
+      requiredCapabilities.containsAll(exclusions + overlayCapabilities),
     )
     assertTrue(
       "Remove exclusions once supported",
-      exclusions.none { it in AutoMobilePrototype.capabilities },
+      (exclusions + overlayCapabilities).none { it in AutoMobilePrototype.capabilities },
     )
-    val missing = requiredCapabilities - AutoMobilePrototype.capabilitiesForSdk(33) - exclusions
+    val missing =
+      requiredCapabilities -
+        AutoMobilePrototype.capabilitiesForSdk(33) -
+        exclusions -
+        overlayCapabilities
     assertTrue("Renderer is missing spec capabilities: $missing", missing.isEmpty())
   }
 

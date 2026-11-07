@@ -11,6 +11,7 @@ import {
 import { TargetFocus } from "./sendkeys/TargetFocus";
 import { TargetState } from "./sendkeys/TargetState";
 import { CommandRunner } from "./sendkeys/CommandRunner";
+import { withImeEditorWarnings, type ImeEditorState } from "./sendkeys/ImeEditorState";
 import {
   SendKeysRequestBudget,
   isSendKeysBudgetExhausted,
@@ -186,7 +187,10 @@ export interface SendKeysCommandResult extends BaseActionResult {
   /** Device upper bound; this is not the verified committedGraphemes count. */
   committedUnits?: number;
   error?: string;
-  /** iOS runner's typed failure code for a key command (`runnerErrorCodes.ts`). */
+  /**
+   * Stable failure code: an iOS runner's typed code for a key command (`runnerErrorCodes.ts`), or
+   * `NO_FOCUSED_EDITABLE` when an Android `type` found no focused editable field.
+   */
   errorCode?: string;
   retryable?: boolean;
   verified?: boolean;
@@ -210,8 +214,12 @@ export interface SendKeysResult extends BaseActionResult {
   commands: SendKeysCommandResult[];
   observation?: ObserveResult;
   error?: string;
+  /** The failed command's stable `errorCode`, when it has one. */
+  errorCode?: string;
   retryable?: boolean;
   warning?: string;
+  /** Observed editor/keyboard state changes after Android IME typing and restoration. */
+  warnings?: string[];
 }
 
 export interface SendKeysFailure {
@@ -223,6 +231,8 @@ export interface SendKeysCommandExecution {
   results: SendKeysCommandResult[];
   failure?: SendKeysFailure;
   restorationFailed?: boolean;
+  /** Internal pre-activation snapshot; compared with the terminal observation. */
+  imeEditorState?: ImeEditorState;
 }
 
 export interface SendKeysCommandExecutor {
@@ -338,6 +348,8 @@ export type TextActionResult = {
   caretPlaced?: boolean;
   resultingTextLength?: number;
   error?: string;
+  /** Stable failure code, e.g. `NO_FOCUSED_EDITABLE` when no editable field has focus. */
+  errorCode?: string;
   partialApplication?: boolean;
   imeTrace?: string[];
   imeFailure?: ImeFailureDiagnostic;
@@ -711,7 +723,7 @@ export class SendKeys {
           : await observe();
       return this.buildResult([], focusFailure, observation);
     }
-    const execution =
+    const execution: SendKeysCommandExecution =
       preflight ?? (await this.executeCommands(commands, progress, signal, routing));
     const terminal = this.terminalCommandFailure(commands.length, execution, signal);
     if (terminal) {
@@ -719,7 +731,10 @@ export class SendKeys {
     }
     signal?.throwIfAborted();
     const observation = await observe(actionStartTimestamp);
-    return this.buildResult(execution.results, execution.failure, observation);
+    return withImeEditorWarnings(
+      this.buildResult(execution.results, execution.failure, observation),
+      execution.imeEditorState,
+    );
   }
 
   private terminalCommandFailure(

@@ -1,4 +1,5 @@
 import { getFocusedTextField } from "../ClearText";
+import { NoFocusedEditableError } from "./AndroidTypingConstants";
 import type { ObserveResult } from "../../../models";
 import {
   IME_PASSWORD_COMMIT_UNAVAILABLE_ERROR,
@@ -94,6 +95,16 @@ export function getAutoImeFallback(
   return operation === "insert" ? "eventAll" : "a11y";
 }
 
+/** A stable failure code, copied onto a command result only when the source carries one. */
+export function errorCodeFields(source: { errorCode?: string }): { errorCode?: string } {
+  return source.errorCode === undefined ? {} : { errorCode: source.errorCode };
+}
+
+/** The stable code of a caught typing failure; other thrown errors carry none. */
+export function caughtErrorCodeFields(error: unknown): { errorCode?: string } {
+  return error instanceof NoFocusedEditableError ? errorCodeFields(error) : {};
+}
+
 /** The optional outcome fields of an InputKey press, copied onto a sendKeys key result. */
 export function inputKeyOutcomeFields(
   result: Awaited<ReturnType<SendKeysInputKey["press"]>>,
@@ -102,7 +113,7 @@ export function inputKeyOutcomeFields(
     ...(result.verified === undefined ? {} : { verified: result.verified }),
     ...(result.warning === undefined ? {} : { warning: result.warning }),
     ...(result.error ? { error: result.error } : {}),
-    ...(result.errorCode === undefined ? {} : { errorCode: result.errorCode }),
+    ...errorCodeFields(result),
   };
 }
 

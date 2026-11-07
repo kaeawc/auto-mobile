@@ -405,6 +405,8 @@ describe("SharedStorageService", () => {
         service.stage({
           device: androidDevice,
           namespace: "chunked",
+          // This test pins rollback chunking and budgets; MediaStore scans are covered elsewhere.
+          indexMedia: false,
           rollbackOnFailure: true,
           signal: controller.signal,
           files: [
@@ -469,7 +471,7 @@ describe("SharedStorageService", () => {
     }
   });
 
-  test("resets only the declared Downloads namespace, stages every file, and indexes media", async () => {
+  test("resets only the declared Downloads namespace, stages every file, and indexes documents and media", async () => {
     const executor = new FakeAdbExecutor();
     executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
     const service = createSharedStorageServiceForTesting({ adbFactory: adbFactoryFor(executor) });
@@ -500,11 +502,7 @@ describe("SharedStorageService", () => {
         {
           destinationPath: "docs/read me.txt",
           byteCount: 7,
-          mediaIndexing: {
-            status: "notRequested",
-            reason:
-              "media indexing was not requested for docs/read me.txt; Android document pickers discover files directly from Downloads",
-          },
+          mediaIndexing: { status: "completed" },
         },
         {
           destinationPath: "media/photo.png",
@@ -593,6 +591,7 @@ describe("SharedStorageService", () => {
       device: androidDevice,
       namespace: "work-fixtures",
       reset: true,
+      indexMedia: false,
       files: [{ contentText: "picker", destinationPath: "document.txt" }],
     });
 
@@ -638,6 +637,7 @@ describe("SharedStorageService", () => {
       device: androidDevice,
       namespace: "explicit-zero",
       explicitUserId: 0,
+      indexMedia: false,
       files: [{ contentText: "zero", destinationPath: "fixture.txt" }],
     });
 
@@ -681,6 +681,99 @@ describe("SharedStorageService", () => {
         .getExecutedCommands()
         .some((command) => command.startsWith("shell content query --user 12 --uri ")),
     ).toBe(true);
+  });
+
+  test("scans every document type and confirms it in the MediaStore file collection (#17264)", async () => {
+    const executor = new FakeAdbExecutor();
+    executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
+    const service = createSharedStorageServiceForTesting({
+      adbFactory: adbFactoryFor(executor),
+      timer: new FakeTimer(),
+    });
+    const names = ["a.pdf", "a.txt", "a.doc", "notes"];
+
+    const result = await service.stage({
+      device: androidDevice,
+      namespace: "picker-docs",
+      indexMedia: true,
+      files: names.map((name) => ({ contentText: name, destinationPath: name })),
+    });
+
+    expect(result.files.map((file) => file.mediaIndexing)).toEqual(
+      names.map(() => ({ status: "completed" })),
+    );
+    const commands = executor.getExecutedCommands();
+    for (const name of names) {
+      expect(commands).toContain(
+        `shell am broadcast --user 0 -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d 'file:///storage/emulated/0/Download/picker-docs/${name}'`,
+      );
+      expect(commands).toContain(
+        `shell content query --user 0 --uri content://media/external_primary/file --projection _id --where ${shellQuote(
+          `relative_path='Download/picker-docs/' AND _display_name='${name}'`,
+        )}`,
+      );
+    }
+    expect(commands.some((command) => command.includes("/audio/media"))).toBe(false);
+  });
+
+  test("confirms media files in their own collection and documents by _data before API 29", async () => {
+    const executor = new FakeAdbExecutor();
+    executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
+    executor.setCommandResponse("getprop ro.build.version.sdk", execResult("28"));
+    const service = createSharedStorageServiceForTesting({
+      adbFactory: adbFactoryFor(executor),
+      timer: new FakeTimer(),
+    });
+
+    await service.stage({
+      device: androidDevice,
+      namespace: "legacy",
+      files: ["a.pdf", "clip.mp4", "song.mp3", "a.avif"].map((name) => ({
+        contentText: name,
+        destinationPath: name,
+      })),
+    });
+
+    const queries = executor
+      .getExecutedCommands()
+      .filter((command) => command.includes("content query"));
+    expect(queries.map((query) => query.split(" --projection")[0])).toEqual([
+      "shell content query --user 0 --uri content://media/external/file",
+      "shell content query --user 0 --uri content://media/external/video/media",
+      "shell content query --user 0 --uri content://media/external/audio/media",
+      "shell content query --user 0 --uri content://media/external/images/media",
+    ]);
+    expect(queries[0]).toContain(shellQuote("_data='/storage/emulated/0/Download/legacy/a.pdf'"));
+  });
+
+  test("fails and rolls back a document batch whose MediaStore row never appears", async () => {
+    const executor = new FakeAdbExecutor();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    executor.setCommandResponse("content query", execResult(""));
+    const service = createSharedStorageServiceForTesting({
+      adbFactory: adbFactoryFor(executor),
+      timer,
+    });
+
+    await expect(
+      service.stage({
+        device: androidDevice,
+        namespace: "picker-docs",
+        indexMedia: true,
+        rollbackOnFailure: true,
+        files: [{ contentText: "pdf", destinationPath: "a.pdf" }],
+      }),
+    ).rejects.toThrow(
+      "Android media indexing did not complete for /storage/emulated/0/Download/picker-docs/a.pdf within 5 seconds.",
+    );
+    const commands = executor.getExecutedCommands();
+    expect(commands.filter((command) => command.includes("content query"))).toHaveLength(20);
+    expect(commands).toContain("shell rm -f '/storage/emulated/0/Download/picker-docs/a.pdf'");
+    // The rollback rescans the deleted document so MediaStore drops any row the scan created.
+    expect(commands.at(-1)).toContain(
+      "MEDIA_SCANNER_SCAN_FILE -d '\\''file:///storage/emulated/0/Download/picker-docs/a.pdf'\\''",
+    );
   });
 
   test("reports why indexing was not requested when the caller opts out", async () => {

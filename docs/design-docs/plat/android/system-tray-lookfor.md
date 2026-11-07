@@ -144,6 +144,18 @@ bound the operation.
 - Open/close (preferred): `adb -s <device> shell cmd statusbar expand-notifications` / `cmd statusbar collapse` (also `systemTray` action `close`). Fallback: swipe down from the status bar when `cmd statusbar` is unavailable.
 - Find: read the `com.android.systemui` node tree via the AccessibilityService, match text or resource ID, and return bounding box plus hierarchy path for follow-up taps.
 
+### App filter attribution
+
+`find`, `tap`, `dismiss` and `clearAll` compare `notification.appId`'s label (and
+the id itself) only against a row's attribution element, so another app's name
+in a title or body never attributes the row to that app. On Android that is the
+`app_name_text` header label; a group child is attributed by its group's header.
+On iOS no separate label exists: the `NotificationShortLookView` accessibility
+label leads with the app's display name (`"MESSAGES, now, <title>, <body>"`),
+and only that leading name is compared. A row that renders no attribution
+element (for example a header-less Silent row) falls back to matching the app
+filter against all of its text.
+
 ### Collapsed notification group handling
 
 When an app posts 2+ notifications, Android collapses them into a single

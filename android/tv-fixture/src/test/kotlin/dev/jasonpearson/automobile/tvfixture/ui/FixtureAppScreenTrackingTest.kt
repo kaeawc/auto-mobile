@@ -1,9 +1,10 @@
 package dev.jasonpearson.automobile.tvfixture.ui
 
 import androidx.activity.ComponentActivity
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import dev.jasonpearson.automobile.tvfixture.TvFixtureCatalog
 import dev.jasonpearson.automobile.tvfixture.player.PlayerState
 import org.junit.Assert.assertEquals
@@ -29,6 +30,12 @@ class FixtureAppScreenTrackingTest {
     compose.waitForIdle()
   }
 
+  // tv-material buttons and cards ignore touch input, so select them through their click action.
+  private fun select(tag: String) {
+    compose.onNodeWithTag(tag).performSemanticsAction(SemanticsActions.OnClick)
+    compose.waitForIdle()
+  }
+
   private fun pressBack() {
     compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
     compose.waitForIdle()
@@ -43,8 +50,7 @@ class FixtureAppScreenTrackingTest {
   @Test
   fun `search is reported when opened and browse again after back`() {
     launch()
-    compose.onNodeWithTag(TvFixtureCatalog.NAV_SEARCH).performClick()
-    compose.waitForIdle()
+    select(TvFixtureCatalog.NAV_SEARCH)
     pressBack()
     assertEquals(listOf("BrowseDestination", "SearchDestination", "BrowseDestination"), screens)
   }
@@ -52,18 +58,15 @@ class FixtureAppScreenTrackingTest {
   @Test
   fun `player is reported from the browse player button`() {
     launch()
-    compose.onNodeWithTag(TvFixtureCatalog.NAV_PLAYER).performClick()
-    compose.waitForIdle()
+    select(TvFixtureCatalog.NAV_PLAYER)
     assertEquals(listOf("BrowseDestination", "PlayerDestination"), screens)
   }
 
   @Test
   fun `detail is reported for a selected card and player from its play button`() {
     launch()
-    compose.onNodeWithTag("card_featured_01").performClick()
-    compose.waitForIdle()
-    compose.onNodeWithTag("detail_play").performClick()
-    compose.waitForIdle()
+    select("card_featured_01")
+    select("detail_play")
     assertEquals(
       listOf("BrowseDestination", "DetailDestination", "PlayerDestination"),
       screens,

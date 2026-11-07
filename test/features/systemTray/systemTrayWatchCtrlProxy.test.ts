@@ -72,6 +72,35 @@ const LABELS: Record<string, string> = {
   [FIXTURE_APP]: "AutoMobile Wear Fixture",
 };
 
+const SCAN = "shell input swipe 227 340 227 113 500";
+const titles = (result: { payload: { notifications?: unknown } }) =>
+  (result.payload.notifications as { title: string }[]).map((card) => card.title);
+type Bounds = [number, number, number, number];
+const rewriteBounds = (page: ObserveResult, change: (bounds: Bounds) => Bounds): ObserveResult => {
+  const visit = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      node.forEach(visit);
+    } else if (node !== null && typeof node === "object") {
+      const record = node as { bounds?: Bounds };
+      if (Array.isArray(record.bounds)) {
+        record.bounds = change(record.bounds);
+      }
+      Object.values(record).forEach(visit);
+    }
+  };
+  const copy = structuredClone(page);
+  visit(copy.viewHierarchy);
+  return copy;
+};
+/** A captured page whose card node `from` is stretched to `to`, e.g. past the viewport edges. */
+const reboundedCard = (page: ObserveResult, from: Bounds, to: Bounds) =>
+  rewriteBounds(page, (bounds) => (bounds.join() === from.join() ? to : bounds));
+/** A captured page with everything at or below `fromTop` scrolled by `dy`. */
+const shiftedBelow = (page: ObserveResult, fromTop: number, dy: number) =>
+  rewriteBounds(page, ([left, top, right, bottom]) =>
+    top >= fromTop ? [left, top + dy, right, bottom + dy] : [left, top, right, bottom],
+  );
+
 function setup(read: (commands: string[], reads: number) => ObserveResult) {
   const adb = new FakeAdbExecutor();
   const observer = new FakeObserveScreen();
@@ -163,7 +192,7 @@ describe("Wear OS 7 stream actions", () => {
     expect(result.payload.notifications).toMatchObject([{ title: "Bravo", body: "bravo" }]);
   });
 
-  test("list returns a card shown on two scan pages once and skips the card cut off at the edge", async () => {
+  test("list returns a card shown on two scan pages once, from the page that shows it whole", async () => {
     const { tray, adb } = setup((commands) => {
       const scans = commands.filter(
         (command) => command === "shell input swipe 227 340 227 113 500",
@@ -180,6 +209,43 @@ describe("Wear OS 7 stream actions", () => {
       ["TitleFour", "TitleThree", "TitleTwo"],
     );
     expect(adb.getExecutedCommands()).not.toContain(WHEEL);
+  });
+
+  test("list keeps a card that stays cut off at the edge on the only and final page", async () => {
+    const { tray } = setup(() => page1);
+    const result = await tray.execute({
+      action: "list",
+      notification: { appId: "com.android.shell" },
+      awaitTimeout: 5000,
+    });
+    expect(titles(result)).toEqual(["TitleFour", "TitleThree"]);
+  });
+
+  test("list keeps a card taller than the viewport that touches an edge on every page", async () => {
+    const tall = (page: ObserveResult, from: Bounds) =>
+      reboundedCard(page, from, [35, 0, 419, 454]);
+    const { tray } = setup((commands) =>
+      commands.includes(SCAN) ? tall(page2, [23, 49, 431, 225]) : tall(page1, [35, 291, 419, 454]),
+    );
+    const result = await tray.execute({
+      action: "list",
+      notification: { appId: "com.android.shell" },
+      awaitTimeout: 5000,
+    });
+    expect(titles(result)).toEqual(["TitleFour", "TitleThree", "TitleTwo"]);
+  });
+
+  test("list keeps repeated notifications that only meet at a page boundary", async () => {
+    // Earlier and Duplicate fit whole on the first page; Duplicate leads the second. Equal
+    // content alone does not make the two sightings one card: the first page cut nothing off.
+    const whole = shiftedBelow(page1, 100, -20);
+    const { tray } = setup((commands) => (commands.includes(SCAN) ? page2 : whole));
+    const result = await tray.execute({
+      action: "list",
+      notification: { appId: "com.android.shell" },
+      awaitTimeout: 5000,
+    });
+    expect(titles(result)).toEqual(["TitleFour", "TitleThree", "TitleThree", "TitleTwo"]);
   });
 
   test("list waits for a scroll that is not drawn yet instead of ending the scan", async () => {

@@ -22,6 +22,7 @@ import {
   watchClearAll,
   watchExpandedTarget,
   watchNotifications,
+  watchCardClipEdges,
   watchCardClipped,
   watchRevealedDismiss,
   watchStreamRoot,
@@ -100,16 +101,71 @@ const visiblyRemoved = (card: WatchNotification, before: ObserveResult, after: O
   );
 };
 
+/** A card as one scan page showed it: the fullest reading so far, and where the last page put it. */
+interface ScannedCard {
+  card: WatchNotification;
+  /** Cut off by a viewport edge, so its text may be partial. */
+  clipped: boolean;
+  /** Cut off at the bottom edge, so the next page must show its continuation. */
+  clippedBottom: boolean;
+  /** Bounds on the latest page that showed it. */
+  bounds: WatchNotification["element"]["bounds"];
+}
+
+const scannedCards = (observation: ObserveResult, cards: WatchNotification[]): ScannedCard[] =>
+  cards
+    .map((card) => {
+      const edges = watchCardClipEdges(observation.viewHierarchy, card);
+      return {
+        card,
+        clipped: edges.top || edges.bottom,
+        clippedBottom: edges.bottom,
+        bounds: card.element.bounds,
+      };
+    })
+    // A slice with no text yet says nothing about the card; the page that shows it whole will.
+    .filter((entry) => !entry.clipped || entry.card.title !== null || entry.card.body !== null);
+
+/** The fuller of two readings of one card: a whole card beats a clipped one, else the taller slice. */
+const fuller = (known: ScannedCard, seen: ScannedCard) => {
+  const height = (entry: ScannedCard) => entry.bounds.bottom - entry.bounds.top;
+  const better =
+    known.clipped && (!seen.clipped || height(seen) > height(known)) ? seen.card : known.card;
+  return { ...seen, card: better };
+};
+
+/**
+ * Whether the head of `page` shows again the `tail` cards of `collected`. Equal content alone is
+ * no proof: separate notifications can repeat an app, title and body. Evidence beyond content is
+ * either a run of two or more equal neighbours, or a single card the last page cut off at its
+ * bottom edge (its continuation must lead the next page); every card must also have moved up with
+ * the scroll, never down.
+ */
+const isSameRun = (tail: ScannedCard[], head: ScannedCard[]) =>
+  tail.every((known, index) => {
+    const seen = head[index];
+    return (
+      cardIdentity(known.card) === cardIdentity(seen.card) && seen.bounds.top <= known.bounds.top
+    );
+  }) &&
+  (tail.length >= 2 || tail[0].clippedBottom);
+
 /**
  * Appends a scanned page to the cards collected so far. A scroll moves less than a screen, so the
- * cards at the end of the last page show again at the start of the next: drop that overlap, the
- * longest tail of `collected` equal to the head of `page`, so one card is listed once (#17317).
+ * cards at the end of the last page can show again at the start of the next: when the overlap is
+ * established (see {@link isSameRun}) it is listed once, keeping the fuller reading of each card;
+ * otherwise every card is kept, so repeated notifications are never lost (#17317).
  */
-const mergePage = (collected: WatchNotification[], page: WatchNotification[]) => {
+const mergePage = (collected: ScannedCard[], page: ScannedCard[]) => {
   for (let overlap = Math.min(collected.length, page.length); overlap > 0; overlap--) {
     const tail = collected.slice(-overlap);
-    if (tail.every((card, index) => cardIdentity(card) === cardIdentity(page[index]))) {
-      return [...collected, ...page.slice(overlap)];
+    const head = page.slice(0, overlap);
+    if (isSameRun(tail, head)) {
+      return [
+        ...collected.slice(0, -overlap),
+        ...tail.map((known, index) => fuller(known, head[index])),
+        ...page.slice(overlap),
+      ];
     }
   }
   return [...collected, ...page];
@@ -393,7 +449,7 @@ export class WatchSystemTray {
     observation: ObserveResult,
   ): Promise<SystemTrayOutcome> {
     const { criteria, label, deadline } = scope;
-    let cards: WatchNotification[] = [];
+    let cards: ScannedCard[] = [];
     let previous: ObserveResult | undefined;
     for (let page = 0; page < MAX_STREAM_PAGES; page++) {
       if (!watchStreamRoot(observation.viewHierarchy)) {
@@ -417,15 +473,11 @@ export class WatchSystemTray {
       if (target && actionable(args.action, target, observation, atEnd)) {
         return this.act(args, target, observation, scope);
       }
-      // Preserve identical cards within a page. Cross-page overlap is deliberately conservative:
-      // without captured stable IDs, keep duplicates rather than silently lose notifications.
+      // Identical cards within a page are all kept. A page identical to the last one adds nothing.
       if (!unmoved) {
-        // A card cut off by the viewport edge shows only part of its text, so it is read from the
-        // page where it is whole; the last page has no later page to wait for.
-        cards = mergePage(
-          cards,
-          matching.filter((card) => atEnd || !watchCardClipped(observation.viewHierarchy, card)),
-        );
+        // Cards cut off by a viewport edge are kept as partial readings until a page shows them
+        // whole; a card taller than the viewport is never shown whole.
+        cards = mergePage(cards, scannedCards(observation, matching));
       }
       if (atEnd && ["list", "clearAll"].includes(args.action)) {
         return this.scanResult(args, scope, cards, observation);
@@ -479,14 +531,14 @@ export class WatchSystemTray {
   private scanResult(
     args: SystemTrayArgs,
     scope: WatchScope,
-    cards: WatchNotification[],
+    cards: ScannedCard[],
     observation: ObserveResult,
   ): SystemTrayOutcome {
     const { criteria } = scope;
     if (args.action === "list") {
       return outcome({
         message: `Listed ${cards.length} notifications for ${criteria.appId}`,
-        notifications: cards.map((card) => listedCard(card, criteria.appId)),
+        notifications: cards.map(({ card }) => listedCard(card, criteria.appId)),
         observation,
       });
     }

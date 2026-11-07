@@ -183,12 +183,21 @@ export function watchCardClipped(
   hierarchy: ViewHierarchyResult | undefined,
   card: WatchNotification,
 ): boolean {
+  const edges = watchCardClipEdges(hierarchy, card);
+  return edges.top || edges.bottom;
+}
+
+/** Which viewport edges cut `card` off: a card taller than the viewport touches both. */
+export function watchCardClipEdges(
+  hierarchy: ViewHierarchyResult | undefined,
+  card: WatchNotification,
+): { top: boolean; bottom: boolean } {
   const root = watchStreamRoot(hierarchy);
   const viewport = root && new DefaultElementParser().parseNodeBounds(root)?.bounds;
-  return (
-    !!viewport &&
-    (card.element.bounds.top <= viewport.top || card.element.bounds.bottom >= viewport.bottom)
-  );
+  return {
+    top: !!viewport && card.element.bounds.top <= viewport.top,
+    bottom: !!viewport && card.element.bounds.bottom >= viewport.bottom,
+  };
 }
 
 /** A copy of the stream with every notification card subtree removed. */

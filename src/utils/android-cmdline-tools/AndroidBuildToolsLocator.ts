@@ -189,11 +189,24 @@ export class DefaultAndroidBuildToolsLocator implements AndroidBuildToolsLocator
     });
   }
 
+  /**
+   * Sort key for a build-tools or platform directory name. An SDK-extension
+   * platform (`android-33-ext5`) sorts by its API level first and its extension
+   * level last, so it never outranks a newer API level such as `android-37.0`.
+   */
   private parseVersion(version: string): number[] {
-    return version
+    const [release, extension] = version.split(/-ext/i, 2);
+    const releaseParts = release
       .split(".")
       .map((part) => Number.parseInt(part.replace(/\D/g, ""), 10))
       .map((value) => (Number.isNaN(value) ? 0 : value));
+    if (extension === undefined) {
+      return releaseParts;
+    }
+    const extensionLevel = Number.parseInt(extension.replace(/\D/g, ""), 10);
+    // Pad the release to a fixed width so the extension level is compared only on a tie.
+    const paddedRelease = [...releaseParts, 0, 0, 0].slice(0, Math.max(releaseParts.length, 3));
+    return [...paddedRelease, Number.isNaN(extensionLevel) ? 0 : extensionLevel];
   }
 }
 

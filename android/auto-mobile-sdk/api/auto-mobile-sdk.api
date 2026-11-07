@@ -1466,9 +1466,16 @@ public final class dev.jasonpearson.automobile.sdk.interaction.TapGestureClassif
   public final dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Result classify$auto_mobile_sdk(dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Action, float, float, long);
 }
 Compiled from "KeystoreTestState.kt"
+public interface dev.jasonpearson.automobile.sdk.keystore.KeyGenerationGate {
+  public abstract void check(java.lang.String, boolean);
+}
+Compiled from "KeystoreTestState.kt"
 public final class dev.jasonpearson.automobile.sdk.keystore.KeystoreTestState {
   public static final dev.jasonpearson.automobile.sdk.keystore.KeystoreTestState INSTANCE;
   public static final int $stable;
+  public final dev.jasonpearson.automobile.sdk.keystore.KeyGenerationGate getKeyGenerationGate$auto_mobile_sdk();
+  public final void setKeyGenerationGate$auto_mobile_sdk(dev.jasonpearson.automobile.sdk.keystore.KeyGenerationGate);
+  public final void checkKeyGeneration(android.security.keystore.KeyGenParameterSpec);
   public final void setEnabled(boolean);
   public final boolean isEnabled();
   public final dev.jasonpearson.automobile.sdk.InspectorRegistration declareScope(java.lang.String, java.util.Set<java.lang.String>);

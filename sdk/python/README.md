@@ -32,18 +32,27 @@ User documentation: [`docs/using/python-sdk.md`](../../docs/using/python-sdk.md)
 
 ## Development
 
-Tests use only `unittest` and run against fakes (a fake CLI runner, an in-memory
-transport, and a fake daemon endpoint on a loopback socket); no daemon or device is
-needed and the suite takes well under a second.
+The build uses [uv](https://docs.astral.sh/uv/) with the committed `uv.lock`, ruff for
+lint and format, and mypy (strict) for types. The pinned tools live in the `dev`
+dependency group; the SDK itself still has no runtime dependencies.
 
 ```bash
 cd sdk/python
-PYTHONPATH=src python3 -m unittest discover -s tests -t .
+uv sync --locked                       # create .venv with the pinned tools
+uv run ruff check                      # lint
+uv run ruff format --check             # format check (ruff format to rewrite)
+uv run mypy                            # typecheck
+uv run python -m unittest discover -s tests -t .   # tests
 ```
 
-From the repository root, `bash scripts/validate_python_sdk.sh` runs the same suite;
-CI runs it as the `python-sdk` Fast Validation check. Optional local tooling, configured
-in `pyproject.toml`: `ruff check`, `ruff format --check` and `mypy` (strict).
+From the repository root, `bash scripts/validate_python_sdk.sh [task...]` runs the same
+task list (`lint`, `format-check`, `format`, `typecheck`, `test`; `all` by default). CI
+runs `all` as the `python-sdk` Fast Validation check.
 
-The daemon state-path resolver is tested against the shared vectors in
-`test/fixtures/daemon-isolation-paths.json`, as every other client port is.
+Tests use only `unittest` and run against fakes (a fake CLI runner, an in-memory
+transport, and a fake daemon endpoint on a loopback socket); no daemon or device is
+needed and the suite takes well under a second. The daemon state-path resolver is
+tested against the shared vectors in `test/fixtures/daemon-isolation-paths.json`, as
+every other client port is.
+
+After changing the `dev` group in `pyproject.toml`, run `uv lock` and commit `uv.lock`.

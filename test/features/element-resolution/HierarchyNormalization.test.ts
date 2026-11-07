@@ -1,8 +1,11 @@
 import { convertIosHierarchy } from "../../helpers/iosHierarchyConverter";
 import { describe, expect, test } from "bun:test";
+import { projectActionableHierarchy } from "../../../src/features/observe/HierarchyNormalization";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
 import type { ViewHierarchyAndroidCtrlProxy } from "../../../src/features/observe/android/ViewHierarchyAndroidCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import duoInnerPlaygroundHierarchy from "../../fixtures/ios-duo/observe-inner-playground-hierarchy-17306.json";
+import duoDemosRawHierarchy from "../../fixtures/ios-duo/issue8379-demos-raw-hierarchy.json";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { wireCapture } from "../../helpers/wireCapture";
 
@@ -76,5 +79,40 @@ describe("shared iOS capture normalization", () => {
       reader.normalizeIosHierarchy(convertIosHierarchy(source)),
     );
     expect(JSON.stringify(result.windows)).not.toContain("Offscreen");
+  });
+});
+
+// Captured on an unfolded iPhone Duo (iOS 27.1): the application root keeps the portrait frame
+// 669x951 while the content is the 951x669 landscape inner panel (#17306).
+describe("iPhone Duo inner-panel root bounds", () => {
+  const project = (multiPanel: boolean) => {
+    const reader = normalizer();
+    return projectActionableHierarchy(
+      "ios",
+      reader.normalizeIosHierarchy(wireCapture(structuredClone(duoDemosRawHierarchy))),
+      multiPanel,
+    );
+  };
+
+  test("the application root is reported in the landscape space of the screen size", () => {
+    for (const multiPanel of [false, true]) {
+      expect(project(multiPanel).hierarchy.bounds).toEqual({
+        left: 0,
+        top: 0,
+        right: 951,
+        bottom: 669,
+      });
+    }
+  });
+
+  // The runner's wire form: the application is the single `node` and its bounds sit in `$`.
+  test("the wire-form application node is corrected too, keeping the tuple shape", () => {
+    const projected = projectActionableHierarchy(
+      "ios",
+      wireCapture(structuredClone(duoInnerPlaygroundHierarchy)),
+      true,
+    );
+    const root = projected.hierarchy.node as unknown as { $: { bounds: number[] } };
+    expect(root.$.bounds).toEqual([0, 0, 951, 669]);
   });
 });

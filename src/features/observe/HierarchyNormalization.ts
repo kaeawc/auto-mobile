@@ -100,16 +100,75 @@ export function projectActionableHierarchy(
     size.width,
     size.height,
   );
+  result.hierarchy = withLandscapeRootBounds(result.hierarchy, size);
   if (source.windows) {
     result.windows = source.windows.map((window) => ({
       ...window,
       hierarchy: window.hierarchy
-        ? filterOffscreenNodes({ hierarchy: window.hierarchy }, size.width, size.height).hierarchy
+        ? withLandscapeRootBounds(
+            filterOffscreenNodes({ hierarchy: window.hierarchy }, size.width, size.height)
+              .hierarchy,
+            size,
+          )
         : window.hierarchy,
     }));
   }
   projectedScreenSizes.set(result.hierarchy, size);
   return result;
+}
+
+/**
+ * The runner keeps the application root at the device's portrait frame while the content (and
+ * the resolved `screenSize`) is landscape (#8379, the iPhone Duo inner panel). Report the root in
+ * the same space as the screen size so the context layer's root agrees with the skeleton (#17306).
+ */
+function withLandscapeRootBounds<T extends { bounds?: unknown; node?: unknown } | undefined>(
+  root: T,
+  size: ScreenSize,
+): T {
+  if (!root) {
+    return root;
+  }
+  const direct = landscapeBounds(root.bounds, size);
+  if (direct) {
+    return { ...root, bounds: direct };
+  }
+  // The runner wire form carries the application as the single `node` whose attributes (`$`)
+  // hold the bounds; a collapsed array of siblings has no single root to correct.
+  const child = root.node;
+  if (root.bounds === undefined && child && typeof child === "object" && !Array.isArray(child)) {
+    return { ...root, node: withLandscapeNodeBounds(child as WireNode, size) };
+  }
+  return root;
+}
+
+type WireNode = { bounds?: unknown; $?: Record<string, unknown> };
+
+function withLandscapeNodeBounds(node: WireNode, size: ScreenSize): WireNode {
+  const direct = landscapeBounds(node.bounds, size);
+  if (direct) {
+    return { ...node, bounds: direct };
+  }
+  const attributeBounds = landscapeBounds(node.$?.["bounds"], size);
+  return attributeBounds ? { ...node, $: { ...node.$, bounds: attributeBounds } } : node;
+}
+
+/** The same bounds with width and height exchanged to the resolved size, in the input's own shape. */
+function landscapeBounds(value: unknown, size: ScreenSize): ElementBounds | number[] | undefined {
+  const bounds = parseBounds(value);
+  if (!bounds) {
+    return undefined;
+  }
+  const width = bounds.right - bounds.left;
+  const height = bounds.bottom - bounds.top;
+  if (width === height || width !== size.height || height !== size.width) {
+    return undefined;
+  }
+  const right = bounds.left + size.width;
+  const bottom = bounds.top + size.height;
+  return Array.isArray(value)
+    ? [bounds.left, bounds.top, right, bottom]
+    : { left: bounds.left, top: bounds.top, right, bottom };
 }
 
 function isCompletelyOffscreen(

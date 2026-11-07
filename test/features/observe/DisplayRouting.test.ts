@@ -420,7 +420,12 @@ describe("display read routing", () => {
       expect(result.display).toMatchObject({ key: "inner", role: "inner" });
       expect(result.display.posture).toBe("closed");
       expect(result.otherDisplays).toEqual([
-        { key: "cover", role: "cover", size: { width: 100, height: 100 } },
+        {
+          key: "cover",
+          role: "cover",
+          size: { width: 100, height: 100 },
+          units: "physical-pixels",
+        },
       ]);
       expect(source.reads).toBe(1);
       const coverScreen = new RealObserveScreen(
@@ -871,8 +876,8 @@ describe("display read routing", () => {
       deviceId: "ios-duo-stamp-test",
       displays: {
         panels: [
-          { key: "primary", role: "cover", sizePx: { width: 1398, height: 2034 } },
-          { key: "primary-1", role: "inner", sizePx: { width: 2007, height: 2853 } },
+          { key: "primary", role: "cover", sizePx: { width: 1398, height: 2034 }, scale: 3 },
+          { key: "primary-1", role: "inner", sizePx: { width: 2007, height: 2853 }, scale: 3 },
         ],
         postures: ["unknown"],
       },
@@ -920,7 +925,7 @@ describe("display read routing", () => {
       });
       expect(result.display).toMatchObject({ key: "primary-1", role: "inner", posture: "opened" });
       expect(result.otherDisplays).toEqual([
-        { key: "primary", role: "cover", size: { width: 1398, height: 2034 } },
+        { key: "primary", role: "cover", size: { width: 466, height: 678 }, units: "points" },
       ]);
       expect((await screen.execute({ ...readOptions, display: "active" })).display.key).toBe(
         "primary-1",

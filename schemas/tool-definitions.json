@@ -5165,6 +5165,10 @@
                 },
                 "required": ["width", "height"],
                 "additionalProperties": false
+              },
+              "units": {
+                "type": "string",
+                "enum": ["physical-pixels", "points"]
               }
             },
             "required": ["key", "role", "size"],
@@ -8508,6 +8512,10 @@
                 },
                 "required": ["width", "height"],
                 "additionalProperties": false
+              },
+              "units": {
+                "type": "string",
+                "enum": ["physical-pixels", "points"]
               }
             },
             "required": ["key", "role", "size"],
@@ -13809,6 +13817,10 @@
                 },
                 "required": ["width", "height"],
                 "additionalProperties": false
+              },
+              "units": {
+                "type": "string",
+                "enum": ["physical-pixels", "points"]
               }
             },
             "required": ["key", "role", "size"],
@@ -17359,6 +17371,10 @@
                 },
                 "required": ["width", "height"],
                 "additionalProperties": false
+              },
+              "units": {
+                "type": "string",
+                "enum": ["physical-pixels", "points"]
               }
             },
             "required": ["key", "role", "size"],
@@ -23005,6 +23021,10 @@
                 },
                 "required": ["width", "height"],
                 "additionalProperties": false
+              },
+              "units": {
+                "type": "string",
+                "enum": ["physical-pixels", "points"]
               }
             },
             "required": ["key", "role", "size"],
@@ -27027,6 +27047,10 @@
                 },
                 "required": ["width", "height"],
                 "additionalProperties": false
+              },
+              "units": {
+                "type": "string",
+                "enum": ["physical-pixels", "points"]
               }
             },
             "required": ["key", "role", "size"],
@@ -29557,6 +29581,10 @@
                 },
                 "required": ["width", "height"],
                 "additionalProperties": false
+              },
+              "units": {
+                "type": "string",
+                "enum": ["physical-pixels", "points"]
               }
             },
             "required": ["key", "role", "size"],
@@ -45384,6 +45412,10 @@
                 },
                 "required": ["width", "height"],
                 "additionalProperties": false
+              },
+              "units": {
+                "type": "string",
+                "enum": ["physical-pixels", "points"]
               }
             },
             "required": ["key", "role", "size"],
@@ -48667,6 +48699,10 @@
                 },
                 "required": ["width", "height"],
                 "additionalProperties": false
+              },
+              "units": {
+                "type": "string",
+                "enum": ["physical-pixels", "points"]
               }
             },
             "required": ["key", "role", "size"],
@@ -50733,6 +50769,10 @@
                 },
                 "required": ["width", "height"],
                 "additionalProperties": false
+              },
+              "units": {
+                "type": "string",
+                "enum": ["physical-pixels", "points"]
               }
             },
             "required": ["key", "role", "size"],
@@ -57770,6 +57810,10 @@
                 },
                 "required": ["width", "height"],
                 "additionalProperties": false
+              },
+              "units": {
+                "type": "string",
+                "enum": ["physical-pixels", "points"]
               }
             },
             "required": ["key", "role", "size"],
@@ -59675,6 +59719,10 @@
                 },
                 "required": ["width", "height"],
                 "additionalProperties": false
+              },
+              "units": {
+                "type": "string",
+                "enum": ["physical-pixels", "points"]
               }
             },
             "required": ["key", "role", "size"],
@@ -63359,6 +63407,10 @@
                 },
                 "required": ["width", "height"],
                 "additionalProperties": false
+              },
+              "units": {
+                "type": "string",
+                "enum": ["physical-pixels", "points"]
               }
             },
             "required": ["key", "role", "size"],
@@ -66317,6 +66369,10 @@
                 },
                 "required": ["width", "height"],
                 "additionalProperties": false
+              },
+              "units": {
+                "type": "string",
+                "enum": ["physical-pixels", "points"]
               }
             },
             "required": ["key", "role", "size"],
@@ -68194,6 +68250,10 @@
                 },
                 "required": ["width", "height"],
                 "additionalProperties": false
+              },
+              "units": {
+                "type": "string",
+                "enum": ["physical-pixels", "points"]
               }
             },
             "required": ["key", "role", "size"],

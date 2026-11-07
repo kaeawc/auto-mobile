@@ -256,6 +256,7 @@ export const otherDisplaysSchema = z
         "unknown",
       ]),
       size: z.object({ width: z.number(), height: z.number() }),
+      units: z.enum(["physical-pixels", "points"]).optional(),
     }),
   )
   .optional();

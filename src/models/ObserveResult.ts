@@ -178,7 +178,13 @@ export type ObserveResult = {
   /** Opt-in Android display:"all" aggregate; the proposed additive shape (#8256). */
   displays?: DisplayObservation[];
   /** Other known physical panels, only present when inventory has multiple panels. */
-  otherDisplays?: Array<Pick<DisplayPanel, "key" | "role"> & { size: DisplayPanel["sizePx"] }>;
+  otherDisplays?: Array<
+    Pick<DisplayPanel, "key" | "role"> & {
+      size: DisplayPanel["sizePx"];
+      /** Unit of `size`: iOS panels are converted to points like `screenSize`; Android stays in pixels. */
+      units: "points" | "physical-pixels";
+    }
+  >;
   /** INTERNAL-ONLY: display transition revision when this capture completed. */
   displayRevision?: number;
   /** Short-lived full-screen coordinate reference for a later tapAt call. */

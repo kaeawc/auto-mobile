@@ -169,8 +169,15 @@ export function verifyIosRotation(
     const error =
       coverPanelRefusalError(previousObservation, IOS_ROTATION_UNSUPPORTED_ERROR) ??
       "Rotation is not supported on this display (the screen size did not change). The runner reported a rotation but the screen size is unchanged.";
+    // The screen did not rotate, so the runner's orientation readout (the requested axis) is
+    // transient: report the orientation the display still has, like the next observe (#17306).
+    const heldRotation = previousObservation?.rotation;
     return {
       ...normalized,
+      currentOrientation: previous === "unknown" ? normalized.currentOrientation : previous,
+      ...(result.observation && heldRotation !== undefined
+        ? { observation: { ...result.observation, rotation: heldRotation } }
+        : {}),
       success: false,
       rotationPerformed: false,
       error,

@@ -248,6 +248,24 @@ describe("iOS rotation verification screen-size checks (#17047)", () => {
     expect(result.message).toBe("Failed to rotate to landscape; the screen size did not change.");
   });
 
+  // An unchanged size is evidence of a refusal only on the same display: a rotation that
+  // succeeded while the target display changed must not be reported as unsupported (#17346).
+  test("accepts a Duo landscape rotation observed on a different display", () => {
+    const rotation = duoRotation();
+    const onOtherDisplay = {
+      ...rotation,
+      observation: {
+        ...rotation.observation!,
+        display: { ...rotation.observation!.display, key: "primary" },
+      },
+    };
+    const result = verifyIosRotation(onOtherDisplay, "landscape", duoPrevious());
+    expect(result.success).toBe(true);
+    expect(result.rotationPerformed).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.message).toBe("Successfully rotated from portrait to landscape");
+  });
+
   test("accepts a same-axis portrait repair whose size is legitimately unchanged", () => {
     const result = verifyIosRotation(
       {

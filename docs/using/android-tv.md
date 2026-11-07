@@ -142,8 +142,10 @@ move closer with `focusNavigate`. When an editable text field or the on-screen k
 the walk first hides a shown keyboard with back (and presses tab when the focused element is not a
 text field, since tab would type into one), then tries every direction again. If focus still does
 not move, `focusNavigation.status` is `stuck`, `focusNavigation.blockedBy` is `ime` or `editable`,
-`focusNavigation.escapes` lists the keys tried, and the error names the trapped field: leave the
-field first, for example with `sendKeys` key `next` or `done`, then retry.
+`focusNavigation.escapes` lists the keys tried, and the error names the trapped field: hide the
+keyboard with `pressButton` `back`, press `pressButton` `down` to move focus out of the field,
+observe, then retry. An IME action such as `sendKeys` key `next` or `done` does not move D-pad focus
+out of the field.
 `focusNavigate` returns the same `blockedBy` and `escapes`. Other selectors (`testTag`, `textAny`,
 `accessibilityLink`), other actions, and the options `sibling`, `container`, `index`, `searchUntil`, `ensureChecked`,
 `subtext`, `layer`, `display` and a `selectionStrategy` other than `first` still need a touchscreen. `swipeOn` needs a touchscreen too;

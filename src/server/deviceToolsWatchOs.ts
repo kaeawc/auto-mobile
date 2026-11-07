@@ -78,7 +78,7 @@ export async function startWatchDevice(
           stage.current = "waiting for the device lifecycle lease";
           const lease = await reserveWatchLifecycle(watch, deps, deadlineMs, requestSignal);
           let stopLaunchedRunner: (() => void) | undefined;
-          let rollbackPair: (() => Promise<void>) | undefined;
+          let rollbackPair: () => Promise<void> = async () => {};
           let completed = false;
           try {
             const lifecycleSignal =
@@ -153,7 +153,7 @@ export async function startWatchDevice(
           } finally {
             if (!completed) {
               stopLaunchedRunner?.();
-              await rollbackPair?.();
+              await rollbackPair();
             }
             lease.release();
           }

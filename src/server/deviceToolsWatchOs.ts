@@ -1,7 +1,5 @@
-import {
-  defaultSimulatorPairService,
-  type WatchPairResult,
-} from "../utils/ios-cmdline-tools/SimulatorPairs";
+import { type WatchPairResult } from "../utils/ios-cmdline-tools/SimulatorPairs";
+import { configuredSimulatorPairService } from "./deviceToolsSimulatorPairs";
 import { bindBootedSimulatorSession } from "./deviceToolsSimulatorSession";
 import { z } from "zod/v4";
 import { describeDevice, projectBootedDevice } from "../daemon/deviceDescription";
@@ -80,21 +78,23 @@ export async function startWatchDevice(
           stage.current = "waiting for the device lifecycle lease";
           const lease = await reserveWatchLifecycle(watch, deps, deadlineMs, requestSignal);
           let stopLaunchedRunner: (() => void) | undefined;
+          let rollbackPair: (() => Promise<void>) | undefined;
           let completed = false;
           try {
             const lifecycleSignal =
               combineAbortSignals(requestSignal, lease.signal) ?? lease.signal;
-            const refreshPair = await prepareWatchPair(
+            const preparedPair = await prepareWatchPair(
               watch.deviceId,
               args.pairWithDeviceId,
               deps,
               lifecycleSignal,
             );
+            rollbackPair = preparedPair.rollback;
             stage.current = "booting the Apple Watch simulator";
             const boot = await lifecycle.boot(watch, {
               timeoutMs: Math.max(1, deadlineMs - deps.timer.now()),
             });
-            const pair = await refreshPair();
+            const pair = await preparedPair.refresh();
             stage.current = "starting the Apple Watch automation runner";
             let runnerUnavailable: string | undefined;
             let runner: Pick<WatchRunnerLifecycle, "start" | "attach" | "stop"> | undefined;
@@ -153,6 +153,7 @@ export async function startWatchDevice(
           } finally {
             if (!completed) {
               stopLaunchedRunner?.();
+              await rollbackPair?.();
             }
             lease.release();
           }
@@ -180,18 +181,26 @@ export async function bindWatchSession(
   );
 }
 
+/** The watch's pair, prepared before boot; `rollback` unpairs it only when this start created it. */
 async function prepareWatchPair(
   watch: string,
   phone: string | undefined,
   deps: DeviceToolsDependencies,
   signal: AbortSignal,
-): Promise<() => Promise<WatchPairResult | undefined>> {
+): Promise<{
+  refresh: () => Promise<WatchPairResult | undefined>;
+  rollback: () => Promise<void>;
+}> {
   if (!phone) {
-    return async () => undefined;
+    return { refresh: async () => undefined, rollback: async () => {} };
   }
-  const service = (deps.simulatorPairServiceFactory ?? defaultSimulatorPairService)();
+  const service = configuredSimulatorPairService(deps);
   const pair = await service.ensure(watch, phone, signal);
-  return async () => service.refresh(pair, signal);
+  return {
+    refresh: async () => service.refresh(pair, signal),
+    // unpairCreated logs and keeps a failed unpair, so rollback never masks the start's error.
+    rollback: async () => (pair.created ? service.unpairCreated(watch) : undefined),
+  };
 }
 
 async function reserveWatchLifecycle(

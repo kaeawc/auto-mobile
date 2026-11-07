@@ -60,11 +60,12 @@ never booted by this call: boot it separately with `startDevice`, `platform: "io
 The result includes `pair` with `pairId`, `state` (`active` or `inactive`), `connection`
 (`connected` or `disconnected`), `phoneDeviceId`, and `created`. `created: false` means an
 existing pair was reused. Connection is sampled after watch boot and may still be disconnected.
+If `startDevice` fails after pairing, a pair it created is unpaired again; a reused pair is kept.
 A watch already paired to another phone is refused with its pair ID and phone name/UDID:
 unpair it first or pass that phone. A missing or non-iOS simulator UDID is refused; choose an
 iPhone simulator from the device images. One phone may have several watches.
 
-`listDevices` for `ios` or `watchos` includes `simulatorPairs` when pairs are available. Each
+`listDevices` for `ios`, `watchos` or no platform includes `simulatorPairs` when pairs are available. Each
 entry has `pairId`, `state`, `connection`, and `watch`/`phone` objects with `deviceId`, `name`,
 and device `state`. Pair information is omitted if none exist or the pair listing fails.
 Deleting a watch automatically unpairs only pairs created by the current daemon.

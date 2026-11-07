@@ -261,6 +261,63 @@ describe("startDevice on an Apple Watch simulator", () => {
     expect(startDeviceOutputSchema.safeParse(result).success).toBe(true);
   });
 
+  test.each([true, false])(
+    "a failed start with a pair created by it (%p) unpairs only that pair",
+    async (created) => {
+      const f = await arrange();
+      const pairs = new FakeSimulatorPairs();
+      const service = pairs.service();
+      const ensure = service.ensure.bind(service);
+      service.ensure = async (watch, phone, signal) => {
+        const pair = await ensure(watch, phone, signal);
+        return created ? pair : { ...pair, created: false };
+      };
+      if (!created) {
+        // A pre-existing pair is not this daemon's to remove, even when it is recorded as owned.
+        service.unpairCreated = async () => {
+          throw new Error("must not unpair a pre-existing pair");
+        };
+      }
+      setDeviceToolsDependencies({ simulatorPairServiceFactory: () => service });
+      await expect(
+        startWatchDevice(
+          {
+            platform: "watchos",
+            deviceId: WATCH_UDID,
+            pairWithDeviceId: capturedPair.phone.deviceId,
+          },
+          async () => {
+            throw new ActionableError("bind refused");
+          },
+        ),
+      ).rejects.toThrow("bind refused");
+      expect(f.watchLauncher.calls).toContain("stop");
+      expect(pairs.calls.filter((call) => call[0] === "unpair")).toEqual(
+        created ? [["unpair", capturedPair.pairId]] : [],
+      );
+    },
+  );
+
+  test("a failed rollback unpair does not mask the start's error", async () => {
+    await arrange();
+    const pairs = new FakeSimulatorPairs();
+    pairs.unpairError = "unpair failed";
+    setDeviceToolsDependencies({ simulatorPairServiceFactory: () => pairs.service() });
+    await expect(
+      startWatchDevice(
+        {
+          platform: "watchos",
+          deviceId: WATCH_UDID,
+          pairWithDeviceId: capturedPair.phone.deviceId,
+        },
+        async () => {
+          throw new ActionableError("bind refused");
+        },
+      ),
+    ).rejects.toThrow("bind refused");
+    expect(pairs.calls).toContainEqual(["unpair", capturedPair.pairId]);
+  });
+
   test("launch happens before bind and release after attach stops the runner", async () => {
     const f = await arrange();
     const response = await startWatchDevice(

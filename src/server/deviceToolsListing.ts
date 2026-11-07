@@ -387,7 +387,8 @@ async function listSimulatorPairFields(
   deviceManager: Pick<PlatformDeviceManager, "listSimulatorPairs">,
   signal?: AbortSignal,
 ): Promise<{ simulatorPairs?: SimulatorPair[] }> {
-  if (platform !== "ios" && platform !== "watchos") {
+  // The default listing ("either") includes iOS, so it reports pairs too.
+  if (platform !== "ios" && platform !== "watchos" && platform !== "either") {
     return {};
   }
   // Pairs come from the device manager's own simctl, so a fake simctl never reaches xcrun.

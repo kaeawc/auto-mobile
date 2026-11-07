@@ -79,25 +79,28 @@ describe("watchOS listDevices (#17320)", () => {
   });
 });
 
-test.each(["watchos", "ios"] as const)("%s listing includes simulator pairs", async (platform) => {
-  const f = host();
-  if (platform === "ios") {
-    setDeviceToolsDependencies({ deviceManagerFactory: () => new FakeDeviceUtils() });
-  }
-  const pairs = new FakeSimulatorPairs();
-  pairs.listing = pairsFixture("list-pairs-active-connected.json");
-  setDeviceToolsDependencies({ simulatorPairServiceFactory: () => pairs.service() });
-  const result = toolJson(await f.handlers.listDevicesHandler({ platform }));
-  expect(result.simulatorPairs).toEqual([
-    {
-      ...capturedPair,
-      connection: "connected",
-      watch: { ...capturedPair.watch, state: "Booted" },
-      phone: { ...capturedPair.phone, state: "Booted" },
-    },
-  ]);
-  expect(listDevicesOutputSchema.safeParse(result).success).toBe(true);
-});
+test.each(["watchos", "ios", undefined] as const)(
+  "%s listing includes simulator pairs",
+  async (platform) => {
+    const f = host();
+    if (platform !== "watchos") {
+      setDeviceToolsDependencies({ deviceManagerFactory: () => new FakeDeviceUtils() });
+    }
+    const pairs = new FakeSimulatorPairs();
+    pairs.listing = pairsFixture("list-pairs-active-connected.json");
+    setDeviceToolsDependencies({ simulatorPairServiceFactory: () => pairs.service() });
+    const result = toolJson(await f.handlers.listDevicesHandler(platform ? { platform } : {}));
+    expect(result.simulatorPairs).toEqual([
+      {
+        ...capturedPair,
+        connection: "connected",
+        watch: { ...capturedPair.watch, state: "Booted" },
+        phone: { ...capturedPair.phone, state: "Booted" },
+      },
+    ]);
+    expect(listDevicesOutputSchema.safeParse(result).success).toBe(true);
+  },
+);
 test("pair listing failure omits simulatorPairs", async () => {
   const f = host();
   const service = new FakeSimulatorPairs().service();

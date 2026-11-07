@@ -202,7 +202,12 @@ final class SimulatorHighlightOverlay: SimulatorOverlay {
     private let layer = HandDrawnCircleLayer()
     private let startedAt = ProcessInfo.processInfo.systemUptime
     private var previousFrame: CGRect?
+    /// Set by `close()`. A refresh suspended in `prepare` must not touch the
+    /// panel after a replacement closed this overlay.
+    private var isClosed = false
 
+    private let isTrusted: () -> Bool
+    private let targets: () -> [SimulatorOverlayTarget]
     private let displayFrame: @MainActor (SimulatorOverlayTarget) -> CGRect?
     private let prepare: (@MainActor (SimulatorOverlayTarget) async -> Void)?
 
@@ -211,11 +216,13 @@ final class SimulatorHighlightOverlay: SimulatorOverlay {
         request: SimulatorHighlightRequest,
         displayFrame: @escaping @MainActor (SimulatorOverlayTarget) -> CGRect? = SimulatorDisplayGeometry
             .displayFrame(window:),
-        prepare: (@MainActor (SimulatorOverlayTarget) async -> Void)? = nil
+        prepare: (@MainActor (SimulatorOverlayTarget) async -> Void)? = nil,
+        isTrusted: @escaping () -> Bool = { AXIsProcessTrusted() },
+        targets: @escaping () -> [SimulatorOverlayTarget] = { SimulatorDisplayGeometry.targets() }
     )
         throws
     {
-        guard !request.id.isEmpty, AXIsProcessTrusted(),
+        guard !request.id.isEmpty, isTrusted(),
               let frame = displayFrame(window),
               SimulatorDisplayGeometry.orientedBounds(request.shape.bounds, targetSize: frame.size)
               .scaled(to: frame.size) != nil
@@ -226,6 +233,8 @@ final class SimulatorHighlightOverlay: SimulatorOverlay {
         }
         self.displayFrame = displayFrame
         self.prepare = prepare
+        self.isTrusted = isTrusted
+        self.targets = targets
         targetID = window.windowID
         targetPID = window.processID
         shape = request.shape
@@ -251,19 +260,24 @@ final class SimulatorHighlightOverlay: SimulatorOverlay {
     }
 
     func refresh() async throws {
-        guard let window = SimulatorDisplayGeometry.targets()
+        guard !isClosed else { return }
+        guard let window = targets()
             .first(where: { $0.windowID == targetID && $0.processID == targetPID })
         else {
             throw OverlayError("Simulator window disappeared")
         }
         await prepare?(window)
+        guard !isClosed else { return }
         guard let frame = displayFrame(window) else {
             throw OverlayError("Simulator window disappeared")
         }
         update(frame: frame)
     }
 
+    var isPanelVisible: Bool { panel.isVisible }
+
     func close() {
+        isClosed = true
         panel.close()
     }
 

@@ -437,3 +437,44 @@ final class SimulatorHighlightHostTests: XCTestCase {
         XCTAssertEqual(replies[0].error, "permission denied")
     }
 }
+
+@MainActor
+final class SimulatorHighlightOverlayRefreshTests: XCTestCase {
+    func testClosedOverlayIgnoresRefreshResumingFromPendingCapture() async throws {
+        let window = SimulatorOverlayTarget(
+            windowID: 7, processID: 1, frame: CGRect(x: 0, y: 0, width: 200, height: 400), title: "mt-duo-0090b"
+        )
+        let request = try JSONDecoder().decode(SimulatorHighlightRequest.self, from: Data("""
+        {"requestId":"r","id":"h","shape":{"type":"circle","bounds":{"x":10,"y":20,"width":30,"height":40,\
+        "sourceWidth":100,"sourceHeight":200}}}
+        """.utf8))
+        var frameLookups = 0
+        var captureStarted: CheckedContinuation<Void, Never>?
+        var captureFinish: CheckedContinuation<Void, Never>?
+        let overlay = try SimulatorHighlightOverlay(
+            window: window,
+            request: request,
+            displayFrame: { _ in frameLookups += 1; return window.frame },
+            prepare: { _ in
+                await withCheckedContinuation { finish in
+                    captureFinish = finish
+                    captureStarted?.resume()
+                    captureStarted = nil
+                }
+            },
+            isTrusted: { true },
+            targets: { [window] }
+        )
+        XCTAssertEqual(frameLookups, 1)
+
+        let refresh = Task { try await overlay.refresh() }
+        while captureFinish == nil { await Task.yield() }
+        // A same-ID replacement closes the old overlay while its capture is pending.
+        overlay.close()
+        captureFinish?.resume()
+        try await refresh.value
+
+        XCTAssertEqual(frameLookups, 1, "closed overlay must not resolve a frame or re-order its panel")
+        XCTAssertFalse(overlay.isPanelVisible)
+    }
+}

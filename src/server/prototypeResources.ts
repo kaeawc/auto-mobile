@@ -174,9 +174,9 @@ async function readWeb(
     sources.rendererVersion(),
     sources.images,
   );
-  const { frame, revision, variant } = query;
+  const { frame, revision, variant, mcpSessionId } = query;
   return {
-    uri: readUri(query.id, "web", { frame, revision, variant }),
+    uri: readUri(query.id, "web", { frame, revision, variant, mcpSessionId }),
     mimeType: "text/html",
     text: web.html,
     _meta: { ...web.meta },
@@ -188,9 +188,9 @@ function readEmbed(
   query: PrototypeEmbedResourceQuery,
 ): ResourceContent {
   const embed = readPrototypeEmbedResource(sources.revisions, query, sources.rendererVersion());
-  const { revision, variant } = query;
+  const { revision, variant, mcpSessionId } = query;
   return {
-    uri: readUri(query.id, "embed", { revision, variant }),
+    uri: readUri(query.id, "embed", { revision, variant, mcpSessionId }),
     mimeType: "application/json",
     text: embed.text,
     _meta: { ...embed.meta },
@@ -208,9 +208,9 @@ function readSource(
     query,
     sources.rendererVersion(),
   );
-  const { frame, revision } = query;
+  const { frame, revision, mcpSessionId } = query;
   return {
-    uri: readUri(query.id, format, { frame, revision }),
+    uri: readUri(query.id, format, { frame, revision, mcpSessionId }),
     mimeType: file.mimeType,
     text: file.text,
     _meta: { ...file.meta },
@@ -361,13 +361,14 @@ function registerSourceTemplate(
   label: string,
 ): void {
   ResourceRegistry.registerTemplate(template, `Prototype as one ${label} file`, {
-    description: `A shown prototype as one ${label} source file: the spec inlined as a string constant, a header naming the renderer library, required capabilities and asset URIs, and a preview sized to the frame (frame: a device frame id; revision: a kept spec revision, default the latest)`,
+    description: `A shown prototype as one ${label} source file: the spec inlined as a string constant, a header naming the renderer library, required capabilities and asset URIs, and a preview sized to the frame (frame: a device frame id; revision: a kept spec revision, default the latest; mcpSessionId: only the revisions that MCP session produced)`,
     mimeType: prototypeSourceMimeType(format),
     handler: async (params: Record<string, string>) =>
       readSource(sources, format, {
         id: decodeSegmentOrThrow(params.id ?? ""),
         frame: params.frame,
         revision: params.revision,
+        mcpSessionId: params.mcpSessionId,
       }),
   });
 }
@@ -375,7 +376,7 @@ function registerSourceTemplate(
 function registerPrototypeWebResources(sources: PrototypeWebSources): void {
   ResourceRegistry.registerTemplate(PROTOTYPE_WEB_TEMPLATE, "Prototype as a web page", {
     description:
-      "A shown prototype as one self-contained HTML page in a device frame (frame: a device frame id; revision: a kept spec revision, default the latest; variant: the prototype id of its variant group shown first)",
+      "A shown prototype as one self-contained HTML page in a device frame (frame: a device frame id; revision: a kept spec revision, default the latest; variant: the prototype id of its variant group shown first; mcpSessionId: only the revisions that MCP session produced)",
     mimeType: "text/html",
     handler: async (params: Record<string, string>) =>
       readWeb(sources, {
@@ -383,17 +384,19 @@ function registerPrototypeWebResources(sources: PrototypeWebSources): void {
         frame: params.frame,
         revision: params.revision,
         variant: params.variant,
+        mcpSessionId: params.mcpSessionId,
       }),
   });
   ResourceRegistry.registerTemplate(PROTOTYPE_EMBED_TEMPLATE, "Prototype as an embed envelope", {
     description:
-      'A shown prototype as {format: "automobile-prototype-embed", version: 1, requires, spec} for the web renderer library, requires being the capabilities the spec needs (revision: a kept spec revision, default the latest; variant: the prototype id of its variant group to serve)',
+      'A shown prototype as {format: "automobile-prototype-embed", version: 1, requires, spec} for the web renderer library, requires being the capabilities the spec needs (revision: a kept spec revision, default the latest; variant: the prototype id of its variant group to serve; mcpSessionId: only the revisions that MCP session produced)',
     mimeType: "application/json",
     handler: async (params: Record<string, string>) =>
       readEmbed(sources, {
         id: decodeSegmentOrThrow(params.id ?? ""),
         revision: params.revision,
         variant: params.variant,
+        mcpSessionId: params.mcpSessionId,
       }),
   });
   registerSourceTemplate(sources, PROTOTYPE_COMPOSE_TEMPLATE, "compose", "Jetpack Compose");

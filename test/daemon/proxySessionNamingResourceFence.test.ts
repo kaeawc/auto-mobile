@@ -57,8 +57,16 @@ afterAll(() => {
   restoreServerFixture();
 });
 
+/**
+ * Template parameters that name an MCP connection, not a device session, so a read naming one is
+ * never fenced: the prototype resources' `mcpSessionId` revision filter (#17358).
+ */
+const EXEMPT_CONNECTION_PARAMS = /\bmcpSessionId\b/g;
+
 function sessionScopedTemplates(): string[] {
-  return templates.filter((template) => /\{[^}]*session[^}]*\}/i.test(template));
+  return templates.filter((template) =>
+    /\{[^}]*session[^}]*\}/i.test(template.replace(EXEMPT_CONNECTION_PARAMS, "")),
+  );
 }
 
 describe("the proxy's session-naming classifier against the registered templates", () => {

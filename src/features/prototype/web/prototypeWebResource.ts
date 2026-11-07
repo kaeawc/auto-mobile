@@ -1,5 +1,9 @@
 import { ActionableError } from "../../../models";
-import type { PrototypeSpecRevision, PrototypeSpecRevisionSource } from "../prototypeSpecRevisions";
+import type {
+  PrototypeSpecRevision,
+  PrototypeSpecRevisionFilter,
+  PrototypeSpecRevisionSource,
+} from "../prototypeSpecRevisions";
 import { defaultDeviceFrameId, deviceFrameOrThrow } from "./deviceFrames";
 import { withActionableWebInputAsync } from "./prototypeWebInputActionable";
 import { type PrototypeWebVariant } from "./webPage";
@@ -31,12 +35,16 @@ export interface PrototypeWebResourceQuery {
   readonly frame?: string;
   readonly revision?: string;
   readonly variant?: string;
+  /** Only this MCP session's revisions (#17358); absent for every session's. */
+  readonly mcpSessionId?: string;
 }
 
 export interface PrototypeWebResourceMeta {
   readonly revision: number;
   readonly deviceRevision?: number;
-  /** Kept revisions of the variant shown first, oldest first. */
+  /** The MCP session that produced the revision shown first, when known (#17358). */
+  readonly mcpSessionId?: string;
+  /** Kept revisions of the variant shown first (only the filtered session's), oldest first. */
   readonly revisions: readonly number[];
   /** Prototype ids shown as variants, in page order. */
   readonly variants: readonly string[];
@@ -64,6 +72,21 @@ export function parsePrototypeRevision(value: string | undefined): number | unde
   return Number(value);
 }
 
+/** The revision filter of a resource's `mcpSessionId` query parameter (#17358). */
+export function prototypeRevisionFilter(
+  mcpSessionId: string | undefined,
+): PrototypeSpecRevisionFilter | undefined {
+  if (mcpSessionId === undefined) {
+    return undefined;
+  }
+  if (mcpSessionId.trim().length === 0) {
+    throw new ActionableError(
+      "Invalid prototype mcpSessionId: use the mcpSessionId a show or patch returned, or omit it for every session's revisions.",
+    );
+  }
+  return { mcpSessionId };
+}
+
 /** Ids sharing `id`'s variant group (by each id's latest revision), in first-seen order. */
 export function prototypeVariantIds(source: PrototypeSpecRevisionSource, id: string): string[] {
   const group = source.revision(id).variant?.group;
@@ -88,7 +111,7 @@ function webVariant(source: PrototypeSpecRevisionSource, id: string): PrototypeW
 /** The variant `query` shows first and its requested revision; unknown variants are refused. */
 export function shownRevision(
   source: PrototypeSpecRevisionSource,
-  query: Pick<PrototypeWebResourceQuery, "id" | "revision" | "variant">,
+  query: Pick<PrototypeWebResourceQuery, "id" | "revision" | "variant" | "mcpSessionId">,
   variantIds: readonly string[],
 ): { id: string; revision: PrototypeSpecRevision } {
   const id = query.variant ?? query.id;
@@ -97,7 +120,8 @@ export function shownRevision(
       `Unknown variant "${id}" for prototype "${query.id}". Variants: ${variantIds.join(", ")}.`,
     );
   }
-  return { id, revision: source.revision(id, parsePrototypeRevision(query.revision)) };
+  const filter = prototypeRevisionFilter(query.mcpSessionId);
+  return { id, revision: source.revision(id, parsePrototypeRevision(query.revision), filter) };
 }
 
 /**
@@ -130,7 +154,8 @@ async function buildWebResource(
   const group = source.revision(query.id).variant?.group;
   // Read before awaiting the encoder: a show landing meanwhile, or the byte cap evicting this id,
   // must not change the metadata of the page already being built.
-  const revisions = source.history(shown.id).map((entry) => entry.revision);
+  const filter = prototypeRevisionFilter(query.mcpSessionId);
+  const revisions = source.history(shown.id, filter).map((entry) => entry.revision);
   const page = await buildPrototypeWebPageWithImages(
     {
       title: group ?? query.id,
@@ -143,13 +168,14 @@ async function buildWebResource(
     images.assets(variantIds),
     images.encoder,
   );
-  const { deviceRevision } = shown.revision;
+  const { deviceRevision, mcpSessionId } = shown.revision;
   return {
     html: page.html,
     lastModified: shown.revision.time,
     meta: {
       revision: shown.revision.revision,
       ...(deviceRevision === undefined ? {} : { deviceRevision }),
+      ...(mcpSessionId === undefined ? {} : { mcpSessionId }),
       revisions,
       variants: variantIds,
       frame: page.frame,

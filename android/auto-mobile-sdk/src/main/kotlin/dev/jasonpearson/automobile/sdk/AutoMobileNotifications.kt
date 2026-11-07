@@ -67,12 +67,14 @@ object AutoMobileNotifications {
   const val ACTION_NOTIFICATION_ACTION = "dev.jasonpearson.automobile.sdk.NOTIFICATION_ACTION"
 
   /** Host query: does the channel named by [EXTRA_CHANNEL_ID] exist? */
-  const val ACTION_CHANNEL_QUERY = "dev.jasonpearson.automobile.sdk.NOTIFICATION_CHANNEL_QUERY"
+  internal const val ACTION_CHANNEL_QUERY =
+    "dev.jasonpearson.automobile.sdk.NOTIFICATION_CHANNEL_QUERY"
 
   /**
    * Host request: delete the channel named by [EXTRA_CHANNEL_ID], then report whether it exists.
    */
-  const val ACTION_CHANNEL_DELETE = "dev.jasonpearson.automobile.sdk.NOTIFICATION_CHANNEL_DELETE"
+  internal const val ACTION_CHANNEL_DELETE =
+    "dev.jasonpearson.automobile.sdk.NOTIFICATION_CHANNEL_DELETE"
 
   const val EXTRA_TITLE = "title"
   const val EXTRA_BODY = "body"

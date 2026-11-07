@@ -88,16 +88,30 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
 
     private func node(_ snapshot: any XCUIElementSnapshot) -> SdkViewNode {
         let frame = snapshot.frame
+        let bounds = SdkBounds(
+            left: Int(frame.minX), top: Int(frame.minY), right: Int(frame.maxX), bottom: Int(frame.maxY)
+        )
+        let className = "XCUIElementType(\(snapshot.elementType.rawValue))"
+        var children = snapshot.children.map { node($0) }
+        if let value = watchTextValueChild(
+            elementType: snapshot.elementType.rawValue, label: snapshot.label, value: snapshot.value as? String
+        ) {
+            children.append(SdkViewNode(
+                className: className, bounds: bounds, accessibilityLabel: value,
+                accessibilityIdentifier: snapshot.identifier, isUserInteractionEnabled: snapshot.isEnabled
+            ))
+        }
         return SdkViewNode(
             // Preserve the XCUITest raw element type without claiming an in-app SwiftUI class.
-            className: "XCUIElementType(\(snapshot.elementType.rawValue))",
-            bounds: SdkBounds(
-                left: Int(frame.minX), top: Int(frame.minY), right: Int(frame.maxX), bottom: Int(frame.maxY)
+            className: className,
+            bounds: bounds,
+            accessibilityLabel: watchAccessibilityLabel(
+                elementType: snapshot.elementType.rawValue, label: snapshot.label,
+                value: snapshot.value as? String, placeholder: snapshot.placeholderValue
             ),
-            accessibilityLabel: snapshot.label,
             accessibilityIdentifier: snapshot.identifier,
             isUserInteractionEnabled: snapshot.isEnabled,
-            children: snapshot.children.map { node($0) }
+            children: children
         )
     }
 
@@ -132,7 +146,8 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
                 // A slow drag that holds before release ends without fling momentum.
                 app.coordinate(withNormalizedOffset: from).press(
                     forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: to),
-                    withVelocity: .slow, thenHoldForDuration: 0.3)
+                    withVelocity: .slow, thenHoldForDuration: 0.3
+                )
                 return
             }
             switch direction {

@@ -110,10 +110,51 @@ function matches(element: Element, selector: { elementId?: string; text?: string
   );
 }
 
+/**
+ * The runner exposes a populated text field's value (or a placeholder) as a same-type, same-bounds
+ * child that repeats the field's identifier. An identifier match must count the field once, or an
+ * index over several fields sharing an identifier lands on the first field's alias.
+ */
+function dropIdentifierAliases(candidates: readonly Element[]): Element[] {
+  const seen = new Set<string>();
+  return candidates.filter((element) => {
+    const { left, top, right, bottom } = element.bounds;
+    const key = `${element["resource-id"] ?? element["view-id"]}|${element.class}|${left},${top},${right},${bottom}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function matchWatchTapCandidates(
+  available: readonly Element[],
+  selector: { elementId?: string; text?: string },
+): Element[] {
+  const matched = available.filter((element) => matches(element, selector));
+  return selector.elementId !== undefined ? dropIdentifierAliases(matched) : matched;
+}
+
+/** Stable input-first ordering for sendKeys; ordinary taps retain hierarchy order. */
+export function orderWatchTapCandidates(
+  candidates: readonly Element[],
+  preferTextInput: boolean,
+): Element[] {
+  const isTextInput = (element: Element) =>
+    ["XCUIElementType(45)", "XCUIElementType(49)", "XCUIElementType(50)"].includes(
+      element.class ?? "",
+    );
+  return preferTextInput
+    ? candidates.toSorted((a, b) => Number(isTextInput(b)) - Number(isTextInput(a)))
+    : [...candidates];
+}
+
 export async function watchTapOn(
   deviceId: string,
   options: TapOnElementOptions,
   signal?: AbortSignal,
+  preferTextInput = false,
 ): Promise<TapOnElementResult> {
   // Must precede hierarchy reads, not just the tap itself: long press is never advertised.
   if (options.action !== "tap") {
@@ -126,7 +167,10 @@ export async function watchTapOn(
   signal?.throwIfAborted();
   const client = watchRunners.require(deviceId);
   const { all, available } = await elements(client, signal);
-  const candidates = available.filter((element) => matches(element, options));
+  const candidates = orderWatchTapCandidates(
+    matchWatchTapCandidates(available, options),
+    options.text !== undefined && preferTextInput,
+  );
   const element = candidates[options.index ?? 0];
   if (!element) {
     throw new ActionableError(

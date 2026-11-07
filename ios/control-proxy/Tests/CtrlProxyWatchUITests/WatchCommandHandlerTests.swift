@@ -4,6 +4,40 @@ import XCTest
 
 @MainActor
 final class WatchCommandHandlerTests: XCTestCase {
+    func testSystemAlertsIgnoreEmptyAlerts() {
+        let tree = WatchAlertTree(element: "root", children: [
+            WatchAlertTree(element: "empty", isAlert: true),
+            WatchAlertTree(element: "empty descendants", isAlert: true, children: [
+                WatchAlertTree(element: "empty child"),
+            ]),
+            WatchAlertTree(element: "ordinary content", label: "App"),
+        ])
+        XCTAssertEqual(watchSystemAlerts(in: tree), [])
+    }
+
+    func testSystemAlertsKeepLabelsAndIdentifiersInOrder() {
+        let tree = WatchAlertTree(element: "root", children: [
+            WatchAlertTree(element: "permission", isAlert: true, label: "Allow"),
+            WatchAlertTree(element: "empty", isAlert: true),
+            WatchAlertTree(element: "notification", isAlert: true, identifier: "Invite"),
+        ])
+        XCTAssertEqual(watchSystemAlerts(in: tree), ["permission", "notification"])
+    }
+
+    func testSystemAlertsFindNestedContentWithoutDuplicatingAlerts() {
+        let tree = WatchAlertTree(element: "root", children: [
+            WatchAlertTree(element: "container", children: [
+                WatchAlertTree(element: "alert", isAlert: true, children: [
+                    WatchAlertTree(element: "table", children: [
+                        WatchAlertTree(element: "text", label: "Join the meeting?"),
+                        WatchAlertTree(element: "nested alert", isAlert: true, identifier: "Invite"),
+                    ]),
+                ]),
+            ]),
+        ])
+        XCTAssertEqual(watchSystemAlerts(in: tree), ["alert"])
+    }
+
     func testCommandFailureCoordinatorScopesAndBoundsFailures() {
         let coordinator = WatchXCUISource.CommandFailureCoordinator()
         XCTAssertFalse(coordinator.recordDeflectedFailure("Outside gesture"))

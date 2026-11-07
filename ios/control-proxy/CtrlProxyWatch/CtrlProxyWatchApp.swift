@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct CtrlProxyWatchApp: App {
@@ -9,6 +10,7 @@ struct CtrlProxyWatchApp: App {
     }
 
     @FocusState private var crownFocus: CrownFocus?
+    @StateObject private var notifications = WatchNotificationFixture()
 
     var body: some Scene {
         WindowGroup {
@@ -16,6 +18,8 @@ struct CtrlProxyWatchApp: App {
                 VStack {
                     crownFixture
                         .frame(height: 95)
+                    Text(notifications.status)
+                        .accessibilityIdentifier("watch-notification-status")
                     List {
                         NavigationLink {
                             Text("Watch smoke next")
@@ -70,5 +74,51 @@ struct CtrlProxyWatchApp: App {
                 .accessibilityLabel("Non-hittable fixture")
                 .accessibilityIdentifier("ctrlproxy-non-hittable")
         }
+    }
+}
+
+/// Notification fixture: requests authorization, registers category AM_WATCH_CHECK with two actions
+/// and records the chosen action so a push can be verified end to end.
+@MainActor
+final class WatchNotificationFixture: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
+    @Published var status = UserDefaults.standard.string(forKey: "notificationStatus") ?? "notification idle"
+
+    private func record(_ text: String) {
+        status = text
+        UserDefaults.standard.set(text, forKey: "notificationStatus")
+    }
+
+    override init() {
+        super.init()
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        let accept = UNNotificationAction(identifier: "ACCEPT_ACTION", title: "Accept", options: [])
+        let decline = UNNotificationAction(identifier: "DECLINE_ACTION", title: "Decline", options: [])
+        center.setNotificationCategories([
+            UNNotificationCategory(
+                identifier: "AM_WATCH_CHECK", actions: [accept, decline], intentIdentifiers: [], options: []
+            ),
+        ])
+        center.requestAuthorization(options: [.alert, .sound]) { _, _ in
+            UNUserNotificationCenter.current().getNotificationSettings { settings in
+                let state = settings.authorizationStatus == .authorized ? "authorized" : "not authorized"
+                Task { @MainActor in
+                    if !self.status.hasPrefix("notification action") { self.record("notification \(state)") }
+                }
+            }
+        }
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter, willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .list, .sound]
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
+    ) async {
+        let action = response.actionIdentifier
+        await MainActor.run { self.record("notification action \(action)") }
     }
 }

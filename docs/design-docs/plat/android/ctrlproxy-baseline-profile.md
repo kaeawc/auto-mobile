@@ -12,8 +12,8 @@ AGP merges two rule sources for the release variant:
   components and the hot paths (accessibility event handling and hierarchy extraction, the Ktor CIO
   WebSocket server, the IME, prototype rendering, and the serialized models). Its unit test keeps
   every rule well formed and every manifest component covered.
-- `android/control-proxy/src/main/generated/baselineProfiles/`: rules recorded on a device by
-  `:control-proxy-baselineprofile`. Absent until someone runs the generator.
+- `generated/baselineProfiles/` in the `main` source set of `android/control-proxy`: rules recorded
+  on a device by `:control-proxy-baselineprofile`. Absent until someone runs the generator.
 
 R8 expands wildcard rules and rewrites them to the obfuscated names before AGP compiles the binary
 profile, so the packaged profile matches the minified dex.

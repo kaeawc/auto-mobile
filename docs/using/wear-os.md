@@ -134,11 +134,12 @@ from its top, and an already-open stream is scrolled back to the top first and l
 afterwards. If the top cannot be reached within `awaitTimeout`, the action fails with
 `notification_not_found` instead of scanning from the middle.
 
-- `list` returns each card's app label, `title`, `body`, `texts` and `bounds`; `id` is `null`
-  and `actions` is empty.
+- `list` returns each card once with its app label, `title`, `body`, `texts` and `bounds`; `id`
+  is `null` and `actions` is empty.
 - `tap` opens the card, then taps `tapActionLabel` (or the card's title or body) in the expanded
-  view. If that text is not a single clickable target there, it fails rather than guessing and
-  goes back to the stream; retry with an explicit `tapActionLabel`.
+  card, scrolling the stream when the action sits below the screen edge. If that text is not a
+  single clickable target there, it fails rather than guessing and collapses the card; retry with
+  an explicit `tapActionLabel`.
 - `dismiss` swipes the card sideways, taps the X button when the swipe only reveals it (Wear OS
   7), and reports `dismissal_unconfirmed` unless the removal is
   confirmed: with `appId`, by one of the app's active notifications showing the card's title
@@ -147,6 +148,9 @@ afterwards. If the top cannot be reached within `awaitTimeout`, the action fails
 - `clearAll` taps the stream's **Clear all** only when every active notification belongs to
   `appId`; otherwise, or when `title` or `body` narrows it, it dismisses matching cards one by
   one.
+
+`open` needs the watch face: from the app launcher, the stream does not open and the action
+fails; go back to the watch face first.
 
 A tap target whose centre falls outside the round display is refused; scroll it into view.
 Every action captures the configured action screenshot or accessibility audit from the final

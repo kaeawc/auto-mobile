@@ -22,9 +22,12 @@ import {
   watchClearAll,
   watchExpandedTarget,
   watchNotifications,
+  watchCardClipEdges,
   watchCardClipped,
   watchRevealedDismiss,
   watchStreamRoot,
+  watchStreamScroll,
+  watchHasExpandedCard,
   isWearHierarchy,
   type WatchNotification,
 } from "./helpers/watchHierarchy";
@@ -35,6 +38,11 @@ const MAX_STREAM_PAGES = 20;
 const POLL_MS = 250;
 const MAX_SETTLE_READS = 6;
 const SETTLE_MS = 500;
+const MAX_CLOSE_PRESSES = 3;
+const MAX_UNMOVED_RETRIES = 2;
+const CLOSE_POLLS = 8;
+const REWIND_WHEEL_STEP = 3;
+const MIN_RESTORE_MS = 10_000;
 
 const outcome = (payload: Record<string, unknown>, success = true): SystemTrayOutcome => ({
   payload: { ...payload, success },
@@ -93,6 +101,75 @@ const visiblyRemoved = (card: WatchNotification, before: ObserveResult, after: O
   );
 };
 
+/** A card as one scan page showed it: the fullest reading so far, and where the last page put it. */
+interface ScannedCard {
+  card: WatchNotification;
+  /** Cut off by a viewport edge, so its text may be partial. */
+  clipped: boolean;
+  /** Cut off at the bottom edge, so the next page must show its continuation. */
+  clippedBottom: boolean;
+  /** Bounds on the latest page that showed it. */
+  bounds: WatchNotification["element"]["bounds"];
+}
+
+const scannedCards = (observation: ObserveResult, cards: WatchNotification[]): ScannedCard[] =>
+  cards
+    .map((card) => {
+      const edges = watchCardClipEdges(observation.viewHierarchy, card);
+      return {
+        card,
+        clipped: edges.top || edges.bottom,
+        clippedBottom: edges.bottom,
+        bounds: card.element.bounds,
+      };
+    })
+    // A slice with no text yet says nothing about the card; the page that shows it whole will.
+    .filter((entry) => !entry.clipped || entry.card.title !== null || entry.card.body !== null);
+
+/** The fuller of two readings of one card: a whole card beats a clipped one, else the taller slice. */
+const fuller = (known: ScannedCard, seen: ScannedCard) => {
+  const height = (entry: ScannedCard) => entry.bounds.bottom - entry.bounds.top;
+  const better =
+    known.clipped && (!seen.clipped || height(seen) > height(known)) ? seen.card : known.card;
+  return { ...seen, card: better };
+};
+
+/**
+ * Whether the head of `page` shows again the `tail` cards of `collected`. Equal content alone is
+ * no proof: separate notifications can repeat an app, title and body. Evidence beyond content is
+ * either a run of two or more equal neighbours, or a single card the last page cut off at its
+ * bottom edge (its continuation must lead the next page); every card must also have moved up with
+ * the scroll, never down.
+ */
+const isSameRun = (tail: ScannedCard[], head: ScannedCard[]) =>
+  tail.every((known, index) => {
+    const seen = head[index];
+    return (
+      cardIdentity(known.card) === cardIdentity(seen.card) && seen.bounds.top <= known.bounds.top
+    );
+  }) &&
+  (tail.length >= 2 || tail[0].clippedBottom);
+
+/**
+ * Appends a scanned page to the cards collected so far. A scroll moves less than a screen, so the
+ * cards at the end of the last page can show again at the start of the next: when the overlap is
+ * established (see {@link isSameRun}) it is listed once, keeping the fuller reading of each card;
+ * otherwise every card is kept, so repeated notifications are never lost (#17317).
+ */
+const mergePage = (collected: ScannedCard[], page: ScannedCard[]) => {
+  for (let overlap = Math.min(collected.length, page.length); overlap > 0; overlap--) {
+    const tail = collected.slice(-overlap);
+    const head = page.slice(0, overlap);
+    if (isSameRun(tail, head)) {
+      return [
+        ...collected.slice(0, -overlap),
+        ...tail.map((known, index) => fuller(known, head[index])),
+        ...page.slice(overlap),
+      ];
+    }
+  }
+  return [...collected, ...page];
+};
 /** Whether the matched card can take its action now, or must first be scrolled into full view. */
 const actionable = (
   action: SystemTrayArgs["action"],
@@ -228,7 +305,7 @@ export class WatchSystemTray {
       const deadline = getSystemTrayDependencies().timer.now() + timeout;
       const observation = opened.observation ?? (await this.read());
       // The scan only moves toward the end, so a stream left scrolled down must start at the top.
-      const top = initiallyOpen ? await this.rewind(observation, deadline) : observation;
+      const top = await this.toTop(observation, initiallyOpen, deadline);
       result = top
         ? await this.run(args, { criteria, label, deadline, dismissedCount: 0 }, top)
         : outcome(
@@ -244,7 +321,8 @@ export class WatchSystemTray {
       const controller = new AbortController();
       restored = await raceWithDeadline(() => this.restore(initiallyOpen, controller.signal), {
         timer: getSystemTrayDependencies().timer,
-        timeoutMs: timeout,
+        // Restoring waits for the stream's slide-out, so a short request deadline must not cut it.
+        timeoutMs: Math.max(timeout, MIN_RESTORE_MS),
         label: "Watch notification stream restoration",
         onTimeout: () => controller.abort(),
       });
@@ -253,6 +331,24 @@ export class WatchSystemTray {
       }
     }
     return { outcome: result, observation: restored };
+  }
+
+  /**
+   * The stream at its top, or `undefined` when it could not be reached. The scan only moves toward
+   * the end, so a stream left scrolled down must start at the top. At the top already, another
+   * downward move would pull down Quick Settings (#17317). A freshly opened stream comes back where
+   * it was left, so it is rewound too once it is known to be scrolled; a capture that cannot say is
+   * trusted to start at the top.
+   */
+  private toTop(
+    observation: ObserveResult,
+    initiallyOpen: boolean,
+    deadline: number,
+  ): Promise<ObserveResult | undefined> {
+    const scroll = watchStreamScroll(observation.viewHierarchy);
+    return scroll === "scrolled" || (initiallyOpen && scroll === "unknown")
+      ? this.rewind(observation, deadline)
+      : Promise.resolve(observation);
   }
 
   private async toggle(action: "open" | "close", timeout: number): Promise<WatchSystemTrayResult> {
@@ -274,7 +370,9 @@ export class WatchSystemTray {
   private async restore(initiallyOpen: boolean, signal: AbortSignal): Promise<ObserveResult> {
     // Cleanup deliberately ignores request cancellation, as on the phone clear path.
     let current = await this.readWithoutCancellation(signal);
-    if (
+    if (this.expandedByUs && watchHasExpandedCard(current.viewHierarchy)) {
+      current = await this.collapseCard(current, signal);
+    } else if (
       this.expandedByUs &&
       !watchStreamRoot(current.viewHierarchy) &&
       isWearHierarchy(current.viewHierarchy)
@@ -283,15 +381,49 @@ export class WatchSystemTray {
       current = await this.readWithoutCancellation(signal);
     }
     if (!initiallyOpen && watchStreamRoot(current.viewHierarchy)) {
-      await this.commandWithoutCancellation("shell input keyevent 4", signal);
-      current = await this.readWithoutCancellation(signal);
-      if (watchStreamRoot(current.viewHierarchy)) {
-        throw new ActionableError(
-          "Watch notification stream did not close after returning to the previous screen.",
-        );
-      }
+      current = await this.closeStream(current, signal);
     }
     return current;
+  }
+
+  /** Back collapses a card expanded in place; wait for it, without closing the stream twice. */
+  private async collapseCard(first: ObserveResult, signal: AbortSignal): Promise<ObserveResult> {
+    await this.commandWithoutCancellation("shell input keyevent 4", signal);
+    let current = first;
+    for (let poll = 0; poll < CLOSE_POLLS; poll++) {
+      current = await this.readWithoutCancellation(signal);
+      if (!watchStreamRoot(current.viewHierarchy) || !watchHasExpandedCard(current.viewHierarchy)) {
+        return current;
+      }
+      await sleep(POLL_MS, signal);
+    }
+    return current;
+  }
+
+  /**
+   * Press Back and wait for the stream to be gone. It slides out over a second or so, so a read
+   * straight after Back still sees it (#17317). A second Back is pressed only while a card is
+   * still expanded: on the watch face Back opens the app launcher, so an impatient repeat would
+   * leave the watch somewhere the next request cannot open the stream from.
+   */
+  private async closeStream(first: ObserveResult, signal: AbortSignal): Promise<ObserveResult> {
+    let current = first;
+    for (let press = 0; press < MAX_CLOSE_PRESSES; press++) {
+      await this.commandWithoutCancellation("shell input keyevent 4", signal);
+      for (let poll = 0; poll < CLOSE_POLLS; poll++) {
+        current = await this.readWithoutCancellation(signal);
+        if (!watchStreamRoot(current.viewHierarchy)) {
+          return current;
+        }
+        await sleep(POLL_MS, signal);
+      }
+      if (!watchHasExpandedCard(current.viewHierarchy)) {
+        break;
+      }
+    }
+    throw new ActionableError(
+      "Watch notification stream did not close after returning to the previous screen.",
+    );
   }
 
   private readWithoutCancellation(signal: AbortSignal): Promise<ObserveResult> {
@@ -317,7 +449,7 @@ export class WatchSystemTray {
     observation: ObserveResult,
   ): Promise<SystemTrayOutcome> {
     const { criteria, label, deadline } = scope;
-    let cards: WatchNotification[] = [];
+    let cards: ScannedCard[] = [];
     let previous: ObserveResult | undefined;
     for (let page = 0; page < MAX_STREAM_PAGES; page++) {
       if (!watchStreamRoot(observation.viewHierarchy)) {
@@ -341,10 +473,11 @@ export class WatchSystemTray {
       if (target && actionable(args.action, target, observation, atEnd)) {
         return this.act(args, target, observation, scope);
       }
-      // Preserve identical cards within a page. Cross-page overlap is deliberately conservative:
-      // without captured stable IDs, keep duplicates rather than silently lose notifications.
+      // Identical cards within a page are all kept. A page identical to the last one adds nothing.
       if (!unmoved) {
-        cards = [...cards, ...matching];
+        // Cards cut off by a viewport edge are kept as partial readings until a page shows them
+        // whole; a card taller than the viewport is never shown whole.
+        cards = mergePage(cards, scannedCards(observation, matching));
       }
       if (atEnd && ["list", "clearAll"].includes(args.action)) {
         return this.scanResult(args, scope, cards, observation);
@@ -398,14 +531,14 @@ export class WatchSystemTray {
   private scanResult(
     args: SystemTrayArgs,
     scope: WatchScope,
-    cards: WatchNotification[],
+    cards: ScannedCard[],
     observation: ObserveResult,
   ): SystemTrayOutcome {
     const { criteria } = scope;
     if (args.action === "list") {
       return outcome({
         message: `Listed ${cards.length} notifications for ${criteria.appId}`,
-        notifications: cards.map((card) => listedCard(card, criteria.appId)),
+        notifications: cards.map(({ card }) => listedCard(card, criteria.appId)),
         observation,
       });
     }
@@ -469,9 +602,15 @@ export class WatchSystemTray {
       if (getSystemTrayDependencies().timer.now() >= deadline) {
         return undefined;
       }
+      // One more downward swipe at the top would pull down Quick Settings.
+      if (watchStreamScroll(observation.viewHierarchy) === "top") {
+        return observation;
+      }
+      // A mouse-wheel step scrolls the stream and stops at its top. A finger swipe hands whatever
+      // it has left at the top to the system and pulls down Quick Settings (#17317).
       const { width, height } = observation.screenSize;
       await this.command(
-        `shell input swipe ${Math.floor(width / 2)} ${Math.floor(height * 0.25)} ${Math.floor(width / 2)} ${Math.floor(height * 0.75)} 500`,
+        `shell input mouse scroll ${Math.floor(width / 2)} ${Math.floor(height / 2)} --axis VSCROLL,${REWIND_WHEEL_STEP}`,
       );
       await sleep(
         Math.min(POLL_MS, Math.max(0, deadline - getSystemTrayDependencies().timer.now())),
@@ -503,7 +642,22 @@ export class WatchSystemTray {
       Math.min(POLL_MS, Math.max(0, deadline - getSystemTrayDependencies().timer.now())),
       this.signal,
     );
-    return this.read();
+    let next = await this.read();
+    // A swipe that seems to have moved nothing may only not have been drawn yet (a loaded device
+    // serves the pre-scroll tree for a while); the scan treats an unmoved page as the end of the
+    // stream, so look again before it does (#17317).
+    for (
+      let retry = 0;
+      !atEnd && retry < MAX_UNMOVED_RETRIES && pageSignature(next) === pageSignature(observation);
+      retry++
+    ) {
+      await sleep(
+        Math.min(SETTLE_MS, Math.max(0, deadline - getSystemTrayDependencies().timer.now())),
+        this.signal,
+      );
+      next = await this.read();
+    }
+    return next;
   }
 
   private async act(
@@ -520,7 +674,7 @@ export class WatchSystemTray {
       });
     }
     if (args.action === "tap") {
-      return this.tapNotification(args, card, observation);
+      return this.tapNotification(args, card, observation, scope);
     }
     return this.dismissNotification(args, card, observation, scope);
   }
@@ -529,13 +683,28 @@ export class WatchSystemTray {
     args: SystemTrayArgs,
     card: WatchNotification,
     observation: ObserveResult,
+    scope: WatchScope,
   ): Promise<SystemTrayOutcome> {
     await this.tap(card.element, observation);
     this.expandedByUs = true;
-    await sleep(POLL_MS, this.signal);
-    const expanded = await this.read();
     const text = args.notification?.tapActionLabel ?? card.title ?? card.body;
-    const target = text ? watchExpandedTarget(expanded.viewHierarchy, text) : undefined;
+    // The card expands over a few hundred ms and its actions only appear once it has, so re-read
+    // until the labelled target shows up (bounded).
+    let expanded = observation;
+    let target: Element | undefined;
+    for (let attempt = 0; attempt < MAX_SETTLE_READS && text && !target; attempt++) {
+      await sleep(POLL_MS, this.signal);
+      expanded = await this.read();
+      target = watchExpandedTarget(expanded.viewHierarchy, text);
+      // The expanded card grows past the bottom edge and the stream does not follow it, so its
+      // action rows are off screen until the stream is scrolled up (#17317).
+      if (!target && watchHasExpandedCard(expanded.viewHierarchy)) {
+        const { width, height } = expanded.screenSize;
+        await this.command(
+          `shell input swipe ${Math.floor(width / 2)} ${Math.floor(height * 0.7)} ${Math.floor(width / 2)} ${Math.floor(height * 0.35)} 400`,
+        );
+      }
+    }
     if (!target) {
       throw new ActionableError(
         "Watch notification expanded target is not available. Re-observe the expanded notification and use an explicit clickable content or action label.",

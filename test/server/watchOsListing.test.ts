@@ -1,3 +1,5 @@
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeSimulatorPairs, pairsFixture, capturedPair } from "../fakes/FakeSimulatorPairs";
 import { afterEach, describe, expect, test } from "bun:test";
 import fixture from "../fixtures/ios-simctl/list-all-appletv-26-5.json";
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
@@ -36,6 +38,7 @@ function host() {
     avdManagerFactory: () => new FakeAvdManager(),
     timer: new FakeTimer(),
     bootCapacityReporters: {},
+    simulatorPairServiceFactory: () => new FakeSimulatorPairs().service(),
   });
   return { simctl, handlers: createListingHandlers() };
 }
@@ -73,5 +76,95 @@ describe("watchOS listDevices (#17320)", () => {
       count: 0,
       discovery: { complete: false, failedPlatforms: ["watchos"] },
     });
+  });
+});
+
+test.each(["watchos", "ios", undefined] as const)(
+  "%s listing includes simulator pairs",
+  async (platform) => {
+    const f = host();
+    if (platform !== "watchos") {
+      setDeviceToolsDependencies({ deviceManagerFactory: () => new FakeDeviceUtils() });
+    }
+    const pairs = new FakeSimulatorPairs();
+    pairs.listing = pairsFixture("list-pairs-active-connected.json");
+    setDeviceToolsDependencies({ simulatorPairServiceFactory: () => pairs.service() });
+    const result = toolJson(await f.handlers.listDevicesHandler(platform ? { platform } : {}));
+    expect(result.simulatorPairs).toEqual([
+      {
+        ...capturedPair,
+        connection: "connected",
+        watch: { ...capturedPair.watch, state: "Booted" },
+        phone: { ...capturedPair.phone, state: "Booted" },
+      },
+    ]);
+    expect(listDevicesOutputSchema.safeParse(result).success).toBe(true);
+  },
+);
+test("pair listing failure omits simulatorPairs", async () => {
+  const f = host();
+  const service = new FakeSimulatorPairs().service();
+  service.list = async () => {
+    throw new Error("listing failed");
+  };
+  setDeviceToolsDependencies({ simulatorPairServiceFactory: () => service });
+  expect(
+    toolJson(await f.handlers.listDevicesHandler({ platform: "watchos" })).simulatorPairs,
+  ).toBeUndefined();
+});
+
+describe("listDevices pair source is the device manager's simctl (#17418)", () => {
+  function managerHost(manager: MultiPlatformDeviceManager) {
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => manager,
+      avdManagerFactory: () => new FakeAvdManager(),
+      timer: new FakeTimer(),
+      bootCapacityReporters: {},
+    });
+    return createListingHandlers();
+  }
+  const availableSimctl = () =>
+    fakeDeviceManagerSimctl({
+      isAvailable: async () => true,
+      getBootedSimulatorsChecked: async () => [],
+    });
+
+  test("a manager over a fake simctl lists no pairs", async () => {
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient(),
+      availableSimctl(),
+      createFakeAndroidEmulator(),
+    );
+    expect(await manager.listSimulatorPairs()).toEqual([]);
+    const result = toolJson(await managerHost(manager).listDevicesHandler({ platform: "ios" }));
+    expect(result).not.toHaveProperty("simulatorPairs");
+  });
+
+  test("the injected pair source is listed under ios", async () => {
+    const pairs = new FakeSimulatorPairs();
+    pairs.listing = pairsFixture("list-pairs-active-connected.json");
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient(),
+      availableSimctl(),
+      createFakeAndroidEmulator(),
+    ).withSimulatorPairs(pairs.service());
+    const result = toolJson(await managerHost(manager).listDevicesHandler({ platform: "ios" }));
+    expect(result.simulatorPairs).toHaveLength(1);
+    expect(pairs.calls).toEqual([["list", "pairs", "-j"]]);
+  });
+
+  test("a failing pair source leaves the device listing unchanged", async () => {
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient(),
+      availableSimctl(),
+      createFakeAndroidEmulator(),
+    ).withSimulatorPairs({
+      list: async () => {
+        throw new Error("simctl list pairs failed");
+      },
+    });
+    const result = toolJson(await managerHost(manager).listDevicesHandler({ platform: "ios" }));
+    expect(result).toMatchObject({ count: 0, discovery: { complete: true } });
+    expect(result).not.toHaveProperty("simulatorPairs");
   });
 });

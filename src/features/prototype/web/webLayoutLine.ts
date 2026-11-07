@@ -94,12 +94,10 @@ function measuredSize(element: WebElement, axis: Axis, vars: CssVars, depth: num
 }
 
 /**
- * A content-sized element's size on one axis from its measurable in-flow children (#17459):
- * stacked along its layout's axis with its gap, else the largest, plus padding and border.
- * Unknown when any child is text, inline, has a margin or is itself unmeasurable.
+ * The in-flow children a content-sized element can be measured from; undefined when any is text,
+ * inline in flow or has a margin, or when there are none or they lie in tracks.
  */
-function measuredContent(element: WebElement, axis: Axis, vars: CssVars, depth: number): Len {
-  const layout = layoutOf(element);
+function measurableChildren(element: WebElement, layout: Layout): WebElement[] | undefined {
   const children = element.children.filter((child) =>
     typeof child !== "string"
       ? !outOfFlow(child) && child.style.display !== "none"
@@ -107,7 +105,6 @@ function measuredContent(element: WebElement, axis: Axis, vars: CssVars, depth: 
   );
   const elements = elementsOf(children);
   const unmeasurable =
-    depth >= MAX_MEASURE_DEPTH ||
     layout === "tracks" ||
     elements.length === 0 ||
     elements.length < children.length ||
@@ -116,14 +113,22 @@ function measuredContent(element: WebElement, axis: Axis, vars: CssVars, depth: 
         (layout === "flow" && isInline(child)) ||
         Object.keys(child.style).some((name) => name.startsWith("margin")),
     );
-  if (unmeasurable) {
+  return unmeasurable ? undefined : elements;
+}
+
+/**
+ * A content-sized element's size on one axis from its measurable in-flow children (#17459):
+ * stacked along its layout's axis with its gap, else the largest, plus padding and border.
+ * Unknown when any child is unmeasurable.
+ */
+function measuredContent(element: WebElement, axis: Axis, vars: CssVars, depth: number): Len {
+  const layout = layoutOf(element);
+  const elements = depth >= MAX_MEASURE_DEPTH ? undefined : measurableChildren(element, layout);
+  const sizes = (elements ?? []).map((child) => measuredSize(child, axis, vars, depth + 1));
+  const known = sizes.filter((size): size is number => size !== undefined);
+  if (elements === undefined || known.length < sizes.length) {
     return undefined;
   }
-  const sizes = elements.map((child) => measuredSize(child, axis, vars, depth + 1));
-  if (sizes.some((size) => size === undefined)) {
-    return undefined;
-  }
-  const known = sizes as number[];
   const stacked =
     layout === (axis === "width" ? "row" : "column") || (layout === "flow" && axis === "height");
   const unknownRoom: WebRect = { left: 0, top: 0, width: undefined, height: undefined };

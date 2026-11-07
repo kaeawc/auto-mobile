@@ -132,10 +132,15 @@ with `skipped: true`. `list` and `clearAll`
 require `notification.appId`; `find`, `tap`, `dismiss`, `list` and `clearAll` scroll the stream
 from its top, and an already-open stream is scrolled back to the top first and left open
 afterwards. If the top cannot be reached within `awaitTimeout`, the action fails with
-`notification_not_found` instead of scanning from the middle.
+`notification_not_found` instead of scanning from the middle (`list` instead returns no cards,
+flagged as below).
 
 - `list` returns each card once with its app label, `title`, `body`, `texts` and `bounds`; `id`
-  is `null` and `actions` is empty.
+  is `null` and `actions` is empty. Without `awaitTimeout` it scans for up to 30 s, enough for a
+  full scroll of a typical stream. When the scan stops before the end of the stream, it still
+  succeeds with the cards read so far, `incomplete: true` and `incompleteReason`: `deadline`
+  (time ran out), `page_limit` (too many pages) or `rewind` (the top was not reached, so no cards
+  were read). Retry with a larger `awaitTimeout` to read the rest.
 - `tap` opens the card, then taps `tapActionLabel` (or the card's title or body) in the expanded
   card, scrolling the stream when the action sits below the screen edge. If that text is not a
   single clickable target there, it fails rather than guessing and collapses the card; retry with

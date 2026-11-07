@@ -32,6 +32,7 @@ import {
   type WatchNotification,
 } from "./helpers/watchHierarchy";
 import type { SystemTrayOutcome } from "./SystemTray";
+import { WATCH_LIST_SCAN_TIMEOUT_MS, listMessage, type ListCutShort } from "./watchListTimeout";
 import type { SystemTrayArgs, SystemTrayNotificationArgs } from "./systemTrayTypes";
 
 const MAX_STREAM_PAGES = 20;
@@ -313,6 +314,8 @@ export class WatchSystemTray {
   constructor(
     private readonly device: BootedDevice,
     private readonly signal?: AbortSignal,
+    /** Most pages one scan or rewind reads; tests lower it to reach the limit cheaply. */
+    private readonly maxStreamPages = MAX_STREAM_PAGES,
   ) {}
 
   private read(signal = this.signal): Promise<ObserveResult> {
@@ -390,6 +393,11 @@ export class WatchSystemTray {
       throw new ActionableError(`${args.action} action requires notification.appId`);
     }
     const label = await this.appLabel(criteria);
+    // A list reads every page, so without a caller timeout it gets a deadline for a full scroll.
+    const scanTimeout =
+      args.action === "list" && args.awaitTimeout === undefined
+        ? WATCH_LIST_SCAN_TIMEOUT_MS
+        : timeout;
     const initial = await this.read();
     const initiallyOpen = !!watchStreamRoot(initial.viewHierarchy);
     let result: SystemTrayOutcome | undefined;
@@ -404,21 +412,14 @@ export class WatchSystemTray {
           "Could not open the watch notification stream from the current screen. Return to the watch face and retry.",
         );
       }
-      const deadline = getSystemTrayDependencies().timer.now() + timeout;
+      const deadline = getSystemTrayDependencies().timer.now() + scanTimeout;
       const observation = opened.observation ?? (await this.read());
-      // The scan only moves toward the end, so a stream left scrolled down must start at the top.
-      const top = await this.toTop(observation, initiallyOpen, deadline);
-      result = top
-        ? await this.run(args, { criteria, label, deadline, dismissedCount: 0 }, top)
-        : outcome(
-            {
-              code: "notification_not_found",
-              message:
-                "Could not scroll the watch notification stream back to its top before the scan limit or deadline",
-              observation,
-            },
-            false,
-          );
+      result = await this.scanFromTop(
+        args,
+        { criteria, label, deadline, dismissedCount: 0 },
+        observation,
+        initiallyOpen,
+      );
     } finally {
       const controller = new AbortController();
       restored = await raceWithDeadline(() => this.restore(initiallyOpen, controller.signal), {
@@ -433,6 +434,32 @@ export class WatchSystemTray {
       }
     }
     return { outcome: result, observation: restored };
+  }
+
+  /** Rewinds the stream to its top, then runs the scan from there. */
+  private async scanFromTop(
+    args: SystemTrayArgs,
+    scope: WatchScope,
+    observation: ObserveResult,
+    initiallyOpen: boolean,
+  ): Promise<SystemTrayOutcome> {
+    // The scan only moves toward the end, so a stream left scrolled down must start at the top.
+    const top = await this.toTop(observation, initiallyOpen, scope.deadline);
+    if (top) {
+      return this.run(args, scope, top);
+    }
+    if (args.action === "list") {
+      return this.listResult(scope, [], observation, "rewind");
+    }
+    return outcome(
+      {
+        code: "notification_not_found",
+        message:
+          "Could not scroll the watch notification stream back to its top before the scan limit or deadline",
+        observation,
+      },
+      false,
+    );
   }
 
   /**
@@ -553,7 +580,8 @@ export class WatchSystemTray {
     const { criteria, label, deadline } = scope;
     let scan: ScanState = { cards: [], beforeLast: [], lastPage: [] };
     let previous: ObserveResult | undefined;
-    for (let page = 0; page < MAX_STREAM_PAGES; page++) {
+    let cutShort: ListCutShort = "page_limit";
+    for (let page = 0; page < this.maxStreamPages; page++) {
       if (!watchStreamRoot(observation.viewHierarchy)) {
         throw new ActionableError("Watch notification stream is not readable.");
       }
@@ -581,10 +609,14 @@ export class WatchSystemTray {
         return this.scanResult(args, scope, scan.cards, observation);
       }
       if (getSystemTrayDependencies().timer.now() >= deadline) {
+        cutShort = "deadline";
         break;
       }
       previous = observation;
       observation = await this.nextPage(observation, atEnd, deadline);
+    }
+    if (args.action === "list") {
+      return this.listResult(scope, scan.cards, observation, cutShort);
     }
     return outcome(
       {
@@ -632,13 +664,8 @@ export class WatchSystemTray {
     cards: ScannedCard[],
     observation: ObserveResult,
   ): SystemTrayOutcome {
-    const { criteria } = scope;
     if (args.action === "list") {
-      return outcome({
-        message: `Listed ${cards.length} notifications for ${criteria.appId}`,
-        notifications: cards.map(({ card }) => listedCard(card, criteria.appId)),
-        observation,
-      });
+      return this.listResult(scope, cards, observation);
     }
     if (args.action === "clearAll" && cards.length === 0) {
       return outcome({
@@ -655,6 +682,25 @@ export class WatchSystemTray {
       },
       false,
     );
+  }
+
+  /**
+   * The cards a `list` scan read. A scan cut short still returns what it read, flagged
+   * `incomplete` with the reason, instead of a not-found error that drops those cards (#17386).
+   */
+  private listResult(
+    scope: WatchScope,
+    cards: ScannedCard[],
+    observation: ObserveResult,
+    cutShort?: ListCutShort,
+  ): SystemTrayOutcome {
+    const { appId } = scope.criteria;
+    return outcome({
+      message: listMessage(cards.length, appId, cutShort),
+      notifications: cards.map(({ card }) => listedCard(card, appId)),
+      ...(cutShort ? { incomplete: true, incompleteReason: cutShort } : {}),
+      observation,
+    });
   }
 
   /**
@@ -696,7 +742,7 @@ export class WatchSystemTray {
   ): Promise<ObserveResult | undefined> {
     let previous = observation;
     let ambiguous = 0;
-    for (let page = 0; page < MAX_STREAM_PAGES; page++) {
+    for (let page = 0; page < this.maxStreamPages; page++) {
       if (getSystemTrayDependencies().timer.now() >= deadline) {
         return undefined;
       }

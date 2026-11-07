@@ -158,7 +158,8 @@ export class WatchAppManager {
       call.signal?.throwIfAborted();
       await this.simctl.uninstallApp(appId, this.device.deviceId, { signal: call.signal });
     }
-    this.targetApps.terminated(this.device.deviceId, appId);
+    // A runner automating this app (its own host app included) is dead once the app is gone.
+    this.targetApps.uninstalled(this.device.deviceId, appId);
     return { success: true, packageName: appId, keepData: false, wasInstalled };
   }
 

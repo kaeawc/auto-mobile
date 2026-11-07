@@ -5,8 +5,9 @@ it uses for a phone, plus D-pad focus navigation. This guide covers creating one
 and what is out of scope.
 
 > Use the `android-tv` image for TV apps. Touch gestures need a device with a touchscreen;
-> otherwise, use D-pad navigation. On a TV without a touchscreen, a plain `tapOn` by `text` or
-> `elementId` moves focus and presses `enter` for you; see [Navigating a TV app](#navigating-a-tv-app).
+> otherwise, use D-pad navigation. AutoMobile treats every Android TV as having no touchscreen,
+> including TV emulators, which report one although they have no touch input. A plain `tapOn` by
+> `text` or `elementId` moves focus and presses `enter` for you; see [Navigating a TV app](#navigating-a-tv-app).
 
 ## Install a TV system image
 
@@ -131,7 +132,7 @@ counts as focused. To land on the exact control `tapOn` would tap, name the targ
 with `until.label` or `until.elementId` alone: focus must then reach that control, and a focused
 row that only contains it does not count.
 
-On a TV without a touchscreen, `tapOn` with a `text` or `elementId` selector moves D-pad focus to
+On a TV, `tapOn` with a `text` or `elementId` selector moves D-pad focus to
 the match and presses `enter`, so one flow can tap on both Android TV and tvOS. The selector picks
 the same element a touch tap would, including a text field found by its placeholder and the first
 of several matches, even when focus is on another one. The result then has

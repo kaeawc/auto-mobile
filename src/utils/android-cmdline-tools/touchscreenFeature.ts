@@ -8,6 +8,12 @@ import { adbFailureOutput } from "./adbFailureOutput";
 export const TOUCHSCREEN_FEATURE = "android.hardware.touchscreen";
 
 /**
+ * Features that mark an Android TV. TV emulator images declare a touchscreen though they have no
+ * touch input device (#17316), so a TV is driven as touchless whatever it says about touch.
+ */
+export const TV_FEATURES = ["android.software.leanback", "android.hardware.type.television"];
+
+/**
  * Hardware features do not change while a device is up; the expiry only guards a serial that a
  * pool reuses for a different AVD (a phone replaced by a TV on emulator-5554).
  */
@@ -41,7 +47,8 @@ export function parseFailedHasFeature(raw: string): boolean | null {
 /** Whether an Android device declares a touchscreen. */
 export interface TouchscreenFeature {
   /**
-   * True or false as the device declares it; null when the probe failed or its answer was not
+   * True or false as the device declares it, except that a TV (leanback or television feature)
+   * reads as false; null when the probe failed or its answer was not
    * understood. Callers that need a yes/no treat null as a touchscreen, so a failed probe leaves
    * touch input in place.
    */
@@ -57,7 +64,12 @@ interface CacheEntry {
   value: boolean;
 }
 
-/** Probes `pm has-feature android.hardware.touchscreen` and caches a definite answer per device. */
+type FeatureAnswer = boolean | null;
+
+/**
+ * Probes `pm has-feature android.hardware.touchscreen`, then the TV features when it says true,
+ * and caches a definite answer per device.
+ */
 export class CachedTouchscreenFeature implements TouchscreenFeature {
   private readonly cache = new Map<string, CacheEntry>();
 
@@ -75,37 +87,68 @@ export class CachedTouchscreenFeature implements TouchscreenFeature {
     if (cached && this.timer.now() - cached.readAt < this.ttlMs) {
       return cached.value;
     }
-    let value: boolean | null;
-    try {
-      const result = await adb.executeCommand(`shell pm has-feature ${TOUCHSCREEN_FEATURE}`, {
-        noRetry: true,
-        timeoutMs: PROBE_TIMEOUT_MS,
-        ...(signal ? { signal } : {}),
-      });
-      value = parseHasFeature(result.stdout);
-    } catch (error) {
-      signal?.throwIfAborted();
-      // `pm has-feature` prints `false` and exits 1 for a missing feature, which adb reports as a
-      // failed command; that output is the answer, not a probe failure.
-      value = parseFailedHasFeature(adbFailureOutput(error).stdout);
-      if (value === null) {
-        logger.warn(
-          `[TouchscreenFeature] probe failed for ${deviceId}: ${errorMessage(error)}`,
-          error,
-        );
-        return null;
-      }
-    }
-    if (value === null) {
-      logger.warn(
-        `[TouchscreenFeature] unrecognized pm has-feature output for ${deviceId}; keeping touch input`,
-      );
+    const touchscreen = await probeFeature(adb, deviceId, TOUCHSCREEN_FEATURE, signal);
+    if (touchscreen === null) {
       this.cache.delete(deviceId);
       return null;
     }
+    if (touchscreen === false) {
+      return this.remember(deviceId, false);
+    }
+    for (const tvFeature of TV_FEATURES) {
+      const isTv = await probeFeature(adb, deviceId, tvFeature, signal);
+      if (isTv === null) {
+        // Unknown TV-ness keeps the declared touchscreen, uncached so the next call asks again.
+        this.cache.delete(deviceId);
+        return true;
+      }
+      if (isTv) {
+        return this.remember(deviceId, false);
+      }
+    }
+    return this.remember(deviceId, true);
+  }
+
+  private remember(deviceId: string, value: boolean): boolean {
     this.cache.set(deviceId, { readAt: this.timer.now(), value });
     return value;
   }
+}
+
+/** One `pm has-feature` probe: the device's answer, or null when it failed or was not understood. */
+async function probeFeature(
+  adb: AdbCommandRunner,
+  deviceId: string,
+  feature: string,
+  signal: AbortSignal | undefined,
+): Promise<FeatureAnswer> {
+  let value: FeatureAnswer;
+  try {
+    const result = await adb.executeCommand(`shell pm has-feature ${feature}`, {
+      noRetry: true,
+      timeoutMs: PROBE_TIMEOUT_MS,
+      ...(signal ? { signal } : {}),
+    });
+    value = parseHasFeature(result.stdout);
+  } catch (error) {
+    signal?.throwIfAborted();
+    // `pm has-feature` prints `false` and exits 1 for a missing feature, which adb reports as a
+    // failed command; that output is the answer, not a probe failure.
+    value = parseFailedHasFeature(adbFailureOutput(error).stdout);
+    if (value === null) {
+      logger.warn(
+        `[TouchscreenFeature] ${feature} probe failed for ${deviceId}: ${errorMessage(error)}`,
+        error,
+      );
+      return null;
+    }
+  }
+  if (value === null) {
+    logger.warn(
+      `[TouchscreenFeature] unrecognized pm has-feature ${feature} output for ${deviceId}; keeping touch input`,
+    );
+  }
+  return value;
 }
 
 /** Process-wide probe, so each device is asked once per TTL. */

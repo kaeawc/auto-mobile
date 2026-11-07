@@ -37,6 +37,37 @@ import {
 
 export type { PerformanceAuditResult };
 
+export const NO_FRAMES_RENDERED =
+  "No frames were rendered in the audit window, so there are no frame times to check.";
+export const NO_FRAME_COUNT =
+  "gfxinfo reported no rendered-frame count, so its frame times cannot be checked.";
+
+/**
+ * Frame-time percentiles from one gfxinfo reading. With no rendered frames gfxinfo still prints
+ * percentiles, all at its histogram's top bucket (4950ms); they are not measurements, so they are
+ * reported as null with the reason instead of failing an idle screen (#17307). A reading without a
+ * frame count cannot tell the two apart and is treated the same way.
+ */
+function frameTimePercentiles(
+  metrics: ReturnType<Idle["parseMetrics"]>,
+): Pick<PerformanceMetrics, "p50Ms" | "p90Ms" | "p95Ms" | "p99Ms" | "frameTimeUnmeasured"> {
+  if (!metrics.totalFrames) {
+    return {
+      p50Ms: null,
+      p90Ms: null,
+      p95Ms: null,
+      p99Ms: null,
+      frameTimeUnmeasured: metrics.totalFrames === 0 ? NO_FRAMES_RENDERED : NO_FRAME_COUNT,
+    };
+  }
+  return {
+    p50Ms: metrics.percentile50th,
+    p90Ms: metrics.percentile90th,
+    p95Ms: metrics.percentile95th,
+    p99Ms: metrics.percentile99th,
+  };
+}
+
 /**
  * Options for metric collection
  */
@@ -201,12 +232,16 @@ export class PerformanceAudit {
     | "missedVsyncCount"
     | "slowUiThreadCount"
     | "frameDeadlineMissedCount"
+    | "frameTimeUnmeasured"
   > {
     return {
       p50Ms: gfxMetrics.p50Ms ?? null,
       p90Ms: gfxMetrics.p90Ms ?? null,
       p95Ms: gfxMetrics.p95Ms ?? null,
       p99Ms: gfxMetrics.p99Ms ?? null,
+      ...(gfxMetrics.frameTimeUnmeasured !== undefined
+        ? { frameTimeUnmeasured: gfxMetrics.frameTimeUnmeasured }
+        : {}),
       jankCount: gfxMetrics.jankCount ?? null,
       missedVsyncCount: gfxMetrics.missedVsyncCount ?? null,
       slowUiThreadCount: gfxMetrics.slowUiThreadCount ?? null,
@@ -264,10 +299,7 @@ export class PerformanceAudit {
       const window = computeJankWindow(opening.counters, closing.counters, elapsedMs);
 
       return {
-        p50Ms: metrics.percentile50th,
-        p90Ms: metrics.percentile90th,
-        p95Ms: metrics.percentile95th,
-        p99Ms: metrics.percentile99th,
+        ...frameTimePercentiles(metrics),
         jankCount: window?.jankPerSecond ?? null,
         missedVsyncCount: window?.missedVsync ?? null,
         slowUiThreadCount: window?.slowUiThread ?? null,

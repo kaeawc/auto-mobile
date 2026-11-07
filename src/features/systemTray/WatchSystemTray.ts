@@ -39,7 +39,20 @@ const POLL_MS = 250;
 const MAX_SETTLE_READS = 6;
 const SETTLE_MS = 500;
 const MAX_CLOSE_PRESSES = 3;
-const MAX_UNMOVED_RETRIES = 2;
+// A loaded watch can take seconds to draw a scroll, and an unmoved page ends the scan.
+const MAX_UNMOVED_RETRIES = 6;
+/** A swipe scrolls about half the screen; a card lower than this cannot have scrolled out of view. */
+const SCROLL_REACH = 0.6;
+/**
+ * A swipe moves the stream by about half the screen (0.50 to 0.53 on captured pages). A card seen
+ * again must have moved by that much, the same for every card of a run: a shift far from it, or
+ * one that differs inside the run, means the equal-looking cards are different notifications.
+ */
+const SHIFT_MIN = 0.35;
+const SHIFT_MAX = 0.7;
+const SHIFT_SKEW = 0.03;
+/** The last swipe stops where the stream ends, so it can move the cards by far less than a swipe. */
+const END_SHIFT_MIN = 0.05;
 const CLOSE_POLLS = 8;
 const REWIND_WHEEL_STEP = 3;
 const MIN_RESTORE_MS = 10_000;
@@ -106,6 +119,8 @@ interface ScannedCard {
   card: WatchNotification;
   /** Cut off by a viewport edge, so its text may be partial. */
   clipped: boolean;
+  /** Cut off at the top edge, so its first lines may be missing. */
+  clippedTop: boolean;
   /** Cut off at the bottom edge, so the next page must show its continuation. */
   clippedBottom: boolean;
   /** Bounds on the latest page that showed it. */
@@ -119,6 +134,7 @@ const scannedCards = (observation: ObserveResult, cards: WatchNotification[]): S
       return {
         card,
         clipped: edges.top || edges.bottom,
+        clippedTop: edges.top,
         clippedBottom: edges.bottom,
         bounds: card.element.bounds,
       };
@@ -127,28 +143,77 @@ const scannedCards = (observation: ObserveResult, cards: WatchNotification[]): S
     .filter((entry) => !entry.clipped || entry.card.title !== null || entry.card.body !== null);
 
 /** The fuller of two readings of one card: a whole card beats a clipped one, else the taller slice. */
+const heightOf = (entry: ScannedCard) => entry.bounds.bottom - entry.bounds.top;
 const fuller = (known: ScannedCard, seen: ScannedCard) => {
-  const height = (entry: ScannedCard) => entry.bounds.bottom - entry.bounds.top;
   const better =
-    known.clipped && (!seen.clipped || height(seen) > height(known)) ? seen.card : known.card;
+    known.clipped && (!seen.clipped || heightOf(seen) > heightOf(known)) ? seen.card : known.card;
   return { ...seen, card: better };
+};
+
+/**
+ * How far the card moved up between two readings, from whichever edge neither reading cut off;
+ * `undefined` when both edges are cut off in one of them.
+ */
+const scrollShift = (known: ScannedCard, seen: ScannedCard) => {
+  if (!known.clippedTop && !seen.clippedTop) {
+    return known.bounds.top - seen.bounds.top;
+  }
+  if (!known.clippedBottom && !seen.clippedBottom) {
+    return known.bounds.bottom - seen.bounds.bottom;
+  }
+  return undefined;
+};
+
+/**
+ * Whether `seen` is another reading of `known`: equal, or `known` is a partial of it cut off at
+ * the bottom edge, whose visible text starts the fuller reading and fits inside it.
+ */
+const sameReading = (known: ScannedCard, seen: ScannedCard) => {
+  if (cardIdentity(known.card) === cardIdentity(seen.card)) {
+    return true;
+  }
+  const partialBody = (known.card.body ?? "").replace(/(?:…|\.\.\.)$/, "");
+  return (
+    known.clippedBottom &&
+    known.card.appLabel === seen.card.appLabel &&
+    (known.card.title === null || known.card.title === seen.card.title) &&
+    (seen.card.body ?? "").startsWith(partialBody) &&
+    // A whole card shorter than the slice already seen cannot be what that slice was cut from.
+    (seen.clipped || heightOf(seen) >= heightOf(known))
+  );
 };
 
 /**
  * Whether the head of `page` shows again the `tail` cards of `collected`. Equal content alone is
  * no proof: separate notifications can repeat an app, title and body. Evidence beyond content is
- * either a run of two or more equal neighbours, or a single card the last page cut off at its
- * bottom edge (its continuation must lead the next page); every card must also have moved up with
- * the scroll, never down.
+ * that every card moved up with the scroll by the same, scroll-sized amount (so a further pair of
+ * look-alikes lower down in the stream is not the pair already listed), plus either a run of two
+ * or more equal neighbours, or a single card the last page cut off at its bottom edge (its
+ * continuation must lead the next page).
  */
-const isSameRun = (tail: ScannedCard[], head: ScannedCard[]) =>
-  tail.every((known, index) => {
-    const seen = head[index];
-    return (
-      cardIdentity(known.card) === cardIdentity(seen.card) && seen.bounds.top <= known.bounds.top
-    );
-  }) &&
-  (tail.length >= 2 || tail[0].clippedBottom);
+const isSameRun = (tail: ScannedCard[], head: ScannedCard[], height: number, minShift: number) => {
+  if (
+    !tail.every((known, index) => {
+      const seen = head[index];
+      return sameReading(known, seen) && seen.bounds.top <= known.bounds.top;
+    })
+  ) {
+    return false;
+  }
+  const shifts = tail.flatMap((known, index) => scrollShift(known, head[index]) ?? []);
+  const scrollSized = shifts.every(
+    (shift) =>
+      shift >= height * minShift &&
+      shift <= height * SHIFT_MAX &&
+      Math.abs(shift - shifts[0]) <= height * SHIFT_SKEW,
+  );
+  // A single card that sits lower than one scroll can reach cannot have left the screen, so the
+  // equal card leading the next page is that card; a higher one may have scrolled out of view.
+  return (
+    scrollSized &&
+    (tail.length >= 2 || tail[0].clippedBottom || tail[0].bounds.bottom > height * SCROLL_REACH)
+  );
+};
 
 /**
  * Appends a scanned page to the cards collected so far. A scroll moves less than a screen, so the
@@ -156,11 +221,16 @@ const isSameRun = (tail: ScannedCard[], head: ScannedCard[]) =>
  * established (see {@link isSameRun}) it is listed once, keeping the fuller reading of each card;
  * otherwise every card is kept, so repeated notifications are never lost (#17317).
  */
-const mergePage = (collected: ScannedCard[], page: ScannedCard[]) => {
+const mergePage = (
+  collected: ScannedCard[],
+  page: ScannedCard[],
+  height: number,
+  minShift = SHIFT_MIN,
+) => {
   for (let overlap = Math.min(collected.length, page.length); overlap > 0; overlap--) {
     const tail = collected.slice(-overlap);
     const head = page.slice(0, overlap);
-    if (isSameRun(tail, head)) {
+    if (isSameRun(tail, head, height, minShift)) {
       return [
         ...collected.slice(0, -overlap),
         ...tail.map((known, index) => fuller(known, head[index])),
@@ -170,6 +240,38 @@ const mergePage = (collected: ScannedCard[], page: ScannedCard[]) => {
   }
   return [...collected, ...page];
 };
+
+/** The cards collected so far, and the latest page with the cards before it (see {@link scanPage}). */
+interface ScanState {
+  cards: ScannedCard[];
+  beforeLast: ScannedCard[];
+  lastPage: ScannedCard[];
+}
+
+/**
+ * Takes one page into the scan. Cards cut off by a viewport edge are kept as partial readings
+ * until a page shows them whole; a card taller than the viewport is never shown whole. An unmoved
+ * page proves the previous one was the end of the stream, where the last swipe may have moved the
+ * cards by less than a full scroll, so that page is merged again with the shorter shift allowed.
+ */
+const scanPage = (
+  state: ScanState,
+  observation: ObserveResult,
+  page: ScannedCard[],
+  end: { unmoved: boolean; atEnd: boolean },
+): ScanState => {
+  const height = observation.screenSize.height;
+  if (end.unmoved) {
+    return { ...state, cards: mergePage(state.beforeLast, state.lastPage, height, END_SHIFT_MIN) };
+  }
+  const minShift = end.atEnd ? END_SHIFT_MIN : SHIFT_MIN;
+  return {
+    cards: mergePage(state.cards, page, height, minShift),
+    beforeLast: state.cards,
+    lastPage: page,
+  };
+};
+
 /** Whether the matched card can take its action now, or must first be scrolled into full view. */
 const actionable = (
   action: SystemTrayArgs["action"],
@@ -449,7 +551,7 @@ export class WatchSystemTray {
     observation: ObserveResult,
   ): Promise<SystemTrayOutcome> {
     const { criteria, label, deadline } = scope;
-    let cards: ScannedCard[] = [];
+    let scan: ScanState = { cards: [], beforeLast: [], lastPage: [] };
     let previous: ObserveResult | undefined;
     for (let page = 0; page < MAX_STREAM_PAGES; page++) {
       if (!watchStreamRoot(observation.viewHierarchy)) {
@@ -474,13 +576,9 @@ export class WatchSystemTray {
         return this.act(args, target, observation, scope);
       }
       // Identical cards within a page are all kept. A page identical to the last one adds nothing.
-      if (!unmoved) {
-        // Cards cut off by a viewport edge are kept as partial readings until a page shows them
-        // whole; a card taller than the viewport is never shown whole.
-        cards = mergePage(cards, scannedCards(observation, matching));
-      }
+      scan = scanPage(scan, observation, scannedCards(observation, matching), { unmoved, atEnd });
       if (atEnd && ["list", "clearAll"].includes(args.action)) {
-        return this.scanResult(args, scope, cards, observation);
+        return this.scanResult(args, scope, scan.cards, observation);
       }
       if (getSystemTrayDependencies().timer.now() >= deadline) {
         break;

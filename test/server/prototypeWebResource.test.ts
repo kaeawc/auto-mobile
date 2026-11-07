@@ -69,7 +69,7 @@ describe("automobile:prototype/{id}/web (#16345)", () => {
   test("registers the template", () => {
     expect(ResourceRegistry.getTemplateDefinitions()).toContainEqual(
       expect.objectContaining({
-        uriTemplate: "automobile:prototype/{id}/web{?frame,revision,variant}",
+        uriTemplate: "automobile:prototype/{id}/web{?frame,revision,variant,mcpSessionId}",
         mimeType: "text/html",
       }),
     );
@@ -126,6 +126,29 @@ describe("automobile:prototype/{id}/web (#16345)", () => {
     })) as { contents: { uri: string; _meta: Record<string, unknown> }[] };
     expect(pinned.contents[0]!.uri).toBe(`${URI}?frame=pixel-9&revision=1`);
     expect(pinned.contents[0]!._meta).toMatchObject({ revision: 1, frame: "pixel-9" });
+  });
+
+  test("_meta names the producing MCP session and mcpSessionId filters the revisions (#17358)", async () => {
+    const ticket = specs.beginShow("d", "checkout", true, "ios");
+    specs.endShow("d", ticket, { id: "checkout", spec: spec("mine"), mcpSessionId: "conn-a" });
+    patch("theirs");
+    const latest = (await request("resources/read", { uri: URI })) as {
+      contents: { _meta: Record<string, unknown> }[];
+    };
+    expect(latest.contents[0]!._meta).toMatchObject({ revision: 2, revisions: [1, 2] });
+    expect(latest.contents[0]!._meta).not.toHaveProperty("mcpSessionId");
+    const own = (await request("resources/read", {
+      uri: `${URI}?mcpSessionId=conn-a&frame=pixel-9`,
+    })) as { contents: { uri: string; _meta: Record<string, unknown> }[] };
+    expect(own.contents[0]!.uri).toBe(`${URI}?frame=pixel-9&mcpSessionId=conn-a`);
+    expect(own.contents[0]!._meta).toMatchObject({
+      revision: 1,
+      mcpSessionId: "conn-a",
+      revisions: [1],
+    });
+    await expect(request("resources/read", { uri: `${URI}?mcpSessionId=%20` })).rejects.toThrow(
+      "Invalid prototype mcpSessionId",
+    );
   });
 
   test("a prototype leaving its variant group also updates its former siblings", async () => {

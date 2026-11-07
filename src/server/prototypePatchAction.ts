@@ -65,6 +65,8 @@ export interface PrototypePatchDependencies {
   queue: PrototypePatchQueue;
   /** Retires the device's cached observation after an applied patch. */
   retire: (result: PrototypeResult) => void;
+  /** The MCP connection issuing the patch, recorded on its spec revision (#17358). */
+  mcpSessionId?: string;
 }
 export interface PrototypePatchInput {
   id: string;
@@ -191,6 +193,7 @@ async function finishPatch(
   const committed = deps.store.shownSpecs.commitPatch(deviceId, args.id, read.version, {
     spec: applied.spec,
     deviceRevision: fields.revision,
+    ...(deps.mcpSessionId === undefined ? {} : { mcpSessionId: deps.mcpSessionId }),
   });
   if (committed) {
     deps.store.recordPatch(deviceId, args.id, {

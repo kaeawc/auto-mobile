@@ -1,3 +1,4 @@
+import { FakeSimulatorPairs } from "../fakes/FakeSimulatorPairs";
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { toolJson } from "../helpers/toolResponse";
@@ -165,6 +166,23 @@ describe("deleteDevice on an Apple Watch simulator", () => {
     Object.values(simctl.listing.devices)
       .flat()
       .map((device) => device.udid);
+
+  test("unpairs daemon-owned pairs before deleting the watch", async () => {
+    const watch = watchDevice({ name: NAME });
+    const f = await arrange([watch]);
+    const pairs = new FakeSimulatorPairs().service();
+    const calls: string[] = [];
+    pairs.unpairCreated = async (id) => {
+      calls.push(id);
+      expect(f.simctl.commands).toEqual([]);
+    };
+    setDeviceToolsDependencies({ simulatorPairServiceFactory: () => pairs });
+    await ToolRegistry.getTool("deleteDevice")!.handler({
+      target: { platform: "watchos", stableId: watch.udid },
+    });
+    expect(calls).toEqual([watch.udid]);
+    expect(f.simctl.commands).toEqual([`delete ${watch.udid}`]);
+  });
 
   test("deletes a stopped watch and confirms it absent from a fresh listing", async () => {
     const watch = watchDevice({ name: NAME });

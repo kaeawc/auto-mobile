@@ -1,3 +1,4 @@
+import { simulatorPairSchema } from "../../../utils/ios-cmdline-tools/SimulatorPairs";
 import { disabledResourcesSchema } from "../../../utils/deviceResourceSchemas";
 import { z } from "zod/v4";
 import {
@@ -144,6 +145,7 @@ const iosBootCapacitySchema = bootCapacitySchema.extend({
 });
 
 export const listDevicesOutputSchema = z.object({
+  simulatorPairs: z.array(simulatorPairSchema).optional(),
   message: z.string(),
   devices: z.array(
     listDevicesEntrySchema.extend({ transportAliases: z.array(z.string()).optional() }),

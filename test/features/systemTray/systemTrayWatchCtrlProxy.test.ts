@@ -3,17 +3,21 @@ import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { ActionableError } from "../../../src/models";
 import { SystemTray } from "../../../src/features/systemTray/SystemTray";
 import { WatchSystemTray } from "../../../src/features/systemTray/WatchSystemTray";
+import { prepareWatchSystemTray } from "../../../src/features/systemTray/helpers/watchOpening";
 import {
   resetSystemTrayDependencies,
   setSystemTrayDependencies,
 } from "../../../src/features/systemTray/systemTrayHelpers";
 import {
+  watchAlert,
   watchExpandedTarget,
   watchHasExpandedCard,
   watchNotifications,
   watchStreamScroll,
 } from "../../../src/features/systemTray/helpers/watchHierarchy";
 import { observeResultFromFixture } from "../../helpers/observeFixture";
+import fullAlertCapture from "../../fixtures/wear/systemtray/ctrlproxy-alert-full.json";
+import shyAlertCapture from "../../fixtures/wear/systemtray/ctrlproxy-alert-shy-over-launcher.json";
 import topCapture from "../../fixtures/wear/systemtray/ctrlproxy-stream-top.json";
 import scrolledCapture from "../../fixtures/wear/systemtray/ctrlproxy-stream-scrolled.json";
 import fixtureCardCapture from "../../fixtures/wear/systemtray/ctrlproxy-stream-fixture-card.json";
@@ -41,6 +45,8 @@ const capture = (raw: unknown, label: string): ObserveResult =>
     { updatedAt: 0, systemInsets: { top: 0, right: 0, bottom: 0, left: 0 }, ...(raw as object) },
     label,
   );
+const fullAlert = capture(fullAlertCapture, "alert-full");
+const shyAlert = capture(shyAlertCapture, "alert-shy");
 const top = capture(topCapture, "stream-top");
 const scrolled = capture(scrolledCapture, "stream-scrolled");
 const withFixtureCard = capture(fixtureCardCapture, "stream-fixture-card");
@@ -663,4 +669,140 @@ describe("closing the stream after an action", () => {
     ).rejects.toBeInstanceOf(ActionableError);
     expect(adb.getExecutedCommands().filter((command) => command === BACK)).toHaveLength(1);
   });
+});
+
+describe("watch notification alerts", () => {
+  test("classifies the full and shy captures without confusing the stream for an alert", () => {
+    expect(watchAlert(fullAlert.viewHierarchy)).toEqual({
+      kind: "full",
+      appLabel: "Shell",
+      texts: ["Fixture", "l16826h"],
+    });
+    expect(watchAlert(shyAlert.viewHierarchy)).toEqual({ kind: "shy", texts: [] });
+    expect(watchAlert(top.viewHierarchy)).toBeUndefined();
+    expect(watchAlert()).toBeUndefined();
+  });
+
+  test("uses screen-relative bounds on another watch size", () => {
+    const resized = rewriteBounds(
+      fullAlert,
+      (bounds) => bounds.map((value) => value * 2) as Bounds,
+    );
+    expect(watchAlert(resized.viewHierarchy)?.kind).toBe("full");
+  });
+
+  test("a lone heads-up icon is shy", () => {
+    const hierarchy = {
+      packageName: "com.google.android.clockwork.sysui",
+      hierarchy: {
+        node: {
+          $: {
+            "resource-id": "com.google.android.clockwork.sysui:id/hun_icon_container",
+            bounds: "[0,352][384,384]",
+          },
+        },
+      },
+    };
+    expect(watchAlert(hierarchy)).toEqual({ kind: "shy", texts: [] });
+  });
+  test.each(["find", "list"] as const)(
+    "%s dismisses a full alert once and waits for it to clear",
+    async (action) => {
+      let afterBack = 0;
+      const { tray, adb, timer } = setup((commands) => {
+        if (!commands.includes(BACK)) {
+          return fullAlert;
+        }
+        return afterBack++ < 2 ? fullAlert : top;
+      });
+      const result = await tray.execute({
+        action,
+        notification: { appId: "com.android.shell" },
+        awaitTimeout: 3000,
+      });
+      expect(result.isError).toBe(false);
+      expect(adb.getExecutedCommands().filter((command) => command === BACK)).toHaveLength(1);
+      expect(timer.getSleepHistory().filter((ms) => ms === 250).length).toBeGreaterThanOrEqual(2);
+      expect(timer.getSleepHistory().slice(0, 3)).toEqual([250, 250, 1500]);
+    },
+  );
+
+  test("open dismisses a full alert before opening from the fresh watch face", async () => {
+    const { tray, adb, timer } = setup((commands) => {
+      if (!commands.includes(BACK)) {
+        return fullAlert;
+      }
+      return commands.some((command) => command.startsWith("shell input swipe")) ? top : closed;
+    });
+    const result = await tray.execute({ action: "open", awaitTimeout: 2000 });
+    expect(result.payload.opened).toBe(true);
+    expect(adb.getExecutedCommands()[0]).toBe(BACK);
+    expect(adb.getExecutedCommands().filter((command) => command === BACK)).toHaveLength(1);
+    expect(timer.getSleepHistory()[0]).toBe(1500);
+  });
+
+  test("passes the observation read after settling as initial", async () => {
+    const clock: { timer?: FakeTimer } = {};
+    const readTimes: number[] = [];
+    const { timer } = setup((_commands, reads) => {
+      readTimes.push(clock.timer?.now() ?? 0);
+      return reads === 0 ? fullAlert : reads === 1 ? top : closed;
+    });
+    clock.timer = timer;
+    const prepared = await prepareWatchSystemTray(watch, 2000);
+    expect(prepared.initial).toEqual(closed);
+    expect(prepared.remainingTimeout).toBe(500);
+    expect(timer.getSleepHistory()).toEqual([1500]);
+    expect(readTimes).toEqual([0, 0, 1500]);
+  });
+
+  test.each(["find", "open"] as const)(
+    "%s caps settling at the remaining deadline after polling",
+    async (action) => {
+      let afterBack = 0;
+      const { adb, timer } = setup((commands) => {
+        if (!commands.includes(BACK)) {
+          return fullAlert;
+        }
+        return afterBack++ === 0 ? fullAlert : closed;
+      });
+      await expect(
+        new WatchSystemTray(watch).execute({ action, awaitTimeout: 1000 }),
+      ).rejects.toThrow(/notification alert.*covering the watch/);
+      expect(timer.getSleepHistory()).toEqual([250, 750]);
+      expect(timer.now()).toBe(1000);
+      expect(adb.getExecutedCommands()).toEqual([BACK]);
+    },
+  );
+
+  test.each([top, closed, shyAlert])(
+    "does not settle without a full alert: %#",
+    async (initial) => {
+      const { adb, timer } = setup(() => initial);
+      const prepared = await prepareWatchSystemTray(watch, 2000);
+      expect(prepared.initial).toEqual(initial);
+      expect(prepared.remainingTimeout).toBe(2000);
+      expect(timer.getSleepHistory()).toEqual([]);
+      expect(adb.getExecutedCommands()).toEqual([]);
+    },
+  );
+
+  test("open does not press Back on a shy alert over the launcher", async () => {
+    const { tray, adb } = setup((commands) => (commands.length === 0 ? shyAlert : top));
+    const result = await tray.execute({ action: "open", awaitTimeout: 500 });
+    expect(result.payload.opened).toBe(true);
+    expect(adb.getExecutedCommands()).not.toContain(BACK);
+  });
+
+  test.each(["find", "open"] as const)(
+    "%s reports a full alert that never clears within the request timeout",
+    async (action) => {
+      const { adb, timer } = setup(() => fullAlert);
+      const pending = new WatchSystemTray(watch).execute({ action, awaitTimeout: 600 });
+      await expect(pending).rejects.toBeInstanceOf(ActionableError);
+      await expect(pending).rejects.toThrow(/notification alert.*covering the watch/);
+      expect(timer.now()).toBe(600);
+      expect(adb.getExecutedCommands()).toEqual([BACK]);
+    },
+  );
 });

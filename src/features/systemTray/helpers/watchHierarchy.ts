@@ -1,7 +1,7 @@
 import type { Element, ViewHierarchyNode, ViewHierarchyResult } from "../../../models";
 import { DefaultElementParser } from "../../utility/ElementParser";
 import { isClickableElementProperties } from "../../utility/elementProperties";
-import { toSearchable } from "../../utility/SearchableNode";
+import { matchesCtrlProxyResourceId, toSearchable } from "../../utility/SearchableNode";
 import { ResolverElementSelector } from "../../utility/ResolverElementSelector";
 import { ignoreCasePolicy, INSPECT_INTENT } from "../../utility/SelectionPolicy";
 import { getHierarchyRoots, getNodeProperties } from "../notificationHints";
@@ -57,6 +57,76 @@ function wearOwnedNodes(hierarchy?: ViewHierarchyResult): Set<ViewHierarchyNode>
 export function isWearHierarchy(hierarchy?: ViewHierarchyResult): boolean {
   const owned = wearOwnedNodes(hierarchy);
   return !!hierarchy && getHierarchyRoots(hierarchy).some((root) => owned.has(root));
+}
+
+export interface WatchAlert {
+  kind: "full" | "shy";
+  appLabel?: string;
+  texts: string[];
+}
+
+/** Require coverage of at least three quarters of both screen dimensions. */
+function coversWatchScreen(bounds?: Element["bounds"], screen?: Element["bounds"]): boolean {
+  return (
+    !!bounds &&
+    !!screen &&
+    screen.right > screen.left &&
+    screen.bottom > screen.top &&
+    Math.min(bounds.right, screen.right) - Math.max(bounds.left, screen.left) >=
+      (screen.right - screen.left) * 0.75 &&
+    Math.min(bounds.bottom, screen.bottom) - Math.max(bounds.top, screen.top) >=
+      (screen.bottom - screen.top) * 0.75
+  );
+}
+
+/** Full alerts cover the watch; a narrow heads-up strip must not send Back to the launcher. */
+export function watchAlert(hierarchy?: ViewHierarchyResult): WatchAlert | undefined {
+  if (!hierarchy) {
+    return undefined;
+  }
+  const owned = wearOwnedNodes(hierarchy);
+  const parser = new DefaultElementParser();
+  const roots = getHierarchyRoots(hierarchy);
+  // Heads-up windows can be only a bottom strip; the largest root describes the screen.
+  const screen = roots
+    .map((root) => parser.parseNodeBounds(root)?.bounds)
+    .filter((bounds): bounds is Element["bounds"] => !!bounds)
+    .sort(
+      (a, b) => (b.right - b.left) * (b.bottom - b.top) - (a.right - a.left) * (a.bottom - a.top),
+    )[0];
+  let shy = false;
+  for (const root of roots) {
+    for (const node of watchNodes(root)) {
+      if (!owned.has(node)) {
+        continue;
+      }
+      const id = toSearchable(getNodeProperties(node) ?? {}).nativeId;
+      if (matchesCtrlProxyResourceId(id, "hun_icon_container")) {
+        shy = true;
+      }
+      if (!matchesCtrlProxyResourceId(id, "full_view_container")) {
+        continue;
+      }
+      shy = true;
+      const bounds = parser.parseNodeBounds(node)?.bounds;
+      if (!coversWatchScreen(bounds, screen)) {
+        continue;
+      }
+      const nodes = watchNodes(node).map((child) => toSearchable(getNodeProperties(child) ?? {}));
+      const app = nodes.find((child) =>
+        matchesCtrlProxyResourceId(child.nativeId, "full_view_app_name"),
+      );
+      return {
+        kind: "full",
+        appLabel: app?.shownText,
+        texts: nodes
+          .filter((child) => child !== app)
+          .map((child) => child.shownText)
+          .filter((text): text is string => !!text?.trim() && text !== "Now"),
+      };
+    }
+  }
+  return shy ? { kind: "shy", texts: [] } : undefined;
 }
 
 const isTrayContainer = (node: ViewHierarchyNode): boolean => {

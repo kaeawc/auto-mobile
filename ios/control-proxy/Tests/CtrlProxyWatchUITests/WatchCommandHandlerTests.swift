@@ -89,8 +89,8 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertTrue(handler.handle(Data(#"{"type":"swipe","direction":"up","distance":0.4}"#.utf8)).success)
         XCTAssertEqual(source.calls, ["up:0.4"])
         for distance in ["0", "-0.1", "1.5"] {
-            let response = handler.handle(Data("{\"type\":\"swipe\",\"direction\":\"up\",\"distance\":\(distance)}".utf8))
-            XCTAssertFalse(response.success)
+            let command = "{\"type\":\"swipe\",\"direction\":\"up\",\"distance\":\(distance)}"
+            XCTAssertFalse(handler.handle(Data(command.utf8)).success)
         }
         XCTAssertEqual(source.calls, ["up:0.4"])
     }

@@ -1,6 +1,9 @@
 import { convertIosHierarchy } from "../../helpers/iosHierarchyConverter";
 import { describe, expect, test } from "bun:test";
-import { projectActionableHierarchy } from "../../../src/features/observe/HierarchyNormalization";
+import {
+  projectActionableHierarchy,
+  resolveActionableHierarchyScreenSize,
+} from "../../../src/features/observe/HierarchyNormalization";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
 import type { ViewHierarchyAndroidCtrlProxy } from "../../../src/features/observe/android/ViewHierarchyAndroidCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -101,6 +104,17 @@ describe("iPhone Duo inner-panel root bounds", () => {
         top: 0,
         right: 951,
         bottom: 669,
+      });
+    }
+  });
+
+  // Consumers of a projected capture (pinchOn's capture geometry) must keep the landscape size
+  // rather than re-deriving it from the corrected root plus the runner's portrait metadata.
+  test("the projected capture still resolves to the landscape screen size", () => {
+    for (const multiPanel of [false, true]) {
+      expect(resolveActionableHierarchyScreenSize(project(multiPanel))).toEqual({
+        width: 951,
+        height: 669,
       });
     }
   });

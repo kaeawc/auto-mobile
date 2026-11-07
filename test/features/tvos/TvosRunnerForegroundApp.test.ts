@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { WatchAppManager } from "../../../src/features/action/watch/WatchAppManager";
 import { WebSocketTvosRunnerClient } from "../../../src/features/tvos/TvosRunnerClient";
+import { TvosRunnerDisconnectedError } from "../../../src/features/tvos/TvosRunnerDisconnectedError";
 import { TvosRunnerTimeoutError } from "../../../src/features/tvos/TvosRunnerTimeoutError";
 import { connectTvosRunnerClient } from "../../../src/features/tvos/TvosRunnerLauncher";
 import { tvosTargetApps } from "../../../src/features/tvos/TvosTargetApps";
@@ -123,9 +124,10 @@ describe("tvOS runner command deadline", () => {
     expect(client.isUsable()).toBe(false);
     expect(socket.closed).toBe(true);
 
-    // Later calls fail at once with the same cause instead of queueing behind the stuck one.
+    // Later calls fail at once, naming themselves, instead of queueing behind the stuck one.
     const next = await settle(client.request({ type: "request_press_button", action: "down" }));
-    expect(next).toBe(error);
+    expect(next).toBeInstanceOf(TvosRunnerDisconnectedError);
+    expect(String(next)).toContain("request_press_button was not sent");
     expect(socket.sent).toHaveLength(1);
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });

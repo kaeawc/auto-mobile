@@ -99,9 +99,35 @@ object NavigationBuildLens {
       )
       .toList()
 
-  /** Short human label for a build, e.g. `v2 (hashB)`; the hash is cut to [LABEL_HASH_CHARS]. */
-  fun label(build: ProvenanceBuildKey): String =
-    "v${build.versionCode} (${build.contentHash.take(LABEL_HASH_CHARS).ifEmpty { "no hash" }})"
+  /** Git's default abbreviation length for the sha in a `branch@shortsha` label (#16954). */
+  const val LABEL_SHA_CHARS: Int = 7
+
+  /**
+   * Short human label for a build: `branch@shortsha` when the build declared its git revision
+   * (#16954), otherwise e.g. `v2 (hashB)` with the hash cut to [LABEL_HASH_CHARS].
+   */
+  fun label(build: ProvenanceBuildKey, revision: BuildSourceRevision? = null): String =
+    if (revision != null) {
+      "${revision.gitBranch}@${revision.gitSha.take(LABEL_SHA_CHARS)}"
+    } else {
+      "v${build.versionCode} (${build.contentHash.take(LABEL_HASH_CHARS).ifEmpty { "no hash" }})"
+    }
+
+  /**
+   * Labels for every build in [graph], keyed by build key (#16954). A build's revision lives on its
+   * build-key row, so every record of one build carries the same value; the first one found is
+   * used. Revisions never change which builds exist or how they match.
+   */
+  fun labelsIn(graph: NavigationGraph): Map<ProvenanceBuildKey, String> {
+    val records =
+      graph.screens.flatMap { it.provenance } + graph.transitions.flatMap { it.provenance }
+    val revisions =
+      records
+        .mapNotNull { record -> record.sourceRevision?.let { record.buildKey to it } }
+        .distinctBy { it.first }
+        .toMap()
+    return buildsIn(graph).associateWith { label(it, revisions[it]) }
+  }
 
   fun membership(provenance: List<ScreenProvenance>, build: ProvenanceBuildKey): BuildMembership {
     val classifiable = provenance.filter { it.isClassifiable() }
@@ -151,16 +177,17 @@ object NavigationBuildLens {
       else -> ProvenanceOpacity.alphaFor(provenance, context, nowMs)
     }
 
-  /** Accessible description for a node/edge under [lens]. */
+  /** Accessible description for a node/edge under [lens]; [buildLabels] come from [labelsIn]. */
   fun contentDescription(
     label: String,
     provenance: List<ScreenProvenance>,
     context: NavigationActiveContext?,
     lens: BuildLens,
+    buildLabels: Map<ProvenanceBuildKey, String> = emptyMap(),
   ): String =
     when (lens) {
       is BuildLens.Filter -> {
-        val build = label(lens.build)
+        val build = buildLabels[lens.build] ?: label(lens.build)
         when (membership(provenance, lens.build)) {
           BuildMembership.InBuild -> "$label — in build $build"
           BuildMembership.OtherBuild ->

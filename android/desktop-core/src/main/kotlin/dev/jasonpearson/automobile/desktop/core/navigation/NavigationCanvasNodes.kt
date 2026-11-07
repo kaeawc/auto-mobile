@@ -85,6 +85,7 @@ private fun CanvasNode(context: NavigationCanvasContext, pos: NodePosition) {
               screen.provenance,
               activeContext,
               buildLens,
+              buildLabels,
             ),
           onClick = {
             onScreenSelected(screen.id)

@@ -114,6 +114,50 @@ Use the names in `screens` as `navigateTo` targets.
 prototype screens and transitions the app lacks, and app screens the prototype
 lacks.
 
+## Labeling builds with their git revision
+
+The graph records which app build reached each screen. By default a build is
+shown as `v<versionCode> (<hash prefix>)`. To show `branch@shortsha` instead
+(for example `main@3f2a9c1`), declare the git branch and full commit sha the app
+was built from. Builds that declare nothing keep the default label, and the
+declaration never changes which builds are told apart.
+
+On Android, add both values as manifest meta-data, typically filled from your
+Gradle build:
+
+```xml
+<application>
+  <meta-data android:name="dev.jasonpearson.automobile.build.gitBranch"
+             android:value="${gitBranch}" />
+  <meta-data android:name="dev.jasonpearson.automobile.build.gitSha"
+             android:value="${gitSha}" />
+</application>
+```
+
+```kotlin
+android {
+  defaultConfig {
+    manifestPlaceholders["gitBranch"] = providers.exec {
+      commandLine("git", "rev-parse", "--abbrev-ref", "HEAD")
+    }.standardOutput.asText.get().trim()
+    manifestPlaceholders["gitSha"] = providers.exec {
+      commandLine("git", "rev-parse", "HEAD")
+    }.standardOutput.asText.get().trim()
+  }
+}
+```
+
+On iOS, add the same two keys as strings to the app's `Info.plist`, for example
+from a build phase that runs `git rev-parse`. iOS builds are labeled on
+simulators only.
+
+Both values are required. The branch must be 1–255 characters; the sha must be
+7–64 hexadecimal characters, and a full 40-character sha is recommended (Android
+reads an all-digit short sha as a number and ignores it). An invalid pair is
+ignored. The label takes effect the next time AutoMobile observes the app after
+it is installed; rebuilding the same version and content from a later commit
+updates the label.
+
 ## Going to a screen
 
 ```json

@@ -153,6 +153,9 @@ export interface NavigationBuildKeysTable {
   version_code: number;
   content_hash: string;
   created_at: Generated<string>;
+  // App-declared git provenance (#16954): display-only, latest declaration wins.
+  git_branch: string | null;
+  git_sha: string | null;
 }
 
 // Per-node observation records (#4984): a screen reached by many builds/devices/sessions.

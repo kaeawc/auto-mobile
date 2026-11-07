@@ -63372,6 +63372,13 @@
             "additionalProperties": {}
           }
         },
+        "incomplete": {
+          "type": "boolean"
+        },
+        "incompleteReason": {
+          "type": "string",
+          "enum": ["deadline", "page_limit", "rewind"]
+        },
         "unattributedRows": {
           "type": "integer",
           "minimum": 0,

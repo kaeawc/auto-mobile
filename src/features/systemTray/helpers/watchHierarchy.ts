@@ -139,6 +139,23 @@ export function watchNotifications(hierarchy?: ViewHierarchyResult): WatchNotifi
     .filter((card): card is WatchNotification => card !== undefined);
 }
 
+/**
+ * Whether the stream's viewport cuts `card` off at its top or bottom edge. The visible slice of a
+ * clipped card is not its true extent (the bounds shrink and the row sits under the screen edge),
+ * so a swipe aimed at its centre can miss it or leave the stream (#17331).
+ */
+export function watchCardClipped(
+  hierarchy: ViewHierarchyResult | undefined,
+  card: WatchNotification,
+): boolean {
+  const root = watchStreamRoot(hierarchy);
+  const viewport = root && new DefaultElementParser().parseNodeBounds(root)?.bounds;
+  return (
+    !!viewport &&
+    (card.element.bounds.top <= viewport.top || card.element.bounds.bottom >= viewport.bottom)
+  );
+}
+
 /** A copy of the stream with every notification card subtree removed. */
 function withoutCards(node: ViewHierarchyNode, cards: Set<ViewHierarchyNode>): ViewHierarchyNode {
   return {

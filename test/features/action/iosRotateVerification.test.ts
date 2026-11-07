@@ -77,6 +77,33 @@ describe("iOS runner refusal screen-size checks (#17101)", () => {
     expect(result.message).toBe("Failed to rotate to portrait; the screen size did not change.");
   });
 
+  test("the refusal keeps the held landscape orientation instead of the runner's transient portrait", () => {
+    const result = verifyIosRotation(runnerRefusal(), "portrait", previousLandscape());
+    expect(result.observation?.rotation).toBe(1);
+    expect(result.currentOrientation).toBe("landscape");
+  });
+
+  test("clears the transient rotation when the previous observation has none", () => {
+    const previous = { ...previousLandscape(), rotation: undefined };
+    const result = verifyIosRotation(runnerRefusal(), "portrait", previous);
+    expect(result.observation?.rotation).toBeUndefined();
+    expect(result.currentOrientation).toBe("landscape");
+  });
+
+  test("a refusal observed on a different display keeps its own rotation", () => {
+    const refusal = runnerRefusal();
+    const onOtherDisplay = {
+      ...refusal,
+      observation: {
+        ...refusal.observation!,
+        display: { ...refusal.observation!.display, key: "primary" },
+      },
+    };
+    const result = verifyIosRotation(onOtherDisplay, "portrait", previousLandscape());
+    expect(result.observation?.rotation).toBe(refusal.observation?.rotation);
+    expect(result.currentOrientation).toBe(onOtherDisplay.currentOrientation);
+  });
+
   test("reconciles the same refusal when the observed screen size changes", () => {
     const refusal = runnerRefusal();
     const result = verifyIosRotation(

@@ -12,7 +12,7 @@ import type { ElementBounds } from "../../models/ElementBounds";
 import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
 import { DefaultTextMatcher } from "../utility/TextMatcher";
 import { normalize } from "../utility/ElementResolverMatching";
-import { isTruthyFlag } from "../utility/elementProperties";
+import { isEditableElementProperties, isTruthyFlag } from "../utility/elementProperties";
 import { matchesCtrlProxyResourceId } from "../utility/SearchableNode";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { reportToolDispatched } from "../../utils/ToolDispatchContext";
@@ -67,6 +67,8 @@ export interface FocusScreen {
   elements: readonly Element[];
   /** The read's hierarchy, for callers that resolve the target with tapOn's own selector. */
   hierarchy?: ViewHierarchyResult;
+  /** Whether an input-method (on-screen keyboard) window was in the read; undefined when unknown. */
+  imeVisible?: boolean;
 }
 
 export interface FocusObserver {
@@ -79,6 +81,21 @@ export interface FocusKeyPresser {
     signal?: AbortSignal,
   ): Promise<{ success: boolean; error?: string; verified?: boolean }>;
 }
+
+/**
+ * Hides the on-screen keyboard (Android: KEYCODE_BACK). Only called when the read that preceded it
+ * showed an IME window, so the back press closes the keyboard rather than leaving the screen.
+ */
+export interface FocusKeyboardHider {
+  hideKeyboard(signal?: AbortSignal): Promise<{ success: boolean; error?: string }>;
+}
+
+/** What holds focus when presses stop moving it: the on-screen keyboard, or an editable field. */
+export const FOCUS_NAVIGATE_BLOCKERS = ["ime", "editable"] as const;
+export type FocusNavigateBlocker = (typeof FOCUS_NAVIGATE_BLOCKERS)[number];
+
+/** The keys pressed to leave a focus trap: back hides the keyboard, tab moves to the next focusable. */
+export type FocusTrapEscape = "back" | "tab";
 
 export interface FocusPathEntry {
   /** Label of a contained node; the identity fields and bounds still describe the focused parent. */
@@ -120,6 +137,10 @@ export interface FocusNavigateResult {
   focusedElement?: FocusPathEntry;
   /** With `select`: whether the select key was sent to the focused target. */
   selected?: boolean;
+  /** On `stuck`: the keyboard or editable text field that held focus (#17356). */
+  blockedBy?: FocusNavigateBlocker;
+  /** On `stuck` with `blockedBy`: the escapes tried before giving up, in order. */
+  escapes?: FocusTrapEscape[];
   message?: string;
 }
 
@@ -537,11 +558,73 @@ function stuckMessage(progress: FocusProgress): string {
     : `Focus did not move after ${presses}`;
 }
 
+/** Whether the walk has run out of presses that could still move focus. */
+function isExhausted(
+  options: FocusNavigateOptions,
+  progress: FocusProgress,
+  direction: FocusNavigateDirection | undefined,
+): boolean {
+  return options.direction ? progress.unchanged >= FOCUS_NAVIGATE_STUCK_PRESSES : !direction;
+}
+
+/** One read's state for deciding how a walk that cannot continue ends. */
+interface ExitContext {
+  screen: FocusScreen;
+  focusedElement: FocusPathEntry | undefined;
+  /** Escapes already pressed; set once, so a second stuck read gives up. */
+  trap: { escapes?: FocusTrapEscape[] };
+  select: boolean;
+  signal: AbortSignal | undefined;
+}
+
+/** The keyboard or editable field holding focus on this read, if either does. */
+function focusBlocker(screen: FocusScreen): FocusNavigateBlocker | undefined {
+  if (screen.imeVisible) {
+    return "ime";
+  }
+  return screen.focused && isEditableElementProperties(screen.focused) ? "editable" : undefined;
+}
+
+function describeEntry(entry: FocusPathEntry | undefined): string {
+  if (!entry) {
+    return "";
+  }
+  const name = entry.resourceId ?? entry.text ?? entry.contentDesc ?? entry.descendantLabel;
+  if (name) {
+    return ` ${JSON.stringify(name)}`;
+  }
+  const { left, top, right, bottom } = entry.bounds;
+  return ` at [${left},${top}][${right},${bottom}]`;
+}
+
+/** The stuck message naming the trap, the escapes tried and what the caller can do instead. */
+function trapMessage(
+  blocker: FocusNavigateBlocker,
+  editable: boolean,
+  focusedElement: FocusPathEntry | undefined,
+  escapes: readonly FocusTrapEscape[],
+): string {
+  const holder = editable
+    ? `the editable text field${describeEntry(focusedElement)}`
+    : `the focused element${describeEntry(focusedElement)}`;
+  const trap =
+    blocker === "ime"
+      ? `D-pad focus is trapped by the on-screen keyboard over ${holder}`
+      : `D-pad focus is trapped in ${holder}`;
+  const tried =
+    escapes.length > 0
+      ? `; pressing ${escapes.join(" then ")} and every direction again did not move focus`
+      : "; arrow keys do not leave it and tab would type into it";
+  return `${trap}${tried}. Leave the field first (for example sendKeys with key next or done), then retry`;
+}
+
 export class FocusNavigate {
   constructor(
     private readonly observer: FocusObserver,
     private readonly keys: FocusKeyPresser,
     private readonly timer: Timer,
+    /** Without it a keyboard trap is reported but not escaped with back (tvOS, older callers). */
+    private readonly keyboard?: FocusKeyboardHider,
   ) {}
 
   async execute(options: FocusNavigateOptions): Promise<FocusNavigateResult> {
@@ -555,7 +638,8 @@ export class FocusNavigate {
 
     const path: FocusPathEntry[] = [];
     let steps = 0;
-    const progress = createFocusProgress();
+    let progress = createFocusProgress();
+    const trap: ExitContext["trap"] = {};
 
     for (;;) {
       throwIfAborted(signal);
@@ -570,9 +654,7 @@ export class FocusNavigate {
       }
 
       const direction = options.direction ?? this.nextDirection(focused, onScreen, progress);
-      const exhausted = options.direction
-        ? progress.unchanged >= FOCUS_NAVIGATE_STUCK_PRESSES
-        : !direction;
+      const exhausted = isExhausted(options, progress, direction);
       const done = this.exitFor(focusedElement, matches, {
         steps,
         stuck: exhausted ? stuckMessage(progress) : undefined,
@@ -580,7 +662,20 @@ export class FocusNavigate {
         path,
       });
       if (done) {
-        return await this.finish(done, options.select === true, signal);
+        const outcome = await this.exit(done, {
+          screen,
+          focusedElement,
+          trap,
+          select: options.select === true,
+          signal,
+        });
+        if (outcome !== "escaped") {
+          return outcome;
+        }
+        // Every direction gets a fresh try from the same element once the trap is left.
+        progress = createFocusProgress();
+        await awaitWhileRequestIsLive(this.timer.sleep(settleMs), signal);
+        continue;
       }
       if (!direction) {
         throw new ActionableError("focusNavigate has no direction to press");
@@ -652,6 +747,71 @@ export class FocusNavigate {
     return untried[0];
   }
 
+  /** How a walk that cannot continue ends: a trap escape to retry from, or the final result. */
+  private async exit(
+    done: FocusNavigateResult,
+    context: ExitContext,
+  ): Promise<FocusNavigateResult | "escaped"> {
+    const trapped = await this.trapOutcome(done, context);
+    return trapped ?? (await this.finish(done, context.select, context.signal));
+  }
+
+  /**
+   * For a stuck exit with a keyboard or editable field holding focus: "escaped" after the first
+   * escape keys were pressed, else the stuck result naming the trap. Undefined without a trap.
+   */
+  private async trapOutcome(
+    done: FocusNavigateResult,
+    { screen, focusedElement, trap, signal }: ExitContext,
+  ): Promise<FocusNavigateResult | "escaped" | undefined> {
+    const blocker = done.status === "stuck" ? focusBlocker(screen) : undefined;
+    if (!blocker) {
+      return undefined;
+    }
+    if (trap.escapes === undefined) {
+      trap.escapes = await this.escapeTrap(screen, signal);
+      if (trap.escapes.length > 0) {
+        return "escaped";
+      }
+    }
+    const editable = screen.focused !== null && isEditableElementProperties(screen.focused);
+    return this.stopped("stuck", done.steps, done.path, {
+      focusedElement,
+      message: trapMessage(blocker, editable, focusedElement, trap.escapes),
+      blockedBy: blocker,
+      escapes: trap.escapes,
+    });
+  }
+
+  /**
+   * Leave a keyboard or text-field focus trap (#17356): hide a shown keyboard with back, and press
+   * tab when the focused element is not editable (tab escapes a slider, #17209, but types a tab
+   * character into a text field). Returns the escapes pressed; empty when none applies.
+   */
+  private async escapeTrap(
+    screen: FocusScreen,
+    signal: AbortSignal | undefined,
+  ): Promise<FocusTrapEscape[]> {
+    const escapes: FocusTrapEscape[] = [];
+    if (screen.imeVisible && this.keyboard) {
+      throwIfAborted(signal);
+      const hidden = await this.keyboard.hideKeyboard(signal);
+      if (!hidden.success) {
+        throw new ActionableError(hidden.error ?? "Failed to hide the on-screen keyboard");
+      }
+      escapes.push("back");
+    }
+    if (screen.focused && !isEditableElementProperties(screen.focused)) {
+      throwIfAborted(signal);
+      const pressed = await this.keys.press("tab", signal);
+      if (!pressed.success) {
+        throw new ActionableError(pressed.error ?? "Failed to press tab");
+      }
+      escapes.push("tab");
+    }
+    return escapes;
+  }
+
   /** With `select`, activate a focused target with the select key; a refused key fails the call. */
   private async finish(
     done: FocusNavigateResult,
@@ -688,7 +848,17 @@ export class FocusNavigate {
     status: "stuck" | "max_steps",
     steps: number,
     path: FocusPathEntry[],
-    { focusedElement, message }: { focusedElement: FocusPathEntry | undefined; message: string },
+    {
+      focusedElement,
+      message,
+      blockedBy,
+      escapes,
+    }: {
+      focusedElement: FocusPathEntry | undefined;
+      message: string;
+      blockedBy?: FocusNavigateBlocker;
+      escapes?: FocusTrapEscape[];
+    },
   ): FocusNavigateResult {
     return {
       success: false,
@@ -696,6 +866,7 @@ export class FocusNavigate {
       steps,
       path,
       ...(focusedElement ? { focusedElement } : {}),
+      ...(blockedBy ? { blockedBy, escapes: escapes ?? [] } : {}),
       message: `${message}; the target was not focused. Observe before retrying.`,
     };
   }

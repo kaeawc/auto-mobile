@@ -138,8 +138,14 @@ the same element a touch tap would, including a text field found by its placehol
 of several matches, even when focus is on another one. The result then has
 `inputMethod: "dpad"` and a `focusNavigation` object with the focus `status`, `steps` and `path`.
 If focus cannot reach the match, the call fails without pressing `enter`; observe and retry, or
-move closer with `focusNavigate`. Other selectors (`testTag`, `textAny`, `accessibilityLink`),
-other actions, and the options `sibling`, `container`, `index`, `searchUntil`, `ensureChecked`,
+move closer with `focusNavigate`. When an editable text field or the on-screen keyboard holds focus,
+the walk first hides a shown keyboard with back (and presses tab when the focused element is not a
+text field, since tab would type into one), then tries every direction again. If focus still does
+not move, `focusNavigation.status` is `stuck`, `focusNavigation.blockedBy` is `ime` or `editable`,
+`focusNavigation.escapes` lists the keys tried, and the error names the trapped field: leave the
+field first, for example with `sendKeys` key `next` or `done`, then retry.
+`focusNavigate` returns the same `blockedBy` and `escapes`. Other selectors (`testTag`, `textAny`,
+`accessibilityLink`), other actions, and the options `sibling`, `container`, `index`, `searchUntil`, `ensureChecked`,
 `subtext`, `layer`, `display` and a `selectionStrategy` other than `first` still need a touchscreen. `swipeOn` needs a touchscreen too;
 on a TV without one, navigate with `focusNavigate` and `sendKeys` instead.
 

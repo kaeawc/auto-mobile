@@ -8,7 +8,10 @@ import { elementSchema, selectedElementSchema } from "./elements";
 import { observationBackendFields, observationOutputSchema } from "./observation";
 import { observationDiffMetadataSchema, tapEffectSchema } from "./observationMetadata";
 import { platformSchema } from "../../utils/schemaHelpers";
-import { FOCUS_NAVIGATE_STATUSES } from "../../features/action/FocusNavigate";
+import {
+  FOCUS_NAVIGATE_BLOCKERS,
+  FOCUS_NAVIGATE_STATUSES,
+} from "../../features/action/FocusNavigate";
 
 /** A successful openurl may still need a foreground confirmation before the next action. */
 export const openLinkResultSchema = z
@@ -267,6 +270,16 @@ export const tapOnResultSchema = z
         steps: z.number(),
         path: z.array(z.record(z.string(), z.unknown())),
         focusedElement: z.record(z.string(), z.unknown()).optional(),
+        blockedBy: z
+          .enum(FOCUS_NAVIGATE_BLOCKERS)
+          .optional()
+          .describe(
+            "On stuck: the on-screen keyboard (ime) or editable text field (editable) that held focus",
+          ),
+        escapes: z
+          .array(z.enum(["back", "tab"]))
+          .optional()
+          .describe("On stuck with blockedBy: the keys pressed to leave the trap before giving up"),
       })
       .passthrough()
       .optional()

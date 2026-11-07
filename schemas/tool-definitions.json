@@ -66195,6 +66195,19 @@
                 "type": "string"
               },
               "additionalProperties": {}
+            },
+            "blockedBy": {
+              "description": "On stuck: the on-screen keyboard (ime) or editable text field (editable) that held focus",
+              "type": "string",
+              "enum": ["ime", "editable"]
+            },
+            "escapes": {
+              "description": "On stuck with blockedBy: the keys pressed to leave the trap before giving up",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["back", "tab"]
+              }
             }
           },
           "required": ["status", "steps", "path"],

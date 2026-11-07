@@ -331,13 +331,13 @@ private final class ScriptedCrownSource: WatchSnapshotSource, WatchGesturePerfor
         )
     }
 
-    func rotateCrown(delta: Double, velocity: Double) throws {
+    func rotateCrown(delta _: Double, velocity _: Double) throws {
         try watchVerifiedCrownRotation(snapshots: self) { rotations += 1 }
     }
 
-    func tap(x: Double, y: Double) throws {}
-    func tap(identifier: String) throws {}
-    func swipe(_ direction: WatchSwipeDirection, distance: Double?) throws {}
-    func typeText(_ text: String) throws {}
+    func tap(x _: Double, y _: Double) throws {}
+    func tap(identifier _: String) throws {}
+    func swipe(_: WatchSwipeDirection, distance _: Double?) throws {}
+    func typeText(_: String) throws {}
     func home() throws {}
 }

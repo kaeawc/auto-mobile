@@ -1,10 +1,13 @@
 import { drainUntil } from "../../helpers/fakeTimerStepping";
 import { afterEach, expect, test } from "bun:test";
 import {
+  VISIONOS_RUNNER_HOST_BUNDLE_ID,
   VisionosRunnerLifecycle,
   requireVisionosRunner,
+  withVisionosHostRecovery,
 } from "../../../src/features/visionos/VisionosRunnerLifecycle";
 import { visionosRunners } from "../../../src/features/visionos/VisionosRunnerRegistry";
+import { VisionosRunnerError } from "../../../src/features/visionos/VisionosRunnerError";
 import type {
   SessionReleaseCallback,
   SessionDeviceUnboundCallback,
@@ -304,4 +307,50 @@ test("a first command reports artifact failure without launching or allocating a
   );
   expect(f.launcher.launches).toEqual([]);
   expect(f.allocated).toEqual([]);
+});
+
+function hostAppGoneFixture() {
+  const f = fixture();
+  const dead = new FakeVisionosRunnerClient();
+  dead.failure = new VisionosRunnerError(
+    `Application ${VISIONOS_RUNNER_HOST_BUNDLE_ID} is not running`,
+    "command_failed",
+  );
+  const clients: FakeVisionosRunnerClient[] = [dead];
+  f.launcher.nextClient = () => clients.shift() ?? new FakeVisionosRunnerClient();
+  const observe = async () =>
+    (await requireVisionosRunner("owned-visionos", undefined, f.owner)).hierarchy();
+  return { ...f, dead, clients, observe };
+}
+
+test("a host app removed outside uninstallApp restarts the runner once and retries (#17382)", async () => {
+  const f = hostAppGoneFixture();
+  const tree = await withVisionosHostRecovery("owned-visionos", undefined, f.observe, f.owner);
+  expect(tree).toBeDefined();
+  expect(f.launcher.launches).toHaveLength(2);
+  expect(f.launcher.stops).toBe(1);
+  expect(f.dead.closed).toBe(true);
+});
+
+test("a host app that stays gone after one restart surfaces the runner error", async () => {
+  const f = hostAppGoneFixture();
+  const stillDead = new FakeVisionosRunnerClient();
+  stillDead.failure = f.dead.failure;
+  f.clients.push(stillDead);
+  await expect(
+    withVisionosHostRecovery("owned-visionos", undefined, f.observe, f.owner),
+  ).rejects.toThrow("is not running");
+  expect(f.launcher.launches).toHaveLength(2);
+});
+
+test("other runner failures and a target app's absence are not treated as a lost host app", async () => {
+  const f = hostAppGoneFixture();
+  f.dead.failure = new VisionosRunnerError(
+    "Application com.example.target is not running",
+    "command_failed",
+  );
+  await expect(
+    withVisionosHostRecovery("owned-visionos", undefined, f.observe, f.owner),
+  ).rejects.toThrow("com.example.target");
+  expect(f.launcher.launches).toHaveLength(1);
 });

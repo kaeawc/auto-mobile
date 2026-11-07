@@ -133,6 +133,7 @@ nav:
       - "UI tests": using/ui-tests.md
       - "Test prep tools": using/test-prep-tools.md
       - "Manufacturer profiles": using/oem-personas.md
+      - "Kill profiles": using/kill-profiles.md
       - "Session execution logs": using/session-logs.md
       - "Storage capabilities": using/storage-capabilities.md
       - "Keystore test state": using/keystore-test-state.md

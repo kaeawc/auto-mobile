@@ -14,13 +14,33 @@ export const SURVIVAL_EVENT_IDS = [
 
 export type SurvivalEventId = (typeof SURVIVAL_EVENT_IDS)[number];
 export type SurvivalOutcome = "ran" | "delayed" | "never";
-/** All nineteen profiles are measured on an API 35 emulator; the OEM profiles from #17126 were measured in the #16871 run. */
+/** Measured profiles have API 35 baselines; unmeasured recipes retain TODO_MEASURE. */
 export type ExpectedSurvivalScore = Record<SurvivalEventId, SurvivalOutcome | "TODO_MEASURE">;
 
 /** API level the table below was measured on; other levels have no baseline to compare against. */
 export const EXPECTED_SCORES_API_LEVEL = 35;
 
 export const KILL_PROFILE_EXPECTED_SCORES: Record<KillProfileId, ExpectedSurvivalScore> = {
+  "samsung-foreground-kill": {
+    "workmanager-periodic": "TODO_MEASURE",
+    "workmanager-oneshot": "TODO_MEASURE",
+    jobscheduler: "TODO_MEASURE",
+    "alarm-exact": "TODO_MEASURE",
+    "alarm-inexact": "TODO_MEASURE",
+    "foreground-service": "TODO_MEASURE",
+    "boot-receiver": "TODO_MEASURE",
+    "push-broadcast": "TODO_MEASURE",
+  },
+  "screen-off-stop": {
+    "workmanager-periodic": "TODO_MEASURE",
+    "workmanager-oneshot": "TODO_MEASURE",
+    jobscheduler: "TODO_MEASURE",
+    "alarm-exact": "TODO_MEASURE",
+    "alarm-inexact": "TODO_MEASURE",
+    "foreground-service": "TODO_MEASURE",
+    "boot-receiver": "TODO_MEASURE",
+    "push-broadcast": "TODO_MEASURE",
+  },
   "samsung-sleeping": {
     "workmanager-periodic": "ran",
     "workmanager-oneshot": "ran",

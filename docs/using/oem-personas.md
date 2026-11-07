@@ -3,11 +3,11 @@
 The `manufacturerProfile` tool approximates an OEM device on a stock Android emulator
 or device. A manufacturer profile is a named, versioned bundle of facets. Each facet is applied by an existing tool:
 
-| Facet      | Applied with            | What it changes                                               |
-| ---------- | ----------------------- | ------------------------------------------------------------- |
-| `keyboard` | `keyboard` `setProfile` | The AutoMobile IME's typing behaviour (`gboard`, `samsung`)   |
-| `kill`     | `killProfile`           | Standby bucket, appops, Doze and force-stop for one package   |
-| `display`  | `displayProfile`        | Display cutout and navigation-mode overlays, density and more |
+| Facet      | Applied with                      | What it changes                                               |
+| ---------- | --------------------------------- | ------------------------------------------------------------- |
+| `keyboard` | `keyboard` `setProfile`           | The AutoMobile IME's typing behaviour (`gboard`, `samsung`)   |
+| `kill`     | [`killProfile`](kill-profiles.md) | Standby bucket, appops, Doze and force-stop for one package   |
+| `display`  | `displayProfile`                  | Display cutout and navigation-mode overlays, density and more |
 
 ## Manufacturer profiles simulate effects, not firmware
 

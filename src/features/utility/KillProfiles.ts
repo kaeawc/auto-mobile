@@ -34,6 +34,14 @@ export type KillProfileStep =
   | { kind: "notificationPermission"; mode: "revoke" }
   /** App hibernation, restored to the state read before the first change. */
   | { kind: "hibernation" }
+  /** Revoke all currently granted runtime permissions; restore the captured set (API 23+). */
+  | { kind: "runtimePermissions" }
+  /** Open Settings and confirm another package is top resumed. Nothing to restore. */
+  | { kind: "foregroundChange" }
+  /** Sleep the screen, verify it, then wait; wake on reset only if initially awake. */
+  | { kind: "screenOff"; minutes: number }
+  /** Observe boot receivers, stopped state and pending alarms without sending a broadcast. */
+  | { kind: "bootReceiverCheck" }
   /** `dumpsys deviceidle force-idle`: force deep Doze. Restored by `dumpsys deviceidle unforce`. */
   | { kind: "forceIdle" }
   /** `input keyevent KEYCODE_HOME`: background the app first, as a recents swipe does. */
@@ -45,6 +53,8 @@ export const KILL_PROFILE_IDS = [
   "samsung-sleeping",
   "samsung-deep-sleeping",
   "samsung-auto-disable",
+  "samsung-foreground-kill",
+  "screen-off-stop",
   "xiaomi-autostart-off",
   "oneplus-deep-optimization",
   "recents-swipe-kill",
@@ -92,6 +102,13 @@ const FORCE_STOP_AND_RESTRICT_NOTE =
   "Approximated as a force-stop plus RUN_ANY_IN_BACKGROUND ignore: the app is stopped and may not " +
   "run in the background until reset. The OEM's own trigger and exemption UI are not reproduced.";
 
+const BOOT_CHECK_NOTE =
+  " Boot-receiver observation predicts default delivery without sending BOOT_COMPLETED: shell is denied " +
+  "this protected broadcast (SecurityException). Root checks on stock API 35 show a force-stopped package " +
+  "receives no default broadcast (no process starts), but does with --include-stopped-packages. " +
+  "A non-stopped package still receives it with RUN_ANY_IN_BACKGROUND=ignore or the restricted bucket; " +
+  "only stopped state blocks delivery on stock Android when a receiver and permission are present.";
+
 export const KILL_PROFILES: Readonly<Record<KillProfileId, KillProfile>> = {
   "samsung-sleeping": {
     id: "samsung-sleeping",
@@ -118,23 +135,48 @@ export const KILL_PROFILES: Readonly<Record<KillProfileId, KillProfile>> = {
   },
   "samsung-auto-disable": {
     id: "samsung-auto-disable",
-    version: 1,
-    description: "Samsung auto-disable of unused apps: app hibernation.",
-    steps: [{ kind: "hibernation" }],
+    version: 2,
+    description:
+      "Samsung auto-disable of unused apps: runtime permissions revoked and app hibernation.",
+    steps: [{ kind: "runtimePermissions" }, { kind: "hibernation" }],
     evidenceStatus: "inferred",
     evidenceNote:
-      "Approximated by AOSP app hibernation, which Samsung's auto-disable of unused apps uses. " +
-      "Restores the hibernation state read before the first change; the unused-for-N-days trigger " +
+      "Approximated by explicit runtime permission revocation and AOSP app hibernation. Hibernation alone does not revoke permissions of preinstalled apps. " +
+      "Restores the captured granted permission set and hibernation state read before the first change; the unused-for-N-days trigger " +
       "is not reproduced.",
     source: SAMSUNG_APP_MANAGEMENT,
   },
+  "samsung-foreground-kill": {
+    id: "samsung-foreground-kill",
+    version: 1,
+    description:
+      "Samsung Game Booster / Good Guardians: force-stop after another app comes to the foreground.",
+    steps: [{ kind: "foregroundChange" }, { kind: "kill", mode: "hard" }],
+    evidenceStatus: "inferred",
+    evidenceNote:
+      "Opens Settings, verifies another app is foreground, then force-stops. Approximates Game Booster / Good Guardians; OEM trigger and exemption policies are not reproduced.",
+    source: "https://dontkillmyapp.com/samsung",
+  },
+  "screen-off-stop": {
+    id: "screen-off-stop",
+    version: 1,
+    description: "Screen-off cleanup: wait one minute with the screen off, then force-stop.",
+    steps: [
+      { kind: "screenOff", minutes: 1 },
+      { kind: "kill", mode: "hard" },
+    ],
+    evidenceStatus: "inferred",
+    evidenceNote:
+      "Approximates Asus Power Master, Meizu Protected apps and realme/Tecno screen-off cleanup with an explicit one-minute wait. Restores an initially awake screen; the N-days-unused trigger remains non-emulatable.",
+    source: DONT_KILL_MY_APP,
+  },
   "xiaomi-autostart-off": {
     id: "xiaomi-autostart-off",
-    version: 1,
+    version: 2,
     description: "Xiaomi HyperOS/MIUI Autostart off: stopped and not restarted in the background.",
-    steps: FORCE_STOP_AND_RESTRICT,
+    steps: [...FORCE_STOP_AND_RESTRICT, { kind: "bootReceiverCheck" }],
     evidenceStatus: "inferred",
-    evidenceNote: FORCE_STOP_AND_RESTRICT_NOTE,
+    evidenceNote: FORCE_STOP_AND_RESTRICT_NOTE + BOOT_CHECK_NOTE,
     source: DONT_KILL_MY_APP,
   },
   "oneplus-deep-optimization": {
@@ -223,35 +265,39 @@ export const KILL_PROFILES: Readonly<Record<KillProfileId, KillProfile>> = {
   },
   "huawei-powergenie": {
     id: "huawei-powergenie",
-    version: 1,
+    version: 2,
     description:
       "Huawei EMUI: Classic battery optimization: Don't allow and background restriction.",
     steps: [
       { kind: "standbyBucket", bucket: "restricted" },
       { kind: "appOp", op: "RUN_ANY_IN_BACKGROUND", mode: "ignore" },
       { kind: "appOp", op: "WAKE_LOCK", mode: "ignore" },
+      { kind: "bootReceiverCheck" },
     ],
     evidenceStatus: "inferred",
     evidenceNote:
-      "Classic battery optimization: Don't allow and background restriction, approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com Huawei entry (CC-BY-4.0). Not modelled yet (#16869): PowerGenie's kill of non-whitelisted apps (time-based policy and foreground-change kill); the Startup manager boot check (boot-receiver check).",
+      "Classic battery optimization: Don't allow and background restriction, approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com Huawei entry (CC-BY-4.0). Not modelled yet (#16869): PowerGenie's non-whitelist and time-based trigger policies. Foreground-change kills are available separately as samsung-foreground-kill." +
+      BOOT_CHECK_NOTE,
     source: "https://dontkillmyapp.com/huawei",
   },
   "vivo-autostart": {
     id: "vivo-autostart",
-    version: 1,
+    version: 2,
     description: "Vivo Funtouch OS: Per-app background power restriction (Android 13).",
     steps: [
       { kind: "appOp", op: "RUN_ANY_IN_BACKGROUND", mode: "ignore" },
       { kind: "standbyBucket", bucket: "restricted" },
+      { kind: "bootReceiverCheck" },
     ],
     evidenceStatus: "inferred",
     evidenceNote:
-      "Per-app background power restriction (Android 13), approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com Vivo entry (CC-BY-4.0). Not modelled yet (#16869): the Autostart permission, which gates apps launched from the background and at boot (boot-receiver check).",
+      "Per-app background power restriction (Android 13), approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com Vivo entry (CC-BY-4.0). The boot check observes stock delivery eligibility; Vivo's proprietary background-launch permission is not reproduced." +
+      BOOT_CHECK_NOTE,
     source: "https://dontkillmyapp.com/vivo",
   },
   "realme-power-saver": {
     id: "realme-power-saver",
-    version: 1,
+    version: 2,
     description: "realme UI: Power saving on battery with App battery management set to Optimize.",
     steps: [
       { kind: "batteryUnplug" },
@@ -260,12 +306,12 @@ export const KILL_PROFILES: Readonly<Record<KillProfileId, KillProfile>> = {
     ],
     evidenceStatus: "inferred",
     evidenceNote:
-      "Power saving on battery with App battery management set to Optimize, approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com realme entry (CC-BY-4.0). Not modelled yet (#16869): the power-saving background kill and stand-by optimization, which depend on screen-off and sleep time (time-based policy).",
+      "Power saving on battery with App battery management set to Optimize, approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com realme entry (CC-BY-4.0). Screen-off cleanup is available separately as screen-off-stop; OEM sleep schedules and trigger policies are not reproduced.",
     source: "https://dontkillmyapp.com/realme",
   },
   "meizu-flyme-background": {
     id: "meizu-flyme-background",
-    version: 1,
+    version: 2,
     description:
       'Meizu Flyme: Background processes not allowed and "keep running after screen off" off (wake-lock denial).',
     steps: [
@@ -274,12 +320,12 @@ export const KILL_PROFILES: Readonly<Record<KillProfileId, KillProfile>> = {
     ],
     evidenceStatus: "inferred",
     evidenceNote:
-      'Background processes not allowed and "keep running after screen off" off (wake-lock denial), approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com Meizu entry (CC-BY-4.0). Not modelled yet (#16869): Protected apps kill when the screen turns off (time-based policy).',
+      'Background processes not allowed and "keep running after screen off" off (wake-lock denial), approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com Meizu entry (CC-BY-4.0). Protected apps screen-off kills are available separately as screen-off-stop; OEM exemption policies are not reproduced.',
     source: "https://dontkillmyapp.com/meizu",
   },
   "asus-power-master": {
     id: "asus-power-master",
-    version: 1,
+    version: 2,
     description: "Asus ZenUI: Power Master's auto-deny of auto-start.",
     steps: [
       { kind: "standbyBucket", bucket: "restricted" },
@@ -287,12 +333,12 @@ export const KILL_PROFILES: Readonly<Record<KillProfileId, KillProfile>> = {
     ],
     evidenceStatus: "inferred",
     evidenceNote:
-      "Power Master's auto-deny of auto-start, approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com Asus entry (CC-BY-4.0). Not modelled yet (#16869): Power Master's clean-up of background tasks on screen-off (time-based policy).",
+      "Power Master's auto-deny of auto-start, approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com Asus entry (CC-BY-4.0). Power Master's screen-off cleanup is available separately as screen-off-stop; OEM trigger policies are not reproduced.",
     source: "https://dontkillmyapp.com/asus",
   },
   "sony-stamina": {
     id: "sony-stamina",
-    version: 1,
+    version: 2,
     description: "Sony Xperia: STAMINA mode (background processes and alarms restricted).",
     steps: [
       { kind: "batteryUnplug" },
@@ -301,12 +347,12 @@ export const KILL_PROFILES: Readonly<Record<KillProfileId, KillProfile>> = {
     ],
     evidenceStatus: "inferred",
     evidenceNote:
-      'STAMINA mode (background processes and alarms restricted), approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com Sony entry (CC-BY-4.0). Not modelled yet (#16869): STAMINA\'s "Prefer battery time" limits that apply after screen-off (time-based policy); the Power-saving feature exception list (boot-receiver/alarm check).',
+      'STAMINA mode (background processes and alarms restricted), approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com Sony entry (CC-BY-4.0). Not modelled yet (#16869): STAMINA\'s "Prefer battery time" limits that apply after screen-off (time-based policy); the proprietary Power-saving feature exception list.',
     source: "https://dontkillmyapp.com/sony",
   },
   "tecno-app-halt": {
     id: "tecno-app-halt",
-    version: 1,
+    version: 2,
     description:
       "Tecno HiOS: Background execution denied and foreground-service wake locks denied.",
     steps: [
@@ -315,7 +361,7 @@ export const KILL_PROFILES: Readonly<Record<KillProfileId, KillProfile>> = {
     ],
     evidenceStatus: "inferred",
     evidenceNote:
-      "Background execution denied and foreground-service wake locks denied, approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com Tecno entry (CC-BY-4.0). Not modelled yet (#16869): the app-freeze that stops timers and services until the user reopens it, Power Marathon's screen-off optimisation, and the night-time airplane-mode sleep schedule (time-based policy).",
+      "Background execution denied and foreground-service wake locks denied, approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com Tecno entry (CC-BY-4.0). Power Marathon screen-off cleanup is available separately as screen-off-stop. Not modelled yet (#16869): app-freeze and the night-time airplane-mode sleep schedule.",
     source: "https://dontkillmyapp.com/tecno",
   },
 };

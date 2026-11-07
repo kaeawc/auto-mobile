@@ -29,7 +29,11 @@ import type {
   TapAtElementLike,
 } from "./dependencies";
 import { hitTestSchema } from "./tapSchemas";
-import { dpadTapOnTarget, type DpadTapOnResult } from "../../features/action/DpadTapOn";
+import {
+  dpadTapOnHoldMs,
+  dpadTapOnTarget,
+  type DpadTapOnResult,
+} from "../../features/action/DpadTapOn";
 import { defaultTapOnDpadFallbackFactory } from "./tapOnDpadFallback";
 
 /**
@@ -284,7 +288,8 @@ async function tapOnByDpad(
   const factory =
     deps.tapOnDpadFallbackFactory ??
     (deps.tapOnElementFactory ? undefined : defaultTapOnDpadFallbackFactory);
-  const target = factory ? dpadTapOnTarget({ ...args, action }) : undefined;
+  const request = { ...args, action };
+  const target = factory ? dpadTapOnTarget(request) : undefined;
   if (!factory || !target) {
     return undefined;
   }
@@ -292,7 +297,7 @@ async function tapOnByDpad(
   if ((await fallback.hasTouchscreen(signal)) !== false) {
     return undefined;
   }
-  return await fallback.tap(target, signal);
+  return await fallback.tap(target, signal, dpadTapOnHoldMs(request));
 }
 
 export async function tapOnHandler(

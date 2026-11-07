@@ -17230,6 +17230,10 @@
         "verifyFailureReason": {
           "type": "string"
         },
+        "verificationSkipped": {
+          "type": "string",
+          "const": "platform"
+        },
         "observedAppId": {
           "type": "string"
         },

@@ -313,4 +313,31 @@ describe("buildLaunchAppResponse (already foreground, #6868)", () => {
       "App com.android.settings was already in the foreground (foreground verified)",
     );
   });
+
+  // #17319: a tvOS, visionOS or watchOS launch is never observed; that is not a failure.
+  test("a launch whose path never observes is unverified, not a verification failure", () => {
+    const payload = buildLaunchAppResponse("com.apple.TVSettings", {
+      success: true,
+      packageName: "com.apple.TVSettings",
+      pid: 42,
+      verificationSkipped: "platform",
+    });
+
+    expect(payload.verified).toBeUndefined();
+    expect(payload).not.toHaveProperty("verifyFailureReason");
+    expect(payload.verificationSkipped).toBe("platform");
+    expect(payload.message).toBe(
+      "Launched app com.apple.TVSettings (foreground not verified: launchApp does not observe on this platform; call observe to confirm)",
+    );
+  });
+
+  test("a launch without the skip marker and without an observation still fails verification", () => {
+    const payload = buildLaunchAppResponse("com.example.app", {
+      success: true,
+      packageName: "com.example.app",
+    });
+
+    expect(payload.verified).toBe(false);
+    expect(payload.verifyFailureReason).toBe("no_observation");
+  });
 });

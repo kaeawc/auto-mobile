@@ -10,11 +10,19 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const PROBE = "pm has-feature android.hardware.touchscreen";
+const LEANBACK = "pm has-feature android.software.leanback";
+const TELEVISION = "pm has-feature android.hardware.type.television";
 
 function adbAnswering(stdout: string): FakeAdbExecutor {
   const adb = new FakeAdbExecutor();
   adb.setCommandResponse(PROBE, createExecResult(stdout, ""));
   return adb;
+}
+
+/** `pm has-feature` prints `false` and exits 1 for a feature the device lacks. */
+function missingFeature(): Error {
+  const exitOne = Object.assign(new Error("Command failed: exit 1"), { stdout: "false\n" });
+  return new Error("adb command failed", { cause: exitOne });
 }
 
 const probes = (adb: FakeAdbExecutor): number =>
@@ -72,6 +80,52 @@ describe("CachedTouchscreenFeature", () => {
   test("reports a phone's touchscreen", async () => {
     const feature = new CachedTouchscreenFeature(new FakeTimer());
     expect(await feature.hasTouchscreen(adbAnswering("true\n"), "phone")).toBe(true);
+  });
+
+  // mt0091b (#17316): API 36 android-tv and google-tv emulators answer `true` for both the
+  // touchscreen and leanback features, though they have no touch input device.
+  test("a TV emulator that declares a touchscreen and leanback reads as touchless", async () => {
+    const feature = new CachedTouchscreenFeature(new FakeTimer());
+    const adb = adbAnswering("true\n");
+    adb.setCommandResponse(LEANBACK, createExecResult("true\n", ""));
+
+    expect(await feature.hasTouchscreen(adb, "emulator-5554")).toBe(false);
+    expect(await feature.hasTouchscreen(adb, "emulator-5554")).toBe(false);
+    expect(probes(adb)).toBe(1);
+  });
+
+  test("a television feature without leanback also reads as touchless", async () => {
+    const feature = new CachedTouchscreenFeature(new FakeTimer());
+    const adb = adbAnswering("true\n");
+    adb.setCommandError(LEANBACK, missingFeature());
+    adb.setCommandResponse(TELEVISION, createExecResult("true\n", ""));
+    expect(await feature.hasTouchscreen(adb, "tv")).toBe(false);
+  });
+
+  test("a phone that declares neither TV feature keeps its cached touchscreen", async () => {
+    const feature = new CachedTouchscreenFeature(new FakeTimer());
+    const adb = adbAnswering("true\n");
+    adb.setCommandError(LEANBACK, missingFeature());
+    adb.setCommandError(TELEVISION, missingFeature());
+    expect(await feature.hasTouchscreen(adb, "phone")).toBe(true);
+    expect(await feature.hasTouchscreen(adb, "phone")).toBe(true);
+    expect(probes(adb)).toBe(1);
+  });
+
+  test("an unreadable TV-feature probe keeps touch input and is not cached", async () => {
+    const feature = new CachedTouchscreenFeature(new FakeTimer());
+    const adb = adbAnswering("true\n");
+    adb.setCommandError(LEANBACK, new Error("device offline"));
+    expect(await feature.hasTouchscreen(adb, "tv")).toBe(true);
+    expect(await feature.hasTouchscreen(adb, "tv")).toBe(true);
+    expect(probes(adb)).toBe(2);
+  });
+
+  test("a device without a touchscreen is not asked about TV features", async () => {
+    const feature = new CachedTouchscreenFeature(new FakeTimer());
+    const adb = adbAnswering("false\n");
+    expect(await feature.hasTouchscreen(adb, "tv")).toBe(false);
+    expect(adb.getExecutedCommands().filter((command) => command.includes(LEANBACK))).toEqual([]);
   });
 
   test("a failed or unreadable probe returns null and is not cached", async () => {

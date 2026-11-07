@@ -1,0 +1,48 @@
+{
+  "id": "settings-open-wifi",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["settings"]
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "button",
+        "id": "app",
+        "label": "App settings",
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "settings.open",
+            "args": {
+              "page": {
+                "value": "app"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "button",
+        "id": "wifi",
+        "label": "Wi-Fi",
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "settings.open",
+            "args": {
+              "page": {
+                "value": "wifi"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

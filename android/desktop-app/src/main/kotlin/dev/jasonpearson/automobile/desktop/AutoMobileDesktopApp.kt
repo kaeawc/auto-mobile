@@ -1,9 +1,12 @@
 package dev.jasonpearson.automobile.desktop
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopInputAllocation
@@ -59,10 +62,17 @@ fun AutoMobileDesktopApp(
   // False while the window is closed to the tray (#10695): after a short grace the desktop session
   // releases the device it holds, and showing the window allocates it again on the next input.
   windowVisible: Boolean = true,
+  // Receives the window title for the focused workspace device (see windowTitle); Main.kt owns the
+  // Window, which sits above the workspace state.
+  onWindowTitleChange: (String) -> Unit = {},
 ) {
   val runtime = rememberDesktopRuntime(windowVisible)
   val ui = remember { DesktopAppUiState(runtime.settings) }
   val presentation = desktopPresentation(runtime, daemonConnectionState)
+  val foregroundApps by ui.foregroundApps.apps.collectAsState()
+  val title = windowTitle(presentation.workspaceState, foregroundApps)
+  val currentOnWindowTitleChange by rememberUpdatedState(onWindowTitleChange)
+  LaunchedEffect(title) { currentOnWindowTitleChange(title) }
   DesktopMenuEffects(presentation, ui, menuBarActions, openPaletteRequest)
   DesktopWorkspaceEffects(presentation, ui)
   DesktopLockStateEffect(presentation)
@@ -114,6 +124,8 @@ internal fun WorkspaceFacet(
         options =
           NavigationFacetOptions(
             sessionUuidProvider = sessionUuidProvider,
+            // Navigating along a transition drives the device, so it allocates it first (#16953).
+            inputAllocation = inputAllocation,
           ),
       )
     // Test reads the per-device test-runs daemon resource (automobile:test-runs?deviceId=<id>,

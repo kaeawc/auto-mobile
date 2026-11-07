@@ -6,12 +6,10 @@ import ScreenCaptureCore
 /// Wraps an `AVCaptureSession` configured to stream frames from a USB-connected
 /// iOS device to a `FrameWriter`.
 ///
-/// Two paths (issue #4790): the default raw path delivers 32BGRA and streams it
-/// byte-for-byte as before; `--encode h264` delivers 420v (NV12) and feeds the
-/// delivered `CVPixelBuffer` straight into the SAME `EncodePipeline` /
-/// `H264VideoEncoder` stage the Simulator path uses, emitting Annex-B
-/// encoded-video records. AVFoundation accepts 420v directly with no color
-/// conversion, so the encode input is the lowest-CPU form.
+/// Delivers 420v (NV12) and feeds the delivered `CVPixelBuffer` straight into the
+/// SAME `EncodePipeline` / `H264VideoEncoder` stage the Simulator path uses,
+/// emitting Annex-B encoded-video records (issue #4790). AVFoundation accepts 420v
+/// directly with no color conversion, so the encode input is the lowest-CPU form.
 ///
 /// `@unchecked Sendable`: `_pipeline` is guarded by `stateLock`, while `observers`
 /// and `stopping` are confined to the main queue (install/remove and `stop()` all
@@ -24,16 +22,14 @@ final class DeviceCaptureSession: NSObject, AVCaptureVideoDataOutputSampleBuffer
     private let writer: FrameWriter
     private let onFatalError: (Error) -> Void
     private let diagnosticSink: (String) -> Void
-    /// In-helper H.264 encode settings (issue #4790). `nil` keeps the raw-BGRA
-    /// path byte-for-byte unchanged.
-    private let encodeSettings: CommandLineOptions.EncodeSettings?
+    /// In-helper H.264 encode settings (issue #4790).
+    private let encodeSettings: CommandLineOptions.EncodeSettings
     /// Force-keyframe latch shared with the STDIN control channel; consumed by the
-    /// encoder on the next frame. Present even in raw mode (harmless there).
+    /// encoder on the next frame.
     let forceKeyFrameLatch = ForceKeyFrameLatch()
-    /// Shared in-helper encode wiring in `--encode h264` mode; `nil` on the raw
-    /// path. Identical `EncodePipeline` type as the Simulator session. Guarded by
-    /// `stateLock` because `captureOutput` reads it on the frame `queue` while
-    /// `stop()` clears it off-queue.
+    /// Shared in-helper encode wiring; identical `EncodePipeline` type as the
+    /// Simulator session. Guarded by `stateLock` because `captureOutput` reads it
+    /// on the frame `queue` while `stop()` clears it off-queue.
     private var _pipeline: EncodePipeline?
     /// Guards `_pipeline` across the frame `queue` and `stop()`.
     private let stateLock = NSLock()
@@ -43,7 +39,7 @@ final class DeviceCaptureSession: NSObject, AVCaptureVideoDataOutputSampleBuffer
 
     init(
         writer: FrameWriter,
-        encode: CommandLineOptions.EncodeSettings? = nil,
+        encode: CommandLineOptions.EncodeSettings,
         diagnosticSink: @escaping (String) -> Void = { line in
             DescriptorWrite.writeDiagnostic(line)
         },
@@ -59,12 +55,6 @@ final class DeviceCaptureSession: NSObject, AVCaptureVideoDataOutputSampleBuffer
         removeObservers()
     }
 
-    /// Whether this session encodes H.264 in-process instead of streaming raw
-    /// BGRA.
-    var isEncoding: Bool {
-        encodeSettings != nil
-    }
-
     func start(device: AVCaptureDevice) throws {
         let input = try AVCaptureDeviceInput(device: device)
 
@@ -75,42 +65,33 @@ final class DeviceCaptureSession: NSObject, AVCaptureVideoDataOutputSampleBuffer
         }
         session.addInput(input)
 
-        if let encodeSettings = encodeSettings {
-            // 420v (NV12) feeds VideoToolbox directly with no color conversion.
-            output.videoSettings = [
-                kCVPixelBufferPixelFormatTypeKey as String:
-                    kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
-            ]
-            // Drop policy (issue #4790): the encode path relies SOLELY on #4788's
-            // encoder-input drop (`EncoderDropPolicy.shouldDropBeforeEncode`), which
-            // is the only backpressure that can see the real encoder state
-            // (in-flight frames) and always drops BEFORE encode, leaving the encoded
-            // reference chain intact. `alwaysDiscardsLateVideoFrames` is therefore
-            // turned OFF here so we do NOT stack a second, encoder-blind drop layer
-            // at the capture edge that could over-drop frames the encoder was ready
-            // to accept. The delegate never blocks (VideoToolbox encode is
-            // fire-and-forget and the input drop returns immediately when behind), so
-            // AVFoundation does not accumulate late frames without the discard.
-            output.alwaysDiscardsLateVideoFrames = false
-            // Set before `startRunning()`, i.e. before frames flow, so a direct
-            // field write is safe here.
-            _pipeline = EncodePipeline(
-                writer: writer,
-                fps: DeviceCaptureSession.deviceFPS,
-                source: .device,
-                bitrate: encodeSettings.bitrate,
-                forceKeyFrameLatch: forceKeyFrameLatch,
-                diagnosticSink: diagnosticSink,
-                onFatalError: onFatalError
-            )
-        } else {
-            // Raw path unchanged: newest-wins late-frame discard at the capture
-            // edge, 32BGRA delivery.
-            output.alwaysDiscardsLateVideoFrames = true
-            output.videoSettings = [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-            ]
-        }
+        // 420v (NV12) feeds VideoToolbox directly with no color conversion.
+        output.videoSettings = [
+            kCVPixelBufferPixelFormatTypeKey as String:
+                kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+        ]
+        // Drop policy (issue #4790): the encode path relies SOLELY on #4788's
+        // encoder-input drop (`EncoderDropPolicy.shouldDropBeforeEncode`), which
+        // is the only backpressure that can see the real encoder state
+        // (in-flight frames) and always drops BEFORE encode, leaving the encoded
+        // reference chain intact. `alwaysDiscardsLateVideoFrames` is therefore
+        // turned OFF here so we do NOT stack a second, encoder-blind drop layer
+        // at the capture edge that could over-drop frames the encoder was ready
+        // to accept. The delegate never blocks (VideoToolbox encode is
+        // fire-and-forget and the input drop returns immediately when behind), so
+        // AVFoundation does not accumulate late frames without the discard.
+        output.alwaysDiscardsLateVideoFrames = false
+        // Set before `startRunning()`, i.e. before frames flow, so a direct
+        // field write is safe here.
+        _pipeline = EncodePipeline(
+            writer: writer,
+            fps: DeviceCaptureSession.deviceFPS,
+            source: .device,
+            bitrate: encodeSettings.bitrate,
+            forceKeyFrameLatch: forceKeyFrameLatch,
+            diagnosticSink: diagnosticSink,
+            onFatalError: onFatalError
+        )
 
         output.setSampleBufferDelegate(self, queue: queue)
         guard session.canAddOutput(output) else {
@@ -206,12 +187,10 @@ final class DeviceCaptureSession: NSObject, AVCaptureVideoDataOutputSampleBuffer
         stateLock.unlock()
         if let pipeline = pipeline {
             encodeFrame(pipeline: pipeline, sampleBuffer: sampleBuffer)
-            return
         }
-        writer.write(sampleBuffer: sampleBuffer)
     }
 
-    /// Encode-mode frame path (issue #4790). Unlike the Simulator path — which
+    /// Frame path (issue #4790). Unlike the Simulator path — which
     /// asks ScreenCaptureKit to deliver the Level 4.2 and quality-capped size —
     /// AVFoundation cannot reshape its delivery size, so the encoder is sized to
     /// the budgeted target and VideoToolbox scales the native buffer into it. On a
@@ -223,7 +202,7 @@ final class DeviceCaptureSession: NSObject, AVCaptureVideoDataOutputSampleBuffer
         let height = CVPixelBufferGetHeight(pixelBuffer)
         let target = H264EncodeMath.resolveEncoderScale(
             H264EncodeMath.EncoderSize(width: width, height: height),
-            maxLongSide: encodeSettings?.maxLongSide
+            maxLongSide: encodeSettings.maxLongSide
         ) ?? H264EncodeMath.EncoderSize(width: width, height: height)
 
         guard pipeline.ensureEncoder(width: target.width, height: target.height) else { return }

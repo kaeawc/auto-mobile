@@ -5,6 +5,7 @@ import {
   parseActiveNotificationKeysForApp,
   parseDumpsysNotificationRecords,
   prototypeTagForRow,
+  stablePrototypeTagForRow,
 } from "../../../src/features/systemTray/notificationDumpsys";
 
 const dump = (...lines: string[]): string => lines.join("\n");
@@ -678,5 +679,28 @@ describe("dumpsys notification prototype tags", () => {
       ...parseDumpsysNotificationRecords(tagged("proto:b", "Same")),
     ];
     expect(prototypeTagForRow(records, "com.example.proto", new Set(["Same"]))).toBeUndefined();
+  });
+
+  describe("across a paged scan", () => {
+    const parse = (tag: string, title: string) =>
+      parseDumpsysNotificationRecords(tagged(tag, title));
+    const same = new Set(["Same"]);
+    const appId = "com.example.proto";
+
+    test("keeps the tag ambiguous when a competing record disappears mid-scan", () => {
+      const before = [...parse("proto:a", "Same"), ...parse("proto:b", "Same")];
+      const after = parse("proto:b", "Same");
+      expect(prototypeTagForRow(after, appId, same)).toBe("proto:b");
+      expect(stablePrototypeTagForRow([before], after, appId, same)).toBeUndefined();
+    });
+
+    test("names the tag when every snapshot agrees", () => {
+      const records = parse("proto:a", "Same");
+      expect(stablePrototypeTagForRow([records, records], records, appId, same)).toBe("proto:a");
+    });
+
+    test("falls back to the after dump without a before snapshot", () => {
+      expect(stablePrototypeTagForRow([], parse("proto:b", "Same"), appId, same)).toBe("proto:b");
+    });
   });
 });

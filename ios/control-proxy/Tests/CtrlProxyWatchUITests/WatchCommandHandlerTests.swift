@@ -33,8 +33,8 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertFalse(coordinator.recordDeflectedFailure("After truncated gesture"))
     }
 
-    func testAllowlistContainsExactlyHierarchyTapSwipeHomeAndCrown() {
-        XCTAssertEqual(WatchCommandHandler.supportedCommands, ["hierarchy", "tap", "swipe", "home", "crown"])
+    func testAllowlistContainsExactlySupportedCommands() {
+        XCTAssertEqual(WatchCommandHandler.supportedCommands, ["hierarchy", "tap", "swipe", "home", "crown", "type"])
     }
 
     func testEveryOtherCommandReturnsStructuredUnsupportedError() throws {
@@ -63,7 +63,7 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertEqual(event.type, "connected")
         XCTAssertEqual(event.id, 7)
         XCTAssertEqual(event.platform, "watchos")
-        XCTAssertEqual(event.supportedCommands, ["hierarchy", "tap", "swipe", "home", "crown"])
+        XCTAssertEqual(event.supportedCommands, ["hierarchy", "tap", "swipe", "home", "crown", "type"])
         XCTAssertEqual(event.supportedFeatures, [])
     }
 
@@ -81,6 +81,50 @@ final class WatchCommandHandlerTests: XCTestCase {
             XCTAssertTrue(handler.handle(Data("{\"type\":\"swipe\",\"direction\":\"\(direction)\"}".utf8)).success)
         }
         XCTAssertEqual(source.calls, ["hierarchy", "tap:12.5,20.0", "tap:counter", "up", "down", "left", "right"])
+    }
+
+    func testSwipeDistanceIsForwardedAndValidated() {
+        let source = FakeWatchSource()
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        XCTAssertTrue(handler.handle(Data(#"{"type":"swipe","direction":"up","distance":0.4}"#.utf8)).success)
+        XCTAssertEqual(source.calls, ["up:0.4"])
+        for distance in ["0", "-0.1", "1.5"] {
+            let response = handler.handle(Data("{\"type\":\"swipe\",\"direction\":\"up\",\"distance\":\(distance)}".utf8))
+            XCTAssertFalse(response.success)
+        }
+        XCTAssertEqual(source.calls, ["up:0.4"])
+    }
+
+    func testTypeReturnsResultAndUsesInjectedGesture() {
+        let source = FakeWatchSource()
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        let response = handler.handle(Data(#"{"type":"type","requestId":"t","text":"Hello 🐾"}"#.utf8))
+        XCTAssertTrue(response.success)
+        XCTAssertEqual(response.type, "type_result")
+        XCTAssertEqual(response.requestId, "t")
+        XCTAssertEqual(source.calls, ["type:Hello 🐾"])
+    }
+
+    func testTypeRejectsEmptyOrMissingTextWithoutGestures() {
+        let source = FakeWatchSource()
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        for json in [#"{"type":"type","text":""}"#, #"{"type":"type"}"#] {
+            let response = handler.handle(Data(json.utf8))
+            XCTAssertFalse(response.success)
+            XCTAssertEqual(response.errorCode, "invalid_request")
+            XCTAssertEqual(response.error, "type requires non-empty text")
+        }
+        XCTAssertEqual(source.calls, [])
+    }
+
+    func testTypeFailureBecomesStructuredError() {
+        let source = FakeWatchSource()
+        source.shouldFail = true
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        let response = handler.handle(Data(#"{"type":"type","text":"Hello"}"#.utf8))
+        XCTAssertFalse(response.success)
+        XCTAssertEqual(response.errorCode, "command_failed")
+        XCTAssertEqual(response.error, "No focused text field; tap the field first")
     }
 
     func testHomeReturnsResultAndUsesInjectedGesture() {
@@ -205,8 +249,13 @@ private final class FakeWatchSource: WatchSnapshotSource, WatchGesturePerformer 
         calls.append("tap:\(identifier)")
     }
 
-    func swipe(_ direction: WatchSwipeDirection) throws {
-        calls.append(direction.rawValue)
+    func swipe(_ direction: WatchSwipeDirection, distance: Double?) throws {
+        calls.append(distance.map { "\(direction.rawValue):\($0)" } ?? direction.rawValue)
+    }
+
+    func typeText(_ text: String) throws {
+        if shouldFail { throw WatchCommandError.commandFailed("No focused text field; tap the field first") }
+        calls.append("type:\(text)")
     }
 
     func home() throws {

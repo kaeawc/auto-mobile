@@ -1,0 +1,37 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"success\":false,\"executedSteps\":0,\"totalSteps\":1,\"failedStep\":{\"stepIndex\":0,\"tool\":\"tapOn\",\"error\":\"Expectation 1/1 (textEquals testTag=\\\"counter\\\" text=\\\"1\\\") failed: not satisfied after 5000ms; 1 near match(es); observed texts: \\\"Count: 0\\\"\",\"failureObservation\":{\"capturedAtMs\":1700000000000,\"awaitTimeout\":true,\"visibleTextsSample\":[\"Count: 0\"],\"resourceIdsSample\":[\"counter\"]}},\"error\":\"Expectation 1/1 (textEquals testTag=\\\"counter\\\" text=\\\"1\\\") failed: not satisfied after 5000ms; 1 near match(es); observed texts: \\\"Count: 0\\\"\",\"platform\":\"ios\",\"deviceId\":\"SIM-UDID-1\",\"videoWarnings\":[\"Failed to start automatic video recording: unexpected video start\"]}"
+    }
+  ],
+  "structuredContent": {
+    "success": false,
+    "executedSteps": 0,
+    "totalSteps": 1,
+    "failedStep": {
+      "stepIndex": 0,
+      "tool": "tapOn",
+      "error": "Expectation 1/1 (textEquals testTag=\"counter\" text=\"1\") failed: not satisfied after 5000ms; 1 near match(es); observed texts: \"Count: 0\"",
+      "failureObservation": {
+        "capturedAtMs": 1700000000000,
+        "awaitTimeout": true,
+        "visibleTextsSample": [
+          "Count: 0"
+        ],
+        "resourceIdsSample": [
+          "counter"
+        ]
+      }
+    },
+    "error": "Expectation 1/1 (textEquals testTag=\"counter\" text=\"1\") failed: not satisfied after 5000ms; 1 near match(es); observed texts: \"Count: 0\"",
+    "platform": "ios",
+    "deviceId": "SIM-UDID-1",
+    "videoWarnings": [
+      "Failed to start automatic video recording: unexpected video start"
+    ]
+  },
+  "success": false,
+  "error": "Expectation 1/1 (textEquals testTag=\"counter\" text=\"1\") failed: not satisfied after 5000ms; 1 near match(es); observed texts: \"Count: 0\"",
+  "isError": true
+}

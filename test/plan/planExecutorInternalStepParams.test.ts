@@ -32,7 +32,6 @@ describe("PlanExecutor saved internal step params", () => {
             deviceId: z.string(),
             device: z.string(),
             sessionUuid: z.string(),
-            __lockNamespace: z.string().optional(),
           })
           .strict(),
         {
@@ -75,7 +74,6 @@ describe("PlanExecutor saved internal step params", () => {
           deviceId: "explicit-device",
           device: "A",
           sessionUuid: injectSession ? "current-session" : "saved-session",
-          ...(requiresDevice && injectSession ? { __lockNamespace: "current-session" } : {}),
           __internalNoDiff: true,
         },
       ]);

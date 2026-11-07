@@ -62,6 +62,28 @@ final class SdkObservationCommandTests: XCTestCase {
         XCTAssertEqual(routes, [.observationSnapshot])
     }
 
+    func testMultiSceneRelaysSceneIdentifiersForObservationAndAction() async throws {
+        let body = try JSONEncoder().encode(SdkMultiSceneError(scenes: ["scene-a", "scene-b"]))
+        let reply = SdkBridgeRequestResult.reply(SdkBridgeReply(statusCode: 409, body: body))
+        let (observation, _) = try await handle(
+            Self.observeJson, info: Self.registered, reply: reply, as: SdkObservationResponse.self
+        )
+        let (action, _) = try await handle(
+            Self.actionJson(#"{"back":{"observationIdentity":41}}"#), info: Self.registered,
+            reply: reply, as: SdkActionResponse.self
+        )
+        XCTAssertFalse(observation.success)
+        XCTAssertFalse(action.success)
+        XCTAssertTrue(observation.available)
+        XCTAssertTrue(action.available)
+        XCTAssertEqual(observation.failure, "multi_scene")
+        XCTAssertEqual(action.failure, "multi_scene")
+        XCTAssertEqual(observation.scenes, ["scene-a", "scene-b"])
+        XCTAssertEqual(action.scenes, observation.scenes)
+        XCTAssertNil(observation.observation)
+        XCTAssertNil(action.result)
+    }
+
     func testNoBridgeOrForeignAppNeverCallsTheSdk() async throws {
         let infos: [SdkHierarchyServerInfo?] = [
             nil,

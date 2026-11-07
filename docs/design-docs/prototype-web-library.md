@@ -18,12 +18,18 @@ link to a running daemon are separate decisions with their own gates, below.
   pure function from spec, frame, orientation, mode and screen to an element tree. It already
   runs no actions, timers or requests, and serializes deterministically. The page runtime
   (`webPageRuntime.ts`) only switches pre-rendered views and moves the stage.
-- Bundling `renderPrototypeStill` and `toHtml` for the browser today fails: `prototypeFormat.ts`
-  imports the shared logger, which reaches `src/utils/tempDir.ts` and `node:os`. Built for Node
-  instead, the same entry is 424 KB minified (84 KB gzip). The renderer and its prototype helpers
-  are about 71 KB of that; the rest is the whole spec contract JSON (228 KB, read for five limits
-  and one repeat option), zod (59 KB, for one `z.custom` in `prototypeStrings.ts`) and the
-  logger and environment config (62 KB).
+- `renderPrototypeStill` and `toHtml` bundle for the browser with no Node builtin, at about 111 KB
+  minified (38 KB gzip). Element builders share repeated style-property names, attribute names
+  and style values as identifiers from `webCss.ts`, so each long literal is bundled once, and
+  device-frame provenance lives in `deviceFrameSources.json`, outside the closure. The closure
+  reads only the contract values in the generated `prototypeRenderContract.generated.ts`, not the
+  whole contract JSON; the string-table zod schema lives in `prototypeStringsSchema.ts` and the frame schema in `deviceFrameSchema.ts`, outside
+  the closure; the derived-format path takes an optional injected logger instead of
+  importing the server's; and an invalid locale, text size or frame throws a plain
+  `PrototypeWebInputError`, which the server's page builder and resource readers rethrow as an
+  `ActionableError` with the same message. `stillBrowserBundle.test.ts` fails on any Node builtin,
+  on the contract JSON, zod, the server logger or `ActionableError` in the closure, and on the export
+  budget below.
 - Shared JSON fixtures already drive parity across the TypeScript host, the Kotlin protocol and
   the Swift agent (`test/fixtures/prototype-spec/list-writes/`, `derive/`).
 
@@ -93,7 +99,8 @@ shell) is internal.
 | `mode`        | `light`, `dark`, `system` (follows `prefers-color-scheme`)                  | `system`                       |
 | `screen`      | A screen key of the outermost stack                                         | the stack's `start`            |
 | `controls`    | `false`, or any of `rotate`, `zoom`, `screen`                               | `["rotate", "zoom", "screen"]` |
-| `locale`      | A BCP 47 tag for string tables and formatting                               | `en-US`                        |
+| `locale`      | A BCP 47 tag for string tables, formatting and layout direction             | `en-US`                        |
+| `textSize`    | `{fontScale}` (Android frame, 0.85–2) or `{contentSize}` (iOS frame)        | the platform default           |
 
 - **Chromeless** is `frame: false` with `controls: false`: the default frame's screen size and
   safe areas without bezel, status bar, cutout or navigation marks, for pages that draw their own
@@ -138,11 +145,13 @@ later, separately gated stage.
   no device. Transitions and motion are not animated; the runtime switches to the end state.
 - **Size.** The interactive runtime ships as a separate entry
   (`@kaeawc/auto-mobile-prototype-web/interactive`), so a static embed never pays for it.
-- **Parity.** Action semantics are tested by shared trace fixtures: a spec, a sequence of
-  actions and the expected state, `/data` and stack after each step, in the style of
-  `test/fixtures/prototype-spec/list-writes/`. The TypeScript runtime, the Kotlin protocol tests
-  and the Swift agent tests each run every trace. A trace one platform cannot run yet is listed
-  in that platform's skip list with its issue, so a gap is visible rather than silent.
+- **Parity.** Action semantics are tested by shared trace fixtures
+  (`test/fixtures/prototype-spec/action-traces/`): a spec, then steps that each run one tap's
+  actions or advance a fake clock, with the expected state, `/data`, stack paths, pager pages
+  and shown flag after each step. The TypeScript tests, the Android runtime tests and the Swift
+  agent tests each run every trace. A trace one platform cannot run yet is listed under that
+  platform in `action-trace-skips.json` with its issue, and a skipped trace that passes fails
+  the run, so a gap is visible rather than silent and the list only shrinks.
 - **Go criterion.** Build it only after the static library has an embedder asking for taps;
   the trace fixtures are worth adding first regardless, because they also tighten Android and
   iOS parity.
@@ -172,19 +181,11 @@ that needs more is refused whole, never half drawn.
 
 ## Size and tree-shaking
 
-Budgets are minified and gzip, measured by the bundling test, for an embed that imports only
-that entry:
+An export has one budget: 0.5 MB (500,000 bytes) of HTML, JS and CSS counted together,
+minified, whichever entries it imports (core `mount`, the custom `element`, the `interactive`
+action runtime). There is no separate gzip limit. The bundling test sums every build output of
+the core entry against it.
 
-| Entry          | Contents                           | Minified | Gzip   |
-| -------------- | ---------------------------------- | -------- | ------ |
-| core (`mount`) | renderer, frame registry, `mount`  | 100 KB   | 30 KB  |
-| `element`      | core plus the custom element       | 105 KB   | 32 KB  |
-| `interactive`  | the action runtime, on top of core | +40 KB   | +12 KB |
-
-- Reaching the core budget needs the renderer's closure cut down: a generated constants module
-  with only the contract limits it reads instead of the whole contract JSON, the string-table
-  schema without zod, and the logger injected rather than imported. With those three cuts the
-  renderer and its helpers measure about 71 KB minified.
 - Per-node tree-shaking is not offered. Node renderers are dispatched by type from a spec only
   known at runtime, so a bundler cannot drop any. Splitting renderers into opt-in groups would
   make an embed silently show placeholders for nodes its author forgot to register; the budget

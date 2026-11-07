@@ -49,6 +49,7 @@ import { registerAccessibilityTools } from "./accessibilityTools";
 import { registerAccessibilityFocusTools } from "./accessibilityFocusTools";
 import { focusNavigateTool } from "./focusNavigateTool";
 import { registerNetworkTools } from "./networkTools";
+import { registerPortReverseTools } from "./portReverseTools";
 import { registerKillProfileTools } from "./killProfileTools";
 import { registerSystemAlertTools } from "./systemAlertTools";
 import { registerSensorTools } from "./sensorTools";
@@ -58,6 +59,7 @@ import { registerPersonaTools } from "./personaTools";
 import { registerToolSelectionTools } from "./toolSelectionTools";
 import type { IosRunnerLocationResolver } from "../features/utility/device-state/IosRunnerLocation";
 import type { BootedDevice } from "../models";
+import type { IosAccessibilityFocusService } from "../features/accessibility/SetAccessibilityFocus";
 import type { KeystoreResetBackend } from "../features/storage/keystoreReset";
 
 export interface RegisterAllToolsOptions {
@@ -73,6 +75,8 @@ export interface RegisterAllToolsOptions {
   includeToolSelection?: boolean;
   /** Physical iOS location runner (#14091), resolved by the composition root (#11806). */
   iosRunnerLocation?: IosRunnerLocationResolver;
+  /** iOS VoiceOver focus client, resolved by the composition root (#11806). */
+  iosAccessibilityFocus?: (device: BootedDevice) => IosAccessibilityFocusService;
   keystoreReset?: (device: BootedDevice) => KeystoreResetBackend;
 }
 
@@ -139,9 +143,10 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerPerformanceTraceTools();
   registerFormTools();
   registerAccessibilityTools();
-  registerAccessibilityFocusTools();
+  registerAccessibilityFocusTools({ iosServiceFactory: options.iosAccessibilityFocus });
   focusNavigateTool.register();
   registerNetworkTools();
+  registerPortReverseTools();
   registerKillProfileTools();
   registerSystemAlertTools();
   registerSensorTools();

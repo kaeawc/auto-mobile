@@ -77,6 +77,7 @@ const commandByCapability: Record<IosSdkCapability, string> = {
   database: "execute_sql",
   highlight: "add_highlight",
   magic_tap: "request_magic_tap",
+  accessibility_focus: "request_accessibility_focus",
 };
 
 /** Generation-bound SDK negotiation and capability gates. */

@@ -6,7 +6,7 @@ enum PrototypeBundleCapabilities {
     static func required(_ data: Data) throws -> [String] {
         let value = try PrototypeBundleJSON(data, code: .specInvalidJSON, path: "spec.json").value
         guard let spec = value.objectFields else { return [] }
-        var names = Set<String>()
+        var names = PrototypePlatformValidator.backendCapabilities(spec)
         if spec["motion"] == .string("expressive") { names.insert(PrototypeMotionV3.capability) }
         func need(_ feature: String) { names.insert("prototype_\(feature)_v1") }
         if PrototypeContractValidator.locatedActionTypes(value).contains("hideKeyboard") { need("hide_keyboard") }
@@ -232,6 +232,7 @@ enum PrototypeBundleCapabilities {
             }
             if key == "animate", child.objectFields?["tempo"] != nil { names.insert("prototype_motion_tokens_v1") }
             if key == "keyframes" { names.insert("prototype_keyframes_v1"); continue }
+            if key == "attentionLoop" { names.insert("prototype_loops_v1"); continue }
             if key == "style", child.objectFields?["shader"] != nil { names.insert("prototype_custom_shaders_v1") }
             if key == "style", child.objectFields?["effects"] != nil { names.insert("prototype_effects_v1") }
             if key == "style", child.objectFields?["runSpacing"] != nil { names.insert("prototype_flow_grid_v1") }

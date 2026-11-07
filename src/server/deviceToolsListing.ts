@@ -19,6 +19,7 @@ import {
   projectConfiguredDeviceInventory,
 } from "../utils/configuredDeviceInventory";
 import { describeDevice, projectConfiguredImage } from "../daemon/deviceDescription";
+import { compactDeviceImages } from "./listDeviceImagesCompaction";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { logger } from "../utils/logger";
@@ -65,7 +66,7 @@ async function transitionalHeldListing(input: {
   let probeFailure: DeviceDiscoveryError | undefined;
   const devices: BootedDevice[] = [];
   const holds = new Map<string, TransitionalHold>();
-  if (input.platform !== "tvos") {
+  if (input.platform === "android" || input.platform === "ios" || input.platform === "either") {
     for (const offlineHeld of await adbOfflineHeldDevices({
       platform: input.platform === "ios" ? "ios" : "android",
       discovered,
@@ -178,7 +179,12 @@ function listingDiscoveryObservation(
 }
 
 function listingPlatform(platform: SomePlatform): SomePlatform {
-  if (platform === "either" || platform === "tvos") {
+  if (
+    platform === "either" ||
+    platform === "watchos" ||
+    platform === "tvos" ||
+    platform === "visionos"
+  ) {
     return platform;
   }
   return requireAndroidOrIosPlatform(platform, "listDevices");
@@ -213,7 +219,7 @@ export function createListingHandlers() {
 
       return createStructuredToolResponse({
         message: `Found ${images.length} configured ${args.platform} device images`,
-        images,
+        ...(args.detail === "full" ? { images } : compactDeviceImages(images)),
         count: images.length,
         platform: args.platform,
         configuredInventory,

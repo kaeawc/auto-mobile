@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { PrototypeShownSpecs } from "../../src/features/prototype/PrototypeShownSpecs";
 import { PrototypeSpecRevisions } from "../../src/features/prototype/prototypeSpecRevisions";
 import {
+  cachedPrototypeWebAssets,
   prototypeWebNotificationsSettled,
   registerPrototypeResources,
 } from "../../src/server/prototypeResources";
@@ -68,7 +69,7 @@ describe("automobile:prototype/{id}/web (#16345)", () => {
   test("registers the template", () => {
     expect(ResourceRegistry.getTemplateDefinitions()).toContainEqual(
       expect.objectContaining({
-        uriTemplate: "automobile:prototype/{id}/web{?frame,revision,variant}",
+        uriTemplate: "automobile:prototype/{id}/web{?frame,revision,variant,mcpSessionId}",
         mimeType: "text/html",
       }),
     );
@@ -125,6 +126,29 @@ describe("automobile:prototype/{id}/web (#16345)", () => {
     })) as { contents: { uri: string; _meta: Record<string, unknown> }[] };
     expect(pinned.contents[0]!.uri).toBe(`${URI}?frame=pixel-9&revision=1`);
     expect(pinned.contents[0]!._meta).toMatchObject({ revision: 1, frame: "pixel-9" });
+  });
+
+  test("_meta names the producing MCP session and mcpSessionId filters the revisions (#17358)", async () => {
+    const ticket = specs.beginShow("d", "checkout", true, "ios");
+    specs.endShow("d", ticket, { id: "checkout", spec: spec("mine"), mcpSessionId: "conn-a" });
+    patch("theirs");
+    const latest = (await request("resources/read", { uri: URI })) as {
+      contents: { _meta: Record<string, unknown> }[];
+    };
+    expect(latest.contents[0]!._meta).toMatchObject({ revision: 2, revisions: [1, 2] });
+    expect(latest.contents[0]!._meta).not.toHaveProperty("mcpSessionId");
+    const own = (await request("resources/read", {
+      uri: `${URI}?mcpSessionId=conn-a&frame=pixel-9`,
+    })) as { contents: { uri: string; _meta: Record<string, unknown> }[] };
+    expect(own.contents[0]!.uri).toBe(`${URI}?frame=pixel-9&mcpSessionId=conn-a`);
+    expect(own.contents[0]!._meta).toMatchObject({
+      revision: 1,
+      mcpSessionId: "conn-a",
+      revisions: [1],
+    });
+    await expect(request("resources/read", { uri: `${URI}?mcpSessionId=%20` })).rejects.toThrow(
+      "Invalid prototype mcpSessionId",
+    );
   });
 
   test("a prototype leaving its variant group also updates its former siblings", async () => {
@@ -206,5 +230,85 @@ describe("automobile:prototype/{id}/web (#16345)", () => {
     expect(request("resources/read", { uri: "automobile:prototype/nope/web" })).rejects.toThrow(
       "Known prototypes: checkout.",
     );
+  });
+});
+
+describe("web page images from the host asset cache (#16533)", () => {
+  const cache = {
+    get: async (serial: string, id: string) =>
+      serial === "pixel" && id === "hero"
+        ? { id, mimeType: "image/png" as const, bytes: Uint8Array.of(1) }
+        : undefined,
+  };
+
+  test("reads an asset from the first device showing a variant that cached it", async () => {
+    const devices: Record<string, string[]> = { a: ["sim"], b: ["pixel", "sim"] };
+    const source = cachedPrototypeWebAssets((id) => devices[id] ?? [], cache)(["a", "b"]);
+    expect((await source.get("hero"))?.mimeType).toBe("image/png");
+    expect(await source.get("other")).toBeUndefined();
+    expect(await cachedPrototypeWebAssets(() => [], cache)(["a"]).get("hero")).toBeUndefined();
+  });
+
+  test("an asset id two devices cached with different bytes stays a placeholder (#17241)", async () => {
+    const bytes: Record<string, Uint8Array> = { pixel: Uint8Array.of(1), sim: Uint8Array.of(2) };
+    const differing = {
+      get: async (serial: string, id: string) =>
+        id === "hero" ? { id, mimeType: "image/png" as const, bytes: bytes[serial]! } : undefined,
+    };
+    const devices: Record<string, string[]> = { a: ["pixel"], b: ["sim"] };
+    const assets = cachedPrototypeWebAssets((id) => devices[id] ?? [], differing);
+    // Variant a's page also shows variant b: one slot per id cannot hold both images.
+    expect(await assets(["a", "b"]).get("hero")).toBeUndefined();
+    expect((await assets(["a"]).get("hero"))?.bytes).toEqual(Uint8Array.of(1));
+    // The same bytes on both devices are one image.
+    bytes.sim = Uint8Array.of(1);
+    expect((await assets(["a", "b"]).get("hero"))?.bytes).toEqual(Uint8Array.of(1));
+  });
+
+  test("skips a device whose cache cannot be read", async () => {
+    const failing = {
+      get: async (serial: string, id: string) => {
+        if (serial === "sim") {
+          throw new Error("EACCES: permission denied");
+        }
+        return cache.get(serial, id);
+      },
+    };
+    const source = cachedPrototypeWebAssets(() => ["sim", "pixel"], failing)(["a"]);
+    expect((await source.get("hero"))?.mimeType).toBe("image/png");
+    expect(await source.get("other")).toBeUndefined();
+  });
+
+  test("the web resource inlines a cached asset the page draws", async () => {
+    const before = ResourceRegistry.snapshotForTesting();
+    ResourceRegistry.clearServersForTesting();
+    const store = new PrototypeSpecRevisions(new FakeTimer());
+    const shown = new PrototypeShownSpecs(store);
+    registerPrototypeResources(undefined, {
+      revisions: store,
+      rendererVersion: () => "v",
+      images: {
+        assets: cachedPrototypeWebAssets((id) => shown.devicesShowing(id), cache),
+        encoder: { encode: async () => ({ bytes: Uint8Array.of(7), width: 2, height: 1 }) },
+      },
+    });
+    const fake = new FakeMcpServer();
+    ResourceRegistry.registerWithServer(fake);
+    try {
+      const ticket = shown.beginShow("pixel", "checkout", true, "android");
+      shown.endShow("pixel", ticket, {
+        id: "checkout",
+        spec: { id: "checkout", root: { type: "image", asset: "hero" } },
+      });
+      const handler = fake.server.handlersBySchema.get("resources/read")!;
+      const read = (await handler(
+        { params: { uri: URI } },
+        { mcpReq: { signal: new AbortController().signal } },
+      )) as { contents: { text: string }[] };
+      expect(read.contents[0]!.text).toContain("--pa-0:url(data:image/webp;base64,Bw==)");
+    } finally {
+      ResourceRegistry.clearServersForTesting();
+      ResourceRegistry.restoreForTesting(before);
+    }
   });
 });

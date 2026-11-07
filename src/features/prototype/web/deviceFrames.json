@@ -13,11 +13,7 @@
         "portrait": { "top": 48, "bottom": 24, "left": 0, "right": 0 },
         "landscape": { "top": 48, "bottom": 24, "left": 48, "right": 0 }
       },
-      "frame": { "bezelDp": 10, "color": "#1b1b1b" },
-      "source": {
-        "screen": "Public spec: 1080 x 2424 px at 420 dpi (density 2.625)",
-        "insets": "Estimated; not yet measured on an emulator"
-      }
+      "frame": { "bezelDp": 10, "color": "#1b1b1b" }
     },
     {
       "id": "small-phone",
@@ -32,11 +28,7 @@
         "portrait": { "top": 24, "bottom": 48, "left": 0, "right": 0 },
         "landscape": { "top": 24, "bottom": 0, "left": 0, "right": 48 }
       },
-      "frame": { "bezelDp": 12, "color": "#202124" },
-      "source": {
-        "screen": "Android Studio small_phone device definition: 720 x 1280 px at 320 dpi",
-        "insets": "AOSP defaults: 24 dp status bar, 48 dp three-button navigation bar"
-      }
+      "frame": { "bezelDp": 12, "color": "#202124" }
     },
     {
       "id": "medium-tablet",
@@ -51,11 +43,7 @@
         "portrait": { "top": 24, "bottom": 24, "left": 0, "right": 0 },
         "landscape": { "top": 24, "bottom": 24, "left": 0, "right": 0 }
       },
-      "frame": { "bezelDp": 16, "color": "#202124" },
-      "source": {
-        "screen": "Android Studio medium_tablet device definition: 1600 x 2560 px at 320 dpi",
-        "insets": "Estimated; not yet measured on an emulator"
-      }
+      "frame": { "bezelDp": 16, "color": "#202124" }
     },
     {
       "id": "iphone-16",
@@ -76,11 +64,7 @@
         "portrait": { "top": 59, "bottom": 34, "left": 0, "right": 0 },
         "landscape": { "top": 0, "bottom": 21, "left": 59, "right": 59 }
       },
-      "frame": { "bezelDp": 12, "color": "#1c1c1e" },
-      "source": {
-        "screen": "Public spec: 393 x 852 pt at @3x",
-        "insets": "UIKit safe area insets for this model; cutout geometry estimated"
-      }
+      "frame": { "bezelDp": 12, "color": "#1c1c1e" }
     },
     {
       "id": "iphone-16-pro-max",
@@ -101,11 +85,7 @@
         "portrait": { "top": 62, "bottom": 34, "left": 0, "right": 0 },
         "landscape": { "top": 0, "bottom": 21, "left": 62, "right": 62 }
       },
-      "frame": { "bezelDp": 12, "color": "#1c1c1e" },
-      "source": {
-        "screen": "Public spec: 440 x 956 pt at @3x",
-        "insets": "UIKit safe area insets for this model; cutout geometry estimated"
-      }
+      "frame": { "bezelDp": 12, "color": "#1c1c1e" }
     },
     {
       "id": "iphone-se-3",
@@ -120,11 +100,7 @@
         "portrait": { "top": 20, "bottom": 0, "left": 0, "right": 0 },
         "landscape": { "top": 0, "bottom": 0, "left": 0, "right": 0 }
       },
-      "frame": { "bezelDp": 14, "color": "#1c1c1e" },
-      "source": {
-        "screen": "Public spec: 375 x 667 pt at @2x",
-        "insets": "UIKit safe area insets for this model"
-      }
+      "frame": { "bezelDp": 14, "color": "#1c1c1e" }
     },
     {
       "id": "ipad-10",
@@ -139,11 +115,164 @@
         "portrait": { "top": 24, "bottom": 20, "left": 0, "right": 0 },
         "landscape": { "top": 24, "bottom": 20, "left": 0, "right": 0 }
       },
-      "frame": { "bezelDp": 20, "color": "#1c1c1e" },
-      "source": {
-        "screen": "Public spec: 820 x 1180 pt at @2x",
-        "insets": "UIKit safe area insets for this model; corner radius estimated"
-      }
+      "frame": { "bezelDp": 20, "color": "#1c1c1e" }
+    },
+    {
+      "id": "wearos-small-round",
+      "platform": "android",
+      "label": "Wear OS small round",
+      "formFactor": "watch",
+      "screen": { "widthDp": 192, "heightDp": 192, "density": 2 },
+      "cornerRadiusDp": 96,
+      "cutout": { "type": "none" },
+      "statusBarDp": 0,
+      "navBar": { "type": "none" },
+      "safeArea": {
+        "portrait": { "top": 0, "bottom": 0, "left": 0, "right": 0 },
+        "landscape": { "top": 0, "bottom": 0, "left": 0, "right": 0 }
+      },
+      "mask": "round",
+      "input": "rotary",
+      "frame": { "bezelDp": 14, "color": "#202124" }
+    },
+    {
+      "id": "apple-watch",
+      "platform": "ios",
+      "label": "Apple Watch Series 10 (46mm)",
+      "formFactor": "watch",
+      "screen": { "widthDp": 208, "heightDp": 248, "density": 2 },
+      "cornerRadiusDp": 42,
+      "cutout": { "type": "none" },
+      "statusBarDp": 0,
+      "navBar": { "type": "none" },
+      "safeArea": {
+        "portrait": { "top": 0, "bottom": 0, "left": 0, "right": 0 },
+        "landscape": { "top": 0, "bottom": 0, "left": 0, "right": 0 }
+      },
+      "input": "rotary",
+      "frame": { "bezelDp": 14, "color": "#1c1c1e" }
+    },
+    {
+      "id": "android-tv-1080p",
+      "platform": "android",
+      "label": "Android TV (1080p)",
+      "formFactor": "tv",
+      "screen": { "widthDp": 540, "heightDp": 960, "density": 2 },
+      "cornerRadiusDp": 0,
+      "cutout": { "type": "none" },
+      "statusBarDp": 0,
+      "navBar": { "type": "none" },
+      "safeArea": {
+        "portrait": { "top": 48, "bottom": 48, "left": 27, "right": 27 },
+        "landscape": { "top": 27, "bottom": 27, "left": 48, "right": 48 }
+      },
+      "input": "dpad",
+      "frame": { "bezelDp": 6, "color": "#111111" }
+    },
+    {
+      "id": "apple-tv",
+      "platform": "ios",
+      "label": "Apple TV 4K",
+      "formFactor": "tv",
+      "screen": { "widthDp": 1080, "heightDp": 1920, "density": 2 },
+      "cornerRadiusDp": 0,
+      "cutout": { "type": "none" },
+      "statusBarDp": 0,
+      "navBar": { "type": "none" },
+      "safeArea": {
+        "portrait": { "top": 80, "bottom": 80, "left": 60, "right": 60 },
+        "landscape": { "top": 60, "bottom": 60, "left": 80, "right": 80 }
+      },
+      "input": "dpad",
+      "frame": { "bezelDp": 8, "color": "#111111" }
+    },
+    {
+      "id": "car-1024p-landscape",
+      "platform": "android",
+      "label": "Car (1024p landscape)",
+      "formFactor": "automotive",
+      "screen": { "widthDp": 768, "heightDp": 1024, "density": 1 },
+      "cornerRadiusDp": 0,
+      "cutout": { "type": "none" },
+      "statusBarDp": 48,
+      "navBar": { "type": "buttons", "heightDp": 64 },
+      "safeArea": {
+        "portrait": { "top": 48, "bottom": 64, "left": 0, "right": 0 },
+        "landscape": { "top": 48, "bottom": 64, "left": 0, "right": 0 }
+      },
+      "frame": { "bezelDp": 10, "color": "#202124" }
+    },
+    {
+      "id": "pixel-fold",
+      "platform": "android",
+      "label": "Pixel Fold",
+      "formFactor": "foldable",
+      "screen": { "widthDp": 841, "heightDp": 701, "density": 2.625 },
+      "cornerRadiusDp": 20,
+      "cutout": { "type": "none" },
+      "statusBarDp": 32,
+      "navBar": { "type": "gesture", "heightDp": 24 },
+      "safeArea": {
+        "portrait": { "top": 32, "bottom": 24, "left": 0, "right": 0 },
+        "landscape": { "top": 32, "bottom": 24, "left": 0, "right": 0 }
+      },
+      "panels": [
+        {
+          "role": "cover",
+          "screen": { "widthDp": 411, "heightDp": 797, "density": 2.625 },
+          "cornerRadiusDp": 32,
+          "cutout": { "type": "punchHole", "centerXDp": 205.5, "centerYDp": 24, "radiusDp": 12 },
+          "statusBarDp": 48,
+          "navBar": { "type": "gesture", "heightDp": 24 },
+          "safeArea": {
+            "portrait": { "top": 48, "bottom": 24, "left": 0, "right": 0 },
+            "landscape": { "top": 48, "bottom": 24, "left": 48, "right": 0 }
+          }
+        }
+      ],
+      "hinge": { "axis": "vertical", "positionDp": 420.5, "widthDp": 0, "occluding": false },
+      "postures": [
+        { "posture": "closed", "panel": "cover", "hingeDegrees": 0 },
+        { "posture": "half_opened", "panel": "inner", "hingeDegrees": 90 },
+        { "posture": "opened", "panel": "inner", "hingeDegrees": 180 }
+      ],
+      "frame": { "bezelDp": 10, "color": "#1b1b1b" }
+    },
+    {
+      "id": "flip-foldable",
+      "platform": "android",
+      "label": "Flip foldable",
+      "formFactor": "foldable",
+      "screen": { "widthDp": 411, "heightDp": 1004, "density": 2.625 },
+      "cornerRadiusDp": 24,
+      "cutout": { "type": "punchHole", "centerXDp": 205.5, "centerYDp": 24, "radiusDp": 12 },
+      "statusBarDp": 48,
+      "navBar": { "type": "gesture", "heightDp": 24 },
+      "safeArea": {
+        "portrait": { "top": 48, "bottom": 24, "left": 0, "right": 0 },
+        "landscape": { "top": 48, "bottom": 24, "left": 48, "right": 0 }
+      },
+      "panels": [
+        {
+          "role": "cover",
+          "screen": { "widthDp": 262, "heightDp": 272, "density": 2.75 },
+          "cornerRadiusDp": 24,
+          "cutout": { "type": "none" },
+          "statusBarDp": 24,
+          "navBar": { "type": "none" },
+          "safeArea": {
+            "portrait": { "top": 24, "bottom": 0, "left": 0, "right": 0 },
+            "landscape": { "top": 24, "bottom": 0, "left": 0, "right": 0 }
+          }
+        }
+      ],
+      "hinge": { "axis": "horizontal", "positionDp": 502, "widthDp": 0, "occluding": false },
+      "postures": [
+        { "posture": "closed", "panel": "cover", "hingeDegrees": 0 },
+        { "posture": "half_opened", "panel": "inner", "hingeDegrees": 90 },
+        { "posture": "opened", "panel": "inner", "hingeDegrees": 180 }
+      ],
+      "frame": { "bezelDp": 10, "color": "#1b1b1b" }
     }
   ]
 }

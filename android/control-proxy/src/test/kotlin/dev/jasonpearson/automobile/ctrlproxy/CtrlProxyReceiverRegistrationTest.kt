@@ -67,6 +67,16 @@ class CtrlProxyReceiverRegistrationTest {
       ),
       actionsByReceiver,
     )
+    // PackageEventReceiver reads intent.data, so its registered filter must keep the scheme.
+    val packageFilter =
+      shadowOf(app)
+        .registeredReceivers
+        .single { it.broadcastReceiver !in before && it.broadcastReceiver is PackageEventReceiver }
+        .intentFilter
+    assertEquals(
+      listOf("package"),
+      (0 until packageFilter.countDataSchemes()).map { packageFilter.getDataScheme(it) },
+    )
     service.unregisterReceivers()
   }
 }

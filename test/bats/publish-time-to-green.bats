@@ -162,17 +162,10 @@ STUB
   grep -Fq 'no report was published for this window' "$GITHUB_STEP_SUMMARY"
 }
 
-wiring_requires_yq() {
-  command -v yq >/dev/null 2>&1 && return 0
-  if [[ -n "${CI:-}" ]]; then
-    echo 'yq is required in CI to verify time-to-green workflow wiring' >&2
-    return 1
-  fi
-  skip 'yq not installed'
-}
+load yq-helpers
 
 @test "workflow schedules daily and permits a manual window" {
-  wiring_requires_yq
+  require_mikefarah_yq
   run yq -r '.on.schedule[0].cron' "$WF"
   [ "$status" -eq 0 ]
   [ "$output" = '37 4 * * *' ]
@@ -182,7 +175,7 @@ wiring_requires_yq() {
 }
 
 @test "workflow uses read-only permissions and passes the window only through env" {
-  wiring_requires_yq
+  require_mikefarah_yq
   run yq -r '.jobs.report.permissions | to_entries | map(.value) | unique | .[]' "$WF"
   [ "$status" -eq 0 ]
   [ "$output" = read ]
@@ -195,7 +188,7 @@ wiring_requires_yq() {
 }
 
 @test "artifact upload is unconditional with 90-day retention" {
-  wiring_requires_yq
+  require_mikefarah_yq
   run yq -r '.jobs.report.steps[] | select(.uses == "actions/upload-artifact@v6") | [.if, .with.name, .with.path, .with."if-no-files-found", .with."retention-days"] | @tsv' "$WF"
   [ "$status" -eq 0 ]
   [ "$output" = $'always()\tci-time-to-green-report\t${{ runner.temp }}/ci-time-to-green-report/\tignore\t90' ]

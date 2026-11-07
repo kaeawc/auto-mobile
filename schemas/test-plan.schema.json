@@ -18,7 +18,7 @@
     },
     "platform": {
       "type": "string",
-      "enum": ["android", "ios"],
+      "enum": ["android", "ios", "tvos"],
       "description": "Optional platform hint for plan execution"
     },
     "devices": {
@@ -149,7 +149,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"],
+          "enum": ["android", "ios", "tvos"],
           "description": "Target platform for this device"
         },
         "simulatorType": {

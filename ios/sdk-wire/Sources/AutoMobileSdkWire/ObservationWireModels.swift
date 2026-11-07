@@ -204,3 +204,14 @@ public struct AutoMobileActionResult: Codable, Sendable, Equatable {
         self.nextObservationIdentity = nextObservationIdentity
     }
 }
+
+/// A scene selection is required before the observation bridge can target the app safely.
+public struct SdkMultiSceneError: Codable, Equatable, Sendable {
+    public let error: String
+    public let scenes: [String]
+
+    public init(scenes: [String]) {
+        error = "multi_scene"
+        self.scenes = scenes.sorted()
+    }
+}

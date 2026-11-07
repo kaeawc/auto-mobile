@@ -1,5 +1,5 @@
 import type { TypingSession } from "./TypingSession";
-import { ANDROID_TYPE_FOCUSED_INPUT_ERROR } from "./AndroidTypingConstants";
+import { ANDROID_TYPE_FOCUS_FAILURE, type FocusedInputFailure } from "./AndroidTypingConstants";
 import type {
   SendKeysTextClient,
   SendKeysOperation,
@@ -104,11 +104,11 @@ export interface ImeCommitTyperHost {
   withTextWarnings(result: TextActionResult, warnings: Array<string | undefined>): TextActionResult;
   requireFocusedAndroidInput(
     signal?: AbortSignal,
-    error?: string,
+    failure?: FocusedInputFailure,
     display?: string,
   ): Promise<
     | { success: true; hierarchy: NonNullable<ObserveResult["viewHierarchy"]> }
-    | { success: false; error: string }
+    | ({ success: false } & FocusedInputFailure)
   >;
   readFocusedText(observation: ObserveResult): string | undefined;
   readFocusedTextSnapshot(observation: ObserveResult): { text: string; length: number } | undefined;
@@ -760,7 +760,7 @@ export class ImeCommitTyper implements AndroidModeTyper {
       checkAbort: (error) => this.host.checkAbort(signal, error),
       lacksRequiredFocus: (observation) => this.imeReadBackLacksRequiredFocus(observation, routing),
       focusedText: (observation) => this.readImeCommitText(observation, operation, text),
-      focusError: ANDROID_TYPE_FOCUSED_INPUT_ERROR,
+      focusError: ANDROID_TYPE_FOCUS_FAILURE,
       passwordField: routing.passwordField,
       // Explicit modes skip the pre-type observe; the read-back still shows a password field.
       isPasswordField: (observation) => {

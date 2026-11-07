@@ -72,6 +72,7 @@ export const IOS_KNOWN_REQUEST_TYPES = [
   "get_traversal_order",
   "add_highlight",
   "request_magic_tap",
+  "request_accessibility_focus",
   "request_sdk_trigger",
   "request_sdk_observation",
   "request_sdk_action",

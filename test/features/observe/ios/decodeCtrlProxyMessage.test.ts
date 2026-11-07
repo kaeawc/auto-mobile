@@ -882,6 +882,7 @@ function isExplicitlyDecoded(rawValue: string): boolean {
 // as its size so a dropped decoder cannot be hidden by another addition.
 const EXPECTED_RESHAPED_RESPONSE_TYPES = [
   "accessibility_audit_result",
+  "accessibility_focus_result",
   "action_result",
   "appearance_result",
   "append_text_result",
@@ -963,8 +964,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     "connected",
   ];
 
-  test("Swift ResponseType declares exactly 60 rawValues", () => {
-    expect(rawValues.length).toBe(60);
+  test("Swift ResponseType declares exactly 61 rawValues", () => {
+    expect(rawValues.length).toBe(61);
   });
 
   test("rawValues are unique (no accidental duplicate)", () => {
@@ -977,9 +978,9 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     }
   });
 
-  test("the decoder explicitly reshapes exactly the 55 expected response types", () => {
+  test("the decoder explicitly reshapes exactly the 56 expected response types", () => {
     const reshaped = rawValues.filter(isExplicitlyDecoded).sort();
-    expect(reshaped.length).toBe(55);
+    expect(reshaped.length).toBe(56);
     expect(reshaped).toEqual(EXPECTED_RESHAPED_RESPONSE_TYPES);
   });
 
@@ -1137,6 +1138,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     { type: "ime_action_result", expected: true },
     { type: "action_result", expected: true },
     { type: "magic_tap_result", expected: false },
+    { type: "accessibility_focus_result", expected: false },
     { type: "accessibility_audit_result", expected: false },
     { type: "voiceover_state_result", expected: true },
     { type: "voiceover_set_result", expected: false },
@@ -1255,8 +1257,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     });
   });
 
-  test("the passthrough set is the 54 success-reading types", () => {
-    expect(READS_MESSAGE_SUCCESS.length).toBe(54);
+  test("the passthrough set is the 55 success-reading types", () => {
+    expect(READS_MESSAGE_SUCCESS.length).toBe(55);
   });
 
   for (const type of READS_MESSAGE_SUCCESS) {

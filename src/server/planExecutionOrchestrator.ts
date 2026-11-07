@@ -94,6 +94,13 @@ export {
   type VideoRecorder,
 } from "./planExecutionRecords";
 
+/** Platforms a plan runs on: Android, iOS, and tvOS (remote-driven steps only). */
+type PlanPlatform = AndroidOrIosPlatform | "tvos";
+
+function requirePlanPlatform(platform: BootedDevice["platform"]): PlanPlatform {
+  return platform === "tvos" ? platform : requireAndroidOrIosPlatform(platform, "executePlan");
+}
+
 /**
  * Orchestrates a single executePlan invocation end-to-end.
  *
@@ -113,7 +120,7 @@ export class PlanExecutionOrchestrator {
   // Capture before planTools installs this invocation's own planRequest context.
   private readonly nestedInPlan = getToolSelectionContext()?.planRequest !== undefined;
   private readonly device: BootedDevice;
-  private readonly platform: AndroidOrIosPlatform;
+  private readonly platform: PlanPlatform;
   private readonly request: PlanExecutionRequest;
   private readonly progress?: ProgressCallback;
   private readonly signal?: AbortSignal;
@@ -134,7 +141,7 @@ export class PlanExecutionOrchestrator {
 
   constructor(context: ExecutionContext, deps: PlanExecutionDependencies = {}) {
     this.device = context.device;
-    this.platform = requireAndroidOrIosPlatform(context.device.platform, "executePlan");
+    this.platform = requirePlanPlatform(context.device.platform);
     this.request = context.request;
     this.progress = context.progress;
     this.signal = context.signal;
@@ -659,7 +666,6 @@ export class PlanExecutionOrchestrator {
   private async startVideoRecording(plan: Plan): Promise<VideoState> {
     const videoOutputPrefix = `test-${plan.name}-${this.timer.now()}`;
     const state: VideoState = {};
-
     try {
       this.perfLog("Starting automatic video recording for test");
       if (this.platform === "android") {

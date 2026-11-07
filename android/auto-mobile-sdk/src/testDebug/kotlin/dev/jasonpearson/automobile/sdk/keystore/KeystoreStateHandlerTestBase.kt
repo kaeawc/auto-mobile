@@ -28,6 +28,14 @@ internal abstract class KeystoreStateHandlerTestBase {
       calls.add("entryCategory:$alias")
       return entries.getValue(alias)
     }
+
+    /** Thrown by the usability check, as AndroidKeyStore does on Cipher.init for that alias. */
+    val usabilityFailures = mutableMapOf<String, Exception>()
+
+    override fun verifyUsable(alias: String) {
+      calls.add("verifyUsable:$alias")
+      usabilityFailures[alias]?.let { throw it }
+    }
   }
 
   protected class FakeDeviceLockProbe(var locked: DeviceLockState = DeviceLockState.UNLOCKED) :

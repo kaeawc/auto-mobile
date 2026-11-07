@@ -66,6 +66,7 @@ export function defaultClockRestorerFactory(timer: Timer): (device: BootedDevice
       value.rootedByUs ||= root.rootedByUs;
       const result = await restoreDeviceClock(device, adapter, value, {
         hostClock: timer,
+        mutationSignal: signal,
         invalidate: (deviceId) => {
           if (!signal?.aborted) {
             invalidateDisplayCaches(deviceId, "Device clock restored");

@@ -2,19 +2,10 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { builtinModules } from "node:module";
 import { fileURLToPath } from "node:url";
 
-/** Budgets from docs/design-docs/prototype-web-library.md for the core entry. */
-// The badge/progress/fab/flow/list/chart/adaptive/swipe component set accounts for the growth past
-// 120 KB / 40 KB. Raised for the inlined image renderer (#16533): measured 137,146 bytes plus ~8% headroom.
-// The iOS skin's textField, bottomNav, tabBar and sheet account for the gzip growth past 46 KB.
-// The watch, TV and car frames and the TV focus ring (#16446) account for the growth past 48 KB.
-// The watch/TV/car frames (#16638) and the status bar top-colour walk (#16630) grew it past 148 KB.
-// The still's mode resolution from role overrides and the authored background (#16654) grew it past
-// 150 KB / 49 KB: measured 150,452 / 49,246 bytes.
-// Foldable frames, posture and the hinge drawing (#16632) on top: measured 155,482 / 50,526 bytes.
-// Owner set 175 KB minified (#17275) after #16677/#16678 measured 157,052 / 51,031 bytes, leaving
-// room for the remaining prototype-web queue instead of a raise per merge; gzip scaled to match.
-const MAX_MINIFIED_BYTES = 175_000;
-const MAX_GZIP_BYTES = 57_000;
+/** Budget from docs/design-docs/prototype-web-library.md for the core entry. */
+// Owner set one 0.5 MB budget for the export's HTML, JS and CSS counted together, minified, in
+// place of the separate minified and gzip limits that were raised per merge.
+const MAX_EXPORT_BYTES = 500_000;
 
 /** Server-only modules the renderer once reached; any of them back in the closure is a regression. */
 const FORBIDDEN_INPUTS = [
@@ -33,6 +24,8 @@ const builtins = new Set(builtinModules);
 
 interface Bundle {
   code: string;
+  /** Minified bytes of every build output (HTML, JS and CSS), summed. */
+  totalBytes: number;
   builtins: string[];
   inputs: string[];
 }
@@ -65,6 +58,7 @@ async function bundleStill(): Promise<Bundle> {
   }
   return {
     code: await result.outputs[0].text(),
+    totalBytes: result.outputs.reduce((sum, output) => sum + output.size, 0),
     builtins: [...reached],
     inputs: Object.keys(result.metafile?.inputs ?? {}),
   };
@@ -92,10 +86,8 @@ describe("still renderer browser bundle (#16451)", () => {
     expect(wireTypes.filter((type) => bundle.code.includes(`"${type}"`))).toEqual([]);
   });
 
-  test("stays within the minified and gzip budgets", () => {
-    const minified = new TextEncoder().encode(bundle.code).byteLength;
-    const gzip = Bun.gzipSync(bundle.code).byteLength;
-    expect(minified).toBeLessThanOrEqual(MAX_MINIFIED_BYTES);
-    expect(gzip).toBeLessThanOrEqual(MAX_GZIP_BYTES);
+  test("stays within the combined HTML, JS and CSS budget", () => {
+    expect(bundle.totalBytes).toBeGreaterThan(0);
+    expect(bundle.totalBytes).toBeLessThanOrEqual(MAX_EXPORT_BYTES);
   });
 });

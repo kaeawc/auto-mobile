@@ -28,7 +28,7 @@ link to a running daemon are separate decisions with their own gates, below.
   importing the server's; and an invalid locale, text size or frame throws a plain
   `PrototypeWebInputError`, which the server's page builder and resource readers rethrow as an
   `ActionableError` with the same message. `stillBrowserBundle.test.ts` fails on any Node builtin,
-  on the contract JSON, zod, the server logger or `ActionableError` in the closure, and on the core
+  on the contract JSON, zod, the server logger or `ActionableError` in the closure, and on the export
   budget below.
 - Shared JSON fixtures already drive parity across the TypeScript host, the Kotlin protocol and
   the Swift agent (`test/fixtures/prototype-spec/list-writes/`, `derive/`).
@@ -181,14 +181,10 @@ that needs more is refused whole, never half drawn.
 
 ## Size and tree-shaking
 
-Budgets are minified and gzip, measured by the bundling test, for an embed that imports only
-that entry:
-
-| Entry          | Contents                           | Minified | Gzip   |
-| -------------- | ---------------------------------- | -------- | ------ |
-| core (`mount`) | renderer, frame registry, `mount`  | 175 KB   | 57 KB  |
-| `element`      | core plus the custom element       | 178 KB   | 57 KB  |
-| `interactive`  | the action runtime, on top of core | +40 KB   | +12 KB |
+An export has one budget: 0.5 MB (500,000 bytes) of HTML, JS and CSS counted together,
+minified, whichever entries it imports (core `mount`, the custom `element`, the `interactive`
+action runtime). There is no separate gzip limit. The bundling test sums every build output of
+the core entry against it.
 
 - Per-node tree-shaking is not offered. Node renderers are dispatched by type from a spec only
   known at runtime, so a bundler cannot drop any. Splitting renderers into opt-in groups would

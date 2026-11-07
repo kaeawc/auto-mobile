@@ -124,8 +124,11 @@ listing.
 
 With a connected runner, `observe` returns a screenshot, the hierarchy and `focusedElement`;
 `project: "full"` includes the full hierarchy. Without a runner it returns a screenshot with
-`hierarchyUnavailable`; call `startDevice` again to prepare automation. Advanced observe options
-are refused.
+`hierarchyUnavailable`; call `startDevice` again to prepare automation. With a runner, `waitFor`
+waits for an element (`elementId`, `testTag`, `text`, `textAny`, `className`,
+`contentDescription`, `absent`) by re-reading the hierarchy until it matches or `timeout` elapses;
+`waitFor` with `for`, `posture`, `activeDisplay` or `activeWindow` is refused. Other advanced
+observe options are refused.
 
 ## Record and compare the screen
 
@@ -208,7 +211,8 @@ every item it can focus on a screen, observes after every remote press, records 
 
 `executePlan` with `platform: "tvos"` runs plan steps that use Apple TV tools: `pressButton`,
 `tapOn`, `sendKeys`, `observe` and the app tools. A step whose tool is not in the supported-tools
-table fails the plan with the same error the tool returns on its own. A plan may declare
+table fails the plan with the same error the tool returns on its own. Step `expectations` are
+checked with the runner's hierarchy, as with `observe` `waitFor`. A plan may declare
 `platform: tvos`, and a device in its `devices` list may use `platform: tvos`. Apple TV plans are
 video-recorded like iOS plans; a recording that cannot start adds a `videoWarnings` entry and the
 plan still runs.

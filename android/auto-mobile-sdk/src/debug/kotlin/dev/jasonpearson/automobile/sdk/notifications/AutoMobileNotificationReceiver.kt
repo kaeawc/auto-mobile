@@ -1,8 +1,10 @@
 package dev.jasonpearson.automobile.sdk.notifications
 
+import android.app.NotificationManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.util.Log
 import androidx.annotation.VisibleForTesting
 import dev.jasonpearson.automobile.sdk.AutoMobileNotifications
@@ -16,9 +18,8 @@ class AutoMobileNotificationReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent?) {
     when (intent?.action) {
       AutoMobileNotifications.ACTION_POST_NOTIFICATION -> post(context, intent)
-      AutoMobileNotifications.ACTION_CHANNEL_QUERY,
-      AutoMobileNotifications.ACTION_CHANNEL_DELETE ->
-        resultCode = channelResultCode(context, intent)
+      ACTION_CHANNEL_QUERY,
+      ACTION_CHANNEL_DELETE -> resultCode = channelResultCode(context, intent)
     }
   }
 
@@ -34,12 +35,15 @@ class AutoMobileNotificationReceiver : BroadcastReceiver() {
       return RESULT_ERROR
     }
     return try {
+      val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+      if (
+        intent.action == ACTION_CHANNEL_DELETE && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+      ) {
+        manager.deleteNotificationChannel(channelId)
+      }
       val exists =
-        if (intent.action == AutoMobileNotifications.ACTION_CHANNEL_DELETE) {
-          AutoMobileNotifications.deleteChannel(context, channelId)
-        } else {
-          AutoMobileNotifications.channelExists(context, channelId)
-        }
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+          manager.getNotificationChannel(channelId) != null
       if (exists) RESULT_CHANNEL_PRESENT else RESULT_CHANNEL_ABSENT
     } catch (e: Exception) {
       Log.e(TAG, "Failed to handle notification channel request", e)
@@ -116,6 +120,14 @@ class AutoMobileNotificationReceiver : BroadcastReceiver() {
   }
 
   companion object {
+    /** Host query: does the channel named by the channel id extra exist? */
+    internal const val ACTION_CHANNEL_QUERY =
+      "dev.jasonpearson.automobile.sdk.NOTIFICATION_CHANNEL_QUERY"
+
+    /** Host request: delete the channel named by the channel id extra, then report its state. */
+    internal const val ACTION_CHANNEL_DELETE =
+      "dev.jasonpearson.automobile.sdk.NOTIFICATION_CHANNEL_DELETE"
+
     private const val TAG = "AutoMobileNotifReceiver"
     private const val RESULT_SUCCESS = 1
     private const val RESULT_POSTED_WITHOUT_IMAGE = 2

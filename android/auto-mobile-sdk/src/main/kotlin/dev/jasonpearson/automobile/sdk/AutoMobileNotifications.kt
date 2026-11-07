@@ -66,16 +66,6 @@ object AutoMobileNotifications {
   const val ACTION_POST_NOTIFICATION = "dev.jasonpearson.automobile.sdk.NOTIFICATION_POST"
   const val ACTION_NOTIFICATION_ACTION = "dev.jasonpearson.automobile.sdk.NOTIFICATION_ACTION"
 
-  /** Host query: does the channel named by [EXTRA_CHANNEL_ID] exist? */
-  internal const val ACTION_CHANNEL_QUERY =
-    "dev.jasonpearson.automobile.sdk.NOTIFICATION_CHANNEL_QUERY"
-
-  /**
-   * Host request: delete the channel named by [EXTRA_CHANNEL_ID], then report whether it exists.
-   */
-  internal const val ACTION_CHANNEL_DELETE =
-    "dev.jasonpearson.automobile.sdk.NOTIFICATION_CHANNEL_DELETE"
-
   const val EXTRA_TITLE = "title"
   const val EXTRA_BODY = "body"
   const val EXTRA_STYLE = "style"
@@ -200,26 +190,6 @@ object AutoMobileNotifications {
       AutoMobileSDK.logger.e(TAG, e) { "Failed to post notification" }
       NotificationPostResult.FAILED
     }
-  }
-
-  /** Whether this app has a live (not deleted) notification channel with [channelId]. */
-  internal fun channelExists(context: Context, channelId: String): Boolean {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
-    val notificationManager =
-      context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-    return notificationManager.getNotificationChannel(channelId) != null
-  }
-
-  /**
-   * Deletes this app's notification channel [channelId] (and so cancels its notifications), then
-   * reports whether it still exists. Used by the host to revert a channel a test session created.
-   */
-  internal fun deleteChannel(context: Context, channelId: String): Boolean {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
-    val notificationManager =
-      context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-    notificationManager.deleteNotificationChannel(channelId)
-    return channelExists(context, channelId)
   }
 
   private fun ensureChannel(

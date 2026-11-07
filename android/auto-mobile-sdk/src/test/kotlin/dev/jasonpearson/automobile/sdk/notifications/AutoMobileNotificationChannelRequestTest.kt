@@ -44,9 +44,9 @@ class AutoMobileNotificationChannelRequestTest {
 
   @Test
   fun `query reports whether the channel exists`() {
-    assertEquals(3, request(AutoMobileNotifications.ACTION_CHANNEL_QUERY, "session_channel"))
+    assertEquals(3, request(AutoMobileNotificationReceiver.ACTION_CHANNEL_QUERY, "session_channel"))
     createChannel("session_channel")
-    assertEquals(4, request(AutoMobileNotifications.ACTION_CHANNEL_QUERY, "session_channel"))
+    assertEquals(4, request(AutoMobileNotificationReceiver.ACTION_CHANNEL_QUERY, "session_channel"))
   }
 
   @Test
@@ -54,16 +54,19 @@ class AutoMobileNotificationChannelRequestTest {
     createChannel("session_channel")
     createChannel("app_channel")
 
-    assertEquals(3, request(AutoMobileNotifications.ACTION_CHANNEL_DELETE, "session_channel"))
+    assertEquals(
+      3,
+      request(AutoMobileNotificationReceiver.ACTION_CHANNEL_DELETE, "session_channel"),
+    )
 
     assertNull(manager.getNotificationChannel("session_channel"))
     assertNotNull(manager.getNotificationChannel("app_channel"))
-    assertEquals(3, request(AutoMobileNotifications.ACTION_CHANNEL_QUERY, "session_channel"))
+    assertEquals(3, request(AutoMobileNotificationReceiver.ACTION_CHANNEL_QUERY, "session_channel"))
   }
 
   @Test
   fun `a request without a channel id fails`() {
-    assertEquals(0, request(AutoMobileNotifications.ACTION_CHANNEL_DELETE, null))
-    assertEquals(0, request(AutoMobileNotifications.ACTION_CHANNEL_QUERY, " "))
+    assertEquals(0, request(AutoMobileNotificationReceiver.ACTION_CHANNEL_DELETE, null))
+    assertEquals(0, request(AutoMobileNotificationReceiver.ACTION_CHANNEL_QUERY, " "))
   }
 }

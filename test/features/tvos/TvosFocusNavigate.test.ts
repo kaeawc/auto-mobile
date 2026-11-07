@@ -212,7 +212,7 @@ describe.each(PLATFORMS)("focusNavigate contract on %s", (_platform, create) => 
     const result = await run({ until: { resourceId: "tile_5" } });
     expect(result).toMatchObject({ success: true, status: "focused", steps: 3 });
     expect(grid.moves).toEqual(["down", "right", "right"]);
-    expect(texts(result)).toEqual(["Home", "Movies", "Settings", "Search"]);
+    expect(texts(result)).toEqual(["Home", "Games", "Settings", "Search"]);
     expect(result.focusedElement?.text).toBe("Search");
   });
 

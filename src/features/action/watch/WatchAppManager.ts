@@ -25,6 +25,7 @@ import type { LaunchAppCall } from "../LaunchAppTypes";
 import { PACKAGE_NOT_INSTALLED_ERROR } from "../LaunchPackageRemovedError";
 import type { UninstallAppCall } from "../UninstallApp";
 import { visionosTargetApps, type VisionosTargetApps } from "../../visionos/VisionosTargetApps";
+import { tvosTargetApps } from "../../tvos/TvosTargetApps";
 
 /** The simctl calls a watch app manager makes; nothing else on the client is reachable. */
 export type WatchAppsSimctl = Pick<
@@ -94,7 +95,7 @@ export class WatchAppManager {
       resolveArtifactPath = (artifactPath) =>
         resolvePathFromDaemonLaunchWorkingDirectory(artifactPath),
       dataWipe = {},
-      targetApps = visionosTargetApps,
+      targetApps = device.platform === "tvos" ? tvosTargetApps : visionosTargetApps,
     }: {
       targetApps?: VisionosTargetApps;
       simctl?: WatchAppsSimctl;
@@ -189,8 +190,12 @@ export class WatchAppManager {
       { launchArguments: call.launchArguments },
       this.device.deviceId,
     );
-    if (launched.success && this.device.platform === "visionos") {
-      // The visionOS runner automates the app the session launched last.
+    if (
+      launched.success &&
+      (this.device.platform === "visionos" || this.device.platform === "tvos")
+    ) {
+      // The visionOS runner automates the app the session launched last; the tvOS runner reads
+      // it as the foreground-app hint for hierarchy and text requests (#17310).
       this.targetApps.launched(this.device.deviceId, appId);
     }
     return launched.success

@@ -24,21 +24,30 @@ function unchangedSizeError(previousObservation: ObserveResult | undefined): str
     : `${unsupportedRotationError(previousObservation)}. The runner reported a rotation but the screen size is unchanged.`;
 }
 
-function panelRefusalError(
+function coverPanelRefusalError(
   previousObservation: ObserveResult | undefined,
   runnerError: string | undefined,
 ): string | undefined {
-  if (runnerError !== IOS_ROTATION_UNSUPPORTED_ERROR) {
-    return undefined;
-  }
-  switch (previousObservation?.display.role) {
-    case "cover":
-      return IOS_COVER_ROTATION_UNSUPPORTED_ERROR;
-    case "inner":
-      return `${unsupportedRotationError(previousObservation)}. Keep the current orientation.`;
-    default:
-      return undefined;
-  }
+  return previousObservation?.display.role === "cover" &&
+    runnerError === IOS_ROTATION_UNSUPPORTED_ERROR
+    ? IOS_COVER_ROTATION_UNSUPPORTED_ERROR
+    : undefined;
+}
+
+// Applied only after an observed rotation has been reconciled, so a refusal the display
+// contradicts still counts as a rotation on the inner panel.
+function innerPanelRefusal(
+  normalized: RotateResult,
+  previousObservation: ObserveResult | undefined,
+  runnerError: string | undefined,
+): RotateResult {
+  return previousObservation?.display.role === "inner" &&
+    runnerError === IOS_ROTATION_UNSUPPORTED_ERROR
+    ? {
+        ...normalized,
+        error: `${unsupportedRotationError(previousObservation)}. Keep the current orientation.`,
+      }
+    : normalized;
 }
 
 function verifyIosRunnerFailure(
@@ -52,13 +61,13 @@ function verifyIosRunnerFailure(
   },
 ): RotateResult {
   const { requested, previous, current, previousObservation } = context;
-  const panelError = panelRefusalError(previousObservation, result.error);
-  if (panelError) {
+  const coverError = coverPanelRefusalError(previousObservation, result.error);
+  if (coverError) {
     return {
       ...normalized,
       success: false,
       rotationPerformed: false,
-      error: panelError,
+      error: coverError,
     };
   }
   if (current === requested && previous !== "unknown" && previous !== requested) {
@@ -71,7 +80,7 @@ function verifyIosRunnerFailure(
       message: `Successfully rotated from ${previous} to ${current}`,
     };
   }
-  return normalized;
+  return innerPanelRefusal(normalized, previousObservation, result.error);
 }
 
 export function normalizeIosOrientation(orientation: string | undefined): Orientation {

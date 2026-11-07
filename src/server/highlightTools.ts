@@ -124,14 +124,14 @@ export const highlightSchema = addDeviceTargetingToSchema(highlightBaseSchema).s
 export type HighlightArgs = z.infer<typeof highlightSchema>;
 
 /** The fields of the circled element a caller needs to tell which match was chosen (#17385). */
-export type HighlightedElement = Pick<
+type HighlightedElement = Pick<
   Element,
   "bounds" | "text" | "resource-id" | "content-desc" | "class"
 >;
 
 const HIGHLIGHTED_ELEMENT_FIELDS = ["text", "resource-id", "content-desc", "class"] as const;
 
-export const highlightedElementSummary = (element: Element): HighlightedElement => {
+const highlightedElementSummary = (element: Element): HighlightedElement => {
   const summary: HighlightedElement = { bounds: { ...element.bounds } };
   for (const field of HIGHLIGHTED_ELEMENT_FIELDS) {
     const value: unknown = element[field];
@@ -394,7 +394,7 @@ export function registerHighlightTools(dependencies: HighlightToolDependencies =
         description: args.description,
         shape: resolvedShape,
       });
-      return toHighlightResponse(result, selected.element);
+      return toHighlightResponse(result, result.success ? selected.element : undefined);
     } catch (error) {
       logger.warn("[highlight] Failed to highlight element", error);
       return toHighlightErrorResponse(error);

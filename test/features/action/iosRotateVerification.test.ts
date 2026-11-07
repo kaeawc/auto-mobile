@@ -205,10 +205,27 @@ describe("iOS runner rotation refusal display guidance", () => {
       error: coverError,
       message: "Runner refusal message",
     });
-    expect(verifyIosRotation(runnerFailure(), "landscape", inner).error).toBe(
-      "Rotation is not supported on the inner panel (the screen size did not change). Keep the current orientation.",
-    );
+    expect(verifyIosRotation(runnerFailure(), "landscape", inner)).toMatchObject({
+      success: false,
+      rotationPerformed: false,
+      error:
+        "Rotation is not supported on the inner panel (the screen size did not change). Keep the current orientation.",
+    });
     expect(verifyIosRotation(runnerFailure(), "landscape", undefined).error).toBe(runnerError);
+  });
+
+  test("an inner-panel rotation the display shows still wins over the runner refusal", () => {
+    const inner = {
+      ...observation(0),
+      display: { ...observation(0).display, role: "inner" as const },
+    };
+    const result = verifyIosRotation(
+      { ...runnerFailure(), observation: observation(1, 874, 402) },
+      "landscape",
+      inner,
+    );
+    expect(result).toMatchObject({ success: true, rotationPerformed: true, error: undefined });
+    expect(result.warning).toContain(runnerError);
   });
 });
 

@@ -87,7 +87,7 @@ import {
   prototypeIconVariant,
   type PrototypeIconGlyphSource,
 } from "./webIconGlyphs";
-import { rowFillAxes, rowMeasured } from "./webRowAspect";
+import { contentHeightBound, rowFillAxes, rowMeasured } from "./webRowAspect";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
@@ -154,6 +154,8 @@ export interface WebRenderScope {
   readonly consumedInsets?: readonly string[];
   /** Safe-area edges the node being rendered applies, consumed for its descendants. */
   readonly ownInsets?: readonly string[];
+  /** The content height bound in dp a row or box passes its children; a scroll passes none. */
+  readonly heightBound?: number;
 }
 
 export type NodeRenderer = (node: Raw, scope: WebRenderScope, path: string) => WebElement;
@@ -275,6 +277,8 @@ function child(scope: WebRenderScope, patch: Partial<WebRenderScope>): WebRender
     style: { ...scope.style, ...patch.style },
     consumedInsets,
     ownInsets: [],
+    // Only a row or box (or a repeat row of one) passes its height bound on; a scroll has none.
+    heightBound: patch.heightBound,
   };
 }
 
@@ -313,7 +317,10 @@ function rowScopes(node: Raw, scope: WebRenderScope): WebRenderScope[] {
       values: derive ? projectPrototypeDerivedItem(derive, values, scope.format) : values,
       index,
     };
-    return child(scope, { instances: [...scope.instances, instance] });
+    return child(scope, {
+      instances: [...scope.instances, instance],
+      heightBound: scope.heightBound,
+    });
   });
 }
 
@@ -388,6 +395,9 @@ function childFillAxes(entry: unknown, scope: WebRenderScope, path: string): Web
   return [...authored, ...inferred];
 }
 
+/** Containers that pass their content height bound on to their children. */
+const BOUNDING_CONTAINERS: ReadonlySet<string> = new Set(["row", "column", "box"]);
+
 /** Containers that grow on an axis when a child fills it, as a Compose parent does. */
 const GROWING_CONTAINERS: ReadonlySet<string> = new Set(["row", "column", "box", "card"]);
 
@@ -402,8 +412,14 @@ function lineFillAxes(raw: Raw, scope: WebRenderScope, path: string): WebAxis[] 
     return [];
   }
   const list: unknown[] = raw.children;
-  const own = rowFillAxes(raw, path, prepareIn(scope));
-  const fromRows = rows.flatMap((row) => list.flatMap((e) => childFillAxes(e, row, path)));
+  const own = rowFillAxes(raw, path, prepareIn(scope), scope.heightBound);
+  // Children see the bound this container passes them, as rendering gives it (see `line`, `box`).
+  const bound = BOUNDING_CONTAINERS.has(String(raw.type))
+    ? contentHeightBound(raw.style, scope.heightBound)
+    : undefined;
+  const fromRows = rows.flatMap((row) =>
+    list.flatMap((e) => childFillAxes(e, { ...row, heightBound: bound }, path)),
+  );
   const axes = new Set([...own, ...fromRows]);
   return (["width", "height"] as const).filter((axis) => axes.has(axis));
 }
@@ -420,8 +436,12 @@ const line =
     // A wrap-sized line around a filling child grows to its parent on that axis, as a Compose
     // parent does around a fillMax child; otherwise it would shrink to nothing.
     const node = filling(raw, lineFillAxes(raw, scope, path));
-    const inner = child(scope, { inBox: false, style: containerChildStyle(scope, node, axis) });
-    const rowed = rowMeasured(node, path, prepareIn(inner));
+    const inner = child(scope, {
+      inBox: false,
+      style: containerChildStyle(scope, node, axis),
+      heightBound: contentHeightBound(node.style, scope.heightBound),
+    });
+    const rowed = rowMeasured(node, path, prepareIn(inner), scope.heightBound);
     const { attrs, style } = base(rowed, scope, lineCss(axis, rowed.style));
     return el("div", { attrs, style }, children(rowed, inner, path));
   };
@@ -430,7 +450,11 @@ const box: NodeRenderer = (raw, scope, path) => {
   // A wrap-sized box grows around a filling child, as a Compose Box does.
   const node = filling(raw, lineFillAxes(raw, scope, path));
   const { attrs, style } = base(node, scope, boxLayoutCss(node.style));
-  const inner = child(scope, { inBox: true, style: containerChildStyle(scope, node, undefined) });
+  const inner = child(scope, {
+    inBox: true,
+    style: containerChildStyle(scope, node, undefined),
+    heightBound: contentHeightBound(node.style, scope.heightBound),
+  });
   return el("div", { attrs, style }, children(node, inner, path));
 };
 

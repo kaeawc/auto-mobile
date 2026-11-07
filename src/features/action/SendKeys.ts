@@ -11,7 +11,11 @@ import {
 import { TargetFocus } from "./sendkeys/TargetFocus";
 import { TargetState } from "./sendkeys/TargetState";
 import { CommandRunner } from "./sendkeys/CommandRunner";
-import { withImeEditorWarnings, type ImeEditorState } from "./sendkeys/ImeEditorState";
+import {
+  hasImeKeyboardHiddenChange,
+  withImeEditorWarnings,
+  type ImeEditorState,
+} from "./sendkeys/ImeEditorState";
 import {
   SendKeysRequestBudget,
   isSendKeysBudgetExhausted,
@@ -62,6 +66,8 @@ import { FieldTypeDetector } from "./FieldTypeDetector";
 import { iosSdkBridgeTarget } from "../observe/ios/iosSdkObservationMerge";
 import { iosSdkWebValueTarget } from "../observe/ios/iosSdkWebMerge";
 import { type KeyboardIdentity } from "./AndroidImeCatalog";
+
+const IME_KEYBOARD_HIDDEN_SETTLE_MS = 400;
 
 export { DefaultSendKeysCommandExecutor };
 export type { SendKeysPlatformDependencies };
@@ -730,11 +736,32 @@ export class SendKeys {
       return terminal;
     }
     signal?.throwIfAborted();
-    const observation = await observe(actionStartTimestamp);
-    return withImeEditorWarnings(
+    return this.observeImeEditorResult(execution, () => observe(actionStartTimestamp), signal);
+  }
+
+  private async observeImeEditorResult(
+    execution: SendKeysCommandExecution,
+    observe: () => Promise<ObserveResult>,
+    signal?: AbortSignal,
+  ): Promise<SendKeysResult> {
+    const observation = await observe();
+    const result = withImeEditorWarnings(
       this.buildResult(execution.results, execution.failure, observation),
       execution.imeEditorState,
     );
+    if (
+      result.warnings?.length &&
+      hasImeKeyboardHiddenChange(execution.imeEditorState, observation)
+    ) {
+      await this.timer.sleep(IME_KEYBOARD_HIDDEN_SETTLE_MS);
+      signal?.throwIfAborted();
+      const settledObservation = await observe();
+      return withImeEditorWarnings(
+        this.buildResult(execution.results, execution.failure, settledObservation),
+        execution.imeEditorState,
+      );
+    }
+    return result;
   }
 
   private terminalCommandFailure(

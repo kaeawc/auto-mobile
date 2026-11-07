@@ -13,6 +13,7 @@ import {
 } from "../../prototype/prototypePatchWire";
 import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import { z } from "zod";
+import { parsePrototypeStacks, prototypeStacksSchema } from "./prototypeStacksWire";
 import { ActionableError } from "../../../models/ActionableError";
 import { logger } from "../../../utils/logger";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
@@ -206,24 +207,7 @@ const prototypeEventEnvelopeSchema = z.object({
   kind: z.string().min(1),
 });
 
-/** Optional navigation snapshots from newer devices; malformed entries are ignored. */
-const stackEntrySchema = z
-  .object({
-    path: z.array(z.string().min(1)).min(1).max(32),
-    depth: z.number().int().min(1).max(32),
-  })
-  .refine((entry) => entry.path.length === entry.depth);
-export function parsePrototypeStacks(value: unknown): PrototypeEvent["stacks"] {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-  const entries = Object.entries(value).flatMap(([id, entry]) => {
-    const parsed = stackEntrySchema.safeParse(entry);
-    return id && parsed.success ? [[id, parsed.data] as const] : [];
-  });
-  return entries.length ? Object.fromEntries(entries) : undefined;
-}
-export const prototypeStacksSchema = z.unknown().optional().transform(parsePrototypeStacks);
+export { parsePrototypeStacks, prototypeStacksSchema };
 
 type ReservedEmit = Pick<PrototypeEvent, "kind" | "name" | "payload">;
 

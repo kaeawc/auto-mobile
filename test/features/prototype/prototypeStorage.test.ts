@@ -284,6 +284,23 @@ describe("restore precedence (adopted decision)", () => {
     expect(restored.dropped).toEqual([{ key: "state:darkMode", reason: "unlisted" }]);
   });
 
+  test("a stored stack path is applied by shape and changes no state or data", () => {
+    const restored = restorePrototypeStorage(
+      { ...base, storage: { version: 1, keys: ["stack:nav", "stack:other"] } },
+      {
+        version: 1,
+        values: {
+          "stack:nav": [{ screen: "home" }, { screen: "post", params: { postId: "41" } }],
+          "stack:other": [],
+        },
+      },
+    );
+    expect(restored.state).toEqual(base.state);
+    expect(restored.data).toEqual(base.data);
+    expect(restored.applied).toEqual(["stack:nav"]);
+    expect(restored.dropped).toEqual([{ key: "stack:other", reason: "mismatch" }]);
+  });
+
   test("a stored value that no longer fits the spec falls back to the spec's value", () => {
     const restored = restorePrototypeStorage(base, {
       version: 1,

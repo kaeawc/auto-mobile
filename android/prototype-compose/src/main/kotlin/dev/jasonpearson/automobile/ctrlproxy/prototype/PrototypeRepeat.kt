@@ -50,12 +50,14 @@ import dev.jasonpearson.automobile.protocol.PrototypePagerNode
 import dev.jasonpearson.automobile.protocol.PrototypePasteButtonNode
 import dev.jasonpearson.automobile.protocol.PrototypePrependDataAction
 import dev.jasonpearson.automobile.protocol.PrototypeProgressNode
+import dev.jasonpearson.automobile.protocol.PrototypePushAction
 import dev.jasonpearson.automobile.protocol.PrototypeRadioGroupNode
 import dev.jasonpearson.automobile.protocol.PrototypeRemoveDataAction
 import dev.jasonpearson.automobile.protocol.PrototypeRepeat
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatNodeBinding
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatSegment
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatTemplate
+import dev.jasonpearson.automobile.protocol.PrototypeReplaceAction
 import dev.jasonpearson.automobile.protocol.PrototypeRequestAction
 import dev.jasonpearson.automobile.protocol.PrototypeRowNode
 import dev.jasonpearson.automobile.protocol.PrototypeScalar
@@ -64,6 +66,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeSearchBarNode
 import dev.jasonpearson.automobile.protocol.PrototypeSegmentedButtonNode
 import dev.jasonpearson.automobile.protocol.PrototypeSelectNode
 import dev.jasonpearson.automobile.protocol.PrototypeSetDataAction
+import dev.jasonpearson.automobile.protocol.PrototypeSetStackAction
 import dev.jasonpearson.automobile.protocol.PrototypeSetStateAction
 import dev.jasonpearson.automobile.protocol.PrototypeSliderNode
 import dev.jasonpearson.automobile.protocol.PrototypeSnackbarNode
@@ -891,7 +894,25 @@ private fun PrototypeAction.bound(instance: RepeatInstance): PrototypeAction =
     is PrototypeToggleAction -> copy(key = instance.interpolate(key))
     is PrototypeIncrementAction -> copy(key = instance.interpolate(key))
     is PrototypeDecrementAction -> copy(key = instance.interpolate(key))
+    is PrototypePushAction -> copy(params = params?.let(instance::routeParams))
+    is PrototypeReplaceAction -> copy(params = params?.let(instance::routeParams))
+    is PrototypeSetStackAction ->
+      copy(path = path.map { it.copy(params = it.params?.let(instance::routeParams)) })
     else -> boundDataAction(instance) ?: this
+  }
+
+/**
+ * Navigation params of a row (#14188): a binding binds like a data value, a literal string that is
+ * one placeholder keeps the item's type and any other literal renders to text.
+ */
+private fun RepeatInstance.routeParams(params: Map<String, JsonElement>): Map<String, JsonElement> =
+  params.mapValues { (_, value) ->
+    when {
+      value is JsonObject -> dataValue(value)
+      value is JsonPrimitive && value.isString ->
+        EmitContextResolver.scalar(interpolateTyped(value.content))
+      else -> value
+    }
   }
 
 private fun PrototypeAction.boundDataAction(instance: RepeatInstance): PrototypeAction? =

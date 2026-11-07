@@ -233,6 +233,25 @@ object PrototypeStorageRestorer {
     }
   }
 
+  /**
+   * [currentValues] plus each listed `stack:<id>` key's current path from [stacks] (#14188), as
+   * [PrototypeRouteRuntime.storedValue] stores it.
+   */
+  fun currentValues(
+    spec: PrototypeSpec,
+    stacks: Map<String, PrototypeStackSnapshot>,
+  ): Map<String, JsonElement> =
+    currentValues(spec) +
+      spec.storage
+        ?.keys
+        .orEmpty()
+        .filter { it.startsWith(PrototypeRouteRuntime.STACK_STORAGE_PREFIX) }
+        .mapNotNull { key ->
+          stacks[key.removePrefix(PrototypeRouteRuntime.STACK_STORAGE_PREFIX)]?.let {
+            key to PrototypeRouteRuntime.storedValue(it)
+          }
+        }
+
   /** UTF-8 bytes of the storage key plus the compact JSON of its value. */
   fun entryBytes(storageKey: String, value: JsonElement): Int =
     storageKey.toByteArray(Charsets.UTF_8).size + value.toString().toByteArray(Charsets.UTF_8).size
@@ -244,26 +263,32 @@ object PrototypeStorageRestorer {
     storageKey: String,
     value: JsonElement,
   ): PrototypeSpec? =
-    when (val key = PrototypeStorageKey.parse(storageKey)) {
-      is PrototypeStorageKey.State -> {
-        val scalar = fittingScalar(authored.state?.get(key.key), value)
-        scalar?.let { restored.copy(state = restored.state.orEmpty() + (key.key to it)) }
+    // A stored stack path lives in the runtime, not the spec: only its shape is checked here, and
+    // the runtime starts the stack at `start` when its screens or params no longer fit (#14188).
+    if (storageKey.startsWith(PrototypeRouteRuntime.STACK_STORAGE_PREFIX))
+      restored.takeIf { value is JsonArray && value.isNotEmpty() }
+    else
+      when (val key = PrototypeStorageKey.parse(storageKey)) {
+        is PrototypeStorageKey.State -> {
+          val scalar = fittingScalar(authored.state?.get(key.key), value)
+          scalar?.let { restored.copy(state = restored.state.orEmpty() + (key.key to it)) }
+        }
+        is PrototypeStorageKey.Data -> {
+          // Compare against the spec's own value, not the restore so far: an earlier stored key
+          // must
+          // not change what "the spec's value" is for a later one.
+          val own = PrototypeDataPointer.resolve(authored.data, key.pointer)
+          val fits = value !is JsonPrimitive || value.isString || value.content != "null"
+          if (!fits || (own != null && kind(own) != kind(value))) null
+          else
+            (PrototypeDataWriter.apply(
+                restored.data,
+                PrototypeDataWrite.Set("/data${key.pointer}", value),
+              ) as? PrototypeDataWriteResult.Success)
+              ?.let { restored.copy(data = it.data) }
+        }
+        null -> null
       }
-      is PrototypeStorageKey.Data -> {
-        // Compare against the spec's own value, not the restore so far: an earlier stored key must
-        // not change what "the spec's value" is for a later one.
-        val own = PrototypeDataPointer.resolve(authored.data, key.pointer)
-        val fits = value !is JsonPrimitive || value.isString || value.content != "null"
-        if (!fits || (own != null && kind(own) != kind(value))) null
-        else
-          (PrototypeDataWriter.apply(
-              restored.data,
-              PrototypeDataWrite.Set("/data${key.pointer}", value),
-            ) as? PrototypeDataWriteResult.Success)
-            ?.let { restored.copy(data = it.data) }
-      }
-      null -> null
-    }
 
   /** The stored value as the declared scalar's own type, or null when the type differs. */
   private fun fittingScalar(declared: PrototypeScalar?, stored: JsonElement): PrototypeScalar? {

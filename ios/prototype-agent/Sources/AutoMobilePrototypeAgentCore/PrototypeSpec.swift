@@ -108,6 +108,8 @@ struct PrototypeSpec: Decodable {
     let media: JSONValue?
     let platformHandlers: [String: JSONValue]
     private(set) var platformState: [String: JSONValue] = [:]
+    /// The route params `{route.<name>}` placeholders are bound to in `root` (#14188); empty at decode.
+    private(set) var routeScope: PrototypeRouteBinder.Scope = [:]
 
     private enum CodingKeys: String, CodingKey {
         case id, window, state, data, theme, motion, root, storage, requires, platform, strings, derive, channels, auth
@@ -192,7 +194,7 @@ struct PrototypeSpec: Decodable {
     private static func buildRoot(
         _ raw: JSONValue, data: [String: JSONValue]?, menuState: [String: JSONValue],
         strings: JSONValue?, locales: [String], platform: [String: JSONValue] = [:],
-        derive: [String: PrototypeDerivedEntry]? = nil
+        derive: [String: PrototypeDerivedEntry]? = nil, routes: PrototypeRouteBinder.Scope = [:]
     )
         throws -> PrototypeNode
     {
@@ -215,7 +217,9 @@ struct PrototypeSpec: Decodable {
         try PrototypeRepeat.validateEmitContexts(raw, data: data)
         let formatContext = PrototypeDerivedContext(entries: derive ?? [:], data: data)
         try PrototypeLimits.guardSubstitutedText(raw, data: data, derived: formatContext, state: menuState)
-        let bound = PrototypeDataResolver.resolveRoot(raw, data: data, platform: platform)
+        // Route params bind before data resolution, so `{data:/posts/{route.id}/title}` resolves (#14188).
+        let routed = PrototypeRouteBinder.bind(raw, scope: routes)
+        let bound = PrototypeDataResolver.resolveRoot(routed, data: data, platform: platform)
         let resolved = strings
             .map { PrototypeStrings.resolve(bound, strings: $0, locales: locales, data: data) } ?? bound
         try PrototypeLimits.guardTree(resolved)
@@ -250,6 +254,7 @@ struct PrototypeSpec: Decodable {
         media = spec.media
         platformHandlers = spec.platformHandlers
         platformState = spec.platformState
+        routeScope = spec.routeScope
         id = spec.id
         strings = spec.strings
         locales = spec.locales
@@ -272,7 +277,7 @@ struct PrototypeSpec: Decodable {
         }
         let rebuilt = try Self.buildRoot(
             authoredRoot, data: data, menuState: state ?? [:], strings: strings, locales: locales,
-            platform: platform, derive: derive
+            platform: platform, derive: derive, routes: routeScope
         )
         var next = PrototypeSpec(replacing: self, data: data, root: rebuilt)
         next.platformState = platform
@@ -291,7 +296,7 @@ struct PrototypeSpec: Decodable {
         if let data { try PrototypeLimits.guardData(data) }
         let rebuilt = try Self.buildRoot(
             raw, data: data, menuState: state ?? [:], strings: strings, locales: locales,
-            platform: platformState, derive: derive
+            platform: platformState, derive: derive, routes: routeScope
         )
         try PrototypeStacks.validate(root: rebuilt)
         try PrototypeThemeModes.validate(placement: window.placement, root: rebuilt)
@@ -313,7 +318,8 @@ struct PrototypeSpec: Decodable {
             strings: strings,
             locales: locales,
             platform: platformState,
-            derive: derive
+            derive: derive,
+            routes: routeScope
         )
         var result = PrototypeSpec(replacing: self, data: data, root: root)
         result.locales = locales
@@ -331,11 +337,32 @@ struct PrototypeSpec: Decodable {
             strings: strings,
             locales: locales,
             platform: platformState,
-            derive: derive
+            derive: derive,
+            routes: routeScope
         )
         try PrototypeStacks.validate(root: rebuilt)
         try PrototypeThemeModes.validate(placement: window.placement, root: rebuilt)
         return PrototypeSpec(replacing: self, data: data, root: rebuilt)
+    }
+
+    /// This spec with `{route.<name>}` placeholders bound to `scope` (#14188) and the drawn tree rebuilt
+    /// from the authored one. Throws when the bound tree breaks a limit the show enforces.
+    func replacingRoutes(_ scope: PrototypeRouteBinder.Scope) throws -> PrototypeSpec {
+        let rebuilt = try Self.buildRoot(
+            authoredRoot,
+            data: data,
+            menuState: state ?? [:],
+            strings: strings,
+            locales: locales,
+            platform: platformState,
+            derive: derive,
+            routes: scope
+        )
+        try PrototypeStacks.validate(root: rebuilt)
+        try PrototypeThemeModes.validate(placement: window.placement, root: rebuilt)
+        var next = PrototypeSpec(replacing: self, data: data, root: rebuilt)
+        next.routeScope = scope
+        return next
     }
 }
 

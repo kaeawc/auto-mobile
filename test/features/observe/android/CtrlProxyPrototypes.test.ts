@@ -1,3 +1,4 @@
+import type { PrototypeStackSnapshot } from "../../../../src/features/observe/android/ctrlProxyProtocol/prototypeMessages";
 import type {
   PrototypeChannelHost,
   PrototypeChannelSender,
@@ -1446,6 +1447,32 @@ test("decodes screen_changed and tolerates optional stack snapshots", () => {
     )?.stacks,
   ).toEqual(stacks);
   expect(decodePrototypeEvent({ ...event, stacks: {} }, "test")?.stacks).toBeUndefined();
+});
+
+test("decodes route params parallel to a stack path and drops misaligned ones", () => {
+  const stacks: Record<string, PrototypeStackSnapshot> = {
+    nav: { path: ["feed", "post"], depth: 2, params: [{}, { postId: "41", pinned: true }] },
+  };
+  const decoded = decodePrototypeEvent(
+    {
+      ...event,
+      kind: "screen_changed",
+      name: "nav",
+      payload: { screen: "post", depth: 2, params: { postId: "41", pinned: true } },
+      stacks: {
+        ...stacks,
+        short: { path: ["feed", "post"], depth: 2, params: [{}] },
+        nested: { path: ["feed"], depth: 1, params: [{ post: { id: 1 } }] },
+      },
+    },
+    "test",
+  );
+  expect(decoded?.stacks).toEqual(stacks);
+  expect(decoded?.payload).toEqual({
+    screen: "post",
+    depth: 2,
+    params: { postId: "41", pinned: true },
+  });
 });
 
 test("show result decoding preserves optional stack snapshots", async () => {

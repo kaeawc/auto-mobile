@@ -1,8 +1,10 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.util.Log
+import dev.jasonpearson.automobile.protocol.PrototypeRouteRuntime
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
+import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
 import dev.jasonpearson.automobile.protocol.PrototypeStorageDrop
 import dev.jasonpearson.automobile.protocol.PrototypeStorageDropReason
 import dev.jasonpearson.automobile.protocol.PrototypeStorageKeyBytes
@@ -192,7 +194,11 @@ class PrototypeStoragePersistence(
         debounceMillis = debounceMillis,
         warn = warn,
         stored = kept,
-        baseline = PrototypeStorageRestorer.currentValues(restore.spec),
+        // A restored stack path is in the runtime, not the spec: seed it so an unchanged path is
+        // not written again.
+        baseline =
+          PrototypeStorageRestorer.currentValues(restore.spec) +
+            kept.filterKeys { it.startsWith(PrototypeRouteRuntime.STACK_STORAGE_PREFIX) },
         // What the disk holds is not what the session does when the unsaved values were carried.
         persisted =
           if (unsaved == null) kept
@@ -278,11 +284,24 @@ internal constructor(
     if (persisted != values) markDirty()
   }
 
-  /** Notes the shown spec's listed values; stores those that changed. Cheap when none did. */
-  fun record(spec: PrototypeSpec) {
-    val now = PrototypeStorageRestorer.currentValues(spec)
+  /**
+   * Notes the shown spec's listed values; stores those that changed. Cheap when none did. Listed
+   * `stack:<id>` keys are left as they are: only [record] with the stacks sees them.
+   */
+  fun record(spec: PrototypeSpec) =
+    record(PrototypeStorageRestorer.currentValues(spec), includeStacks = false)
+
+  /** [record] with the listed `stack:<id>` paths of [stacks] too (#14188). */
+  fun record(spec: PrototypeSpec, stacks: Map<String, PrototypeStackSnapshot>) =
+    record(PrototypeStorageRestorer.currentValues(spec, stacks), includeStacks = true)
+
+  /** The value this session holds for [storageKey]: what was restored until it is recorded. */
+  fun stored(storageKey: String): JsonElement? = synchronized(lock) { values[storageKey] }
+
+  private fun record(now: Map<String, JsonElement>, includeStacks: Boolean) {
     synchronized(lock) {
       for (key in keys) {
+        if (!includeStacks && key.startsWith(PrototypeRouteRuntime.STACK_STORAGE_PREFIX)) continue
         val value = now[key]
         if (value == lastSeen[key]) continue
         if (value == null) lastSeen.remove(key) else lastSeen[key] = value

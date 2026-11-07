@@ -156,7 +156,9 @@ fun mapPrototypeSpec(
   PrototypeTrace.section(PrototypeTrace.MAP_PROTOTYPE_SPEC) {
     val resolved =
       dev.jasonpearson.automobile.protocol.PrototypeStrings.resolve(
-        PrototypeDataResolver.resolve(spec),
+        PrototypeDataResolver.resolve(
+          spec.copy(root = PrototypeRouteRuntime.bindRoot(spec.root, stacks)),
+        ),
         locales,
       )
     guardPrototypeTree(resolved.root)

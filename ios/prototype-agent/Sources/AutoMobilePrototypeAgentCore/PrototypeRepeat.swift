@@ -734,6 +734,10 @@ struct PrototypeRepeatInstance {
             if case let .array(actions)? = fields["actions"] {
                 fields["actions"] = .array(actions.map(bindAction))
             }
+        case .string("push")?, .string("replace")?:
+            bindRouteParams(&fields)
+        case .string("setStack")?:
+            bindList("path", in: &fields) { bindRouteParams(&$0) }
         case .string("request")?:
             bindRequest(&fields)
         case .string("platform")?:
@@ -778,6 +782,16 @@ struct PrototypeRepeatInstance {
         for list in ["onSuccess", "onError"] {
             if case let .array(actions)? = fields[list] { fields[list] = .array(actions.map(bindAction)) }
         }
+    }
+
+    /// Push, replace and setStack params (#14188): a binding object binds like a data write's value
+    /// (`{item}` and `{index: true}` become this row's `{value}`); a literal stays as authored.
+    private func bindRouteParams(_ fields: inout [String: JSONValue]) {
+        guard case let .object(params)? = fields["params"] else { return }
+        fields["params"] = .object(params.mapValues { value in
+            guard case let .object(binding) = value else { return value }
+            return bindDataValue(binding)
+        })
     }
 
     /// Only a whole `{index}` segment binds (#12519), so item content cannot inject pointer syntax.

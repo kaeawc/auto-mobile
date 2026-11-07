@@ -91,18 +91,22 @@ existing screen. Actions \`push {stack, screen}\`, \`pop {stack}\`, \`popToRoot 
 Push is ignored at depth 32; pop at depth 1 does nothing. \`screen_changed\` has name = stack id
 and payload \`{screen, depth}\`, emitted only when the top screen or depth changes. Requires
 \`prototype_stack_v1\`; every screen counts toward node limits, including hidden screens.
-Route contract (requires \`prototype_routes_v1\`, currently unadvertised by Android and iOS):
+Routes (requires \`prototype_routes_v1\`; older devices refuse them):
 keep \`screens\` as bare nodes and optionally add \`routes:{screen:{params?,onEnter?,onBack?}}\`.
 Declare up to 16 params per screen as string|number|boolean; names match [A-Za-z_][A-Za-z0-9_]*.
 Push/replace accept a flat \`params\` map of scalars or {state}/{data}/{item}/{index:true} bindings;
 all declared params are required, literals must match their types, and extra names are refused.
-\`setStack {stack,path:[{screen,params?}]}\` takes 1-32 entries. In a screen and its lifecycle actions,
-\`{route.name}\` binds in the same fields as repeat placeholders, condition operands and whole
-/data pointer segments. onEnter/onBack each take 1-32 actions with normal nesting limits;
-a direct same-stack pop in onBack needs \`force:true\` (dialog actions are independent).
-Storage keys may name \`stack:<id>\`. Runtime navigation, lifecycle execution and path restore
-are deferred; the reserved reports keep \`path:string[]\` and add parallel \`params:object[]\`,
-with optional params beside screen/depth in screen_changed payloads.
+\`setStack {stack,path:[{screen,params?}]}\` takes 1-32 entries and replaces the whole path.
+Each back-stack entry keeps its own params, so Back shows the previous entry as it was.
+In a screen and its lifecycle actions, \`{route.name}\` binds the top entry's params in the same
+fields as repeat placeholders, condition operands and whole /data pointer segments.
+onEnter/onBack each take 1-32 actions with normal nesting limits. onEnter runs after the
+\`screen_changed\` event whenever the screen becomes top, and once on show. onBack replaces the pop
+for system Back, the iOS edge swipe and a plain \`pop\`; \`pop {force:true}\` always pops, so a
+dialog confirm that leaves uses force (a direct same-stack pop in onBack needs it too).
+Storage key \`stack:<id>\` persists the path with params; a stored path whose screens or params no
+longer fit is dropped and the stack starts at \`start\`. Status and inspect keep \`path:string[]\`
+and add parallel \`params:object[]\`; screen_changed payloads add \`params\` when the top has any.
 Android Back and the iOS edge swipe pop a stack above depth 1. A stack's optional
 \`transition: "platform" | "slide" | "fade" | "none"\` selects screen navigation animation
 (default \`platform\`); \`push\` and \`replace\` can override it with their own \`transition\`.

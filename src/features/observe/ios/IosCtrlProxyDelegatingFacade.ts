@@ -40,7 +40,7 @@ import { SimCtlClient } from "../../../utils/ios-cmdline-tools/SimCtlClient";
 import { captureIosPanelScreenshot } from "./CtrlProxyScreenshot";
 import { displayTransitions } from "../DisplayTransition";
 
-import { HighlightShape, ViewHierarchyResult } from "../../../models";
+import { BootedDevice, HighlightShape, ViewHierarchyResult } from "../../../models";
 
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 
@@ -643,6 +643,17 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
   // ===========================================================================
   // Delegated Public Methods - Screenshot
   // ===========================================================================
+
+  /**
+   * The registry keeps the device of whichever caller created this client first, which may
+   * predate display discovery. Adopt a later caller's panel inventory so a Duo screenshot can
+   * pick its active panel instead of the runner's cover capture (#17366).
+   */
+  adoptDisplayInventory(displays: BootedDevice["displays"]): void {
+    if (displays?.panels.length && !this.device.displays?.panels.length) {
+      this.device = { ...this.device, displays };
+    }
+  }
 
   async requestScreenshot(
     timeoutMs?: number,

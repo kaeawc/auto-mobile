@@ -295,8 +295,12 @@ const resolveHighlightShapeFromSelector = async (
   if (device.platform === "ios") {
     const sourceDimensions = resolveSourceDimensions(viewHierarchy);
     if (sourceDimensions) {
+      // Hierarchy bounds are points, so the source is one unit per display point (#17354).
       return {
-        shape: { type: "circle", bounds: { ...highlightBounds, ...sourceDimensions } },
+        shape: {
+          type: "circle",
+          bounds: { ...highlightBounds, ...sourceDimensions, sourceScale: 1 },
+        },
         element,
       };
     }

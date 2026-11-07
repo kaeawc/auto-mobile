@@ -25801,7 +25801,7 @@
     "annotations": {
       "destructiveHint": false
     },
-    "description": "Simulate a phone call: Android emulator gsm commands, or CallKit via the app's AutoMobile iOS SDK.",
+    "description": "Simulate a phone call: Android emulator gsm commands, or CallKit via the app's AutoMobile iOS SDK (iOS Simulator: accept/hold return supported:partial).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -25836,11 +25836,17 @@
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "__schema0": {
+          "type": "string",
+          "enum": ["call", "accept", "cancel", "busy", "hold"]
+        }
+      },
       "type": "object",
       "properties": {
         "success": {
           "type": "boolean",
-          "const": true
+          "enum": [true, false]
         },
         "action": {
           "type": "string",
@@ -25854,10 +25860,24 @@
         },
         "message": {
           "type": "string"
+        },
+        "reason": {
+          "type": "string",
+          "enum": ["ios_simulator_callkit_limit"]
         }
       },
       "required": ["success", "action", "supported", "message"],
-      "additionalProperties": {}
+      "if": {
+        "properties": {
+          "success": {
+            "const": false
+          }
+        },
+        "required": ["success"]
+      },
+      "then": {
+        "required": ["reason"]
+      }
     }
   },
   {

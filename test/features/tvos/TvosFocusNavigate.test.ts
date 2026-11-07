@@ -211,7 +211,7 @@ describe.each(PLATFORMS)("focusNavigate contract on %s", (_platform, create) => 
     const { grid, run } = harness(0);
     const result = await run({ until: { resourceId: "tile_5" } });
     expect(result).toMatchObject({ success: true, status: "focused", steps: 3 });
-    expect(grid.moves).toEqual(["right", "down", "right"]);
+    expect(grid.moves).toEqual(["down", "right", "right"]);
     expect(texts(result)).toEqual(["Home", "Movies", "Settings", "Search"]);
     expect(result.focusedElement?.text).toBe("Search");
   });
@@ -269,7 +269,7 @@ describe.each(PLATFORMS)("focusNavigate contract on %s", (_platform, create) => 
     const result = await run({ until: { text: "Search" }, maxSteps: 1 });
     expect(result).toMatchObject({ success: false, status: "max_steps", steps: 1 });
     expect(result.message).toContain("Reached maxSteps (1)");
-    expect(grid.moves).toEqual(["right"]);
+    expect(grid.moves).toEqual(["down"]);
   });
 
   test("settles between presses", async () => {

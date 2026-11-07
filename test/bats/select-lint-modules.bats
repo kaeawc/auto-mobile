@@ -31,6 +31,14 @@ select_for() {
   [ "$output" = ':playground:baz:lintDebug' ]
 }
 
+@test "the flavored app shell selects its base debug lint variant" {
+  mkdir -p android/prototype-app-shell/src/main
+  printf 'plugins { id("automobile.android-application") }\n' > android/prototype-app-shell/build.gradle.kts
+  run select_for android/prototype-app-shell/src/main/A.kt android/foo/src/main/Foo.kt
+  [ "$status" -eq 0 ]
+  [ "$output" = $':foo:lintDebug\n:prototype-app-shell:lintBaseDebug' ]
+}
+
 @test "non-Android modules and unrelated files select nothing" {
   run select_for android/jvm/src/main/J.kt README.md src/daemon/x.ts docs/a.md
   [ "$status" -eq 0 ]

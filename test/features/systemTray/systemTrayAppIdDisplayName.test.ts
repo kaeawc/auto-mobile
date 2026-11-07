@@ -97,6 +97,20 @@ describe("systemTray find with appId on iOS", () => {
     );
   });
 
+  test("does not match by a display name shared with another installed app", async () => {
+    // Derived from the capture: Settings is renamed to the same "Messages" label.
+    const sharedName = parseSimctlListApps(
+      readFixture("simctl-listapps-messages.json").replace(
+        '"CFBundleDisplayName": "Settings"',
+        '"CFBundleDisplayName": "Messages"',
+      ),
+    );
+    install(sharedName);
+    await expect(find({ title: "mt0091c", appId: "com.apple.MobileSMS" })).rejects.toThrow(
+      "Notification not found",
+    );
+  });
+
   test("keeps a direct bundle-id match when the listing has no display name", async () => {
     // Derived from the capture: a row that carries the bundle id instead of the name.
     const bundleIdTray = JSON.parse(

@@ -223,7 +223,8 @@ const readCompleteIosTrayApps = async (
     );
   }
   const appIds: string[] = [];
-  const displayNames = new Map<string, string>();
+  const namesByBundleId = new Map<string, string>();
+  const nameCounts = new Map<string, number>();
   for (const app of inventory.apps) {
     const bundleId = getIosInstalledAppBundleId(app);
     if (bundleId === undefined) {
@@ -232,9 +233,15 @@ const readCompleteIosTrayApps = async (
     appIds.push(bundleId);
     const displayName = getIosInstalledAppDisplayName(app);
     if (displayName !== undefined) {
-      displayNames.set(bundleId, displayName);
+      namesByBundleId.set(bundleId, displayName);
+      nameCounts.set(displayName, (nameCounts.get(displayName) ?? 0) + 1);
     }
   }
+  // A name shared by several installed apps cannot attribute a row to one of
+  // them, so only unambiguous names are matchable; bundle ids always are.
+  const displayNames = new Map(
+    [...namesByBundleId].filter(([, name]) => nameCounts.get(name) === 1),
+  );
   return { appIds, displayNames };
 };
 

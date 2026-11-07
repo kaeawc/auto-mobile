@@ -4,6 +4,9 @@ import XCTest
 @MainActor
 final class VisionCommandRouter {
     private let application: XCUIApplication
+    /// Identifier of the element the last `request_tap_element` hit; typing falls back to it when
+    /// no field reports focus.
+    private var lastTappedIdentifier: String?
 
     init(application: XCUIApplication) {
         self.application = application
@@ -76,6 +79,7 @@ final class VisionCommandRouter {
                 }
                 // Never translate an ornament frame to a coordinate.
                 matches.firstMatch.tap()
+                lastTappedIdentifier = request.identifier
                 return try JSONEncoder().encode(WebSocketResponse.success(
                     type: "tap_element_result", requestId: requestId, totalTimeMs: 0
                 ))
@@ -90,20 +94,28 @@ final class VisionCommandRouter {
                     throw CommandError.invalidParameter("text", "append text must not contain the delete key")
                 }
                 var focusedFields: [XCUIElement] = []
+                var lastTappedFields: [XCUIElement] = []
                 let textTypes: [XCUIElement.ElementType] = [.textField, .secureTextField, .textView, .searchField]
                 for candidate in application.descendants(matching: .any).allElementsBoundByIndex {
                     let snapshot = try candidate.snapshot()
-                    if snapshot.hasFocus, textTypes.contains(snapshot.elementType) {
+                    guard textTypes.contains(snapshot.elementType) else { continue }
+                    if snapshot.hasFocus {
                         focusedFields.append(candidate)
                     }
+                    if let tapped = lastTappedIdentifier, snapshot.identifier == tapped {
+                        lastTappedFields.append(candidate)
+                    }
                 }
-                guard focusedFields.count == 1 else {
-                    throw CommandError.invalidParameter(
-                        "text",
-                        "no unique focused text input; focus it with tapOn first"
-                    )
+                let target: XCUIElement
+                switch VisionCommandPolicy.typingTarget(
+                    focusedCount: focusedFields.count,
+                    lastTappedTextInputCount: lastTappedFields.count
+                ) {
+                case .focused: target = focusedFields[0]
+                case .lastTapped: target = lastTappedFields[0]
+                case .none: throw CommandError.noFocusedTextInput
                 }
-                focusedFields[0].typeText(request.text)
+                target.typeText(request.text)
                 return try JSONEncoder().encode(WebSocketResponse.success(
                     type: "append_text_result", requestId: requestId, totalTimeMs: 0
                 ))

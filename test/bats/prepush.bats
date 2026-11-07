@@ -186,3 +186,18 @@ set_paths() { printf '%s\n' "$@" > "$PREPUSH_CHANGED_FILES_FILE"; }
   run bash scripts/prepush.sh --profile
   [ "$status" -eq 2 ]
 }
+
+@test "timing forwards to node with changed, and only to node" {
+  set_paths src/a.ts android/a.kt
+  run bash scripts/prepush.sh --changed --timing
+  [ "$status" -eq 0 ]
+  grep -q '^node --changed --timing$' "$LOG"
+  grep -q '^android --base-ref origin/main$' "$LOG"
+}
+
+@test "cloud profile with timing passes --timing once" {
+  set_paths src/a.ts
+  run bash scripts/prepush.sh --profile cloud --timing
+  [ "$status" -eq 0 ]
+  grep -q '^node --timing$' "$LOG"
+}

@@ -10005,6 +10005,12 @@
         "type": "int",
         "nullable": false,
         "hasDefault": true
+      },
+      {
+        "name": "params",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeStagger": [

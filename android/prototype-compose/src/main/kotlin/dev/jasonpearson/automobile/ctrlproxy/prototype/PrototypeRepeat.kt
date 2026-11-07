@@ -894,11 +894,16 @@ private fun PrototypeAction.bound(instance: RepeatInstance): PrototypeAction =
     is PrototypeToggleAction -> copy(key = instance.interpolate(key))
     is PrototypeIncrementAction -> copy(key = instance.interpolate(key))
     is PrototypeDecrementAction -> copy(key = instance.interpolate(key))
+    else -> boundDataAction(instance) ?: boundRouteAction(instance) ?: this
+  }
+
+private fun PrototypeAction.boundRouteAction(instance: RepeatInstance): PrototypeAction? =
+  when (this) {
     is PrototypePushAction -> copy(params = params?.let(instance::routeParams))
     is PrototypeReplaceAction -> copy(params = params?.let(instance::routeParams))
     is PrototypeSetStackAction ->
       copy(path = path.map { it.copy(params = it.params?.let(instance::routeParams)) })
-    else -> boundDataAction(instance) ?: this
+    else -> null
   }
 
 /**

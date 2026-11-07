@@ -110,6 +110,7 @@ class CommandAdvertisementTest {
       "prototype_show_in_place_v1",
       "prototype_patch_v1",
       "prototype_stack_v1",
+      "prototype_routes_v1",
       "prototype_anchor_v1",
       "prototype_window_metadata_v1",
       "screenshot_hide_prototype_v1",

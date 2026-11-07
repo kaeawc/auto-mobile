@@ -22,10 +22,7 @@ object PrototypeRouteRuntime {
 
   const val STACK_STORAGE_PREFIX = "stack:"
 
-  private const val ALIAS = "route"
   private val empty = JsonObject(emptyMap())
-  private val typedKeys = setOf("equals", "notEquals", "value")
-  private val pointerKeys = setOf("data", "path", "into", "to")
   private val defaultJson = Json { classDiscriminator = "type" }
 
   /**
@@ -121,7 +118,10 @@ object PrototypeRouteRuntime {
   ): PrototypeNode {
     if (stacks.values.none { it.paramsAt(it.path.lastIndex).isNotEmpty() }) return root
     val encoded = json.encodeToJsonElement(PrototypeNode.serializer(), root)
-    return json.decodeFromJsonElement(PrototypeNode.serializer(), bind(encoded, empty, stacks))
+    return json.decodeFromJsonElement(
+      PrototypeNode.serializer(),
+      PrototypeRouteBinder.bind(encoded, empty, stacks),
+    )
   }
 
   /** [actions] (a route's onEnter or onBack) with `{route.<name>}` bound to [params]. */
@@ -134,10 +134,21 @@ object PrototypeRouteRuntime {
     if (params.isEmpty()) return actions
     val serializer = ListSerializer(PrototypeAction.serializer())
     val encoded = json.encodeToJsonElement(serializer, actions)
-    return json.decodeFromJsonElement(serializer, bind(encoded, params, stacks))
+    return json.decodeFromJsonElement(
+      serializer,
+      PrototypeRouteBinder.bind(encoded, params, stacks),
+    )
   }
+}
 
-  private fun bind(
+/** Binds `{route.<name>}` placeholders in encoded nodes and actions for [PrototypeRouteRuntime]. */
+internal object PrototypeRouteBinder {
+  private const val ALIAS = "route"
+  private val empty = JsonObject(emptyMap())
+  private val typedKeys = setOf("equals", "notEquals", "value")
+  private val pointerKeys = setOf("data", "path", "into", "to")
+
+  fun bind(
     element: JsonElement,
     params: JsonObject,
     stacks: Map<String, PrototypeStackSnapshot>,

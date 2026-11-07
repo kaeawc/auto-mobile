@@ -194,11 +194,7 @@ class PrototypeStoragePersistence(
         debounceMillis = debounceMillis,
         warn = warn,
         stored = kept,
-        // A restored stack path is in the runtime, not the spec: seed it so an unchanged path is
-        // not written again.
-        baseline =
-          PrototypeStorageRestorer.currentValues(restore.spec) +
-            kept.filterKeys { it.startsWith(PrototypeRouteRuntime.STACK_STORAGE_PREFIX) },
+        baseline = restoredBaseline(restore.spec, kept),
         // What the disk holds is not what the session does when the unsaved values were carried.
         persisted =
           if (unsaved == null) kept
@@ -207,6 +203,14 @@ class PrototypeStoragePersistence(
     registry?.register(session)
     return PrototypeStorageOpen(restore.spec, session, plan)
   }
+
+  /**
+   * What the restored show holds for its listed keys. A restored stack path lives in the runtime,
+   * not the spec, so it is seeded from [kept] and an unchanged path is not written again.
+   */
+  private fun restoredBaseline(spec: PrototypeSpec, kept: Map<String, JsonElement>) =
+    PrototypeStorageRestorer.currentValues(spec) +
+      kept.filterKeys { it.startsWith(PrototypeRouteRuntime.STACK_STORAGE_PREFIX) }
 
   /** Clears an id nobody is showing: the stored keys removed, from disk alone. */
   suspend fun clear(id: String): Int =

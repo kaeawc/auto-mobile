@@ -117,8 +117,24 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
         }
     }
 
-    func swipe(_ direction: WatchSwipeDirection) throws {
+    func swipe(_ direction: WatchSwipeDirection, distance: Double?) throws {
         try performGesture {
+            if let distance {
+                // The default swipe scrolls about two screens on a watch. A partial drag moves the
+                // content by a fraction of the screen so consecutive lookFor reads overlap.
+                let half = distance / 2
+                let (from, to): (CGVector, CGVector) = switch direction {
+                case .up: (CGVector(dx: 0.5, dy: 0.5 + half), CGVector(dx: 0.5, dy: 0.5 - half))
+                case .down: (CGVector(dx: 0.5, dy: 0.5 - half), CGVector(dx: 0.5, dy: 0.5 + half))
+                case .left: (CGVector(dx: 0.5 + half, dy: 0.5), CGVector(dx: 0.5 - half, dy: 0.5))
+                case .right: (CGVector(dx: 0.5 - half, dy: 0.5), CGVector(dx: 0.5 + half, dy: 0.5))
+                }
+                // A slow drag that holds before release ends without fling momentum.
+                app.coordinate(withNormalizedOffset: from).press(
+                    forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: to),
+                    withVelocity: .slow, thenHoldForDuration: 0.3)
+                return
+            }
             switch direction {
             case .up: app.swipeUp()
             case .down: app.swipeDown()

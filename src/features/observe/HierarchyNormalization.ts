@@ -96,7 +96,7 @@ export function projectActionableHierarchy(
     return source;
   }
   const result: ViewHierarchyResult = filterOffscreenNodes(
-    { ...source, screenWidth: size.width, screenHeight: size.height },
+    { ...source, screenWidth: size.width, screenHeight: size.height, projectedScreenSize: size },
     size.width,
     size.height,
   );

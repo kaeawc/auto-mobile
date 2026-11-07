@@ -128,6 +128,22 @@ describe("iPhone Duo inner-panel root bounds", () => {
     }
   });
 
+  // Cached observe results are structuredClone'd, which drops tree-identity provenance (#17339).
+  test("a cloned projected capture still resolves to the landscape screen size", () => {
+    for (const multiPanel of [false, true]) {
+      const cloned = structuredClone(project(multiPanel));
+      expect(resolveActionableHierarchyScreenSize(cloned, multiPanel)).toEqual({
+        width: 951,
+        height: 669,
+      });
+      const reprojected = projectActionableHierarchy("ios", cloned, multiPanel);
+      expect(resolveActionableHierarchyScreenSize(reprojected, multiPanel)).toEqual({
+        width: 951,
+        height: 669,
+      });
+    }
+  });
+
   test("the full-screen application window is reported in the same landscape space", () => {
     const projected = projectActionableHierarchy(
       "ios",

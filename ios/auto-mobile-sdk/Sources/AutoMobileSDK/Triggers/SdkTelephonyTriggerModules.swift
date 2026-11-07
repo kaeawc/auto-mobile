@@ -168,20 +168,49 @@
         static func postLocalNotification(title: String, body: String) -> String? {
             #if canImport(UserNotifications)
                 installPresentationHandlerIfNeeded()
-                let semaphore = DispatchSemaphore(value: 0)
-                let posted = OSAllocatedUnfairLock(initialState: false)
-                Task {
-                    let result = await AutoMobileNotifications.shared.post(title: title, body: body)
-                    posted.withLock { $0 = result }
-                    semaphore.signal()
-                }
-                guard semaphore.wait(timeout: .now() + postTimeout) == .success else {
-                    return "notification_timeout"
-                }
-                return posted.withLock { $0 } ? nil : "notification_not_scheduled"
+                return postLocalNotification(
+                    title: title,
+                    body: body,
+                    settingsProbe: { done in
+                        UNUserNotificationCenter.current().getNotificationSettings { _ in done() }
+                    },
+                    post: { title, body, done in
+                        Task {
+                            done(await AutoMobileNotifications.shared.post(title: title, body: body))
+                        }
+                    }
+                )
             #else
                 return "notifications_unavailable"
             #endif
+        }
+
+        /// The settings probe and post share one deadline. Callback and wait seams keep timeout
+        /// tests deterministic without calling the notification service.
+        static func postLocalNotification(
+            title: String,
+            body: String,
+            settingsProbe: @Sendable (@escaping @Sendable () -> Void) -> Void,
+            post: @Sendable (String, String, @escaping @Sendable (Bool) -> Void) -> Void,
+            wait: (DispatchSemaphore, DispatchTime) -> DispatchTimeoutResult = { $0.wait(timeout: $1) }
+        ) -> String? {
+            let deadline = DispatchTime.now() + postTimeout
+            let settingsReady = DispatchSemaphore(value: 0)
+            settingsProbe { settingsReady.signal() }
+            guard wait(settingsReady, deadline) == .success else {
+                return "notification_settings_unavailable"
+            }
+
+            let semaphore = DispatchSemaphore(value: 0)
+            let posted = OSAllocatedUnfairLock(initialState: false)
+            post(title, body) { result in
+                posted.withLock { $0 = result }
+                semaphore.signal()
+            }
+            guard wait(semaphore, deadline) == .success else {
+                return "notification_timeout"
+            }
+            return posted.withLock { $0 } ? nil : "notification_not_scheduled"
         }
     }
 

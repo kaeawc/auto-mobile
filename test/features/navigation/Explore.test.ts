@@ -456,9 +456,9 @@ describe("Explore", () => {
         );
 
         expect(fakeGraph.getMethodCallCount("getStats")).toBe(1);
-        // The recorded event names its app, so the final report exports that app's graph.
-        expect(fakeGraph.getMethodCallCount("exportGraph")).toBe(1);
-        expect(fakeGraph.getMethodCallCount("exportGraphForApp")).toBe(1);
+        // The requested package names the graph both reads export, never the graph's current app.
+        expect(fakeGraph.getMethodCallCount("exportGraph")).toBe(0);
+        expect(fakeGraph.getMethodCallCount("exportGraphForApp")).toBe(2);
         expect(progressMessages).toContain("Explored 1 new screens (1/1 interactions)");
         expect(result.screensDiscovered).toBe(1);
       });
@@ -857,9 +857,9 @@ describe("Explore", () => {
         ],
         currentScreen: null,
       };
-      const targetExport = spyOn(fakeGraph, "exportGraphForApp").mockResolvedValue(
-        finalTargetGraph,
-      );
+      const targetExport = spyOn(fakeGraph, "exportGraphForApp")
+        .mockResolvedValueOnce(targetGraph)
+        .mockResolvedValue(finalTargetGraph);
       const launch = spyOn(LaunchApp.prototype, "execute").mockResolvedValue({
         success: true,
         packageName: "com.test.app",

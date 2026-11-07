@@ -660,8 +660,22 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     perf?: PerformanceTracker,
     signal?: AbortSignal,
   ): Promise<CtrlProxyScreenshotResult> {
+    return this.captureActivePanel(
+      () => this.screenshot.requestScreenshot(timeoutMs, perf, signal),
+      signal,
+    );
+  }
+
+  /**
+   * On a multi-panel device, capture the active panel and keep the runner only as the fallback:
+   * the runner captures the cover display, which is black while a Duo is unfolded (#17366, #17373).
+   */
+  private async captureActivePanel(
+    runnerCapture: () => Promise<CtrlProxyScreenshotResult>,
+    signal?: AbortSignal,
+  ): Promise<CtrlProxyScreenshotResult> {
     if ((this.device.displays?.panels.length ?? 0) < 2) {
-      return this.screenshot.requestScreenshot(timeoutMs, perf, signal);
+      return runnerCapture();
     }
     const currentPanel = displayTransitions.currentObservedPanel(this.device.deviceId);
     const hierarchy =
@@ -671,7 +685,7 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
         ? this.cachedHierarchy.hierarchy
         : null;
     return captureIosPanelScreenshot(this.device, hierarchy, new SimCtlClient(this.device), {
-      runnerCapture: () => this.screenshot.requestScreenshot(timeoutMs, perf, signal),
+      runnerCapture,
       signal,
       activePanelKey: currentPanel?.key,
     });
@@ -687,7 +701,10 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     if (remaining <= 0) {
       throw new ObserverPendingRequestTimeoutError();
     }
-    return this.screenshot.requestScreenshot(remaining, undefined, signal, true);
+    return this.captureActivePanel(
+      () => this.screenshot.requestScreenshot(remaining, undefined, signal, true),
+      signal,
+    );
   }
 
   async requestScreenshotWithoutObservationStreamPush(

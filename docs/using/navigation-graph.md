@@ -51,8 +51,10 @@ Launch the app first, then call `explore`:
 
 `explore` taps and swipes through the app until it reaches a limit or runs out
 of new things to try. On an Android TV it moves D-pad focus to an element and
-selects it instead, recorded as `focusNavigate` with `select: true`. It interacts
-with the device, so run it on a test device and test account.
+selects it instead, recorded as `focusNavigate` with `select: true`. It never
+explores the on-screen keyboard: when a field opens it over the app, `explore`
+presses back once to hide it, and it skips the keyboard's keys if it stays open.
+It interacts with the device, so run it on a test device and test account.
 
 | Parameter         | Default    | Meaning                                                                                                |
 | ----------------- | ---------- | ------------------------------------------------------------------------------------------------------ |
@@ -78,6 +80,7 @@ would tap before letting it run.
 | `coverage`              | `totalScreens`, `exploredScreens`, and `percentage`.                              |
 | `explorationPath`       | Screens visited, in order.                                                        |
 | `stopReason`            | Why the run ended, such as the interaction or time limit.                         |
+| `navigationGraph`       | The recorded graph of `packageName`, whose `appId` names that app.                |
 | `graphTraversal`        | In `validate` mode: which known transitions were re-walked and whether each held. |
 
 `explore` is not the only source of the graph. Taps, swipes, and other

@@ -23,6 +23,38 @@ export function getIosInstalledAppBundleId(app: IosInstalledAppRecord): string |
 }
 
 /**
+ * Display-name keys across the simulator (`simctl listapps`) and devicectl
+ * record formats. `CFBundleDisplayName` precedes `CFBundleName` because the
+ * latter is often the executable name (`MobileSMS` for Messages).
+ */
+const DISPLAY_NAME_KEYS = [
+  "bundleDisplayName",
+  "bundleName",
+  "CFBundleDisplayName",
+  "CFBundleName",
+  "displayName",
+  "name",
+] as const;
+
+/**
+ * Returns the user-visible app name (what SpringBoard shows on icons and
+ * notification rows) from an installed-app record, or undefined when absent.
+ */
+export function getIosInstalledAppDisplayName(app: IosInstalledAppRecord): string | undefined {
+  for (const key of DISPLAY_NAME_KEYS) {
+    const value = app[key];
+    if (typeof value !== "string") {
+      continue;
+    }
+    const name = value.trim();
+    if (name) {
+      return name;
+    }
+  }
+  return undefined;
+}
+
+/**
  * Path-carrying keys across the simulator (`simctl listapps`) and devicectl
  * (`devicectl device info apps`) record formats, most specific first: an
  * explicit bundle location beats a container. devicectl spells the bundle

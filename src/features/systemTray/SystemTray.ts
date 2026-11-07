@@ -2,7 +2,10 @@ import type { BootedDevice } from "../../models";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { SystemTrayArgs, SystemTrayNotificationArgs } from "./systemTrayTypes";
 import type { ProgressCallback } from "../action/BaseVisualChange";
-import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosInstalledApp";
+import {
+  getIosInstalledAppBundleId,
+  getIosInstalledAppDisplayName,
+} from "../../utils/ios-cmdline-tools/iosInstalledApp";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
@@ -195,10 +198,16 @@ const readCompleteTrayAppIds = async (
   ];
 };
 
-const readCompleteIosTrayAppIds = async (
+/** Bundle ids plus each app's display name, which is what iOS notification rows carry (#17388). */
+interface IosTrayApps {
+  appIds: string[];
+  displayNames: Map<string, string>;
+}
+
+const readCompleteIosTrayApps = async (
   device: BootedDevice,
   signal?: AbortSignal,
-): Promise<string[]> => {
+): Promise<IosTrayApps> => {
   throwIfAborted(signal);
   const inventory = await awaitWhileRequestIsLive(
     Promise.resolve(
@@ -213,9 +222,20 @@ const readCompleteIosTrayAppIds = async (
       `Cannot verify notification ownership because the installed apps could not be listed; the installed-app inventory is incomplete.${reason}`,
     );
   }
-  return inventory.apps
-    .map(getIosInstalledAppBundleId)
-    .filter((bundleId): bundleId is string => bundleId !== undefined);
+  const appIds: string[] = [];
+  const displayNames = new Map<string, string>();
+  for (const app of inventory.apps) {
+    const bundleId = getIosInstalledAppBundleId(app);
+    if (bundleId === undefined) {
+      continue;
+    }
+    appIds.push(bundleId);
+    const displayName = getIosInstalledAppDisplayName(app);
+    if (displayName !== undefined) {
+      displayNames.set(bundleId, displayName);
+    }
+  }
+  return { appIds, displayNames };
 };
 
 function applyStalledClearAll(
@@ -425,19 +445,30 @@ export class SystemTray {
 
     if (notification.appId) {
       throwIfAborted(signal);
-      installedApps =
-        device.platform === "android"
-          ? await awaitWhileRequestIsLive(readCompleteTrayAppIds(device, signal), signal)
-          : await readCompleteIosTrayAppIds(device, signal);
+      let iosDisplayNames: Map<string, string> | undefined;
+      if (device.platform === "android") {
+        installedApps = await awaitWhileRequestIsLive(
+          readCompleteTrayAppIds(device, signal),
+          signal,
+        );
+      } else {
+        const iosApps = await readCompleteIosTrayApps(device, signal);
+        installedApps = iosApps.appIds;
+        iosDisplayNames = iosApps.displayNames;
+      }
       if (!installedApps.includes(notification.appId)) {
         throw new ActionableError(`App ${notification.appId} is not installed.`);
       }
 
       throwIfAborted(signal);
-      appLabel = await awaitWhileRequestIsLive(
-        getSystemTrayDependencies().appLabelResolver(device, notification.appId, signal),
-        signal,
-      );
+      // iOS rows show the display name ("MESSAGES"), never the bundle id; the
+      // listing already carries it, so no per-app lookup is needed (#17388).
+      appLabel =
+        iosDisplayNames?.get(notification.appId) ??
+        (await awaitWhileRequestIsLive(
+          getSystemTrayDependencies().appLabelResolver(device, notification.appId, signal),
+          signal,
+        ));
       appMatchTexts = [appLabel, notification.appId].filter(Boolean) as string[];
     }
     return { notification, appLabel, appMatchTexts, installedApps };

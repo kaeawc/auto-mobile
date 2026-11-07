@@ -97,6 +97,17 @@ describe("systemTray find with appId on iOS", () => {
     );
   });
 
+  test("does not match a row that only names the app in its body", async () => {
+    // Derived from the capture: the Messages row's body mentions Settings (#17401).
+    const settingsInBody = JSON.parse(
+      JSON.stringify(messagesTray).replaceAll("hello tray", "open Settings"),
+    ) as ObserveResult;
+    install(listedApps, settingsInBody);
+    await expect(find({ title: "mt0091c", appId: "com.apple.Preferences" })).rejects.toThrow(
+      "Notification not found",
+    );
+  });
+
   test("does not match by a display name shared with another installed app", async () => {
     // Derived from the capture: Settings is renamed to the same "Messages" label.
     const sharedName = parseSimctlListApps(

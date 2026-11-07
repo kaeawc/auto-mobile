@@ -47,8 +47,8 @@ const watch: BootedDevice = {
   platform: "android",
   formFactor: "watch",
 };
-// Scrolls the stream toward its top (a downward finger swipe on the 384px fake screen).
-const REWIND_SWIPE = "shell input swipe 192 96 192 288 500";
+// Scrolls the stream toward its top (a mouse-wheel step at the centre of the 384px fake screen).
+const REWIND_SWIPE = "shell input mouse scroll 192 192 --axis VSCROLL,3";
 let hierarchy: ViewHierarchyResult;
 let stream: ObserveResult;
 let emptyStream: ObserveResult;

@@ -414,14 +414,14 @@ function describeFocus(
       elementMatchesTarget(element, target) && !(target.atBounds && isActionable(element)),
   );
   const matches = Boolean(focused && (elementMatchesTarget(focused, target) || matchingDescendant));
+  // Prefer a visible label: a resource-id is usually shared by every card in a row (a Leanback
+  // ImageCardView's first child is its `main_image`), so it cannot tell cards apart (#17376).
   const label =
     matchingDescendant ??
     contained.find(
-      (element) =>
-        stringProp(element, "text") ||
-        stringProp(element, "content-desc") ||
-        stringProp(element, "resource-id"),
-    );
+      (element) => stringProp(element, "text") || stringProp(element, "content-desc"),
+    ) ??
+    contained.find((element) => stringProp(element, "resource-id"));
   return { focusedElement: focused ? pathEntry(focused, label) : undefined, matches };
 }
 

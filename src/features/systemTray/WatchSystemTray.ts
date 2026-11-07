@@ -22,6 +22,7 @@ import {
   watchClearAll,
   watchExpandedTarget,
   watchNotifications,
+  watchCardClipped,
   watchRevealedDismiss,
   watchStreamRoot,
   isWearHierarchy,
@@ -32,6 +33,8 @@ import type { SystemTrayArgs, SystemTrayNotificationArgs } from "./systemTrayTyp
 
 const MAX_STREAM_PAGES = 20;
 const POLL_MS = 250;
+const MAX_SETTLE_READS = 6;
+const SETTLE_MS = 500;
 
 const outcome = (payload: Record<string, unknown>, success = true): SystemTrayOutcome => ({
   payload: { ...payload, success },
@@ -89,6 +92,16 @@ const visiblyRemoved = (card: WatchNotification, before: ObserveResult, after: O
     visibleAfter.filter(sameCard).length < visibleBefore.filter(sameCard).length
   );
 };
+
+/** Whether the matched card can take its action now, or must first be scrolled into full view. */
+const actionable = (
+  action: SystemTrayArgs["action"],
+  card: WatchNotification,
+  observation: ObserveResult,
+  atEnd: boolean,
+) =>
+  action !== "list" &&
+  (action !== "dismiss" || atEnd || !watchCardClipped(observation.viewHierarchy, card));
 
 const toggleMessage = (action: "open" | "close", changed: boolean, skipped: boolean): string => {
   if (skipped) {
@@ -318,18 +331,21 @@ export class WatchSystemTray {
         // Cards dismissed one by one earlier already left the inventory `clear.count` reads.
         return this.verifyClearAll(deadline, clear.appId, clear.count + scope.dismissedCount);
       }
-      if (args.action !== "list" && matching[0]) {
-        return this.act(args, matching[0], observation, scope);
-      }
       // Strict: a different ongoing card that scrolled in must never be mistaken for this page.
       const unmoved =
         previous !== undefined && pageSignature(previous) === pageSignature(observation);
+      const atEnd = unmoved || !!watchClearAll(observation.viewHierarchy);
+      // A swipe needs the card's true extent: scroll a clipped match into full view first and act
+      // on its bounds from the re-read, unless the stream cannot scroll any further.
+      const target = matching[0];
+      if (target && actionable(args.action, target, observation, atEnd)) {
+        return this.act(args, target, observation, scope);
+      }
       // Preserve identical cards within a page. Cross-page overlap is deliberately conservative:
       // without captured stable IDs, keep duplicates rather than silently lose notifications.
       if (!unmoved) {
         cards = [...cards, ...matching];
       }
-      const atEnd = unmoved || !!watchClearAll(observation.viewHierarchy);
       if (atEnd && ["list", "clearAll"].includes(args.action)) {
         return this.scanResult(args, scope, cards, observation);
       }
@@ -535,7 +551,13 @@ export class WatchSystemTray {
     observation: ObserveResult,
     scope: WatchScope,
   ): Promise<SystemTrayOutcome> {
-    const { next, removed } = await this.swipeAway(card, observation, args.notification?.appId);
+    const target = await this.settled(card, observation, scope);
+    const { next, removed } = await this.swipeAway(
+      target.card,
+      target.observation,
+      args.notification?.appId,
+      scope,
+    );
     if (!removed) {
       return outcome(
         {
@@ -565,11 +587,56 @@ export class WatchSystemTray {
     return outcome({ message: "Dismissed notification", dismissedCount: 1, observation: next });
   }
 
+  /**
+   * The card the action targets in `observation`: the first visible match of the criteria, which
+   * is how the scan picked it. Cards carry no stable key and a CtrlProxy capture exposes their
+   * title and body only as text lines, so a card is relocated by its criteria, never by position.
+   */
+  private locate(observation: ObserveResult, scope: WatchScope): WatchNotification | undefined {
+    return watchNotifications(observation.viewHierarchy).find((card) =>
+      watchCardMatches(card, scope.criteria, scope.label),
+    );
+  }
+
+  /**
+   * Re-read until `card`'s bounds hold still between two reads. A scroll or the end-of-stream
+   * spring-back keeps animating after the swipe that caused it, so the bounds of the read that
+   * found the card can be stale; a swipe aimed at them misses the card and leaves the stream
+   * (#17331). Returns the card and observation of the settled read.
+   */
+  private async settled(
+    card: WatchNotification,
+    observation: ObserveResult,
+    scope: WatchScope,
+  ): Promise<{ card: WatchNotification; observation: ObserveResult }> {
+    let current = { card, observation };
+    for (let attempt = 0; attempt < MAX_SETTLE_READS; attempt++) {
+      await sleep(SETTLE_MS, this.signal);
+      const next = await this.read();
+      const moved = this.locate(next, scope);
+      if (!moved) {
+        throw new ActionableError(
+          "The watch notification left view while the stream settled. Retry the action.",
+        );
+      }
+      const still =
+        JSON.stringify(moved.element.bounds) === JSON.stringify(current.card.element.bounds);
+      current = { card: moved, observation: next };
+      if (still) {
+        return current;
+      }
+    }
+    throw new ActionableError(
+      "The watch notification stream kept moving. Retry the action once it is still.",
+    );
+  }
+
   /** Swipe `card` away and report whether its removal is confirmed. */
   private async swipeAway(
     card: WatchNotification,
     observation: ObserveResult,
     appId: string | undefined,
+    scope: WatchScope,
   ): Promise<{ next: ObserveResult; removed: boolean }> {
     const { left, top, right, bottom } = card.element.bounds;
     const before = appId ? await this.inventory(appId, card) : undefined;
@@ -580,7 +647,10 @@ export class WatchSystemTray {
     await sleep(POLL_MS, this.signal);
     let next = await this.read();
     // Wear OS 7 only reveals the X and settings buttons; tapping the X dismisses the card.
-    const revealed = watchRevealedDismiss(next.viewHierarchy, card);
+    // Tap only the X on the swiped card's own row: if the stream moved under the swipe, another
+    // card's buttons are showing and tapping them would dismiss the wrong notification (#17331).
+    const swiped = this.locate(next, scope);
+    const revealed = swiped && watchRevealedDismiss(next.viewHierarchy, swiped);
     if (revealed) {
       await this.tap(revealed, next);
       await sleep(POLL_MS, this.signal);

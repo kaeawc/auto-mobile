@@ -280,7 +280,7 @@ describe("Wear notification stream capture", () => {
     expect(
       await tray.execute({ action: "dismiss", notification: { title: "Wear" }, awaitTimeout: 500 }),
     ).toMatchObject({ isError: true, payload: { code: "dismissal_unconfirmed" } });
-    expect(timer.getSleepHistory()).toEqual([250, 250]);
+    expect(timer.getSleepHistory()).toEqual([250, 500, 250]);
   });
 
   test("confirms a removed card in a readable stream after the injected dismiss swipe", async () => {
@@ -295,7 +295,7 @@ describe("Wear notification stream capture", () => {
       }),
     ).toMatchObject({ isError: false, payload: { dismissedCount: 1, success: true } });
     expect(adb.getExecutedCommands()).not.toContain("shell input tap 192 335");
-    expect(timer.getSleepHistory()).toEqual([250, 250]);
+    expect(timer.getSleepHistory()).toEqual([250, 500, 250]);
   });
 
   // Rewrites one captured card text to model an ongoing card that updates in place.

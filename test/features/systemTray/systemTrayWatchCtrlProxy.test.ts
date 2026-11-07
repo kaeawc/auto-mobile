@@ -25,6 +25,8 @@ import wholeACapture from "../../fixtures/wear/systemtray/ctrlproxy-round384-str
 import wholeBCapture from "../../fixtures/wear/systemtray/ctrlproxy-round384-stream-whole-b.json";
 import clippedACapture from "../../fixtures/wear/systemtray/ctrlproxy-round384-stream-clipped-a.json";
 import clippedBCapture from "../../fixtures/wear/systemtray/ctrlproxy-round384-stream-clipped-b.json";
+import endACapture from "../../fixtures/wear/systemtray/ctrlproxy-round384-stream-end-a.json";
+import endBCapture from "../../fixtures/wear/systemtray/ctrlproxy-round384-stream-end-b.json";
 import expandedCapture from "../../fixtures/wear/systemtray/ctrlproxy-card-expanded.json";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -56,6 +58,10 @@ const wholeA = capture(wholeACapture, "round384-whole-a");
 const wholeB = capture(wholeBCapture, "round384-whole-b");
 const clippedA = capture(clippedACapture, "round384-clipped-a");
 const clippedB = capture(clippedBCapture, "round384-clipped-b");
+// The last two pages of a stream: the Item9 card is cut off at the bottom edge, then shown whole
+// with Clear all below it, where the stream ends.
+const endA = capture(endACapture, "round384-end-a");
+const endB = capture(endBCapture, "round384-end-b");
 // A fake watch face, not a captured hierarchy.
 const closed: ObserveResult = {
   ...top,
@@ -120,6 +126,19 @@ const movedDown = (page: ObserveResult, dy: number): ObserveResult => {
   visit(copy.viewHierarchy);
   return copy;
 };
+/** A captured page without its Clear all button, as before the stream's end is reached. */
+function withoutClearAll(page: ObserveResult): ObserveResult {
+  const strip = (node: unknown): unknown => {
+    if (Array.isArray(node)) {
+      return node.filter((child) => (child as { text?: string }).text !== "Clear all").map(strip);
+    }
+    if (node !== null && typeof node === "object") {
+      return Object.fromEntries(Object.entries(node).map(([key, value]) => [key, strip(value)]));
+    }
+    return node;
+  };
+  return { ...page, viewHierarchy: strip(page.viewHierarchy) as ObserveResult["viewHierarchy"] };
+}
 /** A captured page whose card node `from` is stretched to `to`, e.g. past the viewport edges. */
 const reboundedCard = (page: ObserveResult, from: Bounds, to: Bounds) =>
   rewriteBounds(page, (bounds) => (bounds.join() === from.join() ? to : bounds));
@@ -303,10 +322,11 @@ describe("Wear OS 7 stream actions", () => {
   });
 
   test("list keeps an equal card that a scroll did not carry up from the one already read", async () => {
-    // Item 4 ends the first page; the next page shows an equal item 4 only 40px higher, a shift no
-    // half-screen swipe makes, so it is another notification and not the one already read.
+    // Item 4 ends the first page; the next page shows an equal item 4 only 15px higher, a shift no
+    // scroll makes (not even the short last one at the end of the stream), so it is another
+    // notification and not the one already read.
     const SCAN384 = "shell input swipe 192 288 192 96 500";
-    const lowerItem4 = movedDown(wholeB, 155);
+    const lowerItem4 = movedDown(wholeB, 180);
     const { tray } = setup((commands) => (commands.includes(SCAN384) ? lowerItem4 : wholeA));
     const result = await tray.execute({
       action: "list",
@@ -320,6 +340,26 @@ describe("Wear OS 7 stream actions", () => {
       "AM17357 item 3",
     ]);
   });
+
+  test.each([
+    ["with Clear all in view", (page: ObserveResult) => page],
+    ["until an unmoved page shows it was the last", withoutClearAll],
+  ])(
+    "list merges a cut-off card across a short last swipe at the end of the stream, %s",
+    async (_name, endPage) => {
+      // The last swipe moved the stream by 88px (23% of the screen), not a full scroll, because the
+      // stream ended: the card cut off at the bottom edge leads the final page and is listed once.
+      const SCAN384 = "shell input swipe 192 288 192 96 500";
+      const shortLastSwipe = endPage(movedDown(endB, 110));
+      const { tray } = setup((commands) => (commands.includes(SCAN384) ? shortLastSwipe : endA));
+      const result = await tray.execute({
+        action: "list",
+        notification: { appId: "com.android.shell", body: "n9" },
+        awaitTimeout: 5000,
+      });
+      expect(result.payload.notifications).toMatchObject([{ title: "Item9", body: "n9" }]);
+    },
+  );
 
   test("list does not take a card that merely starts with the cut-off text for its continuation", async () => {
     // The last card is cut off at the bottom showing only its app; the page after the swipe has a

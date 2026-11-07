@@ -33,7 +33,8 @@ final class DeviceHubDisplayTrackerTests: XCTestCase {
     }
 
     func testNilRelocationKeepsThePreviousRectAndIsThrottled() async throws {
-        let capture = Capture(rects: [Capture.zoomFit, nil])
+        let recovered = CGRect(x: 300, y: 150, width: 400, height: 280)
+        let capture = Capture(rects: [Capture.zoomFit, nil, recovered])
         let tracker = try await capture.makeTracker()
         capture.time += DeviceHubDisplayTracker.relocateInterval
         await tracker.refreshIfDue(windowSize: capture.window.frame.size)
@@ -41,6 +42,49 @@ final class DeviceHubDisplayTrackerTests: XCTestCase {
 
         XCTAssertEqual(capture.calls, 2)
         assertRect(tracker.frame(for: capture.window), Capture.zoomFit.offsetBy(dx: 49, dy: 48))
+
+        capture.time += DeviceHubDisplayTracker.relocateInterval
+        await tracker.refreshIfDue(windowSize: capture.window.frame.size)
+        XCTAssertEqual(capture.calls, 3)
+        assertRect(tracker.frame(for: capture.window), recovered.offsetBy(dx: 49, dy: 48))
+    }
+
+    func testStalledCaptureTimesOutKeepsThePlacementAndAppliesLateResult() async throws {
+        let late = CGRect(x: 300, y: 150, width: 400, height: 280)
+        var time: TimeInterval = 0
+        var calls = 0
+        var release: CheckedContinuation<CGRect?, Never>?
+        let target = SimulatorOverlayTarget(
+            windowID: 1, processID: 2, frame: CGRect(x: 49, y: 48, width: 1100, height: 800), title: "Device Hub"
+        )
+        let tracker = DeviceHubDisplayTracker(
+            relativeRect: Capture.zoomFit,
+            windowSize: target.frame.size,
+            now: { time },
+            sleep: { _ in },
+            relocate: {
+                calls += 1
+                return await withCheckedContinuation { release = $0 }
+            }
+        )
+        time += DeviceHubDisplayTracker.relocateInterval
+        await tracker.refreshIfDue(windowSize: target.frame.size)
+
+        XCTAssertEqual(calls, 1, "a stalled capture must not block the refresh")
+        assertRect(tracker.frame(for: target), Capture.zoomFit.offsetBy(dx: 49, dy: 48))
+
+        time += DeviceHubDisplayTracker.relocateInterval
+        await tracker.refreshIfDue(windowSize: target.frame.size)
+        XCTAssertEqual(calls, 1, "no second capture starts while one is still running")
+
+        while release == nil {
+            await Task.yield()
+        }
+        release?.resume(returning: late)
+        while tracker.frame(for: target) == Capture.zoomFit.offsetBy(dx: 49, dy: 48) {
+            await Task.yield()
+        }
+        assertRect(tracker.frame(for: target), late.offsetBy(dx: 49, dy: 48))
     }
 
     func testWindowResizeForcesImmediateRelocation() async throws {

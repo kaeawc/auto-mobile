@@ -261,17 +261,26 @@ final class SimulatorHighlightOverlay: SimulatorOverlay {
 
     func refresh() async throws {
         guard !isClosed else { return }
+        var window = try resolveWindow()
+        if let prepare {
+            await prepare(window)
+            guard !isClosed else { return }
+            // The window can move while the capture runs; place the panel from where it is now.
+            window = try resolveWindow()
+        }
+        guard let frame = displayFrame(window) else {
+            throw OverlayError("Simulator window disappeared")
+        }
+        update(frame: frame)
+    }
+
+    private func resolveWindow() throws -> SimulatorOverlayTarget {
         guard let window = targets()
             .first(where: { $0.windowID == targetID && $0.processID == targetPID })
         else {
             throw OverlayError("Simulator window disappeared")
         }
-        await prepare?(window)
-        guard !isClosed else { return }
-        guard let frame = displayFrame(window) else {
-            throw OverlayError("Simulator window disappeared")
-        }
-        update(frame: frame)
+        return window
     }
 
     var isPanelVisible: Bool { panel.isVisible }

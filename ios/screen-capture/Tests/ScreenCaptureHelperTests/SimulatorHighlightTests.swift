@@ -440,6 +440,32 @@ final class SimulatorHighlightHostTests: XCTestCase {
 
 @MainActor
 final class SimulatorHighlightOverlayRefreshTests: XCTestCase {
+    func testRefreshPlacesThePanelFromTheWindowAfterCaptureMoved() async throws {
+        let window = SimulatorOverlayTarget(
+            windowID: 7, processID: 1, frame: CGRect(x: 0, y: 0, width: 200, height: 400), title: "mt-duo-0090b"
+        )
+        let moved = SimulatorOverlayTarget(
+            windowID: 7, processID: 1, frame: CGRect(x: 30, y: 40, width: 200, height: 400), title: "mt-duo-0090b"
+        )
+        let request = try JSONDecoder().decode(SimulatorHighlightRequest.self, from: Data("""
+        {"requestId":"r","id":"h","shape":{"type":"circle","bounds":{"x":10,"y":20,"width":30,"height":40,\
+        "sourceWidth":100,"sourceHeight":200}}}
+        """.utf8))
+        var current = window
+        var seen: [CGPoint] = []
+        let overlay = try SimulatorHighlightOverlay(
+            window: window,
+            request: request,
+            displayFrame: { seen.append($0.frame.origin); return $0.frame },
+            prepare: { _ in current = moved },
+            isTrusted: { true },
+            targets: { [current] }
+        )
+        try await overlay.refresh()
+
+        XCTAssertEqual(seen.last, moved.frame.origin, "the frame must come from the window re-resolved after capture")
+    }
+
     func testClosedOverlayIgnoresRefreshResumingFromPendingCapture() async throws {
         let window = SimulatorOverlayTarget(
             windowID: 7, processID: 1, frame: CGRect(x: 0, y: 0, width: 200, height: 400), title: "mt-duo-0090b"
@@ -468,7 +494,9 @@ final class SimulatorHighlightOverlayRefreshTests: XCTestCase {
         XCTAssertEqual(frameLookups, 1)
 
         let refresh = Task { try await overlay.refresh() }
-        while captureFinish == nil { await Task.yield() }
+        while captureFinish == nil {
+            await Task.yield()
+        }
         // A same-ID replacement closes the old overlay while its capture is pending.
         overlay.close()
         captureFinish?.resume()

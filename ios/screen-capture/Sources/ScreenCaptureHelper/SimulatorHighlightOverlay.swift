@@ -141,22 +141,31 @@ enum SimulatorDisplayGeometry {
         return matching.count == 1 ? matching[0] : nil
     }
 
+    struct DisplayFrameLookup {
+        let frame: @MainActor (SimulatorOverlayTarget) -> CGRect?
+        var prepare: (@MainActor (SimulatorOverlayTarget) async -> Void)?
+    }
+
     /// Where the display sits for `window`: its accessibility display group, or, when the window has
     /// none (Device Hub shows both Duo panels in one window), the drawn display found from pixels.
+    @MainActor
     static func displayFrameLookup(
         for window: SimulatorOverlayTarget,
         sourceSize: CGSize?
     )
-        async -> (SimulatorOverlayTarget) -> CGRect?
+        async -> DisplayFrameLookup
     {
-        if displayFrame(window: window) != nil { return displayFrame(window:) }
+        if displayFrame(window: window) != nil { return DisplayFrameLookup(frame: displayFrame(window:)) }
         guard let relative = await DeviceHubDisplayLocator.locate(window: window, sourceSize: sourceSize)
-        else { return displayFrame(window:) }
-        let offset = relative.origin // relative to the window's top-left
-        // Device Hub keeps the display at the same place in its window, so follow the window.
-        return { moved in
-            CGRect(origin: CGPoint(x: moved.frame.minX + offset.x, y: moved.frame.minY + offset.y), size: relative.size)
+        else { return DisplayFrameLookup(frame: displayFrame(window:)) }
+        var currentWindow = window
+        let tracker = DeviceHubDisplayTracker(relativeRect: relative, windowSize: window.frame.size) {
+            await DeviceHubDisplayLocator.locate(window: currentWindow, sourceSize: sourceSize)
         }
+        return DisplayFrameLookup(frame: { tracker.frame(for: $0) }, prepare: { updated in
+            currentWindow = updated
+            await tracker.refreshIfDue(windowSize: updated.frame.size)
+        })
     }
 
     static func displayFrame(window: SimulatorOverlayTarget) -> CGRect? {
@@ -193,17 +202,27 @@ final class SimulatorHighlightOverlay: SimulatorOverlay {
     private let layer = HandDrawnCircleLayer()
     private let startedAt = ProcessInfo.processInfo.systemUptime
     private var previousFrame: CGRect?
+    /// Set by `close()`. A refresh suspended in `prepare` must not touch the
+    /// panel after a replacement closed this overlay.
+    private var isClosed = false
 
-    private let displayFrame: (SimulatorOverlayTarget) -> CGRect?
+    private let isTrusted: () -> Bool
+    private let targets: () -> [SimulatorOverlayTarget]
+    private let displayFrame: @MainActor (SimulatorOverlayTarget) -> CGRect?
+    private let prepare: (@MainActor (SimulatorOverlayTarget) async -> Void)?
 
     init(
         window: SimulatorOverlayTarget,
         request: SimulatorHighlightRequest,
-        displayFrame: @escaping (SimulatorOverlayTarget) -> CGRect? = SimulatorDisplayGeometry.displayFrame(window:)
+        displayFrame: @escaping @MainActor (SimulatorOverlayTarget) -> CGRect? = SimulatorDisplayGeometry
+            .displayFrame(window:),
+        prepare: (@MainActor (SimulatorOverlayTarget) async -> Void)? = nil,
+        isTrusted: @escaping () -> Bool = { AXIsProcessTrusted() },
+        targets: @escaping () -> [SimulatorOverlayTarget] = { SimulatorDisplayGeometry.targets() }
     )
         throws
     {
-        guard !request.id.isEmpty, AXIsProcessTrusted(),
+        guard !request.id.isEmpty, isTrusted(),
               let frame = displayFrame(window),
               SimulatorDisplayGeometry.orientedBounds(request.shape.bounds, targetSize: frame.size)
               .scaled(to: frame.size) != nil
@@ -213,6 +232,9 @@ final class SimulatorHighlightOverlay: SimulatorOverlay {
             )
         }
         self.displayFrame = displayFrame
+        self.prepare = prepare
+        self.isTrusted = isTrusted
+        self.targets = targets
         targetID = window.windowID
         targetPID = window.processID
         shape = request.shape
@@ -238,16 +260,33 @@ final class SimulatorHighlightOverlay: SimulatorOverlay {
     }
 
     func refresh() async throws {
-        guard let window = SimulatorDisplayGeometry.targets()
-            .first(where: { $0.windowID == targetID && $0.processID == targetPID }),
-            let frame = displayFrame(window)
-        else {
+        guard !isClosed else { return }
+        var window = try resolveWindow()
+        if let prepare {
+            await prepare(window)
+            guard !isClosed else { return }
+            // The window can move while the capture runs; place the panel from where it is now.
+            window = try resolveWindow()
+        }
+        guard let frame = displayFrame(window) else {
             throw OverlayError("Simulator window disappeared")
         }
         update(frame: frame)
     }
 
+    private func resolveWindow() throws -> SimulatorOverlayTarget {
+        guard let window = targets()
+            .first(where: { $0.windowID == targetID && $0.processID == targetPID })
+        else {
+            throw OverlayError("Simulator window disappeared")
+        }
+        return window
+    }
+
+    var isPanelVisible: Bool { panel.isVisible }
+
     func close() {
+        isClosed = true
         panel.close()
     }
 
@@ -320,7 +359,12 @@ final class SimulatorHighlightHost {
             }
             let window = try SimulatorDisplayGeometry.find(deviceName: deviceName, sourceSize: sourceSize)
             let lookup = await SimulatorDisplayGeometry.displayFrameLookup(for: window, sourceSize: sourceSize)
-            return try SimulatorHighlightOverlay(window: window, request: request, displayFrame: lookup)
+            return try SimulatorHighlightOverlay(
+                window: window,
+                request: request,
+                displayFrame: lookup.frame,
+                prepare: lookup.prepare
+            )
         }
     }
 

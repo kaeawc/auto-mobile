@@ -151,3 +151,63 @@ test("a ratio-sized line item is aligned with its derived cross size", () => {
     height: 400,
   });
 });
+
+test("a growing item's minimum wins over a smaller maximum", () => {
+  const row = named("row", { display: "flex", "flex-direction": "row" }, [
+    named("item", { flex: "1 1 0", "min-width": "300px", "max-width": "100px", height: "10px" }),
+  ]);
+  expect(rectOf(topEdgePaintOrder(row, SCREEN), "item")).toEqual({
+    left: 0,
+    top: 0,
+    width: 300,
+    height: 10,
+  });
+});
+
+test("an absolute child derives its unknown dimension from its aspect ratio before placing", () => {
+  const root = named("root", { position: "relative" }, [
+    named("square", { position: "absolute", top: "0", height: "400px", "aspect-ratio": "1" }),
+    named("end", {
+      position: "absolute",
+      top: "0",
+      right: "0",
+      height: "100px",
+      "aspect-ratio": "2 / 1",
+    }),
+  ]);
+  const painted = topEdgePaintOrder(root, SCREEN);
+  expect(rectOf(painted, "square")).toEqual({ left: 0, top: 0, width: 400, height: 400 });
+  expect(rectOf(painted, "end")).toEqual({ left: 200, top: 0, width: 200, height: 100 });
+});
+
+test("a content-sized wrapper takes its measurable children's size before it is aligned", () => {
+  // The still's floating window: a centred grid cell holding an unsized translate wrapper.
+  const window = named(
+    "window",
+    { display: "grid", "align-items": "center", "justify-items": "center" },
+    [
+      named("wrapper", { transform: "translate(0px, 0px)", padding: "5px" }, [
+        named("panel", { width: "390px", height: "890px" }),
+      ]),
+    ],
+  );
+  const painted = topEdgePaintOrder(window, SCREEN);
+  expect(rectOf(painted, "wrapper")).toEqual({ left: 0, top: -50, width: 400, height: 900 });
+  expect(rectOf(painted, "panel")).toEqual({ left: 5, top: -45, width: 390, height: 890 });
+});
+
+test("a wrapper with text or an unsized child stays unmeasured", () => {
+  const centred = (children: (WebElement | string)[]) =>
+    rectOf(
+      topEdgePaintOrder(
+        named("box", { display: "grid", "align-items": "center" }, [
+          el("div", { attrs: { "data-name": "wrapper" }, style: {} }, children),
+        ]),
+        SCREEN,
+      ),
+      "wrapper",
+    )?.top;
+  expect(centred([named("sized", { height: "100px" })])).toBe(350);
+  expect(centred([named("sized", { height: "100px" }), "label"])).toBeUndefined();
+  expect(centred([named("sized", { height: "100px" }), named("unsized", {})])).toBeUndefined();
+});

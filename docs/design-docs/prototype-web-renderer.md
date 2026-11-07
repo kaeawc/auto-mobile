@@ -578,9 +578,11 @@ the host, so the page's script only switches between views it was given and neve
   last opaque background painted there is the colour, else the screen background; the colour at the most
   points wins. Element opacity multiplies down the tree, so a background counts only when it is opaque
   after that opacity, and a fully transparent subtree paints nothing. The window placement is part of the
-  layout, so a bottom sheet or floating window leaves the screen background at the top edge. Text and
-  other unsized content are not measured: an unknown height or offset is taken as non-zero, a content-sized
-  width covers nothing, and a box, row or column child with no self-alignment starts at its container's
+  layout, so only what a window paints at the top edge counts: a bottom sheet or a small centred floating
+  window leaves the screen background there, while a wide floating panel at `topStart` that reaches the
+  edge sets the colour. Text and other unsized content are not measured: an unknown height or offset is
+  taken as non-zero, a content-sized width covers nothing (a wrapper whose in-flow children all have
+  measurable sizes takes their stacked or largest size, padding included), and a box, row or column child with no self-alignment starts at its container's
   start as the renderer emits it. A subtree that starts below the top edge inside an overflow clip, or
   behind a transform other than a translation, is not laid out. Landscape swaps the screen size, uses
   the landscape safe areas, and moves the cutout from the top edge to the left edge. A frame whose

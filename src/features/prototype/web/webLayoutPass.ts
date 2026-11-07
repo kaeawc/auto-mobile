@@ -7,6 +7,7 @@ import {
   contentBox,
   declaredSize,
   sub,
+  withAspectRatio,
   type Axis,
   type Len,
   type WebRect,
@@ -112,35 +113,47 @@ function insetsOn(child: WebElement, axis: Axis): [string | undefined, string | 
     : [style.top ?? top, style.bottom ?? bottom];
 }
 
-/** An absolute child's position and size on one axis, against its container's border box. */
-function absoluteAxis(
+/** An absolute child's size on one axis: declared, else stretched between both insets. */
+function absoluteSize(child: WebElement, axis: Axis, container: WebRect, vars: CssVars): Len {
+  const [startValue, endValue] = insetsOn(child, axis);
+  const room = container[axis];
+  const declared = declaredSize(child, axis, room, vars);
+  const stretched =
+    present(startValue) && present(endValue)
+      ? sub(sub(room, cssLength(startValue, vars, room)), cssLength(endValue, vars, room))
+      : undefined;
+  return clampSize(declared === "auto" ? stretched : declared, child, axis, { base: room, vars });
+}
+
+/** An absolute child's start on one axis, against its container's border box. */
+function absoluteStart(
   child: WebElement,
   axis: Axis,
   container: WebRect,
-  vars: CssVars,
-): [Len, Len] {
+  context: { readonly size: Len; readonly vars: CssVars },
+): Len {
   const [startValue, endValue] = insetsOn(child, axis);
   const room = container[axis];
   const origin = axis === "width" ? container.left : container.top;
-  const start = present(startValue) ? cssLength(startValue, vars, room) : undefined;
-  const end = present(endValue) ? cssLength(endValue, vars, room) : undefined;
-  const declared = declaredSize(child, axis, room, vars);
-  const stretched =
-    present(startValue) && present(endValue) ? sub(sub(room, start), end) : undefined;
-  const size = clampSize(declared === "auto" ? stretched : declared, child, axis, {
-    base: room,
-    vars,
-  });
   if (present(startValue)) {
-    return [add(origin, start), size];
+    return add(origin, cssLength(startValue, context.vars, room));
   }
   // Only an end offset: measure back from the far edge. Neither: the static position, its start.
-  return present(endValue) ? [sub(add(origin, sub(room, end)), size), size] : [origin, size];
+  return present(endValue)
+    ? sub(add(origin, sub(room, cssLength(endValue, context.vars, room))), context.size)
+    : origin;
 }
 
 function absoluteChild(child: WebElement, container: WebRect, vars: CssVars): PlacedChild {
-  const [left, width] = absoluteAxis(child, "width", container, vars);
-  const [top, height] = absoluteAxis(child, "height", container, vars);
+  // A ratio-derived dimension is known before an end inset places the child.
+  const { width, height } = withAspectRatio(child, {
+    left: 0,
+    top: 0,
+    width: absoluteSize(child, "width", container, vars),
+    height: absoluteSize(child, "height", container, vars),
+  });
+  const left = absoluteStart(child, "width", container, { size: width, vars });
+  const top = absoluteStart(child, "height", container, { size: height, vars });
   return { element: child, rect: { left, top, width, height } };
 }
 

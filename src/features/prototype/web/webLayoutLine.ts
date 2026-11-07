@@ -3,6 +3,7 @@ import {
   add,
   alignOffset,
   clampSize,
+  contentInsets,
   declaredSize,
   shorthandValues,
   sub,
@@ -78,8 +79,60 @@ function alignedSize(
   const room = box.content[axis];
   const declared = declaredSize(child, axis, room, box.vars);
   const stretched = align === "stretch" || align === "normal";
-  const size = declared !== "auto" ? declared : stretched ? room : undefined;
+  const size =
+    declared !== "auto" ? declared : stretched ? room : measuredContent(child, axis, box.vars, 0);
   return clampSize(size, child, axis, { base: room, vars: box.vars });
+}
+
+const MAX_MEASURE_DEPTH = 32;
+
+/** An element's size on one axis with no room to resolve against: declared, else measured. */
+function measuredSize(element: WebElement, axis: Axis, vars: CssVars, depth: number): Len {
+  const declared = declaredSize(element, axis, undefined, vars);
+  const size = declared === "auto" ? measuredContent(element, axis, vars, depth) : declared;
+  return clampSize(size, element, axis, { base: undefined, vars });
+}
+
+/**
+ * A content-sized element's size on one axis from its measurable in-flow children (#17459):
+ * stacked along its layout's axis with its gap, else the largest, plus padding and border.
+ * Unknown when any child is text, inline, has a margin or is itself unmeasurable.
+ */
+function measuredContent(element: WebElement, axis: Axis, vars: CssVars, depth: number): Len {
+  const layout = layoutOf(element);
+  const children = element.children.filter(
+    (child) =>
+      typeof child !== "string" ? !outOfFlow(child) && child.style.display !== "none" : child.trim() !== "",
+  );
+  const elements = elementsOf(children);
+  const unmeasurable =
+    depth >= MAX_MEASURE_DEPTH ||
+    layout === "tracks" ||
+    elements.length === 0 ||
+    elements.length < children.length ||
+    elements.some(
+      (child) =>
+        (layout === "flow" && isInline(child)) ||
+        Object.keys(child.style).some((name) => name.startsWith("margin")),
+    );
+  if (unmeasurable) {
+    return undefined;
+  }
+  const sizes = elements.map((child) => measuredSize(child, axis, vars, depth + 1));
+  if (sizes.some((size) => size === undefined)) {
+    return undefined;
+  }
+  const known = sizes as number[];
+  const stacked = layout === (axis === "width" ? "row" : "column") || (layout === "flow" && axis === "height");
+  const unknownRoom: WebRect = { left: 0, top: 0, width: undefined, height: undefined };
+  const gap = layout === "flow" ? 0 : mainGap(axis, { parent: element, content: unknownRoom, vars });
+  const extent = stacked
+    ? known.reduce((sum, size) => sum + size, gap * (known.length - 1))
+    : Math.max(...known);
+  const insets = contentInsets(element, undefined, vars);
+  return axis === "width"
+    ? add(add(extent, insets.left), insets.right)
+    : add(add(extent, insets.top), insets.bottom);
 }
 
 /** A cell's column span, from `grid-column: span N`. */
@@ -224,7 +277,10 @@ function lineItem(child: WebChild, main: Axis, box: Container): LineItem {
     base: room,
     vars: box.vars,
   });
-  const max = cssLength(child.style[`max-${main}`], box.vars, room);
+  // The minimum wins over the maximum while growing, as in CSS.
+  const min = cssLength(child.style[`min-${main}`], box.vars, room);
+  const capped = cssLength(child.style[`max-${main}`], box.vars, room);
+  const max = capped === undefined ? undefined : Math.max(capped, min ?? -Infinity);
   // A growing item's unmeasured content basis is taken as zero, so it shares the room as
   // `flex: 1` would; its growth, not its content, decides its size.
   return { element: child, base: base === undefined && grow > 0 ? 0 : base, grow, max };

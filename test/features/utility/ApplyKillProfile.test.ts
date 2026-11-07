@@ -211,10 +211,21 @@ describe("kill profiles (#14051)", () => {
     forget.mockRestore();
   });
 
+  const expectedLimits: Record<(typeof vendorProfileIds)[number], string> = {
+    "huawei-powergenie": "HwPFWService",
+    "vivo-autostart": "Autostart permission",
+    "realme-power-saver": "Super power saving",
+    "meizu-flyme-background": "Protected apps",
+    "asus-power-master": "auto-start denial",
+    "sony-stamina": "Prefer battery time",
+    "tecno-app-halt": "Sleep Mode",
+  };
+
   test.each(vendorProfileIds)("%s credits its source and states emulation limits", (id) => {
     const note = KILL_PROFILES[id].evidenceNote;
     expect(note).toContain("CC-BY-4.0");
     expect(note).toContain("Not emulated:");
+    expect(note.slice(note.indexOf("Not emulated:"))).toContain(expectedLimits[id]);
     expect(note).not.toContain("#16869");
   });
 
@@ -225,6 +236,33 @@ describe("kill profiles (#14051)", () => {
     );
     for (const id of vendorProfileIds) {
       expect(guide).toContain(id);
+    }
+  });
+
+  const vendorRowSteps: Record<(typeof vendorProfileIds)[number], string[]> = {
+    "huawei-powergenie": ["Huawei", "Manage manually", "restricted bucket", "WAKE_LOCK"],
+    "vivo-autostart": ["Vivo", "restricted bucket", "boot receiver"],
+    "realme-power-saver": ["realme", "battery unplug", "restricted bucket"],
+    "meizu-flyme-background": ["Meizu", "background restriction", "WAKE_LOCK"],
+    "asus-power-master": ["Asus", "restricted bucket", "below API 33"],
+    "sony-stamina": ["Sony", "battery unplug", "USE_EXACT_ALARM"],
+    "tecno-app-halt": ["Tecno", "wake-lock denial"],
+  };
+
+  test.each(vendorProfileIds)("the guide vendor table row for %s lists its behaviour", (id) => {
+    const guide = readFileSync(
+      path.join(import.meta.dir, "../../../docs/using/kill-profiles.md"),
+      "utf8",
+    );
+    const row = guide
+      .split("\n")
+      .find(
+        (line) =>
+          line.includes(`| \`${id}\``) && /^\| \w+ +\| `/.test(line) && line.split("|").length > 5,
+      );
+    expect(row).toBeDefined();
+    for (const phrase of vendorRowSteps[id]) {
+      expect(row).toContain(phrase);
     }
   });
 

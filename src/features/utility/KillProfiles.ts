@@ -276,7 +276,7 @@ export const KILL_PROFILES: Readonly<Record<KillProfileId, KillProfile>> = {
     ],
     evidenceStatus: "inferred",
     evidenceNote:
-      'Battery > App launch "Manage manually" off is approximated by the restricted bucket, RUN_ANY_IN_BACKGROUND ignore and WAKE_LOCK ignore, plus boot receiver observation. Mechanisms from the dontkillmyapp.com Huawei entry (CC-BY-4.0). samsung-foreground-kill gives a foreground-change kill; screen-off-stop gives a screen-off kill. Not emulated: PowerGenie/HwPFWService killing every non-whitelisted app after about 60 minutes in the background, using a Huawei-maintained whitelist; System Manager Smart tune-up cleanup.' +
+      'Battery > App launch set to "Manage manually" with Auto-launch, Secondary launch and Run in background switched off is approximated by the restricted bucket, RUN_ANY_IN_BACKGROUND ignore and WAKE_LOCK ignore, plus boot receiver observation. Mechanisms from the dontkillmyapp.com Huawei entry (CC-BY-4.0). samsung-foreground-kill gives a foreground-change kill; screen-off-stop gives a screen-off kill. Not emulated: PowerGenie/HwPFWService killing every non-whitelisted app after about 60 minutes in the background, using a Huawei-maintained whitelist; System Manager Smart tune-up cleanup.' +
       BOOT_CHECK_NOTE,
     source: "https://dontkillmyapp.com/huawei",
   },
@@ -333,7 +333,7 @@ export const KILL_PROFILES: Readonly<Record<KillProfileId, KillProfile>> = {
     ],
     evidenceStatus: "inferred",
     evidenceNote:
-      'Power Master auto-deny of auto-start is approximated by the restricted bucket and RUN_ANY_IN_BACKGROUND ignore. Mechanisms from the dontkillmyapp.com Asus entry (CC-BY-4.0). screen-off-stop approximates "Clean up in suspend". Not emulated: Power Master\'s own whitelist and settings UI.',
+      'Power Master auto-deny of auto-start is approximated by the restricted bucket and RUN_ANY_IN_BACKGROUND ignore. Mechanisms from the dontkillmyapp.com Asus entry (CC-BY-4.0). screen-off-stop approximates "Clean up in suspend". Not emulated: Power Master\'s own whitelist and settings UI; its auto-start denial, which can block a boot receiver from starting an app that targets below API 33 (stock Android still starts it, so a boot receiver check here can differ from a real Asus device).',
     source: "https://dontkillmyapp.com/asus",
   },
   "sony-stamina": {
@@ -347,7 +347,7 @@ export const KILL_PROFILES: Readonly<Record<KillProfileId, KillProfile>> = {
     ],
     evidenceStatus: "inferred",
     evidenceNote:
-      'STAMINA mode on battery is approximated by battery unplug, background restriction and exact alarm denial. Mechanisms from the dontkillmyapp.com Sony entry (CC-BY-4.0). Not emulated: the time-based "Prefer battery time" STAMINA level limits after screen off; the Power-saving feature Excepted list; Intelligence Engine.',
+      'STAMINA mode on battery is approximated by battery unplug, background restriction and exact alarm denial. On Android 13 and later an app declaring USE_EXACT_ALARM can keep exact alarm access despite the SCHEDULE_EXACT_ALARM denial. Mechanisms from the dontkillmyapp.com Sony entry (CC-BY-4.0). Not emulated: the time-based "Prefer battery time" STAMINA level limits after screen off; the Power-saving feature Excepted list; Intelligence Engine.',
     source: "https://dontkillmyapp.com/sony",
   },
   "tecno-app-halt": {

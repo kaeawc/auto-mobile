@@ -1,3 +1,6 @@
+import { defaultDaemonContext } from "../daemon/daemonContext";
+import { ExecNetworkFilterBridge } from "../features/networkFilter/NetworkFilterBridge";
+import { prearmSessionAppNetwork } from "./sessionNetworkCondition";
 import { LaunchApp, type LaunchAppCall } from "../features/action/LaunchApp";
 import {
   getLaunchObservationPackageNames,
@@ -47,6 +50,7 @@ export interface PrototypeAgentLaunchInjector {
 // is covered by a test rather than only the response builder (issue #6868).
 export interface LaunchAppToolDependencies {
   createLaunchApp(device: BootedDevice): LaunchAppExecutor;
+  prearmNetwork(device: BootedDevice, args: LaunchAppActionArgs): Promise<void>;
   idGenerator: IdGenerator;
   /** Agent records shared by launchApp, terminateApp and the prototype tool. */
   prototypeAgentRegistry: PrototypeAgentRegistry;
@@ -74,6 +78,21 @@ export function createDefaultLaunchAppToolDependencies(): LaunchAppToolDependenc
   let viewerAttacher: ReturnType<typeof createPrototypeViewerAttacher> | undefined;
   return {
     createLaunchApp: (device) => new LaunchApp(device),
+    prearmNetwork: async (device, args) => {
+      if (
+        device.platform !== "ios" ||
+        !args.sessionUuid ||
+        resolveIosDeviceKind(device) !== "simulator"
+      ) {
+        return;
+      }
+      await prearmSessionAppNetwork(
+        defaultDaemonContext.sessionManager(),
+        { sessionUuid: args.sessionUuid, deviceId: device.deviceId },
+        args.appId,
+        new ExecNetworkFilterBridge(),
+      );
+    },
     idGenerator: defaultIdGenerator,
     prototypeAgentRegistry,
     prototypeViewerConnections,

@@ -29,10 +29,10 @@ final class ControllerContractTests: XCTestCase {
         return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 
-    func testContractNewestVersionIsFourAndDefaultIsThree() {
-        XCTAssertEqual(ControllerContract.version, 4)
+    func testContractNewestVersionIsFiveAndDefaultIsThree() {
+        XCTAssertEqual(ControllerContract.version, 5)
         XCTAssertEqual(ControllerContract.defaultVersion, 3)
-        XCTAssertEqual(ControllerContract.supportedVersions, [3, 4])
+        XCTAssertEqual(ControllerContract.supportedVersions, [3, 4, 5])
         XCTAssertEqual(ControllerContract.commands, ["activate", "status", "snapshot", "apply", "reset", "renew"])
     }
 

@@ -45,6 +45,7 @@ export type IosAppNetworkApplyResult =
       leaseRemainingMs?: number;
       reconciled: boolean;
       shaping?: NetworkFilterShapingResolution;
+      existingFlows?: "dropped" | "unaffected";
     }
   /** The provider definitively refused it; nothing of this command is installed. */
   | {
@@ -117,6 +118,19 @@ export class IosAppNetworkRuleClient {
     return this.apply(rule, leaseMs, rollbackRevision);
   }
 
+  async applyWatch(
+    rule: IosAppNetworkRule,
+    leaseMs: number,
+    rollbackRevision: () => number,
+  ): Promise<IosAppNetworkApplyResult> {
+    return this.applyResult(
+      rule,
+      rollbackRevision,
+      await this.bridge.watch(target(rule), ownership(rule), leaseMs),
+      "watch",
+    );
+  }
+
   applyShaped(
     rule: IosAppNetworkRule,
     shaping: NetworkFilterShapingRequest,
@@ -141,7 +155,20 @@ export class IosAppNetworkRuleClient {
     rollbackRevision: () => number,
     shaping?: NetworkFilterShapingRequest,
   ): Promise<IosAppNetworkApplyResult> {
-    const result = await this.bridge.apply(target(rule), ownership(rule), leaseMs, shaping);
+    return this.applyResult(
+      rule,
+      rollbackRevision,
+      await this.bridge.apply(target(rule), ownership(rule), leaseMs, shaping),
+      shaping === undefined ? "offline" : "shaped",
+    );
+  }
+
+  private async applyResult(
+    rule: IosAppNetworkRule,
+    rollbackRevision: () => number,
+    result: NetworkFilterRuleCommandResult,
+    condition: "offline" | "shaped" | "watch",
+  ): Promise<IosAppNetworkApplyResult> {
     if (result.upgradeRequired) {
       return { kind: "upgrade_required", ...result.upgradeRequired, detail: result.detail };
     }
@@ -152,7 +179,6 @@ export class IosAppNetworkRuleClient {
       return { kind: "not_ready", state: result.state, detail: result.detail };
     }
     const installed = await this.installedRule(rule);
-    const condition = shaping === undefined ? "offline" : "shaped";
     if (
       installed?.revision === rule.revision &&
       installed.owner === rule.owner &&
@@ -192,6 +218,7 @@ export class IosAppNetworkRuleClient {
             ? { leaseRemainingMs: verdict.leaseRemainingMilliseconds }
             : {}),
           reconciled: false,
+          ...(verdict.existingFlows ? { existingFlows: verdict.existingFlows } : {}),
           ...(verdict.shaping ? { shaping: verdict.shaping } : {}),
         }
       : {

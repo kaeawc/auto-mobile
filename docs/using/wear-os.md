@@ -139,7 +139,8 @@ afterwards. If the top cannot be reached within `awaitTimeout`, the action fails
 - `tap` opens the card, then taps `tapActionLabel` (or the card's title or body) in the expanded
   view. If that text is not a single clickable target there, it fails rather than guessing and
   goes back to the stream; retry with an explicit `tapActionLabel`.
-- `dismiss` swipes the card sideways and reports `dismissal_unconfirmed` unless the removal is
+- `dismiss` swipes the card sideways, taps the X button when the swipe only reveals it (Wear OS
+  7), and reports `dismissal_unconfirmed` unless the removal is
   confirmed: with `appId`, by one of the app's active notifications showing the card's title
   and body going away; otherwise by one fewer such card being shown. Of two identical cards,
   removing one counts as a dismissal.

@@ -110,7 +110,9 @@ Every other tool refuses a watch before doing anything, with:
   elements wholly on screen match. Only `action: "tap"` is supported.
 - `tapAt` takes absolute coordinates in points.
 - `swipeOn` swipes in a direction. With `lookFor` it swipes until an exact `text` or `elementId`
-  is on screen, up to `maxSwipes` (default 10, maximum 100). Coordinates and duration cannot be set.
+  is on screen, up to `maxSwipes` (default 10, maximum 100). Each `lookFor` step is a short, slow drag (about
+  one row on a list) so consecutive reads overlap and nearby targets are not skipped. Coordinates
+  and duration cannot be set.
 - `pressButton` supports `home` only.
 - `rotateCrown` turns the Digital Crown by a signed, non-zero `delta`, with an optional positive
   `velocity` (default 1). It is not listed by default; enable it with `setToolEnabled` (see

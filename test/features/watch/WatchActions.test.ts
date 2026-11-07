@@ -198,9 +198,13 @@ describe("watch actions", () => {
       }),
     ).toMatchObject({ found: false, scrollIterations: 2 });
     expect(client.commands.filter((command) => command.type === "swipe")).toEqual([
-      { type: "swipe", direction: "down" },
-      { type: "swipe", direction: "down" },
+      { type: "swipe", direction: "down", distance: watchActions.WATCH_LOOK_FOR_SWIPE_DISTANCE },
+      { type: "swipe", direction: "down", distance: watchActions.WATCH_LOOK_FOR_SWIPE_DISTANCE },
     ]);
+  });
+  test("lookFor swipes move less than one screen so consecutive reads overlap", () => {
+    expect(watchActions.WATCH_LOOK_FOR_SWIPE_DISTANCE).toBeGreaterThan(0);
+    expect(watchActions.WATCH_LOOK_FOR_SWIPE_DISTANCE).toBeLessThan(1);
   });
   test("long press, pinch, multi-touch and text reject before any command", async () => {
     const timer = new FakeTimer();

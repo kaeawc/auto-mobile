@@ -12,7 +12,7 @@ import type {
 } from "../../models";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { normalizeWatchHierarchy } from "./WatchHierarchy";
-import { type WatchRunnerClient } from "./WatchRunnerClient";
+import { type WatchCommand, type WatchRunnerClient } from "./WatchRunnerClient";
 import { watchRunners } from "./WatchRunnerRegistry";
 
 export function unsupportedWatchAction(action: string): never {
@@ -20,6 +20,12 @@ export function unsupportedWatchAction(action: string): never {
     `${action} is not supported by the watchOS runner; use tap, directional swipe, rotateCrown or home.`,
   );
 }
+
+/**
+ * Fraction of the screen extent one lookFor swipe moves the content. The runner's default swipe
+ * scrolls about two screens on a watch, so a target one screen away is skipped between reads.
+ */
+export const WATCH_LOOK_FOR_SWIPE_DISTANCE = 0.4;
 
 export interface WatchCrownOptions {
   delta: number;
@@ -179,6 +185,12 @@ function validateWatchSwipe(options: SwipeOnOptions): number {
   return maxSwipes;
 }
 
+function swipeCommand(direction: "up" | "down" | "left" | "right", lookFor: boolean): WatchCommand {
+  return lookFor
+    ? { type: "swipe", direction, distance: WATCH_LOOK_FOR_SWIPE_DISTANCE }
+    : { type: "swipe", direction };
+}
+
 export async function watchSwipeOn(
   deviceId: string,
   options: SwipeOnOptions,
@@ -206,7 +218,7 @@ export async function watchSwipeOn(
     if (found || count >= maxSwipes) {
       break;
     }
-    await client.request({ type: "swipe", direction }, signal);
+    await client.request(swipeCommand(direction, !!options.lookFor), signal);
     count++;
   }
   return {

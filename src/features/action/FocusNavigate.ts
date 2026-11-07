@@ -615,7 +615,9 @@ function trapMessage(
     escapes.length > 0
       ? `; pressing ${escapes.join(" then ")} and every direction again did not move focus`
       : "; arrow keys do not leave it and tab would type into it";
-  return `${trap}${tried}. Leave the field first (for example sendKeys with key next or done), then retry`;
+  // An IME action (sendKeys next/done) does not move D-pad focus out of a TV text field (#17378):
+  // only back to hide the keyboard, then an arrow, leaves it.
+  return `${trap}${tried}. Hide the keyboard with pressButton back, press pressButton down to move focus out of the field, observe, then retry`;
 }
 
 export class FocusNavigate {

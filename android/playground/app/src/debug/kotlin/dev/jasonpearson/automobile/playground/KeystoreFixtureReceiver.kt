@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
+import android.security.keystore.StrongBoxUnavailableException
 import android.util.Log
 import java.io.IOException
 import java.security.GeneralSecurityException
@@ -17,6 +19,7 @@ class KeystoreFixtureReceiver : BroadcastReceiver() {
     when (intent.action) {
       ACTION_SEED -> seedFixture(intent.getBooleanExtra(EXTRA_INCLUDE_AUTH_BOUND_KEY, false))
       ACTION_PROBE_AUTH_BOUND_KEY -> probeAuthBoundKey()
+      ACTION_PROBE_STRONGBOX_KEY_GENERATION -> probeStrongBoxKeyGeneration()
       else -> return
     }
   }
@@ -53,6 +56,18 @@ class KeystoreFixtureReceiver : BroadcastReceiver() {
     resultData = if (error == null) outcome.getOrThrow() else authBoundProbeOutcome(error)
   }
 
+  /** Launch MainActivity first: the fault only applies to an alias in a declared scope. */
+  private fun probeStrongBoxKeyGeneration() {
+    resultCode = Activity.RESULT_OK
+    resultData =
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) KeystoreStrongBoxProbe.UNSUPPORTED
+      else
+        KeystoreStrongBoxProbe(AndroidStrongBoxKeyGenerator()) {
+            it is StrongBoxUnavailableException
+          }
+          .run()
+  }
+
   private fun handleSeedFailure(error: Exception) {
     Log.e("KeystoreFixture", "Could not seed AndroidKeyStore fixture", error)
     resultCode = Activity.RESULT_CANCELED
@@ -64,6 +79,8 @@ class KeystoreFixtureReceiver : BroadcastReceiver() {
       "dev.jasonpearson.automobile.playground.action.TEST_SEED_KEYSTORE_FIXTURE"
     const val ACTION_PROBE_AUTH_BOUND_KEY =
       "dev.jasonpearson.automobile.playground.action.PROBE_AUTH_BOUND_KEY"
+    const val ACTION_PROBE_STRONGBOX_KEY_GENERATION =
+      "dev.jasonpearson.automobile.playground.action.PROBE_STRONGBOX_KEY_GENERATION"
     const val EXTRA_INCLUDE_AUTH_BOUND_KEY =
       "dev.jasonpearson.automobile.playground.extra.INCLUDE_AUTH_BOUND_KEY"
   }

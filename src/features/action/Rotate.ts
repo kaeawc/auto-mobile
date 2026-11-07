@@ -1,3 +1,4 @@
+import { verifyIosRotationDisplayRead, type IosDisplayPixelProbe } from "./iosRotateDisplayProbe";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
@@ -51,6 +52,7 @@ interface AndroidRotationWrites {
 }
 
 export interface RotateOptions {
+  iosDisplayPixelProbe?: IosDisplayPixelProbe;
   deadlineMs?: number;
   sessionRotation?: <T>(mutation: (slot?: RotationRestoreSlot) => Promise<T>) => Promise<T>;
 }
@@ -351,7 +353,8 @@ export class Rotate extends BaseVisualChange {
   ): Promise<RotateResult> {
     throwIfAborted(signal);
     let previousObservation: ObserveResult | undefined;
-    let runner: Pick<IosCtrlProxy, "requestRotate"> | undefined;
+    let runner: IOSCtrlProxyClient | undefined;
+    let timedOut = false;
     const result: RotateResult = await this.observedInteraction(
       async (observation) => {
         previousObservation = observation;
@@ -363,6 +366,7 @@ export class Rotate extends BaseVisualChange {
             awaitWhileRequestIsLive(client.requestRotate(orientation, 5000, perf), signal),
           );
 
+          timedOut = result.timedOut === true;
           if (!result.success) {
             return {
               success: false,
@@ -403,7 +407,30 @@ export class Rotate extends BaseVisualChange {
         skipUiStability: true,
       },
     );
-    const verified = verifyIosRotation(result, orientation, previousObservation);
+    let verified = verifyIosRotation(result, orientation, previousObservation, timedOut);
+    if (timedOut && runner) {
+      let warning: string;
+      try {
+        runner.ensureRecoveryStarted();
+        const state = await runner.awaitRecovery(
+          IOSCtrlProxyClient.OBSERVE_RECOVERY_WAIT_MS,
+          signal,
+        );
+        warning = `iOS runner recovery after rotate timeout: ${state}${state === "recovered" ? " (runner restarted)" : ""}.`;
+      } catch (error) {
+        logger.warn(`iOS rotate timeout recovery failed: ${errorMessage(error)}`, error);
+        warning = `iOS runner recovery after rotate timeout: failed; ${errorMessage(error)}`;
+      }
+      return { ...verified, warning: [verified.warning, warning].filter(Boolean).join(" ") };
+    }
+    verified = await verifyIosRotationDisplayRead(verified, {
+      requested: orientation,
+      previousObservation,
+      device: this.device,
+      probe: this.options.iosDisplayPixelProbe,
+      timer: this.timer,
+      signal,
+    });
     return verified.success
       ? verified
       : await this.restoreIosOrientationAfterFailure(verified, runner, previousObservation, {

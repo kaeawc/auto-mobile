@@ -1,6 +1,8 @@
+import { SimulatorIosDisplayPixelProbe } from "../../../src/features/action/iosRotateDisplayProbe";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
+  reconcileIosRotationWithDisplayRead,
   normalizeIosOrientation,
   observedIosOrientation,
   restoreTargetIosOrientation,
@@ -376,5 +378,99 @@ describe("iOS restore prior from drawn size (#17101)", () => {
     expect(restoreTargetIosOrientation(observation(undefined, 402, 874))).toBe("portrait");
     expect(restoreTargetIosOrientation(observation(1, 0, 0))).toBe("landscape");
     expect(restoreTargetIosOrientation(observation(1, 500, 500))).toBe("landscape");
+  });
+});
+
+describe("independent iOS rotate confirmation", () => {
+  const before = {
+    ...observation(1, 951, 669),
+    display: {
+      key: "primary-1",
+      role: "inner" as const,
+      posture: "unknown" as const,
+      generation: 0,
+    },
+  };
+  const claimed: RotateResult = {
+    success: true,
+    orientation: "portrait",
+    value: 0,
+    rotationPerformed: true,
+    observation: { ...observation(0, 669, 951), display: before.display },
+  };
+  test("a timeout cannot be promoted by flipped observation points", () => {
+    const result = verifyIosRotation(
+      { ...claimed, success: false, error: "Rotate timed out after 5000ms" },
+      "portrait",
+      before,
+      true,
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Rotate timed out after 5000ms");
+    expect(result.error).toContain("could not be confirmed");
+    expect(result.warning).toBeUndefined();
+  });
+  test("pixel landscape overrides a claimed inner-panel rotation", () => {
+    expect(
+      reconcileIosRotationWithDisplayRead(claimed, "portrait", before, {
+        width: 2853,
+        height: 2007,
+      }),
+    ).toMatchObject({ success: false, rotationPerformed: false, currentOrientation: "landscape" });
+    expect(
+      reconcileIosRotationWithDisplayRead(claimed, "portrait", before, {
+        width: 2853,
+        height: 2007,
+      }).error,
+    ).toContain("inner panel");
+  });
+  test.each([{ width: 2007, height: 2853 }, undefined, { width: 10, height: 10 }])(
+    "noncontradictory pixels preserve result %p",
+    (size) => {
+      expect(reconcileIosRotationWithDisplayRead(claimed, "portrait", before, size)).toBe(claimed);
+    },
+  );
+});
+
+describe("simulator display probe", () => {
+  const simulator = {
+    deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+    name: "Duo",
+    platform: "ios" as const,
+  };
+  test("reads a captured screenshot header and forwards the selected display and signal", async () => {
+    const pixels = readFileSync("test/fixtures/screenshots/small-element.png");
+    const calls: unknown[] = [];
+    const probe = new SimulatorIosDisplayPixelProbe(simulator, {
+      async screenshot(...args) {
+        calls.push(args);
+        return pixels;
+      },
+    });
+    const signal = new AbortController().signal;
+    const size = await probe.readPixelSize(simulator.deviceId, "primary-1", signal);
+    expect(size?.width).toBeGreaterThan(0);
+    expect(size?.height).toBeGreaterThan(0);
+    expect(calls).toEqual([[simulator.deviceId, "primary-1", signal]]);
+  });
+  test("never screenshots physical devices", async () => {
+    let calls = 0;
+    const device = { ...simulator, deviceId: "physical-iphone" };
+    const probe = new SimulatorIosDisplayPixelProbe(device, {
+      async screenshot() {
+        calls++;
+        throw new Error("unreachable");
+      },
+    });
+    expect(await probe.readPixelSize(device.deviceId, "default")).toBeUndefined();
+    expect(calls).toBe(0);
+  });
+  test("read failures are best effort", async () => {
+    const probe = new SimulatorIosDisplayPixelProbe(simulator, {
+      async screenshot() {
+        throw new Error("capture unavailable");
+      },
+    });
+    expect(await probe.readPixelSize(simulator.deviceId, "primary-1")).toBeUndefined();
   });
 });

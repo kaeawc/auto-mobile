@@ -29,7 +29,9 @@ foreground is an error: bring the app to the foreground first, or omit `appId`.
 
 **platform** (iOS 17+, Simulator and physical) runs XCUITest `performAccessibilityAudit`. The
 result has `issues` (each with `check`, `summary`, `elementId` usable with `tapOn`, and `bounds`),
-`totalIssues`, `truncated` and `unsupportedChecks`.
+`totalIssues`, `truncated` and `unsupportedChecks`. As with `wcag`, an `appId` that is not in the
+foreground (in the background or not running) is an error: bring the app to the foreground first,
+or omit `appId`.
 
 `errorCode` is `unsupported_platform` for `wcag` on iOS and for `platform` on Android (the Android
 Accessibility Test Framework engine is not available yet), and `unsupported_capability` when the

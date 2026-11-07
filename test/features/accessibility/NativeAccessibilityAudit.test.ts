@@ -39,10 +39,34 @@ function issue(index: number): RunnerAccessibilityAuditIssue {
   };
 }
 
-function audit(result: CtrlProxyAccessibilityAuditResult) {
-  const sender = new FakeAuditSender(result);
-  return { sender, audit: new NativeAccessibilityAudit(() => sender) };
+/** A fake foreground read; undefined is an observation that names no app. */
+function foregroundIs(appId: string | undefined) {
+  const reads: string[] = [];
+  return {
+    reads,
+    reader: async (device: BootedDevice) => {
+      reads.push(device.deviceId);
+      return appId;
+    },
+  };
 }
+
+function audit(result: CtrlProxyAccessibilityAuditResult, foreground?: string) {
+  const sender = new FakeAuditSender(result);
+  const read = foregroundIs(foreground);
+  return {
+    sender,
+    reads: read.reads,
+    audit: new NativeAccessibilityAudit(() => sender, read.reader),
+  };
+}
+
+const PASSING: CtrlProxyAccessibilityAuditResult = {
+  success: true,
+  totalTimeMs: 1,
+  issues: [],
+  unsupportedChecks: [],
+};
 
 describe("NativeAccessibilityAudit (#14086)", () => {
   test("all, or no checks, runs every XCUITest check", () => {
@@ -133,6 +157,66 @@ describe("NativeAccessibilityAudit (#14086)", () => {
     expect(result.errorCode).toBeUndefined();
     expect(result.error).toContain("boom");
     expect(result.issues).toHaveLength(1);
+  });
+
+  test("a background appId is refused before the runner, naming both apps (#17303)", async () => {
+    const { sender, audit: subject } = audit(PASSING, "com.apple.springboard");
+
+    const result = await subject.run(ios, { appId: "com.apple.Preferences" });
+
+    expect(result).toMatchObject({ success: false, engine: "xcuitest", issues: [] });
+    expect(result.errorCode).toBeUndefined();
+    expect(result.error).toBe(
+      "The accessibility audit checks the foreground screen; com.apple.Preferences is not in the foreground (com.apple.springboard is). Bring com.apple.Preferences to the foreground or omit appId.",
+    );
+    expect(sender.requests).toEqual([]);
+  });
+
+  test("the foreground appId reaches the runner", async () => {
+    const { sender, audit: subject } = audit(PASSING, "com.example.app");
+
+    const result = await subject.run(ios, { appId: "com.example.app" });
+
+    expect(result.success).toBe(true);
+    expect(sender.requests).toHaveLength(1);
+  });
+
+  test("without appId the foreground is not read", async () => {
+    const { reads, audit: subject } = audit(PASSING, "com.other.app");
+
+    const result = await subject.run(ios);
+
+    expect(result.success).toBe(true);
+    expect(reads).toEqual([]);
+  });
+
+  test.each([
+    ["a background app", "Invalid target app 57020"],
+    ["an app that is not running", "Invalid XCUIApplication"],
+  ])("the runner's raw error for %s maps to the refusal", async (_case, raw) => {
+    const { audit: subject } = audit({ success: false, totalTimeMs: 1, error: raw });
+
+    const result = await subject.run(ios, { appId: "com.apple.MobileSMS" });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe(
+      "The accessibility audit checks the foreground screen; com.apple.MobileSMS is not in the foreground. Bring com.apple.MobileSMS to the foreground or omit appId.",
+    );
+  });
+
+  test("a failed foreground read still runs the audit", async () => {
+    const sender = new FakeAuditSender(PASSING);
+    const subject = new NativeAccessibilityAudit(
+      () => sender,
+      async () => {
+        throw new Error("observe failed");
+      },
+    );
+
+    const result = await subject.run(ios, { appId: "com.example.app" });
+
+    expect(result.success).toBe(true);
+    expect(sender.requests).toHaveLength(1);
   });
 
   test("Android reports the native audit unsupported and points at the WCAG audit", async () => {

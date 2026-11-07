@@ -13,6 +13,7 @@ import type {
 import type { PerformanceAuditResult } from "../../models/PerformanceAuditResult";
 import type { MemoryAudit } from "../memory/MemoryAudit";
 import { MAX_ACCESSIBILITY_VIOLATIONS } from "../accessibility/WcagAudit";
+import { auditForegroundRefusal } from "../accessibility/AuditForegroundRefusal";
 import { matchesCtrlProxyResourceId } from "../utility/SearchableNode";
 
 export const AUDIT_KINDS = ["accessibility", "performance", "memory"] as const;
@@ -142,7 +143,7 @@ function foregroundMismatch(observation: ObserveResult, appId: string): string |
   if (foreground === undefined || foreground === appId) {
     return undefined;
   }
-  return `The accessibility audit checks the foreground screen; ${appId} is not in the foreground (${foreground} is). Bring ${appId} to the foreground or omit appId.`;
+  return auditForegroundRefusal(appId, foreground);
 }
 
 /** The app to audit, or the failed result when there is none or it is not on screen. */

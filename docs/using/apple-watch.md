@@ -134,7 +134,7 @@ Every other tool refuses a watch before doing anything, with:
 
 `sendKeys` accepts non-empty text only and appends to the focused field. Focus a field with
 `tapOn` first, or provide a selector with an exact `elementId` or `text` to focus it before typing.
-Selector `text` matches a field's value or placeholder; matching text fields are preferred over static text.
+Selector `text` matches a field's label, value or placeholder; matching text fields are preferred over static text.
 On watchOS a focused field opens the keyboard, and the text is typed through that keyboard. Input
 fails when no text field or keyboard is up. Commands that clear, replace or press keys are refused.
 

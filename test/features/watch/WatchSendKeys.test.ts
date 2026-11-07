@@ -194,3 +194,39 @@ test.each([
     ]);
   },
 );
+
+test("text selector reaches a labeled field by its value through the value child", async () => {
+  const bounds = { left: 0, top: 0, right: 100, bottom: 40 };
+  const field = { className: "XCUIElementType(49)", bounds, accessibilityIdentifier: "name-field" };
+  const tree = {
+    timestamp: 1,
+    screenWidth: 208,
+    screenHeight: 248,
+    screenScale: 1,
+    root: {
+      className: "XCUIElementType(1)",
+      bounds: { left: 0, top: 0, right: 208, bottom: 248 },
+      children: [
+        {
+          ...field,
+          accessibilityLabel: "Name",
+          children: [{ ...field, accessibilityLabel: "helloAB" }],
+        },
+      ],
+    },
+  };
+  const fake = new FakeWatchRunnerClient(tree);
+  const release = watchRunners.register("watch-labeled-field", fake);
+  try {
+    await watchSendKeys("watch-labeled-field", [{ action: "type", text: "CD" }], {
+      text: "helloAB",
+    });
+  } finally {
+    release();
+  }
+  expect(fake.commands.filter((command) => command.type !== "hierarchy")).toEqual([
+    // The field and its value child share an identifier, so the tap falls back to coordinates.
+    { type: "tap", x: 50, y: 20 },
+    { type: "type", text: "CD" },
+  ]);
+});

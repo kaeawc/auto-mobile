@@ -43,4 +43,20 @@ final class WatchAccessibilityLabelTests: XCTestCase {
             )
         }
     }
+
+    func testLabeledPopulatedTextFieldExposesValueChild() {
+        for type in [UInt(45), 49] {
+            XCTAssertEqual(watchTextValueChild(elementType: type, label: "Name", value: "helloAB"), "helloAB")
+            XCTAssertNil(watchTextValueChild(elementType: type, label: "Name", value: ""))
+            XCTAssertNil(watchTextValueChild(elementType: type, label: "Name", value: nil))
+            XCTAssertNil(watchTextValueChild(elementType: type, label: "same", value: "same"))
+            XCTAssertNil(watchTextValueChild(elementType: type, label: "", value: "helloAB"))
+        }
+    }
+
+    func testSecureAndOtherElementsNeverExposeValueChild() {
+        for type in [UInt(50), 48, 9] {
+            XCTAssertNil(watchTextValueChild(elementType: type, label: "Password", value: "secret"))
+        }
+    }
 }

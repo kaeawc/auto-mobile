@@ -554,6 +554,18 @@ extension ElementLocator {
         )
     }
 
+    /// Bounds the offscreen filter measures against: the application root frame plus every window
+    /// frame. On a two-panel device an unfolded app's root frame keeps the portrait cover size
+    /// while its window is landscape, so the root alone would drop anything right of it, such as
+    /// the iOS 27 floating tab bar (#17305).
+    nonisolated static func offscreenFilterBounds(rootFrame: CGRect, windowFrames: [CGRect]) -> CGRect {
+        windowFrames
+            .filter { frame in
+                !frame.isEmpty && [frame.minX, frame.minY, frame.width, frame.height].allSatisfy(\.isFinite)
+            }
+            .reduce(rootFrame) { $0.union($1) }
+    }
+
     /// A leaf at the raw depth cap is complete; only withheld children make the walk partial.
     nonisolated static func depthCapTruncationReason(depth: Int, maxDepth: Int, hasChildren: Bool) -> String? {
         depth >= maxDepth && hasChildren ? "max_depth" : nil

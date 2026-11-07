@@ -399,6 +399,12 @@ export const prototypeOutputSchema = z.object({
     .max(Number.MAX_SAFE_INTEGER)
     .optional()
     .describe("patch only: current device revision after applying or refusing a patch"),
+  mcpSessionId: z
+    .string()
+    .optional()
+    .describe(
+      "show and patch: the MCP session the spec revision is recorded under; filter automobile:prototype/<id>/web, compose or swiftui with mcpSessionId=<this> to read only this session's revisions",
+    ),
   conflict: z
     .object({
       revision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),

@@ -24,7 +24,7 @@ import type { PrototypeSpecRevisionSource } from "./prototypeSpecRevisions";
 import { prototypeResourceUri } from "./prototypeWebUris";
 import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "./web/deviceFrames";
 import { frameOrientations, screenSize } from "./web/webFrame";
-import { parsePrototypeRevision } from "./web/prototypeWebResource";
+import { parsePrototypeRevision, prototypeRevisionFilter } from "./web/prototypeWebResource";
 import { withActionableWebInput } from "./web/prototypeWebInputActionable";
 
 /**
@@ -53,12 +53,16 @@ export interface PrototypeSourceResourceQuery {
   readonly id: string;
   readonly frame?: string;
   readonly revision?: string;
+  /** Only this MCP session's revisions (#17358); absent for every session's. */
+  readonly mcpSessionId?: string;
 }
 
 export interface PrototypeSourceResourceMeta {
   readonly revision: number;
   readonly deviceRevision?: number;
-  /** Kept revisions of the id, oldest first. */
+  /** The MCP session that produced the revision, when known (#17358). */
+  readonly mcpSessionId?: string;
+  /** Kept revisions of the id (only the filtered session's, when filtered), oldest first. */
   readonly revisions: readonly number[];
   readonly frame: string;
   readonly sha256: string;
@@ -145,7 +149,8 @@ function buildSourceResource(
   rendererVersion: string,
 ): PrototypeSourceResource {
   const { platform, mimeType, render } = FORMATS[format];
-  const shown = source.revision(query.id, parsePrototypeRevision(query.revision));
+  const filter = prototypeRevisionFilter(query.mcpSessionId);
+  const shown = source.revision(query.id, parsePrototypeRevision(query.revision), filter);
   // The format fixes the platform, so its default frame is the closest known profile.
   const frame = deviceFrameOrThrow(query.frame ?? defaultDeviceFrameId(platform));
   rejectUnexportableSpec(shown.spec, platform);
@@ -172,14 +177,15 @@ function buildSourceResource(
       preview: previewSize(frame),
     },
   });
-  const { deviceRevision } = shown;
+  const { deviceRevision, mcpSessionId } = shown;
   return {
     text,
     mimeType,
     meta: {
       revision: shown.revision,
       ...(deviceRevision === undefined ? {} : { deviceRevision }),
-      revisions: source.history(query.id).map((entry) => entry.revision),
+      ...(mcpSessionId === undefined ? {} : { mcpSessionId }),
+      revisions: source.history(query.id, filter).map((entry) => entry.revision),
       frame: frame.id,
       sha256: createHash("sha256").update(text, "utf8").digest("hex"),
       rendererVersion,

@@ -5,7 +5,11 @@ import type { PrototypeSpecRevisionSource } from "../prototypeSpecRevisions";
 import { prototypeEmbedGlyphs } from "./prototypeEmbedGlyphs";
 import { materialIconGlyphs } from "./materialIconGlyphs";
 import type { PrototypeIconGlyphSource } from "./webIconGlyphs";
-import { prototypeVariantIds, shownRevision } from "./prototypeWebResource";
+import {
+  prototypeRevisionFilter,
+  prototypeVariantIds,
+  shownRevision,
+} from "./prototypeWebResource";
 
 /** The envelope's `format`, so an embedder can tell it from a bare spec. */
 export const PROTOTYPE_EMBED_FORMAT = "automobile-prototype-embed";
@@ -36,13 +40,17 @@ export interface PrototypeEmbedResourceQuery {
   readonly id: string;
   readonly revision?: string;
   readonly variant?: string;
+  /** Only this MCP session's revisions (#17358); absent for every session's. */
+  readonly mcpSessionId?: string;
 }
 
 /** The web resource's `_meta` without `frame`: an envelope has no device frame. */
 export interface PrototypeEmbedResourceMeta {
   readonly revision: number;
   readonly deviceRevision?: number;
-  /** Kept revisions of the variant served, oldest first. */
+  /** The MCP session that produced the revision served, when known (#17358). */
+  readonly mcpSessionId?: string;
+  /** Kept revisions of the variant served (only the filtered session's), oldest first. */
   readonly revisions: readonly number[];
   /** Prototype ids of the variant group, in the web page's order. */
   readonly variants: readonly string[];
@@ -85,14 +93,16 @@ export function readPrototypeEmbedResource(
   const shown = shownRevision(source, query, variantIds);
   const envelope = prototypeEmbedEnvelope(shown.revision.spec, glyphSource);
   const text = JSON.stringify(envelope);
-  const { deviceRevision } = shown.revision;
+  const { deviceRevision, mcpSessionId } = shown.revision;
+  const filter = prototypeRevisionFilter(query.mcpSessionId);
   return {
     text,
     envelope,
     meta: {
       revision: shown.revision.revision,
       ...(deviceRevision === undefined ? {} : { deviceRevision }),
-      revisions: source.history(shown.id).map((entry) => entry.revision),
+      ...(mcpSessionId === undefined ? {} : { mcpSessionId }),
+      revisions: source.history(shown.id, filter).map((entry) => entry.revision),
       variants: variantIds,
       sha256: createHash("sha256").update(text).digest("hex"),
       rendererVersion,

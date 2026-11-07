@@ -2,6 +2,7 @@ import type { InstalledApp, InstalledAppsByProfile, SystemInstalledApp } from ".
 import type { ListInstalledApps } from "../features/observe/ListInstalledApps";
 import {
   getIosInstalledAppBundleId,
+  getIosInstalledAppDisplayName,
   getIosInstalledAppPath,
 } from "../utils/ios-cmdline-tools/iosInstalledApp";
 import type {
@@ -104,17 +105,6 @@ function readIosAppField(app: Record<string, unknown>, keys: string[]): string |
     }
   }
   return undefined;
-}
-
-function extractIosDisplayName(app: Record<string, unknown>): string | undefined {
-  return readIosAppField(app, [
-    "bundleDisplayName",
-    "bundleName",
-    "CFBundleDisplayName",
-    "CFBundleName",
-    "displayName",
-    "name",
-  ]);
 }
 
 function extractIosVersion(app: Record<string, unknown>): string | undefined {
@@ -287,7 +277,7 @@ export function normalizeIosApps(
     const info: IosInstalledAppInfo = {
       bundleId,
       type: extractIosApplicationType(rawApp, bundleId, isPhysicalDevice),
-      displayName: extractIosDisplayName(rawApp),
+      displayName: getIosInstalledAppDisplayName(rawApp),
       ...(version ? { version } : {}),
       ...(path ? { path } : {}),
       ...(launchable === undefined ? {} : { launchable }),

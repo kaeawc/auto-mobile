@@ -234,7 +234,7 @@ describe("a connection bound to the base session naming its own derived label se
       { seeded: true, target: "foreign-owned", live: true },
       { seeded: false, target: "unissued", live: false },
       { seeded: true, target: "unissued", live: false },
-    ])("a bound connection reading $target uses and rebinds nothing (seeded=$seeded)", (row) =>
+    ])("a bound connection reads $target without use or rebinding (seeded=$seeded)", (row) =>
       scenario(async () => {
         if (row.live) {
           await pool.bindOrReuseDeviceSession({
@@ -286,11 +286,18 @@ describe("a connection bound to the base session naming its own derived label se
               [INTERNAL_MCP_SESSION_PARAM]: OWNER,
             },
           });
-          if (row.live) {
-            // This connection holds neither live session's binding: refused (#13540).
+          if (row.target === "foreign-owned") {
+            // Another connected client owns it and this connection holds no binding (#13540).
             expect(result.isError).toBe(true);
             expect(JSON.stringify(result)).toContain("read_session_not_bound");
             expect(tools.runs.some((run) => run.sessionUuid === row.target)).toBe(false);
+          } else if (row.live) {
+            expect(result.isError).not.toBe(true);
+            expect(tools.runs.at(-1)).toMatchObject({
+              name: "observe",
+              deviceId: third.deviceId,
+              sessionUuid: row.target,
+            });
           } else {
             expect(result.isError).not.toBe(true);
             expect(tools.watcherReads).toEqual([third.deviceId]);
@@ -300,7 +307,7 @@ describe("a connection bound to the base session naming its own derived label se
           expect(binding!.boundDeviceSessionUuid(OWNER)).toBe(BASE);
           expect(manager.peekSession(BASE)).toEqual(before);
           expect(namedClocks()).toEqual(namedBefore);
-          // Still ownerless: the read did not adopt it.
+          // Still ownerless: a read that crossed the routing guard did not adopt it.
           if (row.live) {
             expect(pool.isSessionOwnedByOtherConnection(row.target, OTHER)).toBe(false);
             expect(pool.isSessionOwnedByOtherConnection(row.target, OWNER)).toBe(

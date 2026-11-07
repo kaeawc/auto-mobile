@@ -167,6 +167,19 @@ describe("a connection that closed while its explicit-sessionUuid call was in fl
     );
   }
 
+  function arrangedEach<T>(table: readonly T[]) {
+    return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
+      test.each([...table])(
+        name,
+        async (row: T) => {
+          await setUp();
+          await fn(row);
+        },
+        timeout,
+      );
+    };
+  }
+
   async function tearDown() {
     await fixture?.teardown();
     fixture = undefined;
@@ -237,7 +250,7 @@ describe("a connection that closed while its explicit-sessionUuid call was in fl
   }
 
   arranged(
-    "a read naming an ownerless session is refused without adopting it or moving its release or stamps",
+    "a read naming an ownerless session answers without adopting it or moving its release or stamps",
     async () => {
       timer.advanceTime(ELAPSED_MS);
       const before = stamps();
@@ -245,9 +258,8 @@ describe("a connection that closed while its explicit-sessionUuid call was in fl
       expect(remaining).toBe(OWNER_DISCONNECT_GRACE_MS - ELAPSED_MS);
 
       const result = await callRead();
-      // The reader never held the session's binding: a sessionUuid is not a bearer capability.
-      expect(result.isError).toBe(true);
-      expect(JSON.stringify(result.content)).toContain("read_session_not_bound");
+      expect(result.isError).not.toBe(true);
+      expect(result.content).toEqual([{ type: "text", text: DEVICE.deviceId }]);
       expect(pool.resolveAutolockSessionForMcpSession(READER)).toBeUndefined();
       expect(pool.isSessionOwnedByOtherConnection(sessionId, "an-unrelated-connection")).toBe(
         false,
@@ -258,11 +270,11 @@ describe("a connection that closed while its explicit-sessionUuid call was in fl
     },
   );
 
-  arranged(
-    "an ownerless read refusal tells the proxy not to remember the named session",
-    async () => {
-      const result = await callRead(READER);
-      expect(result.isError).toBe(true);
+  arrangedEach([false, true])(
+    "an ownerless read result tells the proxy not to remember the named session (failure=%s)",
+    async (fail) => {
+      const result = await callRead(READER, { fail });
+      expect(Boolean(result.isError)).toBe(fail);
       expect(foreignOwnedSessionUuidFromResult(result)).toBe(sessionId);
     },
   );
@@ -356,8 +368,7 @@ describe("a connection that closed while its explicit-sessionUuid call was in fl
     expect(manager.adoptCliLivenessPolicy(sessionId)).toBe(true);
     expect(manager.getSession(sessionId)?.livenessPolicy).toBe("cli-idle");
     const result = await callRead();
-    // Refused all the same: the reader does not hold the session's binding (#13540).
-    expect(JSON.stringify(result.content)).toContain("read_session_not_bound");
+    expect(result.isError).not.toBe(true);
     expect(foreignOwnedSessionUuidFromResult(result)).toBeUndefined();
   });
 
@@ -367,10 +378,13 @@ describe("a connection that closed while its explicit-sessionUuid call was in fl
     expect(pool.resolveAutolockSessionForMcpSession(READER)).toBeUndefined();
   });
 
-  arranged("a refused ownerless read does not defer the armed release", async () => {
-    const result = await callRead(READER, { wait: true });
-    expect(result.isError).toBe(true);
+  arranged("an in-flight ownerless read does not defer the armed release", async () => {
+    const call = callRead(READER, { wait: true });
+    await entered.promise;
     await expectDisconnectRelease(OWNER_DISCONNECT_GRACE_MS);
+    proceed.resolve();
+    const result = await call;
+    expect(result.isError).not.toBe(true);
     expect(pool.resolveAutolockSessionForMcpSession(READER)).toBeUndefined();
   });
 

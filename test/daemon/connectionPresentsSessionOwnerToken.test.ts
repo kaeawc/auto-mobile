@@ -38,12 +38,3 @@ test("a connection with another token, or none, does not present it", async () =
   expect(pool.connectionPresentsSessionOwnerToken("S", "conn-silent")).toBe(false);
   expect(pool.connectionPresentsSessionOwnerToken("unknown", "conn-other")).toBe(false);
 });
-
-test("a setActiveDevice read binding is per connection and cleared on disconnect", async () => {
-  const pool = await setup();
-  pool.recordMcpSessionReadBinding("conn-desktop", "S");
-  expect(pool.hasMcpSessionReadBinding("S", "conn-desktop")).toBe(true);
-  expect(pool.hasMcpSessionReadBinding("S", "conn-other")).toBe(false);
-  pool.releaseMcpSessionBindings("conn-desktop");
-  expect(pool.hasMcpSessionReadBinding("S", "conn-desktop")).toBe(false);
-});

@@ -13,27 +13,20 @@ const SESSION = "11111111-2222-4333-8444-555555555555";
 const OWNER = "socket-owner";
 const OTHER = "socket-other";
 
-/** A fake daemon view: live sessions, per-connection ownership, declared tokens and grants. */
+/** A fake daemon view: which connected connection owns each session, tokens and broker grants. */
 class FakeReadSessionBindingView implements ReadSessionBindingView {
-  readonly live = new Set<string>([SESSION]);
-  readonly owned = new Map<string, Set<string>>([[OWNER, new Set([SESSION])]]);
+  /** Session (or base) -> its connected owning connection. */
+  readonly owners = new Map<string, string>([[SESSION, OWNER]]);
   readonly tokens = new Map<string, Set<string>>();
   readonly grants = new Map<string, Set<string>>();
-  readonly setActiveDeviceBindings = new Map<string, Set<string>>();
 
-  isLiveDeviceSession(sessionUuid: string): boolean {
-    return this.live.has(sessionUuid);
-  }
-  isSessionOwnedByConnection(sessionUuid: string, mcpSessionId: string): boolean {
+  isSessionOwnedByOtherConnection(sessionUuid: string, mcpSessionId: string): boolean {
     const base = sessionUuid.split(":", 1)[0];
-    const owned = this.owned.get(mcpSessionId);
-    return owned?.has(sessionUuid) === true || owned?.has(base) === true;
+    const owner = this.owners.get(sessionUuid) ?? this.owners.get(base);
+    return owner !== undefined && owner !== mcpSessionId;
   }
   connectionPresentsSessionOwnerToken(sessionUuid: string, mcpSessionId: string): boolean {
     return this.tokens.get(mcpSessionId)?.has(sessionUuid) === true;
-  }
-  hasSetActiveDeviceBinding(sessionUuid: string, mcpSessionId: string): boolean {
-    return this.setActiveDeviceBindings.get(mcpSessionId)?.has(sessionUuid) === true;
   }
   brokerGrantedSessions(mcpSessionId: string): ReadonlySet<string> | undefined {
     return this.grants.get(mcpSessionId);
@@ -54,20 +47,12 @@ describe("read session binding (#13540)", () => {
   });
 
   test("a derived label session is held through its base", () => {
-    const view = new FakeReadSessionBindingView();
-    view.live.add(`${SESSION}:phone`);
-    expect(refusal(view, OWNER, `${SESSION}:phone`)).toBeUndefined();
+    expect(refusal(new FakeReadSessionBindingView(), OWNER, `${SESSION}:phone`)).toBeUndefined();
   });
 
   test("a connection presenting the session's owner token may read under it", () => {
     const view = new FakeReadSessionBindingView();
     view.tokens.set(OTHER, new Set([SESSION]));
-    expect(refusal(view, OTHER)).toBeUndefined();
-  });
-
-  test("a connection that bound the session with setActiveDevice may read under it", () => {
-    const view = new FakeReadSessionBindingView();
-    view.setActiveDeviceBindings.set(OTHER, new Set([SESSION]));
     expect(refusal(view, OTHER)).toBeUndefined();
   });
 
@@ -77,14 +62,19 @@ describe("read session binding (#13540)", () => {
     expect(refusal(view, OTHER)).toBeUndefined();
   });
 
-  test("an unbound connection naming a live session is refused", () => {
+  test("an unbound connection naming another connected client's session is refused", () => {
     const error = refusal(new FakeReadSessionBindingView(), OTHER);
     expect(error).toBeInstanceOf(ReadSessionNotBoundError);
     expect(error?.message).toContain(SESSION);
     expect(error?.message).toContain("owner token");
   });
 
-  test("another connection's broker grant does not authorize the read", () => {
+  test("an unbound connection naming another client's derived label session is refused", () => {
+    const error = refusal(new FakeReadSessionBindingView(), OTHER, `${SESSION}:phone`);
+    expect(error).toBeInstanceOf(ReadSessionNotBoundError);
+  });
+
+  test("a broker grant of some other session does not authorize the read", () => {
     const view = new FakeReadSessionBindingView();
     view.grants.set(OTHER, new Set(["some-other-session"]));
     expect(refusal(view, OTHER)).toBeInstanceOf(ReadSessionNotBoundError);
@@ -107,7 +97,13 @@ describe("read session binding (#13540)", () => {
     expect(wire).not.toHaveProperty("nextAction");
   });
 
-  test("an id naming no live device session (an IDE observer session) is not judged", () => {
+  test("a session no connected client owns (a finished --cli call's) is not refused", () => {
+    const view = new FakeReadSessionBindingView();
+    view.owners.clear();
+    expect(refusal(view, OTHER)).toBeUndefined();
+  });
+
+  test("an id naming no owned session (an IDE observer session) is not judged", () => {
     expect(refusal(new FakeReadSessionBindingView(), OTHER, "observer-uuid")).toBeUndefined();
   });
 

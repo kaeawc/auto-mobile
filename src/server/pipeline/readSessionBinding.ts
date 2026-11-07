@@ -3,40 +3,43 @@ import { ReadSessionNotBoundError } from "../../daemon/ReadSessionNotBoundError"
 
 /** What the read-binding rule reads from the daemon (#13540). */
 export interface ReadSessionBindingView {
-  /** Whether `sessionUuid` names a live device session holding a device. */
-  isLiveDeviceSession(sessionUuid: string): boolean;
-  /** The connection acquired or restored the session (or its base), or holds its autolock route. */
-  isSessionOwnedByConnection(sessionUuid: string, mcpSessionId: string): boolean;
+  /**
+   * Whether a still-connected client other than `mcpSessionId` owns the session (a derived
+   * `base:label` session counts as its base): the same ownership question control calls ask.
+   */
+  isSessionOwnedByOtherConnection(sessionUuid: string, mcpSessionId: string): boolean;
   /** The connection declared the session's owner token. */
   connectionPresentsSessionOwnerToken(sessionUuid: string, mcpSessionId: string): boolean;
-  /** The connection bound the session to its device through `setActiveDevice`. */
-  hasSetActiveDeviceBinding(sessionUuid: string, mcpSessionId: string): boolean;
   /** The sessions a broker binding granted this connection, if it is a broker connection. */
   brokerGrantedSessions(mcpSessionId: string): ReadonlySet<string> | undefined;
 }
 
 /**
- * #13540 (owner decision 2026-11-07): a `sessionUuid` is not a bearer capability. A read-only call
- * from a connection that names a live device session must come from a connection that holds the
- * session binding (it acquired or restored the session, holds its autolock route, bound it with
- * `setActiveDevice`, or a broker binding granted it) or that presents the session's owner token. Otherwise it is refused with the
- * non-retryable `read_session_not_bound`. An id that names no live device session (an IDE observer
- * session, #10968) is not judged here: the read runs sessionless. A call with no connection
- * identity (direct mode, or an internal plan step admitted under its enclosing call) is not judged.
+ * #13540 (owner decision 2026-11-07): a `sessionUuid` is not a bearer capability. Reads follow
+ * the same ownership rule as control calls (#11344): a read-only call that names a session another
+ * connected client owns is refused with the non-retryable `read_session_not_bound`, unless this
+ * connection was granted the session by a broker binding or presents the session's owner token.
+ * The owning connection itself, and a session no connected client owns (its owner disconnected,
+ * such as a finished one-shot `--cli` call), are not refused. An id that names no live device
+ * session (an IDE observer session, #10968) is owned by no connection, so the read runs
+ * sessionless. A call with no connection identity (direct mode, or an internal plan step admitted
+ * under its enclosing call) is not judged.
  */
 export function readSessionBindingRefusal(
   view: ReadSessionBindingView,
   input: { toolName: string; sessionUuid: string | undefined; mcpSessionId: string | undefined },
 ): ReadSessionNotBoundError | undefined {
   const { sessionUuid, mcpSessionId } = input;
-  if (!sessionUuid || !mcpSessionId || !view.isLiveDeviceSession(sessionUuid)) {
+  if (
+    !sessionUuid ||
+    !mcpSessionId ||
+    !view.isSessionOwnedByOtherConnection(sessionUuid, mcpSessionId)
+  ) {
     return undefined;
   }
   const base = sessionUuid.split(":", 1)[0] ?? sessionUuid;
   const granted = view.brokerGrantedSessions(mcpSessionId);
   const holds =
-    view.isSessionOwnedByConnection(sessionUuid, mcpSessionId) ||
-    view.hasSetActiveDeviceBinding(sessionUuid, mcpSessionId) ||
     granted?.has(sessionUuid) === true ||
     granted?.has(base) === true ||
     view.connectionPresentsSessionOwnerToken(sessionUuid, mcpSessionId);
@@ -46,26 +49,22 @@ export function readSessionBindingRefusal(
 /** The daemon's view for {@link readSessionBindingRefusal}; undefined outside a daemon. */
 export function daemonReadSessionBindingView(): ReadSessionBindingView | undefined {
   const pool = defaultDaemonContext.devicePool();
-  const sessions = defaultDaemonContext.sessionManager();
-  if (!pool || !sessions) {
+  if (!pool) {
     return undefined;
   }
   return {
-    isLiveDeviceSession: (sessionUuid) => !!sessions.findSession(sessionUuid)?.assignedDevice,
-    isSessionOwnedByConnection: (sessionUuid, mcpSessionId) =>
-      pool.isSessionOwnedByConnection(sessionUuid, mcpSessionId),
+    isSessionOwnedByOtherConnection: (sessionUuid, mcpSessionId) =>
+      pool.isSessionOwnedByOtherConnection(sessionUuid, mcpSessionId),
     connectionPresentsSessionOwnerToken: (sessionUuid, mcpSessionId) =>
       pool.connectionPresentsSessionOwnerToken(sessionUuid, mcpSessionId),
-    hasSetActiveDeviceBinding: (sessionUuid, mcpSessionId) =>
-      pool.hasMcpSessionReadBinding(sessionUuid, mcpSessionId),
     brokerGrantedSessions: (mcpSessionId) =>
       defaultDaemonContext.brokerConnectionScopes()?.get(mcpSessionId)?.sessionUuids,
   };
 }
 
 /**
- * Throws {@link ReadSessionNotBoundError} for an unbound read naming a live session (#13540).
- * Control calls (`readOnly: false`) keep their own owner and broker-grant refusals.
+ * Throws {@link ReadSessionNotBoundError} for a read naming a session another connected client
+ * owns (#13540). Control calls (`readOnly: false`) keep their own owner and broker-grant refusals.
  */
 export function assertReadCallerHoldsSessionBinding(input: {
   toolName: string;

@@ -674,18 +674,6 @@ export class DevicePool {
     return this.parts.connectionClaims.connectionPresentsSessionOwnerToken(...args);
   }
 
-  recordMcpSessionReadBinding(
-    ...args: Parameters<PoolOps["recordMcpSessionReadBinding"]>
-  ): ReturnType<PoolOps["recordMcpSessionReadBinding"]> {
-    return this.parts.connectionClaims.recordMcpSessionReadBinding(...args);
-  }
-
-  hasMcpSessionReadBinding(
-    ...args: Parameters<PoolOps["hasMcpSessionReadBinding"]>
-  ): ReturnType<PoolOps["hasMcpSessionReadBinding"]> {
-    return this.parts.connectionClaims.hasMcpSessionReadBinding(...args);
-  }
-
   beginMcpSessionOwnerCall(
     ...args: Parameters<PoolOps["beginMcpSessionOwnerCall"]>
   ): ReturnType<PoolOps["beginMcpSessionOwnerCall"]> {

@@ -18,10 +18,6 @@ export interface ConnectionClaimsOperations {
   declareMcpSessionLivenessOwnerToken(mcpSessionId: string, token: string): void;
   /** Whether the connection declared the owner token of `sessionId`'s owning session (#13540). */
   connectionPresentsSessionOwnerToken(sessionId: string, mcpSessionId: string): boolean;
-  /** Record that `setActiveDevice` on this connection bound `sessionId` (#13540); not ownership. */
-  recordMcpSessionReadBinding(mcpSessionId: string, sessionId: string): void;
-  /** Whether this connection bound `sessionId` (or its base) through `setActiveDevice`. */
-  hasMcpSessionReadBinding(sessionId: string, mcpSessionId: string): boolean;
   registerMcpSessionOwnerCallReader(): void;
   /** Only a still-connected caller presenting the mint's token defends its claim lease. */
   beginMcpSessionOwnerCall(mcpSessionId: string, token: string): () => void;
@@ -41,7 +37,6 @@ type ConnectionClaimsState = Pick<
   | "sessionManager"
   | "mcpSessionAcquiredDeviceSessions"
   | "mcpSessionLivenessOwnerTokens"
-  | "mcpSessionReadBindings"
   | "ownerConnectionIntervals"
   | "mcpSessionOwnerCallsInFlight"
   | "autolockManager"
@@ -168,22 +163,6 @@ export class DevicePoolConnectionClaims {
     return owner?.livenessOwnerToken === token;
   }
 
-  /** Record that `setActiveDevice` on this connection bound `sessionId` (#13540); not ownership. */
-  recordMcpSessionReadBinding(mcpSessionId: string, sessionId: string): void {
-    const bound = this.state.mcpSessionReadBindings.get(mcpSessionId) ?? new Set<string>();
-    bound.add(this.ownershipSessionId(sessionId));
-    this.state.mcpSessionReadBindings.set(mcpSessionId, bound);
-  }
-
-  /** Whether this connection bound `sessionId` (or its base) through `setActiveDevice`. */
-  hasMcpSessionReadBinding(sessionId: string, mcpSessionId: string): boolean {
-    return (
-      this.state.mcpSessionReadBindings
-        .get(mcpSessionId)
-        ?.has(this.ownershipSessionId(sessionId)) === true
-    );
-  }
-
   registerMcpSessionOwnerCallReader(): void {
     this.state.sessionManager.setOwnerConnectedAtReader?.((session, at) => {
       const ownerId = this.ownershipSessionId(session.sessionId);
@@ -306,8 +285,6 @@ export function connectConnectionClaims(
       seams.declareMcpSessionLivenessOwnerToken(...args),
     connectionPresentsSessionOwnerToken: (...args) =>
       part().connectionPresentsSessionOwnerToken(...args),
-    recordMcpSessionReadBinding: (...args) => part().recordMcpSessionReadBinding(...args),
-    hasMcpSessionReadBinding: (...args) => part().hasMcpSessionReadBinding(...args),
     registerMcpSessionOwnerCallReader: (...args) =>
       part().registerMcpSessionOwnerCallReader(...args),
     beginMcpSessionOwnerCall: (...args) => seams.beginMcpSessionOwnerCall(...args),

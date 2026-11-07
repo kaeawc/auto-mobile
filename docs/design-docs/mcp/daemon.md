@@ -94,15 +94,16 @@ bindings live in a daemon-scoped store rather than on any one server. The design
 [SDK v2 and stateless daemon layer](sdk-v2-stateless-migration.md).
 
 A `sessionUuid` on a read is not a bearer capability (owner decision 2026-11-07, #13540).
-A `deviceReadOnly` call from a connection that names a live device session is admitted
-only when that connection holds the session binding: it acquired or restored the session
-(or its base), holds its autolock route, bound it to a device with `setActiveDevice` (a
-release-neutral read binding, cleared when the connection closes), was granted it by a
-broker binding, or declared the session's owner token. Any other connection is refused before admission with the
-non-retryable `read_session_not_bound` (`ReadSessionNotBoundError`, carrying the session
-and `missingBinding: "session"`). The check (`readSessionBindingRefusal`) runs in
-read-target resolution, so a refused read runs no readiness and records no activity. An id that
-names no live device session (an IDE observer session, #10968) still reads sessionlessly,
-and sessionless reads stay open (#10965). Calls with no connection identity (direct mode,
-and internal plan steps judged under their enclosing call) are not judged. Control calls
-keep their own owner and broker-grant refusals.
+Reads follow the ownership rule control calls follow (#11344): a `deviceReadOnly` call that
+names a session another connected client owns (a derived `base:label` session counts as its
+base) is refused before admission with the non-retryable `read_session_not_bound`
+(`ReadSessionNotBoundError`, carrying the session and `missingBinding: "session"`), unless
+the calling connection was granted that session by a broker binding or declared the
+session's owner token. The owning connection reads as before, and a session no connected
+client owns (its owner disconnected, such as a finished one-shot `--cli` call) stays
+readable by any connection, as it stays controllable. The check
+(`readSessionBindingRefusal`) runs in read-target resolution, so a refused read runs no
+readiness and records no activity. An id that names no live device session (an IDE
+observer session, #10968) still reads sessionlessly, and sessionless reads stay open
+(#10965). Calls with no connection identity (direct mode, and internal plan steps judged
+under their enclosing call) are not judged.

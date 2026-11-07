@@ -477,7 +477,7 @@ product refusal code or message (success or unrelated errors exit 2). Product
 refusal codes: `device_outside_broker_grant` (labels and unbound devices),
 `device_outside_bound_session` (a bound connection naming another session or device,
 as in the `cross-client-isolation-live` probe), `read_session_not_bound` (a read naming
-a live session this connection does not hold) and `session_ownership_lost`.
+a session another connected client owns) and `session_ownership_lost`.
 Lifecycle probes accept only `{}` or an object containing only the client's own
 `sessionUuid`; device names and selectors refuse before sending. Resources/list,
 `automobile:devices/*` reads and `--allow-selector` remain forbidden. `--token-of

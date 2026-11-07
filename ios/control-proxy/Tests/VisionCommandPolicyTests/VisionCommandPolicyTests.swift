@@ -71,6 +71,16 @@ final class VisionCommandPolicyTests: XCTestCase {
         XCTAssertFalse(VisionCommandPolicy.containsDeleteKey("hello world\n"))
     }
 
+    func testTypingTargetPrefersFocusAndFallsBackToTheLastTappedField() {
+        XCTAssertEqual(VisionCommandPolicy.typingTarget(focusedCount: 1, lastTappedTextInputCount: 0), .focused)
+        XCTAssertEqual(VisionCommandPolicy.typingTarget(focusedCount: 1, lastTappedTextInputCount: 1), .focused)
+        XCTAssertEqual(VisionCommandPolicy.typingTarget(focusedCount: 0, lastTappedTextInputCount: 1), .lastTapped)
+        XCTAssertEqual(VisionCommandPolicy.typingTarget(focusedCount: 0, lastTappedTextInputCount: 0), .none)
+        XCTAssertEqual(VisionCommandPolicy.typingTarget(focusedCount: 0, lastTappedTextInputCount: 2), .none)
+        // Several focused fields are ambiguous: never guess.
+        XCTAssertEqual(VisionCommandPolicy.typingTarget(focusedCount: 2, lastTappedTextInputCount: 1), .none)
+    }
+
     func testHandshakeAdvertisesOnlyTheVisionWindowSubset() throws {
         struct Event: Decodable {
             let type: String

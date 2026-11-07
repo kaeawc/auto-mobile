@@ -202,6 +202,12 @@ describe("app tools on an Apple Vision Pro simulator", () => {
       packageName: BUNDLE,
       pid: visionSimctl.pidOf(visionPro.deviceId, BUNDLE),
     });
+    expect(launched).not.toHaveProperty("verified");
+    expect(launched).not.toHaveProperty("verifyFailureReason");
+    expect(launched.verificationSkipped).toBe("platform");
+    expect(launched.message).toBe(
+      `Launched app ${BUNDLE} (foreground not verified: launchApp does not observe on this platform; call observe to confirm)`,
+    );
     expect(
       toolJson(await call("terminateApp", { sessionUuid: VISION_SESSION, appId: BUNDLE })),
     ).toMatchObject({ success: true, wasInstalled: true, wasRunning: true });

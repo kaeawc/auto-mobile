@@ -183,6 +183,7 @@ export const launchAppResultSchema = z
     verifiedBy: z.string().optional(),
     verified: z.boolean().optional(),
     verifyFailureReason: z.string().optional(),
+    verificationSkipped: z.literal("platform").optional(),
     observedAppId: z.string().optional(),
     prototypeAgent: z
       .object({

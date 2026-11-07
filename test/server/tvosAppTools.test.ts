@@ -204,6 +204,12 @@ describe("app tools on an Apple TV simulator", () => {
       packageName: BUNDLE,
       pid: tvSimctl.pidOf(tv.deviceId, BUNDLE),
     });
+    expect(launched).not.toHaveProperty("verified");
+    expect(launched).not.toHaveProperty("verifyFailureReason");
+    expect(launched.verificationSkipped).toBe("platform");
+    expect(launched.message).toBe(
+      `Launched app ${BUNDLE} (foreground not verified: launchApp does not observe on this platform; call observe to confirm)`,
+    );
     expect(
       toolJson(await call("terminateApp", { sessionUuid: TV_SESSION, appId: BUNDLE })),
     ).toMatchObject({ success: true, wasInstalled: true, wasRunning: true });

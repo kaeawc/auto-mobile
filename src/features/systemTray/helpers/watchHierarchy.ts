@@ -189,6 +189,37 @@ export function watchClearAll(hierarchy?: ViewHierarchyResult): Element | undefi
 }
 
 /**
+ * The dismiss (X) button a swipe revealed beside `card`. Wear OS 7 only reveals the X and settings
+ * buttons on a horizontal swipe, so the card is gone only once the X is tapped. The button must
+ * share the swiped card's row, so another card's revealed buttons are never tapped.
+ */
+export function watchRevealedDismiss(
+  hierarchy: ViewHierarchyResult | undefined,
+  card: WatchNotification,
+): Element | undefined {
+  const root = watchStreamRoot(hierarchy);
+  if (!root) {
+    return undefined;
+  }
+  const owned = wearOwnedNodes(hierarchy);
+  const parser = new DefaultElementParser();
+  const rowTop = card.element.bounds.top;
+  const rowBottom = card.element.bounds.bottom;
+  const buttons = watchNodes(root)
+    .filter(
+      (node) =>
+        owned.has(node) &&
+        (toSearchable(getNodeProperties(node) ?? {}).nativeId ?? "").endsWith(
+          ":id/notification_str_clear_button",
+        ) &&
+        isClickableElementProperties(getNodeProperties(node) ?? {}),
+    )
+    .flatMap((node) => parser.parseNodeBounds(node) ?? [])
+    .filter(({ bounds }) => bounds.top < rowBottom && bounds.bottom > rowTop);
+  return buttons.length === 1 ? buttons[0] : undefined;
+}
+
+/**
  * Narrow expanded-state hook: only a changed Wear SystemUI tree with an explicit clickable
  * text target is actionable. No expanded hierarchy has been captured; do not infer IDs,
  * coordinates, implicit content intents, reply fields or alert layouts here.

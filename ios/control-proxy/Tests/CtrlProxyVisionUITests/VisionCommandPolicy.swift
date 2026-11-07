@@ -19,6 +19,21 @@ enum VisionCommandPolicy {
         text.contains { deleteKeySequences.contains($0) }
     }
 
+    enum TypingTarget: Equatable {
+        case focused
+        case lastTapped
+        case none
+    }
+
+    /// Picks the field text is appended to. `hasFocus` is not always set on the field a tap just
+    /// activated, so when nothing reports focus the single text input the last `tapOn` hit is used.
+    /// Several focused fields stay ambiguous: guessing could type into the wrong one.
+    static func typingTarget(focusedCount: Int, lastTappedTextInputCount: Int) -> TypingTarget {
+        if focusedCount == 1 { return .focused }
+        if focusedCount == 0, lastTappedTextInputCount == 1 { return .lastTapped }
+        return .none
+    }
+
     /// The window app under automation: the daemon-supplied bundle id, else nil (demo app).
     static func targetBundleId(environment: [String: String]) -> String? {
         guard let value = environment["AM_BUNDLE_ID"]?

@@ -158,7 +158,7 @@ function buildLaunchMessage(
   appId: string,
   verified: boolean | undefined,
   verifyFailureReason: LaunchVerificationFailureReason | undefined,
-  alreadyForeground: boolean | undefined,
+  { alreadyForeground, verificationSkipped }: LaunchAppResult,
 ): string {
   // An app that was already foreground was never launched — say so rather than
   // claiming a launch that did not happen (issue #6868). The verification suffix
@@ -168,6 +168,9 @@ function buildLaunchMessage(
     : `Launched app ${appId}`;
   if (verified === true) {
     return `${lead} (foreground verified)`;
+  }
+  if (verificationSkipped) {
+    return `${lead} (foreground not verified: launchApp does not observe on this platform; call observe to confirm)`;
   }
   if (verifyFailureReason) {
     return `${lead} (verification failed: ${launchVerificationFailureMessage(verifyFailureReason)})`;
@@ -204,7 +207,8 @@ function resolveLaunchObservedAppId(
  * window is available, foreground identity signals disagree, or the observed
  * package differs from the requested app. It remains `undefined` for an
  * accepted notification permission surface or matching-but-stale observation,
- * where the surface or freshness prevents confirmation.
+ * where the surface or freshness prevents confirmation, and for a launch path
+ * that never observes (`verificationSkipped`).
  */
 export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
   if (!result.success) {
@@ -220,13 +224,15 @@ export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
   // caller that supplies one. Identity conflicts and mismatches are then
   // surfaced as a structured verification failure below.
   const isVerified = isVerifiedLaunchObservation(appId, result.observation);
-  const verifyFailureReason = isVerified
-    ? undefined
-    : launchVerificationFailureReason(appId, observedAppId, result.observation);
+  // A launch path that never observes (#17319) has nothing to verify against.
+  const verifyFailureReason =
+    isVerified || result.verificationSkipped
+      ? undefined
+      : launchVerificationFailureReason(appId, observedAppId, result.observation);
   const verified = isVerified ? true : verifyFailureReason ? false : undefined;
 
   return {
-    message: buildLaunchMessage(appId, verified, verifyFailureReason, result.alreadyForeground),
+    message: buildLaunchMessage(appId, verified, verifyFailureReason, result),
     verified,
     ...(verifyFailureReason ? { verifyFailureReason } : {}),
     observedAppId,

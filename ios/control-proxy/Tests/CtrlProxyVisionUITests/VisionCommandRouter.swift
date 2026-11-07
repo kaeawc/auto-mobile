@@ -33,7 +33,18 @@ final class VisionCommandRouter {
             }
             switch envelope.type {
             case "request_hierarchy":
-                let snapshot = try application.snapshot()
+                let snapshot: any XCUIElementSnapshot
+                do {
+                    snapshot = try application.snapshot()
+                } catch {
+                    guard VisionCommandPolicy.shouldRelaunchForSnapshotError(String(describing: error)) else {
+                        throw error
+                    }
+                    // Recover this app's inaccessible main window once (#17448).
+                    application.terminate()
+                    application.launch()
+                    snapshot = try application.snapshot()
+                }
                 // One snapshot already carries the whole tree, ornaments included. Snapshotting each
                 // descendant query result costs a round trip per element (about 100 ms each, 26 s for
                 // Settings' 259 elements), which exceeded the 20 s hierarchy budget (#17218).

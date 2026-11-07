@@ -8,7 +8,7 @@ import type {
 } from "../action/SendKeys";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { normalizeVisionosHierarchy } from "./VisionosHierarchy";
-import { requireVisionosRunner } from "./VisionosRunnerLifecycle";
+import { requireVisionosRunner, withVisionosHostRecovery } from "./VisionosRunnerLifecycle";
 import { logger } from "../../utils/logger";
 
 /** XCUIKeyboardKey.delete (U+0008 on iOS-family, U+007F on macOS) and forwardDelete (U+F728). */
@@ -42,6 +42,15 @@ export async function visionosTapOn(
   signal?: AbortSignal,
 ): Promise<TapOnElementResult> {
   assertVisionosTapOptions(options);
+  // A tap refused because the host app is gone was never applied, so one retry is safe.
+  return withVisionosHostRecovery(deviceId, signal, () => tapOnce(deviceId, options, signal));
+}
+
+async function tapOnce(
+  deviceId: string,
+  options: TapOnElementOptions,
+  signal?: AbortSignal,
+): Promise<TapOnElementResult> {
   const client = await requireVisionosRunner(deviceId, signal);
   const tree = normalizeVisionosHierarchy(await client.hierarchy(signal));
   const all = new DefaultElementParser().flattenViewHierarchy(tree).map(({ element }) => element);

@@ -1,5 +1,8 @@
 import { normalizeVisionosHierarchy } from "../features/visionos/VisionosHierarchy";
-import { requireVisionosRunner } from "../features/visionos/VisionosRunnerLifecycle";
+import {
+  requireVisionosRunner,
+  withVisionosHostRecovery,
+} from "../features/visionos/VisionosRunnerLifecycle";
 import { visionosRunners } from "../features/visionos/VisionosRunnerRegistry";
 import { defaultDaemonContext } from "../daemon/daemonContext";
 import { holderOf } from "../daemon/deviceBinding";
@@ -192,15 +195,21 @@ async function visionosHierarchyForObserve(
   device: BootedDevice,
   args: ObserveArgs,
   signal: AbortSignal | undefined,
-  startRunner: NonNullable<WatchObserveDependencies["visionosRunner"]>,
+  runner: {
+    start: NonNullable<WatchObserveDependencies["visionosRunner"]>;
+    /** A connect-only held read never restarts another session's runner. */
+    recoverHostLoss: boolean;
+  },
 ): Promise<HierarchyOutcome> {
   const displayKey = watchDisplay(device).ref.key;
   // Refuse options neither path supports before paying for runner startup.
   assertWatchObserveOptions(args, displayKey, "visionos", true);
   let hierarchy;
   try {
-    const runner = await startRunner(device.deviceId, signal);
-    hierarchy = await runner.hierarchy(signal);
+    const read = async () => (await runner.start(device.deviceId, signal)).hierarchy(signal);
+    hierarchy = runner.recoverHostLoss
+      ? await withVisionosHostRecovery(device.deviceId, signal, read)
+      : await read();
   } catch (error) {
     if (signal?.aborted) {
       throw error;
@@ -245,12 +254,11 @@ async function watchHierarchyForObserve(
 ): Promise<HierarchyOutcome> {
   if (screenshotOnlyPlatform(device) === "visionos") {
     const heldRead = (dependencies.heldDeviceRead ?? isReadOfHeldDevice)(device.deviceId);
-    return visionosHierarchyForObserve(
-      device,
-      args,
-      signal,
-      dependencies.visionosRunner ?? (heldRead ? connectedVisionosRunner : requireVisionosRunner),
-    );
+    return visionosHierarchyForObserve(device, args, signal, {
+      start:
+        dependencies.visionosRunner ?? (heldRead ? connectedVisionosRunner : requireVisionosRunner),
+      recoverHostLoss: !heldRead,
+    });
   }
   if (screenshotOnlyPlatform(device) === "tvos") {
     return tvosHierarchyForObserve(device, args, signal);

@@ -41,7 +41,7 @@ auto-mobile --cli launchApp --platform visionos --sessionUuid "$SESSION_ID" \
   --appId com.example.yourapp
 ```
 
-Replace `path/to/YourApp.app` and `com.example.yourapp` with your bundle path and bundle identifier. `launchApp` reports `verified: false` with `no_observation` when no screen is observed after it. The app still launches. Run `observe` to confirm the screen.
+Replace `path/to/YourApp.app` and `com.example.yourapp` with your bundle path and bundle identifier. `launchApp` does not observe after the launch, so it leaves `verified` unset and reports `verificationSkipped: "platform"`. Run `observe` to confirm the screen.
 
 ## Observe the screen
 

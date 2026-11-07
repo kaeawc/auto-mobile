@@ -1,0 +1,1477 @@
+Activity Resolver Table:
+  Full MIME Types:
+      vnd.android.cursor.dir/event:
+        1461b3f com.google.android.calendar/com.android.calendar.event.LaunchInfoActivity filter 1df2955
+          Action: "android.intent.action.EDIT"
+          Action: "android.intent.action.INSERT"
+          Category: "android.intent.category.DEFAULT"
+          StaticType: "vnd.android.cursor.dir/event"
+      application/ics:
+        2634310 com.google.android.calendar/.ICalLauncher filter b42522f
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          StaticType: "application/ics"
+      text/calendar:
+        2634310 com.google.android.calendar/.ICalLauncher filter 50a380e
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          StaticType: "text/calendar"
+      time/epoch:
+        aa7ccf8 com.google.android.calendar/com.android.calendar.AllInOneActivity filter 8ec5836
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Category: "android.intent.category.BROWSABLE"
+          Scheme: "content"
+          Authority: "com.android.calendar": -1
+          StaticType: "time/epoch"
+      vnd.android.cursor.item/event:
+        1461b3f com.google.android.calendar/com.android.calendar.event.LaunchInfoActivity filter 8e0fc0c
+          Action: "android.intent.action.EDIT"
+          Action: "android.intent.action.VIEW"
+          Action: "android.intent.action.INSERT"
+          Category: "android.intent.category.DEFAULT"
+          StaticType: "vnd.android.cursor.item/event"
+      application/octet-stream:
+        2634310 com.google.android.calendar/.ICalLauncher filter fa1803c
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          Path: "PatternMatcher{GLOB: .*\.ics}"
+          StaticType: "application/octet-stream"
+
+  Base MIME Types:
+      vnd.android.cursor.dir:
+        1461b3f com.google.android.calendar/com.android.calendar.event.LaunchInfoActivity filter 1df2955
+          Action: "android.intent.action.EDIT"
+          Action: "android.intent.action.INSERT"
+          Category: "android.intent.category.DEFAULT"
+          StaticType: "vnd.android.cursor.dir/event"
+      vnd.android.cursor.item:
+        1461b3f com.google.android.calendar/com.android.calendar.event.LaunchInfoActivity filter 8e0fc0c
+          Action: "android.intent.action.EDIT"
+          Action: "android.intent.action.VIEW"
+          Action: "android.intent.action.INSERT"
+          Category: "android.intent.category.DEFAULT"
+          StaticType: "vnd.android.cursor.item/event"
+      text:
+        2634310 com.google.android.calendar/.ICalLauncher filter 50a380e
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          StaticType: "text/calendar"
+      time:
+        aa7ccf8 com.google.android.calendar/com.android.calendar.AllInOneActivity filter 8ec5836
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Category: "android.intent.category.BROWSABLE"
+          Scheme: "content"
+          Authority: "com.android.calendar": -1
+          StaticType: "time/epoch"
+      application:
+        2634310 com.google.android.calendar/.ICalLauncher filter b42522f
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          StaticType: "application/ics"
+        2634310 com.google.android.calendar/.ICalLauncher filter fa1803c
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          Path: "PatternMatcher{GLOB: .*\.ics}"
+          StaticType: "application/octet-stream"
+
+  Schemes:
+      :
+        2634310 com.google.android.calendar/.ICalLauncher filter 1129e09
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          Path: "PatternMatcher{GLOB: .*\.ics}"
+        2634310 com.google.android.calendar/.ICalLauncher filter 50a380e
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          StaticType: "text/calendar"
+        2634310 com.google.android.calendar/.ICalLauncher filter b42522f
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          StaticType: "application/ics"
+        2634310 com.google.android.calendar/.ICalLauncher filter fa1803c
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          Path: "PatternMatcher{GLOB: .*\.ics}"
+          StaticType: "application/octet-stream"
+      file:
+        2634310 com.google.android.calendar/.ICalLauncher filter 1129e09
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          Path: "PatternMatcher{GLOB: .*\.ics}"
+        2634310 com.google.android.calendar/.ICalLauncher filter 50a380e
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          StaticType: "text/calendar"
+        2634310 com.google.android.calendar/.ICalLauncher filter b42522f
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          StaticType: "application/ics"
+        2634310 com.google.android.calendar/.ICalLauncher filter fa1803c
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          Path: "PatternMatcher{GLOB: .*\.ics}"
+          StaticType: "application/octet-stream"
+      http:
+        1461b3f com.google.android.calendar/com.android.calendar.event.LaunchInfoActivity filter 75aaf6a
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Category: "android.intent.category.BROWSABLE"
+          Scheme: "http"
+          Scheme: "https"
+          Authority: "www.google.com": -1
+          Path: "PatternMatcher{PREFIX: /calendar/event}"
+          Path: "PatternMatcher{PREFIX: /calendar/mevent}"
+          Path: "PatternMatcher{PREFIX: /calendar/render}"
+          Path: "PatternMatcher{GLOB: /calendar}"
+          Path: "PatternMatcher{GLOB: /calendar/}"
+          Path: "PatternMatcher{GLOB: /calendar/hosted/.*/event}"
+          AutoVerify=true
+        1461b3f com.google.android.calendar/com.android.calendar.event.LaunchInfoActivity filter 90b2c5b
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Category: "android.intent.category.BROWSABLE"
+          Scheme: "http"
+          Scheme: "https"
+          Authority: "calendar.google.com": -1
+          Path: "PatternMatcher{PREFIX: /calendar/event}"
+          Path: "PatternMatcher{PREFIX: /calendar/task}"
+          Path: "PatternMatcher{GLOB: /calendar/u/.*/event}"
+          Path: "PatternMatcher{PREFIX: /calendar/mevent}"
+          Path: "PatternMatcher{GLOB: /calendar/u/.*/mevent}"
+          Path: "PatternMatcher{PREFIX: /calendar/render}"
+          Path: "PatternMatcher{PREFIX: /calendar/u/.*/render}"
+          Path: "PatternMatcher{GLOB: /calendar/hosted/.*/event}"
+          Path: "PatternMatcher{GLOB: /calendar/hosted/.*/render}"
+          Path: "PatternMatcher{GLOB: }"
+          Path: "PatternMatcher{GLOB: /}"
+          Path: "PatternMatcher{GLOB: /calendar}"
+          Path: "PatternMatcher{GLOB: /calendar/}"
+          Path: "PatternMatcher{GLOB: /calendar/u/.}"
+          Path: "PatternMatcher{GLOB: /calendar/u/..}"
+          AutoVerify=true
+        2634310 com.google.android.calendar/.ICalLauncher filter 1129e09
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          Path: "PatternMatcher{GLOB: .*\.ics}"
+        2634310 com.google.android.calendar/.ICalLauncher filter 50a380e
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          StaticType: "text/calendar"
+        2634310 com.google.android.calendar/.ICalLauncher filter b42522f
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          StaticType: "application/ics"
+        2634310 com.google.android.calendar/.ICalLauncher filter fa1803c
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          Path: "PatternMatcher{GLOB: .*\.ics}"
+          StaticType: "application/octet-stream"
+      https:
+        1461b3f com.google.android.calendar/com.android.calendar.event.LaunchInfoActivity filter 75aaf6a
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Category: "android.intent.category.BROWSABLE"
+          Scheme: "http"
+          Scheme: "https"
+          Authority: "www.google.com": -1
+          Path: "PatternMatcher{PREFIX: /calendar/event}"
+          Path: "PatternMatcher{PREFIX: /calendar/mevent}"
+          Path: "PatternMatcher{PREFIX: /calendar/render}"
+          Path: "PatternMatcher{GLOB: /calendar}"
+          Path: "PatternMatcher{GLOB: /calendar/}"
+          Path: "PatternMatcher{GLOB: /calendar/hosted/.*/event}"
+          AutoVerify=true
+        1461b3f com.google.android.calendar/com.android.calendar.event.LaunchInfoActivity filter 90b2c5b
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Category: "android.intent.category.BROWSABLE"
+          Scheme: "http"
+          Scheme: "https"
+          Authority: "calendar.google.com": -1
+          Path: "PatternMatcher{PREFIX: /calendar/event}"
+          Path: "PatternMatcher{PREFIX: /calendar/task}"
+          Path: "PatternMatcher{GLOB: /calendar/u/.*/event}"
+          Path: "PatternMatcher{PREFIX: /calendar/mevent}"
+          Path: "PatternMatcher{GLOB: /calendar/u/.*/mevent}"
+          Path: "PatternMatcher{PREFIX: /calendar/render}"
+          Path: "PatternMatcher{PREFIX: /calendar/u/.*/render}"
+          Path: "PatternMatcher{GLOB: /calendar/hosted/.*/event}"
+          Path: "PatternMatcher{GLOB: /calendar/hosted/.*/render}"
+          Path: "PatternMatcher{GLOB: }"
+          Path: "PatternMatcher{GLOB: /}"
+          Path: "PatternMatcher{GLOB: /calendar}"
+          Path: "PatternMatcher{GLOB: /calendar/}"
+          Path: "PatternMatcher{GLOB: /calendar/u/.}"
+          Path: "PatternMatcher{GLOB: /calendar/u/..}"
+          AutoVerify=true
+        2634310 com.google.android.calendar/.ICalLauncher filter 1129e09
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          Path: "PatternMatcher{GLOB: .*\.ics}"
+        2634310 com.google.android.calendar/.ICalLauncher filter 50a380e
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          StaticType: "text/calendar"
+        2634310 com.google.android.calendar/.ICalLauncher filter b42522f
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          StaticType: "application/ics"
+        2634310 com.google.android.calendar/.ICalLauncher filter fa1803c
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          Path: "PatternMatcher{GLOB: .*\.ics}"
+          StaticType: "application/octet-stream"
+        babe24b com.google.android.calendar/com.google.apps.security.cse.xplat.identity.oidc.appauth.android.CseRedirectUriReceiverActivity filter 8246428
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Category: "android.intent.category.BROWSABLE"
+          Scheme: "https"
+          Authority: "client-side-encryption.google.com": -1
+          Path: "PatternMatcher{LITERAL: /oidc/calendar/native/callback}"
+          AutoVerify=true
+        babe24b com.google.android.calendar/com.google.apps.security.cse.xplat.identity.oidc.appauth.android.CseRedirectUriReceiverActivity filter cf30541
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Category: "android.intent.category.BROWSABLE"
+          Scheme: "https"
+          Authority: "krahsc.google.com": -1
+          Path: "PatternMatcher{LITERAL: /oidc/calendar/native/callback}"
+          AutoVerify=true
+      content:
+        aa7ccf8 com.google.android.calendar/com.android.calendar.AllInOneActivity filter 8ec5836
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Category: "android.intent.category.BROWSABLE"
+          Scheme: "content"
+          Authority: "com.android.calendar": -1
+          StaticType: "time/epoch"
+        2634310 com.google.android.calendar/.ICalLauncher filter 1129e09
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          Path: "PatternMatcher{GLOB: .*\.ics}"
+        2634310 com.google.android.calendar/.ICalLauncher filter 50a380e
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          StaticType: "text/calendar"
+        2634310 com.google.android.calendar/.ICalLauncher filter b42522f
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          StaticType: "application/ics"
+        2634310 com.google.android.calendar/.ICalLauncher filter fa1803c
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          Path: "PatternMatcher{GLOB: .*\.ics}"
+          StaticType: "application/octet-stream"
+
+  Non-Data Actions:
+      com.google.android.calendar.EVENT_VIEW:
+        aa7ccf8 com.google.android.calendar/com.android.calendar.AllInOneActivity filter f463337
+          Action: "com.google.android.calendar.EVENT_VIEW"
+          Action: "com.google.android.calendar.EVENT_INSERT"
+          Action: "com.google.android.calendar.widget.CHAT"
+          Action: "com.google.android.calendar.widget.MEET"
+      android.intent.action.MAIN:
+        aa7ccf8 com.google.android.calendar/com.android.calendar.AllInOneActivity filter 9b605d1
+          Action: "android.intent.action.MAIN"
+          Category: "android.intent.category.DEFAULT"
+          Category: "android.intent.category.LAUNCHER"
+          Category: "android.intent.category.APP_CALENDAR"
+        9442e0d com.google.android.calendar/.timely.settings.CalendarPublicPreferenceActivity filter 2c0cbd3
+          Action: "android.intent.action.MAIN"
+          Category: "android.intent.category.DEFAULT"
+          Category: "android.intent.category.NOTIFICATION_PREFERENCES"
+      com.google.android.calendar.FIND_TIME:
+        aa7ccf8 com.google.android.calendar/com.android.calendar.AllInOneActivity filter 808c0a4
+          Action: "com.google.android.calendar.FIND_TIME"
+          Action: "com.google.android.calendar.AD_HOC_SCHEDULE_INSERT"
+          Category: "android.intent.category.DEFAULT"
+      com.google.android.gms.actions.SEARCH_ACTION:
+        73e11c5 com.google.android.calendar/.AlternateSearchActivity filter 235c71a
+          Action: "com.google.android.gms.actions.SEARCH_ACTION"
+          Action: "android.intent.action.SEARCH"
+          Category: "android.intent.category.DEFAULT"
+      com.google.android.calendar.EVENT_INSERT:
+        aa7ccf8 com.google.android.calendar/com.android.calendar.AllInOneActivity filter f463337
+          Action: "com.google.android.calendar.EVENT_VIEW"
+          Action: "com.google.android.calendar.EVENT_INSERT"
+          Action: "com.google.android.calendar.widget.CHAT"
+          Action: "com.google.android.calendar.widget.MEET"
+      android.intent.action.MANAGE_NETWORK_USAGE:
+        9442e0d com.google.android.calendar/.timely.settings.CalendarPublicPreferenceActivity filter 31dc1c2
+          Action: "android.intent.action.MANAGE_NETWORK_USAGE"
+          Category: "android.intent.category.DEFAULT"
+      android.provider.calendar.action.VIEW_MANAGED_PROFILE_CALENDAR_EVENT:
+        10e5c99 com.google.android.calendar/.event.EventInfoActivity filter aaa3b5e
+          Action: "android.provider.calendar.action.VIEW_MANAGED_PROFILE_CALENDAR_EVENT"
+          Category: "android.intent.category.DEFAULT"
+      com.google.android.calendar.AD_HOC_SCHEDULE_INSERT:
+        aa7ccf8 com.google.android.calendar/com.android.calendar.AllInOneActivity filter 808c0a4
+          Action: "com.google.android.calendar.FIND_TIME"
+          Action: "com.google.android.calendar.AD_HOC_SCHEDULE_INSERT"
+          Category: "android.intent.category.DEFAULT"
+      com.google.android.calendar.widget.CHAT:
+        aa7ccf8 com.google.android.calendar/com.android.calendar.AllInOneActivity filter f463337
+          Action: "com.google.android.calendar.EVENT_VIEW"
+          Action: "com.google.android.calendar.EVENT_INSERT"
+          Action: "com.google.android.calendar.widget.CHAT"
+          Action: "com.google.android.calendar.widget.MEET"
+      com.google.android.calendar.widget.MEET:
+        aa7ccf8 com.google.android.calendar/com.android.calendar.AllInOneActivity filter f463337
+          Action: "com.google.android.calendar.EVENT_VIEW"
+          Action: "com.google.android.calendar.EVENT_INSERT"
+          Action: "com.google.android.calendar.widget.CHAT"
+          Action: "com.google.android.calendar.widget.MEET"
+      ConferencePhoneNumbersActivity.intent.action.Launch:
+        593ae6 com.google.android.calendar/com.google.android.apps.calendar.meetings.activity.ConferencePhoneNumbersActivity filter 9d45827
+          Action: "ConferencePhoneNumbersActivity.intent.action.Launch"
+          Category: "android.intent.category.DEFAULT"
+      android.intent.action.SEARCH:
+        73e11c5 com.google.android.calendar/.AlternateSearchActivity filter 235c71a
+          Action: "com.google.android.gms.actions.SEARCH_ACTION"
+          Action: "android.intent.action.SEARCH"
+          Category: "android.intent.category.DEFAULT"
+
+  MIME Typed Actions:
+      android.intent.action.EDIT:
+        1461b3f com.google.android.calendar/com.android.calendar.event.LaunchInfoActivity filter 8e0fc0c
+          Action: "android.intent.action.EDIT"
+          Action: "android.intent.action.VIEW"
+          Action: "android.intent.action.INSERT"
+          Category: "android.intent.category.DEFAULT"
+          StaticType: "vnd.android.cursor.item/event"
+        1461b3f com.google.android.calendar/com.android.calendar.event.LaunchInfoActivity filter 1df2955
+          Action: "android.intent.action.EDIT"
+          Action: "android.intent.action.INSERT"
+          Category: "android.intent.category.DEFAULT"
+          StaticType: "vnd.android.cursor.dir/event"
+      android.intent.action.VIEW:
+        1461b3f com.google.android.calendar/com.android.calendar.event.LaunchInfoActivity filter 8e0fc0c
+          Action: "android.intent.action.EDIT"
+          Action: "android.intent.action.VIEW"
+          Action: "android.intent.action.INSERT"
+          Category: "android.intent.category.DEFAULT"
+          StaticType: "vnd.android.cursor.item/event"
+        aa7ccf8 com.google.android.calendar/com.android.calendar.AllInOneActivity filter 8ec5836
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Category: "android.intent.category.BROWSABLE"
+          Scheme: "content"
+          Authority: "com.android.calendar": -1
+          StaticType: "time/epoch"
+        2634310 com.google.android.calendar/.ICalLauncher filter 50a380e
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          StaticType: "text/calendar"
+        2634310 com.google.android.calendar/.ICalLauncher filter b42522f
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          StaticType: "application/ics"
+        2634310 com.google.android.calendar/.ICalLauncher filter fa1803c
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Scheme: "http"
+          Scheme: "https"
+          Scheme: "content"
+          Scheme: "file"
+          Scheme: ""
+          Authority: "": -1 WILD
+          Path: "PatternMatcher{GLOB: .*\.ics}"
+          StaticType: "application/octet-stream"
+      android.intent.action.INSERT:
+        1461b3f com.google.android.calendar/com.android.calendar.event.LaunchInfoActivity filter 8e0fc0c
+          Action: "android.intent.action.EDIT"
+          Action: "android.intent.action.VIEW"
+          Action: "android.intent.action.INSERT"
+          Category: "android.intent.category.DEFAULT"
+          StaticType: "vnd.android.cursor.item/event"
+        1461b3f com.google.android.calendar/com.android.calendar.event.LaunchInfoActivity filter 1df2955
+          Action: "android.intent.action.EDIT"
+          Action: "android.intent.action.INSERT"
+          Category: "android.intent.category.DEFAULT"
+          StaticType: "vnd.android.cursor.dir/event"
+
+Receiver Resolver Table:
+  Full MIME Types:
+      vnd.android.data/update:
+        b959040 com.google.android.calendar/com.android.calendar.widget.CalendarAppWidgetProvider filter f63706c
+          Action: "com.google.android.calendar.APPWIDGET_SCHEDULED_UPDATE"
+          Scheme: "content"
+          Authority: "com.android.calendar": -1
+          StaticType: "vnd.android.data/update"
+        b4d2758 com.google.android.calendar/.widgetschedule.ScheduleViewWidgetDataReceiver filter 7e6c0b1
+          Action: "com.google.android.calendar.APPWIDGET_REFRESH_MODEL"
+          Scheme: "content"
+          Authority: "com.android.calendar": -1
+          StaticType: "vnd.android.data/update"
+
+  Base MIME Types:
+      vnd.android.data:
+        b959040 com.google.android.calendar/com.android.calendar.widget.CalendarAppWidgetProvider filter f63706c
+          Action: "com.google.android.calendar.APPWIDGET_SCHEDULED_UPDATE"
+          Scheme: "content"
+          Authority: "com.android.calendar": -1
+          StaticType: "vnd.android.data/update"
+        b4d2758 com.google.android.calendar/.widgetschedule.ScheduleViewWidgetDataReceiver filter 7e6c0b1
+          Action: "com.google.android.calendar.APPWIDGET_REFRESH_MODEL"
+          Scheme: "content"
+          Authority: "com.android.calendar": -1
+          StaticType: "vnd.android.data/update"
+
+  Schemes:
+      widget:
+        19e2aca com.google.android.calendar/.widgetschedule.ScheduleViewWidgetLifeboatReceiver filter 39df43b
+          Action: "com.google.android.calendar.APPWIDGET_LIFEBOAT"
+          Scheme: "widget"
+          Authority: "com.android.calendar": -1
+      content:
+        b959040 com.google.android.calendar/com.android.calendar.widget.CalendarAppWidgetProvider filter 57ac0be
+          Action: "android.intent.action.PROVIDER_CHANGED"
+          Scheme: "content"
+          Authority: "com.android.calendar": -1
+        b959040 com.google.android.calendar/com.android.calendar.widget.CalendarAppWidgetProvider filter f63706c
+          Action: "com.google.android.calendar.APPWIDGET_SCHEDULED_UPDATE"
+          Scheme: "content"
+          Authority: "com.android.calendar": -1
+          StaticType: "vnd.android.data/update"
+        b4d2758 com.google.android.calendar/.widgetschedule.ScheduleViewWidgetDataReceiver filter 7e6c0b1
+          Action: "com.google.android.calendar.APPWIDGET_REFRESH_MODEL"
+          Scheme: "content"
+          Authority: "com.android.calendar": -1
+          StaticType: "vnd.android.data/update"
+        828afb3 com.google.android.calendar/.widgetmonth.MonthViewWidgetModelRefresher filter b83d4e9
+          Action: "android.intent.action.PROVIDER_CHANGED"
+          Scheme: "content"
+          Authority: "com.android.calendar": -1
+        1102446 com.google.android.calendar/com.google.android.apps.calendar.usernotifications.NotificationsRelevantUpdatesReceiver filter 310f607
+          Action: "android.intent.action.PROVIDER_CHANGED"
+          Scheme: "content"
+          Authority: "com.android.calendar": -1
+
+  Non-Data Actions:
+      android.accounts.action.ACCOUNT_REMOVED:
+        b959040 com.google.android.calendar/com.android.calendar.widget.CalendarAppWidgetProvider filter 2221b79
+          Action: "android.accounts.action.ACCOUNT_REMOVED"
+          Action: "android.accounts.LOGIN_ACCOUNTS_CHANGED"
+          Action: "android.intent.action.LOCALE_CHANGED"
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "com.google.android.calendar.widget.MIDNIGHT"
+          Action: "android.intent.action.DATE_CHANGED"
+        828afb3 com.google.android.calendar/.widgetmonth.MonthViewWidgetModelRefresher filter 874940f
+          Action: "android.accounts.action.ACCOUNT_REMOVED"
+          Action: "android.accounts.LOGIN_ACCOUNTS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_CALLER_IS_SYNCADAPTER"
+          Action: "com.google.android.timely.intent.action.TASK_SETTINGS_CHANGED"
+          Action: "com.google.android.timely.intent.action.REMINDER_SETTINGS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_TASK_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_REMINDER_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_CROSS_PROFILE_CHANGED"
+        21a7fd0 com.google.android.calendar/com.google.android.libraries.phenotype.client.stable.AccountRemovedBroadcastReceiver filter 319fbc9
+          Action: "android.accounts.action.ACCOUNT_REMOVED"
+      android.intent.action.BATTERY_OKAY:
+        6151dda com.google.android.calendar/androidx.work.impl.background.systemalarm.ConstraintProxy$BatteryNotLowProxy filter 6b2520b
+          Action: "android.intent.action.BATTERY_OKAY"
+          Action: "android.intent.action.BATTERY_LOW"
+      android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED:
+        81a3ed2 com.google.android.calendar/com.google.android.apps.calendar.usernotificationsframework.common.UserNotificationBroadcastReceiver filter abceba3
+          Action: "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED"
+          Action: "com.google.android.calendar.intent.action.UPDATE_NOTIFICATION"
+          Action: "com.google.android.calendar.intent.action.CHECK_NOTIFICATIONS"
+          Action: "com.google.android.calendar.intent.action.MIDNIGHT"
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Action: "com.google.android.calendar.intent.action.CHECK_NOTIFICATIONS_WHEN_AWAKE"
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+      android.intent.action.ACTION_POWER_DISCONNECTED:
+        e6fc8fc com.google.android.calendar/androidx.work.impl.background.systemalarm.ConstraintProxy$BatteryChargingProxy filter 3bd8b85
+          Action: "android.intent.action.ACTION_POWER_DISCONNECTED"
+          Action: "android.intent.action.ACTION_POWER_CONNECTED"
+      android.intent.action.QUICKBOOT_POWERON:
+        a39761e com.google.android.calendar/com.google.android.libraries.internal.growth.growthkit.inject.GrowthKitBootCompletedBroadcastReceiver filter 5a89eff
+          Action: "android.intent.action.QUICKBOOT_POWERON"
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+      com.google.android.calendar.appsearch.metrics:
+        97eda7a com.google.android.calendar/com.google.android.apps.calendar.appsearch.impl.metrics.RemoteMetricsBroadcastReceiver filter 5f0622b
+          Action: "com.google.android.calendar.appsearch.metrics"
+      android.intent.action.DEVICE_STORAGE_LOW:
+        e6e78e8 com.google.android.calendar/androidx.work.impl.background.systemalarm.ConstraintProxy$StorageNotLowProxy filter 9505b01
+          Action: "android.intent.action.DEVICE_STORAGE_LOW"
+          Action: "android.intent.action.DEVICE_STORAGE_OK"
+      android.net.conn.CONNECTIVITY_CHANGE:
+        6b73da6 com.google.android.calendar/androidx.work.impl.background.systemalarm.ConstraintProxy$NetworkStateProxy filter 53203e7
+          Action: "android.net.conn.CONNECTIVITY_CHANGE"
+      com.google.android.assistant.appactions.widgets.COMPLETE_PIN_APP_WIDGET:
+        205c56 com.google.android.calendar/com.google.assistant.appactions.widgets.pinappwidget.PinAppWidgetBroadcastReceiver filter a6db4d7
+          Action: "com.google.android.assistant.appactions.widgets.COMPLETE_PIN_APP_WIDGET"
+      com.google.android.libraries.internal.growth.growthkit.CLEAR_COUNTERS:
+        17794cc com.google.android.calendar/com.google.android.libraries.internal.growth.growthkit.internal.debug.TestingToolsBroadcastReceiver filter 108b315
+          Action: "com.google.android.libraries.internal.growth.growthkit.CLEAR_COUNTERS"
+          Action: "com.google.android.libraries.internal.growth.growthkit.FETCH_EVAL_RESULTS"
+          Action: "com.google.android.libraries.internal.growth.growthkit.FETCH_PROMOTIONS"
+          Action: "com.google.android.libraries.internal.growth.growthkit.SYNC"
+          Action: "com.google.android.libraries.internal.growth.growthkit.GET_REGISTRATION_STATE"
+          Action: "com.google.android.libraries.internal.growth.growthkit.LOG_DEBUG_DATA"
+          Action: "com.google.android.libraries.internal.growth.growthkit.ADD_PREVIEW_PROMO"
+          Action: "com.google.android.libraries.internal.growth.growthkit.ADD_PROMO"
+      com.google.android.calendar.intent.action.UPDATE_NOTIFICATION:
+        81a3ed2 com.google.android.calendar/com.google.android.apps.calendar.usernotificationsframework.common.UserNotificationBroadcastReceiver filter abceba3
+          Action: "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED"
+          Action: "com.google.android.calendar.intent.action.UPDATE_NOTIFICATION"
+          Action: "com.google.android.calendar.intent.action.CHECK_NOTIFICATIONS"
+          Action: "com.google.android.calendar.intent.action.MIDNIGHT"
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Action: "com.google.android.calendar.intent.action.CHECK_NOTIFICATIONS_WHEN_AWAKE"
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+      android.accounts.LOGIN_ACCOUNTS_CHANGED:
+        5ee1f72 com.google.android.calendar/com.google.android.apps.calendar.removeaccountdata.AccountDataCleaner filter 8244fc3
+          Action: "android.accounts.LOGIN_ACCOUNTS_CHANGED"
+        b959040 com.google.android.calendar/com.android.calendar.widget.CalendarAppWidgetProvider filter 2221b79
+          Action: "android.accounts.action.ACCOUNT_REMOVED"
+          Action: "android.accounts.LOGIN_ACCOUNTS_CHANGED"
+          Action: "android.intent.action.LOCALE_CHANGED"
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "com.google.android.calendar.widget.MIDNIGHT"
+          Action: "android.intent.action.DATE_CHANGED"
+        5dc2996 com.google.android.calendar/com.google.calendar.v2a.shared.sync.impl.android.accounts.AccountsBroadcastReceiver filter 36d9917
+          Action: "android.accounts.LOGIN_ACCOUNTS_CHANGED"
+        828afb3 com.google.android.calendar/.widgetmonth.MonthViewWidgetModelRefresher filter 874940f
+          Action: "android.accounts.action.ACCOUNT_REMOVED"
+          Action: "android.accounts.LOGIN_ACCOUNTS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_CALLER_IS_SYNCADAPTER"
+          Action: "com.google.android.timely.intent.action.TASK_SETTINGS_CHANGED"
+          Action: "com.google.android.timely.intent.action.REMINDER_SETTINGS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_TASK_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_REMINDER_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_CROSS_PROFILE_CHANGED"
+        159cc9c com.google.android.calendar/com.google.android.apps.calendar.appsearch.impl.AppSearchBroadcastReceiver filter c3bd6a5
+          Action: "android.accounts.LOGIN_ACCOUNTS_CHANGED"
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+        6ef31b8 com.google.android.calendar/com.google.android.libraries.notifications.platform.entrypoints.accountchanged.AccountChangedReceiver filter 14e6b91
+          Action: "android.accounts.LOGIN_ACCOUNTS_CHANGED"
+      android.intent.action.DEVICE_STORAGE_OK:
+        e6e78e8 com.google.android.calendar/androidx.work.impl.background.systemalarm.ConstraintProxy$StorageNotLowProxy filter 9505b01
+          Action: "android.intent.action.DEVICE_STORAGE_LOW"
+          Action: "android.intent.action.DEVICE_STORAGE_OK"
+      com.google.android.calendar.intent.action.CHECK_NOTIFICATIONS:
+        81a3ed2 com.google.android.calendar/com.google.android.apps.calendar.usernotificationsframework.common.UserNotificationBroadcastReceiver filter abceba3
+          Action: "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED"
+          Action: "com.google.android.calendar.intent.action.UPDATE_NOTIFICATION"
+          Action: "com.google.android.calendar.intent.action.CHECK_NOTIFICATIONS"
+          Action: "com.google.android.calendar.intent.action.MIDNIGHT"
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Action: "com.google.android.calendar.intent.action.CHECK_NOTIFICATIONS_WHEN_AWAKE"
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+      com.google.android.calendar.APPWIDGET_CALLER_IS_SYNCADAPTER:
+        b959040 com.google.android.calendar/com.android.calendar.widget.CalendarAppWidgetProvider filter 91ff635
+          Action: "com.google.android.calendar.APPWIDGET_CALLER_IS_SYNCADAPTER"
+          Action: "com.google.android.timely.intent.action.TASK_SETTINGS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_NEXT_UPDATE"
+          Action: "com.google.android.timely.intent.action.REMINDER_SETTINGS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_TASK_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_REMINDER_CHANGED"
+          Action: "android.appwidget.action.APPWIDGET_UPDATE"
+          Action: "com.google.android.calendar.APPWIDGET_CROSS_PROFILE_CHANGED"
+        828afb3 com.google.android.calendar/.widgetmonth.MonthViewWidgetModelRefresher filter 874940f
+          Action: "android.accounts.action.ACCOUNT_REMOVED"
+          Action: "android.accounts.LOGIN_ACCOUNTS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_CALLER_IS_SYNCADAPTER"
+          Action: "com.google.android.timely.intent.action.TASK_SETTINGS_CHANGED"
+          Action: "com.google.android.timely.intent.action.REMINDER_SETTINGS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_TASK_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_REMINDER_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_CROSS_PROFILE_CHANGED"
+      com.google.android.calendar.intent.action.MIDNIGHT:
+        81a3ed2 com.google.android.calendar/com.google.android.apps.calendar.usernotificationsframework.common.UserNotificationBroadcastReceiver filter abceba3
+          Action: "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED"
+          Action: "com.google.android.calendar.intent.action.UPDATE_NOTIFICATION"
+          Action: "com.google.android.calendar.intent.action.CHECK_NOTIFICATIONS"
+          Action: "com.google.android.calendar.intent.action.MIDNIGHT"
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Action: "com.google.android.calendar.intent.action.CHECK_NOTIFICATIONS_WHEN_AWAKE"
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+      com.google.android.libraries.internal.growth.growthkit.FETCH_EVAL_RESULTS:
+        17794cc com.google.android.calendar/com.google.android.libraries.internal.growth.growthkit.internal.debug.TestingToolsBroadcastReceiver filter 108b315
+          Action: "com.google.android.libraries.internal.growth.growthkit.CLEAR_COUNTERS"
+          Action: "com.google.android.libraries.internal.growth.growthkit.FETCH_EVAL_RESULTS"
+          Action: "com.google.android.libraries.internal.growth.growthkit.FETCH_PROMOTIONS"
+          Action: "com.google.android.libraries.internal.growth.growthkit.SYNC"
+          Action: "com.google.android.libraries.internal.growth.growthkit.GET_REGISTRATION_STATE"
+          Action: "com.google.android.libraries.internal.growth.growthkit.LOG_DEBUG_DATA"
+          Action: "com.google.android.libraries.internal.growth.growthkit.ADD_PREVIEW_PROMO"
+          Action: "com.google.android.libraries.internal.growth.growthkit.ADD_PROMO"
+      com.google.android.timely.intent.action.TASK_SETTINGS_CHANGED:
+        b959040 com.google.android.calendar/com.android.calendar.widget.CalendarAppWidgetProvider filter 91ff635
+          Action: "com.google.android.calendar.APPWIDGET_CALLER_IS_SYNCADAPTER"
+          Action: "com.google.android.timely.intent.action.TASK_SETTINGS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_NEXT_UPDATE"
+          Action: "com.google.android.timely.intent.action.REMINDER_SETTINGS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_TASK_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_REMINDER_CHANGED"
+          Action: "android.appwidget.action.APPWIDGET_UPDATE"
+          Action: "com.google.android.calendar.APPWIDGET_CROSS_PROFILE_CHANGED"
+        828afb3 com.google.android.calendar/.widgetmonth.MonthViewWidgetModelRefresher filter 874940f
+          Action: "android.accounts.action.ACCOUNT_REMOVED"
+          Action: "android.accounts.LOGIN_ACCOUNTS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_CALLER_IS_SYNCADAPTER"
+          Action: "com.google.android.timely.intent.action.TASK_SETTINGS_CHANGED"
+          Action: "com.google.android.timely.intent.action.REMINDER_SETTINGS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_TASK_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_REMINDER_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_CROSS_PROFILE_CHANGED"
+      com.google.android.calendar.APPWIDGET_NEXT_UPDATE:
+        b959040 com.google.android.calendar/com.android.calendar.widget.CalendarAppWidgetProvider filter 91ff635
+          Action: "com.google.android.calendar.APPWIDGET_CALLER_IS_SYNCADAPTER"
+          Action: "com.google.android.timely.intent.action.TASK_SETTINGS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_NEXT_UPDATE"
+          Action: "com.google.android.timely.intent.action.REMINDER_SETTINGS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_TASK_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_REMINDER_CHANGED"
+          Action: "android.appwidget.action.APPWIDGET_UPDATE"
+          Action: "com.google.android.calendar.APPWIDGET_CROSS_PROFILE_CHANGED"
+      android.intent.action.LOCALE_CHANGED:
+        b959040 com.google.android.calendar/com.android.calendar.widget.CalendarAppWidgetProvider filter 2221b79
+          Action: "android.accounts.action.ACCOUNT_REMOVED"
+          Action: "android.accounts.LOGIN_ACCOUNTS_CHANGED"
+          Action: "android.intent.action.LOCALE_CHANGED"
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "com.google.android.calendar.widget.MIDNIGHT"
+          Action: "android.intent.action.DATE_CHANGED"
+        828afb3 com.google.android.calendar/.widgetmonth.MonthViewWidgetModelRefresher filter 64d8970
+          Action: "android.intent.action.LOCALE_CHANGED"
+        1102446 com.google.android.calendar/com.google.android.apps.calendar.usernotifications.NotificationsRelevantUpdatesReceiver filter 83f355d
+          Action: "android.intent.action.LOCALE_CHANGED"
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "android.intent.action.DATE_CHANGED"
+        9a5ec18 com.google.android.calendar/.utils.notification.NotificationChannelLocaleChangeBroadcastReceiver filter c250671
+          Action: "android.intent.action.LOCALE_CHANGED"
+      com.google.android.timely.intent.action.REMINDER_SETTINGS_CHANGED:
+        b959040 com.google.android.calendar/com.android.calendar.widget.CalendarAppWidgetProvider filter 91ff635
+          Action: "com.google.android.calendar.APPWIDGET_CALLER_IS_SYNCADAPTER"
+          Action: "com.google.android.timely.intent.action.TASK_SETTINGS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_NEXT_UPDATE"
+          Action: "com.google.android.timely.intent.action.REMINDER_SETTINGS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_TASK_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_REMINDER_CHANGED"
+          Action: "android.appwidget.action.APPWIDGET_UPDATE"
+          Action: "com.google.android.calendar.APPWIDGET_CROSS_PROFILE_CHANGED"
+        828afb3 com.google.android.calendar/.widgetmonth.MonthViewWidgetModelRefresher filter 874940f
+          Action: "android.accounts.action.ACCOUNT_REMOVED"
+          Action: "android.accounts.LOGIN_ACCOUNTS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_CALLER_IS_SYNCADAPTER"
+          Action: "com.google.android.timely.intent.action.TASK_SETTINGS_CHANGED"
+          Action: "com.google.android.timely.intent.action.REMINDER_SETTINGS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_TASK_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_REMINDER_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_CROSS_PROFILE_CHANGED"
+      com.google.android.c2dm.intent.RECEIVE:
+        6502af6 com.google.android.calendar/com.google.android.libraries.notifications.platform.entrypoints.push.PushReceiver filter d7d6ef7
+          Action: "com.google.android.c2dm.intent.RECEIVE"
+          mPriority=99, mOrder=0, mHasStaticPartialTypes=false, mHasDynamicPartialTypes=false
+      android.app.action.APP_BLOCK_STATE_CHANGED:
+        e82d62a com.google.android.calendar/com.google.android.libraries.notifications.entrypoints.blockstatechanged.BlockStateChangedReceiver filter 9722c1b
+          Action: "android.app.action.APP_BLOCK_STATE_CHANGED"
+          Action: "android.app.action.NOTIFICATION_CHANNEL_GROUP_BLOCK_STATE_CHANGED"
+          Action: "android.app.action.NOTIFICATION_CHANNEL_BLOCK_STATE_CHANGED"
+      android.intent.action.BATTERY_LOW:
+        6151dda com.google.android.calendar/androidx.work.impl.background.systemalarm.ConstraintProxy$BatteryNotLowProxy filter 6b2520b
+          Action: "android.intent.action.BATTERY_OKAY"
+          Action: "android.intent.action.BATTERY_LOW"
+      android.intent.action.TIMEZONE_CHANGED:
+        b959040 com.google.android.calendar/com.android.calendar.widget.CalendarAppWidgetProvider filter 2221b79
+          Action: "android.accounts.action.ACCOUNT_REMOVED"
+          Action: "android.accounts.LOGIN_ACCOUNTS_CHANGED"
+          Action: "android.intent.action.LOCALE_CHANGED"
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "com.google.android.calendar.widget.MIDNIGHT"
+          Action: "android.intent.action.DATE_CHANGED"
+        9196104 com.google.android.calendar/.widgetmonth.MonthViewWidgetProvider filter 294922
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "android.intent.action.DATE_CHANGED"
+        159cc9c com.google.android.calendar/com.google.android.apps.calendar.appsearch.impl.AppSearchBroadcastReceiver filter c3bd6a5
+          Action: "android.accounts.LOGIN_ACCOUNTS_CHANGED"
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+        1102446 com.google.android.calendar/com.google.android.apps.calendar.usernotifications.NotificationsRelevantUpdatesReceiver filter 83f355d
+          Action: "android.intent.action.LOCALE_CHANGED"
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "android.intent.action.DATE_CHANGED"
+        f263b94 com.google.android.calendar/androidx.work.impl.background.systemalarm.RescheduleReceiver filter 1e6a63d
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "android.intent.action.BOOT_COMPLETED"
+      android.intent.action.TIME_SET:
+        b959040 com.google.android.calendar/com.android.calendar.widget.CalendarAppWidgetProvider filter 2221b79
+          Action: "android.accounts.action.ACCOUNT_REMOVED"
+          Action: "android.accounts.LOGIN_ACCOUNTS_CHANGED"
+          Action: "android.intent.action.LOCALE_CHANGED"
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "com.google.android.calendar.widget.MIDNIGHT"
+          Action: "android.intent.action.DATE_CHANGED"
+        9196104 com.google.android.calendar/.widgetmonth.MonthViewWidgetProvider filter 294922
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "android.intent.action.DATE_CHANGED"
+        159cc9c com.google.android.calendar/com.google.android.apps.calendar.appsearch.impl.AppSearchBroadcastReceiver filter c3bd6a5
+          Action: "android.accounts.LOGIN_ACCOUNTS_CHANGED"
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+        1102446 com.google.android.calendar/com.google.android.apps.calendar.usernotifications.NotificationsRelevantUpdatesReceiver filter 83f355d
+          Action: "android.intent.action.LOCALE_CHANGED"
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "android.intent.action.DATE_CHANGED"
+        f263b94 com.google.android.calendar/androidx.work.impl.background.systemalarm.RescheduleReceiver filter 1e6a63d
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "android.intent.action.BOOT_COMPLETED"
+      com.google.android.libraries.internal.growth.growthkit.FETCH_PROMOTIONS:
+        17794cc com.google.android.calendar/com.google.android.libraries.internal.growth.growthkit.internal.debug.TestingToolsBroadcastReceiver filter 108b315
+          Action: "com.google.android.libraries.internal.growth.growthkit.CLEAR_COUNTERS"
+          Action: "com.google.android.libraries.internal.growth.growthkit.FETCH_EVAL_RESULTS"
+          Action: "com.google.android.libraries.internal.growth.growthkit.FETCH_PROMOTIONS"
+          Action: "com.google.android.libraries.internal.growth.growthkit.SYNC"
+          Action: "com.google.android.libraries.internal.growth.growthkit.GET_REGISTRATION_STATE"
+          Action: "com.google.android.libraries.internal.growth.growthkit.LOG_DEBUG_DATA"
+          Action: "com.google.android.libraries.internal.growth.growthkit.ADD_PREVIEW_PROMO"
+          Action: "com.google.android.libraries.internal.growth.growthkit.ADD_PROMO"
+      com.google.android.calendar.widget.MIDNIGHT:
+        b959040 com.google.android.calendar/com.android.calendar.widget.CalendarAppWidgetProvider filter 2221b79
+          Action: "android.accounts.action.ACCOUNT_REMOVED"
+          Action: "android.accounts.LOGIN_ACCOUNTS_CHANGED"
+          Action: "android.intent.action.LOCALE_CHANGED"
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "com.google.android.calendar.widget.MIDNIGHT"
+          Action: "android.intent.action.DATE_CHANGED"
+      com.google.android.libraries.internal.growth.growthkit.SYNC:
+        17794cc com.google.android.calendar/com.google.android.libraries.internal.growth.growthkit.internal.debug.TestingToolsBroadcastReceiver filter 108b315
+          Action: "com.google.android.libraries.internal.growth.growthkit.CLEAR_COUNTERS"
+          Action: "com.google.android.libraries.internal.growth.growthkit.FETCH_EVAL_RESULTS"
+          Action: "com.google.android.libraries.internal.growth.growthkit.FETCH_PROMOTIONS"
+          Action: "com.google.android.libraries.internal.growth.growthkit.SYNC"
+          Action: "com.google.android.libraries.internal.growth.growthkit.GET_REGISTRATION_STATE"
+          Action: "com.google.android.libraries.internal.growth.growthkit.LOG_DEBUG_DATA"
+          Action: "com.google.android.libraries.internal.growth.growthkit.ADD_PREVIEW_PROMO"
+          Action: "com.google.android.libraries.internal.growth.growthkit.ADD_PROMO"
+      android.intent.action.BOOT_COMPLETED:
+        76f9ad4 com.google.android.calendar/com.google.android.apps.calendar.sync.SyncOnUnlockReceiver filter fa9b47d
+          Action: "android.intent.action.BOOT_COMPLETED"
+        159cc9c com.google.android.calendar/com.google.android.apps.calendar.appsearch.impl.AppSearchBroadcastReceiver filter c3bd6a5
+          Action: "android.accounts.LOGIN_ACCOUNTS_CHANGED"
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+        81a3ed2 com.google.android.calendar/com.google.android.apps.calendar.usernotificationsframework.common.UserNotificationBroadcastReceiver filter abceba3
+          Action: "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED"
+          Action: "com.google.android.calendar.intent.action.UPDATE_NOTIFICATION"
+          Action: "com.google.android.calendar.intent.action.CHECK_NOTIFICATIONS"
+          Action: "com.google.android.calendar.intent.action.MIDNIGHT"
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Action: "com.google.android.calendar.intent.action.CHECK_NOTIFICATIONS_WHEN_AWAKE"
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+        54e2ea0 com.google.android.calendar/com.google.android.apps.calendar.vitals.notification.impl.AlarmBroadcastReceiver filter 43eca59
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Action: "com.google.android.apps.calendar.vitals.notification.impl.MIDNIGHT_ALARM"
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+        a39761e com.google.android.calendar/com.google.android.libraries.internal.growth.growthkit.inject.GrowthKitBootCompletedBroadcastReceiver filter 5a89eff
+          Action: "android.intent.action.QUICKBOOT_POWERON"
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+        41b164 com.google.android.calendar/com.google.android.libraries.notifications.platform.entrypoints.restart.RestartReceiver filter 75d2fcd
+          Action: "android.intent.action.BOOT_COMPLETED"
+        f263b94 com.google.android.calendar/androidx.work.impl.background.systemalarm.RescheduleReceiver filter 1e6a63d
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "android.intent.action.BOOT_COMPLETED"
+        bbe5b7e com.google.android.calendar/.upgradereceiver.SyncUpgradeReceiver filter 16188df
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Category: "android.intent.category.DEFAULT"
+        c515ff5 com.google.android.calendar/.upgradereceiver.AllPrefsUpgradeReceiver filter 660b18a
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Category: "android.intent.category.DEFAULT"
+      android.app.action.NOTIFICATION_CHANNEL_GROUP_BLOCK_STATE_CHANGED:
+        e82d62a com.google.android.calendar/com.google.android.libraries.notifications.entrypoints.blockstatechanged.BlockStateChangedReceiver filter 9722c1b
+          Action: "android.app.action.APP_BLOCK_STATE_CHANGED"
+          Action: "android.app.action.NOTIFICATION_CHANNEL_GROUP_BLOCK_STATE_CHANGED"
+          Action: "android.app.action.NOTIFICATION_CHANNEL_BLOCK_STATE_CHANGED"
+      android.intent.action.ACTION_POWER_CONNECTED:
+        e6fc8fc com.google.android.calendar/androidx.work.impl.background.systemalarm.ConstraintProxy$BatteryChargingProxy filter 3bd8b85
+          Action: "android.intent.action.ACTION_POWER_DISCONNECTED"
+          Action: "android.intent.action.ACTION_POWER_CONNECTED"
+      android.intent.action.DATE_CHANGED:
+        b959040 com.google.android.calendar/com.android.calendar.widget.CalendarAppWidgetProvider filter 2221b79
+          Action: "android.accounts.action.ACCOUNT_REMOVED"
+          Action: "android.accounts.LOGIN_ACCOUNTS_CHANGED"
+          Action: "android.intent.action.LOCALE_CHANGED"
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "com.google.android.calendar.widget.MIDNIGHT"
+          Action: "android.intent.action.DATE_CHANGED"
+        9196104 com.google.android.calendar/.widgetmonth.MonthViewWidgetProvider filter 294922
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "android.intent.action.DATE_CHANGED"
+        1102446 com.google.android.calendar/com.google.android.apps.calendar.usernotifications.NotificationsRelevantUpdatesReceiver filter 83f355d
+          Action: "android.intent.action.LOCALE_CHANGED"
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "android.intent.action.DATE_CHANGED"
+      com.google.android.calendar.APPWIDGET_TASK_CHANGED:
+        b959040 com.google.android.calendar/com.android.calendar.widget.CalendarAppWidgetProvider filter 91ff635
+          Action: "com.google.android.calendar.APPWIDGET_CALLER_IS_SYNCADAPTER"
+          Action: "com.google.android.timely.intent.action.TASK_SETTINGS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_NEXT_UPDATE"
+          Action: "com.google.android.timely.intent.action.REMINDER_SETTINGS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_TASK_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_REMINDER_CHANGED"
+          Action: "android.appwidget.action.APPWIDGET_UPDATE"
+          Action: "com.google.android.calendar.APPWIDGET_CROSS_PROFILE_CHANGED"
+        828afb3 com.google.android.calendar/.widgetmonth.MonthViewWidgetModelRefresher filter 874940f
+          Action: "android.accounts.action.ACCOUNT_REMOVED"
+          Action: "android.accounts.LOGIN_ACCOUNTS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_CALLER_IS_SYNCADAPTER"
+          Action: "com.google.android.timely.intent.action.TASK_SETTINGS_CHANGED"
+          Action: "com.google.android.timely.intent.action.REMINDER_SETTINGS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_TASK_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_REMINDER_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_CROSS_PROFILE_CHANGED"
+      android.app.action.NOTIFICATION_CHANNEL_BLOCK_STATE_CHANGED:
+        e82d62a com.google.android.calendar/com.google.android.libraries.notifications.entrypoints.blockstatechanged.BlockStateChangedReceiver filter 9722c1b
+          Action: "android.app.action.APP_BLOCK_STATE_CHANGED"
+          Action: "android.app.action.NOTIFICATION_CHANNEL_GROUP_BLOCK_STATE_CHANGED"
+          Action: "android.app.action.NOTIFICATION_CHANNEL_BLOCK_STATE_CHANGED"
+      com.google.android.calendar.APPWIDGET_REMINDER_CHANGED:
+        b959040 com.google.android.calendar/com.android.calendar.widget.CalendarAppWidgetProvider filter 91ff635
+          Action: "com.google.android.calendar.APPWIDGET_CALLER_IS_SYNCADAPTER"
+          Action: "com.google.android.timely.intent.action.TASK_SETTINGS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_NEXT_UPDATE"
+          Action: "com.google.android.timely.intent.action.REMINDER_SETTINGS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_TASK_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_REMINDER_CHANGED"
+          Action: "android.appwidget.action.APPWIDGET_UPDATE"
+          Action: "com.google.android.calendar.APPWIDGET_CROSS_PROFILE_CHANGED"
+        828afb3 com.google.android.calendar/.widgetmonth.MonthViewWidgetModelRefresher filter 874940f
+          Action: "android.accounts.action.ACCOUNT_REMOVED"
+          Action: "android.accounts.LOGIN_ACCOUNTS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_CALLER_IS_SYNCADAPTER"
+          Action: "com.google.android.timely.intent.action.TASK_SETTINGS_CHANGED"
+          Action: "com.google.android.timely.intent.action.REMINDER_SETTINGS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_TASK_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_REMINDER_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_CROSS_PROFILE_CHANGED"
+      com.google.android.libraries.internal.growth.growthkit.GET_REGISTRATION_STATE:
+        17794cc com.google.android.calendar/com.google.android.libraries.internal.growth.growthkit.internal.debug.TestingToolsBroadcastReceiver filter 108b315
+          Action: "com.google.android.libraries.internal.growth.growthkit.CLEAR_COUNTERS"
+          Action: "com.google.android.libraries.internal.growth.growthkit.FETCH_EVAL_RESULTS"
+          Action: "com.google.android.libraries.internal.growth.growthkit.FETCH_PROMOTIONS"
+          Action: "com.google.android.libraries.internal.growth.growthkit.SYNC"
+          Action: "com.google.android.libraries.internal.growth.growthkit.GET_REGISTRATION_STATE"
+          Action: "com.google.android.libraries.internal.growth.growthkit.LOG_DEBUG_DATA"
+          Action: "com.google.android.libraries.internal.growth.growthkit.ADD_PREVIEW_PROMO"
+          Action: "com.google.android.libraries.internal.growth.growthkit.ADD_PROMO"
+      com.google.android.calendar.ACTION_CALENDAR_PROVIDER_CHANGED_FOR_NOTIFICATIONS:
+        1102446 com.google.android.calendar/com.google.android.apps.calendar.usernotifications.NotificationsRelevantUpdatesReceiver filter 9991334
+          Action: "com.google.android.calendar.ACTION_CALENDAR_PROVIDER_CHANGED_FOR_NOTIFICATIONS"
+      com.google.android.libraries.internal.growth.growthkit.LOG_DEBUG_DATA:
+        17794cc com.google.android.calendar/com.google.android.libraries.internal.growth.growthkit.internal.debug.TestingToolsBroadcastReceiver filter 108b315
+          Action: "com.google.android.libraries.internal.growth.growthkit.CLEAR_COUNTERS"
+          Action: "com.google.android.libraries.internal.growth.growthkit.FETCH_EVAL_RESULTS"
+          Action: "com.google.android.libraries.internal.growth.growthkit.FETCH_PROMOTIONS"
+          Action: "com.google.android.libraries.internal.growth.growthkit.SYNC"
+          Action: "com.google.android.libraries.internal.growth.growthkit.GET_REGISTRATION_STATE"
+          Action: "com.google.android.libraries.internal.growth.growthkit.LOG_DEBUG_DATA"
+          Action: "com.google.android.libraries.internal.growth.growthkit.ADD_PREVIEW_PROMO"
+          Action: "com.google.android.libraries.internal.growth.growthkit.ADD_PROMO"
+      com.google.android.calendar.intent.action.CHECK_NOTIFICATIONS_WHEN_AWAKE:
+        81a3ed2 com.google.android.calendar/com.google.android.apps.calendar.usernotificationsframework.common.UserNotificationBroadcastReceiver filter abceba3
+          Action: "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED"
+          Action: "com.google.android.calendar.intent.action.UPDATE_NOTIFICATION"
+          Action: "com.google.android.calendar.intent.action.CHECK_NOTIFICATIONS"
+          Action: "com.google.android.calendar.intent.action.MIDNIGHT"
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Action: "com.google.android.calendar.intent.action.CHECK_NOTIFICATIONS_WHEN_AWAKE"
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+      com.google.android.apps.calendar.vitals.notification.impl.MIDNIGHT_ALARM:
+        54e2ea0 com.google.android.calendar/com.google.android.apps.calendar.vitals.notification.impl.AlarmBroadcastReceiver filter 43eca59
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Action: "com.google.android.apps.calendar.vitals.notification.impl.MIDNIGHT_ALARM"
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+      android.appwidget.action.APPWIDGET_UPDATE:
+        b959040 com.google.android.calendar/com.android.calendar.widget.CalendarAppWidgetProvider filter 91ff635
+          Action: "com.google.android.calendar.APPWIDGET_CALLER_IS_SYNCADAPTER"
+          Action: "com.google.android.timely.intent.action.TASK_SETTINGS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_NEXT_UPDATE"
+          Action: "com.google.android.timely.intent.action.REMINDER_SETTINGS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_TASK_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_REMINDER_CHANGED"
+          Action: "android.appwidget.action.APPWIDGET_UPDATE"
+          Action: "com.google.android.calendar.APPWIDGET_CROSS_PROFILE_CHANGED"
+        9196104 com.google.android.calendar/.widgetmonth.MonthViewWidgetProvider filter 875b6ed
+          Action: "android.appwidget.action.APPWIDGET_UPDATE"
+      androidx.work.diagnostics.REQUEST_DIAGNOSTICS:
+        cf57d00 com.google.android.calendar/androidx.work.impl.diagnostics.DiagnosticsReceiver filter e9c6939
+          Action: "androidx.work.diagnostics.REQUEST_DIAGNOSTICS"
+      android.intent.action.MY_PACKAGE_REPLACED:
+        159cc9c com.google.android.calendar/com.google.android.apps.calendar.appsearch.impl.AppSearchBroadcastReceiver filter c3bd6a5
+          Action: "android.accounts.LOGIN_ACCOUNTS_CHANGED"
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+        d851688 com.google.android.calendar/com.google.android.apps.calendar.panlingual.impl.PanlingualBroadcastReceiver filter 3b83821
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+        81a3ed2 com.google.android.calendar/com.google.android.apps.calendar.usernotificationsframework.common.UserNotificationBroadcastReceiver filter abceba3
+          Action: "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED"
+          Action: "com.google.android.calendar.intent.action.UPDATE_NOTIFICATION"
+          Action: "com.google.android.calendar.intent.action.CHECK_NOTIFICATIONS"
+          Action: "com.google.android.calendar.intent.action.MIDNIGHT"
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Action: "com.google.android.calendar.intent.action.CHECK_NOTIFICATIONS_WHEN_AWAKE"
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+        54e2ea0 com.google.android.calendar/com.google.android.apps.calendar.vitals.notification.impl.AlarmBroadcastReceiver filter 43eca59
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Action: "com.google.android.apps.calendar.vitals.notification.impl.MIDNIGHT_ALARM"
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+        a39761e com.google.android.calendar/com.google.android.libraries.internal.growth.growthkit.inject.GrowthKitBootCompletedBroadcastReceiver filter 5a89eff
+          Action: "android.intent.action.QUICKBOOT_POWERON"
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+        ccc0082 com.google.android.calendar/com.google.android.libraries.notifications.platform.entrypoints.update.UpdateReceiver filter 1900393
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+        bbe5b7e com.google.android.calendar/.upgradereceiver.SyncUpgradeReceiver filter 9b5692c
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+        c515ff5 com.google.android.calendar/.upgradereceiver.AllPrefsUpgradeReceiver filter 7ffd3fb
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+      com.google.android.libraries.internal.growth.growthkit.ADD_PREVIEW_PROMO:
+        17794cc com.google.android.calendar/com.google.android.libraries.internal.growth.growthkit.internal.debug.TestingToolsBroadcastReceiver filter 108b315
+          Action: "com.google.android.libraries.internal.growth.growthkit.CLEAR_COUNTERS"
+          Action: "com.google.android.libraries.internal.growth.growthkit.FETCH_EVAL_RESULTS"
+          Action: "com.google.android.libraries.internal.growth.growthkit.FETCH_PROMOTIONS"
+          Action: "com.google.android.libraries.internal.growth.growthkit.SYNC"
+          Action: "com.google.android.libraries.internal.growth.growthkit.GET_REGISTRATION_STATE"
+          Action: "com.google.android.libraries.internal.growth.growthkit.LOG_DEBUG_DATA"
+          Action: "com.google.android.libraries.internal.growth.growthkit.ADD_PREVIEW_PROMO"
+          Action: "com.google.android.libraries.internal.growth.growthkit.ADD_PROMO"
+      androidx.work.impl.background.systemalarm.UpdateProxies:
+        6098e32 com.google.android.calendar/androidx.work.impl.background.systemalarm.ConstraintProxyUpdateReceiver filter 810f783
+          Action: "androidx.work.impl.background.systemalarm.UpdateProxies"
+      com.google.android.libraries.internal.growth.growthkit.ADD_PROMO:
+        17794cc com.google.android.calendar/com.google.android.libraries.internal.growth.growthkit.internal.debug.TestingToolsBroadcastReceiver filter 108b315
+          Action: "com.google.android.libraries.internal.growth.growthkit.CLEAR_COUNTERS"
+          Action: "com.google.android.libraries.internal.growth.growthkit.FETCH_EVAL_RESULTS"
+          Action: "com.google.android.libraries.internal.growth.growthkit.FETCH_PROMOTIONS"
+          Action: "com.google.android.libraries.internal.growth.growthkit.SYNC"
+          Action: "com.google.android.libraries.internal.growth.growthkit.GET_REGISTRATION_STATE"
+          Action: "com.google.android.libraries.internal.growth.growthkit.LOG_DEBUG_DATA"
+          Action: "com.google.android.libraries.internal.growth.growthkit.ADD_PREVIEW_PROMO"
+          Action: "com.google.android.libraries.internal.growth.growthkit.ADD_PROMO"
+      com.google.android.gms.phenotype.UPDATE:
+        33da2ce com.google.android.calendar/com.google.android.libraries.phenotype.client.stable.PhenotypeUpdateBackgroundBroadcastReceiver filter 22d45ef
+          Action: "com.google.android.gms.phenotype.UPDATE"
+      com.google.android.calendar.ACTION_CALENDAR_PROVIDER_CHANGED:
+        b959040 com.google.android.calendar/com.android.calendar.widget.CalendarAppWidgetProvider filter cf2251f
+          Action: "com.google.android.calendar.ACTION_CALENDAR_PROVIDER_CHANGED"
+        828afb3 com.google.android.calendar/.widgetmonth.MonthViewWidgetModelRefresher filter 736d56e
+          Action: "com.google.android.calendar.ACTION_CALENDAR_PROVIDER_CHANGED"
+      com.google.android.calendar.APPWIDGET_CROSS_PROFILE_CHANGED:
+        b959040 com.google.android.calendar/com.android.calendar.widget.CalendarAppWidgetProvider filter 91ff635
+          Action: "com.google.android.calendar.APPWIDGET_CALLER_IS_SYNCADAPTER"
+          Action: "com.google.android.timely.intent.action.TASK_SETTINGS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_NEXT_UPDATE"
+          Action: "com.google.android.timely.intent.action.REMINDER_SETTINGS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_TASK_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_REMINDER_CHANGED"
+          Action: "android.appwidget.action.APPWIDGET_UPDATE"
+          Action: "com.google.android.calendar.APPWIDGET_CROSS_PROFILE_CHANGED"
+        828afb3 com.google.android.calendar/.widgetmonth.MonthViewWidgetModelRefresher filter 874940f
+          Action: "android.accounts.action.ACCOUNT_REMOVED"
+          Action: "android.accounts.LOGIN_ACCOUNTS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_CALLER_IS_SYNCADAPTER"
+          Action: "com.google.android.timely.intent.action.TASK_SETTINGS_CHANGED"
+          Action: "com.google.android.timely.intent.action.REMINDER_SETTINGS_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_TASK_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_REMINDER_CHANGED"
+          Action: "com.google.android.calendar.APPWIDGET_CROSS_PROFILE_CHANGED"
+
+  MIME Typed Actions:
+      com.google.android.calendar.APPWIDGET_REFRESH_MODEL:
+        b4d2758 com.google.android.calendar/.widgetschedule.ScheduleViewWidgetDataReceiver filter 7e6c0b1
+          Action: "com.google.android.calendar.APPWIDGET_REFRESH_MODEL"
+          Scheme: "content"
+          Authority: "com.android.calendar": -1
+          StaticType: "vnd.android.data/update"
+      com.google.android.calendar.APPWIDGET_SCHEDULED_UPDATE:
+        b959040 com.google.android.calendar/com.android.calendar.widget.CalendarAppWidgetProvider filter f63706c
+          Action: "com.google.android.calendar.APPWIDGET_SCHEDULED_UPDATE"
+          Scheme: "content"
+          Authority: "com.android.calendar": -1
+          StaticType: "vnd.android.data/update"
+
+Service Resolver Table:
+  Non-Data Actions:
+      android.content.SyncAdapter:
+        319b1c4 com.google.android.calendar/com.google.calendar.v2a.shared.sync.impl.android.PlatformSyncShell$SyncAdapterService filter 7b298ad
+          Action: "android.content.SyncAdapter"
+        45de7e2 com.google.android.calendar/com.google.android.apps.calendar.vagabond.tasks.impl.sync.PlatformSync$SyncService filter 36ec773
+          Action: "android.content.SyncAdapter"
+        1f6a02e com.google.android.calendar/com.google.android.syncadapters.calendar.CalendarSyncAdapterService filter c6467cf
+          Action: "android.content.SyncAdapter"
+      com.google.android.assistant.appactions.widgets.PIN_APP_WIDGET:
+        77b755c com.google.android.calendar/com.google.assistant.appactions.widgets.pinappwidget.PinAppWidgetService filter e7b3065
+          Action: "com.google.android.assistant.appactions.widgets.PIN_APP_WIDGET"
+      com.google.android.build.data.Properties:
+        650913a com.google.android.calendar/com.google.android.build.data.PropertiesServiceHolder filter 969b1eb
+          Action: "com.google.android.build.data.Properties"
+      com.google.android.libraries.phenotype.registration.PhenotypeMetadataHolderService:
+        ce22630 com.google.android.calendar/com.google.android.libraries.phenotype.registration.PhenotypeMetadataHolderService filter d0d12a9
+          Action: "com.google.android.libraries.phenotype.registration.PhenotypeMetadataHolderService"
+
+Domain verification status:
+  com.google.android.calendar:
+    ID: c705eab1-df0c-4304-b729-4304b47764d8
+    Signatures: [D2:2C:C5:00:29:9F:B2:28:73:A0:1A:01:0D:E1:C8:2F:BE:4D:06:11:19:B9:48:14:DD:30:1D:AB:50:CB:76:78]
+    Domain verification state:
+      www.google.com: system_configured
+      calendar.google.com: system_configured
+      client-side-encryption.google.com: system_configured
+      krahsc.google.com: system_configured
+    User all:
+      Verification link handling allowed: true
+      Selection state:
+        Disabled:
+          www.google.com
+          calendar.google.com
+          client-side-encryption.google.com
+          krahsc.google.com
+
+Permissions:
+  Permission [com.google.android.calendar.permission.C2D_MESSAGE] (505e203):
+    sourcePackage=com.google.android.calendar
+    uid=10161 gids=[] type=0 prot=signature
+    perm=PermissionInfo{30bf372 com.google.android.calendar.permission.C2D_MESSAGE}
+    flags=0x0
+
+Permissions:
+  Permission [com.google.android.calendar.permission.SEND_REMOTE_METRICS] (fb05580):
+    sourcePackage=com.google.android.calendar
+    uid=10161 gids=[] type=0 prot=signature
+    perm=PermissionInfo{6598440 com.google.android.calendar.permission.SEND_REMOTE_METRICS}
+    flags=0x0
+
+Permissions:
+  Permission [com.google.android.calendar.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION] (92197b9):
+    sourcePackage=com.google.android.calendar
+    uid=10161 gids=[] type=0 prot=signature
+    perm=PermissionInfo{8a1d4be com.google.android.calendar.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION}
+    flags=0x0
+
+Permissions:
+  Permission [com.google.android.calendar.permission.READ_OOBE] (19e27fe):
+    sourcePackage=com.google.android.calendar
+    uid=10161 gids=[] type=0 prot=signature
+    perm=PermissionInfo{472a46c com.google.android.calendar.permission.READ_OOBE}
+    flags=0x0
+
+Registered ContentProviders:
+  com.google.android.calendar/com.google.android.apps.calendar.vagabond.tasks.impl.sync.PlatformSync$Provider:
+    Provider{a711a35 com.google.android.calendar/com.google.android.apps.calendar.vagabond.tasks.impl.sync.PlatformSync$Provider}
+  com.google.android.calendar/androidx.lifecycle.ProcessLifecycleOwnerInitializer:
+    Provider{2227eca com.google.android.calendar/androidx.lifecycle.ProcessLifecycleOwnerInitializer}
+  com.google.android.calendar/com.google.calendar.v2a.shared.sync.impl.android.PlatformSyncShell$Provider:
+    Provider{58db83b com.google.android.calendar/com.google.calendar.v2a.shared.sync.impl.android.PlatformSyncShell$Provider}
+  com.google.android.calendar/androidx.core.content.FileProvider:
+    Provider{41b9b58 com.google.android.calendar/androidx.core.content.FileProvider}
+
+ContentProvider Authorities:
+  [com.google.android.calendar.tasks]:
+    Provider{a711a35 com.google.android.calendar/com.google.android.apps.calendar.vagabond.tasks.impl.sync.PlatformSync$Provider}
+      applicationInfo=ApplicationInfo{cfa9b5f com.google.android.calendar}
+  [com.google.android.calendar.fileprovider]:
+    Provider{41b9b58 com.google.android.calendar/androidx.core.content.FileProvider}
+      applicationInfo=ApplicationInfo{c8549ac com.google.android.calendar}
+  [com.google.android.calendar]:
+    Provider{58db83b com.google.android.calendar/com.google.calendar.v2a.shared.sync.impl.android.PlatformSyncShell$Provider}
+      applicationInfo=ApplicationInfo{83af675 com.google.android.calendar}
+  [com.google.android.calendar.lifecycle-process]:
+    Provider{2227eca com.google.android.calendar/androidx.lifecycle.ProcessLifecycleOwnerInitializer}
+      applicationInfo=ApplicationInfo{bb0c60a com.google.android.calendar}
+
+Key Set Manager:
+  [com.google.android.calendar]
+      Signing KeySets: 22
+
+Packages:
+  Package [com.google.android.calendar] (e834589):
+    appId=10161
+    sharedUser=SharedUserSetting{7ccf3b3 com.google.android.calendar.uid.shared/10161}
+    pkg=Package{3f67d70 com.google.android.calendar}
+    codePath=/product/app/CalendarGooglePrebuilt
+    resourcePath=/product/app/CalendarGooglePrebuilt
+    legacyNativeLibraryDir=/product/app/CalendarGooglePrebuilt/lib
+    extractNativeLibs=true
+    primaryCpuAbi=null
+    secondaryCpuAbi=null
+    cpuAbiOverride=null
+    versionCode=2017394391 minSdk=26 targetSdk=34
+    minExtensionVersions=[]
+    versionName=2024.13.0-620698557-release
+    hiddenApiEnforcementPolicy=2
+    usesNonSdkApi=false
+    splits=[base]
+    apkSigningVersion=3
+    flags=[ SYSTEM HAS_CODE ALLOW_CLEAR_USER_DATA ALLOW_BACKUP KILL_AFTER_RESTORE RESTORE_ANY_VERSION ]
+    privateFlags=[ PRIVATE_FLAG_ACTIVITIES_RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION ALLOW_AUDIO_PLAYBACK_CAPTURE HAS_DOMAIN_URLS PARTIALLY_DIRECT_BOOT_AWARE PRODUCT PRIVATE_FLAG_ALLOW_NATIVE_HEAP_POINTER_TAGGING ]
+    forceQueryable=false
+    queriesPackages=[com.google.android.apps.dynamite, com.google.android.gm, com.google.android.syncadapters.calendar, com.google.android.apps.tasks, com.google.android.calendar, com.google.android.apps.meetings, com.google.android.apps.tachyon, com.google.android.apps.docs, com.android.contacts, com.google.android.gms, com.android.vending, com.google.android.gm.lite, com.google.android.gm.exchange, com.google.corp.bizapps.rews.campus.android, com.google.android.apps.docs.editors.docs, com.google.android.apps.docs.editors.sheets, com.google.android.apps.docs.editors.slides, com.google.android.apps.docs.editors.drawings]
+    queriesIntents=[Intent { act=android.intent.action.SENDTO dat=mailto:xx }, Intent { act=android.intent.action.INSERT dat=content://*/... typ=vnd.android.cursor.item/event }, Intent { act=android.intent.action.VIEW dat=https://chat.google.com/... }, Intent { act=android.intent.action.VIEW dat=content://*/... typ=vnd.google.android.hangouts/* }, Intent { act=android.intent.action.INSERT dat=content://*/... typ=vnd.android.cursor.dir/contact }, Intent { act=android.intent.action.VIEW cat=[android.intent.category.BROWSABLE] dat=https:/... }, Intent { act=android.intent.action.CALL }, Intent { act=android.intent.action.DIAL }, Intent { act=com.google.android.gsf.GOOGLE_APPS_LOCATION_SETTINGS }, Intent { act=android.intent.action.VIEW cat=[android.intent.category.BROWSABLE] dat=https://docs.google.com/... }, Intent { act=android.intent.action.VIEW cat=[android.intent.category.BROWSABLE] dat=https://drive.google.com/... }, Intent { act=android.intent.action.VIEW cat=[android.intent.category.BROWSABLE] dat=http://www.example.com/... }, Intent { act=android.support.customtabs.action.CustomTabsService }]
+    scannedAsStoppedSystemApp=true
+    supportsScreens=[small, medium, large, xlarge, resizeable, anyDensity]
+    usesOptionalLibraries:
+      org.apache.http.legacy
+      androidx.window.extensions
+      androidx.window.sidecar
+    usesLibraryFiles:
+      /system/framework/org.apache.http.legacy.jar
+      /system_ext/framework/androidx.window.extensions.jar
+      /system_ext/framework/androidx.window.sidecar.jar
+    timeStamp=2025-01-23 11:22:57
+    lastUpdateTime=2026-11-06 18:14:56
+    installerPackageName=null
+    installerPackageUid=-1
+    initiatingPackageName=null
+    originatingPackageName=null
+    packageSource=0
+    appMetadataFilePath=null
+    appMetadataSource=0
+    signatures=PackageSignatures{c4ae96e version:3, signatures:[f1014c4], past signatures:[ef3d224c flags: 17, f1014c4 flags: 17]}
+    installPermissionsFixed=false
+    pkgFlags=[ SYSTEM HAS_CODE ALLOW_CLEAR_USER_DATA ALLOW_BACKUP KILL_AFTER_RESTORE RESTORE_ANY_VERSION ]
+    privatePkgFlags=[ PRIVATE_FLAG_ACTIVITIES_RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION ALLOW_AUDIO_PLAYBACK_CAPTURE HAS_DOMAIN_URLS PARTIALLY_DIRECT_BOOT_AWARE PRODUCT PRIVATE_FLAG_ALLOW_NATIVE_HEAP_POINTER_TAGGING ]
+    apexModuleName=null
+    declared permissions:
+      com.google.android.calendar.permission.C2D_MESSAGE: prot=signature
+      com.google.android.calendar.permission.READ_OOBE: prot=signature
+      com.google.android.calendar.permission.SEND_REMOTE_METRICS: prot=signature
+      com.google.android.calendar.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION: prot=signature
+    requested permissions:
+      com.google.android.calendar.permission.C2D_MESSAGE
+      android.permission.READ_CALENDAR
+      android.permission.POST_NOTIFICATIONS
+      com.google.android.c2dm.permission.RECEIVE
+      android.permission.USE_CREDENTIALS
+      com.google.android.providers.gsf.permission.READ_GSERVICES
+      android.permission.WRITE_SYNC_SETTINGS
+      android.permission.RECEIVE_BOOT_COMPLETED
+      android.permission.SUBSCRIBED_FEEDS_READ
+      android.permission.SUBSCRIBED_FEEDS_WRITE
+      android.permission.INTERNET
+      android.permission.GET_PACKAGE_SIZE
+      android.permission.USE_EXACT_ALARM
+      android.permission.ACCESS_COARSE_LOCATION
+      com.google.android.gm.exchange.BIND
+      android.permission.CALL_PHONE
+      com.google.android.gm.permission.READ_GMAIL
+      com.google.android.hangouts.START_HANGOUT
+      android.permission.ACCESS_NETWORK_STATE
+      android.permission.WRITE_CALENDAR
+      android.permission.READ_SYNC_STATS
+      android.permission.READ_SYNC_SETTINGS
+      android.permission.VIBRATE
+      android.permission.INTERACT_ACROSS_PROFILES
+      android.permission.WAKE_LOCK
+      android.permission.READ_CONTACTS
+    install permissions:
+      com.google.android.calendar.permission.C2D_MESSAGE: granted=true
+      com.google.android.c2dm.permission.RECEIVE: granted=true
+      android.permission.USE_CREDENTIALS: granted=true
+      com.google.android.providers.gsf.permission.READ_GSERVICES: granted=true
+      android.permission.WRITE_SYNC_SETTINGS: granted=true
+      android.permission.RECEIVE_BOOT_COMPLETED: granted=true
+      android.permission.SUBSCRIBED_FEEDS_READ: granted=true
+      android.permission.SUBSCRIBED_FEEDS_WRITE: granted=true
+      android.permission.INTERNET: granted=true
+      android.permission.GET_PACKAGE_SIZE: granted=true
+      android.permission.USE_EXACT_ALARM: granted=true
+      com.google.android.gm.permission.READ_GMAIL: granted=true
+      android.permission.ACCESS_NETWORK_STATE: granted=true
+      android.permission.READ_SYNC_STATS: granted=true
+      android.permission.READ_SYNC_SETTINGS: granted=true
+      android.permission.VIBRATE: granted=true
+      android.permission.WAKE_LOCK: granted=true
+    User 0: ceDataInode=549352 deDataInode=393732 installed=true hidden=false suspended=false distractionFlags=0 stopped=true notLaunched=false enabled=0 instant=false virtual=false quarantined=false
+      installReason=0
+      dataDir=/data/user/0/com.google.android.calendar
+      firstInstallTime=2026-11-06 18:14:56
+      uninstallReason=0
+      overlay paths:
+        /product/overlay/EmulationPixel8/EmulationPixel8Overlay.apk
+        /product/overlay/NavigationBarModeGestural/NavigationBarModeGesturalOverlay.apk
+      legacy overlay paths:
+        /product/overlay/EmulationPixel8/EmulationPixel8Overlay.apk
+        /product/overlay/NavigationBarModeGestural/NavigationBarModeGesturalOverlay.apk
+
+Queries:
+  system apps queryable: false
+  queries via forceQueryable:
+  queries via package name:
+    com.google.android.calendar:
+      com.google.android.apps.docs
+      com.google.android.gm
+    com.google.android.gm:
+      com.google.android.calendar
+  queries via component:
+    com.google.android.apps.safetyhub:
+      com.google.android.calendar
+    com.google.android.apps.messaging:
+      com.google.android.calendar
+    com.google.android.settings.intelligence:
+      com.google.android.calendar
+    com.google.android.contacts:
+      com.google.android.calendar
+    com.google.android.apps.docs:
+      com.google.android.calendar
+    com.google.android.calendar:
+      com.google.android.dialer
+      com.android.chrome
+      com.google.android.contacts
+      com.google.android.apps.docs
+      com.google.android.gm
+    com.google.android.gm:
+      com.google.android.calendar
+    com.google.android.googlesdksetup:
+      com.google.android.calendar
+    com.android.wallpaper:
+      com.google.android.calendar
+    com.google.android.apps.wallpaper:
+      com.google.android.calendar
+  queryable via interaction:
+    User 0:
+  queryable via uses-library:
+
+Shared users:
+  SharedUser [com.google.android.calendar.uid.shared] (7ccf3b3):
+    appId=10161
+    Packages
+      PackageSetting{e834589 com.google.android.calendar/10161}
+    install permissions:
+      com.google.android.calendar.permission.C2D_MESSAGE: granted=true
+      com.google.android.c2dm.permission.RECEIVE: granted=true
+      android.permission.USE_CREDENTIALS: granted=true
+      com.google.android.providers.gsf.permission.READ_GSERVICES: granted=true
+      android.permission.WRITE_SYNC_SETTINGS: granted=true
+      android.permission.RECEIVE_BOOT_COMPLETED: granted=true
+      android.permission.SUBSCRIBED_FEEDS_READ: granted=true
+      android.permission.SUBSCRIBED_FEEDS_WRITE: granted=true
+      android.permission.INTERNET: granted=true
+      android.permission.GET_PACKAGE_SIZE: granted=true
+      android.permission.USE_EXACT_ALARM: granted=true
+      com.google.android.gm.permission.READ_GMAIL: granted=true
+      android.permission.ACCESS_NETWORK_STATE: granted=true
+      android.permission.READ_SYNC_STATS: granted=true
+      android.permission.READ_SYNC_SETTINGS: granted=true
+      android.permission.VIBRATE: granted=true
+      android.permission.WAKE_LOCK: granted=true
+    User 0: 
+      gids=[3003]
+      runtime permissions:
+        android.permission.READ_CALENDAR: granted=true, flags=[ GRANTED_BY_DEFAULT|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+        android.permission.POST_NOTIFICATIONS: granted=true, flags=[ GRANTED_BY_DEFAULT|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+        android.permission.ACCESS_COARSE_LOCATION: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+        android.permission.CALL_PHONE: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+        android.permission.WRITE_CALENDAR: granted=true, flags=[ GRANTED_BY_DEFAULT|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+        android.permission.READ_CONTACTS: granted=true, flags=[ GRANTED_BY_DEFAULT|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+
+Dexopt state:
+  [com.google.android.calendar]
+    path: /product/app/CalendarGooglePrebuilt/CalendarGooglePrebuilt.apk
+      arm64: [status=verify] [reason=prebuilt] [primary-abi]
+        [location is /product/app/CalendarGooglePrebuilt/oat/arm64/CalendarGooglePrebuilt.odex]
+
+Compiler stats:
+  [com.google.android.calendar]
+    (No recorded stats)

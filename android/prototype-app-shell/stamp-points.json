@@ -1,0 +1,13 @@
+{
+  "templateApplicationId": "dev.jasonpearson.automobile.app.template",
+  "points": [
+    {
+      "file": "AndroidManifest.xml",
+      "path": "manifest@package"
+    },
+    {
+      "file": "AndroidManifest.xml",
+      "path": "manifest/application/provider[@android:name='androidx.startup.InitializationProvider']@android:authorities"
+    }
+  ]
+}

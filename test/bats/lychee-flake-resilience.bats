@@ -37,14 +37,7 @@
 
 CONFIG=".lycherc.toml"
 
-requires_yq() {
-  command -v yq >/dev/null 2>&1 && return 0
-  if [[ -n "${CI:-}" ]]; then
-    echo "yq is required in CI to verify .lycherc.toml hardening" >&2
-    return 1
-  fi
-  skip "yq not installed"
-}
+load yq-helpers
 
 # Extracts the kaeawc/auto-mobile issue/pull exclude pattern as a raw
 # (non-JSON-escaped) string usable directly as a bash =~ regex.
@@ -64,7 +57,7 @@ release_download_placeholder_exclude_pattern() {
 }
 
 @test "lychee retries failed requests with a backoff (retry_wait_time)" {
-  requires_yq
+  require_mikefarah_yq
   run yq -p toml -o json '.retry_wait_time' "$CONFIG"
   [ "$status" -eq 0 ]
   # Must be a positive number: retrying immediately (no wait) against a
@@ -74,7 +67,7 @@ release_download_placeholder_exclude_pattern() {
 }
 
 @test "lychee allows a roomier per-request timeout for slow responses" {
-  requires_yq
+  require_mikefarah_yq
   run yq -p toml -o json '.timeout' "$CONFIG"
   [ "$status" -eq 0 ]
   [[ "$output" =~ ^[0-9]+$ ]]
@@ -84,7 +77,7 @@ release_download_placeholder_exclude_pattern() {
 }
 
 @test "contributor-covenant.org is excluded for all paths, not just the root" {
-  requires_yq
+  require_mikefarah_yq
   run yq -p toml -o json '.exclude[] | select(test("contributor-covenant"))' "$CONFIG"
   [ "$status" -eq 0 ]
   [ -n "$output" ]
@@ -94,7 +87,7 @@ release_download_placeholder_exclude_pattern() {
 }
 
 @test "self-referential auto-mobile issue/pull exclude pattern is present in .lycherc.toml" {
-  requires_yq
+  require_mikefarah_yq
   run self_referential_exclude_pattern
   [ "$status" -eq 0 ]
   # Exactly one exclude entry covers kaeawc/auto-mobile issue/pull links, both
@@ -116,7 +109,7 @@ release_download_placeholder_exclude_pattern() {
 }
 
 @test "self-referential exclude pattern does not match a malformed appended-ID link" {
-  requires_yq
+  require_mikefarah_yq
   run self_referential_exclude_pattern
   [ "$status" -eq 0 ]
   local pattern="$output"
@@ -133,7 +126,7 @@ release_download_placeholder_exclude_pattern() {
 }
 
 @test "self-referential exclude pattern does not over-exclude other repos' issue/pull links" {
-  requires_yq
+  require_mikefarah_yq
   run self_referential_exclude_pattern
   [ "$status" -eq 0 ]
   local pattern="$output"
@@ -154,7 +147,7 @@ release_download_placeholder_exclude_pattern() {
 }
 
 @test "release-download base exclude pattern matches only the bare base with an optional trailing slash" {
-  requires_yq
+  require_mikefarah_yq
   run release_download_base_exclude_pattern
   [ "$status" -eq 0 ]
   [ "$output" = '^https://github\.com/kaeawc/auto-mobile/releases/download/?$' ]
@@ -168,7 +161,7 @@ release_download_placeholder_exclude_pattern() {
 }
 
 @test "release-download base exclude pattern does not match real assets, release pages, or other repos" {
-  requires_yq
+  require_mikefarah_yq
   run release_download_base_exclude_pattern
   [ "$status" -eq 0 ]
   local pattern="$output"
@@ -184,7 +177,7 @@ release_download_placeholder_exclude_pattern() {
 }
 
 @test "release-download placeholder exclude matches an unexpanded tag and nothing real" {
-  requires_yq
+  require_mikefarah_yq
   run release_download_placeholder_exclude_pattern
   [ "$status" -eq 0 ]
   [ -n "$output" ]
@@ -210,7 +203,7 @@ badge_endpoint_exclude_pattern() {
 }
 
 @test "shields.io endpoint badges backed by our own gh-pages JSON are excluded" {
-  requires_yq
+  require_mikefarah_yq
   run badge_endpoint_exclude_pattern
   [ "$status" -eq 0 ]
   # Exactly one entry.
@@ -224,7 +217,7 @@ badge_endpoint_exclude_pattern() {
 }
 
 @test "badge exclude does not widen to static badges, other endpoints, other hosts or suffixes" {
-  requires_yq
+  require_mikefarah_yq
   run badge_endpoint_exclude_pattern
   [ "$status" -eq 0 ]
   local pattern="$output"

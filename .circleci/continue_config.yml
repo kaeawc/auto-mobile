@@ -5,8 +5,12 @@ version: 2.1
 # REQUIRED dynamic-config project setting, and
 # docs/design-docs/ci/macos-capacity-plan.md for where every macOS job runs.
 #
-# CircleCI runs ONE macOS job at a time for this organization (#11010), so this
-# file holds exactly three kinds of work:
+# The `linux-*` jobs (workflow `linux-pr`, gated on `run-linux`) are a PR shadow
+# lane that mirrors GitHub's Linux Node/shell jobs; see
+# docs/design-docs/ci/circleci-linux-shadow-lane.md.
+#
+# CircleCI runs ONE macOS job at a time for this organization (#11010), so the
+# macOS part of this file holds exactly three kinds of work:
 #
 # 1. Pull requests: only `ios-playground-tests` (advisory Playground design-system
 #    tests), gated on `run-ios`. Every other PR macOS job runs in exactly one place
@@ -36,6 +40,11 @@ parameters:
   run-ios:
     type: boolean
     default: false
+  # Set by the `.*` mapping in config.yml for every PR that changes a file: gates
+  # the Linux shadow jobs below.
+  run-linux:
+    type: boolean
+    default: false
   run-swift-coverage-main:
     type: boolean
     default: false
@@ -50,8 +59,30 @@ parameters:
   run-nightly-macos:
     type: boolean
     default: false
+  # Post-merge Linux Node mirrors, set from .circleci/main-macos-paths.txt on main.
+  run-main-linux:
+    type: boolean
+    default: false
+  # Set by the nightly Linux scheduled pipeline (owner-configured trigger).
+  run-nightly-linux:
+    type: boolean
+    default: false
 
 executors:
+  # Shadow Linux lane (4 vCPU / 8 GB, 20 credits/min). The `-node` variant carries
+  # the JDK 21 that Fast Validation's ktfmt check needs plus the npm that the
+  # pinned-graph and unpacked-size checks shell out to; every Linux job shares it.
+  linux:
+    docker:
+      - image: cimg/openjdk:21.0-node
+    resource_class: large
+    environment:
+      GIT_LFS_SKIP_SMUDGE: "1"
+      # A Docker container reports the host's core count, so the scripts that size
+      # themselves from nproc oversubscribe the 4 vCPU. Pin them to what the GitHub
+      # 4-core runner picks.
+      AUTOMOBILE_UNIT_TEST_WORKERS: "3"
+      AUTOMOBILE_BATS_JOBS: "4"
   ios:
     parameters:
       xcode:
@@ -126,6 +157,8 @@ commands:
           command: |
             bun_version="$(jq -r '.packageManager | sub("^bun@"; "")' package.json)"
             curl -fsSL https://bun.sh/install | bash -s "bun-v${bun_version}"
+            # The installer leaves no `bunx` on PATH here; bun runs as bunx when invoked by that name.
+            ln -sf "${HOME}/.bun/bin/bun" "${HOME}/.bun/bin/bunx"
             echo 'export PATH="${HOME}/.bun/bin:${PATH}"' >> "${BASH_ENV}"
 
   # Mirror of .github/actions/setup-auto-mobile-npm-package: Bun, ripgrep,
@@ -136,13 +169,23 @@ commands:
       - run:
           name: "Install ripgrep"
           command: |
-            if ! command -v rg >/dev/null 2>&1; then
-              bash .github/actions/setup-ripgrep/install-ripgrep.sh --install-dir "${HOME}/.local/bin"
-              echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${BASH_ENV}"
-            fi
+            mkdir -p ci-logs
+            {
+              if ! command -v rg >/dev/null 2>&1; then
+                bash .github/actions/setup-ripgrep/install-ripgrep.sh --install-dir "${HOME}/.local/bin"
+                echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${BASH_ENV}"
+              fi
+            } 2>&1 | tee -a ci-logs/setup.log
       - run:
           name: "Install dependencies"
-          command: bash scripts/ci/install-bun-deps.sh
+          # install-bun-deps.sh only puts node_modules/.bin on $GITHUB_PATH, so
+          # expose it here for bare `turbo` calls in later steps.
+          command: |
+            mkdir -p ci-logs
+            {
+              bash scripts/ci/install-bun-deps.sh
+              echo "export PATH=\"${PWD}/node_modules/.bin:\${PATH}\"" >> "${BASH_ENV}"
+            } 2>&1 | tee -a ci-logs/setup.log
       - run:
           name: "Build AutoMobile"
           environment:
@@ -150,10 +193,14 @@ commands:
             TURBO_NO_UPDATE_NOTIFIER: "1"
             DO_NOT_TRACK: "1"
             NO_COLOR: "1"
-          command: bunx turbo run build --output-logs=errors-only
+          command: |
+            mkdir -p ci-logs
+            { bun x turbo run build --output-logs=errors-only; } 2>&1 | tee -a ci-logs/setup.log
       - run:
           name: "Globally Install AutoMobile"
-          command: bun add -g .
+          command: |
+            mkdir -p ci-logs
+            { bun add -g .; } 2>&1 | tee -a ci-logs/setup.log
 
   # Post-merge coalescing (#11010): halt (successfully) when a newer main commit
   # changes the same path group, because that commit's pipeline runs this job on
@@ -210,6 +257,499 @@ jobs:
       - run:
           name: "Run Playground tests"
           command: ./scripts/ios/xcode-test.sh Playground
+
+  # ── Linux shadow lane (PRs) ─────────────────────────────────────────────
+  # Mirrors of the Linux jobs in .github/workflows/pull_request.yml, run on the
+  # CircleCI open-source plan. They report as `ci/circleci: <job>` and are NOT
+  # required checks: the GitHub jobs stay authoritative until these have been
+  # green long enough to swap the `green-main` ruleset contexts. Steps that need
+  # a GitHub token (PR comment, artifact upload, rerun dispatch) are omitted.
+  linux-fast-validation:
+    executor: linux
+    parameters:
+      superseded-path-group:
+        type: string
+        default: ""
+        description: "Main path group for halt_if_superseded_on_main; empty skips the check."
+    steps:
+      - checkout_without_lfs
+      - when:
+          condition: << parameters.superseded-path-group >>
+          steps:
+            - halt_if_superseded_on_main:
+                path-group: << parameters.superseded-path-group >>
+      - run:
+          name: "Install fast validation dependencies"
+          command: |
+            mkdir -p ci-logs
+            { scripts/ci/install-fast-validation-deps.sh; } 2>&1 | tee -a ci-logs/fast-validation.log
+      - run:
+          name: "Install ShellCheck 0.9.0 and Ruby"
+          # The shell validators baseline ShellCheck 0.9.0 (the GitHub runner's
+          # version); the image's newer ShellCheck reports extra findings.
+          # validate_dependabot.sh needs ruby.
+          command: |
+            curl -fsSL https://github.com/koalaman/shellcheck/releases/download/v0.9.0/shellcheck-v0.9.0.linux.x86_64.tar.xz | tar -xJ -C /tmp
+            mkdir -p "${HOME}/.local/bin"
+            install -m 0755 /tmp/shellcheck-v0.9.0/shellcheck "${HOME}/.local/bin/shellcheck"
+            echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${BASH_ENV}"
+            sudo apt-get update -qq && sudo apt-get install -y -qq ruby
+      - run:
+          name: "Install uv and hadolint"
+          command: |
+            mkdir -p ci-logs
+            {
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+              echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${BASH_ENV}"
+              sudo curl -fsSL -o /usr/local/bin/hadolint \
+                https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64
+              sudo chmod +x /usr/local/bin/hadolint
+            } 2>&1 | tee -a ci-logs/fast-validation.log
+      - setup_auto_mobile_npm_package
+      - run:
+          name: "Check formatting"
+          command: |
+            mkdir -p ci-logs
+            { bun run format:check; } 2>&1 | tee -a ci-logs/fast-validation.log
+      - run:
+          name: "Run hadolint"
+          command: |
+            mkdir -p ci-logs
+            { hadolint --config .hadolint.yaml --failure-threshold error Dockerfile; } 2>&1 | tee -a ci-logs/fast-validation.log
+      - run:
+          name: "Install pinned Claude Code"
+          command: |
+            export CLAUDE_CODE_INSTALL_DIR="${HOME}/claude-code"
+            scripts/ci/install-claude-code.sh
+            echo "export PATH=\"${CLAUDE_CODE_INSTALL_DIR}:\${PATH}\"" >> "${BASH_ENV}"
+      - run:
+          name: "Run fast validation checks"
+          environment:
+            INSTALL_KTFMT_WHEN_MISSING: "true"
+            KTFMT_ONLY_TOUCHED_FILES: "false"
+          command: |
+            mkdir -p ci-logs
+            {
+              scripts/all_fast_validate_checks.sh \
+                --only yaml,lfs-pointers,scripts-referenced,schema-copy-drift,tool-definitions,prototype-spec-models,protoviewer-notices,privacy-manifests,store-listing,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,android-parity-budgets,shared-process-allowlist,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock,debug-tags,datetime-now-literal,markdown-bash \
+                --max-parallel 4
+            } 2>&1 | tee -a ci-logs/fast-validation.log
+      - run:
+          name: "Run offline lychee link check"
+          command: |
+            mkdir -p ci-logs
+            { scripts/all_fast_validate_checks.sh --only lychee-offline; } 2>&1 | tee -a ci-logs/fast-validation.log
+      - run:
+          name: "Check iOS version constant is in sync with package.json"
+          command: |
+            mkdir -p ci-logs
+            { bash scripts/versioning/generate-ios-version.sh --check; } 2>&1 | tee -a ci-logs/fast-validation.log
+      - store_artifacts:
+          when: always
+          path: ci-logs
+          destination: ci-logs
+      - store_artifacts:
+          when: on_fail
+          path: scratch
+          destination: fast-validation-logs
+
+  linux-node-checks:
+    executor: linux
+    parameters:
+      superseded-path-group:
+        type: string
+        default: ""
+        description: "Main path group for halt_if_superseded_on_main; empty skips the check."
+    steps:
+      - checkout_without_lfs
+      - when:
+          condition: << parameters.superseded-path-group >>
+          steps:
+            - halt_if_superseded_on_main:
+                path-group: << parameters.superseded-path-group >>
+      - setup_auto_mobile_npm_package
+      - run:
+          name: "Run Bun Audit"
+          command: bun pm audit --json > bun-audit-results.json || true
+      - run:
+          name: "Verify pinned runtime dependency graph"
+          when: always
+          command: bash scripts/ci/verify-pinned-runtime-graph.sh
+      - run:
+          name: "Run Memory Leak Detection"
+          when: always
+          command: bun run test:memory-leaks
+      - run:
+          name: "Run MCP Benchmarks"
+          when: always
+          command: |
+            mkdir -p reports
+            failed=false
+            bun run benchmark-context --output reports/context-benchmark.json || failed=true
+            bun run benchmark-tools --output reports/tool-benchmark.json || failed=true
+            timeout 60s bun run benchmark-startup --compare benchmark/startup-baseline.json --output reports/startup-benchmark.json || failed=true
+            bun run benchmark-npm-unpacked-size --output reports/npm-unpacked-size.json || failed=true
+            if [ "$failed" = "true" ]; then
+              echo "One or more MCP benchmarks failed; see reports/*.json" >&2
+              exit 1
+            fi
+      - store_artifacts:
+          when: always
+          path: reports
+          destination: benchmark-reports
+      - store_artifacts:
+          when: always
+          path: bun-audit-results.json
+          destination: bun-audit-results.json
+      - store_artifacts:
+          when: always
+          path: ci-logs
+          destination: ci-logs
+
+  linux-node-build-and-test:
+    executor: linux
+    steps:
+      - checkout_without_lfs
+      - setup_auto_mobile_npm_package
+      - run:
+          name: "Run Lint"
+          environment:
+            NODE_OPTIONS: "--max-old-space-size=4096"
+            TURBO_TELEMETRY_DISABLED: "1"
+            TURBO_NO_UPDATE_NOTIFIER: "1"
+            DO_NOT_TRACK: "1"
+            NO_COLOR: "1"
+          command: |
+            mkdir -p ci-logs
+            { bun x turbo run lint --output-logs=errors-only --log-order=grouped; } 2>&1 | tee -a ci-logs/build-and-test.log
+      - run:
+          name: "Check stdlib-first dependency decisions"
+          command: |
+            mkdir -p ci-logs
+            {
+              STDLIB_FIRST_BASE_REF="$(git merge-base origin/main HEAD)" bun run check:stdlib-first
+            } 2>&1 | tee -a ci-logs/build-and-test.log
+      - run:
+          name: "Run Typecheck Gate"
+          command: |
+            mkdir -p ci-logs
+            { bun run typecheck; } 2>&1 | tee -a ci-logs/build-and-test.log
+      - run:
+          name: "Run Test Typecheck Gate"
+          command: |
+            mkdir -p ci-logs
+            { bun run typecheck:test; } 2>&1 | tee -a ci-logs/build-and-test.log
+      - run:
+          name: "Run Bun MCP startup smoke"
+          command: |
+            mkdir -p ci-logs
+            { bun run test:startup:bun; } 2>&1 | tee -a ci-logs/build-and-test.log
+      - run:
+          name: "Run Bun image runtime smoke"
+          command: |
+            mkdir -p ci-logs
+            { bun run test:image:bun; } 2>&1 | tee -a ci-logs/build-and-test.log
+      - run:
+          name: "Run complete unit lane"
+          no_output_timeout: 20m
+          environment:
+            AUTOMOBILE_TEST_MODE: "true"
+            AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720"
+            AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS: "1560"
+            AUTOMOBILE_UNIT_JUNIT_DIR: scratch/timing-unit-reports
+          command: |
+            mkdir -p ci-logs
+            { bash scripts/test-ts.sh unit; } 2>&1 | tee -a ci-logs/build-and-test.log
+      - run:
+          name: "Enforce 100ms budget for changed unit tests"
+          environment:
+            BUN_TEST_TIMING_REPORT_DIR: scratch/timing-unit-reports
+            BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS: "360"
+          command: |
+            mkdir -p ci-logs
+            {
+              BUN_TEST_TIMING_BASE_REF="$(git merge-base origin/main HEAD)" bash scripts/validate-bun-test-timings.sh
+            } 2>&1 | tee -a ci-logs/build-and-test.log
+      - store_artifacts:
+          when: always
+          path: ci-logs
+          destination: ci-logs
+      - store_artifacts:
+          when: always
+          path: scratch/timing-unit-reports
+          destination: node-unit-test-diagnostics/timing-unit-reports
+      - store_artifacts:
+          when: always
+          path: scratch/test-ts-unit-shards
+          destination: node-unit-test-diagnostics/test-ts-unit-shards
+
+  linux-node-host-integration-tests:
+    executor: linux
+    parameters:
+      superseded-path-group:
+        type: string
+        default: ""
+        description: "Main path group for halt_if_superseded_on_main; empty skips the check."
+    steps:
+      - checkout_without_lfs
+      - when:
+          condition: << parameters.superseded-path-group >>
+          steps:
+            - halt_if_superseded_on_main:
+                path-group: << parameters.superseded-path-group >>
+      - install_bun
+      - run:
+          name: "Install Bun dependencies"
+          command: |
+            bash scripts/ci/install-bun-deps.sh
+            echo "export PATH=\"${PWD}/node_modules/.bin:\${PATH}\"" >> "${BASH_ENV}"
+      - run:
+          name: "Run host integration lane"
+          no_output_timeout: 15m
+          environment:
+            AUTOMOBILE_TEST_MODE: "true"
+            AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "900"
+          command: bash scripts/test-ts.sh integration
+      - run:
+          name: "Run stress lane"
+          environment:
+            AUTOMOBILE_TEST_MODE: "true"
+            AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "300"
+          command: bash scripts/test-ts.sh stress
+
+  linux-bats-tests:
+    executor: linux
+    steps:
+      - checkout_without_lfs
+      - run:
+          name: "Install BATS, ShellCheck, jq, yq and ripgrep"
+          # The GitHub runner image ships newer jq/yq (several wiring tests need
+          # mikefarah yq >= 4.49.1), ShellCheck 0.9.0 and ripgrep; the CircleCI
+          # image's versions differ. Everything goes into /usr/local/bin, never
+          # onto PATH through BASH_ENV: CircleCI sources BASH_ENV in every bash,
+          # which would re-prepend those directories ahead of the stub binaries
+          # the tests put first on PATH and run the real tools instead.
+          command: |
+            git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
+            test "$(git -C /tmp/bats-core rev-parse HEAD)" = "eb7f42f8d608ac693d7a4b67474f6714ea68cfc5"
+            sudo /tmp/bats-core/install.sh /usr/local
+            curl -fsSL https://github.com/koalaman/shellcheck/releases/download/v0.9.0/shellcheck-v0.9.0.linux.x86_64.tar.xz | tar -xJ -C /tmp
+            sudo install -m 0755 /tmp/shellcheck-v0.9.0/shellcheck /usr/local/bin/shellcheck
+            sudo curl -fsSL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.49.2/yq_linux_amd64
+            sudo curl -fsSL -o /usr/local/bin/jq https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64
+            sudo chmod +x /usr/local/bin/yq /usr/local/bin/jq
+            sudo bash .github/actions/setup-ripgrep/install-ripgrep.sh --install-dir /usr/local/bin
+            # gawk: the image's mawk does not support {n} interval expressions.
+            sudo apt-get update -qq && sudo apt-get install -y -qq parallel gawk
+            # Tests parse TOML with python3's tomllib (3.11+); the image has 3.10.
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+            "${HOME}/.local/bin/uv" python install 3.12
+            sudo ln -sf "$("${HOME}/.local/bin/uv" python find 3.12)" /usr/local/bin/python3
+            python3 --version
+      - run:
+          name: "Install Bun"
+          command: |
+            bun_version="$(jq -r '.packageManager | sub("^bun@"; "")' package.json)"
+            curl -fsSL https://bun.sh/install | bash -s "bun-v${bun_version}"
+            sudo ln -sf "${HOME}/.bun/bin/bun" /usr/local/bin/bun
+            sudo ln -sf "${HOME}/.bun/bin/bun" /usr/local/bin/bunx
+      - run:
+          name: "Install Bun dependencies"
+          command: |
+            bash scripts/ci/install-bun-deps.sh
+            for tool in node_modules/.bin/*; do sudo ln -sf "${PWD}/${tool}" "/usr/local/bin/$(basename "${tool}")"; done
+      - run:
+          name: "Run BATS Unit Tests"
+          environment:
+            AUTOMOBILE_BATS_MAX_FILE_SECONDS: "240"
+            AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS: "420"
+          command: |
+            mkdir -p ci-logs
+            set -o pipefail
+            scripts/ci/run-bats.sh unit 2>&1 | tee ci-logs/bats-unit.log
+      - run:
+          name: "Run BATS Integration Tests"
+          when: always
+          command: |
+            mkdir -p ci-logs
+            set -o pipefail
+            scripts/ci/run-bats.sh integration 2>&1 | tee ci-logs/bats-integration.log
+      - run:
+          name: "Summarize BATS failures"
+          when: always
+          command: |
+            mkdir -p ci-logs
+            { grep -hE '^(\[[^]]+\][[:space:]]+)?not ok' ci-logs/*.log || true; } > ci-logs/bats-failures.txt
+            # Re-run each failing file alone with its command output printed.
+            awk '/^not ok/ {bad=1} /^BATS file duration:/ {if (bad) print $NF; bad=0}' ci-logs/bats-unit.log > ci-logs/failing-files.txt || true
+            while read -r f; do
+              printf '\n=== %s\n' "$f"
+              timeout 150 bats --print-output-on-failure "$f" 2>&1 | grep -vE '^ok ' | head -60
+            done < ci-logs/failing-files.txt > ci-logs/bats-failure-detail.txt 2>&1 || true
+            { for t in jq yq rg shellcheck parallel awk bats python3 xcrun xmllint; do printf '%s: ' "$t"; (command -v "$t" >/dev/null && "$t" --version 2>&1 | head -1) || echo missing; done; } > ci-logs/tools.txt
+      - store_artifacts:
+          when: always
+          path: ci-logs
+          destination: ci-logs
+      - store_artifacts:
+          when: always
+          path: scratch/bats-unit-joblog.tsv
+          destination: bats-unit-joblog/bats-unit-joblog.tsv
+
+  # Post-merge mirror of merge.yml's `benchmark-context-thresholds`: the benchmark
+  # exits non-zero when a configured MCP context threshold is exceeded. The report
+  # is kept even then; the artifact upload there needs a GitHub token.
+  linux-benchmark-context-thresholds:
+    executor: linux
+    parameters:
+      superseded-path-group:
+        type: string
+        default: ""
+        description: "Main path group for halt_if_superseded_on_main; empty skips the check."
+    steps:
+      - checkout_without_lfs
+      - when:
+          condition: << parameters.superseded-path-group >>
+          steps:
+            - halt_if_superseded_on_main:
+                path-group: << parameters.superseded-path-group >>
+      - setup_auto_mobile_npm_package
+      - run:
+          name: "Run Context Baseline Benchmark"
+          command: |
+            mkdir -p reports ci-logs
+            set -o pipefail
+            if ! bun run benchmark-context --output reports/context-benchmark.json 2>&1 | tee -a ci-logs/benchmark-context.log; then
+              echo "MCP context benchmark failed - one or more configured thresholds were exceeded" >&2
+              cat reports/context-benchmark.json >&2 || true
+              exit 1
+            fi
+      - store_artifacts:
+          when: always
+          path: reports/context-benchmark.json
+          destination: context-benchmark-report
+      - store_artifacts:
+          when: always
+          path: ci-logs
+          destination: ci-logs
+
+  # Nightly Linux mirror of nightly.yml's advisory Node jobs: the randomized unit
+  # lane, the pinned Claude Code elicitation conformance run and the auto-advance
+  # race guard. Each step runs `when: always`, so one failure never hides the rest.
+  linux-nightly-node:
+    executor: linux
+    steps:
+      - checkout_without_lfs
+      - install_bun
+      - run:
+          name: "Install Bun dependencies"
+          command: |
+            mkdir -p ci-logs
+            {
+              bash scripts/ci/install-bun-deps.sh
+              echo "export PATH=\"${PWD}/node_modules/.bin:\${PATH}\"" >> "${BASH_ENV}"
+            } 2>&1 | tee -a ci-logs/setup.log
+      # Local repro: AUTOMOBILE_TEST_MODE=true AUTOMOBILE_UNIT_RANDOM_SEED=N bash scripts/test-ts.sh unit
+      - run:
+          name: "Run randomized unit lane"
+          when: always
+          no_output_timeout: 15m
+          environment:
+            AUTOMOBILE_TEST_MODE: "true"
+            AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720"
+          command: |
+            mkdir -p ci-logs
+            set -o pipefail
+            AUTOMOBILE_UNIT_RANDOM_SEED="${CIRCLE_BUILD_NUM}" bash scripts/test-ts.sh unit 2>&1 | tee -a ci-logs/randomized-unit.log
+      # Same pinned binary as nightly.yml: the first version that declares form and
+      # url elicitation and negotiates 2026-07-28; bump it deliberately.
+      - run:
+          name: "Fetch pinned Claude Code"
+          when: always
+          environment:
+            CLAUDE_CODE_VERSION: "2.1.311"
+          command: |
+            set -euo pipefail
+            mkdir -p ci-logs
+            dir="${HOME}/claude-code"
+            mkdir -p "$dir"
+            (
+              cd "$dir"
+              tgz="$(npm pack --silent "@anthropic-ai/claude-code-linux-x64@${CLAUDE_CODE_VERSION}")"
+              tar xzf "$tgz"
+              chmod +x "$dir/package/claude"
+            )
+            "$dir/package/claude" --version 2>&1 | tee -a ci-logs/claude-code.log
+            echo "export AUTOMOBILE_CLAUDE_BIN=\"$dir/package/claude\"" >> "${BASH_ENV}"
+      - run:
+          name: "Run Claude Code elicitation conformance"
+          when: always
+          no_output_timeout: 15m
+          command: |
+            mkdir -p ci-logs
+            set -o pipefail
+            bun test test/server/claudeCodeElicitation.integration.test.ts 2>&1 | tee -a ci-logs/claude-code-elicitation.log
+      - run:
+          name: "Run auto-advance race guard"
+          when: always
+          no_output_timeout: 20m
+          command: |
+            mkdir -p ci-logs
+            set -o pipefail
+            bash scripts/ci/auto-advance-race-guard.sh 2>&1 | tee -a ci-logs/auto-advance-race-guard.log
+      - store_artifacts:
+          when: always
+          path: ci-logs
+          destination: ci-logs
+      - store_artifacts:
+          when: always
+          path: scratch/test-ts-unit-shards
+          destination: node-unit-test-diagnostics/test-ts-unit-shards
+
+  # Mirror of webrtc-integration-test ("WebRTC Publisher Integration (MediaMTX)").
+  # Overrides the linux executor's image with the -browsers variant (Node plus
+  # Chrome, which the WHEP decode step resolves); the other settings match it.
+  linux-webrtc-publisher-integration:
+    docker:
+      - image: cimg/openjdk:21.0-browsers
+    resource_class: large
+    environment:
+      GIT_LFS_SKIP_SMUDGE: "1"
+    steps:
+      - checkout_without_lfs
+      - run:
+          name: "Install FFmpeg and verify a browser is present"
+          command: |
+            mkdir -p ci-logs
+            {
+              bash scripts/ci/install-apt-packages.sh ffmpeg
+              ffmpeg -version | head -1
+              command -v google-chrome || command -v chromium || command -v chromium-browser
+            } 2>&1 | tee ci-logs/setup.log
+      - install_bun
+      - run:
+          name: "Install Bun dependencies"
+          command: |
+            bash scripts/ci/install-bun-deps.sh
+            echo "export PATH=\"${PWD}/node_modules/.bin:\${PATH}\"" >> "${BASH_ENV}"
+      - restore_cache:
+          keys:
+            - mediamtx-v1-{{ arch }}-{{ checksum "scripts/webrtc/run-mediamtx-publisher-integration.sh" }}
+      - run:
+          name: "Run MediaMTX WebRTC publisher integration test"
+          no_output_timeout: 15m
+          command: |
+            mkdir -p ci-logs
+            set -o pipefail
+            bun run test:integration:webrtc-mediamtx 2>&1 | tee ci-logs/webrtc-mediamtx.log
+      - save_cache:
+          key: mediamtx-v1-{{ arch }}-{{ checksum "scripts/webrtc/run-mediamtx-publisher-integration.sh" }}
+          paths:
+            - scratch/mediamtx
+      - store_artifacts:
+          path: ci-logs
+          destination: ci-logs
+          when: always
 
   # ── Post-merge (formerly merge.yml) and nightly sweeps ──────────────────────
   # Generate + drift-check + build every XcodeGen project. Post-merge it replaces
@@ -614,6 +1154,57 @@ jobs:
           destination: automobile-daemon-logs-xctestrunner
 
 workflows:
+  # Linux shadow lane: PR-only mirrors of the GitHub Linux jobs, off the
+  # required-check list (see the job comments above). The four heavy jobs run in
+  # parallel; Fast Validation is the required gate on GitHub, so it also runs here.
+  linux-pr:
+    when: << pipeline.parameters.run-linux >>
+    jobs:
+      - linux-fast-validation
+      - linux-node-checks
+      - linux-node-build-and-test
+      - linux-node-host-integration-tests:
+          requires:
+            - linux-fast-validation
+      - linux-bats-tests
+      - linux-webrtc-publisher-integration
+
+  # Post-merge Linux Node mirrors (main only; path group run-main-linux). Each job
+  # halts when a newer main commit touches the same group, so a merge burst runs
+  # once. Advisory like the PR lane: no required check.
+  main-linux:
+    when: << pipeline.parameters.run-main-linux >>
+    jobs:
+      - linux-fast-validation:
+          superseded-path-group: run-main-linux
+          filters:
+            branches:
+              only: main
+      - linux-node-checks:
+          superseded-path-group: run-main-linux
+          filters:
+            branches:
+              only: main
+      - linux-benchmark-context-thresholds:
+          superseded-path-group: run-main-linux
+          filters:
+            branches:
+              only: main
+      - linux-node-host-integration-tests:
+          superseded-path-group: run-main-linux
+          requires:
+            - linux-fast-validation
+          filters:
+            branches:
+              only: main
+
+  # Nightly Linux Node jobs (replaces nightly.yml's advisory Node jobs); started by
+  # a scheduled pipeline on main with run-nightly-linux=true.
+  nightly-linux:
+    when: << pipeline.parameters.run-nightly-linux >>
+    jobs:
+      - linux-nightly-node
+
   # PR path: exactly one macOS job (#11010). When `run-ios` is false (no iOS
   # changes) the workflow has no jobs and no macOS executor is used.
   ios-macos:

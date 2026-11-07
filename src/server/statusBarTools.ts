@@ -9,10 +9,13 @@ import {
   STATUS_BAR_BATTERY_STATES,
   STATUS_BAR_DATA_NETWORKS,
   type StatusBarController,
+  type StatusBarField,
   type StatusBarOverrides,
+  StatusBarRequestRejectedError,
 } from "../features/utility/StatusBarOverride";
 import {
   defaultStatusBarOverrideRegistry,
+  type StatusBarOverrideRecord,
   type StatusBarOverrideStore,
 } from "../features/utility/StatusBarOverrideRegistry";
 import type { BootedDevice } from "../models";
@@ -128,7 +131,16 @@ async function readStatusBar(call: StatusBarCall) {
 }
 
 async function clearStatusBar(call: StatusBarCall) {
-  await call.controller.clear(call.signal);
+  // Under the caller's session like an override, so a clear that waited in the device queue while
+  // its session released or rebound is refused instead of clearing the next owner's override.
+  await runSessionStatusBarMutation({
+    sessionManager: call.sessionManager,
+    sessionUuid: call.args.sessionUuid,
+    deviceId: call.device.deviceId,
+    // A clear records nothing, so a rejection has nothing to undo.
+    record: () => () => undefined,
+    mutation: () => call.controller.clear(call.signal),
+  });
   call.registry.forget(call.device.deviceId);
   return createStructuredToolResponse({
     message: "Cleared the status bar override",
@@ -139,14 +151,68 @@ async function clearStatusBar(call: StatusBarCall) {
   });
 }
 
+/**
+ * Puts the store back to `previous` (or nothing) for this device, but only while it still holds
+ * `written`, the record this call wrote: a record another caller has since replaced or removed is
+ * newer than this call's view, so it is left alone (#17079).
+ */
+function restoreRecord(
+  registry: StatusBarOverrideStore,
+  device: BootedDevice,
+  written: StatusBarOverrideRecord | null,
+  previous: StatusBarOverrideRecord | null,
+): boolean {
+  if (registry.get(device.deviceId) !== written) {
+    return false;
+  }
+  registry.forget(device.deviceId);
+  if (previous) {
+    registry.record(previous.device, previous.sessionId, previous.overrides);
+  }
+  return true;
+}
+
+/** The requested values of the fields the platform applied. */
+function appliedOverrides(
+  requested: StatusBarOverrides,
+  applied: readonly StatusBarField[],
+): StatusBarOverrides {
+  return Object.fromEntries(
+    applied.map((field) => [field, requested[field]]),
+  ) as StatusBarOverrides;
+}
+
 async function overrideStatusBar(call: StatusBarCall, requested: StatusBarOverrides) {
   const { device, registry } = call;
+  // Recorded before the device command so a racing release still clears it (#14105). A request
+  // refused before any device command is undone; any other rejection may have left part of the
+  // override on the device, so the record stays as the release-time cleanup obligation. On
+  // success the record narrows to the fields the platform applied (#17054).
+  let previous: StatusBarOverrideRecord | null = null;
+  let written: StatusBarOverrideRecord | null = null;
+  let owner: string | null = null;
   const outcome = await runSessionStatusBarMutation({
     sessionManager: call.sessionManager,
     sessionUuid: call.args.sessionUuid,
     deviceId: device.deviceId,
-    record: (sessionId) => registry.record(device, sessionId, requested),
-    mutation: () => call.controller.override(requested, call.signal),
+    record: (sessionId) => {
+      previous = registry.get(device.deviceId);
+      owner = sessionId;
+      registry.record(device, sessionId, requested);
+      written = registry.get(device.deviceId);
+      return (error) => {
+        if (error instanceof StatusBarRequestRejectedError) {
+          restoreRecord(registry, device, written, previous);
+        }
+      };
+    },
+    mutation: async () => {
+      const result = await call.controller.override(requested, call.signal);
+      if (restoreRecord(registry, device, written, previous) && result.applied.length > 0) {
+        registry.record(device, owner, appliedOverrides(requested, result.applied));
+      }
+      return result;
+    },
   });
   const partial = outcome.unsupported.length > 0;
   const applied = outcome.applied.join(", ") || "nothing";
@@ -159,7 +225,7 @@ async function overrideStatusBar(call: StatusBarCall, requested: StatusBarOverri
     ...callBase(call),
     applied: outcome.applied,
     unsupported: outcome.unsupported,
-    override: registry.get(device.deviceId)?.overrides ?? requested,
+    override: registry.get(device.deviceId)?.overrides ?? null,
   });
 }
 
@@ -193,7 +259,21 @@ export function createStatusBarHandler(deps: StatusBarToolDependencies = {}) {
     if (args.action === "get") {
       return readStatusBar(call);
     }
-    return args.action === "clear" ? clearStatusBar(call) : overrideStatusBar(call, requested);
+    // One at a time per device, in call order (#17079): the daemon's per-device queue already
+    // does this, but direct stdio mode runs tool calls concurrently, and an override's
+    // finalization restores the record it saw before its device command. The registry owns the
+    // queue so the daemon's release-time clear is ordered against these calls too (#17084).
+    // Queued outside the session's tracked setup, so a release drains only the running mutation,
+    // and a queued override or clear re-checks its session's admission when it starts.
+    const queued = <T>(mutation: () => Promise<T>): Promise<T> =>
+      registry.runOnDevice(device.deviceId, () => {
+        // A call aborted while it waited for the device must not start its device command.
+        signal?.throwIfAborted();
+        return mutation();
+      });
+    return args.action === "clear"
+      ? queued(() => clearStatusBar(call))
+      : queued(() => overrideStatusBar(call, requested));
   };
 }
 

@@ -132,6 +132,32 @@ describe("WatchSimulatorProvisioner", () => {
     expect(simctl.commands).toEqual([]);
   });
 
+  test("a short device type or runtime names the full identifier and where they are listed", async () => {
+    const { simctl, provisioner } = arrange([]);
+    const shortType = WATCH_DEVICE_TYPE.identifier.split(".").at(-1)!;
+    const shortRuntime = WATCH_RUNTIME_ID.split(".").at(-1)!;
+
+    const type = await rejection(
+      provisioner.provision(request({ spec: { ...SPEC, deviceType: shortType } }), {
+        allowCreate: true,
+      }),
+    );
+    const runtime = await rejection(
+      provisioner.provision(request({ spec: { ...SPEC, runtime: shortRuntime } }), {
+        allowCreate: true,
+      }),
+    );
+
+    expect(String(type)).toContain(
+      `Unknown Apple Watch device type '${shortType}'. Pass the full CoreSimulator identifier '${WATCH_DEVICE_TYPE.identifier}'.`,
+    );
+    expect(String(type)).toContain("automobile:devices/images/watchos");
+    expect(String(runtime)).toContain(
+      `Pass the full CoreSimulator identifier '${WATCH_RUNTIME_ID}'.`,
+    );
+    expect(simctl.commands).toEqual([]);
+  });
+
   test("an iPhone device type or iOS runtime is not a watch spec", async () => {
     const { simctl, provisioner } = arrange([]);
     simctl.deviceTypes.push({
@@ -220,6 +246,31 @@ describe("WatchSimulatorProvisioner", () => {
       String(await rejection(provisioner.provision(request(), { allowCreate: true }))),
     ).toContain("timed out");
     expect(simctl.commands).toEqual([]);
+  });
+
+  test("discardCreated cleans up owned pairs before deleting", async () => {
+    const simctl = new FakeWatchProvisionSimctl([EXISTING]);
+    const cleaned: string[] = [];
+    const provisioner = new WatchSimulatorProvisioner(
+      new WatchSimulatorInventory(simctl, "arm64"),
+      simctl,
+      {
+        unpairCreated: async (id) => {
+          expect(simctl.commands).toEqual([]);
+          cleaned.push(id);
+        },
+      },
+    );
+    expect(
+      await provisioner.discardCreated({
+        ...EXISTING,
+        deviceId: EXISTING.udid,
+        platform: "watchos",
+        isRunning: false,
+      }),
+    ).toEqual({ deleted: true });
+    expect(cleaned).toEqual([EXISTING.udid]);
+    expect(simctl.commands).toEqual([`delete ${EXISTING.udid}`]);
   });
 
   test("discardCreated deletes the created watch, and reports a delete that failed", async () => {

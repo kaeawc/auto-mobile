@@ -1,6 +1,9 @@
+import { defaultSimulatorPairService, type SimulatorPairService } from "./SimulatorPairs";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../describeUnknownError";
 import { logger } from "../logger";
+import { APPLE_PROVISION_SPEC_GUIDANCE } from "../provisionDeviceSpecSchemas";
+import { unknownSimulatorIdentifierMessage } from "./simulatorCatalogRefusal";
 import type { SimCtlClient } from "./SimCtlClient";
 import type { WatchSimulatorCatalog, WatchSimulatorInventory } from "./WatchSimulatorInventory";
 import type { ListedWatch } from "./WatchSimulatorLifecycle";
@@ -48,6 +51,10 @@ export class WatchSimulatorProvisioner {
   constructor(
     private readonly inventory: WatchProvisionInventory,
     private readonly creator: WatchSimulatorCreator,
+    private readonly pairs: Pick<
+      SimulatorPairService,
+      "unpairCreated"
+    > = defaultSimulatorPairService(),
   ) {}
 
   async provision(
@@ -82,6 +89,7 @@ export class WatchSimulatorProvisioner {
    */
   async discardCreated(watch: ListedWatch): Promise<WatchDiscardResult> {
     try {
+      await this.pairs.unpairCreated(watch.deviceId);
       await this.creator.deleteSimulator(watch.deviceId);
       return { deleted: true };
     } catch (error) {
@@ -175,15 +183,23 @@ export function assertWatchSpecInCatalog(
 ): void {
   if (!catalog.deviceTypes.some((type) => type.identifier === spec.deviceType)) {
     throw new ActionableError(
-      `Unknown Apple Watch device type '${spec.deviceType}'. Available: ` +
-        listOrNone(catalog.deviceTypes.map((type) => type.identifier)),
+      unknownSimulatorIdentifierMessage({
+        kind: "Apple Watch device type",
+        requested: spec.deviceType,
+        identifiers: catalog.deviceTypes.map((type) => type.identifier),
+        catalog: APPLE_PROVISION_SPEC_GUIDANCE.watchos.catalog,
+      }),
     );
   }
   const runtime = catalog.runtimes.find((entry) => entry.identifier === spec.runtime);
   if (!runtime) {
     throw new ActionableError(
-      `Unknown watchOS runtime '${spec.runtime}'. Available: ` +
-        listOrNone(catalog.runtimes.map((entry) => entry.identifier)),
+      unknownSimulatorIdentifierMessage({
+        kind: "watchOS runtime",
+        requested: spec.runtime,
+        identifiers: catalog.runtimes.map((entry) => entry.identifier),
+        catalog: APPLE_PROVISION_SPEC_GUIDANCE.watchos.catalog,
+      }),
     );
   }
   if (!runtime.isAvailable) {
@@ -210,8 +226,4 @@ function assertMatchesSpec(watch: ListedWatch, request: WatchProvisionRequest): 
         (watch.availabilityError ? `: ${watch.availabilityError}` : ""),
     );
   }
-}
-
-function listOrNone(identifiers: string[]): string {
-  return identifiers.length > 0 ? identifiers.join(", ") : "none installed";
 }

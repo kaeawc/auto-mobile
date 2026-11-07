@@ -4,30 +4,25 @@ import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { executionTracker } from "../../src/daemon/executionTracker";
 import { LivenessScenario } from "../helpers/livenessScenarioHarness";
-import { PIXEL, PIXEL_FOLD, type WireFixture } from "./helpers/desktopWireHarness";
+import { PIXEL, PIXEL_FOLD, type WireFixture } from "./helpers/desktopWireFixture";
 
 const FIXTURE_DIR = join(import.meta.dir, "..", "fixtures", "desktop-wire");
 const DESKTOP_1 = "d0000000-0000-4000-8000-000000000001";
 const DESKTOP_2 = "d0000000-0000-4000-8000-000000000002";
 const AGENT = "a0000000-0000-4000-8000-00000000000a";
 
-// Capture setup: desktopWireContract.test.ts:59 and :639. Other out-of-band events are
-// derived in replay from agent-bind/release and daemon-restart's heartbeat-lapse (:96-102,
-// :240-243, :532). End holders mirror each contract row's assertions and description.
-// Daemon.startOn rehydrates persisted sessions (src/daemon/daemon.ts:1685-1688), whereas
-// the capture restarts with fresh fake persistence. Pin both actual envelopes, not a relaxed
-// comparison: the old heartbeat succeeds and release finds a real held device.
-const RESTART_MISMATCHES = [
-  `heartbeat-lapse#0: ${JSON.stringify({ success: true, result: { sessionId: DESKTOP_1 } })}`,
-  `release-lapsed#0: ${JSON.stringify({ success: true, result: { message: `Session ${DESKTOP_1} released`, device: PIXEL.deviceId, alreadyReleased: false } })}`,
-];
-
+// The capture (desktopWireContract.test.ts) records every fixture through DesktopWireHarness, which
+// runs this same started daemon; replaying it must reproduce every answer. Out-of-band events are
+// derived from the frames: the agent keeper from agent-bind/release, and a daemon restart from the
+// frame that carries daemonRestartDowntimeMs. End holders mirror each contract row's
+// assertions and description.
 const ROWS = [
   { name: "no-click-start", holders: [null, null] },
   { name: "bind-error-not-ownership", holders: [null, null], missingPixel: true },
   { name: "bound-device-control", holders: [DESKTOP_1, null] },
   { name: "close-pane-releases-device", holders: [DESKTOP_2, null] },
   { name: "daemon-restart", holders: [DESKTOP_2, null] },
+  { name: "daemon-restart-rehydrates", holders: [DESKTOP_1, null] },
   { name: "first-tap-binds-device", holders: [DESKTOP_1, null] },
   { name: "heartbeat-expiry", holders: [null, null] },
   { name: "held-by-another-session", holders: [DESKTOP_1, null] },
@@ -104,7 +99,7 @@ describe("started daemon desktop fixture replay", () => {
         captured.exchanges.reduce((count, frame) => count + (frame.repeat ?? 1), 0),
       );
       expect(replay.skipped).toEqual([]);
-      expect(replay.mismatches).toEqual(row.name === "daemon-restart" ? RESTART_MISMATCHES : []);
+      expect(replay.mismatches).toEqual([]);
       expect(replay.unclaimedInputs).toEqual([]);
       expect(replay.unclaimedControls).toEqual([]);
       expect([

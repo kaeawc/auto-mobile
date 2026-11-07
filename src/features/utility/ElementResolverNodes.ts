@@ -12,6 +12,7 @@ import { isEditableElementProperties } from "./elementProperties";
 import type { Element } from "../../models/Element";
 import { hasVisibleScreenPart } from "./ElementGeometry";
 import { normalize } from "./ElementResolverMatching";
+import { isSystemUiStatusBarId } from "../../utils/androidStatusBar";
 import type {
   ElementReference,
   ElementResolution,
@@ -240,6 +241,38 @@ export function isWithin(
       return true;
     }
     parent = nodes[parent]?.parentIndex;
+  }
+  return false;
+}
+
+/**
+ * Notification rows whose subtree is shade content, not status-bar chrome. The status-bar
+ * allowlist's `status_bar*` pattern also matches `status_bar_notification`.
+ */
+const NOTIFICATION_ROW_IDS: ReadonlySet<string> = new Set([
+  "com.android.systemui:id/status_bar_notification",
+  "com.android.systemui:id/expandableNotificationRow",
+]);
+
+/**
+ * Whether the node is SystemUI status-bar chrome (clock, battery, signal icons) or sits inside
+ * it. `observe` folds that chrome into one summary row, so a client never picks a label from it;
+ * a substring of its content-desc (`Battery` in `Battery charging, 77 percent.`) is not the
+ * element a text selector names (#17198). A notification row and its descendants are not chrome.
+ */
+export function isStatusBarChrome(
+  node: SearchableEntry,
+  nodes: readonly SearchableEntry[],
+): boolean {
+  let current: SearchableEntry | undefined = node;
+  while (current) {
+    if (current.nativeId !== undefined && NOTIFICATION_ROW_IDS.has(current.nativeId)) {
+      return false;
+    }
+    if (isSystemUiStatusBarId(current.nativeId)) {
+      return true;
+    }
+    current = current.parentIndex === undefined ? undefined : nodes[current.parentIndex];
   }
   return false;
 }

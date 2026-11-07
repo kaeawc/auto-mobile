@@ -55,8 +55,8 @@ export function eventHost() {
       calls.push({ insert: text, options, signal });
       return { success: true };
     },
-    requireFocusedAndroidInput: async (signal, error, display) => {
-      calls.push({ focus: display, signal, error });
+    requireFocusedAndroidInput: async (signal, failure, display) => {
+      calls.push({ focus: display, signal, failure });
       return { success: true, hierarchy: observation().viewHierarchy! };
     },
     readPrecedingState: async (needed) => {

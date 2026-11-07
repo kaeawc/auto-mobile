@@ -6,39 +6,53 @@
 # (space-separated), but the old `for arg in "$@"` loop only matched
 # `--min-ios=*`, so the documented space form was silently dropped and the
 # minimum was auto-detected instead. Both forms must be honored.
+#
+# The Xcode tools are stubbed as exported bash functions, not as executable
+# files on PATH (#16429). Writing a stub file and exec'ing it moments later can
+# fail transiently on a loaded runner (e.g. ETXTBSY), which killed the script
+# before it logged the parsed value. Functions inherited by the child `bash`
+# shadow PATH lookups, so nothing is written, chmod'ed or exec'ed, and no real
+# simulator or Xcode tool is ever reached.
 
 SCRIPT="scripts/ios/setup-ios-simulator.sh"
 
 setup() {
   ABS_SCRIPT="$(cd "$(dirname "$SCRIPT")" && pwd)/$(basename "$SCRIPT")"
-  STUB_DIR="$(mktemp -d)"
-  # Stub every tool the early gates require so the script reaches (and logs)
-  # the parsed min-ios value on any OS (Linux CI has no Xcode), then exits
-  # without touching real simulators.
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB_DIR/xcrun"   # no runtimes
-  printf '#!/usr/bin/env bash\nexit 1\n' > "$STUB_DIR/rg"      # no detected versions
-  printf '#!/usr/bin/env bash\necho "/Applications/Xcode.app/Contents/Developer"\n' > "$STUB_DIR/xcode-select"
-  cat > "$STUB_DIR/xcodebuild" <<'EOF'
-#!/usr/bin/env bash
-case "$1" in
-  -version)  echo "Xcode 15.0"; echo "Build version 15A240d" ;;
-  -showsdks) echo "iOS Simulator SDKs:"; echo "        -sdk iphonesimulator17.0" ;;
-  *) exit 0 ;;
-esac
-EOF
-  chmod +x "$STUB_DIR/xcrun" "$STUB_DIR/rg" "$STUB_DIR/xcode-select" "$STUB_DIR/xcodebuild"
+
+  # No runtimes, so the script stops at the --skip-download gate after logging
+  # the parsed minimum.
+  xcrun() { return 0; }
+  # Only reached by auto-detection, which an explicit --min-ios skips.
+  rg() { return 1; }
+  xcode-select() { echo "/Applications/Xcode.app/Contents/Developer"; }
+  xcodebuild() {
+    case "$1" in
+      -version) printf 'Xcode 15.0\nBuild version 15A240d\n' ;;
+      -showsdks) printf 'iOS Simulator SDKs:\n        -sdk iphonesimulator17.0\n' ;;
+      *) return 0 ;;
+    esac
+  }
+  export -f xcrun rg xcode-select xcodebuild
 }
 
-teardown() {
-  rm -rf "$STUB_DIR"
+# Runs the script with the given args and asserts it logged the expected
+# minimum, then stopped at the --skip-download gate (no runtime available).
+assert_min_ios_logged() {
+  local expected="$1"
+  shift
+  run bash "$ABS_SCRIPT" "$@" --skip-download
+  if [[ "$status" -ne 1 \
+    || "$output" != *"Minimum iOS deployment target: ${expected}"* \
+    || "$output" != *"Download skipped (--skip-download flag)"* ]]; then
+    printf 'status=%s\noutput:\n%s\n' "$status" "$output" >&2
+    return 1
+  fi
 }
 
 @test "honors --min-ios VERSION (space-separated, as documented)" {
-  run env PATH="$STUB_DIR:$PATH" bash "$ABS_SCRIPT" --min-ios 16.0 --skip-download
-  [[ "$output" == *"Minimum iOS deployment target: 16.0"* ]]
+  assert_min_ios_logged 16.0 --min-ios 16.0
 }
 
 @test "still honors --min-ios=VERSION" {
-  run env PATH="$STUB_DIR:$PATH" bash "$ABS_SCRIPT" --min-ios=17.2 --skip-download
-  [[ "$output" == *"Minimum iOS deployment target: 17.2"* ]]
+  assert_min_ios_logged 17.2 --min-ios=17.2
 }

@@ -117,7 +117,7 @@ function onlyTesting(command: string): string[] {
 }
 
 const PR_PARAMETERS = ["run-ios"];
-const MAIN_PARAMETERS = ["run-main-ios", "run-main-desktop"];
+const MAIN_PARAMETERS = ["run-main-ios", "run-main-desktop", "run-main-linux"];
 const NIGHTLY_ORDER = [
   "XCTestRunner Simulator Tests",
   "Swift Packages Sweep (Xcode 26.6)",
@@ -157,9 +157,10 @@ describe("CircleCI macOS policy (#10887, #11010)", () => {
     const keys = typeof restore === "string" ? undefined : restore?.restore_cache?.keys;
     expect(keys).toEqual(['spm-v2-{{ checksum "/tmp/spm-lock.txt" }}']);
     const saveKeys = Object.values(config.jobs ?? {}).flatMap((job) =>
-      (job.steps ?? []).flatMap((step) =>
-        typeof step !== "string" && step.save_cache ? [step.save_cache.key] : [],
-      ),
+      (job.steps ?? []).flatMap((step) => {
+        const key = typeof step === "string" ? undefined : step.save_cache?.key;
+        return typeof key === "string" && key.startsWith("spm-") ? [key] : [];
+      }),
     );
     expect(saveKeys.length).toBeGreaterThan(0);
     for (const key of saveKeys) {

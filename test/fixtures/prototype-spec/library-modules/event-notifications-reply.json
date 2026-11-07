@@ -1,0 +1,30 @@
+{
+  "spec": {
+    "id": "library-reply",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["notifications"]
+    },
+    "platform": {
+      "on": {
+        "notifications.reply": [
+          {
+            "type": "dismiss"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "spacer"
+    }
+  },
+  "options": {
+    "library": true
+  },
+  "expectedPath": "platform.on[\"notifications.reply\"]",
+  "expectedMessage": "Sensitive platform event notifications.reply is unavailable in a library"
+}

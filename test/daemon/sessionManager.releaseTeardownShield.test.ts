@@ -406,6 +406,59 @@ test("session release restores a pending typing IME exactly once before handing 
   }
 });
 
+test("a release forced after the restore took the IME lock aborts that restore's fence (#16580)", async () => {
+  const h = await harness();
+  await ownDevice(h, []);
+  const { pendingImeRestores } =
+    await import("../../src/features/action/sendkeys/PendingImeRestore");
+  const started = Promise.withResolvers<AbortSignal | undefined>();
+  const gate = Promise.withResolvers<void>();
+  const writes: string[] = [];
+  pendingImeRestores.store(
+    device.deviceId,
+    {
+      snapshot: { prior: "keyboard/.Ime", wasEnabled: false, priorSubtype: { id: 7 } },
+      userId: 10,
+      restore: async (fence) => {
+        started.resolve(fence);
+        await gate.promise;
+        // Stands in for ImeRestore: every later device write checks the fence first.
+        if (!fence?.aborted) {
+          writes.push("ime disable");
+        }
+      },
+    },
+    h.timer,
+  );
+  const session = h.manager.getSession("old");
+  const stateRestore = Reflect.get(h.manager, "stateRestore") as SessionDeviceStateRestore;
+  const operation: SessionReleaseOperation = {
+    session: session!,
+    promise: Promise.resolve(null),
+    reason: { value: "plan-auto-release" },
+    options: {},
+    startedAtMs: 0,
+    stuckDeadlineMs: 1000,
+    forcedAbort: new AbortController(),
+  };
+  try {
+    const drain = stateRestore.drainReleaseTeardown("old", session!, operation);
+    const fence = await started.promise;
+    expect(fence?.aborted).toBe(false);
+
+    operation.forced = true;
+    operation.forcedAbort!.abort(new Error("forced"));
+    expect(fence?.aborted).toBe(true);
+    gate.resolve();
+    await Promise.all(await drain);
+
+    expect(writes).toEqual([]);
+    expect(pendingImeRestores.hasPending(device.deviceId)).toBe(false);
+  } finally {
+    pendingImeRestores.discard(device.deviceId);
+  }
+});
+
 test("a release forced while it waits for the IME lock discards the pending restore", async () => {
   const h = await harness();
   await ownDevice(h, []);

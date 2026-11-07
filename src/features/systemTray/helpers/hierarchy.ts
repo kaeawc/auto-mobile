@@ -437,3 +437,57 @@ export const findHeaderAppLabel = (
   }
   return undefined;
 };
+
+// iOS renders no separate app-name label: the short-look view's accessibility
+// label leads with the app's display name ("MESSAGES, now, <title>, <body>").
+const IOS_NOTIFICATION_ATTRIBUTION_RESOURCE_ID = "NotificationShortLookView";
+const IOS_NOTIFICATION_ROW_RESOURCE_IDS = ["ListCell", IOS_NOTIFICATION_ATTRIBUTION_RESOURCE_ID];
+
+/**
+ * The element of a row that names the posting app: the Android `app_name_text`
+ * header label, or the iOS short-look label whose leading segment is the app
+ * name (`leading`). The app filter compares against this only (#17401).
+ */
+export interface NotificationAttribution {
+  text: string;
+  leading: boolean;
+}
+
+export const getNodeAttribution = (node: ViewHierarchyNode): NotificationAttribution | null => {
+  const props = getNodeProperties(node);
+  if (!props) {
+    return null;
+  }
+  const resourceId = rawResourceId(props);
+  if (resourceId.toLowerCase().includes("app_name_text")) {
+    const text = rawNodeValue(props, "text");
+    return typeof text === "string" && text.trim() ? { text, leading: false } : null;
+  }
+  if (resourceId === IOS_NOTIFICATION_ATTRIBUTION_RESOURCE_ID) {
+    const text = extractNodeTextCandidates(node).find((candidate) => candidate.trim());
+    return text ? { text, leading: true } : null;
+  }
+  return null;
+};
+
+export const collectNotificationAttributions = (
+  node: ViewHierarchyNode | null | undefined,
+): NotificationAttribution[] => {
+  if (!node) {
+    return [];
+  }
+  const own = getNodeAttribution(node);
+  return [
+    ...(own ? [own] : []),
+    ...getDirectChildNodes(node).flatMap(collectNotificationAttributions),
+  ];
+};
+
+/** A node that bounds one notification (or group) and therefore its attribution. */
+export const nodeIsNotificationRowRoot = (node: ViewHierarchyNode): boolean => {
+  if (nodeHasNotificationRowHint(node) || nodeIsNotificationGroup(node)) {
+    return true;
+  }
+  const resourceId = rawResourceId(getNodeProperties(node));
+  return IOS_NOTIFICATION_ROW_RESOURCE_IDS.includes(resourceId);
+};

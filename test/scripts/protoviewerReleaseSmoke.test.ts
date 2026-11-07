@@ -37,6 +37,10 @@ const LIBRARY_ID = "11111111-1111-4111-8111-111111111111";
 class FakeViewer implements ProtoViewerDevice {
   readonly library = new Map<string, string>();
   wipeOnInstall = false;
+  /** A build without a capabilities report: the app's own import gate decides. */
+  async capabilities(): Promise<undefined> {
+    return undefined;
+  }
   async installed(): Promise<boolean> {
     return true;
   }
@@ -156,6 +160,7 @@ describe("iOS smoke launch state", () => {
         ...driver,
         viewer: {
           installed: () => viewer.installed(),
+          capabilities: () => viewer.capabilities(),
           async importBundle(bytes, label) {
             expect(runner.calls.at(-1)?.args[1]).toBe("terminate");
             events.push("import");

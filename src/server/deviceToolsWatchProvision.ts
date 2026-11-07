@@ -1,3 +1,4 @@
+import { notifyAfterAppleSimulatorProvision } from "./appleSimulatorInventoryNotify";
 import { describeDevice, projectProvisionedDevice } from "../daemon/deviceDescription";
 import {
   getDeviceToolsDependencies,
@@ -10,7 +11,10 @@ import { ActionableError, toActionableError } from "../models";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { DEFAULT_PROVISION_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
-import { WatchSimulatorInventory } from "../utils/ios-cmdline-tools/WatchSimulatorInventory";
+import {
+  WatchSimulatorInventory,
+  type WatchSimulatorSimctl,
+} from "../utils/ios-cmdline-tools/WatchSimulatorInventory";
 import type {
   ListedWatch,
   WatchBootResult,
@@ -18,6 +22,7 @@ import type {
 import {
   WatchSimulatorProvisioner,
   type WatchProvisionRequest,
+  type WatchSimulatorCreator,
 } from "../utils/ios-cmdline-tools/WatchSimulatorProvisioner";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { runWithAcquisitionDeadline } from "./deviceToolsAcquisition";
@@ -26,6 +31,7 @@ import {
   defaultWatchLifecycle,
   type BindBootedSession,
 } from "./deviceToolsWatchOs";
+import { configuredSimulatorPairService } from "./deviceToolsSimulatorPairs";
 import { formatToolParamError } from "./toolParamError";
 import { stripInternalToolParams } from "./internalToolParams";
 
@@ -95,6 +101,11 @@ export async function provisionWatchDevice(
             );
             const { watch, created } = resolved;
             if (args.boot === false) {
+              notifyAfterAppleSimulatorProvision(
+                `watchOS simulator ${watch.deviceId}`,
+                created,
+                undefined,
+              );
               return watchProvisionResponse(args, watch, created, undefined);
             }
             const booted = await bootAndBind(
@@ -102,6 +113,11 @@ export async function provisionWatchDevice(
               deps,
               deadlineMs,
               { signal: requestSignal, stage },
+            );
+            notifyAfterAppleSimulatorProvision(
+              `watchOS simulator ${watch.deviceId}`,
+              created,
+              booted,
             );
             return watchProvisionResponse(args, watch, created, booted);
           } finally {
@@ -210,7 +226,14 @@ function parseWatchProvisionArgs(rawArgs: object): WatchProvisionDeviceRequest {
   );
 }
 
-function defaultWatchProvisioner(): WatchSimulatorProvisioner {
-  const simctl = new SimCtlClient();
-  return new WatchSimulatorProvisioner(new WatchSimulatorInventory(simctl), simctl);
+/** Discarding a created watch unpairs through the same pair service startDevice paired with. */
+export function defaultWatchProvisioner(
+  deps: Pick<DeviceToolsDependencies, "simulatorPairServiceFactory"> = getDeviceToolsDependencies(),
+  simctl: WatchSimulatorSimctl & WatchSimulatorCreator = new SimCtlClient(),
+): WatchSimulatorProvisioner {
+  return new WatchSimulatorProvisioner(
+    new WatchSimulatorInventory(simctl),
+    simctl,
+    configuredSimulatorPairService(deps),
+  );
 }

@@ -9,7 +9,6 @@ import {
   test,
 } from "bun:test";
 import { z } from "zod/v4";
-import { UNEVALUATED_EXPECTATIONS_WARNING } from "../../src/utils/plan/PlanExecutor";
 import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -157,7 +156,17 @@ describe("criticalSection sub-steps get the plan path's migration and schema par
     expect(result.failedStep?.error).toContain("Invalid parameters for tool tapOn");
   });
 
-  test("a sub-step carrying expectations runs and the section warns they were not evaluated", async () => {
+  test("a sub-step's expectations are checked on the section's device and a failure fails the section", async () => {
+    const observedWaits: unknown[] = [];
+    ToolRegistry.register(
+      "observe",
+      "fake observe",
+      z.object({ platform: z.string().optional(), waitFor: z.unknown().optional() }).passthrough(),
+      async (params) => {
+        observedWaits.push(params.waitFor);
+        return createStructuredToolResponse({ awaitTimeout: true, awaitDuration: 5000 });
+      },
+    );
     const result = await executor.executePlan(
       sectionPlan([
         {
@@ -169,16 +178,12 @@ describe("criticalSection sub-steps get the plan path's migration and schema par
       ]),
       0,
     );
-    expect(result.failedStep).toBeUndefined();
-    expect(result.success).toBe(true);
-    expect(tappedTexts).toEqual(["Sync", "Plain"]);
-    expect(result.warnings).toEqual([
-      {
-        stepIndex: 0,
-        tool: "criticalSection",
-        warnings: [`step 1 (tapOn): ${UNEVALUATED_EXPECTATIONS_WARNING}`],
-      },
-    ]);
+    expect(result.success).toBe(false);
+    expect(tappedTexts).toEqual(["Sync"]);
+    expect(observedWaits).toEqual([{ text: "Done" }]);
+    expect(result.failedStep?.error).toContain(
+      'Expectation 1/1 (elementVisible text="Done") failed: not satisfied after 5000ms',
+    );
   });
 
   test("an empty expectations list adds no warning", async () => {

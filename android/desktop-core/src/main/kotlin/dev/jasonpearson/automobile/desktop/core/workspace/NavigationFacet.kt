@@ -9,8 +9,10 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import dev.jasonpearson.automobile.desktop.core.daemon.DesktopInputAllocation
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
+import dev.jasonpearson.automobile.desktop.core.daemon.reconnectBackoffMs
 import dev.jasonpearson.automobile.desktop.core.datasource.NavigationDataSource
 import dev.jasonpearson.automobile.desktop.core.datasource.NavigationGraph
 import dev.jasonpearson.automobile.desktop.core.datasource.RealNavigationDataSource
@@ -18,6 +20,7 @@ import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.navigation.DefaultNavigationScreenshotLoaderRegistry
+import dev.jasonpearson.automobile.desktop.core.navigation.EdgeNavigator
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -85,6 +88,9 @@ internal sealed interface NavigationFacetState {
  * broadcast for one device can be misattributed to the other pane. Full disambiguation needs the
  * deviceId/build discriminator that lands in a later phase; we do not block on it here.
  *
+ * When the app provides a [LocalDaemonStreamHub], the stream is a lease on the hub's one shared
+ * observation connection for the device (#16967) and the hub owns its reconnection.
+ *
  * [observationStreamFactory], [backoffDelay], [socketAvailable], and [navigationDataSourceProvider]
  * are injected so reconnect and app-resolution behavior is testable with a
  * [dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream] and a fake data source,
@@ -98,13 +104,11 @@ fun NavigationFacet(
   val graph = LocalAutoMobileGraph.current
 
   val observation =
-    rememberReconnectingObservationState(
-      ReconnectingObservationOptions(
-        deviceId = column.deviceId,
-        streamFactory = { options.observationStreamFactory(column.deviceId) },
-        backoffDelay = options.backoffDelay,
-        socketAvailable = options.socketAvailable,
-      ),
+    rememberPaneObservationState(
+      column,
+      { options.observationStreamFactory(column.deviceId) },
+      options.backoffDelay,
+      options.socketAvailable,
     )
   val stream = observation.stream
 
@@ -236,7 +240,8 @@ fun NavigationFacet(
       val screenshotLoader =
         remember(column.deviceId, loaderProvider) { loaderProvider(column.deviceId) }
 
-      NavigationContent(memory, stream, clientProvider, screenshotLoader)
+      val navigator = rememberEdgeNavigator(options, clientProvider)
+      NavigationContent(memory, stream, clientProvider, screenshotLoader, navigator)
     }
   }
 }
@@ -272,6 +277,11 @@ data class NavigationFacetOptions(
   val connectionStateCollectorGate: suspend (ConnectionState) -> Unit = {},
   val screenshotLoaderProvider: ((String) -> ScreenshotLoader)? = null,
   val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
+  // Allocates the pane's device before a navigate action drives it (#16953). Without it (and
+  // without [edgeNavigator]) the facet offers no navigate action.
+  val inputAllocation: DesktopInputAllocation? = null,
+  // Overrides the daemon-backed navigator; tests pass a fake.
+  val edgeNavigator: EdgeNavigator? = null,
 )
 
 internal data class NavigationMemory(

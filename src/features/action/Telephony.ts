@@ -24,6 +24,10 @@ import {
   type IosSdkTriggerSenderFactory,
 } from "./IosSdkTrigger";
 import type { CtrlProxySdkTriggerResult } from "../observe/ios/types";
+import { isIosSimulatorDevice } from "./IosSimulatorPermissions";
+
+const IOS_PHYSICAL_TELEPHONY_UNSUPPORTED_ERROR =
+  "Telephony on iOS needs the app's AutoMobile SDK on the iOS Simulator; a physical iOS device has no public API for call or SMS simulation.";
 
 /**
  * Factory for building an EmulatorConsoleClient for a specific emulator console port.
@@ -213,6 +217,15 @@ export class Telephony {
    * tool's actions one to one.
    */
   private async phoneCallIos(options: PhoneCallOptions): Promise<PhoneCallResult> {
+    if (!isIosSimulatorDevice(this.device)) {
+      return {
+        success: false,
+        action: options.action,
+        phoneNumber: options.phoneNumber,
+        supported: false,
+        error: IOS_PHYSICAL_TELEPHONY_UNSUPPORTED_ERROR,
+      };
+    }
     const base = { action: options.action, phoneNumber: options.phoneNumber };
     if (options.action !== "hold" && !options.phoneNumber) {
       return {
@@ -246,6 +259,15 @@ export class Telephony {
 
   /** iOS: the app's in-app SDK posts an SMS-style local notification (`messages` module). */
   private async sendSmsIos(options: SendSmsOptions): Promise<SendSmsResult> {
+    if (!isIosSimulatorDevice(this.device)) {
+      return {
+        success: false,
+        phoneNumber: options.phoneNumber,
+        messageLength: options.message.length,
+        supported: false,
+        error: IOS_PHYSICAL_TELEPHONY_UNSUPPORTED_ERROR,
+      };
+    }
     const base = { phoneNumber: options.phoneNumber, messageLength: options.message.length };
     try {
       // Same body constraints as the Android console path, so both platforms reject the same input.

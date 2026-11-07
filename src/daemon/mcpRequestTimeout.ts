@@ -20,6 +20,7 @@ import {
   APP_FILE_PUSH_TIMEOUT_MS,
   FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
 } from "../features/storage/fileTransferTimeout";
+import { resolveKillProfileBudgetMs } from "../features/utility/killProfileTimeout";
 export {
   SNAPSHOT_MCP_TIMEOUT_HEADROOM_MS,
   WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
@@ -495,6 +496,7 @@ const ARGUMENT_BUDGET_RESOLVERS: ReadonlyMap<string, (args: Record<string, unkno
     ],
     ["putAppFile", (args) => resolveFileTransferBudgetMs(args, APP_FILE_PUSH_TIMEOUT_MS)],
     ["prototype", resolvePrototypeAwaitBudgetMs],
+    ["killProfile", resolveKillProfileBudgetMs],
   ]);
 
 function resolveArgumentBudgetToolBudgetMs(request: DaemonRequest): number {

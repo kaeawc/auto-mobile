@@ -74,7 +74,11 @@ the harness requires API 33+.
 | tecno-app-halt            | ran                  | ran                 | never        | ran         | never         | delayed            | ran           | ran            |
 
 The measurements use an Android 15 (API 35) google_apis arm64 emulator. A real reboot is not
-exercised; `BOOT_COMPLETED` is delivered by adb broadcast. On this emulator the standby bucket
+exercised; `BOOT_COMPLETED` is delivered by adb broadcast as root with exclude-stopped flags.
+Shell cannot send this protected broadcast. On stock API 35, default delivery requires a receiver,
+RECEIVE_BOOT_COMPLETED and a non-stopped package; restricted buckets and background appops
+do not themselves block it. The boot-receiver check observes these conditions without broadcasting.
+The samsung-foreground-kill and screen-off-stop recipes have no measured survival baseline yet. On this emulator the standby bucket
 `restricted` reads back as bucket 45 and `SCHEDULE_EXACT_ALARM` deny reads back as `deny`; the
 harness requires every step of a profile to report `applied` before it scores it. Profiles that
 depend on those steps still reflect emulator behavior, not confirmed OEM effects.

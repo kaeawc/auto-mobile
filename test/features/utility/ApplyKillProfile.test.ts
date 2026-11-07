@@ -36,6 +36,14 @@ describe("kill profiles (#14051)", () => {
   beforeEach(() => {
     adb = new FakeAdbExecutor();
     adb.setAndroidApiLevel(34);
+    adb.setCommandResponse(
+      `shell dumpsys package ${Q}`,
+      createExecResult(revokedNotifications, ""),
+    );
+    adb.setCommandResponse(
+      "shell dumpsys alarm",
+      createExecResult("Current Alarm Manager state:\n", ""),
+    );
     adb.setCommandResponse("shell pm path", createExecResult("package:/data/app/base.apk\n", ""));
     adb.setCommandResponse(
       "shell dumpsys battery",
@@ -66,7 +74,7 @@ describe("kill profiles (#14051)", () => {
       .getExecutedCommands()
       .filter(
         (command) =>
-          !/pm path|dumpsys package|appops get|app_hibernation get-state|get-standby-bucket|^shell dumpsys battery$/.test(
+          !/pm path|dumpsys package|dumpsys alarm|appops get|app_hibernation get-state|get-standby-bucket|^shell dumpsys battery$/.test(
             command,
           ),
       );
@@ -153,7 +161,7 @@ describe("kill profiles (#14051)", () => {
       fixture("deskclock-hibernation-after-true"),
     ]);
     const result = await applyKillProfile(emulator, APP, "samsung-auto-disable", deps());
-    expect(result.steps[0].status).toBe("applied");
+    expect(result.steps[1].status).toBe("applied");
     expect(adb.getExecutedCommands().filter((command) => command === read)).toHaveLength(2);
   });
 
@@ -163,9 +171,11 @@ describe("kill profiles (#14051)", () => {
       fixture("deskclock-hibernation-before"),
     );
     const forget = spyOn(registry, "forget");
-    await expect(applyKillProfile(emulator, APP, "samsung-auto-disable", deps())).rejects.toThrow(
-      "hibernation reads back as false, expected true",
-    );
+    const result = await applyKillProfile(emulator, APP, "samsung-auto-disable", deps());
+    expect(result.steps[1]).toMatchObject({
+      status: "failed",
+      reason: "hibernation reads back as false, expected true",
+    });
     expect(forget).not.toHaveBeenCalled();
     expect(registry.has(emulator.deviceId, `hibernation:${APP}`)).toBe(true);
     forget.mockRestore();
@@ -283,22 +293,58 @@ describe("kill profiles (#14051)", () => {
       expect(profile.steps.some((step) => step.kind === "kill")).toBe(false);
       expect(
         profile.steps.every((step) =>
-          ["batteryUnplug", "standbyBucket", "appOp"].includes(step.kind),
+          ["batteryUnplug", "standbyBucket", "appOp", "bootReceiverCheck"].includes(step.kind),
         ),
       ).toBe(true);
-      expect(profile.version).toBe(1);
+      expect(profile.version).toBe(
+        [
+          "huawei-powergenie",
+          "vivo-autostart",
+          "realme-power-saver",
+          "meizu-flyme-background",
+          "asus-power-master",
+          "tecno-app-halt",
+          "sony-stamina",
+        ].includes(id)
+          ? 2
+          : 1,
+      );
       expect(profile.evidenceStatus).toBe("inferred");
-      expect(profile.evidenceNote).toContain("Not modelled yet (#16869):");
-      const result = await applyKillProfile(emulator, APP, id, deps());
+      expect(profile.evidenceNote).toContain("dontkillmyapp.com");
+      const appId = "com.google.android.deskclock";
+      const quoted = `'${appId}'`;
+      adb.setCommandResponse(
+        `shell dumpsys package ${quoted}`,
+        fixture("deskclock-package-running"),
+      );
+      adb.setCommandResponseSequence(`shell am get-standby-bucket ${quoted}`, [
+        createExecResult("10", ""),
+        createExecResult("45", ""),
+      ]);
+      for (const op of ["RUN_ANY_IN_BACKGROUND", "WAKE_LOCK"]) {
+        adb.setCommandResponseSequence(`shell appops get ${quoted} ${op}`, [
+          createExecResult("No operations.", ""),
+          createExecResult(`${op}: ignore`, ""),
+        ]);
+      }
+      adb.setCommandResponseSequence(`shell appops get --uid ${quoted} SCHEDULE_EXACT_ALARM`, [
+        createExecResult("No operations.", ""),
+        createExecResult("Uid mode: SCHEDULE_EXACT_ALARM: deny", ""),
+      ]);
+      const result = await applyKillProfile(emulator, appId, id, deps());
       expect(result.status).toBe("applied");
-      expect(writes()).toEqual([...applied]);
-      expect(result.restore?.commands).toEqual([...restored]);
-      expect(result.restore?.commands).toHaveLength(profile.steps.length);
+      expect(writes()).toEqual(applied.map((command) => command.replaceAll(APP, appId)));
+      expect(result.restore?.commands).toEqual(
+        restored.map((command) => command.replaceAll(APP, appId)),
+      );
+      expect(result.restore?.commands).toHaveLength(
+        profile.steps.filter((step) => step.kind !== "bootReceiverCheck").length,
+      );
       adb.clearHistory();
-      const reset = await resetKillProfile(emulator, APP, {}, deps());
+      const reset = await resetKillProfile(emulator, appId, {}, deps());
       expect(reset).toMatchObject({ source: "recorded", status: "applied" });
-      expect(writes()).toEqual([...restored]);
-      expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([]);
+      expect(writes()).toEqual(restored.map((command) => command.replaceAll(APP, appId)));
+      expect(registry.pendingFor(emulator.deviceId, appId)).toEqual([]);
     },
   );
 
@@ -527,7 +573,10 @@ describe("kill profiles (#14051)", () => {
       const result = await applyKillProfile(emulator, APP, "samsung-auto-disable", deps());
       expect(result).toMatchObject({
         status: "applied",
-        steps: [{ step: "app hibernation", status: "applied" }],
+        steps: [
+          { step: "runtime permissions revoke", status: "applied" },
+          { step: "app hibernation", status: "applied" },
+        ],
       });
       expect(writes()).toEqual([`shell cmd app_hibernation set-state --user 0 ${Q} true`]);
       const commands = adb.getExecutedCommands();
@@ -551,7 +600,7 @@ describe("kill profiles (#14051)", () => {
 
   test.each([
     ["notifications-off", 32, 33],
-    ["samsung-auto-disable", 30, 31],
+    ["samsung-auto-disable", 22, 23],
   ] as const)("%s is unsupported on API %s", async (profile, api, minimum) => {
     adb.setAndroidApiLevel(api);
     const result = await applyKillProfile(emulator, APP, profile, deps());
@@ -659,13 +708,16 @@ describe("kill profiles (#14051)", () => {
     expect(registry.pendingFor(emulator.deviceId, APP)).toEqual([]);
   });
 
-  test("Xiaomi and OnePlus force-stop recipes retain their version and steps", () => {
+  test("Xiaomi appends a boot observation while OnePlus retains its force-stop recipe", () => {
     for (const id of ["xiaomi-autostart-off", "oneplus-deep-optimization"] as const) {
-      expect(KILL_PROFILES[id].version).toBe(1);
-      expect(KILL_PROFILES[id].steps).toEqual([
+      expect(KILL_PROFILES[id].version).toBe(id === "xiaomi-autostart-off" ? 2 : 1);
+      expect(KILL_PROFILES[id].steps.slice(0, 2)).toEqual([
         { kind: "kill", mode: "hard" },
         { kind: "appOp", op: "RUN_ANY_IN_BACKGROUND", mode: "ignore" },
       ]);
+      expect(KILL_PROFILES[id].steps.slice(2)).toEqual(
+        id === "xiaomi-autostart-off" ? [{ kind: "bootReceiverCheck" }] : [],
+      );
     }
   });
 

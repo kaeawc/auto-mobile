@@ -185,6 +185,22 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
     }
 
     func rotateCrown(delta: Double, velocity: Double) throws {
+        // The host can be foreground yet hold no crown focus (for example after a simctl launch), and
+        // the private rotate selector then returns normally with nothing consuming the rotation.
+        // The first snapshot after a launch can still be settling, so discard it and compare against the next.
+        _ = try? snapshot()
+        let before = try? snapshot()
+        try rotateFocusedCrown(delta: delta, velocity: velocity)
+        guard let before, let after = try? snapshot(), !watchCrownChangedHierarchy(before: before, after: after) else {
+            return
+        }
+        throw WatchCommandError.commandFailed(
+            "rotateCrown changed nothing: no view consumed the rotation. No view holds crown focus, or the "
+                + "scrolled content is already at its limit; tap the view that should receive the crown, then retry."
+        )
+    }
+
+    private func rotateFocusedCrown(delta: Double, velocity: Double) throws {
         try performGesture {
             // Rotate the currently focused control using a private selector with unboxed Double arguments.
             let device = XCUIDevice.shared
@@ -209,4 +225,15 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
         }
         try result.get()
     }
+}
+
+/// True when the rotation changed anything observable. Compares the node tree only: the wrapper's
+/// timestamp changes on every snapshot.
+func watchCrownChangedHierarchy(before: SdkViewHierarchy, after: SdkViewHierarchy) -> Bool {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = .sortedKeys
+    guard let old = try? encoder.encode(before.root), let new = try? encoder.encode(after.root) else {
+        return true
+    }
+    return old != new
 }

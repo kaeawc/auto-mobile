@@ -120,7 +120,9 @@ Every other tool refuses a watch before doing anything, with:
 - `pressButton` supports `home` only.
 - `rotateCrown` turns the Digital Crown by a signed, non-zero `delta`, with an optional positive
   `velocity` (default 1). It is not listed by default; enable it with `setToolEnabled` (see
-  [Dynamic Tools](dynamic-tools.md)).
+  [Dynamic Tools](dynamic-tools.md)). A rotation that changes nothing on screen fails with an
+  error: no view holds crown focus (for example after launching the app outside AutoMobile; tap the
+  view that should receive the crown, then retry) or the content is already at its limit.
 
   ```json
   { "name": "rotateCrown", "arguments": { "platform": "watchos", "delta": 2 } }

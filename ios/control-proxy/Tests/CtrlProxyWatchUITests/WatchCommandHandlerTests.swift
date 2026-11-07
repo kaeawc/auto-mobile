@@ -147,6 +147,24 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertEqual(source.calls, ["crown:0.5,1.0"])
     }
 
+    func testCrownEffectComparesNodeTreeNotTimestamp() {
+        func hierarchy(_ label: String, timestamp: Int64) -> SdkViewHierarchy {
+            SdkViewHierarchy(
+                timestamp: timestamp, screenScale: 1, screenWidth: 208, screenHeight: 248,
+                root: SdkViewNode(
+                    className: "Window", bounds: SdkBounds(left: 0, top: 0, right: 208, bottom: 248),
+                    accessibilityLabel: label
+                )
+            )
+        }
+        XCTAssertFalse(watchCrownChangedHierarchy(
+            before: hierarchy("crown 0.00", timestamp: 1), after: hierarchy("crown 0.00", timestamp: 2)
+        ))
+        XCTAssertTrue(watchCrownChangedHierarchy(
+            before: hierarchy("crown 0.00", timestamp: 1), after: hierarchy("crown 8.71", timestamp: 2)
+        ))
+    }
+
     func testCrownUsesExplicitVelocity() {
         let source = FakeWatchSource()
         let handler = WatchCommandHandler(snapshotSource: source, gestures: source)

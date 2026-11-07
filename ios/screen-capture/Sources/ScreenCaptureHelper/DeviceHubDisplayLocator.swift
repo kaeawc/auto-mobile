@@ -3,6 +3,45 @@ import CoreGraphics
 import Foundation
 import ScreenCaptureKit
 
+/// Retains the last usable display placement while Device Hub changes zoom or window size.
+@MainActor
+final class DeviceHubDisplayTracker {
+    static let relocateInterval: TimeInterval = 0.5
+
+    private var relativeRect: CGRect
+    private var windowSize: CGSize
+    private var lastRelocate: TimeInterval
+    private let now: () -> TimeInterval
+    private let relocate: @MainActor () async -> CGRect?
+
+    init(
+        relativeRect: CGRect,
+        windowSize: CGSize,
+        now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        relocate: @escaping @MainActor () async -> CGRect?
+    ) {
+        self.relativeRect = relativeRect
+        self.windowSize = windowSize
+        self.now = now
+        self.relocate = relocate
+        lastRelocate = now()
+    }
+
+    func refreshIfDue(windowSize: CGSize) async {
+        guard windowSize != self.windowSize || now() - lastRelocate >= Self.relocateInterval else { return }
+        // Throttle failed attempts too, retaining the last good placement until capture recovers.
+        self.windowSize = windowSize
+        lastRelocate = now()
+        if let rect = await relocate() {
+            relativeRect = rect
+        }
+    }
+
+    func frame(for window: SimulatorOverlayTarget) -> CGRect {
+        relativeRect.offsetBy(dx: window.frame.minX, dy: window.frame.minY)
+    }
+}
+
 /// Finds the simulated display inside Xcode 27's Device Hub window.
 ///
 /// Device Hub shows a foldable such as the Duo as one window for both panels. Its accessibility

@@ -141,22 +141,31 @@ enum SimulatorDisplayGeometry {
         return matching.count == 1 ? matching[0] : nil
     }
 
+    struct DisplayFrameLookup {
+        let frame: @MainActor (SimulatorOverlayTarget) -> CGRect?
+        var prepare: (@MainActor (SimulatorOverlayTarget) async -> Void)?
+    }
+
     /// Where the display sits for `window`: its accessibility display group, or, when the window has
     /// none (Device Hub shows both Duo panels in one window), the drawn display found from pixels.
+    @MainActor
     static func displayFrameLookup(
         for window: SimulatorOverlayTarget,
         sourceSize: CGSize?
     )
-        async -> (SimulatorOverlayTarget) -> CGRect?
+        async -> DisplayFrameLookup
     {
-        if displayFrame(window: window) != nil { return displayFrame(window:) }
+        if displayFrame(window: window) != nil { return DisplayFrameLookup(frame: displayFrame(window:)) }
         guard let relative = await DeviceHubDisplayLocator.locate(window: window, sourceSize: sourceSize)
-        else { return displayFrame(window:) }
-        let offset = relative.origin // relative to the window's top-left
-        // Device Hub keeps the display at the same place in its window, so follow the window.
-        return { moved in
-            CGRect(origin: CGPoint(x: moved.frame.minX + offset.x, y: moved.frame.minY + offset.y), size: relative.size)
+        else { return DisplayFrameLookup(frame: displayFrame(window:)) }
+        var currentWindow = window
+        let tracker = DeviceHubDisplayTracker(relativeRect: relative, windowSize: window.frame.size) {
+            await DeviceHubDisplayLocator.locate(window: currentWindow, sourceSize: sourceSize)
         }
+        return DisplayFrameLookup(frame: { tracker.frame(for: $0) }, prepare: { updated in
+            currentWindow = updated
+            await tracker.refreshIfDue(windowSize: updated.frame.size)
+        })
     }
 
     static func displayFrame(window: SimulatorOverlayTarget) -> CGRect? {
@@ -194,12 +203,15 @@ final class SimulatorHighlightOverlay: SimulatorOverlay {
     private let startedAt = ProcessInfo.processInfo.systemUptime
     private var previousFrame: CGRect?
 
-    private let displayFrame: (SimulatorOverlayTarget) -> CGRect?
+    private let displayFrame: @MainActor (SimulatorOverlayTarget) -> CGRect?
+    private let prepare: (@MainActor (SimulatorOverlayTarget) async -> Void)?
 
     init(
         window: SimulatorOverlayTarget,
         request: SimulatorHighlightRequest,
-        displayFrame: @escaping (SimulatorOverlayTarget) -> CGRect? = SimulatorDisplayGeometry.displayFrame(window:)
+        displayFrame: @escaping @MainActor (SimulatorOverlayTarget) -> CGRect? = SimulatorDisplayGeometry
+            .displayFrame(window:),
+        prepare: (@MainActor (SimulatorOverlayTarget) async -> Void)? = nil
     )
         throws
     {
@@ -213,6 +225,7 @@ final class SimulatorHighlightOverlay: SimulatorOverlay {
             )
         }
         self.displayFrame = displayFrame
+        self.prepare = prepare
         targetID = window.windowID
         targetPID = window.processID
         shape = request.shape
@@ -239,9 +252,12 @@ final class SimulatorHighlightOverlay: SimulatorOverlay {
 
     func refresh() async throws {
         guard let window = SimulatorDisplayGeometry.targets()
-            .first(where: { $0.windowID == targetID && $0.processID == targetPID }),
-            let frame = displayFrame(window)
+            .first(where: { $0.windowID == targetID && $0.processID == targetPID })
         else {
+            throw OverlayError("Simulator window disappeared")
+        }
+        await prepare?(window)
+        guard let frame = displayFrame(window) else {
             throw OverlayError("Simulator window disappeared")
         }
         update(frame: frame)
@@ -320,7 +336,12 @@ final class SimulatorHighlightHost {
             }
             let window = try SimulatorDisplayGeometry.find(deviceName: deviceName, sourceSize: sourceSize)
             let lookup = await SimulatorDisplayGeometry.displayFrameLookup(for: window, sourceSize: sourceSize)
-            return try SimulatorHighlightOverlay(window: window, request: request, displayFrame: lookup)
+            return try SimulatorHighlightOverlay(
+                window: window,
+                request: request,
+                displayFrame: lookup.frame,
+                prepare: lookup.prepare
+            )
         }
     }
 

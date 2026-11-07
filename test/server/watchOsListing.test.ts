@@ -1,3 +1,5 @@
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeSimulatorPairs, pairsFixture, capturedPair } from "../fakes/FakeSimulatorPairs";
 import { afterEach, describe, expect, test } from "bun:test";
 import fixture from "../fixtures/ios-simctl/list-all-appletv-26-5.json";
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
@@ -36,6 +38,7 @@ function host() {
     avdManagerFactory: () => new FakeAvdManager(),
     timer: new FakeTimer(),
     bootCapacityReporters: {},
+    simulatorPairServiceFactory: () => new FakeSimulatorPairs().service(),
   });
   return { simctl, handlers: createListingHandlers() };
 }
@@ -74,4 +77,35 @@ describe("watchOS listDevices (#17320)", () => {
       discovery: { complete: false, failedPlatforms: ["watchos"] },
     });
   });
+});
+
+test.each(["watchos", "ios"] as const)("%s listing includes simulator pairs", async (platform) => {
+  const f = host();
+  if (platform === "ios") {
+    setDeviceToolsDependencies({ deviceManagerFactory: () => new FakeDeviceUtils() });
+  }
+  const pairs = new FakeSimulatorPairs();
+  pairs.listing = pairsFixture("list-pairs-active-connected.json");
+  setDeviceToolsDependencies({ simulatorPairServiceFactory: () => pairs.service() });
+  const result = toolJson(await f.handlers.listDevicesHandler({ platform }));
+  expect(result.simulatorPairs).toEqual([
+    {
+      ...capturedPair,
+      connection: "connected",
+      watch: { ...capturedPair.watch, state: "Booted" },
+      phone: { ...capturedPair.phone, state: "Booted" },
+    },
+  ]);
+  expect(listDevicesOutputSchema.safeParse(result).success).toBe(true);
+});
+test("pair listing failure omits simulatorPairs", async () => {
+  const f = host();
+  const service = new FakeSimulatorPairs().service();
+  service.list = async () => {
+    throw new Error("listing failed");
+  };
+  setDeviceToolsDependencies({ simulatorPairServiceFactory: () => service });
+  expect(
+    toolJson(await f.handlers.listDevicesHandler({ platform: "watchos" })).simulatorPairs,
+  ).toBeUndefined();
 });

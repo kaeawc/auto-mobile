@@ -1,3 +1,7 @@
+import {
+  defaultSimulatorPairService,
+  type WatchPairResult,
+} from "../utils/ios-cmdline-tools/SimulatorPairs";
 import { bindBootedSimulatorSession } from "./deviceToolsSimulatorSession";
 import { z } from "zod/v4";
 import { describeDevice, projectBootedDevice } from "../daemon/deviceDescription";
@@ -80,10 +84,17 @@ export async function startWatchDevice(
           try {
             const lifecycleSignal =
               combineAbortSignals(requestSignal, lease.signal) ?? lease.signal;
+            const refreshPair = await prepareWatchPair(
+              watch.deviceId,
+              args.pairWithDeviceId,
+              deps,
+              lifecycleSignal,
+            );
             stage.current = "booting the Apple Watch simulator";
             const boot = await lifecycle.boot(watch, {
               timeoutMs: Math.max(1, deadlineMs - deps.timer.now()),
             });
+            const pair = await refreshPair();
             stage.current = "starting the Apple Watch automation runner";
             let runnerUnavailable: string | undefined;
             let runner: Pick<WatchRunnerLifecycle, "start" | "attach" | "stop"> | undefined;
@@ -135,6 +146,7 @@ export async function startWatchDevice(
             const response = watchStartResponse(watch, boot, sessionId, {
               elapsedMs: deps.timer.now() - startedAtMs,
               runnerUnavailable,
+              pair,
             });
             completed = true;
             return response;
@@ -168,6 +180,20 @@ export async function bindWatchSession(
   );
 }
 
+async function prepareWatchPair(
+  watch: string,
+  phone: string | undefined,
+  deps: DeviceToolsDependencies,
+  signal: AbortSignal,
+): Promise<() => Promise<WatchPairResult | undefined>> {
+  if (!phone) {
+    return async () => undefined;
+  }
+  const service = (deps.simulatorPairServiceFactory ?? defaultSimulatorPairService)();
+  const pair = await service.ensure(watch, phone, signal);
+  return async () => service.refresh(pair, signal);
+}
+
 async function reserveWatchLifecycle(
   watch: ListedWatch,
   deps: DeviceToolsDependencies,
@@ -191,7 +217,11 @@ function watchStartResponse(
   watch: ListedWatch,
   boot: WatchBootResult,
   sessionId: string,
-  { elapsedMs, runnerUnavailable }: { elapsedMs: number; runnerUnavailable?: string },
+  {
+    elapsedMs,
+    runnerUnavailable,
+    pair,
+  }: { elapsedMs: number; runnerUnavailable?: string; pair?: WatchPairResult },
 ) {
   const description = describeDevice({
     kind: "booted",
@@ -206,6 +236,7 @@ function watchStartResponse(
       `watchos '${boot.device.name}' is booted (${how})` +
       (runnerUnavailable ? `; watch runner unavailable: ${runnerUnavailable}` : ""),
     ...projectBootedDevice(description),
+    ...(pair ? { pair } : {}),
     isReady: true,
     acquisition: boot.acquisition,
     readiness: {
@@ -227,7 +258,7 @@ function parseWatchStartArgs(rawArgs: object): WatchStartDeviceArgs {
   );
   if (unsupported.length > 0) {
     throw new ActionableError(
-      "startDevice for watchOS accepts only deviceId, name and timeoutMs; " +
+      "startDevice for watchOS accepts only deviceId, name, timeoutMs, enableTools, sessionUuid and pairWithDeviceId; " +
         `unsupported option(s): ${unsupported.join(", ")}.`,
     );
   }

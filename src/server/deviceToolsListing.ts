@@ -1,4 +1,8 @@
 import {
+  defaultSimulatorPairService,
+  type SimulatorPair,
+} from "../utils/ios-cmdline-tools/SimulatorPairs";
+import {
   ActionableError,
   toActionableError,
   type BootedDevice,
@@ -342,6 +346,7 @@ export function createListingHandlers() {
     return createStructuredToolResponse({
       message: `Found ${devices.length} booted device${devices.length === 1 ? "" : "s"}${platformFilter}`,
       devices,
+      ...(await listSimulatorPairFields(platform, deps, signal)),
       count: devices.length,
       discovery,
       ...(configured.enrichment ? { enrichment: configured.enrichment } : {}),
@@ -376,4 +381,23 @@ export function availableDeviceResourceNote() {
     uriPrefix:
       "All resource URIs use the 'automobile:' prefix. URIs like 'android://devices' are not supported.",
   };
+}
+
+async function listSimulatorPairFields(
+  platform: string,
+  deps: ReturnType<typeof getDeviceToolsDependencies>,
+  signal?: AbortSignal,
+): Promise<{ simulatorPairs?: SimulatorPair[] }> {
+  if (platform !== "ios" && platform !== "watchos") {
+    return {};
+  }
+  try {
+    const simulatorPairs = await (
+      deps.simulatorPairServiceFactory ?? defaultSimulatorPairService
+    )().list(signal);
+    return simulatorPairs.length ? { simulatorPairs } : {};
+  } catch (error) {
+    logger.warn(`Could not list simulator pairs: ${errorMessage(error)}`, error);
+    return {};
+  }
 }

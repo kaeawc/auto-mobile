@@ -7,8 +7,8 @@ up, the supported tools and what is out of scope.
 ## Supported watches
 
 - Simulators only. A physical Apple Watch is not supported.
-- Standalone watch apps only. AutoMobile never pairs a watch with an iPhone simulator, so flows
-  that need a companion iPhone app cannot be tested.
+- Standalone and companion watch apps. Pair a watch with an iPhone simulator using `startDevice`
+  with `pairWithDeviceId`.
 - Any Apple Watch device type and watchOS runtime installed in Xcode. Install a missing runtime
   with `xcodebuild -downloadPlatform watchOS`; AutoMobile never downloads one.
 
@@ -49,11 +49,25 @@ an example and the accepted identifiers. `resources`, `enableTools` and `readine
 are refused.
 
 Boot an existing watch and start a session with `startDevice`, naming it by exact UDID or exact
-name. Every other option is refused.
+name. Optional `timeoutMs` bounds startup; `pairWithDeviceId` names an iPhone simulator UDID.
 
 ```json
 { "name": "startDevice", "arguments": { "platform": "watchos", "deviceId": "<watch UDID>" } }
 ```
+
+With `pairWithDeviceId`, the watch is paired and the pair activated before boot. The phone is
+never booted by this call: boot it separately with `startDevice`, `platform: "ios"`.
+The result includes `pair` with `pairId`, `state` (`active` or `inactive`), `connection`
+(`connected` or `disconnected`), `phoneDeviceId`, and `created`. `created: false` means an
+existing pair was reused. Connection is sampled after watch boot and may still be disconnected.
+A watch already paired to another phone is refused with its pair ID and phone name/UDID:
+unpair it first or pass that phone. A missing or non-iOS simulator UDID is refused; choose an
+iPhone simulator from the device images. One phone may have several watches.
+
+`listDevices` for `ios` or `watchos` includes `simulatorPairs` when pairs are available. Each
+entry has `pairId`, `state`, `connection`, and `watch`/`phone` objects with `deviceId`, `name`,
+and device `state`. Pair information is omitted if none exist or the pair listing fails.
+Deleting a watch automatically unpairs only pairs created by the current daemon.
 
 `startDevice` also starts the watch automation runner. If the runner cannot start, the session is
 still bound at readiness `booted`, the response message says why, and `observe` returns a

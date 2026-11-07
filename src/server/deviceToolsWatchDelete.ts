@@ -1,3 +1,4 @@
+import { defaultSimulatorPairService } from "../utils/ios-cmdline-tools/SimulatorPairs";
 import { notifyAppleSimulatorInventoryChanged } from "./appleSimulatorInventoryNotify";
 import {
   getDeviceToolsDependencies,
@@ -179,6 +180,10 @@ async function destroyUnderLease(
     }
     signal.throwIfAborted();
     (deps.watchRunnerLifecycleFactory ?? getWatchRunnerLifecycle)().stop(device.deviceId);
+    await (deps.simulatorPairServiceFactory ?? defaultSimulatorPairService)().unpairCreated(
+      device.deviceId,
+      signal,
+    );
     await provisioner.deleteAndConfirmAbsent(device.deviceId, signal);
   } finally {
     lease.release();

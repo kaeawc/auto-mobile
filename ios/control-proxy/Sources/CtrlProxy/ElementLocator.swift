@@ -321,7 +321,10 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             let panelWindowFrame = panel.flatMap { selected in
                 snapshot.children.first { Self.displayId(of: $0) == selected.displayId }?.frame
             }
-            let screenBounds = panelWindowFrame ?? snapshot.frame
+            let screenBounds = panelWindowFrame ?? Self.offscreenFilterBounds(
+                rootFrame: snapshot.frame,
+                windowFrames: snapshot.children.filter { $0.elementType == .window }.map(\.frame)
+            )
 
             // Build hierarchy from snapshot (no more IPC calls - all data is local)
             var truncationReasons: Set<String> = []

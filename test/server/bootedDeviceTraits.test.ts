@@ -103,6 +103,16 @@ describe("bootedDeviceTraits.enrich", () => {
     expect(reader.reads.map((read) => read.deviceId)).toEqual(["emulator-5554"]);
   });
 
+  test("carries an automotive build's vehicle capabilities (#16742)", async () => {
+    const vehicle = { motion: "unsupported" as const, nightMode: "supported" as const };
+    const reader = new FakeDeviceTraits(androidDeviceTraits({ formFactor: "automotive", vehicle }));
+    const devices = [entry("android", "emulator-5554")];
+
+    await enrich(devices, options(reader));
+
+    expect(devices[0].traits?.vehicle).toEqual(vehicle);
+  });
+
   test("carries an announced watch, automotive or tv form factor and leaves handhelds null", async () => {
     const reader = new FakeDeviceTraits(androidDeviceTraits());
     reader.setTraitsFor("emulator-5554", androidDeviceTraits({ formFactor: "automotive" }));

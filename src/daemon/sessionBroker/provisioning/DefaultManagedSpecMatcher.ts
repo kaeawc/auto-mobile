@@ -57,7 +57,8 @@ export class DefaultManagedSpecMatcher implements ManagedSpecMatcher {
       case "ios":
         return matchesIosSimulator(device, spec);
       case "tvos":
-        // No binding spec describes an Apple TV yet, so one is never reused for a binding.
+      case "visionos":
+        // No binding spec describes an Apple TV or a Vision Pro yet, so neither is reused for a binding.
         return "mismatch";
     }
   }

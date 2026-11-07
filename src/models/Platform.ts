@@ -1,11 +1,11 @@
 import { ActionableError } from "./ActionableError";
 
 /**
- * Platforms AutoMobile drives. `"watchos"` is an Apple Watch simulator and `"tvos"` an Apple TV
- * simulator. A tool rejects either unless the tool opts in (docs/decisions/watchos-platform.md),
- * so neither is ever driven as an iPhone.
+ * Platforms AutoMobile drives. `"watchos"` is an Apple Watch simulator, `"tvos"` an Apple TV
+ * simulator and `"visionos"` an Apple Vision Pro simulator. A tool rejects each unless the tool
+ * opts in (docs/decisions/watchos-platform.md), so none is ever driven as an iPhone.
  */
-export type Platform = "android" | "ios" | "watchos" | "tvos";
+export type Platform = "android" | "ios" | "watchos" | "tvos" | "visionos";
 
 /** The platforms every tool supports. */
 export type AndroidOrIosPlatform = "android" | "ios";
@@ -17,6 +17,14 @@ export type NonIosApplePlatform = Exclude<Platform, AndroidOrIosPlatform>;
 export const NON_IOS_APPLE_PLATFORM_LABELS: Readonly<Record<NonIosApplePlatform, string>> = {
   watchos: "watchOS",
   tvos: "tvOS",
+  visionos: "visionOS",
+};
+
+/** How messages name each platform. */
+export const PLATFORM_LABELS: Readonly<Record<Platform, string>> = {
+  android: "Android",
+  ios: "iOS",
+  ...NON_IOS_APPLE_PLATFORM_LABELS,
 };
 
 /** A platform selector: one platform, or `"either"` for whichever is connected. */

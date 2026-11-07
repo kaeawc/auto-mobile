@@ -1,0 +1,182 @@
+{
+  "id": "notify-limits-at-boundary",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["notifications"],
+    "permissions": [
+      {
+        "name": "notifications",
+        "purpose": "Tell you about new messages"
+      }
+    ]
+  },
+  "notifications": {
+    "channels": [
+      {
+        "id": "messages",
+        "name": "Channel 1",
+        "importance": "min"
+      },
+      {
+        "id": "channel1",
+        "name": "Channel 2",
+        "importance": "low"
+      },
+      {
+        "id": "channel2",
+        "name": "Channel 3",
+        "importance": "default"
+      },
+      {
+        "id": "channel3",
+        "name": "Channel 4",
+        "importance": "high"
+      },
+      {
+        "id": "channel4",
+        "name": "Channel 5",
+        "importance": "min"
+      },
+      {
+        "id": "channel5",
+        "name": "Channel 6",
+        "importance": "low"
+      },
+      {
+        "id": "channel6",
+        "name": "Channel 7",
+        "importance": "default"
+      },
+      {
+        "id": "channel7",
+        "name": "Channel 8",
+        "importance": "high"
+      }
+    ]
+  },
+  "root": {
+    "type": "button",
+    "label": "Notify",
+    "onTap": [
+      {
+        "type": "platform",
+        "call": "notifications.post",
+        "args": {
+          "id": {
+            "value": "iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii"
+          },
+          "channel": {
+            "value": "messages"
+          },
+          "title": {
+            "value": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+          },
+          "body": {
+            "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "data": {
+            "value": {
+              "d": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            }
+          },
+          "badge": {
+            "value": 9999
+          },
+          "progress": {
+            "value": {
+              "value": 1
+            }
+          },
+          "actions": {
+            "value": [
+              {
+                "id": "a",
+                "label": "A"
+              },
+              {
+                "id": "b",
+                "label": "B"
+              },
+              {
+                "id": "c",
+                "label": "C"
+              }
+            ]
+          },
+          "style": {
+            "value": {
+              "type": "messaging",
+              "self": "Me",
+              "messages": [
+                {
+                  "from": "P0",
+                  "text": "m0"
+                },
+                {
+                  "from": "P1",
+                  "text": "m1"
+                },
+                {
+                  "from": "P2",
+                  "text": "m2"
+                },
+                {
+                  "from": "P3",
+                  "text": "m3"
+                },
+                {
+                  "from": "P4",
+                  "text": "m4"
+                },
+                {
+                  "from": "P5",
+                  "text": "m5"
+                },
+                {
+                  "from": "P6",
+                  "text": "m6"
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "type": "platform",
+        "call": "notifications.post",
+        "args": {
+          "id": {
+            "value": "msg-1"
+          },
+          "channel": {
+            "value": "messages"
+          },
+          "title": {
+            "value": "Ada"
+          },
+          "badge": {
+            "value": 0
+          },
+          "progress": {
+            "value": {
+              "value": 0
+            }
+          }
+        }
+      },
+      {
+        "type": "platform",
+        "call": "notifications.setBadge",
+        "args": {
+          "count": {
+            "value": 0
+          }
+        }
+      }
+    ]
+  }
+}

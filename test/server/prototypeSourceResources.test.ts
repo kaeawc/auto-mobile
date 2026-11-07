@@ -75,13 +75,13 @@ describe("automobile:prototype/{id}/compose and /swiftui (#16345)", () => {
     const templates = ResourceRegistry.getTemplateDefinitions();
     expect(templates).toContainEqual(
       expect.objectContaining({
-        uriTemplate: "automobile:prototype/{id}/compose{?frame,revision}",
+        uriTemplate: "automobile:prototype/{id}/compose{?frame,revision,mcpSessionId}",
         mimeType: "text/x-kotlin",
       }),
     );
     expect(templates).toContainEqual(
       expect.objectContaining({
-        uriTemplate: "automobile:prototype/{id}/swiftui{?frame,revision}",
+        uriTemplate: "automobile:prototype/{id}/swiftui{?frame,revision,mcpSessionId}",
         mimeType: "text/x-swift",
       }),
     );
@@ -180,6 +180,28 @@ describe("automobile:prototype/{id}/compose and /swiftui (#16345)", () => {
     expect(pinned.contents[0]!.uri).toBe(`${SWIFTUI}?frame=iphone-se-3&revision=1`);
     expect(pinned.contents[0]!._meta).toMatchObject({ revision: 1, frame: "iphone-se-3" });
     expect(pinned.contents[0]!.text).toContain("first");
+  });
+
+  test("_meta names the producing MCP session and mcpSessionId filters the revisions (#17358)", async () => {
+    const first = specs.beginShow("d", "checkout", false, "ios");
+    specs.endShow("d", first, { id: "checkout", spec: spec("mine"), mcpSessionId: "conn-a" });
+    show("theirs");
+    const latest = (await request("resources/read", { uri: COMPOSE })) as ReadResult;
+    expect(latest.contents[0]!._meta).toMatchObject({ revision: 2, revisions: [1, 2] });
+    expect(latest.contents[0]!._meta).not.toHaveProperty("mcpSessionId");
+    const own = (await request("resources/read", {
+      uri: `${SWIFTUI}?mcpSessionId=conn-a`,
+    })) as ReadResult;
+    expect(own.contents[0]!.uri).toBe(`${SWIFTUI}?mcpSessionId=conn-a`);
+    expect(own.contents[0]!._meta).toMatchObject({
+      revision: 1,
+      mcpSessionId: "conn-a",
+      revisions: [1],
+    });
+    expect(own.contents[0]!.text).toContain("mine");
+    await expect(
+      request("resources/read", { uri: `${COMPOSE}?mcpSessionId=other` }),
+    ).rejects.toThrow('no kept revision from MCP session "other"');
   });
 
   test("an unknown id or frame is an actionable error", async () => {

@@ -1,4 +1,7 @@
+import { deleteAppleVisionDevice } from "./deviceToolsAppleVisionDelete";
 import { deleteAppleTvDevice } from "./deviceToolsAppleTvDelete";
+import { flushPendingImeRestoreBeforeTool } from "./pipeline/deviceCallDispatch";
+import { pendingImeRestores } from "../features/action/sendkeys/PendingImeRestore";
 import type { DeleteDeviceOptions } from "../features/deviceLifecycle/teardown/teardownContracts";
 import type { RestartStopIdentity } from "../daemon/devicePool";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
@@ -793,6 +796,14 @@ async function stopDevice(
   const deadlineMs = deps.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
   args = await resolveKillDeviceArgs(args, deps, deadlineMs, requestAbortSignal);
   const stopIdentity = await assertKillDeviceCaller(args, deps, deadlineMs, requestAbortSignal);
+  if (args.device.platform === "android") {
+    // Only an admitted caller restores the target's keyboard; a refused one leaves it pending (#16579).
+    await flushPendingImeRestoreBeforeTool(
+      false,
+      args.device.deviceId,
+      deps.pendingImeRestores ?? pendingImeRestores,
+    );
+  }
   const { daemonState } = deps;
   const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
   // Preflight: if this target's AVD name comes from the pool rather than from
@@ -932,9 +943,18 @@ export function createLifecycleHandlers(options: { iosDeleteGate?: BootConcurren
     _progress?: ProgressCallback,
     abortSignal?: AbortSignal,
   ) => {
-    if (args.target.platform === "tvos" || isWatchTeardownRequest(args)) {
+    if (
+      args.target.platform === "visionos" ||
+      args.target.platform === "tvos" ||
+      isWatchTeardownRequest(args)
+    ) {
       const force = args.force ?? false;
-      const remove = args.target.platform === "tvos" ? deleteAppleTvDevice : deleteWatchDevice;
+      const remove =
+        args.target.platform === "visionos"
+          ? deleteAppleVisionDevice
+          : args.target.platform === "tvos"
+            ? deleteAppleTvDevice
+            : deleteWatchDevice;
       return await remove(
         args,
         {

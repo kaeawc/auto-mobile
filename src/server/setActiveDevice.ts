@@ -1,3 +1,4 @@
+import { isAndroidOrIosPlatform, NON_IOS_APPLE_PLATFORM_LABELS } from "../models/Platform";
 import { holderOf } from "../daemon/deviceBinding";
 import { RunnerReadinessError } from "../ctrlProxy/RunnerReadinessService";
 import type { AcquisitionReceipt } from "../daemon/acquisitionReceipt";
@@ -249,7 +250,12 @@ async function requestedPoolDevice(
 ): Promise<PooledDevice> {
   let device = pool.getDevice(deviceId);
   if (!device) {
-    const outcome = await pool.refreshDevicesWithOutcome();
+    // An "either" refresh sweeps only the TV and Vision Pro families the pool already tracks.
+    const outcome = await pool.refreshDevicesWithOutcome(
+      platform === "tvos" || platform === "visionos"
+        ? { appleSimulatorPlatforms: [platform] }
+        : undefined,
+    );
     device = pool.getDevice(deviceId);
     const discoveryIncomplete = device
       ? undefined
@@ -258,19 +264,9 @@ async function requestedPoolDevice(
       throw discoveryIncomplete;
     }
   }
-  if (
-    !device ||
-    (device.platform === "watchos") !== (platform === "watchos") ||
-    (device.platform === "tvos") !== (platform === "tvos")
-  ) {
-    // Non-iOS Apple simulators are selected only when the call names their platform.
+  if (!device || !matchesExplicitApplePlatform(device.platform, platform)) {
     throw new ActionableError(
-      `Device '${deviceId}' not found in device pool` +
-        (device?.platform === "watchos"
-          ? '; pass platform "watchos" to select an Apple Watch'
-          : device?.platform === "tvos"
-            ? '; pass platform "tvos" to select an Apple TV'
-            : ""),
+      `Device '${deviceId}' not found in device pool` + appleSelectionHint(device?.platform),
     );
   }
   return device;
@@ -403,7 +399,7 @@ async function selectSessionDevice(input: {
   // its admitted attempt, which a caller that does not hold the device must not do (#11651).
   pool.assertNotPreparedForOtherRequest(args.deviceId);
   assertDeviceOwner({ device, sessionUuid: args.sessionUuid, sessions, pool });
-  if (device.platform !== "tvos") {
+  if (!["tvos", "visionos"].includes(device.platform)) {
     await dependencies.resumeCtrlProxy(args.deviceId, device.platform);
   }
   // Checked again: another session may have bound the device while the resume listed devices.
@@ -498,10 +494,12 @@ async function selectLegacyDevice(input: {
   signal?.throwIfAborted();
   assertNotPreparedForOtherRequest(readyDevice.deviceId);
   const resolvedPlatform = args.platform ?? readyDevice.platform;
-  if ((readyDevice.platform === "tvos") !== (args.platform === "tvos")) {
-    throw new ActionableError('Pass platform "tvos" to select an Apple TV');
+  if (!matchesExplicitApplePlatform(readyDevice.platform, args.platform)) {
+    throw new ActionableError(
+      "Pass the target platform to select this device" + appleSelectionHint(readyDevice.platform),
+    );
   }
-  if (resolvedPlatform !== "tvos") {
+  if (!["tvos", "visionos"].includes(resolvedPlatform)) {
     await resumeCtrlProxy(readyDevice.deviceId, resolvedPlatform);
   }
   signal?.throwIfAborted();
@@ -607,4 +605,21 @@ export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDepend
       throw toActionableError(error, "Failed to set active device");
     }
   };
+}
+
+function matchesExplicitApplePlatform(actual: Platform, requested: Platform | undefined): boolean {
+  if (
+    isAndroidOrIosPlatform(actual) &&
+    (requested === undefined || isAndroidOrIosPlatform(requested))
+  ) {
+    return true;
+  }
+  return actual === requested;
+}
+
+function appleSelectionHint(platform: Platform | undefined): string {
+  if (platform === undefined || isAndroidOrIosPlatform(platform)) {
+    return "";
+  }
+  return `; pass platform "${platform}" to select ${NON_IOS_APPLE_PLATFORM_LABELS[platform]}`;
 }

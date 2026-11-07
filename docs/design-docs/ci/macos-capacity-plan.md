@@ -39,7 +39,9 @@ Package are gone; those jobs run on GitHub only.
 | `run-main-ios`     | `ios/**`, `scripts/ios/**`, `Package.swift`, SwiftFormat/SwiftLint config | Build Xcode Projects (main): generate, drift check, build |
 | `run-main-desktop` | `android/desktop-app/**`, `android/desktop-core/**`                       | Build Desktop App (macos)                                 |
 
-Both groups also match `.circleci/**`, so a config change revalidates itself.
+Both groups also match `.circleci/**`, so a config change revalidates itself. The
+same file holds the `run-main-linux` group for the Linux Node mirrors, which use
+no macOS capacity (`circleci-linux-shadow-lane.md`).
 Swift coverage keeps its existing trigger: `merge.yml`'s `swift-code-coverage` job
 starts a `run-swift-coverage-main` pipeline for coverage-input changes and
 downloads the badge.

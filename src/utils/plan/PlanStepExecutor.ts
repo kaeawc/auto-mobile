@@ -19,12 +19,7 @@ import { ScreenshotJobTracker } from "../ScreenshotJobTracker";
 import { redactTypedTextArguments } from "../redactTypedTextArguments";
 import { isDeviceLostError } from "../../models/DeviceLostError";
 import { isParticipantFailureAbort } from "./ParticipantFailureTracker";
-import {
-  UNEVALUATED_EXPECTATIONS_WARNING,
-  formatStepError,
-  parseStepParams,
-  stripUndeclaredDeviceLabel,
-} from "./planStepParams";
+import { formatStepError, parseStepParams, stripUndeclaredDeviceLabel } from "./planStepParams";
 import { formatStructuredToolError } from "../formatStructuredToolError";
 import {
   summarizeObserveResultForFailure,
@@ -32,6 +27,11 @@ import {
 } from "./summarizeFailureObservation";
 import { PlanStepError } from "./PlanStepError";
 import { redactToolSecrets } from "../redactToolSecrets";
+import {
+  evaluateStepExpectations,
+  type ExpectationObserve,
+  type StepExpectationOutcome,
+} from "./StepExpectationEvaluator";
 export { PlanStepError } from "./PlanStepError";
 
 /** Only the registry operations and tool metadata required to execute a step. */
@@ -55,6 +55,8 @@ export interface PlanStepTools<TTool extends PlanStepTool> {
       targetDevice?: BootedDevice;
       /** The geometry a replayed tapAt step resolves against (#15663). */
       tapAtPlanContext?: TapAtPlanContext;
+      /** The lock namespace a barrier or criticalSection step scopes its lock under (#15663). */
+      planLockNamespace?: string;
     },
   ): Promise<unknown>;
 }
@@ -76,19 +78,6 @@ export interface StepExecutionContext {
   captureObserveSteps?: NonNullable<PlanExecutionOptions["captureObserveSteps"]>;
   logPrefix: string;
   debugLog?: boolean;
-}
-
-function withUnevaluatedExpectationsWarning(
-  step: PlanStep,
-  toolWarnings: string[] | undefined,
-  details: Record<string, unknown>,
-): string[] | undefined {
-  if (!step.expectations || step.expectations.length === 0) {
-    return toolWarnings;
-  }
-  const warnings = [...(toolWarnings ?? []), UNEVALUATED_EXPECTATIONS_WARNING];
-  details.warnings = warnings;
-  return warnings;
 }
 
 /**
@@ -152,6 +141,31 @@ function completedStepPayload(
   return "content" in payload || "structuredContent" in payload ? undefined : payload;
 }
 
+/**
+ * A completed step after its expectations ran: still completed when they held, failed with the
+ * failing expectation's details otherwise. Unsupported-type warnings join the tool's warnings.
+ */
+function withExpectationOutcome(
+  completed: StepExecutionResult,
+  outcome: StepExpectationOutcome,
+): StepExecutionResult {
+  const warnings = [...(completed.warnings ?? []), ...(outcome.warnings ?? [])];
+  const warned = warnings.length > 0 ? { warnings } : {};
+  if (outcome.status === "passed") {
+    return { ...completed, details: { ...completed.details, ...warned }, ...warned };
+  }
+  return {
+    status: "failed",
+    error: outcome.error,
+    details: { ...completed.details, ...outcome.details, ...warned },
+    ...(outcome.failureObservation ? { failureObservation: outcome.failureObservation } : {}),
+    ...warned,
+  };
+}
+
+/** Step params that route a call to a device; an expectation's observe follows the step's. */
+const EXPECTATION_ROUTING_KEYS = ["platform", "device", "deviceId"] as const;
+
 /** The optional-step skip record shared by every "tool answered but the step failed" branch. */
 function skippedOptionalResult(step: PlanStep, error: string): StepExecutionResult {
   return {
@@ -159,6 +173,22 @@ function skippedOptionalResult(step: PlanStep, error: string): StepExecutionResu
     error,
     details: { params: redactToolSecrets(step.tool, step.params), error, optional: true },
   };
+}
+
+/**
+ * The tool's own payload when it reports a timed-out `waitFor` and no other failure.
+ * A direct call marks that envelope `isError` (#16889, #16902), which `classifyToolResult`
+ * turns into a generic `success: false`; reading the envelope's payload keeps the step on
+ * the timeout path with its diagnostics.
+ */
+function waitTimedOutPayload(response: unknown): Record<string, unknown> | undefined {
+  if (!response || typeof response !== "object") {
+    return undefined;
+  }
+  const payload = getStructuredPayload<Record<string, unknown>>(response);
+  return payload && payload.success !== false && waitForTimeoutError(payload, "") !== null
+    ? payload
+    : undefined;
 }
 
 /**
@@ -337,12 +367,12 @@ export class DefaultPlanStepExecutor<
   }
 
   private buildFailureObservationParams(
-    platform: string,
+    platform: string | undefined,
     deviceId: string | undefined,
     sessionUuid: string | undefined,
     deviceLabel: string | undefined,
   ): Record<string, unknown> {
-    const enhancedParams: Record<string, unknown> = { platform };
+    const enhancedParams: Record<string, unknown> = platform ? { platform } : {};
     const shouldSuppressDeviceId = !!(sessionUuid && this.isDaemonInitialized());
     if (deviceId && !shouldSuppressDeviceId) {
       enhancedParams.deviceId = deviceId;
@@ -474,16 +504,17 @@ export class DefaultPlanStepExecutor<
 
     this.injectDeviceRoutingParams(enhancedParams, step.tool, { platform, deviceId, sessionUuid });
 
-    // Scope the shared CriticalSectionCoordinator by the plan's base session UUID
-    // (identical across every device track of one plan, distinct across plans),
-    // so two concurrent plans reusing a lock name get isolated barriers. Strict
-    // schemas reject unknown keys, so only explicitly opted-in coordination tools
-    // may receive the internal namespace.
-    if (tool.acceptsPlanLockNamespace && sessionUuid && !enhancedParams.__lockNamespace) {
-      enhancedParams.__lockNamespace = sessionUuid;
-    }
-
     return enhancedParams;
+  }
+
+  /**
+   * Scope the shared CriticalSectionCoordinator by the plan's base session UUID (identical across
+   * every device track of one plan, distinct across plans), so two concurrent plans reusing a lock
+   * name get isolated barriers. It travels as call context for this one step (#15663), and only to
+   * the coordination tools that opted in.
+   */
+  private planLockNamespace(tool: TTool, sessionUuid: string | undefined): string | undefined {
+    return tool.requiresDevice && tool.acceptsPlanLockNamespace ? sessionUuid : undefined;
   }
 
   private injectDeviceRoutingParams(
@@ -591,10 +622,12 @@ export class DefaultPlanStepExecutor<
       logger.info(`${context.logPrefix} Calling ${step.tool} with params: ${paramsPreview}`);
     }
 
+    const planLockNamespace = this.planLockNamespace(tool, context.sessionUuid);
     return this.tools.callInternal(tool, parsedParams, {
       signal: context.signal,
       forPlan: true,
       sessionUuid: context.sessionUuid,
+      ...(planLockNamespace ? { planLockNamespace } : {}),
       ...(context.targetDevice ? { targetDevice: context.targetDevice } : {}),
       ...(step.tool === "tapAt" && step.geometry
         ? { tapAtPlanContext: { geometry: step.geometry } }
@@ -620,7 +653,9 @@ export class DefaultPlanStepExecutor<
     toolResult: Record<string, unknown> | undefined,
   ): Promise<StepExecutionResult> {
     const checkResult = toolResult ?? response;
+    const timedOutPayload = waitTimedOutPayload(response);
     if (
+      !timedOutPayload &&
       checkResult &&
       typeof checkResult === "object" &&
       "success" in checkResult &&
@@ -629,7 +664,7 @@ export class DefaultPlanStepExecutor<
       const error = this.returnedFailureMessage(checkResult, context);
       return this.resultFromToolFailure(step, context, { response, toolResult, error });
     }
-    const payload = getStructuredPayload(toolResult) ?? toolResult;
+    const payload = timedOutPayload ?? getStructuredPayload(toolResult) ?? toolResult;
     const error = waitForTimeoutError(payload, step.tool) ?? unsupportedToolResultError(payload);
     if (error) {
       // A waitFor timeout or unsupported result is a failed step like any other: it gets the same
@@ -643,6 +678,61 @@ export class DefaultPlanStepExecutor<
       });
     }
     return this.resultFromSuccess(step, context, response, toolResult);
+  }
+
+  /**
+   * One fresh internal `observe` with the expectation's `waitFor`, routed exactly like the step's
+   * own call: the step's explicit platform/device/deviceId win, then the plan context fills the
+   * rest, and a critical section keeps its owner device (#16817).
+   */
+  private expectationObserve(step: PlanStep, context: StepExecutionContext): ExpectationObserve {
+    const routing = Object.fromEntries(
+      EXPECTATION_ROUTING_KEYS.flatMap((key) =>
+        step.params?.[key] === undefined ? [] : [[key, step.params[key]]],
+      ),
+    );
+    this.injectDeviceRoutingParams(routing, "observe", {
+      platform: context.platform,
+      deviceId: context.deviceId,
+      sessionUuid: context.sessionUuid,
+    });
+    return async (waitFor) => {
+      const observeTool = this.tools.getTool("observe");
+      if (!observeTool) {
+        throw new ActionableError("the observe tool is not available");
+      }
+      const params = parseStepParams(observeTool.schema, { ...routing, waitFor });
+      return this.tools.callInternal(observeTool, params, {
+        signal: context.signal,
+        ...(context.targetDevice ? { targetDevice: context.targetDevice } : {}),
+      });
+    };
+  }
+
+  /** Fail (or skip, when optional) a completed step whose expectations did not hold. */
+  private async checkExpectations(
+    step: PlanStep,
+    context: StepExecutionContext,
+    completed: StepExecutionResult,
+  ): Promise<StepExecutionResult> {
+    if (!step.expectations || step.expectations.length === 0) {
+      return completed;
+    }
+    const outcome = await evaluateStepExpectations(
+      step.expectations,
+      this.expectationObserve(step, context),
+    );
+    if (!context.targetDevice) {
+      throwIfAborted(context.signal);
+    }
+    if (outcome.status === "failed" && this.shouldSkipReturnedFailure(step, context)) {
+      const skipped = skippedOptionalResult(step, outcome.error);
+      return {
+        ...skipped,
+        details: { ...skipped.details, failedExpectation: outcome.details.failedExpectation },
+      };
+    }
+    return withExpectationOutcome(completed, outcome);
   }
 
   /**
@@ -699,12 +789,12 @@ export class DefaultPlanStepExecutor<
     };
   }
 
-  private resultFromSuccess(
+  private async resultFromSuccess(
     step: PlanStep,
     context: StepExecutionContext,
     response: unknown,
     toolResult: Record<string, unknown> | undefined,
-  ): StepExecutionResult {
+  ): Promise<StepExecutionResult> {
     const details: Record<string, unknown> = {
       params: redactToolSecrets(step.tool, step.params),
     };
@@ -717,15 +807,14 @@ export class DefaultPlanStepExecutor<
         details.stepObservation = stepObservation;
       }
     }
-    const toolWarnings = this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, details);
-    const warnings = withUnevaluatedExpectationsWarning(step, toolWarnings, details);
+    const warnings = this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, details);
 
-    return {
+    return this.checkExpectations(step, context, {
       status: "completed",
       details,
       toolPayload: completedStepPayload(response, step.tool),
       ...(warnings ? { warnings } : {}),
-    };
+    });
   }
 
   private async observationForThrownStep(

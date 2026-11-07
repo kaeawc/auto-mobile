@@ -296,7 +296,9 @@ const userFilesTargetSchema = z
       .boolean()
       .optional()
       .default(false)
-      .describe("Request Android media indexing for media files"),
+      .describe(
+        "Request an Android MediaStore scan of every written file so media apps and the system document picker can list it",
+      ),
   })
   .strict()
   .superRefine((target, ctx) => {

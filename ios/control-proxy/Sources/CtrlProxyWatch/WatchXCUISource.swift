@@ -88,16 +88,30 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
 
     private func node(_ snapshot: any XCUIElementSnapshot) -> SdkViewNode {
         let frame = snapshot.frame
+        let bounds = SdkBounds(
+            left: Int(frame.minX), top: Int(frame.minY), right: Int(frame.maxX), bottom: Int(frame.maxY)
+        )
+        let className = "XCUIElementType(\(snapshot.elementType.rawValue))"
+        var children = snapshot.children.map { node($0) }
+        if let value = watchTextValueChild(
+            elementType: snapshot.elementType.rawValue, label: snapshot.label, value: snapshot.value as? String
+        ) {
+            children.append(SdkViewNode(
+                className: className, bounds: bounds, accessibilityLabel: value,
+                accessibilityIdentifier: snapshot.identifier, isUserInteractionEnabled: snapshot.isEnabled
+            ))
+        }
         return SdkViewNode(
             // Preserve the XCUITest raw element type without claiming an in-app SwiftUI class.
-            className: "XCUIElementType(\(snapshot.elementType.rawValue))",
-            bounds: SdkBounds(
-                left: Int(frame.minX), top: Int(frame.minY), right: Int(frame.maxX), bottom: Int(frame.maxY)
+            className: className,
+            bounds: bounds,
+            accessibilityLabel: watchAccessibilityLabel(
+                elementType: snapshot.elementType.rawValue, label: snapshot.label,
+                value: snapshot.value as? String, placeholder: snapshot.placeholderValue
             ),
-            accessibilityLabel: snapshot.label,
             accessibilityIdentifier: snapshot.identifier,
             isUserInteractionEnabled: snapshot.isEnabled,
-            children: snapshot.children.map { node($0) }
+            children: children
         )
     }
 
@@ -117,8 +131,25 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
         }
     }
 
-    func swipe(_ direction: WatchSwipeDirection) throws {
+    func swipe(_ direction: WatchSwipeDirection, distance: Double?) throws {
         try performGesture {
+            if let distance {
+                // The default swipe scrolls about two screens on a watch. A partial drag moves the
+                // content by a fraction of the screen so consecutive lookFor reads overlap.
+                let half = distance / 2
+                let (from, to): (CGVector, CGVector) = switch direction {
+                case .up: (CGVector(dx: 0.5, dy: 0.5 + half), CGVector(dx: 0.5, dy: 0.5 - half))
+                case .down: (CGVector(dx: 0.5, dy: 0.5 - half), CGVector(dx: 0.5, dy: 0.5 + half))
+                case .left: (CGVector(dx: 0.5 + half, dy: 0.5), CGVector(dx: 0.5 - half, dy: 0.5))
+                case .right: (CGVector(dx: 0.5 - half, dy: 0.5), CGVector(dx: 0.5 + half, dy: 0.5))
+                }
+                // A slow drag that holds before release ends without fling momentum.
+                app.coordinate(withNormalizedOffset: from).press(
+                    forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: to),
+                    withVelocity: .slow, thenHoldForDuration: 0.3
+                )
+                return
+            }
             switch direction {
             case .up: app.swipeUp()
             case .down: app.swipeDown()
@@ -128,11 +159,38 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
         }
     }
 
+    func typeText(_ text: String) throws {
+        try performGesture {
+            let field = app.descendants(matching: .any).matching(NSPredicate(
+                format: "(elementType == %d OR elementType == %d OR elementType == %d) AND hasKeyboardFocus == true",
+                XCUIElement.ElementType.textField.rawValue,
+                XCUIElement.ElementType.secureTextField.rawValue,
+                XCUIElement.ElementType.searchField.rawValue
+            )).firstMatch
+            if field.exists {
+                field.typeText(text)
+                return
+            }
+            // watchOS presents a focused text field's input as a keyboard sheet that hides the field,
+            // so the field is no longer in the keyboard-focus query. Type into the presented keyboard.
+            guard app.keyboards.firstMatch.exists else {
+                throw WatchCommandError.commandFailed("No focused text field; tap the field first")
+            }
+            app.typeText(text)
+        }
+    }
+
     func home() throws {
         try performGesture { XCUIDevice.shared.press(.home) }
     }
 
     func rotateCrown(delta: Double, velocity: Double) throws {
+        try watchVerifiedCrownRotation(snapshots: self) {
+            try rotateFocusedCrown(delta: delta, velocity: velocity)
+        }
+    }
+
+    private func rotateFocusedCrown(delta: Double, velocity: Double) throws {
         try performGesture {
             // Rotate the currently focused control using a private selector with unboxed Double arguments.
             let device = XCUIDevice.shared
@@ -157,4 +215,37 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
         }
         try result.get()
     }
+}
+
+/// True when the rotation changed anything observable. Compares the node tree only: the wrapper's
+/// timestamp changes on every snapshot.
+func watchCrownChangedHierarchy(before: SdkViewHierarchy, after: SdkViewHierarchy) -> Bool {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = .sortedKeys
+    guard let old = try? encoder.encode(before.root), let new = try? encoder.encode(after.root) else {
+        return true
+    }
+    return old != new
+}
+
+/// Runs `rotate` and fails when the node tree is identical before and after. The host can be foreground
+/// yet hold no crown focus (for example after a simctl launch), and the private rotate selector then
+/// returns normally with nothing consuming the rotation. Detection is best effort: the first snapshot
+/// after a launch can still be settling (so it is discarded), and a missing snapshot on either side
+/// skips the check rather than failing a rotation that may have been applied.
+@MainActor
+func watchVerifiedCrownRotation(snapshots: any WatchSnapshotSource, rotate: () throws -> Void) throws {
+    _ = try? snapshots.snapshot()
+    let before = try? snapshots.snapshot()
+    try rotate()
+    guard let before, let after = try? snapshots.snapshot(),
+          !watchCrownChangedHierarchy(before: before, after: after)
+    else {
+        return
+    }
+    throw WatchCommandError.commandFailed(
+        "rotateCrown changed nothing the accessibility tree shows: no view may hold crown focus, or the "
+            + "scrolled content is already at its limit. Tap the view that should receive the crown, then "
+            + "observe to confirm."
+    )
 }

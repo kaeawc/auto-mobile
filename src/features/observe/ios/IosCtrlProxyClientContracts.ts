@@ -59,6 +59,8 @@ import type {
   CtrlProxyKeyboardResult,
   CtrlProxyLaunchAppResult,
   CtrlProxyMagicTapResult,
+  CtrlProxyAccessibilityFocusResult,
+  AccessibilityFocusSelector,
   CtrlProxyPinchResult,
   CtrlProxyPressBackResult,
   CtrlProxyPressButtonResult,
@@ -366,6 +368,13 @@ export interface IosCtrlProxy extends Omit<CtrlProxyClient, "requestPinch"> {
     label?: string,
     options?: CtrlProxyRequestActionOptions & { timeoutMs?: number },
   ): Promise<CtrlProxyActionResult>;
+
+  requestAccessibilityFocus(
+    selector: AccessibilityFocusSelector,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<CtrlProxyAccessibilityFocusResult>;
 
   requestMagicTap(
     timeoutMs?: number,

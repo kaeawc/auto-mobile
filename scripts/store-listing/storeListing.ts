@@ -284,3 +284,47 @@ export function validateListing(files: ListingFiles): Finding[] {
   }
   return findings;
 }
+
+/** Listing URLs the owner decided are hosted on the docs site (#14144). */
+export const DOCS_SITE_URL_FILES = ["privacy_url.txt", "support_url.txt"] as const;
+
+export interface DocsSite {
+  /** mkdocs.yml `site_url`, e.g. `https://example.github.io/project/`. */
+  url: string;
+  /** Whether `docs/<path>` exists, for a forward-slash path such as `protoviewer/privacy.md`. */
+  hasPage(path: string): boolean;
+}
+
+/** The docs page a directory-style site URL is built from, or undefined when it is off-site. */
+export function docsPageCandidates(url: string, siteUrl: string): string[] | undefined {
+  const base = siteUrl.endsWith("/") ? siteUrl : `${siteUrl}/`;
+  if (!url.startsWith(base)) {
+    return undefined;
+  }
+  const page = url.slice(base.length).split(/[?#]/)[0]!.replace(/\/$/, "");
+  return page.length === 0 ? ["index.md"] : [`${page}.md`, `${page}/index.md`];
+}
+
+/** Privacy and support URLs must point at a page this repository's docs site builds. */
+export function checkDocsSiteUrls(files: ListingFiles, site: DocsSite): Finding[] {
+  const findings: Finding[] = [];
+  localesOf(files, "ios").forEach((locale) => {
+    DOCS_SITE_URL_FILES.forEach((file) => {
+      const path = `ios/${locale}/${file}`;
+      const raw = files.get(path);
+      if (raw === undefined) {
+        return;
+      }
+      const candidates = docsPageCandidates(body(raw).trim(), site.url);
+      if (candidates === undefined) {
+        findings.push({ path, message: `must be a page on the docs site (${site.url})` });
+      } else if (!candidates.some((candidate) => site.hasPage(candidate))) {
+        findings.push({
+          path,
+          message: `no docs page builds this URL; expected docs/${candidates.join(" or docs/")}`,
+        });
+      }
+    });
+  });
+  return findings;
+}

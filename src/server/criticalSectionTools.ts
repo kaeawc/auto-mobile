@@ -23,7 +23,10 @@ import { type Timer, defaultTimer } from "../utils/SystemTimer";
 import { addDeviceTargetingToSchema } from "../utils/schemaHelpers";
 import { isDeviceLostError } from "../utils/deviceLossOutcome";
 import type { PlanStep } from "../models/Plan";
-import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import {
+  currentPlanLockNamespace,
+  getToolSelectionContext,
+} from "../features/toolSelection/toolSelectionContext";
 
 // Schema for steps inside critical section.
 // Every sub-step MUST declare a `device` matching the section owner label.
@@ -62,14 +65,6 @@ const criticalSectionSchema = addDeviceTargetingToSchema(
         .positive()
         .optional()
         .describe("Barrier timeout ms (default 30000)"),
-      // Internal: the plan's base session UUID, injected by PlanExecutor
-      // (buildEnhancedStepParams). Scopes the shared coordinator so two independent
-      // plans that reuse the same lock name get isolated barriers instead of
-      // colliding. Not authored by users; stripped from recordings via INTERNAL_PARAMS.
-      __lockNamespace: z
-        .string()
-        .optional()
-        .describe("Internal plan-scoped lock namespace (injected)"),
     })
     .strict(),
 );
@@ -251,7 +246,9 @@ const criticalSectionHandler = async (
   params: CriticalSectionParams,
   { progress: _progress, signal }: { progress?: unknown; signal?: AbortSignal } = {},
 ): Promise<any> => {
-  const { lock, steps, deviceCount, timeout, __lockNamespace: namespace } = params;
+  const { lock, steps, deviceCount, timeout } = params;
+  // A plan step runs under its plan's namespace; a direct call is unscoped (#15663).
+  const namespace = currentPlanLockNamespace();
   // Sub-steps are not in `plan.steps`, so migratePlan never saw them; apply the
   // same legacy-shape migration here so `tapOn { text }` and friends behave as
   // they do at the top level (#9927).

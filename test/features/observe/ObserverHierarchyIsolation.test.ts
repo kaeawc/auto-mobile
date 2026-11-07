@@ -25,6 +25,12 @@ import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient"
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
+import type { BootedDevice } from "../../../src/models";
+import { DevicectlPanelScreenshotSource } from "../../../src/utils/ios-cmdline-tools/DevicectlPanelScreenshotSource";
+import { parseDevicectlDisplayInfo } from "../../../src/utils/ios-cmdline-tools/DevicectlDisplayInfo";
+import { loadDevicectlListFixture } from "../../helpers/devicectlListFixtures";
+import { pngHeader } from "../../helpers/pngFixtures";
+import { FakeLogger } from "../../fakes/FakeLogger";
 
 class CapturingSocket extends FakeWebSocket {
   readonly sent: string[] = [];
@@ -958,54 +964,131 @@ test("Android observer JPEG screenshot uses ADB while the real owner client stay
   }
 });
 
-test.each([true, false])(
-  "iOS simulator observer captures %s panel without advancing transitions",
-  async (hasObservedPanel) => {
-    const device = {
+const duoCover = { key: "primary", role: "cover" as const, sizePx: { width: 1398, height: 2034 } };
+const duoInner = {
+  key: "primary-1",
+  role: "inner" as const,
+  sizePx: { width: 2007, height: 2853 },
+};
+const duoDisplays = { panels: [duoCover, duoInner], postures: [] };
+
+/** Captured CoreDevice display info: the unfolded Duo reports only its inner panel active. */
+function capturedDuoDisplays(fixture: string) {
+  const listing = parseDevicectlDisplayInfo(loadDevicectlListFixture(fixture), new FakeLogger());
+  if (listing.kind !== "ok") {
+    throw new Error(`expected parsed displays in ${fixture}`);
+  }
+  return listing.displays;
+}
+
+function stubDuoPanelSources(live: () => ReturnType<typeof capturedDuoDisplays>) {
+  const readDisplays = spyOn(
+    DevicectlPanelScreenshotSource.prototype,
+    "readDisplays",
+  ).mockImplementation(async () => live());
+  const capturePanel = spyOn(
+    DevicectlPanelScreenshotSource.prototype,
+    "capturePanel",
+  ).mockResolvedValue(undefined);
+  const captures: (string | undefined)[] = [];
+  const simctl = spyOn(SimCtlClient.prototype, "screenshot").mockImplementation(
+    async (_deviceId, display) => {
+      captures.push(display);
+      const panel = display === duoInner.key ? duoInner : duoCover;
+      return pngHeader(panel.sizePx.width, panel.sizePx.height);
+    },
+  );
+  return {
+    readDisplays,
+    captures,
+    restore: () => {
+      readDisplays.mockRestore();
+      capturePanel.mockRestore();
+      simctl.mockRestore();
+    },
+  };
+}
+
+function observerScreenshot(device: BootedDevice): TakeScreenshot {
+  return new TakeScreenshot(device, {
+    adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+    timer: new FakeTimer(),
+    idGenerator: new CountingIdGenerator("observer"),
+    fileWriter: new FakeScreenshotFileWriter(),
+    cleanupOnCreate: false,
+    pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+  });
+}
+
+test.each([
+  ["the observed panel", true, "info-displays-duo-cover-active.json", "primary-1", 0],
+  ["the live active panel", false, "info-displays-duo-inner-active.json", "primary-1", 1],
+  ["the live cover panel", false, "info-displays-duo-cover-active.json", "primary", 1],
+  ["the first panel without live evidence", false, undefined, "primary", 1],
+] as const)(
+  "iOS simulator observer captures %s without advancing transitions",
+  async (_label, hasObservedPanel, liveFixture, expected, liveReads) => {
+    const device: BootedDevice = {
       deviceId: `A1B2C3D4-E5F6-7890-ABCD-EF12345678${hasObservedPanel ? "90" : "91"}`,
       name: "Duo",
-      platform: "ios" as const,
-      displays: {
-        panels: [
-          { key: "cover-1", role: "cover" as const, sizePx: { width: 100, height: 100 } },
-          { key: "primary-1", role: "inner" as const, sizePx: { width: 200, height: 200 } },
-        ],
-        postures: [],
-      },
+      platform: "ios",
+      displays: duoDisplays,
     };
     if (hasObservedPanel) {
       displayTransitions.record(device.deviceId, {
         display: { key: "primary-1", role: "inner", generation: 1 },
-        screenSize: { width: 200, height: 200 },
+        screenSize: { width: 2007, height: 2853 },
       } as ObserveResult);
     }
     const revision = displayTransitions.revision(device.deviceId);
-    const captures: (string | undefined)[] = [];
-    const simctl = spyOn(SimCtlClient.prototype, "screenshot").mockImplementation(
-      async (_deviceId, display) => {
-        captures.push(display);
-        return readFileSync("test/fixtures/screenshots/black-on-white.png");
-      },
+    const sources = stubDuoPanelSources(() =>
+      liveFixture ? capturedDuoDisplays(liveFixture) : [],
     );
-    const writer = new FakeScreenshotFileWriter();
     try {
-      const screenshot = new TakeScreenshot(device, {
-        adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
-        timer: new FakeTimer(),
-        idGenerator: new CountingIdGenerator("observer"),
-        fileWriter: writer,
-        cleanupOnCreate: false,
-        pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
-      });
-      expect((await screenshot.executeObservationRead({ format: "png" })).success).toBe(true);
-      expect(captures).toEqual([hasObservedPanel ? "primary-1" : "cover-1"]);
+      const result = await observerScreenshot(device).executeObservationRead({ format: "png" });
+      expect(result.success).toBe(true);
+      expect(sources.captures.at(-1)).toBe(expected);
+      expect(sources.readDisplays).toHaveBeenCalledTimes(liveReads);
       expect(displayTransitions.revision(device.deviceId)).toBe(revision);
     } finally {
-      simctl.mockRestore();
+      sources.restore();
       displayTransitions.reset(device.deviceId);
     }
   },
 );
+
+test("iOS observer through a connected client without inventory captures the active Duo panel", async () => {
+  // The registered client predates display discovery (#17373); the observe's device knows the panels.
+  const deviceId = "A1B2C3D4-E5F6-7890-ABCD-EF1234567893";
+  const client = IOSCtrlProxyClient.getInstance({ deviceId, name: "Duo", platform: "ios" });
+  const connected = spyOn(client, "isConnected").mockReturnValue(true);
+  const runner = spyOn(client.testHooks.screenshot(), "requestScreenshot").mockResolvedValue({
+    success: true,
+    data: "runner-cover",
+  });
+  const sources = stubDuoPanelSources(() =>
+    capturedDuoDisplays("info-displays-duo-inner-active.json"),
+  );
+  try {
+    const result = await observerScreenshot({
+      deviceId,
+      name: "Duo",
+      platform: "ios",
+      displays: duoDisplays,
+    }).executeObservationRead({ format: "png" });
+    expect(result).toMatchObject({
+      success: true,
+      screenshotImageSize: { width: 2007, height: 2853 },
+    });
+    expect(sources.captures).toEqual(["primary-1"]);
+    expect(runner).not.toHaveBeenCalled();
+  } finally {
+    connected.mockRestore();
+    runner.mockRestore();
+    sources.restore();
+    await client.close();
+  }
+});
 
 test("aborted iOS simulator observer removes its frame and never pushes to the stream", async () => {
   const device = {

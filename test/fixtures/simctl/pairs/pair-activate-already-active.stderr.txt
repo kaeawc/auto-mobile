@@ -1,0 +1,3 @@
+An error was encountered processing the command (domain=NSPOSIXErrorDomain, code=37):
+This pair is already active.
+Operation already in progress

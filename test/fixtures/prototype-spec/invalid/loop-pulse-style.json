@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "loops",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Attention",
+      "attentionLoop": {
+        "effect": "pulse",
+        "periodMs": 800
+      },
+      "style": {
+        "scale": 1
+      }
+    }
+  },
+  "expectedPath": "root.attentionLoop",
+  "expectedMessage": "pulse loop cannot set style.scale"
+}

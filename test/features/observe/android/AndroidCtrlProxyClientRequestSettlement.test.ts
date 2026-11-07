@@ -58,6 +58,7 @@ async function harness() {
     "request_ime_action",
     "request_two_finger_swipe",
     "get_current_focus",
+    "export_attestation",
     "multi_finger_gesture_v1",
     "get_traversal_order",
     "request_hierarchy",
@@ -456,6 +457,11 @@ const methods: RequestMethod[] = [
     name: "requestHierarchySyncWithoutObservationStreamPush",
     invoke: (h, s) =>
       h.client.requestHierarchySyncWithoutObservationStreamPush(perf, false, s, LONG_TIMEOUT_MS),
+  },
+  {
+    name: "exportAttestation",
+    abortable: false,
+    invoke: (h) => h.client.exportAttestation(),
   },
   {
     name: "subscribeStorage",

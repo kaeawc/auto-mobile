@@ -320,5 +320,54 @@
   "isoPeriod": {
     "accepted": ["P1M", "P7D", "P2W", "P1Y", "P999D"],
     "rejected": ["P0D", "P1H", "PT1H", "P1M2D", "1M", "P1000D", "P1M\n"]
+  },
+  "webViewUrl": {
+    "accepted": [
+      "https://example.com",
+      "https://example.com/post/{data:/selected/slug}",
+      "https://help.example.com/a?b=c%20d#top"
+    ],
+    "rejected": [
+      "http://example.com",
+      "HTTPS://example.com",
+      "https://",
+      "{data:/url}",
+      "javascript:alert(1)",
+      "data:text/html,x",
+      "file:///a.html",
+      "https://example.com/a b",
+      "https://example.com/\u0000",
+      "https://example.com/\u0085",
+      "https://example.com/\n",
+      ""
+    ]
+  },
+  "webOrigin": {
+    "accepted": [
+      "https://example.com",
+      "https://a.b-c.example.com",
+      "https://example.com:8443",
+      "https://example.com:65535",
+      "https://example.com:1",
+      "https://127.0.0.1",
+      "https://localhost"
+    ],
+    "rejected": [
+      "https://example.com/",
+      "https://example.com:443",
+      "https://example.com:0",
+      "https://example.com:65536",
+      "https://example.com:08443",
+      "http://example.com",
+      "https://Example.com",
+      "https://-a.com",
+      "https://a-.com",
+      "https://user@example.com",
+      "https://[::1]",
+      "https://example.com.",
+      "https://*.example.com",
+      "https://example.com\n",
+      ""
+    ]
   }
 }

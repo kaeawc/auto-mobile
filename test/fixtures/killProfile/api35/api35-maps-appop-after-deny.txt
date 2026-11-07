@@ -1,0 +1,1 @@
+Uid mode: SCHEDULE_EXACT_ALARM: deny

@@ -1,0 +1,40 @@
+Available Android Virtual Devices:
+    Name: am15542a
+  Device: pixel_8 (Google)
+    Path: /Users/jason/.android/avd/am15542a.avd
+  Target: Google APIs (Google Inc.)
+          Based on: Android 17.0 ("CinnamonBun") Tag/ABI: google_apis/arm64-v8a
+  Sdcard: 512 MB
+---------
+    Name: am15542b
+  Device: pixel_8 (Google)
+    Path: /Users/jason/.android/avd/am15542b.avd
+  Target: Google APIs (Google Inc.)
+          Based on: Android 17.0 ("CinnamonBun") Tag/ABI: google_apis/arm64-v8a
+  Sdcard: 512 MB
+---------
+    Name: ambroker-e2c278b1-27-g1-a8a752d1
+  Device: pixel_8 (Google)
+    Path: /Users/jason/.android/avd/ambroker-e2c278b1-27-g1-a8a752d1.avd
+  Target: Google APIs (Google Inc.)
+          Based on: Android 17.0 ("CinnamonBun") Tag/ABI: google_apis/arm64-v8a
+  Sdcard: 512 MB
+---------
+    Name: ambroker-verify-api30
+  Device: pixel_3 (Google)
+    Path: /Users/jason/.android/avd/ambroker-verify-api30.avd
+  Target: Google APIs (Google Inc.)
+          Based on: Android 11.0 ("R") Tag/ABI: google_apis/arm64-v8a
+  Sdcard: 512 MB
+---------
+    Name: ambroker-verify-api31
+  Device: pixel_3 (Google)
+    Path: /Users/jason/.android/avd/ambroker-verify-api31.avd
+  Target: Google APIs (Google Inc.)
+          Based on: Android 12.0 ("S") Tag/ABI: google_apis/arm64-v8a
+  Sdcard: 512 MB
+---------
+    Name: ambroker-verify-api32
+  Device: pixel_3 (Google)
+    Path: /Users/jason/.android/avd/ambroker-verify-api32.avd
+  Target: Google APIs (Google Inc.)

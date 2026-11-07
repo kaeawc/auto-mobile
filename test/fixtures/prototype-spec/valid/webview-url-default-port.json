@@ -1,0 +1,22 @@
+{
+  "id": "webview-url-default-port",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["webview"]
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "webView",
+        "id": "article",
+        "url": "https://Example.com:443/post",
+        "allowedOrigins": ["https://example.com"]
+      }
+    ]
+  }
+}

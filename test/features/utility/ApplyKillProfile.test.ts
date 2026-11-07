@@ -16,6 +16,15 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 
 const emulator: BootedDevice = { name: "emu", platform: "android", deviceId: "emulator-5554" };
 const APP = "com.example.app";
+const vendorProfileIds = [
+  "huawei-powergenie",
+  "vivo-autostart",
+  "realme-power-saver",
+  "meizu-flyme-background",
+  "asus-power-master",
+  "sony-stamina",
+  "tecno-app-halt",
+] as const;
 // Captures contain only the runtime section; supply the package/user context dumpsys normally has.
 const notificationDump = (state: "granted" | "revoked", appId = APP) =>
   `Packages:\n  Package [${appId}] (test):\n    User 0: installed=true\n${readFileSync(
@@ -200,6 +209,23 @@ describe("kill profiles (#14051)", () => {
     expect(forget).not.toHaveBeenCalled();
     expect(registry.has(emulator.deviceId, `standbyBucket:${APP}`)).toBe(true);
     forget.mockRestore();
+  });
+
+  test.each(vendorProfileIds)("%s credits its source and states emulation limits", (id) => {
+    const note = KILL_PROFILES[id].evidenceNote;
+    expect(note).toContain("CC-BY-4.0");
+    expect(note).toContain("Not emulated:");
+    expect(note).not.toContain("#16869");
+  });
+
+  test("the kill profiles guide includes every vendor profile", () => {
+    const guide = readFileSync(
+      path.join(import.meta.dir, "../../../docs/using/kill-profiles.md"),
+      "utf8",
+    );
+    for (const id of vendorProfileIds) {
+      expect(guide).toContain(id);
+    }
   });
 
   test.each([

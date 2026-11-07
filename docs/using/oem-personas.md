@@ -47,7 +47,7 @@ manufacturer profile.
 | `sony-xperia`      | `gboard`  | `sony-stamina`              | none                          |
 | `tecno-hios`       | `gboard`  | `tecno-app-halt`            | none                          |
 
-The Huawei, Vivo, realme, Meizu, Asus, Sony and Tecno profiles do not yet model every behaviour listed in their kill profile's note.
+See [Vendor profiles](kill-profiles.md#vendor-profiles) for the Huawei, Vivo, realme, Meizu, Asus, Sony and Tecno mappings and behaviours that cannot be emulated.
 
 The catalog has a `catalogVersion`, and each manufacturer profile a `version` that changes whenever one of
 its facets does, so a result names exactly what it applied.

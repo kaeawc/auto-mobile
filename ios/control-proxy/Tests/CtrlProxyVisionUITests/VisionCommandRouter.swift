@@ -31,9 +31,10 @@ final class VisionCommandRouter {
             switch envelope.type {
             case "request_hierarchy":
                 let snapshot = try application.snapshot()
-                // The spike used descendants(.any), including ornaments whose frames are scene-local.
-                let descendants = try application.descendants(matching: .any)
-                    .allElementsBoundByIndex.map { try $0.snapshot() }
+                // One snapshot already carries the whole tree, ornaments included. Snapshotting each
+                // descendant query result costs a round trip per element (about 100 ms each, 26 s for
+                // Settings' 259 elements), which exceeded the 20 s hierarchy budget (#17218).
+                let descendants = Self.flattenedDescendants(of: snapshot)
                 let nodes = descendants.map { element($0) }
                 let root = UIElementInfo(
                     text: snapshot.label,
@@ -118,6 +119,10 @@ final class VisionCommandRouter {
             return (try? JSONEncoder().encode(response))
                 ?? Data(#"{"type":"error","success":false,"error":"Response encoding failed"}"#.utf8)
         }
+    }
+
+    private static func flattenedDescendants(of snapshot: any XCUIElementSnapshot) -> [any XCUIElementSnapshot] {
+        snapshot.children.flatMap { [$0] + flattenedDescendants(of: $0) }
     }
 
     private func kind(of type: XCUIElement.ElementType) -> VisionElementKind {

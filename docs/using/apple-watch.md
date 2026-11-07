@@ -19,6 +19,7 @@ A watch never appears in an iOS listing or iOS tool result. Every watch call nam
 
 Read the `automobile:devices/images/watchos` resource. It lists existing watch simulators
 (`watchosCount`) and the catalog of installed watchOS runtimes and Apple Watch device types.
+`listDevices` with `platform: "watchos"` lists the booted watches.
 
 Create a watch with `provisionDevice`, passing exact identifiers from that catalog:
 

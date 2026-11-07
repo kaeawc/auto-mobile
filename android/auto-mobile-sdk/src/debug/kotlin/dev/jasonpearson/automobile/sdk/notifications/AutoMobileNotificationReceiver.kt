@@ -14,10 +14,40 @@ import org.json.JSONException
 
 class AutoMobileNotificationReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent?) {
-    if (intent?.action != AutoMobileNotifications.ACTION_POST_NOTIFICATION) {
-      return
+    when (intent?.action) {
+      AutoMobileNotifications.ACTION_POST_NOTIFICATION -> post(context, intent)
+      AutoMobileNotifications.ACTION_CHANNEL_QUERY,
+      AutoMobileNotifications.ACTION_CHANNEL_DELETE ->
+        resultCode = channelResultCode(context, intent)
     }
+  }
 
+  /**
+   * Answers a host channel request with the channel's state after the action: 3 absent, 4 present,
+   * 0 when the request names no channel or the action failed.
+   */
+  @VisibleForTesting
+  internal fun channelResultCode(context: Context, intent: Intent): Int {
+    val channelId = intent.getStringExtra(AutoMobileNotifications.EXTRA_CHANNEL_ID)
+    if (channelId.isNullOrBlank()) {
+      Log.w(TAG, "Missing channel id in notification channel request")
+      return RESULT_ERROR
+    }
+    return try {
+      val exists =
+        if (intent.action == AutoMobileNotifications.ACTION_CHANNEL_DELETE) {
+          AutoMobileNotifications.deleteChannel(context, channelId)
+        } else {
+          AutoMobileNotifications.channelExists(context, channelId)
+        }
+      if (exists) RESULT_CHANNEL_PRESENT else RESULT_CHANNEL_ABSENT
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed to handle notification channel request", e)
+      RESULT_ERROR
+    }
+  }
+
+  private fun post(context: Context, intent: Intent) {
     try {
       val title = intent.getStringExtra(AutoMobileNotifications.EXTRA_TITLE).orEmpty()
       val body = intent.getStringExtra(AutoMobileNotifications.EXTRA_BODY).orEmpty()
@@ -90,5 +120,7 @@ class AutoMobileNotificationReceiver : BroadcastReceiver() {
     private const val RESULT_SUCCESS = 1
     private const val RESULT_POSTED_WITHOUT_IMAGE = 2
     private const val RESULT_ERROR = 0
+    private const val RESULT_CHANNEL_ABSENT = 3
+    private const val RESULT_CHANNEL_PRESENT = 4
   }
 }

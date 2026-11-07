@@ -78,18 +78,18 @@ Package-data reset remains a separate operation. On iOS Simulator,
 
 ## Fault injection
 
-In a debug app, call `injectFault` on `content://<appId>.automobile.keystore`
-with extras `scope` and/or `alias`, and `kind`: `KEY_STORE_EXCEPTION`,
+Call `resetKeychain` with `action: "injectFault"`, `appId`, an explicit device
+target, `scope` and/or `alias`, and `kind`: `KEY_STORE_EXCEPTION`,
 `PROVIDER_EXCEPTION`, `USER_NOT_AUTHENTICATED`, `DELAY`, or
-`STRONGBOX_UNAVAILABLE`. Use exact declared
-aliases; a scope selects all its aliases. For `DELAY`, supply a long integer
-`delayMs` from 1 through 10000. The delay runs before each selected alias's
-metadata lookup or deletion operation, and the delays in one provider call add up
-to at most 10000 ms in total: once that is spent, the call's remaining operations
-run without delay. `resetKeychain` waits up to 20 s for the bridge, so injected
-delay alone does not make it report `BRIDGE_UNAVAILABLE`. `KEY_STORE_EXCEPTION`,
-`PROVIDER_EXCEPTION`, and `USER_NOT_AUTHENTICATED` simulate the named failure on
-those same operations.
+`STRONGBOX_UNAVAILABLE`. Nothing is deleted. Use exact declared aliases; a scope
+selects all its aliases. For `DELAY`, supply an integer `delayMs` from 1 through
+10000; `kind` and `delayMs` are accepted only with `injectFault`. The delay runs
+before each selected alias's metadata lookup or deletion operation, and the delays
+in one provider call add up to at most 10000 ms in total: once that is spent, the
+call's remaining operations run without delay. A `resetKeychain` reset waits up to
+20 s for the bridge, so injected delay alone does not make it report
+`BRIDGE_UNAVAILABLE`. `KEY_STORE_EXCEPTION`, `PROVIDER_EXCEPTION`, and
+`USER_NOT_AUTHENTICATED` simulate the named failure on those same operations.
 
 `STRONGBOX_UNAVAILABLE` affects key generation only, and only in an app that runs
 the debug SDK's key-generation check with its key spec immediately before
@@ -100,23 +100,29 @@ app's fallback runs. Keys that do not request StrongBox, unarmed aliases, API
 levels below 28, and release builds are unaffected. Metadata and deletion ignore
 this kind.
 
-Setting a fault replaces the previous fault for each selected alias. These calls
-require the same app opt-in, caller authorization, and mutation policy as deletion.
+Setting a fault replaces the previous fault for each selected alias.
 
-Call `clearFaults` with `alias` to clear one fault, or `scope` to clear all faults
-for that scope. Empty selectors are refused for both calls. Faults persist across
-calls; observing disabled or reset test state clears all faults. Disabled test
-state never applies faults.
+Call `resetKeychain` with `action: "clearFaults"` and `alias` to clear one fault,
+or `scope` to clear all faults for that scope. Empty selectors are refused for both
+actions. Both are Android-only, keep the reset's selector and `confirm: false`
+rules, and require the same app opt-in and mutation policy as deletion. Faults
+persist until cleared or the app process restarts; observing disabled or reset
+test state clears all faults. Disabled test state never applies faults. The same
+debug app provider also accepts these as `injectFault` and `clearFaults` calls on
+`content://<appId>.automobile.keystore` with the same extras.
 
-The `result` JSON contains `schemaVersion`, `capability: "storage.keystore"`,
-`bridgeAvailable`, `outcome`, and any supplied `requestedScope`, `requestedAlias`,
-and `requestedKind`. Success returns `ok`. Refusals add `reason`: `disabled` /
-`DISABLED`, `authorization_denied` / `MUTATION_NOT_ALLOWED`, `scope_not_declared` /
-`SCOPE_NOT_DECLARED`, or `invalid_selector` / `EMPTY_SELECTOR` or `INVALID_FAULT`.
-Correct the selector, kind, delay, or app authorization before retrying. Faulted
-metadata can report `authentication_required` or `unavailable`; deletion retains
-its per-alias failure outcomes. Responses never include exception text or key
-material. Fault injection is available through these debug app calls only.
+The result has `action`, `success` (true only for outcome `ok`), `scope: "app"`,
+`schemaVersion`, `capability: "storage.keystore"`, `bridgeAvailable`, `outcome`,
+and any supplied `requestedScope`, `requestedAlias`, and `requestedKind`.
+Refusals add `reason`: `disabled` / `DISABLED`, `authorization_denied` /
+`MUTATION_NOT_ALLOWED`, `scope_not_declared` / `SCOPE_NOT_DECLARED`,
+`invalid_selector` / `EMPTY_SELECTOR` or `INVALID_FAULT`, `unsupported` /
+`DECLARED_UNSUPPORTED` (an app SDK without fault injection), or `unavailable` /
+`BRIDGE_NOT_INSTALLED` (no debug SDK provider in the app) or `BRIDGE_UNAVAILABLE`.
+Correct the selector, kind, delay, or app authorization, or install a debug build
+with a current SDK, before retrying. Faulted metadata can report
+`authentication_required` or `unavailable`; deletion retains its per-alias
+failure outcomes. Responses never include exception text or key material.
 
 ## iOS Keychain item deletion
 

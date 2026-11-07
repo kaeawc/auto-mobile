@@ -128,12 +128,110 @@ function withOverBudget(page: PrototypeWebPage, ids: ReadonlySet<string>): Proto
   };
 }
 
+/** The page with these images inlined, or undefined when their markup alone overflows it. */
+function buildWithImages(
+  input: PrototypeWebPageInput,
+  images: readonly PrototypeWebImage[],
+): PrototypeWebPage | undefined {
+  try {
+    return buildPrototypeWebPage({ ...input, images });
+  } catch (error) {
+    if (!(error instanceof ActionableError)) {
+      throw error;
+    }
+    // The placeholder build fit, so only the image layers' markup overflowed.
+    logger.debug(`[PROTOTYPE] Web page images do not fit: ${errorMessage(error)}`);
+    return undefined;
+  }
+}
+
+type EncodeOptions = Parameters<typeof encodePrototypeWebImages>[3];
+
+/**
+ * The second pass when the long-side encodes do not all fit: the assets with compact boxes
+ * re-encoded at them, then the page that keeps the most leading images (budget order) at the long
+ * side while inlining as many images as with every one compact. Undefined when no asset has
+ * compact boxes, so the first pass stands.
+ */
+async function buildWithCompactImages(
+  input: PrototypeWebPageInput,
+  first: PrototypeWebPage,
+  {
+    large,
+    fullPage,
+  }: {
+    readonly large: EncodedPrototypeWebImages;
+    readonly fullPage: PrototypeWebPage | undefined;
+  },
+  {
+    source,
+    encoder,
+    options,
+  }: {
+    readonly source: PrototypeWebAssetSource;
+    readonly encoder: PrototypeWebImageEncoder;
+    readonly options: EncodeOptions;
+  },
+): Promise<PrototypeWebPage | undefined> {
+  const largeById = new Map(large.images.map((image) => [image.id, image]));
+  const requests = first.imageRequests.flatMap((request) =>
+    request.compactBoxes && (largeById.has(request.id) || large.overBudget.has(request.id))
+      ? [{ id: request.id, boxes: request.compactBoxes }]
+      : [],
+  );
+  if (requests.length === 0) {
+    return undefined;
+  }
+  const compact = await encodePrototypeWebImages(requests, source, encoder, options);
+  const compactById = new Map(compact.images.map((image) => [image.id, image]));
+  const ids = first.imageRequests
+    .map((request) => request.id)
+    .filter((id) => largeById.has(id) || compactById.has(id));
+  const builds = new Map<number, PrototypeWebPage | undefined>();
+  const build = (keepLarge: number) => {
+    if (!builds.has(keepLarge)) {
+      const images = ids.map((id, index) =>
+        index < keepLarge
+          ? (largeById.get(id) ?? compactById.get(id)!)
+          : (compactById.get(id) ?? largeById.get(id)!),
+      );
+      builds.set(keepLarge, buildWithImages(input, images));
+    }
+    return builds.get(keepLarge);
+  };
+  const inlined = (page: PrototypeWebPage | undefined) => page?.inlinedImages.length ?? -1;
+  const best = inlined(build(0));
+  // Only images the first pass inlined ahead of its first overflow can stay large.
+  const overflow = fullPage ? ids.findIndex((id) => !fullPage.inlinedImages.includes(id)) : 0;
+  let low = 0;
+  let high = overflow === -1 ? ids.length : overflow;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (inlined(build(middle)) >= best) {
+      low = middle;
+    } else {
+      high = middle - 1;
+    }
+  }
+  const overBudget = new Set([...large.overBudget].filter((id) => !compactById.has(id)));
+  for (const id of compact.overBudget) {
+    overBudget.add(id);
+  }
+  const chosen = build(low);
+  return chosen
+    ? withOverBudget(chosen, overBudget)
+    : withOverBudget(first, new Set([...overBudget, ...ids]));
+}
+
 /**
  * The page with its assets inlined: one build finds what the views draw and where, the assets are
  * encoded at the largest size the frame draws them, and a second build inlines them while the
- * page budget allows. Without a drawn asset the host has bytes for, it is the first build. An
- * image draws more markup than a placeholder, so when that markup alone pushes the always-kept
- * views over the budget, the placeholder page stands, its images reported `assetOverBudget`.
+ * page budget allows. When they do not all fit, the assets whose filled axes the portrait width
+ * bounds more tightly are re-encoded at it (#16605) and the overflow, then as few earlier images
+ * as it takes, draw those compact encodes. Without a drawn asset the host has bytes for, it is
+ * the first build. An image draws more markup than a placeholder, so when that markup alone
+ * pushes the always-kept views over the budget, the placeholder page stands, its images reported
+ * `assetOverBudget`.
  */
 export async function buildPrototypeWebPageWithImages(
   input: PrototypeWebPageInput,
@@ -144,28 +242,33 @@ export async function buildPrototypeWebPageWithImages(
   if (first.imageRequests.length === 0) {
     return first;
   }
-  const { images, overBudget } = await encodePrototypeWebImages(
-    first.imageRequests,
-    source,
-    encoder,
+  const options: EncodeOptions = {
+    ...(input.maxBytes === undefined ? {} : { maxBytes: input.maxBytes }),
+    applyExifOrientation: deviceFrameOrThrow(first.frame).platform === "ios",
+  };
+  const large = await encodePrototypeWebImages(first.imageRequests, source, encoder, options);
+  const full = large.images.length === 0 ? undefined : buildWithImages(input, large.images);
+  if (full && full.inlinedImages.length === large.images.length && large.overBudget.size === 0) {
+    return full;
+  }
+  const compact = await buildWithCompactImages(
+    input,
+    first,
+    { large, fullPage: full },
     {
-      ...(input.maxBytes === undefined ? {} : { maxBytes: input.maxBytes }),
-      applyExifOrientation: deviceFrameOrThrow(first.frame).platform === "ios",
+      source,
+      encoder,
+      options,
     },
   );
-  if (images.length === 0) {
-    return withOverBudget(first, overBudget);
+  if (compact) {
+    return compact;
   }
-  try {
-    return withOverBudget(buildPrototypeWebPage({ ...input, images }), overBudget);
-  } catch (error) {
-    if (!(error instanceof ActionableError)) {
-      throw error;
-    }
-    // The first build fit, so only the image layers' markup overflowed: keep the placeholders.
-    logger.debug(
-      `[PROTOTYPE] Web page images do not fit; keeping placeholders: ${errorMessage(error)}`,
-    );
-    return withOverBudget(first, new Set([...overBudget, ...images.map((image) => image.id)]));
+  if (full) {
+    return withOverBudget(full, large.overBudget);
   }
+  return withOverBudget(
+    first,
+    new Set([...large.overBudget, ...large.images.map((image) => image.id)]),
+  );
 }

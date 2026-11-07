@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { ActionableError } from "../../../src/models";
 import { SystemTray } from "../../../src/features/systemTray/SystemTray";
+import { WatchSystemTray } from "../../../src/features/systemTray/WatchSystemTray";
 import {
   resetSystemTrayDependencies,
   setSystemTrayDependencies,
@@ -412,6 +413,105 @@ describe("Wear OS 7 stream actions", () => {
     expect((result.payload.notifications as { title: string }[]).map((card) => card.title)).toEqual(
       ["TitleFour", "TitleThree", "TitleTwo"],
     );
+  });
+
+  describe("list cut short", () => {
+    const SCAN384 = "shell input swipe 192 288 192 96 500";
+    const stillScrolling = withoutClearAll(wholeB);
+    /**
+     * A stream read on a loaded host: the first read after each swipe lands `pageMs` later, and
+     * the page shown depends on how many swipes were made.
+     */
+    function slowStream(pages: ObserveResult[], pageMs: number, before = wholeA) {
+      const clock: { timer?: FakeTimer } = {};
+      let swipesSeen = 0;
+      const harness = setup((commands) => {
+        const swipes = commands.filter((command) => command === SCAN384).length;
+        if (swipes > swipesSeen) {
+          swipesSeen = swipes;
+          clock.timer?.advanceTime(pageMs);
+        }
+        return swipes === 0 ? before : pages[Math.min(swipes, pages.length) - 1];
+      });
+      clock.timer = harness.timer;
+      return harness;
+    }
+
+    test("returns the cards read so far, flagged incomplete, when the deadline passes", async () => {
+      const { tray } = slowStream([stillScrolling, endB], 6_000);
+      const result = await tray.execute({
+        action: "list",
+        notification: { appId: "com.android.shell" },
+        awaitTimeout: 5000,
+      });
+      expect(result.isError).toBe(false);
+      expect(result.payload).toMatchObject({ incomplete: true, incompleteReason: "deadline" });
+      expect(result.payload.code).toBeUndefined();
+      expect(titles(result)).toEqual(["AM17357 item 5", "AM17357 item 4", "AM17357 item 3"]);
+    });
+
+    test("without awaitTimeout scans past the 5 s tray default to the end of the stream", async () => {
+      const { tray } = slowStream([stillScrolling, endB], 6_000);
+      const result = await tray.execute({
+        action: "list",
+        notification: { appId: "com.android.shell" },
+      });
+      expect(result.isError).toBe(false);
+      expect(result.payload.incomplete).toBeUndefined();
+      expect(titles(result).slice(0, 3)).toEqual([
+        "AM17357 item 5",
+        "AM17357 item 4",
+        "AM17357 item 3",
+      ]);
+      expect(titles(result)).toContain("Item9");
+    });
+
+    test("without awaitTimeout still stops at its own deadline with the cards read", async () => {
+      const { tray } = slowStream([stillScrolling, endB], 31_000);
+      const result = await tray.execute({
+        action: "list",
+        notification: { appId: "com.android.shell" },
+      });
+      expect(result.payload).toMatchObject({ incomplete: true, incompleteReason: "deadline" });
+      expect(titles(result)).toEqual(["AM17357 item 5", "AM17357 item 4", "AM17357 item 3"]);
+    });
+
+    test("flags a stream that never ends within the page limit", async () => {
+      // Every swipe shows a page different from the last, so no page proves the end.
+      slowStream([stillScrolling, wholeA, stillScrolling, wholeA], 0);
+      const { outcome: result } = await new WatchSystemTray(watch, undefined, 3).execute({
+        action: "list",
+        notification: { appId: "com.android.shell" },
+        awaitTimeout: 60_000,
+      });
+      expect(result.isError).toBe(false);
+      expect(result.payload).toMatchObject({ incomplete: true, incompleteReason: "page_limit" });
+      expect(titles(result).length).toBeGreaterThan(0);
+    });
+
+    test("reports no cards, flagged incomplete, when the stream cannot be rewound to its top", async () => {
+      const clock: { timer?: FakeTimer } = {};
+      let wheeled = false;
+      const harness = setup((commands) => {
+        if (commands.includes(WHEEL) && !wheeled) {
+          wheeled = true;
+          clock.timer?.advanceTime(6_000);
+        }
+        return wheeled ? withFixtureCard : scrolled;
+      });
+      clock.timer = harness.timer;
+      const result = await harness.tray.execute({
+        action: "list",
+        notification: { appId: "com.android.shell" },
+        awaitTimeout: 5000,
+      });
+      expect(result.isError).toBe(false);
+      expect(result.payload).toMatchObject({
+        notifications: [],
+        incomplete: true,
+        incompleteReason: "rewind",
+      });
+    });
   });
 
   test("tap with an action label taps the action inside the expanded card", async () => {

@@ -187,7 +187,7 @@ describe("iOS runner rotation refusal display guidance", () => {
     observation: observation(0),
   });
 
-  test("uses cover guidance only for a cover observation", () => {
+  test("names the cover and inner panels and keeps generic wording otherwise", () => {
     const previous = observation(0);
     const cover = {
       ...previous,
@@ -205,13 +205,32 @@ describe("iOS runner rotation refusal display guidance", () => {
       error: coverError,
       message: "Runner refusal message",
     });
-    expect(verifyIosRotation(runnerFailure(), "landscape", inner).error).toBe(runnerError);
+    expect(verifyIosRotation(runnerFailure(), "landscape", inner)).toMatchObject({
+      success: false,
+      rotationPerformed: false,
+      error:
+        "Rotation is not supported on the inner panel (the screen size did not change). Keep the current orientation.",
+    });
     expect(verifyIosRotation(runnerFailure(), "landscape", undefined).error).toBe(runnerError);
+  });
+
+  test("an inner-panel rotation the display shows still wins over the runner refusal", () => {
+    const inner = {
+      ...observation(0),
+      display: { ...observation(0).display, role: "inner" as const },
+    };
+    const result = verifyIosRotation(
+      { ...runnerFailure(), observation: observation(1, 874, 402) },
+      "landscape",
+      inner,
+    );
+    expect(result).toMatchObject({ success: true, rotationPerformed: true, error: undefined });
+    expect(result.warning).toContain(runnerError);
   });
 });
 
 describe("iOS rotation verification screen-size checks (#17047)", () => {
-  test("gives cover-panel guidance only for a cover observation", () => {
+  test("names the cover and inner panels in an unchanged-size refusal (#17385)", () => {
     const previous = {
       ...duoPrevious(),
       display: { ...duoPrevious().display, role: "cover" as const },
@@ -234,7 +253,9 @@ describe("iOS rotation verification screen-size checks (#17047)", () => {
     expect(coverResult.success).toBe(false);
     expect(coverResult.rotationPerformed).toBe(false);
 
-    expect(verifyIosRotation(duoRotation(), "landscape", innerPrevious).error).toBe(genericError);
+    expect(verifyIosRotation(duoRotation(), "landscape", innerPrevious).error).toBe(
+      "Rotation is not supported on the inner panel (the screen size did not change). The runner reported a rotation but the screen size is unchanged.",
+    );
     expect(verifyIosRotation(duoRotation(), "landscape", unknownPrevious).error).toBe(genericError);
   });
 
@@ -310,6 +331,21 @@ describe("iOS rotation verification screen-size checks (#17047)", () => {
     );
     expect(result.success).toBe(true);
     expect(result.message).toBe("Successfully rotated from portrait to landscape");
+  });
+
+  test("names the inner panel in the mismatch message (#17385)", () => {
+    const result = verifyIosRotation(
+      {
+        ...duoRotation(),
+        observation: observation(0, 951, 669),
+        previousOrientation: "unknown",
+      },
+      "landscape",
+      { ...duoPrevious(), display: { ...duoPrevious().display, role: "inner" as const } },
+    );
+    expect(result.error).toContain(
+      "Rotation is not supported on the inner panel (the screen size did not change). The display is still portrait",
+    );
   });
 
   test("preserves the cover-panel refusal mismatch message", () => {

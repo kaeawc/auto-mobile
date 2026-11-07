@@ -1038,7 +1038,8 @@ describe("DaemonManager control-state recovery", () => {
     const directory = mkdtempSync(join(tmpdir(), "daemon-manager-recovery-pid-reuse-"));
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
-    const pid = 4601;
+    // Discovery excludes process.pid; offset so a runner PID cannot collide with the fake.
+    const pid = process.pid + 46010;
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     writeStopPidFile(pidFilePath, pid, socketPath);

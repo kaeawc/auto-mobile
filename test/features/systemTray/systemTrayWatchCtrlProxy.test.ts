@@ -102,6 +102,24 @@ const rewriteBounds = (page: ObserveResult, change: (bounds: Bounds) => Bounds):
   visit(copy.viewHierarchy);
   return copy;
 };
+/** A captured round384 page with everything but the full-screen containers moved down by `dy`. */
+const movedDown = (page: ObserveResult, dy: number): ObserveResult => {
+  const visit = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      node.forEach(visit);
+    } else if (node !== null && typeof node === "object") {
+      const record = node as { bounds?: { top: number; bottom: number } };
+      if (record.bounds && record.bounds.bottom - record.bounds.top < 384) {
+        record.bounds.top += dy;
+        record.bounds.bottom += dy;
+      }
+      Object.values(record).forEach(visit);
+    }
+  };
+  const copy = structuredClone(page);
+  visit(copy.viewHierarchy);
+  return copy;
+};
 /** A captured page whose card node `from` is stretched to `to`, e.g. past the viewport edges. */
 const reboundedCard = (page: ObserveResult, from: Bounds, to: Bounds) =>
   rewriteBounds(page, (bounds) => (bounds.join() === from.join() ? to : bounds));
@@ -282,6 +300,40 @@ describe("Wear OS 7 stream actions", () => {
       { title: "AM17357 item 1" },
       { title: "AM17357", body: "1" },
     ]);
+  });
+
+  test("list keeps an equal card that a scroll did not carry up from the one already read", async () => {
+    // Item 4 ends the first page; the next page shows an equal item 4 only 40px higher, a shift no
+    // half-screen swipe makes, so it is another notification and not the one already read.
+    const SCAN384 = "shell input swipe 192 288 192 96 500";
+    const lowerItem4 = movedDown(wholeB, 155);
+    const { tray } = setup((commands) => (commands.includes(SCAN384) ? lowerItem4 : wholeA));
+    const result = await tray.execute({
+      action: "list",
+      notification: { appId: "com.android.shell" },
+      awaitTimeout: 5000,
+    });
+    expect(titles(result)).toEqual([
+      "AM17357 item 5",
+      "AM17357 item 4",
+      "AM17357 item 4",
+      "AM17357 item 3",
+    ]);
+  });
+
+  test("list does not take a card that merely starts with the cut-off text for its continuation", async () => {
+    // The last card is cut off at the bottom showing only its app; the page after the swipe has a
+    // card of that app starting with "1", but 100px lower than the real continuation sits, so the
+    // cut-off card is gone and this is another notification.
+    const SCAN384 = "shell input swipe 192 288 192 96 500";
+    const unrelated = movedDown(clippedB, 100);
+    const { tray } = setup((commands) => (commands.includes(SCAN384) ? unrelated : clippedA));
+    const result = await tray.execute({
+      action: "list",
+      notification: { appId: "com.android.shell" },
+      awaitTimeout: 5000,
+    });
+    expect(titles(result).filter((title) => title === "AM17357")).toHaveLength(2);
   });
 
   test("list waits for a scroll that is not drawn yet instead of ending the scan", async () => {

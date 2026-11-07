@@ -146,7 +146,8 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
                 // A slow drag that holds before release ends without fling momentum.
                 app.coordinate(withNormalizedOffset: from).press(
                     forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: to),
-                    withVelocity: .slow, thenHoldForDuration: 0.3)
+                    withVelocity: .slow, thenHoldForDuration: 0.3
+                )
                 return
             }
             switch direction {

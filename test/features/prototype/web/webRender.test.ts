@@ -551,6 +551,69 @@ describe("prototype web still (#16346)", () => {
     expect(byTag({ element: row }, "field")[0]!.style).not.toHaveProperty("flex");
   });
 
+  test("a row's aspect ratio honors a height bound inherited from its parent (#16675)", () => {
+    const line = (rowStyle: Record<string, unknown>, parent: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          root: {
+            type: "column",
+            children: [
+              {
+                type: "box",
+                style: parent,
+                children: [
+                  {
+                    type: "row",
+                    testTag: "line",
+                    style: rowStyle,
+                    children: [
+                      { type: "box", testTag: "ratio", style: { aspectRatio: 1 } },
+                      { type: "box", testTag: "after", style: { width: { dp: 40 } } },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+        "line",
+      )[0]!;
+    const own = line({ height: { dp: 100 } }, {});
+    const inherited = line({}, { height: { dp: 116 }, padding: { top: 8, bottom: 8 } });
+    const style = (row: WebElement, tag: string) => byTag({ element: row }, tag)[0]!.style;
+    // The inherited 100dp content height caps the ratio just as the row's own 100dp does, so the
+    // ratio no longer zeroes its later sibling.
+    expect(style(inherited, "ratio")).toEqual(style(own, "ratio"));
+    expect(style(inherited, "after")).toEqual(style(own, "after"));
+    expect(style(inherited, "after")["max-width"]).not.toBe("0px");
+    // A scroll passes no bound on: the ratio takes the rest again.
+    const scrolled = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "box",
+          style: { height: { dp: 116 } },
+          children: [
+            {
+              type: "scroll",
+              child: {
+                type: "row",
+                testTag: "line",
+                children: [
+                  { type: "box", testTag: "ratio", style: { aspectRatio: 1 } },
+                  { type: "box", testTag: "after", style: { width: { dp: 40 } } },
+                ],
+              },
+            },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    expect(style(scrolled, "after")["max-width"]).toBe("0px");
+  });
+
   test("a row's unsized aspect ratio takes the width its earlier siblings left (#16659)", () => {
     const root = byTag(
       renderPrototypeStill({

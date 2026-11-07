@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { ActionableError } from "../models";
+import { ActionableError, toActionableError } from "../models";
 import type { BootedDevice } from "../models";
 import { defineDeviceTool } from "./defineTool";
 import { PLAN_RELEVANT } from "./toolRegistryTypes";
@@ -15,6 +15,7 @@ import {
   FOCUS_NAVIGATE_MAX_STEPS_LIMIT,
   FOCUS_NAVIGATE_STATUSES,
   FocusNavigate,
+  type FocusKeyboardHider,
   type FocusKeyPresser,
   type FocusNavigateOptions,
   type FocusNavigateResult,
@@ -93,6 +94,24 @@ export function createFocusKeyPresser(device: BootedDevice): FocusKeyPresser {
   };
 }
 
+/**
+ * Hides the Android IME with KEYCODE_BACK. FocusNavigate calls it only after a read showed an IME
+ * window, so the back press closes the keyboard instead of leaving the screen.
+ */
+export function createFocusKeyboardHider(device: BootedDevice): FocusKeyboardHider {
+  const adb = defaultAdbClientFactory.create(device);
+  return {
+    hideKeyboard: async (signal) => {
+      try {
+        await adb.executeCommand("shell input keyevent KEYCODE_BACK", signal ? { signal } : {});
+        return { success: true };
+      } catch (error) {
+        throw toActionableError(error, "Failed to hide the on-screen keyboard with back");
+      }
+    },
+  };
+}
+
 /** `label` and `elementId` targets resolve to the element tapOn would tap. */
 const targetResolver = new SelectorDpadTargetResolver(new ResolverElementSelector());
 
@@ -110,6 +129,7 @@ function runFocusNavigate(
     createFocusNavigateObserver(new RealObserveScreen(device, defaultAdbClientFactory)),
     createFocusKeyPresser(device),
     defaultTimer,
+    createFocusKeyboardHider(device),
   ).execute(options);
 }
 

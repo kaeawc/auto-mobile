@@ -7,7 +7,11 @@ import type { BootedDevice } from "../../models";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultTouchscreenFeature } from "../../utils/android-cmdline-tools/touchscreenFeature";
 import { defaultTimer } from "../../utils/SystemTimer";
-import { createFocusKeyPresser, createFocusNavigateObserver } from "../focusNavigateTool";
+import {
+  createFocusKeyboardHider,
+  createFocusKeyPresser,
+  createFocusNavigateObserver,
+} from "../focusNavigateTool";
 import type { TapOnDpadFallbackLike } from "./dependencies";
 
 /** The production D-pad tapOn: real touchscreen probe, hierarchy reads and key presses. */
@@ -25,6 +29,7 @@ export function defaultTapOnDpadFallbackFactory(device: BootedDevice): TapOnDpad
         createFocusNavigateObserver(new RealObserveScreen(device, defaultAdbClientFactory)),
         keys,
         defaultTimer,
+        createFocusKeyboardHider(device),
       );
       const resolver = new SelectorDpadTargetResolver(new ResolverElementSelector());
       return new DpadTapOn(navigator, keys, resolver).execute(target, signal);

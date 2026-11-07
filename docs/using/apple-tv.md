@@ -123,8 +123,14 @@ listing.
 ## Observe
 
 With a connected runner, `observe` returns a screenshot, the hierarchy and `focusedElement`;
-`project: "full"` includes the full hierarchy. Without a runner it returns a screenshot with
-`hierarchyUnavailable`; call `startDevice` again to prepare automation. With a runner, `waitFor`
+`project: "full"` includes the full hierarchy. The hierarchy describes the app in front: the app
+you last started with `launchApp`, Settings or another Apple app, or the home screen.
+
+Without a runner it returns a screenshot with `hierarchyUnavailable`; call `startDevice` again to
+prepare automation. A runner that does not answer a command within 5 seconds is disconnected:
+`observe` then returns a screenshot with `hierarchyUnavailable` and the reason in its `message`
+(`project` and `waitFor` are refused), and `pressButton`, `tapOn` and `sendKeys` fail at once,
+asking you to call `startDevice` to restart the runner. With a runner, `waitFor`
 waits for an element (`elementId`, `testTag`, `text`, `textAny`, `className`,
 `contentDescription`, `absent`) by re-reading the hierarchy until it matches or `timeout` elapses;
 `waitFor` with `for`, `posture`, `activeDisplay` or `activeWindow` is refused. Other advanced

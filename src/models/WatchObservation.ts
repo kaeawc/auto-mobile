@@ -13,6 +13,12 @@ export const TVOS_HIERARCHY_UNAVAILABLE_MESSAGE =
   "Call startDevice to prepare the runner for hierarchy and focus navigation. " +
   "Absent hierarchy fields do not mean the screen is empty; read the screenshot instead.";
 
+/** A tvOS runner is registered but did not return a hierarchy (stuck, disconnected or failed). */
+export const TVOS_RUNNER_UNAVAILABLE_MESSAGE =
+  "The tvOS runner did not return a view hierarchy: this observation carries only a screenshot. " +
+  "Call startDevice to restart the runner for hierarchy and focus navigation. " +
+  "Absent hierarchy fields do not mean the screen is empty; read the screenshot instead.";
+
 export const VISIONOS_HIERARCHY_UNAVAILABLE_MESSAGE =
   "The visionOS window-app runner is unavailable: this observation carries only a screenshot. " +
   "The view hierarchy needs the runner. " +

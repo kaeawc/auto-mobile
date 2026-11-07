@@ -23,6 +23,7 @@ import { ActionableError, toActionableError } from "../models/ActionableError";
 import {
   WATCH_HIERARCHY_UNAVAILABLE_MESSAGE,
   TVOS_HIERARCHY_UNAVAILABLE_MESSAGE,
+  TVOS_RUNNER_UNAVAILABLE_MESSAGE,
   VISIONOS_HIERARCHY_UNAVAILABLE_MESSAGE,
   type AppleScreenshotOnlyPlatform,
   type WatchObservation,
@@ -251,9 +252,44 @@ async function watchHierarchyForObserve(
       dependencies.visionosRunner ?? (heldRead ? connectedVisionosRunner : requireVisionosRunner),
     );
   }
+  if (screenshotOnlyPlatform(device) === "tvos") {
+    return tvosHierarchyForObserve(device, args, signal);
+  }
   return {
     hierarchy: await appleRunnerHierarchy(device, args, signal, dependencies.runner),
   };
+}
+
+/**
+ * The registered tvOS runner's hierarchy. A runner that is stuck, disconnected or fails degrades
+ * observe to its screenshot with the reason, as on visionOS, instead of failing the call (#17310).
+ */
+async function tvosHierarchyForObserve(
+  device: BootedDevice,
+  args: ObserveArgs,
+  signal: AbortSignal | undefined,
+): Promise<HierarchyOutcome> {
+  const displayKey = watchDisplay(device).ref.key;
+  const runner = tvosRunners.get(device.deviceId);
+  assertWatchObserveOptions(args, displayKey, "tvos", runner !== undefined);
+  if (!runner) {
+    return {};
+  }
+  try {
+    return { hierarchy: normalizeTvosHierarchy(await runner.hierarchy(signal)) };
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
+    const reason = errorMessage(error);
+    logger.warn(
+      `[TvosRunner] observe on ${device.deviceId} could not retrieve the runner hierarchy: ${reason}`,
+      error,
+    );
+    // Without a hierarchy the hierarchy-only options (project, waitFor) cannot be honoured.
+    assertWatchObserveOptions(args, displayKey, "tvos", false);
+    return { unavailableReason: reason };
+  }
 }
 
 async function appleRunnerHierarchy(
@@ -263,11 +299,6 @@ async function appleRunnerHierarchy(
   injectedRunner?: WatchRunnerClient,
 ): Promise<ViewHierarchyResult | undefined> {
   const platform = screenshotOnlyPlatform(device);
-  if (platform === "tvos") {
-    const runner = tvosRunners.get(device.deviceId);
-    assertWatchObserveOptions(args, watchDisplay(device).ref.key, platform, runner !== undefined);
-    return runner ? normalizeTvosHierarchy(await runner.hierarchy(signal)) : undefined;
-  }
   const runner = injectedRunner ?? watchRunners.get(device.deviceId);
   assertWatchObserveOptions(args, watchDisplay(device).ref.key, platform, runner !== undefined);
   try {
@@ -306,7 +337,8 @@ export async function observeWatch(
   const { png, width, height } = await captureWatchPng(
     device,
     display.captureKey,
-    dependencies.screenshots ?? defaultWatchScreenshotSource(device),
+    dependencies.screenshots ??
+      defaultWatchScreenshotSource(device, unavailableReason === undefined),
     signal,
   );
   // A cancelled call must not leave a retained screenshot nobody will read.
@@ -387,7 +419,10 @@ function watchObservationPayload(
   unavailableReason?: string,
 ): WatchObservation | ObserveResult {
   if (!viewHierarchy) {
-    const message = HIERARCHY_UNAVAILABLE_MESSAGES[platform];
+    const message =
+      platform === "tvos" && unavailableReason
+        ? TVOS_RUNNER_UNAVAILABLE_MESSAGE
+        : HIERARCHY_UNAVAILABLE_MESSAGES[platform];
     return {
       ...capture,
       hierarchyUnavailable: {
@@ -414,8 +449,17 @@ function watchObservationPayload(
   };
 }
 
-function defaultWatchScreenshotSource(device: BootedDevice): WatchScreenshotSource {
-  return device.platform === "tvos" && tvosRunners.get(device.deviceId)
+/**
+ * The tvOS runner's screenshot while it answers; simctl's once the runner failed this observe, so
+ * a stuck runner cannot also stall the screenshot-only fallback.
+ */
+export function defaultWatchScreenshotSource(
+  device: BootedDevice,
+  runnerAnswered = true,
+): WatchScreenshotSource {
+  return device.platform === "tvos" &&
+    runnerAnswered &&
+    tvosRunners.get(device.deviceId)?.isUsable() === true
     ? runnerTvosScreenshotSource
     : simctlWatchScreenshotSource;
 }

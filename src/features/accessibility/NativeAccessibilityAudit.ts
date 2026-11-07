@@ -8,6 +8,10 @@ import {
   type RunnerAccessibilityAuditIssue,
 } from "../observe/ios/CtrlProxyAccessibilityAudit";
 import { MAX_ACCESSIBILITY_VIOLATIONS } from "./WcagAudit";
+import { auditForegroundRefusal } from "./AuditForegroundRefusal";
+import { observeForegroundApp, type ForegroundAppReader } from "./IosForegroundApp";
+import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
 
 /**
  * Runs the platform's own accessibility audit engine (#14086): XCUITest's
@@ -63,6 +67,12 @@ const OUTDATED_RUNNER_ERROR =
   "accessibilityAudit on iOS needs an AutoMobile iOS runner that supports " +
   "request_accessibility_audit; restart the daemon so it installs the current runner";
 
+/**
+ * XCUITest's errors for an app it cannot audit: `Invalid target app <pid>` for a background app,
+ * `Invalid XCUIApplication` for one that is not running (#17303).
+ */
+const RUNNER_TARGET_ERROR = /Invalid target app|Invalid XCUIApplication/;
+
 /** The concrete checks a request names; `all`, or no checks, means every check. */
 export function resolveAuditChecks(
   checks: readonly AccessibilityAuditCheckInput[] | undefined,
@@ -76,6 +86,7 @@ export function resolveAuditChecks(
 export class NativeAccessibilityAudit {
   constructor(
     private readonly senderFactory: IosAccessibilityAuditSenderFactory = defaultSenderFactory,
+    private readonly foregroundApp: ForegroundAppReader = observeForegroundApp,
   ) {}
 
   async run(
@@ -86,10 +97,15 @@ export class NativeAccessibilityAudit {
     if (device.platform !== "ios") {
       return unsupported("atf", checks, "unsupported_platform", ANDROID_UNSUPPORTED_ERROR);
     }
+    const { appId, signal } = input;
+    const mismatch = appId ? await this.foregroundMismatch(device, appId, signal) : undefined;
+    if (mismatch) {
+      return failed(mismatch);
+    }
     const result = await this.senderFactory(device).requestAccessibilityAudit({
-      ...(input.appId ? { appId: input.appId } : {}),
+      ...(appId ? { appId } : {}),
       checks,
-      ...(input.signal ? { signal: input.signal } : {}),
+      ...(signal ? { signal } : {}),
     });
     if (result.unsupported) {
       const detail = result.error ? ` (${result.error})` : "";
@@ -100,18 +116,64 @@ export class NativeAccessibilityAudit {
         `${OUTDATED_RUNNER_ERROR}${detail}.`,
       );
     }
-    const all = result.issues ?? [];
-    const maxIssues = input.maxIssues ?? MAX_ACCESSIBILITY_VIOLATIONS;
-    return {
-      success: result.success,
-      engine: "xcuitest",
-      issues: all.slice(0, maxIssues),
-      totalIssues: all.length,
-      truncated: all.length > maxIssues,
-      unsupportedChecks: result.unsupportedChecks ?? [],
-      ...(result.success || !result.error ? {} : { error: result.error }),
-    };
+    return toAuditResult(result, input);
   }
+
+  /**
+   * The refusal when `appId` is not the app on screen, as the wcag engine returns (#17303). An
+   * unknown foreground is not a mismatch; the runner's own error is mapped instead.
+   */
+  private async foregroundMismatch(
+    device: BootedDevice,
+    appId: string,
+    signal: AbortSignal | undefined,
+  ): Promise<string | undefined> {
+    let foreground: string | undefined;
+    try {
+      foreground = await this.foregroundApp(device, signal);
+    } catch (error) {
+      signal?.throwIfAborted();
+      // Best effort: the runner still audits, and its target error is mapped to the refusal.
+      logger.warn(`accessibilityAudit foreground read failed: ${errorMessage(error)}`, error);
+      return undefined;
+    }
+    return foreground === undefined || foreground === appId
+      ? undefined
+      : auditForegroundRefusal(appId, foreground);
+  }
+}
+
+function toAuditResult(
+  result: CtrlProxyAccessibilityAuditResult,
+  { appId, maxIssues = MAX_ACCESSIBILITY_VIOLATIONS }: NativeAccessibilityAuditInput,
+): NativeAccessibilityAuditResult {
+  const error = result.success ? undefined : result.error;
+  if (appId && error && RUNNER_TARGET_ERROR.test(error)) {
+    // The app left the foreground after the check, or the foreground was unknown.
+    return failed(auditForegroundRefusal(appId));
+  }
+  const all = result.issues ?? [];
+  return {
+    success: result.success,
+    engine: "xcuitest",
+    issues: all.slice(0, maxIssues),
+    totalIssues: all.length,
+    truncated: all.length > maxIssues,
+    unsupportedChecks: result.unsupportedChecks ?? [],
+    ...(error ? { error } : {}),
+  };
+}
+
+function failed(error: string): NativeAccessibilityAuditResult {
+  return {
+    success: false,
+    engine: "xcuitest",
+    issues: [],
+    totalIssues: 0,
+    truncated: false,
+    unsupportedChecks: [],
+    error,
+  };
 }
 
 function unsupported(

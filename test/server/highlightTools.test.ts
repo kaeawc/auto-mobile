@@ -82,6 +82,31 @@ describe("Highlight Tools Registration", () => {
     });
   });
 
+  test("a failed text highlight does not report a circled element (#17385)", async () => {
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: {
+        node: { text: "Target", bounds: { left: 0, top: 0, right: 100, bottom: 100 } },
+      },
+    };
+    registerHighlightTools({
+      generateHighlightId: () => "failed-highlight",
+      viewHierarchyClientFactory: () => ({
+        requestHierarchySync: async () => ({ hierarchy }),
+        convertToViewHierarchyResult: () => hierarchy,
+      }),
+      highlightClientFactory: () => ({
+        addHighlight: async () => ({ success: false, error: "Overlay unavailable" }),
+      }),
+    });
+    const tool = ToolRegistry.getTool("highlight")!;
+    const response = await tool.deviceAwareHandler!(
+      { deviceId: "test", platform: "android", name: "Test" } as BootedDevice,
+      tool.schema.parse({ platform: "android", text: "Target" }),
+    );
+    expect(toolIsError(response)).toBe(true);
+    expect(toolJson(response)).toEqual({ success: false, error: "Overlay unavailable" });
+  });
+
   test("registers highlight tool", () => {
     registerHighlightTools();
 
@@ -128,6 +153,10 @@ describe("Highlight Tools Registration", () => {
     expect(toolJson(response).success).toBe(true);
     expect(toolIsError(response)).toBe(false);
     expect(shapes[0]).toEqual({ type: "circle", bounds });
+    // #17385: the result names the element that was circled.
+    expect(toolJson(response).element).toEqual({
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+    });
   });
 
   test("Android text highlight chooses the same nested clickable ancestor as tap", async () => {

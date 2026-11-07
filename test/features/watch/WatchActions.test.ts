@@ -70,6 +70,38 @@ beforeEach(() => {
 });
 afterEach(() => unregister());
 
+describe("watch tap by shared identifier with value aliases", () => {
+  const field = (top: number, label: string, children: object[] = []) => ({
+    className: "XCUIElementType(49)",
+    accessibilityIdentifier: "repeated-field",
+    accessibilityLabel: label,
+    bounds: { left: 2, top, right: 180, bottom: top + 40 },
+    children,
+  });
+  const alias = (top: number, value: string) => field(top, value);
+  const tree = {
+    ...hierarchy,
+    root: {
+      ...hierarchy.root,
+      children: [
+        field(10, "First", [alias(10, "alpha")]),
+        field(60, "Second", [alias(60, "beta")]),
+      ],
+    },
+  };
+
+  test("elementId index addresses the second field, not the first field's value alias", async () => {
+    const aliasClient = new FakeWatchRunnerClient(tree);
+    const release = watchRunners.register("watch-alias", aliasClient);
+    try {
+      await watchTapOn("watch-alias", { elementId: "repeated-field", index: 1, action: "tap" });
+      expect(aliasClient.commands.at(-1)).toEqual({ type: "tap", x: 91, y: 80 });
+    } finally {
+      release();
+    }
+  });
+});
+
 describe("watch actions", () => {
   test.each([0.5, -0.5])("rotates the crown by signed delta %s", async (delta) => {
     expect(await watchActions.watchRotateCrown(device, { delta, velocity: 2 })).toEqual({

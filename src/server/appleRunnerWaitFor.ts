@@ -65,6 +65,9 @@ export async function pollAppleRunnerWaitFor(
     polls++;
     const evaluation = hierarchy
       ? evaluateWaitForObservation(finder, waitFor, { viewHierarchy: hierarchy } as ObserveResult, {
+          // Runner hierarchies are iOS-shaped: accessibility labels arrive as `text`, so keep
+          // the iOS contentDescription-to-text fallback.
+          devicePlatform: "ios",
           displayInventory: "unavailable",
           modes,
           iosMultiPanel: false,

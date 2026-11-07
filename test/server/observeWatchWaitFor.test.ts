@@ -119,6 +119,23 @@ describe("observe waitFor with the tvOS runner", () => {
     }
   });
 
+  test("contentDescription matches an accessibility label the runner reports as text", async () => {
+    const runner = new ChangingTvosRunner(b01.data, b01.data, 0);
+    const { observe, unregister } = arrange(runner);
+    try {
+      const present = getStructuredPayload<Record<string, unknown>>(
+        await observe({ waitFor: { contentDescription: "B01", timeout: 200 } }),
+      )!;
+      expect(present).toMatchObject({ matched: true, awaitTimeout: false, polls: 1 });
+      const absent = getStructuredPayload<Record<string, unknown>>(
+        await observe({ waitFor: { absent: { contentDescription: "B01" }, timeout: 200 } }),
+      )!;
+      expect(absent).toMatchObject({ matched: false, awaitTimeout: true });
+    } finally {
+      unregister();
+    }
+  });
+
   test("refuses waitFor fields that read device state, naming them", async () => {
     const { observe, unregister } = arrange(new FakeTvosRunnerClient());
     try {

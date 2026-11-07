@@ -24,6 +24,7 @@
 		0B8D8402F5CE665217F70E36 /* ScreenshotResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A4FD49FFF4C9C286C2ADE9 /* ScreenshotResponse.swift */; };
 		0BCC415B05792AC932C2F734 /* GesturePerformer+FocusDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6F42A3144E0096330181CF7 /* GesturePerformer+FocusDiagnostics.swift */; };
 		0CA6FCCBEAFE7EA7CE982B50 /* WebSocketResponding.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE8AB11A7BF22041EE27F3B2 /* WebSocketResponding.swift */; };
+		0CE3E9E5FDFA6E3A4A15DCD9 /* WatchAccessibilityLabelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C39C95E75A2B7C57B04592F /* WatchAccessibilityLabelTests.swift */; };
 		0DD80B9475700E816D970365 /* GesturePerformer+ImeActionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2782EB695F1EF1147BEF7163 /* GesturePerformer+ImeActionPolicy.swift */; };
 		0E36260B360CCACB7542B8C5 /* CommandHandler+Accessibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE7FA458DAC40E12AE86DA3C /* CommandHandler+Accessibility.swift */; };
 		0EB7418FDE9A1FEDA2F30FDA /* ConnectedEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48DEED5C2D528F921F904360 /* ConnectedEvent.swift */; };
@@ -168,6 +169,7 @@
 		70D31ADD9D3844113B3C1A68 /* Data+SHA1.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39455F0AC269C6DF516061C0 /* Data+SHA1.swift */; };
 		71ADCEA9A7423E30D120DFFF /* SpringBoardPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85FF0A05F82D34309527733C /* SpringBoardPanel.swift */; };
 		71FF9B8E7B7C04C380B5E8A2 /* CommandHandler+MagicTap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62C2962F9934DD21D34CE5A2 /* CommandHandler+MagicTap.swift */; };
+		7423691E6319052B3839B7B3 /* WatchAccessibilityLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 702F04706EB73E8D9CB48E60 /* WatchAccessibilityLabel.swift */; };
 		743E0819215F8BA9DAB9CE4D /* SdkDatabaseFetching.swift in Sources */ = {isa = PBXBuildFile; fileRef = D249EC998B62FD013AC1069A /* SdkDatabaseFetching.swift */; };
 		75F74653C446CF3CD95D783A /* GesturePerformer+Errors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D4195430525F5A49BF1898 /* GesturePerformer+Errors.swift */; };
 		77628974AC4F404A4BD7FC4A /* DefaultHingeAngleSetter.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF6FB4F8EE013ACD7C305D32 /* DefaultHingeAngleSetter.swift */; };
@@ -458,6 +460,7 @@
 		1813D6B9A071E30DEABE0897 /* TVCommandRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVCommandRouter.swift; sourceTree = "<group>"; };
 		188BE288EC69549D52914B56 /* XCUIQueryBound.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XCUIQueryBound.swift; sourceTree = "<group>"; };
 		1AA0F355DDDA77EDBF4DF329 /* SdkHierarchyFetching.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyFetching.swift; sourceTree = "<group>"; };
+		1C39C95E75A2B7C57B04592F /* WatchAccessibilityLabelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchAccessibilityLabelTests.swift; sourceTree = "<group>"; };
 		1D33F89FE98F22976C2FD7C8 /* CommandHandler+SdkTrigger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CommandHandler+SdkTrigger.swift"; sourceTree = "<group>"; };
 		1E422FE8F167052A8CF7C2AB /* PasteAlertLabelMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteAlertLabelMatcher.swift; sourceTree = "<group>"; };
 		1F27ADAFFBF4CDF394A5EBF7 /* GesturePerformer+ArrowBudget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GesturePerformer+ArrowBudget.swift"; sourceTree = "<group>"; };
@@ -552,6 +555,7 @@
 		6F0FD212F530D385CEE727EB /* GesturePerformer+SemanticLinks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GesturePerformer+SemanticLinks.swift"; sourceTree = "<group>"; };
 		6F21966C591F135A99BD62D9 /* HingeAngleResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HingeAngleResponse.swift; sourceTree = "<group>"; };
 		6F8DAF2C427F896348E37111 /* RequestAddHighlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestAddHighlight.swift; sourceTree = "<group>"; };
+		702F04706EB73E8D9CB48E60 /* WatchAccessibilityLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchAccessibilityLabel.swift; sourceTree = "<group>"; };
 		709950512202BABDEC0F5C18 /* WatchCommandHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchCommandHandler.swift; sourceTree = "<group>"; };
 		71317E8F588E250C318066FD /* SdkStorageCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkStorageCapabilities.swift; sourceTree = "<group>"; };
 		7202779AE26A81F6267AE8B8 /* RequestSetNetworkFaultRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestSetNetworkFaultRules.swift; sourceTree = "<group>"; };
@@ -801,6 +805,7 @@
 			isa = PBXGroup;
 			children = (
 				63694422003F8724A696C5E5 /* CtrlProxyWatchUITests.swift */,
+				1C39C95E75A2B7C57B04592F /* WatchAccessibilityLabelTests.swift */,
 				A0E1522E4CFD63428175E1CA /* WatchCommandHandlerTests.swift */,
 			);
 			name = CtrlProxyWatchUITests;
@@ -935,6 +940,7 @@
 		6C0B8BCEAF280E5BC30D50E9 /* CtrlProxyWatch */ = {
 			isa = PBXGroup;
 			children = (
+				702F04706EB73E8D9CB48E60 /* WatchAccessibilityLabel.swift */,
 				709950512202BABDEC0F5C18 /* WatchCommandHandler.swift */,
 				7FBDA093EE5DBEC356E1C95E /* WatchRunnerService.swift */,
 				0581F03D1D44EB53D5ED82F3 /* WatchXCUISource.swift */,
@@ -1539,6 +1545,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				2EF5856505FC188DC10BA2A1 /* CtrlProxyWatchUITests.swift in Sources */,
+				7423691E6319052B3839B7B3 /* WatchAccessibilityLabel.swift in Sources */,
+				0CE3E9E5FDFA6E3A4A15DCD9 /* WatchAccessibilityLabelTests.swift in Sources */,
 				1679B0C0C97C5CA60AAF486E /* WatchCommandHandler.swift in Sources */,
 				68D916A8F435BD9C1598A886 /* WatchCommandHandlerTests.swift in Sources */,
 				673AFA045917A167786359B3 /* WatchRunnerService.swift in Sources */,

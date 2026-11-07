@@ -94,7 +94,10 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
             bounds: SdkBounds(
                 left: Int(frame.minX), top: Int(frame.minY), right: Int(frame.maxX), bottom: Int(frame.maxY)
             ),
-            accessibilityLabel: snapshot.label,
+            accessibilityLabel: watchAccessibilityLabel(
+                elementType: snapshot.elementType.rawValue, label: snapshot.label,
+                value: snapshot.value as? String, placeholder: snapshot.placeholderValue
+            ),
             accessibilityIdentifier: snapshot.identifier,
             isUserInteractionEnabled: snapshot.isEnabled,
             children: snapshot.children.map { node($0) }

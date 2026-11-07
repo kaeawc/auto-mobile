@@ -110,10 +110,25 @@ function matches(element: Element, selector: { elementId?: string; text?: string
   );
 }
 
+/** Stable input-first ordering for sendKeys; ordinary taps retain hierarchy order. */
+export function orderWatchTapCandidates(
+  candidates: readonly Element[],
+  preferTextInput: boolean,
+): Element[] {
+  const isTextInput = (element: Element) =>
+    ["XCUIElementType(45)", "XCUIElementType(49)", "XCUIElementType(50)"].includes(
+      element.class ?? "",
+    );
+  return preferTextInput
+    ? candidates.toSorted((a, b) => Number(isTextInput(b)) - Number(isTextInput(a)))
+    : [...candidates];
+}
+
 export async function watchTapOn(
   deviceId: string,
   options: TapOnElementOptions,
   signal?: AbortSignal,
+  preferTextInput = false,
 ): Promise<TapOnElementResult> {
   // Must precede hierarchy reads, not just the tap itself: long press is never advertised.
   if (options.action !== "tap") {
@@ -126,7 +141,10 @@ export async function watchTapOn(
   signal?.throwIfAborted();
   const client = watchRunners.require(deviceId);
   const { all, available } = await elements(client, signal);
-  const candidates = available.filter((element) => matches(element, options));
+  const candidates = orderWatchTapCandidates(
+    available.filter((element) => matches(element, options)),
+    options.text !== undefined && preferTextInput,
+  );
   const element = candidates[options.index ?? 0];
   if (!element) {
     throw new ActionableError(

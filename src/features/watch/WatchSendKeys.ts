@@ -72,7 +72,7 @@ export async function watchSendKeys(
   signal?.throwIfAborted();
   const client = watchRunners.require(deviceId);
   if (selector !== undefined) {
-    await watchTapOn(deviceId, { action: "tap", ...selector }, signal);
+    await watchTapOn(deviceId, { action: "tap", ...selector }, signal, true);
   }
   const results: SendKeysResult["commands"] = [];
   for (const [index, command] of typing.entries()) {

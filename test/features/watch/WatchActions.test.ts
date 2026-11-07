@@ -7,6 +7,7 @@ import {
   watchTapAt,
   watchSwipeOn,
   watchPress,
+  orderWatchTapCandidates,
 } from "../../../src/features/watch/WatchActions";
 import { FakeWatchRunnerClient } from "../../fakes/FakeWatchRunnerClient";
 import hierarchy from "../../fixtures/watchos-xcuitest/sdk-hierarchy-live.json";
@@ -18,9 +19,47 @@ import { PressButton } from "../../../src/features/action/PressButton";
 import { SendKeys } from "../../../src/features/action/SendKeys";
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import { MultiTouchGesture } from "../../../src/features/action/MultiTouchGesture";
-import type { BootedDevice } from "../../../src/models";
+import type { BootedDevice, Element } from "../../../src/models";
 import { ActionableError } from "../../../src/models/ActionableError";
 import * as watchActions from "../../../src/features/watch/WatchActions";
+import xcuiHierarchy from "../../fixtures/watchos-xcuitest/hierarchy.json";
+
+describe("watch tap candidate ordering", () => {
+  // Fake candidates shaped like the captured XCUITest nodes, without parsing a hierarchy.
+  const candidate = (type: number): Element => {
+    const [x, y, width, height] = xcuiHierarchy.frame;
+    return {
+      class: `XCUIElementType(${type})`,
+      text: "helloAB",
+      bounds: { left: x, top: y, right: x + width, bottom: y + height },
+    };
+  };
+
+  test("prefers every input type and preserves order within both groups without mutation", () => {
+    const label = candidate(48);
+    const field = candidate(49);
+    const button = candidate(9);
+    const secure = candidate(50);
+    const search = candidate(45);
+    const otherField = candidate(49);
+    const candidates = [label, field, button, secure, search, otherField];
+    const ordered = orderWatchTapCandidates(candidates, true);
+    const expected = [field, secure, search, otherField, label, button];
+    ordered.forEach((element, index) => expect(element).toBe(expected[index]));
+    expect(candidates).toEqual([label, field, button, secure, search, otherField]);
+  });
+
+  test("ordinary taps keep hierarchy order even with matching inputs", () => {
+    const candidates = [candidate(48), candidate(49), candidate(45), candidate(50)];
+    expect(orderWatchTapCandidates(candidates, false)).toEqual(candidates);
+  });
+
+  test("falls back to other matches in order and handles empty candidates", () => {
+    const candidates = [candidate(48), candidate(9), { ...candidate(1), class: undefined }];
+    expect(orderWatchTapCandidates(candidates, true)).toEqual(candidates);
+    expect(orderWatchTapCandidates([], true)).toEqual([]);
+  });
+});
 
 const device: BootedDevice = { deviceId: "watch-actions", platform: "watchos", name: "Watch" };
 let client: FakeWatchRunnerClient;

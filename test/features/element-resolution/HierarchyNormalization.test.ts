@@ -164,6 +164,36 @@ describe("iPhone Duo inner-panel root bounds", () => {
     expect(projected.windows?.[0]?.bounds).toEqual(offset);
   });
 
+  // Swapped dimensions alone are no staleness evidence: only a window whose frame is the
+  // runner's stale portrait root is rewritten (#17346).
+  test("a genuine origin-aligned landscape window on a portrait screen keeps its bounds", () => {
+    const portrait = {
+      packageName: "com.example",
+      screenWidth: 400,
+      screenHeight: 800,
+      hierarchy: { bounds: { left: 0, top: 0, right: 400, bottom: 800 } },
+      windows: [{ id: 0, bounds: [0, 0, 800, 400] }],
+    };
+    const projected = projectActionableHierarchy("ios", wireCapture(portrait), true);
+    expect(resolveActionableHierarchyScreenSize(projected, true)).toEqual({
+      width: 400,
+      height: 800,
+    });
+    expect<unknown>(projected.windows?.[0]?.bounds).toEqual([0, 0, 800, 400]);
+  });
+
+  test("a re-projection keeps a swapped window that the stale root no longer explains", () => {
+    const capture = wireCapture(structuredClone(duoInnerPlaygroundHierarchy));
+    const once = projectActionableHierarchy("ios", capture, true);
+    const genuine = [0, 0, 669, 951];
+    const twice = projectActionableHierarchy(
+      "ios",
+      wireCapture({ ...once, windows: [{ ...once.windows![0]!, bounds: genuine }] }),
+      true,
+    );
+    expect<unknown>(twice.windows?.[0]?.bounds).toEqual(genuine);
+  });
+
   // The runner's wire form: the application is the single `node` and its bounds sit in `$`.
   test("the wire-form application node is corrected too, keeping the tuple shape", () => {
     const projected = projectActionableHierarchy(

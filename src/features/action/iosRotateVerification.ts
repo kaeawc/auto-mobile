@@ -110,6 +110,7 @@ function iosRotationScreenSizeUnchanged(
   const afterSize = result.observation?.screenSize;
   return (
     Boolean(
+      sameIosDisplay(previousObservation, result.observation) &&
       beforeSize &&
       afterSize &&
       beforeSize.width === afterSize.width &&
@@ -151,20 +152,15 @@ function isObservedRotationMismatch(
   return result.success && current !== "unknown" && current !== requested;
 }
 
-// Dimensions alone cannot name a landscape direction, so a missing held rotation clears the
-// runner's transient one rather than keeping the requested axis. A different display than the one
-// observed before is no evidence about the held rotation, so it keeps its own.
-function heldRotationState(
-  previous: Orientation,
+// Two observations of different displays (different display keys) say nothing about whether
+// one display's size changed; a missing key is no evidence of a different display.
+function sameIosDisplay(
   before: ObserveResult | undefined,
   after: ObserveResult | undefined,
 ): boolean {
   const beforeKey = before?.display?.key;
   const afterKey = after?.display?.key;
-  return (
-    previous !== "unknown" &&
-    (beforeKey === undefined || afterKey === undefined || beforeKey === afterKey)
-  );
+  return beforeKey === undefined || afterKey === undefined || beforeKey === afterKey;
 }
 
 export function verifyIosRotation(
@@ -187,7 +183,9 @@ export function verifyIosRotation(
       "Rotation is not supported on this display (the screen size did not change). The runner reported a rotation but the screen size is unchanged.";
     // The screen did not rotate, so the runner's orientation readout (the requested axis) is
     // transient: report the orientation the display still has, like the next observe (#17306).
-    const held = heldRotationState(previous, previousObservation, result.observation);
+    // Dimensions alone cannot name a landscape direction, so a missing held rotation clears the
+    // runner's transient one rather than keeping the requested axis.
+    const held = previous !== "unknown";
     return {
       ...normalized,
       currentOrientation: held ? previous : normalized.currentOrientation,

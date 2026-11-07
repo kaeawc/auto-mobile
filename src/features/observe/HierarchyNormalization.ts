@@ -101,10 +101,13 @@ export function projectActionableHierarchy(
     size.height,
   );
   result.hierarchy = withLandscapeRootBounds(result.hierarchy, size);
+  const staleRoot = staleRootFrame(source.hierarchy, size);
   if (source.windows) {
     result.windows = source.windows.map((window) => ({
       ...window,
-      ...(window.bounds ? { bounds: withLandscapeWindowBounds(window.bounds, size) } : {}),
+      ...(window.bounds && staleRoot
+        ? { bounds: withLandscapeWindowBounds(window.bounds, staleRoot, size) }
+        : {}),
       hierarchy: window.hierarchy
         ? withLandscapeRootBounds(
             filterOffscreenNodes({ hierarchy: window.hierarchy }, size.width, size.height)
@@ -134,18 +137,51 @@ function withLandscapeRootBounds<T extends { bounds?: unknown; node?: unknown } 
   if (direct) {
     return { ...root, bounds: direct };
   }
-  // The runner wire form carries the application as the single `node` whose attributes (`$`)
-  // hold the bounds; a collapsed array of siblings has no single root to correct.
-  const child = root.node;
-  if (root.bounds === undefined && child && typeof child === "object" && !Array.isArray(child)) {
-    return { ...root, node: withLandscapeNodeBounds(child as WireNode, size) };
-  }
-  return root;
+  const child = wireApplicationNode(root);
+  return child ? { ...root, node: withLandscapeNodeBounds(child, size) } : root;
 }
 
+// The runner wire form carries the application as the single `node` whose attributes (`$`)
+// hold the bounds; a collapsed array of siblings has no single root to correct.
+function wireApplicationNode(root: { bounds?: unknown; node?: unknown }): WireNode | undefined {
+  const child = root.node;
+  return root.bounds === undefined && child && typeof child === "object" && !Array.isArray(child)
+    ? (child as WireNode)
+    : undefined;
+}
+
+/** The runner's stale portrait application frame this projection corrects, if the root has one. */
+function staleRootFrame(
+  root: ViewHierarchyResult["hierarchy"] | undefined,
+  size: ScreenSize,
+): ElementBounds | undefined {
+  if (!root) {
+    return undefined;
+  }
+  const node = wireApplicationNode(root);
+  const stale = [root.bounds, node?.bounds, node?.$?.["bounds"]].find((candidate) =>
+    landscapeBounds(candidate, size),
+  );
+  return parseBounds(stale) ?? undefined;
+}
+
+// Swapped dimensions alone are no staleness evidence: only a window whose frame is the stale
+// root's is rewritten, so a genuine origin-aligned landscape window keeps its bounds (#17346).
 // A window's bounds keep the shape the runner sent (the iOS wire form is a tuple).
-function withLandscapeWindowBounds(bounds: ElementBounds, size: ScreenSize): ElementBounds {
-  return (landscapeBounds(bounds, size) as ElementBounds | undefined) ?? bounds;
+function withLandscapeWindowBounds(
+  bounds: ElementBounds,
+  staleRoot: ElementBounds,
+  size: ScreenSize,
+): ElementBounds {
+  const frame = parseBounds(bounds);
+  const isStaleRoot =
+    frame?.left === staleRoot.left &&
+    frame.top === staleRoot.top &&
+    frame.right === staleRoot.right &&
+    frame.bottom === staleRoot.bottom;
+  return isStaleRoot
+    ? ((landscapeBounds(bounds, size) as ElementBounds | undefined) ?? bounds)
+    : bounds;
 }
 
 type WireNode = { bounds?: unknown; $?: Record<string, unknown> };

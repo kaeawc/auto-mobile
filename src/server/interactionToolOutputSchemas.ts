@@ -104,7 +104,8 @@ const trayCountSchema = () => z.number().int().nonnegative().optional();
 /**
  * One object across every systemTray action: open/close report `skipped`; find, tap and
  * dismiss report the matched texts; tap adds its target; list reports the attributed
- * notifications; clearAll reports its dismissal accounting.
+ * notifications (a watch scan cut short adds `incomplete` and its reason); clearAll reports its
+ * dismissal accounting.
  */
 export const systemTrayResultSchema = z
   .object({
@@ -146,6 +147,8 @@ export const systemTrayResultSchema = z
           .passthrough(),
       )
       .optional(),
+    incomplete: z.boolean().optional(),
+    incompleteReason: z.enum(["deadline", "page_limit", "rewind"]).optional(),
     unattributedRows: trayCountSchema(),
     swipes: trayCountSchema(),
     order: z.literal("encounter").optional(),

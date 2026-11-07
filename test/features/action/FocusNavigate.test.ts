@@ -91,6 +91,27 @@ describe("FocusNavigate", () => {
 
   const navigator = (grid: FakeGrid) => new FocusNavigate(grid, grid, timer);
 
+  test("keeps the planning target while it stays visible when another match becomes nearer", async () => {
+    const box = (cx: number, cy: number) => ({
+      left: cx - 50,
+      top: cy - 50,
+      right: cx + 50,
+      bottom: cy + 50,
+    });
+    const grid = new FakeGrid(0);
+    grid.elements = [
+      { text: "Start", bounds: box(500, 500) },
+      { text: "Item", bounds: box(500, 200) },
+      { text: "Item", bounds: box(1000, 500) },
+      { text: "Via", bounds: box(900, 250) },
+    ];
+    // Up from Start lands on Via, which is nearer the second Item than the first.
+    grid.moves = { 0: { arrow_up: 3 }, 3: { arrow_left: 1, arrow_down: 0 } };
+    const result = await navigator(grid).execute({ until: { text: "Item" } });
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 2 });
+    expect(grid.presses).toEqual(["arrow_up", "arrow_left"]);
+  });
+
   test("returns focused with no presses when focus already matches", async () => {
     const grid = new FakeGrid(1);
     const result = await navigator(grid).execute({ until: { text: "movies" } });
@@ -333,13 +354,8 @@ describe("FocusNavigate", () => {
     expect(result.status).toBe("focused");
     expect(result.focusedElement?.text).toBe("Search");
     expect(result.steps).toBe(grid.presses.length);
-    expect(result.path.map((entry) => entry.text)).toEqual([
-      "Home",
-      "Movies",
-      "Settings",
-      "Search",
-    ]);
-    expect(grid.presses[0]).toBe("arrow_right");
+    expect(result.path.map((entry) => entry.text)).toEqual(["Home", "Games", "Settings", "Search"]);
+    expect(grid.presses[0]).toBe("arrow_down");
   });
 
   test("an explicit direction overrides steering", async () => {
@@ -384,7 +400,7 @@ describe("FocusNavigate", () => {
   test("steering sequence for a reachable grid target is unchanged", async () => {
     const grid = new FakeGrid(0);
     await navigator(grid).execute({ until: { text: "Search" } });
-    expect(grid.presses).toEqual(["arrow_right", "arrow_down", "arrow_right"]);
+    expect(grid.presses).toEqual(["arrow_down", "arrow_right", "arrow_right"]);
   });
 
   test("exits max_steps when focus keeps moving without reaching the target", async () => {
@@ -499,11 +515,11 @@ describe("FocusNavigate blocked directions", () => {
 
   const navigator = (grid: FakeGrid) => new FocusNavigate(grid, grid, timer);
 
-  test("tries up after right is a dead end, then reaches the target", async () => {
+  test("changes rows first when the target is on another row, then reaches it", async () => {
     const grid = launcherGrid();
     const result = await navigator(grid).execute({ until: { contentDesc: "Settings, button" } });
-    expect(result).toMatchObject({ success: true, status: "focused", steps: 4 });
-    expect(grid.presses).toEqual(["arrow_right", "arrow_up", "arrow_right", "arrow_right"]);
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 3 });
+    expect(grid.presses).toEqual(["arrow_up", "arrow_right", "arrow_right"]);
     expect(result.steps).toBe(grid.presses.length);
   });
 
@@ -512,18 +528,18 @@ describe("FocusNavigate blocked directions", () => {
     grid.moves = { 0: {} };
     const result = await navigator(grid).execute({ until: { text: "Settings, button" } });
     expect(result).toMatchObject({ success: false, status: "stuck", steps: 4 });
-    expect(grid.presses).toEqual(["arrow_right", "arrow_up", "arrow_down", "arrow_left"]);
+    expect(grid.presses).toEqual(["arrow_up", "arrow_right", "arrow_left", "arrow_down"]);
     expect(result.message).toContain("Focus did not move after 4 presses;");
     expect(result.focusedElement?.text).toBe("Add app to favorites");
   });
 
   test("blocked directions reset once focus moves to another element", async () => {
     const grid = launcherGrid();
-    // Right is blocked on the first element and must be retried on the next one.
+    // Up is pressed first on the first element; the next element starts with a fresh set.
     grid.moves = { 0: { arrow_up: 1 }, 1: { arrow_right: 3 }, 3: {} };
     const result = await navigator(grid).execute({ until: { text: "Settings, button" } });
     expect(result.status).toBe("focused");
-    expect(grid.presses).toEqual(["arrow_right", "arrow_up", "arrow_right"]);
+    expect(grid.presses).toEqual(["arrow_up", "arrow_right"]);
   });
 
   test("does not repeat a direction already pressed from the same focused element", async () => {
@@ -533,8 +549,8 @@ describe("FocusNavigate blocked directions", () => {
       until: { text: "Settings, button" },
       maxSteps: 4,
     });
-    // Back on the first element, right and up were already pressed there: down is next.
-    expect(grid.presses).toEqual(["arrow_right", "arrow_up", "arrow_right", "arrow_down"]);
+    // Back on the first element, up was already pressed there: right is next, then left.
+    expect(grid.presses).toEqual(["arrow_up", "arrow_right", "arrow_right", "arrow_left"]);
     expect(result).toEqual({
       success: false,
       status: "max_steps",
@@ -557,9 +573,46 @@ describe("FocusNavigate blocked directions", () => {
 
 describe("directionsToward", () => {
   test("ranks the dominant axis first and omits axes with no offset", () => {
-    expect(directionsToward(tile(0), [tile(5)])).toEqual(["right", "down"]);
+    // Tile 5 is on the next row: change rows first, then slide sideways (#17379).
+    expect(directionsToward(tile(0), [tile(5)])).toEqual(["down", "right"]);
     expect(directionsToward(tile(0), [tile(2)])).toEqual(["right"]);
     expect(directionsToward(null, [tile(2)])).toEqual(["down"]);
+  });
+});
+
+describe("directionsToward route planning (#17379)", () => {
+  test("a target in the same band slides sideways first even when it is also lower", () => {
+    const wide: Element = { text: "wide", bounds: { left: 0, top: 0, right: 100, bottom: 100 } };
+    const target: Element = { text: "t", bounds: { left: 400, top: 80, right: 500, bottom: 180 } };
+    expect(directionsToward(wide, [target])).toEqual(["right", "down"]);
+  });
+
+  test("a card one row down and one column over is reached down first (captured tv-fixture)", () => {
+    // Bounds from a uiautomator dump of the Compose for TV fixture (Android TV API 36, tv_1080p):
+    // focus rests on card_featured_01 and tapOn "Movies 03" targets card_movies_03 (#17379).
+    const featured01: Element = {
+      "resource-id": "card_featured_01",
+      focused: true,
+      bounds: { left: 96, top: 324, right: 488, bottom: 544 },
+    };
+    const movies03: Element = {
+      "resource-id": "card_movies_03",
+      text: "Movies 03",
+      bounds: { left: 520, top: 657, right: 912, bottom: 877 },
+    };
+    expect(directionsToward(featured01, [movies03])).toEqual(["down", "right"]);
+  });
+
+  test("does not plan the press that undoes the one that just moved focus here", () => {
+    expect(directionsToward(tile(3), [tile(2)], "down")).toEqual(["right", "up"]);
+    expect(directionsToward(tile(3), [tile(2)])).toEqual(["up", "right"]);
+  });
+
+  test("prefers a sideways move over the reversing one when both close distance", () => {
+    // Tile 1 is up and left of tile 5: arriving by down, going up again would retrace the press.
+    expect(directionsToward(tile(5), [tile(1)], "down")).toEqual(["left", "up"]);
+    // The reversing press stays as the fallback, and is the only move when nothing else closes in.
+    expect(directionsToward(tile(3), [tile(0)], "down")).toEqual(["up"]);
   });
 });
 

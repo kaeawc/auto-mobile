@@ -277,6 +277,28 @@ export class HeldDeviceFormFactorResolver {
     return formFactor === undefined ? device : { ...device, formFactor };
   }
 
+  /** Legacy readiness has no pool incarnation to cache; optional metadata stays bounded. */
+  async enrichUnpooled(device: BootedDevice): Promise<BootedDevice> {
+    if (!this.reader) {
+      return device;
+    }
+    const formFactor = await raceWithDeadline(
+      enrichBootedDeviceFormFactor(device, this.reader).then((enriched) => enriched.formFactor),
+      {
+        timer: this.timer,
+        timeoutMs: this.timeoutMs,
+        label: `AVD form factor read for ${device.name}`,
+      },
+    ).catch((error) => {
+      // Optional host metadata may time out; readiness remains usable without a form factor.
+      logger.debug(`AVD form factor unavailable for ${device.name}: ${errorMessage(error)}`);
+      return undefined;
+    });
+    return formFactor === undefined || formFactor === device.formFactor
+      ? device
+      : { ...device, formFactor };
+  }
+
   private resolve(
     device: BootedDevice,
     pooled: PooledDevice | null,

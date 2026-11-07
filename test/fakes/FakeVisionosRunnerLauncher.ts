@@ -10,17 +10,20 @@ export class FakeVisionosRunnerLauncher implements VisionosRunnerLauncher {
   readonly launches: VisionosRunnerLaunchOptions[] = [];
   readonly calls: string[] = [];
   stops = 0;
+  /** When set, each launch registers a fresh client, as a real restarted runner would. */
+  nextClient?: () => VisionosRunnerClient;
   constructor(readonly client: VisionosRunnerClient = new FakeVisionosRunnerClient()) {}
   async launch(options: VisionosRunnerLaunchOptions): Promise<{ stop(): void }> {
     this.calls.push("launch");
     this.launches.push(options);
-    const unregister = visionosRunners.register(options.deviceId, this.client);
+    const client = this.nextClient?.() ?? this.client;
+    const unregister = visionosRunners.register(options.deviceId, client);
     return {
       stop: () => {
         this.calls.push("stop");
         this.stops++;
         unregister();
-        this.client.close();
+        client.close();
       },
     };
   }

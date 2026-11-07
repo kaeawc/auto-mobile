@@ -91,6 +91,27 @@ describe("FocusNavigate", () => {
 
   const navigator = (grid: FakeGrid) => new FocusNavigate(grid, grid, timer);
 
+  test("keeps the planning target while it stays visible when another match becomes nearer", async () => {
+    const box = (cx: number, cy: number) => ({
+      left: cx - 50,
+      top: cy - 50,
+      right: cx + 50,
+      bottom: cy + 50,
+    });
+    const grid = new FakeGrid(0);
+    grid.elements = [
+      { text: "Start", bounds: box(500, 500) },
+      { text: "Item", bounds: box(500, 200) },
+      { text: "Item", bounds: box(1000, 500) },
+      { text: "Via", bounds: box(900, 250) },
+    ];
+    // Up from Start lands on Via, which is nearer the second Item than the first.
+    grid.moves = { 0: { arrow_up: 3 }, 3: { arrow_left: 1, arrow_down: 0 } };
+    const result = await navigator(grid).execute({ until: { text: "Item" } });
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 2 });
+    expect(grid.presses).toEqual(["arrow_up", "arrow_left"]);
+  });
+
   test("returns focused with no presses when focus already matches", async () => {
     const grid = new FakeGrid(1);
     const result = await navigator(grid).execute({ until: { text: "movies" } });
@@ -585,6 +606,13 @@ describe("directionsToward route planning (#17379)", () => {
   test("does not plan the press that undoes the one that just moved focus here", () => {
     expect(directionsToward(tile(3), [tile(2)], "down")).toEqual(["right", "up"]);
     expect(directionsToward(tile(3), [tile(2)])).toEqual(["up", "right"]);
+  });
+
+  test("prefers a sideways move over the reversing one when both close distance", () => {
+    // Tile 1 is up and left of tile 5: arriving by down, going up again would retrace the press.
+    expect(directionsToward(tile(5), [tile(1)], "down")).toEqual(["left", "up"]);
+    // The reversing press stays as the fallback, and is the only move when nothing else closes in.
+    expect(directionsToward(tile(3), [tile(0)], "down")).toEqual(["up"]);
   });
 });
 

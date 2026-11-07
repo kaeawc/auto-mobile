@@ -325,7 +325,51 @@ function rankAxes(
   const dominant = dominantVertical ? [...vertical, ...horizontal] : [...horizontal, ...vertical];
   const verticalFirst = rowsApart || (!columnsApart && dominantVertical);
   const planned = verticalFirst ? [...vertical, ...horizontal] : [...horizontal, ...vertical];
-  return arrivedBy !== undefined && planned[0] === OPPOSITE[arrivedBy] ? dominant : planned;
+  if (arrivedBy === undefined) {
+    return planned;
+  }
+  const back = OPPOSITE[arrivedBy];
+  const ranked = planned[0] === back ? dominant : planned;
+  // Reversing stays available as the last resort when it is the only way that closes in.
+  return [
+    ...ranked.filter((direction) => direction !== back),
+    ...ranked.filter((direction) => direction === back),
+  ];
+}
+
+/** An element's identity across reads: its selectors plus where it sits. */
+function matchKey(element: Element): string {
+  const { left, top, right, bottom } = element.bounds;
+  return [
+    stringProp(element, "resource-id"),
+    stringProp(element, "text"),
+    stringProp(element, "content-desc"),
+    `${left},${top},${right},${bottom}`,
+  ].join("|");
+}
+
+/**
+ * Chooses the match to plan toward each read: the one chosen last read while it is still on
+ * screen, else the nearest. Recomputing the nearest every read lets a press that lands beside
+ * another match flip the target and walk back and forth between the two.
+ */
+function createTargetPlanner() {
+  let previousKey: string | undefined;
+  return (from: Element | null, matches: readonly Element[]): Element[] => {
+    if (!from || matches.length === 0) {
+      previousKey = undefined;
+      return [];
+    }
+    const origin = center(from.bounds);
+    const distance = (m: Element) => {
+      const point = center(m.bounds);
+      return Math.hypot(point.x - origin.x, point.y - origin.y);
+    };
+    const nearest = matches.reduce((best, next) => (distance(next) < distance(best) ? next : best));
+    const target = matches.find((m) => matchKey(m) === previousKey) ?? nearest;
+    previousKey = matchKey(target);
+    return [target];
+  };
 }
 
 /**
@@ -680,6 +724,7 @@ export class FocusNavigate {
     const path: FocusPathEntry[] = [];
     let steps = 0;
     let progress = createFocusProgress();
+    const planTarget = createTargetPlanner();
     const trap: ExitContext["trap"] = {};
 
     for (;;) {
@@ -694,7 +739,8 @@ export class FocusNavigate {
         path.push(focusedElement);
       }
 
-      const direction = options.direction ?? this.nextDirection(focused, onScreen, progress);
+      const direction =
+        options.direction ?? this.nextDirection(focused, planTarget(focused, onScreen), progress);
       const exhausted = isExhausted(options, progress, direction);
       const done = this.exitFor(focusedElement, matches, {
         steps,

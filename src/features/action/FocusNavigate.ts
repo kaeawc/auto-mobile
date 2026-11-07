@@ -282,6 +282,11 @@ export function firstMatchTarget(
   return first ? { ...target, atBounds: first.element.bounds } : target;
 }
 
+/** Whether the closed intervals [aStart, aEnd] and [bStart, bEnd] share any length. */
+function spansOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
+  return Math.min(aEnd, bEnd) > Math.max(aStart, bStart);
+}
+
 function center(bounds: ElementBounds): { x: number; y: number } {
   return { x: (bounds.left + bounds.right) / 2, y: (bounds.top + bounds.bottom) / 2 };
 }
@@ -298,6 +303,76 @@ export function directionToward(
 }
 
 /**
+ * The axes to move along toward `target`, best first. A target on another row is reached by
+ * changing rows first: focus then lands in that row near the target's column, where sliding along
+ * the current row first would walk past it (#17379). Likewise a target in another column but the
+ * same band moves sideways first. Only when the target overlaps the focused element on both axes
+ * does the dominant offset decide. The press that undoes the one that just moved focus here is
+ * never planned: around a dead end the planned and dominant routes would trade places forever, so
+ * the dominant offset decides then.
+ */
+function rankAxes(
+  from: ElementBounds,
+  target: ElementBounds,
+  { dx, dy }: { dx: number; dy: number },
+  arrivedBy: FocusNavigateDirection | undefined,
+): FocusNavigateDirection[] {
+  const horizontal: FocusNavigateDirection[] = dx === 0 ? [] : [dx > 0 ? "right" : "left"];
+  const vertical: FocusNavigateDirection[] = dy === 0 ? [] : [dy < 0 ? "up" : "down"];
+  const rowsApart = !spansOverlap(from.top, from.bottom, target.top, target.bottom);
+  const columnsApart = !spansOverlap(from.left, from.right, target.left, target.right);
+  const dominantVertical = Math.abs(dx) <= Math.abs(dy);
+  const dominant = dominantVertical ? [...vertical, ...horizontal] : [...horizontal, ...vertical];
+  const verticalFirst = rowsApart || (!columnsApart && dominantVertical);
+  const planned = verticalFirst ? [...vertical, ...horizontal] : [...horizontal, ...vertical];
+  if (arrivedBy === undefined) {
+    return planned;
+  }
+  const back = OPPOSITE[arrivedBy];
+  const ranked = planned[0] === back ? dominant : planned;
+  // Reversing stays available as the last resort when it is the only way that closes in.
+  return [
+    ...ranked.filter((direction) => direction !== back),
+    ...ranked.filter((direction) => direction === back),
+  ];
+}
+
+/** An element's identity across reads: its selectors plus where it sits. */
+function matchKey(element: Element): string {
+  const { left, top, right, bottom } = element.bounds;
+  return [
+    stringProp(element, "resource-id"),
+    stringProp(element, "text"),
+    stringProp(element, "content-desc"),
+    `${left},${top},${right},${bottom}`,
+  ].join("|");
+}
+
+/**
+ * Chooses the match to plan toward each read: the one chosen last read while it is still on
+ * screen, else the nearest. Recomputing the nearest every read lets a press that lands beside
+ * another match flip the target and walk back and forth between the two.
+ */
+function createTargetPlanner() {
+  let previousKey: string | undefined;
+  return (from: Element | null, matches: readonly Element[]): Element[] => {
+    if (!from || matches.length === 0) {
+      previousKey = undefined;
+      return [];
+    }
+    const origin = center(from.bounds);
+    const distance = (m: Element) => {
+      const point = center(m.bounds);
+      return Math.hypot(point.x - origin.x, point.y - origin.y);
+    };
+    const nearest = matches.reduce((best, next) => (distance(next) < distance(best) ? next : best));
+    const target = matches.find((m) => matchKey(m) === previousKey) ?? nearest;
+    previousKey = matchKey(target);
+    return [target];
+  };
+}
+
+/**
  * Every D-pad direction that closes distance to the nearest match, best first: the dominant axis,
  * then the other axis when the match is offset on it. Without a focused element or a match the
  * only candidate is down.
@@ -305,6 +380,7 @@ export function directionToward(
 export function directionsToward(
   from: Element | null,
   matches: readonly Element[],
+  arrivedBy?: FocusNavigateDirection,
 ): [FocusNavigateDirection, ...FocusNavigateDirection[]] {
   if (!from || matches.length === 0) {
     return ["down"];
@@ -314,17 +390,17 @@ export function directionsToward(
     const point = center(match.bounds);
     return { dx: point.x - origin.x, dy: point.y - origin.y };
   });
-  const nearest = offsets.reduce((best, next) =>
-    Math.hypot(next.dx, next.dy) < Math.hypot(best.dx, best.dy) ? next : best,
+  const nearestIndex = offsets.reduce(
+    (best, next, index) =>
+      Math.hypot(next.dx, next.dy) < Math.hypot(offsets[best].dx, offsets[best].dy) ? index : best,
+    0,
   );
-  const horizontal: FocusNavigateDirection[] =
-    nearest.dx === 0 ? [] : [nearest.dx > 0 ? "right" : "left"];
-  const vertical: FocusNavigateDirection[] =
-    nearest.dy === 0 ? [] : [nearest.dy < 0 ? "up" : "down"];
-  const ranked =
-    Math.abs(nearest.dx) > Math.abs(nearest.dy)
-      ? [...horizontal, ...vertical]
-      : [...vertical, ...horizontal];
+  const ranked = rankAxes(
+    from.bounds,
+    matches[nearestIndex].bounds,
+    offsets[nearestIndex],
+    arrivedBy,
+  );
   const [best, ...rest] = ranked;
   return best ? [best, ...rest] : ["down"];
 }
@@ -453,6 +529,8 @@ interface FocusProgress {
   readonly tried: ReadonlySet<FocusNavigateDirection>;
   /** Directions that kept moving focus without closing distance; tried after every other one. */
   readonly stalled: ReadonlySet<FocusNavigateDirection>;
+  /** The direction of the press that moved focus onto the current element, if known. */
+  readonly arrivedBy: FocusNavigateDirection | undefined;
   /** Presses a stalled direction again because every escape from it failed; it stays undemoted. */
   resume(direction: FocusNavigateDirection): void;
   /**
@@ -515,7 +593,11 @@ function createFocusProgress(): FocusProgress {
   let unchanged = 0;
   let previousKey: string | undefined;
   let lastDirection: FocusNavigateDirection | undefined;
+  let arrivedBy: FocusNavigateDirection | undefined;
   return {
+    get arrivedBy() {
+      return arrivedBy;
+    },
     get unchanged() {
       return unchanged;
     },
@@ -538,6 +620,7 @@ function createFocusProgress(): FocusProgress {
         memory.blocked.add(lastDirection);
       }
       stall.observe(distance, didNotMove ? undefined : lastDirection);
+      arrivedBy = didNotMove ? arrivedBy : lastDirection;
       previousKey = key;
       lastDirection = undefined;
       return moved;
@@ -641,6 +724,7 @@ export class FocusNavigate {
     const path: FocusPathEntry[] = [];
     let steps = 0;
     let progress = createFocusProgress();
+    const planTarget = createTargetPlanner();
     const trap: ExitContext["trap"] = {};
 
     for (;;) {
@@ -655,7 +739,8 @@ export class FocusNavigate {
         path.push(focusedElement);
       }
 
-      const direction = options.direction ?? this.nextDirection(focused, onScreen, progress);
+      const direction =
+        options.direction ?? this.nextDirection(focused, planTarget(focused, onScreen), progress);
       const exhausted = isExhausted(options, progress, direction);
       const done = this.exitFor(focusedElement, matches, {
         steps,
@@ -728,7 +813,7 @@ export class FocusNavigate {
     matches: readonly Element[],
     progress: FocusProgress,
   ): FocusNavigateDirection | undefined {
-    const toward = directionsToward(focused, matches);
+    const toward = directionsToward(focused, matches, progress.arrivedBy);
     const candidates =
       focused && matches.length > 0 ? directionsWithFallbacks(toward) : [...toward];
     const untried = candidates.filter((direction) => !progress.tried.has(direction));

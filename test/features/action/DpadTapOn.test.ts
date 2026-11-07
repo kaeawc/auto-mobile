@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
   DpadTapOn,
+  dpadTapOnHoldMs,
   dpadTapOnTarget,
+  type DpadSelectHolder,
   type DpadTapOnNavigator,
   type DpadTapOnRequest,
 } from "../../../src/features/action/DpadTapOn";
@@ -66,7 +68,6 @@ describe("dpadTapOnTarget", () => {
     { selector: { testTag: "row" } },
     { selector: { textAny: ["Movies"] } },
     { selector: { accessibilityLink: "Terms" } },
-    { selector: { text: "Movies" }, action: "longPress" },
     { selector: { text: "Movies" }, action: "doubleTap" },
     { selector: { text: "Movies" }, duration: 500 },
     { selector: { text: "Movies" }, sibling: true },
@@ -79,6 +80,56 @@ describe("dpadTapOnTarget", () => {
     { selector: { text: "Movies" }, selectionStrategy: "random" },
   ] satisfies DpadTapOnRequest[])("leaves %j to the touch path", (request) => {
     expect(dpadTapOnTarget(request)).toBeUndefined();
+  });
+});
+
+describe("D-pad long press (#17379)", () => {
+  test("longPress stays on the D-pad path and holds for duration, default 1000 ms", () => {
+    const request = { selector: { text: "Movies" }, action: "longPress" } as const;
+    expect(dpadTapOnTarget(request)).toEqual({ label: "Movies" });
+    expect(dpadTapOnHoldMs(request)).toBe(1000);
+    expect(dpadTapOnHoldMs({ ...request, duration: 1500 })).toBe(1500);
+    expect(dpadTapOnHoldMs({ selector: { text: "Movies" }, action: "tap" })).toBeUndefined();
+  });
+
+  test("a tap with a duration still needs touch", () => {
+    expect(
+      dpadTapOnTarget({ selector: { text: "Movies" }, action: "tap", duration: 500 }),
+    ).toBeUndefined();
+  });
+
+  test("holds center after focusing instead of pressing enter", async () => {
+    const holds: number[] = [];
+    const holder: DpadSelectHolder = {
+      holdSelect: async (durationMs) => {
+        holds.push(durationMs);
+        return { success: true };
+      },
+    };
+    const keys = new FakeKeys();
+    const result = await new DpadTapOn(new FakeNavigator(focused), keys, undefined, holder).execute(
+      { label: "Movies" },
+      undefined,
+      1000,
+    );
+    expect(keys.presses).toEqual([]);
+    expect(holds).toEqual([1000]);
+    expect(result).toMatchObject({ success: true, action: "longPress" });
+    expect(result.message).toContain("held center for 1000 ms");
+  });
+
+  test("reports a hold that failed", async () => {
+    const holder: DpadSelectHolder = {
+      holdSelect: async () => ({ success: false, error: "needs API 35" }),
+    };
+    const result = await new DpadTapOn(
+      new FakeNavigator(focused),
+      new FakeKeys(),
+      undefined,
+      holder,
+    ).execute({ label: "Movies" }, undefined, 500);
+    expect(result).toMatchObject({ success: false, action: "longPress" });
+    expect(result.error).toContain("holding center for 500 ms failed: needs API 35");
   });
 });
 

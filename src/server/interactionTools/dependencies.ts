@@ -118,7 +118,8 @@ export type TapOnElementLike = Pick<TapOnElement, "execute">;
 export interface TapOnDpadFallbackLike {
   /** False only when the device declares no touchscreen; null when that could not be read. */
   hasTouchscreen(signal?: AbortSignal): Promise<boolean | null>;
-  tap(target: FocusNavigateTarget, signal?: AbortSignal): Promise<DpadTapOnResult>;
+  /** `holdMs` long-presses D-pad center for that long instead of pressing enter. */
+  tap(target: FocusNavigateTarget, signal?: AbortSignal, holdMs?: number): Promise<DpadTapOnResult>;
 }
 
 export type TapAtElementLike = Pick<TapAtCoordinate, "execute">;

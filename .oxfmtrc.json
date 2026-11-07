@@ -2,6 +2,7 @@
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "ignorePatterns": [
     "test/fixtures/android-avdmanager/*.txt",
+    "test/fixtures/visionos-settings/*.json",
     "dist/**",
     "ios/**",
     "android/**",

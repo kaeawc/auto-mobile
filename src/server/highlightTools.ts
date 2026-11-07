@@ -241,6 +241,9 @@ const resolveHighlightShapeFromSelector = async (
     },
     {
       action: "highlight",
+      // Rank like tapOn: a visible actionable match (the Settings sidebar row) beats an
+      // inert same-text label such as a navigation title; inert labels stay the fallback (#17365).
+      preferTap: true,
       viewport:
         viewHierarchy.screenWidth && viewHierarchy.screenHeight
           ? { width: viewHierarchy.screenWidth, height: viewHierarchy.screenHeight }

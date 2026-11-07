@@ -97,7 +97,7 @@ enum SimulatorDisplayGeometry {
             if panelMatches.count == 1 { return panelMatches[0] }
         }
         throw OverlayError(
-            "Expected one visible Simulator or Device Hub window named \(deviceName), found \(matches.count). Open that device window and close duplicate windows. A foldable device such as the Duo has one window per panel; if several match, the display size could not pick one."
+            "Expected one visible Simulator or Device Hub window named \(deviceName), found \(matches.count). Open that device window and close duplicate windows. Device Hub shows both panels of a foldable such as the Duo in one window; if several windows match, the display size could not pick one."
         )
     }
 

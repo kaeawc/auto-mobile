@@ -12609,6 +12609,74 @@
         },
         "error": {
           "type": "string"
+        },
+        "element": {
+          "description": "Element a text/elementId selector circled (its container with containerOf); absent for a shape highlight",
+          "type": "object",
+          "properties": {
+            "bounds": {
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "left": {
+                      "type": "number"
+                    },
+                    "top": {
+                      "type": "number"
+                    },
+                    "right": {
+                      "type": "number"
+                    },
+                    "bottom": {
+                      "type": "number"
+                    },
+                    "centerX": {
+                      "type": "number"
+                    },
+                    "centerY": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["left", "top", "right", "bottom"],
+                  "additionalProperties": false
+                },
+                {
+                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ]
+                }
+              ]
+            },
+            "text": {
+              "type": "string"
+            },
+            "resource-id": {
+              "type": "string"
+            },
+            "content-desc": {
+              "type": "string"
+            },
+            "class": {
+              "type": "string"
+            }
+          },
+          "required": ["bounds"],
+          "additionalProperties": false
         }
       },
       "required": ["success"],

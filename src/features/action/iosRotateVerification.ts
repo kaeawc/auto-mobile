@@ -8,14 +8,37 @@ const IOS_ROTATION_UNSUPPORTED_ERROR =
 const IOS_COVER_ROTATION_UNSUPPORTED_ERROR =
   "Rotation is not supported on the cover panel (the screen size did not change). Open the device to its inner panel (unfold the hinge) and retry there, or keep the current orientation.";
 
-function coverPanelRefusalError(
+// Name the panel the way the cover refusal does, so an inner-panel refusal on a foldable
+// does not read as an unnamed display (#17385). Other roles keep the generic wording.
+function rotationTargetName(previousObservation: ObserveResult | undefined): string {
+  return previousObservation?.display.role === "inner" ? "the inner panel" : "this display";
+}
+
+function unsupportedRotationError(previousObservation: ObserveResult | undefined): string {
+  return `Rotation is not supported on ${rotationTargetName(previousObservation)} (the screen size did not change)`;
+}
+
+function unchangedSizeError(previousObservation: ObserveResult | undefined): string {
+  return previousObservation?.display.role === "cover"
+    ? IOS_COVER_ROTATION_UNSUPPORTED_ERROR
+    : `${unsupportedRotationError(previousObservation)}. The runner reported a rotation but the screen size is unchanged.`;
+}
+
+function panelRefusalError(
   previousObservation: ObserveResult | undefined,
   runnerError: string | undefined,
 ): string | undefined {
-  return previousObservation?.display.role === "cover" &&
-    runnerError === IOS_ROTATION_UNSUPPORTED_ERROR
-    ? IOS_COVER_ROTATION_UNSUPPORTED_ERROR
-    : undefined;
+  if (runnerError !== IOS_ROTATION_UNSUPPORTED_ERROR) {
+    return undefined;
+  }
+  switch (previousObservation?.display.role) {
+    case "cover":
+      return IOS_COVER_ROTATION_UNSUPPORTED_ERROR;
+    case "inner":
+      return `${unsupportedRotationError(previousObservation)}. Keep the current orientation.`;
+    default:
+      return undefined;
+  }
 }
 
 function verifyIosRunnerFailure(
@@ -29,13 +52,13 @@ function verifyIosRunnerFailure(
   },
 ): RotateResult {
   const { requested, previous, current, previousObservation } = context;
-  const coverError = coverPanelRefusalError(previousObservation, result.error);
-  if (coverError) {
+  const panelError = panelRefusalError(previousObservation, result.error);
+  if (panelError) {
     return {
       ...normalized,
       success: false,
       rotationPerformed: false,
-      error: coverError,
+      error: panelError,
     };
   }
   if (current === requested && previous !== "unknown" && previous !== requested) {
@@ -96,7 +119,7 @@ function rotationMismatchError(
     result.rotationPerformed &&
     normalizeIosOrientation(result.previousOrientation) === "unknown" &&
     unchangedSize
-      ? "Rotation is not supported on this display (the screen size did not change). "
+      ? `${unsupportedRotationError(previousObservation)}. `
       : "";
   const error = `${unsupported}The display is still ${current} after the runner reported ${claim} (currentOrientation: ${result.currentOrientation ?? "unknown"}).`;
   return error;
@@ -178,9 +201,7 @@ export function verifyIosRotation(
       current === "unknown" ? normalizeIosOrientation(result.currentOrientation) : current,
   };
   if (isUnverifiedIosRotationSize(result, requested, { previous, current }, previousObservation)) {
-    const error =
-      coverPanelRefusalError(previousObservation, IOS_ROTATION_UNSUPPORTED_ERROR) ??
-      "Rotation is not supported on this display (the screen size did not change). The runner reported a rotation but the screen size is unchanged.";
+    const error = unchangedSizeError(previousObservation);
     // The screen did not rotate, so the runner's orientation readout (the requested axis) is
     // transient: report the orientation the display still has, like the next observe (#17306).
     // Dimensions alone cannot name a landscape direction, so a missing held rotation clears the

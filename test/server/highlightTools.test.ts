@@ -128,6 +128,10 @@ describe("Highlight Tools Registration", () => {
     expect(toolJson(response).success).toBe(true);
     expect(toolIsError(response)).toBe(false);
     expect(shapes[0]).toEqual({ type: "circle", bounds });
+    // #17385: the result names the element that was circled.
+    expect(toolJson(response).element).toEqual({
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+    });
   });
 
   test("Android text highlight chooses the same nested clickable ancestor as tap", async () => {

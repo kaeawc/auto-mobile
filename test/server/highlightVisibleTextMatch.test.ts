@@ -59,5 +59,18 @@ describe("highlight text selection (#17365)", () => {
     expect(shape.bounds.y + shape.bounds.height).toBeLessThanOrEqual(bottom);
     expect(shape.bounds.x).toBeGreaterThanOrEqual(left);
     expect(shape.bounds.x + shape.bounds.width).toBeLessThanOrEqual(right);
+
+    // #17385: the result reports the circled label so callers can check the ranking.
+    const element = toolJson(result).element as {
+      text?: string;
+      bounds: { left: number; top: number; right: number; bottom: number };
+    };
+    expect(element.text).toBe("General");
+    expect(element.bounds).toEqual({
+      left: shape.bounds.x,
+      top: shape.bounds.y,
+      right: shape.bounds.x + shape.bounds.width,
+      bottom: shape.bounds.y + shape.bounds.height,
+    });
   });
 });

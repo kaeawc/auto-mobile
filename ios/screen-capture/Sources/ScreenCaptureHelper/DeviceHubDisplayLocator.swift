@@ -4,32 +4,29 @@ import Foundation
 import ScreenCaptureKit
 
 /// Retains the last usable display placement while Device Hub changes zoom or window size.
+///
+/// A relocation capture runs as its own task: `refreshIfDue` starts it and returns at once, and
+/// `frame(for:)` applies whatever capture completed last. The overlay host refreshes highlights
+/// one after another, so waiting on a capture there would delay deadline cleanup and every other
+/// highlight's refresh.
 @MainActor
 final class DeviceHubDisplayTracker {
     static let relocateInterval: TimeInterval = 0.5
-    /// Longest a refresh waits on one capture, so a stalled ScreenCaptureKit call cannot hold the
-    /// highlight loop past a panel's deadline or freeze other highlights.
-    static let relocateTimeout: TimeInterval = 0.4
 
     private var relativeRect: CGRect
     private var windowSize: CGSize
     private var lastRelocate: TimeInterval
     private let now: () -> TimeInterval
-    private let relocate: @MainActor () async -> CGRect?
-    private let sleep: @MainActor (TimeInterval) async throws -> Void
-    /// True while a capture is running, including one that outlived the timeout; no second starts.
-    private var isRelocating = false
+    private let relocate: @MainActor (SimulatorOverlayTarget) async -> CGRect?
+    /// The capture still running, however long it takes; no second one starts until it finishes.
+    private var relocation: Task<Void, Never>?
 
     init(
         relativeRect: CGRect,
         windowSize: CGSize,
         now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
-        sleep: @escaping @MainActor (TimeInterval) async throws -> Void = { seconds in
-            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-        },
-        relocate: @escaping @MainActor () async -> CGRect?
+        relocate: @escaping @MainActor (SimulatorOverlayTarget) async -> CGRect?
     ) {
-        self.sleep = sleep
         self.relativeRect = relativeRect
         self.windowSize = windowSize
         self.now = now
@@ -37,39 +34,24 @@ final class DeviceHubDisplayTracker {
         lastRelocate = now()
     }
 
-    func refreshIfDue(windowSize: CGSize) async {
-        guard !isRelocating,
-              windowSize != self.windowSize || now() - lastRelocate >= Self.relocateInterval else { return }
+    /// Starts a capture of `window` when its size changed or the interval elapsed, without waiting
+    /// for it. Returns the started capture so tests can await its result; nil when none started.
+    @discardableResult
+    func refreshIfDue(window: SimulatorOverlayTarget) -> Task<Void, Never>? {
+        guard relocation == nil,
+              window.frame.size != windowSize || now() - lastRelocate >= Self.relocateInterval else { return nil }
         // Throttle failed attempts too, retaining the last good placement until capture recovers.
-        self.windowSize = windowSize
+        windowSize = window.frame.size
         lastRelocate = now()
-        isRelocating = true
-        await boundedRelocate()
-    }
-
-    /// Waits for one capture, or `relocateTimeout`, whichever comes first. A capture that outlives
-    /// the timeout still updates the placement when it finishes.
-    private func boundedRelocate() async {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            var resumed = false
-            var timer: Task<Void, Never>?
-            let finish: () -> Void = {
-                guard !resumed else { return }
-                resumed = true
-                timer?.cancel()
-                continuation.resume()
-            }
-            timer = Task { [sleep] in
-                do { try await sleep(Self.relocateTimeout) } catch { return }
-                finish()
-            }
-            Task { [relocate] in
-                let rect = await relocate()
-                isRelocating = false
-                if let rect { relativeRect = rect }
-                finish()
-            }
+        let task = Task { [weak self, relocate] in
+            let rect = await relocate(window)
+            guard let self else { return }
+            relocation = nil
+            // A result that arrives after later refreshes still moves the placement when it lands.
+            if let rect { relativeRect = rect }
         }
+        relocation = task
+        return task
     }
 
     func frame(for window: SimulatorOverlayTarget) -> CGRect {

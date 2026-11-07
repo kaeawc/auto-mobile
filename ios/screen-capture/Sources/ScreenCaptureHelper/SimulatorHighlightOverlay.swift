@@ -146,6 +146,13 @@ enum SimulatorDisplayGeometry {
         var prepare: (@MainActor (SimulatorOverlayTarget) async -> Void)?
     }
 
+    /// Places the display from `tracker`. `prepare` only starts a due capture and never waits on
+    /// it, so a slow capture cannot hold the host's refresh loop.
+    @MainActor
+    static func trackingLookup(_ tracker: DeviceHubDisplayTracker) -> DisplayFrameLookup {
+        DisplayFrameLookup(frame: { tracker.frame(for: $0) }, prepare: { _ = tracker.refreshIfDue(window: $0) })
+    }
+
     /// Where the display sits for `window`: its accessibility display group, or, when the window has
     /// none (Device Hub shows both Duo panels in one window), the drawn display found from pixels.
     @MainActor
@@ -158,14 +165,10 @@ enum SimulatorDisplayGeometry {
         if displayFrame(window: window) != nil { return DisplayFrameLookup(frame: displayFrame(window:)) }
         guard let relative = await DeviceHubDisplayLocator.locate(window: window, sourceSize: sourceSize)
         else { return DisplayFrameLookup(frame: displayFrame(window:)) }
-        var currentWindow = window
-        let tracker = DeviceHubDisplayTracker(relativeRect: relative, windowSize: window.frame.size) {
-            await DeviceHubDisplayLocator.locate(window: currentWindow, sourceSize: sourceSize)
+        let tracker = DeviceHubDisplayTracker(relativeRect: relative, windowSize: window.frame.size) { current in
+            await DeviceHubDisplayLocator.locate(window: current, sourceSize: sourceSize)
         }
-        return DisplayFrameLookup(frame: { tracker.frame(for: $0) }, prepare: { updated in
-            currentWindow = updated
-            await tracker.refreshIfDue(windowSize: updated.frame.size)
-        })
+        return trackingLookup(tracker)
     }
 
     static func displayFrame(window: SimulatorOverlayTarget) -> CGRect? {
@@ -265,7 +268,7 @@ final class SimulatorHighlightOverlay: SimulatorOverlay {
         if let prepare {
             await prepare(window)
             guard !isClosed else { return }
-            // The window can move while the capture runs; place the panel from where it is now.
+            // The window can move while `prepare` is suspended; place the panel from where it is now.
             window = try resolveWindow()
         }
         guard let frame = displayFrame(window) else {

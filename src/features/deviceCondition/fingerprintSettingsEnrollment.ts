@@ -20,6 +20,12 @@ import { shell } from "./injectorSupport";
 /** Public Settings action that opens fingerprint enrollment (API 28+, still handled on 35+). */
 export const FINGERPRINT_ENROLL_ACTION = "android.settings.FINGERPRINT_ENROLL";
 
+/**
+ * `am start` reports this when it reused an existing task instead of starting the activity. A
+ * finished enroll task survives HOME, so a plain start would reopen it over the launcher (#17380).
+ */
+const STALE_TASK_OUTPUT = /current task has been brought to the front/i;
+
 const DUMP_PATH = "/data/local/tmp/automobile-fingerprint-enroll.xml";
 
 /** Upper bound on screen reads; emulator enrollment takes roughly a dozen sensor touches. */
@@ -192,7 +198,8 @@ async function step(
 /**
  * Enroll one fingerprint with `fingerId` through Settings, resolving once `dumpsys fingerprint`
  * reports `targetCount` enrollments. Leaves Settings with HOME. A lock-screen credential must be
- * set to `deps.pin` first: Settings will not enroll without one.
+ * set to `deps.pin` first: Settings will not enroll without one. `am start -S` force-stops Settings
+ * first, so the previous run's finished enroll task cannot be brought back instead of a fresh flow.
  */
 export async function enrollFingerprintThroughSettings(
   deps: FingerprintSettingsEnrollmentDeps,
@@ -200,7 +207,17 @@ export async function enrollFingerprintThroughSettings(
   targetCount: number,
   signal?: AbortSignal,
 ): Promise<void> {
-  await shell(deps.adb, ["am", "start", "-W", "-a", FINGERPRINT_ENROLL_ACTION], signal);
+  const started = await shell(
+    deps.adb,
+    ["am", "start", "-S", "-W", "-a", FINGERPRINT_ENROLL_ACTION],
+    signal,
+  );
+  if (STALE_TASK_OUTPUT.test(started)) {
+    throw new ActionableError(
+      "Settings brought an existing fingerprint enrollment task to the front instead of starting " +
+        "a new one. Run `adb shell am force-stop com.android.settings` and retry.",
+    );
+  }
   const state: FlowState = { unknownStreak: 0, credentialEntries: 0, lastSummary: "" };
   for (let attempt = 0; attempt < ENROLL_MAX_STEPS; attempt++) {
     throwIfAborted(signal);

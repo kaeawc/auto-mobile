@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import type { ExecResult } from "../../../src/models";
 import {
   AdbFingerprintEnrollmentPort,
@@ -48,14 +50,33 @@ const SCREENS = {
     node({ text: "Skip", bounds: "[0,900][400,1000]" }),
   ),
   unknown: screen(node({ text: "Bienvenue", bounds: "[0,0][100,50]" })),
+  launcher: screen(node({ text: "Phone", bounds: "[0,0][100,50]" })),
 };
+
+const ENROLL_FLOW = ["credential", "consentMore", "consentAgree", "touch"];
+
+/** `am start` output when Settings' finished enroll task is still alive (#17380, mt0091c). */
+const BROUGHT_TO_FRONT = readFileSync(
+  path.join(
+    import.meta.dir,
+    "../../fixtures/android-fingerprint-enroll/am-start-stale-task-brought-to-front.txt",
+  ),
+  "utf8",
+);
 
 const dumpsys = (count: number) =>
   `Fingerprint Manager\n{"service":"Fingerprint Manager","isUdfps":false,"prints":[{"id":0,"count":${count},"accept":0}]}\nHAL deaths since last reboot: 0`;
 
-/** An emulator in Settings' enrollment flow: three sensor touches enroll one fingerprint. */
+/**
+ * An emulator in Settings' enrollment flow: three sensor touches enroll one fingerprint. Like
+ * Settings, a finished enroll task survives HOME, so a later plain `am start` only brings it to
+ * the front over the launcher; `am start -S` force-stops Settings and starts the flow afresh.
+ */
 class EnrollingEmulator extends FakeAdbExecutor {
-  screens: string[] = ["credential", "consentMore", "consentAgree", "touch"];
+  /** Screens a fresh enroll task walks through. */
+  flow: string[] = [...ENROLL_FLOW];
+  screens: string[] = ["launcher"];
+  settingsTaskAlive = false;
   count = 0;
   touches = 0;
   readonly commands: string[] = [];
@@ -77,8 +98,15 @@ class EnrollingEmulator extends FakeAdbExecutor {
     if (command === "shell dumpsys fingerprint") {
       return this.result(dumpsys(this.count));
     }
+    if (command.startsWith("shell am start")) {
+      return this.startEnroll(command.split(" ").includes("-S"));
+    }
+    if (command === "shell input keyevent KEYCODE_HOME") {
+      this.screens = ["launcher"];
+      return this.result("");
+    }
     if (command.startsWith("shell cat")) {
-      const current = this.screens[0] as keyof typeof SCREENS;
+      const current = (this.screens[0] ?? "launcher") as keyof typeof SCREENS;
       return this.result(SCREENS[current]);
     }
     if (command.startsWith("shell input text") || command.startsWith("shell input tap")) {
@@ -89,6 +117,15 @@ class EnrollingEmulator extends FakeAdbExecutor {
 
   createResult(stdout: string): ExecResult {
     return this.createExecResult(stdout, "");
+  }
+
+  private startEnroll(forceStop: boolean): ExecResult {
+    if (this.settingsTaskAlive && !forceStop) {
+      return this.result(BROUGHT_TO_FRONT);
+    }
+    this.settingsTaskAlive = true;
+    this.screens = [...this.flow];
+    return this.result(`Starting: Intent { act=${FINGERPRINT_ENROLL_ACTION} }\nStatus: ok`);
   }
 
   private result(stdout: string): ExecResult {
@@ -161,16 +198,40 @@ describe("AdbFingerprintEnrollmentPort", () => {
     await portFor(adb).enrollFingerprint(1, 1);
 
     expect(adb.count).toBe(1);
-    expect(adb.commands[0]).toBe(`shell am start -W -a ${FINGERPRINT_ENROLL_ACTION}`);
+    expect(adb.commands[0]).toBe(`shell am start -S -W -a ${FINGERPRINT_ENROLL_ACTION}`);
     expect(adb.commands).toContain("shell input text 1234");
     expect(adb.commands.filter((command) => command === "emu finger touch 1")).toHaveLength(3);
     expect(adb.commands).toContain("emu finger remove");
     expect(adb.commands.at(-1)).toBe("shell input keyevent KEYCODE_HOME");
   });
 
+  test("a second add reaches the enroll screen although the first run's Settings task is alive", async () => {
+    const adb = new EnrollingEmulator();
+    const port = portFor(adb);
+
+    await port.enrollFingerprint(1, 1);
+    await port.enrollFingerprint(2, 2);
+
+    expect(adb.count).toBe(2);
+    expect(adb.commands.filter((command) => command === "emu finger touch 2")).toHaveLength(3);
+  });
+
+  test("refuses at once when Settings brings a stale task to the front", async () => {
+    const adb = new EnrollingEmulator();
+    adb.settingsTaskAlive = true;
+    const start = adb.execute.bind(adb);
+    adb.execute = async (args) =>
+      args.join(" ").startsWith("shell am start")
+        ? adb.createResult(BROUGHT_TO_FRONT)
+        : start(args);
+
+    await expect(portFor(adb).enrollFingerprint(1, 1)).rejects.toThrow(/brought .* to the front/);
+    expect(adb.commands.some((command) => command.startsWith("shell uiautomator"))).toBe(false);
+  });
+
   test("stops on an unrecognized screen, naming its text", async () => {
     const adb = new EnrollingEmulator();
-    adb.screens = Array.from({ length: ENROLL_MAX_UNKNOWN_STREAK }, () => "unknown");
+    adb.flow = Array.from({ length: ENROLL_MAX_UNKNOWN_STREAK }, () => "unknown");
 
     await expect(portFor(adb).enrollFingerprint(1, 1)).rejects.toThrow(/Bienvenue/);
   });

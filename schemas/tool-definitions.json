@@ -18536,7 +18536,7 @@
               },
               "platform": {
                 "type": "string",
-                "enum": ["android", "ios"]
+                "enum": ["android", "ios", "watchos", "tvos", "visionos"]
               },
               "isVirtual": {
                 "type": "boolean"
@@ -19148,8 +19148,9 @@
       "type": "object",
       "properties": {
         "platform": {
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "tvos", "visionos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "requires": {
           "description": "Filter booted devices by display inventory capabilities",
@@ -19226,7 +19227,7 @@
               },
               "platform": {
                 "type": "string",
-                "enum": ["android", "ios"]
+                "enum": ["android", "ios", "watchos", "tvos", "visionos"]
               },
               "isVirtual": {
                 "type": "boolean"

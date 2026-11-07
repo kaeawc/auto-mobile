@@ -1,32 +1,9 @@
 import type { AppleVisionSimulatorInventory } from "../utils/ios-cmdline-tools/AppleVisionSimulatorInventory";
-import { ActionableError, type BootedDevice, type DeviceInfo } from "../models";
+import { ActionableError, type BootedDevice } from "../models";
 import { isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import type { AppleTvSimulatorInventory } from "../utils/ios-cmdline-tools/AppleTvSimulatorInventory";
 import { errorMessage } from "../utils/describeUnknownError";
-import { logger } from "../utils/logger";
-import type { DeviceImageDiscovery, DeviceManagerSimCtl } from "./deviceDiscoveryContracts";
-
-/** A failed configured-device read leaves tvOS inventory incomplete. */
-export async function discoverAppleTvDeviceImages(
-  list: () => Promise<DeviceInfo[]>,
-  signal?: AbortSignal,
-): Promise<DeviceImageDiscovery> {
-  try {
-    const devices = await list();
-    signal?.throwIfAborted();
-    return { devices, succeededPlatforms: new Set(["tvos"]), discoveryErrors: {} };
-  } catch (error) {
-    signal?.throwIfAborted();
-    logger.warn(`tvOS configured-device inventory failed: ${errorMessage(error)}`, error);
-    return {
-      devices: [],
-      succeededPlatforms: new Set(),
-      discoveryErrors: {
-        tvos: { code: "failed", message: errorMessage(error) },
-      },
-    };
-  }
-}
+import type { DeviceManagerSimCtl } from "./deviceDiscoveryContracts";
 
 /** Keep confirmed iOS UDIDs fast; otherwise resolve the simulator family before any shutdown. */
 export async function resolveSimulatorKillTarget(

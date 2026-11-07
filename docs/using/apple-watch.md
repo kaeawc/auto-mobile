@@ -122,7 +122,8 @@ Every other tool refuses a watch before doing anything, with:
 
 - `installApp` takes a watch simulator `.app` bundle. `uninstallApp` refuses `keepData: true`.
 - `launchApp` reports an app that is not installed without launching anything. `prototype: true`
-  is refused. `clearAppData` wipes the app's Documents, Library and tmp before launch.
+  is refused. `clearAppData` wipes the app's Documents, Library and tmp before launch. It does not
+  observe the launched app: `verified` stays unset with `verificationSkipped: "platform"`.
 - `terminateApp` succeeds with `wasRunning: false` when the app was not running.
 
 `sendKeys` accepts non-empty text only and appends to the focused field. Focus a field with

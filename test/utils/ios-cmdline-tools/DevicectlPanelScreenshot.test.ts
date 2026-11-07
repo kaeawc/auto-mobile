@@ -11,6 +11,7 @@ import type {
 import { CoreDeviceCapabilityProbe } from "../../../src/utils/ios-cmdline-tools/CoreDeviceCapabilityProbe";
 import {
   type DevicectlDisplayInfo,
+  type DevicectlDisplayInfoSource,
   parseDevicectlDisplayInfo,
 } from "../../../src/utils/ios-cmdline-tools/DevicectlDisplayInfo";
 import {
@@ -375,7 +376,15 @@ describe("captureIosPanelScreenshotWith", () => {
     displays: { panels: [coverPanel, innerPanel], postures: ["closed", "opened"] },
   };
 
-  function run(options: { device?: BootedDevice; devicectlPng?: Buffer; simctlPng?: Buffer }) {
+  function run(options: {
+    device?: BootedDevice;
+    devicectlPng?: Buffer;
+    simctlPng?: Buffer;
+    activePanelKey?: string;
+    displayInfo?: DevicectlDisplayInfoSource;
+    signal?: AbortSignal;
+  }) {
+    const runnerCalls: boolean[] = [];
     const devicectlCalls: unknown[] = [];
     const simctlCalls: string[] = [];
     const devicectl: SimulatorPanelScreenshotSource = {
@@ -394,11 +403,105 @@ describe("captureIosPanelScreenshotWith", () => {
         },
       },
       devicectl,
-      runnerCapture: async () => ({ success: true, data: "runner" }),
-      activePanelKey: "primary-1",
+      runnerCapture: async () => {
+        runnerCalls.push(true);
+        return { success: true, data: "runner" };
+      },
+      activePanelKey: "activePanelKey" in options ? options.activePanelKey : "primary-1",
+      displayInfo: options.displayInfo,
+      signal: options.signal,
     });
-    return { result, devicectlCalls, simctlCalls };
+    return { result, devicectlCalls, simctlCalls, runnerCalls };
   }
+
+  test.each([
+    ["info-displays-duo-inner-active.json", innerPanel],
+    ["info-displays-duo-cover-active.json", coverPanel],
+  ] as const)("resolves a panel without hierarchy from %s", async (fixture, panel) => {
+    const signal = new AbortController().signal;
+    const reads: Array<{ deviceId: string; signal?: AbortSignal }> = [];
+    const h = run({
+      activePanelKey: undefined,
+      signal,
+      displayInfo: {
+        readDisplays: async (request) => {
+          reads.push(request);
+          return displaysOf(loadDevicectlListFixture(fixture));
+        },
+      },
+      simctlPng: png(panel.sizePx.width, panel.sizePx.height),
+    });
+    expect((await h.result).data).not.toBe("runner");
+    expect(reads).toEqual([{ deviceId: "sim-duo", signal }]);
+    expect(h.devicectlCalls).toEqual([{ deviceId: "sim-duo", panel, panelCount: 2, signal }]);
+    expect(h.simctlCalls).toEqual([panel.key]);
+    expect(h.runnerCalls).toEqual([]);
+  });
+
+  test.each(["throws", "none", "multiple"] as const)(
+    "uses runner when live display info %s cannot identify a panel",
+    async (mode) => {
+      const h = run({
+        activePanelKey: undefined,
+        displayInfo: {
+          readDisplays: async () => {
+            if (mode === "throws") {
+              throw new Error("display read failed");
+            }
+            const displays = displaysOf(
+              loadDevicectlListFixture("info-displays-duo-inner-active.json"),
+            );
+            return displays.map((display) => ({ ...display, active: mode === "multiple" }));
+          },
+        },
+      });
+      expect((await h.result).data).toBe("runner");
+      expect(h.runnerCalls).toEqual([true]);
+      expect(h.devicectlCalls).toEqual([]);
+      expect(h.simctlCalls).toEqual([]);
+    },
+  );
+
+  test("explicit panel key wins without reading live displays", async () => {
+    const reads: boolean[] = [];
+    const h = run({
+      activePanelKey: innerPanel.key,
+      displayInfo: {
+        readDisplays: async () => {
+          reads.push(true);
+          return displaysOf(loadDevicectlListFixture("info-displays-duo-cover-active.json"));
+        },
+      },
+    });
+    expect((await h.result).data).not.toBe("runner");
+    expect(h.simctlCalls).toEqual([innerPanel.key]);
+    expect(reads).toEqual([]);
+  });
+
+  test.each(["returns", "throws"] as const)(
+    "rethrows cancellation when live read %s",
+    async (mode) => {
+      const controller = new AbortController();
+      const reason = new Error("cancelled display read");
+      const h = run({
+        activePanelKey: undefined,
+        signal: controller.signal,
+        displayInfo: {
+          readDisplays: async () => {
+            controller.abort(reason);
+            if (mode === "throws") {
+              throw reason;
+            }
+            return displaysOf(loadDevicectlListFixture("info-displays-duo-inner-active.json"));
+          },
+        },
+      });
+      await expect(h.result).rejects.toBe(reason);
+      expect(h.runnerCalls).toEqual([]);
+      expect(h.devicectlCalls).toEqual([]);
+      expect(h.simctlCalls).toEqual([]);
+    },
+  );
 
   test("uses a devicectl capture of the selected panel and skips simctl", async () => {
     const frame = png(2007, 2853);

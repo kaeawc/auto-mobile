@@ -1,3 +1,5 @@
+import type { DevicectlDisplayInfo } from "../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
+import { sizeMatchesPanel } from "../device/postureCommands";
 import type {
   BootedDevice,
   DisplayPanel,
@@ -392,6 +394,17 @@ function displayForAndroidInfos(
     display: { key, role: panel?.role ?? "unknown", posture: "unknown", generation: 0 },
     logicalId,
   };
+}
+
+/** Resolve exactly one active CoreDevice display to exactly one inventory panel by size. */
+export function activeLivePanel(
+  displays: readonly DevicectlDisplayInfo[],
+  panels: readonly DisplayPanel[],
+): DisplayPanel | undefined {
+  const active = displays.filter((display) => display.active === true);
+  const size = active.length === 1 ? (active[0].nativeSize ?? active[0].bounds?.size) : undefined;
+  const matches = size ? panels.filter((panel) => sizeMatchesPanel(size, panel)) : [];
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 function liveIosPanel(

@@ -124,7 +124,7 @@ import os
                     return GestureCoordinateGeometry(
                         app: size, screen: screen,
                         observation: observation,
-                        rotation: GestureCoordinateGeometry.observationRotation(rotation, size: observation),
+                        rotation: GestureCoordinateGeometry.observationRotation(rotation, size: observation, app: size),
                         appOrigin: GesturePoint(x: Double(frame.minX), y: Double(frame.minY)),
                         screenOrigin: GesturePoint(
                             x: Double(UIScreen.main.bounds.minX), y: Double(UIScreen.main.bounds.minY)

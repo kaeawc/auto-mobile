@@ -55,6 +55,12 @@ set_paths() { printf '%s\n' "$@" > "$PREPUSH_CHANGED_FILES_FILE"; }
   [ "$status" -eq 0 ]; [ "$output" = node ]
 }
 
+@test "python sdk selects the shell lane" {
+  set_paths sdk/python/src/auto_mobile/session.py
+  run bash scripts/prepush.sh --list
+  [ "$status" -eq 0 ]; [ "$output" = shell ]
+}
+
 @test "shell-only runs formatter" {
   set_paths scripts/x.sh
   run bash scripts/prepush.sh

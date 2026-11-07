@@ -57,7 +57,7 @@ lane_for_path() {
   local path="$1"
   if [[ "$path" == package.json || "$path" == bun.lock ]]; then printf '%s\n' runtime-pins node integration; fi
   if [[ "$path" == src/* || ( "$path" == test/* && "$path" != test/bats/* ) || "$path" == schemas/* || "$path" == tsconfig*.json || "$path" == .oxlintrc.json || "$path" == oxlint-plugins/* || "$path" == turbo.json || "$path" == scripts/*.ts || "$path" == benchmark/agent/* ]]; then printf '%s\n' node; fi
-  if [[ "$path" == scripts/*.sh || "$path" == scripts/lib/* || "$path" == test/bats/* ]]; then printf '%s\n' shell; fi
+  if [[ "$path" == scripts/*.sh || "$path" == scripts/lib/* || "$path" == test/bats/* || "$path" == sdk/python/* ]]; then printf '%s\n' shell; fi
   if [[ "$path" == android/* ]]; then printf '%s\n' android; fi
   if [[ "$path" == ios/* ]]; then printf '%s\n' ios; fi
   if [[ "$path" == *.integration.test.ts || "$path" == scripts/release/pin-runtime-deps.ts || "$path" == scripts/release/runtime-graph.json || "$path" == scripts/release/lib/runtime-pins.ts || "$path" == scripts/release/lib/runtime-roots.ts || "$path" == scripts/ci/assert-installed-runtime-graph.ts || "$path" == scripts/ci/verify-pinned-runtime-graph.sh || "$path" == package.json || "$path" == bun.lock ]]; then printf '%s\n' integration; fi

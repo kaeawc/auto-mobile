@@ -18,15 +18,13 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
-import dev.jasonpearson.automobile.tvfixture.FixtureCard
+import dev.jasonpearson.automobile.tvfixture.FixtureState
 import dev.jasonpearson.automobile.tvfixture.TvFixtureCatalog
 
 /** A search field over every card title, with matching cards in one row below it. */
 @Composable
 internal fun SearchScreen(
-  query: String,
-  summary: String,
-  results: List<FixtureCard>,
+  state: FixtureState,
   onQueryChange: (String) -> Unit,
   onCardFocused: (String) -> Unit,
   onCardClick: (String) -> Unit,
@@ -40,12 +38,12 @@ internal fun SearchScreen(
       modifier = Modifier.padding(horizontal = ScreenPadding),
       verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-      SearchField(query, onQueryChange, field)
-      Text(text = summary, modifier = Modifier.testTag("search_summary"))
+      SearchField(state.query, onQueryChange, field)
+      Text(text = state.searchSummary, modifier = Modifier.testTag("search_summary"))
     }
     CardRow(
       tag = "search_results",
-      cards = results,
+      cards = state.results,
       onCardFocused = onCardFocused,
       onCardClick = onCardClick,
     )

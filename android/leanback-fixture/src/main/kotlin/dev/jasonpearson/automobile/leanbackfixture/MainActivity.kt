@@ -7,11 +7,10 @@ import androidx.fragment.app.FragmentActivity
 class MainActivity : FragmentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
-    setContentView(R.layout.activity_main)
     if (savedInstanceState == null) {
       supportFragmentManager
         .beginTransaction()
-        .replace(R.id.browse_container, FixtureBrowseFragment())
+        .replace(android.R.id.content, FixtureBrowseFragment())
         .commit()
     }
   }

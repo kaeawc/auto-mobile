@@ -59,9 +59,7 @@ private fun RouteContent(
       )
     FixtureRoute.Search ->
       SearchScreen(
-        query = state.query,
-        summary = state.searchSummary,
-        results = state.results,
+        state = state,
         onQueryChange = { update { queryChanged(it) } },
         onCardFocused = onCardFocused,
         onCardClick = onCardClick,

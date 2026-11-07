@@ -1,3 +1,4 @@
+import { TvosRunnerDisconnectedError } from "./TvosRunnerDisconnectedError";
 import { TvosRunnerError } from "./TvosRunnerError";
 import { TvosRunnerTimeoutError } from "./TvosRunnerTimeoutError";
 import WebSocket from "ws";
@@ -209,7 +210,9 @@ export class WebSocketTvosRunnerClient implements TvosRunnerClient {
           await this.ready;
           requestSignal.throwIfAborted();
           if (this.failure) {
-            throw this.failure;
+            // The connection was lost after the handshake: report this command, not the earlier
+            // failure that disconnected the runner (#17384).
+            throw new TvosRunnerDisconnectedError(command.type, this.failure);
           }
           if (!this.supported.has(command.type)) {
             throw new TvosRunnerError(

@@ -420,6 +420,99 @@ final class SimulatorHighlightHostTests: XCTestCase {
         XCTAssertTrue(newOverlays.allSatisfy { $0.closed })
     }
 
+    /// Two highlights, one on a Device Hub window whose relocation capture never finishes until the
+    /// test releases it. The host's serial refresh must neither wait on that capture nor delay the
+    /// other highlight's refresh or the Device Hub highlight's deadline cleanup.
+    func testPendingDeviceHubCaptureDelaysNeitherDeadlineCleanupNorTheOtherHighlight() async throws {
+        var now: TimeInterval = 0
+        var captures = 0
+        var release: CheckedContinuation<CGRect?, Never>?
+        let window = SimulatorOverlayTarget(
+            windowID: 7, processID: 1, frame: CGRect(x: 0, y: 0, width: 200, height: 400), title: "Device Hub"
+        )
+        let tracker = DeviceHubDisplayTracker(
+            relativeRect: CGRect(x: 0, y: 0, width: 200, height: 400),
+            windowSize: window.frame.size,
+            now: { now },
+            relocate: { _ in
+                captures += 1
+                return await withCheckedContinuation { release = $0 }
+            }
+        )
+        let lookup = SimulatorDisplayGeometry.trackingLookup(tracker)
+        var hubFrameLookups = 0
+        var hub: SimulatorHighlightOverlay?
+        var other: FakeOverlay?
+        let host = SimulatorHighlightHost(deviceName: "Device Hub", now: { now }, makeOverlay: { request in
+            guard request.id == "hub" else {
+                let overlay = FakeOverlay()
+                other = overlay
+                return overlay
+            }
+            let overlay = try SimulatorHighlightOverlay(
+                window: window,
+                request: request,
+                displayFrame: { hubFrameLookups += 1; return lookup.frame($0) },
+                prepare: lookup.prepare,
+                isTrusted: { true },
+                targets: { [window] }
+            )
+            hub = overlay
+            return overlay
+        }, waitForFrame: { throw CancellationError() }, replySink: { _ in })
+        defer { host.close() }
+        func command(_ id: String) -> Data {
+            Data("""
+            {"requestId":"\(id)","id":"\(id)","shape":{"type":"circle","bounds":{"x":10,"y":20,"width":30,\
+            "height":40,"sourceWidth":100,"sourceHeight":200}}}
+            """.utf8)
+        }
+        await host.receive(command("hub"))
+        now = DeviceHubDisplayTracker.relocateInterval
+        await host.receive(command("other"))
+        let hubOverlay = try XCTUnwrap(hub)
+        let otherOverlay = try XCTUnwrap(other)
+
+        // The Device Hub capture is due: this refresh starts it and must return while it is pending.
+        await host.refresh()
+        XCTAssertEqual(otherOverlay.refreshes, 1, "the other highlight refreshes in the same pass")
+        for _ in 0 ..< 100 where release == nil {
+            await Task.yield()
+        }
+        XCTAssertEqual(captures, 1)
+        XCTAssertNotNil(release, "the capture is still pending")
+        let lookupsWhilePending = hubFrameLookups
+
+        now += 0.1
+        await host.refresh()
+        XCTAssertEqual(otherOverlay.refreshes, 2)
+        XCTAssertGreaterThan(hubFrameLookups, lookupsWhilePending, "the hub panel keeps its last placement")
+        XCTAssertEqual(captures, 1, "no second capture starts while one is pending")
+
+        // Past the hub deadline only: it is cleaned up on this pass with the capture still pending.
+        now = HandDrawnCircle.duration
+        await host.refresh()
+        XCTAssertFalse(hubOverlay.isPanelVisible)
+        XCTAssertEqual(otherOverlay.refreshes, 3)
+        XCTAssertFalse(otherOverlay.closed)
+        let lookupsAtClose = hubFrameLookups
+
+        // The late result lands after the overlay closed; it must not reopen or move the panel.
+        release?.resume(returning: CGRect(x: 10, y: 10, width: 100, height: 200))
+        for _ in 0 ..< 20 {
+            await Task.yield()
+        }
+        now += 0.1
+        await host.refresh()
+        XCTAssertEqual(hubFrameLookups, lookupsAtClose, "the expired hub highlight is no longer refreshed")
+        XCTAssertFalse(hubOverlay.isPanelVisible)
+        XCTAssertEqual(otherOverlay.refreshes, 4)
+
+        now = DeviceHubDisplayTracker.relocateInterval + HandDrawnCircle.duration
+        await host.refresh()
+        XCTAssertTrue(otherOverlay.closed)
+    }
+
     func testNativeDrawFailureIsAcknowledgedAsFailure() async {
         var replies: [SimulatorHighlightReply] = []
         let host = SimulatorHighlightHost(deviceName: "iPhone", makeOverlay: { _ in

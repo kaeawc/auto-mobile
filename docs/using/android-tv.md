@@ -136,7 +136,10 @@ On a TV, `tapOn` with a `text` or `elementId` selector moves D-pad focus to
 the match and presses `enter`, so one flow can tap on both Android TV and tvOS. The selector picks
 the same element a touch tap would, including a text field found by its placeholder and the first
 of several matches, even when focus is on another one. The result then has
-`inputMethod: "dpad"` and a `focusNavigation` object with the focus `status`, `steps` and `path`.
+`inputMethod: "dpad"` and a `focusNavigation` object with the focus `status`, `steps` and `path`. Focus takes the shortest
+route: a match on another row is reached by changing rows first. With `action: "longPress"` the
+call holds D-pad center for `duration` ms (default 1000) instead of pressing `enter`; the hold
+needs Android 15 (API 35) or newer.
 If focus cannot reach the match, the call fails without pressing `enter`; observe and retry, or
 move closer with `focusNavigate`. When an editable text field or the on-screen keyboard holds focus,
 the walk first hides a shown keyboard with back (and presses tab when the focused element is not a
@@ -147,7 +150,7 @@ keyboard with `pressButton` `back`, press `pressButton` `down` to move focus out
 observe, then retry. An IME action such as `sendKeys` key `next` or `done` does not move D-pad focus
 out of the field.
 `focusNavigate` returns the same `blockedBy` and `escapes`. Other selectors (`testTag`, `textAny`,
-`accessibilityLink`), other actions, and the options `sibling`, `container`, `index`, `searchUntil`, `ensureChecked`,
+`accessibilityLink`), actions other than `tap` and `longPress`, and the options `sibling`, `container`, `index`, `searchUntil`, `ensureChecked`,
 `subtext`, `layer`, `display` and a `selectionStrategy` other than `first` still need a touchscreen. `swipeOn` needs a touchscreen too;
 on a TV without one, navigate with `focusNavigate` and `sendKeys` instead.
 

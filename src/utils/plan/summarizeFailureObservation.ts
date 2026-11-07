@@ -32,7 +32,12 @@ export function summarizeObserveResultForFailure(
   const texts = new Set<string>();
   const resourceIds = new Set<string>();
 
+  // Legacy `elements` buckets first (still present on `project: "full"` / older
+  // payloads), then the default skeleton projection's `skeleton` (actionable) and
+  // `context` (static text) rows, which replaced them (#17308).
   collectElementSamples(raw.elements, texts, resourceIds);
+  collectSkeletonSamples(raw.skeleton, texts, resourceIds);
+  collectSkeletonSamples(raw.context, texts, resourceIds);
 
   return {
     capturedAtMs,
@@ -74,20 +79,46 @@ function collectElementSamples(
   }
 }
 
+function collectSkeletonSamples(rows: unknown, texts: Set<string>, resourceIds: Set<string>): void {
+  if (!Array.isArray(rows)) {
+    return;
+  }
+  for (const row of rows) {
+    if (texts.size >= MAX_SAMPLES && resourceIds.size >= MAX_SAMPLES) {
+      return;
+    }
+    if (!row || typeof row !== "object") {
+      continue;
+    }
+    const r = row as Record<string, unknown>;
+    addText(r.label, texts);
+    addText(r.sublabel, texts);
+    addResourceId(r.elementId, resourceIds);
+  }
+}
+
 function addElementSamples(
   e: Record<string, unknown>,
   texts: Set<string>,
   resourceIds: Set<string>,
 ): void {
-  if (typeof e.text === "string") {
-    const t = e.text.trim();
-    if (t.length > 0) {
-      texts.add(t.length > MAX_TEXT_LEN ? `${t.slice(0, MAX_TEXT_LEN)}…` : t);
-    }
+  addText(e.text, texts);
+  addResourceId(e.resourceId, resourceIds);
+}
+
+function addText(value: unknown, texts: Set<string>): void {
+  if (typeof value !== "string" || texts.size >= MAX_SAMPLES) {
+    return;
   }
-  if (typeof e.resourceId === "string" && e.resourceId.length > 0) {
-    const id =
-      e.resourceId.length > MAX_ID_LEN ? `${e.resourceId.slice(0, MAX_ID_LEN)}…` : e.resourceId;
-    resourceIds.add(id);
+  const t = value.trim();
+  if (t.length > 0) {
+    texts.add(t.length > MAX_TEXT_LEN ? `${t.slice(0, MAX_TEXT_LEN)}…` : t);
   }
+}
+
+function addResourceId(value: unknown, resourceIds: Set<string>): void {
+  if (typeof value !== "string" || value.length === 0 || resourceIds.size >= MAX_SAMPLES) {
+    return;
+  }
+  resourceIds.add(value.length > MAX_ID_LEN ? `${value.slice(0, MAX_ID_LEN)}…` : value);
 }

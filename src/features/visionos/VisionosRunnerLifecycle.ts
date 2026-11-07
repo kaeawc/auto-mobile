@@ -15,7 +15,10 @@ import {
   type VisionosRunnerLauncher,
 } from "./VisionosRunnerLauncher";
 import { visionosRunners } from "./VisionosRunnerRegistry";
-import { visionosTargetApps } from "./VisionosTargetApps";
+import { visionosTargetApps, type VisionosAppUninstalls } from "./VisionosTargetApps";
+
+/** The runner's own host app, which it automates when it has no target window app. */
+export const VISIONOS_RUNNER_HOST_BUNDLE_ID = "dev.jasonpearson.automobile.ctrlproxy.vision";
 
 type VisionosRunnerSessions = Pick<
   SessionManager,
@@ -28,6 +31,8 @@ interface OwnedRunner {
   port?: number;
   /** The window app the runner was started to automate; absent means its demo app. */
   bundleId?: string;
+  /** The app the runner automates was uninstalled, so the runner can only fail until restarted. */
+  appRemoved?: boolean;
 }
 
 /** Owns only runners launched here; a pre-registered runner is reused without taking ownership. */
@@ -45,8 +50,22 @@ export class VisionosRunnerLifecycle {
       /** The device's window app, when known; absent keeps the runner on its demo app. */
       targetBundleId?: (deviceId: string) => string | undefined;
       ports: { allocate(deviceId: string): number; release(deviceId: string, port: number): void };
+      /** Uninstall notifications; an uninstalled automated app marks its runner for restart. */
+      appUninstalls?: VisionosAppUninstalls;
     },
-  ) {}
+  ) {
+    dependencies.appUninstalls?.onUninstalled((deviceId, bundleId) =>
+      this.appUninstalled(deviceId, bundleId),
+    );
+  }
+
+  /** A runner whose automated app (its host app when it has no target) was uninstalled is dead. */
+  appUninstalled(deviceId: string, bundleId: string): void {
+    const entry = this.runners.get(deviceId);
+    if (entry && (entry.bundleId ?? VISIONOS_RUNNER_HOST_BUNDLE_ID) === bundleId) {
+      entry.appRemoved = true;
+    }
+  }
 
   /** Bind on-demand automation to an existing session when one owns the call. */
   async ensure(request: {
@@ -127,11 +146,16 @@ export class VisionosRunnerLifecycle {
 
   /**
    * A runner this lifecycle started keeps its window app for its lifetime, so any change of
-   * target restarts it, including losing the target when that app is terminated.
+   * target restarts it, including losing the target when that app is terminated. Uninstalling
+   * the app it automates also restarts it: with no target that is its own host app, whose
+   * absence the target comparison alone cannot see (#17313).
    */
   needsRestart(deviceId: string): boolean {
     const entry = this.runners.get(deviceId);
-    return entry !== undefined && entry.bundleId !== this.dependencies.targetBundleId?.(deviceId);
+    return (
+      entry !== undefined &&
+      (entry.appRemoved === true || entry.bundleId !== this.dependencies.targetBundleId?.(deviceId))
+    );
   }
 
   /** Transfer only lifecycle-owned runners to the newly bound session. */
@@ -257,6 +281,7 @@ export function getVisionosRunnerLifecycle(): VisionosRunnerLifecycle {
       // The app the session launched on this device, else the optional env override.
       targetBundleId: (deviceId) =>
         visionosTargetApps.get(deviceId) ?? globalThis.process.env.CTRL_PROXY_IOS_BUNDLE_ID,
+      appUninstalls: visionosTargetApps,
       ports: {
         allocate: (deviceId) =>
           PortManager.allocate(`visionos:${deviceId}`, {

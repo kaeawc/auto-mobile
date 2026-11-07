@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { WatchAppManager } from "../../../src/features/action/watch/WatchAppManager";
 import {
+  VISIONOS_RUNNER_HOST_BUNDLE_ID,
   VisionosRunnerLifecycle,
   requireVisionosRunner,
 } from "../../../src/features/visionos/VisionosRunnerLifecycle";
@@ -121,6 +122,7 @@ describe("VisionosRunnerLifecycle target bundle id", () => {
       launcher,
       artifacts: { resolve: async () => "/products/x.xctestrun" },
       targetBundleId: (deviceId) => targetApps.get(deviceId),
+      appUninstalls: targetApps,
       ports: { allocate: () => 9011, release: () => {} },
     });
     owners.push(owner);
@@ -161,5 +163,41 @@ describe("VisionosRunnerLifecycle target bundle id", () => {
     expect(launcher.launches.map((launch) => launch.bundleId)).toEqual([A, undefined]);
     expect(launcher.stops).toBe(1);
     expect(owner.needsRestart(DEVICE)).toBe(false);
+  });
+
+  function visionManager(targetApps: InMemoryVisionosTargetApps) {
+    const device: BootedDevice = { name: "Vision", deviceId: DEVICE, platform: "visionos" };
+    const plist = new FakeWatchBundleIds();
+    return new WatchAppManager(device, {
+      simctl: new FakeWatchAppsSimctl(plist),
+      plist,
+      targetApps,
+    });
+  }
+
+  test("uninstalling the runner's own host app restarts the runner on the next call", async () => {
+    const { owner, launcher, targetApps } = fixture();
+    await requireVisionosRunner(DEVICE, undefined, owner);
+    expect(launcher.launches.map((launch) => launch.bundleId)).toEqual([undefined]);
+
+    await visionManager(targetApps).uninstall(VISIONOS_RUNNER_HOST_BUNDLE_ID);
+    expect(owner.needsRestart(DEVICE)).toBe(true);
+    await requireVisionosRunner(DEVICE, undefined, owner);
+    expect(launcher.launches.map((launch) => launch.bundleId)).toEqual([undefined, undefined]);
+    expect(launcher.stops).toBe(1);
+    expect(owner.needsRestart(DEVICE)).toBe(false);
+  });
+
+  test("uninstalling an app the runner does not automate keeps the runner", async () => {
+    const { owner, launcher, targetApps } = fixture();
+    targetApps.launched(DEVICE, A);
+    await requireVisionosRunner(DEVICE, undefined, owner);
+    const manager = visionManager(targetApps);
+    await manager.uninstall(B);
+    await manager.uninstall(VISIONOS_RUNNER_HOST_BUNDLE_ID);
+    expect(owner.needsRestart(DEVICE)).toBe(false);
+    await requireVisionosRunner(DEVICE, undefined, owner);
+    expect(launcher.launches.map((launch) => launch.bundleId)).toEqual([A]);
+    expect(launcher.stops).toBe(0);
   });
 });

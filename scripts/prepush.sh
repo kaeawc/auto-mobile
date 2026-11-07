@@ -112,8 +112,13 @@ if [[ "$profile" == cloud ]]; then
     if [[ -n "$candidate" && -d "$candidate" ]]; then android_sdk="$candidate"; break; fi
   done
   if [[ -z "$android_sdk" && -f "$SCRIPT_DIR/../android/local.properties" ]]; then android_sdk="android/local.properties"; fi
+  # Match gradlew's Java selection: JAVA_HOME wins when set, else java on PATH.
   java_found=0
-  if command -v java > /dev/null 2>&1; then java_found=1; fi
+  if [[ -n "${JAVA_HOME:-}" ]]; then
+    if [[ -x "$JAVA_HOME/bin/java" ]]; then java_found=1; fi
+  elif command -v java > /dev/null 2>&1; then
+    java_found=1
+  fi
   runnable_lanes=()
   for lane in ${selected_lanes[@]+"${selected_lanes[@]}"}; do
     reason=""
@@ -123,7 +128,7 @@ if [[ "$profile" == cloud ]]; then
         if [[ -z "$android_sdk" ]]; then
           reason="no Android SDK (ANDROID_HOME, ANDROID_SDK_ROOT or android/local.properties); CI Detekt, ktfmt and Kotlin jobs cover it"
         elif [[ "$java_found" -eq 0 ]]; then
-          reason="no java on PATH; CI Detekt, ktfmt and Kotlin jobs cover it"
+          reason="no java (JAVA_HOME or PATH); CI Detekt, ktfmt and Kotlin jobs cover it"
         fi
         ;;
     esac

@@ -49,6 +49,19 @@ function traversalStopReason(
     `Pending edges not reached before stopping (source->destination): ${pending.join(", ")}`
   );
 }
+/**
+ * The requested app's graph. The graph's current app can be whatever ran
+ * before (an IME host such as Settings, #17377), so it is read by package.
+ */
+export async function exportTargetGraph(
+  navigationManager: ExploreReportContext["navigationManager"],
+  targetPackageName: string | null,
+): Promise<ExportedGraph> {
+  return targetPackageName
+    ? await navigationManager.exportGraphForApp(targetPackageName)
+    : await navigationManager.exportGraph();
+}
+
 /** Assemble coverage and traversal diagnostics after the final graph read. */
 export async function generateExplorationReport(
   initialGraph: ExportedGraph,

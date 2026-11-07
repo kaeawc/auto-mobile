@@ -15,6 +15,9 @@ enum DeviceHubDisplayLocator {
     /// Bezel thickness around the display in the display's own points, measured on the Duo at
     /// two zoom levels: the drawn device is `(display + 2 * bezel) * zoom` wide.
     static let bezelPoints: CGFloat = 20.5
+    /// Longest display edge, in points, of any panel Device Hub draws today (the Duo inner panel is
+    /// 951). A source longer than this is in pixels of a 2x or 3x capture.
+    static let maxDisplayPointsLongEdge: CGFloat = 1000
     /// Per-channel sum of absolute differences from the background that counts as drawn.
     static let backgroundTolerance = 40
     /// Gap kept between the control row and the searched region, in points.
@@ -79,11 +82,21 @@ enum DeviceHubDisplayLocator {
         )
     }
 
+    /// `sourceSize` in display points: the smallest whole scale from 1 to 3 that brings the long edge
+    /// within `maxDisplayPointsLongEdge`. The bezel is fixed in points, so the display must be too;
+    /// otherwise the same bounds sent as screenshot pixels would be placed differently.
+    static func pointSize(of sourceSize: CGSize) -> CGSize {
+        let longEdge = max(sourceSize.width, sourceSize.height)
+        let scale = (1 ... 3).first { longEdge / CGFloat($0) <= maxDisplayPointsLongEdge } ?? 3
+        return CGSize(width: sourceSize.width / CGFloat(scale), height: sourceSize.height / CGFloat(scale))
+    }
+
     /// The display inside the drawn device. With the source size, the zoom follows from the
     /// device width; the display keeps the source aspect, in the orientation Device Hub drew.
     static func displayRect(deviceBounds: CGRect, sourceSize: CGSize?) -> CGRect? {
         guard deviceBounds.width > 0, deviceBounds.height > 0 else { return nil }
-        guard let sourceSize, sourceSize.width > 0, sourceSize.height > 0 else { return nil }
+        guard let rawSize = sourceSize, rawSize.width > 0, rawSize.height > 0 else { return nil }
+        let sourceSize = pointSize(of: rawSize)
         let drawnLandscape = deviceBounds.width > deviceBounds.height
         let sourceLandscape = sourceSize.width > sourceSize.height
         let oriented = drawnLandscape == sourceLandscape

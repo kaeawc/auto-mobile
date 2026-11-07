@@ -58,6 +58,25 @@ final class DeviceHubDisplayLocatorTests: XCTestCase {
         assertRect(rect, CGRect(x: 557, y: 231, width: 236, height: 344))
     }
 
+    func testPixelSourceGivesTheSameDisplayAsPointSource() throws {
+        let bounds = CGRect(x: 547, y: 225, width: 256.5, height: 355.5)
+        let points = try XCTUnwrap(DeviceHubDisplayLocator.displayRect(
+            deviceBounds: bounds,
+            sourceSize: CGSize(width: 466, height: 678)
+        ))
+        let pixels = try XCTUnwrap(DeviceHubDisplayLocator.displayRect(
+            deviceBounds: bounds,
+            sourceSize: CGSize(width: 1398, height: 2034)
+        ))
+        assertRect(pixels, points)
+        let inner = CGRect(x: 427, y: 226, width: 495.5, height: 354.5)
+        let innerPixels = try XCTUnwrap(DeviceHubDisplayLocator.displayRect(
+            deviceBounds: inner,
+            sourceSize: CGSize(width: 2853, height: 2007)
+        ))
+        assertRect(innerPixels, CGRect(x: 437, y: 236, width: 475, height: 334))
+    }
+
     func testInnerPanelDisplayIsLandscapeWhenDrawnLandscape() throws {
         let rect = try XCTUnwrap(DeviceHubDisplayLocator.displayRect(
             deviceBounds: CGRect(x: 427, y: 226, width: 495.5, height: 354.5),

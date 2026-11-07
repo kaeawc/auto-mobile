@@ -185,6 +185,12 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
     }
 
     func rotateCrown(delta: Double, velocity: Double) throws {
+        try watchVerifiedCrownRotation(snapshots: self) {
+            try rotateFocusedCrown(delta: delta, velocity: velocity)
+        }
+    }
+
+    private func rotateFocusedCrown(delta: Double, velocity: Double) throws {
         try performGesture {
             // Rotate the currently focused control using a private selector with unboxed Double arguments.
             let device = XCUIDevice.shared
@@ -209,4 +215,37 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
         }
         try result.get()
     }
+}
+
+/// True when the rotation changed anything observable. Compares the node tree only: the wrapper's
+/// timestamp changes on every snapshot.
+func watchCrownChangedHierarchy(before: SdkViewHierarchy, after: SdkViewHierarchy) -> Bool {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = .sortedKeys
+    guard let old = try? encoder.encode(before.root), let new = try? encoder.encode(after.root) else {
+        return true
+    }
+    return old != new
+}
+
+/// Runs `rotate` and fails when the node tree is identical before and after. The host can be foreground
+/// yet hold no crown focus (for example after a simctl launch), and the private rotate selector then
+/// returns normally with nothing consuming the rotation. Detection is best effort: the first snapshot
+/// after a launch can still be settling (so it is discarded), and a missing snapshot on either side
+/// skips the check rather than failing a rotation that may have been applied.
+@MainActor
+func watchVerifiedCrownRotation(snapshots: any WatchSnapshotSource, rotate: () throws -> Void) throws {
+    _ = try? snapshots.snapshot()
+    let before = try? snapshots.snapshot()
+    try rotate()
+    guard let before, let after = try? snapshots.snapshot(),
+          !watchCrownChangedHierarchy(before: before, after: after)
+    else {
+        return
+    }
+    throw WatchCommandError.commandFailed(
+        "rotateCrown changed nothing the accessibility tree shows: no view may hold crown focus, or the "
+            + "scrolled content is already at its limit. Tap the view that should receive the crown, then "
+            + "observe to confirm."
+    )
 }

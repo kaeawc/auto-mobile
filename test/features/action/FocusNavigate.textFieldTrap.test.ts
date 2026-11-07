@@ -91,6 +91,12 @@ describe("FocusNavigate text-field focus trap (#17356)", () => {
     expect(device.keys.filter((key) => key === "back")).toHaveLength(1);
     expect(result.message).toContain("D-pad focus is trapped in the editable text field");
     expect(result.message).toContain("pressing back and every direction again");
+    // Back then down is the escape the walk already tried; an IME action does not free focus (#17378).
+    expect(device.keys.slice(back + 1)).toContain("arrow_down");
+    expect(result.message).toContain(
+      "Hide the keyboard with pressButton back, press pressButton down to move focus out of the field",
+    );
+    expect(result.message).not.toMatch(/sendKeys|\bnext\b|\bdone\b/);
   });
 
   test("without a keyboard hider the trap is reported as the IME and nothing is escaped", async () => {
@@ -106,6 +112,8 @@ describe("FocusNavigate text-field focus trap (#17356)", () => {
     expect(result.message).toContain(
       "trapped by the on-screen keyboard over the editable text field",
     );
+    expect(result.message).toContain("Hide the keyboard with pressButton back");
+    expect(result.message).not.toContain("sendKeys");
   });
 
   test("focus that leaves the field once the keyboard is hidden reaches the target", async () => {

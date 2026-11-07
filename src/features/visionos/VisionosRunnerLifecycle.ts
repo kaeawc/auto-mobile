@@ -324,6 +324,50 @@ export async function requireVisionosRunner(
   return visionosRunners.require(deviceId);
 }
 
+/**
+ * The runner reports its own host app as not running or not installed. Removing the host app
+ * outside uninstallApp (simctl, Xcode) sends no uninstall notification, so this failure is the
+ * first sign that the runner is dead (#17382).
+ */
+export function isVisionosRunnerHostAppGone(error: unknown): boolean {
+  const message = errorMessage(error);
+  return (
+    message.includes(VISIONOS_RUNNER_HOST_BUNDLE_ID) &&
+    /is not running|not installed/i.test(message)
+  );
+}
+
+/**
+ * Run a runner command, and when it fails because the runner's host app is gone, mark the
+ * lifecycle-owned runner as removed (as uninstallApp does, #17313) and run it once more, so the
+ * retry's requireVisionosRunner restarts the runner and reinstalls its host app. A runner this
+ * lifecycle does not own is never restarted, so its failure surfaces unchanged.
+ */
+export async function withVisionosHostRecovery<T>(
+  deviceId: string,
+  signal: AbortSignal | undefined,
+  attempt: () => Promise<T>,
+  lifecycle?: Partial<Pick<VisionosRunnerLifecycle, "appUninstalled" | "needsRestart">>,
+): Promise<T> {
+  try {
+    return await attempt();
+  } catch (error) {
+    const owner = lifecycle ?? defaultLifecycle;
+    if (signal?.aborted || !isVisionosRunnerHostAppGone(error) || !owner?.appUninstalled) {
+      throw error;
+    }
+    owner.appUninstalled(deviceId, VISIONOS_RUNNER_HOST_BUNDLE_ID);
+    if (!owner.needsRestart?.(deviceId)) {
+      throw error;
+    }
+    logger.warn(
+      `[VisionosRunner] Host app of the runner for ${deviceId} is gone; restarting the runner: ${errorMessage(error)}`,
+      error,
+    );
+    return attempt();
+  }
+}
+
 function attachVisionosRunnerToSession(
   deviceId: string,
   lifecycle: Pick<VisionosRunnerLifecycle, "attach"> | undefined,

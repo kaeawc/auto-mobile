@@ -23,7 +23,7 @@ const verifyPinArgs = [...LOCK_SETTINGS, "verify", "--old", LOCK_SCREEN_TEST_PIN
 
 // `locksettings get-disabled` only reports a fully disabled lock screen, so a swipe-only device
 // would look credentialed; the dumpsys credential type is the source of truth.
-async function hasCredential(adb: AdbExecutor): Promise<boolean> {
+export async function hasCredential(adb: AdbExecutor): Promise<boolean> {
   const reading = await new AdbLockSettingsClient(adb).read();
   if (reading.secure !== undefined) {
     return reading.secure;
@@ -33,7 +33,7 @@ async function hasCredential(adb: AdbExecutor): Promise<boolean> {
   );
 }
 
-async function testPinVerifies(adb: AdbExecutor, signal?: AbortSignal): Promise<boolean> {
+export async function testPinVerifies(adb: AdbExecutor, signal?: AbortSignal): Promise<boolean> {
   try {
     const result = await shell(adb, verifyPinArgs, signal);
     return result.includes("verified successfully");
@@ -43,6 +43,16 @@ async function testPinVerifies(adb: AdbExecutor, signal?: AbortSignal): Promise<
     }
     throw error;
   }
+}
+
+/** Set the AutoMobile test PIN; the caller has checked no other credential is set. */
+export async function setTestPin(adb: AdbExecutor, signal?: AbortSignal): Promise<void> {
+  await shell(adb, setPinArgs, signal);
+}
+
+/** Clear the AutoMobile test PIN. Android deletes enrolled fingerprints with the credential. */
+export async function clearTestPin(adb: AdbExecutor, signal?: AbortSignal): Promise<void> {
+  await shell(adb, clearPinArgs, signal);
 }
 
 export function createLockScreenFaultInjector(adb: AdbExecutor): DeviceConditionInjector {

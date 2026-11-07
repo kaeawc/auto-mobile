@@ -74,6 +74,43 @@ describe("DefaultAndroidBuildToolsLocator", () => {
       androidJar: join("/sdk/platforms", "android-37", "android.jar"),
     });
   });
+  test("orders platforms by API level before the extension level", async () => {
+    systemDetection.setPlatform("darwin");
+    systemDetection.setEnvVar("ANDROID_HOME", "/sdk");
+    systemDetection.addExistingFile("/sdk");
+    for (const tool of ["aapt2", "zipalign", "apksigner"]) {
+      fileSystem.setFile(`/sdk/build-tools/37.0.0/${tool}`, "");
+    }
+    const platforms = ["android-33-ext5", "android-34-ext9", "android-36", "android-37.0"];
+    for (const platform of platforms) {
+      fileSystem.setFile(`/sdk/platforms/${platform}/android.jar`, "");
+    }
+    const locator = new DefaultAndroidBuildToolsLocator(fileSystem, systemDetection);
+    expect((await locator.findStampTools())?.androidJar).toBe(
+      join("/sdk/platforms", "android-37.0", "android.jar"),
+    );
+
+    await fileSystem.remove("/sdk/platforms/android-37.0");
+    await fileSystem.remove("/sdk/platforms/android-36");
+    expect((await locator.findStampTools())?.androidJar).toBe(
+      join("/sdk/platforms", "android-34-ext9", "android.jar"),
+    );
+  });
+  test("uses the extension level only to break a tie on API level", async () => {
+    systemDetection.setPlatform("darwin");
+    systemDetection.setEnvVar("ANDROID_HOME", "/sdk");
+    systemDetection.addExistingFile("/sdk");
+    for (const tool of ["aapt2", "zipalign", "apksigner"]) {
+      fileSystem.setFile(`/sdk/build-tools/37.0.0/${tool}`, "");
+    }
+    for (const platform of ["android-35", "android-35-ext14", "android-34-ext12"]) {
+      fileSystem.setFile(`/sdk/platforms/${platform}/android.jar`, "");
+    }
+    const locator = new DefaultAndroidBuildToolsLocator(fileSystem, systemDetection);
+    expect((await locator.findStampTools())?.androidJar).toBe(
+      join("/sdk/platforms", "android-35-ext14", "android.jar"),
+    );
+  });
   test("skips a newer build-tools directory missing zipalign or apksigner", async () => {
     systemDetection.setPlatform("darwin");
     systemDetection.setEnvVar("ANDROID_HOME", "/sdk");

@@ -30,6 +30,7 @@ describe("iOS refusals (#14073)", () => {
       "faults.corruptAppFile",
       "faults.revokePermission",
       "faults.lockScreen",
+      "faults.biometricEnrollment",
       "faults.disablePackage",
       "faults.killApp",
       "faults.trimMemory",

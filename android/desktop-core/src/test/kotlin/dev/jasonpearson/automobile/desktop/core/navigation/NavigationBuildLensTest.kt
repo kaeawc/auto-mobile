@@ -266,7 +266,7 @@ class NavigationBuildLensTest {
 
     assertEquals(
       mapOf(declared to "main@0123456", plain to "v1 (hashA)"),
-      NavigationBuildLens.labelsIn(graph),
+      NavigationBuildLabels.labelsIn(graph),
     )
     // Identity is unchanged: the revision does not split or merge builds.
     assertEquals(listOf(declared, plain), NavigationBuildLens.buildsIn(graph))

@@ -186,7 +186,7 @@ private fun NavigationFlowMap(
 ) {
   val graph = state.navigationGraph ?: NavigationGraph(emptyList(), emptyList())
   val builds = remember(graph) { NavigationBuildLens.buildsIn(graph) }
-  val buildLabels = remember(graph) { NavigationBuildLens.labelsIn(graph) }
+  val buildLabels = remember(graph) { NavigationBuildLabels.labelsIn(graph) }
   val lens = effectiveBuildLens(state.buildLens, builds)
   Box(modifier = Modifier.fillMaxSize()) {
     if (lens is BuildLens.Compare) {

@@ -113,22 +113,6 @@ object NavigationBuildLens {
       "v${build.versionCode} (${build.contentHash.take(LABEL_HASH_CHARS).ifEmpty { "no hash" }})"
     }
 
-  /**
-   * Labels for every build in [graph], keyed by build key (#16954). A build's revision lives on its
-   * build-key row, so every record of one build carries the same value; the first one found is
-   * used. Revisions never change which builds exist or how they match.
-   */
-  fun labelsIn(graph: NavigationGraph): Map<ProvenanceBuildKey, String> {
-    val records =
-      graph.screens.flatMap { it.provenance } + graph.transitions.flatMap { it.provenance }
-    val revisions =
-      records
-        .mapNotNull { record -> record.sourceRevision?.let { record.buildKey to it } }
-        .distinctBy { it.first }
-        .toMap()
-    return buildsIn(graph).associateWith { label(it, revisions[it]) }
-  }
-
   fun membership(provenance: List<ScreenProvenance>, build: ProvenanceBuildKey): BuildMembership {
     val classifiable = provenance.filter { it.isClassifiable() }
     return when {
@@ -177,7 +161,10 @@ object NavigationBuildLens {
       else -> ProvenanceOpacity.alphaFor(provenance, context, nowMs)
     }
 
-  /** Accessible description for a node/edge under [lens]; [buildLabels] come from [labelsIn]. */
+  /**
+   * Accessible description for a node/edge under [lens]; [buildLabels] come from
+   * [NavigationBuildLabels.labelsIn].
+   */
   fun contentDescription(
     label: String,
     provenance: List<ScreenProvenance>,

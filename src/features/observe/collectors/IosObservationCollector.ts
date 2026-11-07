@@ -1,10 +1,11 @@
-import type {
-  DevicectlDisplayInfo,
-  DevicectlDisplayInfoSource,
-} from "../../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
+import type { DevicectlDisplayInfoSource } from "../../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
 import type { DisplayPanel } from "../../../models/DisplayPanel";
-import { sizeMatchesPanel } from "../../device/postureCommands";
-import { liveIosPanelFor, rememberLiveIosPanel, runnerIosPanel } from "../ObservationDisplay";
+import {
+  activeLivePanel,
+  liveIosPanelFor,
+  rememberLiveIosPanel,
+  runnerIosPanel,
+} from "../ObservationDisplay";
 import { appendObserveError } from "../ObserveError";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
@@ -44,16 +45,6 @@ export interface IosObservationCollectorDeps {
 }
 
 const SPRINGBOARD_BUNDLE_ID = "com.apple.springboard";
-
-function activeLivePanel(
-  displays: DevicectlDisplayInfo[],
-  panels: DisplayPanel[],
-): DisplayPanel | undefined {
-  const active = displays.filter((display) => display.active === true);
-  const size = active.length === 1 ? (active[0].nativeSize ?? active[0].bounds?.size) : undefined;
-  const matches = size ? panels.filter((panel) => sizeMatchesPanel(size, panel)) : [];
-  return matches.length === 1 ? matches[0] : undefined;
-}
 
 export class DefaultIosObservationCollector implements IosObservationCollector {
   constructor(private readonly deps: IosObservationCollectorDeps) {}

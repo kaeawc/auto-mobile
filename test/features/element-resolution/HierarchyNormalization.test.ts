@@ -128,6 +128,26 @@ describe("iPhone Duo inner-panel root bounds", () => {
     }
   });
 
+  test("the full-screen application window is reported in the same landscape space", () => {
+    const projected = projectActionableHierarchy(
+      "ios",
+      wireCapture(structuredClone(duoInnerPlaygroundHierarchy)),
+      true,
+    );
+    expect<unknown>(projected.windows?.[0]?.bounds).toEqual([0, 0, 951, 669]);
+  });
+
+  test("a swapped-size window away from the screen origin keeps its bounds", () => {
+    const capture = wireCapture(structuredClone(duoInnerPlaygroundHierarchy));
+    const offset = { left: 10, top: 20, right: 10 + 669, bottom: 20 + 951 };
+    const projected = projectActionableHierarchy(
+      "ios",
+      { ...capture, windows: [{ ...capture.windows![0]!, bounds: offset }] },
+      true,
+    );
+    expect(projected.windows?.[0]?.bounds).toEqual(offset);
+  });
+
   // The runner's wire form: the application is the single `node` and its bounds sit in `$`.
   test("the wire-form application node is corrected too, keeping the tuple shape", () => {
     const projected = projectActionableHierarchy(

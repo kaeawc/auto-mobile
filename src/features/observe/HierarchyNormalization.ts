@@ -104,6 +104,7 @@ export function projectActionableHierarchy(
   if (source.windows) {
     result.windows = source.windows.map((window) => ({
       ...window,
+      ...(window.bounds ? { bounds: withLandscapeWindowBounds(window.bounds, size) } : {}),
       hierarchy: window.hierarchy
         ? withLandscapeRootBounds(
             filterOffscreenNodes({ hierarchy: window.hierarchy }, size.width, size.height)
@@ -142,6 +143,11 @@ function withLandscapeRootBounds<T extends { bounds?: unknown; node?: unknown } 
   return root;
 }
 
+// A window's bounds keep the shape the runner sent (the iOS wire form is a tuple).
+function withLandscapeWindowBounds(bounds: ElementBounds, size: ScreenSize): ElementBounds {
+  return (landscapeBounds(bounds, size) as ElementBounds | undefined) ?? bounds;
+}
+
 type WireNode = { bounds?: unknown; $?: Record<string, unknown> };
 
 function withLandscapeNodeBounds(node: WireNode, size: ScreenSize): WireNode {
@@ -161,7 +167,15 @@ function landscapeBounds(value: unknown, size: ScreenSize): ElementBounds | numb
   }
   const width = bounds.right - bounds.left;
   const height = bounds.bottom - bounds.top;
-  if (width === height || width !== size.height || height !== size.width) {
+  // The stale frame is the application's portrait frame at the screen origin; a swapped-size
+  // rectangle anywhere else is genuine geometry and keeps its bounds.
+  if (
+    bounds.left !== 0 ||
+    bounds.top !== 0 ||
+    width === height ||
+    width !== size.height ||
+    height !== size.width
+  ) {
     return undefined;
   }
   const right = bounds.left + size.width;

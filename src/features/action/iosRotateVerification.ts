@@ -151,6 +151,22 @@ function isObservedRotationMismatch(
   return result.success && current !== "unknown" && current !== requested;
 }
 
+// Dimensions alone cannot name a landscape direction, so a missing held rotation clears the
+// runner's transient one rather than keeping the requested axis. A different display than the one
+// observed before is no evidence about the held rotation, so it keeps its own.
+function heldRotationState(
+  previous: Orientation,
+  before: ObserveResult | undefined,
+  after: ObserveResult | undefined,
+): boolean {
+  const beforeKey = before?.display?.key;
+  const afterKey = after?.display?.key;
+  return (
+    previous !== "unknown" &&
+    (beforeKey === undefined || afterKey === undefined || beforeKey === afterKey)
+  );
+}
+
 export function verifyIosRotation(
   result: RotateResult,
   requested: "portrait" | "landscape",
@@ -171,12 +187,12 @@ export function verifyIosRotation(
       "Rotation is not supported on this display (the screen size did not change). The runner reported a rotation but the screen size is unchanged.";
     // The screen did not rotate, so the runner's orientation readout (the requested axis) is
     // transient: report the orientation the display still has, like the next observe (#17306).
-    const heldRotation = previousObservation?.rotation;
+    const held = heldRotationState(previous, previousObservation, result.observation);
     return {
       ...normalized,
-      currentOrientation: previous === "unknown" ? normalized.currentOrientation : previous,
-      ...(result.observation && heldRotation !== undefined
-        ? { observation: { ...result.observation, rotation: heldRotation } }
+      currentOrientation: held ? previous : normalized.currentOrientation,
+      ...(result.observation && held
+        ? { observation: { ...result.observation, rotation: previousObservation?.rotation } }
         : {}),
       success: false,
       rotationPerformed: false,

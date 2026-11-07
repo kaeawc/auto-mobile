@@ -1,4 +1,7 @@
-import { discoverAppleVisionDeviceImages } from "./appleVisionDiscovery";
+import {
+  discoverAppleSimulatorDeviceImages,
+  discoverWatchDeviceImages,
+} from "./appleSimulatorImageDiscovery";
 import { ActionableError, BootedDevice, DeviceInfo, SomePlatform } from "../models";
 import { requireAndroidOrIosPlatform, requireAndroidOrIosSelector } from "../models/Platform";
 import { toActionableError } from "../models/ActionableError";
@@ -29,7 +32,7 @@ import { resolveIosLifecycleBackend } from "../utils/ios-cmdline-tools/IosLifecy
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { AppleVisionSimulatorInventory } from "../utils/ios-cmdline-tools/AppleVisionSimulatorInventory";
 import { AppleTvSimulatorInventory } from "../utils/ios-cmdline-tools/AppleTvSimulatorInventory";
-import { discoverAppleTvDeviceImages, resolveSimulatorKillTarget } from "./appleTvDiscovery";
+import { resolveSimulatorKillTarget } from "./appleTvDiscovery";
 import { WatchSimulatorInventory } from "../utils/ios-cmdline-tools/WatchSimulatorInventory";
 import { WatchSimulatorLifecycle } from "../utils/ios-cmdline-tools/WatchSimulatorLifecycle";
 import {
@@ -503,17 +506,12 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     platform: SomePlatform,
     options: DeviceImageDiscoveryOptions = {},
   ): Promise<DeviceImageDiscovery> {
-    if (platform === "tvos") {
-      return discoverAppleTvDeviceImages(
-        () => this.listDeviceImages("tvos", options.signal),
-        options.signal,
-      );
+    if (platform === "tvos" || platform === "visionos") {
+      const list = () => this.listDeviceImages(platform, options.signal);
+      return discoverAppleSimulatorDeviceImages(platform, list, options.signal);
     }
-    if (platform === "visionos") {
-      return discoverAppleVisionDeviceImages(
-        () => this.listDeviceImages("visionos", options.signal),
-        options.signal,
-      );
+    if (platform === "watchos") {
+      return discoverWatchDeviceImages(this.watchSimulators, options.signal);
     }
 
     const [android, ios] = await Promise.all([

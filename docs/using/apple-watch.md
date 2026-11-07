@@ -19,6 +19,7 @@ A watch never appears in an iOS listing or iOS tool result. Every watch call nam
 
 Read the `automobile:devices/images/watchos` resource. It lists existing watch simulators
 (`watchosCount`) and the catalog of installed watchOS runtimes and Apple Watch device types.
+`listDevices` with `platform: "watchos"` lists the booted watches.
 
 Create a watch with `provisionDevice`, passing exact identifiers from that catalog:
 
@@ -104,8 +105,11 @@ Every other tool refuses a watch before doing anything, with:
   `hierarchyUnavailable` and no hierarchy fields. With a hierarchy, bounds and `screenSize` are in
   points and `screenshotImageSize` is in pixels; a screenshot-only result reports `screenSize` in
   pixels. Check `screenSize.units` (`points` or `physical-pixels`) before using it for `tapAt`,
-  which takes points. `waitFor`, `settled`, `raw`, `includeExtras`, `scope`,
-  `layer`, `skipBackStack`, `crop`, `screenshotOptions` and `screenshot: "none"` are refused.
+  which takes points. With the runner connected, an element `waitFor` re-reads the hierarchy until
+  it matches or `timeout` elapses; `waitFor` with `for`, `posture`, `activeDisplay` or
+  `activeWindow`, and `waitFor` without a runner, are refused. `settled`, `raw`, `includeExtras`,
+  `scope`, `layer`, `skipBackStack`, `crop`, `screenshotOptions` and `screenshot: "none"` are
+  refused.
 - `tapOn` takes a `selector` with an exact `elementId` or `text`, and an optional `index`. Only
   elements wholly on screen match. Only `action: "tap"` is supported.
 - `tapAt` takes absolute coordinates in points.

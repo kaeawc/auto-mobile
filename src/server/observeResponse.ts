@@ -355,12 +355,14 @@ function aggregateObserveTimeoutMs(args: ObserveArgs): number | undefined {
  * A timed-out waitFor still returns the last observation and its wait diagnostics, but
  * marks the envelope `isError` so a client does not continue as if the condition held (#16889).
  */
-export async function createObserveWaitResponse(
-  result: ObserveToolPayload,
-  waitOutcome: WaitForObservationOutcome,
+export async function createObserveWaitResponse<
+  T extends ObserveResponsePayload = ObserveToolPayload,
+>(
+  result: T,
+  waitOutcome: Omit<WaitForObservationOutcome, "observation">,
   includeScreenshotImage?: boolean,
   options: { signal?: AbortSignal; protection?: ScreenshotPathProtection } = {},
-): Promise<ObserveResponse & { isError?: true }> {
+): Promise<ObserveResponse<T> & { isError?: true }> {
   const waitMetadata: Omit<WaitForObservationOutcome, "observation"> = {
     awaitedElement: waitOutcome.awaitedElement,
     awaitDuration: waitOutcome.awaitDuration,

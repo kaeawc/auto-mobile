@@ -13,6 +13,10 @@
  *   `exceededRequestedScope: false`. Physical iOS resets remain unsupported.
  */
 export interface ResetKeychainResult {
+  /** Present for the Android fault actions; a reset omits it. */
+  action?: "injectFault" | "clearFaults";
+  /** The fault kind an injectFault requested, echoed by the SDK. */
+  requestedKind?: string | null;
   schemaVersion?: 1;
   capability?: "storage.keystore";
   bridgeAvailable?: boolean;
@@ -43,6 +47,7 @@ export interface ResetKeychainResult {
     | "SCOPE_NOT_DECLARED"
     | "MUTATION_NOT_ALLOWED"
     | "EMPTY_SELECTOR"
+    | "INVALID_FAULT"
     | null;
   success: boolean;
   deviceId: string;

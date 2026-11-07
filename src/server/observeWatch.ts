@@ -47,7 +47,16 @@ import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
-import { createObserveResponse, type ObserveResponse } from "./observeResponse";
+import {
+  createObserveResponse,
+  createObserveWaitResponse,
+  type ObserveResponse,
+} from "./observeResponse";
+import {
+  assertAppleRunnerWaitFor,
+  pollAppleRunnerWaitFor,
+  type AppleRunnerWaitOutcome,
+} from "./appleRunnerWaitFor";
 import type { ObserveArgs } from "./observeTools";
 
 /** Captures an Apple simulator's screen as PNG bytes. */
@@ -104,6 +113,9 @@ const WATCH_UNSUPPORTED_OPTIONS: readonly OptionCheck[] = [
   ['screenshot: "none"', (args) => args.screenshot === "none"],
 ];
 
+/** Options a runner hierarchy can honour: the full projection and element waits (#17309). */
+const RUNNER_HIERARCHY_OPTIONS: ReadonlySet<string> = new Set(["project", "waitFor"]);
+
 function screenshotOnlyPlatform(device: BootedDevice): AppleScreenshotOnlyPlatform {
   return device.platform === "tvos" || device.platform === "visionos" ? device.platform : "watchos";
 }
@@ -133,7 +145,7 @@ export function assertWatchObserveOptions(
 ): void {
   const hasRunnerHierarchy = hierarchyAvailable;
   const refused = WATCH_UNSUPPORTED_OPTIONS.filter(
-    ([name, isSet]) => isSet(args) && !(hasRunnerHierarchy && name === "project"),
+    ([name, isSet]) => isSet(args) && !(hasRunnerHierarchy && RUNNER_HIERARCHY_OPTIONS.has(name)),
   ).map(([name]) => name);
   if (args.display !== undefined && args.display !== "active" && args.display !== displayKey) {
     refused.push(`display: "${args.display}"`);
@@ -276,16 +288,15 @@ export async function observeWatch(
   args: ObserveArgs,
   signal: AbortSignal | undefined,
   dependencies: WatchObserveDependencies = {},
-): Promise<ObserveResponse<WatchObservation | ObserveResult>> {
+): Promise<ObserveResponse<WatchObservation | ObserveResult> & { isError?: true }> {
   const platform = screenshotOnlyPlatform(device);
   const display = watchDisplay(device);
-  const { hierarchy: viewHierarchy, unavailableReason } = await watchHierarchyForObserve(
-    device,
-    args,
-    signal,
-    dependencies,
-  );
   const timer = dependencies.timer ?? defaultTimer;
+  const {
+    hierarchy: viewHierarchy,
+    unavailableReason,
+    waitOutcome,
+  } = await observedHierarchy(device, args, signal, { ...dependencies, timer });
   const idGenerator = dependencies.idGenerator ?? defaultIdGenerator;
   const protection = dependencies.pathProtection ?? screenshotPathProtection;
   const directory = (dependencies.cacheDir ?? (() => TakeScreenshot.getCacheDir()))();
@@ -331,11 +342,42 @@ export async function observeWatch(
     screenshotCaptureSource: "device",
     screenshotCapturedAt: new Date(capturedAt).toISOString(),
   };
-  return createObserveResponse(
-    watchObservationPayload(capture, platform, viewHierarchy, unavailableReason),
-    args.includeScreenshotImage,
-    { signal, protection },
+  const payload = watchObservationPayload(capture, platform, viewHierarchy, unavailableReason);
+  return waitOutcome
+    ? createObserveWaitResponse(payload, waitOutcome, args.includeScreenshotImage, {
+        signal,
+        protection,
+      })
+    : createObserveResponse(payload, args.includeScreenshotImage, { signal, protection });
+}
+
+/**
+ * The runner hierarchy for this observe; with `waitFor`, the hierarchy of the poll that matched
+ * (or the last one before the timeout) plus the wait metadata (#17309).
+ */
+async function observedHierarchy(
+  device: BootedDevice,
+  args: ObserveArgs,
+  signal: AbortSignal | undefined,
+  dependencies: WatchObserveDependencies & { timer: Timer },
+): Promise<HierarchyOutcome & { waitOutcome?: AppleRunnerWaitOutcome }> {
+  const first = await watchHierarchyForObserve(device, args, signal, dependencies);
+  if (args.waitFor === undefined) {
+    return first;
+  }
+  // assertWatchObserveOptions admitted waitFor, so a runner is connected.
+  assertAppleRunnerWaitFor(args.waitFor, screenshotOnlyPlatform(device));
+  let pending: HierarchyOutcome | undefined = first;
+  const { hierarchy, outcome } = await pollAppleRunnerWaitFor(
+    args.waitFor,
+    async () => {
+      const read = pending ?? (await watchHierarchyForObserve(device, args, signal, dependencies));
+      pending = undefined;
+      return read.hierarchy;
+    },
+    { timer: dependencies.timer, signal },
   );
+  return { hierarchy, waitOutcome: outcome };
 }
 
 function watchObservationPayload(

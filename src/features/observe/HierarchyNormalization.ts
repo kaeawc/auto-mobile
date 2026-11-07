@@ -86,9 +86,9 @@ export function projectActionableHierarchy(
   if (platform !== "ios") {
     return source;
   }
-  const size = (iosMultiPanel
-    ? resolveActionableHierarchyScreenSize(source, true)
-    : extractHierarchyScreenSize(source)) ?? {
+  // A re-projection must keep the recorded size: its root is already corrected to landscape and
+  // would swap back to portrait against the runner's stale pixel metadata (#17306).
+  const size = resolveActionableHierarchyScreenSize(source, iosMultiPanel) ?? {
     width: source.screenWidth ?? 0,
     height: source.screenHeight ?? 0,
   };

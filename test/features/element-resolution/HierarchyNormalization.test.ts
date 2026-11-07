@@ -119,6 +119,15 @@ describe("iPhone Duo inner-panel root bounds", () => {
     }
   });
 
+  // Observe projects once in the collector and again when identifying the capture.
+  test("re-projecting a projected capture keeps the landscape screen size", () => {
+    for (const multiPanel of [false, true]) {
+      const twice = projectActionableHierarchy("ios", project(multiPanel), multiPanel);
+      expect(resolveActionableHierarchyScreenSize(twice)).toEqual({ width: 951, height: 669 });
+      expect(twice.hierarchy.bounds).toEqual({ left: 0, top: 0, right: 951, bottom: 669 });
+    }
+  });
+
   // The runner's wire form: the application is the single `node` and its bounds sit in `$`.
   test("the wire-form application node is corrected too, keeping the tuple shape", () => {
     const projected = projectActionableHierarchy(

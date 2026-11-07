@@ -83,6 +83,18 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertEqual(source.calls, ["hierarchy", "tap:12.5,20.0", "tap:counter", "up", "down", "left", "right"])
     }
 
+    func testSwipeDistanceIsForwardedAndValidated() {
+        let source = FakeWatchSource()
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        XCTAssertTrue(handler.handle(Data(#"{"type":"swipe","direction":"up","distance":0.4}"#.utf8)).success)
+        XCTAssertEqual(source.calls, ["up:0.4"])
+        for distance in ["0", "-0.1", "1.5"] {
+            let response = handler.handle(Data("{\"type\":\"swipe\",\"direction\":\"up\",\"distance\":\(distance)}".utf8))
+            XCTAssertFalse(response.success)
+        }
+        XCTAssertEqual(source.calls, ["up:0.4"])
+    }
+
     func testTypeReturnsResultAndUsesInjectedGesture() {
         let source = FakeWatchSource()
         let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
@@ -237,8 +249,8 @@ private final class FakeWatchSource: WatchSnapshotSource, WatchGesturePerformer 
         calls.append("tap:\(identifier)")
     }
 
-    func swipe(_ direction: WatchSwipeDirection) throws {
-        calls.append(direction.rawValue)
+    func swipe(_ direction: WatchSwipeDirection, distance: Double?) throws {
+        calls.append(distance.map { "\(direction.rawValue):\($0)" } ?? direction.rawValue)
     }
 
     func typeText(_ text: String) throws {

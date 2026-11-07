@@ -11,7 +11,7 @@ export type WatchCommand =
   | { type: "tap"; identifier: string }
   | { type: "tap"; x: number; y: number }
   | { type: "crown"; delta: number; velocity?: number }
-  | { type: "swipe"; direction: "up" | "down" | "left" | "right" };
+  | { type: "swipe"; direction: "up" | "down" | "left" | "right"; distance?: number };
 
 export interface WatchRunnerClient {
   /** Registered clients remain reusable until a permanent connection failure or close. */

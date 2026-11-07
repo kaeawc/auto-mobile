@@ -112,7 +112,7 @@ describe("iPhone Duo inner-panel root bounds", () => {
       wireCapture(structuredClone(duoInnerPlaygroundHierarchy)),
       true,
     );
-    const root = projected.hierarchy.node as unknown as { $: { bounds: number[] } };
-    expect(root.$.bounds).toEqual([0, 0, 951, 669]);
+    const root = projected.hierarchy.node;
+    expect(root && !Array.isArray(root) ? root.$?.["bounds"] : undefined).toEqual([0, 0, 951, 669]);
   });
 });

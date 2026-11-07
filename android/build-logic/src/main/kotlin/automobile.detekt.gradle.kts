@@ -9,6 +9,7 @@ listOf(
     "org.jetbrains.kotlin.android",
     "com.android.application",
     "com.android.library",
+    "com.android.test",
   )
   .forEach { pluginId -> pluginManager.withPlugin(pluginId) { pluginManager.apply("dev.detekt") } }
 
@@ -26,7 +27,9 @@ pluginManager.withPlugin("dev.detekt") {
     // `release` re-analyzes the same `main` sources `debug` already covered.
     // Skipping release halves Android analysis and avoids compiling the release
     // variant classpath purely to feed detekt.
-    ignoredBuildTypes = listOf("release")
+    // The baseline profile plugin's benchmarkRelease and nonMinifiedRelease build types are
+    // release copies over the same sources, so they are skipped for the same reason.
+    ignoredBuildTypes = listOf("release", "benchmarkRelease", "nonMinifiedRelease")
   }
 
   // The plain `detekt` task (what `check`/`build` runs) analyzes main and test

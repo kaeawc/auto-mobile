@@ -1,7 +1,8 @@
 import type { BootedDevice } from "../../models";
 import { RealObserveScreen } from "../observe/ObserveScreen";
+import { verifiedForegroundApp } from "./AuditForegroundRefusal";
 
-/** Reads the app on screen; undefined when the observation does not name one. */
+/** Reads the app on screen; undefined when the observation does not name one or is unverified. */
 export type ForegroundAppReader = (
   device: BootedDevice,
   signal?: AbortSignal,
@@ -17,5 +18,5 @@ export const observeForegroundApp: ForegroundAppReader = async (device, signal) 
     skipPerformanceAudit: true,
     ...(signal ? { signal } : {}),
   });
-  return result.activeWindow?.appId;
+  return verifiedForegroundApp(result);
 };

@@ -10,6 +10,7 @@ import type {
   IosAccessibilityAuditRequest,
   RunnerAccessibilityAuditIssue,
 } from "../../../src/features/observe/ios/CtrlProxyAccessibilityAudit";
+import { verifiedForegroundApp } from "../../../src/features/accessibility/AuditForegroundRefusal";
 
 const ios: BootedDevice = {
   name: "iPhone 16",
@@ -217,6 +218,16 @@ describe("NativeAccessibilityAudit (#14086)", () => {
 
     expect(result.success).toBe(true);
     expect(sender.requests).toHaveLength(1);
+  });
+
+  test("a stale observation's foreground is unknown, not a mismatch", () => {
+    const activeWindow = { appId: "com.previous.app", activityName: "", layoutSeqSum: 0 };
+
+    expect(verifiedForegroundApp({ activeWindow, freshness: { isFresh: false } })).toBeUndefined();
+    expect(verifiedForegroundApp({ activeWindow, freshness: { isFresh: true } })).toBe(
+      "com.previous.app",
+    );
+    expect(verifiedForegroundApp({ activeWindow })).toBe("com.previous.app");
   });
 
   test("Android reports the native audit unsupported and points at the WCAG audit", async () => {

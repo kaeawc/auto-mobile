@@ -165,6 +165,32 @@ final class WatchCommandHandlerTests: XCTestCase {
         ))
     }
 
+    func testUnchangedHierarchyAfterCrownReturnsCommandFailed() throws {
+        let source = ScriptedCrownSource(labels: ["crown 0", "crown 0", "crown 0"])
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        let response = handler.handle(Data(#"{"type":"crown","requestId":"c","delta":2}"#.utf8))
+        XCTAssertFalse(response.success)
+        XCTAssertEqual(response.requestId, "c")
+        XCTAssertEqual(response.errorCode, "command_failed")
+        XCTAssertEqual(source.rotations, 1)
+    }
+
+    func testChangedHierarchyAfterCrownSucceeds() {
+        let source = ScriptedCrownSource(labels: ["crown 0", "crown 0", "crown 8"])
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        let response = handler.handle(Data(#"{"type":"crown","requestId":"c","delta":2}"#.utf8))
+        XCTAssertTrue(response.success)
+        XCTAssertEqual(response.type, "crown_result")
+    }
+
+    func testCrownVerificationSkippedWhenSnapshotsUnavailable() {
+        let source = ScriptedCrownSource(labels: [])
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        let response = handler.handle(Data(#"{"type":"crown","requestId":"c","delta":2}"#.utf8))
+        XCTAssertTrue(response.success)
+        XCTAssertEqual(source.rotations, 1)
+    }
+
     func testCrownUsesExplicitVelocity() {
         let source = FakeWatchSource()
         let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
@@ -283,4 +309,35 @@ private final class FakeWatchSource: WatchSnapshotSource, WatchGesturePerformer 
     func rotateCrown(delta: Double, velocity: Double) throws {
         calls.append("crown:\(delta),\(velocity)")
     }
+}
+
+/// Drives the production crown verification through the handler with scripted snapshots.
+@MainActor
+private final class ScriptedCrownSource: WatchSnapshotSource, WatchGesturePerformer {
+    private var labels: [String]
+    private(set) var rotations = 0
+
+    init(labels: [String]) { self.labels = labels }
+
+    func snapshot() throws -> SdkViewHierarchy {
+        guard !labels.isEmpty else { throw WatchCommandError.commandFailed("Snapshot failed") }
+        let label = labels.removeFirst()
+        return SdkViewHierarchy(
+            timestamp: Int64(labels.count), screenScale: 1, screenWidth: 100, screenHeight: 100,
+            root: SdkViewNode(
+                className: "Window", bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100),
+                accessibilityLabel: label
+            )
+        )
+    }
+
+    func rotateCrown(delta: Double, velocity: Double) throws {
+        try watchVerifiedCrownRotation(snapshots: self) { rotations += 1 }
+    }
+
+    func tap(x: Double, y: Double) throws {}
+    func tap(identifier: String) throws {}
+    func swipe(_ direction: WatchSwipeDirection, distance: Double?) throws {}
+    func typeText(_ text: String) throws {}
+    func home() throws {}
 }

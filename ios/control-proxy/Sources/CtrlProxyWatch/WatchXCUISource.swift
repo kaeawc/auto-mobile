@@ -185,19 +185,9 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
     }
 
     func rotateCrown(delta: Double, velocity: Double) throws {
-        // The host can be foreground yet hold no crown focus (for example after a simctl launch), and
-        // the private rotate selector then returns normally with nothing consuming the rotation.
-        // The first snapshot after a launch can still be settling, so discard it and compare against the next.
-        _ = try? snapshot()
-        let before = try? snapshot()
-        try rotateFocusedCrown(delta: delta, velocity: velocity)
-        guard let before, let after = try? snapshot(), !watchCrownChangedHierarchy(before: before, after: after) else {
-            return
+        try watchVerifiedCrownRotation(snapshots: self) {
+            try rotateFocusedCrown(delta: delta, velocity: velocity)
         }
-        throw WatchCommandError.commandFailed(
-            "rotateCrown changed nothing: no view consumed the rotation. No view holds crown focus, or the "
-                + "scrolled content is already at its limit; tap the view that should receive the crown, then retry."
-        )
     }
 
     private func rotateFocusedCrown(delta: Double, velocity: Double) throws {
@@ -236,4 +226,26 @@ func watchCrownChangedHierarchy(before: SdkViewHierarchy, after: SdkViewHierarch
         return true
     }
     return old != new
+}
+
+/// Runs `rotate` and fails when the node tree is identical before and after. The host can be foreground
+/// yet hold no crown focus (for example after a simctl launch), and the private rotate selector then
+/// returns normally with nothing consuming the rotation. Detection is best effort: the first snapshot
+/// after a launch can still be settling (so it is discarded), and a missing snapshot on either side
+/// skips the check rather than failing a rotation that may have been applied.
+@MainActor
+func watchVerifiedCrownRotation(snapshots: any WatchSnapshotSource, rotate: () throws -> Void) throws {
+    _ = try? snapshots.snapshot()
+    let before = try? snapshots.snapshot()
+    try rotate()
+    guard let before, let after = try? snapshots.snapshot(),
+          !watchCrownChangedHierarchy(before: before, after: after)
+    else {
+        return
+    }
+    throw WatchCommandError.commandFailed(
+        "rotateCrown changed nothing the accessibility tree shows: no view may hold crown focus, or the "
+            + "scrolled content is already at its limit. Tap the view that should receive the crown, then "
+            + "observe to confirm."
+    )
 }

@@ -23,7 +23,7 @@ Node TypeScript MCP server providing Android Debug Bridge (ADB) capabilities thr
 - After implementation changes, run relevant validation commands
 - Before pushing shell/scripts changes, run `scripts/prepush-shell.sh` and `bun run format` (the formatter catches Fast Validation fan-out); if `bun.lock` and/or `package.json` changed in the diff, run `bun scripts/release/pin-runtime-deps.ts --write` and commit `package.json`, `bun.lock`, and `scripts/release/runtime-graph.json`; otherwise rebase onto current main and do not hand-edit pins to mask a stale base; never run two `bats test/bats/` sweeps concurrently on one machine; when an Actions API job log is empty, read the `fast-validation-logs` workflow artifact's per-check `.status`/`.log` files under `scratch/fast-validate-*/`.
 - Use `scripts/prepush.sh` to select and run the relevant per-lane pre-push gates.
-- Changes to `package.json` or `bun.lock` select runtime-pins, node, and integration lanes; runtime-graph input changes also require `scripts/prepush-integration.sh`.
+- Changes to `package.json` or `bun.lock` select runtime-pins, node, shell, and integration lanes; runtime-graph input changes also require `scripts/prepush-integration.sh`. Docs, skills, `.github/`, XML, test-plan YAML and every `scripts/` path select the shell lane, which mirrors CI's required `Shell Changed Files` job.
 - Write terminal output to `scratch/` when not visible
 - Local validation scripts live under `scripts/` and should almost always be written in bash with shellcheck validation
 - Run `scripts/prepush-android.sh` from the repository root before pushing changes under `android/`; its scoped Detekt pass is a smoke check, not a substitute for the full-tree CI Detekt job.

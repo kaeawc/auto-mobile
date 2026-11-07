@@ -53,11 +53,26 @@ else
   fi
 fi
 
+# Every path prepush-shell.sh selects a fast check or BATS file for. CI's
+# required "Shell Changed Files" job runs that same selector, so a path missing
+# here passes locally and fails that job (docs-github-markdown, mkdocs-nav and
+# xml on docs/ or XML-only changes; BATS files naming a scripts/*.ts input).
+# Keep in step with the case arms in scripts/prepush-shell.sh; the lane itself
+# exits in seconds when nothing applies.
+shell_lane_for_path() {
+  case "$1" in
+    scripts/*|*.sh|.githooks/*|test/bats/*) printf '%s\n' shell ;;
+    docs/*|docs-assets/*|mkdocs.yml|CHANGELOG.md|.github/*) printf '%s\n' shell ;;
+    skills/*|.agents/skills/*|AGENTS.md|.claude/commands/*|.claude-plugin/*|plugins/*) printf '%s\n' shell ;;
+    package.json|bun.lock|Dockerfile|*.xml|*test-plans/*.yaml|*test-plans/*.yml|.gitattributes|*/.gitattributes) printf '%s\n' shell ;;
+  esac
+}
+
 lane_for_path() {
   local path="$1"
   if [[ "$path" == package.json || "$path" == bun.lock ]]; then printf '%s\n' runtime-pins node integration; fi
   if [[ "$path" == src/* || ( "$path" == test/* && "$path" != test/bats/* ) || "$path" == schemas/* || "$path" == tsconfig*.json || "$path" == .oxlintrc.json || "$path" == oxlint-plugins/* || "$path" == turbo.json || "$path" == scripts/*.ts || "$path" == benchmark/agent/* ]]; then printf '%s\n' node; fi
-  if [[ "$path" == scripts/*.sh || "$path" == scripts/lib/* || "$path" == test/bats/* ]]; then printf '%s\n' shell; fi
+  shell_lane_for_path "$path"
   if [[ "$path" == android/* ]]; then printf '%s\n' android; fi
   if [[ "$path" == ios/* ]]; then printf '%s\n' ios; fi
   if [[ "$path" == *.integration.test.ts || "$path" == scripts/release/pin-runtime-deps.ts || "$path" == scripts/release/runtime-graph.json || "$path" == scripts/release/lib/runtime-pins.ts || "$path" == scripts/release/lib/runtime-roots.ts || "$path" == scripts/ci/assert-installed-runtime-graph.ts || "$path" == scripts/ci/verify-pinned-runtime-graph.sh || "$path" == package.json || "$path" == bun.lock ]]; then printf '%s\n' integration; fi

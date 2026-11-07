@@ -276,7 +276,7 @@ export const KILL_PROFILES: Readonly<Record<KillProfileId, KillProfile>> = {
     ],
     evidenceStatus: "inferred",
     evidenceNote:
-      "Classic battery optimization: Don't allow and background restriction, approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com Huawei entry (CC-BY-4.0). Not modelled yet (#16869): PowerGenie's non-whitelist and time-based trigger policies. Foreground-change kills are available separately as samsung-foreground-kill." +
+      'Battery > App launch set to "Manage manually" with Auto-launch, Secondary launch and Run in background switched off is approximated by the restricted bucket, RUN_ANY_IN_BACKGROUND ignore and WAKE_LOCK ignore, plus boot receiver observation. Mechanisms from the dontkillmyapp.com Huawei entry (CC-BY-4.0). samsung-foreground-kill gives a foreground-change kill; screen-off-stop gives a screen-off kill. Not emulated: PowerGenie/HwPFWService killing every non-whitelisted app after about 60 minutes in the background, using a Huawei-maintained whitelist; System Manager Smart tune-up cleanup.' +
       BOOT_CHECK_NOTE,
     source: "https://dontkillmyapp.com/huawei",
   },
@@ -291,7 +291,7 @@ export const KILL_PROFILES: Readonly<Record<KillProfileId, KillProfile>> = {
     ],
     evidenceStatus: "inferred",
     evidenceNote:
-      "Per-app background power restriction (Android 13), approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com Vivo entry (CC-BY-4.0). The boot check observes stock delivery eligibility; Vivo's proprietary background-launch permission is not reproduced." +
+      "Android 13 background power restriction is approximated by background restriction and the restricted bucket, plus boot receiver observation. Mechanisms from the dontkillmyapp.com Vivo entry (CC-BY-4.0). Not emulated: the proprietary Autostart permission (stock delivery is only observed); taskbar app lock." +
       BOOT_CHECK_NOTE,
     source: "https://dontkillmyapp.com/vivo",
   },
@@ -306,7 +306,7 @@ export const KILL_PROFILES: Readonly<Record<KillProfileId, KillProfile>> = {
     ],
     evidenceStatus: "inferred",
     evidenceNote:
-      "Power saving on battery with App battery management set to Optimize, approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com realme entry (CC-BY-4.0). Screen-off cleanup is available separately as screen-off-stop; OEM sleep schedules and trigger policies are not reproduced.",
+      "Power saving on battery and App battery management Optimize are approximated by battery unplug, the restricted bucket and background restriction. Mechanisms from the dontkillmyapp.com realme entry (CC-BY-4.0). The separate screen-off-stop profile approximates screen-off cleanup. Not emulated: Super power saving mode's 6-app limit; auto power-saving trigger levels; OEM sleep schedules.",
     source: "https://dontkillmyapp.com/realme",
   },
   "meizu-flyme-background": {
@@ -320,7 +320,7 @@ export const KILL_PROFILES: Readonly<Record<KillProfileId, KillProfile>> = {
     ],
     evidenceStatus: "inferred",
     evidenceNote:
-      'Background processes not allowed and "keep running after screen off" off (wake-lock denial), approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com Meizu entry (CC-BY-4.0). Protected apps screen-off kills are available separately as screen-off-stop; OEM exemption policies are not reproduced.',
+      "Background processes not allowed is approximated by background restriction. Keep running after screen off off is approximated by WAKE_LOCK ignore. Mechanisms from the dontkillmyapp.com Meizu entry (CC-BY-4.0). screen-off-stop gives a screen-off kill. Not emulated: Protected apps list; Power plan.",
     source: "https://dontkillmyapp.com/meizu",
   },
   "asus-power-master": {
@@ -333,7 +333,7 @@ export const KILL_PROFILES: Readonly<Record<KillProfileId, KillProfile>> = {
     ],
     evidenceStatus: "inferred",
     evidenceNote:
-      "Power Master's auto-deny of auto-start, approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com Asus entry (CC-BY-4.0). Power Master's screen-off cleanup is available separately as screen-off-stop; OEM trigger policies are not reproduced.",
+      'Power Master auto-deny of auto-start is approximated by the restricted bucket and RUN_ANY_IN_BACKGROUND ignore. Mechanisms from the dontkillmyapp.com Asus entry (CC-BY-4.0). screen-off-stop approximates "Clean up in suspend". Not emulated: Power Master\'s own whitelist and settings UI; its auto-start denial, which can block a boot receiver from starting an app that targets below API 33 (stock Android still starts it, so a boot receiver check here can differ from a real Asus device).',
     source: "https://dontkillmyapp.com/asus",
   },
   "sony-stamina": {
@@ -347,7 +347,7 @@ export const KILL_PROFILES: Readonly<Record<KillProfileId, KillProfile>> = {
     ],
     evidenceStatus: "inferred",
     evidenceNote:
-      'STAMINA mode (background processes and alarms restricted), approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com Sony entry (CC-BY-4.0). Not modelled yet (#16869): STAMINA\'s "Prefer battery time" limits that apply after screen-off (time-based policy); the proprietary Power-saving feature exception list.',
+      'STAMINA mode on battery is approximated by battery unplug, background restriction and exact alarm denial. On Android 13 and later an app declaring USE_EXACT_ALARM can keep exact alarm access despite the SCHEDULE_EXACT_ALARM denial. Mechanisms from the dontkillmyapp.com Sony entry (CC-BY-4.0). Not emulated: the time-based "Prefer battery time" STAMINA level limits after screen off; the Power-saving feature Excepted list; Intelligence Engine.',
     source: "https://dontkillmyapp.com/sony",
   },
   "tecno-app-halt": {
@@ -361,7 +361,7 @@ export const KILL_PROFILES: Readonly<Record<KillProfileId, KillProfile>> = {
     ],
     evidenceStatus: "inferred",
     evidenceNote:
-      "Background execution denied and foreground-service wake locks denied, approximated with restorable stock Android restrictions. Mechanisms from the dontkillmyapp.com Tecno entry (CC-BY-4.0). Power Marathon screen-off cleanup is available separately as screen-off-stop. Not modelled yet (#16869): app-freeze and the night-time airplane-mode sleep schedule.",
+      'Power Saving Management For Apps denial is approximated by background execution and wake-lock denial. Mechanisms from the dontkillmyapp.com Tecno entry (CC-BY-4.0). screen-off-stop approximates Power Marathon screen-off cleanup. Not emulated: app-freeze ("frozen in time") of timers and foreground services; the night-time Sleep Mode airplane-mode schedule; Auto-start management allow-list.',
     source: "https://dontkillmyapp.com/tecno",
   },
 };

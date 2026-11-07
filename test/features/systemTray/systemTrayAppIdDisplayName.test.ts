@@ -14,6 +14,8 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { observeResultFromJsonText } from "../../helpers/observeFixture";
 import { toolJson } from "../../helpers/toolResponse";
 import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
+import { InMemoryPostedNotificationLedger } from "../../../src/features/utility/postedNotificationLedger";
+import { ios26TrayOpenHome } from "./iosTrayObservationFixture";
 
 isolateToolRegistry();
 
@@ -38,7 +40,11 @@ const iosDevice: BootedDevice = {
   source: "local",
 };
 
-const install = (apps = listedApps, observation = messagesTray) => {
+const install = (
+  apps = listedApps,
+  observation = messagesTray,
+  postedNotifications = new InMemoryPostedNotificationLedger(),
+) => {
   const labelLookups: string[] = [];
   const observer = new FakeObserveScreen();
   observer.setObserveResult(() => observation);
@@ -53,6 +59,7 @@ const install = (apps = listedApps, observation = messagesTray) => {
       },
       executeIosDetailedResult: async () => ({ apps, successful: true }),
     }),
+    postedNotifications,
     // The production resolver answers null on iOS; record any fallback call.
     appLabelResolver: async (_device, appId) => {
       labelLookups.push(appId);
@@ -134,5 +141,46 @@ describe("systemTray find with appId on iOS", () => {
       match: { app: { text: "com.apple.MobileSMS" } },
     });
     expect(labelLookups).toEqual(["com.apple.MobileSMS"]);
+  });
+});
+
+// The captured Settings "Ready for Apple Intelligence" lone banner names no app (#17445).
+describe("systemTray find with appId on an iOS lone banner", () => {
+  const banner = {
+    title: "Ready for Apple Intelligence",
+    body: "Time to experience the new personal intelligence system.",
+  };
+
+  test("matches the banner when postNotification posted it for that app", async () => {
+    const ledger = new InMemoryPostedNotificationLedger();
+    ledger.record(iosDevice.deviceId, "com.apple.Preferences", banner);
+    install(listedApps, ios26TrayOpenHome, ledger);
+    const payload = toolJson(await find({ title: banner.title, appId: "com.apple.Preferences" }));
+    expect(payload).toMatchObject({ success: true, match: { app: { text: "Settings" } } });
+  });
+
+  test("does not match content another app posted", async () => {
+    const ledger = new InMemoryPostedNotificationLedger();
+    ledger.record(iosDevice.deviceId, "com.apple.Preferences", banner);
+    install(listedApps, ios26TrayOpenHome, ledger);
+    await expect(find({ title: banner.title, appId: "com.apple.MobileSMS" })).rejects.toThrow(
+      "cannot be attributed to com.apple.MobileSMS",
+    );
+  });
+
+  test("does not use content posted to another device", async () => {
+    const ledger = new InMemoryPostedNotificationLedger();
+    ledger.record("another-simulator", "com.apple.Preferences", banner);
+    install(listedApps, ios26TrayOpenHome, ledger);
+    await expect(find({ title: banner.title, appId: "com.apple.Preferences" })).rejects.toThrow(
+      "Omit appId to match it by content, or post it with postNotification",
+    );
+  });
+
+  test("keeps the plain not-found when no banner has that content", async () => {
+    install(listedApps, ios26TrayOpenHome);
+    await expect(find({ title: "absent", appId: "com.apple.Preferences" })).rejects.toThrow(
+      /^Notification not found after \d+ms\.$/,
+    );
   });
 });

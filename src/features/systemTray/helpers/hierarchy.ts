@@ -438,10 +438,47 @@ export const findHeaderAppLabel = (
   return undefined;
 };
 
-// iOS renders no separate app-name label: the short-look view's accessibility
-// label leads with the app's display name ("MESSAGES, now, <title>, <body>").
+// iOS renders no separate app-name label: a stacked row's short-look label leads
+// with the app's display name ("MESSAGES, Grouped, now, <title>, <body>"), while
+// a lone banner's label starts at its time ("now, <title>, <body>") and names no
+// app at all (#17445).
 const IOS_NOTIFICATION_ATTRIBUTION_RESOURCE_ID = "NotificationShortLookView";
 const IOS_NOTIFICATION_ROW_RESOURCE_IDS = ["ListCell", IOS_NOTIFICATION_ATTRIBUTION_RESOURCE_ID];
+const IOS_NOTIFICATION_CONTENT_RESOURCE_IDS = ["NotificationTitle", "TextContent.Primary"];
+
+const findIosShortLookContentText = (node: ViewHierarchyNode): string | undefined => {
+  for (const child of getDirectChildNodes(node)) {
+    const props = getNodeProperties(child);
+    const text = rawNodeValue(props, "text");
+    if (
+      IOS_NOTIFICATION_CONTENT_RESOURCE_IDS.includes(rawResourceId(props)) &&
+      typeof text === "string" &&
+      text.trim()
+    ) {
+      return text;
+    }
+    const nested = findIosShortLookContentText(child);
+    if (nested) {
+      return nested;
+    }
+  }
+  return undefined;
+};
+
+/**
+ * Whether a short-look label leads with an app name: the segments ahead of the
+ * row's own title (or body) are more than its time alone.
+ */
+const iosShortLookLabelNamesApp = (node: ViewHierarchyNode, label: string): boolean => {
+  const content = findIosShortLookContentText(node);
+  const contentAt = content ? label.indexOf(`, ${content}`) : -1;
+  if (contentAt <= 0) {
+    return false;
+  }
+  const segments = label.slice(0, contentAt).split(", ");
+  const name = segments[0].trim();
+  return segments.length >= 2 && /\p{L}/u.test(name);
+};
 
 /**
  * The element of a row that names the posting app: the Android `app_name_text`
@@ -465,7 +502,7 @@ export const getNodeAttribution = (node: ViewHierarchyNode): NotificationAttribu
   }
   if (resourceId === IOS_NOTIFICATION_ATTRIBUTION_RESOURCE_ID) {
     const text = extractNodeTextCandidates(node).find((candidate) => candidate.trim());
-    return text ? { text, leading: true } : null;
+    return text && iosShortLookLabelNamesApp(node, text) ? { text, leading: true } : null;
   }
   return null;
 };
@@ -490,4 +527,25 @@ export const nodeIsNotificationRowRoot = (node: ViewHierarchyNode): boolean => {
   }
   const resourceId = rawResourceId(getNodeProperties(node));
   return IOS_NOTIFICATION_ROW_RESOURCE_IDS.includes(resourceId);
+};
+
+/** Whether a row renders an iOS short-look view, whose label is its only app evidence. */
+export const nodeHasIosShortLook = (node: ViewHierarchyNode | null | undefined): boolean =>
+  Boolean(node) &&
+  (rawResourceId(getNodeProperties(node)) === IOS_NOTIFICATION_ATTRIBUTION_RESOURCE_ID ||
+    getDirectChildNodes(node).some(nodeHasIosShortLook));
+
+/**
+ * The outermost notification rows (or groups) within a node: the node itself when
+ * it is one, else every row below it. App evidence never crosses between them.
+ */
+export const collectOutermostNotificationRows = (
+  node: ViewHierarchyNode | null | undefined,
+): ViewHierarchyNode[] => {
+  if (!node) {
+    return [];
+  }
+  return nodeIsNotificationRowRoot(node)
+    ? [node]
+    : getDirectChildNodes(node).flatMap(collectOutermostNotificationRows);
 };

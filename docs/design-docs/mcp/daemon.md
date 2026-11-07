@@ -92,3 +92,11 @@ in-band `__mcpSessionId` argument). The socket server forwards its socket sessio
 in that header, and the desktop app sends one id per app session. Tool-to-session
 bindings live in a daemon-scoped store rather than on any one server. The design (#4678, #11820) and resolved questions are in
 [SDK v2 and stateless daemon layer](sdk-v2-stateless-migration.md).
+
+Read-only tools do not consult the connection binding. A broker connection's grants
+(`BrokerConnectionScopes`) confine control and lifecycle calls only (owner decision Q6),
+and a read needs no session at all (#10965, #10982), so a `sessionUuid` on a read selects
+which session's device to read and grants nothing a sessionless read on that device
+lacks. It is therefore not a bearer capability: an unbound connection that names a live
+session's UUID on `observe` is admitted read-only, takes no control and records no
+activity. Control calls stay confined to the holder and to a bound connection's grants.

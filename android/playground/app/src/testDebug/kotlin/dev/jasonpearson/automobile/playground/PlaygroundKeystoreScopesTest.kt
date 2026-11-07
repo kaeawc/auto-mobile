@@ -27,19 +27,29 @@ class PlaygroundKeystoreScopesTest {
         KeystoreFixtureSeeder.KEY_ALIAS,
         KeystoreFixtureSeeder.CERTIFICATE_ALIAS,
         KeystoreFixtureSeeder.AUTH_BOUND_KEY_ALIAS,
+        KeystoreStrongBoxProbe.ALIAS,
       ),
       PlaygroundKeystoreScopes.scopes.values.flatten().toSet(),
     )
   }
 
   @Test
-  fun declareRegistersBothScopesWithTheirAliases() {
+  fun strongBoxProbeAliasIsDeclaredInItsOwnScope() {
+    assertEquals(
+      setOf(KeystoreStrongBoxProbe.ALIAS),
+      PlaygroundKeystoreScopes.scopes[PlaygroundKeystoreScopes.FIXTURE_STRONGBOX_SCOPE],
+    )
+  }
+
+  @Test
+  fun declareRegistersEveryScopeWithTheirAliases() {
     val declared = mutableMapOf<String, Set<String>>()
     PlaygroundKeystoreScopes.declare { name, aliases -> declared[name] = aliases }
     assertEquals(
       mapOf(
         "fixture" to setOf("automobile.fixture", "automobile.fixture.certificate"),
         "fixture-auth" to setOf("automobile.fixture.auth-bound"),
+        "fixture-strongbox" to setOf("automobile.fixture.strongbox"),
       ),
       declared,
     )

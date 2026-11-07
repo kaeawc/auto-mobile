@@ -39,7 +39,10 @@ const POLL_MS = 250;
 const MAX_SETTLE_READS = 6;
 const SETTLE_MS = 500;
 const MAX_CLOSE_PRESSES = 3;
-const MAX_UNMOVED_RETRIES = 2;
+// A loaded watch can take seconds to draw a scroll, and an unmoved page ends the scan.
+const MAX_UNMOVED_RETRIES = 6;
+/** A swipe scrolls about half the screen; a card lower than this cannot have scrolled out of view. */
+const SCROLL_REACH = 0.6;
 const CLOSE_POLLS = 8;
 const REWIND_WHEEL_STEP = 3;
 const MIN_RESTORE_MS = 10_000;
@@ -134,6 +137,20 @@ const fuller = (known: ScannedCard, seen: ScannedCard) => {
   return { ...seen, card: better };
 };
 
+/** Whether `seen` is another reading of `known`: equal, or `known` is a clipped partial of it. */
+const sameReading = (known: ScannedCard, seen: ScannedCard) => {
+  if (cardIdentity(known.card) === cardIdentity(seen.card)) {
+    return true;
+  }
+  const partialBody = (known.card.body ?? "").replace(/(?:…|\.\.\.)$/, "");
+  return (
+    known.clipped &&
+    known.card.appLabel === seen.card.appLabel &&
+    (known.card.title === null || known.card.title === seen.card.title) &&
+    (seen.card.body ?? "").startsWith(partialBody)
+  );
+};
+
 /**
  * Whether the head of `page` shows again the `tail` cards of `collected`. Equal content alone is
  * no proof: separate notifications can repeat an app, title and body. Evidence beyond content is
@@ -141,14 +158,14 @@ const fuller = (known: ScannedCard, seen: ScannedCard) => {
  * bottom edge (its continuation must lead the next page); every card must also have moved up with
  * the scroll, never down.
  */
-const isSameRun = (tail: ScannedCard[], head: ScannedCard[]) =>
+const isSameRun = (tail: ScannedCard[], head: ScannedCard[], reach: number) =>
   tail.every((known, index) => {
     const seen = head[index];
-    return (
-      cardIdentity(known.card) === cardIdentity(seen.card) && seen.bounds.top <= known.bounds.top
-    );
+    return sameReading(known, seen) && seen.bounds.top <= known.bounds.top;
   }) &&
-  (tail.length >= 2 || tail[0].clippedBottom);
+  // A single card that sits lower than one scroll can reach cannot have left the screen, so the
+  // equal card leading the next page is that card; a higher one may have scrolled out of view.
+  (tail.length >= 2 || tail[0].clippedBottom || tail[0].bounds.bottom > reach);
 
 /**
  * Appends a scanned page to the cards collected so far. A scroll moves less than a screen, so the
@@ -156,11 +173,11 @@ const isSameRun = (tail: ScannedCard[], head: ScannedCard[]) =>
  * established (see {@link isSameRun}) it is listed once, keeping the fuller reading of each card;
  * otherwise every card is kept, so repeated notifications are never lost (#17317).
  */
-const mergePage = (collected: ScannedCard[], page: ScannedCard[]) => {
+const mergePage = (collected: ScannedCard[], page: ScannedCard[], reach: number) => {
   for (let overlap = Math.min(collected.length, page.length); overlap > 0; overlap--) {
     const tail = collected.slice(-overlap);
     const head = page.slice(0, overlap);
-    if (isSameRun(tail, head)) {
+    if (isSameRun(tail, head, reach)) {
       return [
         ...collected.slice(0, -overlap),
         ...tail.map((known, index) => fuller(known, head[index])),
@@ -477,7 +494,11 @@ export class WatchSystemTray {
       if (!unmoved) {
         // Cards cut off by a viewport edge are kept as partial readings until a page shows them
         // whole; a card taller than the viewport is never shown whole.
-        cards = mergePage(cards, scannedCards(observation, matching));
+        cards = mergePage(
+          cards,
+          scannedCards(observation, matching),
+          observation.screenSize.height * SCROLL_REACH,
+        );
       }
       if (atEnd && ["list", "clearAll"].includes(args.action)) {
         return this.scanResult(args, scope, cards, observation);

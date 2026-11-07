@@ -18536,7 +18536,7 @@
               },
               "platform": {
                 "type": "string",
-                "enum": ["android", "ios"]
+                "enum": ["android", "ios", "watchos", "tvos", "visionos"]
               },
               "isVirtual": {
                 "type": "boolean"
@@ -19148,8 +19148,9 @@
       "type": "object",
       "properties": {
         "platform": {
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "tvos", "visionos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "requires": {
           "description": "Filter booted devices by display inventory capabilities",
@@ -19226,7 +19227,7 @@
               },
               "platform": {
                 "type": "string",
-                "enum": ["android", "ios"]
+                "enum": ["android", "ios", "watchos", "tvos", "visionos"]
               },
               "isVirtual": {
                 "type": "boolean"
@@ -21374,7 +21375,7 @@
     "annotations": {
       "readOnlyHint": true
     },
-    "description": "Android synthetic s2- element ids are valid only for the observation that returned them; re-observe before using an id after the screen changes. The default skeleton lists only actionable rows; read static text (status labels, validation errors) from context. Without layer, waitFor text and textAny, and for: appear/textEquals with only text, also match rows in both arrays when no hierarchy node carries the text (textEquals stays exact and case-sensitive). Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. On an Apple Watch simulator (platform: 'watchos' or a watch session), observe keeps the screenshot and returns hierarchy-derived elements in XCTest points when a watch runner is connected (project: 'full' includes viewHierarchy). Without a connected runner it returns screenshot-only with physical screenSize and hierarchyUnavailable; advanced observe options are refused. On an Apple TV simulator (platform: 'tvos' or an Apple TV session), observe returns a screenshot and runner hierarchy with focusedElement when connected (project: 'full' includes viewHierarchy); without a runner it returns screenshot-only with hierarchyUnavailable. Use pressButton for focus navigation; advanced observe options are refused. On an Apple Vision Pro simulator (platform 'visionos'), observe returns a screenshot and the window-app runner hierarchy with focusedElement (project: 'full' includes viewHierarchy); the runner starts on demand, except that a deviceId read of a device another session holds only connects to an already-running runner; when it cannot start or be reached, observe returns screenshot-only with hierarchyUnavailable unless project is set, which then is refused. Advanced observe options are refused. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Each screenshot path is kept for at least 10 minutes after the response that returned it unless evicted early under capacity pressure, so a returned path is not guaranteed to survive until its expiresAt; expiresAt metadata uses the host clock. Returning cached paths extends their lifetime. At the shared 128 MiB / 4096-file cap, new captures are never refused: the least recently returned screenshots are evicted early, unreferenced ones first and then referenced ones, to admit them. Release and device removal leave files until their guarantees expire. Restart uses a ten-minute process-start grace; other processes can only honor the ten-minute mtime floor. Capacity uses a per-process in-memory inventory reconciled on sweeps and near either cap. Concurrent processes can exceed the aggregate cap before reconciliation; discovered files count against subsequent admission. Expired files are swept at initial inventory, near capacity and every minute while idle. Copy files needed beyond the guarantee.",
+    "description": "Android synthetic s2- element ids are valid only for the observation that returned them; re-observe before using an id after the screen changes. The default skeleton lists only actionable rows; read static text (status labels, validation errors) from context. Without layer, waitFor text and textAny, and for: appear/textEquals with only text, also match rows in both arrays when no hierarchy node carries the text (textEquals stays exact and case-sensitive). Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. On an Apple Watch simulator (platform: 'watchos' or a watch session), observe keeps the screenshot and returns hierarchy-derived elements in XCTest points when a watch runner is connected (project: 'full' includes viewHierarchy). Without a connected runner it returns screenshot-only with physical screenSize and hierarchyUnavailable. With a runner hierarchy (watchOS, tvOS, visionOS), element waitFor polls the runner hierarchy; waitFor for/posture/activeDisplay/activeWindow and other advanced observe options are refused. On an Apple TV simulator (platform: 'tvos' or an Apple TV session), observe returns a screenshot and runner hierarchy with focusedElement when connected (project: 'full' includes viewHierarchy); without a runner it returns screenshot-only with hierarchyUnavailable. Use pressButton for focus navigation. On an Apple Vision Pro simulator (platform 'visionos'), observe returns a screenshot and the window-app runner hierarchy with focusedElement (project: 'full' includes viewHierarchy); the runner starts on demand, except that a deviceId read of a device another session holds only connects to an already-running runner; when it cannot start or be reached, observe returns screenshot-only with hierarchyUnavailable unless project is set, which then is refused. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Each screenshot path is kept for at least 10 minutes after the response that returned it unless evicted early under capacity pressure, so a returned path is not guaranteed to survive until its expiresAt; expiresAt metadata uses the host clock. Returning cached paths extends their lifetime. At the shared 128 MiB / 4096-file cap, new captures are never refused: the least recently returned screenshots are evicted early, unreferenced ones first and then referenced ones, to admit them. Release and device removal leave files until their guarantees expire. Restart uses a ten-minute process-start grace; other processes can only honor the ten-minute mtime floor. Capacity uses a per-process in-memory inventory reconciled on sweeps and near either cap. Concurrent processes can exceed the aggregate cap before reconciliation; discovered files count against subsequent admission. Expired files are swept at initial inventory, near capacity and every minute while idle. Copy files needed beyond the guarantee.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -47208,7 +47209,7 @@
       "destructiveHint": true,
       "idempotentHint": true
     },
-    "description": "Reset secure test state. Android deletes app-declared scope/alias under app opt-in and SDK mutation authorization; confirm is not needed, but confirm:false refuses. iOS Simulator resets EVERY app's Keychain and requires confirm:true. Physical iOS is unsupported. Requires explicit device targeting.",
+    "description": "Reset secure test state. Android deletes app-declared scope/alias under app opt-in and SDK mutation authorization; confirm is not needed, but confirm:false refuses. On Android, action injectFault/clearFaults arms or clears a debug-SDK Keystore fault (kind, delayMs for DELAY) on the same declared selectors instead of deleting. iOS Simulator resets EVERY app's Keychain and requires confirm:true. Physical iOS is unsupported. Requires explicit device targeting.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -47221,17 +47222,39 @@
           "pattern": "^[A-Za-z0-9._-]+$"
         },
         "scope": {
-          "description": "Android declared scope to reset; required unless alias is given.",
+          "description": "Android declared scope to reset or fault; required unless alias is given.",
           "type": "string",
           "minLength": 1
         },
         "alias": {
-          "description": "Android declared alias to delete; with scope, must belong to it.",
+          "description": "Android declared alias to delete or fault; with scope, must belong to it.",
           "type": "string",
           "minLength": 1
         },
+        "action": {
+          "description": "Default reset. Android only: injectFault arms a debug-SDK Keystore fault on the selected declared aliases until clearFaults or app restart; clearFaults removes them.",
+          "type": "string",
+          "enum": ["reset", "injectFault", "clearFaults"]
+        },
+        "kind": {
+          "description": "injectFault only, required: the fault each Keystore use of the alias raises.",
+          "type": "string",
+          "enum": [
+            "KEY_STORE_EXCEPTION",
+            "PROVIDER_EXCEPTION",
+            "USER_NOT_AUTHENTICATED",
+            "DELAY",
+            "STRONGBOX_UNAVAILABLE"
+          ]
+        },
+        "delayMs": {
+          "description": "injectFault with kind DELAY only, required: delay per Keystore operation.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
         "confirm": {
-          "description": "Required true on iOS Simulator, which erases EVERY app's Keychain. Android does not need confirm (app opt-in, declared aliases and the SDK mutation gate authorize deletion), but confirm: false refuses the reset.",
+          "description": "Required true on iOS Simulator, which erases EVERY app's Keychain. Android does not need confirm (app opt-in, declared aliases and the SDK mutation gate authorize it), but confirm: false refuses the action.",
           "type": "boolean"
         },
         "platform": {
@@ -47311,7 +47334,8 @@
                 "DECLARED_UNSUPPORTED",
                 "SCOPE_NOT_DECLARED",
                 "MUTATION_NOT_ALLOWED",
-                "EMPTY_SELECTOR"
+                "EMPTY_SELECTOR",
+                "INVALID_FAULT"
               ]
             },
             {
@@ -47381,6 +47405,20 @@
               "type": "null"
             }
           ]
+        },
+        "requestedKind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action": {
+          "type": "string",
+          "enum": ["injectFault", "clearFaults"]
         }
       },
       "required": [

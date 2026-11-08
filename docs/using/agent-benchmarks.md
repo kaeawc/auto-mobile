@@ -111,8 +111,8 @@ they can still affect results:
   reaches the same adb server. `CLAUDE_CODE_MCP_ALLOWLIST_ENV` is removed from Claude's
   environment, so the server also inherits `PATH` and runs the same `adb` the run was
   fingerprinted against. Before preflight touches the device,
-  the harness runs the same ownership check daemons use (forwarding lease, current and legacy
-  claims, unreadable claims, live CtrlProxy forwards) and refuses a device another AutoMobile
+  the harness runs the same ownership check daemons use (forwarding lease, allocation claims,
+  unreadable claims, live CtrlProxy forwards) and refuses a device another AutoMobile
   session holds. It then holds the device's allocation claim itself through preflight, so a
   concurrent daemon is refused rather than racing `pm clear`, and hands it over just before Claude
   starts so the run's own daemon can claim it. If that claim cannot be written, the run stops

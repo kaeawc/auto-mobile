@@ -12,6 +12,11 @@ import {
   imeCommitSuffixMatches,
   imeInsertedTextMatches,
 } from "../observe/android/CtrlProxyText";
+import {
+  IME_REFORMATTED_DIGITS_CONFIRMED_WARNING,
+  imePartialCommitGuidance,
+  reformattedDigitsPreserved,
+} from "./imePartialCommitGuidance";
 
 // Three attempts preserve the existing diagnostic retry bound.
 export const IME_DIAGNOSTIC_ATTEMPTS = 3;
@@ -276,9 +281,15 @@ export function verifyImeInsertedText(
       ...result,
       success: false,
       partialApplication: true,
-      error: context.passwordField
-        ? `IME partial commit: sent ${passwordTextPlaceholder(text)} but the editor inserted a different value`
-        : `IME partial commit: sent ${JSON.stringify(text)} but the editor inserted ${JSON.stringify(insertedText)}`,
+      error: `${
+        context.passwordField
+          ? `IME partial commit: sent ${passwordTextPlaceholder(text)} but the editor inserted a different value`
+          : `IME partial commit: sent ${JSON.stringify(text)} but the editor inserted ${JSON.stringify(insertedText)}`
+      }. ${imePartialCommitGuidance(text, {
+        insertedText,
+        deviceReportedSuccess: result.success,
+        passwordField: context.passwordField,
+      })}`,
     },
     text,
     "verification",
@@ -288,6 +299,10 @@ export function verifyImeInsertedText(
     },
   );
   return context.passwordField ? redactPasswordImeFailure(failure, text) : failure;
+}
+
+function withWarning(result: TextActionResult, warning: string): TextActionResult {
+  return { ...result, warning: [result.warning, warning].filter(Boolean).join(" ") };
 }
 
 interface ImeVerification {
@@ -393,6 +408,42 @@ function syncLossReadBack(
   return imeCommitSuffixMatches(observedText, text) === true ? "confirmed" : "mismatch";
 }
 
+/**
+ * A formatter that restarted input mid-commit can garble the delta while every digit still
+ * landed; after a device-reported success, the whole-field digits decide (#17462).
+ */
+function reconcileReformattedDelta(
+  result: TextActionResult,
+  deltaVerified: TextActionResult,
+  {
+    observedText,
+    text,
+    passwordField,
+  }: { observedText: string; text: string; passwordField?: boolean },
+): TextActionResult {
+  return result.success === true &&
+    passwordField !== true &&
+    reformattedDigitsPreserved(observedText, text)
+    ? withWarning(result, IME_REFORMATTED_DIGITS_CONFIRMED_WARNING)
+    : deltaVerified;
+}
+
+function readBackPartialCommitError(
+  result: TextActionResult,
+  text: string,
+  observedText: string,
+  verification: Pick<ImeVerification, "passwordField">,
+): string {
+  const mismatch = verification.passwordField
+    ? `IME partial commit: sent ${passwordTextPlaceholder(text)} but the focused field holds a different value`
+    : `IME partial commit: sent ${JSON.stringify(text)} but the focused field holds ${JSON.stringify(observedText)}`;
+  return `${mismatch}. ${imePartialCommitGuidance(text, {
+    insertedText: result.insertedText,
+    deviceReportedSuccess: result.success,
+    passwordField: verification.passwordField,
+  })}`;
+}
+
 async function verifyImeCommitReadBack(
   result: TextActionResult,
   text: string,
@@ -433,7 +484,11 @@ async function verifyImeCommitReadBack(
         passwordField: verification.passwordField,
       });
       if (deltaVerified !== result) {
-        return deltaVerified;
+        return reconcileReformattedDelta(result, deltaVerified, {
+          observedText,
+          text,
+          passwordField: verification.passwordField,
+        });
       }
       const suffixMatches = imeCommitSuffixMatches(observedText, text);
       // Editors can consume markers or add prefixes across multiple segments.
@@ -447,9 +502,7 @@ async function verifyImeCommitReadBack(
             ...result,
             success: false,
             partialApplication: true,
-            error: verification.passwordField
-              ? `IME partial commit: sent ${passwordTextPlaceholder(text)} but the focused field holds a different value`
-              : `IME partial commit: sent ${JSON.stringify(text)} but the focused field holds ${JSON.stringify(observedText)}`,
+            error: readBackPartialCommitError(result, text, observedText, verification),
           },
           text,
           "verification",

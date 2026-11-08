@@ -47,7 +47,7 @@ describe("DeviceOwnershipView", () => {
   test("two live daemons on different sources are a disagreement", async () => {
     const sources = new FakeSources();
     sources.locks.push({ source: "claim_file", pid: 10, alive: true });
-    sources.locks.push({ source: "legacy_claim_file", pid: 11, alive: true });
+    sources.locks.push({ source: "forward_lease", pid: 11, alive: true });
 
     const ownership = await new DeviceOwnershipView(sources).ownershipOf(phone);
 

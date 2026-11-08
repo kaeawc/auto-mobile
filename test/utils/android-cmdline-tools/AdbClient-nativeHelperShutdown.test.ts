@@ -15,16 +15,31 @@ import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 
 afterEach(() => mock.restore());
 
+// Pinned pids: FakeChildProcess's process-wide pid counter can reach the real
+// runner pid when many files share one Bun process (Windows, #17466), and the
+// shutdown path never signals its own pid.
+const OWN_PID = 30;
+
+function fakeChild(timer: FakeTimer, pid: number): FakeChildProcess {
+  const child = new FakeChildProcess(timer);
+  child.pid = pid;
+  return child;
+}
+
+function terminate(timer: FakeTimer, ownPid: number = OWN_PID) {
+  return terminateActiveAdbProcesses({ timer, graceMs: 10, ownPid });
+}
+
 function harness() {
   const timer = new FakeTimer();
   const store = new FakeNativeHelperRecordStore();
   const control = new FakeNativeHelperProcessControl();
-  control.processes.set(30, "owner");
+  control.processes.set(OWN_PID, "owner");
   const registry = new NativeHelperRegistry({
     timer,
     store,
     control,
-    ownPid: 30,
+    ownPid: OWN_PID,
     logger: new FakeLogger(),
   });
   const host = new FakeHostCommandExecutor();
@@ -54,7 +69,7 @@ async function advance<T>(work: Promise<T>, timer: FakeTimer): Promise<T> {
 describe("host adb native helper shutdown", () => {
   test("tracks long-lived spawns and shuts down children across client instances", async () => {
     const h = harness();
-    const children = [new FakeChildProcess(h.timer), new FakeChildProcess(h.timer)];
+    const children = [fakeChild(h.timer, 101), fakeChild(h.timer, 102)];
     const signals: string[] = [];
     const spies = [spyOn(children[0]!, "kill"), spyOn(children[1]!, "kill")];
     for (const [index, child] of children.entries()) {
@@ -73,10 +88,7 @@ describe("host adb native helper shutdown", () => {
         ["adb", false],
         ["adb", false],
       ]);
-      const summary = await advance(
-        terminateActiveAdbProcesses({ timer: h.timer, graceMs: 10 }),
-        h.timer,
-      );
+      const summary = await advance(terminate(h.timer), h.timer);
       expect(signals).toEqual(["0:SIGTERM", "1:SIGTERM", "1:SIGKILL"]);
       expect(summary).toEqual({ terminated: 2, failed: 0 });
       expect(h.store.list()).toEqual([]);
@@ -88,7 +100,7 @@ describe("host adb native helper shutdown", () => {
   });
   test("retains a cancelled child for shutdown until it actually exits", async () => {
     const h = harness();
-    const child = new FakeChildProcess(h.timer);
+    const child = fakeChild(h.timer, 103);
     const signals: Array<NodeJS.Signals | number | undefined> = [];
     const kill = spyOn(child, "kill").mockImplementation((signal) => {
       signals.push(signal);
@@ -101,7 +113,7 @@ describe("host adb native helper shutdown", () => {
       const controller = new AbortController();
       await h.client(child).spawn(["shell", "getevent"], { signal: controller.signal });
       controller.abort();
-      await advance(terminateActiveAdbProcesses({ timer: h.timer, graceMs: 10 }), h.timer);
+      await advance(terminate(h.timer), h.timer);
       expect(signals).toEqual(["SIGTERM", "SIGTERM", "SIGKILL"]);
     } finally {
       kill.mockRestore();
@@ -109,7 +121,7 @@ describe("host adb native helper shutdown", () => {
   });
   test("one-shot exec uses live-child cleanup but writes no durable record", async () => {
     const h = harness();
-    const child = new FakeChildProcess(h.timer);
+    const child = fakeChild(h.timer, 104);
     let resolveResult: (() => void) | undefined;
     const result = new Promise<Awaited<ReturnType<FakeHostCommandExecutor["executeCommand"]>>>(
       (resolve) => {
@@ -135,12 +147,59 @@ describe("host adb native helper shutdown", () => {
       await Promise.resolve();
     }
     expect(h.store.list()).toEqual([]);
-    const cleanup = terminateActiveAdbProcesses({ timer: h.timer, graceMs: 10 });
+    const cleanup = terminate(h.timer);
     h.timer.advanceTime(0);
     resolveResult?.();
     await advance(cleanup, h.timer);
     await pending;
     expect(child.killed).toBe(true);
     expect(h.store.list()).toEqual([]);
+  });
+  test("never signals a child whose pid is the injected own pid", async () => {
+    const h = harness();
+    const self = fakeChild(h.timer, 105);
+    const sibling = fakeChild(h.timer, 106);
+    const signals: string[] = [];
+    const spies = [spyOn(self, "kill"), spyOn(sibling, "kill")];
+    for (const [index, child] of [self, sibling].entries()) {
+      spies[index]!.mockImplementation((signal) => {
+        signals.push(`${child.pid}:${signal}`);
+        child.simulateExit(null, typeof signal === "string" ? signal : null);
+        return true;
+      });
+    }
+    try {
+      await h.client(self).spawn(["shell", "getevent"]);
+      await h.client(sibling).spawn(["exec-out", "screenrecord"]);
+      const summary = await advance(terminate(h.timer, 105), h.timer);
+      expect(signals).toEqual(["106:SIGTERM"]);
+      // The own-pid child is skipped, not terminated or failed: it stays tracked.
+      expect(summary).toEqual({ terminated: 1, failed: 0 });
+    } finally {
+      for (const spy of spies) {
+        spy.mockRestore();
+      }
+      // Let the skipped child exit so the shared tracker does not carry it into later tests.
+      self.simulateExit(0);
+      h.timer.advanceTime(0);
+    }
+  });
+  test("defaults the own pid to the real process pid", async () => {
+    const h = harness();
+    const self = fakeChild(h.timer, process.pid);
+    const kill = spyOn(self, "kill");
+    try {
+      await h.client(self).spawn(["shell", "getevent"]);
+      const summary = await advance(
+        terminateActiveAdbProcesses({ timer: h.timer, graceMs: 10 }),
+        h.timer,
+      );
+      expect(kill).not.toHaveBeenCalled();
+      expect(summary).toEqual({ terminated: 0, failed: 0 });
+    } finally {
+      kill.mockRestore();
+      self.simulateExit(0);
+      h.timer.advanceTime(0);
+    }
   });
 });

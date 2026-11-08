@@ -8,6 +8,7 @@ import { ActionableError, toActionableError } from "../models/ActionableError";
 import type { BootedDevice } from "../models";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import type { FeatureFlagReader } from "../features/featureFlags/FeatureFlagService";
+import { featureFlagDisabledMessage } from "../features/featureFlags/featureFlagDisabledMessage";
 import {
   DeviceConditionRegistry,
   defaultDeviceConditionRegistry,
@@ -59,14 +60,11 @@ const OTHER_DEVICE_STATE_FIELDS: readonly (keyof DeviceConditionCallFields)[] = 
   "power",
 ];
 
-/**
- * The refusal for a deviceCondition call while the flag is off. It names both enable paths, so an
- * agent without the IDE plugin can turn the flag on (#16882).
- */
-export const DEVICE_CONDITION_FLAG_DISABLED_MESSAGE =
-  "deviceCondition is behind the 'device-condition' feature flag, which is disabled. " +
-  "Enable it with `auto-mobile --daemon set-feature-flag device-condition true` " +
-  "(or the IDE plugin's feature flag settings), then retry the call.";
+/** The refusal for a deviceCondition call while the flag is off (#16882, #16906). */
+export const DEVICE_CONDITION_FLAG_DISABLED_MESSAGE = featureFlagDisabledMessage(
+  "device-condition",
+  "deviceCondition",
+);
 
 /** Fail closed until the composition root registers the process's feature flags. */
 const FLAGS_UNREGISTERED: FeatureFlagReader = { isEnabled: () => false };

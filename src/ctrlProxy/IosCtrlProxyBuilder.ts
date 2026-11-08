@@ -567,6 +567,10 @@ export class IosCtrlProxyBuilder {
       return true;
     }
 
+    if (await this.artifactVerifier.needsExecutableRepair(platform)) {
+      return true;
+    }
+
     logger.info("[IOSCtrlProxyBuilder] CtrlProxy artifacts are up to date");
     return false;
   }

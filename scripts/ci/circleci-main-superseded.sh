@@ -88,7 +88,7 @@ for commit in ${commits}; do
   fi
   for pattern in ${patterns[@]+"${patterns[@]}"}; do
     # ERE, not PCRE: the macOS executor ships BSD grep. The mapping regexes use only
-    # the subset both dialects share (., .*, [^/]*, \.).
+    # the subset both dialects share (., .*, \.).
     if match="$(grep -E -m 1 -- "${pattern}" <<< "${changed}")"; then
       echo "circleci-main-superseded: ${commit} (before ${branch} tip ${tip}) also changes ${match} (${parameter}); skipping ${sha}." >&2
       exit 0

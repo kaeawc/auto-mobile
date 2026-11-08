@@ -322,6 +322,12 @@ describe("resolveApkUrl / resolveIpaUrl (EC1, EC2, EC3)", function () {
     );
   });
 
+  test("pins the iOS runner asset name the release publishes (#17216)", function () {
+    expect(resolveIpaUrl({ AUTOMOBILE_VERSION: "0.0.90" })).toBe(
+      "https://github.com/kaeawc/auto-mobile/releases/download/0.0.90/control-proxy.ipa",
+    );
+  });
+
   test("EC2: AUTOMOBILE_ASSET_BASE_URL mirrors the download host", function () {
     expect(resolveApkUrl({ AUTOMOBILE_ASSET_BASE_URL: "https://mirror.test/am" })).toBe(
       `https://mirror.test/am/${newest.version}/control-proxy-debug.apk`,

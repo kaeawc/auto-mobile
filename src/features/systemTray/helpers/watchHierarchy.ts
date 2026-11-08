@@ -1,7 +1,7 @@
 import type { Element, ViewHierarchyNode, ViewHierarchyResult } from "../../../models";
 import { DefaultElementParser } from "../../utility/ElementParser";
 import { isClickableElementProperties } from "../../utility/elementProperties";
-import { toSearchable } from "../../utility/SearchableNode";
+import { matchesCtrlProxyResourceId, toSearchable } from "../../utility/SearchableNode";
 import { ResolverElementSelector } from "../../utility/ResolverElementSelector";
 import { ignoreCasePolicy, INSPECT_INTENT } from "../../utility/SelectionPolicy";
 import { getHierarchyRoots, getNodeProperties } from "../notificationHints";
@@ -57,6 +57,24 @@ function wearOwnedNodes(hierarchy?: ViewHierarchyResult): Set<ViewHierarchyNode>
 export function isWearHierarchy(hierarchy?: ViewHierarchyResult): boolean {
   const owned = wearOwnedNodes(hierarchy);
   return !!hierarchy && getHierarchyRoots(hierarchy).some((root) => owned.has(root));
+}
+
+/** The Wear app list, where the open swipe does nothing (#17443). */
+export function isWatchAppList(hierarchy?: ViewHierarchyResult): boolean {
+  const owned = wearOwnedNodes(hierarchy);
+  return (
+    !!hierarchy &&
+    getHierarchyRoots(hierarchy)
+      .flatMap(watchNodes)
+      .some(
+        (node) =>
+          owned.has(node) &&
+          matchesCtrlProxyResourceId(
+            toSearchable(getNodeProperties(node) ?? {}).nativeId,
+            "appsList",
+          ),
+      )
+  );
 }
 
 const isTrayContainer = (node: ViewHierarchyNode): boolean => {

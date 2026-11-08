@@ -8,6 +8,7 @@ import {
   type DumpsysNotificationRecord,
 } from "./notificationDumpsys";
 import { readActiveNotificationKeysForApp } from "./helpers/listing";
+import { openWatchStream, readWatchFace } from "./helpers/watchFace";
 import { createNotificationUIDetector } from "./createNotificationUIDetector";
 import { getSystemTrayDependencies, resolveUniqueTrayAppLabel } from "./helpers/dependencies";
 import {
@@ -398,7 +399,7 @@ export class WatchSystemTray {
       args.action === "list" && args.awaitTimeout === undefined
         ? WATCH_LIST_SCAN_TIMEOUT_MS
         : timeout;
-    const initial = await this.read();
+    const initial = await readWatchFace(this.device, this.signal);
     const initiallyOpen = !!watchStreamRoot(initial.viewHierarchy);
     let result: SystemTrayOutcome | undefined;
     let restored: ObserveResult | undefined;
@@ -483,7 +484,7 @@ export class WatchSystemTray {
   private async toggle(action: "open" | "close", timeout: number): Promise<WatchSystemTrayResult> {
     const result =
       action === "open"
-        ? await ensureSystemTrayOpen(this.device, timeout, { signal: this.signal })
+        ? await openWatchStream(this.device, timeout, this.signal)
         : await ensureSystemTrayClosed(this.device, timeout, undefined, this.signal);
     const changed = "opened" in result ? result.opened : result.closed;
     const success = result.skipped || changed;

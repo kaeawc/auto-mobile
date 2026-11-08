@@ -15,7 +15,7 @@ import {
   ProgressCallback,
   type DisplayFenceDependencies,
 } from "./BaseVisualChange";
-import { BootedDevice, PressButtonResult } from "../../models";
+import { BootedDevice, type ObserveResult, PressButtonResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android";
@@ -47,6 +47,7 @@ import { resolveActionCall, type ActionCall } from "./ActionCall";
 import { isRotaryButton, RotaryInput, type RotaryButton } from "./RotaryInput";
 import type { DeviceTraits } from "../../utils/android-cmdline-tools/deviceTraits";
 import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
+import { retryBackOnTemplateHost, type TemplateHostBackTapClient } from "./carAppTemplateBack";
 
 /** iOS hardware buttons that only some devices have, pressed via XCUIDevice.Button (#14100). */
 const IOS_OPTIONAL_HARDWARE_BUTTONS: ReadonlySet<string> = new Set(["action", "camera"]);
@@ -67,6 +68,8 @@ export interface PressButtonCtrlProxyOverrides {
   systemActionClient?: Pick<AndroidCtrlProxyClient, "requestGlobalAction" | "supportsCommand">;
   /** Build-characteristics read the rotary gate uses (#14920). */
   deviceTraits?: DeviceTraits;
+  /** Coordinate tap for the Car App Library template Back fallback (#17498). */
+  templateBackTapClient?: TemplateHostBackTapClient;
 }
 
 /** `steps` only counts rotary detents; passing it with another button is a mistake worth refusing. */
@@ -130,6 +133,7 @@ export class PressButton extends BaseVisualChange {
   private readonly frameContextClient?: PressButtonCtrlProxyOverrides["frameContextClient"];
   private readonly systemActionClient?: PressButtonCtrlProxyOverrides["systemActionClient"];
   private readonly deviceTraits?: DeviceTraits;
+  private readonly templateBackTapClient?: TemplateHostBackTapClient;
   private readonly simctl: Pick<SimCtl, "executeCommandArgs">;
   private readonly holdRequest?: DispatchedRequestHold;
 
@@ -148,6 +152,7 @@ export class PressButton extends BaseVisualChange {
     this.frameContextClient = collaborators.frameContextClient;
     this.systemActionClient = collaborators.systemActionClient;
     this.deviceTraits = collaborators.deviceTraits;
+    this.templateBackTapClient = collaborators.templateBackTapClient;
   }
 
   private iosLockStateInvalidator?: IosLockStateInvalidator;
@@ -261,7 +266,9 @@ export class PressButton extends BaseVisualChange {
     let startedOnFallbackSpringboard = false;
     let pressSucceeded = false;
     let verifiedAlreadyOpen = false;
+    let prePress: ObserveResult | undefined;
     const result = await this.observedInteraction(async (previousObservation) => {
+      prePress = previousObservation;
       // A Home press on SpringBoard may change nothing (#14954); that is a no-op success.
       if (isIosHomePressOnSpringboard(this.device.platform, button, previousObservation)) {
         options.changeExpected = false;
@@ -300,7 +307,15 @@ export class PressButton extends BaseVisualChange {
       button,
       pressSucceeded,
     });
-    return result;
+    return retryBackOnTemplateHost(
+      result,
+      { platform: this.device.platform, button, pressSucceeded, prePress, options },
+      {
+        tapClient: () => this.templateBackTapClient ?? this.defaultCtrlProxyClient(),
+        observedInteraction: (block, interactionOptions) =>
+          this.observedInteraction<PressButtonResult>(block, interactionOptions),
+      },
+    );
   }
 
   private async pressRotary(

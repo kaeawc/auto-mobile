@@ -1,6 +1,6 @@
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../models/ViewHierarchyResult";
-import { nodeAttributes, nodeBounds } from "../../../models/ViewHierarchyResult";
-import { boundsKey, childrenOf } from "./iosSdkObservationMerge";
+import { childrenOf, nodeAttributes, nodeBounds } from "../../../models/ViewHierarchyResult";
+import { boundsKey } from "./iosSdkObservationMerge";
 import type { IosSdkWebElement, IosSdkWebSnapshot, IosSdkWebViewport } from "./sdkWebViewBridge";
 import { WEB_SNAPSHOT_ID_ATTRIBUTE } from "../../../utils/hierarchyFingerprint";
 import { VALUE_REDACTED_ATTRIBUTE } from "../../../models/Element";

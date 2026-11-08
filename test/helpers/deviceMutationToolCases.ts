@@ -119,6 +119,11 @@ export const DEVICE_MUTATION_TOOL_CASES: readonly {
     args: { appId: "com.example", action: { runJob: { jobId: 7 } } },
     kind: "opaque",
   },
+  {
+    name: "wearSurface",
+    args: { action: "addTile", component: "com.example/.Tile" },
+    kind: "opaque",
+  },
   { name: "launchApp", args: { appId: "com.example", clearAppData: true }, kind: "opaque" },
   { name: "measureStartup", args: { appId: "com.example", compilation: "speed" }, kind: "opaque" },
   {

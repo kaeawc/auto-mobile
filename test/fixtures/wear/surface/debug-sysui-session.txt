@@ -1,0 +1,4 @@
+$ am broadcast -a com.google.android.wearable.app.DEBUG_SYSUI --es operation show-tile --ei index 1
+Broadcast completed: result=1
+$ ... --es operation show-tile            -> result=3, data="An index is required."
+$ ... --es operation show-tile --ei index 99   -> result=1 (silently accepted, nothing shown)

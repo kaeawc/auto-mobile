@@ -1,0 +1,8 @@
+add-tile  (ok)                result=1, data="Index=[0]"
+add-tile  (unknown provider)  result=2, data="add-tile failed. java.lang.IllegalArgumentException: Requested tile provider does not exist."
+add-tile  (no component)      result=3, data="A component name is required."
+remove-tile (ok or absent)    result=1, data="Tile(s) removed."
+remove-tile (no component)    result=3, data="A component name is required."
+<any op unknown to the action> result=3, data="Unrecognized operation <op>"     (show-tile on DEBUG_SURFACE too)
+show-tile on DEBUG_SYSUI (ok, also index 99)  result=1   (no data line)
+show-tile on DEBUG_SYSUI (no index)           result=3, data="An index is required."

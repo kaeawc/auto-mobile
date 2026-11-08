@@ -1,0 +1,9 @@
+$ am broadcast -a com.google.android.wearable.app.DEBUG_SURFACE --es operation add-tile --ecn component <pkg>/<service>
+Broadcast completed: result=1, data="Index=[0]"
+$ ... --es operation add-tile --ecn component com.google.android.clockwork.sysui/x
+Broadcast completed: result=2, data="add-tile failed. java.lang.IllegalArgumentException: Requested tile provider does not exist."
+$ ... --es operation add-tile            -> result=3, data="A component name is required."
+$ ... --es operation remove-tile --ecn component <pkg>/<service>
+Broadcast completed: result=1, data="Tile(s) removed."
+$ ... --es operation bogus / list-tiles / get-tiles -> result=3, data="Unrecognized operation <op>"
+$ ... DEBUG_SURFACE --es operation show-tile ...  -> result=3, data="Unrecognized operation show-tile"

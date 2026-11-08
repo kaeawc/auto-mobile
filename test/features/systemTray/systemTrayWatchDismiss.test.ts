@@ -10,7 +10,8 @@ import {
   watchStreamRoot,
 } from "../../../src/features/systemTray/helpers/watchHierarchy";
 import { capturedLauncherHierarchy } from "../../helpers/capturedLauncherHierarchy";
-import { buildObserveResult } from "../../helpers/observeFixture";
+import { buildObserveResult, observeResultFromFixture } from "../../helpers/observeFixture";
+import launcherCapture from "../../fixtures/wear/systemtray/ctrlproxy-alert-shy-over-launcher.json";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -209,5 +210,115 @@ describe("Wear OS 7 dismiss targets the requested card with several stacked", ()
     expect(result).toMatchObject({ isError: false, payload: { dismissedCount: 1 } });
     const swipes = adb.getExecutedCommands().filter((command) => command.includes("input swipe"));
     expect(swipes.filter((command) => command.endsWith(" 300"))).toEqual([SWIPE_BRAVO]);
+  });
+});
+
+// Captured with CtrlProxy on a Wear OS 7 round emulator (API 37, 384x384): the app list
+// (AllAppsLauncherActivity, `appsList`), which Back opens from the watch face.
+const appList = observeResultFromFixture(
+  { updatedAt: 0, systemInsets: { top: 0, right: 0, bottom: 0, left: 0 }, ...launcherCapture },
+  "alert-shy-over-launcher",
+);
+// A fake third-party app in front, not a captured hierarchy.
+const APP = "dev.example.accept";
+const app: ObserveResult = {
+  ...closed,
+  viewHierarchy: { packageName: APP, hierarchy: { node: { $: { bounds: "[0,0][384,384]" } } } },
+  activeWindow: { appId: APP, activityName: `${APP}.MainActivity`, layoutSeqSum: 0 },
+};
+const BACK = "shell input keyevent 4";
+const HOME = "shell input keyevent KEYCODE_HOME";
+const OPEN = "shell input swipe 192 370 192 119 900";
+/**
+ * Reads after the X tap up to and including the one cleanup decides from that the stream is still
+ * open: the dismissal's confirmation read, then cleanup's first read.
+ */
+const READS_UNTIL_CLEANUP_DECIDES = 2;
+
+type Surface = "app" | "face" | "stream" | "revealed" | "emptied" | "appList";
+const surfaces = (): Record<Surface, ObserveResult> => ({
+  app,
+  face: closed,
+  stream: single,
+  revealed,
+  emptied,
+  appList,
+});
+
+/**
+ * A watch with an app in front and one card posted. After its last card is removed, the stream
+ * closes on its own once `selfCloseAfter` reads have seen it emptied; the close lands before the
+ * next read or key. Back closes a showing stream onto the watch face, and on the face opens the
+ * app list, as on a device.
+ */
+function dismissFromApp(selfCloseAfter: number) {
+  let surface: Surface = "app";
+  let handled = 0;
+  let readsSinceTap = 0;
+  const closeIfDue = () => {
+    if (surface === "emptied" && readsSinceTap >= selfCloseAfter) {
+      surface = "face";
+    }
+  };
+  const press = (command: string) => {
+    closeIfDue();
+    const next: Partial<Record<string, Partial<Record<Surface, Surface>>>> = {
+      [HOME]: { app: "face" },
+      [OPEN]: { face: "stream" },
+      [SWIPE]: { stream: "revealed" },
+      [TAP_X]: { revealed: "emptied" },
+      [BACK]: { face: "appList", stream: "face", revealed: "face", emptied: "face" },
+    };
+    surface = next[command]?.[surface] ?? surface;
+    if (command === TAP_X) {
+      readsSinceTap = 0;
+    }
+  };
+  return (commands: string[]): ObserveResult => {
+    commands.slice(handled).forEach(press);
+    handled = commands.length;
+    closeIfDue();
+    readsSinceTap += 1;
+    return surfaces()[surface];
+  };
+}
+
+describe("Wear dismiss started from inside an app restores the watch face (#17546)", () => {
+  const dismiss = (tray: SystemTray) =>
+    tray.execute({ action: "dismiss", notification: { title: "Zebra" }, awaitTimeout: 500 });
+
+  test("closes a stream that is still showing with one Back onto the watch face", async () => {
+    const { adb, tray } = setup(dismissFromApp(Number.POSITIVE_INFINITY));
+    const result = await dismiss(tray);
+    expect(result).toMatchObject({ isError: false, payload: { dismissedCount: 1, success: true } });
+    expect(result.payload.observation).toBe(closed);
+    const commands = adb.getExecutedCommands();
+    expect(commands[0]).toBe(HOME);
+    expect(commands.filter((command) => command === BACK)).toHaveLength(1);
+  });
+
+  test("does not press Back when the stream closed between the last read and the Back", async () => {
+    const { adb, tray } = setup(dismissFromApp(READS_UNTIL_CLEANUP_DECIDES));
+    const result = await dismiss(tray);
+    expect(result).toMatchObject({ isError: false, payload: { dismissedCount: 1, success: true } });
+    expect(result.payload.observation).toBe(closed);
+    expect(adb.getExecutedCommands()).not.toContain(BACK);
+  });
+
+  test("reports dismissal_unconfirmed when cleanup leaves the watch on the app list", async () => {
+    // A Back that lands on the watch face anyway (the close finished after the fresh read).
+    const model = dismissFromApp(Number.POSITIVE_INFINITY);
+    const { adb, tray } = setup((commands) => {
+      const shown = model(commands);
+      return commands.includes(BACK) ? appList : shown;
+    });
+    const result = await dismiss(tray);
+    expect(result).toMatchObject({
+      isError: true,
+      payload: { code: "dismissal_unconfirmed", dismissedCount: 1, success: false },
+    });
+    expect(String(result.payload.message)).toContain("left the watch on the app list");
+    expect(result.payload.observation).toBe(appList);
+    expect(adb.getExecutedCommands().filter((command) => command === BACK)).toHaveLength(1);
   });
 });

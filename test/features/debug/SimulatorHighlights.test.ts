@@ -2,7 +2,11 @@ import { createExecResult } from "../../../src/utils/execResult";
 import { describe, expect, test, spyOn } from "bun:test";
 import { logger } from "../../../src/utils/logger";
 import type { ChildProcess } from "node:child_process";
-import { SimulatorHighlights } from "../../../src/features/debug/SimulatorHighlights";
+import {
+  resolveHighlightSourceScale,
+  SimulatorHighlights,
+} from "../../../src/features/debug/SimulatorHighlights";
+import type { ScreenScaleMetadata } from "../../../src/models/ScreenScaleMetadata";
 import { DefaultHostCommandExecutor } from "../../../src/utils/HostCommandExecutor";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -37,20 +41,61 @@ class Executor extends DefaultHostCommandExecutor {
     return child;
   }
 }
-function setup() {
+function setup(screenScale?: () => ScreenScaleMetadata | null) {
   const executor = new Executor();
   const client = new SimulatorHighlights(device, {
     executor,
     timer: executor.timer,
     resolveHelper: async () => "/helper",
+    screenScale,
   });
   return { executor, client };
 }
+// A 3x device whose screen is 200x300 pt and whose screenshot is 600x900 px (#17354).
+const threeX: ScreenScaleMetadata = { nativeScale: 3, pixelWidth: 600, pixelHeight: 900 };
+const boundsWithSource = (sourceWidth: number, sourceHeight: number) => ({
+  x: 1,
+  y: 2,
+  width: 20,
+  height: 30,
+  sourceWidth,
+  sourceHeight,
+});
 async function spawned() {
   for (let i = 0; i < 5; i++) {
     await Promise.resolve();
   }
 }
+
+describe("resolveHighlightSourceScale", () => {
+  test("reads a screenshot-pixel source as the device scale", () => {
+    expect(resolveHighlightSourceScale(boundsWithSource(600, 900), threeX)).toBe(3);
+  });
+  test("reads a point source as one unit per point", () => {
+    expect(resolveHighlightSourceScale(boundsWithSource(200, 300), threeX)).toBe(1);
+  });
+  test("matches either orientation and one unit of rounding", () => {
+    expect(resolveHighlightSourceScale(boundsWithSource(901, 599), threeX)).toBe(3);
+    expect(resolveHighlightSourceScale(boundsWithSource(300, 200), threeX)).toBe(1);
+  });
+  test("keeps a fractional native scale as reported", () => {
+    const zoomed = { nativeScale: 2.88, pixelWidth: 1080, pixelHeight: 2340 };
+    expect(resolveHighlightSourceScale(boundsWithSource(1080, 2340), zoomed)).toBe(2.88);
+    expect(resolveHighlightSourceScale(boundsWithSource(375, 813), zoomed)).toBe(1);
+  });
+  test("leaves the scale unset when it cannot tell", () => {
+    expect(resolveHighlightSourceScale(boundsWithSource(600, 900), null)).toBeUndefined();
+    expect(resolveHighlightSourceScale(boundsWithSource(1000, 1000), threeX)).toBeUndefined();
+    expect(
+      resolveHighlightSourceScale({ x: 1, y: 2, width: 20, height: 30 }, threeX),
+    ).toBeUndefined();
+  });
+  test("never overrides a scale the bounds already carry", () => {
+    expect(
+      resolveHighlightSourceScale({ ...boundsWithSource(600, 900), sourceScale: 1 }, threeX),
+    ).toBeUndefined();
+  });
+});
 
 describe("SimulatorHighlights", () => {
   test("warns on helper resolution failure and preserves its typed result", async () => {
@@ -176,6 +221,38 @@ describe("SimulatorHighlights", () => {
     );
     expect((await second).success).toBe(true);
     expect(executor.children[0].killed).toBe(false);
+    executor.children[0].emit("exit", 0);
+  });
+  test("sends the device scale with screenshot-pixel bounds", async () => {
+    const { client, executor } = setup(() => threeX);
+    void client.requestAddHighlight("px", {
+      type: "circle",
+      bounds: boundsWithSource(600, 900),
+    });
+    await spawned();
+    expect(JSON.parse(executor.args[3]).shape.bounds).toEqual({
+      ...boundsWithSource(600, 900),
+      sourceScale: 3,
+    });
+    executor.children[0].emit("exit", 0);
+  });
+  test("keeps the bounds unchanged when the scale is unknown", async () => {
+    const { client, executor } = setup(() => null);
+    void client.requestAddHighlight("legacy", shape);
+    await spawned();
+    expect(JSON.parse(executor.args[3]).shape).toEqual(shape);
+    expect(JSON.parse(executor.args[3]).shape.bounds).not.toHaveProperty("sourceScale");
+    executor.children[0].emit("exit", 0);
+  });
+  test("forwards a scale the selector path already set", async () => {
+    const { client, executor } = setup(() => threeX);
+    const points: HighlightShape = {
+      type: "circle",
+      bounds: { ...boundsWithSource(600, 900), sourceScale: 1 },
+    };
+    void client.requestAddHighlight("selector", points);
+    await spawned();
+    expect(JSON.parse(executor.args[3]).shape).toEqual(points);
     executor.children[0].emit("exit", 0);
   });
 });

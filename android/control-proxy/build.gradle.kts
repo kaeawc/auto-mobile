@@ -1,6 +1,7 @@
 import com.android.build.api.artifact.ScopedArtifact
 import com.android.build.api.artifact.SingleArtifact
 import com.android.build.api.variant.ScopedArtifacts
+import dev.jasonpearson.automobile.buildlogic.baselineprofile.VerifyApkBaselineProfileTask
 import dev.jasonpearson.automobile.buildlogic.r8.VerifyR8KeptClassesTask
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.tasks.PathSensitivity
@@ -13,6 +14,8 @@ plugins {
   id("automobile.android-application")
   alias(libs.plugins.kotlin.serialization)
   alias(libs.plugins.compose.compiler)
+  // Packages the generated baseline profile from :control-proxy-baselineprofile (#17417).
+  id("automobile.android-baseline-profile")
 }
 
 val minifyRelease =
@@ -62,6 +65,26 @@ android {
 
 androidComponents {
   onVariants(selector().withBuildType("release")) { variant ->
+    // The release APK must ship a profile ART applies on install that covers CtrlProxy's own
+    // entry points, not only the rules its libraries contribute (#17417).
+    val verifyProfile =
+      tasks.register<VerifyApkBaselineProfileTask>("verifyReleaseBaselineProfile") {
+        apkDirectory.set(variant.artifacts.get(SingleArtifact.APK))
+        requiredClasses.set(
+          listOf(
+              "CtrlProxy",
+              "MainActivity",
+              "ime/CtrlProxyIme",
+              "prototype/SavedPrototypeActivity",
+              "AutoMobileDeviceAdminReceiver",
+            )
+            .map { "Ldev/jasonpearson/automobile/ctrlproxy/$it;" },
+        )
+        reportFile.set(layout.buildDirectory.file("reports/baseline-profile/release.txt"))
+      }
+    tasks.matching { it.name == "assembleRelease" }.configureEach { dependsOn(verifyProfile) }
+    // Also check APKs packaged for installRelease without assembleRelease.
+    tasks.matching { it.name == "packageRelease" }.configureEach { finalizedBy(verifyProfile) }
     if (minifyRelease.get()) {
       val verify =
         tasks.register<VerifyR8KeptClassesTask>("verifyReleaseR8KeptClasses") {
@@ -101,6 +124,10 @@ kotlin {
 dependencies {
   implementation(libs.androidx.core)
   implementation(libs.androidx.window)
+  // Applies the packaged baseline profile on sideloaded installs (adb install), which skip the
+  // Play Store's profile installation.
+  implementation(libs.androidx.profileinstaller)
+  baselineProfile(projects.controlProxyBaselineprofile)
 
   // AutoMobile SDK for navigation event tracking
   implementation(projects.autoMobileSdk)

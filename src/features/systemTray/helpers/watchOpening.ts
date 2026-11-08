@@ -3,6 +3,7 @@ import { logger } from "../../../utils/logger";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../../utils/toolUtils";
 import { getSystemTrayDependencies } from "./dependencies";
 import { ensureSystemTrayOpen, observeSystemTray, sleep } from "./runtime";
+import { returnToWatchFace } from "./watchFace";
 import { watchAlert } from "./watchHierarchy";
 
 const ALERT_POLL_MS = 250;
@@ -66,12 +67,14 @@ export async function prepareWatchSystemTray(
   signal?: AbortSignal,
 ) {
   const deadline = getSystemTrayDependencies().timer.now() + timeout;
-  const initial = await dismissWatchAlert(
+  // A covering alert hides whatever is under it, so dismiss it before leaving an app (#17443).
+  const dismissed = await dismissWatchAlert(
     device,
     await readWatch(device, signal),
     deadline,
     signal,
   );
+  const initial = await returnToWatchFace(device, dismissed, signal);
   return {
     initial,
     remainingTimeout: Math.max(0, deadline - getSystemTrayDependencies().timer.now()),

@@ -778,23 +778,35 @@ describe("watch notification alerts", () => {
     },
   );
 
-  test.each([top, closed, shyAlert])(
-    "does not settle without a full alert: %#",
-    async (initial) => {
-      const { adb, timer } = setup(() => initial);
-      const prepared = await prepareWatchSystemTray(watch, 2000);
-      expect(prepared.initial).toEqual(initial);
-      expect(prepared.remainingTimeout).toBe(2000);
-      expect(timer.getSleepHistory()).toEqual([]);
-      expect(adb.getExecutedCommands()).toEqual([]);
-    },
-  );
+  test.each([top, closed])("does not settle without a full alert: %#", async (initial) => {
+    const { adb, timer } = setup(() => initial);
+    const prepared = await prepareWatchSystemTray(watch, 2000);
+    expect(prepared.initial).toEqual(initial);
+    expect(prepared.remainingTimeout).toBe(2000);
+    expect(timer.getSleepHistory()).toEqual([]);
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
 
-  test("open does not press Back on a shy alert over the launcher", async () => {
-    const { tray, adb } = setup((commands) => (commands.length === 0 ? shyAlert : top));
-    const result = await tray.execute({ action: "open", awaitTimeout: 500 });
+  test("a shy alert over the launcher only leaves the app list, without the alert settle", async () => {
+    const { adb, timer } = setup((commands) => (commands.length === 0 ? shyAlert : closed));
+    const prepared = await prepareWatchSystemTray(watch, 2000);
+    expect(prepared.initial).toEqual(closed);
+    // The one Back closes the app list (#17443); a shy alert is never dismissed itself.
+    expect(adb.getExecutedCommands()).toEqual([BACK]);
+    expect(timer.getSleepHistory()).not.toContain(1500);
+  });
+
+  test("open from a shy alert over the launcher presses Back once for the app list", async () => {
+    const { tray, adb, timer } = setup((commands) => {
+      if (commands.length === 0) {
+        return shyAlert;
+      }
+      return commands.some((command) => command.startsWith("shell input swipe")) ? top : closed;
+    });
+    const result = await tray.execute({ action: "open", awaitTimeout: 2000 });
     expect(result.payload.opened).toBe(true);
-    expect(adb.getExecutedCommands()).not.toContain(BACK);
+    expect(adb.getExecutedCommands().filter((command) => command === BACK)).toHaveLength(1);
+    expect(timer.getSleepHistory()).not.toContain(1500);
   });
 
   test.each(["find", "open"] as const)(

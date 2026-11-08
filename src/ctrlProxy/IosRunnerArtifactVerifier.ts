@@ -1032,4 +1032,44 @@ export class IosRunnerArtifactVerifier {
 
     return false;
   }
+
+  /**
+   * True when an extracted runner executable has no owner exec bit (#17216).
+   * Bundles extracted before the mode fix were written as 0o666 and cannot be
+   * launched, yet their checksum and metadata still match, so re-extract them.
+   * Missing executables are left to the other freshness checks.
+   */
+  public async needsExecutableRepair(platform: IOSCtrlProxyPlatform | undefined): Promise<boolean> {
+    if (process.platform === "win32") {
+      return false;
+    }
+    const platforms: IOSCtrlProxyPlatform[] = platform ? [platform] : ["simulator", "device"];
+    for (const candidate of platforms) {
+      const buildPath = await this.host.getBuildProductsPath(candidate);
+      if (!buildPath) {
+        continue;
+      }
+      const runnerApp = path.join(buildPath, "CtrlProxyUITests-Runner.app");
+      for (const executable of [
+        path.join(runnerApp, "CtrlProxyUITests-Runner"),
+        path.join(runnerApp, "PlugIns", "CtrlProxyUITests.xctest", "CtrlProxyUITests"),
+      ]) {
+        const mode = await fs.stat(executable).then(
+          (stats) => stats.mode,
+          (error: unknown) => {
+            // Absent executables are handled by the artifact/hash checks, not here.
+            logger.debug(`CtrlProxy runner exec-bit probe failed: ${errorMessage(error)}`);
+            return null;
+          },
+        );
+        if (mode !== null && (mode & 0o100) === 0) {
+          logger.info(
+            `[IOSCtrlProxyBuilder] CtrlProxy runner executable is not executable (${executable}), need re-extract`,
+          );
+          return true;
+        }
+      }
+    }
+    return false;
+  }
 }

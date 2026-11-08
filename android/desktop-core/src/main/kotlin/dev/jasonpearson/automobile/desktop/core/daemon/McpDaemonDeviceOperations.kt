@@ -66,12 +66,14 @@ internal class McpDaemonDeviceOperations(private val owner: () -> McpDaemonClien
           success = false,
           message = e.message ?: "Failed to set active device",
           refusal = classifySetActiveDeviceRefusal(json, response),
+          holder = heldElsewhereHolderOf(json, response),
         )
       } catch (e: IllegalArgumentException) {
         SetActiveDeviceResult(
           success = false,
           message = e.message ?: "Failed to set active device",
           refusal = classifySetActiveDeviceRefusal(json, response),
+          holder = heldElsewhereHolderOf(json, response),
         )
       }
     }

@@ -108,6 +108,52 @@ final class DeviceHubDisplayLocatorTests: XCTestCase {
         ))
     }
 
+    func testDaemonScaleReadsSmallThreeTimesSourceAsPixels() throws {
+        // A 200x300 pt display drawn at zoom 1: the device is the display plus a 20.5 pt bezel.
+        let bounds = CGRect(x: 100, y: 100, width: 241, height: 341)
+        let points = try XCTUnwrap(DeviceHubDisplayLocator.displayRect(
+            deviceBounds: bounds,
+            sourceSize: CGSize(width: 200, height: 300),
+            sourceScale: 1
+        ))
+        assertRect(points, CGRect(x: 120.5, y: 120.5, width: 200, height: 300))
+        // Its 3x screenshot is 600x900 px, under the 1000 pt long edge the heuristic accepts as 1x.
+        let pixels = try XCTUnwrap(DeviceHubDisplayLocator.displayRect(
+            deviceBounds: bounds,
+            sourceSize: CGSize(width: 600, height: 900),
+            sourceScale: 3
+        ))
+        assertRect(pixels, points)
+        let guessed = try XCTUnwrap(DeviceHubDisplayLocator.displayRect(
+            deviceBounds: bounds,
+            sourceSize: CGSize(width: 600, height: 900)
+        ))
+        XCTAssertGreaterThan(abs(guessed.width - points.width), 1)
+    }
+
+    func testDaemonScaleOfOneKeepsLongPointSource() {
+        // A 1366 pt long edge is points when the daemon says so; the heuristic would halve it.
+        let size = CGSize(width: 1024, height: 1366)
+        XCTAssertEqual(DeviceHubDisplayLocator.pointSize(of: size, sourceScale: 1), size)
+        XCTAssertEqual(DeviceHubDisplayLocator.pointSize(of: size), CGSize(width: 512, height: 683))
+    }
+
+    func testFractionalDaemonScaleIsUsedAsIs() {
+        let size = DeviceHubDisplayLocator.pointSize(of: CGSize(width: 1080, height: 2340), sourceScale: 2.5)
+        XCTAssertEqual(size, CGSize(width: 432, height: 936))
+    }
+
+    func testMissingOrInvalidDaemonScaleFallsBackToHeuristic() {
+        let pixels = CGSize(width: 1398, height: 2034)
+        let points = CGSize(width: 466, height: 678)
+        XCTAssertEqual(DeviceHubDisplayLocator.pointSize(of: pixels), points)
+        XCTAssertEqual(DeviceHubDisplayLocator.pointSize(of: pixels, sourceScale: nil), points)
+        XCTAssertEqual(DeviceHubDisplayLocator.pointSize(of: pixels, sourceScale: 0), points)
+        XCTAssertEqual(DeviceHubDisplayLocator.pointSize(of: pixels, sourceScale: -3), points)
+        XCTAssertEqual(DeviceHubDisplayLocator.pointSize(of: pixels, sourceScale: .infinity), points)
+        XCTAssertEqual(DeviceHubDisplayLocator.pointSize(of: pixels, sourceScale: .nan), points)
+    }
+
     func testDrawnBoundsIgnoresPixelsOutsideTheRegion() throws {
         // 2 pixels per point on a 20x10 point window; the region is the right half.
         var buffer = Buffer(width: 40, height: 20, background: (30, 30, 40))

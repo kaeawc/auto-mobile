@@ -155,8 +155,10 @@ flagged as below).
   `appId`; otherwise, or when `title` or `body` narrows it, it dismisses matching cards one by
   one.
 
-`open` needs the watch face: from the app launcher, the stream does not open and the action
-fails; go back to the watch face first.
+The stream opens only from the watch face, so every action that opens it first leaves the app list
+(with `back`) or an app in front (with `home`), and the stream is closed back onto the watch face
+afterwards. If the watch face does not come back, the action fails without the open gesture; press
+the watch's side button and retry.
 
 A tap target whose centre falls outside the round display is refused; scroll it into view.
 Every action captures the configured action screenshot or accessibility audit from the final

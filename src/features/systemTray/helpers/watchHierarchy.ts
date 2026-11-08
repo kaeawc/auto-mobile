@@ -129,6 +129,24 @@ export function watchAlert(hierarchy?: ViewHierarchyResult): WatchAlert | undefi
   return shy ? { kind: "shy", texts: [] } : undefined;
 }
 
+/** The Wear app list, where the open swipe does nothing (#17443). */
+export function isWatchAppList(hierarchy?: ViewHierarchyResult): boolean {
+  const owned = wearOwnedNodes(hierarchy);
+  return (
+    !!hierarchy &&
+    getHierarchyRoots(hierarchy)
+      .flatMap(watchNodes)
+      .some(
+        (node) =>
+          owned.has(node) &&
+          matchesCtrlProxyResourceId(
+            toSearchable(getNodeProperties(node) ?? {}).nativeId,
+            "appsList",
+          ),
+      )
+  );
+}
+
 const isTrayContainer = (node: ViewHierarchyNode): boolean => {
   const searchable = toSearchable(getNodeProperties(node) ?? {});
   return (

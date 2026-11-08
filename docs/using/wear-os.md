@@ -158,7 +158,9 @@ flagged as below).
 The stream opens only from the watch face, so every action that opens it first leaves the app list
 (with `back`) or an app in front (with `home`), and the stream is closed back onto the watch face
 afterwards. If the watch face does not come back, the action fails without the open gesture; press
-the watch's side button and retry.
+the watch's side button and retry. If closing the stream after `dismiss` or `clearAll` leaves the
+app list in front instead of the watch face, the action reports `dismissal_unconfirmed` with its
+`dismissedCount`; press `back` to return to the watch face.
 
 A tap target whose centre falls outside the round display is refused; scroll it into view.
 Every action captures the configured action screenshot or accessibility audit from the final

@@ -9,6 +9,7 @@ import {
 } from "./notificationDumpsys";
 import { prepareWatchSystemTray, openWatchSystemTray } from "./helpers/watchOpening";
 import { readActiveNotificationKeysForApp } from "./helpers/listing";
+import { restoreWatchStream, unrestoredDismissal } from "./helpers/watchRestore";
 import { createNotificationUIDetector } from "./createNotificationUIDetector";
 import { getSystemTrayDependencies, resolveUniqueTrayAppLabel } from "./helpers/dependencies";
 import {
@@ -29,7 +30,6 @@ import {
   watchStreamRoot,
   watchStreamScroll,
   watchHasExpandedCard,
-  isWearHierarchy,
   type WatchNotification,
 } from "./helpers/watchHierarchy";
 import type { SystemTrayOutcome } from "./SystemTray";
@@ -40,7 +40,6 @@ const MAX_STREAM_PAGES = 20;
 const POLL_MS = 250;
 const MAX_SETTLE_READS = 6;
 const SETTLE_MS = 500;
-const MAX_CLOSE_PRESSES = 3;
 // A loaded watch can take seconds to draw a scroll, and an unmoved page ends the scan.
 const MAX_UNMOVED_RETRIES = 6;
 /** A swipe scrolls about half the screen; a card lower than this cannot have scrolled out of view. */
@@ -55,7 +54,6 @@ const SHIFT_MAX = 0.7;
 const SHIFT_SKEW = 0.03;
 /** The last swipe stops where the stream ends, so it can move the cards by far less than a swipe. */
 const END_SHIFT_MIN = 0.05;
-const CLOSE_POLLS = 8;
 const REWIND_WHEEL_STEP = 3;
 const MIN_RESTORE_MS = 10_000;
 
@@ -427,7 +425,13 @@ export class WatchSystemTray {
       );
     } finally {
       const controller = new AbortController();
-      restored = await raceWithDeadline(() => this.restore(initiallyOpen, controller.signal), {
+      const restore = () =>
+        restoreWatchStream(
+          this.device,
+          { initiallyOpen, expandedByUs: this.expandedByUs },
+          controller.signal,
+        );
+      restored = await raceWithDeadline(restore, {
         timer: getSystemTrayDependencies().timer,
         // Restoring waits for the stream's slide-out, so a short request deadline must not cut it.
         timeoutMs: Math.max(timeout, MIN_RESTORE_MS),
@@ -438,7 +442,7 @@ export class WatchSystemTray {
         result.payload.observation = restored;
       }
     }
-    return { outcome: result, observation: restored };
+    return { outcome: unrestoredDismissal(args, result, initial, restored), observation: restored };
   }
 
   /** Rewinds the stream to its top, then runs the scan from there. */
@@ -499,82 +503,6 @@ export class WatchSystemTray {
       ),
       observation: result.observation,
     };
-  }
-
-  private async restore(initiallyOpen: boolean, signal: AbortSignal): Promise<ObserveResult> {
-    // Cleanup deliberately ignores request cancellation, as on the phone clear path.
-    let current = await this.readWithoutCancellation(signal);
-    if (this.expandedByUs && watchHasExpandedCard(current.viewHierarchy)) {
-      current = await this.collapseCard(current, signal);
-    } else if (
-      this.expandedByUs &&
-      !watchStreamRoot(current.viewHierarchy) &&
-      isWearHierarchy(current.viewHierarchy)
-    ) {
-      await this.commandWithoutCancellation("shell input keyevent 4", signal);
-      current = await this.readWithoutCancellation(signal);
-    }
-    if (!initiallyOpen && watchStreamRoot(current.viewHierarchy)) {
-      current = await this.closeStream(current, signal);
-    }
-    return current;
-  }
-
-  /** Back collapses a card expanded in place; wait for it, without closing the stream twice. */
-  private async collapseCard(first: ObserveResult, signal: AbortSignal): Promise<ObserveResult> {
-    await this.commandWithoutCancellation("shell input keyevent 4", signal);
-    let current = first;
-    for (let poll = 0; poll < CLOSE_POLLS; poll++) {
-      current = await this.readWithoutCancellation(signal);
-      if (!watchStreamRoot(current.viewHierarchy) || !watchHasExpandedCard(current.viewHierarchy)) {
-        return current;
-      }
-      await sleep(POLL_MS, signal);
-    }
-    return current;
-  }
-
-  /**
-   * Press Back and wait for the stream to be gone. It slides out over a second or so, so a read
-   * straight after Back still sees it (#17317). A second Back is pressed only while a card is
-   * still expanded: on the watch face Back opens the app launcher, so an impatient repeat would
-   * leave the watch somewhere the next request cannot open the stream from.
-   */
-  private async closeStream(first: ObserveResult, signal: AbortSignal): Promise<ObserveResult> {
-    let current = first;
-    for (let press = 0; press < MAX_CLOSE_PRESSES; press++) {
-      await this.commandWithoutCancellation("shell input keyevent 4", signal);
-      for (let poll = 0; poll < CLOSE_POLLS; poll++) {
-        current = await this.readWithoutCancellation(signal);
-        if (!watchStreamRoot(current.viewHierarchy)) {
-          return current;
-        }
-        await sleep(POLL_MS, signal);
-      }
-      if (!watchHasExpandedCard(current.viewHierarchy)) {
-        break;
-      }
-    }
-    throw new ActionableError(
-      "Watch notification stream did not close after returning to the previous screen.",
-    );
-  }
-
-  private readWithoutCancellation(signal: AbortSignal): Promise<ObserveResult> {
-    return observeSystemTray(
-      getSystemTrayDependencies().observeScreenFactory(this.device),
-      0,
-      signal,
-      true,
-    );
-  }
-
-  private commandWithoutCancellation(command: string, signal: AbortSignal): Promise<unknown> {
-    throwIfAborted(signal);
-    return awaitWhileRequestIsLive(
-      getSystemTrayDependencies().adbFactory(this.device).executeCommand(command, { signal }),
-      signal,
-    );
   }
 
   private async run(

@@ -3,6 +3,23 @@ import Foundation
 import XCTest
 
 final class VisionCommandPolicyTests: XCTestCase {
+    func testHierarchyRelaunchRequiresTheAXDisabledMarker() {
+        for description in [
+            "Error getting main window kAXErrorAPIDisabled",
+            #"Error Domain=com.apple.dt.xctest.automation-support.error Code=8 "Error getting main window kAXErrorAPIDisabled""#,
+        ] {
+            XCTAssertTrue(VisionCommandPolicy.shouldRelaunchForSnapshotError(description), description)
+        }
+        for description in [
+            "",
+            "element not found",
+            "Error getting main window kAXErrorCannotComplete",
+            #"Error Domain=com.apple.dt.xctest.automation-support.error Code=8 "Other failure""#,
+        ] {
+            XCTAssertFalse(VisionCommandPolicy.shouldRelaunchForSnapshotError(description), description)
+        }
+    }
+
     func testOnlyWindowHierarchyIdentifierTapAndAppendTextAreSupported() {
         XCTAssertEqual(VisionCommandPolicy.supportedCommands, [
             "request_hierarchy", "request_tap_element", "request_append_text",

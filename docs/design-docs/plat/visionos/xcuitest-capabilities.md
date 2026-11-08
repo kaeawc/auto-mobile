@@ -59,6 +59,20 @@ such as Settings or Safari took about 8 s, so a hierarchy-based readiness check
 timed out on every attempt (#17199). Hierarchy requests default to a 20 s budget;
 taps and text input keep 5 s.
 
+A target app process launched before the runner can fail `snapshot()` with
+`Error getting main window kAXErrorAPIDisabled` even while Settings and other
+apps on the same simulator remain accessible. For `request_hierarchy` only,
+the runner matches that marker in the error description, terminates and launches
+the target app once, then retries the snapshot once (#17448). Relaunching can
+reset the app's transient state. Other errors do not trigger a relaunch; if the
+retry fails, its error is returned.
+
+A runner error containing `kAXErrorAPIDisabled` maps to
+`accessibility_api_disabled`, with the runner's error preserved as `cause`.
+It means this app's accessibility window could not be read even after relaunch,
+not that accessibility is unavailable across the simulator. Other apps may
+still work; use a screenshot from `simctl` to see the affected app.
+
 ## Decision
 
 **GO** for #16852 on the window-app scope: hierarchy with focus, element taps in

@@ -185,7 +185,7 @@ export class WebSocketVisionosRunnerClient implements VisionosRunnerClient {
       if (runnerError.includes("kAXErrorAPIDisabled")) {
         pending.reject(
           new VisionosRunnerError(
-            "The visionOS simulator's accessibility API is disabled, so no hierarchy can be read for the built-in app. Re-create the Apple Vision Pro simulator or boot it with accessibility enabled, then observe again.",
+            "The visionOS runner could not read this app's accessibility window even after relaunching the app. Other apps on the simulator may still work. Use a screenshot (simctl/screenshot) to see the app instead.",
             "accessibility_api_disabled",
             { cause: runnerError },
           ),

@@ -164,6 +164,17 @@ function replayRequestDeadline(): Pick<NavigateToOptions, "requestDeadline"> {
   return Object.keys(deadline).length > 0 ? { requestDeadline: deadline } : {};
 }
 
+/**
+ * `explore` records into the navigation graph that `navigateTo` and `getNavigationGraph` read, so
+ * it shares their `--embedded-sdk` gate on every platform; tvOS drives the runner, not the SDK,
+ * which makes the generic reason misleading there (#17528).
+ */
+export const EXPLORE_EMBEDDED_SDK_GATE_HINT =
+  "explore needs this flag on every platform, Apple TV (tvOS) included, even though the app " +
+  "under test does not embed the SDK there. Add --embedded-sdk to the AutoMobile MCP server " +
+  "command and reconnect (a running daemon started without it is restarted with it), then enable " +
+  "explore for the session with setToolEnabled";
+
 export function createNavigateToHandler({
   navigationManagerFactory = getNavigationManager,
   navigateToFactory = (device, args) =>
@@ -446,6 +457,7 @@ export function registerNavigationTools({
       defaultEnabled: false,
       supportsProgress: true,
       embeddedSdkOnly: true,
+      embeddedSdkGateHint: EXPLORE_EMBEDDED_SDK_GATE_HINT,
       outputSchema: exploreResultSchema,
     },
   );

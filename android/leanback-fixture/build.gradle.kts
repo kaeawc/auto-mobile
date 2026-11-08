@@ -13,11 +13,14 @@ android {
     applicationId = "dev.jasonpearson.automobile.leanbackfixture"
     versionCode = 1
   }
+  testOptions { unitTests.isIncludeAndroidResources = true }
 }
 
 dependencies {
   implementation(libs.androidx.core)
   implementation(libs.androidx.leanback)
+  // AutoMobile SDK: each screen reports a navigation event so explore and navigateTo work (#17421).
+  implementation(projects.autoMobileSdk)
 
   testImplementation(libs.junit)
   testImplementation(libs.robolectric)

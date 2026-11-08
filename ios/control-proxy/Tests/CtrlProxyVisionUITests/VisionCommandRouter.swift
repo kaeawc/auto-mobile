@@ -139,7 +139,15 @@ final class VisionCommandRouter {
                     lastTappedTextInputCount: lastTappedFields.count
                 ) {
                 case .focused: target = focusedFields[0]
-                case .lastTapped: target = lastTappedFields[0]
+                case .lastTapped:
+                    target = lastTappedFields[0]
+                    // visionOS typeText needs a focusing tap to preserve existing text (#17312).
+                    target.tap()
+                    for _ in 0 ..< 10 {
+                        if (try? target.snapshot().hasFocus) == true { break }
+                        let focusPending = XCTestExpectation(description: "Waiting for text input focus")
+                        _ = XCTWaiter().wait(for: [focusPending], timeout: 0.1)
+                    }
                 case .none: throw CommandError.noFocusedTextInput
                 }
                 target.typeText(request.text)

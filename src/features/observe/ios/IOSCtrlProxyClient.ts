@@ -676,6 +676,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyTestHooksFacade implements I
       transientObserver: true,
       iosSource: resident?.buildContext.dependencies().iosSource,
       contentHashProvider: resident?.buildContext.dependencies().contentHashProvider,
+      infoPlistReader: resident?.buildContext.dependencies().infoPlistReader,
     });
     if (ownsPortAllocation) {
       client.allocatedPort = port;

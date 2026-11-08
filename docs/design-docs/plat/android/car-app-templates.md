@@ -74,3 +74,21 @@ first-record order, so it can change after `disable()` and `enable()`.
   recording stays off until the app calls `enable`.
 - The block describes templates the app returned, never what the host rendered or hid (driving
   restrictions, list limits, host-side truncation). The `note` field says so on every block.
+
+## Back on host-rendered templates
+
+The AAOS templates host (`com.google.android.apps.automotive.templates.host`) renders template screens
+inside the app's `CarAppActivity` and does not act on BACK, whether sent as a global action or an
+`input keyevent` (root cause tracked in #17501). `pressButton` `back` keeps BACK as its first attempt, so
+behavior is unchanged wherever BACK works. Only when the press dispatched, the screen did not change, and
+the screen is a template host (foreground activity `androidx.car.app.activity.CarAppActivity`, or nodes
+with the host's resource-id prefix) does it tap the host's Back affordance in a second observed
+interaction: `car_ui_toolbar_nav_icon_container` first, then `primary_header_action`, clickable with
+non-empty bounds. The target is re-resolved from that interaction's own pre-tap read, and the tap carries
+its `frameContext` and asserts the display fence before sending, so a screen that moved on is not tapped
+at stale coordinates. A tap that was dispatched without an acknowledged reply is reported as
+`indeterminate_outcome` with `retryable: false`, because it may already have navigated. The result names
+the tapped affordance in `backFallback`. Template detection is a local
+check in `src/features/action/carAppTemplateBack.ts`; it should switch to observe's host-rendered marker
+(#17499) once that exists. The unit fixtures are trimmed captures from an API 34 AAOS emulator under
+`test/fixtures/automotive/car-app-templates/`.

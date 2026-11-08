@@ -16,6 +16,7 @@ import {
   isAccessibilityViewClass,
   resolveBackStackActivityAttribution,
 } from "../ActiveWindowAttribution";
+import { pairPermissionDialogWindow } from "../../action/launchPermissionBlocker";
 import { deriveAndroidScreenIdentity } from "../android/AndroidScreenIdentity";
 import { displayTransitions } from "../DisplayTransition";
 import { resolveTargetDisplay } from "../DisplaySelection";
@@ -141,6 +142,9 @@ export class DefaultAndroidObservationCollector implements AndroidObservationCol
     // the activity belongs to the captured hierarchy's app.
     scopeActiveWindowToBackStack(result);
     await this.applyAndroidScreenIdentity(result);
+    // A permission dialog's window never hosts the app activity behind it (#17465);
+    // pair it before automotive state reads the foreground activity.
+    result.activeWindow = pairPermissionDialogWindow(result.activeWindow);
     if (this.deps.device().formFactor === "automotive") {
       await this.deps.deviceStateCollector().collectAutomotive(result, signal, context.displayId);
     }

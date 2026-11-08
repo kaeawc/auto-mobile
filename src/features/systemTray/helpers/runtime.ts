@@ -37,7 +37,7 @@ import {
   extractNodeTextCandidates,
   type SystemTrayNotificationMatch,
 } from "./hierarchy";
-import { findBestNotificationMatch } from "./matching";
+import { findBestNotificationMatch, findsContentOnUnattributedIosRow } from "./matching";
 
 const DEFAULT_SYSTEM_TRAY_AWAIT_TIMEOUT_MS = 5000;
 
@@ -511,6 +511,7 @@ export const notificationNotFoundError = (
   device: BootedDevice,
   observation: ObserveResult,
   awaitTimeoutMs: number,
+  criteria?: SystemTrayNotificationArgs,
 ): ActionableError => {
   if (isIosTrayOverAppContentUnavailable(device, observation)) {
     const app = observation.viewHierarchy?.packageName;
@@ -519,6 +520,19 @@ export const notificationNotFoundError = (
         `${app ? `the foreground app (${app})` : "a foreground app"}, and iOS does not expose ` +
         `notification content to automation there. Press home (pressButton "home"), then retry ` +
         `this systemTray action from the home screen.`,
+    );
+  }
+  if (
+    device.platform !== "android" &&
+    criteria?.appId &&
+    observation.viewHierarchy &&
+    findsContentOnUnattributedIosRow(observation.viewHierarchy, criteria)
+  ) {
+    return new ActionableError(
+      `Notification not found after ${awaitTimeoutMs}ms: a notification with that content is ` +
+        `in Notification Center, but it is a single banner and iOS shows no app name on it, so ` +
+        `it cannot be attributed to ${criteria.appId}. Omit appId to match it by content, or ` +
+        `post it with postNotification so systemTray knows which app posted it.`,
     );
   }
   return new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);

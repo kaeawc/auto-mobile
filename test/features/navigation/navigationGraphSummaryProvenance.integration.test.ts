@@ -59,6 +59,40 @@ describe("exportGraphSummaryForApp provenance (#4985)", () => {
     expect(node!.provenance![0].sessionUuid).toBe("session-2");
   });
 
+  test("provenance carries a build's declared git revision only when it has one (#16954)", async () => {
+    const home = await seedRepo.getOrCreateNode(APP, "Home", 100);
+    const declared = await seedRepo.getOrCreateBuildKey(APP, 2, "hashB", {
+      gitBranch: "feature/login",
+      gitSha: "abcdef1234567",
+    });
+    const plain = await seedRepo.getOrCreateBuildKey(APP, 1, "hashA");
+    for (const [buildKeyId, seenAt] of [
+      [declared.id, 200],
+      [plain.id, 100],
+    ]) {
+      await seedRepo.recordNodeObservation(home.id, {
+        buildKeyId,
+        deviceId: "device-1",
+        sessionUuid: "session-1",
+        seenAt,
+      });
+    }
+
+    const summary = await harness.manager.exportGraphSummaryForApp(APP);
+    const provenance = summary.nodes.find((n) => n.screenName === "Home")!.provenance!;
+    expect(provenance[0].buildKey).toEqual({
+      packageId: APP,
+      versionCode: 2,
+      contentHash: "hashB",
+    });
+    expect(provenance[0].sourceRevision).toEqual({
+      gitBranch: "feature/login",
+      gitSha: "abcdef1234567",
+    });
+    expect(provenance[1].sourceRevision).toBeUndefined();
+    expect("sourceRevision" in provenance[1]).toBe(false);
+  });
+
   test("legacy summary fields are preserved (backward compatible)", async () => {
     const home = await seedRepo.getOrCreateNode(APP, "Home", 100);
     const buildA = await seedRepo.getOrCreateBuildKey(APP, 1, "hashA");

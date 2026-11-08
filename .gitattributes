@@ -110,6 +110,8 @@ test/fixtures/android-focus-multidisplay/*.json text eol=lf
 # Byte-exact `cmd locale` captures: pin to LF so a Windows checkout cannot rewrite them to CRLF.
 test/fixtures/android-locale/*.txt text eol=lf
 test/fixtures/automotive/** text eol=lf
+# Car App Library template observe captures (#16744, #17498), kept byte-for-byte as posted.
+test/fixtures/automotive/car-app-templates/*.json text eol=lf
 # Real `am start` / `monkey` failure captures from two emulators (#10192).
 test/fixtures/android-am-start/*.txt text eol=lf
 # `am start` output quoted in the mt0091c stale Settings task report (#17380).

@@ -1,4 +1,5 @@
 import type { SelectedElement, SelectedElementDetection } from "../../models/SelectedElement";
+import type { BuildSourceRevision } from "../../models/BuildSourceRevision";
 /**
  * A navigation event as it arrives off the wire: the SDK may leave `timestamp` on the outer
  * message, so the manager falls back to its own clock when it is absent.
@@ -219,6 +220,11 @@ export interface NavigationProvenanceRecord {
   sessionUuid: string;
   /** Epoch ms of the most recent observation for this (build, device, session). */
   lastSeen: number;
+  /**
+   * Git branch/sha the build declared (#16954). Display metadata only, never part of
+   * the build-key identity; omitted when the build declared none.
+   */
+  sourceRevision?: BuildSourceRevision;
 }
 
 /**

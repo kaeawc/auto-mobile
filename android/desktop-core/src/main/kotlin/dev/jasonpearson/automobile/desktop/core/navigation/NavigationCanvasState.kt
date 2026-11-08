@@ -204,6 +204,9 @@ internal class NavigationCanvasContext(
   val buildLens
     get() = options.buildLens
 
+  val buildLabels
+    get() = options.buildLabels
+
   val clock
     get() = options.clock
 

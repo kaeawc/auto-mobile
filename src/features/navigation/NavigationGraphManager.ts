@@ -33,6 +33,7 @@ import {
 import { recordNodeProvenance, type ResolvedProvenance } from "./navigationGraphWrites";
 import { NavigationReplayFailures } from "./NavigationReplayFailures";
 import { NavigationToolCallHistory } from "./NavigationToolCallHistory";
+import { sameBuildSourceRevision } from "../../models/BuildSourceRevision";
 
 import type {
   NavigationBuildContext,
@@ -185,7 +186,8 @@ export class NavigationGraphManager implements NavigationGraphService {
       previous?.deviceId === context.deviceId &&
       previous.versionCode === context.versionCode &&
       previous.versionKey === context.versionKey &&
-      previous.contentHash === context.contentHash
+      previous.contentHash === context.contentHash &&
+      sameBuildSourceRevision(previous.sourceRevision, context.sourceRevision)
     ) {
       return;
     }
@@ -676,6 +678,7 @@ export class NavigationGraphManager implements NavigationGraphService {
         contentHash: ctx.contentHash,
         deviceId: ctx.deviceId,
         sessionUuid,
+        ...(ctx.sourceRevision ? { sourceRevision: { ...ctx.sourceRevision } } : {}),
       };
     }
     logger.debug(

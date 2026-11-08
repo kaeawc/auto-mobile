@@ -44,6 +44,7 @@ import {
 import type { IosHierarchyMessageEffects } from "./IosHierarchyMessageEffects";
 import { type IosSdkEventIngestor } from "./IosSdkEventIngestor";
 import { NoOpIOSCtrlProxyManager } from "./NoOpIOSCtrlProxyManager";
+import type { InfoPlistReader } from "../../../utils/bundleSourceRevision";
 import type {
   CtrlProxyActionResult,
   CtrlProxyClipboardResult,
@@ -99,6 +100,8 @@ export interface IosCtrlProxyClientOptions {
   transientObserver?: boolean;
   iosSource?: IosAppMetadataSource;
   contentHashProvider?: ContentHashProvider;
+  /** Reads a simulator bundle's Info.plist for its declared git revision (#16954). */
+  infoPlistReader?: InfoPlistReader;
 }
 
 export interface IosCtrlProxyClientDependencies extends IosCtrlProxyClientOptions {

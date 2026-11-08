@@ -89,7 +89,9 @@ export function contentHeightBound(style: unknown, inherited?: number): number |
 
 /**
  * The axes a row grows on to its parent: width when its unsized aspect-ratio child takes all the
- * remaining width, since a wrap-sized Compose Row then reaches its max width.
+ * remaining width, since a wrap-sized Compose Row then reaches its max width. A repeated row is
+ * left out, as rowMeasured leaves it: its children never get the take and zero hints the fill
+ * assumes.
  */
 export function rowFillAxes(
   node: Raw,
@@ -99,6 +101,7 @@ export function rowFillAxes(
 ): "width"[] {
   const fills =
     node.type === "row" &&
+    node.repeat === undefined &&
     Array.isArray(node.children) &&
     node.children.some((entry, index) =>
       isUnsizedAspectRatio(

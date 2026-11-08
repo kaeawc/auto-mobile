@@ -20,6 +20,8 @@ dependencies {
   implementation(libs.androidx.car.app)
   implementation(libs.androidx.car.app.automotive)
 
+  debugImplementation(projects.autoMobileSdk)
+
   testImplementation(libs.junit)
   testImplementation(libs.robolectric)
 }

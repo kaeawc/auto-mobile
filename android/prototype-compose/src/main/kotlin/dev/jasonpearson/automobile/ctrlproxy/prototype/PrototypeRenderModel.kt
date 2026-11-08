@@ -962,6 +962,10 @@ private fun hasPrototypeListTextField(node: PrototypeNode): Boolean =
 internal val PROTOTYPE_MODAL_ROLES =
   setOf("bottomSheet", "dialog", "snackbar", "menu", "tooltip", "drawer")
 
+private fun hasPrototypeListModal(node: PrototypeNode): Boolean =
+  prototypeNodeRole(node) in PROTOTYPE_MODAL_ROLES ||
+    prototypeDescendants(node).any(::hasPrototypeListModal)
+
 /**
  * Open sheets, dialogs and snackbars are rendered last, in tree order, so a modal scrim covers the
  * entire prototype window.
@@ -977,8 +981,19 @@ internal fun modalPrototypeSheets(
     else emptyList()
   val children =
     if (node.role == "pager") listOfNotNull(node.children.getOrNull(node.page)) else node.children
+  // Lazy rows are absent from children. Only map them when their template can hoist a modal;
+  // the existing mapper preserves each repeat key in the identity, including closed panels.
+  val rowModals =
+    node.list
+      ?.takeIf { it.source.children.any(::hasPrototypeListModal) }
+      ?.let { model ->
+        model.rows.flatMapIndexed { index, item ->
+          modalPrototypeSheets(model.render(item, index), includeClosedDrawers)
+        }
+      } ?: emptyList()
   return (if (modal) listOf(node) else emptyList()) +
-    children.flatMap { modalPrototypeSheets(it, includeClosedDrawers) }
+    children.flatMap { modalPrototypeSheets(it, includeClosedDrawers) } +
+    rowModals
 }
 
 /** Roles that compose their children inline through the node renderer; others never draw them. */

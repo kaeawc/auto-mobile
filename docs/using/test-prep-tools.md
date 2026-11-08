@@ -84,12 +84,13 @@ iOS URIs have no user query.
 | iOS Simulator + SDK | `call`, `cancel`, `busy`; `accept`/`hold` partial | SMS-style notification from the app's SDK |
 | iOS physical        | Not supported                                     | Not supported                             |
 
-On iOS the app under test must embed the AutoMobile iOS SDK; without it both tools
-fail with an error asking for the SDK.
+On iOS the app under test must embed the AutoMobile iOS SDK; without it `sendSms`
+and `phoneCall` `call`, `cancel` and `busy` fail with an error asking for the SDK.
 
 The iOS Simulator cannot answer or hold a CallKit call: its call service ends the
 call instead. `phoneCall` with `accept` or `hold` on a simulator therefore sends
-nothing to the app and returns, without an error:
+nothing to the app and returns, without an error and whether or not the app embeds
+the SDK or a `phoneNumber` is given:
 
 ```json
 {

@@ -35,6 +35,16 @@ describe("simulator pairs", () => {
       }
     },
   );
+  test("watch deletion capture has no listed or owned pair to clean up", async () => {
+    const listing = pairsFixture("list-pairs-after-watch-delete.json");
+    expect(parseSimulatorPairs(listing)).toEqual([]);
+    const watchId = "E5397E9B-BB5D-42A8-9D34-D6B6D8607D9B";
+    const fake = new FakeSimulatorPairs();
+    fake.listing = listing;
+    const owned = new Map([["03DA0ED4-123F-469A-B77E-44CCFEE05AEE", watchId]]);
+    const service = new SimulatorPairService(fake, owned);
+    expect((await service.list()).some((entry) => entry.watch.deviceId === watchId)).toBe(false);
+  });
   test("builds exact argv", () => {
     expect(simulatorPairArgs.pair("watch", "phone")).toEqual(["pair", "watch", "phone"]);
     expect(simulatorPairArgs.activate("id")).toEqual(["pair_activate", "id"]);

@@ -120,7 +120,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🪟 <code>windowMode</code>                  | Fullscreen, PiP, or split-screen an Android task                                        |
 | 🎛️ <code>rotaryScroll</code>                | Wear OS crown scroll with read-back; reports every attempted method                     |
 | 🌙 <code>ambient</code>                     | Wear OS sleep/wake power-state change; wakefulness readback does not prove ambient mode |
-| 🧩 <code>wearSurface</code>                 | Wear OS tiles: add, remove, or show a tile; showTile is confirmed by an observe         |
+| 🧩 <code>wearSurface</code>                 | Wear OS tiles: add, remove, or show a tile (confirmed by an observe); read watch faces  |
 | ⌚ <code>rotateCrown</code>                 | watchOS: rotate the Digital Crown by a signed delta with optional velocity              |
 | 🌍 <code>openLink</code>                    | Open URL in browser                                                                     |
 | 🏠 <code>homeScreen</code>                  | Go to home screen                                                                       |

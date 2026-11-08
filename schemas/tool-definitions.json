@@ -67305,19 +67305,19 @@
   },
   {
     "name": "wearSurface",
-    "title": "Manage Wear OS Tiles",
+    "title": "Manage Wear OS Tiles and Watch Faces",
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Wear OS watches only (other form factors are refused without a change): tiles. addTile adds a tile provider to the carousel (idempotent; reports its index). removeTile removes it (also succeeds when it was absent). showTile scrolls the carousel to a tile by component (index resolved right before showing, adding the tile if absent) or by index, then observes; success requires the observe to confirm a tile container in the foreground Wear system UI. The debug broadcasts report success even when nothing happened, so verified is only true when an observe confirmed it.",
+    "description": "Wear OS watches only (other form factors are refused without a change): tiles. addTile adds a tile provider to the carousel (idempotent; reports its index). removeTile removes it (also succeeds when it was absent). showTile scrolls the carousel to a tile by component (index resolved right before showing, adding the tile if absent) or by index, then observes; success requires the observe to confirm a tile container in the foreground Wear system UI. The debug broadcasts report success even when nothing happened, so verified is only true when an observe confirmed it. watchFace only reads dumpsys wear_service: the active face (package, favoriteId, fallback), each favorite's complication slots (slot, type, provider or null; the active favorite's are live) and ambient; available is false when the watch faces cannot be read.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "action": {
-          "description": "addTile and removeTile need component; showTile needs component (index resolved right before showing) or index",
+          "description": "addTile and removeTile need component; showTile needs component (index resolved right before showing) or index; watchFace takes neither and only reads",
           "type": "string",
-          "enum": ["addTile", "showTile", "removeTile"]
+          "enum": ["addTile", "showTile", "removeTile", "watchFace"]
         },
         "component": {
           "description": "Tile provider service as <package>/<service>",
@@ -67358,7 +67358,7 @@
         },
         "action": {
           "type": "string",
-          "enum": ["addTile", "showTile", "removeTile"]
+          "enum": ["addTile", "showTile", "removeTile", "watchFace"]
         },
         "requested": {
           "type": "object",
@@ -67382,7 +67382,82 @@
           "type": "number"
         },
         "verified": {
-          "description": "True only when an observe after the action confirmed it",
+          "description": "Tile actions: true only when an observe after the action confirmed it",
+          "type": "boolean"
+        },
+        "available": {
+          "description": "watchFace: false when dumpsys wear_service had no readable watch faces",
+          "type": "boolean"
+        },
+        "activeFace": {
+          "type": "object",
+          "properties": {
+            "package": {
+              "type": "string"
+            },
+            "favoriteId": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fallback": {
+              "description": "The classic fallback face, which has no slots",
+              "type": "boolean"
+            }
+          },
+          "required": ["package", "favoriteId", "fallback"],
+          "additionalProperties": false
+        },
+        "favorites": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "favoriteId": {
+                "type": "number"
+              },
+              "package": {
+                "type": "string"
+              },
+              "slots": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "slot": {
+                      "type": "number"
+                    },
+                    "type": {
+                      "description": "Complication data type id",
+                      "type": "number"
+                    },
+                    "provider": {
+                      "description": "<package>/<class>, or null for an empty slot",
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": ["slot", "type", "provider"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["favoriteId", "package", "slots"],
+            "additionalProperties": false
+          }
+        },
+        "ambient": {
           "type": "boolean"
         },
         "message": {
@@ -67422,7 +67497,7 @@
           "additionalProperties": {}
         }
       },
-      "required": ["success", "action", "requested", "broadcastResult", "verified", "message"],
+      "required": ["success", "action", "message"],
       "additionalProperties": false,
       "$defs": {
         "__schema0": {

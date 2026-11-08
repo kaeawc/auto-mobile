@@ -17,6 +17,7 @@ import type {
 import type { FormFactorRead } from "../../src/server/requireWatch";
 import type { TraitFormFactor } from "../../src/utils/android-cmdline-tools/deviceTraits";
 import { toolJson } from "../helpers/toolResponse";
+import type { WatchFaceReader, WatchFaceResult } from "../../src/features/wear/WatchFace";
 
 const watchDevice: BootedDevice = { name: "Wear", deviceId: "emulator-5554", platform: "android" };
 const COMPONENT = "com.google.android.contacts/com.google.android.wearable.contacts.tiles.X";
@@ -89,6 +90,7 @@ describe("wearSurface tool", () => {
       { action: "removeTile", component: COMPONENT },
       { action: "showTile", index: 0 },
       { action: "showTile", component: COMPONENT },
+      { action: "watchFace" },
     ]) {
       expect(wearSurfaceSchema.safeParse(input).success).toBe(true);
     }
@@ -123,6 +125,53 @@ describe("wearSurface tool", () => {
     expect(response.isError ?? false).toBe(false);
   });
 
+  test.each<[string, WatchFaceResult]>([
+    [
+      "available",
+      {
+        success: true,
+        action: "watchFace",
+        available: true,
+        activeFace: { package: "com.google.wear.offhand", favoriteId: 1, fallback: false },
+        favorites: [
+          {
+            favoriteId: 1,
+            package: "com.google.wear.offhand",
+            slots: [{ slot: 11, type: 1, provider: null }],
+          },
+        ],
+        ambient: false,
+        message: "read",
+      },
+    ],
+    [
+      "unavailable",
+      {
+        success: false,
+        action: "watchFace",
+        available: false,
+        message: "unreadable",
+        reason: "no section",
+      },
+    ],
+  ])("watchFace %s reads without constructing the tile surface", async (_label, result) => {
+    const reads: string[] = [];
+    const reader: WatchFaceReader = {
+      observe: async () => (reads.push("observe"), result),
+    };
+    const response = await createWearSurfaceHandler(
+      () => {
+        throw new Error("must not construct");
+      },
+      announces("watch"),
+      () => reader,
+    )(watchDevice, wearSurfaceSchema.parse({ action: "watchFace" }));
+    expect(reads).toEqual(["observe"]);
+    expect(toolJson(response)).toEqual({ ...result });
+    expect(wearSurfaceResultSchema.safeParse(toolJson(response)).success).toBe(true);
+    expect(response.isError ?? false).toBe(!result.success);
+  });
+
   test("an unconfirmed result is marked as an error", async () => {
     const response = await createWearSurfaceHandler(
       () => recordingSurface([], false),
@@ -137,6 +186,7 @@ describe("wearSurface tool", () => {
     ["removeTile with an index", { action: "removeTile", component: COMPONENT, index: 0 }],
     ["showTile with neither", { action: "showTile" }],
     ["showTile with both", { action: "showTile", component: COMPONENT, index: 0 }],
+    ["watchFace with a component", { action: "watchFace", component: COMPONENT }],
   ])("%s is refused before any adb call", async (_label, args) => {
     const calls: Call[] = [];
     const call = createWearSurfaceHandler(() => recordingSurface(calls), announces("watch"))(

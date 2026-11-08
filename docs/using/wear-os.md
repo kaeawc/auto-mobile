@@ -220,7 +220,7 @@ with a tile provider's component (`<package>/<service>`):
 
 The watch reports success for an `index` with no tile and for removing a tile that is absent, so
 only `showTile` checks the screen, and only its `verified: true` means AutoMobile saw a tile container in the foreground Wear system UI.
-`addTile` and `removeTile` always return `verified: false`. Every result carries `requested`,
+`addTile` and `removeTile` always return `verified: false`. Every tile result carries `requested`,
 `broadcastResult` (`code`, `data` and a typed `outcome`: `added`, `removed`, `showRequested`,
 `providerNotFound`, `missingComponent`, `indexRequired`, `unrecognizedOperation` or `unknown`),
 `index` when known, and a `reason` on failure.
@@ -239,6 +239,47 @@ only `showTile` checks the screen, and only its `verified: true` means AutoMobil
 - The broadcasts were measured on the verified emulator; the tool itself is unverified on a
   device, so check `broadcastResult` when a result surprises you.
 
+## Watch faces
+
+`wearSurface` with `"action": "watchFace"` (no other arguments) reads the watch faces without
+changing anything:
+
+```json
+{
+  "success": true,
+  "action": "watchFace",
+  "available": true,
+  "activeFace": { "package": "com.google.wear.offhand", "favoriteId": 1, "fallback": false },
+  "favorites": [
+    {
+      "favoriteId": 1,
+      "package": "com.google.wear.offhand",
+      "slots": [
+        { "slot": 11, "type": 1, "provider": null },
+        {
+          "slot": 12,
+          "type": 3,
+          "provider": "com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.DayAndDateProviderService"
+        }
+      ]
+    }
+  ],
+  "ambient": false,
+  "message": "Active watch face com.google.wear.offhand (favorite 1); 1 favorite(s)."
+}
+```
+
+- `activeFace.fallback: true` means the classic fallback face, which has no complication slots.
+- `favorites` lists every saved favorite. Each slot has its `slot` id, complication data `type`
+  and `provider` (`<package>/<class>`, or `null` when the slot is empty). The active favorite's
+  slots are the live configuration; the other favorites show their saved slots.
+- `ambient` is the watch face's own ambient flag, the same reading `ambient` uses; it is absent
+  when the watch does not report it.
+- `available: false` (with `success: false` and a `reason`) means the watch reported no
+  readable watch faces; nothing is thrown. A failed adb command returns an error instead.
+- Read only: it does not set a face, edit complications or render a preview. Use `observe` or a
+  screenshot to see the face.
+
 ## Prototypes
 
 `prototype` `show` renders on a watch with the phone overlay and components; there are no
@@ -251,7 +292,7 @@ they stay tappable. Wear launchers are not expected to support pinned shortcuts,
 ## Not supported
 
 - Physical watches: only Wear OS emulators are matched and created.
-- Complications and watch faces, and listing the tiles in the carousel.
+- Setting a watch face or editing complications, and listing the tiles in the carousel.
 - Tapping a notification's expanded content or its reply and action buttons without an explicit
   clickable label (see [Notifications](#notifications)).
 - Hardware wake by tilt or touch, and a paired phone and watch.

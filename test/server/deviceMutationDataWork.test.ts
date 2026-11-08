@@ -86,6 +86,10 @@ describe("wearSurface mutation identity", () => {
       deviceToolMutations("wearSurface", { action: "addTile", component: TILE }, "android"),
     );
   });
+
+  test("watchFace only reads dumpsys wear_service and records nothing", () => {
+    expect(deviceToolMutations("wearSurface", { action: "watchFace" }, "android")).toEqual([]);
+  });
 });
 
 describe("backgroundWork mutation identity", () => {

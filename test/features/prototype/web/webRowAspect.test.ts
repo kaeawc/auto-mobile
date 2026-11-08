@@ -7,6 +7,7 @@ import {
   isUnsizedAspectRatio,
   LATER_SHRINK,
   rowContentHeight,
+  rowFillAxes,
   rowMeasured,
   rowSequentialChildren,
 } from "../../../../src/features/prototype/web/webRowAspect";
@@ -415,4 +416,16 @@ test("a container that authors a dp width or maxWidth bounds its children's widt
     parentAxis: "column",
     unboundedWidth: false,
   });
+});
+
+test("a repeated row does not fill width, as its children are never measured (#16694)", () => {
+  const prepare = (entry: unknown) => record(entry);
+  const row = {
+    type: "row",
+    children: [{ type: "box", style: { aspectRatio: 2 } }, { type: "text" }],
+  };
+  expect(rowFillAxes(row, "root", prepare)).toEqual(["width"]);
+  const repeated = { ...row, repeat: { items: [{}, {}] } };
+  expect(rowFillAxes(repeated, "root", prepare)).toEqual([]);
+  expect(rowMeasured(repeated, "root", prepare)).toBe(repeated);
 });

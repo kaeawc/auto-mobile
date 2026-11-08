@@ -24,8 +24,14 @@ press before selecting. It accepts only the tap action; absent matches or focus,
 directions and a 30-move limit fail with actionable guidance. Press replies synchronize
 navigation without sleeps. Touch gestures are refused with focus-navigation guidance;
 long press and text input are unsupported. A tvOS handshake is required before registration.
-`AUTOMOBILE_TVOS_RUNNER_XCTESTRUN` overrides artifact discovery; otherwise an appletvsimulator
-xctestrun is discovered or the `AutoMobileTVTest` scheme is built with a 120-second limit.
+`AUTOMOBILE_TVOS_RUNNER_XCTESTRUN` overrides artifact discovery; otherwise `TvosRunnerArtifacts`
+uses local appletvsimulator products, then `TvosRunnerReleaseProvider`, then builds the
+`AutoMobileTVTest` scheme with a 120-second limit. The provider verifies the pinned
+`tvos-runner-macos.zip` checksum before worker extraction, stages `Build/Products` in a secure
+cache, and publishes by rename. A matching metadata SHA and an existing template xctestrun are
+required for cache reuse; launch copies prefixed `automobile-runner-` are ignored. Empty pins
+disable release downloads. Installed packages need no source checkout when a pinned runner is
+available; absent both the release and source project, startup explains the override.
 Startup uses the tvOS destination and an isolated xctestrun with `AM_PORT`; runner ownership,
 release, shutdown and deletion follow the watch lifecycle. Connected observations use runner
 screenshots, while observations without a runner retain the simctl screenshot-only fallback.

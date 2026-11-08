@@ -52,7 +52,8 @@
 }
 
 .md-typeset {
-  font-family: "Comic Sans MS", "Comic Sans", cursive;
+  /* Phones have no Comic Sans; fall back to the loaded theme font, not the platform cursive. */
+  font-family: "Comic Sans MS", "Comic Sans", var(--md-text-font-family), sans-serif;
 }
 
 .md-typeset h1,

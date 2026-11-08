@@ -8,7 +8,7 @@ import {
   type CarAppHostRenderedUi,
 } from "../../../../src/features/observe/automotive/carAppHostRenderedUi";
 import { observeResultSchema } from "../../../../src/server/toolOutputSchemas/observation";
-import { createObserveResultForTest } from "../flatHierarchyBuilders";
+import { createFlatHierarchyForTest, createObserveResultForTest } from "../flatHierarchyBuilders";
 import {
   CAR_APP_HOST_FIXTURES,
   fixtureHierarchy,
@@ -70,6 +70,19 @@ describe("detectCarAppHostRenderedUi", () => {
         },
       },
     });
+    expect(detectCarAppHostRenderedUi(result)).toEqual(HOST_MARKER);
+  });
+
+  test("a host resource id under any window root matches", () => {
+    const fixture = readCarAppHostFixture("pane");
+    const appWindow = fixtureHierarchy(withoutHostNodes(fixture)).hierarchy.node;
+    const hostWindow = fixtureHierarchy(fixture).hierarchy.node;
+    const result = createObserveResultForTest({
+      activeWindow: { ...fixture.activeWindow, activityName: "" },
+      viewHierarchy: createFlatHierarchyForTest({ hierarchy: { node: appWindow } }),
+    });
+    // Multi-window captures carry an array in the root slot despite its single-node type.
+    Object.assign(result.viewHierarchy?.hierarchy ?? {}, { node: [appWindow, hostWindow] });
     expect(detectCarAppHostRenderedUi(result)).toEqual(HOST_MARKER);
   });
 

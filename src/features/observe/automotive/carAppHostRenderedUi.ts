@@ -1,6 +1,7 @@
 import type { ObserveResult } from "../../../models";
 import type { CarAppHostRenderedUi } from "../../../models/CarAppTemplates";
 import { childrenOf, type ViewHierarchyNode } from "../../../models/ViewHierarchyResult";
+import { toNodeArray } from "../output/resultOutput/hierarchy";
 
 export type { CarAppHostRenderedUi };
 
@@ -18,8 +19,9 @@ function nodeResourceId(node: ViewHierarchyNode): unknown {
   return node["resource-id"] ?? node.$?.["resource-id"];
 }
 
+/** Every window root: real captures put an array in the root `node` slot. */
 function hasHostResourceId(root: ViewHierarchyNode | undefined): boolean {
-  const pending: ViewHierarchyNode[] = root ? [root] : [];
+  const pending = [...toNodeArray(root)];
   for (let node = pending.pop(); node; node = pending.pop()) {
     const id = nodeResourceId(node);
     if (typeof id === "string" && id.startsWith(HOST_RESOURCE_ID_PREFIX)) {

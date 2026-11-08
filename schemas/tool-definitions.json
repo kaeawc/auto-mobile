@@ -23531,7 +23531,7 @@
               "type": "boolean"
             },
             "hostRenderedUi": {
-              "description": "Present when the foreground screen is Car App Library templates drawn by the car host, not the app's own views; absent otherwise.",
+              "description": "Present when the foreground screen is Car App Library templates drawn by the car host, not the app's own views. With hostPackage, template nodes from that host were seen; without it, only the foreground activity is CarAppActivity, which also covers the library's own connection-error screen. Absence means neither signal was seen (for example an incomplete capture), not proof that the screen is app-drawn.",
               "type": "object",
               "properties": {
                 "kind": {

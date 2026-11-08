@@ -199,6 +199,18 @@ The block reports what the app built, not what the car host rendered; its `note`
 main thread did not answer in time, the block has `error: "main_thread_timeout"` and no sessions. Apps
 that do not enable the route add nothing to `observe`.
 
+### Back on Car App Library templates
+
+On an Android Automotive emulator, the Car App Library templates host ignores the BACK key, so
+`pressButton` `back` first sees no change. If the screen then shows one of the host's recognized Back
+controls (the toolbar Back on list, grid, pane and detail screens, or the unlabelled header button on a
+navigation place list), `pressButton` taps it. A press that popped the screen this way succeeds with
+`backFallback` set to `toolbar_nav_icon` or `primary_header_action`. When no recognized control is
+visible, such as on a root template, the press still fails with `No visual change observed`. If the tap
+was sent but its result never arrived, the press reports `code: "indeterminate_outcome"` with
+`retryable: false`: observe before pressing again, because the screen may already have gone back. Other
+screens are unchanged.
+
 ## Not supported
 
 - Android Auto projection and the Desktop Head Unit (see #14118).

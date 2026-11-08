@@ -91,6 +91,24 @@ measured on API 34 ext9 AAOS (#16744):
 The marker is computed whenever the automotive block is built or its foreground activity refreshed,
 and again after reconciliation in case the hierarchy was replaced under the same activity. A stale
 marker is removed. Non-automotive observations have no `automotive` block, so they are unchanged.
-Action code should test it with `isCarAppHostRendered(result)`
-(`src/features/observe/automotive/carAppHostRenderedUi.ts`) rather than repeating the signals; the
+Action code should test it with `isCarAppHostRendered(result)`, or call `detectCarAppHostRenderedUi`
+on an observation that may lack the `automotive` block
+(`src/features/observe/automotive/carAppHostRenderedUi.ts`), rather than repeating the signals; the
 host ignores the BACK key on these screens (#17498).
+
+## Back on host-rendered templates
+
+The AAOS templates host (`com.google.android.apps.automotive.templates.host`) renders template screens
+inside the app's `CarAppActivity` and does not act on BACK, whether sent as a global action or an
+`input keyevent` (root cause tracked in #17501). `pressButton` `back` keeps BACK as its first attempt, so
+behavior is unchanged wherever BACK works. Only when the press dispatched, the screen did not change, and
+the screen is a template host (foreground activity `androidx.car.app.activity.CarAppActivity`, or nodes
+with the host's resource-id prefix) does it tap the host's Back affordance in a second observed
+interaction: `car_ui_toolbar_nav_icon_container` first, then `primary_header_action`, clickable with
+non-empty bounds. The target is re-resolved from that interaction's own pre-tap read, and the tap carries
+its `frameContext` and asserts the display fence before sending, so a screen that moved on is not tapped
+at stale coordinates. A tap that was dispatched without an acknowledged reply is reported as
+`indeterminate_outcome` with `retryable: false`, because it may already have navigated. The result names
+the tapped affordance in `backFallback`. Template detection is `detectCarAppHostRenderedUi`, the same
+check behind the host-rendered marker. The unit fixtures are trimmed captures from an API 34 AAOS
+emulator under `test/fixtures/automotive/car-app-templates/`.

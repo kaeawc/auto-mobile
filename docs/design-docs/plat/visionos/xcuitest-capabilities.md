@@ -69,9 +69,11 @@ retry fails, its error is returned.
 
 A runner error containing `kAXErrorAPIDisabled` maps to
 `accessibility_api_disabled`, with the runner's error preserved as `cause`.
-It means this app's accessibility window could not be read even after relaunch,
-not that accessibility is unavailable across the simulator. Other apps may
-still work; use a screenshot from `simctl` to see the affected app.
+It means this app's accessibility window could not be read, not that
+accessibility is unavailable across the simulator. Only a `request_hierarchy`
+message says the app was relaunched; a tap or text input message says no
+relaunch happened and to observe (which relaunches once) before retrying. Other
+apps may still work; use a screenshot from `simctl` to see the affected app.
 
 ## Decision
 

@@ -377,6 +377,8 @@ export const CTRL_PROXY_RESPONSE_FIELDS: {
     totalTimeMs: "optional",
     timestamp: "optional",
     error: "optional",
+    gitBranch: "optional",
+    gitSha: "optional",
   },
   permission_result: {
     type: "required",

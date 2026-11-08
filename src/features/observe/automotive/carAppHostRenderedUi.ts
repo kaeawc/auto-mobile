@@ -11,7 +11,8 @@ export const CAR_APP_ACTIVITY = "androidx.car.app.activity.CarAppActivity";
 /** The AAOS templates host that renders Car App Library templates (#16744). */
 export const CAR_APP_TEMPLATES_HOST_PACKAGE = "com.google.android.apps.automotive.templates.host";
 
-const HOST_RESOURCE_ID_PREFIX = `${CAR_APP_TEMPLATES_HOST_PACKAGE}:id/`;
+/** Resource-id prefix of the nodes the templates host draws. */
+export const HOST_RESOURCE_ID_PREFIX = `${CAR_APP_TEMPLATES_HOST_PACKAGE}:id/`;
 
 type HostRenderedUiInput = Pick<ObserveResult, "activeWindow" | "viewHierarchy">;
 

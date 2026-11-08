@@ -12,6 +12,7 @@ import {
   sanitizeObserveResult,
   projectSanitizedObserveSkeleton,
   diffObserveResult,
+  SKELETON_DIFF_SCALAR_FIELDS,
   isSameObservationScreen,
   type SanitizeObserveConfig,
 } from "../../features/observe/output/ObserveResultOutput";
@@ -482,7 +483,9 @@ function emitActionObservationDiff(
   const diff = diffObserveResult(baseline, sanitized, {
     collapseKeyboard: servedObservation.skeleton !== undefined,
     skipStatusBar: servedObservation.skeleton !== undefined,
-    layoutWarningsDiffMode: servedObservation.skeleton !== undefined ? "perEntry" : "full",
+    ...(servedObservation.skeleton !== undefined
+      ? { scalarFields: SKELETON_DIFF_SCALAR_FIELDS }
+      : {}),
     projectAddedRemoved: servedObservation.skeleton !== undefined,
   });
   // Always attach a usable selector surface alongside the diff (issue #6221

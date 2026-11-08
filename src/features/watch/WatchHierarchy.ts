@@ -7,6 +7,8 @@ import type { CtrlProxyNode } from "../observe/ios/types";
 export interface WatchHierarchyNode {
   accessibilityIdentifier?: string | null;
   accessibilityLabel?: string | null;
+  /** Semantic role for observe elements (e.g. `widget` on a Smart Stack cell); the SDK wire omits it. */
+  role?: string | null;
   className: string;
   bounds: NonNullable<CtrlProxyNode["bounds"]>;
   children?: WatchHierarchyNode[] | null;
@@ -76,7 +78,7 @@ function isWatchBounds(value: unknown): value is WatchHierarchyNode["bounds"] {
 function hasValidNodeProperties(node: Record<string, unknown>): boolean {
   const traits = node.accessibilityTraits ?? [];
   return (
-    [node.accessibilityIdentifier, node.accessibilityLabel].every(
+    [node.accessibilityIdentifier, node.accessibilityLabel, node.role].every(
       (entry) => entry === undefined || entry === null || typeof entry === "string",
     ) &&
     [
@@ -102,6 +104,7 @@ function convertNode(node: WatchHierarchyNode): CtrlProxyNode {
   return {
     text: node.accessibilityLabel ?? undefined,
     resourceId: node.accessibilityIdentifier ?? undefined,
+    role: node.role ?? undefined,
     className: node.className,
     bounds: node.bounds,
     enabled: String(node.isUserInteractionEnabled ?? true),

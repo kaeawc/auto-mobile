@@ -145,7 +145,7 @@ move closer with `focusNavigate`. When an editable text field or the on-screen k
 the walk first hides a shown keyboard with back (and presses tab when the focused element is not a
 text field), then tries every direction again. A Compose text field keeps focus on every D-pad
 direction, so when focus still has not moved the walk presses tab once and tries again. A classic
-View `EditText` (a package-qualified `resource-id` such as `com.example:id/search`) never gets tab,
+View `EditText` (one not inside a Compose screen, with or without a `resource-id`) never gets tab,
 since tab could type into it. If focus still does not move, `focusNavigation.status` is `stuck`,
 `focusNavigation.blockedBy` is `ime` or `editable`, `focusNavigation.escapes` lists the keys tried
 (`back`, `tab`), and the error names the trapped field and what to do: for a View field, hide the

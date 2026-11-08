@@ -59,7 +59,7 @@ internal class HierarchyController(
 
     fun activeWindowRoot(): AccessibilityNodeInfo?
 
-    fun lastWindowClassName(): String?
+    fun lastWindowState(): AccessibilityEventDispatcher.WindowState
 
     fun rotationProvenance(): RotationProvenanceTracker
 
@@ -67,7 +67,11 @@ internal class HierarchyController(
 
     fun wakefulness(): String
 
-    fun foregroundActivity(rootPackage: String?, windowClass: String?): String?
+    fun foregroundActivity(
+      rootPackage: String?,
+      windowClass: String?,
+      windowPackage: String?,
+    ): String?
 
     fun isEmulator(): Boolean
 
@@ -169,7 +173,7 @@ internal class HierarchyController(
     // Capture foreground info atomically with rootNode to avoid race conditions
     // where the app state changes between hierarchy extraction and getForegroundActivity()
     private val capturedRootPackage = rootNode?.packageName?.toString()
-    private val capturedWindowClass = host.lastWindowClassName()
+    private val capturedWindowState = host.lastWindowState()
     private val screenDimensions = displayController.getScreenDimensions(targetDisplayId)
     private val insets = displayController.getObservationInsets(screenDimensions, targetDisplayId)
 
@@ -235,7 +239,12 @@ internal class HierarchyController(
 
       // Add device metadata to the hierarchy (eliminates need for dumpsys calls on client)
       val wakefulness = host.wakefulness()
-      val foreground = host.foregroundActivity(capturedRootPackage, capturedWindowClass)
+      val foreground =
+        host.foregroundActivity(
+          capturedRootPackage,
+          capturedWindowState.className,
+          capturedWindowState.packageName,
+        )
       val density = displayController.getDensity()
       val enriched =
         HierarchyMetadataBuilder.enrich(
@@ -356,7 +365,12 @@ internal class HierarchyController(
             systemInsets = CtrlProxy.legacySystemInsets(captureInsets),
             insets = captureInsets,
             wakefulness = host.wakefulness(),
-            foregroundActivity = host.foregroundActivity(capturedRootPackage, capturedWindowClass),
+            foregroundActivity =
+              host.foregroundActivity(
+                capturedRootPackage,
+                capturedWindowState.className,
+                capturedWindowState.packageName,
+              ),
             density = displayController.getDensity(),
             sdkInt = Build.VERSION.SDK_INT,
             deviceModel = Build.MODEL,

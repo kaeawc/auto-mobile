@@ -10,7 +10,7 @@ import {
 } from "./FocusedTextClearVerifier";
 import { EventLastTyper } from "./EventLastTyper";
 import { EventAllTyper } from "./EventAllTyper";
-import { ImeCommitTyper } from "./ImeCommitTyper";
+import { ImeCommitTyper, imeTraceResultFields } from "./ImeCommitTyper";
 import { ImeRestore, type SendKeysImeRecoverySnapshot } from "./ImeRestore";
 import type { ImeCommitRouting, AndroidTypeOptions } from "./ImeTypes";
 import {
@@ -503,20 +503,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
   }
 
-  /**
-   * The IME trace is failure diagnostics (#17464): a successful command logs it
-   * at debug level instead of returning it in the response.
-   */
   private imeTraceFields(success: boolean): Pick<TextActionResult, "imeTrace"> {
-    const lines = this.imeTraceContext.getStore()?.lines;
-    if (lines === undefined) {
-      return {};
-    }
-    if (success) {
-      logger.debug(`[SendKeys] IME trace:\n${lines.join("\n")}`);
-      return {};
-    }
-    return { imeTrace: lines };
+    return imeTraceResultFields(this.imeTraceContext.getStore()?.lines, success);
   }
 
   private imeResultFields(mode: ResolvedSendKeysTypingMode) {

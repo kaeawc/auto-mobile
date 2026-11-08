@@ -888,3 +888,21 @@ export function currentCommitTrace(lines: readonly string[]): string[] {
   const start = lines.findLastIndex((line) => / event=commitStart(?: |$)/.test(line));
   return lines.slice(Math.max(start, 0));
 }
+
+/**
+ * The IME trace is failure diagnostics (#17464): a successful command logs it
+ * at debug level instead of returning it in the response.
+ */
+export function imeTraceResultFields(
+  lines: string[] | undefined,
+  success: boolean,
+): { imeTrace?: string[] } {
+  if (lines === undefined) {
+    return {};
+  }
+  if (success) {
+    logger.debug(`[SendKeys] IME trace:\n${lines.join("\n")}`);
+    return {};
+  }
+  return { imeTrace: lines };
+}

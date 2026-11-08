@@ -14,6 +14,14 @@ enum TVRemoteButton: String, CaseIterable {
     case down, left, right, select, menu, home, playPause
 }
 
+enum TVElementText {
+    static func text(label: String, value: String?, isTextInput: Bool, isSecure: Bool) -> String {
+        guard !isSecure, isTextInput, let value, !value.isEmpty else { return label }
+        // Emit the value alone for an empty or matching label; otherwise join label and value with one space.
+        return label.isEmpty || label == value ? value : "\(label) \(value)"
+    }
+}
+
 /// Which application a hierarchy or text command queries. The runner is bound to its host app,
 /// and querying a host that is no longer frontmost returns the host's stale tree or waits on
 /// XCTest's target-application retry. Kept pure so macOS SwiftPM tests cover the choice.

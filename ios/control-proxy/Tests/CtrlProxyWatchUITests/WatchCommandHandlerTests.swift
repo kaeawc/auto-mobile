@@ -4,6 +4,40 @@ import XCTest
 
 @MainActor
 final class WatchCommandHandlerTests: XCTestCase {
+    func testSystemAlertsIgnoreEmptyAlerts() {
+        let tree = WatchAlertTree(element: "root", children: [
+            WatchAlertTree(element: "empty", isAlert: true),
+            WatchAlertTree(element: "empty descendants", isAlert: true, children: [
+                WatchAlertTree(element: "empty child"),
+            ]),
+            WatchAlertTree(element: "ordinary content", label: "App"),
+        ])
+        XCTAssertEqual(watchSystemAlerts(in: tree), [])
+    }
+
+    func testSystemAlertsKeepLabelsAndIdentifiersInOrder() {
+        let tree = WatchAlertTree(element: "root", children: [
+            WatchAlertTree(element: "permission", isAlert: true, label: "Allow"),
+            WatchAlertTree(element: "empty", isAlert: true),
+            WatchAlertTree(element: "notification", isAlert: true, identifier: "Invite"),
+        ])
+        XCTAssertEqual(watchSystemAlerts(in: tree), ["permission", "notification"])
+    }
+
+    func testSystemAlertsFindNestedContentWithoutDuplicatingAlerts() {
+        let tree = WatchAlertTree(element: "root", children: [
+            WatchAlertTree(element: "container", children: [
+                WatchAlertTree(element: "alert", isAlert: true, children: [
+                    WatchAlertTree(element: "table", children: [
+                        WatchAlertTree(element: "text", label: "Join the meeting?"),
+                        WatchAlertTree(element: "nested alert", isAlert: true, identifier: "Invite"),
+                    ]),
+                ]),
+            ]),
+        ])
+        XCTAssertEqual(watchSystemAlerts(in: tree), ["alert"])
+    }
+
     func testCommandFailureCoordinatorScopesAndBoundsFailures() {
         let coordinator = WatchXCUISource.CommandFailureCoordinator()
         XCTAssertFalse(coordinator.recordDeflectedFailure("Outside gesture"))
@@ -216,13 +250,19 @@ final class WatchCommandHandlerTests: XCTestCase {
     }
 
     func testUnchangedHierarchyAfterCrownReturnsCommandFailed() throws {
-        let source = ScriptedCrownSource(labels: ["crown 0", "crown 0", "crown 0"])
+        let source = ScriptedCrownSource(labels: Array(repeating: "crown 0", count: 6))
         let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
         let response = handler.handle(Data(#"{"type":"crown","requestId":"c","delta":2}"#.utf8))
         XCTAssertFalse(response.success)
         XCTAssertEqual(response.requestId, "c")
         XCTAssertEqual(response.errorCode, "command_failed")
-        XCTAssertEqual(source.rotations, 1)
+        XCTAssertTrue(response.error?.contains("retrying once after a neutral touch") == true)
+        XCTAssertEqual(source.rotations, 2)
+        XCTAssertEqual(source.taps, 1)
+        XCTAssertEqual(source.events, [
+            "snapshot:crown 0", "snapshot:crown 0", "rotate", "snapshot:crown 0", "tap",
+            "snapshot:crown 0", "snapshot:crown 0", "rotate", "snapshot:crown 0",
+        ])
     }
 
     func testChangedHierarchyAfterCrownSucceeds() {
@@ -231,6 +271,60 @@ final class WatchCommandHandlerTests: XCTestCase {
         let response = handler.handle(Data(#"{"type":"crown","requestId":"c","delta":2}"#.utf8))
         XCTAssertTrue(response.success)
         XCTAssertEqual(response.type, "crown_result")
+        XCTAssertEqual(source.rotations, 1)
+        XCTAssertEqual(source.taps, 0)
+        XCTAssertEqual(source.events, ["snapshot:crown 0", "snapshot:crown 0", "rotate", "snapshot:crown 8"])
+    }
+
+    func testCrownStabilizesBaselineBeforeRotatingAndAfterTouch() {
+        let source = ScriptedCrownSource(labels: [
+            "launching", "crown 0", "crown 0", "crown 0",
+            "touch settling", "crown 0 focused", "crown 0 focused", "crown 8",
+        ])
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        let response = handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8))
+        XCTAssertTrue(response.success)
+        XCTAssertEqual(source.rotations, 2)
+        XCTAssertEqual(source.taps, 1)
+        XCTAssertEqual(source.events, [
+            "snapshot:launching", "snapshot:crown 0", "snapshot:crown 0", "rotate", "snapshot:crown 0", "tap",
+            "snapshot:touch settling", "snapshot:crown 0 focused", "snapshot:crown 0 focused", "rotate",
+            "snapshot:crown 8",
+        ])
+    }
+
+    func testCrownRetriesUnchangedRotationAfterOneTouch() {
+        let source = ScriptedCrownSource(labels: [
+            "crown 0", "crown 0", "crown 0", "focused", "focused", "crown 8",
+        ])
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        let response = handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8))
+        XCTAssertTrue(response.success)
+        XCTAssertEqual(source.rotations, 2)
+        XCTAssertEqual(source.taps, 1)
+        XCTAssertEqual(source.events, [
+            "snapshot:crown 0", "snapshot:crown 0", "rotate", "snapshot:crown 0", "tap",
+            "snapshot:focused", "snapshot:focused", "rotate", "snapshot:crown 8",
+        ])
+    }
+
+    func testCrownBaselineStopsAfterThreeSnapshotsAndUsesLast() {
+        let source = ScriptedCrownSource(labels: ["launching", "settling", "crown 0", "crown 8"])
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        XCTAssertTrue(handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8)).success)
+        XCTAssertEqual(source.rotations, 1)
+        XCTAssertEqual(source.taps, 0)
+        XCTAssertEqual(source.events, [
+            "snapshot:launching", "snapshot:settling", "snapshot:crown 0", "rotate", "snapshot:crown 8",
+        ])
+    }
+
+    func testCrownDoesNotRetryWhenAfterSnapshotIsUnavailable() {
+        let source = ScriptedCrownSource(labels: ["crown 0", "crown 0"])
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        XCTAssertTrue(handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8)).success)
+        XCTAssertEqual(source.rotations, 1)
+        XCTAssertEqual(source.taps, 0)
     }
 
     func testCrownVerificationSkippedWhenSnapshotsUnavailable() {
@@ -239,6 +333,7 @@ final class WatchCommandHandlerTests: XCTestCase {
         let response = handler.handle(Data(#"{"type":"crown","requestId":"c","delta":2}"#.utf8))
         XCTAssertTrue(response.success)
         XCTAssertEqual(source.rotations, 1)
+        XCTAssertEqual(source.taps, 0)
     }
 
     func testCrownUsesExplicitVelocity() {
@@ -376,12 +471,15 @@ private final class FakeWatchSource: WatchSnapshotSource, WatchGesturePerformer 
 private final class ScriptedCrownSource: WatchSnapshotSource, WatchGesturePerformer {
     private var labels: [String]
     private(set) var rotations = 0
+    private(set) var taps = 0
+    private(set) var events: [String] = []
 
     init(labels: [String]) { self.labels = labels }
 
     func snapshot() throws -> SdkViewHierarchy {
         guard !labels.isEmpty else { throw WatchCommandError.commandFailed("Snapshot failed") }
         let label = labels.removeFirst()
+        events.append("snapshot:\(label)")
         return SdkViewHierarchy(
             timestamp: Int64(labels.count), screenScale: 1, screenWidth: 100, screenHeight: 100,
             root: SdkViewNode(
@@ -392,7 +490,13 @@ private final class ScriptedCrownSource: WatchSnapshotSource, WatchGesturePerfor
     }
 
     func rotateCrown(delta _: Double, velocity _: Double) throws {
-        try watchVerifiedCrownRotation(snapshots: self) { rotations += 1 }
+        try watchVerifiedCrownRotation(snapshots: self, wake: {
+            self.taps += 1
+            self.events.append("tap")
+        }, rotate: {
+            self.rotations += 1
+            self.events.append("rotate")
+        })
     }
 
     func faceTap(x _: Double, y _: Double) throws {}

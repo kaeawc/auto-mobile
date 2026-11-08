@@ -1,0 +1,2 @@
+Broadcasting: Intent { act=dev.jasonpearson.automobile.sdk.NOTIFICATION_CHANNEL_QUERY flg=0x400020 cmp=com.example.probe/dev.jasonpearson.automobile.sdk.notifications.AutoMobileNotificationReceiver (has extras) }
+Broadcast completed: result=3

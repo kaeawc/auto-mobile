@@ -42,6 +42,13 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
   @Volatile var unrelatedBindFailures: Int = 0
 
   /**
+   * A captured `setActiveDevice` refusal (a `tools/call` result from `test/fixtures/refusal-wire/`)
+   * every bind answers while set, for the next [bindRefusalTimes] binds (#11365).
+   */
+  @Volatile var bindRefusal: String? = null
+  @Volatile var bindRefusalTimes: Int = Int.MAX_VALUE
+
+  /**
    * Session UUIDs the daemon has terminally released (idle release, #10682 C4): their heartbeat is
    * "Session not found" and their `setActiveDevice` is `session_ownership_lost`.
    */
@@ -52,6 +59,9 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
    * it.
    */
   val releaseReasons: MutableMap<String, String> = java.util.concurrent.ConcurrentHashMap()
+
+  /** [releasedSessions] whose not-found answer carries `idle: true` (#11365). */
+  val idleReleases: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
   /** Methods that fail like an unreachable daemon on every call until removed (#11072). */
   val unavailable: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
@@ -95,7 +105,10 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
     val sessionId = request.params["sessionId"]?.jsonPrimitive?.content
     sessionCalls.add(request.method to sessionId)
     if (key == "daemon/heartbeat" && sessionId in releasedSessions) {
-      val answer = WireAnswers.sessionNotFound.response(request.id)
+      val answer =
+        WireAnswers.sessionNotFound.response(request.id).let {
+          if (sessionId in idleReleases) it.copy(idle = true) else it
+        }
       return if (sessionId in releaseReasons) {
         answer.copy(releaseReason = releaseReasons[sessionId]?.ifEmpty { null })
       } else {
@@ -179,6 +192,10 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
       request.params["arguments"]?.jsonObject?.get("sessionUuid")?.jsonPrimitive?.content
     return when {
       session in releasedSessions -> WireAnswers.sessionReleased.result.toString()
+      bindRefusal != null && bindRefusalTimes > 0 -> {
+        bindRefusalTimes--
+        requireNotNull(bindRefusal)
+      }
       heldByAnotherSession || device in heldDeviceIds -> WireAnswers.heldRefusal(device)
       unrelatedBindFailures > 0 -> {
         unrelatedBindFailures--

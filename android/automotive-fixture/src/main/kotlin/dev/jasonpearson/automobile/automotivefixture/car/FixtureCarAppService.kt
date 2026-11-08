@@ -14,6 +14,11 @@ class FixtureCarAppService : CarAppService() {
 
   override fun onCreateSession(): Session =
     object : Session() {
-      override fun onCreateScreen(intent: Intent): Screen = TemplateMenuScreen(carContext)
+      private val initialScreen by lazy {
+        CarTemplateRecorderFactory.recorder.enable(carContext)
+        TemplateMenuScreen(carContext)
+      }
+
+      override fun onCreateScreen(intent: Intent): Screen = initialScreen
     }
 }

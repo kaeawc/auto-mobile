@@ -576,16 +576,20 @@ the host, so the page's script only switches between views it was given and neve
   ears beside it; Android puts them at the start and end. Its content is light or dark: `window.statusBar`
   `light` or `dark` picks it, and `auto` or none takes whichever of white or black contrasts more with the
   app's top colour. The top colour comes from geometry, not from reading CSS properties one by one: a
-  small layout pass places the window's content on the screen (flex lines with growth, gaps, arrangement
+  small layout pass places the window's content on the screen (flex lines with growth and shrink, gaps, arrangement
   and alignment, a reversed line placed from its end, one-cell boxes, collection grids' column tracks, block flow, minimum and maximum sizes, aspect ratio, padding including
-  the safe-area insets, absolute insets, relative offsets and translations, overflow clips, and CSS paint
-  order with z-index), then samples evenly spaced points along the screen's top edge. At each point the
+  the safe-area insets, absolute insets, relative offsets and translations, overflow clips, corner radii, and CSS paint
+  order with z-index), then samples evenly spaced points along the screen's top edge. A point in a rounded
+  corner's cut-away region is outside the box: neither its background nor its overflow clip's descendants
+  paint there, so a circle meets the top edge at one point. Logical corners follow the element's
+  direction, so right to left rounds the opposite side. A box of unmeasured height keeps square
+  corners, because its real height could scale the radii down. At each point the
   last opaque background painted there is the colour, else the screen background; the colour at the most
   points wins. Element opacity multiplies down the tree, so a background counts only when it is opaque
   after that opacity, and a fully transparent subtree paints nothing. The window placement is part of the
   layout, so a bottom sheet or floating window leaves the screen background at the top edge. Text and
   other unsized content are not measured: an unknown height or offset is taken as non-zero, a content-sized
-  width covers nothing, and a box, row or column child with no self-alignment starts at its container's
+  width covers nothing, a flex item whose automatic minimum depends on that content does not shrink, and a box, row or column child with no self-alignment starts at its container's
   start as the renderer emits it. A subtree that starts below the top edge inside an overflow clip, or
   behind a transform other than a translation, is not laid out. Landscape swaps the screen size, uses
   the landscape safe areas, and moves the cutout from the top edge to the left edge. A frame whose

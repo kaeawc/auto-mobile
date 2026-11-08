@@ -3,7 +3,7 @@ import {
   type HighlightOperationResult,
   type HighlightShape,
 } from "../../src/models";
-import { highlightShapeSchema } from "../../src/features/debug/VisualHighlight";
+import { deviceHighlightShapeSchema } from "../../src/features/debug/VisualHighlight";
 import {
   type HighlightOptions,
   type VisualHighlightClient,
@@ -31,7 +31,7 @@ export class FakeHighlightClient implements Pick<VisualHighlightClient, "addHigh
     if (id.length === 0) {
       throw new ActionableError("Highlight id must be a non-empty string");
     }
-    const parsed = highlightShapeSchema.safeParse(shape);
+    const parsed = deviceHighlightShapeSchema.safeParse(shape);
     if (!parsed.success) {
       throw new ActionableError(parsed.error.issues.map((issue) => issue.message).join("; "));
     }

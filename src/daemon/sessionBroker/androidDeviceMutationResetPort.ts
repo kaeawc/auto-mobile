@@ -29,7 +29,12 @@ import {
 } from "./androidMutationBaseline";
 import { settingsBackedRawMutations } from "./androidSettingsBackedRevert";
 import { appLocaleJournalAppId, appLocalePrior } from "./appLocaleJournalKey";
-import { postedNotificationAppId } from "./mutations/postedNotification";
+import {
+  notificationChannelBroadcastCommand,
+  notificationChannelBroadcastState,
+  postedNotificationAppId,
+  postedNotificationChannel,
+} from "./mutations/postedNotification";
 import { genericBaselineRevert, type BaselineChange } from "./mutations/baseline";
 import type { DeviceMutationResetContext } from "./mutations/reset";
 import type { DeviceBaseline, DeviceMutationEntry, DeviceMutationInput } from "./mutations/types";
@@ -46,6 +51,8 @@ import { VOLUME_RESTORED_MARKER, volumeRevertScript } from "./mutations/volumeMu
 interface AndroidRevertCommand {
   command: string;
   success?: string;
+  /** Output check for commands whose success is not one exact line. */
+  confirms?: (output: string) => boolean;
   timeoutMs?: number;
   retryable?: boolean;
   wakeSleptScreen?: boolean;
@@ -87,7 +94,8 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
       this.appDataCommands(mutation) ?? this.systemPropertyCommands(mutation),
     "shared-file": (mutation) => this.fileCommands(mutation),
     "status-bar": (mutation) => this.statusBarCommands(mutation),
-    notification: (mutation) => this.postedNotificationCommands(mutation),
+    notification: (mutation) =>
+      this.postedNotificationCommands(mutation) ?? this.notificationChannelCommands(mutation),
   };
 
   constructor(
@@ -198,7 +206,7 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     ) {
       return;
     }
-    for (const { command, success, timeoutMs, retryable, wakeSleptScreen } of commands) {
+    for (const { command, success, confirms, timeoutMs, retryable, wakeSleptScreen } of commands) {
       const output = await this.execute(command, context, {
         timeoutMs,
         optionalClipboard: mutation.kind === "clipboard",
@@ -208,7 +216,7 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
         logger.warn("Android cleaning skipped unsupported journal clipboard clear");
         continue;
       }
-      if ((success !== undefined && output !== success) || this.failedOutput(output)) {
+      if (!this.confirmed(output, { success, confirms })) {
         throw new ActionableError("Android reset command failed to confirm success");
       }
       if (wakeSleptScreen) {
@@ -216,6 +224,17 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
       }
     }
     await this.verifyPower(mutation, context);
+  }
+
+  private confirmed(
+    output: string,
+    { success, confirms }: Pick<AndroidRevertCommand, "success" | "confirms">,
+  ): boolean {
+    return (
+      (success === undefined || output === success) &&
+      (confirms === undefined || confirms(output)) &&
+      !this.failedOutput(output)
+    );
   }
 
   private powerClient(context: DeviceMutationResetContext): AdbPowerClient {
@@ -680,6 +699,29 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     return [
       { command: `shell am force-stop ${shellQuote(appId)}` },
       { command: `shell sh -c ${shellQuote(script)}`, success: NOTIFICATIONS_CANCELLED_MARKER },
+    ];
+  }
+
+  /**
+   * Deletes a channel a session's `postNotification` created through the app's SDK receiver (the
+   * shell has no channel delete), then asks the receiver again and requires the channel absent.
+   * Only a channel journaled absent before the post is deleted: one the app already had may have
+   * been renamed by the post, which no revert here can undo. The final force-stop leaves the app
+   * stopped, as the posted-notification revert does.
+   */
+  private notificationChannelCommands({
+    key,
+    priorValue,
+  }: DeviceMutationInput): AndroidRevertCommand[] | null {
+    const channel = postedNotificationChannel(key);
+    if (channel === undefined || priorValue.state !== "absent") {
+      return null;
+    }
+    const absent = (output: string) => notificationChannelBroadcastState(output) === "absent";
+    return [
+      { command: notificationChannelBroadcastCommand(channel, "delete"), confirms: absent },
+      { command: notificationChannelBroadcastCommand(channel, "query"), confirms: absent },
+      { command: `shell am force-stop ${shellQuote(channel.appId)}` },
     ];
   }
 

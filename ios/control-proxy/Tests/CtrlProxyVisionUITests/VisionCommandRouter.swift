@@ -106,7 +106,7 @@ final class VisionCommandRouter {
                 case .missing:
                     throw CommandError.invalidParameter(
                         "identifier",
-                        "element missing for the supplied type/label; observe again"
+                        "no element matches the identifier (and type/label when supplied); observe again"
                     )
                 case .disabled:
                     throw CommandError.invalidParameter(

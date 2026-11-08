@@ -90,6 +90,7 @@ add_check "desktop-core-unified" "\"$PROJECT_ROOT/scripts/android/validate-no-de
 add_check "workflow-assertion-triggers" "\"$PROJECT_ROOT/scripts/ci/validate_workflow_assertion_triggers.sh\"" "config,ci" "Ensure workflow-YAML assertion tests are triggered by the paths they assert"
 add_check "github-python-lock" "cd \"$PROJECT_ROOT/scripts/github\" && uv sync --locked --no-install-project" "config,dependencies" "Validate the GitHub documentation Python lockfile"
 add_check "manual-test-python" "\"$PROJECT_ROOT/scripts/validate_manual_test_python.sh\"" "config,dependencies" "Validate the private Python MCP stdio harness"
+add_check "python-sdk" "\"$PROJECT_ROOT/scripts/validate_python_sdk.sh\"" "lint,python" "Lint, format-check, typecheck and test the Python SDK (sdk/python, uv + ruff + mypy)"
 
 print_usage() {
   cat <<'EOF'

@@ -57,6 +57,15 @@ test("a permission dialog window does not carry the activity of the app behind i
   });
 });
 
+test("the AOSP permission controller window is paired the same way", async () => {
+  const result = await collectWithForegroundActivity(
+    "com.android.permissioncontroller/com.example.app.MainActivity",
+  );
+
+  expect(result.activeWindow?.appId).toBe("com.android.permissioncontroller");
+  expect(result.activeWindow?.activityName).toBe("");
+});
+
 test("the permission controller's own grant activity is kept", async () => {
   const result = await collectWithForegroundActivity(
     "com.google.android.permissioncontroller/com.android.permissioncontroller.permission.ui.GrantPermissionsActivity",

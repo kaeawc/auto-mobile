@@ -391,6 +391,33 @@ describe("buildLaunchAppResponse (already foreground, #6868)", () => {
       );
     });
 
+    // A status-bar-only capture keeps the stale controller package; it shows no
+    // dialog, so the launch reports the missing window and no blocker.
+    test("reports no blockedBy when no foreground window was observed", () => {
+      const payload = buildLaunchAppResponse("com.google.android.contacts", {
+        success: true,
+        packageName: "com.google.android.contacts",
+        observation: observation({
+          systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
+          activeWindow: {
+            appId: "com.google.android.permissioncontroller",
+            activityName: "",
+            layoutSeqSum: 0,
+          },
+          viewHierarchy: {
+            hierarchy: {
+              node: { bounds: { left: 0, top: 0, right: 1080, bottom: 63 } },
+            },
+            packageName: "com.google.android.permissioncontroller",
+          },
+        }),
+      });
+
+      expect(payload.verifyFailureReason).toBe("no_foreground_window");
+      expect("blockedBy" in payload).toBe(false);
+      expect(payload.message).not.toContain("blocked by");
+    });
+
     test("a verified launch carries no blockedBy", () => {
       const payload = buildLaunchAppResponse("com.android.settings", {
         success: true,

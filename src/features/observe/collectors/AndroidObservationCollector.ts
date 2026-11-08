@@ -142,12 +142,13 @@ export class DefaultAndroidObservationCollector implements AndroidObservationCol
     // the activity belongs to the captured hierarchy's app.
     scopeActiveWindowToBackStack(result);
     await this.applyAndroidScreenIdentity(result);
+    // A permission dialog's window never hosts the app activity behind it (#17465);
+    // pair it before automotive state reads the foreground activity.
+    result.activeWindow = pairPermissionDialogWindow(result.activeWindow);
     if (this.deps.device().formFactor === "automotive") {
       await this.deps.deviceStateCollector().collectAutomotive(result, signal, context.displayId);
     }
 
-    // A permission dialog's window never hosts the app activity behind it (#17465).
-    result.activeWindow = pairPermissionDialogWindow(result.activeWindow);
     if (result.notificationPermissionDetected && result.activeWindow) {
       result.activeWindow.type = "notification_permission_dialog";
     }

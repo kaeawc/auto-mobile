@@ -256,9 +256,14 @@ export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
   const verified = isVerified ? true : verifyFailureReason ? false : undefined;
   // A successful launch behind a permission dialog is reported as blocked with
   // the dialog's buttons as next steps, not as a plain success (#17465).
-  const blockedBy = isVerified
-    ? undefined
-    : resolveLaunchPermissionBlocker(appId, result.observation);
+  // An incomplete capture (no observation, or no foreground window) can keep a
+  // stale controller package; it is not evidence a dialog is showing.
+  const blockedBy =
+    isVerified ||
+    verifyFailureReason === "no_observation" ||
+    verifyFailureReason === "no_foreground_window"
+      ? undefined
+      : resolveLaunchPermissionBlocker(appId, result.observation);
   const observation = pairLaunchObservationWindow(result.observation);
 
   return {

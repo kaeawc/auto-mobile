@@ -494,7 +494,7 @@ test("a growing child held short by a maximum height does not reach the top of a
           children: [
             {
               type: "column",
-              style: { width: "fill", weight: 1, maxHeight: 80, background: "#ffffff" },
+              style: { width: "fill", height: "fill", maxHeight: 80, background: "#ffffff" },
             },
           ],
         },
@@ -502,6 +502,25 @@ test("a growing child held short by a maximum height does not reach the top of a
     },
   });
   expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
+test("a weighted child's maximum height does not hold it short, as its share pins it (#16698)", () => {
+  const still = renderPrototypeStill({
+    id: "weighted-growth",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "column",
+      style: { width: "fill", height: "fill", arrangement: "end", background: "#000000" },
+      children: [
+        {
+          type: "column",
+          style: { width: "fill", weight: 1, maxHeight: 80, background: "#ffffff" },
+        },
+      ],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("dark");
 });
 
 test("a row-bound min() maximum width binds only below the screen width", () => {

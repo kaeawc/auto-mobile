@@ -12,7 +12,7 @@ import type { BootedDevice } from "../models";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { defaultTimer } from "../utils/SystemTimer";
-import { resourceLinkField } from "../utils/schemaHelpers";
+import { resourceLinkField, watchAwarePlatformSchema } from "../utils/schemaHelpers";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { nodeAppFileFileSystem } from "./appFileSupport";
 import { defineDeviceTool, type DeviceToolSchema } from "./defineTool";
@@ -24,6 +24,7 @@ import { UNIFIED_LOG_DEFAULT_TIMEOUT_MS } from "./sessionLogService";
 import { PLAN_RELEVANT } from "./toolRegistryTypes";
 
 const getLogsInput = z.object({
+  platform: watchAwarePlatformSchema(),
   appId: z
     .string()
     .min(1)
@@ -134,10 +135,10 @@ export function createGetLogsHandler(
   };
 }
 
-const getLogsTool = defineDeviceTool({
+export const getLogsTool = defineDeviceTool({
   name: "getLogs",
   description:
-    "Read device logs with filters: Android logcat by app (every process, so a crash survives process death), tags, priority, regex, buffers (main, system, crash, events) and since the last action or session start; iOS Simulator unified log by app subsystem. Bounded output.",
+    "Read device logs with filters: Android logcat by app (every process, so a crash survives process death), tags, priority, regex, buffers (main, system, crash, events) and since the last action or session start; iOS and Apple Watch Simulator unified log by app subsystem and process. Bounded output.",
   input: getLogsInput,
   options: {
     // A plan step that captures what the app logged around the preceding steps.

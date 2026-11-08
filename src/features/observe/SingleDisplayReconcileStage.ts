@@ -22,6 +22,7 @@ import {
 } from "./collectors/DisplayBindingCollector";
 import { enforceHierarchyPlatform, HierarchyPlatformValidator } from "./HierarchyPlatformValidator";
 import type { DeviceStateCollectorPort } from "./collectors/collectorPorts";
+import { applyCarAppHostRenderedUi } from "./automotive/carAppHostRenderedUi";
 
 /** Stage 2 of one single-display observation: reconcile window and activity attribution and bind the final display. */
 export interface SingleDisplayReconcileStageDependencies {
@@ -97,6 +98,9 @@ export class SingleDisplayReconcileStage {
     await this.verifyCachedHierarchyIfRequested(run, postCaptureForeground);
     if (result.automotive && activityKey(result) !== collectedActivity) {
       await this.d.deviceStateCollector().refreshAutomotiveForegroundActivity(result, signal);
+    } else {
+      // A replaced hierarchy can change what the host drew without changing the activity.
+      applyCarAppHostRenderedUi(result);
     }
     const recordProvenance = await this.bindFinalSingleDisplay(run);
     this.attachOtherDisplays(result);

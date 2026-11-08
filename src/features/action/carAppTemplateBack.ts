@@ -13,20 +13,18 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { ObservedChangeOptions, ObservedEnvelope } from "./observedInteractionTypes";
 import type { DisplayFence } from "./visualChangeDisplayFence";
-
-/** Activity every Car App Library app runs its templates in on Android Automotive. */
-export const CAR_APP_ACTIVITY = "androidx.car.app.activity.CarAppActivity";
-
-/** Resource-id prefix of nodes the AAOS templates host renders inside a `CarAppActivity`. */
-export const TEMPLATES_HOST_ID_PREFIX = "com.google.android.apps.automotive.templates.host:id/";
+import {
+  detectCarAppHostRenderedUi,
+  HOST_RESOURCE_ID_PREFIX,
+} from "../observe/automotive/carAppHostRenderedUi";
 
 /** Host-rendered Back affordances, most specific first (#17498). */
 const BACK_AFFORDANCES: ReadonlyArray<{ id: string; affordance: TemplateHostBackAffordance }> = [
   {
-    id: `${TEMPLATES_HOST_ID_PREFIX}car_ui_toolbar_nav_icon_container`,
+    id: `${HOST_RESOURCE_ID_PREFIX}car_ui_toolbar_nav_icon_container`,
     affordance: "toolbar_nav_icon",
   },
-  { id: `${TEMPLATES_HOST_ID_PREFIX}primary_header_action`, affordance: "primary_header_action" },
+  { id: `${HOST_RESOURCE_ID_PREFIX}primary_header_action`, affordance: "primary_header_action" },
 ];
 
 /** A visible Back affordance and the point to tap it. */
@@ -46,22 +44,16 @@ function hostElements(viewHierarchy: ViewHierarchyResult | undefined): Element[]
   return parser
     .flattenViewHierarchy(viewHierarchy)
     .map(({ element }) => element)
-    .filter((element) => element["resource-id"]?.startsWith(TEMPLATES_HOST_ID_PREFIX) === true);
+    .filter((element) => element["resource-id"]?.startsWith(HOST_RESOURCE_ID_PREFIX) === true);
 }
 
 /**
- * True when the observation shows a Car App Library template (#17498): the foreground activity is
- * `CarAppActivity`, or the tree holds templates-host nodes. Local stand-in until observe marks
- * host-rendered UI itself (#17499); switch to that marker once it lands.
+ * True when the observation shows a Car App Library template (#17498). Uses the same detection
+ * observe uses for `automotive.hostRenderedUi` (#17499), so it also works on observations without
+ * an `automotive` block.
  */
 export function isCarAppTemplateHost(observation: ObserveResult | undefined): boolean {
-  if (!observation) {
-    return false;
-  }
-  if (observation.activeWindow?.activityName === CAR_APP_ACTIVITY) {
-    return true;
-  }
-  return hostElements(observation.viewHierarchy).length > 0;
+  return observation !== undefined && detectCarAppHostRenderedUi(observation) !== undefined;
 }
 
 function isClickable(element: Element): boolean {

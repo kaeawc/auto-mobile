@@ -27,6 +27,8 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "launchApp",
     "terminateApp",
     "observe",
+    // simctl spawn <udid> log show, as on an iOS simulator (#17547).
+    "getLogs",
   ]),
   tvos: new Set<string>([
     "explore",

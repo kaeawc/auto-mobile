@@ -43,6 +43,9 @@ import {
 import {
   defaultFillAxes,
   filling,
+  isUnsizedSpacer,
+  lineMainAxis,
+  spacerFilled,
   webCollectionRenderers,
   withPagerLocals,
   type WebAxis,
@@ -352,23 +355,6 @@ function renderOrSkip(
   return drawn ? [drawn] : [];
 }
 
-/** A spacer with no width, height or weight fills its parent, as the native spacer does. */
-function isUnsizedSpacer(node: unknown): boolean {
-  const raw = record(node);
-  const style = record(raw?.style) ?? {};
-  return (
-    raw?.type === "spacer" &&
-    style.width === undefined &&
-    style.height === undefined &&
-    style.weight === undefined
-  );
-}
-
-/** Missing width and height default to `fill`, without touching authored sizes. */
-function fillMissing(node: Raw): Raw {
-  return filling(node, ["width", "height"]);
-}
-
 /**
  * The axes a child will fill in its line: both for a visible unsized spacer, else those its type
  * fills by default (a slider's width, or an expanded search bar's width and height). Its repeat
@@ -388,7 +374,9 @@ function childFillAxes(entry: unknown, scope: WebRenderScope, path: string): Web
   const authored = (["width", "height"] as const).filter((axis) => style[axis] === "fill");
   // A nested line or card grows around its own filling child, so its parent grows too.
   const inferred = GROWING_CONTAINERS.has(String(styled.type))
-    ? lineFillAxes(styled, local, path).filter((axis) => style[axis] === undefined)
+    ? lineFillAxes(styled, local, path, lineMainAxis(styled)).filter(
+        (axis) => style[axis] === undefined,
+      )
     : styled.type === "searchBar"
       ? searchBarFillAxes(styled, local, { bound })
       : defaultFillAxes(styled);
@@ -401,11 +389,23 @@ const BOUNDING_CONTAINERS: ReadonlySet<string> = new Set(["row", "column", "box"
 /** Containers that grow on an axis when a child fills it, as a Compose parent does. */
 const GROWING_CONTAINERS: ReadonlySet<string> = new Set(["row", "column", "box", "card"]);
 
+/** A visible child with a positive weight, which takes a share of its line's main axis. */
+function isWeighted(entry: unknown, scope: WebRenderScope, path: string): boolean {
+  const weight = record(preparedNode(entry, scope, path)?.styled.style)?.weight;
+  return typeof weight === "number" && weight > 0;
+}
+
 /**
  * The axes on which a container grows because a child fills them; a repeat with no rows renders
- * no children.
+ * no children. A line with a weighted child also grows on its main axis, as a bounded Compose
+ * Row or Column takes its max size there and shares what is left among its weighted children.
  */
-function lineFillAxes(raw: Raw, scope: WebRenderScope, path: string): WebAxis[] {
+function lineFillAxes(
+  raw: Raw,
+  scope: WebRenderScope,
+  path: string,
+  mainAxis?: WebAxis,
+): WebAxis[] {
   // Each repeat row binds its own placeholders, as `children` renders it (#16803).
   const rows = rowScopes(raw, scope);
   if (!Array.isArray(raw.children) || rows.length === 0) {
@@ -417,25 +417,24 @@ function lineFillAxes(raw: Raw, scope: WebRenderScope, path: string): WebAxis[] 
   const bound = BOUNDING_CONTAINERS.has(String(raw.type))
     ? contentHeightBound(raw.style, scope.heightBound)
     : undefined;
-  const fromRows = rows.flatMap((row) =>
-    list.flatMap((e) => childFillAxes(e, { ...row, heightBound: bound }, path)),
+  const slots = rows.flatMap((row) =>
+    list.map((e) => [e, { ...row, heightBound: bound }] as const),
   );
-  const axes = new Set([...own, ...fromRows]);
+  const axes = new Set([...own, ...slots.flatMap(([e, s]) => childFillAxes(e, s, path))]);
+  if (mainAxis && slots.some(([e, s]) => isWeighted(e, s, path))) {
+    axes.add(mainAxis);
+  }
   return (["width", "height"] as const).filter((axis) => axes.has(axis));
 }
 
 const prepareIn = (s: WebRenderScope) => (e: unknown, at: string) => preparedNode(e, s, at)?.styled;
-
-function spacerFilled(node: Raw): Raw {
-  return isUnsizedSpacer(node) ? fillMissing(node) : node;
-}
 
 const line =
   (axis: "row" | "column"): NodeRenderer =>
   (raw, scope, path) => {
     // A wrap-sized line around a filling child grows to its parent on that axis, as a Compose
     // parent does around a fillMax child; otherwise it would shrink to nothing.
-    const node = filling(raw, lineFillAxes(raw, scope, path));
+    const node = filling(raw, lineFillAxes(raw, scope, path, axis === "row" ? "width" : "height"));
     const inner = child(scope, {
       inBox: false,
       style: containerChildStyle(scope, node, axis),

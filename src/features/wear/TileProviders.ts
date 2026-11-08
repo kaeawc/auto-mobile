@@ -1,5 +1,5 @@
 import { toActionableError } from "../../models/ActionableError";
-import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { AdbCommandRunner } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { TileProviderNotFoundError } from "./TileProviderNotFoundError";
 import { TILE_PROVIDER_ACTION } from "./tileProviderAction";
 
@@ -16,7 +16,7 @@ export interface TileProviderLister {
   list(signal?: AbortSignal): Promise<TileProvider[]>;
 }
 
-export type TileProviderAdb = Pick<AdbExecutor, "execute">;
+const COMMAND_TIMEOUT_MS = 10_000;
 
 const COMPONENT_LINE = /^([A-Za-z0-9_.]+)\/([A-Za-z0-9_.$]+)$/;
 
@@ -52,14 +52,14 @@ export function normalizeTileComponent(component: string): string {
 }
 
 export class AdbTileProviderLister implements TileProviderLister {
-  constructor(private readonly adb: TileProviderAdb) {}
+  constructor(private readonly adb: AdbCommandRunner) {}
 
   async list(signal?: AbortSignal): Promise<TileProvider[]> {
     try {
       signal?.throwIfAborted();
-      const result = await this.adb.execute(
-        ["shell", "cmd", "package", "query-services", "--components", "-a", TILE_PROVIDER_ACTION],
-        { signal },
+      const result = await this.adb.executeCommand(
+        `shell cmd package query-services --components -a ${TILE_PROVIDER_ACTION}`,
+        { timeoutMs: COMMAND_TIMEOUT_MS, signal },
       );
       return parseTileProviderComponents(result.stdout);
     } catch (error) {

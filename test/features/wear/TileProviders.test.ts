@@ -8,9 +8,9 @@ import {
   normalizeTileComponent,
   parseTileProviderComponents,
   requireTileProvider,
-  type TileProviderAdb,
 } from "../../../src/features/wear/TileProviders";
 import { ActionableError, type ExecResult } from "../../../src/models";
+import type { AdbCommandRunner } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { createExecResult } from "../../../src/utils/execResult";
 
 // Captured verbatim from a Wear OS 7.0 / API 37 emulator (#16824, #17496).
@@ -23,15 +23,16 @@ const FAVORITES =
 const SINGLE =
   "com.google.android.contacts/com.google.android.wearable.contacts.tiles.singlecontact.SingleContactTileService";
 
-class FakeTileProviderAdb implements TileProviderAdb {
-  readonly calls: string[][] = [];
+/** Replays a captured `query-services --components` transcript. */
+class FakeTileProviderAdb implements AdbCommandRunner {
+  readonly calls: string[] = [];
   constructor(
     private readonly stdout = CAPTURED,
     private readonly error?: Error,
   ) {}
 
-  async execute(args: string[]): Promise<ExecResult> {
-    this.calls.push(args);
+  async executeCommand(command: string): Promise<ExecResult> {
+    this.calls.push(command);
     if (this.error) {
       throw this.error;
     }
@@ -88,7 +89,7 @@ describe("AdbTileProviderLister", () => {
     const adb = new FakeTileProviderAdb();
     const providers = await new AdbTileProviderLister(adb).list();
     expect(adb.calls).toEqual([
-      ["shell", "cmd", "package", "query-services", "--components", "-a", TILE_PROVIDER_ACTION],
+      `shell cmd package query-services --components -a ${TILE_PROVIDER_ACTION}`,
     ]);
     expect(providers.map((p) => p.component)).toEqual([FAVORITES, SINGLE]);
   });

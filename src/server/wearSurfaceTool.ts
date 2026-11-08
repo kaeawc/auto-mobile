@@ -12,10 +12,12 @@ import {
   WEAR_SURFACE_ACTIONS,
   type SurfaceObserver,
   type SurfaceSnapshot,
+  type TileProviderListResult,
   type TileTarget,
   type WearSurface,
   type WearSurfaceResult,
 } from "../features/wear/WearSurface";
+import { AdbTileProviderLister } from "../features/wear/TileProviders";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultDeviceTraits } from "../utils/android-cmdline-tools/deviceTraits";
@@ -31,7 +33,7 @@ const wearSurfaceInput = z.strictObject({
   action: z
     .enum(WEAR_SURFACE_ACTIONS)
     .describe(
-      "addTile and removeTile need component; showTile needs component (index resolved right before showing) or index",
+      "listTileProviders takes no other argument; addTile and removeTile need component; showTile needs component (index resolved right before showing) or index",
     ),
   component: z
     .string()
@@ -60,9 +62,15 @@ export const wearSurfaceResultSchema = z.object({
   success: z.boolean(),
   action: z.enum(WEAR_SURFACE_ACTIONS),
   requested: z.object({ component: z.string().optional(), index: z.number().optional() }),
-  broadcastResult: broadcastSchema,
+  broadcastResult: broadcastSchema
+    .optional()
+    .describe("The broadcast that performed the action; absent for listTileProviders"),
   indexResolution: broadcastSchema.optional(),
   index: z.number().optional(),
+  providers: z
+    .array(z.object({ component: z.string(), packageName: z.string(), className: z.string() }))
+    .optional()
+    .describe("listTileProviders only: installed tile provider services"),
   verified: z.boolean().describe("True only when an observe after the action confirmed it"),
   message: z.string(),
   reason: z.string().optional(),
@@ -101,12 +109,15 @@ function deviceObserver(device: BootedDevice): SurfaceObserver {
   };
 }
 
-const defaultWearSurfaceFactory: WearSurfaceFactory = (device) =>
-  new AdbWearSurface({
-    adb: defaultAdbClientFactory.create(device),
+const defaultWearSurfaceFactory: WearSurfaceFactory = (device) => {
+  const adb = defaultAdbClientFactory.create(device);
+  return new AdbWearSurface({
+    adb,
     timer: defaultTimer,
     observe: deviceObserver(device),
+    tileProviders: new AdbTileProviderLister(adb),
   });
+};
 
 const defaultFormFactorRead = traitsFormFactorRead(
   defaultDeviceTraits,
@@ -117,12 +128,19 @@ const defaultFormFactorRead = traitsFormFactorRead(
 const WEAR_SURFACE_REFUSAL = { tool: "wearSurface", purpose: "tile tests" };
 
 type SurfaceCall =
+  | { action: "listTileProviders" }
   | { action: "showTile"; target: TileTarget }
   | { action: "addTile" | "removeTile"; component: string };
 
 /** The argument combination each action takes; anything else is refused before adb runs. */
 function surfaceCall(args: WearSurfaceArgs): SurfaceCall {
   const { action, component, index } = args;
+  if (action === "listTileProviders") {
+    if (component !== undefined || index !== undefined) {
+      throw new ActionableError("listTileProviders takes no component or index.");
+    }
+    return { action };
+  }
   if (action === "showTile") {
     if (component !== undefined && index === undefined) {
       return { action, target: { component } };
@@ -144,6 +162,8 @@ function surfaceCall(args: WearSurfaceArgs): SurfaceCall {
 
 function run(surface: WearSurface, call: SurfaceCall, signal?: AbortSignal) {
   switch (call.action) {
+    case "listTileProviders":
+      return surface.listTileProviders(signal);
     case "showTile":
       return surface.showTile(call.target, signal);
     case "addTile":
@@ -171,14 +191,18 @@ export const createWearSurfaceHandler =
     }
     const call = surfaceCall(args);
     await requireWatch(device, readFormFactor, WEAR_SURFACE_REFUSAL);
-    const result: WearSurfaceResult = await run(makeSurface(device), call, signal);
+    const result: WearSurfaceResult | TileProviderListResult = await run(
+      makeSurface(device),
+      call,
+      signal,
+    );
     return withIsErrorOnFailure(createStructuredToolResponse(result), result.success);
   };
 
 const wearSurfaceTool = defineDeviceTool({
   name: "wearSurface",
   description:
-    "Wear OS watches only (other form factors are refused without a change): tiles. addTile adds a tile provider to the carousel (idempotent; reports its index). removeTile removes it (also succeeds when it was absent). showTile scrolls the carousel to a tile by component (index resolved right before showing, adding the tile if absent) or by index, then observes; success requires the observe to confirm a tile container in the foreground Wear system UI. The debug broadcasts report success even when nothing happened, so verified is only true when an observe confirmed it.",
+    "Wear OS watches only (other form factors are refused without a change): tiles. listTileProviders lists the installed tile provider components. addTile adds a tile provider to the carousel (idempotent; reports its index; a component that is not a tile provider fails before anything is sent, naming the valid ones). removeTile removes it (also succeeds when it was absent). showTile scrolls the carousel to a tile by component (index resolved right before showing, adding the tile if absent) or by index, then observes; success requires the observe to confirm a tile container in the foreground Wear system UI. The debug broadcasts report success even when nothing happened, so verified is only true when an observe confirmed it.",
   input: wearSurfaceInput,
   handler: createWearSurfaceHandler(),
   options: { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: wearSurfaceResultSchema },

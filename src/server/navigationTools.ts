@@ -175,6 +175,11 @@ export const EXPLORE_EMBEDDED_SDK_GATE_HINT =
   "command and reconnect (a running daemon started without it is restarted with it), then enable " +
   "explore for the session with setToolEnabled";
 
+const EXPLORE_EMBEDDED_SDK_GATE = {
+  embeddedSdkOnly: true,
+  embeddedSdkGateHint: EXPLORE_EMBEDDED_SDK_GATE_HINT,
+} as const;
+
 export function createNavigateToHandler({
   navigationManagerFactory = getNavigationManager,
   navigateToFactory = (device, args) =>
@@ -456,8 +461,7 @@ export function registerNavigationTools({
       ),
       defaultEnabled: false,
       supportsProgress: true,
-      embeddedSdkOnly: true,
-      embeddedSdkGateHint: EXPLORE_EMBEDDED_SDK_GATE_HINT,
+      ...EXPLORE_EMBEDDED_SDK_GATE,
       outputSchema: exploreResultSchema,
     },
   );

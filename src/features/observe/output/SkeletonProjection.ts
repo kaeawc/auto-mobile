@@ -649,6 +649,12 @@ export interface SkeletonProjectionResult {
    * array means what its schema says: actionable-only.
    */
   context: SkeletonElement[];
+  /**
+   * Rows dropped from `skeleton` as shadows of a sibling at identical bounds
+   * (#17465). Never emitted; diff replay reads them so a changed shadowed node
+   * keeps its selector index.
+   */
+  shadowed?: SkeletonElement[];
 }
 
 /**
@@ -831,6 +837,11 @@ function dropShadowedRows(rows: SkeletonAccumulator[]): SkeletonAccumulator[] {
   });
 }
 
+/** The replay-only `shadowed` field, present only when a row was dropped. */
+function shadowedRows(shadowed: SkeletonAccumulator[]): Pick<SkeletonProjectionResult, "shadowed"> {
+  return shadowed.length > 0 ? { shadowed: shadowed.map(toSkeletonEntry) } : {};
+}
+
 /**
  * Project the flattened `elements` block into the actionable `skeleton` and
  * informational `context` arrays (issue #6221 item 1): merge + dedup the
@@ -871,6 +882,8 @@ export function projectSkeleton(
   }
   markAppRowsCoveredByApplicationWindow(kept, androidHierarchy, viewport);
   const distinct = dropShadowedRows(kept);
+  const emitted = new Set(distinct);
+  const shadowed = kept.filter((acc) => !emitted.has(acc));
   const actionable = distinct.filter((acc) => acc.affordances.size > 0);
   const nonActionable = distinct.filter((acc) => acc.affordances.size === 0);
 
@@ -883,7 +896,8 @@ export function projectSkeleton(
 
   // Number emitted rows against the same complete captured candidate set used
   // by positional resolution. Promoted sources and their owners share a slot.
-  assignDuplicateIndexes(actionable, viewport, getSearchableEntries(elements));
+  // Shadowed rows keep their slot so diff replay still indexes their selector.
+  assignDuplicateIndexes([...actionable, ...shadowed], viewport, getSearchableEntries(elements));
 
   return {
     // Report only observed IME identity; missing capture evidence does not mean hidden.
@@ -893,6 +907,7 @@ export function projectSkeleton(
         (ime ? { visible: true, package: ime.package } : undefined)),
     skeleton: actionable.map(toSkeletonEntry),
     context: collapseSystemUiBlock(nonActionable).map(toSkeletonEntry),
+    ...shadowedRows(shadowed),
   };
 }
 
@@ -923,7 +938,7 @@ export function projectSkeletonReplayRows(
       continue;
     }
     const { elementId, displayedLabel, affordances } = toSkeletonSearchable(element);
-    const matches = projection.skeleton.filter(
+    const matches = [...projection.skeleton, ...(projection.shadowed ?? [])].filter(
       (row) =>
         row.elementId === elementId && row.bounds.every((edge, index) => edge === bounds[index]),
     );

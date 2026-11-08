@@ -26,7 +26,7 @@ const captures = [
   [
     "android-overlay-window/app-layer-overlay-over-playground.raw.json",
     "android",
-    "d8114e23b7b51bc5cfed4b147d28adaed56b334064c5ec9551f9e34979ef2c88",
+    "75b0ce7b92c3a8c84e9d424a75fe27e763a7c28b9ec9f148fb8c08e308bc64bd",
   ],
   [
     "ios/nested-selection/cart-a-item-44-quantity-focused.json",
@@ -36,7 +36,7 @@ const captures = [
   [
     "observe-output/ios-keyboard-states/ios-keyboard-visible.raw.json",
     "ios",
-    "3857840e0e546327ced89c085c0647cec83d03f5d186cfa02366e16cb0306849",
+    "00a0857b015b684e643aede721a8b0b32dcb8b3f7bff61d3ad21757bc6692c29",
   ],
   [
     "observe/diff/text-input-typed.json",

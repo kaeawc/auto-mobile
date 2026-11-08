@@ -210,9 +210,10 @@ describe("AdbWearSurface", () => {
     ]);
     expect(adb.commands).toEqual([]);
     expect(result).toMatchObject({ success: true, action: "listTileProviders", verified: false });
-    expect(result.providers.map((provider) => provider.component)).toEqual(
-      PROVIDERS.trim().split("\n"),
-    );
+    expect(result.providers.map((provider) => provider.component)).toEqual([
+      FAVORITES,
+      "com.google.android.contacts/com.google.android.wearable.contacts.tiles.singlecontact.SingleContactTileService",
+    ]);
   });
 
   test("listTileProviders with none installed is an empty list, not an error", async () => {

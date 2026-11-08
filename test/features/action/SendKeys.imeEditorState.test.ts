@@ -90,7 +90,11 @@ function harness(
   let committed = false;
   const terminalReads: Parameters<SendKeysObserver["execute"]>[0][] = [];
   const reads: Parameters<SendKeysObserver["execute"]>[0][] = [];
+  const captured: (ObserveResult | undefined)[] = [];
   const observer: SendKeysObserver = {
+    captureScreenshot: async (_path, options) => {
+      captured.push(options?.observation);
+    },
     execute: async (options) => {
       reads.push(options);
       if (baselineUnavailable && reads.length === 1) {
@@ -117,7 +121,7 @@ function harness(
     timer,
     timestampProvider: { now: async () => 1 },
   });
-  return { ...h, action, timer, reads, terminalReads };
+  return { ...h, action, timer, reads, terminalReads, captured };
 }
 
 test("sendKeys warns when IME typing loses focus without changing delivery", async () => {
@@ -163,6 +167,27 @@ test("sendKeys settles a transient hidden keyboard and returns the fresh observa
   expect(h.terminalReads).toHaveLength(2);
   expect(h.terminalReads[1]).toEqual(h.terminalReads[0]);
   expect(h.terminalReads[1]).toMatchObject({ freshness: "fresh", minTimestamp: 1 });
+  expect(h.captured).toEqual([settled]);
+});
+
+test("sendKeys captures the first observation once when no settle is needed", async () => {
+  const after = frame(false);
+  const h = harness(after);
+  await h.action.execute([{ action: "type", text: "日本語😀", mode: "ime" }]);
+  expect(h.captured).toEqual([after]);
+});
+
+test("an unreadable settle confirmation keeps the first sample's warnings", async () => {
+  const first = frame(false, false);
+  const fallback: ObserveResult = { ...focused, viewHierarchy: undefined };
+  const h = harness(first, false, fallback);
+  const result = await h.action.execute([{ action: "type", text: "日本語😀", mode: "ime" }]);
+  expect(result.observation).toBe(first);
+  expect(result.warnings).toEqual([
+    expect.stringContaining("focused editor lost focus and the keyboard became hidden"),
+  ]);
+  expect(h.timer.getSleepHistory()).toEqual([400]);
+  expect(h.captured).toEqual([first]);
 });
 
 for (const focus of [false, "other"] as const) {

@@ -124,6 +124,7 @@ system lists tested.
 
 ## Notifications
 
+An alert covering the watch is dismissed with Back before the notification stream opens.
 On a watch, `systemTray` drives the Wear OS notification stream instead of the phone shade:
 `open` swipes the stream up from the bottom edge and reports `opened: true` once the stream is on
 screen; `close` goes back and reports `closed: true` only after the stream is gone. Either fails

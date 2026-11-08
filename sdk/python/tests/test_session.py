@@ -1,18 +1,23 @@
 from __future__ import annotations
 
+import os
+import tempfile
 import unittest
 from typing import Any
 
 from auto_mobile import (
     DaemonAuthenticationError,
     DaemonUnavailableError,
+    FileTokenProvider,
     McpError,
     McpSession,
     ProtocolError,
     SessionBindingError,
     ToolCallError,
+    UnsafeTokenFileError,
 )
 from auto_mobile.http import HttpResponse
+from auto_mobile.token import TokenProvider
 
 from .fakes import (
     FakeClock,
@@ -36,7 +41,7 @@ class Harness:
     def __init__(
         self,
         handler: Any = daemon,
-        tokens: FakeTokens | None = None,
+        tokens: TokenProvider | None = None,
         ports: list[int] | None = None,
     ) -> None:
         self.transport = FakeTransport(handler)
@@ -243,6 +248,71 @@ class RetryTest(unittest.IsolatedAsyncioTestCase):
         h.transport.failures.append(ConnectionRefusedError())
         with self.assertRaises(DaemonUnavailableError):
             await h.session().initialize()
+
+    async def test_reset_tool_call_is_not_resent_to_a_new_port(self) -> None:
+        h = Harness(ports=[3000, 3002])
+        session = h.session()
+        await session.initialize()
+        sent_before = len(h.transport.sent)
+        h.transport.failures.append(ConnectionResetError())
+        with self.assertRaisesRegex(DaemonUnavailableError, "may already have run"):
+            await session.call_tool("listDevices")
+        calls = [s for s in h.transport.sent[sent_before:] if s.body["method"] == "tools/call"]
+        self.assertEqual([s.port for s in calls], [3000])
+
+    async def test_reset_forgets_the_port_for_the_next_request(self) -> None:
+        h = Harness(ports=[3000, 3002])
+        session = h.session()
+        await session.initialize()
+        h.transport.failures.append(ConnectionResetError())
+        with self.assertRaises(DaemonUnavailableError):
+            await session.call_tool("listDevices")
+        await session.call_tool("listDevices")
+        self.assertEqual(h.transport.sent[-1].port, 3002)
+
+    async def test_broken_pipe_is_not_retried(self) -> None:
+        h = Harness(ports=[3000, 3002])
+        h.transport.failures.append(BrokenPipeError())
+        with self.assertRaises(DaemonUnavailableError):
+            await h.session().initialize()
+        self.assertEqual(len(h.transport.sent), 1)
+
+
+class TokenErrorTest(unittest.IsolatedAsyncioTestCase):
+    async def test_unsafe_token_file_raises_authentication_error(self) -> None:
+        h = Harness(tokens=RaisingTokens(UnsafeTokenFileError("token file is a symlink")))
+        with self.assertRaisesRegex(DaemonAuthenticationError, "symlink"):
+            await h.session().initialize()
+        self.assertEqual(h.transport.sent, [])
+
+    async def test_unreadable_token_file_raises_authentication_error(self) -> None:
+        h = Harness(tokens=RaisingTokens(PermissionError(13, "Permission denied")))
+        with self.assertRaisesRegex(DaemonAuthenticationError, "Permission denied"):
+            await h.session().initialize()
+        self.assertEqual(h.transport.sent, [])
+
+    @unittest.skipIf(os.name == "nt", "POSIX symlink check")
+    async def test_symlinked_token_file_raises_authentication_error(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target = os.path.join(directory, "real")
+            with open(target, "w", encoding="utf-8") as handle:
+                handle.write("tok")
+            os.chmod(target, 0o600)
+            path = os.path.join(directory, "daemon.token")
+            os.symlink(target, path)
+            tokens = FileTokenProvider({"AUTOMOBILE_DAEMON_TOKEN_FILE_PATH": path})
+            h = Harness(tokens=tokens)
+            with self.assertRaises(DaemonAuthenticationError):
+                await h.session().initialize()
+            self.assertEqual(h.transport.sent, [])
+
+
+class RaisingTokens:
+    def __init__(self, error: OSError) -> None:
+        self.error = error
+
+    def read(self) -> str | None:
+        raise self.error
 
 
 if __name__ == "__main__":

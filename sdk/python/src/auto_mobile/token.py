@@ -13,6 +13,7 @@ import stat
 from collections.abc import Mapping
 from typing import Protocol
 
+from .errors import DaemonAuthenticationError
 from .paths import resolve_state_path
 
 HTTP_TOKEN_ENV = "AUTOMOBILE_DAEMON_HTTP_TOKEN"
@@ -24,8 +25,12 @@ class TokenProvider(Protocol):
     def read(self) -> str | None: ...
 
 
-class UnsafeTokenFileError(OSError):
-    """The token file failed the ownership, mode or file-type checks."""
+class UnsafeTokenFileError(DaemonAuthenticationError, OSError):
+    """The token file failed the ownership, mode or file-type checks.
+
+    A :class:`DaemonAuthenticationError`, so ``McpSession`` surfaces it unchanged; it
+    stays an ``OSError`` for callers of :func:`read_token_file`.
+    """
 
 
 def read_token_file(path: str, *, posix: bool | None = None) -> str | None:

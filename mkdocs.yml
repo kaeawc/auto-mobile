@@ -185,7 +185,9 @@ nav:
       - "iOS SDK contract suite": design-docs/plat/ios/sdk-contract-suite.md
       - "tvOS XCUITest spike": design-docs/plat/tvos/xcuitest-spike.md
       - "tvOS explore and plan replay": design-docs/plat/tvos/focus-explore.md
+      - "tvOS tool support matrix": design-docs/plat/tvos/tool-matrix.md
       - "watchOS XCUITest spike": design-docs/plat/watchos/xcuitest-spike.md
+      - "watchOS Smart Stack cells": design-docs/plat/watchos/smart-stack.md
       - "visionOS XCUITest capability boundary": design-docs/plat/visionos/xcuitest-capabilities.md
       - "iOS iproxy tunnel client": design-docs/plat/ios/iproxy-tunnel-client.md
       - "iOS network capture wire contract": design-docs/plat/ios/network-capture-wire-contract.md

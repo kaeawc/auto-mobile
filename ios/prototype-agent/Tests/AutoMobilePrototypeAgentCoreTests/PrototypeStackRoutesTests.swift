@@ -191,9 +191,9 @@ final class PrototypeStackRoutesTests: XCTestCase {
         )
         // A literal string param that is one placeholder keeps the item's type; other text renders.
         let literal = try json(
-            #"{"type":"replace","stack":"nav","screen":"post","params":{"postId":"{row.id}","label":"#{row.id}"}}"#
+            ##"{"type":"replace","stack":"nav","screen":"post","params":{"postId":"{row.id}","label":"#{row.id}"}}"##
         )
-        XCTAssertEqual(row.bindAction(literal).objectFields?["params"], try json(#"{"postId":3,"label":"#3"}"#))
+        XCTAssertEqual(row.bindAction(literal).objectFields?["params"], try json(##"{"postId":3,"label":"#3"}"##))
     }
 
     func testRoutePlaceholdersBindTextTypedOperandsAndEscapedPointerSegments() {

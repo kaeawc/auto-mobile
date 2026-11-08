@@ -294,6 +294,34 @@ test("a conditional maxWidth or weight cannot undo the row measure (styleWhen me
   expect(nodeCss(taker, context)).toMatchObject({ flex: "1 1 0", "min-width": "0" });
 });
 
+test("a zeroed row child's horizontal padding and border stay inside its zero width (#16710)", () => {
+  const context = { mode: "light" as const, palette: new Map(), parentAxis: "row" as const };
+  const padded = {
+    padding: { top: 4, bottom: 6, start: 20, end: 20 },
+    border: { width: 2, color: "#000000" },
+    [ROW_MEASURE_KEY]: { zero: true },
+  };
+  const css = nodeCss(padded, context);
+  expect(css).toMatchObject({
+    "max-width": "0px",
+    "padding-inline-start": "0px",
+    "padding-inline-end": "0px",
+    "border-inline-width": "0px",
+    // Vertical padding still lays out, as native padding does inside a zero incoming width.
+    "padding-top": "4px",
+    "padding-bottom": "6px",
+  });
+  // The border override follows the shorthand, so it wins in the inline style.
+  const keys = Object.keys(css);
+  expect(keys.indexOf("border-inline-width")).toBeGreaterThan(keys.indexOf("border"));
+  // Unzeroed, or outside a row, the padding stays as authored.
+  const shrinking = { ...padded, [ROW_MEASURE_KEY]: { shrink: LATER_SHRINK } };
+  expect(nodeCss(shrinking, context)["padding-inline-start"]).toBe("20px");
+  const column = { ...context, parentAxis: "column" as const };
+  expect(nodeCss(padded, column)["padding-inline-end"]).toBe("20px");
+  expect(nodeCss({ ...padded, border: undefined }, context)["border-inline-width"]).toBeUndefined();
+});
+
 test("a row's definite content height is its dp height or maxHeight less vertical padding", () => {
   expect(rowContentHeight({ height: { dp: 20 } })).toBe(20);
   expect(

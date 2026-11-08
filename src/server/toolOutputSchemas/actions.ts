@@ -65,7 +65,7 @@ export const keyboardResultSchema = z
 const sendKeysErrorCodeSchema = z
   .string()
   .describe(
-    "Stable failure code. NO_FOCUSED_EDITABLE: no editable field has focus; focus the field (tap it, or tapOn with focus), then retry sendKeys without a mode.",
+    'Stable failure code. NO_FOCUSED_EDITABLE: no editable field has focus; focus the field (tap it, or tapOn with focus), then retry sendKeys without a mode. EDITOR_ACTION_MISMATCH: the focused field did not carry out a semantic key (next, previous, done, search, send, go); use key:"tab" or a selector for the next field instead of next, or key:"enter" for a submit action.',
   );
 
 /** IME fields live on each command result, never on the sendKeys envelope. */

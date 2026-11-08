@@ -357,6 +357,8 @@ export type TextActionResult = {
   error?: string;
   /** Stable failure code, e.g. `NO_FOCUSED_EDITABLE` when no editable field has focus. */
   errorCode?: string;
+  /** Internal: an Android IME next/previous moved focus by traversal, not the editor action. */
+  approximated?: boolean;
   partialApplication?: boolean;
   imeTrace?: string[];
   imeFailure?: ImeFailureDiagnostic;

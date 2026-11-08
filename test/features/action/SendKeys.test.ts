@@ -4290,8 +4290,57 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(result).toMatchObject({
       success: false,
       error: "Android event delivery requires a focused editable field",
+      errorCode: "NO_FOCUSED_EDITABLE",
     });
     expect(calls).toEqual([]);
+  });
+
+  test.each([
+    {
+      approximated: undefined,
+      cause:
+        'the focused field rejected the "next" editor action; its configured action may be another one, such as done',
+    },
+    {
+      approximated: true,
+      cause: "no next focusable field was found beside the focused field",
+    },
+  ])(
+    "maps a bare device 'Action failed' on next to a typed failure (approximated=$approximated, #17463)",
+    async ({ approximated, cause }) => {
+      const { client } = createTextClient();
+      client.ime = async () => ({ success: false, error: "Action failed", approximated });
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(new FakeAdbExecutor()),
+        createObserver(focusedAndroidObservation()),
+        { textClient: client },
+      );
+
+      const result = await executor.key({ action: "key", key: "next" });
+
+      expect(result).toMatchObject({
+        success: false,
+        errorCode: "EDITOR_ACTION_MISMATCH",
+        error: `key "next" was not applied: ${cause}. Use key:"tab" to move focus, or sendKeys with a selector for the next field.`,
+      });
+    },
+  );
+
+  test("keeps a descriptive device error for a semantic key", async () => {
+    const { client } = createTextClient();
+    client.ime = async () => ({ success: false, error: "IME action timed out after 5000ms" });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(new FakeAdbExecutor()),
+      createObserver(focusedAndroidObservation()),
+      { textClient: client },
+    );
+
+    const result = await executor.key({ action: "key", key: "next" });
+
+    expect(result.error).toBe("IME action timed out after 5000ms");
+    expect(result.errorCode).toBeUndefined();
   });
 
   test("iOS accepts every mode and reports its XCUITest mechanism", async () => {

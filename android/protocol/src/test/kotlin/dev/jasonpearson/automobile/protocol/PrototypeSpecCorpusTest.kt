@@ -272,13 +272,14 @@ class PrototypeSpecCorpusTest {
   }
 
   @TestFactory
-  fun routeDiagnostics(): List<DynamicTest> =
+  fun routeAndWebViewDiagnostics(): List<DynamicTest> =
     invalid
       .filter {
-        it.name.startsWith("routes-") && invalidJson.getValue(it)["expectedMessage"] != null
+        listOf("routes-", "webview-").any(it.name::startsWith) &&
+          invalidJson.getValue(it)["expectedMessage"] != null
       }
       .map { file ->
-        DynamicTest.dynamicTest("route diagnostic ${file.name}") {
+        DynamicTest.dynamicTest("route or webView diagnostic ${file.name}") {
           val fixture = invalidJson.getValue(file)
           assertEquals(
             PrototypeSpecValidation.Failure(

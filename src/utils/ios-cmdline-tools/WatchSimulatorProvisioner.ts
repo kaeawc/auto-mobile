@@ -1,3 +1,4 @@
+import { defaultSimulatorPairService, type SimulatorPairService } from "./SimulatorPairs";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../describeUnknownError";
 import { logger } from "../logger";
@@ -50,6 +51,10 @@ export class WatchSimulatorProvisioner {
   constructor(
     private readonly inventory: WatchProvisionInventory,
     private readonly creator: WatchSimulatorCreator,
+    private readonly pairs: Pick<
+      SimulatorPairService,
+      "unpairCreated"
+    > = defaultSimulatorPairService(),
   ) {}
 
   async provision(
@@ -84,6 +89,7 @@ export class WatchSimulatorProvisioner {
    */
   async discardCreated(watch: ListedWatch): Promise<WatchDiscardResult> {
     try {
+      await this.pairs.unpairCreated(watch.deviceId);
       await this.creator.deleteSimulator(watch.deviceId);
       return { deleted: true };
     } catch (error) {

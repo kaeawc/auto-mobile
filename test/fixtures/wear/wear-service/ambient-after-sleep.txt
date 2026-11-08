@@ -1,0 +1,640 @@
+#####################################
+WearService
+#####################################
+Wear Service API: watch_face_editing
+WatchFace Editing Session Manager
+  is session active: =false
+  current session info:
+    null
+
+
+#####################################
+Wear Service API: remote_interactions
+numOfRegisteredListeners=0
+
+
+#####################################
+Wear Service API: notification
+listenerCallbackListRegisteredCallbacks=1
+maxIpcSizeInBytes=65536
+
+NotificationCollector
+Handler:
+  DISABLE_EFFECTS: 1 full sessions
+    First started: 15.608s ago (1794147907672) (10.247s after system start)
+    First finished: 15.608s ago (1794147907672)
+    Average duration: 0.000s
+    n:1 min:0 max:0
+    [     0 -      1) -> 1
+    [     1 -      2) -> 0
+    [     2 -      4) -> 0
+    [     4 -      8) -> 0
+    [     8 -     16) -> 0
+    [    16 -     32) -> 0
+    [    32 -     64) -> 0
+    [    64 -    128) -> 0
+    [   128 -    256) -> 0
+    [   256 -    512) -> 0
+    [   512 -   1024) -> 0
+    [  1024 -   2048) -> 0
+    [  2048 -   4096) -> 0
+    [  4096 -   8192) -> 0
+    [  8192 -  16384) -> 0
+    [ 16384 -  32768) -> 0
+    [ 32768 -  65536) -> 0
+    [ 65536 - 131072) -> 0
+    [131072 - 262144) -> 0
+    [262144+          -> 0
+  REFRESH: 1 full sessions
+    First started: 15.608s ago (1794147907672) (10.247s after system start)
+    First finished: 15.522s ago (1794147907759)
+    Average duration: 0.086s
+    n:1 min:86 max:86
+    [    64 -    128) -> 1
+    [   128 -    256) -> 0
+    [   256 -    512) -> 0
+    [   512 -   1024) -> 0
+    [  1024 -   2048) -> 0
+    [  2048 -   4096) -> 0
+    [  4096 -   8192) -> 0
+    [  8192 -  16384) -> 0
+    [ 16384 -  32768) -> 0
+    [ 32768 -  65536) -> 0
+    [ 65536 - 131072) -> 0
+    [131072 - 262144) -> 0
+    [262144+          -> 0
+  ON_LISTENER_HINTS_CHANGED: 1 full sessions
+    First started: 15.472s ago (1794147907809) (10.383s after system start)
+    First finished: 15.471s ago (1794147907810)
+    Average duration: 0.001s
+    n:1 min:1 max:1
+    [     1 -      2) -> 1
+    [     2 -      4) -> 0
+    [     4 -      8) -> 0
+    [     8 -     16) -> 0
+    [    16 -     32) -> 0
+    [    32 -     64) -> 0
+    [    64 -    128) -> 0
+    [   128 -    256) -> 0
+    [   256 -    512) -> 0
+    [   512 -   1024) -> 0
+    [  1024 -   2048) -> 0
+    [  2048 -   4096) -> 0
+    [  4096 -   8192) -> 0
+    [  8192 -  16384) -> 0
+    [ 16384 -  32768) -> 0
+    [ 32768 -  65536) -> 0
+    [ 65536 - 131072) -> 0
+    [131072 - 262144) -> 0
+    [262144+          -> 0
+  ON_NOTIFICATION_REMOVED: 1 full sessions
+    First started: 13.527s ago (1794147909754) (12.328s after system start)
+    First finished: 13.527s ago (1794147909754)
+    Average duration: 0.000s
+    n:1 min:0 max:0
+    [     0 -      1) -> 1
+    [     1 -      2) -> 0
+    [     2 -      4) -> 0
+    [     4 -      8) -> 0
+    [     8 -     16) -> 0
+    [    16 -     32) -> 0
+    [    32 -     64) -> 0
+    [    64 -    128) -> 0
+    [   128 -    256) -> 0
+    [   256 -    512) -> 0
+    [   512 -   1024) -> 0
+    [  1024 -   2048) -> 0
+    [  2048 -   4096) -> 0
+    [  4096 -   8192) -> 0
+    [  8192 -  16384) -> 0
+    [ 16384 -  32768) -> 0
+    [ 32768 -  65536) -> 0
+    [ 65536 - 131072) -> 0
+    [131072 - 262144) -> 0
+    [262144+          -> 0
+  ON_NOTIFICATION_POSTED_WITH_RANKING: 8 full sessions
+    First started: 15.484s ago (1794147907797) (10.371s after system start)
+    First finished: 15.472s ago (1794147907809)
+    Last started: 5.718s ago (1794147917562)
+    Last finished: 5.708s ago (1794147917572)
+    Average duration: 0.015s
+    n:8 min:1 max:73
+    [     1 -      2) -> 2
+    [     2 -      4) -> 2
+    [     4 -      8) -> 0
+    [     8 -     16) -> 2
+    [    16 -     32) -> 1
+    [    32 -     64) -> 0
+    [    64 -    128) -> 1
+    [   128 -    256) -> 0
+    [   256 -    512) -> 0
+    [   512 -   1024) -> 0
+    [  1024 -   2048) -> 0
+    [  2048 -   4096) -> 0
+    [  4096 -   8192) -> 0
+    [  8192 -  16384) -> 0
+    [ 16384 -  32768) -> 0
+    [ 32768 -  65536) -> 0
+    [ 65536 - 131072) -> 0
+    [131072 - 262144) -> 0
+    [262144+          -> 0
+    Average time between sessions: 1.379s
+    n:7 min:2 max:5248
+    [     2 -      4) -> 1
+    [     4 -      8) -> 0
+    [     8 -     16) -> 0
+    [    16 -     32) -> 0
+    [    32 -     64) -> 0
+    [    64 -    128) -> 1
+    [   128 -    256) -> 1
+    [   256 -    512) -> 0
+    [   512 -   1024) -> 0
+    [  1024 -   2048) -> 3
+    [  2048 -   4096) -> 0
+    [  4096 -   8192) -> 1
+    [  8192 -  16384) -> 0
+    [ 16384 -  32768) -> 0
+    [ 32768 -  65536) -> 0
+    [ 65536 - 131072) -> 0
+    [131072 - 262144) -> 0
+    [262144+          -> 0
+  PausableHandler
+    Messages pending for unpause: 0
+    Underlying handler:
+      Handler (com.google.android.clockwork.common.os.PausableHandler) {a9eea22}
+   @ 25855
+    Looper (StreamLooper, tid 31) {94c3cb3}
+      (MessageQueue is using DeliQueue implementation)
+      (Total messages: 0, polling=false, quitting=false)
+Events:
+  INIT: 1 times
+    First: 15.658s ago (1794147907623)
+  FULL_SYNC_SCHEDULED: 1 times
+    First: 15.609s ago (1794147907672)
+  LISTENER_CONNECT: 1 times
+    First: 15.609s ago (1794147907672)
+  INITIAL_FETCH_STARTED: 1 times
+    First: 15.608s ago (1794147907673)
+  QUERIED_ALL_NOTIFS_SUCCESSFULLY: 1 times
+    First: 15.608s ago (1794147907673)
+  INITIAL_FETCH_COMPLETED: 1 times
+    First: 15.523s ago (1794147907758)
+initial fetch completed
+
+StreamTimeline
+      2026-11-08 08:25:07.535 NOTIFICATION_API_REGISTER_NOTIFICATION_LISTENER Number of registered listeners before registering a new listener: 0
+      2026-11-08 08:25:07.536 NOTIFICATION_API_REGISTER_NOTIFICATION_LISTENER_SUCCESS 
+      2026-11-08 08:25:07.542 NOTIFICATION_API_GET_ACTIVE_NOTIFICATIONS 
+      2026-11-08 08:25:07.623 NFN_LISTENER_BIND                        android.service.notification.NotificationListenerService
+      2026-11-08 08:25:07.672 NFN_LISTENER_CONNECTED                   
+      2026-11-08 08:25:07.672 NFN_LISTENER_SCHEDULE_INITIAL_FETCH      
+      2026-11-08 08:25:07.672 NFN_LISTENER_SCHEDULE_FULL_SYNC          
+      2026-11-08 08:25:07.673 NFN_LISTENER_INITIAL_FETCH_COMPLETE      
+      2026-11-08 08:25:07.749 DATABASE_NEW_STREAM_ITEM                 20972c : 1
+      2026-11-08 08:25:07.776 NFN_LISTENER_NOTIFICATION_POSTED         hashedKey: 20972c : -1, additionalPayload: android
+      2026-11-08 08:25:07.778 NFN_LISTENER_HINTS_CHANGED               6
+      2026-11-08 08:25:07.783 NFN_LISTENER_NOTIFICATION_POSTED         hashedKey: 20972c : -1, additionalPayload: android
+      2026-11-08 08:25:07.809 STREAM_POST                              20972c : 2
+      2026-11-08 08:25:07.919 STREAM_POST                              20972c : 3
+      2026-11-08 08:25:07.950 NFN_LISTENER_NOTIFICATION_POSTED         hashedKey: 20972c : -1, additionalPayload: android
+      2026-11-08 08:25:07.972 STREAM_POST                              20972c : 4
+      2026-11-08 08:25:08.084 NFN_LISTENER_NOTIFICATION_POSTED         hashedKey: 20972c : -1, additionalPayload: android
+      2026-11-08 08:25:08.086 STREAM_POST                              20972c : 5
+      2026-11-08 08:25:09.566 NOTIFICATION_API_GET_CURRENT_INTERRUPTION_FILTER 
+      2026-11-08 08:25:09.574 NOTIFICATION_API_GET_ACTIVE_NOTIFICATIONS 
+      2026-11-08 08:25:09.665 NFN_LISTENER_NOTIFICATION_POSTED         hashedKey: 20972c : -1, additionalPayload: android
+      2026-11-08 08:25:09.734 NFN_LISTENER_NOTIFICATION_REMOVED        hashedKey: 20972c : -1, additionalPayload: android
+      2026-11-08 08:25:09.758 STREAM_POST                              20972c : 6
+      2026-11-08 08:25:09.760 STREAM_CANCEL                            hashedKey: 20972c : -1, additionalPayload: SBN removed: StreamItemIdAndRevision{streamItemId=StreamItemId{source=1, key=0|android|13|PreBootBroadcaster|1000}, revision=-1, originalRevision=-1, updateCount=0}
+      2026-11-08 08:25:09.760 DATABASE_REMOVE_STREAM_ITEM              20972c : -1
+      2026-11-08 08:25:09.764 NOTIFICATION_API_GET_ACTIVE_NOTIFICATIONS 
+      2026-11-08 08:25:09.791 NOTIFICATION_API_GET_ACTIVE_NOTIFICATIONS 
+      2026-11-08 08:25:09.912 BRIDGER_INITIALIZED                      
+      2026-11-08 08:25:09.913 BRIDGER_FULL_SYNC_START                  
+      2026-11-08 08:25:09.932 BRIDGER_IGNORE_STREAM_CHANGE_EVENT_FULL_SYNC_PENDING 
+      2026-11-08 08:25:09.932 BRIDGER_FULL_SYNC_DONE                   
+      2026-11-08 08:25:11.200 NFN_LISTENER_NOTIFICATION_POSTED         hashedKey: 25d6f2 : -1, additionalPayload: android
+      2026-11-08 08:25:11.202 STREAM_POST                              25d6f2 : 7
+      2026-11-08 08:25:11.203 DATABASE_NEW_STREAM_ITEM                 25d6f2 : 7
+      2026-11-08 08:25:11.207 NOTIFICATION_API_GET_ACTIVE_NOTIFICATIONS 
+      2026-11-08 08:25:16.450 NFN_LISTENER_NOTIFICATION_POSTED         hashedKey: 55fb2f : -1, additionalPayload: com.google.android.apps.wearable.systemui
+      2026-11-08 08:25:16.451 STREAM_POST                              55fb2f : 8
+      2026-11-08 08:25:16.453 DATABASE_NEW_STREAM_ITEM                 55fb2f : 8
+      2026-11-08 08:25:17.562 NFN_LISTENER_NOTIFICATION_POSTED         hashedKey: 75ec8a : -1, additionalPayload: com.google.android.clockwork.sysui
+      2026-11-08 08:25:17.573 STREAM_POST                              75ec8a : 9
+      2026-11-08 08:25:17.574 DATABASE_NEW_STREAM_ITEM                 75ec8a : 9
+  BRIDGER_FULL_SYNC_START                  times:1 first:(1794147909913 / 2026-11-08 08:25:09.913)
+  BRIDGER_FULL_SYNC_DONE                   times:1 first:(1794147909932 / 2026-11-08 08:25:09.932)
+  BRIDGER_INITIALIZED                      times:1 first:(1794147909912 / 2026-11-08 08:25:09.912)
+  BRIDGER_IGNORE_STREAM_CHANGE_EVENT_FULL_SYNC_PENDING times:1 first:(1794147909932 / 2026-11-08 08:25:09.932)
+  NFN_LISTENER_BIND                        times:1 first:(1794147907623 / 2026-11-08 08:25:07.623)
+  NFN_LISTENER_CONNECTED                   times:1 first:(1794147907672 / 2026-11-08 08:25:07.672)
+  NFN_LISTENER_HINTS_CHANGED               times:1 first:(1794147907778 / 2026-11-08 08:25:07.778)
+  NFN_LISTENER_NOTIFICATION_POSTED         times:8 first:(1794147907776 / 2026-11-08 08:25:07.776)
+  NFN_LISTENER_NOTIFICATION_REMOVED        times:1 first:(1794147909734 / 2026-11-08 08:25:09.734)
+  NFN_LISTENER_SCHEDULE_INITIAL_FETCH      times:1 first:(1794147907672 / 2026-11-08 08:25:07.672)
+  NFN_LISTENER_SCHEDULE_FULL_SYNC          times:1 first:(1794147907672 / 2026-11-08 08:25:07.672)
+  NFN_LISTENER_INITIAL_FETCH_COMPLETE      times:1 first:(1794147907673 / 2026-11-08 08:25:07.673)
+  STREAM_CANCEL                            times:1 first:(1794147909760 / 2026-11-08 08:25:09.760)
+  STREAM_POST                              times:8 first:(1794147907809 / 2026-11-08 08:25:07.809)
+  DATABASE_NEW_STREAM_ITEM                 times:4 first:(1794147907749 / 2026-11-08 08:25:07.749)
+  DATABASE_REMOVE_STREAM_ITEM              times:1 first:(1794147909760 / 2026-11-08 08:25:09.760)
+  NOTIFICATION_API_GET_ACTIVE_NOTIFICATIONS times:5 first:(1794147907542 / 2026-11-08 08:25:07.542)
+  NOTIFICATION_API_GET_CURRENT_INTERRUPTION_FILTER times:1 first:(1794147909566 / 2026-11-08 08:25:09.566)
+  NOTIFICATION_API_REGISTER_NOTIFICATION_LISTENER times:1 first:(1794147907535 / 2026-11-08 08:25:07.535)
+  NOTIFICATION_API_REGISTER_NOTIFICATION_LISTENER_SUCCESS times:1 first:(1794147907536 / 2026-11-08 08:25:07.536)
+End of StreamTimeline
+
+MigrationStreamManager
+Started: 16.990s ago (1794147906292 / 2026-11-08 08:25:06.292)
+First database revision: 1
+3 stream items:
+   (Wear OS) StreamItemIdAndRevision{streamItemId=StreamItemId{source=1, key=0|com.google.android.clockwork.sysui|4161|null|10062}, revision=9, originalRevision=9, updateCount=0}
+    state: StreamItemState{isRead=false, dismissalReasons=[], filteredReasons=[FOREGROUND_SERVICE], expiredDueToConnectivity=null, expiredDueToThrottling=null}
+    remoteStreamItemId: null
+    creator node: null
+    post time: (1794147917559 / 2026-11-08 08:25:17.559)
+    history: (new item or history disabled)
+    color: 0
+    dismissal id: null
+    bridge tag: null
+    channel:Channel{mId=ChannelId{mPackageName='com.google.android.clockwork.sysui', mId='SysUiServiceNotificationChannelId', mNotificationSource=1}, mName=SysUiServiceNotificationChannel, mImportance=3, mCanBypassDnd=false, mSoundUri=content://settings/system/notification_sound, mShouldShowLights=false, mLightColor=0, mShouldVibrate=false, mVibrationPattern=null, mVibrationEffect=null, mIsImportantConversation=false, mConversationId='null', mLockscreenVisibility=-1000, mCanShowBadge=true, mGroup='null', mDeleted=false}
+    interruptionTime: (1794147917559 / 2026-11-08 08:25:17.559)
+    ongoing: false
+    sortKey: 
+    groupKey:null
+    summary: false
+    original post time:  (1794147917559 / 2026-11-08 08:25:17.559)
+    vibrate: null
+    content:
+      title: SysUiServiceNotificationTitle (29 chars)
+      text: SysUiServiceNotificationText (28 chars)
+      image provider:
+      when: (1794147907553 / 2026-11-08 08:25:07.553)
+      MessagingStyle
+        Display Name: null
+        Conversation title: null
+        messages (0):
+      flags: 0x60 (FLAG_NO_CLEAR|FLAG_FOREGROUND_SERVICE)
+      sort key: 
+      
+  
+   (System UI) StreamItemIdAndRevision{streamItemId=StreamItemId{source=1, key=0|com.google.android.apps.wearable.systemui|4369|null|10064}, revision=8, originalRevision=8, updateCount=0}
+    state: StreamItemState{isRead=false, dismissalReasons=[], filteredReasons=[FOREGROUND_SERVICE], expiredDueToConnectivity=null, expiredDueToThrottling=null}
+    remoteStreamItemId: null
+    creator node: null
+    post time: (1794147916444 / 2026-11-08 08:25:16.444)
+    history: (new item or history disabled)
+    color: 0
+    dismissal id: null
+    bridge tag: null
+    channel:Channel{mId=ChannelId{mPackageName='com.google.android.apps.wearable.systemui', mId='AmbientService', mNotificationSource=1}, mName=AmbientService, mImportance=2, mCanBypassDnd=false, mSoundUri=content://settings/system/notification_sound, mShouldShowLights=false, mLightColor=0, mShouldVibrate=false, mVibrationPattern=null, mVibrationEffect=null, mIsImportantConversation=false, mConversationId='null', mLockscreenVisibility=-1000, mCanShowBadge=true, mGroup='null', mDeleted=false}
+    interruptionTime: (0 / 1969-12-31 18:00:00.000)
+    ongoing: false
+    sortKey: 
+    groupKey:null
+    summary: false
+    original post time:  (1794147916444 / 2026-11-08 08:25:16.444)
+    vibrate: null
+    content:
+      title: AmbientService (14 chars)
+      tickerText: AmbientService (14 chars)
+      text: AmbientService (14 chars)
+      image provider:
+      when: (1794147906440 / 2026-11-08 08:25:06.440)
+      MessagingStyle
+        Display Name: null
+        Conversation title: null
+        messages (0):
+      priority: 2
+      flags: 0x160 (FLAG_NO_CLEAR|FLAG_FOREGROUND_SERVICE|FLAG_LOCAL_ONLY)
+      has content intent
+      sort key: 
+      
+  
+   (Android System) StreamItemIdAndRevision{streamItemId=StreamItemId{source=1, key=0|android|17303299|com.android.wifi|1000}, revision=7, originalRevision=7, updateCount=0}
+    state: StreamItemState{isRead=false, dismissalReasons=[], filteredReasons=[], expiredDueToConnectivity=null, expiredDueToThrottling=null}
+    remoteStreamItemId: null
+    creator node: null
+    post time: (1794147911198 / 2026-11-08 08:25:11.198)
+    history: (new item or history disabled)
+    color: 0
+    dismissal id: null
+    bridge tag: null
+    channel:Channel{mId=ChannelId{mPackageName='android', mId='NETWORK_AVAILABLE', mNotificationSource=1}, mName=Network available, mImportance=2, mCanBypassDnd=false, mSoundUri=content://settings/system/notification_sound, mShouldShowLights=false, mLightColor=0, mShouldVibrate=false, mVibrationPattern=null, mVibrationEffect=null, mIsImportantConversation=false, mConversationId='null', mLockscreenVisibility=-1000, mCanShowBadge=true, mGroup='null', mDeleted=false}
+    interruptionTime: (0 / 1969-12-31 18:00:00.000)
+    ongoing: false
+    sortKey: 
+    groupKey:null
+    summary: false
+    original post time:  (1794147911198 / 2026-11-08 08:25:11.198)
+    vibrate: null
+    content:
+      title: Connect to open Wi‑Fi network (29 chars)
+      tickerText: Connect to open Wi‑Fi network (29 chars)
+      text: AndroidWifi (11 chars)
+      image provider:
+      when: (1794147911197 / 2026-11-08 08:25:11.197)
+      MessagingStyle
+        Display Name: null
+        Conversation title: null
+        messages (0):
+      2 actions
+      flags: 0x900 (FLAG_LOCAL_ONLY|Unknown 0x800)
+      has content intent
+      sort key: 
+      
+  
+Image providers of stream items
+  Item ID = StreamItemIdAndRevision{streamItemId=StreamItemId{source=1, key=0|com.google.android.apps.wearable.systemui|4369|null|10064}, revision=8, originalRevision=8, updateCount=0}
+  NotifImageProvider image provider for StreamItemId{source=1, key=0|com.google.android.apps.wearable.systemui|4369|null|10064}
+  Big Picture: null
+  Large Icon: null
+  Small Icon: Icon(typ=RESOURCE pkg=com.google.android.apps.wearable.systemui id=0x7f08065f)
+  App Icon: Icon(typ=RESOURCE pkg=com.google.android.apps.wearable.systemui id=0x01080093)
+  
+  Item ID = StreamItemIdAndRevision{streamItemId=StreamItemId{source=1, key=0|com.google.android.clockwork.sysui|4161|null|10062}, revision=9, originalRevision=9, updateCount=0}
+  NotifImageProvider image provider for StreamItemId{source=1, key=0|com.google.android.clockwork.sysui|4161|null|10062}
+  Big Picture: null
+  Large Icon: null
+  Small Icon: Icon(typ=RESOURCE pkg=com.google.android.clockwork.sysui id=0x7f080269)
+  App Icon: Icon(typ=RESOURCE pkg=com.google.android.clockwork.sysui id=0x01080093)
+  
+  Item ID = StreamItemIdAndRevision{streamItemId=StreamItemId{source=1, key=0|android|17303299|com.android.wifi|1000}, revision=7, originalRevision=7, updateCount=0}
+  NotifImageProvider image provider for StreamItemId{source=1, key=0|android|17303299|com.android.wifi|1000}
+  Big Picture: null
+  Large Icon: null
+  Small Icon: Icon(typ=RESOURCE pkg=com.google.android.wifi.resources id=0x7f030001)
+  App Icon: Icon(typ=RESOURCE pkg=android id=0x0108047b)
+  
+Recent removals:
+  2026-11-08 08:25:09.760, r#7:	removed item [StreamItemIdAndRevision{streamItemId=StreamItemId{source=1, key=0|android|13|PreBootBroadcaster|1000}, revision=6, originalRevision=1, updateCount=5}] due to request at r#6: Remove[SBN removed: StreamItemIdAndRevision{streamItemId=StreamItemId{source=1, key=0|android|13|PreBootBroadcaster|1000}, revision=-1, originalRevision=-1, updateCount=0}] (13.523 ago)
+
+
+NotificationFrequencyTracker
+  In memory state frequency count for android: 1
+
+CrossDeviceIdStreamListener
+  Cross Device IDs:
+
+BlockedAppsListImpl
+0 muted apps:
+Blocked apps change log:
+
+WS:SubscriptionManager
+  Requested subscription map:
+    empty
+  Committed subscription map:
+    empty
+
+NotificationBridger
+Dismissals per package per source:
+Micro-app packages with special bridging mode:
+InMemoryBridgeModeConfig
+Handler:
+  FULL_SYNC: 1 full sessions
+    First started: 13.370s ago (1794147909913) (12.487s after system start)
+    First finished: 13.351s ago (1794147909932)
+    Average duration: 0.019s
+    n:1 min:19 max:19
+    [    16 -     32) -> 1
+    [    32 -     64) -> 0
+    [    64 -    128) -> 0
+    [   128 -    256) -> 0
+    [   256 -    512) -> 0
+    [   512 -   1024) -> 0
+    [  1024 -   2048) -> 0
+    [  2048 -   4096) -> 0
+    [  4096 -   8192) -> 0
+    [  8192 -  16384) -> 0
+    [ 16384 -  32768) -> 0
+    [ 32768 -  65536) -> 0
+    [ 65536 - 131072) -> 0
+    [131072 - 262144) -> 0
+    [262144+          -> 0
+  FLUSH_STREAM_CHANGE: 4 full sessions
+    First started: 13.351s ago (1794147909932) (12.506s after system start)
+    First finished: 13.351s ago (1794147909932)
+    Last started: 5.708s ago (1794147917575)
+    Last finished: 5.708s ago (1794147917575)
+    Average duration: 0.000s
+    n:4 min:0 max:0
+    [     0 -      1) -> 4
+    [     1 -      2) -> 0
+    [     2 -      4) -> 0
+    [     4 -      8) -> 0
+    [     8 -     16) -> 0
+    [    16 -     32) -> 0
+    [    32 -     64) -> 0
+    [    64 -    128) -> 0
+    [   128 -    256) -> 0
+    [   256 -    512) -> 0
+    [   512 -   1024) -> 0
+    [  1024 -   2048) -> 0
+    [  2048 -   4096) -> 0
+    [  4096 -   8192) -> 0
+    [  8192 -  16384) -> 0
+    [ 16384 -  32768) -> 0
+    [ 32768 -  65536) -> 0
+    [ 65536 - 131072) -> 0
+    [131072 - 262144) -> 0
+    [262144+          -> 0
+    Average time between sessions: 2.547s
+    n:3 min:1122 max:5249
+    [  1024 -   2048) -> 2
+    [  2048 -   4096) -> 0
+    [  4096 -   8192) -> 1
+    [  8192 -  16384) -> 0
+    [ 16384 -  32768) -> 0
+    [ 32768 -  65536) -> 0
+    [ 65536 - 131072) -> 0
+    [131072 - 262144) -> 0
+    [262144+          -> 0
+  Handler (android.os.Handler) {41fb80c} @ 25857
+    Looper (StreamLooper, tid 31) {94c3cb3}
+      (MessageQueue is using DeliQueue implementation)
+      (Total messages: 0, polling=false, quitting=false)
+is notification sink
+0 items in bridged items map (bridged from remote)
+3 active stream items:
+  3 local non bridgeable items:
+    [Hidden] StreamItemIdAndRevision{streamItemId=StreamItemId{source=1, key=0|com.google.android.apps.wearable.systemui|4369|null|10064}, revision=8, originalRevision=8, updateCount=0}
+    [Hidden] StreamItemIdAndRevision{streamItemId=StreamItemId{source=1, key=0|com.google.android.clockwork.sysui|4161|null|10062}, revision=9, originalRevision=9, updateCount=0}
+    StreamItemIdAndRevision{streamItemId=StreamItemId{source=1, key=0|android|17303299|com.android.wifi|1000}, revision=7, originalRevision=7, updateCount=0}
+  0 remote items:
+
+OffBodyAlertingMuter
+  enabledInSettings=true onbody=true isPlugged=true isConnected=true 
+  com.google.wear.services.infra.offbody.LowLatencyOffBodyDetector
+    mIsRegistered=false mRegisteredElapsedTime=-1 Current elapsed time=25858 mExpectFirstEvent=false Sampling period (us)=0 mSensor=null Number of registered callbacks:=0 Last on body state detected: =OffBody 
+
+
+#####################################
+Wear Service API: migration_service
+
+
+#####################################
+Wear Service API: complications
+mDataSender.mComplicationApiDataProxy=alive
+ComplicationManager
+  ComplicationDataSendingController
+    complication cache size=1
+      cacheEntries=1_12_3_com.google.android.clockwork.sysui/.experiences.complications.providers.DayAndDateProviderService
+    shouldRedactSensitiveComplications =false
+    watchFaceIsShowingRedactedComplications =false
+    SysUiDataSenderIsNull=false
+    UnsentDataCount=0
+    ComplicationDataRateLimitedEvaluator
+      scheduled=false
+      watchFaceState=WatchFaceState{watchFaceVisible=true, inAmbient=true}
+    ComplicationsConfigController
+      activeWatchFaceFavoriteId=WatchFaceFavoriteId{mWatchFaceId=WatchFaceId[com.google.wear.offhand,null], mFavoriteId=1, mType=AndroidxWatchFace}
+      activeConfigs: size=2
+      id=1 slot=11 type=1 configActionPending=false provider=null isEnabled=true
+      id=2 slot=12 type=3 configActionPending=false provider=ComponentInfo{com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.DayAndDateProviderService} isEnabled=true
+      PreviewComplicationDataCache=com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.DayAndDateProviderService/3
+    ComplicationUpdateController
+      inRetailMode=false
+    SynchronousComplicationSessionController
+      synchronousComplicationUpdateEnabled=true
+      mPerConfigStates:
+  DeviceLockStateReceiver
+    mDeviceLocked=false
+    mDeviceLockStateListener set
+  System Mapping:
+    1=ComponentInfo{com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.BatteryProviderService}
+    2=ComponentInfo{com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.DayOfMonthProviderService}
+    3=ComponentInfo{com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.CurrentTimeProvider}
+    4=ComponentInfo{com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.StepsProviderService}
+    5=ComponentInfo{com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.WorldClockProviderService}
+    6=ComponentInfo{com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.LauncherProviderService}
+    7=ComponentInfo{com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.UnreadNotificationsProviderService}
+    12=ComponentInfo{com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.SunriseSunsetProviderService}
+    14=ComponentInfo{com.google.android.contacts/com.google.android.wearable.contacts.complications.ContactsComplicationProviderService}
+    13=ComponentInfo{com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.DayOfWeekProviderService}
+    16=ComponentInfo{com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.DayAndDateProviderService}
+    17=ComponentInfo{com.google.android.clockwork.emulator.complication.datasource/com.google.android.clockwork.emulator.complication.datasource.PlaceholderHeartRateProviderService}
+  
+
+#####################################
+Wear Service API: telephony
+
+
+#####################################
+Wear Service API: ongoing_activity_service
+  numOfListenerRegistered=2
+  Ongoing Activity Keeper:
+  numOfListenerRegistered=2
+  Active OngoingActivity IDs=0
+
+
+#####################################
+Wear Service API: companion_connection_service
+  lastReportedConnectionType=1
+  numOfListenerRegistered=1
+
+
+#####################################
+Wear Service API: tiles_service
+  numOfRegisteredTilesChangeListeners=1
+  TileStoreImpl
+    maxTileCount=15
+    Current visible tiles count: =0
+    AvailableTilesProvider
+      supportedContainerType=[0]
+      prioritizedTilesArray=[]
+      Cached available tile packages=[com.google.android.contacts]
+      Available Tiles
+        TileProvider{componentName=ComponentInfo{com.google.android.contacts/com.google.android.wearable.contacts.tiles.FavoriteContactsTileService}, appLabel=Contacts, tileLabel=Favorites, tileDescription=See your favorite contacts, iconResId=2131755013, flags=0, configAction=null, vendorMetadata=null, containerType=0, preferredContainerType=2, group=com.google.android.wearable.contacts.tiles.FavoriteContactsTileService, protoLayoutEnabled=false, isTileSuspended=false}
+        TileProvider{componentName=ComponentInfo{com.google.android.contacts/com.google.android.wearable.contacts.tiles.singlecontact.SingleContactTileService}, appLabel=Contacts, tileLabel=Contact, tileDescription=Add a contact to make getting in touch easy, iconResId=2131755013, flags=1, configAction=com.google.android.wearable.contacts.ACTION_CHOOSE_SINGLE_CONTACT, vendorMetadata=null, containerType=0, preferredContainerType=2, group=com.google.android.wearable.contacts.tiles.singlecontact.SingleContactTileService, protoLayoutEnabled=false, isTileSuspended=false}
+    Visible Tiles
+    DB Visible Tiles
+    VisibleTilesOrderStore
+      Visible tiles order in shared prefs=[]
+    Tiles data items:
+        Tile data providers:
+          Localized tile screenshot asset key=d68f138a64e686ea2923b248aca1ac58
+          Localized tile description=See your favorite contacts
+          Localized app label=Contacts
+          Localized tile label=Favorites
+          Container type=0
+          Does support multi instance=false
+          Vendor metadata=
+          
+          Localized tile screenshot asset key=3aed8bf11f17c494cd2adb289fd0a8a5
+          Localized tile description=Add a contact to make getting in touch easy
+          Localized app label=Contacts
+          Localized tile label=Contact
+          Container type=0
+          Does support multi instance=true
+          Vendor metadata=
+          
+        
+        Tiles data configs:
+        
+
+
+#####################################
+Wear Service API: remote_events
+
+
+#####################################
+Wear Service API: media
+
+
+#####################################
+Wear Service API: watch_faces
+numOfRegisteredActiveWatchFaceChangeListeners=2
+numOfRegisteredFavoriteListeners=1
+Active Watch Face Facade:
+threadState=IDLE
+numOfRegisteredListeners=4
+lastSetWatchFaceFavoriteId=1
+isFallbackWatchFace=false
+runningFlow=ANDROIDX
+activeWatchFaceComponent=WatchFaceId[com.google.wear.offhand,null]
+favoriteId=1
+Current active watch face style={themeColor=8, showSeconds=}
+lastDisconnectionTimeMs=0
+Current Active Engine:
+  Engine Type=AndroidX
+  Current Active Watch Face=favId: 1, family: WatchFaceId[com.google.wear.offhand,null]
+  Current Wallpaper Component=ComponentInfo{com.google.wear.watchface.runtime/com.google.wear.watchface.runtime.DeclarativeWatchFaceRuntime0}
+  Multiple Favorites Enabled=true
+  Flavors Supported=false
+  Resource Only WatchFace=true
+  Editable Resource Only WatchFace=true
+  Runtime Package=com.google.wear.watchface.runtime
+  WearServices WatchFace Client=Binder Alive
+  watchFaceHasComplicationDataCache=true
+  isComplicationDisplayPolicySupported=true
+Watch Face Favorite Repository (DB)
+  Favorite Preview Store:
+    File: 1-preview, size: 8634 bytes
+    File: 3-preview, size: 10148 bytes
+  All Favorites in Database:
+    id=1 packageName=com.google.wear.offhand className=_placeholder_ editedPreviewUri=content://com.google.wear.services.watchface.previews.provider/wf-favorite-previews/1-preview lastUpdatedAt=1794147908276 style={themeColor=8, showSeconds=}
+    complications: 
+      ComplicationInfo{mWatchFaceSlotId=11, mProviderComponent=null, mDataType=1, mSlotEnabled=true}
+      ComplicationInfo{mWatchFaceSlotId=12, mProviderComponent=ComponentInfo{com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.DayAndDateProviderService}, mDataType=3, mSlotEnabled=true}
+    
+    id=2 packageName=com.google.wear.superficial className=_placeholder_ editedPreviewUri=null lastUpdatedAt=1794147908414 style={themeColor=2, useItalic=}
+    complications: 
+    
+    id=3 packageName=com.google.wear.perfunctory className=_placeholder_ editedPreviewUri=content://com.google.wear.services.watchface.previews.provider/wf-favorite-previews/3-preview lastUpdatedAt=1794147909398 style={themeColor=9, useItalic=}
+    complications: 
+      ComplicationInfo{mWatchFaceSlotId=11, mProviderComponent=null, mDataType=1, mSlotEnabled=true}
+      ComplicationInfo{mWatchFaceSlotId=12, mProviderComponent=ComponentInfo{com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.DayAndDateProviderService}, mDataType=3, mSlotEnabled=true}
+    
+  Favorites Operations Journal:
+    Favorites Order in shared prefs: =[1, 2, 3]
+isSyncOngoing=false
+Favorite Order from GMS: [1, 2, 3]
+All Favorites in GMS:
+  Number of Favorites in Total: 3
+  id=1 componentName=com.google.wear.offhand/_placeholder_ previewAssetKey=1-preview Mode=WATCH_FACE_MODE_DEFAULT 
+  id=2 componentName=com.google.wear.superficial/_placeholder_ previewAssetKey=2-preview Mode=WATCH_FACE_MODE_DEFAULT 
+  id=3 componentName=com.google.wear.perfunctory/_placeholder_ previewAssetKey=3-preview Mode=WATCH_FACE_MODE_DEFAULT 
+
+
+

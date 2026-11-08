@@ -55,7 +55,7 @@ final class VisionCommandPolicyTests: XCTestCase {
             VisionCommandPolicy.tapResolution(candidates: candidates, label: "General", elementType: 9), .match(1)
         )
         XCTAssertEqual(
-            VisionCommandPolicy.tapResolution(candidates: candidates, label: "General", elementType: 21), .none
+            VisionCommandPolicy.tapResolution(candidates: candidates, label: "General", elementType: 21), .missing
         )
         XCTAssertEqual(VisionCommandPolicy.tapResolution(candidates: candidates, label: ""), .match(0))
     }
@@ -63,14 +63,24 @@ final class VisionCommandPolicyTests: XCTestCase {
     func testTapResolutionRequiresExactlyOneEnabledMatch() {
         let enabled = VisionCommandPolicy.TapCandidate(elementType: 9, label: "General", isEnabled: true)
         let disabled = VisionCommandPolicy.TapCandidate(elementType: 9, label: "General", isEnabled: false)
-        XCTAssertEqual(VisionCommandPolicy.tapResolution(candidates: []), .none)
-        XCTAssertEqual(VisionCommandPolicy.tapResolution(candidates: [disabled]), .none)
+        XCTAssertEqual(VisionCommandPolicy.tapResolution(candidates: []), .missing)
+        XCTAssertEqual(VisionCommandPolicy.tapResolution(candidates: [disabled]), .disabled)
         XCTAssertEqual(VisionCommandPolicy.tapResolution(candidates: [disabled, enabled]), .match(1))
         XCTAssertEqual(
             VisionCommandPolicy.tapResolution(candidates: [enabled, enabled], label: "General", elementType: 9),
             .ambiguous(2)
         )
         XCTAssertEqual(VisionCommandPolicy.tapResolution(candidates: [enabled]), .match(0))
+        XCTAssertEqual(
+            VisionCommandPolicy.tapResolution(candidates: [disabled, enabled], label: "General", elementType: 9),
+            .match(1)
+        )
+        XCTAssertEqual(
+            VisionCommandPolicy.tapResolution(candidates: [disabled, enabled], label: "Other"), .missing
+        )
+        XCTAssertEqual(
+            VisionCommandPolicy.tapResolution(candidates: [disabled], label: "General", elementType: 9), .disabled
+        )
     }
 
     func testTargetBundleIdComesFromEnvironment() {

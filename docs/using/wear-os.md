@@ -199,8 +199,9 @@ device connection before retrying.
 
 ## Tiles
 
-Enable `wearSurface` with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)), then call it
-with a tile provider's component (`<package>/<service>`):
+Enable `wearSurface` with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)). Call
+`listTileProviders` with no other argument to get the installed tile providers, then pass one
+provider's `component` (`<package>/<service>`) to a tile action:
 
 ```json
 {

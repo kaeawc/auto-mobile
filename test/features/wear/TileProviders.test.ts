@@ -71,6 +71,16 @@ describe("parseTileProviderComponents", () => {
     },
   );
 
+  test("keeps Unicode class names", () => {
+    expect(parseTileProviderComponents("com.example/com.example.CaféTile\n")).toEqual([
+      {
+        component: "com.example/com.example.CaféTile",
+        packageName: "com.example",
+        className: "com.example.CaféTile",
+      },
+    ]);
+  });
+
   test("expands short class names and drops duplicates", () => {
     const parsed = parseTileProviderComponents("com.ex/.Tile\ncom.ex/com.ex.Tile\n");
     expect(parsed).toEqual([

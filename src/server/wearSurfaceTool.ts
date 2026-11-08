@@ -205,7 +205,14 @@ const wearSurfaceTool = defineDeviceTool({
     "Wear OS watches only (other form factors are refused without a change): tiles. listTileProviders lists the installed tile provider components. addTile adds a tile provider to the carousel (idempotent; reports its index; a component that is not a tile provider fails before anything is sent, naming the valid ones). removeTile removes it (also succeeds when it was absent). showTile scrolls the carousel to a tile by component (index resolved right before showing, adding the tile if absent) or by index, then observes; success requires the observe to confirm a tile container in the foreground Wear system UI. The debug broadcasts report success even when nothing happened, so verified is only true when an observe confirmed it.",
   input: wearSurfaceInput,
   handler: createWearSurfaceHandler(),
-  options: { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: wearSurfaceResultSchema },
+  options: {
+    ...PLAN_RELEVANT,
+    defaultEnabled: false,
+    outputSchema: wearSurfaceResultSchema,
+    // listTileProviders only queries the package manager: a read (#10965). Every tile action
+    // broadcasts to the carousel, so it is control.
+    deviceReadOnly: (args) => args.action === "listTileProviders",
+  },
 });
 
 export const wearSurfaceSchema = wearSurfaceTool.schema;

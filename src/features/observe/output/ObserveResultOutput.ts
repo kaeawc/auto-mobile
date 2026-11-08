@@ -14,3 +14,4 @@ export {
 export type { ObserveDiffNode, ObserveDiff } from "./resultOutput/diffTypes";
 export { DIFF_IGNORED_ATTRS } from "./resultOutput/diffComparison";
 export { isSameObservationScreen, diffObserveResult } from "./resultOutput/diff";
+export { hasMaterialLayoutWarningChange } from "./resultOutput/layoutWarningChange";

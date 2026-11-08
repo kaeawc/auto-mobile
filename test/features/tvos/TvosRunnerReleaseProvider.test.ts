@@ -2,11 +2,13 @@ import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { TvosRunnerArtifacts } from "../../../src/features/tvos/TvosRunnerArtifacts";
 import {
   TvosRunnerReleaseProvider,
   TVOS_RUNNER_METADATA_FILENAME,
   type TvosRunnerReleaseProviderDeps,
 } from "../../../src/features/tvos/TvosRunnerReleaseProvider";
+import { createExecResult } from "../../../src/utils/execResult";
 import { FakeChecksumCalculator } from "../../fakes/FakeChecksumCalculator";
 import { FakeFileDownloader } from "../../fakes/FakeFileDownloader";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -185,4 +187,63 @@ test("a cancelled waiter does not cancel another caller's shared download", asyn
   await expect(cancelled).rejects.toThrow("cancelled");
   expect(await remaining).toContain(RUN);
   expect(downloader.downloadedUrls).toEqual([URL]);
+});
+
+const DOWNLOAD_FAILURES = [
+  ["404", new Error("Download failed: HTTP 404 Not Found")],
+  ["offline", Object.assign(new Error("getaddrinfo ENOTFOUND github.com"), { code: "ENOTFOUND" })],
+] as const;
+
+test.each(DOWNLOAD_FAILURES)(
+  "download failure (%s) returns no runner so the source build can run",
+  async (_name, failure) => {
+    downloader.shouldThrow = failure;
+    expect(await provider().ensure()).toBeNull();
+    expect(checksumCalculator.computedFiles).toEqual([]);
+    expect(extracts).toEqual([]);
+    expect(await fs.readdir(cacheDir)).toEqual([]);
+  },
+);
+
+function artifactsWith(release: TvosRunnerReleaseProvider) {
+  const builds: string[][] = [];
+  let built: string | null = null;
+  const artifacts = new TvosRunnerArtifacts({
+    builder: {
+      getConfig: () => ({ projectRoot: "/repo", derivedDataPath: "/derived" }),
+      getXctestrunPath: async () => built,
+    },
+    release,
+    override: () => undefined,
+    access: async () => {},
+    xcodebuild: {
+      executeCommand: async (args) => {
+        builds.push(args);
+        built = "/derived/Build/Products/AutoMobileTVTest_appletvsimulator.xctestrun";
+        return createExecResult("BUILD SUCCEEDED", "");
+      },
+    },
+  });
+  return { artifacts, builds };
+}
+
+test.each(DOWNLOAD_FAILURES)(
+  "release download failure (%s) falls through to the local tvOS build",
+  async (_name, failure) => {
+    downloader.shouldThrow = failure;
+    const { artifacts, builds } = artifactsWith(provider());
+    expect(await artifacts.resolve()).toBe(
+      "/derived/Build/Products/AutoMobileTVTest_appletvsimulator.xctestrun",
+    );
+    expect(builds).toHaveLength(1);
+  },
+);
+
+test("a checksum mismatch fails closed instead of falling through to the local build", async () => {
+  checksumCalculator.checksum = "b".repeat(64);
+  const { artifacts, builds } = artifactsWith(provider());
+  await expect(artifacts.resolve()).rejects.toThrow("checksum verification failed");
+  expect(builds).toEqual([]);
+  expect(extracts).toEqual([]);
+  expect(await fs.readdir(cacheDir)).toEqual([]);
 });

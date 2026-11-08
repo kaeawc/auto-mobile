@@ -9,6 +9,7 @@ import {
   CAPPED_SHRINK,
   rowContentHeight,
   rowMeasured,
+  type PrepareChild,
 } from "../../../../src/features/prototype/web/webRowAspect";
 import {
   INCOMING_HEIGHT_KEY,
@@ -76,7 +77,7 @@ test("a repeat column hands each instance its own share of the column's height (
     repeat: { items: [{}, {}] },
     children: [{ type: "row", style: { weight: 1 } }],
   };
-  const heights = (node: Raw, list: typeof prepares, content: number) =>
+  const heights = (node: Raw, list: readonly PrepareChild[], content: number) =>
     repeatInstanceChildren(node, "root", list, content).map((each) => each.map(heightOf));
   // Two weighted instances in a 40 dp column get 20 dp each, as on Android.
   expect(heights(weighted, prepares, 40)).toEqual([[20], [20]]);
@@ -105,10 +106,7 @@ test("a repeat that is not a bounded column keeps its template for every instanc
   const column = { type: "column", repeat: { items: [{}] }, children };
   expect(repeatInstanceChildren(column, "root", [prepare], undefined)).toEqual([children]);
   const row = { type: "row", repeat: { items: [{}] }, children };
-  expect(repeatInstanceChildren(row, "root", [prepare, prepare], 40)).toEqual([
-    children,
-    children,
-  ]);
+  expect(repeatInstanceChildren(row, "root", [prepare, prepare], 40)).toEqual([children, children]);
   expect(repeatInstanceChildren({ type: "column", children }, "root", [prepare], 40)).toEqual([
     children,
   ]);

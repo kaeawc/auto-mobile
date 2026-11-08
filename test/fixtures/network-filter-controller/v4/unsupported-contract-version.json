@@ -1,1 +1,1 @@
-{"detail":"Invalid or repeated --contract-version. Supported contract versions: 3, 4, 5.","state":"unavailable","version":5}
+{"detail":"Invalid or repeated --contract-version. Supported contract versions: 3, 4.","state":"unavailable","version":4}

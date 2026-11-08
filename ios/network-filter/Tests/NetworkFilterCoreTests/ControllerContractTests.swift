@@ -233,6 +233,40 @@ final class ControllerContractTests: XCTestCase {
                 version: 4
             )
         }
+        return results
+    }
+
+    private func versionFiveFixtureResults() throws -> [String: ControllerResult] {
+        let offline = try XCTUnwrap(snapshot().rules?.first)
+        let watch = NetworkRuleStatus(
+            target: offline.target,
+            owner: offline.owner,
+            ownerGeneration: offline.ownerGeneration,
+            revision: 3,
+            condition: .watch,
+            leaseRemainingMilliseconds: 14000,
+            droppedFlows: 0
+        )
+        let probe = IdentityProbe(resolver: FakeIdentityResolver(), processTable: FakeProcessTable())
+        var results = [
+            "ready": ControllerResult(
+                state: .ready,
+                detail: "Provider replied; per-app offline isolation is unverified until the signed run (#10263).",
+                snapshot: probe.snapshot(managedSimulators: [watch.target.simulator], rules: [watch], version: 5),
+                version: 5
+            ),
+        ]
+        for existingFlows in [ExistingFlows.dropped, .unaffected] {
+            results["rule-applied-existing-flows-\(existingFlows.rawValue)"] = ControllerResult(
+                state: .ready,
+                detail: "Provider answered apply: applied.",
+                rule: NetworkRuleResult(
+                    outcome: .applied, installedRevision: 3, leaseRemainingMilliseconds: 15000,
+                    existingFlows: existingFlows
+                ),
+                version: 5
+            )
+        }
         do {
             _ = try ControllerInvocation.parse(["status", "--contract-version", "9"])
             XCTFail("unsupported version must fail")
@@ -269,8 +303,19 @@ final class ControllerContractTests: XCTestCase {
     /// Regenerate with the command in test/fixtures/network-filter-controller/README.md.
     func testCommittedFixturesMatchTheEncoder() throws {
         let outputDirectory = ProcessInfo.processInfo.environment["AUTOMOBILE_FIXTURE_OUT_DIR"]
+        // This shipped-v4 parser rejection is historical output, not the live parser's result.
+        let historicalRejection = Data((
+            #"{"detail":"Invalid or repeated --contract-version. Supported contract versions: 3, 4.","state":"unavailable","version":4}"#
+                + "\n"
+        ).utf8)
+        XCTAssertEqual(
+            try Data(contentsOf: fixtureDirectory.appendingPathComponent("v4/unsupported-contract-version.json")),
+            historicalRejection
+        )
         let fixtures = try fixtureResults().merging(
             Dictionary(uniqueKeysWithValues: versionFourFixtureResults().map { ("v4/" + $0.key, $0.value) })
+        ) { _, newest in newest }.merging(
+            Dictionary(uniqueKeysWithValues: versionFiveFixtureResults().map { ("v5/" + $0.key, $0.value) })
         ) { _, newest in newest }
         for (name, result) in fixtures {
             var line = try result.encodedLine()

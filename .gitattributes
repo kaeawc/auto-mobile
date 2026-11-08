@@ -71,6 +71,7 @@ test/fixtures/observe-output/ios-alert-over-table/*.json text eol=lf
 test/fixtures/observe-output/ios-prototype-sheet/*.json text eol=lf
 test/fixtures/network-filter-controller/*.json text eol=lf
 test/fixtures/network-filter-controller/v4/*.json text eol=lf
+test/fixtures/network-filter-controller/v5/*.json text eol=lf
 test/fixtures/network-filter-controller/v3-app/*.json text eol=lf
 test/fixtures/desktop-wire/*.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-injected.json text eol=lf

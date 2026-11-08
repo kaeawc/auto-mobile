@@ -1175,7 +1175,7 @@ function setup() {
     timer,
     clock: timer,
     cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
-    // A via "device" request to localhost makes show run `adb reverse`; keep it off the real adb.
+    // Keep any adb call a show makes (app-layer grants, anchor capture) off the real adb.
     adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
   });
 }

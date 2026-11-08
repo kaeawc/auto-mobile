@@ -4,7 +4,9 @@ import {
   ObserveResult,
   ViewHierarchyResult,
   toActionableError,
+  ActionableError,
 } from "../../models";
+import { watchStreamRoot } from "./helpers/watchHierarchy";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import type { NotificationUIDetector } from "../../utils/interfaces/NotificationUIDetector";
 import {
@@ -40,6 +42,9 @@ export class AndroidNotificationUIDetector implements NotificationUIDetector {
   }
 
   isTrayOpen(viewHierarchy?: ViewHierarchyResult): boolean {
+    if (this.device.formFactor === "watch") {
+      return !!watchStreamRoot(viewHierarchy);
+    }
     if (!viewHierarchy) {
       return false;
     }
@@ -49,6 +54,19 @@ export class AndroidNotificationUIDetector implements NotificationUIDetector {
 
   async expandTray(_observation?: ObserveResult): Promise<void> {
     try {
+      if (this.device.formFactor === "watch") {
+        const width = _observation?.screenSize.width ?? this.device.screenWidth;
+        const height = _observation?.screenSize.height ?? this.device.screenHeight;
+        if (!width || !height) {
+          throw new ActionableError(
+            "Watch screen dimensions are unavailable; observe the watch before opening notifications.",
+          );
+        }
+        await this.deps.executeAdbCommand(
+          `shell input swipe ${Math.floor(width / 2)} ${Math.floor(height * 0.965)} ${Math.floor(width / 2)} ${Math.floor(height * 0.31)} 900`,
+        );
+        return;
+      }
       await this.deps.executeAdbCommand("shell cmd statusbar expand-notifications");
     } catch (error) {
       throw toActionableError(error, `Failed to expand system tray`);
@@ -57,6 +75,10 @@ export class AndroidNotificationUIDetector implements NotificationUIDetector {
 
   async collapseTray(_observation?: ObserveResult): Promise<void> {
     try {
+      if (this.device.formFactor === "watch") {
+        await this.deps.executeAdbCommand("shell input keyevent 4");
+        return;
+      }
       await this.deps.executeAdbCommand("shell cmd statusbar collapse");
     } catch (error) {
       throw toActionableError(error, `Failed to collapse system tray`);

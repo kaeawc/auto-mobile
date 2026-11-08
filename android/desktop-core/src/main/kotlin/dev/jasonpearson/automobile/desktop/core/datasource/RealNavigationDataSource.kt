@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.datasource
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.daemon.encodeResourceUriComponent
+import dev.jasonpearson.automobile.desktop.core.navigation.BuildSourceRevision
 import dev.jasonpearson.automobile.desktop.core.navigation.ProvenanceBuildKey
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenNode
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenProvenance
@@ -204,13 +205,15 @@ private data class McpNavigationEdge(
 
 // Matches the additive provenance shape on the `automobile:navigation/graph` resource (#4985):
 // { "buildKey": { "packageId", "versionCode", "contentHash" }, "deviceId", "sessionUuid",
-//   "lastSeen" }.
+//   "lastSeen", "sourceRevision"?: { "gitBranch", "gitSha" } }. `sourceRevision` (#16954) is
+// absent for builds that declared none and from older daemons.
 @Serializable
 private data class McpNavigationProvenance(
   val buildKey: McpNavigationBuildKey,
   val deviceId: String,
   val sessionUuid: String,
   val lastSeen: Long,
+  val sourceRevision: McpBuildSourceRevision? = null,
 ) {
   fun toScreenProvenance(): ScreenProvenance =
     ScreenProvenance(
@@ -223,8 +226,11 @@ private data class McpNavigationProvenance(
       deviceId = deviceId,
       sessionUuid = sessionUuid,
       lastSeen = lastSeen,
+      sourceRevision = sourceRevision?.let { BuildSourceRevision(it.gitBranch, it.gitSha) },
     )
 }
+
+@Serializable private data class McpBuildSourceRevision(val gitBranch: String, val gitSha: String)
 
 @Serializable
 private data class McpNavigationBuildKey(

@@ -3,11 +3,11 @@
 The `manufacturerProfile` tool approximates an OEM device on a stock Android emulator
 or device. A manufacturer profile is a named, versioned bundle of facets. Each facet is applied by an existing tool:
 
-| Facet      | Applied with            | What it changes                                               |
-| ---------- | ----------------------- | ------------------------------------------------------------- |
-| `keyboard` | `keyboard` `setProfile` | The AutoMobile IME's typing behaviour (`gboard`, `samsung`)   |
-| `kill`     | `killProfile`           | Standby bucket, appops, Doze and force-stop for one package   |
-| `display`  | `displayProfile`        | Display cutout and navigation-mode overlays, density and more |
+| Facet      | Applied with                      | What it changes                                               |
+| ---------- | --------------------------------- | ------------------------------------------------------------- |
+| `keyboard` | `keyboard` `setProfile`           | The AutoMobile IME's typing behaviour (`gboard`, `samsung`)   |
+| `kill`     | [`killProfile`](kill-profiles.md) | Standby bucket, appops, Doze and force-stop for one package   |
+| `display`  | `displayProfile`                  | Display cutout and navigation-mode overlays, density and more |
 
 ## Manufacturer profiles simulate effects, not firmware
 
@@ -39,6 +39,15 @@ manufacturer profile.
 | `oneplus-oxygenos` | `gboard`  | `oneplus-deep-optimization` | hole cutout                   |
 | `oppo-coloros`     | `gboard`  | `recents-swipe-force-stop`  | hole cutout                   |
 | `motorola`         | `gboard`  | `motorola-adaptive`         | none                          |
+| `huawei-emui`      | `gboard`  | `huawei-powergenie`         | none                          |
+| `vivo-funtouch`    | `gboard`  | `vivo-autostart`            | none                          |
+| `realme-ui`        | `gboard`  | `realme-power-saver`        | none                          |
+| `meizu-flyme`      | `gboard`  | `meizu-flyme-background`    | none                          |
+| `asus-zenui`       | `gboard`  | `asus-power-master`         | none                          |
+| `sony-xperia`      | `gboard`  | `sony-stamina`              | none                          |
+| `tecno-hios`       | `gboard`  | `tecno-app-halt`            | none                          |
+
+See [Vendor profiles](kill-profiles.md#vendor-profiles) for the Huawei, Vivo, realme, Meizu, Asus, Sony and Tecno mappings and behaviours that cannot be emulated.
 
 The catalog has a `catalogVersion`, and each manufacturer profile a `version` that changes whenever one of
 its facets does, so a result names exactly what it applied.

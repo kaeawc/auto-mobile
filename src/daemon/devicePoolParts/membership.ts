@@ -1,3 +1,4 @@
+import type { AppleSimulatorSweepPlatform } from "../../devices/deviceDiscoveryContracts";
 import { getIosLockStateCache } from "../../features/observe/ios/IosLockStateCacheRegistry";
 import { clearDeviceError, isErrored, holderOf } from "../deviceBinding";
 import { notifyDeviceIdentityReplaced } from "../../utils/deviceIncarnation";
@@ -34,6 +35,10 @@ import { neutralIdentityEvidence, identityEvidenceFields } from "./contracts";
 import type { DevicePoolOperations } from "./operations";
 import type { DevicePoolState } from "./state";
 
+/** An explicit refresh that must also sweep Apple TV or Vision Pro simulators the pool lacks. */
+export interface RefreshWithOutcomeOptions {
+  appleSimulatorPlatforms?: readonly AppleSimulatorSweepPlatform[];
+}
 export interface MembershipOperations {
   resolveRecoveryPolicy(recoveryPolicy?: DeviceRecoveryPolicy): DeviceRecoveryPolicy;
   resolveDeviceSessionContinuity(override: boolean | undefined): boolean;
@@ -60,7 +65,7 @@ export interface MembershipOperations {
    * released by the disconnect monitor.
    */
   refreshDevices(): Promise<number>;
-  refreshDevicesWithOutcome(): Promise<DevicePoolRefreshResult>;
+  refreshDevicesWithOutcome(options?: RefreshWithOutcomeOptions): Promise<DevicePoolRefreshResult>;
   /** @internal Test support for checking removal-stamp retention. */
   getDeviceRemovalStampCountForTest(): number;
   refreshDevicesInternal(assignmentLockHeld: boolean): Promise<DevicePoolRefreshResult>;
@@ -289,8 +294,11 @@ export class DevicePoolMembership {
     return this.state.refreshCoordinator.refreshDevices();
   }
 
-  refreshDevicesWithOutcome(): Promise<DevicePoolRefreshResult> {
-    return this.refreshDevicesInternal(false);
+  refreshDevicesWithOutcome(options?: RefreshWithOutcomeOptions): Promise<DevicePoolRefreshResult> {
+    return this.state.refreshCoordinator.refreshDevicesInternal(
+      false,
+      options?.appleSimulatorPlatforms,
+    );
   }
 
   /** @internal Test support for checking removal-stamp retention. */

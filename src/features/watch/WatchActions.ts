@@ -12,7 +12,7 @@ import type {
 } from "../../models";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { normalizeWatchHierarchy } from "./WatchHierarchy";
-import { type WatchRunnerClient } from "./WatchRunnerClient";
+import { type WatchCommand, type WatchRunnerClient } from "./WatchRunnerClient";
 import { watchRunners } from "./WatchRunnerRegistry";
 
 export function unsupportedWatchAction(action: string): never {
@@ -20,6 +20,12 @@ export function unsupportedWatchAction(action: string): never {
     `${action} is not supported by the watchOS runner; use tap, directional swipe, rotateCrown or home.`,
   );
 }
+
+/**
+ * Fraction of the screen extent one lookFor swipe moves the content. The runner's default swipe
+ * scrolls about two screens on a watch, so a target one screen away is skipped between reads.
+ */
+export const WATCH_LOOK_FOR_SWIPE_DISTANCE = 0.4;
 
 export interface WatchCrownOptions {
   delta: number;
@@ -104,10 +110,51 @@ function matches(element: Element, selector: { elementId?: string; text?: string
   );
 }
 
+/**
+ * The runner exposes a populated text field's value (or a placeholder) as a same-type, same-bounds
+ * child that repeats the field's identifier. An identifier match must count the field once, or an
+ * index over several fields sharing an identifier lands on the first field's alias.
+ */
+function dropIdentifierAliases(candidates: readonly Element[]): Element[] {
+  const seen = new Set<string>();
+  return candidates.filter((element) => {
+    const { left, top, right, bottom } = element.bounds;
+    const key = `${element["resource-id"] ?? element["view-id"]}|${element.class}|${left},${top},${right},${bottom}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function matchWatchTapCandidates(
+  available: readonly Element[],
+  selector: { elementId?: string; text?: string },
+): Element[] {
+  const matched = available.filter((element) => matches(element, selector));
+  return selector.elementId !== undefined ? dropIdentifierAliases(matched) : matched;
+}
+
+/** Stable input-first ordering for sendKeys; ordinary taps retain hierarchy order. */
+export function orderWatchTapCandidates(
+  candidates: readonly Element[],
+  preferTextInput: boolean,
+): Element[] {
+  const isTextInput = (element: Element) =>
+    ["XCUIElementType(45)", "XCUIElementType(49)", "XCUIElementType(50)"].includes(
+      element.class ?? "",
+    );
+  return preferTextInput
+    ? candidates.toSorted((a, b) => Number(isTextInput(b)) - Number(isTextInput(a)))
+    : [...candidates];
+}
+
 export async function watchTapOn(
   deviceId: string,
   options: TapOnElementOptions,
   signal?: AbortSignal,
+  preferTextInput = false,
 ): Promise<TapOnElementResult> {
   // Must precede hierarchy reads, not just the tap itself: long press is never advertised.
   if (options.action !== "tap") {
@@ -120,7 +167,10 @@ export async function watchTapOn(
   signal?.throwIfAborted();
   const client = watchRunners.require(deviceId);
   const { all, available } = await elements(client, signal);
-  const candidates = available.filter((element) => matches(element, options));
+  const candidates = orderWatchTapCandidates(
+    matchWatchTapCandidates(available, options),
+    options.text !== undefined && preferTextInput,
+  );
   const element = candidates[options.index ?? 0];
   if (!element) {
     throw new ActionableError(
@@ -179,6 +229,12 @@ function validateWatchSwipe(options: SwipeOnOptions): number {
   return maxSwipes;
 }
 
+function swipeCommand(direction: "up" | "down" | "left" | "right", lookFor: boolean): WatchCommand {
+  return lookFor
+    ? { type: "swipe", direction, distance: WATCH_LOOK_FOR_SWIPE_DISTANCE }
+    : { type: "swipe", direction };
+}
+
 export async function watchSwipeOn(
   deviceId: string,
   options: SwipeOnOptions,
@@ -206,7 +262,7 @@ export async function watchSwipeOn(
     if (found || count >= maxSwipes) {
       break;
     }
-    await client.request({ type: "swipe", direction }, signal);
+    await client.request(swipeCommand(direction, !!options.lookFor), signal);
     count++;
   }
   return {

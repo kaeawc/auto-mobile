@@ -27,7 +27,7 @@ import {
   GUIDE_TEMPLATES,
 } from "./prototypeGuideProse";
 import {
-  GUIDE_DEVICE_LOOPBACK,
+  GUIDE_DEVICE_DESTINATIONS,
   GUIDE_PLATFORM,
   GUIDE_MEDIA_ACTIONS,
   GUIDE_NOTIFICATIONS,
@@ -38,7 +38,11 @@ import {
   adaptiveGuideProse,
 } from "./prototypeGuideProseMore";
 import { MAX_PROTOTYPE_COMPONENT_DEPTH } from "./prototypeComponents";
-import { PROTOTYPE_NATIVE_ASSET_URI, PROTOTYPE_NATIVE_URI } from "./nativePrototypeUris";
+import {
+  PROTOTYPE_EJECT_URI,
+  PROTOTYPE_NATIVE_ASSET_URI,
+  PROTOTYPE_NATIVE_URI,
+} from "./nativePrototypeUris";
 import { MAX_PROTOTYPE_SPEC_REVISIONS } from "./prototypeSpecRevisions";
 import { PROTOTYPE_PLATFORM_MODULES, type PrototypePlatformModule } from "./prototypePlatform";
 import { renderPlatformDrivingTools } from "./prototypePlatformDrivingTools";
@@ -220,6 +224,8 @@ function renderNativeCode(): string {
     `Read \`${PROTOTYPE_NATIVE_URI}?id=<id>\` (optional \`platform=android|ios\`, \`deviceId\`) for a shown or saved prototype as app code: the spec, its assets, a Jetpack Compose or SwiftUI host file that renders it with the published renderer library, the library coordinate to add, and the capabilities the spec needs. Asset bytes for saved prototypes come from \`${PROTOTYPE_NATIVE_ASSET_URI}?id=<id>&assetId=<asset>\`.`,
     "",
     "For one file to paste instead, read `automobile:prototype/<id>/compose` (Kotlin) or `automobile:prototype/<id>/swiftui` (Swift) for a shown prototype: the same host file with the spec inlined as a string constant, a header naming the library coordinate, required capabilities and each asset's URI (assets are not inlined), and a preview sized to `frame` (default `pixel-9` / `iphone-16`). `revision` picks a kept revision as for the web page.",
+    "",
+    `To graduate a prototype to screens the app owns, read \`${PROTOTYPE_EJECT_URI}?id=<id>\` (same parameters). It returns a one-shot Compose or SwiftUI file with no renderer dependency: layout, text, buttons, text fields, lists and stack navigation become real code, every other node becomes a \`TODO(eject)\` stub that keeps its \`testTag\` and children, and \`remaining\` lists each node, action and binding left to do. It is not round-trip.`,
   ].join("\n");
 }
 
@@ -285,7 +291,11 @@ export function renderPlatformModules(
       const state = Object.keys(module.state ?? {}).map(
         (key) => `\`/${name}/${platformStateScope(name, key)}${key}\``,
       );
-      const capabilities = [module.capability, module.deviceCapability].filter(Boolean);
+      const capabilities = [
+        module.capability,
+        module.deviceCapability,
+        ...Object.values(module.backends ?? {}).map((backend) => backend.capability),
+      ].filter(Boolean);
       return `| \`${name}\` | ${code(capabilities as string[])} | ${calls.join("<br>") || "-"} | ${events.join(", ") || "-"} | ${state.join(", ") || "-"} |`;
     });
   return [
@@ -350,7 +360,7 @@ export function renderPrototypeGuide(): string {
     renderTheme(),
     GUIDE_APPEARANCE,
     GUIDE_CHECKS,
-    GUIDE_DEVICE_LOOPBACK,
+    GUIDE_DEVICE_DESTINATIONS,
     renderIcons(),
     renderPlatformDifferences(),
     renderNativeCode(),

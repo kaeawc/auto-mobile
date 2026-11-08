@@ -13,7 +13,7 @@ setup() {
   TEST_ROOT="$(mktemp -d)"
   SCRIPT_ABS="$(cd "$(dirname "$SCRIPT_SRC")" && pwd)/$(basename "$SCRIPT_SRC")"
   BIN_DIR="${TEST_ROOT}/bin"
-  mkdir -p "${TEST_ROOT}/.claude-plugin" \
+  mkdir -p "${TEST_ROOT}/.claude-plugin" "${TEST_ROOT}/plugins/auto-mobile/.claude-plugin" \
     "${TEST_ROOT}/android/junit-runner" \
     "${TEST_ROOT}/android/playground/app" \
     "${TEST_ROOT}/docs/using" \
@@ -44,7 +44,7 @@ write_fixtures() {
 { "name": "@kaeawc/auto-mobile", "version": "0.0.1" }
 EOF
 
-  cat > "${TEST_ROOT}/.claude-plugin/plugin.json" <<'EOF'
+  cat > "${TEST_ROOT}/plugins/auto-mobile/.claude-plugin/plugin.json" <<'EOF'
 { "name": "auto-mobile", "version": "0.0.1" }
 EOF
 
@@ -109,7 +109,7 @@ run_bump() {
   [ "$status" -eq 0 ]
 
   [ "$(json_field "${TEST_ROOT}/package.json" 'data["version"]')" = "$VERSION" ]
-  [ "$(json_field "${TEST_ROOT}/.claude-plugin/plugin.json" 'data["version"]')" = "$VERSION" ]
+  [ "$(json_field "${TEST_ROOT}/plugins/auto-mobile/.claude-plugin/plugin.json" 'data["version"]')" = "$VERSION" ]
   [ "$(json_field "${TEST_ROOT}/.claude-plugin/marketplace.json" 'data["plugins"][0]["version"]')" = "$VERSION" ]
   [ "$(json_field "${TEST_ROOT}/server.json" 'data["version"]')" = "$VERSION" ]
   [ "$(json_field "${TEST_ROOT}/server.json" 'data["packages"][0]["version"]')" = "$VERSION" ]
@@ -240,7 +240,7 @@ GRADLE
 }
 JSON
 
-  cat > "${TEST_ROOT}/.claude-plugin/plugin.json" <<'JSON'
+  cat > "${TEST_ROOT}/plugins/auto-mobile/.claude-plugin/plugin.json" <<'JSON'
 {
   "name": "auto-mobile",
   "version": "0.0.1",
@@ -273,7 +273,7 @@ JSON
   [ "$status" -eq 0 ]
 
   grep -qF '"keywords": ["mobile", "android", "ios"]' "${TEST_ROOT}/package.json"
-  grep -qF '"commands": ["./skills/"]' "${TEST_ROOT}/.claude-plugin/plugin.json"
+  grep -qF '"commands": ["./skills/"]' "${TEST_ROOT}/plugins/auto-mobile/.claude-plugin/plugin.json"
   grep -qF '"tags": ["android", "ios"]' "${TEST_ROOT}/.claude-plugin/marketplace.json"
   grep -qF '"packages": [{ "identifier": "@kaeawc/auto-mobile", "version": "1.2.3" }]' \
     "${TEST_ROOT}/server.json"
@@ -282,7 +282,7 @@ JSON
   [ "$(json_field "${TEST_ROOT}/.claude-plugin/marketplace.json" 'data["version"]')" = "1.0.0" ]
   [ "$(json_field "${TEST_ROOT}/.claude-plugin/marketplace.json" 'data["plugins"][0]["version"]')" = "$VERSION" ]
   [ "$(json_field "${TEST_ROOT}/package.json" 'data["version"]')" = "$VERSION" ]
-  [ "$(json_field "${TEST_ROOT}/.claude-plugin/plugin.json" 'data["version"]')" = "$VERSION" ]
+  [ "$(json_field "${TEST_ROOT}/plugins/auto-mobile/.claude-plugin/plugin.json" 'data["version"]')" = "$VERSION" ]
   [ "$(json_field "${TEST_ROOT}/server.json" 'data["version"]')" = "$VERSION" ]
 }
 

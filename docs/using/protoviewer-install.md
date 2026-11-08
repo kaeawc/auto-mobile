@@ -38,6 +38,12 @@ apksigner verify --print-certs "automobile-protoviewer-${VERSION}.apk"
 `adb install -r` replaces an installed ProtoViewer in place and keeps its saved prototypes, as long
 as the new APK is signed with the same key and has an equal or higher `versionCode`.
 
+When a spec needs something the installed ProtoViewer cannot show, `prototype save` refuses it
+before copying anything to the device: the result has `errorCode: "unsupported_capability"` and an
+`update` object with `missingCapabilities`, `installedVersion` and a `url` for a newer build.
+Update ProtoViewer as above and save again. AutoMobile supports the three most recent ProtoViewer
+releases.
+
 ## iOS
 
 The iOS simulator template viewer (`AutoMobilePrototypeViewer.zip`) is a separate artifact and is

@@ -3,6 +3,12 @@ import {
   getLaunchObservationPackageNames,
   isLaunchPermissionDialogObservation,
 } from "../features/action/launchObservationPackages";
+import {
+  describeLaunchPermissionBlocker,
+  pairPermissionDialogWindow,
+  resolveLaunchPermissionBlocker,
+  type LaunchPermissionBlocker,
+} from "../features/action/launchPermissionBlocker";
 import { resolveMissingForegroundWindow } from "../features/observe/ObserveScreen";
 import { NodePrototypeAgentConnector } from "../features/prototype/ios/prototypeAgentClient";
 import {
@@ -118,7 +124,7 @@ function launchVerificationFailureReason(
   observedAppId: string | undefined,
   observation: LaunchAppResult["observation"],
 ): LaunchVerificationFailureReason | undefined {
-  if (isLaunchPermissionDialogObservation(observation)) {
+  if (isLaunchPermissionDialogObservation(observation, appId)) {
     return undefined;
   }
   if (observation === undefined) {
@@ -154,11 +160,19 @@ function launchVerificationFailureMessage(reason: LaunchVerificationFailureReaso
   return reason;
 }
 
+/** Append the blocked launch's next step to the verification message (#17465). */
+function withBlockedNextStep(
+  message: string,
+  blockedBy: LaunchPermissionBlocker | undefined,
+): string {
+  return blockedBy ? `${message}; ${describeLaunchPermissionBlocker(blockedBy)}` : message;
+}
+
 function buildLaunchMessage(
   appId: string,
   verified: boolean | undefined,
   verifyFailureReason: LaunchVerificationFailureReason | undefined,
-  alreadyForeground: boolean | undefined,
+  { alreadyForeground, verificationSkipped }: LaunchAppResult,
 ): string {
   // An app that was already foreground was never launched — say so rather than
   // claiming a launch that did not happen (issue #6868). The verification suffix
@@ -168,6 +182,9 @@ function buildLaunchMessage(
     : `Launched app ${appId}`;
   if (verified === true) {
     return `${lead} (foreground verified)`;
+  }
+  if (verificationSkipped) {
+    return `${lead} (foreground not verified: launchApp does not observe on this platform; call observe to confirm)`;
   }
   if (verifyFailureReason) {
     return `${lead} (verification failed: ${launchVerificationFailureMessage(verifyFailureReason)})`;
@@ -197,6 +214,16 @@ function resolveLaunchObservedAppId(
   return getLaunchObservationPackageNames(observation)[0];
 }
 
+/** Report `activeWindow` from the dialog window alone, never mixed with the app behind it. */
+function pairLaunchObservationWindow(
+  observation: LaunchAppResult["observation"],
+): LaunchAppResult["observation"] {
+  const activeWindow = pairPermissionDialogWindow(observation?.activeWindow);
+  return observation && activeWindow !== observation.activeWindow
+    ? { ...observation, activeWindow }
+    : observation;
+}
+
 /**
  * Build the launchApp response from a successful launch result. `verified` is
  * `true` when every reconciled foreground package matches the requested app in
@@ -204,7 +231,8 @@ function resolveLaunchObservedAppId(
  * window is available, foreground identity signals disagree, or the observed
  * package differs from the requested app. It remains `undefined` for an
  * accepted notification permission surface or matching-but-stale observation,
- * where the surface or freshness prevents confirmation.
+ * where the surface or freshness prevents confirmation, and for a launch path
+ * that never observes (`verificationSkipped`).
  */
 export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
   if (!result.success) {
@@ -220,18 +248,35 @@ export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
   // caller that supplies one. Identity conflicts and mismatches are then
   // surfaced as a structured verification failure below.
   const isVerified = isVerifiedLaunchObservation(appId, result.observation);
-  const verifyFailureReason = isVerified
-    ? undefined
-    : launchVerificationFailureReason(appId, observedAppId, result.observation);
+  // A launch path that never observes (#17319) has nothing to verify against.
+  const verifyFailureReason =
+    isVerified || result.verificationSkipped
+      ? undefined
+      : launchVerificationFailureReason(appId, observedAppId, result.observation);
   const verified = isVerified ? true : verifyFailureReason ? false : undefined;
+  // A successful launch behind a permission dialog is reported as blocked with
+  // the dialog's buttons as next steps, not as a plain success (#17465).
+  // An incomplete capture (no observation, or no foreground window) can keep a
+  // stale controller package; it is not evidence a dialog is showing.
+  const blockedBy =
+    isVerified ||
+    verifyFailureReason === "no_observation" ||
+    verifyFailureReason === "no_foreground_window"
+      ? undefined
+      : resolveLaunchPermissionBlocker(appId, result.observation);
+  const observation = pairLaunchObservationWindow(result.observation);
 
   return {
-    message: buildLaunchMessage(appId, verified, verifyFailureReason, result.alreadyForeground),
+    message: withBlockedNextStep(
+      buildLaunchMessage(appId, verified, verifyFailureReason, result),
+      blockedBy,
+    ),
     verified,
     ...(verifyFailureReason ? { verifyFailureReason } : {}),
     observedAppId,
-    observation: result.observation,
     ...result,
+    observation,
+    ...(blockedBy ? { blockedBy } : {}),
   };
 }
 

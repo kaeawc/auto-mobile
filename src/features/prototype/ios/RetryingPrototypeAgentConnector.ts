@@ -4,9 +4,14 @@ import { logger } from "../../../utils/logger";
 import type { Timer } from "../../../utils/SystemTimer";
 import { type PrototypeAgentConnector, type PrototypeAgentSocket } from "./prototypeAgentClient";
 
-export const DEFAULT_CONNECT_ATTEMPTS = 10;
-
 export const DEFAULT_CONNECT_RETRY_DELAY_MS = 200;
+
+/**
+ * About 15 s of retries. The first launch of a freshly installed app on a just-booted simulator
+ * can take several seconds to reach the agent's listener (#16943), so a 2 s window refused
+ * connections from apps that were still starting.
+ */
+export const DEFAULT_CONNECT_ATTEMPTS = 75;
 
 /**
  * Retries refused connections while the app's agent starts its listener. Only `connect` is

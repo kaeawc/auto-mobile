@@ -20,8 +20,11 @@ describe("Node test workflow isolation", () => {
 });
 
 test("merge coverage prevents unit tests and timing rechecks from starting a real adb daemon", () => {
-  const steps = loadJobSteps(".github/workflows/merge.yml", "ts-code-coverage");
-  for (const name of ["Run Tests with Coverage", "Enforce 100ms budget for merged unit tests"]) {
+  for (const [job, name] of [
+    ["ts-coverage-part", "Run Tests with Coverage"],
+    ["ts-code-coverage", "Enforce 100ms budget for merged unit tests"],
+  ] as const) {
+    const steps = loadJobSteps(".github/workflows/merge.yml", job);
     expect(stepNamed(steps, name)?.env?.AUTOMOBILE_TEST_MODE).toBe("true");
   }
 });

@@ -257,6 +257,8 @@ export class AndroidInboundResponseHandlers {
         requestedPermissions: message.requestedPermissions ?? [],
         grantedPermissions: message.grantedPermissions ?? {},
         mainActivity: message.mainActivity,
+        gitBranch: message.gitBranch,
+        gitSha: message.gitSha,
         totalTimeMs: message.totalTimeMs ?? 0,
         error: message.error,
       })),
@@ -437,6 +439,11 @@ export class AndroidInboundResponseHandlers {
     keystore_reset: (message) =>
       this.ctx.resolvePendingResponse(message, (message) => ({ state: message.state })),
 
+    attestation_chain: (message) =>
+      this.ctx.resolvePendingResponse(message, (message) => ({
+        certificateChainBase64: message.certificateChainBase64,
+      })),
+
     keystore_discovery: (message) =>
       this.ctx.resolvePendingResponse(message, (message) => ({ state: message.state })),
 
@@ -561,6 +568,7 @@ export class AndroidInboundResponseHandlers {
     | "global_action_result"
     | "frame_context_validation_result"
     | "device_info_result"
+    | "attestation_chain"
     | "keystore_discovery"
     | "keystore_reset"
     | "sdk_capabilities"

@@ -20,6 +20,15 @@ afterEach(() => ToolRegistry.clearTools());
 describe("putAppFile shared-storage rollback", () => {
   test("preserves the shared rollback error for a three-file indexing failure", async () => {
     const adb = new FakeAdbExecutor();
+    // a.txt is confirmed in the MediaStore file collection; b.png never reaches images.
+    const row = "Row: 0 _id=1";
+    adb.setCommandResponse("content://media/external_primary/file", {
+      stdout: row,
+      stderr: "",
+      toString: () => row,
+      trim: () => row,
+      includes: (text: string) => row.includes(text),
+    });
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const service = createSharedStorageServiceForTesting({

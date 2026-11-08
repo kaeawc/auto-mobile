@@ -1,6 +1,5 @@
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
-import { chargeKeyframeNode } from "./prototypeKeyframes";
-import { chargeVideoNode } from "./prototypeMediaSchema";
+import { chargeMotionNode } from "./prototypeMotionBudget";
 import { effectUses } from "./prototypeEffects";
 import { prototypeNodeChildren } from "./prototypeNodeChildren";
 import { PrototypeRepeatData } from "./prototypeData";
@@ -542,10 +541,9 @@ function chargeExpandedNode(
   if (budget.images > contract.limits.MAX_PROTOTYPE_IMAGES) {
     return fail(at, "Expanded image limit exceeded");
   }
-  const nodeLimit =
-    chargeKeyframeNode(node, budget, contract.limits, path) ?? chargeVideoNode(node, budget, path);
-  if (nodeLimit) {
-    return fail(nodeLimit.path, nodeLimit.message);
+  const motionLimit = chargeMotionNode(node, budget, contract.limits, path);
+  if (motionLimit) {
+    return fail(motionLimit.path, motionLimit.message);
   }
   const effects = effectUses(node);
   budget.effects += effects.total;

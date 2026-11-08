@@ -1559,6 +1559,17 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     return { ...this.sdkTriggerResult };
   }
 
+  accessibilityFocusResult: Awaited<ReturnType<IosCtrlProxy["requestAccessibilityFocus"]>> = {
+    success: true,
+    totalTimeMs: 0,
+  };
+
+  async requestAccessibilityFocus(
+    ..._args: Parameters<IosCtrlProxy["requestAccessibilityFocus"]>
+  ): ReturnType<IosCtrlProxy["requestAccessibilityFocus"]> {
+    return this.accessibilityFocusResult;
+  }
+
   async requestMagicTap(
     _timeoutMs?: number,
     _perf?: PerformanceTracker,

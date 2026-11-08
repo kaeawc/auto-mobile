@@ -11,7 +11,7 @@ import type { BootedDevice } from "../../../models";
 import type { XCTestHierarchy } from "./types";
 import { SimctlScreenshotError } from "../../../utils/ios-cmdline-tools/SimCtlClient";
 import type { SimCtl } from "../../../utils/ios-cmdline-tools/SimCtlClient";
-import { observedIosDisplay } from "../ObservationDisplay";
+import { activeLivePanel, observedIosDisplay } from "../ObservationDisplay";
 import {
   detectImageMimeType,
   readImageHeaderDimensions,
@@ -21,10 +21,13 @@ import type { DisplayPanel } from "../../../models/DisplayPanel";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import type { SimulatorPanelScreenshotSource } from "../../../utils/ios-cmdline-tools/DevicectlDisplayScreenshot";
 import { createProductionDevicectlPanelScreenshotSource } from "../../../utils/ios-cmdline-tools/DevicectlPanelScreenshotSource";
+import type { DevicectlDisplayInfoSource } from "../../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
 
-let defaultDevicectlPanelSource: SimulatorPanelScreenshotSource | undefined;
+type DevicectlPanelSource = SimulatorPanelScreenshotSource & DevicectlDisplayInfoSource;
 
-function productionDevicectlPanelSource(): SimulatorPanelScreenshotSource {
+let defaultDevicectlPanelSource: DevicectlPanelSource | undefined;
+
+function productionDevicectlPanelSource(): DevicectlPanelSource {
   return (defaultDevicectlPanelSource ??= createProductionDevicectlPanelScreenshotSource());
 }
 
@@ -37,6 +40,8 @@ export interface IosPanelScreenshotRequest {
   runnerCapture: () => Promise<CtrlProxyScreenshotResult>;
   signal?: AbortSignal;
   activePanelKey?: string;
+  /** Optional live panel evidence when neither the key nor hierarchy identifies a panel. */
+  displayInfo?: DevicectlDisplayInfoSource;
 }
 
 interface SelectedPanelCapture extends Omit<
@@ -125,6 +130,32 @@ async function captureSelectedPanel(
   return runnerCapture();
 }
 
+async function readLiveScreenshotPanel(
+  request: IosPanelScreenshotRequest,
+  panels: readonly DisplayPanel[],
+): Promise<DisplayPanel | undefined> {
+  if (!request.displayInfo) {
+    return undefined;
+  }
+  try {
+    const displays = await request.displayInfo.readDisplays({
+      deviceId: request.device.deviceId,
+      signal: request.signal,
+    });
+    request.signal?.throwIfAborted();
+    return activeLivePanel(displays, panels);
+  } catch (error) {
+    if (request.signal?.aborted) {
+      throw error;
+    }
+    logger.warn(
+      `[SCREENSHOT] Live iOS panel read failed; using runner capture: ${errorMessage(error)}`,
+      error,
+    );
+    return undefined;
+  }
+}
+
 /**
  * Select a physical simulator panel, verifying its PNG before accepting it.
  * Order: CoreDevice per-panel capture, then simctl, then the runner. A single-display
@@ -139,7 +170,9 @@ export async function captureIosPanelScreenshotWith(
     return request.runnerCapture();
   }
   const display = observedIosDisplay(device, hierarchy ?? undefined);
-  const panel = panels.find((candidate) => candidate.key === (activePanelKey ?? display.key));
+  const panel =
+    panels.find((candidate) => candidate.key === (activePanelKey ?? display.key)) ??
+    (await readLiveScreenshotPanel(request, panels));
   if (!panel) {
     logger.warn("[SCREENSHOT] Could not identify active iOS panel; using runner capture");
     return request.runnerCapture();
@@ -170,6 +203,7 @@ export async function captureIosPanelScreenshot(
     hierarchy,
     simctl,
     devicectl: productionDevicectlPanelSource(),
+    displayInfo: productionDevicectlPanelSource(),
     runnerCapture,
     signal,
     activePanelKey,

@@ -1,0 +1,33 @@
+{
+  "spec": {
+    "id": "library-share",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["share"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "share.open",
+          "args": {
+            "text": {
+              "value": "Hello"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "options": {
+    "library": true
+  },
+  "expectedPath": "root.onTap[0]",
+  "expectedMessage": "Sensitive platform call share.open is unavailable in a library"
+}

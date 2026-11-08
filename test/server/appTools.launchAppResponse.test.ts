@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { buildLaunchAppResponse } from "../../src/server/appTools";
 import { buildObserveResult } from "../helpers/observeFixture";
 import { ActionableError, type LaunchAppResult, type ObserveResult } from "../../src/models";
+import { parseObserveResultJson } from "../../src/features/observe/output/observeResultWire";
+import { launchAppResultSchema } from "../../src/server/toolOutputSchemas";
+import permissionDialogLaunch from "../fixtures/android-launch-permission-dialog/contacts-first-launch-api37.json";
 
 const observation = (fields: Partial<ObserveResult> = {}): ObserveResult =>
   buildObserveResult({
@@ -138,7 +141,9 @@ describe("buildLaunchAppResponse", () => {
 
     expect(payload.verified).toBeUndefined();
     expect(payload.observedAppId).toBe("com.google.android.permissioncontroller");
-    expect(payload.message).toBe("Launched app com.android.settings");
+    expect(payload.message).toBe(
+      "Launched app com.android.settings; blocked by a notification permission dialog (com.google.android.permissioncontroller); answer it with tapOn, or pre-grant with setAppPermissions",
+    );
   });
 
   // LaunchApp reconciles a launch via viewHierarchy.packageName when the active
@@ -248,7 +253,9 @@ describe("buildLaunchAppResponse", () => {
 
     expect(payload.observedAppId).toBe("com.google.android.permissioncontroller");
     expect(payload.verified).toBeUndefined();
-    expect(payload.message).toBe("Launched app com.android.settings");
+    expect(payload.message).toBe(
+      "Launched app com.android.settings; blocked by a notification permission dialog (com.google.android.permissioncontroller); answer it with tapOn, or pre-grant with setAppPermissions",
+    );
   });
 
   // P1 review finding on #6239: a settled `activeWindow.appId` (a primary
@@ -312,5 +319,139 @@ describe("buildLaunchAppResponse (already foreground, #6868)", () => {
     expect(payload.message).toBe(
       "App com.android.settings was already in the foreground (foreground verified)",
     );
+  });
+
+  // #17319: a tvOS, visionOS or watchOS launch is never observed; that is not a failure.
+  test("a launch whose path never observes is unverified, not a verification failure", () => {
+    const payload = buildLaunchAppResponse("com.apple.TVSettings", {
+      success: true,
+      packageName: "com.apple.TVSettings",
+      pid: 42,
+      verificationSkipped: "platform",
+    });
+
+    expect(payload.verified).toBeUndefined();
+    expect(payload).not.toHaveProperty("verifyFailureReason");
+    expect(payload.verificationSkipped).toBe("platform");
+    expect(payload.message).toBe(
+      "Launched app com.apple.TVSettings (foreground not verified: launchApp does not observe on this platform; call observe to confirm)",
+    );
+  });
+
+  test("a launch without the skip marker and without an observation still fails verification", () => {
+    const payload = buildLaunchAppResponse("com.example.app", {
+      success: true,
+      packageName: "com.example.app",
+    });
+
+    expect(payload.verified).toBe(false);
+    expect(payload.verifyFailureReason).toBe("no_observation");
+  });
+
+  // #17465: a first launch that lands behind the notification-permission dialog
+  // is reported as blocked, with the dialog's buttons as next steps.
+  describe("launch behind a permission dialog (captured on API 37)", () => {
+    const launch = (): LaunchAppResult => ({
+      success: permissionDialogLaunch.success,
+      packageName: permissionDialogLaunch.packageName,
+      observation: parseObserveResultJson(JSON.stringify(permissionDialogLaunch.observation)),
+    });
+
+    test("reports a typed blockedBy with the dialog's buttons and a next-step message", () => {
+      const payload = buildLaunchAppResponse("com.google.android.contacts", launch());
+
+      expect(payload.success).toBe(true);
+      expect(payload.verified).toBeUndefined();
+      expect(payload.observedAppId).toBe("com.google.android.permissioncontroller");
+      expect(payload.blockedBy).toEqual({
+        kind: "permission_dialog",
+        packageName: "com.google.android.permissioncontroller",
+        permission: "android.permission.POST_NOTIFICATIONS",
+        actions: ["Allow", "Don’t allow"],
+      });
+      expect(payload.message).toBe(
+        'Launched app com.google.android.contacts; blocked by a notification permission dialog (com.google.android.permissioncontroller); tap "Allow" or "Don’t allow", or pre-grant with setAppPermissions',
+      );
+      expect(launchAppResultSchema.parse(payload).blockedBy).toEqual(payload.blockedBy);
+    });
+
+    test("reports activeWindow from the dialog window alone", () => {
+      const result = launch();
+      const payload = buildLaunchAppResponse("com.google.android.contacts", result);
+
+      expect(payload.observation?.activeWindow).toEqual({
+        appId: "com.google.android.permissioncontroller",
+        activityName: "",
+        layoutSeqSum: 0,
+        type: "notification_permission_dialog",
+      });
+      // The launch result itself is not mutated.
+      expect(result.observation?.activeWindow?.activityName).toBe(
+        "com.google.android.apps.contacts.activities.PeopleActivity",
+      );
+    });
+
+    // A status-bar-only capture keeps the stale controller package; it shows no
+    // dialog, so the launch reports the missing window and no blocker.
+    test("reports no blockedBy when no foreground window was observed", () => {
+      const payload = buildLaunchAppResponse("com.google.android.contacts", {
+        success: true,
+        packageName: "com.google.android.contacts",
+        observation: observation({
+          systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
+          activeWindow: {
+            appId: "com.google.android.permissioncontroller",
+            activityName: "",
+            layoutSeqSum: 0,
+          },
+          viewHierarchy: {
+            hierarchy: {
+              node: { bounds: { left: 0, top: 0, right: 1080, bottom: 63 } },
+            },
+            packageName: "com.google.android.permissioncontroller",
+          },
+        }),
+      });
+
+      expect(payload.verifyFailureReason).toBe("no_foreground_window");
+      expect("blockedBy" in payload).toBe(false);
+      expect(payload.message).not.toContain("blocked by");
+    });
+
+    // CtrlProxy can flag the dialog from an overlapping window while an unrelated
+    // app holds the primary window; that is a wrong-app landing, not a blocker.
+    test("reports a mismatch, not blockedBy, for a dialog flag over an unrelated app", () => {
+      const payload = buildLaunchAppResponse("com.google.android.contacts", {
+        success: true,
+        packageName: "com.google.android.contacts",
+        observation: observation({
+          notificationPermissionDetected: true,
+          activeWindow: {
+            appId: "com.other.app",
+            activityName: "MainActivity",
+            layoutSeqSum: 1,
+            type: "notification_permission_dialog",
+          },
+          viewHierarchy: { hierarchy: {}, packageName: "com.other.app" },
+        }),
+      });
+
+      expect(payload.verified).toBe(false);
+      expect(payload.verifyFailureReason).toBe(
+        "foreground package com.other.app does not match requested com.google.android.contacts",
+      );
+      expect("blockedBy" in payload).toBe(false);
+    });
+
+    test("a verified launch carries no blockedBy", () => {
+      const payload = buildLaunchAppResponse("com.android.settings", {
+        success: true,
+        packageName: "com.android.settings",
+        observation: observationForApp("com.android.settings"),
+      });
+
+      expect(payload.verified).toBe(true);
+      expect("blockedBy" in payload).toBe(false);
+    });
   });
 });

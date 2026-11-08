@@ -34,10 +34,12 @@ test.each([false, true])(
   (projected) => {
     const raw = issue8379SelectionHierarchy();
     const hierarchy = projected ? { ...projectActionableHierarchy("ios", raw, true) } : raw;
-    expect(extractHierarchyScreenSize(hierarchy)).toEqual({ width: 669, height: 951 });
+    // The raw root is the runner's stale portrait frame; projection reports it as landscape (#17306).
+    const rootSize = projected ? { width: 951, height: 669 } : { width: 669, height: 951 };
+    expect(extractHierarchyScreenSize(hierarchy)).toEqual(rootSize);
     if (projected) {
-      // The translated overflow witness was pruned; only the derived target remains.
-      expect(extractHierarchyScreenSize(hierarchy, true)).toEqual({ width: 669, height: 951 });
+      // The translated overflow witness was pruned; the corrected root remains.
+      expect(extractHierarchyScreenSize(hierarchy, true)).toEqual(rootSize);
     }
     const tap = new TapOnElement(selectionFixtureDevice(), new FakeAdbExecutor(), {
       timer: new FakeTimer(),

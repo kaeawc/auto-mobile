@@ -22,6 +22,15 @@ const fixture = JSON.parse(
     "utf8",
   ),
 ) as { id: string; root: { children: Record<string, unknown>[] } };
+const settingsWifi = JSON.parse(
+  readFileSync(
+    join(
+      import.meta.dir,
+      "../fixtures/prototype-spec/platform-window-controls/settings-open-wifi.json",
+    ),
+    "utf8",
+  ),
+) as { id: string };
 const TEST_MODULE = "prototype_platform_test_v1";
 const capabilities = [
   "prototype_patch_v1",
@@ -97,6 +106,36 @@ describe("platform vocabulary through the registered prototype tool (#14294)", (
     expect(replaced.success).toBe(false);
     expect(replaced.error).toContain(TEST_MODULE);
     expect(client.patchRequests).toEqual([]);
+  });
+
+  test("an Android-only settings.open page shows on Android (#16520)", async () => {
+    client.setSupportedCommands([...capabilities, "prototype_platform_settings_v1"]);
+    expect((await call({ action: "show", spec: settingsWifi })).success).toBe(true);
+    expect(client.getPrototypeHistory()).toHaveLength(1);
+  });
+
+  test("a patch introducing settings.open wifi is accepted on Android", async () => {
+    client.setSupportedCommands([...capabilities, "prototype_platform_settings_v1"]);
+    const button = { type: "button", id: "settings", label: "Settings" };
+    const shown = {
+      id: "settings-patch",
+      window: { placement: { type: "fullscreen" } },
+      requires: { platform: ["settings"] },
+      root: { type: "column", children: [button] },
+    };
+    expect((await call({ action: "show", spec: shown })).success).toBe(true);
+    const ops = [
+      {
+        op: "replaceNode" as const,
+        id: button.id,
+        node: {
+          ...button,
+          onTap: [{ type: "platform", call: "settings.open", args: { page: { value: "wifi" } } }],
+        },
+      },
+    ];
+    expect((await call({ action: "patch", id: shown.id, ops })).success).toBe(true);
+    expect(client.patchRequests).toEqual([{ id: shown.id, ops }]);
   });
 
   test("awaitEvent returns a finished call under the reserved emit name", async () => {

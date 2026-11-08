@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
+import dev.jasonpearson.automobile.protocol.AttestationChainResult
 import dev.jasonpearson.automobile.protocol.KeystoreDiscoveryResult
 import dev.jasonpearson.automobile.protocol.KeystoreDiscoveryState
 import dev.jasonpearson.automobile.protocol.KeystoreResetResult
@@ -9,8 +10,8 @@ import dev.jasonpearson.automobile.protocol.SdkCapabilitiesResult
 import dev.jasonpearson.automobile.protocol.SdkCapabilitiesState
 
 /**
- * Routes app-owned capability discovery and scoped Keystore deletion off the request queue,
- * returning correlated results from the target app's debug bridge.
+ * Routes app-owned capability discovery, scoped Keystore deletion and temporary attestation export
+ * off the request queue, returning correlated public results.
  */
 internal class AppDiscoveryController(
   private val source: Source,
@@ -18,8 +19,10 @@ internal class AppDiscoveryController(
   private val resultSender: ResultSender,
   private val timeProvider: TimeProvider,
 ) {
-  /** Accesses the target app's bridge providers. */
+  /** Accesses app bridge providers and CtrlProxy's temporary attestation backend. */
   interface Source {
+    fun exportAttestation(): List<String>
+
     fun resetKeystore(packageName: String, scope: String?, alias: String?): KeystoreResetState
 
     fun keystore(packageName: String): KeystoreDiscoveryState
@@ -36,6 +39,19 @@ internal class AppDiscoveryController(
           timestamp = timeProvider.currentTimeMillis(),
           requestId = requestId,
           state = state,
+        )
+      }
+    }
+  }
+
+  fun exportAttestation(requestId: String?) {
+    asyncActionRunner.launch(requestId, "export_attestation") {
+      val certificates = source.exportAttestation()
+      resultSender.send(requestId, "attestation_chain", attachPerf = false) { _ ->
+        AttestationChainResult(
+          timestamp = timeProvider.currentTimeMillis(),
+          requestId = requestId,
+          certificateChainBase64 = certificates,
         )
       }
     }

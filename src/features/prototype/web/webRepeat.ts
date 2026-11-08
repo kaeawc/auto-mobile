@@ -1,4 +1,4 @@
-import contract from "../../../../schemas/prototype-spec-contract.json";
+import { prototypeRenderLimits } from "../prototypeRenderContract.generated";
 import { resolvePrototypeDataPointer } from "../prototypeData";
 import { record, type Raw } from "../prototypeTemplate";
 
@@ -13,7 +13,7 @@ export function webRepeatLimit(node: Raw): number {
   if (node.type !== "list") {
     return MAX_WEB_REPEAT_ITEMS;
   }
-  const listLimit = contract.limits.MAX_PROTOTYPE_LIST_ITEMS;
+  const listLimit = prototypeRenderLimits.MAX_PROTOTYPE_LIST_ITEMS;
   const maxItems = node.maxItems;
   return typeof maxItems === "number" && Number.isInteger(maxItems) && maxItems >= 0
     ? Math.min(maxItems, listLimit)

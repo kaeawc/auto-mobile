@@ -13,21 +13,23 @@ export function isActiveAdbChild(child: ChildProcess): boolean {
   );
 }
 
+export interface TerminateActiveAdbProcessesOptions {
+  timer?: Timer;
+  graceMs?: number;
+  /**
+   * The pid this process must never signal; defaults to `process.pid`. Tests
+   * inject it so a fake child's pid cannot collide with the runner's (#17466).
+   */
+  ownPid?: number;
+}
+
 export async function terminateActiveAdbProcesses(
-  options: { timer?: Timer; graceMs?: number } = {},
+  options: TerminateActiveAdbProcessesOptions = {},
 ): Promise<{ terminated: number; failed: number }> {
   const timer = options.timer ?? defaultTimer;
   const graceMs = Math.max(0, options.graceMs ?? 500);
   const summary = { terminated: 0, failed: 0 };
-  const pending = new Set<ChildProcess>();
-  for (const child of [...activeProcesses]) {
-    const result = terminateAdbChild(child);
-    if (result === "pending") {
-      pending.add(child);
-    } else if (result === "failed") {
-      summary.failed++;
-    }
-  }
+  const pending = signalActiveAdbChildren(options.ownPid ?? process.pid, summary);
   try {
     await waitForActiveAdbChildren(pending, timer, graceMs);
     for (const child of pending) {
@@ -48,6 +50,20 @@ export async function terminateActiveAdbProcesses(
     summary.failed += pending.size;
   }
   return summary;
+}
+
+/** SIGTERMs every tracked child except `ownPid`; returns the ones awaiting exit. */
+function signalActiveAdbChildren(ownPid: number, summary: { failed: number }): Set<ChildProcess> {
+  const pending = new Set<ChildProcess>();
+  for (const child of [...activeProcesses]) {
+    const result = terminateAdbChild(child, ownPid);
+    if (result === "pending") {
+      pending.add(child);
+    } else if (result === "failed") {
+      summary.failed++;
+    }
+  }
+  return pending;
 }
 
 export async function waitForActiveAdbChildren(
@@ -73,12 +89,15 @@ export function removeFinishedAdbChild(child: ChildProcess): void {
   }
 }
 
-export function terminateAdbChild(child: ChildProcess): "pending" | "skipped" | "failed" {
+export function terminateAdbChild(
+  child: ChildProcess,
+  ownPid: number = process.pid,
+): "pending" | "skipped" | "failed" {
   if (!isActiveAdbChild(child)) {
     activeProcesses.delete(child);
     return "skipped";
   }
-  if (child.pid !== undefined && (child.pid <= 1 || child.pid === process.pid)) {
+  if (child.pid !== undefined && (child.pid <= 1 || child.pid === ownPid)) {
     return "skipped";
   }
   try {

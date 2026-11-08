@@ -8,6 +8,9 @@ import android.view.accessibility.AccessibilityEvent
  * while a client is connected.
  */
 internal class AccessibilityEventDispatcher(private val host: Host) {
+  /** Class and package from the same window-state event, published as one snapshot. */
+  data class WindowState(val className: String?, val packageName: String?)
+
   /** The service state and collaborators an event updates. */
   interface Host {
     /** Drops the remembered insert caret; focus or window moves invalidate it. */
@@ -15,7 +18,7 @@ internal class AccessibilityEventDispatcher(private val host: Host) {
 
     fun onTextSelectionChanged(fromIndex: Int, toIndex: Int)
 
-    fun onWindowStateChanged(className: String?)
+    fun onWindowStateChanged(className: String?, packageName: String?)
 
     fun advanceFrameContext()
 
@@ -38,7 +41,7 @@ internal class AccessibilityEventDispatcher(private val host: Host) {
       else -> Unit
     }
     if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-      host.onWindowStateChanged(event.className?.toString())
+      host.onWindowStateChanged(event.className?.toString(), event.packageName?.toString())
     }
 
     // Advance the frameContext staleness token on every UI-changing event REGARDLESS of observers

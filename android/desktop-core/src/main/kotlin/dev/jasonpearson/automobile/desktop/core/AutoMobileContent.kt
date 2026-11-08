@@ -197,7 +197,8 @@ internal fun activeDeviceConnectionLostEvent(
   activeDeviceId: String?,
 ): DeviceStreamEvent.DeviceConnectionLost? {
   return when (event) {
-    is DeviceStreamEvent.DeviceSessionSuperseded -> null
+    is DeviceStreamEvent.DeviceSessionSuperseded,
+    is DeviceStreamEvent.DeviceSessionEnded -> null
     is DeviceStreamEvent.DeviceConnectionLost ->
       event.takeIf { isActiveDeviceStreamFrame(it.deviceId, activeDeviceId) }
   }
@@ -2082,6 +2083,7 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
                   ) {
                     DeviceViewingNotice(
                       onTakeControl = { desktopSessionState.requestControl(noticeDeviceId) },
+                      holder = desktopSessionState.heldElsewhereHolder,
                     )
                   }
                   // Released after inactivity: still controllable; the next input allocates it

@@ -1,0 +1,691 @@
+{
+  "screenSize": {
+    "width": 454,
+    "height": 454,
+    "units": "physical-pixels"
+  },
+  "viewHierarchy": {
+    "displayId": 0,
+    "hierarchy": {
+      "node": {
+        "windowId": 1,
+        "actions": ["select", "clear_selection", "accessibility_focus"],
+        "visible-to-user": true,
+        "view-id": "s2-dc2cce7f08205314",
+        "bounds": [0, 0, 454, 454],
+        "node": {
+          "actions": ["select", "clear_selection", "accessibility_focus"],
+          "resource-id": "android:id/content",
+          "visible-to-user": true,
+          "bounds": [0, 0, 454, 454],
+          "node": {
+            "actions": ["select", "clear_selection", "accessibility_focus"],
+            "resource-id": "com.google.android.clockwork.sysui:id/root",
+            "visible-to-user": true,
+            "class": "android.view.ViewGroup",
+            "className": "android.view.ViewGroup",
+            "bounds": [0, 0, 454, 454],
+            "node": {
+              "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus",
+                "next_at_movement_granularity",
+                "previous_at_movement_granularity",
+                "set_selection"
+              ],
+              "content-desc": "Notifications",
+              "visible-to-user": true,
+              "view-id": "s2-458d4eba94151be5",
+              "class": "android.view.ViewGroup",
+              "className": "android.view.ViewGroup",
+              "bounds": [0, 0, 454, 454],
+              "node": {
+                "actions": ["select", "clear_selection", "accessibility_focus", "scroll_backward"],
+                "resource-id": "com.google.android.clockwork.sysui:id/trayview_container",
+                "visible-to-user": true,
+                "scrollable": "true",
+                "bounds": [0, 0, 454, 454],
+                "node": [
+                  {
+                    "actions": [
+                      "clear_focus",
+                      "accessibility_focus",
+                      "scroll_forward",
+                      "scroll_backward"
+                    ],
+                    "visible-to-user": true,
+                    "collection-info": "rows:9,cols:1",
+                    "view-id": "s2-fbb1616b5c0bfd54",
+                    "focusable": "true",
+                    "focused": "true",
+                    "scrollable": "true",
+                    "bounds": [0, 0, 454, 454],
+                    "node": [
+                      {
+                        "actions": ["focus", "accessibility_focus", "click", "long_click"],
+                        "visible-to-user": true,
+                        "view-id": "s2-54a37556722ca76a",
+                        "clickable": "true",
+                        "focusable": "true",
+                        "long-clickable": "true",
+                        "bounds": [83, 0, 371, 40],
+                        "node": {
+                          "actions": [
+                            "next_at_movement_granularity",
+                            "previous_at_movement_granularity",
+                            "accessibility_focus",
+                            "set_selection"
+                          ],
+                          "text": "BodyFour",
+                          "visible-to-user": true,
+                          "view-id": "s2-95e0802e5e698988",
+                          "bounds": [97, 0, 202, 26]
+                        }
+                      },
+                      {
+                        "actions": ["focus", "accessibility_focus", "click", "long_click"],
+                        "visible-to-user": true,
+                        "view-id": "s2-5a87405b096168ca~4358b4a1",
+                        "clickable": "true",
+                        "focusable": "true",
+                        "long-clickable": "true",
+                        "bounds": [23, 49, 431, 225],
+                        "node": [
+                          {
+                            "actions": ["accessibility_focus"],
+                            "resource-id": "full_view_app_icon",
+                            "visible-to-user": true,
+                            "bounds": [43, 69, 99, 125]
+                          },
+                          {
+                            "actions": ["accessibility_focus"],
+                            "resource-id": "full_view_app_icon",
+                            "visible-to-user": true,
+                            "bounds": [51, 77, 91, 117]
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "Shell",
+                            "resource-id": "full_view_app_name",
+                            "visible-to-user": true,
+                            "bounds": [111, 81, 357, 114]
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "2m",
+                            "content-desc": "2 minutes ago",
+                            "visible-to-user": true,
+                            "view-id": "s2-598c3d5403bbdfa1-1",
+                            "bounds": [369, 81, 411, 114]
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "TitleThree",
+                            "visible-to-user": true,
+                            "view-id": "s2-dcaabd4589ad7889",
+                            "bounds": [43, 129, 201, 167]
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "BodyThree",
+                            "visible-to-user": true,
+                            "view-id": "s2-91cb26a67fc401dd",
+                            "bounds": [43, 167, 209, 205]
+                          }
+                        ]
+                      },
+                      {
+                        "actions": ["focus", "accessibility_focus", "click", "long_click"],
+                        "visible-to-user": true,
+                        "view-id": "s2-5a87405b096168ca~eae114b3",
+                        "clickable": "true",
+                        "focusable": "true",
+                        "long-clickable": "true",
+                        "bounds": [24, 233, 430, 408],
+                        "node": [
+                          {
+                            "actions": ["accessibility_focus"],
+                            "resource-id": "full_view_app_icon",
+                            "visible-to-user": true,
+                            "bounds": [44, 253, 99, 309]
+                          },
+                          {
+                            "actions": ["accessibility_focus"],
+                            "resource-id": "full_view_app_icon",
+                            "visible-to-user": true,
+                            "bounds": [52, 261, 92, 301]
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "Shell",
+                            "resource-id": "full_view_app_name",
+                            "visible-to-user": true,
+                            "bounds": [111, 265, 357, 298]
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "2m",
+                            "content-desc": "2 minutes ago",
+                            "visible-to-user": true,
+                            "view-id": "s2-598c3d5403bbdfa1-2",
+                            "bounds": [368, 265, 410, 298]
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "TitleTwo",
+                            "visible-to-user": true,
+                            "view-id": "s2-4f7f8fa3f156818e",
+                            "bounds": [44, 313, 176, 351]
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "BodyTwo",
+                            "visible-to-user": true,
+                            "view-id": "s2-9badd5e6c8bfd81d",
+                            "bounds": [44, 351, 185, 388]
+                          }
+                        ]
+                      },
+                      {
+                        "actions": ["focus", "accessibility_focus", "click", "long_click"],
+                        "visible-to-user": true,
+                        "view-id": "s2-0c2fc2ba4367dc1b",
+                        "clickable": "true",
+                        "focusable": "true",
+                        "long-clickable": "true",
+                        "bounds": [85, 417, 369, 454],
+                        "node": [
+                          {
+                            "actions": ["accessibility_focus"],
+                            "resource-id": "full_view_app_icon",
+                            "visible-to-user": true,
+                            "bounds": [99, 431, 138, 454]
+                          },
+                          {
+                            "actions": ["accessibility_focus"],
+                            "resource-id": "full_view_app_icon",
+                            "visible-to-user": true,
+                            "bounds": [105, 436, 132, 454]
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "Shell",
+                            "resource-id": "full_view_app_name",
+                            "visible-to-user": true,
+                            "bounds": [146, 439, 317, 454]
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "2m",
+                            "content-desc": "2 minutes ago",
+                            "visible-to-user": true,
+                            "view-id": "s2-598c3d5403bbdfa1-3",
+                            "bounds": [326, 439, 355, 454]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "actions": ["focus", "accessibility_focus", "click"],
+                    "visible-to-user": false,
+                    "view-id": "s2-0d9b468dbcaf26fe",
+                    "clickable": "true",
+                    "focusable": "true",
+                    "bounds": [0, 412, 454, 454]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "packageName": "com.google.android.clockwork.sysui",
+    "windows": [
+      {
+        "id": 1,
+        "displayId": 0,
+        "type": 1,
+        "windowLayer": 0,
+        "isActive": true,
+        "isFocused": true,
+        "bounds": [0, 0, 454, 454],
+        "packageName": "com.google.android.clockwork.sysui",
+        "hierarchy": {
+          "windowId": 1,
+          "actions": ["select", "clear_selection", "accessibility_focus"],
+          "visible-to-user": true,
+          "view-id": "s2-dc2cce7f08205314",
+          "bounds": [0, 0, 454, 454],
+          "node": {
+            "actions": ["select", "clear_selection", "accessibility_focus"],
+            "resource-id": "android:id/content",
+            "visible-to-user": true,
+            "view-id": "android:id/content",
+            "bounds": [0, 0, 454, 454],
+            "node": {
+              "actions": ["select", "clear_selection", "accessibility_focus"],
+              "resource-id": "com.google.android.clockwork.sysui:id/root",
+              "visible-to-user": true,
+              "view-id": "com.google.android.clockwork.sysui:id/root",
+              "class": "android.view.ViewGroup",
+              "className": "android.view.ViewGroup",
+              "bounds": [0, 0, 454, 454],
+              "node": {
+                "actions": [
+                  "select",
+                  "clear_selection",
+                  "accessibility_focus",
+                  "next_at_movement_granularity",
+                  "previous_at_movement_granularity",
+                  "set_selection"
+                ],
+                "content-desc": "Notifications",
+                "visible-to-user": true,
+                "view-id": "s2-458d4eba94151be5",
+                "class": "android.view.ViewGroup",
+                "className": "android.view.ViewGroup",
+                "bounds": [0, 0, 454, 454],
+                "node": {
+                  "actions": [
+                    "select",
+                    "clear_selection",
+                    "accessibility_focus",
+                    "scroll_backward"
+                  ],
+                  "resource-id": "com.google.android.clockwork.sysui:id/trayview_container",
+                  "visible-to-user": true,
+                  "view-id": "com.google.android.clockwork.sysui:id/trayview_container",
+                  "scrollable": "true",
+                  "bounds": [0, 0, 454, 454],
+                  "node": [
+                    {
+                      "actions": [
+                        "clear_focus",
+                        "accessibility_focus",
+                        "scroll_forward",
+                        "scroll_backward"
+                      ],
+                      "visible-to-user": true,
+                      "collection-info": "rows:9,cols:1",
+                      "view-id": "s2-fbb1616b5c0bfd54",
+                      "focusable": "true",
+                      "focused": "true",
+                      "scrollable": "true",
+                      "bounds": [0, 0, 454, 454],
+                      "node": [
+                        {
+                          "actions": ["focus", "accessibility_focus", "click", "long_click"],
+                          "visible-to-user": true,
+                          "view-id": "s2-54a37556722ca76a",
+                          "clickable": "true",
+                          "focusable": "true",
+                          "long-clickable": "true",
+                          "bounds": [83, 0, 371, 40],
+                          "node": {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "BodyFour",
+                            "visible-to-user": true,
+                            "view-id": "s2-95e0802e5e698988",
+                            "bounds": [97, 0, 202, 26]
+                          }
+                        },
+                        {
+                          "actions": ["focus", "accessibility_focus", "click", "long_click"],
+                          "visible-to-user": true,
+                          "view-id": "s2-5a87405b096168ca~4358b4a1",
+                          "clickable": "true",
+                          "focusable": "true",
+                          "long-clickable": "true",
+                          "bounds": [23, 49, 431, 225],
+                          "node": [
+                            {
+                              "actions": ["accessibility_focus"],
+                              "resource-id": "full_view_app_icon",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_icon",
+                              "bounds": [43, 69, 99, 125]
+                            },
+                            {
+                              "actions": ["accessibility_focus"],
+                              "resource-id": "full_view_app_icon",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_icon",
+                              "bounds": [51, 77, 91, 117]
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "Shell",
+                              "resource-id": "full_view_app_name",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_name",
+                              "bounds": [111, 81, 357, 114]
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "2m",
+                              "content-desc": "2 minutes ago",
+                              "visible-to-user": true,
+                              "view-id": "s2-598c3d5403bbdfa1-1",
+                              "bounds": [369, 81, 411, 114]
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "TitleThree",
+                              "visible-to-user": true,
+                              "view-id": "s2-dcaabd4589ad7889",
+                              "bounds": [43, 129, 201, 167]
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "BodyThree",
+                              "visible-to-user": true,
+                              "view-id": "s2-91cb26a67fc401dd",
+                              "bounds": [43, 167, 209, 205]
+                            }
+                          ]
+                        },
+                        {
+                          "actions": ["focus", "accessibility_focus", "click", "long_click"],
+                          "visible-to-user": true,
+                          "view-id": "s2-5a87405b096168ca~eae114b3",
+                          "clickable": "true",
+                          "focusable": "true",
+                          "long-clickable": "true",
+                          "bounds": [24, 233, 430, 408],
+                          "node": [
+                            {
+                              "actions": ["accessibility_focus"],
+                              "resource-id": "full_view_app_icon",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_icon",
+                              "bounds": [44, 253, 99, 309]
+                            },
+                            {
+                              "actions": ["accessibility_focus"],
+                              "resource-id": "full_view_app_icon",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_icon",
+                              "bounds": [52, 261, 92, 301]
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "Shell",
+                              "resource-id": "full_view_app_name",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_name",
+                              "bounds": [111, 265, 357, 298]
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "2m",
+                              "content-desc": "2 minutes ago",
+                              "visible-to-user": true,
+                              "view-id": "s2-598c3d5403bbdfa1-2",
+                              "bounds": [368, 265, 410, 298]
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "TitleTwo",
+                              "visible-to-user": true,
+                              "view-id": "s2-4f7f8fa3f156818e",
+                              "bounds": [44, 313, 176, 351]
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "BodyTwo",
+                              "visible-to-user": true,
+                              "view-id": "s2-9badd5e6c8bfd81d",
+                              "bounds": [44, 351, 185, 388]
+                            }
+                          ]
+                        },
+                        {
+                          "actions": ["focus", "accessibility_focus", "click", "long_click"],
+                          "visible-to-user": true,
+                          "view-id": "s2-0c2fc2ba4367dc1b",
+                          "clickable": "true",
+                          "focusable": "true",
+                          "long-clickable": "true",
+                          "bounds": [85, 417, 369, 454],
+                          "node": [
+                            {
+                              "actions": ["accessibility_focus"],
+                              "resource-id": "full_view_app_icon",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_icon",
+                              "bounds": [99, 431, 138, 454]
+                            },
+                            {
+                              "actions": ["accessibility_focus"],
+                              "resource-id": "full_view_app_icon",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_icon",
+                              "bounds": [105, 436, 132, 454]
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "Shell",
+                              "resource-id": "full_view_app_name",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_name",
+                              "bounds": [146, 439, 317, 454]
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "2m",
+                              "content-desc": "2 minutes ago",
+                              "visible-to-user": true,
+                              "view-id": "s2-598c3d5403bbdfa1-3",
+                              "bounds": [326, 439, 355, 454]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "actions": ["focus", "accessibility_focus", "click"],
+                      "visible-to-user": false,
+                      "view-id": "s2-0d9b468dbcaf26fe",
+                      "clickable": "true",
+                      "focusable": "true",
+                      "bounds": [0, 412, 454, 454]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    ],
+    "intentChooserDetected": false,
+    "notificationPermissionDetected": false,
+    "ctrlProxyIncomplete": null,
+    "sources": ["control-proxy"],
+    "screenWidth": 454,
+    "screenHeight": 454,
+    "rotation": 0,
+    "systemInsets": {
+      "top": 0,
+      "bottom": 0,
+      "left": 0,
+      "right": 0
+    },
+    "insets": {
+      "available": true,
+      "source": "android-window-metrics",
+      "units": "physical-pixels",
+      "systemBars": {
+        "visible": {
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0
+        },
+        "stable": {
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0
+        }
+      },
+      "displayCutout": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "displayCutoutInfo": {
+        "classification": "none",
+        "bounds": null
+      },
+      "systemGestures": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "mandatorySystemGestures": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "tappableElement": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "systemChrome": {
+        "visibility": "hidden",
+        "statusBar": "hidden",
+        "navigationBar": "hidden",
+        "homeIndicatorAutoHideRequested": null,
+        "source": "android-window-insets"
+      }
+    },
+    "wakefulness": "Awake",
+    "foregroundActivity": null,
+    "density": 320,
+    "sdkInt": 37,
+    "deviceModel": "sdk_gwear_arm64",
+    "isEmulator": true,
+    "accessibilityTool": true,
+    "nativeScale": 1,
+    "pixelWidth": 454,
+    "pixelHeight": 454,
+    "updatedAt": 1794025616377,
+    "receivedAt": 1794025615978,
+    "frameContext": "9f1625b4-97a2-459d-ad18-36da4fa8e3aa:8983",
+    "fresh": true
+  }
+}

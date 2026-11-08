@@ -102,7 +102,8 @@ import os
         func geometry() throws -> GestureCoordinateGeometry? {
             guard let cached = locator.gestureCoordinateGeometry else { return nil }
             // No extra platform reads for folded / ordinary single-panel observations.
-            guard hasMultiPanelMismatch(app: cached.app, screen: cached.screen) else { return cached }
+            guard hasMultiPanelMismatch(app: cached.app, screen: cached.screen), !cached.pinnedToObservation
+            else { return cached }
             let reference = Self.referenceScreenCache.screen(for: cached)
             if let corrected = cached.resolvingSinglePanel(reference: reference) { return corrected }
             do {

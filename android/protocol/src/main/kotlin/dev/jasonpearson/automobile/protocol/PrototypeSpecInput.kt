@@ -116,6 +116,7 @@ internal object PrototypeSpecInput {
     platformErrors(value, context)
       ?: PrototypeTimerRules.error(context)
       ?: PrototypeScrollMotion.error(context)
+      ?: PrototypeLoopsRules.validate(context)
       ?: motionErrors(context)
       ?: choreographyErrors(context)
       ?: shimmerErrors(context)

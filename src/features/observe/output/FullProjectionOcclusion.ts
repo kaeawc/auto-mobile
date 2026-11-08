@@ -28,7 +28,10 @@ function markOccluded(target: Record<string, unknown>): void {
   delete target.actions;
 }
 
-/** Source nodes of actionable rows that application windows or AutoMobile prototypes fully cover. */
+/**
+ * Source nodes of actionable rows that application windows, AutoMobile prototypes or same-window
+ * controls fully cover.
+ */
 function coveredSources(
   elements: NonNullable<ObserveResult["elements"]>,
   source: ObserveResult,
@@ -47,6 +50,8 @@ function coveredSources(
         bounds &&
         isFullyCoveredByApplicationWindow(source.viewHierarchy!, element, bounds, {
           ownWindows: "touch",
+          // Like tapOn, a control drawn over the row in its own window covers it too (#17059).
+          views: true,
           index: coverIndex,
         })
       ) {

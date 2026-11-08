@@ -27,6 +27,22 @@ describe("PlanSchemaValidator", () => {
     validator.validateYaml("name: warmup\nsteps:\n  - tool: observe\n");
   });
 
+  it("accepts an Apple TV plan platform and device platform", () => {
+    const result = validator.validateYaml(`
+name: tv-plan
+platform: tvos
+devices:
+  - label: tv
+    platform: tvos
+steps:
+  - tool: pressButton
+    device: tv
+    params: { button: down }
+`);
+    expect(result.errors).toBeUndefined();
+    expect(result.valid).toBe(true);
+  });
+
   it("keeps timestamps and YAML 1.1 boolean words as strings", () => {
     for (const quoted of [false, true]) {
       for (const label of ["yes", "no", "on", "off", "YES", "ON"]) {

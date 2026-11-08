@@ -184,7 +184,6 @@ describe("restart recovery onto a device another daemon holds (#11076)", () => {
       const source: DeviceOwnershipFileSource = {
         leasePath: () => undefined,
         claimPath: (id) => `/a/${id}`,
-        legacyClaimPath: () => undefined,
         read: (path) => files.get(path),
         isProcessRunning: (pid) => pid === DAEMON_B_PID || pid === DAEMON_A_PID,
         tryAcquire: (path, owner) => {
@@ -364,7 +363,6 @@ describe("startup rehydration respects foreign device claims", () => {
     }
     const source: DeviceOwnershipFileSource = {
       leasePath: () => undefined,
-      legacyClaimPath: () => undefined,
       claimPath: (id) => id,
       read: (path) => files.get(path),
       isProcessRunning: (pid) => pid === DAEMON_A_PID || (pid === DAEMON_B_PID && !options.dead),

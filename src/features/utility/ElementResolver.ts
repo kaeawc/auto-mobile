@@ -27,6 +27,7 @@ import {
   isWithin,
   containerSource,
   resolveReference,
+  isStatusBarChrome,
 } from "./ElementResolverNodes";
 export type {
   MatchMode,
@@ -828,15 +829,19 @@ export class ElementResolver {
         };
       }
     }
+    // The implicit substring fallback skips status-bar chrome; an explicit `contains` or
+    // `regex` still reaches it, as does an exact label.
+    const fallbackContains = matchMode === "contains" && requested === undefined;
     const matches =
       matchMode === "exact"
         ? exact
-        : nodes.filter((node) =>
-            fields(node).some((field) =>
-              regex
-                ? regex.test(normalizeQuotes(field))
-                : normalize(field, selector.caseSensitive).includes(query),
-            ),
+        : nodes.filter(
+            (node) =>
+              fields(node).some((field) =>
+                regex
+                  ? regex.test(normalizeQuotes(field))
+                  : normalize(field, selector.caseSensitive).includes(query),
+              ) && !(fallbackContains && isStatusBarChrome(node, snapshot.nodes)),
           );
     return {
       matches: matches.map((node) => ({

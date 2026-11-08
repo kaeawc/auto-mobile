@@ -4,6 +4,7 @@ import { type Platform } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
 import { DeviceOwnedByOtherDaemonError } from "../../models/deviceAcquisitionRefusals";
 import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../models/managedExecutionLiveness";
+import { UNCLEAN_DAEMON_EXIT_RELEASE_REASON } from "../../models/releaseReasons";
 import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -288,7 +289,11 @@ export class SessionRecovery {
     persisted: DeviceSession | undefined,
   ): Pick<
     Session,
-    "persistenceMetadata" | "livenessOwnerToken" | "livenessOwnershipClaims" | "lastOwnerHeartbeat"
+    | "persistenceMetadata"
+    | "livenessOwnerToken"
+    | "livenessOwnershipClaims"
+    | "lastOwnerHeartbeat"
+    | "recoveredFromUncleanDaemonExit"
   > {
     if (!persisted) {
       return {};
@@ -301,6 +306,11 @@ export class SessionRecovery {
         // The persisted owner is the dead daemon; this daemon now owns the row (#11114).
         daemonSessionId: this.host.recoveredRowOwner(),
       },
+      // Only the startup sweep writes `daemon-restart`, for a row whose daemon is no longer live
+      // (#17255); a graceful shutdown hands off as `daemon-shutdown` and keeps the full window.
+      ...(persisted.release_reason === UNCLEAN_DAEMON_EXIT_RELEASE_REASON
+        ? { recoveredFromUncleanDaemonExit: true as const }
+        : {}),
       ...(persisted.liveness_owner_token
         ? {
             livenessOwnerToken: persisted.liveness_owner_token,
@@ -407,6 +417,11 @@ export class SessionRecovery {
         mcpSessionId: persisted.mcp_session_id,
         daemonSessionId: this.host.recoveredRowOwner(),
       },
+      // Only the startup sweep writes `daemon-restart`, for a row whose daemon is no longer live
+      // (#17255); a graceful shutdown hands off as `daemon-shutdown` and keeps the full window.
+      ...(persisted.release_reason === UNCLEAN_DAEMON_EXIT_RELEASE_REASON
+        ? { recoveredFromUncleanDaemonExit: true as const }
+        : {}),
       ...(persisted.platform === "android"
         ? { androidEmulator: isAndroidEmulatorSerial(persisted.device_id) }
         : {}),

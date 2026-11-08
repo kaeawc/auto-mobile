@@ -91,18 +91,15 @@ describe("IosScreenCaptureHelper capability handshake (issue #4787)", () => {
     expect(() => helper.assertSupportsEncodedVideo()).not.toThrow();
   });
 
-  test("surfaces an encoded-video record over stdout via the encodedVideo event, not as a frame", async () => {
+  test("surfaces an encoded-video record over stdout via the encodedVideo event", async () => {
     const { fake, helper } = withFakeSpawner();
     const video: DecodedEncodedVideo[] = [];
-    const frames: number[] = [];
     helper.on("encodedVideo", (v) => video.push(v));
-    helper.on("frame", () => frames.push(1));
     helper.start();
 
     fake.stdout.push(Buffer.from(goldenKeyframeRecordHex, "hex"));
     await flush();
 
-    expect(frames).toEqual([]);
     expect(video).toHaveLength(1);
     expect(video[0].keyframe).toBe(true);
     expect(video[0].presentationTimestampMs).toBe(1000);

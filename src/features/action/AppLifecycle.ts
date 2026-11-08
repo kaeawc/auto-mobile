@@ -13,6 +13,7 @@ import {
   readAndroidPackageProcesses,
   selectAndroidUserId,
 } from "../../utils/android-cmdline-tools/androidProcessState";
+import { adbFailureOutput } from "../../utils/android-cmdline-tools/adbFailureOutput";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { ANDROID_PACKAGE_NAME_PATTERN } from "../../utils/androidPackageName";
 import { fixedBackoff } from "../../utils/Backoff";
@@ -64,6 +65,10 @@ const TRIM_LEVEL_ARGUMENT: Readonly<Record<AppTrimMemoryLevel, string>> = {
   COMPLETE: "COMPLETE",
 };
 const TRIM_FAILURE_OUTPUT = /error|exception|unknown|not found|no such|failed/i;
+/** The `Exception: message` line `am` prints first, ahead of the stack frames (#16481). */
+const TRIM_EXCEPTION_LINE = /^\s*(?:[\w$]+\.)*[\w$]*(?:Exception|Error):\s*\S.*$/m;
+/** ActivityManager's refusal of HIDDEN/BACKGROUND/MODERATE/COMPLETE for a foreground app. */
+const TRIM_FOREGROUND_REFUSAL = /background trim level on a foreground process/i;
 const MECHANISMS = {
   background: "home",
   killBackgrounded: "am-kill",
@@ -73,6 +78,32 @@ interface AndroidLifecycleTarget {
   base: AppLifecycleResult;
   userId: number;
   pidBefore: number;
+}
+
+/**
+ * The reason `am send-trim-memory` failed: its exception sentence, which sits above the stack and
+ * so is cut from the tail-only excerpt in the wrapped adb error, with a next step when Android
+ * refused a background level for a foreground app. Falls back to `fallback` when no exception
+ * line is present.
+ */
+export function describeTrimFailure(
+  output: string,
+  appId: string,
+  level: AppTrimMemoryLevel,
+  fallback: string,
+): string {
+  const exception = TRIM_EXCEPTION_LINE.exec(output)?.[0].trim();
+  if (exception === undefined) {
+    return fallback;
+  }
+  if (!TRIM_FOREGROUND_REFUSAL.test(exception)) {
+    return `am send-trim-memory ${level} failed for ${appId}: ${exception}`;
+  }
+  return (
+    `Android refused ${level} for ${appId} because it is in the foreground (${exception}). ` +
+    "Send a RUNNING_* level (RUNNING_MODERATE, RUNNING_LOW, RUNNING_CRITICAL), " +
+    "or move the app to the background first (appLifecycle action background)."
+  );
 }
 
 /** trimMemory needs a level and no other action takes one; null when the combination is valid. */
@@ -206,10 +237,24 @@ export class AppLifecycle {
     } catch (error) {
       signal?.throwIfAborted();
       logger.warn(`[AppLifecycle] Android trim-memory command failed for ${base.appId}`, error);
-      return { ...attempt, errorCode: "trim_failed", error: errorMessage(error) };
+      const failure = adbFailureOutput(error);
+      return {
+        ...attempt,
+        errorCode: "trim_failed",
+        error: describeTrimFailure(
+          `${failure.stderr}\n${failure.stdout}`,
+          base.appId,
+          level,
+          errorMessage(error),
+        ),
+      };
     }
     if (TRIM_FAILURE_OUTPUT.test(output)) {
-      return { ...attempt, errorCode: "trim_failed", error: output };
+      return {
+        ...attempt,
+        errorCode: "trim_failed",
+        error: describeTrimFailure(output, base.appId, level, output),
+      };
     }
     return {
       ...attempt,

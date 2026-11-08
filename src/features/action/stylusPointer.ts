@@ -24,7 +24,8 @@ import { StaleDisplayError } from "../observe/StaleDisplayError";
  * `toolType = getToolType(inputSource)` (`TOOL_TYPE_STYLUS` for the stylus source), while `Input.java`
  * from `android-7.0.0_r36` through `android-11.0.0_r48` builds the event with the legacy
  * `MotionEvent.obtain` overload that carries no tool type, so API 24 to 30 are refused. Releases
- * before API 24 were not read. A device-side probe of the received tool type is still pending (#13082).
+ * before API 24 were not read. Measured on emulators (#13082): API 30 delivers tool type `UNKNOWN`,
+ * API 31, 32, 33 and 37 deliver `TOOL_TYPE_STYLUS`.
  */
 export const STYLUS_INPUT_MIN_SDK = 31;
 

@@ -16,6 +16,7 @@ import { type ScreenSizeForOffscreenCheckOptions } from "../../utility/ElementGe
 import type { ConditionResolver } from "../ConditionPredicates";
 import type { ObserveWaitForOptions, WaitForWithSettled } from "./WaitForSchemas";
 import { findWaitForElement, hasElementPredicate } from "./WaitElement";
+import { findProjectedTextRow } from "./WaitProjectedText";
 
 export interface ObserveConditionEvaluation extends ConditionEvaluation {
   containerFailure?: ContainerFailure;
@@ -167,6 +168,40 @@ export function layerScopedObservation(
   };
 }
 
+/**
+ * Search the hierarchy for the waited element. Static text is reported in
+ * `context`, not the actionable-only `skeleton` (#6221), so a text-only wait
+ * that misses there also matches either array's rows (#16890).
+ */
+function findAwaitedElement(
+  finder: ConditionResolver,
+  waitFor: ObserveWaitForOptions,
+  observation: ObserveResult,
+  {
+    platform,
+    sizeOptions,
+    evaluation,
+    modes,
+  }: {
+    platform: AndroidOrIosPlatform | undefined;
+    sizeOptions: ScreenSizeForOffscreenCheckOptions;
+    evaluation: ConditionEvaluation;
+    modes: Map<string, MatchMode>;
+  },
+): Element | null {
+  if (!observation.viewHierarchy) {
+    return null;
+  }
+  const found = findWaitForElement(finder, waitFor, observation.viewHierarchy, {
+    platform,
+    options: { ...sizeOptions, evaluation, modes },
+  });
+  if (found || evaluation.diagnostic) {
+    return found;
+  }
+  return findProjectedTextRow(waitFor, observation);
+}
+
 export const evaluateWaitForObservation = (
   finder: ConditionResolver,
   waitFor: WaitForWithSettled,
@@ -205,17 +240,9 @@ export const evaluateWaitForObservation = (
   const activeWindowMatched = matchesActiveWindow(observation, waitFor, platform);
   const displayMatched = matchesDisplayStamp(observation, waitFor, displayInventory);
   const needsElementMatch = hasElementPredicate(waitFor);
-  const awaitedElement =
-    needsElementMatch && observation.viewHierarchy
-      ? findWaitForElement(finder, waitFor, observation.viewHierarchy, {
-          platform,
-          options: {
-            ...sizeOptions,
-            evaluation,
-            modes,
-          },
-        })
-      : null;
+  const matchedElement = needsElementMatch
+    ? findAwaitedElement(finder, waitFor, observation, { platform, sizeOptions, evaluation, modes })
+    : null;
   // The shared admission guard above ensures absence is evaluated only on a
   // usable capture; an unavailable tree cannot prove that an element is gone.
   const absentSatisfied =
@@ -229,12 +256,12 @@ export const evaluateWaitForObservation = (
     activeWindowMatched,
     displayMatched,
     absentSatisfied,
-    !needsElementMatch || awaitedElement !== null,
+    !needsElementMatch || matchedElement !== null,
   ].every(Boolean);
   return {
     ...evaluation,
     ...containerFailureMetadata(!matched, tracked.failure()),
     matched,
-    awaitedElement: awaitedElement ?? undefined,
+    awaitedElement: matchedElement ?? undefined,
   };
 };

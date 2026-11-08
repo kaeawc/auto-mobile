@@ -30,6 +30,7 @@ type AllocationWiringState = Pick<
   | "iosForeignDeviceOwnership"
   | "watchForeignDeviceOwnership"
   | "tvForeignDeviceOwnership"
+  | "visionForeignDeviceOwnership"
   | "devices"
   | "DEVICE_WAIT_TIMEOUT_MS"
   | "RECOVERY_RESPONSE_MARGIN_MS"
@@ -194,6 +195,9 @@ export class DevicePoolAllocationWiring {
       },
       get tvForeignDeviceOwnership() {
         return pool.tvForeignDeviceOwnership;
+      },
+      get visionForeignDeviceOwnership() {
+        return pool.visionForeignDeviceOwnership;
       },
       get timer() {
         return pool.timer;

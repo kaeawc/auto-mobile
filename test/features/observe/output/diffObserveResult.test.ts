@@ -863,6 +863,32 @@ describe("diffObserveResult", () => {
     expect(DIFF_SCALAR_FIELDS).toContain("awaitDuration");
   });
 
+  test("an automotive-only state change survives action observation diffs", () => {
+    const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
+    const parked: ObserveResult["automotive"] = {
+      drivingState: "parked",
+      uxRestrictions: { requiresDistractionOptimization: false, activeRestrictions: 0 },
+      foregroundActivity: { distractionOptimized: false },
+      blocked: false,
+    };
+    const moving: ObserveResult["automotive"] = {
+      drivingState: "moving",
+      uxRestrictions: { requiresDistractionOptimization: true, activeRestrictions: 511 },
+      foregroundActivity: { distractionOptimized: false },
+      blocked: true,
+    };
+
+    const diff = diffObserveResult(
+      obs({ ...node }, { automotive: parked }),
+      obs({ ...node }, { automotive: moving }),
+    );
+
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    expect(diff.changed).toEqual([]);
+    expect(diff.fields).toEqual({ automotive: { from: parked, to: moving } });
+  });
+
   test("timeout reason gains, changes and removals survive action observation diffs", () => {
     const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
     const timeoutReason =
@@ -2556,6 +2582,10 @@ describe("diffObserveResult — all DIFF_SCALAR_FIELDS members (P6)", () => {
       to: { locked: true, keyguardShowing: true, secure: true },
     },
     deviceLockUnknown: { from: undefined, to: { reason: "timeout" } },
+    automotive: {
+      from: { drivingState: "parked", blocked: false },
+      to: { drivingState: "moving", blocked: true },
+    },
     awaitTimeout: { from: false, to: true },
     awaitDuration: { from: undefined, to: 250 },
     timeoutReason: { from: undefined, to: "posture wait timed out" },
@@ -2567,6 +2597,7 @@ describe("diffObserveResult — all DIFF_SCALAR_FIELDS members (P6)", () => {
   // DIFF_SCALAR_FIELDS (which would silently undiff it) reddens here rather than
   // just removing a generated row. `updatedAt` must stay OUT (churns every capture).
   const EXPECTED_SCALARS = [
+    "automotive",
     "awaitDuration",
     "awaitTimeout",
     "deviceLock",

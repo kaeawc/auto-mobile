@@ -55,6 +55,7 @@ Other refusals you may meet, and what to do:
 | `ambiguous_session_selector`                         | Several of your sessions match; pass `sessionUuid` or `deviceId`.                                                                                                               |
 | `ambiguous_device_target`                            | An unnamed call matched several devices; reads pass `deviceId`, control calls acquire a session and pass `sessionUuid`.                                                         |
 | `device_outside_bound_session`                       | The call names a `deviceId` other than the session's device.                                                                                                                    |
+| `read_session_not_bound` (not retryable)             | A read named a session another connected client owns. Read on the owning connection, or pass `deviceId` instead of `sessionUuid`.                                               |
 | `plan_execution_in_progress` (retryable)             | A plan is running; retry when it finishes. Reads stay allowed.                                                                                                                  |
 | `session_ownership_lost`, `no_active_device_session` | The session is gone for good (`retryable: false`, `nextAction: "acquire_new_session"`). Acquire a new session.                                                                  |
 | `session_released_during_creation`                   | The session was released before it finished creating. Acquire a new one.                                                                                                        |
@@ -177,7 +178,7 @@ Refusals do not count as session use and do not extend the session's idle window
 ### Reads and control
 
 Read-only calls never need a session and never count as activity, even for the
-holder. Anything that changes visible UI or starts a device-side process is
+holder. A read that names another connected client's session is refused (below). Anything that changes visible UI or starts a device-side process is
 control.
 
 - Reads include `observe`, `snapshotOf`, `hitTest`, `identifyInteractions`,
@@ -195,6 +196,15 @@ control.
 - A sessionless read that passes `deviceId` may boot that stopped device (an
   Android AVD name or an available iOS simulator UDID) and never creates one.
   Boot capacity limits still apply.
+- A read that passes the `sessionUuid` of a session another connected client
+  owns is refused like a control call: knowing the UUID is not enough. It gets
+  the non-retryable `read_session_not_bound`, which names the session, unless
+  it comes from a broker connection granted that session or presents the
+  session's owner token. Read on the owning connection, or leave `sessionUuid`
+  out and pass `deviceId` for a sessionless read. Once the owner has
+  disconnected (a finished `--cli` call, for example) another connection may
+  read under the session. A `sessionUuid` that names no device session (such as
+  an IDE observer session) still reads sessionlessly.
 - Ownership is a guard between cooperating clients, not a security boundary
   against other local processes.
 
@@ -234,13 +244,25 @@ the windows with the variables in
 - **Terminal releases.** A released session UUID is never revived. A later call
   naming it is refused with `session_ownership_lost`, `retryable: false` and
   `nextAction: "acquire_new_session"`. After an idle release the refusal also
-  carries `idle: true`. A call still running when its session is released is cut
-  with the same refusal.
+  carries `idle: true`. After a `cli-idle-timeout` release it also carries
+  `idleTimeoutMs`, the idle window the session had: the
+  `AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS` of the last `--cli` call that used it,
+  capped at 1 hour. A plan's derived label session that ends with its base's
+  `cli-idle-timeout` carries the base's `idleTimeoutMs`, the window that
+  expired. A call still running when its session is released is cut with the same
+  refusal.
 - **Daemon restart.** A daemon restart is not terminal: the owner reclaims the
   session under the same UUID. While the daemon reclaims the binding, calls may
   receive the retryable `binding_ownership_unconfirmed`; wait `retryAfterMs`.
   If ownership cannot be confirmed in about a minute the session is released and
   calls get `session_ownership_lost`.
+  If the previous daemon exited without shutting down (it crashed or was killed),
+  its sessions wait at most about 8 seconds for their owner to reconnect, whatever
+  their own heartbeat or CLI idle window; a client that is still running and
+  heartbeating keeps its session, and otherwise the device is free for another
+  session within seconds. A CLI session (which does not heartbeat) does not
+  survive such a restart: its next call gets `session_ownership_lost`, and a new
+  session is acquired.
 - **Device restart.** When a device restarts, its session can resume under the
   same UUID for 180 seconds; other sessions cannot take that device meanwhile
   (a start naming it is refused with a retry hint). If the window passes without
@@ -274,7 +296,7 @@ the windows with the variables in
 | ------------------------------------------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `explicit-release`                                                                                      | Yes        | `session_ownership_lost`; acquire a new session.                                                                                                                                                                                                                    |
 | `cleanup-expired` (legacy: `lazy-expiry`)                                                               | Yes (idle) | `session_ownership_lost` refusals and session-not-found answers (heartbeat, `daemon/sessionInfo`) carry `idle: true`. Acquire a new session.                                                                                                                        |
-| `cli-idle-timeout`                                                                                      | Yes (idle) | `session_ownership_lost` refusals and session-not-found answers (heartbeat, `daemon/sessionInfo`) carry `idle: true` for a one-shot CLI session.                                                                                                                    |
+| `cli-idle-timeout`                                                                                      | Yes (idle) | `session_ownership_lost` refusals (including the `daemon/registerSession` refusal) and session-not-found answers (heartbeat, `daemon/sessionInfo`) carry `idle: true` and `idleTimeoutMs` for a one-shot CLI session.                                               |
 | `heartbeat-timeout`, `missing-first-heartbeat`                                                          | Yes        | `session_ownership_lost`, with the heartbeat age and limit in the message.                                                                                                                                                                                          |
 | `rehydration-owner-timeout`                                                                             | Yes        | `session_ownership_lost`: a rehydrated session's owner never reclaimed it.                                                                                                                                                                                          |
 | `owner-disconnected`                                                                                    | Yes        | `session_ownership_lost`: the owning connection closed and no other client owns the session.                                                                                                                                                                        |
@@ -326,47 +348,21 @@ the device really should be stopped out from under its holder.
 
 ## Apple TV simulators
 
-Call `listDevices` with `platform: "tvos"` to list booted Apple TV simulators, or
-`listDeviceImages` with `platform: "tvos"` to list configured ones. Read
-`automobile:devices/images/tvos` for configured Apple TVs, installed tvOS runtimes,
-Apple TV models and their compatible runtimes. Check inventory completeness before
-treating an empty result as no devices; retry a failed listing.
-General device and image listings continue to cover Android and iOS.
+Listing, provisioning, starting, deleting and driving Apple TV simulators are covered in
+[Apple TV simulators](apple-tv.md).
 
-`provisionDevice` with `device.platform: "tvos"` takes an exact `name`, optional
-`deviceId` (UDID), and `spec: { runtime, deviceType }` identifiers from that
-catalog. It adopts an exact match or creates a simulator; a name clash, missing
-UDID or incompatible runtime/model is refused. A missing tvOS runtime must be
-installed with `xcodebuild -downloadPlatform tvOS`; the tool never downloads it.
-With `boot` (the default), it boots and binds a session at readiness `booted`;
-a simulator it created is deleted again if boot or binding fails; if deleting it
-again fails, the error says so and tells you to delete it with `deleteDevice`. `boot: false`
-creates or adopts without a session. `resources`, `enableTools` and
-`readiness: "automation"` are unsupported.
+## Apple Vision Pro simulators
 
-`deleteDevice` takes `target: { platform: "tvos", isVirtual: true, stableId: "<UDID>" }`,
-`mode: "destroy"` and `verifyAbsence: true`. It stops a running simulator and
-releases its session before deletion, then confirms absence with a fresh listing.
-An absent UDID returns `already_absent`; a mismatched `target.stableName` fails
-with `identity_conflict`, and an unsuccessful deletion with `tv_delete_failed`.
-
-`startDevice` with `platform: "tvos"` boots an existing simulator, starts its automation
-runner and binds a session. Set `AUTOMOBILE_TVOS_RUNNER_XCTESTRUN` to a prebuilt
-simulator runner xctestrun; otherwise a source checkout discovers or builds it.
-If startup fails, the response explains why and the booted session supports screenshot-only
-observation. Releasing the session, killing or deleting the simulator stops its runner.
-
-With a connected runner, `observe` returns the hierarchy and the existing `focusedElement`;
-use `project: "full"` to include the full hierarchy. Navigate focus with `pressButton`
-using `up`, `down`, `left`, `right`, `select`, `menu`, `home` or `playPause`.
-Use `tapOn` with an exact `text` or `elementId` selector and optional zero-based `index` to
-move focus to a visible element and select it. Only the tap action is supported. A missing
-match, absent focus, stalled focus or the 30-move limit produces an error; observe and
-use `pressButton` to establish focus or move closer before retrying.
-Touch gestures and long press are unsupported. Text input supports only `type` (append)
-into the keyboard opened with `pressButton select`; selector, key and clear operations
-are unsupported. Without a runner, observation
-returns a screenshot and `hierarchyUnavailable`; call `startDevice` again to prepare automation.
+Name `platform: "visionos"` or a Vision Pro session to use `installApp`,
+`uninstallApp`, `launchApp`, `terminateApp` and `listApps` on an Apple Vision Pro
+simulator. Install a `.app` bundle built for the visionOS simulator;
+`launchApp` refuses `prototype: true`. With the visionOS runner active,
+`observe` returns the window app's accessibility hierarchy, including
+ornaments, `tapOn` taps an element by a unique accessibility identifier, and
+`sendKeys` types into the focused text field. These act on the app you last
+started with `launchApp`; launch a different app and the next call follows it. If the runner is unavailable, `observe` returns a
+screenshot-only observation with `hierarchyUnavailable`; read the screenshot.
+Coordinate gestures and other input tools are not supported.
 
 ## Apple Watch simulators
 
@@ -407,7 +403,7 @@ watch, even after one was selected.
   Without a runner, observation returns a fresh screenshot (`screenshotPath`,
   `screenshotExpiresAt`) and `screenSize`, with a `hierarchyUnavailable` note.
   Hierarchy fields are absent, not empty; use the screenshot and retry `startDevice`
-  before acting. Apple TV observation uses its connected runner for hierarchy and focus.
+  before acting.
 - A session request (`--session-config` / `AUTOMOBILE_SESSION_CONFIG`) asks for
   a watch with `device: { "schemaVersion": 1, "platform": "watchos", "spec": {
   "runtime": "...", "deviceType": "..." } }`: the exact watchOS runtime and Apple

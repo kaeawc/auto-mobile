@@ -6,7 +6,11 @@ import { convertToViewHierarchyResult } from "../../../src/features/observe/ios/
 import { HomeScreen } from "../../../src/features/action/HomeScreen";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { BootedDevice, ExecResult, ObserveResult, ViewHierarchyResult } from "../../../src/models";
-import type { CtrlProxyHierarchy } from "../../../src/features/observe/ios/types";
+import type {
+  CtrlProxyHierarchy,
+  CtrlProxyPressHomeResult,
+} from "../../../src/features/observe/ios/types";
+import type { IOSDispatchResult } from "../../../src/features/observe/ios/CtrlProxyDispatch";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -27,6 +31,7 @@ import { hideCapturedNode } from "../../helpers/hideCapturedNode";
 import { SimctlCommandTimeoutError } from "../../../src/utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import { drainUntil } from "../../helpers/fakeTimerStepping";
 import { IosHomeLaunchTimeoutError } from "../../../src/models/IosHomeLaunchTimeoutError";
+import { IosHomeNotForegroundError } from "../../../src/models/IosHomeNotForegroundError";
 import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 // Helper function to create mock ObserveResult
@@ -843,6 +848,24 @@ describe("HomeScreen", () => {
       expect(fakeTimer.getSleepHistory()).toEqual([]);
     });
 
+    test("physical iOS keeps reporting an unacknowledged Home press as an error", async () => {
+      const { action, client } = createIosHomeScreen();
+      client.setHierarchyData(iosHierarchy("com.apple.springboard"));
+      const pressHomeResult: IOSDispatchResult<CtrlProxyPressHomeResult> = {
+        success: false,
+        dispatched: true,
+        acknowledged: false,
+        totalTimeMs: 4352,
+        error: "Press home timed out after 4352ms",
+      };
+      spyOn(client, "requestPressHome").mockResolvedValue(pressHomeResult);
+
+      await expect(action.executeIosHomeNavigation()).rejects.toThrow(
+        "Press home timed out after 4352ms",
+      );
+      expect(client.getHierarchyRequestCount()).toBe(0);
+    });
+
     test("reports the foreground app and blocking alert after bounded iOS retries", async () => {
       const { action, client } = createIosHomeScreen();
       client.setHierarchyData(iosHierarchy("com.apple.Maps"));
@@ -1045,6 +1068,39 @@ describe("HomeScreen", () => {
       );
 
       test.each([false, true])(
+        "treats the runner's not-foreground error with recorded query failures as unverified (simulator %s, #17201)",
+        async (simulator) => {
+          const { action, client } = createIosHomeScreen({
+            simulator,
+            simctl: { executeCommandArgs: async () => createExecResult("", "") },
+          });
+          // Captured on iOS 26.5 (iPhone 17 Pro simulator): the switcher dismissal raced the
+          // runner's AppSwitcherContentView query during its one-shot foreground check.
+          client.setPressHomeResult({
+            success: false,
+            totalTimeMs: 1,
+            error:
+              "Home press did not bring SpringBoard to the foreground\nRecorded command failure(s): Failed to get matching snapshot: No matches found for Element at index 3 from input {(\n    Other, identifier: 'AppSwitcherContentView',\n    Other, identifier: 'card:com.apple.Preferences:sceneID:com.apple.Preferences-default'\n)}",
+          });
+          const before = createObserveResult();
+          before.viewHierarchy = convertToViewHierarchyResult(iosSwitcherHierarchy());
+          const after = createObserveResult();
+          after.viewHierarchy = convertToViewHierarchyResult(iosHierarchy("com.apple.springboard"));
+          fakeObserveScreen.setObserveSequence([before, after]);
+          spyOn(client, "requestHierarchySync").mockImplementation(async () => ({
+            hierarchy:
+              client.getPressHomeRequestCount() === 0
+                ? iosSwitcherHierarchy()
+                : iosHierarchy("com.apple.springboard"),
+          }));
+
+          const result = await action.execute();
+          expect(result.success).toBe(true);
+          expect(client.getPressHomeRequestCount()).toBe(1);
+        },
+      );
+
+      test.each([false, true])(
         "fails when the app stays foreground after two runner presses (simulator %s)",
         async (simulator) => {
           const { action, client } = createIosHomeScreen({
@@ -1149,17 +1205,92 @@ describe("HomeScreen", () => {
         await expect(action.executeIosHomeNavigation()).resolves.toBeUndefined();
       });
 
-      test("reports a failed runner Home press after Spotlight survives the launch", async () => {
-        const { action, client } = createIosHomeScreen({ simulator: true, simctl });
-        client.setHierarchyData(iosHierarchy("com.apple.Spotlight"));
-        spyOn(client, "requestPressHome").mockResolvedValue({
-          success: false,
-          totalTimeMs: 1,
-          error: "runner busy",
-        });
+      test.each(["Spotlight", "App Switcher"] as const)(
+        "verifies Home in a fresh window after an unacknowledged press from %s",
+        async (initial) => {
+          const { action, client } = createIosHomeScreen({ simulator: true, simctl });
+          client.setHierarchyData(
+            initial === "Spotlight" ? iosHierarchy("com.apple.Spotlight") : iosSwitcherHierarchy(),
+          );
+          let pressReturnedAt: number | undefined;
+          const read = spyOn(client, "requestHierarchySync");
+          const press = spyOn(client, "requestPressHome").mockImplementation(async () => {
+            fakeTimer.advanceTime(4352);
+            pressReturnedAt = fakeTimer.now();
+            client.setHierarchyData(iosHierarchy("com.apple.Spotlight"));
+            fakeTimer.setTimeout(() => {
+              client.setHierarchyData(iosHierarchy("com.apple.springboard"));
+            }, 3600);
+            return {
+              success: false,
+              dispatched: true,
+              acknowledged: false,
+              totalTimeMs: 4352,
+              error: "Press home timed out after 4352ms",
+            };
+          });
 
-        await expect(action.executeIosHomeNavigation()).rejects.toThrow("runner busy");
-      });
+          await expect(
+            action.executeIosHomeNavigation({ timeoutMs: 4352 }),
+          ).resolves.toBeUndefined();
+          expect(press).toHaveBeenCalledTimes(1);
+          expect(pressReturnedAt).toBeDefined();
+          expect(fakeTimer.now() - (pressReturnedAt ?? 0)).toBe(3700);
+          expect(read.mock.calls.at(-1)?.[3]?.timeoutMs).toBe(300);
+        },
+      );
+
+      test.each(["Spotlight", "App Switcher"] as const)(
+        "reports the foreground failure after an unacknowledged press from %s",
+        async (initial) => {
+          const { action, client } = createIosHomeScreen({ simulator: true, simctl });
+          client.setHierarchyData(
+            initial === "Spotlight" ? iosHierarchy("com.apple.Spotlight") : iosSwitcherHierarchy(),
+          );
+          let pressReturnedAt: number | undefined;
+          const press = spyOn(client, "requestPressHome").mockImplementation(async () => {
+            fakeTimer.advanceTime(4352);
+            pressReturnedAt = fakeTimer.now();
+            client.setHierarchyData(iosHierarchy("com.apple.Spotlight"));
+            return {
+              success: false,
+              dispatched: true,
+              acknowledged: false,
+              totalTimeMs: 4352,
+              error: "Press home timed out after 4352ms",
+            };
+          });
+
+          const failure = await action
+            .executeIosHomeNavigation({ timeoutMs: 4352 })
+            .catch((error: unknown) => error);
+          expect(failure).toBeInstanceOf(ActionableError);
+          expect(failure).toHaveProperty("cause", expect.any(IosHomeNotForegroundError));
+          expect(failure).toHaveProperty(
+            "message",
+            "simctl launched SpringBoard, but foreground verification failed: Home press did not background com.apple.Spotlight; the home screen did not become foreground",
+          );
+          expect(press).toHaveBeenCalledTimes(1);
+          expect(pressReturnedAt).toBeDefined();
+          expect(fakeTimer.now() - (pressReturnedAt ?? 0)).toBe(4000);
+        },
+      );
+
+      test.each([undefined, true])(
+        "reports a failed runner Home press after Spotlight survives the launch (acknowledged %s)",
+        async (acknowledged) => {
+          const { action, client } = createIosHomeScreen({ simulator: true, simctl });
+          client.setHierarchyData(iosHierarchy("com.apple.Spotlight"));
+          spyOn(client, "requestPressHome").mockResolvedValue({
+            success: false,
+            totalTimeMs: 1,
+            error: "runner busy",
+            ...(acknowledged === true ? { dispatched: true, acknowledged } : {}),
+          });
+
+          await expect(action.executeIosHomeNavigation()).rejects.toThrow("runner busy");
+        },
+      );
     });
 
     describe("simulator launch budget regression", () => {

@@ -1,6 +1,6 @@
 import type { FormFactor } from "./DeviceMatchCriteria";
 
-const NON_GEOMETRIC_KINDS = ["tv", "watch", "automotive"] as const;
+const NON_GEOMETRIC_KINDS = ["tv", "watch", "automotive", "xr-headset", "xr-glasses"] as const;
 export type NonGeometricFormFactor = (typeof NON_GEOMETRIC_KINDS)[number];
 
 /**
@@ -22,7 +22,7 @@ const NON_GEOMETRIC_FORM_FACTORS: Readonly<
     defaultProfileId: "tv_1080p",
   },
   watch: {
-    systemImageTags: ["android-wear", "android-wear-cn"],
+    systemImageTags: ["android-wear-signed", "android-wear", "android-wear-cn"],
     profileIdPattern: /^wear(?:os)?_/i,
     defaultProfileId: "wearos_small_round",
   },
@@ -32,6 +32,19 @@ const NON_GEOMETRIC_FORM_FACTORS: Readonly<
     profileIdPattern: /^automotive_/i,
     defaultProfileId: "automotive_1024p_landscape",
   },
+  "xr-headset": {
+    // Plain `google-xr` first, ahead of the Play variants, as TV prefers its rootable image.
+    systemImageTags: ["google-xr", "android-xr-v3-playstore", "android-xr-preview-playstore"],
+    profileIdPattern: /^xr_headset/i,
+    defaultProfileId: "xr_headset_device",
+  },
+  "xr-glasses": {
+    systemImageTags: ["ai-glasses"],
+    profileIdPattern: /^(?:xr_glasses|ai_glasses)_/i,
+    // `ai_glasses_device` carries the `ai-glasses` tag in `avdmanager list device`;
+    // `xr_glasses_device` carries `android-xr`, which no glasses image ships.
+    defaultProfileId: "ai_glasses_device",
+  },
 };
 
 const NON_GEOMETRIC_ENTRIES = NON_GEOMETRIC_KINDS.map((formFactor) => ({
@@ -39,14 +52,40 @@ const NON_GEOMETRIC_ENTRIES = NON_GEOMETRIC_KINDS.map((formFactor) => ({
   ...NON_GEOMETRIC_FORM_FACTORS[formFactor],
 }));
 
+/** True for a form factor fixed by its system image or profile rather than by screen geometry. */
+export function isNonGeometricFormFactor(formFactor: string): formFactor is NonGeometricFormFactor {
+  return (NON_GEOMETRIC_KINDS as readonly string[]).includes(formFactor);
+}
+
 /** The system-image tags of a non-handheld form factor, best first for provisioning. */
 export function androidSystemImageTagsFor(formFactor: NonGeometricFormFactor): readonly string[] {
   return NON_GEOMETRIC_FORM_FACTORS[formFactor].systemImageTags;
 }
 
-/** The avdmanager profile id created for a non-handheld form factor that names no profile. */
-export function defaultAndroidProfileIdFor(formFactor: NonGeometricFormFactor): string {
+/** Default avdmanager profile; screenRound=false selects the square Wear profile. */
+export function defaultAndroidProfileIdFor(
+  formFactor: NonGeometricFormFactor,
+  screenRound?: boolean,
+): string {
+  if (formFactor === "watch" && screenRound === false) {
+    return "wearos_square";
+  }
   return NON_GEOMETRIC_FORM_FACTORS[formFactor].defaultProfileId;
+}
+
+/**
+ * The screen shape a Wear avdmanager profile id names (`wearos_small_round`, `wearos_square`,
+ * `wearos_rect`); undefined for a non-Wear profile or one whose id names no shape.
+ */
+export function wearProfileScreenRound(profileId: string | null | undefined): boolean | undefined {
+  const id = profileId?.trim() ?? "";
+  if (!NON_GEOMETRIC_FORM_FACTORS.watch.profileIdPattern.test(id)) {
+    return undefined;
+  }
+  if (/round/i.test(id)) {
+    return true;
+  }
+  return /square|rect/i.test(id) ? false : undefined;
 }
 
 function nonGeometricFormFactor(input: {
@@ -84,7 +123,7 @@ function isPositiveFiniteNumber(value: number | null | undefined): value is numb
 
 /**
  * Classify a device profile or display into the form-factor vocabulary used by
- * matching. Order: system-image tag, then profile id (tv, watch, automotive), then a hint of
+ * matching. Order: system-image tag, then profile id (tv, watch, automotive, XR), then a hint of
  * those kinds, then the profile's fold/flip identity, then geometry.
  */
 export function formFactorFrom(input: {
@@ -121,6 +160,8 @@ const EXPLICIT_HINTS: ReadonlySet<string> = new Set([
   "tv",
   "watch",
   "automotive",
+  "xr-headset",
+  "xr-glasses",
 ]);
 
 function geometryFormFactor(input: {

@@ -212,6 +212,7 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ...fixture({ ...label, animate: { tempo: "fast" } }),
     with: ["prototype_motion_v2"],
   },
+  prototype_loops_v1: fixture({ ...label, attentionLoop: { effect: "pulse", periodMs: 800 } }),
   prototype_motion_v2: fixture({ ...label, animate: { durationMs: 300 } }),
   prototype_keyframes_v1: fixture({
     ...label,
@@ -713,6 +714,32 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_permissions_v1: {
+    minimalSpec: {
+      ...base,
+      requires: {
+        platform: ["permissions"],
+        permissions: [{ name: "camera", purpose: "Take a photo" }],
+      },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              {
+                type: "platform",
+                call: "permissions.request",
+                args: { names: { value: ["camera"] } },
+              },
+            ],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_notifications_scheduled_v1: {
     minimalSpec: {
       ...base,
@@ -740,6 +767,17 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
             ],
           },
         ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1", "prototype_platform_notifications_v1"],
+  },
+  prototype_platform_push_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["notifications"] },
+      platform: {
+        on: { "notifications.push": [{ type: "setState", key: "active", value: true }] },
       },
     },
     ops: [],
@@ -900,6 +938,22 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_map_google_v1: mapBackendFixture("google"),
+  prototype_platform_map_maplibre_v1: mapBackendFixture("maplibre"),
+  prototype_platform_webview_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["webview"] },
+      root: {
+        ...base.root,
+        children: [
+          { type: "webView", url: "https://example.com", allowedOrigins: ["https://example.com"] },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_sensors_v1: {
     minimalSpec: {
       ...base,
@@ -1044,6 +1098,18 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     with: ["prototype_platform_v1"],
   },
 };
+/**
+ * A map naming a non-default backend (#14302). A patch cannot add `requires`, so, like the map
+ * module gate, the patch path is covered by the patch-result gate test in prototypeMap.test.ts.
+ */
+function mapBackendFixture(backend: string) {
+  const map = { type: "map", id: "label", backend, camera: { lat: 0, lng: 0, zoom: 2 } };
+  return {
+    minimalSpec: { ...fixture(map).minimalSpec, requires: { platform: ["map"] } },
+    ops: [],
+    with: ["prototype_platform_v1", "prototype_platform_map_v1"],
+  };
+}
 function fixture(root: { type: string; id: string } & Record<string, unknown>) {
   return {
     minimalSpec: {
@@ -1109,7 +1175,7 @@ function setup() {
     timer,
     clock: timer,
     cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
-    // A via "device" request to localhost makes show run `adb reverse`; keep it off the real adb.
+    // Keep any adb call a show makes (app-layer grants, anchor capture) off the real adb.
     adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
   });
 }

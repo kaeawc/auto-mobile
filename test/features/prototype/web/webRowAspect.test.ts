@@ -3,16 +3,21 @@ import { record, type Raw } from "../../../../src/features/prototype/prototypeTe
 import {
   aspectRatioCap,
   CAPPED_SHRINK,
+  contentHeightBound,
   isUnsizedAspectRatio,
   LATER_SHRINK,
+  rowContentHeight,
   rowFillAxes,
   rowMeasured,
   rowSequentialChildren,
 } from "../../../../src/features/prototype/web/webRowAspect";
 import {
+  laterMinStrut,
   nodeCss,
   ROW_BOUND_KEY,
   ROW_MEASURE_KEY,
+  containerChildStyle,
+  scrollChildStyle,
 } from "../../../../src/features/prototype/web/webStyle";
 
 const shown = (entry: unknown): Raw | undefined => record(entry);
@@ -119,7 +124,7 @@ test("a capped aspect ratio grows to its cap and its later siblings give up widt
   });
   expect(styleOf(measured[2])).toEqual({
     width: { dp: 40 },
-    [ROW_MEASURE_KEY]: { shrink: LATER_SHRINK },
+    [ROW_MEASURE_KEY]: { shrink: LATER_SHRINK, later: true },
   });
   // A weighted sibling grows into whatever the cap and the later siblings leave.
   expect(measured[3]).toBe(entries[3]);
@@ -131,7 +136,11 @@ test("a later capped aspect ratio keeps its cap as its basis in the later tier",
     { type: "box", style: { aspectRatio: 1, maxWidth: 20 } },
   ];
   const measured = rowSequentialChildren(entries, shown);
-  expect(styleOf(measured[1])?.[ROW_MEASURE_KEY]).toEqual({ shrink: LATER_SHRINK, basis: 20 });
+  expect(styleOf(measured[1])?.[ROW_MEASURE_KEY]).toEqual({
+    shrink: LATER_SHRINK,
+    later: true,
+    basis: 20,
+  });
 });
 
 test("an unsized aspect ratio after a capped one takes what the cap leaves", () => {
@@ -143,7 +152,9 @@ test("an unsized aspect ratio after a capped one takes what the cap leaves", () 
   ];
   const measured = rowSequentialChildren(entries, shown);
   expect(styleOf(measured[0])?.[ROW_MEASURE_KEY]).toEqual({ shrink: CAPPED_SHRINK, basis: 100 });
-  expect(styleOf(measured[1])).toEqual({ [ROW_MEASURE_KEY]: { shrink: LATER_SHRINK } });
+  expect(styleOf(measured[1])).toEqual({
+    [ROW_MEASURE_KEY]: { shrink: LATER_SHRINK, later: true },
+  });
   expect(styleOf(measured[2])).toEqual({ aspectRatio: 1, [ROW_MEASURE_KEY]: { take: true } });
   expect(styleOf(measured[3])).toEqual({ [ROW_MEASURE_KEY]: { zero: true } });
 });
@@ -183,6 +194,69 @@ test("a row measure becomes a flex basis and shrink in a row only", () => {
   expect(nodeCss(capped, { ...context, parentAxis: "column" })).not.toHaveProperty("flex-basis");
 });
 
+test("a later sibling's minWidth folds into its width instead of reserving width ahead of the cap", () => {
+  const context = { mode: "light" as const, palette: new Map(), parentAxis: "row" as const };
+  const later = (style: Raw, basis?: number) => ({
+    ...style,
+    [ROW_MEASURE_KEY]: { shrink: LATER_SHRINK, later: true, ...(basis ? { basis } : {}) },
+  });
+  // A fixed width at its minimum: the min no longer holds against shrinking (Android gives 0).
+  expect(nodeCss(later({ width: { dp: 40 }, minWidth: 40 }), context)).toMatchObject({
+    width: "40px",
+    "min-width": "0",
+    "flex-shrink": String(LATER_SHRINK),
+  });
+  // While width remains it still renders at least its minWidth.
+  expect(nodeCss(later({ width: { dp: 20 }, minWidth: 40 }), context)).toMatchObject({
+    width: "40px",
+    "min-width": "0",
+  });
+  // A content width has no px value to fold into: rendering wraps it around a strut instead.
+  const content = nodeCss(later({ minWidth: 30 }), context);
+  expect(content["min-width"]).toBe("0");
+  expect(content).not.toHaveProperty("width");
+  expect(laterMinStrut(later({ minWidth: 30 }), context)).toBe(30);
+  expect(laterMinStrut(later({ width: "fill", minWidth: 30 }), context)).toBe(30);
+  // A later capped ratio folds the minimum into its basis.
+  expect(nodeCss(later({ aspectRatio: 1, maxWidth: 20, minWidth: 25 }, 20), context)).toMatchObject(
+    { width: "25px", "flex-basis": "25px", "min-width": "0" },
+  );
+  // Without a minWidth the later tier is unchanged.
+  expect(nodeCss(later({ width: { dp: 40 } }), context)).toMatchObject({
+    width: "40px",
+    "min-width": "0",
+  });
+});
+
+test("only a later content- or fill-width sibling with a minWidth in a row needs a strut", () => {
+  const context = { mode: "light" as const, palette: new Map(), parentAxis: "row" as const };
+  const measure = { [ROW_MEASURE_KEY]: { shrink: LATER_SHRINK, later: true } };
+  expect(laterMinStrut({ minWidth: 30, ...measure }, context)).toBe(30);
+  // A px width or basis folds the minimum into its own width.
+  expect(laterMinStrut({ width: { dp: 10 }, minWidth: 30, ...measure }, context)).toBeUndefined();
+  const based = { [ROW_MEASURE_KEY]: { shrink: LATER_SHRINK, later: true, basis: 20 } };
+  expect(laterMinStrut({ minWidth: 30, ...based }, context)).toBeUndefined();
+  // Not later, no minWidth, or not in a row: nothing to wrap.
+  expect(
+    laterMinStrut({ minWidth: 30, [ROW_MEASURE_KEY]: { shrink: CAPPED_SHRINK } }, context),
+  ).toBeUndefined();
+  expect(laterMinStrut(measure, context)).toBeUndefined();
+  expect(laterMinStrut({ minWidth: 30, ...measure }, { ...context, parentAxis: "column" })).toBe(
+    undefined,
+  );
+  expect(laterMinStrut(undefined, context)).toBeUndefined();
+});
+
+test("a later sibling in a capped row is marked so its minWidth folds", () => {
+  const entries = [
+    { type: "box", style: { aspectRatio: 1, maxWidth: 100 } },
+    { type: "box", style: { width: { dp: 40 }, minWidth: 40 } },
+  ];
+  const measured = rowSequentialChildren(entries, shown);
+  expect(styleOf(measured[0])?.[ROW_MEASURE_KEY]).toEqual({ shrink: CAPPED_SHRINK, basis: 100 });
+  expect(styleOf(measured[1])?.[ROW_MEASURE_KEY]).toEqual({ shrink: LATER_SHRINK, later: true });
+});
+
 test("a row without an unsized aspect ratio keeps its children as authored", () => {
   const entries = [{ type: "box", style: { aspectRatio: 2, width: { dp: 40 } } }];
   expect(rowSequentialChildren(entries, shown)).toBe(entries);
@@ -220,6 +294,48 @@ test("a conditional maxWidth or weight cannot undo the row measure (styleWhen me
   expect(nodeCss(taker, context)).toMatchObject({ flex: "1 1 0", "min-width": "0" });
 });
 
+test("a row's definite content height is its dp height or maxHeight less vertical padding", () => {
+  expect(rowContentHeight({ height: { dp: 20 } })).toBe(20);
+  expect(
+    rowContentHeight({ height: { dp: 40 }, maxHeight: 30, padding: { top: 4, bottom: 6 } }),
+  ).toBe(20);
+  expect(rowContentHeight({ height: { dp: 4 }, padding: { top: 4, bottom: 6 } })).toBe(0);
+  expect(rowContentHeight({ height: "fill" })).toBe(Infinity);
+  // sizeIn applies before the height, so a larger minHeight wins over the authored height.
+  expect(rowContentHeight({ height: { dp: 20 }, minHeight: 100 })).toBe(100);
+  expect(rowContentHeight({ minHeight: 100 })).toBe(Infinity);
+  expect(rowContentHeight(undefined)).toBe(Infinity);
+});
+
+test("a container's content height is capped by the bound it inherits (#16675)", () => {
+  expect(rowContentHeight({}, 100)).toBe(100);
+  expect(rowContentHeight({ padding: { top: 8, bottom: 8 } }, 116)).toBe(100);
+  expect(rowContentHeight({ height: { dp: 200 } }, 100)).toBe(100);
+  expect(rowContentHeight({ height: { dp: 60 } }, 100)).toBe(60);
+  expect(contentHeightBound({ height: { dp: 116 }, padding: { top: 8, bottom: 8 } })).toBe(100);
+  expect(contentHeightBound({ maxHeight: 50 }, 80)).toBe(50);
+  expect(contentHeightBound({}, undefined)).toBeUndefined();
+  expect(contentHeightBound(undefined, 30)).toBe(30);
+});
+
+test("an inherited height bound caps a row's aspect ratio as its own height does (#16675)", () => {
+  const row = {
+    type: "row",
+    children: [
+      { type: "box", style: { aspectRatio: 1 } },
+      { type: "box", style: { width: { dp: 40 } } },
+    ],
+  };
+  const inherited = rowMeasured(row, "root", shown, 100).children as unknown[];
+  const own = rowMeasured({ ...row, style: { height: { dp: 100 } } }, "root", shown)
+    .children as unknown[];
+  expect(styleOf(inherited[0])?.[ROW_MEASURE_KEY]).toEqual({ shrink: CAPPED_SHRINK, basis: 100 });
+  expect(styleOf(inherited[1])?.[ROW_MEASURE_KEY]).toEqual(styleOf(own[1])?.[ROW_MEASURE_KEY]);
+  // Unbounded, the ratio takes the rest and zeroes its later sibling.
+  const free = rowMeasured(row, "root", shown).children as unknown[];
+  expect(styleOf(free[1])?.[ROW_MEASURE_KEY]).toEqual({ zero: true });
+});
+
 test("a row's definite height caps its aspect ratios, as the incoming max height does natively", () => {
   const prepare = (entry: unknown) => record(entry);
   const row = {
@@ -233,8 +349,73 @@ test("a row's definite height caps its aspect ratios, as the incoming max height
   const children = rowMeasured(row, "root", prepare).children as unknown[];
   expect(styleOf(children[0])?.[ROW_MEASURE_KEY]).toEqual({ shrink: CAPPED_SHRINK, basis: 20 });
   // An otherwise unsized ratio is capped by the row's height too, so it no longer takes the rest.
-  expect(styleOf(children[1])?.[ROW_MEASURE_KEY]).toEqual({ shrink: LATER_SHRINK, basis: 40 });
+  expect(styleOf(children[1])?.[ROW_MEASURE_KEY]).toEqual({
+    shrink: LATER_SHRINK,
+    later: true,
+    basis: 40,
+  });
   expect(isUnsizedAspectRatio({ type: "box", style: { aspectRatio: 2 } }, 20)).toBe(false);
+});
+
+test("a row in a horizontal scroll is not bounded to the scroll's width", () => {
+  const base = { mode: "light" as const, palette: new Map() };
+  const across = { type: "scroll", axis: "horizontal" };
+  const down = { type: "scroll", axis: "vertical" };
+  const inScroll = scrollChildStyle({ style: base }, across);
+  expect(inScroll).toMatchObject({ parentAxis: "row", unboundedWidth: true });
+  // A vertical scroll inside it keeps the unbounded width; one on its own does not add it.
+  expect(scrollChildStyle({ style: inScroll }, down)).toMatchObject({ unboundedWidth: true });
+  expect(scrollChildStyle({ style: base }, down)).toMatchObject({
+    parentAxis: "column",
+    unboundedWidth: false,
+  });
+  expect(nodeCss({ [ROW_BOUND_KEY]: true }, inScroll)).not.toHaveProperty("max-width");
+  expect(nodeCss({ maxWidth: 50, [ROW_BOUND_KEY]: true }, inScroll)["max-width"]).toBe("50px");
+});
+
+test("a nested bounded row that its parent row zeroes keeps no width", () => {
+  const context = { mode: "light" as const, palette: new Map(), parentAxis: "row" as const };
+  const nested = { [ROW_BOUND_KEY]: true, [ROW_MEASURE_KEY]: { zero: true } };
+  expect(nodeCss(nested, context)["max-width"]).toBe("0px");
+});
+
+test("a container that authors a dp width or maxWidth bounds its children's width again", () => {
+  const unbounded = { style: { mode: "light" as const, palette: new Map(), unboundedWidth: true } };
+  const childOf = (style: Raw) =>
+    containerChildStyle(unbounded, { type: "column", style }, "column");
+  // Modifier.width or widthIn restores a finite max width, as on Android.
+  expect(childOf({ width: { dp: 100 } })).toMatchObject({
+    parentAxis: "column",
+    unboundedWidth: false,
+  });
+  expect(childOf({ maxWidth: 100 }).unboundedWidth).toBe(false);
+  expect(nodeCss({ [ROW_BOUND_KEY]: true }, childOf({ width: { dp: 100 } }))["max-width"]).toBe(
+    "100%",
+  );
+  // A fill or wrap width under an infinite max stays unbounded, as do min and height bounds.
+  for (const style of [
+    {},
+    { width: "fill" },
+    { width: "wrap" },
+    { minWidth: 40 },
+    { maxHeight: 9 },
+  ]) {
+    expect(childOf(style).unboundedWidth).toBe(true);
+  }
+  // A bounded container's box, scroll or row children carry the reset down.
+  const bounded = childOf({ maxWidth: 100 });
+  expect(containerChildStyle({ style: bounded }, { type: "box" }, undefined).unboundedWidth).toBe(
+    false,
+  );
+  // A horizontal scroll inside the bounded container unbounds its own content again.
+  const across = { type: "scroll", axis: "horizontal", style: { width: { dp: 80 } } };
+  expect(scrollChildStyle({ style: bounded }, across).unboundedWidth).toBe(true);
+  expect(
+    scrollChildStyle(unbounded, { type: "scroll", style: { width: { dp: 80 } } }),
+  ).toMatchObject({
+    parentAxis: "column",
+    unboundedWidth: false,
+  });
 });
 
 test("a repeated row does not fill width, as its children are never measured (#16694)", () => {

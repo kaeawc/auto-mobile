@@ -540,6 +540,10 @@ export abstract class SessionManagerForwarders {
     return this.forwardersHost.admission.getReleasedSessionReason(sessionId);
   }
 
+  getReleasedSessionIdleTimeoutMs(sessionId: string): Promise<number | undefined> {
+    return this.forwardersHost.admission.getReleasedSessionIdleTimeoutMs(sessionId);
+  }
+
   getExpiredReleaseSnapshot(sessionId: string): Promise<SessionReleaseSnapshot | undefined> {
     return this.forwardersHost.admission.getExpiredReleaseSnapshot(sessionId);
   }

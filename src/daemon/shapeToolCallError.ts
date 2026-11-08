@@ -39,6 +39,7 @@ import {
   DeviceOutsideBoundSessionError,
   SessionOutsideBoundSessionError,
 } from "./deviceOutsideBoundSessionRefusal";
+import { ReadSessionNotBoundError } from "./ReadSessionNotBoundError";
 import { PlanExecutionInProgressError } from "./planExecutionInProgressRefusal";
 import { AmbiguousDeviceTargetError } from "./ambiguousDeviceTargetRefusal";
 import { SdkTooOldError } from "../models/SdkTooOldError";
@@ -182,6 +183,7 @@ function hasSelfDescribedRefusalPayload(
   | DeviceOutsideBrokerGrantError
   | DeviceOutsideBoundSessionError
   | SessionOutsideBoundSessionError
+  | ReadSessionNotBoundError
   | InputDeviceOwnedError
   | DeviceGestureRecordingStartUnheldError
   | OrphanRecorderActiveError
@@ -207,6 +209,7 @@ function hasSelfDescribedRefusalPayload(
     DeviceOutsideBrokerGrantError,
     DeviceOutsideBoundSessionError,
     SessionOutsideBoundSessionError,
+    ReadSessionNotBoundError,
     InputDeviceOwnedError,
     DeviceGestureRecordingStartUnheldError,
     OrphanRecorderActiveError,

@@ -82,6 +82,31 @@ describe("Highlight Tools Registration", () => {
     });
   });
 
+  test("a failed text highlight does not report a circled element (#17385)", async () => {
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: {
+        node: { text: "Target", bounds: { left: 0, top: 0, right: 100, bottom: 100 } },
+      },
+    };
+    registerHighlightTools({
+      generateHighlightId: () => "failed-highlight",
+      viewHierarchyClientFactory: () => ({
+        requestHierarchySync: async () => ({ hierarchy }),
+        convertToViewHierarchyResult: () => hierarchy,
+      }),
+      highlightClientFactory: () => ({
+        addHighlight: async () => ({ success: false, error: "Overlay unavailable" }),
+      }),
+    });
+    const tool = ToolRegistry.getTool("highlight")!;
+    const response = await tool.deviceAwareHandler!(
+      { deviceId: "test", platform: "android", name: "Test" } as BootedDevice,
+      tool.schema.parse({ platform: "android", text: "Target" }),
+    );
+    expect(toolIsError(response)).toBe(true);
+    expect(toolJson(response)).toEqual({ success: false, error: "Overlay unavailable" });
+  });
+
   test("registers highlight tool", () => {
     registerHighlightTools();
 
@@ -128,6 +153,10 @@ describe("Highlight Tools Registration", () => {
     expect(toolJson(response).success).toBe(true);
     expect(toolIsError(response)).toBe(false);
     expect(shapes[0]).toEqual({ type: "circle", bounds });
+    // #17385: the result names the element that was circled.
+    expect(toolJson(response).element).toEqual({
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+    });
   });
 
   test("Android text highlight chooses the same nested clickable ancestor as tap", async () => {
@@ -456,10 +485,19 @@ describe("Highlight Tools Registration", () => {
 
     expect(payload.success).toBe(true);
     // iOS selector path must attach source dims so the in-app SDK can map
-    // device-coordinate bounds into its own view space (issue #2682).
+    // device-coordinate bounds into its own view space (issue #2682), and the
+    // point scale so the simulator helper need not guess it (#17354).
     expect(addCalls[0]?.shape).toEqual({
       type: "circle",
-      bounds: { x: 12, y: 124, width: 366, height: 44, sourceWidth: 390, sourceHeight: 844 },
+      bounds: {
+        x: 12,
+        y: 124,
+        width: 366,
+        height: 44,
+        sourceWidth: 390,
+        sourceHeight: 844,
+        sourceScale: 1,
+      },
     });
   });
 
@@ -510,7 +548,15 @@ describe("Highlight Tools Registration", () => {
 
     expect(addCalls[0]?.shape).toEqual({
       type: "circle",
-      bounds: { x: 12, y: 124, width: 366, height: 44, sourceWidth: 390, sourceHeight: 844 },
+      bounds: {
+        x: 12,
+        y: 124,
+        width: 366,
+        height: 44,
+        sourceWidth: 390,
+        sourceHeight: 844,
+        sourceScale: 1,
+      },
     });
   });
 

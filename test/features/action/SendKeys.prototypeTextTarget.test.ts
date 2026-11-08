@@ -610,8 +610,9 @@ for (const mode of ["eventLast", "eventAll", "eventOnly"] as const) {
     });
     expect(result.success).toBe(false);
     expect(result.error).toBe(
-      'Android event delivery requires a focused editable field. For printable ASCII, mode: "imeKeyEvents" types without requiring a focused editable node.',
+      "No editable field has focus. Focus the target field first (tap it, or tapOn with focus), then retry sendKeys without a mode.",
     );
+    expect(result.errorCode).toBe("NO_FOCUSED_EDITABLE");
     expect(h.deliveries).toEqual([]);
   });
 }

@@ -136,6 +136,7 @@ struct PrototypeSession {
     private var platformCommands: [PrototypePlatformCommand] = []
     private var platformRateLimiter: PrototypePlatformRateLimiter
     private var platformLifecycleEvents: [PrototypeEvent] = []
+    private var viewCommands: [PrototypeViewCommand] = []
     private var timerCommands: [PrototypeTimerCommand] = []
     private var appeared: Set<String> = []
 
@@ -174,6 +175,11 @@ struct PrototypeSession {
         }
         appeared = Set(visibleAppearances().map(\.0))
         return events
+    }
+
+    mutating func takeViewCommands() -> [PrototypeViewCommand] {
+        defer { viewCommands = [] }
+        return viewCommands
     }
 
     mutating func takeTimerCommands() -> [PrototypeTimerCommand] {
@@ -243,6 +249,7 @@ struct PrototypeSession {
         specBytes: Int? = nil,
         restoredState: [String: JSONValue]? = nil
     ) {
+        viewCommands = []
         listEnds = [:]
         platformLifecycleEvents += cancelPlatformCalls()
         feedbackLog = PrototypeFeedbackLog()
@@ -529,6 +536,8 @@ struct PrototypeSession {
         for (index, action) in actions.enumerated() {
             guard isShown else { break }
             switch action.type {
+            case "hideKeyboard":
+                viewCommands.append(.hideKeyboard)
             case "emit":
                 events += runEmit(action)
             case "push", "pop", "popToRoot", "replace", "setStack":

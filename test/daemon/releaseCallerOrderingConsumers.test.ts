@@ -69,6 +69,7 @@ describe("daemon release pool consumers", () => {
       const manager: DerivedLabelSessionSource = {
         hasSession: () => false,
         getSession: () => ({ assignedDevice: "d1" }),
+        getTerminalReleaseSnapshot: () => undefined,
         takeDerivedLabelSessions: () => ["base:label"],
         onSessionRelease: (cb) => {
           callback = cb;
@@ -109,6 +110,7 @@ describe("daemon release pool consumers", () => {
       const manager: DerivedLabelSessionSource = {
         hasSession: () => failure === "session",
         getSession: () => ({ assignedDevice: "d1" }),
+        getTerminalReleaseSnapshot: () => undefined,
         takeDerivedLabelSessions: () => ["base:label"],
         onSessionRelease: (cb) => {
           callback = cb;

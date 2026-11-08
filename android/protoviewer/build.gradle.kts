@@ -30,7 +30,12 @@ android {
     versionCode = 1
   }
   buildTypes {
-    getByName("debug") { isPseudoLocalesEnabled = true }
+    getByName("debug") {
+      isPseudoLocalesEnabled = true
+      // Dev builds never share the store app ID (#14144). The host (protoViewerContract.ts) drives
+      // either ID, and McpInbox action names stay on the store namespace.
+      applicationIdSuffix = ".dev"
+    }
     // Shrink the Play artifact; the shared mapping archive and VerifyR8KeptClassesTask below guard
     // it.
     getByName("release") { isMinifyEnabled = minifyRelease.get() }

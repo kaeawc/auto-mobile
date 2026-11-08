@@ -7,6 +7,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
+import dev.jasonpearson.automobile.desktop.core.daemon.HierarchyStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.video.FakeVideoStreamSource
 import kotlinx.coroutines.CompletableDeferred
@@ -208,5 +209,43 @@ class LayoutFacetTest {
 
       runOnIdle { visible.value = false }
       waitUntil { video.connectedDeviceId == null }
+    }
+
+  @Test
+  fun `reports the pane device's foreground app from the inspector's hierarchy frames`() =
+    runComposeUiTest {
+      val fake = FakeObservationStream()
+      val reported = mutableListOf<Pair<String, String>>()
+      setContent {
+        MaterialTheme {
+          LayoutFacet(
+            dev.jasonpearson.automobile.desktop.core.workspace.LayoutFacetOptions(
+              column =
+                DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
+              observationStreamFactory = { fake },
+              videoSourceFactory = { FakeVideoStreamSource() },
+              onForegroundApp = { deviceId, packageName -> reported += deviceId to packageName },
+            ),
+          )
+        }
+      }
+      waitForIdle()
+
+      for ((deviceId, packageName) in
+        listOf("dev-1" to "com.example.first", "dev-2" to "com.example.other", "dev-1" to " ")) {
+        runOnIdle {
+          fake.emitHierarchy(
+            HierarchyStreamUpdate(
+              deviceId = deviceId,
+              timestamp = 1L,
+              data = null,
+              packageName = packageName,
+            ),
+          )
+        }
+        waitForIdle()
+      }
+
+      assertEquals(listOf("dev-1" to "com.example.first"), reported)
     }
 }

@@ -471,7 +471,7 @@ for path in "${changed_files[@]}"; do
   esac
 
   case "${path}" in
-    skills/**|.agents/skills/**|AGENTS.md|.claude-plugin/**)
+    skills/**|.agents/skills/**|AGENTS.md|.claude-plugin/**|plugins/**)
       add_check "codex-skills"
       add_check "claude-plugin"
       ;;
@@ -537,6 +537,9 @@ for path in "${changed_files[@]}"; do
       ;;
     scripts/manual-test/python/*|scripts/validate_manual_test_python.sh)
       add_check "manual-test-python"
+      ;;
+    sdk/python/*|scripts/validate_python_sdk.sh)
+      add_check "python-sdk"
       ;;
     scripts/github/uv.lock|scripts/github/pyproject.toml)
       add_check "github-python-lock"

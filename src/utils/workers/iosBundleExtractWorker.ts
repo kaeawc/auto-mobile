@@ -13,8 +13,10 @@
  *
  */
 import { parentPort, workerData } from "node:worker_threads";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { assertZipEntriesContained } from "./assertZipEntriesContained";
+import { extractedFileMode } from "./extractedFileMode";
 import AdmZip from "adm-zip";
 import { errorMessage } from "../describeUnknownError";
 
@@ -29,12 +31,27 @@ export interface IosBundleExtractWorkerMessage {
   stack?: string;
 }
 
+/**
+ * Re-apply each file's executable bit from the archive (#17216); adm-zip writes
+ * every file as 0o666, so the runner executables would otherwise not launch.
+ */
+function restoreEntryModes(zip: AdmZip, root: string): void {
+  for (const entry of zip.getEntries()) {
+    if (entry.isDirectory) {
+      continue;
+    }
+    fs.chmodSync(path.join(root, entry.entryName), extractedFileMode(entry.header.fileAttr));
+  }
+}
+
 function run(): void {
   const { bundlePath, destination } = workerData as IosBundleExtractWorkerData;
   try {
     const zip = new AdmZip(bundlePath);
     assertZipEntriesContained(zip, destination);
-    zip.extractAllTo(path.resolve(destination), true);
+    const root = path.resolve(destination);
+    zip.extractAllTo(root, true);
+    restoreEntryModes(zip, root);
     const message: IosBundleExtractWorkerMessage = { ok: true };
     parentPort?.postMessage(message);
   } catch (error) {

@@ -1,3 +1,30 @@
+import {
+  ABSOLUTE,
+  ALIGN_ITEMS,
+  ALIGN_SELF,
+  ARIA_CHECKED,
+  ARIA_LABEL,
+  BACKGROUND_COLOR,
+  BORDER_RADIUS,
+  CENTER,
+  COLUMN,
+  DATA_TESTID,
+  FLEX,
+  FLEX_BASIS,
+  FLEX_DIRECTION,
+  FONT_SIZE,
+  GRID_AREA,
+  JUSTIFY_SELF,
+  MIN_HEIGHT,
+  PADDING_BOTTOM,
+  PADDING_INLINE,
+  POINTER_EVENTS,
+  RELATIVE,
+  STRETCH,
+  TEXT_ALIGN,
+  WHITE_SPACE,
+} from "./webCss";
+import { roleCss, toggleMark } from "./webToggleMark";
 import { bindPrototypeDataText, resolvePrototypeDataPointer } from "../prototypeData";
 import {
   projectPrototypeDerivedItem,
@@ -17,33 +44,54 @@ import {
   defaultFillAxes,
   filling,
   isUnsizedSpacer,
+  lineMainAxis,
   spacerFilled,
   webCollectionRenderers,
   withPagerLocals,
   type WebAxis,
 } from "./webCollections";
 import { conditionHolds, decide, type ConditionScope } from "./webCondition";
+import { materialButtonRenderer } from "./webButton";
 import { webControlRenderers } from "./webControls";
+import { webIndicatorRenderers, withSwipeActions } from "./webIndicators";
 import { webMapRenderers } from "./webMap";
 import { webMediaRenderers } from "./webMedia";
 import { bindStillPlatformText } from "./webPlatformState";
+import { webModalLayers } from "./webModal";
 import { webRepeatLimit, webRepeatRows } from "./webRepeat";
+import { searchBarFillAxes, webSelectionRenderers } from "./webSelection";
 import { webSheetLayers } from "./webSheet";
+import { webSkins, type WebSkinId } from "./webSkin";
+import { iosCardChrome } from "./webSkinIos";
 import { webStackRenderers, type WebStackScreens } from "./webStack";
+import { withLaterMinStrut } from "./webLaterMin";
 import { el, type WebChild, type WebElement } from "./webNodes";
 import {
   boxLayoutCss,
+  containerChildStyle,
   cssColor,
+  fontPx,
   lineCss,
+  multilineCss,
   nodeCss,
+  scrollChildStyle,
   textCss,
   type WebStyleContext,
 } from "./webStyle";
 import { safeAreaCss, safeAreaEdges } from "./webInsets";
+import { webImageRenderer, type WebImageDraw } from "./webImages";
 import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
 import { textRuns } from "./webText";
-import { rowFillAxes, rowMeasured } from "./webRowAspect";
-import { repeatInstanceChildren, withChildHeights } from "./webIncomingHeight";
+import {
+  glyphSvg,
+  ICON_BOX,
+  ICON_PLACEHOLDER,
+  iconInitial,
+  prototypeIconVariant,
+  type PrototypeIconGlyphSource,
+} from "./webIconGlyphs";
+import { contentHeightBound, rowFillAxes, rowMeasured } from "./webRowAspect";
+import { repeatInstanceChildren, withColumnHeights } from "./webIncomingHeight";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
@@ -51,10 +99,19 @@ export interface UnsupportedWebNode {
   readonly id?: string;
   readonly path: string;
   /**
-   * `shaderFallback`: the node drew without its `style.shader`, as a device that cannot run the
-   * shader does.
+   * `assetNotInlined`: the host has no bytes for the asset; `assetOverBudget`: it has them, but the
+   * page's 2 MiB budget left no room for them. `shaderFallback`: the node drew without its
+   * `style.shader`, as a device that cannot run the shader does. `iconMissing`: an icon name with no
+   * glyph drew the placeholder.
    */
-  readonly reason: "unsupportedType" | "assetNotInlined" | "shaderFallback";
+  readonly reason:
+    | "unsupportedType"
+    | "assetNotInlined"
+    | "assetOverBudget"
+    | "shaderFallback"
+    | "iconMissing";
+  /** The asset an `image` node draws, once bound. */
+  readonly asset?: string;
 }
 
 /** Everything one render pass reads, plus where it records placeholders. */
@@ -70,8 +127,17 @@ export interface WebRenderScope {
   readonly instances: readonly Instance[];
   readonly inBox: boolean;
   readonly unsupported: UnsupportedWebNode[];
+  /** The platform skin components draw in; Android (Material 3) when absent. */
+  readonly skin?: WebSkinId;
+  /**
+   * Where icons find their glyphs; without one every icon draws the placeholder and none is
+   * reported, since no glyph set was asked for.
+   */
+  readonly glyphs?: PrototypeIconGlyphSource;
   /** The screen width in dp for the orientation, which an adaptive grid fits its columns to. */
   readonly screenWidth: number;
+  /** The screen height in dp for the orientation: the most a map that fills its parent can take. */
+  readonly screenHeight: number;
   /**
    * A pager's `page` and `pageCount`: text placeholders and every condition (`visibleWhen`,
    * `styleWhen`, `enabledWhen`, `errorWhen`) read them, as Android's local pager state does; a
@@ -82,12 +148,18 @@ export interface WebRenderScope {
   readonly screen?: string;
   /** Collects the outermost stack drawn, the one `screen` applies to; nested stacks draw start. */
   readonly stacks?: WebStackScreens[];
-  /** What the window draws above the whole tree (an open bottomSheet), in tree order. */
+  /** What the window draws above the whole tree (an open sheet, dialog or snackbar), in tree order. */
   readonly layers: WebElement[];
+  /** Encoded assets the page may inline, by asset id, to the CSS slot that would hold them. */
+  readonly imageSlots?: ReadonlyMap<string, number>;
+  /** Collects every image drawn with a bound asset, so the page can size and inline it. */
+  readonly imageDraws?: WebImageDraw[];
   /** Safe-area edges an ancestor already applied. */
   readonly consumedInsets?: readonly string[];
   /** Safe-area edges the node being rendered applies, consumed for its descendants. */
   readonly ownInsets?: readonly string[];
+  /** The content height bound in dp a row or box passes its children; a scroll passes none. */
+  readonly heightBound?: number;
 }
 
 export type NodeRenderer = (node: Raw, scope: WebRenderScope, path: string) => WebElement;
@@ -103,6 +175,7 @@ export interface WebRenderKit {
   readonly disabledState: typeof disabledState;
   readonly renderNode: typeof renderWebNode;
   readonly safeAreaEdges: typeof safeAreaEdges;
+  readonly fieldErrored: typeof fieldErrored;
 }
 
 /** `{key}` reads state; `{derived:name}` reads a top-level derived value, as on the devices. */
@@ -177,24 +250,24 @@ function shieldedInstance(instance: Instance): Instance {
 function base(node: Raw, scope: WebRenderScope, extra: Record<string, string> = {}) {
   const attrs: Record<string, string> = { "data-node": String(node.type) };
   if (typeof node.testTag === "string") {
-    attrs["data-testid"] = node.testTag;
+    attrs[DATA_TESTID] = node.testTag;
   }
   // As the native mapper resolves it: semantics.label, then the legacy contentDescription.
   const label = record(node.semantics)?.label ?? node.contentDescription;
   if (typeof label === "string") {
-    attrs["aria-label"] = bound(label, scope);
+    attrs[ARIA_LABEL] = bound(label, scope);
   }
   // Component defaults first, so the spec's own style wins, as on both devices.
   const style = {
     ...extra,
     ...nodeCss(node.style, scope.style),
     ...textCss(record(node.style), scope.style),
-    ...(scope.inBox ? { "grid-area": "cell" } : {}),
+    ...(scope.inBox ? { [GRID_AREA]: "cell" } : {}),
   };
   // Per-corner radii are longhands; a component's default shorthand would sort after some of them
   // and reset those corners, so it goes when the spec sets its own corners.
   if ("border-start-start-radius" in style) {
-    delete (style as Record<string, string>)["border-radius"];
+    delete (style as Record<string, string>)[BORDER_RADIUS];
   }
   return { attrs, style: safeAreaCss(node, scope, style) };
 }
@@ -208,6 +281,8 @@ function child(scope: WebRenderScope, patch: Partial<WebRenderScope>): WebRender
     style: { ...scope.style, ...patch.style },
     consumedInsets,
     ownInsets: [],
+    // Only a row or box (or a repeat row of one) passes its height bound on; a scroll has none.
+    heightBound: patch.heightBound,
   };
 }
 
@@ -221,39 +296,67 @@ export type WebCellDecorator = (
   authored: Raw,
 ) => WebElement | undefined;
 
-export function children(
+/**
+ * The children a container draws, each in its own scope and path: a repeat's once per row. A
+ * repeat column's instances are siblings, so with its content height `content` each instance's
+ * children carry their own share of it (see repeatInstanceChildren).
+ */
+export function childEntries(
   node: Raw,
   scope: WebRenderScope,
   path: string,
-  cell?: WebCellDecorator,
-): WebChild[] {
-  const list = Array.isArray(node.children) ? node.children : [];
+  content?: number,
+): WebChildEntry[] {
+  const scopes = rowScopes(node, scope);
+  const lists = repeatInstanceChildren(node, path, scopes.map(prepareIn), content);
+  return scopes.flatMap((itemScope, index) =>
+    lists[index]!.map((entry, at) => ({
+      node: entry,
+      scope: itemScope,
+      path: `${path}.children[${at}]`,
+    })),
+  );
+}
+
+/** The scope each copy of a node's children renders in: one per repeat row, else the node's own. */
+function rowScopes(node: Raw, scope: WebRenderScope): WebRenderScope[] {
   const repeat = record(node.repeat);
   if (!repeat) {
-    return list.flatMap((entry, index) =>
-      renderOrSkip(entry, scope, `${path}.children[${index}]`, cell),
-    );
+    return [scope];
   }
-  const rows = webRepeatRows(repeat, scope.data, webRepeatLimit(node));
   const alias = typeof repeat.as === "string" ? repeat.as : "item";
   const derive = record(repeat.derive) as
     | Parameters<typeof projectPrototypeDerivedItem>[0]
     | undefined;
-  const scopes = rows.map((item, index) => {
+  return webRepeatRows(repeat, scope.data, webRepeatLimit(node)).map((item, index) => {
     const values = record(item) ?? {};
     const instance: Instance = {
       binding: { alias, index: true },
       values: derive ? projectPrototypeDerivedItem(derive, values, scope.format) : values,
       index,
     };
-    return child(scope, { instances: [...scope.instances, instance] });
+    return child(scope, {
+      instances: [...scope.instances, instance],
+      heightBound: scope.heightBound,
+    });
   });
-  // A repeat column's instances are siblings, so each gets its own share of the column's height.
-  const lists = repeatInstanceChildren(node, path, scopes.map(prepareIn));
-  return scopes.flatMap((itemScope, index) =>
-    lists[index]!.flatMap((entry, at) =>
-      renderOrSkip(entry, itemScope, `${path}.children[${at}]`, cell),
-    ),
+}
+
+export interface WebChildEntry {
+  readonly node: unknown;
+  readonly scope: WebRenderScope;
+  readonly path: string;
+}
+
+export function children(
+  node: Raw,
+  scope: WebRenderScope,
+  path: string,
+  cell?: WebCellDecorator,
+  content?: number,
+): WebChild[] {
+  return childEntries(node, scope, path, content).flatMap((entry) =>
+    renderOrSkip(entry.node, entry.scope, entry.path, cell),
   );
 }
 
@@ -270,8 +373,8 @@ function renderOrSkip(
 
 /**
  * The axes a child will fill in its line: both for a visible unsized spacer, else those its type
- * fills by default (a slider's width, say). Its repeat placeholders bind, its visibleWhen must keep
- * it, and its style includes matching styleWhen entries.
+ * fills by default (a slider's width, or an expanded search bar's width and height). Its repeat
+ * placeholders bind, its visibleWhen must keep it, and its style includes matching styleWhen entries.
  */
 function childFillAxes(entry: unknown, scope: WebRenderScope, path: string): WebAxis[] {
   const prepared = preparedNode(entry, scope, path);
@@ -287,56 +390,96 @@ function childFillAxes(entry: unknown, scope: WebRenderScope, path: string): Web
   const authored = (["width", "height"] as const).filter((axis) => style[axis] === "fill");
   // A nested line or card grows around its own filling child, so its parent grows too.
   const inferred = GROWING_CONTAINERS.has(String(styled.type))
-    ? lineFillAxes(heightsIn(styled, local, path), local, path).filter(
+    ? lineFillAxes(styled, local, path, lineMainAxis(styled)).filter(
         (axis) => style[axis] === undefined,
       )
-    : defaultFillAxes(styled);
+    : styled.type === "searchBar"
+      ? searchBarFillAxes(styled, local, { bound })
+      : defaultFillAxes(styled);
   return [...authored, ...inferred];
 }
+
+/** Containers that pass their content height bound on to their children. */
+const BOUNDING_CONTAINERS: ReadonlySet<string> = new Set(["row", "column", "box"]);
 
 /** Containers that grow on an axis when a child fills it, as a Compose parent does. */
 const GROWING_CONTAINERS: ReadonlySet<string> = new Set(["row", "column", "box", "card"]);
 
+/** A visible child with a positive weight, which takes a share of its line's main axis. */
+function isWeighted(entry: unknown, scope: WebRenderScope, path: string): boolean {
+  const weight = record(preparedNode(entry, scope, path)?.styled.style)?.weight;
+  return typeof weight === "number" && weight > 0;
+}
+
 /**
  * The axes on which a container grows because a child fills them; a repeat with no rows renders
- * no children.
+ * no children. A line with a weighted child also grows on its main axis, as a bounded Compose
+ * Row or Column takes its max size there and shares what is left among its weighted children.
  */
-function lineFillAxes(raw: Raw, scope: WebRenderScope, path: string): WebAxis[] {
-  const repeat = record(raw.repeat);
-  if (
-    !Array.isArray(raw.children) ||
-    (repeat && webRepeatRows(repeat, scope.data, webRepeatLimit(raw)).length === 0)
-  ) {
+function lineFillAxes(
+  raw: Raw,
+  scope: WebRenderScope,
+  path: string,
+  mainAxis?: WebAxis,
+): WebAxis[] {
+  // Each repeat row binds its own placeholders, as `children` renders it (#16803).
+  const rows = rowScopes(raw, scope);
+  const sized = columnSized(raw, scope, path);
+  if (!Array.isArray(sized.children) || rows.length === 0) {
     return [];
   }
-  const own = rowFillAxes(raw, path, prepareIn(scope));
-  const axes = new Set([...own, ...raw.children.flatMap((e) => childFillAxes(e, scope, path))]);
+  const list: unknown[] = sized.children;
+  const own = rowFillAxes(raw, path, prepareIn(scope), scope.heightBound);
+  // Children see the bound this container passes them, as rendering gives it (see `line`, `box`).
+  const bound = BOUNDING_CONTAINERS.has(String(raw.type))
+    ? contentHeightBound(raw.style, scope.heightBound)
+    : undefined;
+  const slots = rows.flatMap((row) =>
+    list.map((e) => [e, { ...row, heightBound: bound }] as const),
+  );
+  const axes = new Set([...own, ...slots.flatMap(([e, s]) => childFillAxes(e, s, path))]);
+  if (mainAxis && slots.some(([e, s]) => isWeighted(e, s, path))) {
+    axes.add(mainAxis);
+  }
   return (["width", "height"] as const).filter((axis) => axes.has(axis));
 }
 
 const prepareIn = (s: WebRenderScope) => (e: unknown, at: string) => preparedNode(e, s, at)?.styled;
-const heightsIn = (n: Raw, s: WebRenderScope, at: string) => withChildHeights(n, at, prepareIn(s));
+
+/** A column or card whose children carry the height share it hands each (see withColumnHeights). */
+const columnSized = (raw: Raw, scope: WebRenderScope, path: string) =>
+  withColumnHeights(raw, path, prepareIn(scope), contentHeightBound(raw.style, scope.heightBound));
 
 const line =
   (axis: "row" | "column"): NodeRenderer =>
   (raw, scope, path) => {
     // A wrap-sized line around a filling child grows to its parent on that axis, as a Compose
     // parent does around a fillMax child; otherwise it would shrink to nothing.
-    const sized = heightsIn(raw, scope, path);
-    const node = filling(sized, lineFillAxes(sized, scope, path));
-    const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: axis } });
-    const rowed = rowMeasured(node, path, prepareIn(inner));
+    const sized = columnSized(raw, scope, path);
+    const node = filling(
+      sized,
+      lineFillAxes(sized, scope, path, axis === "row" ? "width" : "height"),
+    );
+    const inner = child(scope, {
+      inBox: false,
+      style: containerChildStyle(scope, node, axis),
+      heightBound: contentHeightBound(node.style, scope.heightBound),
+    });
+    const rowed = rowMeasured(node, path, prepareIn(inner), scope.heightBound);
     const { attrs, style } = base(rowed, scope, lineCss(axis, rowed.style));
-    return el("div", { attrs, style }, children(rowed, inner, path));
+    // The inner scope's bound is this line's content height, which a repeat column shares out.
+    return el("div", { attrs, style }, children(rowed, inner, path, undefined, inner.heightBound));
   };
 
 const box: NodeRenderer = (raw, scope, path) => {
-  // A wrap-sized box grows around a filling child, as a Compose Box does; each child carries the
-  // height the box hands it.
-  const sized = heightsIn(raw, scope, path);
-  const node = filling(sized, lineFillAxes(sized, scope, path));
+  // A wrap-sized box grows around a filling child, as a Compose Box does.
+  const node = filling(raw, lineFillAxes(raw, scope, path));
   const { attrs, style } = base(node, scope, boxLayoutCss(node.style));
-  const inner = child(scope, { inBox: true, style: { ...scope.style, parentAxis: undefined } });
+  const inner = child(scope, {
+    inBox: true,
+    style: containerChildStyle(scope, node, undefined),
+    heightBound: contentHeightBound(node.style, scope.heightBound),
+  });
   return el("div", { attrs, style }, children(node, inner, path));
 };
 
@@ -351,7 +494,7 @@ const text: NodeRenderer = (node, scope) => {
           overflow: "hidden",
         }
       : {};
-  const { attrs, style } = base(node, scope, { ...clamp, "white-space": "pre-wrap" });
+  const { attrs, style } = base(node, scope, { ...clamp, [WHITE_SPACE]: "pre-wrap" });
   return el(
     "span",
     { attrs, style },
@@ -363,18 +506,15 @@ const scroll: NodeRenderer = (node, scope, path) => {
   const horizontal = node.axis === "horizontal";
   const fade = fadeEdgesCss(node, scope.style);
   const { attrs, style } = base(node, scope, {
-    display: "flex",
+    display: FLEX,
     // A reverse scroll starts at its end, as reverseScrolling does; its one child keeps its order.
-    "flex-direction": `${horizontal ? "row" : "column"}${node.reverse === true ? "-reverse" : ""}`,
+    [FLEX_DIRECTION]: `${horizontal ? "row" : "column"}${node.reverse === true ? "-reverse" : ""}`,
     // Like the native start-aligned Box, wrap-sized content keeps its own cross-axis size.
-    "align-items": "flex-start",
+    [ALIGN_ITEMS]: "flex-start",
     [horizontal ? "overflow-x" : "overflow-y"]: "auto",
     ...fade.style,
   });
-  const inner = child(scope, {
-    inBox: false,
-    style: { ...scope.style, parentAxis: horizontal ? "row" : "column" },
-  });
+  const inner = child(scope, { inBox: false, style: scrollChildStyle(scope, node) });
   const scrollAttrs = { ...attrs, ...fade.attrs };
   return el("div", { attrs: scrollAttrs, style }, renderOrSkip(node.child, inner, `${path}.child`));
 };
@@ -394,82 +534,32 @@ const divider: NodeRenderer = (node, scope) => {
       node,
       scope,
       vertical
-        ? { width: "1px", "align-self": "stretch", "background-color": color }
+        ? { width: "1px", [ALIGN_SELF]: STRETCH, [BACKGROUND_COLOR]: color }
         : // Inside a box grid the line axis is horizontal, so it stretches there too.
           {
             height: "1px",
-            "align-self": "stretch",
-            "justify-self": "stretch",
-            "background-color": color,
+            [ALIGN_SELF]: STRETCH,
+            [JUSTIFY_SELF]: STRETCH,
+            [BACKGROUND_COLOR]: color,
           },
     ),
   );
 };
 
-/** The first letter of an icon's name, so a placeholder reads as that icon; none without a name. */
-function iconInitial(name: unknown): string {
-  const letter = typeof name === "string" ? /[a-z0-9]/i.exec(name)?.[0] : undefined;
-  return letter ? letter.toUpperCase() : "";
-}
-
-const icon: NodeRenderer = (node, scope) => {
-  // The Material glyph set is not inlined, so an icon draws as a tinted ring around its name's
-  // initial, titled with the full name.
-  const { attrs, style } = base(node, scope, {
-    display: "inline-flex",
-    "align-items": "center",
-    "justify-content": "center",
-    width: "24px",
-    height: "24px",
-    border: "2px solid currentColor",
-    "border-radius": "6px",
-    "font-size": "11px",
-    "font-weight": "700",
-    "line-height": "1",
-    "flex-shrink": "0",
-  });
-  return el("span", { attrs: { ...attrs, title: String(node.name ?? ""), role: "img" }, style }, [
-    iconInitial(node.name),
+const icon: NodeRenderer = (node, scope, path) => {
+  const name = typeof node.name === "string" ? node.name : undefined;
+  const glyph = name ? scope.glyphs?.glyph(name, prototypeIconVariant(node.variant)) : undefined;
+  if (!glyph && scope.glyphs) {
+    const id = typeof node.id === "string" ? { id: node.id } : {};
+    scope.unsupported.push({ type: "icon", ...id, path, reason: "iconMissing" });
+  }
+  const { attrs, style } = base(node, scope, glyph ? ICON_BOX : ICON_PLACEHOLDER);
+  return el("span", { attrs: { ...attrs, title: name ?? "", role: "img" }, style }, [
+    glyph ? glyphSvg(glyph) : iconInitial(node.name),
   ]);
 };
 
-const image: NodeRenderer = (node, scope, path) => {
-  scope.unsupported.push({
-    type: "image",
-    ...(typeof node.id === "string" ? { id: node.id } : {}),
-    path,
-    reason: "assetNotInlined",
-  });
-  const { attrs, style } = base(node, scope, {
-    "background-color": cssColor("surfaceVariant", scope.style) ?? "#e7e0ec",
-    "min-height": "48px",
-    "min-width": "48px",
-  });
-  return el("div", { attrs: { ...attrs, role: "img" }, style });
-};
-
-function roleCss(
-  scope: WebRenderScope,
-  background: string,
-  foreground: string,
-): Record<string, string> {
-  const css: Record<string, string> = {};
-  const bg = cssColor(background, scope.style);
-  const fg = cssColor(foreground, scope.style);
-  if (bg) {
-    css["background-color"] = bg;
-  }
-  if (fg) {
-    css.color = fg;
-  }
-  return css;
-}
-
-const BUTTON_ROLES: Readonly<Record<string, [string, string]>> = {
-  filled: ["primary", "onPrimary"],
-  tonal: ["secondaryContainer", "onSecondaryContainer"],
-  elevated: ["surfaceContainerLow", "primary"],
-};
+const image = webImageRenderer({ base, bound });
 
 /**
  * A control whose enabledWhen is decidably false draws disabled (Material's 0.38 opacity) and
@@ -486,33 +576,6 @@ function disabledState(
     : { css: { opacity: "0.38" }, attrs: { "aria-disabled": "true" } };
 }
 
-const button: NodeRenderer = (node, scope) => {
-  const disabled = disabledState(node, scope);
-  const variant = typeof node.variant === "string" ? node.variant : "filled";
-  const roles = BUTTON_ROLES[variant];
-  const outline: Record<string, string> =
-    variant === "outlined"
-      ? { border: `1px solid ${cssColor("outline", scope.style) ?? "currentColor"}` }
-      : {};
-  const { attrs, style } = base(node, scope, {
-    display: "inline-flex",
-    "align-items": "center",
-    "justify-content": "center",
-    "min-height": "40px",
-    padding: "0 24px",
-    "border-radius": "20px",
-    "font-weight": "500",
-    ...(roles ? roleCss(scope, roles[0], roles[1]) : roleCss(scope, "transparent", "primary")),
-    gap: "8px",
-    ...outline,
-    ...disabled.css,
-  });
-  return el("div", { attrs: { ...attrs, role: "button", ...disabled.attrs }, style }, [
-    ...namedIcon(node.icon, scope),
-    bound(node.label, scope),
-  ]);
-};
-
 /** App-bar navigation and action slots draw as icon placeholders labelled with their action. */
 function appBarIcons(slots: readonly unknown[], scope: WebRenderScope, path: string): WebElement[] {
   return slots.flatMap((slot) => {
@@ -523,7 +586,7 @@ function appBarIcons(slots: readonly unknown[], scope: WebRenderScope, path: str
     const glyph = icon({ type: "icon", name: action.icon }, scope, path);
     const label = typeof action.label === "string" ? bound(action.label, scope) : action.icon;
     return [
-      el("span", { attrs: { role: "button", "aria-label": label }, style: { padding: "12px" } }, [
+      el("span", { attrs: { role: "button", [ARIA_LABEL]: label }, style: { padding: "12px" } }, [
         glyph,
       ]),
     ];
@@ -547,15 +610,15 @@ const APP_BAR_VARIANTS: Readonly<Record<string, { height: number; title: number 
  */
 function appBarTitleStyle(variant: string, expanded: boolean): Record<string, string> {
   if (expanded) {
-    return { order: "1", "flex-basis": "100%", "padding-bottom": "16px" };
+    return { order: "1", [FLEX_BASIS]: "100%", [PADDING_BOTTOM]: "16px" };
   }
   return variant === "centerAligned"
     ? {
-        position: "absolute",
+        position: ABSOLUTE,
         left: "0",
         right: "0",
-        "text-align": "center",
-        "pointer-events": "none",
+        [TEXT_ALIGN]: CENTER,
+        [POINTER_EVENTS]: "none",
       }
     : { flex: "1 1 auto" };
 }
@@ -565,17 +628,17 @@ const topAppBar: NodeRenderer = (node, scope, path) => {
   const size = APP_BAR_VARIANTS[variant] ?? APP_BAR_VARIANTS.small!;
   const expanded = variant === "medium" || variant === "large";
   const { attrs, style } = base(node, scope, {
-    display: "flex",
+    display: FLEX,
     "flex-wrap": expanded ? "wrap" : "nowrap",
-    "align-items": "center",
+    [ALIGN_ITEMS]: CENTER,
     "align-content": "space-between",
     // Like the native bar, it takes no window insets of its own: status-bar clearance comes only
     // from an authored safeAreaPadding.
-    "min-height": `${size.height}px`,
-    "padding-inline": "16px",
-    "font-size": `${size.title}px`,
-    "align-self": "stretch",
-    position: "relative",
+    [MIN_HEIGHT]: `${size.height}px`,
+    [PADDING_INLINE]: "16px",
+    [FONT_SIZE]: fontPx(size.title, scope.style),
+    [ALIGN_SELF]: STRETCH,
+    position: RELATIVE,
     ...roleCss(scope, "surface", "onSurface"),
   });
   const actions = Array.isArray(node.actions) ? node.actions : [];
@@ -607,22 +670,6 @@ function fieldValue(node: Raw, scope: WebRenderScope): { shown: string; empty: b
   return { shown: secure ? "•".repeat([...value].length) : value, empty: false };
 }
 
-/** A multiline field keeps its newlines and its authored minLines and maxLines (24px lines). */
-function lineBounds(node: Raw): Record<string, string> {
-  if (node.multiline !== true) {
-    return {};
-  }
-  const css: Record<string, string> = { "white-space": "pre-wrap", "line-height": "24px" };
-  if (typeof node.minLines === "number") {
-    css["min-height"] = `${node.minLines * 24}px`;
-  }
-  if (typeof node.maxLines === "number") {
-    css["max-height"] = `${node.maxLines * 24}px`;
-    css.overflow = "hidden";
-  }
-  return css;
-}
-
 /**
  * A Material field's label sits inside an empty field with no placeholder (fieldValue draws it
  * there); once the field holds a value or shows a placeholder, the label floats above it.
@@ -634,7 +681,10 @@ function floatingLabel(node: Raw, empty: boolean, scope: WebRenderScope): WebEle
   return [
     el(
       "span",
-      { attrs: { "data-slot": "label" }, style: { "font-size": "12px", opacity: "0.8" } },
+      {
+        attrs: { "data-slot": "label" },
+        style: { [FONT_SIZE]: fontPx(12, scope.style), opacity: "0.8" },
+      },
       [bound(node.label, scope)],
     ),
   ];
@@ -676,22 +726,30 @@ function fieldCaption(node: Raw, error: boolean, scope: WebRenderScope): WebElem
       "span",
       {
         attrs: error ? { role: "alert" } : {},
-        style: { "font-size": "12px", padding: "0 16px", ...(color ? { color } : {}) },
+        style: {
+          [FONT_SIZE]: fontPx(12, scope.style),
+          padding: "0 16px",
+          ...(color ? { color } : {}),
+        },
       },
       [bound(caption, scope)],
     ),
   ];
 }
 
+/** Whether a field's `errorWhen` decidably holds, which shows its error as on both devices. */
+function fieldErrored(node: Raw, scope: WebRenderScope): boolean {
+  return node.errorWhen !== undefined && decide(node.errorWhen, presentation(scope)) === true;
+}
+
 const textField: NodeRenderer = (node, scope, path) => {
   const { shown, empty } = fieldValue(node, scope);
-  const error =
-    node.errorWhen !== undefined && decide(node.errorWhen, presentation(scope)) === true;
+  const error = fieldErrored(node, scope);
   const disabled = disabledState(node, scope);
   const { attrs, style } = base(node, scope, {
-    display: "flex",
-    "align-items": "center",
-    "min-height": "56px",
+    display: FLEX,
+    [ALIGN_ITEMS]: CENTER,
+    [MIN_HEIGHT]: "56px",
     padding: "0 16px",
     gap: "12px",
     ...fieldChrome(node, error, scope),
@@ -703,9 +761,9 @@ const textField: NodeRenderer = (node, scope, path) => {
   const [outer, inner] = caption.length === 0 ? [{}, style] : splitParentFacing(style);
   const box = el("div", { attrs: { ...attrs, role: "textbox", ...disabled.attrs }, style: inner }, [
     ...namedIcon(node.leadingIcon, scope),
-    el("span", { style: { display: "flex", "flex-direction": "column", flex: "1 1 auto" } }, [
+    el("span", { style: { display: FLEX, [FLEX_DIRECTION]: COLUMN, flex: "1 1 auto" } }, [
       ...floatingLabel(node, empty, scope),
-      el("span", { style: lineBounds(node) }, [shown]),
+      el("span", { style: multilineCss(node, scope.style) }, [shown]),
     ]),
     // The trailing slot is an {icon, label} action, like an app-bar action.
     ...appBarIcons([node.trailingIcon], scope, path),
@@ -713,7 +771,7 @@ const textField: NodeRenderer = (node, scope, path) => {
   const field = caption.length === 0 ? box : withOverContentLayers(box, node.style, scope.style);
   return caption.length === 0
     ? field
-    : el("div", { style: { ...outer, display: "flex", "flex-direction": "column", gap: "4px" } }, [
+    : el("div", { style: { ...outer, display: FLEX, [FLEX_DIRECTION]: COLUMN, gap: "4px" } }, [
         field,
         ...caption,
       ]);
@@ -726,67 +784,15 @@ const textField: NodeRenderer = (node, scope, path) => {
 function fieldChrome(node: Raw, error: boolean, scope: WebRenderScope): Record<string, string> {
   if (node.variant === "outlined") {
     const outline = cssColor(error ? "error" : "outline", scope.style) ?? "currentColor";
-    return { "border-radius": "4px", border: `1px solid ${outline}` };
+    return { [BORDER_RADIUS]: "4px", border: `1px solid ${outline}` };
   }
   const indicator = cssColor(error ? "error" : "onSurfaceVariant", scope.style) ?? "currentColor";
   const container = cssColor("surfaceContainerHighest", scope.style);
   return {
-    "border-radius": "4px 4px 0 0",
+    [BORDER_RADIUS]: "4px 4px 0 0",
     "border-bottom": `1px solid ${indicator}`,
-    ...(container ? { "background-color": container } : {}),
+    ...(container ? { [BACKGROUND_COLOR]: container } : {}),
   };
-}
-
-/**
- * A Material 3 switch: a 52x32 track with a thumb at the end when on (24 px, onPrimary on primary)
- * and at the start when off (16 px, outline on surfaceContainerHighest inside an outline border).
- */
-function switchMark(on: boolean, scope: WebRenderScope): WebElement {
-  const outline = cssColor("outline", scope.style) ?? "currentColor";
-  const thumb = el("span", {
-    attrs: { "data-part": "thumb" },
-    style: {
-      width: on ? "24px" : "16px",
-      height: on ? "24px" : "16px",
-      "border-radius": "50%",
-      "background-color": on ? (cssColor("onPrimary", scope.style) ?? "#fff") : outline,
-      ...(on ? { "margin-inline-start": "auto" } : {}),
-    },
-  });
-  return el(
-    "span",
-    {
-      style: {
-        display: "flex",
-        "align-items": "center",
-        "box-sizing": "border-box",
-        width: "52px",
-        height: "32px",
-        padding: on ? "0 4px" : "0 6px",
-        "border-radius": "16px",
-        "flex-shrink": "0",
-        border: `2px solid ${on ? "transparent" : outline}`,
-        ...roleCss(scope, on ? "primary" : "surfaceContainerHighest", "onPrimary"),
-      },
-    },
-    [thumb],
-  );
-}
-
-/** A switch track or checkbox box, drawn from whether its state is on. */
-function toggleMark(role: "switch" | "checkbox", on: boolean, scope: WebRenderScope): WebElement {
-  return role === "switch"
-    ? switchMark(on, scope)
-    : el("span", {
-        style: {
-          width: "18px",
-          height: "18px",
-          "border-radius": "2px",
-          "flex-shrink": "0",
-          border: `2px solid ${cssColor(on ? "primary" : "onSurfaceVariant", scope.style) ?? "currentColor"}`,
-          ...(on ? roleCss(scope, "primary", "onPrimary") : {}),
-        },
-      });
 }
 
 /** Whether a toggle's state key, with repeat placeholders bound first, holds `true`. */
@@ -801,13 +807,13 @@ const toggle =
     const on = isOn(node.stateKey, scope);
     const disabled = disabledState(node, scope);
     const { attrs, style } = base(node, scope, {
-      display: "flex",
-      "align-items": "center",
+      display: FLEX,
+      [ALIGN_ITEMS]: CENTER,
       gap: "12px",
-      "min-height": "48px",
+      [MIN_HEIGHT]: "48px",
       ...disabled.css,
     });
-    const semantics = { ...attrs, role, "aria-checked": String(on), ...disabled.attrs };
+    const semantics = { ...attrs, role, [ARIA_CHECKED]: String(on), ...disabled.attrs };
     const label = typeof node.label === "string" ? [bound(node.label, scope)] : [];
     const mark = toggleMark(role, on, scope);
     // As on both devices, a switch's label leads its track and a checkbox's box leads its label.
@@ -819,21 +825,26 @@ const toggle =
   };
 
 const card: NodeRenderer = (raw, scope, path) => {
-  // A card hugs its content, but grows like a line around a child that fills.
-  const node = filling(raw, lineFillAxes(raw, scope, path));
+  // A card hugs its content, but grows like a line around a child that fills; each child carries
+  // the height the card's column hands it.
+  const sized = columnSized(raw, scope, path);
+  const node = filling(sized, lineFillAxes(sized, scope, path));
   const { attrs, style } = base(node, scope, {
-    display: "flex",
-    "flex-direction": "column",
+    display: FLEX,
+    [FLEX_DIRECTION]: COLUMN,
     // Material's ColumnScope keeps wrap-sized content at its own width.
-    "align-items": "flex-start",
-    "border-radius": "12px",
-    ...roleCss(
-      scope,
-      node.variant === "outlined" ? "surface" : "surfaceContainerHighest",
-      "onSurface",
-    ),
+    [ALIGN_ITEMS]: "flex-start",
+    [BORDER_RADIUS]: "12px",
+    // The container is a skin metric; the layout is shared.
+    ...(scope.skin === "ios"
+      ? iosCardChrome(node.variant, scope)
+      : roleCss(
+          scope,
+          node.variant === "outlined" ? "surface" : "surfaceContainerHighest",
+          "onSurface",
+        )),
   });
-  const inner = child(scope, { inBox: false, style: { ...scope.style, parentAxis: "column" } });
+  const inner = child(scope, { inBox: false, style: containerChildStyle(scope, node, "column") });
   return el("div", { attrs, style }, children(node, inner, path));
 };
 
@@ -856,8 +867,8 @@ function trailing(
         "span",
         {
           // A disabled list item disables its trailing control too.
-          attrs: { role: entry.type, "aria-checked": String(on), ...disabledAttrs },
-          style: { display: "flex" },
+          attrs: { role: entry.type, [ARIA_CHECKED]: String(on), ...disabledAttrs },
+          style: { display: FLEX },
         },
         [toggleMark(entry.type, on, scope)],
       ),
@@ -872,26 +883,31 @@ function trailing(
 const listItem: NodeRenderer = (node, scope) => {
   const disabled = disabledState(node, scope);
   const { attrs, style } = base(node, scope, {
-    display: "flex",
-    "align-items": "center",
+    display: FLEX,
+    [ALIGN_ITEMS]: CENTER,
     gap: "16px",
-    "min-height": "56px",
+    [MIN_HEIGHT]: "56px",
     padding: "8px 16px",
-    "align-self": "stretch",
+    [ALIGN_SELF]: STRETCH,
     ...disabled.css,
   });
   const supporting =
     node.supporting === undefined
       ? []
       : [
-          el("span", { style: { "font-size": "14px", opacity: "0.7" } }, [
+          el("span", { style: { [FONT_SIZE]: fontPx(14, scope.style), opacity: "0.7" } }, [
             bound(node.supporting, scope),
           ]),
         ];
   const texts = el(
     "div",
-    { style: { display: "flex", "flex-direction": "column", flex: "1 1 auto" } },
-    [el("span", { style: { "font-size": "16px" } }, [bound(node.headline, scope)]), ...supporting],
+    { style: { display: FLEX, [FLEX_DIRECTION]: COLUMN, flex: "1 1 auto" } },
+    [
+      el("span", { style: { [FONT_SIZE]: fontPx(16, scope.style) } }, [
+        bound(node.headline, scope),
+      ]),
+      ...supporting,
+    ],
   );
   return el("div", { attrs: { ...attrs, role: "listitem", ...disabled.attrs }, style }, [
     ...namedIcon(node.leadingIcon, scope),
@@ -910,7 +926,10 @@ const KIT: WebRenderKit = {
   disabledState,
   renderNode: renderWebNode,
   safeAreaEdges,
+  fieldErrored,
 };
+
+const materialButton = materialButtonRenderer(KIT);
 
 export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   box,
@@ -922,21 +941,30 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   divider,
   icon,
   image,
-  button,
   topAppBar,
   textField,
   switch: toggle("switch"),
   checkbox: toggle("checkbox"),
   card,
   listItem,
+  button: materialButton,
   ...webCollectionRenderers(KIT),
   ...webControlRenderers(KIT),
+  ...webSelectionRenderers(KIT, materialButton),
   ...webMediaRenderers(KIT),
   ...webMapRenderers(KIT),
   ...webStackRenderers(KIT),
+  ...webIndicatorRenderers(KIT),
 };
 
-const WEB_LAYER_RENDERERS = webSheetLayers(KIT);
+const WEB_LAYER_RENDERERS = { ...webSheetLayers(KIT), ...webModalLayers(KIT) };
+
+/** Whether `type` draws only in the window's layer while its `openWhen` holds, never in place. */
+export function isWebLayerType(type: unknown): boolean {
+  return Object.hasOwn(WEB_LAYER_RENDERERS, String(type));
+}
+
+const WEB_SKINS = webSkins(KIT);
 
 function placeholder(node: Raw, scope: WebRenderScope, path: string): WebElement {
   const type = String(node.type);
@@ -945,7 +973,7 @@ function placeholder(node: Raw, scope: WebRenderScope, path: string): WebElement
   const { attrs, style } = base(node, scope, {
     border: "1px dashed currentColor",
     padding: "4px",
-    "font-size": "11px",
+    [FONT_SIZE]: "11px",
     opacity: "0.7",
   });
   return el("div", { attrs: { ...attrs, "data-unsupported": type }, style }, [
@@ -995,7 +1023,7 @@ function resolvedStyle(node: Raw, scope: WebRenderScope): Raw | undefined {
  * (through the devices' own contract), a pager's locals set before its own conditions run, its
  * `visibleWhen` (undefined when hidden) and its `styleWhen` merged. One path, so the two agree.
  */
-function preparedNode(
+export function preparedNode(
   node: unknown,
   scope: WebRenderScope,
   path: string,
@@ -1031,14 +1059,19 @@ export function renderWebNode(
     layer(styled, own, path);
     return undefined;
   }
-  const renderer = WEB_NODE_RENDERERS[String(styled.type)];
-  const element = renderer ? renderer(styled, own, path) : placeholder(styled, own, path);
+  const type = String(styled.type);
+  const renderer = WEB_SKINS[own.skin ?? "android"].renderers[type] ?? WEB_NODE_RENDERERS[type];
+  const element = renderer
+    ? withSwipeActions(renderer(styled, own, path), styled, own, KIT)
+    : placeholder(styled, own, path);
   const shaded = shaderFallback(styled, path);
   if (shaded) {
     own.unsupported.push(shaded);
   }
   // The layers belong to the node's own box; a wrapper (a captioned field) layers its box itself.
-  return element.attrs["data-node"] === undefined
-    ? element
-    : withOverContentLayers(element, styled.style, own.style);
+  const layered =
+    element.attrs["data-node"] === undefined
+      ? element
+      : withOverContentLayers(element, styled.style, own.style);
+  return withLaterMinStrut(layered, styled.style, own.style);
 }

@@ -451,3 +451,25 @@ export const prototypeTagForRow = (
   const [only] = plausible;
   return plausible.length === 1 && recordMatchesRow(only, rowTexts) ? only.prototypeTag : undefined;
 };
+
+/**
+ * The prototype tag for a row whose dumps were read at different points of a
+ * paged scan. A row kept from an earlier page can outlive a competing record
+ * cancelled mid-scan, which would leave the after dump naming the survivor's
+ * tag for it. The tag is therefore named only when every snapshot taken
+ * before the swipes agrees with the after dump; without one it falls back to
+ * after-only correlation.
+ */
+export const stablePrototypeTagForRow = (
+  beforeSnapshots: readonly (readonly DumpsysNotificationRecord[])[],
+  afterRecords: readonly DumpsysNotificationRecord[],
+  appId: string,
+  rowTexts: ReadonlySet<string>,
+): string | undefined => {
+  const afterTag = prototypeTagForRow(afterRecords, appId, rowTexts);
+  return beforeSnapshots.every(
+    (records) => prototypeTagForRow(records, appId, rowTexts) === afterTag,
+  )
+    ? afterTag
+    : undefined;
+};

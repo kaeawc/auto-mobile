@@ -211,6 +211,7 @@ export interface WebSocketMessage {
   observation?: unknown;
   result?: unknown;
   failure?: string;
+  scenes?: unknown;
   /** sdk_web_snapshot_result (#5162): the relayed web snapshot, its web view and the registered web views. */
   snapshot?: unknown;
   webViewId?: string;
@@ -384,6 +385,7 @@ export type CtrlProxyPressButtonResult = BaseResult;
 
 /** Rotate result from CtrlProxy iOS */
 export interface CtrlProxyRotateResult extends BaseResult {
+  timedOut?: boolean;
   previousOrientation: string;
   currentOrientation: string;
   value: number;
@@ -568,6 +570,7 @@ export interface CtrlProxySdkObservationResult extends BaseResult {
   available: boolean;
   observation?: IosSdkObservation;
   failure?: IosSdkBridgeFailure;
+  scenes?: string[];
   unsupported?: boolean;
 }
 
@@ -580,6 +583,7 @@ export interface CtrlProxySdkActionResult extends BaseResult {
   available: boolean;
   result?: IosSdkActionResult;
   failure?: IosSdkBridgeFailure;
+  scenes?: string[];
   unsupported?: boolean;
 }
 
@@ -592,6 +596,7 @@ export interface CtrlProxySdkWebSnapshotResult extends BaseResult {
   /** The app's registered web views, when the runner read its SDK's `/health`. */
   webViews?: IosSdkWebViewEntry[];
   failure?: IosSdkWebFailure;
+  scenes?: string[];
   unsupported?: boolean;
 }
 
@@ -604,6 +609,7 @@ export interface CtrlProxySdkWebActionResult extends BaseResult {
   available: boolean;
   result?: IosSdkWebActionResult;
   failure?: IosSdkWebFailure;
+  scenes?: string[];
   unsupported?: boolean;
 }
 
@@ -614,4 +620,14 @@ export interface CtrlProxyMagicTapResult extends BaseResult {
   handled?: boolean;
   unsupported: boolean;
   requiresVoiceOver: false;
+}
+
+/** Selector resolved by the foreground app's SDK, using native accessibility metadata. */
+export type AccessibilityFocusSelector = Pick<
+  import("../../../models/SetAccessibilityFocusOptions").SetAccessibilityFocusOptions,
+  "resourceId" | "text" | "contentDesc"
+>;
+
+export interface CtrlProxyAccessibilityFocusResult extends BaseResult {
+  errorCode?: import("../../../models/SetAccessibilityFocusResult").AccessibilityFocusErrorCode;
 }

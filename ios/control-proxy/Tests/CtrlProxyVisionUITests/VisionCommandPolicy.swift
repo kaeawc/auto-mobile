@@ -10,6 +10,11 @@ enum VisionCommandPolicy {
         supportedCommands.contains(command)
     }
 
+    /// An app launched before XCTest may lack an accessible main window until relaunched.
+    static func shouldRelaunchForSnapshotError(_ description: String) -> Bool {
+        description.contains("kAXErrorAPIDisabled")
+    }
+
     /// Keyboard-key sequences `typeText` interprets as deletion (XCUIKeyboardKey.delete is U+0008
     /// on iOS-family platforms and U+007F on macOS; forwardDelete is U+F728). Append-only text
     /// must not erase content already in the field.

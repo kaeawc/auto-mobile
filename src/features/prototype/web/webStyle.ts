@@ -155,7 +155,10 @@ export function laterMinStrut(style: unknown, context: WebStyleContext): number 
   return sized ? undefined : raw.minWidth;
 }
 
-/** Applied after the authored bounds: `zero` beats a `maxWidth`, an authored `minWidth` holds. */
+/**
+ * Applied after the authored bounds. A shrinking or taking child keeps an authored `minWidth`;
+ * `zero` beats both bounds, as `sizeIn` clamps an authored minimum into a zero incoming width.
+ */
 function rowMeasureStyle(css: Css, style: Raw, context: WebStyleContext) {
   const measure = record(style[ROW_MEASURE_KEY]);
   if (context.parentAxis !== "row" || !measure) {
@@ -175,6 +178,7 @@ function rowMeasureStyle(css: Css, style: Raw, context: WebStyleContext) {
     css[MIN_WIDTH] = "0";
   }
   if (measure.zero === true) {
+    css[MIN_WIDTH] = "0";
     css[MAX_WIDTH] = "0px";
   }
 }

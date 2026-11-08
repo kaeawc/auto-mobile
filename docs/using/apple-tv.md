@@ -50,12 +50,17 @@ unavailable runtime fails, lists the available runtimes and repeats the install 
 | `executePlan`       | Replays a plan of Apple TV steps.                                                                       |
 | `openLink`          | Opens a URL with the app that declares its scheme.                                                      |
 | `getDeepLinks`      | Lists the URL schemes an installed app declares.                                                        |
+| `homeScreen`        | Presses the Siri Remote `home` button.                                                                  |
+| `postNotification`  | Sends a simulated push to an app; `appId` is required.                                                  |
+| `setAppPermissions` | Grants, revokes or resets privacy permissions; the result is not read back.                             |
 
 <!-- apple-tv-supported-tools:end -->
 
 Every other device tool refuses an Apple TV with an error naming the tool. `tapAt`, `swipeOn`,
 `pinchOn`, `multiTouch`, `dragAndDrop` and `tapAny` refuse it as a touch gesture and point to
-focus navigation.
+focus navigation. `displayConfig`, `statusBar`, `clipboard` and `getAppPermissions` refuse it as
+not available on tvOS: the tvOS simulator has no appearance or content size setting, status bar
+override, pasteboard or permission read-back.
 
 ## Create and start an Apple TV simulator
 
@@ -246,6 +251,18 @@ scheme shows that screen. Call `observe` afterwards to see where it landed.
 - The call fails when no installed app handles the URL. Apple TV has no web browser, so an
   `http` or `https` URL opens only if an app claims it.
 - `waitFor`, `settled`, `acceptOpenAlert` and `chooserAppPackage` are refused.
+
+## Notifications and permissions
+
+`postNotification` sends a simulated remote push to the app named by `appId`, with the same
+payload options as on an iOS Simulator. A successful result means the simulator accepted the push;
+whether a banner is shown is up to the app and tvOS, so observe to check.
+
+`setAppPermissions` takes `action` (`grant`, `revoke` or `reset`) and `permissions`, such as
+`photos`, or `all` with `reset`. A permission the tvOS simulator does not have fails that entry with
+the simulator's error; the others still apply. The fields `notificationsEnabled`,
+`notificationPolicyAccess` and `scheduleExactAlarm` are refused. A change is reported as applied
+but is not read back, and `getAppPermissions` is not available.
 
 ## Out of scope
 

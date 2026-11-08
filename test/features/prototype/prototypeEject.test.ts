@@ -322,6 +322,53 @@ describe("automobile:prototype/eject result", () => {
     ]);
   });
 
+  test.each(["row", "column", "box", "flow", "grid"])(
+    "reports repeat and its literal {index} on a %s container in both dialects",
+    async (type) => {
+      const spec = {
+        id: `repeat-${type}`,
+        root: {
+          type,
+          repeat: { items: [{ name: "a" }, { name: "b" }], as: "item" },
+          children: [{ type: "text", text: "chip", testTag: "chip_{index}" }],
+        },
+      };
+      for (const platform of ["android", "ios"] as const) {
+        const result = await eject(platform, spec);
+        expect(result.remaining.filter((item) => item.kind === "binding")).toEqual([
+          { path: "root.children[0]", kind: "binding", type: "chip_{index}" },
+          { path: "root.repeat", kind: "binding", type: "repeat" },
+        ]);
+        expect(result.files[0].content).toContain(
+          "// TODO(eject): repeat at root is not translated; its children are written once.",
+        );
+      }
+    },
+  );
+
+  test("reports a nested span action inside a repeated container in both dialects", async () => {
+    const spec = {
+      id: "repeat-spans",
+      root: {
+        type: "column",
+        repeat: { items: { path: "/rows" }, as: "row" },
+        children: [
+          { type: "text", spans: [{ text: "tap", onTap: [{ type: "emit", name: "t" }] }] },
+        ],
+      },
+    };
+    for (const platform of ["android", "ios"] as const) {
+      const result = await eject(platform, spec);
+      expect(result.remaining).toEqual([
+        { path: "root.children[0].spans[0].onTap[0]", kind: "action", type: "emit" },
+        { path: "root.repeat", kind: "binding", type: "/rows" },
+      ]);
+      expect(result.files[0].content).toContain(
+        "// TODO(eject): spans[0].onTap actions at root.children[0] are not translated.",
+      );
+    }
+  });
+
   test("reads eight-digit theme colors as alpha-first ARGB", async () => {
     const spec = { id: "argb", theme: { colors: { primary: "#80FF0000" } }, root: shop.root };
     expect((await eject("android", spec)).files[0].content).toContain(

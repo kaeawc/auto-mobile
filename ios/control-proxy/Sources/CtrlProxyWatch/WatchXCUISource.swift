@@ -66,33 +66,63 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
     }
 
     private let app: XCUIApplication
+    private let system: XCUIApplication
     private let failureCoordinator: CommandFailureCoordinator
 
-    init(app: XCUIApplication, failureCoordinator: CommandFailureCoordinator) {
+    init(
+        app: XCUIApplication, failureCoordinator: CommandFailureCoordinator,
+        system: XCUIApplication = XCUIApplication(bundleIdentifier: "com.apple.Carousel")
+    ) {
         self.app = app
+        self.system = system
         self.failureCoordinator = failureCoordinator
     }
 
     func snapshot() throws -> SdkViewHierarchy {
-        // XCTest can retain this app's tree after Home even though the watch face is visible.
-        guard app.state == .runningForeground else {
-            throw WatchCommandError.appNotForeground
+        let alerts = systemAlerts()
+        let root: any XCUIElementSnapshot
+        let children: [SdkViewNode]?
+        if app.state == .runningForeground {
+            root = try app.snapshot()
+            children = alerts.isEmpty ? nil : alerts.map { node($0) } + root.children.map { node($0) }
+        } else {
+            // XCTest can retain the host tree after Home. Only system alerts are valid then.
+            guard !alerts.isEmpty, let systemRoot = try? system.snapshot() else {
+                throw WatchCommandError.appNotForeground
+            }
+            root = systemRoot
+            children = alerts.map { node($0) }
         }
-        let root = try app.snapshot()
         // XCUITest frames and gesture coordinates are points. No pixel scale is inferred.
         return SdkViewHierarchy(
             screenScale: 1, screenWidth: Int(root.frame.width), screenHeight: Int(root.frame.height),
-            root: node(root)
+            root: node(root, children: children)
         )
     }
 
-    private func node(_ snapshot: any XCUIElementSnapshot) -> SdkViewNode {
+    /// `system.snapshot()` returns only the frontmost window on watchOS, so the permission prompt and
+    /// notification looks are read through the alert query, one element snapshot each.
+    private func systemAlerts() -> [any XCUIElementSnapshot] {
+        system.alerts.allElementsBoundByIndex
+            .compactMap { try? $0.snapshot() }
+            .filter { alertTree($0).hasContent }
+    }
+
+    private func alertTree(_ snapshot: any XCUIElementSnapshot) -> WatchAlertTree<any XCUIElementSnapshot> {
+        WatchAlertTree(
+            element: snapshot, isAlert: snapshot.elementType == .alert,
+            label: snapshot.label, identifier: snapshot.identifier,
+            children: snapshot.children.map { alertTree($0) }
+        )
+    }
+
+    private func node(_ snapshot: any XCUIElementSnapshot, children: [SdkViewNode]? = nil) -> SdkViewNode {
         let frame = snapshot.frame
         let bounds = SdkBounds(
             left: Int(frame.minX), top: Int(frame.minY), right: Int(frame.maxX), bottom: Int(frame.maxY)
         )
         let className = "XCUIElementType(\(snapshot.elementType.rawValue))"
-        var children = snapshot.children.map { node($0) }
+        var children = children ?? snapshot.children.map { node($0) }
         if let value = watchTextValueChild(
             elementType: snapshot.elementType.rawValue, label: snapshot.label, value: snapshot.value as? String
         ) {
@@ -117,17 +147,25 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
 
     func tap(x: Double, y: Double) throws {
         try performGesture {
-            app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x, dy: y)).tap()
+            let target = systemAlerts().isEmpty ? app : system
+            target.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x, dy: y)).tap()
         }
     }
 
     func tap(identifier: String) throws {
         try performGesture {
             let element = app.descendants(matching: .any).matching(identifier: identifier).firstMatch
-            guard element.exists else {
+            if element.exists {
+                element.tap()
+                return
+            }
+            let systemElement = system.descendants(matching: .any).matching(NSPredicate(
+                format: "identifier == %@ OR label == %@", identifier, identifier
+            )).firstMatch
+            guard systemElement.exists else {
                 throw WatchCommandError.commandFailed("No watchOS element with identifier '\(identifier)'")
             }
-            element.tap()
+            systemElement.tap()
         }
     }
 
@@ -274,4 +312,25 @@ func watchVerifiedCrownRotation(
             + "scrolled content is already at its limit. Tap the view that should receive the crown, then "
             + "observe to confirm."
     )
+}
+
+/// A value tree keeps alert selection independent of XCTest queries and simulator state.
+struct WatchAlertTree<Element> {
+    let element: Element
+    var isAlert = false
+    var label = ""
+    var identifier = ""
+    var children: [WatchAlertTree<Element>] = []
+
+    var hasContent: Bool {
+        !label.isEmpty || !identifier.isEmpty || children.contains { $0.hasContent }
+    }
+}
+
+/// Keep the outermost populated alerts, preserving tree order without duplicating nested alerts.
+func watchSystemAlerts<Element>(in tree: WatchAlertTree<Element>) -> [Element] {
+    if tree.isAlert {
+        return tree.hasContent ? [tree.element] : []
+    }
+    return tree.children.flatMap { watchSystemAlerts(in: $0) }
 }

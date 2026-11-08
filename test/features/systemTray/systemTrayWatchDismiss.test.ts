@@ -108,7 +108,7 @@ function setup(read: (commands: string[]) => ObserveResult) {
   timer.enableAutoAdvance();
   observer.setObserveResult(() => read(adb.getExecutedCommands()));
   setSystemTrayDependencies({ adbFactory: () => adb, observeScreenFactory: () => observer, timer });
-  return { adb, tray: new SystemTray(watch) };
+  return { adb, timer, tray: new SystemTray(watch) };
 }
 
 describe("Wear OS 7 dismiss reveals the X button", () => {
@@ -267,7 +267,13 @@ function dismissFromApp(selfCloseAfter: number) {
       [OPEN]: { face: "stream" },
       [SWIPE]: { stream: "revealed" },
       [TAP_X]: { revealed: "emptied" },
-      [BACK]: { face: "appList", stream: "face", revealed: "face", emptied: "face" },
+      [BACK]: {
+        face: "appList",
+        appList: "face",
+        stream: "face",
+        revealed: "face",
+        emptied: "face",
+      },
     };
     surface = next[command]?.[surface] ?? surface;
     if (command === TAP_X) {
@@ -288,13 +294,15 @@ describe("Wear dismiss started from inside an app restores the watch face (#1754
     tray.execute({ action: "dismiss", notification: { title: "Zebra" }, awaitTimeout: 500 });
 
   test("closes a stream that is still showing with one Back onto the watch face", async () => {
-    const { adb, tray } = setup(dismissFromApp(Number.POSITIVE_INFINITY));
+    const { adb, timer, tray } = setup(dismissFromApp(Number.POSITIVE_INFINITY));
     const result = await dismiss(tray);
     expect(result).toMatchObject({ isError: false, payload: { dismissedCount: 1, success: true } });
     expect(result.payload.observation).toBe(closed);
     const commands = adb.getExecutedCommands();
     expect(commands[0]).toBe(HOME);
     expect(commands.filter((command) => command === BACK)).toHaveLength(1);
+    // Two earlier polls reveal/confirm the X; cleanup waits eight more on the injected clock.
+    expect(timer.getSleepHistory().filter((ms) => ms === 250)).toHaveLength(10);
   });
 
   test("does not press Back when the stream closed between the last read and the Back", async () => {
@@ -305,7 +313,45 @@ describe("Wear dismiss started from inside an app restores the watch face (#1754
     expect(adb.getExecutedCommands()).not.toContain(BACK);
   });
 
-  test("reports dismissal_unconfirmed when cleanup leaves the watch on the app list", async () => {
+  test("waits for the emptied stream to close itself after several reads without Back", async () => {
+    const { adb, timer, tray } = setup(dismissFromApp(5));
+    const result = await dismiss(tray);
+    expect(result).toMatchObject({ isError: false, payload: { dismissedCount: 1, success: true } });
+    expect(result.payload.observation).toBe(closed);
+    expect(adb.getExecutedCommands()).not.toContain(BACK);
+    expect(timer.getSleepHistory().filter((ms) => ms === 250)).toHaveLength(5);
+  });
+
+  test("recovers with another Back when closing the stream lands on the app list", async () => {
+    // The stream closes between the last empty-stream poll and Back, opening the app list.
+    const { adb, tray } = setup(dismissFromApp(READS_UNTIL_CLEANUP_DECIDES + 1 + 8));
+    const result = await dismiss(tray);
+    expect(result).toMatchObject({ isError: false, payload: { dismissedCount: 1, success: true } });
+    expect(result.payload.observation).toBe(closed);
+    expect(adb.getExecutedCommands().filter((command) => command === BACK)).toHaveLength(2);
+  });
+
+  test("keeps dismissal_unconfirmed if the fresh recovery read shows the app list again", async () => {
+    const model = dismissFromApp(Number.POSITIVE_INFINITY);
+    let recoveryReads = 0;
+    const { tray } = setup((commands) => {
+      const shown = model(commands);
+      const backs = commands.filter((command) => command === BACK).length;
+      if (backs >= 2) {
+        // The recovery key's poll and settled read show the face, but its final confirmation does not.
+        return recoveryReads++ < 2 ? closed : appList;
+      }
+      return backs === 1 ? appList : shown;
+    });
+    const result = await dismiss(tray);
+    expect(result).toMatchObject({
+      isError: true,
+      payload: { code: "dismissal_unconfirmed", dismissedCount: 1, success: false },
+    });
+    expect(result.payload.observation).toBe(appList);
+  });
+
+  test("keeps dismissal_unconfirmed when recovery cannot leave the app list", async () => {
     // A Back that lands on the watch face anyway (the close finished after the fresh read).
     const model = dismissFromApp(Number.POSITIVE_INFINITY);
     const { adb, tray } = setup((commands) => {
@@ -319,6 +365,50 @@ describe("Wear dismiss started from inside an app restores the watch face (#1754
     });
     expect(String(result.payload.message)).toContain("left the watch on the app list");
     expect(result.payload.observation).toBe(appList);
+    expect(adb.getExecutedCommands().filter((command) => command === BACK)).toHaveLength(2);
+    expect(adb.getExecutedCommands().filter((command) => command === HOME)).toHaveLength(3);
+  });
+
+  test("keeps the last observation and dismissal_unconfirmed when recovery throws", async () => {
+    const model = dismissFromApp(Number.POSITIVE_INFINITY);
+    const { tray } = setup((commands) => {
+      const shown = model(commands);
+      const backs = commands.filter((command) => command === BACK).length;
+      if (backs >= 2) {
+        throw new Error("Recovery observation failed");
+      }
+      return backs === 1 ? appList : shown;
+    });
+    const result = await dismiss(tray);
+    expect(result).toMatchObject({
+      isError: true,
+      payload: { code: "dismissal_unconfirmed", dismissedCount: 1, success: false },
+    });
+    expect(result.payload.observation).toBe(appList);
+  });
+
+  test("closes with exactly one Back when another card remains", async () => {
+    const { adb, timer, tray } = setup((commands) => {
+      if (commands.includes(BACK)) {
+        return closed;
+      }
+      if (commands.includes(TAP_X)) {
+        return single;
+      }
+      if (commands.includes(SWIPE_CHARLIE)) {
+        return revealed;
+      }
+      return commands.includes(OPEN) ? stackedTop : closed;
+    });
+    const result = await tray.execute({
+      action: "dismiss",
+      notification: { title: "Card Charlie" },
+      awaitTimeout: 500,
+    });
+    expect(result).toMatchObject({ isError: false, payload: { dismissedCount: 1, success: true } });
+    expect(result.payload.observation).toBe(closed);
     expect(adb.getExecutedCommands().filter((command) => command === BACK)).toHaveLength(1);
+    // Only the existing reveal/confirmation settling runs; cleanup adds no empty-stream wait.
+    expect(timer.getSleepHistory()).toEqual([500, 250]);
   });
 });

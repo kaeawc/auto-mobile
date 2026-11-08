@@ -1,11 +1,17 @@
 import { ActionableError, type BootedDevice, type ObserveResult } from "../../../models";
+import { logger } from "../../../utils/logger";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../../utils/toolUtils";
 import type { SystemTrayOutcome } from "../SystemTray";
 import type { SystemTrayArgs } from "../systemTrayTypes";
 import { getSystemTrayDependencies } from "./dependencies";
 import { observeSystemTray, sleep } from "./runtime";
-import { watchAwaySurface } from "./watchFace";
-import { isWearHierarchy, watchHasExpandedCard, watchStreamRoot } from "./watchHierarchy";
+import { returnToWatchFace, watchAwaySurface } from "./watchFace";
+import {
+  isWearHierarchy,
+  watchHasExpandedCard,
+  watchNotifications,
+  watchStreamRoot,
+} from "./watchHierarchy";
 
 const BACK = "shell input keyevent 4";
 const POLL_MS = 250;
@@ -16,6 +22,8 @@ const MAX_CLOSE_PRESSES = 3;
 export interface WatchRestoreState {
   /** The stream was showing before the action, so it is left open. */
   initiallyOpen: boolean;
+  /** An app list present before the action must not trigger watch-face recovery. */
+  initiallyOnAppList: boolean;
   /** The action expanded a card, which Back collapses first. */
   expandedByUs: boolean;
 }
@@ -59,6 +67,27 @@ export async function restoreWatchStream(
   if (!state.initiallyOpen && watchStreamRoot(current.viewHierarchy)) {
     current = await closeStream(device, signal);
   }
+  if (!state.initiallyOnAppList && watchAwaySurface(current) === "app list") {
+    return recoverWatchFace(device, current, signal);
+  }
+  return current;
+}
+
+/** Best effort: retain the last observation if recovery or its confirmation read fails. */
+async function recoverWatchFace(
+  device: BootedDevice,
+  current: ObserveResult,
+  signal: AbortSignal,
+): Promise<ObserveResult> {
+  try {
+    await returnToWatchFace(device, current, signal);
+    current = await read(device, signal);
+    if (watchAwaySurface(current) || watchStreamRoot(current.viewHierarchy)) {
+      throw new ActionableError("Watch face could not be confirmed after stream restoration.");
+    }
+  } catch (error) {
+    logger.warn("[systemTray] Could not recover the watch face after stream restoration", error);
+  }
   return current;
 }
 
@@ -87,13 +116,24 @@ async function collapseCard(
  * leave the watch somewhere the next request cannot open the stream from. For the same reason
  * every Back is preceded by a fresh read: a stream that closed on its own since the last read
  * (its last card removed, a slow host) leaves the watch face in front, where Back would open the
- * app list (#17546).
+ * app list (#17546). An emptied stream is given time to close itself before sending Back.
  */
 async function closeStream(device: BootedDevice, signal: AbortSignal): Promise<ObserveResult> {
   for (let press = 0; press < MAX_CLOSE_PRESSES; press++) {
     let current = await read(device, signal);
     if (!watchStreamRoot(current.viewHierarchy)) {
       return current;
+    }
+    for (
+      let poll = 0;
+      poll < CLOSE_POLLS && watchNotifications(current.viewHierarchy).length === 0;
+      poll++
+    ) {
+      await sleep(POLL_MS, signal);
+      current = await read(device, signal);
+      if (!watchStreamRoot(current.viewHierarchy)) {
+        return current;
+      }
     }
     await back(device, signal);
     for (let poll = 0; poll < CLOSE_POLLS; poll++) {

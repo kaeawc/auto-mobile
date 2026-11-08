@@ -259,6 +259,23 @@ describe("#17464 default action envelope", () => {
         expect(out.observation.fields?.layoutWarnings).toBeUndefined();
       });
 
+      test(`${name}: a diff-invisible screen change beside a warning change falls back`, () => {
+        // The status-bar clock is skipped by the skeleton diff, so this real
+        // change is invisible there; the warning delta must not mask it.
+        const out = envelope(name, (copy) => {
+          visit(copy.viewHierarchy, (n) => {
+            if (n["resource-id"] === "com.android.systemui:id/clock") {
+              n.text = "12:59";
+              n["content-desc"] = "12:59 PM";
+            }
+          });
+          warnings(copy).push(keyboardKey);
+        });
+
+        expect(out.observationDiff).toMatchObject({ mode: "full", reason: "screen_changed" });
+        expect(out.observation.isDiff).toBeUndefined();
+      });
+
       test(`${name}: s2- view id churn alone falls back to the full envelope`, () => {
         const out = envelope(name, (copy) =>
           warnings(copy).forEach((warning, index) => {

@@ -712,9 +712,20 @@ function shouldEmitFullActionObservation(
  * Skeleton diffs leave `layoutWarnings` out of the wire diff (#17464), so a
  * screen change whose only effect is a material warning delta would otherwise
  * read as an empty diff and fall back to the full envelope (#17515). The diff
- * stays a diff; warning churn that carries no identity change (confidence,
- * `s2-` view ids, SystemUI status-bar icons) still falls back.
+ * stays a diff only when the change is attributable solely to the warnings:
+ * with warnings held equal, an unprojected diff (status bar, keyboard and
+ * every node included) must also be empty. Otherwise a real change the
+ * skeleton diff cannot show would ship as an empty `isDiff` with nothing
+ * describing it, so it still falls back. Warning churn that carries no
+ * identity change (confidence, `s2-` view ids, SystemUI status-bar icons)
+ * still falls back too.
  */
 function hasMaterialLayoutWarningOnlyChange(baseline: ObserveResult, next: ObserveResult): boolean {
-  return hasMaterialLayoutWarningChange(baseline.layoutWarnings, next.layoutWarnings);
+  if (!hasMaterialLayoutWarningChange(baseline.layoutWarnings, next.layoutWarnings)) {
+    return false;
+  }
+  const unprojected = diffObserveResult(baseline, next, {
+    scalarFields: SKELETON_DIFF_SCALAR_FIELDS,
+  });
+  return isEmptyObserveDiff(unprojected);
 }

@@ -279,21 +279,24 @@ describe("Wear OS 7 stream actions", () => {
   });
 
   test("list keeps repeated notifications that a scroll could have moved out of view", async () => {
-    // Earlier and Duplicate sit in the top of the first page, so a scroll can carry Duplicate out
-    // of view: the Duplicate that leads the second page may be a second notification.
-    const high = rewriteBounds(page1, ([left, top, right, bottom]) => [
-      left,
-      Math.max(0, top - 300),
-      right,
-      Math.max(0, bottom - 300),
-    ]);
-    const { tray } = setup((commands) => (commands.includes(SCAN) ? page2 : high));
+    // Item 4 ends the first page whole but high, above where one scroll reaches, so the equal
+    // item 4 leading the next page may be a second notification. The scan's unmoved last page
+    // re-merges the two pages with the short end-of-stream shift, leaving only that reach to tell
+    // a repeated card from the same card seen twice.
+    const SCAN384 = "shell input swipe 192 288 192 96 500";
+    const high = movedDown(wholeA, -150);
+    const { tray } = setup((commands) => (commands.includes(SCAN384) ? wholeB : high));
     const result = await tray.execute({
       action: "list",
       notification: { appId: "com.android.shell" },
       awaitTimeout: 5000,
     });
-    expect(titles(result).filter((title) => title === "TitleThree")).toHaveLength(2);
+    expect(titles(result)).toEqual([
+      "AM17357 item 5",
+      "AM17357 item 4",
+      "AM17357 item 4",
+      "AM17357 item 3",
+    ]);
   });
 
   test("list returns a whole card that ends one page and leads the next once", async () => {

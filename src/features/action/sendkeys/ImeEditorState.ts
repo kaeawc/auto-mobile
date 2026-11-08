@@ -47,7 +47,20 @@ export function withImeEditorWarnings(
   return warnings.length ? { ...result, warnings } : result;
 }
 
-/** Reports sampled state changes, not transient hide/show cycles between observations. */
+/** Whether a sampled keyboard disappearance needs confirmation after the IME window settles. */
+export function hasImeKeyboardHiddenChange(
+  before: ImeEditorState | undefined,
+  observation: ObserveResult,
+): boolean {
+  const after = readImeEditorState(observation);
+  return (
+    before?.display === after.display &&
+    before?.keyboardVisible === true &&
+    after.keyboardVisible === false
+  );
+}
+
+/** Reports sampled state changes; callers settle keyboard disappearance before reporting it. */
 export function imeEditorWarnings(before: ImeEditorState, observation: ObserveResult): string[] {
   const after = readImeEditorState(observation);
   if (before.display !== after.display) {

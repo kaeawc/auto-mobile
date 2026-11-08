@@ -914,17 +914,25 @@ export class WatchSystemTray {
       return { next, removed: false };
     }
     const after = appId && before ? await this.inventory(appId, card) : undefined;
+    return {
+      next,
+      removed:
+        this.inventoryRemoval(before, after) ??
+        (streamOpen && visiblyRemoved(card, observation, next)),
+    };
+  }
+
+  private inventoryRemoval(
+    before: { keys: string[]; matching: number } | undefined,
+    after: { keys: string[]; matching: number } | undefined,
+  ): boolean | undefined {
     if (!before || !after || before.matching === 0) {
-      return { next, removed: streamOpen && visiblyRemoved(card, observation, next) };
+      return undefined;
     }
     // An identical card scrolling into view cannot fake a removed key, a refused card that
     // rewrites its text keeps its key, and another notification of the app expiring meanwhile
     // removes a key but not one showing the swiped card's title and body.
-    return {
-      next,
-      removed:
-        before.keys.some((key) => !after.keys.includes(key)) && after.matching < before.matching,
-    };
+    return before.keys.some((key) => !after.keys.includes(key)) && after.matching < before.matching;
   }
 
   /**

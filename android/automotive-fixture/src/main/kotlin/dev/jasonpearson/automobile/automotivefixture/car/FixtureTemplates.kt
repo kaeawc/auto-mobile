@@ -45,10 +45,13 @@ class TemplateMenuScreen(carContext: CarContext) : Screen(carContext) {
     FixtureCatalog.templateMenu.forEach { item ->
       list.addItem(row(item) { screenManager.push(screenFor(item.id)) })
     }
-    return ListTemplate.Builder()
-      .setHeader(header(TEMPLATE_HOME_TITLE, back = false))
-      .setSingleList(list.build())
-      .build()
+    return CarTemplateRecorderFactory.recorder.record(
+      this,
+      ListTemplate.Builder()
+        .setHeader(header(TEMPLATE_HOME_TITLE, back = false))
+        .setSingleList(list.build())
+        .build(),
+    )
   }
 
   private fun screenFor(id: String): Screen =
@@ -56,6 +59,7 @@ class TemplateMenuScreen(carContext: CarContext) : Screen(carContext) {
       "template_grid" -> GridScreen(carContext)
       "template_pane" -> PaneScreen(carContext)
       "template_navigation" -> PoiNavigationScreen(carContext)
+      "template_list_long" -> LongListScreen(carContext)
       else -> ListScreen(carContext)
     }
 
@@ -71,11 +75,35 @@ class ListScreen(carContext: CarContext) : Screen(carContext) {
     FixtureCatalog.listTemplateRows.forEach { item ->
       list.addItem(row(item) { screenManager.push(RowDetailScreen(carContext, item)) })
     }
-    return ListTemplate.Builder()
-      .setHeader(header("List template", back = true))
-      .setSingleList(list.build())
-      .build()
+    return CarTemplateRecorderFactory.recorder.record(
+      this,
+      ListTemplate.Builder()
+        .setHeader(header("List template", back = true))
+        .setSingleList(list.build())
+        .build(),
+    )
   }
+}
+
+/** Thirty fixed rows; a host may render fewer than the recorded template contains. */
+class LongListScreen(carContext: CarContext) : Screen(carContext) {
+  override fun onGetTemplate(): Template =
+    CarTemplateRecorderFactory.recorder.record(
+      this,
+      longListTemplate(FixtureCatalog.longListTemplateRows) { item ->
+        screenManager.push(RowDetailScreen(carContext, item))
+      },
+    )
+}
+
+/** Pure builder so the full long list can be checked without a templates host. */
+fun longListTemplate(rows: List<FixtureRow>, onClick: (FixtureRow) -> Unit): ListTemplate {
+  val list = ItemList.Builder()
+  rows.forEach { item -> list.addItem(row(item) { onClick(item) }) }
+  return ListTemplate.Builder()
+    .setHeader(header("List 30", back = true))
+    .setSingleList(list.build())
+    .build()
 }
 
 /** Six fixed tiles; tapping one opens [RowDetailScreen]. */
@@ -94,10 +122,13 @@ class GridScreen(carContext: CarContext) : Screen(carContext) {
           .build(),
       )
     }
-    return GridTemplate.Builder()
-      .setHeader(header("Grid template", back = true))
-      .setSingleList(list.build())
-      .build()
+    return CarTemplateRecorderFactory.recorder.record(
+      this,
+      GridTemplate.Builder()
+        .setHeader(header("Grid template", back = true))
+        .setSingleList(list.build())
+        .build(),
+    )
   }
 }
 
@@ -106,26 +137,33 @@ class PaneScreen(carContext: CarContext) : Screen(carContext) {
   override fun onGetTemplate(): Template {
     val pane = Pane.Builder()
     FixtureCatalog.paneRows.forEach { pane.addRow(row(it)) }
-    return PaneTemplate.Builder(pane.build())
-      .setHeader(header("Pane template", back = true))
-      .build()
+    return CarTemplateRecorderFactory.recorder.record(
+      this,
+      PaneTemplate.Builder(pane.build()).setHeader(header("Pane template", back = true)).build(),
+    )
   }
 }
 
 /** Shows the row or tile that was tapped, so a check can confirm the tap and then go back. */
 class RowDetailScreen(carContext: CarContext, private val item: FixtureRow) : Screen(carContext) {
   override fun onGetTemplate(): Template =
-    PaneTemplate.Builder(Pane.Builder().addRow(row(item)).build())
-      .setHeader(header(item.title, back = true))
-      .build()
+    CarTemplateRecorderFactory.recorder.record(
+      this,
+      PaneTemplate.Builder(Pane.Builder().addRow(row(item)).build())
+        .setHeader(header(item.title, back = true))
+        .build(),
+    )
 }
 
 /** Navigation place list with four fixed points of interest; no map is drawn. */
 class PoiNavigationScreen(carContext: CarContext) : Screen(carContext) {
   override fun onGetTemplate(): Template =
-    poiPlaceListTemplate(FixtureCatalog.pois) { poi ->
-      screenManager.push(RowDetailScreen(carContext, FixtureRow(poi.id, poi.name, poi.address)))
-    }
+    CarTemplateRecorderFactory.recorder.record(
+      this,
+      poiPlaceListTemplate(FixtureCatalog.pois) { poi ->
+        screenManager.push(RowDetailScreen(carContext, FixtureRow(poi.id, poi.name, poi.address)))
+      },
+    )
 }
 
 /**

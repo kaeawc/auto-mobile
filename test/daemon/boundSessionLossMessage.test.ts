@@ -5,6 +5,7 @@ import {
   releasedSessionNotFoundFields,
   sanitizeBoundSessionLoss,
 } from "../../src/daemon/types";
+import { sessionOwnershipLostPayload } from "../../src/daemon/deviceSessionResult";
 
 function loss(reason: string) {
   return { code: BOUND_SESSION_LOSS_CODE, sessionUuid: "s-1", reason } as const;
@@ -99,5 +100,41 @@ describe("sanitizeBoundSessionLoss release.ownerPid (#11098)", () => {
       "ownerPid",
     );
     expect(sanitizeBoundSessionLoss(release({}))?.release).not.toHaveProperty("ownerPid");
+  });
+});
+
+describe("sanitizeBoundSessionLoss release.cliIdleTimeoutMs (#16940)", () => {
+  const cliIdleLoss = (cliIdleTimeoutMs: unknown) => ({
+    ...loss("cli-idle-timeout"),
+    release: {
+      sessionId: "s-1",
+      deviceId: "emulator-5554",
+      releaseReason: "cli-idle-timeout",
+      releasedAtMs: 2,
+      terminal: true,
+      cliIdleTimeoutMs,
+      heartbeat: { lastHeartbeatMs: 1, hasReceivedHeartbeat: true, timeoutMs: 300_000, ageMs: 1 },
+    },
+  });
+
+  test("keeps the window, so the proxy's ownership-loss refusal reports it", () => {
+    const sanitized = sanitizeBoundSessionLoss(cliIdleLoss(300_000));
+    expect(sanitized?.release?.cliIdleTimeoutMs).toBe(300_000);
+    expect(
+      sessionOwnershipLostPayload({
+        message: "gone",
+        sessionUuid: "s-1",
+        reason: "cli-idle-timeout",
+        release: sanitized?.release,
+      }).error.idleTimeoutMs,
+    ).toBe(300_000);
+  });
+
+  test("drops an unusable window", () => {
+    for (const bad of ["300000", 0, 1.5, -1]) {
+      expect(sanitizeBoundSessionLoss(cliIdleLoss(bad))?.release).not.toHaveProperty(
+        "cliIdleTimeoutMs",
+      );
+    }
   });
 });

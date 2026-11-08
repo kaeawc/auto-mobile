@@ -1,0 +1,37 @@
+{
+  "spec": {
+    "id": "library-webview",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "pw": ""
+    },
+    "requires": {
+      "platform": ["webview"]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "textField",
+          "stateKey": "pw",
+          "secure": true
+        },
+        {
+          "type": "webView",
+          "id": "article",
+          "url": "https://example.com/{pw}",
+          "allowedOrigins": ["https://example.com"]
+        }
+      ]
+    }
+  },
+  "options": {
+    "library": true
+  },
+  "expectedPath": "root.children[1].url",
+  "expectedMessage": "Secure value cannot be bound into a request"
+}

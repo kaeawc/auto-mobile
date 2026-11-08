@@ -190,3 +190,28 @@ export function describeIncompleteCapture(
     accessibilityTool: hierarchy.accessibilityTool,
   };
 }
+
+/** The foreground app id of a fresh, verified observation, else `undefined`. */
+export function usableForegroundAppId(observation: ObserveResult): string | undefined {
+  const { freshness } = observation;
+  if (
+    freshness?.isFresh === false ||
+    freshness?.verified === false ||
+    // The runner reports com.apple.springboard when it cannot identify the
+    // foreground app, so that identity is a guess, not an observation.
+    observation.viewHierarchy?.fallbackToSpringboard === true ||
+    resolveMissingForegroundWindow(observation)
+  ) {
+    return undefined;
+  }
+  return observedAppId(observation);
+}
+
+function observedAppId(observation: ObserveResult): string | undefined {
+  return (
+    observation.activeWindow?.appId ||
+    observation.viewHierarchy?.packageName ||
+    observation.viewHierarchy?.foregroundActivity?.split("/")[0] ||
+    undefined
+  );
+}

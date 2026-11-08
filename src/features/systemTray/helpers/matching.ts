@@ -20,13 +20,17 @@ import {
   type SystemTrayNotificationCandidate,
   type SystemTrayNotificationMatch,
   type SystemTrayTextMatch,
+  type NotificationAttribution,
+  collectNotificationAttributions,
   collectNotificationCandidates,
   createSubHierarchy,
   extractNodeTextCandidates,
   getDirectChildNodes,
   getNotificationGroupChildRows,
+  getNodeAttribution,
   getNotificationGroupHeader,
   nodeIsNotificationGroup,
+  nodeIsNotificationRowRoot,
 } from "./hierarchy";
 
 interface SystemTrayElementMatch {
@@ -99,6 +103,37 @@ const resolveMatchForSearchTexts = (
   }
 
   return null;
+};
+
+// The iOS label leads with the app name, then ", " and the row's other text;
+// a name that itself contains a comma still matches by prefix.
+const attributionEquals = (attribution: NotificationAttribution, normalized: string): boolean => {
+  const text = attribution.text.toLowerCase();
+  return text === normalized || (attribution.leading && text.startsWith(`${normalized},`));
+};
+
+const attributionName = (attribution: NotificationAttribution): string => {
+  const text = attribution.text.toLowerCase();
+  return attribution.leading ? text.split(",")[0] : text;
+};
+
+/** Matches the app filter against a row's app-name elements only (#17401). */
+const resolveAttributionMatch = (
+  attributions: NotificationAttribution[],
+  searchTexts: NormalizedSearchText[],
+): SystemTrayTextMatch | null => {
+  const exact = searchTexts.find((searchText) =>
+    attributions.some((attribution) => attributionEquals(attribution, searchText.normalized)),
+  );
+  if (exact) {
+    return { text: exact.text, matchType: "exact" };
+  }
+  const partial = searchTexts.find((searchText) =>
+    attributions.some((attribution) =>
+      attributionName(attribution).includes(searchText.normalized),
+    ),
+  );
+  return partial ? { text: partial.text, matchType: "partial" } : null;
 };
 
 const mergeTextMatch = (
@@ -179,7 +214,26 @@ const collectCompositeNotificationCandidates = (
     return matches(titleText) && matches(bodyText) && matches(actionText);
   };
 
-  const resolveNodeMatches = (node: ViewHierarchyNode): SystemTrayMatchResult["matches"] => {
+  // Inside a row that renders an app-name element, only that element can
+  // satisfy the app filter; a row without one falls back to all its text.
+  const resolveAppMatch = (
+    node: ViewHierarchyNode,
+    nodeTextCandidatesLower: string[],
+    inAttributedRow: boolean,
+  ): SystemTrayTextMatch | null => {
+    const attribution = getNodeAttribution(node);
+    if (attribution) {
+      return resolveAttributionMatch([attribution], appSearchTexts);
+    }
+    return inAttributedRow
+      ? null
+      : resolveMatchForSearchTexts(nodeTextCandidatesLower, appSearchTexts);
+  };
+
+  const resolveNodeMatches = (
+    node: ViewHierarchyNode,
+    inAttributedRow: boolean,
+  ): SystemTrayMatchResult["matches"] => {
     const nodeTextCandidates = extractNodeTextCandidates(node);
     if (nodeTextCandidates.length === 0) {
       return {};
@@ -210,7 +264,7 @@ const collectCompositeNotificationCandidates = (
     }
 
     if (appSearchTexts.length > 0) {
-      const match = resolveMatchForSearchTexts(nodeTextCandidatesLower, appSearchTexts);
+      const match = resolveAppMatch(node, nodeTextCandidatesLower, inAttributedRow);
       if (match) {
         matches.app = match;
       }
@@ -219,24 +273,20 @@ const collectCompositeNotificationCandidates = (
     return matches;
   };
 
+  interface VisitScope {
+    depth: number;
+    groupNode?: ViewHierarchyNode;
+    inAttributedRow: boolean;
+  }
+
   const visitChildren = (
     node: ViewHierarchyNode,
-    depth: number,
-    currentGroupNode: ViewHierarchyNode | undefined,
+    scope: VisitScope,
     combinedMatches: SystemTrayMatchResult["matches"],
   ): { combinedMatches: SystemTrayMatchResult["matches"]; childHasAll: boolean } => {
     let childHasAll = false;
-    const children = node.node;
-    if (Array.isArray(children)) {
-      for (const child of children) {
-        const childResult = visit(child, depth + 1, currentGroupNode);
-        combinedMatches = mergeMatchMaps(combinedMatches, childResult.matches);
-        if (childResult.hasAll) {
-          childHasAll = true;
-        }
-      }
-    } else if (children && typeof children === "object") {
-      const childResult = visit(children, depth + 1, currentGroupNode);
+    for (const child of getDirectChildNodes(node)) {
+      const childResult = visit(child, { ...scope, depth: scope.depth + 1 });
       combinedMatches = mergeMatchMaps(combinedMatches, childResult.matches);
       if (childResult.hasAll) {
         childHasAll = true;
@@ -248,20 +298,22 @@ const collectCompositeNotificationCandidates = (
 
   const visit = (
     node: ViewHierarchyNode,
-    depth: number,
-    groupNode?: ViewHierarchyNode,
+    scope: VisitScope,
   ): { matches: SystemTrayMatchResult["matches"]; hasAll: boolean } => {
     if (!node || visited.has(node)) {
       return { matches: {}, hasAll: false };
     }
     visited.add(node);
 
-    const nodeMatches = resolveNodeMatches(node);
-    const currentGroupNode = nodeIsNotificationGroup(node) ? node : groupNode;
+    const { depth } = scope;
+    const inAttributedRow =
+      scope.inAttributedRow ||
+      (nodeIsNotificationRowRoot(node) && collectNotificationAttributions(node).length > 0);
+    const nodeMatches = resolveNodeMatches(node, inAttributedRow);
+    const currentGroupNode = nodeIsNotificationGroup(node) ? node : scope.groupNode;
     const { combinedMatches, childHasAll } = visitChildren(
       node,
-      depth,
-      currentGroupNode,
+      { depth, groupNode: currentGroupNode, inAttributedRow },
       nodeMatches,
     );
 
@@ -278,7 +330,7 @@ const collectCompositeNotificationCandidates = (
   };
 
   for (const rootNode of rootNodes) {
-    visit(rootNode, 0);
+    visit(rootNode, { depth: 0, inAttributedRow: false });
   }
 
   return candidates;
@@ -373,10 +425,27 @@ const findElementMatch = (
   text: string,
 ): SystemTrayElementMatch | null => findFirstElementMatch(selector, viewHierarchy, [text]);
 
+// A subtree carrying app-name elements is attributed by them alone; otherwise
+// the app filter may match any of its text unless the caller knows the row is
+// attributed elsewhere (a group child under an app-name header).
+const findAppMatch = (
+  selector: ResolverElementSelector,
+  viewHierarchy: ViewHierarchyResult,
+  appMatchTexts: string[],
+  wholeRowFallback: boolean,
+): SystemTrayTextMatch | null => {
+  const attributions = getHierarchyRoots(viewHierarchy).flatMap(collectNotificationAttributions);
+  if (attributions.length > 0) {
+    return resolveAttributionMatch(attributions, buildNormalizedSearchTexts(appMatchTexts));
+  }
+  return wholeRowFallback ? findFirstTextMatch(selector, viewHierarchy, appMatchTexts) : null;
+};
+
 const buildNotificationMatch = (
   viewHierarchy: ViewHierarchyResult,
   criteria: SystemTrayNotificationArgs,
   appMatchTexts: string[],
+  wholeRowFallback = true,
 ): SystemTrayMatchResult => {
   const selector = new ResolverElementSelector();
   const matches: SystemTrayMatchResult["matches"] = {};
@@ -410,7 +479,7 @@ const buildNotificationMatch = (
   }
 
   if (criteria.appId) {
-    const appMatch = findFirstTextMatch(selector, viewHierarchy, appMatchTexts);
+    const appMatch = findAppMatch(selector, viewHierarchy, appMatchTexts, wholeRowFallback);
     if (!appMatch) {
       matched = false;
     } else {
@@ -495,12 +564,13 @@ const buildNotificationCandidateMatch = (
   appMatchTexts: string[],
 ): SystemTrayMatchResult => {
   const subHierarchy = createSubHierarchy(candidate.node);
-  const direct = buildNotificationMatch(subHierarchy, criteria, appMatchTexts);
-  if (direct.matched || !candidate.groupNode || !criteria.appId) {
-    return direct;
-  }
-  const header = getNotificationGroupHeader(candidate.groupNode);
-  if (!header) {
+  const header =
+    candidate.groupNode && criteria.appId ? getNotificationGroupHeader(candidate.groupNode) : null;
+  // A child of a group whose header names the app is attributed by that header,
+  // never by an app name in the child's own title or body (#17401).
+  const headerAttributed = collectNotificationAttributions(header).length > 0;
+  const direct = buildNotificationMatch(subHierarchy, criteria, appMatchTexts, !headerAttributed);
+  if (direct.matched || !header) {
     return direct;
   }
   const content = buildNotificationMatch(subHierarchy, { ...criteria, appId: undefined }, []);

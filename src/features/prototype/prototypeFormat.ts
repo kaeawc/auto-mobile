@@ -1,4 +1,3 @@
-import { logger } from "../../utils/logger";
 import { resolvePrototypeDataPointer } from "./prototypeData";
 import type {
   PrototypeFormat,
@@ -6,11 +5,18 @@ import type {
   PrototypeRepeatDerivedEntry,
 } from "./prototypeFormatSchema";
 
+/** Where a rejected authored format is traced; injected so this path stays browser-safe. */
+export interface PrototypeFormatLogger {
+  debug(message: string): void;
+}
+
 /** Caller supplies device defaults and a clock snapshot; no ambient clock is read. */
 export interface PrototypeFormatEnvironment {
   locale: string;
   timeZone: string;
   nowMs: number;
+  /** Absent in a browser embed, where a rejected format is shown as empty text only. */
+  logger?: PrototypeFormatLogger;
 }
 
 /** Fixed elapsed-time units, not calendar arithmetic: 30-day months and 365-day years. */
@@ -131,7 +137,7 @@ export function formatPrototypeValue(
       : numeric(format, input, formatting.locale);
   } catch (error) {
     // Invalid Intl locales, zones and option combinations are expected authored-input failures.
-    logger.debug(`Prototype formatter rejected input: ${String(error)}`);
+    formatting.logger?.debug(`Prototype formatter rejected input: ${String(error)}`);
     return undefined;
   }
 }

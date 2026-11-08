@@ -10,6 +10,13 @@ export const MANUFACTURER_PROFILE_IDS = [
   "oneplus-oxygenos",
   "oppo-coloros",
   "motorola",
+  "huawei-emui",
+  "vivo-funtouch",
+  "realme-ui",
+  "meizu-flyme",
+  "asus-zenui",
+  "sony-xperia",
+  "tecno-hios",
 ] as const;
 
 export type ManufacturerProfileId = (typeof MANUFACTURER_PROFILE_IDS)[number];

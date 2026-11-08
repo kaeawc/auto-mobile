@@ -17,6 +17,10 @@ import {
   type XctraceRecorderDependencies,
 } from "../../../src/features/performanceTrace/XctraceRecorder";
 import { traceArtifactBytes } from "../../../src/features/performanceTrace/xctraceFinalization";
+import { XctraceTemplateUnavailableError } from "../../../src/features/performanceTrace/XctraceTemplateUnavailableError";
+import { XctraceUnsupportedEnvironmentError } from "../../../src/features/performanceTrace/XctraceUnsupportedEnvironmentError";
+import type { XctraceEnvironment } from "../../../src/features/performanceTrace/xctraceCompatibility";
+import { parseXctraceTemplateList } from "../../../src/features/performanceTrace/performanceTraceTemplates";
 import { PerformanceTraceStopTimeoutError } from "../../../src/features/performanceTrace/PerformanceTraceStopTimeoutError";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -182,9 +186,31 @@ describe("Perfetto recorder (#14102)", () => {
   });
 });
 
+/** `xcrun xctrace list templates` on Xcode 26.6 (17F113): no "Hangs" template (#16970). */
+const XCODE_26_6_TEMPLATES = [
+  "== Standard Templates ==",
+  "Activity Monitor",
+  "Allocations",
+  "Animation Hitches",
+  "App Launch",
+  "Audio System Trace",
+  "Leaks",
+  "Logging",
+  "Network",
+  "SwiftUI",
+  "System Trace",
+  "Time Profiler",
+  "",
+  "== Custom Templates ==",
+  "",
+].join("\n");
+
 class FakeXctraceHost implements XctraceHost {
   readonly spawned: Array<{ file: string; args: string[]; child: FakeChildProcess }> = [];
   readonly exports: string[][] = [];
+  templateListCalls = 0;
+  templateList = XCODE_26_6_TEMPLATES;
+  templateListError: Error | undefined;
   startOutput = "Starting recording with the Hangs template. Ctrl-C to stop the recording.\n";
 
   constructor(private readonly timer: FakeTimer) {}
@@ -201,6 +227,13 @@ class FakeXctraceHost implements XctraceHost {
     args: string[] = [],
     _options?: HostCommandOptions,
   ): Promise<ExecResult> {
+    if (args.join(" ") === "xctrace list templates") {
+      this.templateListCalls += 1;
+      if (this.templateListError) {
+        throw this.templateListError;
+      }
+      return execResult(this.templateList);
+    }
     this.exports.push(args);
     if (args.includes("--toc")) {
       return execResult(fixture("xctrace-toc.xml"));
@@ -451,6 +484,62 @@ describe("xctrace recorder (#14102)", () => {
   });
 });
 
+describe("xctrace template availability (#16970)", () => {
+  test("records hangs with the Time Profiler template, which carries the Hangs instrument", async () => {
+    const { host, recorder } = xctrace();
+    await recorder.start(iosRequest);
+    const args = host.spawned[0]!.args;
+    expect(args[args.indexOf("--template") + 1]).toBe("Time Profiler");
+  });
+
+  test("refuses a template the installed Xcode lacks before spawning xctrace record", async () => {
+    const { host, recorder } = xctrace();
+    host.templateList = "== Standard Templates ==\nAllocations\nApp Launch\n";
+    const error = await recorder.start(iosRequest).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(XctraceTemplateUnavailableError);
+    expect(error).toBeInstanceOf(ActionableError);
+    const unavailable = error as XctraceTemplateUnavailableError;
+    expect(unavailable.template).toBe("hangs");
+    expect(unavailable.instrumentsTemplate).toBe("Time Profiler");
+    expect(unavailable.availableTemplates).toEqual(["appLaunch", "allocations"]);
+    expect(unavailable.message).toContain("appLaunch, allocations");
+    expect(host.spawned).toEqual([]);
+  });
+
+  test("names no alternatives when no mapped template is installed", async () => {
+    const { host, recorder } = xctrace();
+    host.templateList = "== Standard Templates ==\nLeaks\n";
+    await expect(recorder.start(iosRequest)).rejects.toThrow("xcrun xctrace list templates");
+  });
+
+  test("reads the template list once per recorder", async () => {
+    const { host, recorder } = xctrace();
+    await recorder.start(iosRequest);
+    await recorder.start({ ...iosRequest, traceId: "trace-3", template: "hitches" });
+    expect(host.templateListCalls).toBe(1);
+    expect(host.spawned).toHaveLength(2);
+  });
+
+  test("still records when the template list cannot be read, and retries the list next time", async () => {
+    const { host, recorder } = xctrace();
+    host.templateListError = new Error("xcrun: error: unable to find utility");
+    await recorder.start(iosRequest);
+    expect(host.spawned).toHaveLength(1);
+
+    host.templateListError = undefined;
+    await recorder.start({ ...iosRequest, traceId: "trace-3" });
+    expect(host.templateListCalls).toBe(2);
+  });
+
+  test("parses template names without section headings or blank lines", () => {
+    expect([...parseXctraceTemplateList(XCODE_26_6_TEMPLATES)]).not.toContain("Hangs");
+    expect(parseXctraceTemplateList(XCODE_26_6_TEMPLATES)).toEqual(
+      new Set(XCODE_26_6_TEMPLATES.split("\n").filter((line) => line && !line.startsWith("=="))),
+    );
+  });
+});
+
 describe("trace artifact byte measurement", () => {
   test("sums nested file bytes, observes growth, and treats a missing bundle as zero", async () => {
     const root = await mkdtemp(join(tmpdir(), "trace-size-"));
@@ -465,5 +554,67 @@ describe("trace artifact byte measurement", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+class FakeXctraceEnvironment implements XctraceEnvironment {
+  readonly calls: string[] = [];
+  constructor(private readonly versions: { xcode?: string; runtime?: string }) {}
+  async xcodeVersion(): Promise<string | undefined> {
+    this.calls.push("xcodeVersion");
+    return this.versions.xcode;
+  }
+  async simulatorRuntime(): Promise<string | undefined> {
+    this.calls.push("simulatorRuntime");
+    return this.versions.runtime;
+  }
+}
+
+describe("xctrace known-broken Xcode and simulator pairs (#16999)", () => {
+  test("refuses Xcode 26.6 with an iOS 26.5 simulator before running xctrace", async () => {
+    const environment = new FakeXctraceEnvironment({ xcode: "26.6", runtime: "26.5" });
+    const { host, recorder } = xctrace(4321, { environment });
+    const error = await recorder.start(iosRequest).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(XctraceUnsupportedEnvironmentError);
+    expect(error).toBeInstanceOf(ActionableError);
+    const unsupported = error as XctraceUnsupportedEnvironmentError;
+    expect(unsupported.xcodeVersion).toBe("26.6");
+    expect(unsupported.simulatorRuntime).toBe("26.5");
+    expect(unsupported.message).toContain("Xcode 27.x");
+    expect(unsupported.message).toContain("DEVELOPER_DIR");
+    expect(host.spawned).toEqual([]);
+    expect(host.templateListCalls).toBe(0);
+  });
+
+  test("refuses a 26.6.x point release on a 26.5.x runtime", async () => {
+    const environment = new FakeXctraceEnvironment({ xcode: "26.6.1", runtime: "26.5.1" });
+    const { host, recorder } = xctrace(4321, { environment });
+    await expect(recorder.start(iosRequest)).rejects.toBeInstanceOf(
+      XctraceUnsupportedEnvironmentError,
+    );
+    expect(host.spawned).toEqual([]);
+  });
+
+  test.each([
+    ["Xcode 27 on iOS 26.5", { xcode: "27.1", runtime: "26.5" }],
+    ["Xcode 26.6 on iOS 27.0", { xcode: "26.6", runtime: "27.0" }],
+    ["Xcode 26.6 on iOS 26.4", { xcode: "26.6", runtime: "26.4" }],
+    ["an unknown Xcode", { runtime: "26.5" }],
+    ["an unknown simulator runtime (or a physical device)", { xcode: "26.6" }],
+  ])("records with %s", async (_label, versions) => {
+    const environment = new FakeXctraceEnvironment(versions);
+    const { host, recorder } = xctrace(4321, { environment });
+    const recording = await recorder.start(iosRequest);
+    expect(host.spawned).toHaveLength(1);
+    await recording.stop();
+    expect(host.spawned[0]!.child.signalCode).toBe("SIGINT");
+  });
+
+  test("does not read the Xcode version when the device has no simulator runtime", async () => {
+    const environment = new FakeXctraceEnvironment({ xcode: "26.6" });
+    const { recorder } = xctrace(4321, { environment });
+    await recorder.start(iosRequest);
+    expect(environment.calls).toEqual(["simulatorRuntime"]);
   });
 });

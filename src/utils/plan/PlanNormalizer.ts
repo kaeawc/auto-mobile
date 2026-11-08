@@ -82,7 +82,7 @@ export class PlanNormalizer {
 
     // `expectations` is a plan-step field, not a tool parameter (#9925): keep it off `params` so
     // strict tool schemas do not reject the step. It is retained on the step so the executor can
-    // warn that it is not evaluated.
+    // check it after the step's tool succeeds (#16817).
     if (Array.isArray(step.expectations) && step.expectations.length > 0) {
       normalizedStep.expectations = step.expectations;
     }

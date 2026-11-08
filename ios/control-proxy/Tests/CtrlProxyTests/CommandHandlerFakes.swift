@@ -335,6 +335,7 @@ final class FakeDisplayGestureProvider: DisplayGestureProviding {
     var selections: [GestureCoordinateSelection] = []
     var actions: [String] = []
     var symbolsAvailable = true
+    var synthesisResults: [Bool] = []
     var synthesisError: Error?
     var tapDurations: [TimeInterval] = []
 
@@ -353,6 +354,7 @@ final class FakeDisplayGestureProvider: DisplayGestureProviding {
     func synthesize(_ touch: DisplayTouch) throws -> Bool {
         touches.append(touch)
         if let synthesisError { throw synthesisError }
+        if !synthesisResults.isEmpty { return synthesisResults.removeFirst() }
         return symbolsAvailable
     }
 

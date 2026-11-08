@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @MainActor
 struct PrototypeScreen: View {
@@ -22,15 +23,27 @@ struct PrototypeScreen: View {
     @State private var confirmsReset = false
     @State private var watchdog = PrototypeRenderWatchdog(clock: SystemPrototypeClock())
 
+    @State private var diagnostics: ViewerDiagnostics
+    private let copyText: @MainActor (String) -> Void
+
     private let registry: PrototypePlatformRegistry
     private let network: PrototypeNetworkConfiguration
 
     init(
         store: PrototypeLibraryStore, entry: PrototypeLibraryEntry, networkSwitch: PrototypeLibraryNetworkSwitch,
         registry: PrototypePlatformRegistry = .system,
+        appVersion: String = Bundle.main
+            .object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
+        osVersion: String = UIDevice.current.systemVersion,
+        copyText: @escaping @MainActor (String) -> Void = { UIPasteboard.general.string = $0 },
         onLoaded: @escaping @MainActor () -> Void = {}, onLoadFailed: @escaping @MainActor () -> Void = {},
         onClose: @escaping @MainActor () -> Void
     ) {
+        _diagnostics = State(initialValue: ViewerDiagnostics(
+            appVersion: appVersion, osVersion: osVersion,
+            capabilities: Set(AutoMobilePrototypeCapabilities.supported + registry.capabilities)
+        ))
+        self.copyText = copyText
         self.onClose = onClose
         self.registry = registry
         self.onLoaded = onLoaded
@@ -78,6 +91,7 @@ struct PrototypeScreen: View {
                     Button("Settings", systemImage: "gearshape") { showsSettings = true }
                     Button("Relaunch", systemImage: "arrow.clockwise") { relaunch(.relaunch) }
                     Button("Reset", systemImage: "arrow.counterclockwise", role: .destructive) { confirmsReset = true }
+                    Button("Copy diagnostics", systemImage: "doc.on.doc") { copyText(diagnostics.format()) }
                     Button("Close", systemImage: "xmark") { onClose() }
                 } label: {
                     Label("Prototype actions", systemImage: "ellipsis.circle")
@@ -108,6 +122,7 @@ struct PrototypeScreen: View {
                     onDismiss: { _ in onClose() },
                     onLoadError: {
                         watchdog.cancel()
+                        diagnostics.record(ViewerFailure(rendererError: $0))
                         error = $0
                         self.content = nil
                         onLoadFailed()
@@ -146,20 +161,25 @@ struct PrototypeScreen: View {
             error = nil
             load()
         } catch {
+            diagnostics.record(.libraryStorage)
             self.error = error
             onLoadFailed()
         }
     }
 
     private func load() {
+        var failure = ViewerFailure.libraryCorrupt
         do {
             let loaded = try store.load(entry.libraryId)
+            failure = .storageLoad
             let directory = try store.storageURL(entry.libraryId)
+            failure = .libraryStorage
             try store.markOpened(entry.libraryId)
             storage = directory
             rendererActive = true
             content = loaded
             watchdog.start {
+                diagnostics.record(.watchdog)
                 // No first content within the budget: show the error state; Back and Close stay available.
                 error = PrototypeLibraryFailure(
                     path: entry.label,
@@ -172,6 +192,7 @@ struct PrototypeScreen: View {
                 onLoadFailed()
             }
         } catch {
+            diagnostics.record(failure)
             self.error = error
             onLoadFailed()
         }

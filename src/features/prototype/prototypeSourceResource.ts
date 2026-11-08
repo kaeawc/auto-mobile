@@ -23,7 +23,9 @@ import type { ShownSpecJson } from "./PrototypeShownSpecs";
 import type { PrototypeSpecRevisionSource } from "./prototypeSpecRevisions";
 import { prototypeResourceUri } from "./prototypeWebUris";
 import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "./web/deviceFrames";
-import { parsePrototypeRevision } from "./web/prototypeWebResource";
+import { frameOrientations, screenSize } from "./web/webFrame";
+import { parsePrototypeRevision, prototypeRevisionFilter } from "./web/prototypeWebResource";
+import { withActionableWebInput } from "./web/prototypeWebInputActionable";
 
 /**
  * `automobile:prototype/{id}/compose` and `.../swiftui` (#16345): one source file per prototype,
@@ -51,12 +53,16 @@ export interface PrototypeSourceResourceQuery {
   readonly id: string;
   readonly frame?: string;
   readonly revision?: string;
+  /** Only this MCP session's revisions (#17358); absent for every session's. */
+  readonly mcpSessionId?: string;
 }
 
 export interface PrototypeSourceResourceMeta {
   readonly revision: number;
   readonly deviceRevision?: number;
-  /** Kept revisions of the id, oldest first. */
+  /** The MCP session that produced the revision, when known (#17358). */
+  readonly mcpSessionId?: string;
+  /** Kept revisions of the id (only the filtered session's, when filtered), oldest first. */
   readonly revisions: readonly number[];
   readonly frame: string;
   readonly sha256: string;
@@ -120,6 +126,12 @@ function header(
   ];
 }
 
+/** The preview in the frame's default orientation, so a TV or car preview is landscape. */
+function previewSize(frame: DeviceFrame) {
+  const { width, height } = screenSize(frame, frameOrientations(frame)[0]!);
+  return { name: frame.label, widthDp: width, heightDp: height };
+}
+
 /** One prototype revision as a single Compose or SwiftUI file sized for a device frame. */
 export function readPrototypeSourceResource(
   source: PrototypeSpecRevisionSource,
@@ -127,8 +139,18 @@ export function readPrototypeSourceResource(
   query: PrototypeSourceResourceQuery,
   rendererVersion: string,
 ): PrototypeSourceResource {
+  return withActionableWebInput(() => buildSourceResource(source, format, query, rendererVersion));
+}
+
+function buildSourceResource(
+  source: PrototypeSpecRevisionSource,
+  format: PrototypeSourceFormat,
+  query: PrototypeSourceResourceQuery,
+  rendererVersion: string,
+): PrototypeSourceResource {
   const { platform, mimeType, render } = FORMATS[format];
-  const shown = source.revision(query.id, parsePrototypeRevision(query.revision));
+  const filter = prototypeRevisionFilter(query.mcpSessionId);
+  const shown = source.revision(query.id, parsePrototypeRevision(query.revision), filter);
   // The format fixes the platform, so its default frame is the closest known profile.
   const frame = deviceFrameOrThrow(query.frame ?? defaultDeviceFrameId(platform));
   rejectUnexportableSpec(shown.spec, platform);
@@ -152,21 +174,18 @@ export function readPrototypeSourceResource(
         frame,
         version: rendererVersion,
       }),
-      preview: {
-        name: frame.label,
-        widthDp: frame.screen.widthDp,
-        heightDp: frame.screen.heightDp,
-      },
+      preview: previewSize(frame),
     },
   });
-  const { deviceRevision } = shown;
+  const { deviceRevision, mcpSessionId } = shown;
   return {
     text,
     mimeType,
     meta: {
       revision: shown.revision,
       ...(deviceRevision === undefined ? {} : { deviceRevision }),
-      revisions: source.history(query.id).map((entry) => entry.revision),
+      ...(mcpSessionId === undefined ? {} : { mcpSessionId }),
+      revisions: source.history(query.id, filter).map((entry) => entry.revision),
       frame: frame.id,
       sha256: createHash("sha256").update(text, "utf8").digest("hex"),
       rendererVersion,

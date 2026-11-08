@@ -145,6 +145,11 @@ export class HybridVideoCaptureBackend implements VideoCaptureBackend {
       return isIosPhysicalUdid(device.deviceId) ? this.physicalIosBackend : this.ffmpegBackend;
     }
 
+    if (device.platform === "tvos") {
+      // Apple TV targets are simulators; `simctl io recordVideo` captures them like iOS (#16725).
+      return this.ffmpegBackend;
+    }
+
     if (device.platform === "android") {
       const useFfmpegPipe = readEnvBool(ENV.ANDROID_VIDEO_USE_FFMPEG_PIPE);
       if (useFfmpegPipe) {

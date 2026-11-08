@@ -111,6 +111,21 @@ function isUnreadableHierarchy(result: ObserveResult): boolean {
   );
 }
 
+function unreportedDisplayError(
+  result: ObserveResult,
+  requestedDisplayId: number,
+): DisplaySelectionError {
+  const failure = result.viewHierarchy?.hierarchy;
+  if (requestedDisplayId !== 0 && (failure?.error || failure?.unavailableReason)) {
+    return new DisplaySelectionError(
+      failure.unavailableDetail ?? failure.error ?? "Selected display hierarchy is unavailable",
+    );
+  }
+  return new DisplaySelectionError(
+    "CtrlProxy APK too old for display routing; update it and retry the observation.",
+  );
+}
+
 /** A routed Android observation must return the display it asked for. */
 function assertRoutedDisplayReported(
   { result, requestedPanel, requestedDisplayId, preserveDisplayState }: FinalDisplayBindingContext,
@@ -123,9 +138,7 @@ function assertRoutedDisplayReported(
     !panelUniqueId &&
     !(preserveDisplayState && isUnreadableHierarchy(result))
   ) {
-    throw new DisplaySelectionError(
-      "CtrlProxy APK too old for display routing; update it and retry the observation.",
-    );
+    throw unreportedDisplayError(result, requestedDisplayId);
   }
   if (
     requestedDisplayId !== undefined &&

@@ -17,6 +17,7 @@ import {
 } from "../../utils/ios-cmdline-tools/CoreDeviceCapabilityProbe";
 import { checkDevicectlAvailability } from "../../utils/ios-cmdline-tools/DevicectlDeviceLister";
 import { compareSimctlVersions } from "../../utils/ios-cmdline-tools/simctlVersion";
+import { parseXcodeVersion } from "../../utils/ios-cmdline-tools/XcodebuildClient";
 import { checkIosSimulatorFleetCost } from "./iosSimFleet";
 import { DOCTOR_EXEC_TIMEOUT_MS } from "../../utils/diagnosticTimeouts";
 import { createIosDoctorDependencies } from "./iosDoctorDependencies";
@@ -45,11 +46,6 @@ export { checkIosCtrlProxyRunner, checkIosObserveRoundTrip } from "./iosRunnerCh
 export { checkIosNetworkFilter } from "./iosNetworkFilterChecks";
 
 const MIN_XCODE_VERSION = "15.0";
-
-function parseXcodeVersion(output: string): string | null {
-  const match = output.match(/Xcode\s+([0-9]+(?:\.[0-9]+)*)/);
-  return match ? match[1] : null;
-}
 
 function compareVersions(current: string, minimum: string): number {
   const currentParts = current.split(".").map((part) => Number(part));

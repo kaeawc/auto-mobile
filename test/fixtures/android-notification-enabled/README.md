@@ -18,8 +18,14 @@ foreground. API 33 files use bare mode lines; API 37 files include access or
 rejection history suffixes. These API labels describe representative output
 shapes, not verified platform differences.
 
-The `pm grant/revoke` permission path on API 33+ (including unknown API level)
-and the `cmd appops set/get` path before API 33 are **NOT device-verified**.
-Permission read-back tests reuse the existing captured
+`api35-deskclock-{granted,revoked}-dumpsys-package.txt` are verbatim runtime-permission
+section captures for `com.google.android.deskclock` (UID 10151) on Android 15,
+API 35. Revoking POST_NOTIFICATIONS disabled notifications; granting it restored
+them. Tests supply synthetic package/user headers around these captured sections
+so the package permission parser can read them. The appops and notification-settings
+captures are omitted because these tests do not consume them.
+
+The `cmd appops set/get` path before API 33 is **NOT device-verified**.
+Other permission read-back tests reuse the existing captured
 `android-dumpsys-package/dumpsys-package-system-installed.txt`; renamed packages,
 user IDs, and denied grant variants are hand-reconstructed test adaptations.

@@ -29,6 +29,16 @@ Branch on `reason`, not on error text: `BRIDGE_NOT_INSTALLED`, `DISABLED`,
 `deviceLocked: locked` reports the device lock state but does not block metadata
 reads. Deletion can report per-alias `locked` and `authentication_required` outcomes.
 
+A metadata read checks that each present key created with
+`setUserAuthenticationRequired(true)` can still be used. If that key has been
+permanently invalidated (for example by a new fingerprint enrollment) or needs
+authentication first, the whole read returns `authentication_required` /
+`AUTHENTICATION_REQUIRED` with no `entries`, even when other aliases in the scope
+are healthy; query one `alias` to find the affected key. Authenticate through the
+app's normal flow, or delete and re-create an invalidated key. Other keys, and keys
+whose usability cannot be checked, report presence and category as before, so `ok`
+does not prove that a key is usable.
+
 ## Android scoped deletion
 
 Call `resetKeychain` with `appId`, an explicit device target (`deviceId`, `device`,
@@ -65,6 +75,54 @@ not advertise deletion authorization. `secure_state.read` remains unavailable.
 The provider and its discovery/deletion calls are absent from release builds.
 Package-data reset remains a separate operation. On iOS Simulator,
 `resetKeychain` still requires `confirm: true` and clears every app's Keychain.
+
+## Fault injection
+
+Call `resetKeychain` with `action: "injectFault"`, `appId`, an explicit device
+target, `scope` and/or `alias`, and `kind`: `KEY_STORE_EXCEPTION`,
+`PROVIDER_EXCEPTION`, `USER_NOT_AUTHENTICATED`, `DELAY`, or
+`STRONGBOX_UNAVAILABLE`. Nothing is deleted. Use exact declared aliases; a scope
+selects all its aliases. For `DELAY`, supply an integer `delayMs` from 1 through
+10000; `kind` and `delayMs` are accepted only with `injectFault`. The delay runs
+before each selected alias's metadata lookup or deletion operation, and the delays
+in one provider call add up to at most 10000 ms in total: once that is spent, the
+call's remaining operations run without delay. A `resetKeychain` reset waits up to
+20 s for the bridge, so injected delay alone does not make it report
+`BRIDGE_UNAVAILABLE`. `KEY_STORE_EXCEPTION`, `PROVIDER_EXCEPTION`, and
+`USER_NOT_AUTHENTICATED` simulate the named failure on those same operations.
+
+`STRONGBOX_UNAVAILABLE` affects key generation only, and only in an app that runs
+the debug SDK's key-generation check with its key spec immediately before
+generating a key ([integration](../design-docs/plat/android/keystore-strongbox-fault.md)).
+When the alias is armed and the spec requests StrongBox, generation fails with
+`StrongBoxUnavailableException`, as it does on a device without StrongBox, so the
+app's fallback runs. Keys that do not request StrongBox, unarmed aliases, API
+levels below 28, and release builds are unaffected. Metadata and deletion ignore
+this kind.
+
+Setting a fault replaces the previous fault for each selected alias.
+
+Call `resetKeychain` with `action: "clearFaults"` and `alias` to clear one fault,
+or `scope` to clear all faults for that scope. Empty selectors are refused for both
+actions. Both are Android-only, keep the reset's selector and `confirm: false`
+rules, and require the same app opt-in and mutation policy as deletion. Faults
+persist until cleared or the app process restarts; observing disabled or reset
+test state clears all faults. Disabled test state never applies faults. The same
+debug app provider also accepts these as `injectFault` and `clearFaults` calls on
+`content://<appId>.automobile.keystore` with the same extras.
+
+The result has `action`, `success` (true only for outcome `ok`), `scope: "app"`,
+`schemaVersion`, `capability: "storage.keystore"`, `bridgeAvailable`, `outcome`,
+and any supplied `requestedScope`, `requestedAlias`, and `requestedKind`.
+Refusals add `reason`: `disabled` / `DISABLED`, `authorization_denied` /
+`MUTATION_NOT_ALLOWED`, `scope_not_declared` / `SCOPE_NOT_DECLARED`,
+`invalid_selector` / `EMPTY_SELECTOR` or `INVALID_FAULT`, `unsupported` /
+`DECLARED_UNSUPPORTED` (an app SDK without fault injection), or `unavailable` /
+`BRIDGE_NOT_INSTALLED` (no debug SDK provider in the app) or `BRIDGE_UNAVAILABLE`.
+Correct the selector, kind, delay, or app authorization, or install a debug build
+with a current SDK, before retrying. Faulted metadata can report
+`authentication_required` or `unavailable`; deletion retains its per-alias
+failure outcomes. Responses never include exception text or key material.
 
 ## iOS Keychain item deletion
 

@@ -51,12 +51,19 @@ fun interface LibraryImportCommit {
     bundle: PrototypeBundle,
     source: LibrarySource,
     label: String?,
+    /** App-owned link-origin host of a confirmed share import; null for every other source. */
+    sourceHost: String?,
   ): LibraryResult<LibraryEntry>
 }
 
 /** The validation and commit half of an import, for bytes the app has already read itself. */
 fun interface LibraryBytesImporter {
-  fun importBytes(bytes: ByteArray, source: LibrarySource, label: String?): LibraryImportResult
+  fun importBytes(
+    bytes: ByteArray,
+    source: LibrarySource,
+    label: String?,
+    sourceHost: String?,
+  ): LibraryImportResult
 }
 
 /** No Android or disk dependencies: the only side effect is the final injected commit. */
@@ -79,7 +86,7 @@ class ValidatedLibraryImporter(
           ?: return LibraryImportResult.Rejected("content", "Content exceeds byte limit")
       val source =
         if (request.action == ImportAction.View) LibrarySource.file else LibrarySource.share
-      importBytes(bytes, source, null)
+      importBytes(bytes, source, null, null)
     } catch (error: Exception) {
       Logger.getLogger("ProtoViewerImport").log(Level.WARNING, "Import failed", error)
       LibraryImportResult.Rejected("content", "Unable to read or commit prototype within limits")
@@ -93,6 +100,7 @@ class ValidatedLibraryImporter(
     bytes: ByteArray,
     source: LibrarySource,
     label: String?,
+    sourceHost: String?,
   ): LibraryImportResult {
     return try {
       val bundle =
@@ -104,7 +112,7 @@ class ValidatedLibraryImporter(
       validate(bundle)?.let {
         return it
       }
-      when (val saved = commit.commit(bundle, source, label)) {
+      when (val saved = commit.commit(bundle, source, label, sourceHost)) {
         is LibraryResult.Success -> LibraryImportResult.Imported(saved.value)
         is LibraryResult.Failure -> LibraryImportResult.Rejected("library", saved.error.name)
       }

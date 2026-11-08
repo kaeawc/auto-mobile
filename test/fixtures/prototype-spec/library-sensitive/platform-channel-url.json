@@ -1,0 +1,49 @@
+{
+  "spec": {
+    "id": "sensitive-flow",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["location", "auth", "realtime"]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Location: {platform:/location/current}",
+          "visibleWhen": {
+            "platform": "/auth/userId",
+            "notEquals": ""
+          }
+        },
+        {
+          "type": "button",
+          "label": "Send",
+          "onTap": [
+            {
+              "type": "request",
+              "url": "https://example.com/submit",
+              "via": "device"
+            }
+          ]
+        }
+      ]
+    },
+    "channels": {
+      "updates": {
+        "kind": "sse",
+        "via": "device",
+        "url": "https://example.com/{platform:/auth/userId}"
+      }
+    }
+  },
+  "options": {
+    "library": true
+  },
+  "expectedPath": "channels.updates.url",
+  "expectedMessage": "Sensitive value cannot be bound into a request"
+}

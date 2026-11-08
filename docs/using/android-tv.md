@@ -5,7 +5,9 @@ it uses for a phone, plus D-pad focus navigation. This guide covers creating one
 and what is out of scope.
 
 > Use the `android-tv` image for TV apps. Touch gestures need a device with a touchscreen;
-> otherwise, use D-pad navigation.
+> otherwise, use D-pad navigation. AutoMobile treats every Android TV as having no touchscreen,
+> including TV emulators, which report one although they have no touch input. A plain `tapOn` by
+> `text` or `elementId` moves focus and presses `enter` for you; see [Navigating a TV app](#navigating-a-tv-app).
 
 ## Install a TV system image
 
@@ -97,18 +99,64 @@ appears in `listDevices` and can be asked for in a device `requires` clause or a
 ## Navigating a TV app
 
 TV apps are driven by focus, not touch. Use `focusNavigate` to move D-pad focus to an element and
-`sendKeys` with `enter` to activate the focused item.
-`pressButton` handles back and home.
+`sendKeys` with `enter` to activate the focused item, or pass `select: true` to `focusNavigate` to
+press `enter` once focus lands; the result's `selected` is `true` only when `enter` was pressed.
+`pressButton` handles back, home and the remote's keys:
+
+| Button                                                   | Sends                                  |
+| -------------------------------------------------------- | -------------------------------------- |
+| `up`, `down`, `left`, `right`, `select`                  | D-pad directions and D-pad center      |
+| `playPause`, `fastForward`, `rewind`, `next`, `previous` | Media keys to the current media player |
+
+The names match the Apple TV remote buttons; `fastForward`, `rewind`, `next` and `previous`
+work only on Android.
+
+For a long press of D-pad center, for example to open a context menu, pass `durationMs` with
+`select`: `pressButton { button: "select", durationMs: 1000 }` holds the key for one second.
+`durationMs` takes 100 to 10000, works only with `select`, and needs API 35 or newer; otherwise the
+call fails with `unsupported_button` and sends no key.
+
+`explore` walks a TV app the same way: it moves focus to each element and selects it, recording the
+screens and transitions in the navigation graph. `navigateTo` replays those steps with D-pad moves.
+To reach rows below the visible part of a list or rail, `explore` presses down (or right along a
+rail) until a new row scrolls into view, up to 12 presses, and stops when focus stops moving or
+leaves the list. The step to a card revealed this way in a rail is recorded as `focusNavigate`
+with `direction: "right"`, so `navigateTo` reaches it from the start of the rail. The replay presses
+right from wherever focus is, so it reaches the card only when focus starts in that rail.
+Both are available only when the server runs with `--embedded-sdk` and the app embeds the
+AutoMobile SDK; see [Navigation graph](navigation-graph.md#availability).
 
 `focusNavigate` matches a target on the focused element or on a node inside its bounds, so a label
 on a child view of the focused row counts. A large focused container that holds the target also
-counts as focused.
+counts as focused. To land on the exact control `tapOn` would tap, name the target
+with `until.label` or `until.elementId` alone: focus must then reach that control, and a focused
+row that only contains it does not count.
 
-`tapOn` and `swipeOn` need a device that reports a touchscreen; on a TV without one, navigate with
-`focusNavigate` and `sendKeys` instead.
+On a TV, `tapOn` with a `text` or `elementId` selector moves D-pad focus to
+the match and presses `enter`, so one flow can tap on both Android TV and tvOS. The selector picks
+the same element a touch tap would, including a text field found by its placeholder and the first
+of several matches, even when focus is on another one. The result then has
+`inputMethod: "dpad"` and a `focusNavigation` object with the focus `status`, `steps` and `path`. Focus takes the shortest
+route: a match on another row is reached by changing rows first. With `action: "longPress"` the
+call holds D-pad center for `duration` ms (default 1000) instead of pressing `enter`; the hold
+needs Android 15 (API 35) or newer.
+If focus cannot reach the match, the call fails without pressing `enter`; observe and retry, or
+move closer with `focusNavigate`. When an editable text field or the on-screen keyboard holds focus,
+the walk first hides a shown keyboard with back (and presses tab when the focused element is not a
+text field, since tab would type into one), then tries every direction again. If focus still does
+not move, `focusNavigation.status` is `stuck`, `focusNavigation.blockedBy` is `ime` or `editable`,
+`focusNavigation.escapes` lists the keys tried, and the error names the trapped field: hide the
+keyboard with `pressButton` `back`, press `pressButton` `down` to move focus out of the field,
+observe, then retry. An IME action such as `sendKeys` key `next` or `done` does not move D-pad focus
+out of the field.
+`focusNavigate` returns the same `blockedBy` and `escapes`. Other selectors (`testTag`, `textAny`,
+`accessibilityLink`), actions other than `tap` and `longPress`, and the options `sibling`, `container`, `index`, `searchUntil`, `ensureChecked`,
+`subtext`, `layer`, `display` and a `selectionStrategy` other than `first` still need a touchscreen. `swipeOn` needs a touchscreen too;
+on a TV without one, navigate with `focusNavigate` and `sendKeys` instead.
 
-Prototype overlays can be shown and dismissed, but their buttons are not reachable with D-pad
-focus. Use `prototype` with `dismiss` to close the overlay.
+Prototype overlay buttons support D-pad navigation and show a visible outline when focused.
+Use `focusNavigate` to reach a button and `sendKeys` with `enter` to activate it.
+Use `prototype` with `dismiss` to close the overlay.
 
 ## Out of scope
 

@@ -153,3 +153,49 @@ describe("PrototypeSpecRevisions", () => {
     ]);
   });
 });
+
+describe("PrototypeSpecRevisions session filter (#17358)", () => {
+  function attributed() {
+    const revisions = new PrototypeSpecRevisions(new FakeTimer());
+    const specs = new PrototypeShownSpecs(revisions);
+    const ticket = specs.beginShow("d", "checkout", true, "android");
+    specs.endShow("d", ticket, { id: "checkout", spec: spec("a"), mcpSessionId: "conn-a" });
+    const read = specs.read("d", "checkout");
+    if (read.kind !== "known") {
+      throw new Error("expected a known spec");
+    }
+    specs.commitPatch("d", "checkout", read.version, { spec: spec("b"), mcpSessionId: "conn-b" });
+    show(specs, "checkout", { text: "c" });
+    return revisions;
+  }
+
+  test("each revision keeps the session that produced it; none is omitted, not undefined", () => {
+    const history = attributed().history("checkout");
+    expect(history.map((entry) => entry.mcpSessionId)).toEqual(["conn-a", "conn-b", undefined]);
+    expect(Object.hasOwn(history[2]!, "mcpSessionId")).toBe(false);
+  });
+
+  test("history and revision narrow to one session; no filter keeps every revision", () => {
+    const revisions = attributed();
+    expect(revisions.history("checkout").map((entry) => entry.revision)).toEqual([1, 2, 3]);
+    const own = revisions.history("checkout", { mcpSessionId: "conn-b" });
+    expect(own.map((entry) => entry.revision)).toEqual([2]);
+    expect(revisions.history("checkout", { mcpSessionId: "nobody" })).toEqual([]);
+    expect(revisions.revision("checkout").revision).toBe(3);
+    expect(revisions.revision("checkout", undefined, { mcpSessionId: "conn-a" }).revision).toBe(1);
+    expect(revisions.revision("checkout", 2, { mcpSessionId: "conn-b" }).revision).toBe(2);
+  });
+
+  test("a filtered lookup names another session's revision, an absent session and unknown ones", () => {
+    const revisions = attributed();
+    expect(() => revisions.revision("checkout", 1, { mcpSessionId: "conn-b" })).toThrow(
+      'Revision 1 of prototype "checkout" was produced by another MCP session. Kept revisions of session "conn-b": 2.',
+    );
+    expect(() => revisions.revision("checkout", undefined, { mcpSessionId: "nobody" })).toThrow(
+      'Prototype "checkout" has no kept revision from MCP session "nobody"',
+    );
+    expect(() => revisions.revision("checkout", 9, { mcpSessionId: "conn-a" })).toThrow(
+      'Prototype "checkout" has no revision 9.',
+    );
+  });
+});

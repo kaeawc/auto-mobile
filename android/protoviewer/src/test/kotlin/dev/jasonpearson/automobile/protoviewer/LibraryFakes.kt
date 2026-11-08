@@ -129,6 +129,7 @@ internal class FakeLibraryRepository : LibraryRepository {
   val opened = mutableListOf<String>()
   val resets = mutableListOf<String>()
   var error: LibraryError? = null
+  var failDelete = false
 
   override fun list(): LibraryResult<List<LibraryEntry>> =
     error?.let { LibraryResult.Failure(it) }
@@ -142,6 +143,7 @@ internal class FakeLibraryRepository : LibraryRepository {
       ?: LibraryResult.Failure(LibraryError.NotFound)
 
   override fun delete(libraryId: String): LibraryResult<Unit> {
+    if (failDelete) return LibraryResult.Failure(LibraryError.Storage)
     prototypes.remove(libraryId)
     return LibraryResult.Success(Unit)
   }
@@ -157,4 +159,21 @@ internal class FakeLibraryRepository : LibraryRepository {
   }
 
   override fun sweepOrphans(): LibraryResult<Int> = LibraryResult.Success(0)
+}
+
+internal class FakeContentBlocklist : ContentBlocklist {
+  val hidden = mutableSetOf<String>()
+  val hosts = mutableSetOf<String>()
+
+  override fun hiddenSpecHashes(): Set<String> = hidden.toSet()
+
+  override fun blockedHosts(): Set<String> = hosts.toSet()
+
+  override fun hide(specSha256: String) {
+    hidden += specSha256
+  }
+
+  override fun block(host: String) {
+    hosts += host
+  }
 }

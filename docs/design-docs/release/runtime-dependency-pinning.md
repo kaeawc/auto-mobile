@@ -41,7 +41,9 @@ top-level `dependencies`** (verified empirically). A published
 exact `dependencies` wherever a build-time version does not conflict, with a
 small `bundledDependencies` set for the conflicting Jimp paths:
 
-- **runtime roots** — `jimp`, `@jimp/core`, `sharp`, `kysely` — and every
+- **runtime roots** — `jimp`, `@jimp/core`, `sharp`, `kysely`, and
+  `@material-design-icons/svg` (read from disk through `import.meta.resolve`, which
+  the roots derivation counts like a dynamic import) — and every
   **pure-transitive** node of their closure are pinned to exact versions;
 - **shared Jimp validator** — `zod@3.25.76` is a direct exact pin. AutoMobile
   imports its `zod/v4` subpath, so the bundled server retains the v4 API while

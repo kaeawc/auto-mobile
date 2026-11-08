@@ -95,6 +95,7 @@ describe("DualTrackRecorder reading a touch and a pen node", () => {
       "[  1.1] EV_KEY    BTN_TOUCH            UP",
       "[  1.1] EV_SYN    SYN_REPORT           00000000",
     ]);
+    timer.advanceTime(50);
     const result = await recorder.stop({ hostOnly: true });
     expect(result.steps.map((step) => step.tool)).toEqual(["tapAt"]);
     expect(touchProc.killed).toBe(true);

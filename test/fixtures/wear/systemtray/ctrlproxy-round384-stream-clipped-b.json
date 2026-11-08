@@ -1,0 +1,976 @@
+{
+  "screenSize": {
+    "width": 384,
+    "height": 384,
+    "units": "physical-pixels"
+  },
+  "viewHierarchy": {
+    "displayId": 0,
+    "panelFingerprint": {
+      "width": 384,
+      "height": 384
+    },
+    "hierarchy": {
+      "node": {
+        "windowId": 0,
+        "actions": ["select", "clear_selection", "accessibility_focus"],
+        "visible-to-user": true,
+        "view-id": "s2-0ed89fe9334eb256",
+        "bounds": {
+          "left": 0,
+          "top": 0,
+          "right": 384,
+          "bottom": 384
+        },
+        "node": {
+          "actions": ["select", "clear_selection", "accessibility_focus"],
+          "resource-id": "android:id/content",
+          "visible-to-user": true,
+          "view-id": "android:id/content",
+          "bounds": {
+            "left": 0,
+            "top": 0,
+            "right": 384,
+            "bottom": 384
+          },
+          "node": {
+            "actions": ["select", "clear_selection", "accessibility_focus"],
+            "resource-id": "com.google.android.clockwork.sysui:id/root",
+            "visible-to-user": true,
+            "view-id": "com.google.android.clockwork.sysui:id/root",
+            "class": "android.view.ViewGroup",
+            "className": "android.view.ViewGroup",
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 384,
+              "bottom": 384
+            },
+            "node": {
+              "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus",
+                "next_at_movement_granularity",
+                "previous_at_movement_granularity",
+                "set_selection"
+              ],
+              "content-desc": "Notifications",
+              "visible-to-user": true,
+              "view-id": "s2-ad66342c20099a71",
+              "class": "android.view.ViewGroup",
+              "className": "android.view.ViewGroup",
+              "bounds": {
+                "left": 0,
+                "top": 0,
+                "right": 384,
+                "bottom": 384
+              },
+              "node": {
+                "actions": ["select", "clear_selection", "accessibility_focus", "scroll_backward"],
+                "resource-id": "com.google.android.clockwork.sysui:id/trayview_container",
+                "visible-to-user": true,
+                "view-id": "com.google.android.clockwork.sysui:id/trayview_container",
+                "scrollable": "true",
+                "bounds": {
+                  "left": 0,
+                  "top": 0,
+                  "right": 384,
+                  "bottom": 384
+                },
+                "node": [
+                  {
+                    "actions": [
+                      "clear_focus",
+                      "accessibility_focus",
+                      "scroll_forward",
+                      "scroll_backward"
+                    ],
+                    "visible-to-user": true,
+                    "collection-info": "rows:11,cols:1",
+                    "view-id": "s2-58d7e494343b919d",
+                    "focusable": "true",
+                    "focused": "true",
+                    "scrollable": "true",
+                    "bounds": {
+                      "left": 0,
+                      "top": 0,
+                      "right": 384,
+                      "bottom": 384
+                    },
+                    "node": [
+                      {
+                        "actions": ["focus", "accessibility_focus", "click", "long_click"],
+                        "visible-to-user": true,
+                        "view-id": "s2-b8f77fe8a8739ed6~cee23831",
+                        "clickable": "true",
+                        "focusable": "true",
+                        "long-clickable": "true",
+                        "extras": {
+                          "android.view.accessibility.extra.EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL": "3435"
+                        },
+                        "bounds": {
+                          "left": 34,
+                          "top": 0,
+                          "right": 350,
+                          "bottom": 108
+                        },
+                        "node": [
+                          {
+                            "actions": ["accessibility_focus"],
+                            "resource-id": "full_view_app_icon",
+                            "visible-to-user": true,
+                            "view-id": "full_view_app_icon",
+                            "bounds": {
+                              "left": 52,
+                              "top": 0,
+                              "right": 96,
+                              "bottom": 17
+                            }
+                          },
+                          {
+                            "actions": ["accessibility_focus"],
+                            "resource-id": "full_view_app_icon",
+                            "visible-to-user": true,
+                            "view-id": "full_view_app_icon",
+                            "bounds": {
+                              "left": 58,
+                              "top": 0,
+                              "right": 91,
+                              "bottom": 12
+                            }
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "Shell",
+                            "resource-id": "full_view_app_name",
+                            "visible-to-user": true,
+                            "view-id": "full_view_app_name",
+                            "bounds": {
+                              "left": 107,
+                              "top": 0,
+                              "right": 281,
+                              "bottom": 11
+                            }
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "8m",
+                            "content-desc": "8 minutes ago",
+                            "visible-to-user": true,
+                            "view-id": "s2-18657bf4d92d0666-1",
+                            "bounds": {
+                              "left": 291,
+                              "top": 0,
+                              "right": 332,
+                              "bottom": 11
+                            }
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "AM17357 item 1",
+                            "visible-to-user": true,
+                            "view-id": "s2-2a540cdc6a3e3948",
+                            "bounds": {
+                              "left": 52,
+                              "top": 21,
+                              "right": 269,
+                              "bottom": 55
+                            }
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "Body number 1",
+                            "visible-to-user": true,
+                            "view-id": "s2-8bfcf010f8e3a193",
+                            "bounds": {
+                              "left": 52,
+                              "top": 55,
+                              "right": 260,
+                              "bottom": 90
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "actions": ["focus", "accessibility_focus", "click", "long_click"],
+                        "visible-to-user": true,
+                        "view-id": "s2-b8f77fe8a8739ed6~ed48013c",
+                        "clickable": "true",
+                        "focusable": "true",
+                        "long-clickable": "true",
+                        "extras": {
+                          "android.view.accessibility.extra.EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL": "3456"
+                        },
+                        "bounds": {
+                          "left": 19,
+                          "top": 117,
+                          "right": 365,
+                          "bottom": 285
+                        },
+                        "node": [
+                          {
+                            "actions": ["accessibility_focus"],
+                            "resource-id": "full_view_app_icon",
+                            "visible-to-user": true,
+                            "view-id": "full_view_app_icon",
+                            "bounds": {
+                              "left": 39,
+                              "top": 137,
+                              "right": 87,
+                              "bottom": 185
+                            }
+                          },
+                          {
+                            "actions": ["accessibility_focus"],
+                            "resource-id": "full_view_app_icon",
+                            "visible-to-user": true,
+                            "view-id": "full_view_app_icon",
+                            "bounds": {
+                              "left": 45,
+                              "top": 143,
+                              "right": 81,
+                              "bottom": 179
+                            }
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "Shell",
+                            "resource-id": "full_view_app_name",
+                            "visible-to-user": true,
+                            "view-id": "full_view_app_name",
+                            "bounds": {
+                              "left": 99,
+                              "top": 145,
+                              "right": 289,
+                              "bottom": 178
+                            }
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "8m",
+                            "content-desc": "8 minutes ago",
+                            "visible-to-user": true,
+                            "view-id": "s2-18657bf4d92d0666-2",
+                            "bounds": {
+                              "left": 301,
+                              "top": 145,
+                              "right": 345,
+                              "bottom": 178
+                            }
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "AM17357",
+                            "visible-to-user": true,
+                            "view-id": "s2-97e57dcbe2afe6b3",
+                            "bounds": {
+                              "left": 39,
+                              "top": 189,
+                              "right": 175,
+                              "bottom": 227
+                            }
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "1",
+                            "visible-to-user": true,
+                            "view-id": "s2-c63d6b93d89a0bba",
+                            "bounds": {
+                              "left": 39,
+                              "top": 227,
+                              "right": 53,
+                              "bottom": 265
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "actions": ["focus", "accessibility_focus", "click", "long_click"],
+                        "visible-to-user": true,
+                        "view-id": "s2-65754bbce7a9c1a3",
+                        "clickable": "true",
+                        "focusable": "true",
+                        "long-clickable": "true",
+                        "bounds": {
+                          "left": 45,
+                          "top": 293,
+                          "right": 339,
+                          "bottom": 384
+                        },
+                        "node": [
+                          {
+                            "actions": ["accessibility_focus"],
+                            "resource-id": "full_view_app_icon",
+                            "visible-to-user": true,
+                            "view-id": "full_view_app_icon",
+                            "bounds": {
+                              "left": 62,
+                              "top": 310,
+                              "right": 103,
+                              "bottom": 351
+                            }
+                          },
+                          {
+                            "actions": ["accessibility_focus"],
+                            "resource-id": "full_view_app_icon",
+                            "visible-to-user": true,
+                            "view-id": "full_view_app_icon",
+                            "bounds": {
+                              "left": 67,
+                              "top": 315,
+                              "right": 97,
+                              "bottom": 346
+                            }
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "Android System",
+                            "resource-id": "full_view_app_name",
+                            "visible-to-user": true,
+                            "view-id": "full_view_app_name",
+                            "bounds": {
+                              "left": 113,
+                              "top": 317,
+                              "right": 275,
+                              "bottom": 345
+                            }
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "8m",
+                            "content-desc": "8 minutes ago",
+                            "visible-to-user": true,
+                            "view-id": "s2-18657bf4d92d0666-3",
+                            "bounds": {
+                              "left": 285,
+                              "top": 317,
+                              "right": 322,
+                              "bottom": 345
+                            }
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "Connect to open Wi‑Fi network",
+                            "visible-to-user": true,
+                            "view-id": "s2-f139bc3071df461a",
+                            "bounds": {
+                              "left": 62,
+                              "top": 354,
+                              "right": 322,
+                              "bottom": 384
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "actions": ["focus", "accessibility_focus", "click"],
+                    "visible-to-user": false,
+                    "view-id": "s2-0d9b468dbcaf26fe",
+                    "clickable": "true",
+                    "focusable": "true",
+                    "bounds": {
+                      "left": 0,
+                      "top": 342,
+                      "right": 384,
+                      "bottom": 384
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "packageName": "com.google.android.clockwork.sysui",
+    "windows": [
+      {
+        "id": 0,
+        "displayId": 0,
+        "type": 1,
+        "windowLayer": 0,
+        "isActive": true,
+        "isFocused": true,
+        "bounds": {
+          "left": 0,
+          "top": 0,
+          "right": 384,
+          "bottom": 384
+        },
+        "packageName": "com.google.android.clockwork.sysui",
+        "hierarchy": {
+          "windowId": 0,
+          "actions": ["select", "clear_selection", "accessibility_focus"],
+          "visible-to-user": true,
+          "view-id": "s2-0ed89fe9334eb256",
+          "bounds": {
+            "left": 0,
+            "top": 0,
+            "right": 384,
+            "bottom": 384
+          },
+          "node": {
+            "actions": ["select", "clear_selection", "accessibility_focus"],
+            "resource-id": "android:id/content",
+            "visible-to-user": true,
+            "view-id": "android:id/content",
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 384,
+              "bottom": 384
+            },
+            "node": {
+              "actions": ["select", "clear_selection", "accessibility_focus"],
+              "resource-id": "com.google.android.clockwork.sysui:id/root",
+              "visible-to-user": true,
+              "view-id": "com.google.android.clockwork.sysui:id/root",
+              "class": "android.view.ViewGroup",
+              "className": "android.view.ViewGroup",
+              "bounds": {
+                "left": 0,
+                "top": 0,
+                "right": 384,
+                "bottom": 384
+              },
+              "node": {
+                "actions": [
+                  "select",
+                  "clear_selection",
+                  "accessibility_focus",
+                  "next_at_movement_granularity",
+                  "previous_at_movement_granularity",
+                  "set_selection"
+                ],
+                "content-desc": "Notifications",
+                "visible-to-user": true,
+                "view-id": "s2-ad66342c20099a71",
+                "class": "android.view.ViewGroup",
+                "className": "android.view.ViewGroup",
+                "bounds": {
+                  "left": 0,
+                  "top": 0,
+                  "right": 384,
+                  "bottom": 384
+                },
+                "node": {
+                  "actions": [
+                    "select",
+                    "clear_selection",
+                    "accessibility_focus",
+                    "scroll_backward"
+                  ],
+                  "resource-id": "com.google.android.clockwork.sysui:id/trayview_container",
+                  "visible-to-user": true,
+                  "view-id": "com.google.android.clockwork.sysui:id/trayview_container",
+                  "scrollable": "true",
+                  "bounds": {
+                    "left": 0,
+                    "top": 0,
+                    "right": 384,
+                    "bottom": 384
+                  },
+                  "node": [
+                    {
+                      "actions": [
+                        "clear_focus",
+                        "accessibility_focus",
+                        "scroll_forward",
+                        "scroll_backward"
+                      ],
+                      "visible-to-user": true,
+                      "collection-info": "rows:11,cols:1",
+                      "view-id": "s2-58d7e494343b919d",
+                      "focusable": "true",
+                      "focused": "true",
+                      "scrollable": "true",
+                      "bounds": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 384,
+                        "bottom": 384
+                      },
+                      "node": [
+                        {
+                          "actions": ["focus", "accessibility_focus", "click", "long_click"],
+                          "visible-to-user": true,
+                          "view-id": "s2-b8f77fe8a8739ed6~cee23831",
+                          "clickable": "true",
+                          "focusable": "true",
+                          "long-clickable": "true",
+                          "extras": {
+                            "android.view.accessibility.extra.EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL": "3435"
+                          },
+                          "bounds": {
+                            "left": 34,
+                            "top": 0,
+                            "right": 350,
+                            "bottom": 108
+                          },
+                          "node": [
+                            {
+                              "actions": ["accessibility_focus"],
+                              "resource-id": "full_view_app_icon",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_icon",
+                              "bounds": {
+                                "left": 52,
+                                "top": 0,
+                                "right": 96,
+                                "bottom": 17
+                              }
+                            },
+                            {
+                              "actions": ["accessibility_focus"],
+                              "resource-id": "full_view_app_icon",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_icon",
+                              "bounds": {
+                                "left": 58,
+                                "top": 0,
+                                "right": 91,
+                                "bottom": 12
+                              }
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "Shell",
+                              "resource-id": "full_view_app_name",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_name",
+                              "bounds": {
+                                "left": 107,
+                                "top": 0,
+                                "right": 281,
+                                "bottom": 11
+                              }
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "8m",
+                              "content-desc": "8 minutes ago",
+                              "visible-to-user": true,
+                              "view-id": "s2-18657bf4d92d0666-1",
+                              "bounds": {
+                                "left": 291,
+                                "top": 0,
+                                "right": 332,
+                                "bottom": 11
+                              }
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "AM17357 item 1",
+                              "visible-to-user": true,
+                              "view-id": "s2-2a540cdc6a3e3948",
+                              "bounds": {
+                                "left": 52,
+                                "top": 21,
+                                "right": 269,
+                                "bottom": 55
+                              }
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "Body number 1",
+                              "visible-to-user": true,
+                              "view-id": "s2-8bfcf010f8e3a193",
+                              "bounds": {
+                                "left": 52,
+                                "top": 55,
+                                "right": 260,
+                                "bottom": 90
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "actions": ["focus", "accessibility_focus", "click", "long_click"],
+                          "visible-to-user": true,
+                          "view-id": "s2-b8f77fe8a8739ed6~ed48013c",
+                          "clickable": "true",
+                          "focusable": "true",
+                          "long-clickable": "true",
+                          "extras": {
+                            "android.view.accessibility.extra.EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL": "3456"
+                          },
+                          "bounds": {
+                            "left": 19,
+                            "top": 117,
+                            "right": 365,
+                            "bottom": 285
+                          },
+                          "node": [
+                            {
+                              "actions": ["accessibility_focus"],
+                              "resource-id": "full_view_app_icon",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_icon",
+                              "bounds": {
+                                "left": 39,
+                                "top": 137,
+                                "right": 87,
+                                "bottom": 185
+                              }
+                            },
+                            {
+                              "actions": ["accessibility_focus"],
+                              "resource-id": "full_view_app_icon",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_icon",
+                              "bounds": {
+                                "left": 45,
+                                "top": 143,
+                                "right": 81,
+                                "bottom": 179
+                              }
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "Shell",
+                              "resource-id": "full_view_app_name",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_name",
+                              "bounds": {
+                                "left": 99,
+                                "top": 145,
+                                "right": 289,
+                                "bottom": 178
+                              }
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "8m",
+                              "content-desc": "8 minutes ago",
+                              "visible-to-user": true,
+                              "view-id": "s2-18657bf4d92d0666-2",
+                              "bounds": {
+                                "left": 301,
+                                "top": 145,
+                                "right": 345,
+                                "bottom": 178
+                              }
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "AM17357",
+                              "visible-to-user": true,
+                              "view-id": "s2-97e57dcbe2afe6b3",
+                              "bounds": {
+                                "left": 39,
+                                "top": 189,
+                                "right": 175,
+                                "bottom": 227
+                              }
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "1",
+                              "visible-to-user": true,
+                              "view-id": "s2-c63d6b93d89a0bba",
+                              "bounds": {
+                                "left": 39,
+                                "top": 227,
+                                "right": 53,
+                                "bottom": 265
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "actions": ["focus", "accessibility_focus", "click", "long_click"],
+                          "visible-to-user": true,
+                          "view-id": "s2-65754bbce7a9c1a3",
+                          "clickable": "true",
+                          "focusable": "true",
+                          "long-clickable": "true",
+                          "bounds": {
+                            "left": 45,
+                            "top": 293,
+                            "right": 339,
+                            "bottom": 384
+                          },
+                          "node": [
+                            {
+                              "actions": ["accessibility_focus"],
+                              "resource-id": "full_view_app_icon",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_icon",
+                              "bounds": {
+                                "left": 62,
+                                "top": 310,
+                                "right": 103,
+                                "bottom": 351
+                              }
+                            },
+                            {
+                              "actions": ["accessibility_focus"],
+                              "resource-id": "full_view_app_icon",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_icon",
+                              "bounds": {
+                                "left": 67,
+                                "top": 315,
+                                "right": 97,
+                                "bottom": 346
+                              }
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "Android System",
+                              "resource-id": "full_view_app_name",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_name",
+                              "bounds": {
+                                "left": 113,
+                                "top": 317,
+                                "right": 275,
+                                "bottom": 345
+                              }
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "8m",
+                              "content-desc": "8 minutes ago",
+                              "visible-to-user": true,
+                              "view-id": "s2-18657bf4d92d0666-3",
+                              "bounds": {
+                                "left": 285,
+                                "top": 317,
+                                "right": 322,
+                                "bottom": 345
+                              }
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "Connect to open Wi‑Fi network",
+                              "visible-to-user": true,
+                              "view-id": "s2-f139bc3071df461a",
+                              "bounds": {
+                                "left": 62,
+                                "top": 354,
+                                "right": 322,
+                                "bottom": 384
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "actions": ["focus", "accessibility_focus", "click"],
+                      "visible-to-user": false,
+                      "view-id": "s2-0d9b468dbcaf26fe",
+                      "clickable": "true",
+                      "focusable": "true",
+                      "bounds": {
+                        "left": 0,
+                        "top": 342,
+                        "right": 384,
+                        "bottom": 384
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    ],
+    "intentChooserDetected": false,
+    "notificationPermissionDetected": false,
+    "ctrlProxyIncomplete": null,
+    "sources": ["control-proxy"],
+    "screenWidth": 384,
+    "screenHeight": 384,
+    "rotation": 0,
+    "systemInsets": {
+      "top": 0,
+      "bottom": 0,
+      "left": 0,
+      "right": 0
+    },
+    "insets": {
+      "available": true,
+      "source": "android-window-metrics",
+      "units": "physical-pixels",
+      "systemBars": {
+        "visible": {
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0
+        },
+        "stable": {
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0
+        }
+      },
+      "displayCutout": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "displayCutoutInfo": {
+        "classification": "none",
+        "bounds": null
+      },
+      "systemGestures": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "mandatorySystemGestures": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "tappableElement": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "systemChrome": {
+        "visibility": "hidden",
+        "statusBar": "hidden",
+        "navigationBar": "hidden",
+        "homeIndicatorAutoHideRequested": null,
+        "source": "android-window-insets"
+      }
+    },
+    "wakefulness": "Awake",
+    "foregroundActivity": "com.google.android.clockwork.sysui/.mainui.activity.SysUiActivity",
+    "density": 320,
+    "sdkInt": 37,
+    "deviceModel": "sdk_gwear_arm64",
+    "isEmulator": true,
+    "accessibilityTool": true,
+    "nativeScale": 1,
+    "pixelWidth": 384,
+    "pixelHeight": 384,
+    "updatedAt": 1794029327985,
+    "receivedAt": 1794029327870,
+    "frameContext": "7b098c95-c89c-40cb-8248-f4879323542f:4509",
+    "fresh": true
+  }
+}

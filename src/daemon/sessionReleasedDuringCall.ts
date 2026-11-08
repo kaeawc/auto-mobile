@@ -1,6 +1,6 @@
 import { ActionableError } from "../models/ActionableError";
 import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
-import { idleReleaseField, type SessionReleaseReason } from "./releaseReasons";
+import { cliIdleTimeoutField, idleReleaseField, type SessionReleaseReason } from "./releaseReasons";
 
 /** The wire code of a terminal-session refusal: the named session UUID is gone for good. */
 export const SESSION_OWNERSHIP_LOST_CODE = "session_ownership_lost" as const;
@@ -23,11 +23,21 @@ export class SessionReleasedDuringCallError extends ActionableError {
   readonly code = SESSION_OWNERSHIP_LOST_CODE;
   readonly retryable = false;
   readonly nextAction = ACQUIRE_NEW_SESSION_NEXT_ACTION;
-  readonly details: { sessionUuid: string; reason: SessionReleaseReason; idle?: true };
+  readonly details: {
+    sessionUuid: string;
+    reason: SessionReleaseReason;
+    idle?: true;
+    idleTimeoutMs?: number;
+  };
 
+  /**
+   * `idleTimeoutMs` is the released session's idle window; it is reported only beside a
+   * `cli-idle-timeout` reason (#16908).
+   */
   constructor(
     readonly sessionUuid: string,
     readonly releaseReason: SessionReleaseReason,
+    idleTimeoutMs?: number,
   ) {
     super(
       `Session ${sessionUuid} is terminal after ${releaseReason} and cannot be reused; it was ` +
@@ -35,7 +45,12 @@ export class SessionReleasedDuringCallError extends ActionableError {
         "Acquire a new device with getAndroid or getApple.",
     );
     this.name = "SessionReleasedDuringCallError";
-    this.details = { sessionUuid, reason: releaseReason, ...idleReleaseField(releaseReason) };
+    this.details = {
+      sessionUuid,
+      reason: releaseReason,
+      ...idleReleaseField(releaseReason),
+      ...cliIdleTimeoutField(releaseReason, idleTimeoutMs),
+    };
   }
 }
 

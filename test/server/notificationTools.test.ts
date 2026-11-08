@@ -64,6 +64,40 @@ describe("notification tools", () => {
     }
   });
 
+  test("requires appId when posting notifications on watchOS", () => {
+    const result = postNotificationSchema.safeParse({ platform: "watchos", title: "T", body: "B" });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].path).toEqual(["appId"]);
+      expect(result.error.issues[0].message).toBe("appId is required when platform is watchos");
+    }
+  });
+
+  test("accepts watchOS with appId", () => {
+    expect(
+      postNotificationSchema.safeParse({
+        platform: "watchos",
+        title: "T",
+        body: "B",
+        appId: "com.example.App.watchkitapp",
+      }).success,
+    ).toBe(true);
+  });
+
+  test("requires appId on a resolved watch when platform is omitted", async () => {
+    const handler = createPostNotificationHandler({
+      postNotificationFactory: () => {
+        throw new Error("must not construct executor");
+      },
+    });
+    await expect(
+      handler(
+        { name: "Watch", deviceId: "11111111-2222-3333-4444-555555555555", platform: "watchos" },
+        { title: "T", body: "B" },
+      ),
+    ).rejects.toThrow("appId is required when platform is watchos");
+  });
+
   test("keeps appId optional when posting notifications on Android", () => {
     const result = postNotificationSchema.safeParse({
       platform: "android",
@@ -112,9 +146,14 @@ describe("notification tools", () => {
     const schema = parseJsonSchemaNode(toolDefinition!.inputSchema);
     // #6154: platform is optional wherever deviceId/session resolves it.
     expect(schema.required).toEqual(["title", "body"]);
-    // #6154: platform now comes from the shared `platformSchema` (android, ios, and tvos, which every
-    // tool refuses until it supports one) instead of a per-branch literal union.
-    expect(schema.properties?.platform?.enum).toEqual(["android", "ios", "tvos"]);
+    // Watch-aware schemas advertise watchOS alongside the shared platforms (including visionos).
+    expect(schema.properties?.platform?.enum).toEqual([
+      "android",
+      "ios",
+      "watchos",
+      "tvos",
+      "visionos",
+    ]);
     expect(schema.properties?.appId?.description).toContain(
       "Android defaults to the live foreground app",
     );

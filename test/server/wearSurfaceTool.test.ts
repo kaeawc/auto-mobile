@@ -26,7 +26,7 @@ const announces =
   async () =>
     formFactor;
 
-type Call = ["addTile" | "removeTile", string] | ["showTile", TileTarget];
+type Call = ["addTile" | "removeTile", string] | ["showTile", TileTarget] | ["listTileProviders"];
 
 function recordingSurface(calls: Call[], success = true): WearSurface {
   const result = (action: WearSurfaceResult["action"]): WearSurfaceResult => ({
@@ -39,6 +39,17 @@ function recordingSurface(calls: Call[], success = true): WearSurface {
     ...(success ? {} : { reason: "not confirmed" }),
   });
   return {
+    listTileProviders: async () => (
+      calls.push(["listTileProviders"]),
+      {
+        success: true,
+        action: "listTileProviders",
+        requested: {},
+        providers: [{ component: COMPONENT, packageName: "p", className: "c" }],
+        verified: false,
+        message: "1 tile provider(s)",
+      }
+    ),
     addTile: async (component) => (calls.push(["addTile", component]), result("addTile")),
     removeTile: async (component) => (calls.push(["removeTile", component]), result("removeTile")),
     showTile: async (target) => (calls.push(["showTile", target]), result("showTile")),
@@ -64,6 +75,7 @@ describe("wearSurface tool", () => {
         new AdbWearSurface({
           timer,
           observe: async () => ({ ...snapshot, appId: WEAR_SYSUI_PACKAGE }),
+          tileProviders: { list: async () => [] },
           adb: {
             executeCommand: async () => ({
               stdout,
@@ -84,8 +96,9 @@ describe("wearSurface tool", () => {
     expect(response.isError ?? false).toBe(index !== 0);
   });
 
-  test("strict schema accepts the three actions and refuses unsafe components", () => {
+  test("strict schema accepts the four actions and refuses unsafe components", () => {
     for (const input of [
+      { action: "listTileProviders" },
       { action: "addTile", component: COMPONENT },
       { action: "removeTile", component: COMPONENT },
       { action: "showTile", index: 0 },
@@ -106,6 +119,7 @@ describe("wearSurface tool", () => {
   });
 
   test.each<[string, Record<string, unknown>, Call]>([
+    ["listTileProviders", { action: "listTileProviders" }, ["listTileProviders"]],
     ["addTile", { action: "addTile", component: COMPONENT }, ["addTile", COMPONENT]],
     ["removeTile", { action: "removeTile", component: COMPONENT }, ["removeTile", COMPONENT]],
     ["showTile by index", { action: "showTile", index: 2 }, ["showTile", { index: 2 }]],
@@ -182,6 +196,8 @@ describe("wearSurface tool", () => {
   });
 
   test.each<[string, Record<string, unknown>]>([
+    ["listTileProviders with a component", { action: "listTileProviders", component: COMPONENT }],
+    ["listTileProviders with an index", { action: "listTileProviders", index: 0 }],
     ["addTile without component", { action: "addTile" }],
     ["removeTile with an index", { action: "removeTile", component: COMPONENT, index: 0 }],
     ["showTile with neither", { action: "showTile" }],

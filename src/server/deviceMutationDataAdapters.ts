@@ -177,6 +177,7 @@ function broadcastMutations(
  * The Wear OS tile carousel has no readable prior and no revert, so `addTile` and `removeTile`
  * record a `fallback:` opaque intent per tile provider. `showTile` only scrolls the carousel (a
  * component target may add the tile while resolving its index, so it records like `addTile`).
+ * `listTileProviders` is a package-manager read and records nothing.
  * `watchFace` only reads `dumpsys wear_service` and records nothing.
  */
 function wearSurfaceMutations(
@@ -185,6 +186,7 @@ function wearSurfaceMutations(
 ): ToolMutation[] {
   if (
     platform === "ios" ||
+    args.action === "listTileProviders" ||
     args.action === "watchFace" ||
     (args.action === "showTile" && args.component === undefined)
   ) {

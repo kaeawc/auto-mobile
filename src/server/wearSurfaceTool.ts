@@ -12,10 +12,12 @@ import {
   WEAR_SURFACE_ACTIONS,
   type SurfaceObserver,
   type SurfaceSnapshot,
+  type TileProviderListResult,
   type TileTarget,
   type WearSurface,
   type WearSurfaceResult,
 } from "../features/wear/WearSurface";
+import { AdbTileProviderLister } from "../features/wear/TileProviders";
 import {
   AdbWatchFaceReader,
   type WatchFaceReader,
@@ -38,7 +40,7 @@ const wearSurfaceInput = z.strictObject({
   action: z
     .enum(WEAR_SURFACE_TOOL_ACTIONS)
     .describe(
-      "addTile and removeTile need component; showTile needs component (index resolved right before showing) or index; watchFace takes neither and only reads",
+      "listTileProviders takes no other argument; addTile and removeTile need component; showTile needs component (index resolved right before showing) or index; watchFace takes neither and only reads",
     ),
   component: z
     .string()
@@ -69,16 +71,24 @@ const complicationSlotSchema = z.object({
   provider: z.string().nullable().describe("<package>/<class>, or null for an empty slot"),
 });
 
-/** Tile actions always carry requested, broadcastResult and verified; watchFace never does. */
+/** Tile actions always carry requested and verified; watchFace never does. */
 export const wearSurfaceResultSchema = z.object({
   success: z.boolean(),
   action: z.enum(WEAR_SURFACE_TOOL_ACTIONS),
   requested: z
     .object({ component: z.string().optional(), index: z.number().optional() })
     .optional(),
-  broadcastResult: broadcastSchema.optional(),
+  broadcastResult: broadcastSchema
+    .optional()
+    .describe(
+      "The broadcast that performed the action; absent for listTileProviders and watchFace",
+    ),
   indexResolution: broadcastSchema.optional(),
   index: z.number().optional(),
+  providers: z
+    .array(z.object({ component: z.string(), packageName: z.string(), className: z.string() }))
+    .optional()
+    .describe("listTileProviders only: installed tile provider services"),
   verified: z
     .boolean()
     .optional()
@@ -142,12 +152,15 @@ function deviceObserver(device: BootedDevice): SurfaceObserver {
   };
 }
 
-const defaultWearSurfaceFactory: WearSurfaceFactory = (device) =>
-  new AdbWearSurface({
-    adb: defaultAdbClientFactory.create(device),
+const defaultWearSurfaceFactory: WearSurfaceFactory = (device) => {
+  const adb = defaultAdbClientFactory.create(device);
+  return new AdbWearSurface({
+    adb,
     timer: defaultTimer,
     observe: deviceObserver(device),
+    tileProviders: new AdbTileProviderLister(adb),
   });
+};
 
 const defaultWatchFaceReaderFactory: WatchFaceReaderFactory = (device) =>
   new AdbWatchFaceReader(defaultAdbClientFactory.create(device));
@@ -162,6 +175,7 @@ const WEAR_SURFACE_REFUSAL = { tool: "wearSurface", purpose: "tile and watch-fac
 
 type SurfaceCall =
   | { action: "watchFace" }
+  | { action: "listTileProviders" }
   | { action: "showTile"; target: TileTarget }
   | { action: "addTile" | "removeTile"; component: string };
 
@@ -171,6 +185,12 @@ function surfaceCall(args: WearSurfaceArgs): SurfaceCall {
   if (action === "watchFace") {
     if (component !== undefined || index !== undefined) {
       throw new ActionableError("watchFace only reads and takes no component or index.");
+    }
+    return { action };
+  }
+  if (action === "listTileProviders") {
+    if (component !== undefined || index !== undefined) {
+      throw new ActionableError("listTileProviders takes no component or index.");
     }
     return { action };
   }
@@ -198,12 +218,14 @@ function run(
   factories: { makeSurface: WearSurfaceFactory; makeWatchFace: WatchFaceReaderFactory },
   call: SurfaceCall,
   signal?: AbortSignal,
-): Promise<WearSurfaceResult | WatchFaceResult> {
+): Promise<WearSurfaceResult | TileProviderListResult | WatchFaceResult> {
   if (call.action === "watchFace") {
     return factories.makeWatchFace(device).observe(signal);
   }
   const surface = factories.makeSurface(device);
   switch (call.action) {
+    case "listTileProviders":
+      return surface.listTileProviders(signal);
     case "showTile":
       return surface.showTile(call.target, signal);
     case "addTile":
@@ -239,10 +261,18 @@ export const createWearSurfaceHandler =
 const wearSurfaceTool = defineDeviceTool({
   name: "wearSurface",
   description:
-    "Wear OS watches only (other form factors are refused without a change): tiles. addTile adds a tile provider to the carousel (idempotent; reports its index). removeTile removes it (also succeeds when it was absent). showTile scrolls the carousel to a tile by component (index resolved right before showing, adding the tile if absent) or by index, then observes; success requires the observe to confirm a tile container in the foreground Wear system UI. The debug broadcasts report success even when nothing happened, so verified is only true when an observe confirmed it. watchFace only reads dumpsys wear_service: the active face (package, favoriteId, fallback), each favorite's complication slots (slot, type, provider or null; the active favorite's are live) and ambient; available is false when the watch faces cannot be read.",
+    "Wear OS watches only (other form factors are refused without a change): tiles. listTileProviders lists the installed tile provider components. addTile adds a tile provider to the carousel (idempotent; reports its index; a component that is not a tile provider fails before anything is sent, naming the valid ones). removeTile removes it (also succeeds when it was absent). showTile scrolls the carousel to a tile by component (index resolved right before showing, adding the tile if absent) or by index, then observes; success requires the observe to confirm a tile container in the foreground Wear system UI. The debug broadcasts report success even when nothing happened, so verified is only true when an observe confirmed it. watchFace only reads dumpsys wear_service: the active face (package, favoriteId, fallback), each favorite's complication slots (slot, type, provider or null; the active favorite's are live) and ambient; available is false when the watch faces cannot be read.",
   input: wearSurfaceInput,
   handler: createWearSurfaceHandler(),
-  options: { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: wearSurfaceResultSchema },
+  options: {
+    ...PLAN_RELEVANT,
+    defaultEnabled: false,
+    outputSchema: wearSurfaceResultSchema,
+    // listTileProviders only queries the package manager and watchFace only reads dumpsys
+    // wear_service: both are reads (#10965). Every tile action broadcasts to the carousel, so it
+    // is control.
+    deviceReadOnly: (args) => args.action === "listTileProviders" || args.action === "watchFace",
+  },
 });
 
 export const wearSurfaceSchema = wearSurfaceTool.schema;

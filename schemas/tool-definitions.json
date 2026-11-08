@@ -67309,15 +67309,15 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Wear OS watches only (other form factors are refused without a change): tiles. addTile adds a tile provider to the carousel (idempotent; reports its index). removeTile removes it (also succeeds when it was absent). showTile scrolls the carousel to a tile by component (index resolved right before showing, adding the tile if absent) or by index, then observes; success requires the observe to confirm a tile container in the foreground Wear system UI. The debug broadcasts report success even when nothing happened, so verified is only true when an observe confirmed it. watchFace only reads dumpsys wear_service: the active face (package, favoriteId, fallback), each favorite's complication slots (slot, type, provider or null; the active favorite's are live) and ambient; available is false when the watch faces cannot be read.",
+    "description": "Wear OS watches only (other form factors are refused without a change): tiles. listTileProviders lists the installed tile provider components. addTile adds a tile provider to the carousel (idempotent; reports its index; a component that is not a tile provider fails before anything is sent, naming the valid ones). removeTile removes it (also succeeds when it was absent). showTile scrolls the carousel to a tile by component (index resolved right before showing, adding the tile if absent) or by index, then observes; success requires the observe to confirm a tile container in the foreground Wear system UI. The debug broadcasts report success even when nothing happened, so verified is only true when an observe confirmed it. watchFace only reads dumpsys wear_service: the active face (package, favoriteId, fallback), each favorite's complication slots (slot, type, provider or null; the active favorite's are live) and ambient; available is false when the watch faces cannot be read.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "action": {
-          "description": "addTile and removeTile need component; showTile needs component (index resolved right before showing) or index; watchFace takes neither and only reads",
+          "description": "listTileProviders takes no other argument; addTile and removeTile need component; showTile needs component (index resolved right before showing) or index; watchFace takes neither and only reads",
           "type": "string",
-          "enum": ["addTile", "showTile", "removeTile", "watchFace"]
+          "enum": ["addTile", "showTile", "removeTile", "listTileProviders", "watchFace"]
         },
         "component": {
           "description": "Tile provider service as <package>/<service>",
@@ -67358,7 +67358,7 @@
         },
         "action": {
           "type": "string",
-          "enum": ["addTile", "showTile", "removeTile", "watchFace"]
+          "enum": ["addTile", "showTile", "removeTile", "listTileProviders", "watchFace"]
         },
         "requested": {
           "type": "object",
@@ -67373,6 +67373,7 @@
           "additionalProperties": false
         },
         "broadcastResult": {
+          "description": "The broadcast that performed the action; absent for listTileProviders and watchFace",
           "$ref": "#/$defs/__schema0"
         },
         "indexResolution": {
@@ -67380,6 +67381,26 @@
         },
         "index": {
           "type": "number"
+        },
+        "providers": {
+          "description": "listTileProviders only: installed tile provider services",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string"
+              },
+              "packageName": {
+                "type": "string"
+              },
+              "className": {
+                "type": "string"
+              }
+            },
+            "required": ["component", "packageName", "className"],
+            "additionalProperties": false
+          }
         },
         "verified": {
           "description": "Tile actions: true only when an observe after the action confirmed it",

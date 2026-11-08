@@ -199,8 +199,9 @@ device connection before retrying.
 
 ## Tiles
 
-Enable `wearSurface` with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)), then call it
-with a tile provider's component (`<package>/<service>`):
+Enable `wearSurface` with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)). Call
+`listTileProviders` with no other argument to get the installed tile providers, then pass one
+provider's `component` (`<package>/<service>`) to a tile action:
 
 ```json
 {
@@ -212,16 +213,17 @@ with a tile provider's component (`<package>/<service>`):
 }
 ```
 
-| `action`     | Arguments              | `success: true` means                                                                 |
-| ------------ | ---------------------- | ------------------------------------------------------------------------------------- |
-| `addTile`    | `component`            | The tile is in the carousel at `index` (it may already have been there)               |
-| `removeTile` | `component`            | The tile was removed or was not there; the watch does not say which                   |
-| `showTile`   | `component` or `index` | An observe after a 3 s settle shows a tile container in the foreground Wear system UI |
+| `action`            | Arguments              | `success: true` means                                                                 |
+| ------------------- | ---------------------- | ------------------------------------------------------------------------------------- |
+| `listTileProviders` | none                   | `providers` lists the installed tile providers (it may be empty)                      |
+| `addTile`           | `component`            | The tile is in the carousel at `index` (it may already have been there)               |
+| `removeTile`        | `component`            | The tile was removed or was not there; the watch does not say which                   |
+| `showTile`          | `component` or `index` | An observe after a 3 s settle shows a tile container in the foreground Wear system UI |
 
 The watch reports success for an `index` with no tile and for removing a tile that is absent, so
 only `showTile` checks the screen, and only its `verified: true` means AutoMobile saw a tile container in the foreground Wear system UI.
-`addTile` and `removeTile` always return `verified: false`. Every tile result carries `requested`,
-`broadcastResult` (`code`, `data` and a typed `outcome`: `added`, `removed`, `showRequested`,
+`addTile` and `removeTile` always return `verified: false`. Every add, remove and show result
+carries `requested`, `broadcastResult` (`code`, `data` and a typed `outcome`: `added`, `removed`, `showRequested`,
 `providerNotFound`, `missingComponent`, `indexRequired`, `unrecognizedOperation` or `unknown`),
 `index` when known, and a `reason` on failure.
 
@@ -232,8 +234,13 @@ only `showTile` checks the screen, and only its `verified: true` means AutoMobil
   alone cannot verify a tile, even if its clock changes. Verification confirms a visible tile,
   not its identity or requested index. Use `observe` to read the tile's content and `swipeOn`
   left or right to move through the carousel.
-- `providerNotFound` means the component is not a tile provider on this watch; list providers
-  with `adb shell cmd package query-services -a androidx.wear.tiles.action.BIND_TILE_PROVIDER`.
+- Each `providers` entry has `component` (pass it as `component`), `packageName` and
+  `className`.
+- `addTile`, and `showTile` with `component`, first check the component against the installed
+  tile providers. A component that is not one fails with an error naming the valid components,
+  and nothing is sent. The `.Service` short form of a listed provider is accepted.
+- `providerNotFound` in `broadcastResult` means the watch refused a listed provider, for example
+  one disabled since the check; run `listTileProviders` again.
 - `unrecognizedOperation` means this Wear OS build does not accept the debug broadcasts.
 - Like `ambient`, it refuses any device not confirmed to be a watch and changes nothing.
 - The broadcasts were measured on the verified emulator; the tool itself is unverified on a

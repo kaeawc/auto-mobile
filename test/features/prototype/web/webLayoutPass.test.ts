@@ -91,7 +91,7 @@ test("a box shows at a top-edge point only inside its own rect and every clip", 
     element: el("div"),
     rect: { left: 0, top: 0, width: 400, height: undefined },
     opacity: 1,
-    clips: [{ left: 0, top: 0, width: 20, height: 10 }],
+    clips: [{ rect: { left: 0, top: 0, width: 20, height: 10 } }],
   };
   expect(paintsTopEdgeAt(box, 10)).toBe(true);
   expect(paintsTopEdgeAt(box, 30)).toBe(false);
@@ -360,4 +360,93 @@ test("a shrinking item keeps at least its padding and border", () => {
   );
   expect(rectOf(painted, "black")?.width).toBe(210);
   expect(rectOf(painted, "white")?.left).toBe(210);
+});
+
+test("a rounded box shows at a top-edge point only outside its cut-away corners", () => {
+  const circle = named("circle", {
+    width: "300px",
+    height: "300px",
+    "flex-shrink": "0",
+    "border-radius": "150px",
+  });
+  const painted = topEdgePaintOrder(
+    named("row", { display: "flex", "flex-direction": "row" }, [circle]),
+    SCREEN,
+  );
+  const box = painted.find((entry) => entry.element === circle)!;
+  expect(box.radii?.topLeft).toEqual({ x: 150, y: 150 });
+  expect(paintsTopEdgeAt(box, 150)).toBe(true);
+  expect(paintsTopEdgeAt(box, 140)).toBe(false);
+  expect(paintsTopEdgeAt(box, 160)).toBe(false);
+  // Raised so the top edge crosses 100px into the circle: its chord there is wider.
+  const raised = { ...box, rect: { ...box.rect, top: -100 } };
+  expect(paintsTopEdgeAt(raised, 30)).toBe(true);
+  expect(paintsTopEdgeAt(raised, 5)).toBe(false);
+});
+
+test("corner radii read logical longhands, scale down when they overlap, and square corners are none", () => {
+  const radiiOf = (style: Record<string, string>, width = "100px") =>
+    topEdgePaintOrder(
+      named("root", {}, [named("box", { width, height: "50px", ...style })]),
+      SCREEN,
+    )[1]!.radii;
+  expect(radiiOf({})).toBeUndefined();
+  expect(radiiOf({ "border-radius": "0px" })).toBeUndefined();
+  const logical = radiiOf({
+    "border-start-start-radius": "10px",
+    "border-start-end-radius": "0px",
+    "border-end-end-radius": "0px",
+    "border-end-start-radius": "0px",
+  });
+  expect(logical?.topLeft).toEqual({ x: 10, y: 10 });
+  expect(logical?.topRight).toEqual({ x: 0, y: 0 });
+  // 100px radii sum to 200 on the 50px-tall sides, so every radius scales by a quarter.
+  expect(radiiOf({ "border-radius": "100px" })?.topLeft).toEqual({ x: 25, y: 25 });
+  expect(radiiOf({ "border-radius": "10px 20px" })?.topRight).toEqual({ x: 20, y: 20 });
+  expect(radiiOf({ "border-radius": "50%" })?.topLeft).toEqual({ x: 50, y: 25 });
+});
+
+test("a rounded clip hides a top-edge point in its cut-away corner", () => {
+  const box: PaintedBox = {
+    element: el("div"),
+    rect: { left: 0, top: 0, width: 400, height: 100 },
+    opacity: 1,
+    clips: [
+      {
+        rect: { left: 0, top: 0, width: 400, height: 100 },
+        radii: {
+          topLeft: { x: 20, y: 20 },
+          topRight: { x: 20, y: 20 },
+          bottomRight: { x: 0, y: 0 },
+          bottomLeft: { x: 0, y: 0 },
+        },
+      },
+    ],
+  };
+  expect(paintsTopEdgeAt(box, 10)).toBe(false);
+  expect(paintsTopEdgeAt(box, 390)).toBe(false);
+  expect(paintsTopEdgeAt(box, 200)).toBe(true);
+});
+
+test("logical corners follow the inherited direction: right to left rounds the top-right corner", () => {
+  const box = named("box", { width: "100px", height: "50px", "border-start-start-radius": "10px" });
+  const radiiIn = (dir: string) =>
+    topEdgePaintOrder(el("div", { attrs: { dir } }, [named("wrap", {}, [box])]), SCREEN).find(
+      (entry) => entry.element === box,
+    )?.radii;
+  expect(radiiIn("ltr")?.topLeft).toEqual({ x: 10, y: 10 });
+  expect(radiiIn("ltr")?.topRight).toEqual({ x: 0, y: 0 });
+  expect(radiiIn("rtl")?.topRight).toEqual({ x: 10, y: 10 });
+  expect(radiiIn("rtl")?.topLeft).toEqual({ x: 0, y: 0 });
+});
+
+test("a box of unmeasured height keeps square corners, since its height could shrink the radii", () => {
+  // A pill whose height comes from its unmeasured content: the browser fits 9999px radii to it.
+  const pill = named("pill", { width: "400px", "border-radius": "9999px" });
+  const painted = topEdgePaintOrder(named("root", {}, [pill]), SCREEN);
+  const box = painted.find((entry) => entry.element === pill)!;
+  expect(box.rect.height).toBeUndefined();
+  expect(box.radii).toBeUndefined();
+  expect(paintsTopEdgeAt(box, 200)).toBe(true);
+  expect(paintsTopEdgeAt(box, 5)).toBe(true);
 });

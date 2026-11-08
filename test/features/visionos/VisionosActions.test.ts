@@ -124,6 +124,33 @@ test("Settings Accessibility keeps the identifier-only command", async () => {
   });
 });
 
+test("a disabled Settings twin of the General row resolves to the enabled row", async () => {
+  const tree = useSettingsHierarchy();
+  const nodes = tree.hierarchy.node;
+  const rowIndex = nodes.findIndex(
+    (node) => node["resource-id"] === "General" && node.className === "9",
+  );
+  nodes.splice(rowIndex, 0, { ...structuredClone(nodes[rowIndex]), enabled: "false" });
+  await visionosTapOn(device.deviceId, { action: "tap", elementId: "General" });
+  expect(client.commands[1]).toEqual({
+    type: "request_tap_element",
+    identifier: "General",
+    label: "General",
+    elementType: 9,
+  });
+});
+
+test("a disabled twin does not turn a unique identifier into a shared one", async () => {
+  const nodes = client.tree.hierarchy.node;
+  if (!Array.isArray(nodes)) {
+    throw new Error("Expected captured flat descendants");
+  }
+  const ornament = nodes.find((node) => "resource-id" in node && node["resource-id"] === "orn")!;
+  nodes.unshift({ ...ornament, enabled: "false" });
+  await visionosTapOn(device.deviceId, { action: "tap", elementId: "orn" });
+  expect(client.commands[1]).toEqual({ type: "request_tap_element", identifier: "orn" });
+});
+
 test("identical Settings siblings report ambiguity with candidate details", async () => {
   const tree = useSettingsHierarchy();
   const row = tree.hierarchy.node.find(

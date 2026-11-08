@@ -90,7 +90,10 @@ async function tapOnce(
       "The matched visionOS element is disabled; observe and select an enabled control.",
     );
   }
-  const sharers = all.filter((element) => element["resource-id"] === identifier);
+  // The runner resolves only enabled elements, so a disabled twin never makes a tap ambiguous.
+  const sharers = all.filter(
+    (element) => element["resource-id"] === identifier && element.enabled !== "false",
+  );
   const narrowed = sharers.filter(
     (element) => element.class === target.class && (element.text ?? "") === (target.text ?? ""),
   );

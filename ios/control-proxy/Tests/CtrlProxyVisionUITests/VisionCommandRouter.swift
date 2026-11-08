@@ -103,10 +103,15 @@ final class VisionCommandRouter {
                 case let .match(index):
                     // Never translate an ornament frame to a coordinate.
                     matches[index].tap()
-                case .none:
-                    throw CommandError.executionFailed(
-                        "No enabled element matches identifier '\(request.identifier)' and the supplied type/label; "
-                            + "element missing or disabled; observe again"
+                case .missing:
+                    throw CommandError.invalidParameter(
+                        "identifier",
+                        "element missing for the supplied type/label; observe again"
+                    )
+                case .disabled:
+                    throw CommandError.invalidParameter(
+                        "identifier",
+                        "element disabled; observe again and select an enabled control"
                     )
                 case let .ambiguous(count):
                     let details = snapshots.map {

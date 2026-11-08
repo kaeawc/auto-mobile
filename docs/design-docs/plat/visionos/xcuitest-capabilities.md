@@ -11,7 +11,8 @@ and `killDevice` use `simctl`; boot binds a session at `booted` readiness.
 `observe`, `tapOn` and `sendKeys` prepare a separate window-app XCUITest runner
 on demand. Provisioning still accepts only readiness `none`. The runner reports
 hierarchy and focus, taps enabled window and ornament elements by identifier (narrowed
-by exact type and label when shared), and appends text to a focused field;
+by exact type and label when shared; disabled twins never count as sharers), and appends text to a focused field;
+a missing or disabled target is an invalid `identifier` parameter, and remaining ambiguity is `ambiguous_element`;
 screenshots use `simctl`. iOS inventories exclude xrOS runtimes. `installApp`, `uninstallApp`, `launchApp`, `terminateApp` and
 `listApps` use `simctl`. All other device tools remain disabled.
 

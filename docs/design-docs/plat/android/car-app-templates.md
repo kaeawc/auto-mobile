@@ -34,9 +34,14 @@ override fun onGetTemplate(): Template =
 - **Provider** (`CarAppTemplatesProvider`, debug source set only, authority
   `<applicationId>.automobile.carapptemplates`). Read-only; every entry point enforces
   `DebugInspectorAccess` (shell, root, own uid, CtrlProxy).
-- **Host reader** (`CarAppTemplateReader`). Runs `adb shell content call --method snapshot` for the
-  foreground package, validates the document, and turns an enabled one into the `carAppTemplates`
-  block on the served `observe` copy, never on the cached observation.
+- **Host reader** (`CarAppTemplateReader`). Runs `adb shell content call --user <u> --method snapshot`
+  for the foreground package, validates the document, and turns an enabled one into the
+  `carAppTemplates` block on the served `observe` copy, never on the cached observation. The user is
+  the observation's when it carries one, otherwise the foreground lookup's; a lookup naming another
+  package skips the read instead of falling back to user 0, so a secondary or work-profile app is
+  never read as the default user. While the user an app was last read as is still quiet (below), or a
+  lookup just failed, no lookup runs; a switch to another user's copy of that package is therefore
+  read once that entry expires. Overlapping observations of one app share one read.
 
 ## Stack walk
 
@@ -52,15 +57,20 @@ comes first.
 Ids are slash paths: `session<n>/screen<i>/template/...`, then `items/<k>` (or
 `sections/<s>/items/<k>`), `header/actions/<k>`, `actions/<k>`, `actionStrip/actions/<k>`,
 `mapActionStrip/actions/<k>`, `tabs/<k>` and `tabContent/...`. They depend only on stack position and
-template structure, so the same screen state gives the same ids on every call.
+template structure, so the same screen state gives the same ids on every call. `session<n>` follows
+first-record order, so it can change after `disable()` and `enable()`.
 
 ## Cost and invariants
 
 - An app without the route costs one failed `content call` per device, user and package every five
-  minutes. A route that answers disabled is asked again every thirty seconds. An enabled route is
-  asked on every `observe`, bounded by a 1.5 s deadline.
+  minutes. A route that answers disabled is asked again every thirty seconds. A read that fails
+  (timeout, adb error, a payload that is not JSON or fails schema validation, the last logged as a
+  warning) is retried after five seconds, so a transient failure does not hide an enabled route for
+  five minutes. Expired entries are pruned. An enabled route is asked on every `observe`, bounded by
+  a 1.5 s deadline for the foreground lookup and another for the read.
 - A non-owner read of a held device makes no provider call.
 - When the route does not answer with an enabled document, the payload is unchanged, byte for byte.
-- No new permissions. Nothing runs in the app until it calls `enable`.
+- No new permissions. The manifest provider is created at launch and answers `enabled: false`;
+  recording stays off until the app calls `enable`.
 - The block describes templates the app returned, never what the host rendered or hid (driving
   restrictions, list limits, host-side truncation). The `note` field says so on every block.

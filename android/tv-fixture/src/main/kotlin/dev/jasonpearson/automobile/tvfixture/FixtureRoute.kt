@@ -4,20 +4,33 @@ package dev.jasonpearson.automobile.tvfixture
 sealed interface FixtureRoute {
   val route: String
 
+  /** The stable screen name this route reports to the AutoMobile SDK's navigation graph. */
+  val screenName: String
+
+  /** Navigation arguments reported with [screenName]. */
+  val arguments: Map<String, String>
+    get() = emptyMap()
+
   data object Browse : FixtureRoute {
     override val route = "browse"
+    override val screenName = "BrowseDestination"
   }
 
   data object Search : FixtureRoute {
     override val route = "search"
+    override val screenName = "SearchDestination"
   }
 
   data object Player : FixtureRoute {
     override val route = "player"
+    override val screenName = "PlayerDestination"
   }
 
   data class Detail(val cardId: String) : FixtureRoute {
     override val route = "$DETAIL_PREFIX$cardId"
+    override val screenName = "DetailDestination"
+    override val arguments: Map<String, String>
+      get() = mapOf("cardId" to cardId)
   }
 
   companion object {

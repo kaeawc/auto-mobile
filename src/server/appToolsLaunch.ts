@@ -124,7 +124,7 @@ function launchVerificationFailureReason(
   observedAppId: string | undefined,
   observation: LaunchAppResult["observation"],
 ): LaunchVerificationFailureReason | undefined {
-  if (isLaunchPermissionDialogObservation(observation)) {
+  if (isLaunchPermissionDialogObservation(observation, appId)) {
     return undefined;
   }
   if (observation === undefined) {

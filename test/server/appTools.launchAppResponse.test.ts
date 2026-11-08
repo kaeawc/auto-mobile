@@ -418,6 +418,31 @@ describe("buildLaunchAppResponse (already foreground, #6868)", () => {
       expect(payload.message).not.toContain("blocked by");
     });
 
+    // CtrlProxy can flag the dialog from an overlapping window while an unrelated
+    // app holds the primary window; that is a wrong-app landing, not a blocker.
+    test("reports a mismatch, not blockedBy, for a dialog flag over an unrelated app", () => {
+      const payload = buildLaunchAppResponse("com.google.android.contacts", {
+        success: true,
+        packageName: "com.google.android.contacts",
+        observation: observation({
+          notificationPermissionDetected: true,
+          activeWindow: {
+            appId: "com.other.app",
+            activityName: "MainActivity",
+            layoutSeqSum: 1,
+            type: "notification_permission_dialog",
+          },
+          viewHierarchy: { hierarchy: {}, packageName: "com.other.app" },
+        }),
+      });
+
+      expect(payload.verified).toBe(false);
+      expect(payload.verifyFailureReason).toBe(
+        "foreground package com.other.app does not match requested com.google.android.contacts",
+      );
+      expect("blockedBy" in payload).toBe(false);
+    });
+
     test("a verified launch carries no blockedBy", () => {
       const payload = buildLaunchAppResponse("com.android.settings", {
         success: true,

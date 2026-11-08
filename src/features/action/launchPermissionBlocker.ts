@@ -14,6 +14,18 @@ export function isPermissionControllerPackage(packageName: string | undefined): 
   return packageName !== undefined && PERMISSION_CONTROLLER_PACKAGES.has(packageName);
 }
 
+/**
+ * Whether `packageName` can host the notification permission dialog: a known
+ * permission controller or an OEM alias, matching CtrlProxy's own
+ * `permissioncontroller` detection gate.
+ */
+export function hostsNotificationPermissionDialog(packageName: string | undefined): boolean {
+  return (
+    isPermissionControllerPackage(packageName) ||
+    (packageName !== undefined && /permissioncontroller/i.test(packageName))
+  );
+}
+
 function isActivityInPackage(activityName: string, packageName: string): boolean {
   return activityName === packageName || activityName.startsWith(`${packageName}.`);
 }
@@ -76,10 +88,11 @@ function dialogActions(observation: ObserveResult, dialogPackage: string): strin
 
 /**
  * Describe the permission dialog a successful launch of `appId` landed behind,
- * or `undefined` when the foreground is not one. A dialog counts when the
- * capture flagged a notification-permission dialog or a permission controller
- * owns the foreground window, and in either case the window is not the
- * requested app's own.
+ * or `undefined` when the foreground is not one. A dialog counts only when a
+ * permission controller owns the foreground window (with or without the
+ * notification-permission flag) and that window is not the requested app's own.
+ * CtrlProxy can flag the dialog from an overlapping secondary window, so a flag
+ * on another app's foreground window does not make that app the dialog's owner.
  */
 export function resolveLaunchPermissionBlocker(
   appId: string,
@@ -90,7 +103,10 @@ export function resolveLaunchPermissionBlocker(
     return undefined;
   }
   const notificationDialog = isNotificationPermissionDialog(observation);
-  if (!notificationDialog && !isPermissionControllerPackage(dialogPackage)) {
+  const ownsDialog = notificationDialog
+    ? hostsNotificationPermissionDialog(dialogPackage)
+    : isPermissionControllerPackage(dialogPackage);
+  if (!ownsDialog) {
     return undefined;
   }
   return {

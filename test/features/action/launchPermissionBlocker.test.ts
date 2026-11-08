@@ -86,6 +86,21 @@ describe("resolveLaunchPermissionBlocker", () => {
     expect(resolveLaunchPermissionBlocker("com.example.app", undefined)).toBeUndefined();
   });
 
+  test("does not name an unrelated foreground app as the notification dialog's owner", () => {
+    // CtrlProxy can flag the dialog from an overlapping window while another app
+    // holds the primary window; that app does not own the dialog.
+    const capture = observation();
+    capture.activeWindow = {
+      appId: "com.other.app",
+      activityName: "",
+      layoutSeqSum: 0,
+      type: "notification_permission_dialog",
+    };
+    capture.viewHierarchy = { hierarchy: {}, packageName: "com.other.app" };
+    expect(capture.notificationPermissionDetected).toBe(true);
+    expect(resolveLaunchPermissionBlocker("com.google.android.contacts", capture)).toBeUndefined();
+  });
+
   test("tells the client to answer the dialog when no button was captured", () => {
     expect(
       describeLaunchPermissionBlocker({

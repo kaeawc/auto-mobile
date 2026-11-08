@@ -10,6 +10,7 @@ import { pressButtonSchema } from "../../src/server/interactionTools";
 import { assertToolSupportsDevicePlatform } from "../../src/server/applePlatformToolSupport";
 import type { BootedDevice } from "../../src/models";
 import { ActionableError } from "../../src/models/ActionableError";
+import { WatchRunnerError } from "../../src/features/watch/WatchRunnerError";
 import {
   rotateCrownHandler,
   rotateCrownSchema,
@@ -115,4 +116,34 @@ test("long press is refused by the real handler before hierarchy or input", asyn
     tapOnHandler(device, { selector: { text: "CtrlProxy Watch" }, duration: 1000 }),
   ).rejects.toThrow("longPress");
   expect(client.commands).toEqual([]);
+});
+
+const unchangedCrown =
+  "rotateCrown changed nothing the accessibility tree shows. Tap the view that should receive the crown, then observe before trying again.";
+
+test.each([0.1, -0.5])(
+  "an unchanged sub-revolution crown turn %s names the turn size as a cause",
+  async (delta) => {
+    client.failure = new WatchRunnerError(unchangedCrown, "command_failed");
+    const error = await rotateCrownHandler(device, rotateCrownSchema.parse({ delta })).catch(
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(WatchRunnerError);
+    expect((error as WatchRunnerError).errorCode).toBe("command_failed");
+    expect((error as Error).message).toStartWith(unchangedCrown);
+    expect((error as Error).message).toContain(`A delta of ${delta} is ${Math.abs(delta)} of one`);
+    expect(client.commands).toEqual([{ type: "crown", delta, velocity: 1 }]);
+  },
+);
+
+test.each([
+  { delta: 1, failure: new WatchRunnerError(unchangedCrown, "command_failed") },
+  { delta: -2, failure: new WatchRunnerError(unchangedCrown, "command_failed") },
+  { delta: 0.1, failure: new WatchRunnerError("Watch command failed", "command_failed") },
+  { delta: 0.1, failure: new ActionableError(unchangedCrown) },
+])("crown failure for delta $delta passes through unchanged", async ({ delta, failure }) => {
+  client.failure = failure;
+  await expect(rotateCrownHandler(device, rotateCrownSchema.parse({ delta }))).rejects.toBe(
+    failure,
+  );
 });

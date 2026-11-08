@@ -48305,7 +48305,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "watchOS only: rotate the Apple Watch Digital Crown by a signed, non-zero delta, with optional positive velocity (default: 1). Target an Apple Watch session. Observe afterward to check the app's response.",
+    "description": "watchOS only: rotate the Apple Watch Digital Crown by a signed, non-zero delta in full revolutions (1 = one turn; use fractions such as 0.25 for small changes), with optional positive velocity (default: 1). Target an Apple Watch session. Observe afterward to check the app's response.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -48316,7 +48316,7 @@
           "const": "watchos"
         },
         "delta": {
-          "description": "Signed, non-zero Digital Crown rotation delta",
+          "description": "Signed, non-zero crown turn in full revolutions: 1 is one full turn, 0.25 a quarter turn. How many value steps a turn moves depends on the app's crown step and sensitivity. Fractions are accepted; a turn smaller than one step of the focused control may not register",
           "type": "number"
         },
         "velocity": {

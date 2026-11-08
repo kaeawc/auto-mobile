@@ -14,8 +14,8 @@ function alternatives(key: SendKeysSemanticKey): string {
     case "previous":
       return "Use sendKeys with a selector for the previous field.";
     default:
-      // Enter inserts a newline in a multiline field, so it is only a fallback for single-line ones.
-      return 'Tap the screen\'s submit control, or on a single-line field use key:"enter"; observe the result before retrying.';
+      // Enter may submit, but a multiline field can take it as a newline instead.
+      return 'Tap the screen\'s submit control if there is one; otherwise key:"enter" may submit, though a multiline field can insert a newline instead. Observe the result before retrying.';
   }
 }
 

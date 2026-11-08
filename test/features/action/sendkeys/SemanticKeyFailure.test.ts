@@ -10,7 +10,7 @@ describe("semanticKeyFailure (#17463)", () => {
     });
     expect(semanticKeyFailure("search", { error: "Action failed" })).toEqual({
       error:
-        'key "search" was not applied: the device reported the "search" action as not performed; the field may not accept it, or the key could not be delivered. Tap the screen\'s submit control, or on a single-line field use key:"enter"; observe the result before retrying.',
+        'key "search" was not applied: the device reported the "search" action as not performed; the field may not accept it, or the key could not be delivered. Tap the screen\'s submit control if there is one; otherwise key:"enter" may submit, though a multiline field can insert a newline instead. Observe the result before retrying.',
       errorCode: "EDITOR_ACTION_MISMATCH",
     });
     expect(semanticKeyFailure("next", {})).toEqual({

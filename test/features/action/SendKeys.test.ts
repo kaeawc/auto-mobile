@@ -4335,6 +4335,23 @@ describe("DefaultSendKeysCommandExecutor", () => {
     },
   );
 
+  test("maps a bare device failure on search to a typed submit-key failure (#17463)", async () => {
+    const { client } = createTextClient();
+    client.ime = async () => ({ success: false, error: "Action failed" });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(new FakeAdbExecutor()),
+      createObserver(focusedAndroidObservation()),
+      { textClient: client },
+    );
+
+    const result = await executor.key({ action: "key", key: "search" });
+
+    expect(result).toMatchObject({ success: false, errorCode: "EDITOR_ACTION_MISMATCH" });
+    expect(result.error).toContain("the key could not be delivered");
+    expect(result.error).toContain("a multiline field can insert a newline");
+  });
+
   test("keeps a descriptive device error for a semantic key", async () => {
     const { client } = createTextClient();
     client.ime = async () => ({ success: false, error: "IME action timed out after 5000ms" });

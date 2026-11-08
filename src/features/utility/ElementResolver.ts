@@ -54,6 +54,34 @@ export {
 // Keep label promotion within a parent or grandparent, away from distant editable ancestors.
 const FOCUS_LABEL_ANCESTOR_HOP_LIMIT = 2;
 
+interface HintRetryRequest {
+  snapshot: ResolverSnapshot;
+  selector: ResolverSelector;
+  intent: ResolutionIntent;
+}
+
+function isFocusHintLookup(selector: ResolverSelector, intent: ResolutionIntent): boolean {
+  return (
+    intent.action === "focus-input" &&
+    intent.allowHintFallback === true &&
+    !intent.hintTierOnly &&
+    !intent.negative &&
+    selector.text !== undefined &&
+    selector.sibling === undefined
+  );
+}
+
+/** A focus lookup whose text matched only nodes it cannot focus, outside a container failure. */
+function needsHintTierRetry(
+  result: ElementResolution,
+  selector: ResolverSelector,
+  intent: ResolutionIntent,
+): boolean {
+  const matchedNothingFocusable =
+    !result.chosen && result.candidates.length === 0 && result.matches.length > 0;
+  return matchedNothingFocusable && !result.containerFailure && isFocusHintLookup(selector, intent);
+}
+
 export class ElementResolver {
   constructor(private readonly random: () => number = () => defaultRandom.next()) {}
 
@@ -236,7 +264,37 @@ export class ElementResolver {
         );
       }
     }
-    return result;
+    return this.retryFocusWithHintTier(
+      result,
+      { snapshot, selector, intent },
+      {
+        availableNodes,
+        scope: boundary,
+        preserveTextScope,
+      },
+    );
+  }
+
+  /**
+   * A focus-input text lookup whose primary matches are all non-editable (a "Phone" icon, an
+   * "Add phone" button) would otherwise never reach the editable-hint tier, so an input named
+   * only by its hint could not be selected by the name observe shows for it (#17463).
+   */
+  private retryFocusWithHintTier(
+    result: ElementResolution,
+    { snapshot, selector, intent }: HintRetryRequest,
+    nodeScope: NodeScope & { availableNodes: readonly SearchableEntry[] },
+  ): ElementResolution {
+    if (!needsHintTierRetry(result, selector, intent)) {
+      return result;
+    }
+    const hinted = this.resolveInNodes(
+      snapshot,
+      selector,
+      { ...intent, hintTierOnly: true },
+      nodeScope,
+    );
+    return hinted.chosen || hinted.candidates.length > 0 ? hinted : result;
   }
 
   private matchSelectionNodes(
@@ -734,7 +792,7 @@ export class ElementResolver {
         matchMode: "exact",
       };
     }
-    const primary = this.matchText(nodes, selector, intent, {
+    const primary = this.primaryTextMatch(nodes, selector, intent, {
       snapshot,
       options: { textQuery, scope },
     });
@@ -761,6 +819,13 @@ export class ElementResolver {
       };
     }
     return primary;
+  }
+
+  /** The primary text tier, skipped when a focus retry asks for the hint tier alone. */
+  private primaryTextMatch(
+    ...args: Parameters<ElementResolver["matchText"]>
+  ): ReturnType<ElementResolver["matchText"]> {
+    return args[2].hintTierOnly ? { matches: [], matchMode: "exact" } : this.matchText(...args);
   }
 
   private matchableTextFields(

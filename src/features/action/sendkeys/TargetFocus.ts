@@ -173,7 +173,9 @@ export class TargetFocus {
       ...this.deps.target.prototypeIdentifiers,
       ...(result.identifiers ?? []),
     ];
-    if (!result.success && result[tapFocusFailure]) {
+    // A miss that lists the on-screen inputs is not a scroll problem (#17463).
+    const failure = result[tapFocusFailure];
+    if (!result.success && failure && failure !== "not-found-inputs-listed") {
       return {
         ...result,
         error: `${result.error} The field may be scrolled out of view; use swipeOn with lookFor to bring it into view, then retry.`,

@@ -321,3 +321,102 @@ test("a weighted row bounded around a capped aspect ratio keeps its share over i
     "min(100%, 20px)",
   );
 });
+
+test("a weighted child's height bounds do not move its share, as both devices pin it (#16698, #16763)", () => {
+  const weighted = (weight: number, bounds: Raw = {}) => ({
+    type: "row",
+    style: { weight, ...bounds },
+  });
+  // The renderer drops a weighted column child's min/max height, so CSS and the bound split evenly.
+  expect(columnChildHeights([weighted(1, { maxHeight: 20 }), weighted(1)], 100, 0)).toEqual([
+    50, 50,
+  ]);
+  expect(columnChildHeights([weighted(1, { minHeight: 70 }), weighted(1)], 100, 0)).toEqual([
+    50, 50,
+  ]);
+  expect(
+    columnChildHeights(
+      [weighted(1, { maxHeight: 10 }), weighted(1, { maxHeight: 40 }), weighted(2)],
+      100,
+      0,
+    ),
+  ).toEqual([25, 25, 50]);
+  // Unweighted siblings, spacing and hidden children are taken off before the weights share.
+  expect(
+    columnChildHeights(
+      [
+        { type: "box", style: { height: { dp: 20 } } },
+        undefined,
+        weighted(1, { maxHeight: 10 }),
+        weighted(3),
+      ],
+      100,
+      5,
+    ),
+  ).toEqual([100, undefined, 17.5, 52.5]);
+});
+
+test("a weighted row beside a maxHeight-bounded sibling caps its aspect ratio by its pinned share (#16698, #16763)", () => {
+  const column = withColumnHeights(
+    {
+      type: "column",
+      children: [
+        { type: "box", style: { weight: 1, maxHeight: 20 } },
+        {
+          type: "row",
+          style: { weight: 1 },
+          children: [{ type: "box", style: { aspectRatio: 2 } }, { type: "text" }],
+        },
+      ],
+    },
+    "root",
+    prepare,
+    100,
+  );
+  expect(childrenOf(column).map(heightOf)).toEqual([50, 50]);
+  const ratio = childrenOf(
+    rowMeasured(record(childrenOf(column)[1])!, "root.children[1]", prepare, 100),
+  );
+  expect(record(record(ratio[0])?.style)?.[ROW_MEASURE_KEY]).toEqual({
+    shrink: CAPPED_SHRINK,
+    basis: 100,
+  });
+});
+
+test("weights summing below 1 take only that fraction of the free space, as CSS flex does (#16763)", () => {
+  const weighted = (weight: number, bounds: Raw = {}) => ({
+    type: "row",
+    style: { weight, ...bounds },
+  });
+  expect(columnChildHeights([weighted(0.5)], 100, 0)).toEqual([50]);
+  expect(columnChildHeights([weighted(0.25), weighted(0.25)], 100, 0)).toEqual([25, 25]);
+  // A frame comes off first: 60 dp of padding leaves 40, of which the 0.5 of weight takes half.
+  const padded = weighted(0.25, { padding: { top: 30, bottom: 30 } });
+  expect(columnChildHeights([padded, weighted(0.25)], 100, 0)).toEqual([70, 10]);
+});
+
+test("a weighted child's padding and border are its flex base, which its share grows from (#16763)", () => {
+  const weighted = (weight: number, bounds: Raw = {}) => ({
+    type: "row",
+    style: { weight, ...bounds },
+  });
+  const padded = (top: number, bounds: Raw = {}) =>
+    weighted(1, { padding: { top, bottom: top }, ...bounds });
+  // The share grows on top of the padding: 70 dp of padding leaves 30 to split 1:3.
+  expect(columnChildHeights([padded(35), weighted(3)], 100, 0)).toEqual([77.5, 22.5]);
+  // Its height bounds do not clamp the share, as the renderer drops them (#16698).
+  expect(columnChildHeights([padded(25, { maxHeight: 20 }), weighted(1)], 100, 0)).toEqual([
+    75, 25,
+  ]);
+  expect(columnChildHeights([padded(10, { maxHeight: 40 }), weighted(1)], 100, 0)).toEqual([
+    60, 40,
+  ]);
+  // A frame larger than the free space keeps its frame, and its sibling gets nothing.
+  expect(columnChildHeights([padded(60), weighted(1)], 100, 0)).toEqual([120, 0]);
+  // A solid border counts on both edges; a gradient border is drawn as an overlay and does not.
+  const bordered = (border: Raw) => weighted(1, { border });
+  expect(columnChildHeights([bordered({ width: 10 }), weighted(1)], 100, 0)).toEqual([60, 40]);
+  expect(
+    columnChildHeights([bordered({ width: 10, gradient: { colors: [] } }), weighted(1)], 100, 0),
+  ).toEqual([50, 50]);
+});

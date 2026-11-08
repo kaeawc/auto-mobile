@@ -23,12 +23,66 @@ const takenHeight = (node: Raw, remaining: number): number => {
   return typeof record(style?.height)?.dp === "number" ? ownHeight(style) : floor;
 };
 
+const edge = (box: Raw | undefined, name: string) =>
+  typeof box?.[name] === "number" ? box[name] : 0;
+
+/**
+ * The vertical padding and solid border of a node's box, which `box-sizing: border-box` never lets
+ * it shrink below: a `flex: w w 0` item's base size, the height its weight share is added to.
+ */
+function frame(style: Raw | undefined): number {
+  const padding = record(style?.padding);
+  const border = record(style?.border);
+  const width =
+    typeof border?.width === "number" && border.gradient === undefined ? border.width : 0;
+  return edge(padding, "top") + edge(padding, "bottom") + 2 * width;
+}
+
+/**
+ * Each weighted node's height out of `free`, as CSS's flexible-length algorithm resolves
+ * `flex: w w 0` items: each starts at its frame (see frame), and what the frames leave is split
+ * over the unfrozen weights (only that fraction of the initial free space when the weights sum
+ * below 1). A weight pins its share on both devices, so the node's `maxHeight` and `minHeight` do
+ * not clamp it (the renderer drops them; see sizeStyle), but a target never goes below its frame;
+ * those so raised freeze, and the loop repeats until every target is frozen, handing what a frame
+ * takes from its siblings' shares.
+ */
+function weightShares(nodes: readonly Raw[], free: number): Map<Raw, number> {
+  const frozen = new Map<Raw, number>();
+  let open = nodes.filter((node) => weightOf(node) !== undefined);
+  const base = (node: Raw) => frame(record(node.style));
+  const initial = free - open.reduce((sum, node) => sum + base(node), 0);
+  while (open.length > 0) {
+    const weights = open.reduce((sum, node) => sum + (weightOf(node) ?? 0), 0);
+    const taken = [...frozen.values()].reduce((sum, height) => sum + height, 0);
+    const left = free - taken - open.reduce((sum, node) => sum + base(node), 0);
+    // Weights summing below 1 take only that fraction of the initial free space, when less.
+    const fraction = initial * weights;
+    const space = weights < 1 && Math.abs(fraction) < Math.abs(left) ? fraction : left;
+    const targets = open.map((node) => {
+      const share = base(node) + (space * (weightOf(node) ?? 0)) / weights;
+      const height = Math.max(base(node), share);
+      return { node, share, height };
+    });
+    const violation = targets.reduce((sum, target) => sum + target.height - target.share, 0);
+    const freezes = targets.filter(
+      ({ share, height }) => violation === 0 || (violation > 0 ? height > share : height < share),
+    );
+    for (const { node, height } of freezes) {
+      frozen.set(node, height);
+    }
+    open = open.filter((node) => !frozen.has(node));
+  }
+  return frozen;
+}
+
 /**
  * The incoming max height of each child of a column with content height `content`, as Compose's
  * Column measures them: each unweighted child in order against what its earlier siblings and the
  * spacing left, then each weighted child against its weight's share of what every unweighted
- * child and the spacing left. A sibling with no dp height counts as its minHeight, so the result
- * is an upper bound when one depends on layout. Hidden children (undefined) get no height.
+ * child and the spacing left, each share at least its frame (see weightShares). A sibling with
+ * no dp height counts as its minHeight, so the result is an upper bound when one depends on
+ * layout. Hidden children (undefined) get no height.
  *
  * CSS gives a `fill` child `flex: 1 1 auto`, which shares the height with its weighted siblings;
  * the bound follows Compose instead, where the `fill` child takes it all.
@@ -40,7 +94,6 @@ export function columnChildHeights(
 ): (number | undefined)[] {
   const visible = children.filter((node): node is Raw => node !== undefined);
   const gaps = spacing * Math.max(0, visible.length - 1);
-  const weights = visible.reduce((sum, node) => sum + (weightOf(node) ?? 0), 0);
   const heights: (number | undefined)[] = [];
   let before = 0;
   let used = 0;
@@ -55,11 +108,10 @@ export function columnChildHeights(
     before += taken + spacing;
     used += taken;
   }
-  const share = Math.max(0, content - used - gaps) / (weights || 1);
-  return children.map((node, index) => {
-    const weight = weightOf(node);
-    return node && weight !== undefined ? share * weight : heights[index];
-  });
+  const shares = weightShares(visible, Math.max(0, content - used - gaps));
+  return children.map((node, index) =>
+    node && shares.has(node) ? shares.get(node) : heights[index],
+  );
 }
 
 /**

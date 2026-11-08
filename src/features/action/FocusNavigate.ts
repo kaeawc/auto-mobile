@@ -179,6 +179,45 @@ function stringProp(
 }
 
 /**
+ * The Leanback headers grid (`browse_headers`) holding a focused `row_header`, if focus is there.
+ * While a header holds focus its row's card labels are hidden; another app's `row_header` id
+ * outside that grid is not a Leanback header.
+ */
+function leanbackHeadersPane(
+  focused: Element | null,
+  elements: readonly Element[],
+): Element | undefined {
+  if (!focused || !stringProp(focused, "resource-id").endsWith(":id/row_header")) {
+    return undefined;
+  }
+  return elements.find((element) => {
+    if (!stringProp(element, "resource-id").endsWith(":id/browse_headers")) {
+      return false;
+    }
+    const overlap = intersectBounds(element.bounds, focused.bounds);
+    return overlap !== null && boundsEqual(overlap, focused.bounds);
+  });
+}
+
+/**
+ * Right, to enter a focused Leanback header's content pane when no match is on screen; at most
+ * once per header. A scrollable headers grid can hide the target header below, so the headers
+ * are scanned down first and right is pressed once down is refused at the last header. A refused
+ * right falls through to the down scan.
+ */
+function leanbackEntry(
+  focused: Element | null,
+  elements: readonly Element[],
+  progress: FocusProgress,
+): FocusNavigateDirection | undefined {
+  const pane = leanbackHeadersPane(focused, elements);
+  if (!pane || progress.tried.has("right")) {
+    return undefined;
+  }
+  return isTruthyFlag(pane.scrollable) && !progress.blocked.has("down") ? undefined : "right";
+}
+
+/**
  * Label matching normalized as tapOn's touch resolver does (quotes, trimmed, whitespace collapsed,
  * case-insensitive), so ` Movies ` equals `Movies` and a wrapped `Sign\nin` matches `Sign in`.
  */
@@ -771,7 +810,7 @@ export class FocusNavigate {
       }
 
       const direction =
-        options.direction ?? this.nextDirection(focused, planTarget(focused, onScreen), progress);
+        options.direction ?? this.nextDirection(screen, planTarget(focused, onScreen), progress);
       const exhausted = isExhausted(options, progress, direction);
       const done = this.exitFor(focusedElement, matches, {
         steps,
@@ -836,14 +875,21 @@ export class FocusNavigate {
    * The best direction not yet pressed from the focused element. With the target on screen every
    * direction is a candidate, so focus can leave a container that traps it (#17209): directions
    * toward the target first, then the sideways escapes, then a direction that kept moving focus
-   * without getting closer (resumed for the rest of the call), and backing away last. Without a match on screen the only move is
-   * down, so an absent target scans down rather than wandering the whole screen.
+   * without getting closer (resumed for the rest of the call), and backing away last. Without a
+   * match, enter a Leanback header's content pane with right ({@link leanbackEntry}); otherwise
+   * scan down.
    */
   private nextDirection(
-    focused: Element | null,
+    screen: Pick<FocusScreen, "focused" | "elements">,
     matches: readonly Element[],
     progress: FocusProgress,
   ): FocusNavigateDirection | undefined {
+    const { focused } = screen;
+    const entry =
+      matches.length === 0 ? leanbackEntry(focused, screen.elements, progress) : undefined;
+    if (entry) {
+      return entry;
+    }
     const toward = directionsToward(focused, matches, progress.arrivedBy);
     const candidates =
       focused && matches.length > 0 ? directionsWithFallbacks(toward) : [...toward];

@@ -4934,6 +4934,9 @@ and `uninstallApp` actions remain separate from this artifact pipeline.
 - **Registry.** `disposable-apps.json` under the AutoMobile data dir is keyed by device id. Each
   record holds appId, slug, platform, label, spec sha256, template, signer, installedAt and
   expiresAt. Writes are serialized and atomic. A corrupt file or record is skipped with a warning.
+  An install writes its record, with the new expiresAt, as soon as the package is on the device and
+  before permissions are applied. A permission failure then surfaces as an error saying the app is
+  installed without its permissions, and the sweep still sees the current TTL.
 - **Lifecycle.** `ttlHours` defaults to 72, accepts 0 to 720, and 0 means no expiry. Re-installing
   a slug updates the app in place and keeps its storage unless `reset` is set. The expiry sweep and
   uninstall refuse ids outside the prefix. They also refuse installed packages whose signer differs

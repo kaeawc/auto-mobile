@@ -132,6 +132,8 @@ test.each([0.1, -0.5])(
     expect((error as WatchRunnerError).errorCode).toBe("command_failed");
     expect((error as Error).message).toStartWith(unchangedCrown);
     expect((error as Error).message).toContain(`A delta of ${delta} is ${Math.abs(delta)} of one`);
+    expect((error as Error).message).toContain("smaller than one step of the focused control");
+    expect((error as Error).message).toContain("if it is not at its limit, try a larger delta");
     expect(client.commands).toEqual([{ type: "crown", delta, velocity: 1 }]);
   },
 );

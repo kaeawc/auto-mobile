@@ -145,8 +145,8 @@ Every other tool refuses a watch before doing anything, with:
   control: on a 0–10 control with step 1 and medium sensitivity, `0.25` moves about 3 steps, `0.5`
   about 7, and `1` reaches the end. To reach an intermediate value, use fractional deltas and
   `observe` between turns. A turn smaller than one step of the focused control (for example `0.1`
-  on that control) may not register and fails like a rotation at the limit; for a delta below 1
-  the error says the turn may be too small. It is not listed by default; enable it with `setToolEnabled` (see
+  on that control) may not register and fails like a rotation at the limit; when `delta` is
+  between -1 and 1 the error says the turn may be too small. It is not listed by default; enable it with `setToolEnabled` (see
   [Dynamic Tools](dynamic-tools.md)). When the view hierarchy is
   identical before and after a rotation, it may touch an unoccupied interior point to wake crown
   routing, avoiding navigation and controls. It retries once only when the same focused control's

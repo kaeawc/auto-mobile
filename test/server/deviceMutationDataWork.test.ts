@@ -76,6 +76,12 @@ describe("wearSurface mutation identity", () => {
     expect(remove[0].key).not.toBe(add[0].key);
   });
 
+  test("listTileProviders is a read and records nothing", () => {
+    expect(deviceToolMutations("wearSurface", { action: "listTileProviders" }, "android")).toEqual(
+      [],
+    );
+  });
+
   test("showTile by index records nothing; by component it may add the tile, so it records like addTile", () => {
     expect(deviceToolMutations("wearSurface", { action: "showTile", index: 0 }, "android")).toEqual(
       [],

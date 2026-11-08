@@ -171,21 +171,29 @@ function parseLiveSlots(
 export function parseWatchFaces(dumpsys: string): WatchFaceObservation | null {
   const sections = splitWearServiceSections(dumpsys);
   const watchFaces = sections.get("watch_faces");
-  const body = watchFaces?.join("\n") ?? "";
-  const activePackage = ACTIVE_COMPONENT.exec(body)?.[1];
-  if (!watchFaces || activePackage === undefined) {
+  const activeFace = watchFaces ? parseActiveFace(watchFaces.join("\n")) : null;
+  if (!watchFaces || !activeFace) {
     return null;
   }
-  const favoriteId = ACTIVE_FAVORITE_ID.exec(body)?.[1];
-  const activeFace: ActiveWatchFace = {
-    package: activePackage,
-    favoriteId: favoriteId === undefined ? null : Number(favoriteId),
-    fallback: FALLBACK.exec(body)?.[1] === "true",
-  };
-  const live = activeFace.fallback ? null : parseLiveSlots(sections.get("complications"));
+  const complications = sections.get("complications");
+  const live = activeFace.fallback ? null : parseLiveSlots(complications);
   const favorites = parseFavorites(watchFaces).map((favorite) =>
     live && favorite.favoriteId === live.favoriteId ? { ...favorite, slots: live.slots } : favorite,
   );
-  const ambient = parseWatchFaceState(sections.get("complications")?.join("\n") ?? "")?.inAmbient;
+  const ambient = parseWatchFaceState(complications?.join("\n") ?? "")?.inAmbient;
   return { activeFace, favorites, ...(ambient === undefined ? {} : { ambient }) };
+}
+
+/** `activeWatchFaceComponent=WatchFaceId[<pkg>,null]`, `favoriteId=<n>` and the fallback flag. */
+function parseActiveFace(watchFaces: string): ActiveWatchFace | null {
+  const activePackage = ACTIVE_COMPONENT.exec(watchFaces)?.[1];
+  if (activePackage === undefined) {
+    return null;
+  }
+  const favoriteId = ACTIVE_FAVORITE_ID.exec(watchFaces)?.[1];
+  return {
+    package: activePackage,
+    favoriteId: favoriteId === undefined ? null : Number(favoriteId),
+    fallback: FALLBACK.exec(watchFaces)?.[1] === "true",
+  };
 }

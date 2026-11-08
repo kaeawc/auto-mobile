@@ -149,6 +149,7 @@ nav:
       - "Navigation graph": using/navigation-graph.md
       - "Device condition fixtures": using/device-condition.md
       - "Android Automotive OS": using/android-automotive.md
+      - "Android Auto and the DHU": using/android-auto.md
       - "Android TV": using/android-tv.md
       - "Wear OS": using/wear-os.md
       - "Apple TV": using/apple-tv.md

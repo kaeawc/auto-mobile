@@ -96,6 +96,7 @@ function act(
   name: string,
   extra: Record<string, unknown> = {},
   args?: Record<string, unknown>,
+  mutateNext: (copy: ObserveResult) => void = rowsMovedAndCheckboxToggled,
 ): Payload {
   const store = makeStore();
   finalizeToolResponse(createStructuredToolResponse(observation()), {
@@ -108,7 +109,7 @@ function act(
       createStructuredToolResponse({
         success: true,
         ...extra,
-        observation: observation(rowsMovedAndCheckboxToggled),
+        observation: observation(mutateNext),
       }),
       {
         name,
@@ -207,5 +208,113 @@ describe("#17464 default action envelope", () => {
     const out = act("tapOn", { element: row, selectedElement: { matchedElement: matched } });
 
     expect(out.element).toEqual(row);
+  });
+
+  describe("#17515 warning-only change after a screen-changed effect", () => {
+    const screenChanged = { effect: { screenChanged: true } };
+    const warnings = (copy: ObserveResult): LayoutWarning[] => copy.layoutWarnings!.warnings;
+    const statusBarIcon: LayoutWarning = {
+      type: "important-content-under-inset",
+      severity: "warning",
+      element: {
+        contentDesc: "Messages notification:",
+        bounds: { left: 80, top: 20, right: 120, bottom: 60 },
+      },
+      categories: ["interaction"],
+      insetTypes: ["systemBars"],
+      sides: ["top"],
+      overflowPx: { top: 40 },
+      insetPx: { top: 142 },
+      overlapPercent: 100,
+      confidence: "high",
+    };
+    const keyboardKey: LayoutWarning = {
+      ...statusBarIcon,
+      type: "interaction-in-system-gesture-region",
+      severity: "info",
+      element: { contentDesc: "q", bounds: { left: 0, top: 1900, right: 98, bottom: 2050 } },
+      insetTypes: ["systemGestures"],
+      sides: ["left"],
+      overflowPx: { left: 20 },
+      insetPx: { left: 78 },
+      overlapPercent: 20,
+      confidence: "medium",
+    };
+
+    function envelope(
+      name: string,
+      mutateNext: (copy: ObserveResult) => void,
+      args?: Record<string, unknown>,
+    ) {
+      serverConfig.setActionsDiffObserveEnabled(true);
+      return act(name, screenChanged, args, mutateNext);
+    }
+
+    for (const name of ACTION_TOOLS) {
+      test(`${name}: a material warning change stays a diff without layoutWarnings`, () => {
+        const out = envelope(name, (copy) => warnings(copy).push(keyboardKey));
+
+        expect(out.observationDiff).toMatchObject({ mode: "diff", reason: "diff_emitted" });
+        expect(out.observation.isDiff).toBe(true);
+        expect(out.observation.fields?.layoutWarnings).toBeUndefined();
+      });
+
+      test(`${name}: a diff-invisible screen change beside a warning change falls back`, () => {
+        // The status-bar clock is skipped by the skeleton diff, so this real
+        // change is invisible there; the warning delta must not mask it.
+        const out = envelope(name, (copy) => {
+          visit(copy.viewHierarchy, (n) => {
+            if (n["resource-id"] === "com.android.systemui:id/clock") {
+              n.text = "12:59";
+              n["content-desc"] = "12:59 PM";
+            }
+          });
+          warnings(copy).push(keyboardKey);
+        });
+
+        expect(out.observationDiff).toMatchObject({ mode: "full", reason: "screen_changed" });
+        expect(out.observation.isDiff).toBeUndefined();
+      });
+
+      test(`${name}: s2- view id churn alone falls back to the full envelope`, () => {
+        const out = envelope(name, (copy) =>
+          warnings(copy).forEach((warning, index) => {
+            warning.element.viewId = `s2-${index.toString(16).padStart(16, "0")}`;
+          }),
+        );
+
+        expect(out.observationDiff).toMatchObject({ mode: "full", reason: "screen_changed" });
+        expect(out.observation.isDiff).toBeUndefined();
+      });
+
+      test(`${name}: a SystemUI status-bar warning alone falls back to the full envelope`, () => {
+        const out = envelope(name, (copy) => warnings(copy).push(statusBarIcon));
+
+        expect(out.observationDiff).toMatchObject({ mode: "full", reason: "screen_changed" });
+      });
+
+      test(`${name}: confidence-only churn falls back to the full envelope`, () => {
+        const out = envelope(name, (copy) =>
+          warnings(copy).forEach((warning) => {
+            warning.confidence = warning.confidence === "high" ? "medium" : "high";
+          }),
+        );
+
+        expect(out.observationDiff).toMatchObject({ mode: "full", reason: "screen_changed" });
+      });
+    }
+
+    test('project:"full" still reports the warning change in the diff', () => {
+      const out = envelope("tapOn", (copy) => warnings(copy).push(keyboardKey), {
+        project: "full",
+      });
+
+      expect(out.observationDiff).toMatchObject({ mode: "diff", reason: "diff_emitted" });
+      expect(
+        out.observation.fields.layoutWarnings.to.warnings.map(
+          (w: LayoutWarning) => w.element.contentDesc,
+        ),
+      ).toContain("q");
+    });
   });
 });

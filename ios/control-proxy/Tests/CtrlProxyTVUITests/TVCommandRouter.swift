@@ -4,7 +4,7 @@ import XCTest
 @MainActor
 final class TVCommandRouter {
     private let application: XCUIApplication
-    private var lastFocusedField: TVFocusedField?
+    private var focusMemory = TVFocusMemory()
 
     init(application: XCUIApplication) {
         self.application = application
@@ -52,16 +52,15 @@ final class TVCommandRouter {
                 let resolved = target(requested: envelope.bundleId)
                 let snapshot = try resolved.app.snapshot()
                 let tree = sketch(snapshot)
-                lastFocusedField = TVTextEntryPolicy.rememberedField(in: tree, previous: lastFocusedField)
-                let entry = TVTextEntryPolicy.resolve(
-                    root: tree, hasFocusedKeyboard: TVTextEntryPolicy.hasFocusedKeyboard(tree),
-                    lastFocusedField: lastFocusedField
+                focusMemory.observe(bundle: resolved.packageName, root: tree)
+                let resolution = TVTextEntryPolicy.resolve(
+                    root: tree, lastFocusedField: focusMemory.field(for: resolved.packageName)
                 )
                 return try JSONEncoder().encode(HierarchyUpdateResponse(
                     requestId: request.requestId,
                     data: ViewHierarchy(
                         packageName: resolved.packageName,
-                        hierarchy: element(snapshot, entry: entry),
+                        hierarchy: element(snapshot, node: tree, resolution: resolution),
                         screenWidth: ElementBounds.clampedInt(snapshot.frame.width),
                         screenHeight: ElementBounds.clampedInt(snapshot.frame.height)
                     )
@@ -78,12 +77,11 @@ final class TVCommandRouter {
                 let startTime = Date()
                 if button == .select {
                     let resolved = target(requested: envelope.bundleId)
-                    // Best effort: a failed snapshot must not prevent remote input.
-                    if let snapshot = try? resolved.app.snapshot() {
-                        lastFocusedField = TVTextEntryPolicy.rememberedField(
-                            in: sketch(snapshot), previous: lastFocusedField
-                        )
-                    }
+                    // Remote input still proceeds on failure, but identity must fail closed.
+                    let snapshot = try? resolved.app.snapshot()
+                    focusMemory.willSelect(
+                        bundle: resolved.packageName, snapshot: snapshot.map { sketch($0) }
+                    )
                 }
                 press(button)
                 return try JSONEncoder().encode(WebSocketResponse.success(
@@ -141,20 +139,14 @@ final class TVCommandRouter {
     }
 
     private func element(
-        _ snapshot: any XCUIElementSnapshot, entry: TVKeyboardEntry?, path: [Int] = []
-    ) -> UIElementInfo {
-        let entryOverride = entry.flatMap { $0.path == path ? $0 : nil }
+        _ snapshot: any XCUIElementSnapshot, node: TVNodeSketch,
+        resolution: TVTextEntryResolution, path: [Int] = []
+    )
+        -> UIElementInfo
+    {
+        let entryOverride = resolution.overrideEntry(at: path)
         return UIElementInfo(
-            text: entryOverride?.text ?? TVElementText.text(
-                label: snapshot.label,
-                value: snapshot.value as? String,
-                placeholder: snapshot.placeholderValue,
-                isTextInput: [.textField, .secureTextField, .searchField, .textView].contains(snapshot.elementType),
-                isSecure: TVSecureField.isSecure(
-                    elementType: Int(snapshot.elementType.rawValue), identifier: snapshot.identifier,
-                    label: snapshot.label, placeholder: snapshot.placeholderValue
-                )
-            ),
+            text: resolution.text(for: node, path: path),
             resourceId: entryOverride == nil ? snapshot.identifier : entryOverride?.resourceId,
             className: entryOverride?.className ?? String(snapshot.elementType.rawValue),
             bounds: ElementBounds(clamping: snapshot.frame),
@@ -162,7 +154,7 @@ final class TVCommandRouter {
             focused: String(entryOverride?.focused ?? snapshot.hasFocus),
             selected: String(snapshot.isSelected),
             node: snapshot.children.enumerated().map { index, child in
-                element(child, entry: entry, path: path + [index])
+                element(child, node: node.children[index], resolution: resolution, path: path + [index])
             }
         )
     }

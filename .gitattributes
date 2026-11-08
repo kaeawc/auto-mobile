@@ -3,6 +3,7 @@ test/fixtures/android-display/**/*.txt text eol=lf
 test/fixtures/wear/systemtray/*.xml text eol=lf
 test/fixtures/wear/systemtray/*.json text eol=lf
 test/fixtures/wear/surface/*.txt text eol=lf
+test/fixtures/wear/surface/*.xml text eol=lf
 test/fixtures/crashReports/* text eol=lf
 test/fixtures/android-display-config/*.txt text eol=lf
 test/fixtures/android-power/*.txt text eol=lf

@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
   createWearSurfaceHandler,
+  surfaceSnapshot,
   wearSurfaceResultSchema,
   wearSurfaceSchema,
 } from "../../src/server/wearSurfaceTool";
 import { ActionableError, type BootedDevice } from "../../src/models";
+import { AdbWearSurface, WEAR_SYSUI_PACKAGE } from "../../src/features/wear/WearSurface";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { capturedBroadcast, capturedFace, capturedTile } from "../helpers/wearSurfaceCaptures";
 import type {
   TileTarget,
   WearSurface,
@@ -41,6 +45,44 @@ function recordingSurface(calls: Call[], success = true): WearSurface {
 }
 
 describe("wearSurface tool", () => {
+  test("captured tile and face hierarchies distinguish tile evidence", async () => {
+    expect(surfaceSnapshot({ viewHierarchy: await capturedTile() }).tileShowing).toBe(true);
+    expect(surfaceSnapshot(capturedFace).tileShowing).toBe(false);
+    expect(surfaceSnapshot({}).tileShowing).toBe(false);
+  });
+
+  test.each([0, 99])("captured show index %i verifies only a tile hierarchy", async (index) => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const snapshot = surfaceSnapshot(
+      index === 0 ? { viewHierarchy: await capturedTile() } : capturedFace,
+    );
+    const stdout = capturedBroadcast("ops3.txt", `--es operation show-tile --ei index ${index}`);
+    const response = await createWearSurfaceHandler(
+      () =>
+        new AdbWearSurface({
+          timer,
+          observe: async () => ({ ...snapshot, appId: WEAR_SYSUI_PACKAGE }),
+          adb: {
+            executeCommand: async () => ({
+              stdout,
+              stderr: "",
+              toString: () => stdout,
+              trim: () => stdout.trim(),
+              includes: (s) => stdout.includes(s),
+            }),
+          },
+        }),
+      announces("watch"),
+    )(watchDevice, { action: "showTile", index });
+    expect(toolJson(response)).toMatchObject({
+      success: index === 0,
+      verified: index === 0,
+      broadcastResult: { code: 1 },
+    });
+    expect(response.isError ?? false).toBe(index !== 0);
+  });
+
   test("strict schema accepts the three actions and refuses unsafe components", () => {
     for (const input of [
       { action: "addTile", component: COMPONENT },

@@ -1,6 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import path from "node:path";
+import { beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import {
   AdbWearSurface,
   DEBUG_SURFACE_ACTION,
@@ -18,44 +16,40 @@ import type {
 } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ExecResult } from "../../../src/models";
 import { ActionableError } from "../../../src/models";
+import {
+  capturedBroadcast as capturedReply,
+  capturedFace,
+  capturedTile,
+} from "../../helpers/wearSurfaceCaptures";
+import { surfaceSnapshot } from "../../../src/server/wearSurfaceTool";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
-const FIXTURES = path.join(import.meta.dir, "../../fixtures/wear/surface");
-const fixture = (name: string) => readFileSync(path.join(FIXTURES, name), "utf8");
-
-/** Trailing `result=<n>[, data="..."]` of a transcript line, without the capture's annotations. */
-const REPLY_TAIL = /result=-?\d+(?:, data="[^"]*")?/;
-
-/** The `Broadcast completed:` line a transcript row records. */
-function completedLine(line: string): string {
-  const tail = REPLY_TAIL.exec(line);
-  if (!tail) {
-    throw new Error(`transcript line has no reply: ${line}`);
-  }
-  return `Broadcast completed: ${tail[0]}`;
-}
-
-/** broadcast-replies.txt: `<label>  result=...` rows captured on the Wear OS 7 emulator (#16824). */
-function replies(): Map<string, string> {
-  return new Map(
-    fixture("broadcast-replies.txt")
-      .split("\n")
-      .filter((line) => line.includes("result="))
-      .map((line) => [
-        line.slice(0, line.indexOf("result=")).trim().replace(/\s+/g, " "),
-        completedLine(line),
-      ]),
-  );
-}
-
-const REPLIES = replies();
 function reply(label: string): string {
-  const stdout = REPLIES.get(label);
-  if (stdout === undefined) {
-    throw new Error(`no fixture reply "${label}"; have ${[...REPLIES.keys()].join(" | ")}`);
+  switch (label) {
+    case "add-tile (ok)":
+      return capturedReply("ops1.txt", `--es operation add-tile --ecn component ${FAVORITES}`);
+    case "add-tile (index 1)":
+      return capturedReply(
+        "ops4-index-semantics.txt",
+        `--es operation add-tile --ecn component ${FAVORITES}`,
+      );
+    case "add-tile (unknown provider)":
+      return capturedReply("bc-noop.txt");
+    case "add-tile (no component)":
+      return capturedReply("ops1.txt", "--es operation add-tile");
+    case "remove-tile (ok or absent)":
+      return capturedReply("ops1.txt", `--es operation remove-tile --ecn component ${FAVORITES}`);
+    case "remove-tile (no component)":
+      return capturedReply("ops4-index-semantics.txt", "--es operation remove-tile");
+    case "bogus":
+      return capturedReply("ops1.txt", "--es operation bogus");
+    case "show-tile on DEBUG_SURFACE":
+      return capturedReply("ops1.txt", `--es operation show-tile --ecn component ${FAVORITES}`);
+    case "show-tile on DEBUG_SYSUI (no index)":
+      return capturedReply("ops3.txt", "--es operation show-tile");
+    default:
+      return capturedReply("ops3.txt", `--es operation show-tile --ei index ${label}`);
   }
-  // `am broadcast` prints the intent line before the completed line.
-  return `Broadcasting: Intent { flg=0x400000 (has extras) }\n${stdout}\n`;
 }
 
 function exec(stdout: string): ExecResult {
@@ -86,8 +80,15 @@ class FakeWearAdb implements AdbCommandRunner {
 
 const FAVORITES =
   "com.google.android.contacts/com.google.android.wearable.contacts.tiles.FavoriteContactsTileService";
-const WATCH_FACE: SurfaceSnapshot = { appId: WEAR_SYSUI_PACKAGE, fingerprint: "watch-face" };
-const TILE: SurfaceSnapshot = { appId: WEAR_SYSUI_PACKAGE, fingerprint: "favorites-tile" };
+const WATCH_FACE = {
+  ...surfaceSnapshot(capturedFace),
+  appId: WEAR_SYSUI_PACKAGE,
+  fingerprint: "watch-face",
+};
+let TILE: SurfaceSnapshot;
+beforeAll(async () => {
+  TILE = { ...surfaceSnapshot({ viewHierarchy: await capturedTile() }), appId: WEAR_SYSUI_PACKAGE };
+});
 
 let adb: FakeWearAdb;
 let timer: FakeTimer;
@@ -115,16 +116,8 @@ describe("broadcast reply parser", () => {
     ["add-tile (no component)", "add-tile", { code: 3, outcome: "missingComponent" }],
     ["remove-tile (ok or absent)", "remove-tile", { code: 1, outcome: "removed" }],
     ["remove-tile (no component)", "remove-tile", { code: 3, outcome: "missingComponent" }],
-    [
-      "<any op unknown to the action>",
-      "show-tile",
-      { code: 3, outcome: "unrecognizedOperation", operation: "<op>" },
-    ],
-    [
-      "show-tile on DEBUG_SYSUI (ok, also index 99)",
-      "show-tile",
-      { code: 1, outcome: "showRequested" },
-    ],
+    ["bogus", "show-tile", { code: 3, outcome: "unrecognizedOperation", operation: "bogus" }],
+    ["99", "show-tile", { code: 1, outcome: "showRequested" }],
     ["show-tile on DEBUG_SYSUI (no index)", "show-tile", { code: 3, outcome: "indexRequired" }],
   ])("captured reply %s classifies", (label, operation, expected) => {
     expect(classifyBroadcast(operation, parseBroadcastOutput(reply(label)))).toMatchObject(
@@ -132,43 +125,25 @@ describe("broadcast reply parser", () => {
     );
   });
 
-  test("every captured fixture row is covered", () => {
-    expect(REPLIES.size).toBe(8);
+  test.each(["0", "1", "99"])("captured show index %s is accepted without data", (index) => {
+    expect(parseBroadcastOutput(reply(index))).toEqual({ code: 1 });
   });
 
-  test("every reply in the captured adb sessions parses to a known outcome", () => {
-    const lines = [
-      ...fixture("debug-surface-session.txt").split("\n"),
-      ...fixture("debug-sysui-session.txt").split("\n"),
-    ].filter((line) => line.includes("result="));
-    // The operation each captured reply answered, in transcript order.
-    const operations = [
-      "add-tile",
-      "add-tile",
-      "add-tile",
-      "remove-tile",
-      "add-tile",
-      "show-tile",
-      "show-tile",
-      "show-tile",
-      "show-tile",
-    ] as const;
-    expect(lines).toHaveLength(operations.length);
-    const outcomes = lines.map(
-      (line, i) =>
-        classifyBroadcast(operations[i], parseBroadcastOutput(completedLine(line))).outcome,
-    );
-    expect(outcomes).toEqual([
-      "added",
-      "providerNotFound",
-      "missingComponent",
-      "removed",
-      "unrecognizedOperation",
-      "unrecognizedOperation",
-      "showRequested",
-      "indexRequired",
-      "showRequested",
-    ]);
+  test("DEBUG_SURFACE does not support show-tile", () => {
+    expect(
+      classifyBroadcast("show-tile", parseBroadcastOutput(reply("show-tile on DEBUG_SURFACE"))),
+    ).toMatchObject({ outcome: "unrecognizedOperation", operation: "show-tile" });
+  });
+
+  test("captured repeated add retains its index", () => {
+    expect(
+      parseBroadcastOutput(
+        capturedReply(
+          "ops4-index-semantics.txt",
+          `--es operation add-tile --ecn component ${FAVORITES} --ei index 2`,
+        ),
+      ),
+    ).toEqual(parseBroadcastOutput(reply("add-tile (index 1)")));
   });
 
   test("a reply the release does not know is unknown, never a guessed success", () => {
@@ -231,9 +206,9 @@ describe("AdbWearSurface", () => {
 
   test("showTile by component resolves the index right before showing and verifies by observe", async () => {
     // Indexes shift: Favorites was pushed to 1 by a later add (#16824).
-    adb.on(/operation add-tile/, reply("add-tile (ok)").replace("Index=[0]", "Index=[1]"));
-    adb.on(/operation show-tile/, reply("show-tile on DEBUG_SYSUI (ok, also index 99)"));
-    screens = [WATCH_FACE, TILE];
+    adb.on(/operation add-tile/, reply("add-tile (index 1)"));
+    adb.on(/operation show-tile/, reply("1"));
+    screens = [TILE];
     const result = await surface().showTile({ component: FAVORITES });
     expect(adb.commands).toEqual([
       `shell am broadcast -a ${DEBUG_SURFACE_ACTION} --es operation add-tile --ecn component ${FAVORITES}`,
@@ -251,25 +226,32 @@ describe("AdbWearSurface", () => {
   });
 
   test("an out-of-range index is accepted by the broadcast but not verified", async () => {
-    adb.on(/operation show-tile/, reply("show-tile on DEBUG_SYSUI (ok, also index 99)"));
-    screens = [WATCH_FACE, WATCH_FACE];
+    adb.on(/operation show-tile/, reply("99"));
+    const afterTick = { ...WATCH_FACE, fingerprint: "clock-tick" };
+    expect(afterTick.fingerprint).not.toBe(WATCH_FACE.fingerprint);
+    screens = [afterTick];
     const result = await surface().showTile({ index: 99 });
     expect(result.broadcastResult.code).toBe(1);
     expect(result).toMatchObject({ success: false, verified: false, index: 99 });
-    expect(result.reason).toMatch(/did not change/);
+    expect(result.reason).toMatch(/tile container/);
   });
 
-  test.each<[string, SurfaceSnapshot, SurfaceSnapshot, RegExp]>([
-    ["an unreadable screen", {}, TILE, /could not be read/],
+  test("a tile already showing can be shown again", async () => {
+    adb.on(/operation show-tile/, reply("0"));
+    screens = [TILE];
+    expect(await surface().showTile({ index: 0 })).toMatchObject({ success: true, verified: true });
+  });
+
+  test.each<[string, SurfaceSnapshot, RegExp]>([
+    ["an unreadable screen", { appId: WEAR_SYSUI_PACKAGE }, /could not be read/],
     [
       "another app in front",
-      WATCH_FACE,
-      { appId: "com.example", fingerprint: "x" },
+      { appId: "com.example", tileShowing: true },
       /com\.example, not the Wear system UI/,
     ],
-  ])("showTile is not verified with %s", async (_label, before, after, reason) => {
-    adb.on(/operation show-tile/, reply("show-tile on DEBUG_SYSUI (ok, also index 99)"));
-    screens = [before, after];
+  ])("showTile is not verified with %s", async (_label, after, reason) => {
+    adb.on(/operation show-tile/, reply("0"));
+    screens = [after];
     const result = await surface().showTile({ index: 0 });
     expect(result.verified).toBe(false);
     expect(result.reason).toMatch(reason);
@@ -288,7 +270,7 @@ describe("AdbWearSurface", () => {
   });
 
   test("a show-tile refusal is reported without waiting for an observe", async () => {
-    adb.on(/operation show-tile/, reply("<any op unknown to the action>"));
+    adb.on(/operation show-tile/, reply("bogus"));
     screens = [WATCH_FACE];
     const result = await surface().showTile({ index: 0 });
     expect(result.broadcastResult.outcome).toBe("unrecognizedOperation");

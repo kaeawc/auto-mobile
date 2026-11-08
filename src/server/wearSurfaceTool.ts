@@ -1,11 +1,17 @@
 import { z } from "zod/v4";
-import { ActionableError, type BootedDevice } from "../models";
+import {
+  ActionableError,
+  type ObserveResult,
+  type ViewHierarchyNode,
+  type BootedDevice,
+} from "../models";
 import {
   AdbWearSurface,
   BROADCAST_OUTCOMES,
   TILE_COMPONENT_PATTERN,
   WEAR_SURFACE_ACTIONS,
   type SurfaceObserver,
+  type SurfaceSnapshot,
   type TileTarget,
   type WearSurface,
   type WearSurfaceResult,
@@ -16,7 +22,8 @@ import { defaultDeviceTraits } from "../utils/android-cmdline-tools/deviceTraits
 import { defaultTimer } from "../utils/SystemTimer";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { requireWatch, traitsFormFactorRead, type FormFactorRead } from "./requireWatch";
-import { screenFingerprint } from "./rotaryScrollTool";
+import { ViewHierarchyParser } from "../utils/ViewHierarchyParser";
+import { nodeAttributes } from "../models/ViewHierarchyResult";
 import { defineDeviceTool } from "./defineTool";
 import { PLAN_RELEVANT } from "./toolRegistryTypes";
 
@@ -63,7 +70,23 @@ export const wearSurfaceResultSchema = z.object({
 
 export type WearSurfaceFactory = (device: BootedDevice) => WearSurface;
 
-/** Hierarchy plus foreground app; the screenshot is not needed to tell the screen changed. */
+/** Read tile evidence through the same hierarchy traversal used by element search. */
+export function surfaceSnapshot(
+  observation: Pick<ObserveResult, "viewHierarchy" | "activeWindow">,
+): SurfaceSnapshot {
+  const parser = new ViewHierarchyParser();
+  let tileShowing = false;
+  for (const root of parser.extractRootNodes(observation.viewHierarchy ?? null)) {
+    parser.traverseNode(root, (node: ViewHierarchyNode) => {
+      const attrs = nodeAttributes(node);
+      tileShowing ||=
+        attrs["resource-id"] === "com.google.android.clockwork.sysui:id/carousel_tile_container";
+    });
+  }
+  return { appId: observation.activeWindow?.appId, tileShowing };
+}
+
+/** Hierarchy plus foreground app; screenshots and fingerprint changes are not tile evidence. */
 function deviceObserver(device: BootedDevice): SurfaceObserver {
   return async (signal) => {
     const observation = await new RealObserveScreen(device, undefined, {
@@ -74,12 +97,7 @@ function deviceObserver(device: BootedDevice): SurfaceObserver {
       requireFreshExtraction: true,
       signal,
     });
-    return {
-      ...(observation.activeWindow?.appId ? { appId: observation.activeWindow.appId } : {}),
-      ...(screenFingerprint(observation) !== undefined
-        ? { fingerprint: screenFingerprint(observation) }
-        : {}),
-    };
+    return surfaceSnapshot(observation);
   };
 }
 
@@ -160,7 +178,7 @@ export const createWearSurfaceHandler =
 const wearSurfaceTool = defineDeviceTool({
   name: "wearSurface",
   description:
-    "Wear OS watches only (other form factors are refused without a change): tiles. addTile adds a tile provider to the carousel (idempotent; reports its index). removeTile removes it (also succeeds when it was absent). showTile scrolls the carousel to a tile by component (index resolved right before showing, adding the tile if absent) or by index, then observes; success requires the observe to confirm the screen changed to the Wear system UI. The debug broadcasts report success even when nothing happened, so verified is only true when an observe confirmed it.",
+    "Wear OS watches only (other form factors are refused without a change): tiles. addTile adds a tile provider to the carousel (idempotent; reports its index). removeTile removes it (also succeeds when it was absent). showTile scrolls the carousel to a tile by component (index resolved right before showing, adding the tile if absent) or by index, then observes; success requires the observe to confirm a tile container in the foreground Wear system UI. The debug broadcasts report success even when nothing happened, so verified is only true when an observe confirmed it.",
   input: wearSurfaceInput,
   handler: createWearSurfaceHandler(),
   options: { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: wearSurfaceResultSchema },

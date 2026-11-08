@@ -199,14 +199,14 @@ with a tile provider's component (`<package>/<service>`):
 }
 ```
 
-| `action`     | Arguments              | `success: true` means                                                        |
-| ------------ | ---------------------- | ---------------------------------------------------------------------------- |
-| `addTile`    | `component`            | The tile is in the carousel at `index` (it may already have been there)      |
-| `removeTile` | `component`            | The tile was removed or was not there; the watch does not say which          |
-| `showTile`   | `component` or `index` | An observe after a 3 s settle shows the screen changed to the Wear system UI |
+| `action`     | Arguments              | `success: true` means                                                                 |
+| ------------ | ---------------------- | ------------------------------------------------------------------------------------- |
+| `addTile`    | `component`            | The tile is in the carousel at `index` (it may already have been there)               |
+| `removeTile` | `component`            | The tile was removed or was not there; the watch does not say which                   |
+| `showTile`   | `component` or `index` | An observe after a 3 s settle shows a tile container in the foreground Wear system UI |
 
 The watch reports success for an `index` with no tile and for removing a tile that is absent, so
-only `showTile` checks the screen, and only its `verified: true` means AutoMobile saw a change.
+only `showTile` checks the screen, and only its `verified: true` means AutoMobile saw a tile container in the foreground Wear system UI.
 `addTile` and `removeTile` always return `verified: false`. Every result carries `requested`,
 `broadcastResult` (`code`, `data` and a typed `outcome`: `added`, `removed`, `showRequested`,
 `providerNotFound`, `missingComponent`, `indexRequired`, `unrecognizedOperation` or `unknown`),
@@ -215,9 +215,10 @@ only `showTile` checks the screen, and only its `verified: true` means AutoMobil
 - Indexes shift: a new tile is inserted at index 0 and pushes the others along. Prefer `showTile`
   with `component`, which looks up the current index right before showing. That lookup adds the
   tile when it is missing; `indexResolution` holds its reply.
-- `showTile` with `index` succeeds only if the screen changes, so showing the tile that is
-  already on screen, or an index past the end, returns `success: false`. Use `observe` to read the
-  tile's content and `swipeOn` left or right to move through the carousel.
+- `showTile` succeeds when a tile is visible, including a tile already on screen. A watch face
+  alone cannot verify a tile, even if its clock changes. Verification confirms a visible tile,
+  not its identity or requested index. Use `observe` to read the tile's content and `swipeOn`
+  left or right to move through the carousel.
 - `providerNotFound` means the component is not a tile provider on this watch; list providers
   with `adb shell cmd package query-services -a androidx.wear.tiles.action.BIND_TILE_PROVIDER`.
 - `unrecognizedOperation` means this Wear OS build does not accept the debug broadcasts.

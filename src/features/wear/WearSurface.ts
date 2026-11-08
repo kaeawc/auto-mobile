@@ -113,8 +113,8 @@ const SUCCESSES: Readonly<
 export interface SurfaceSnapshot {
   /** Foreground app of the active window. */
   appId?: string;
-  /** Changes whenever the visible hierarchy changes. */
-  fingerprint?: string;
+  /** Positive evidence of the tile carousel container in the observed hierarchy. */
+  tileShowing?: boolean;
 }
 
 export type SurfaceObserver = (signal?: AbortSignal) => Promise<SurfaceSnapshot>;
@@ -234,7 +234,6 @@ export class AdbWearSurface implements WearSurface {
     } else {
       index = target.index;
     }
-    const before = await this.deps.observe(signal);
     const reply = classifyBroadcast(
       "show-tile",
       await this.broadcast(DEBUG_SYSUI_ACTION, "show-tile", `--ei index ${index}`, signal),
@@ -258,14 +257,14 @@ export class AdbWearSurface implements WearSurface {
     await this.deps.timer.sleep(SHOW_TILE_SETTLE_MS);
     signal?.throwIfAborted();
     const after = await this.deps.observe(signal);
-    const unverified = verificationGap(before, after);
+    const unverified = verificationGap(after);
     return {
       ...base,
       success: unverified === undefined,
       verified: unverified === undefined,
       message:
         unverified === undefined
-          ? `Showed the tile at index ${index}; an observe confirmed the screen changed to the Wear system UI.`
+          ? `The show-tile broadcast was accepted for index ${index}; an observe confirmed a tile container in the foreground Wear system UI (tile identity is not verified).`
           : `The show-tile broadcast was accepted for index ${index}, but the observe did not confirm a tile.`,
       ...(unverified !== undefined ? { reason: unverified } : {}),
     };
@@ -304,20 +303,13 @@ export class AdbWearSurface implements WearSurface {
   }
 }
 
-/**
- * Why the observes do not prove a tile is showing, or undefined when they do. The broadcast is
- * accepted for any index, so the screen must have changed and be owned by the Wear system UI
- * (which hosts the tile; the watch face shares it, so the change is what tells them apart).
- */
-function verificationGap(before: SurfaceSnapshot, after: SurfaceSnapshot): string | undefined {
-  if (before.fingerprint === undefined || after.fingerprint === undefined) {
-    return "The screen could not be read before and after the broadcast (is the CtrlProxy enabled?).";
-  }
+/** The watch face shares sysui, so only the tile container is positive tile evidence. */
+function verificationGap(after: SurfaceSnapshot): string | undefined {
   if (after.appId !== WEAR_SYSUI_PACKAGE) {
     return `The foreground after the broadcast is ${after.appId ?? "unknown"}, not the Wear system UI (${WEAR_SYSUI_PACKAGE}).`;
   }
-  if (after.fingerprint === before.fingerprint) {
-    return "The screen did not change: the index may be out of range, or that tile was already showing.";
+  if (after.tileShowing !== true) {
+    return "The observed hierarchy did not contain the tile container: the index may be out of range or the hierarchy could not be read (is CtrlProxy enabled?).";
   }
   return undefined;
 }

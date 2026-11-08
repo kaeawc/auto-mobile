@@ -206,11 +206,15 @@ class PrototypeStoragePersistence(
 
   /**
    * What the restored show holds for its listed keys. A restored stack path lives in the runtime,
-   * not the spec, so it is seeded from [kept] and an unchanged path is not written again.
+   * not the spec, so it is seeded from [kept] and an unchanged path is not written again. A stack
+   * with nothing kept is seeded at its start, so a path never navigated is never stored and a later
+   * spec's `start` still applies.
    */
   private fun restoredBaseline(spec: PrototypeSpec, kept: Map<String, JsonElement>) =
-    PrototypeStorageRestorer.currentValues(spec) +
-      kept.filterKeys { it.startsWith(PrototypeRouteRuntime.STACK_STORAGE_PREFIX) }
+    PrototypeStorageRestorer.currentValues(
+      spec,
+      stackNodes(spec.root).mapValues { (_, node) -> PrototypeStackSnapshot(listOf(node.start)) },
+    ) + kept.filterKeys { it.startsWith(PrototypeRouteRuntime.STACK_STORAGE_PREFIX) }
 
   /** Clears an id nobody is showing: the stored keys removed, from disk alone. */
   suspend fun clear(id: String): Int =

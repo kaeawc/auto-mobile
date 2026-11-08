@@ -220,6 +220,7 @@ class CommandAdvertisementTest {
     assertTrue(commands.contains("prototype_saved_v1"))
     assertTrue(commands.contains("prototype_show_in_place_v1"))
     assertTrue(commands.contains("prototype_stack_v1"))
+    assertTrue(commands.contains("prototype_routes_v1"))
     assertTrue(commands.contains("prototype_anchor_v1"))
     assertTrue(commands.contains("inspect_prototypes"))
     assertTrue(commands.contains("patch_prototype"))

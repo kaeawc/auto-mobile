@@ -201,6 +201,13 @@ class PrototypeRuntime(
       handle(PrototypeInteraction.TimerFire(actions))
     }
 
+  // The stacks this show kept from the one it replaced; only those skip onEnter on a preserving
+  // show.
+  private val retainedStackIds =
+    stackNodes(spec.root)
+      .filter { (id, node) -> retainedStack(node, previousStacks[id]) != null }
+      .keys
+
   private var appeared = emptySet<String>()
   private var appearanceRoot: PrototypeNode? = null
   private var hasAppearances = false
@@ -208,11 +215,14 @@ class PrototypeRuntime(
   /** Called only after the host accepts the show. A preserving replacement seeds without firing. */
   suspend fun shown(preservingState: Boolean = false) {
     appeared = if (preservingState) visibleAppearances().keys else emptySet()
-    if (!preservingState) {
-      // Each stack's first screen enters once per show (#14188); a preserving show kept its paths.
-      if (current.active) current.stacks.keys.toList().forEach { enter(it) }
-      handle(PrototypeInteraction.TimerFire(emptyList()))
+    // Each stack's first screen enters once per show (#14188); a preserving show skips only the
+    // stacks whose paths it kept, so a stack new to the replacement still enters.
+    if (current.active) {
+      current.stacks.keys
+        .filter { !preservingState || it !in retainedStackIds }
+        .forEach { enter(it) }
     }
+    if (!preservingState) handle(PrototypeInteraction.TimerFire(emptyList()))
   }
 
   private fun visibleAppearances(): Map<String, List<PrototypeAction>> {
@@ -879,6 +889,8 @@ class PrototypeRuntime(
     }
     val id = stackPopTarget(root, current.stacks) ?: return false
     pop(id, force = false)
+    // A direct Back does not pass through handle(), so the popped path is recorded here.
+    if (current.active) storage?.record(current.spec, current.stacks)
     return true
   }
 

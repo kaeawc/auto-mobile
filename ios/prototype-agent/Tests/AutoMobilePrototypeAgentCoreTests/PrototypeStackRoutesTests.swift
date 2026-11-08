@@ -189,6 +189,11 @@ final class PrototypeStackRoutesTests: XCTestCase {
             row.bindAction(setStack).objectFields?["path"],
             try json(#"[{"screen":"post","params":{"i":{"value":1}}}]"#)
         )
+        // A literal string param that is one placeholder keeps the item's type; other text renders.
+        let literal = try json(
+            #"{"type":"replace","stack":"nav","screen":"post","params":{"postId":"{row.id}","label":"#{row.id}"}}"#
+        )
+        XCTAssertEqual(row.bindAction(literal).objectFields?["params"], try json(#"{"postId":3,"label":"#3"}"#))
     }
 
     func testRoutePlaceholdersBindTextTypedOperandsAndEscapedPointerSegments() {

@@ -101,7 +101,8 @@ Each back-stack entry keeps its own params, so Back shows the previous entry as 
 In a screen and its lifecycle actions, \`{route.name}\` binds the top entry's params in the same
 fields as repeat placeholders, condition operands and whole /data pointer segments.
 onEnter/onBack each take 1-32 actions with normal nesting limits. onEnter runs after the
-\`screen_changed\` event whenever the screen becomes top, and once on show. onBack replaces the pop
+\`screen_changed\` event whenever the screen becomes top, and once on show (a same-id show skips it
+for stacks whose path it kept). onBack replaces the pop
 for system Back, the iOS edge swipe and a plain \`pop\`; \`pop {force:true}\` always pops, so a
 dialog confirm that leaves uses force (a direct same-stack pop in onBack needs it too).
 Storage key \`stack:<id>\` persists the path with params; a stored path whose screens or params no

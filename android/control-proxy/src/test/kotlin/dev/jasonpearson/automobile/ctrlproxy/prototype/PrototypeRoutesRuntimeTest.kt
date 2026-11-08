@@ -89,7 +89,11 @@ class PrototypeRoutesRuntimeTest {
     return (validation as? PrototypeSpecValidation.Success)?.spec ?: error(validation.toString())
   }
 
-  private fun runtime(spec: PrototypeSpec = spec(), storage: PrototypeStorageOpen? = null) =
+  private fun runtime(
+    spec: PrototypeSpec = spec(),
+    storage: PrototypeStorageOpen? = null,
+    previousStacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
+  ) =
     PrototypeRuntime(
       storage?.spec ?: spec,
       PrototypeEventSink { events += it },
@@ -97,6 +101,7 @@ class PrototypeRoutesRuntimeTest {
       { ++sequence },
       warn = { warnings += it },
       storage = storage?.session,
+      previousStacks = previousStacks,
     )
 
   private fun persistence() =
@@ -303,5 +308,23 @@ class PrototypeRoutesRuntimeTest {
         store.stored("routes")?.values?.get("stack:nav"),
       )
     }
+  }
+
+  @Test
+  fun `a preserving show skips onEnter only for the stacks it kept`() = runTest {
+    runtime(previousStacks = mapOf("nav" to PrototypeStackSnapshot(listOf("feed"))))
+      .shown(preservingState = true)
+    assertTrue(emitNames().isEmpty())
+    runtime(previousStacks = mapOf("other" to PrototypeStackSnapshot(listOf("feed"))))
+      .shown(preservingState = true)
+    assertEquals(listOf("feed_entered"), emitNames())
+  }
+
+  @Test
+  fun `a stack that never navigated is not stored`() = runTest {
+    val runtime = runtime(storage = persistence().open(spec(storage = true)))
+    runtime.shown()
+    runtime.flushStorage()
+    assertNull(store.stored("routes")?.values?.get("stack:nav"))
   }
 }

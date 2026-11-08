@@ -785,11 +785,12 @@ struct PrototypeRepeatInstance {
     }
 
     /// Push, replace and setStack params (#14188): a binding object binds like a data write's value
-    /// (`{item}` and `{index: true}` become this row's `{value}`); a literal stays as authored.
+    /// (`{item}` and `{index: true}` become this row's `{value}`); a literal string that is one
+    /// placeholder keeps the item's type and any other literal string renders to text.
     private func bindRouteParams(_ fields: inout [String: JSONValue]) {
         guard case let .object(params)? = fields["params"] else { return }
         fields["params"] = .object(params.mapValues { value in
-            guard case let .object(binding) = value else { return value }
+            guard case let .object(binding) = value else { return interpolateScalar(value) }
             return bindDataValue(binding)
         })
     }

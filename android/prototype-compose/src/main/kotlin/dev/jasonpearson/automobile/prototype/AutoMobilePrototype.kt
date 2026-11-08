@@ -167,6 +167,10 @@ private fun EmbeddedBackHandling(
         val committed = collectStackBackProgress(events.map { it.progress }) { seek.progress = it }
         if (committed) dispatch(PrototypeInteraction.Back)
         seek.result = committed
+      } else if (collectStackBackProgress(events.map { it.progress }) {}) {
+        // A drawer, adaptive pane or route onBack owns this Back: nothing to preview, but the
+        // gesture must still be collected and, once committed, delivered.
+        dispatch(PrototypeInteraction.Back)
       }
     }
   } else {

@@ -1490,8 +1490,8 @@ Runtime (shared by `PrototypeRuntime` on Android and the iOS session; pure helpe
 - `screen_changed` is emitted once per navigation when the top screen, depth or top params change,
   with `params` beside `screen` and `depth` only when the top entry has params. The new top screen's
   onEnter runs after that event. Each stack's first screen also enters once per show (not on a
-  same-id show that keeps its paths). Lifecycle lists nest at most 8 deep, so cross-screen
-  onEnter cycles end.
+  stack whose path a same-id show kept; a stack new to that show still enters). Lifecycle lists
+  nest at most 8 deep, so cross-screen onEnter cycles end.
 - System Back, the iOS edge swipe and a non-forced authored `pop` run the top screen's `onBack`
   instead of popping when the stack is above depth 1; `pop {force:true}` always pops, so a confirm
   that leaves must use it. A screen with onBack shows no predictive-back preview.

@@ -83,6 +83,7 @@ test/fixtures/ios/keyboard-modes/*.json text eol=lf
 test/fixtures/ios/nested-selection/*.json text eol=lf
 test/fixtures/android-ime-window/*.json text eol=lf
 test/fixtures/android-focus/*.json text eol=lf
+test/fixtures/android-focus/leanback-*.json text eol=lf
 test/fixtures/android-overlay-testtag/*.json text eol=lf
 test/fixtures/android-overlay-window/*.json text eol=lf
 test/fixtures/android-enabled/*.json text eol=lf

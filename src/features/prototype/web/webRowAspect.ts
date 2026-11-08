@@ -66,7 +66,7 @@ export function ownHeight(style: Raw | undefined): number {
 }
 
 /** `height` held under the node's `maxHeight`, then raised to its `minHeight`, which wins. */
-function clampedHeight(style: Raw | undefined, height: number): number {
+export function clampedHeight(style: Raw | undefined, height: number): number {
   const max = typeof style?.maxHeight === "number" ? style.maxHeight : Infinity;
   const min = typeof style?.minHeight === "number" ? style.minHeight : 0;
   return Math.max(Math.min(height, max), min);

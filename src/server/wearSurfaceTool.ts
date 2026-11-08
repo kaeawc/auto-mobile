@@ -179,18 +179,17 @@ type SurfaceCall =
   | { action: "showTile"; target: TileTarget }
   | { action: "addTile" | "removeTile"; component: string };
 
+const NO_ARGUMENT_READ_REFUSALS = {
+  watchFace: "watchFace only reads and takes no component or index.",
+  listTileProviders: "listTileProviders takes no component or index.",
+} as const;
+
 /** The argument combination each action takes; anything else is refused before adb runs. */
 function surfaceCall(args: WearSurfaceArgs): SurfaceCall {
   const { action, component, index } = args;
-  if (action === "watchFace") {
+  if (action === "watchFace" || action === "listTileProviders") {
     if (component !== undefined || index !== undefined) {
-      throw new ActionableError("watchFace only reads and takes no component or index.");
-    }
-    return { action };
-  }
-  if (action === "listTileProviders") {
-    if (component !== undefined || index !== undefined) {
-      throw new ActionableError("listTileProviders takes no component or index.");
+      throw new ActionableError(NO_ARGUMENT_READ_REFUSALS[action]);
     }
     return { action };
   }

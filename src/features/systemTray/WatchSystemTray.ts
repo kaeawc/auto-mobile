@@ -426,6 +426,10 @@ export class WatchSystemTray {
       );
     } finally {
       const controller = new AbortController();
+      const timer = getSystemTrayDependencies().timer;
+      // Restoring waits for the stream's slide-out, so a short request deadline must not cut it.
+      const restoreMs = Math.max(timeout, MIN_RESTORE_MS);
+      const restoreDeadline = timer.now() + restoreMs;
       const restore = () =>
         restoreWatchStream(
           this.device,
@@ -433,13 +437,13 @@ export class WatchSystemTray {
             initiallyOpen,
             initiallyOnAppList: watchAwaySurface(initial) === "app list",
             expandedByUs: this.expandedByUs,
+            deadline: restoreDeadline,
           },
           controller.signal,
         );
       restored = await raceWithDeadline(restore, {
-        timer: getSystemTrayDependencies().timer,
-        // Restoring waits for the stream's slide-out, so a short request deadline must not cut it.
-        timeoutMs: Math.max(timeout, MIN_RESTORE_MS),
+        timer,
+        timeoutMs: restoreMs,
         label: "Watch notification stream restoration",
         onTimeout: () => controller.abort(),
       });

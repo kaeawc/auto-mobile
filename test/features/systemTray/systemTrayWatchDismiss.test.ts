@@ -351,6 +351,60 @@ describe("Wear dismiss started from inside an app restores the watch face (#1754
     expect(result.payload.observation).toBe(appList);
   });
 
+  test.each([
+    { name: "an app in front", confirmation: () => app, message: "left an app in front" },
+    {
+      name: "the stream open again",
+      confirmation: () => single,
+      message: "notification stream is open again",
+    },
+  ])(
+    "reports dismissal_unconfirmed when the recovery confirmation shows $name",
+    async ({ confirmation, message }) => {
+      const model = dismissFromApp(Number.POSITIVE_INFINITY);
+      let recoveryReads = 0;
+      const { tray } = setup((commands) => {
+        const shown = model(commands);
+        const backs = commands.filter((command) => command === BACK).length;
+        if (backs >= 2) {
+          // The recovery key's poll and settled read show the face; its confirmation read does not.
+          return recoveryReads++ < 2 ? closed : confirmation();
+        }
+        return backs === 1 ? appList : shown;
+      });
+      const result = await dismiss(tray);
+      expect(result).toMatchObject({
+        isError: true,
+        payload: { code: "dismissal_unconfirmed", dismissedCount: 1, success: false },
+      });
+      expect(String(result.payload.message)).toContain(message);
+      expect(result.payload.observation).toBe(confirmation());
+    },
+  );
+
+  test("reports that the stream did not close before the restore deadline aborts cleanup", async () => {
+    // A slow watch: every cleanup read takes 400 ms and the emptied stream ignores Back. Without a
+    // bounded wait one self-close wait plus one Back's polls (~10.8 s) outlasts the 10 s deadline.
+    const model = dismissFromApp(Number.POSITIVE_INFINITY);
+    let clock: FakeTimer | undefined;
+    let readsAfterTap = 0;
+    const { adb, timer, tray } = setup((commands) => {
+      const shown = model(commands);
+      if (!commands.includes(TAP_X)) {
+        return shown;
+      }
+      if (readsAfterTap++ >= READS_UNTIL_CLEANUP_DECIDES - 1) {
+        clock?.advanceTime(400);
+      }
+      return emptied;
+    });
+    clock = timer;
+    await expect(dismiss(tray)).rejects.toThrow(
+      "Watch notification stream did not close after returning to the previous screen.",
+    );
+    expect(adb.getExecutedCommands().filter((command) => command === BACK)).toHaveLength(1);
+  });
+
   test("keeps dismissal_unconfirmed when recovery cannot leave the app list", async () => {
     // A Back that lands on the watch face anyway (the close finished after the fresh read).
     const model = dismissFromApp(Number.POSITIVE_INFINITY);

@@ -17,6 +17,13 @@ const BACK = "shell input keyevent 4";
 const POLL_MS = 250;
 const CLOSE_POLLS = 8;
 const MAX_CLOSE_PRESSES = 3;
+/** How long one Back is watched for the stream to slide out. */
+const BACK_WAIT_MS = CLOSE_POLLS * POLL_MS;
+/**
+ * Closing stops this long before the restore deadline, so a read still in flight finishes and
+ * "did not close" is reported before the deadline aborts cleanup with a bare timeout.
+ */
+export const CLOSE_RESERVE_MS = 2_000;
 
 /** What the action did that cleanup must undo. */
 export interface WatchRestoreState {
@@ -26,6 +33,8 @@ export interface WatchRestoreState {
   initiallyOnAppList: boolean;
   /** The action expanded a card, which Back collapses first. */
   expandedByUs: boolean;
+  /** Absolute time (injected timer) at which the caller aborts cleanup. */
+  deadline: number;
 }
 
 // Cleanup deliberately ignores request cancellation, as on the phone clear path: it runs on its
@@ -65,7 +74,7 @@ export async function restoreWatchStream(
     current = await read(device, signal);
   }
   if (!state.initiallyOpen && watchStreamRoot(current.viewHierarchy)) {
-    current = await closeStream(device, signal);
+    current = await closeStream(device, state.deadline - CLOSE_RESERVE_MS, signal);
   }
   if (!state.initiallyOnAppList && watchAwaySurface(current) === "app list") {
     return recoverWatchFace(device, current, signal);
@@ -73,7 +82,11 @@ export async function restoreWatchStream(
   return current;
 }
 
-/** Best effort: retain the last observation if recovery or its confirmation read fails. */
+/**
+ * Best effort: returns the confirmation read, or the last observation if recovery or that read
+ * fails. The caller judges the result with `unrestoredDismissal`, so an app, the app list or the
+ * stream in the confirmation read is reported rather than taken as the watch face.
+ */
 async function recoverWatchFace(
   device: BootedDevice,
   current: ObserveResult,
@@ -81,14 +94,15 @@ async function recoverWatchFace(
 ): Promise<ObserveResult> {
   try {
     await returnToWatchFace(device, current, signal);
-    current = await read(device, signal);
-    if (watchAwaySurface(current) || watchStreamRoot(current.viewHierarchy)) {
-      throw new ActionableError("Watch face could not be confirmed after stream restoration.");
+    const confirmed = await read(device, signal);
+    if (watchAwaySurface(confirmed) || watchStreamRoot(confirmed.viewHierarchy)) {
+      logger.warn("[systemTray] Watch face could not be confirmed after stream restoration");
     }
+    return confirmed;
   } catch (error) {
     logger.warn("[systemTray] Could not recover the watch face after stream restoration", error);
+    return current;
   }
-  return current;
 }
 
 /** Back collapses a card expanded in place; wait for it, without closing the stream twice. */
@@ -116,17 +130,27 @@ async function collapseCard(
  * leave the watch somewhere the next request cannot open the stream from. For the same reason
  * every Back is preceded by a fresh read: a stream that closed on its own since the last read
  * (its last card removed, a slow host) leaves the watch face in front, where Back would open the
- * app list (#17546). An emptied stream is given time to close itself before sending Back.
+ * app list (#17546). An emptied stream is given time to close itself before sending Back. Every
+ * wait is bounded by `closeBy`, so a slow watch gets the "did not close" error, not the deadline.
  */
-async function closeStream(device: BootedDevice, signal: AbortSignal): Promise<ObserveResult> {
-  for (let press = 0; press < MAX_CLOSE_PRESSES; press++) {
+async function closeStream(
+  device: BootedDevice,
+  closeBy: number,
+  signal: AbortSignal,
+): Promise<ObserveResult> {
+  const timer = getSystemTrayDependencies().timer;
+  const left = () => closeBy - timer.now();
+  for (let press = 0; press < MAX_CLOSE_PRESSES && left() > 0; press++) {
     let current = await read(device, signal);
     if (!watchStreamRoot(current.viewHierarchy)) {
       return current;
     }
+    // The self-close wait only spends time a following Back could still be watched in.
     for (
       let poll = 0;
-      poll < CLOSE_POLLS && watchNotifications(current.viewHierarchy).length === 0;
+      poll < CLOSE_POLLS &&
+      watchNotifications(current.viewHierarchy).length === 0 &&
+      left() > BACK_WAIT_MS;
       poll++
     ) {
       await sleep(POLL_MS, signal);
@@ -136,7 +160,7 @@ async function closeStream(device: BootedDevice, signal: AbortSignal): Promise<O
       }
     }
     await back(device, signal);
-    for (let poll = 0; poll < CLOSE_POLLS; poll++) {
+    for (let poll = 0; poll < CLOSE_POLLS && left() > 0; poll++) {
       current = await read(device, signal);
       if (!watchStreamRoot(current.viewHierarchy)) {
         return current;
@@ -153,9 +177,39 @@ async function closeStream(device: BootedDevice, signal: AbortSignal): Promise<O
 }
 
 /**
- * A dismissal is not reported as a success when closing the stream left the watch on the app list
- * rather than the screen it started from: the caller would be left somewhere it never asked for
- * (#17546). The card's removal itself was confirmed, so `dismissedCount` is kept.
+ * Where cleanup left the watch, if that is not the screen the dismissal started from: an app, the
+ * app list, or the stream re-opened when it started closed. Only the watch face (or the surface
+ * the action started on) counts as restored.
+ */
+function unrestoredSurface(
+  initial: ObserveResult,
+  restored: ObserveResult,
+): "app list" | "app" | "stream" | undefined {
+  if (watchStreamRoot(restored.viewHierarchy)) {
+    return watchStreamRoot(initial.viewHierarchy) ? undefined : "stream";
+  }
+  const surface = watchAwaySurface(restored);
+  if (!surface || surface !== watchAwaySurface(initial)) {
+    return surface;
+  }
+  // The same kind of surface it started on counts only when it is the same app.
+  return surface === "app" && restored.activeWindow?.appId !== initial.activeWindow?.appId
+    ? surface
+    : undefined;
+}
+
+const UNRESTORED_MESSAGES = {
+  "app list":
+    "Dismissed the watch notification, but closing the stream left the watch on the app list instead of the watch face. Press Back to return to the watch face.",
+  app: "Dismissed the watch notification, but closing the stream left an app in front instead of the watch face. Press Home to return to the watch face.",
+  stream:
+    "Dismissed the watch notification, but the notification stream is open again instead of the watch face. Press Back to return to the watch face.",
+} as const;
+
+/**
+ * A dismissal is not reported as a success unless cleanup confirmed the watch back on the screen
+ * it started from (#17546): the caller would be left somewhere it never asked for. The card's
+ * removal itself was confirmed, so `dismissedCount` is kept.
  */
 export function unrestoredDismissal(
   args: SystemTrayArgs,
@@ -163,21 +217,18 @@ export function unrestoredDismissal(
   initial: ObserveResult,
   restored: ObserveResult | undefined,
 ): SystemTrayOutcome {
-  if (
-    !["dismiss", "clearAll"].includes(args.action) ||
-    result.isError ||
-    !restored ||
-    watchAwaySurface(restored) !== "app list" ||
-    watchAwaySurface(initial) === "app list"
-  ) {
+  if (!["dismiss", "clearAll"].includes(args.action) || result.isError || !restored) {
+    return result;
+  }
+  const surface = unrestoredSurface(initial, restored);
+  if (!surface) {
     return result;
   }
   return {
     payload: {
       ...result.payload,
       code: "dismissal_unconfirmed",
-      message:
-        "Dismissed the watch notification, but closing the stream left the watch on the app list instead of the watch face. Press Back to return to the watch face.",
+      message: UNRESTORED_MESSAGES[surface],
       success: false,
     },
     isError: true,

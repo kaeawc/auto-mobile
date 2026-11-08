@@ -1,0 +1,17 @@
+{
+  "pairs" : {
+    "7EE00691-0CCF-4188-A2F6-E8D351FBF183" : {
+      "watch" : {
+        "name" : "L17418 Watch",
+        "udid" : "602ECEEC-DEC3-41E9-8AE3-99A7CD7B2E4E",
+        "state" : "Booted"
+      },
+      "phone" : {
+        "name" : "L17418 Phone",
+        "udid" : "AD536431-4431-40F4-99B1-6AB9970319F7",
+        "state" : "Booted"
+      },
+      "state" : "(active, connected)"
+    }
+  }
+}

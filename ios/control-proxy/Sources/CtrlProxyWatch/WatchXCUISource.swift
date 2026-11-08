@@ -104,14 +104,15 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
     /// `system.snapshot()` returns only the frontmost window on watchOS, so the permission prompt and
     /// notification looks are read through the alert query, one element snapshot each.
     private func systemAlerts() -> [any XCUIElementSnapshot] {
-        system.alerts.allElementsBoundByIndex
+        let trees = system.alerts.allElementsBoundByIndex
             .compactMap { try? $0.snapshot() }
-            .filter { alertTree($0).hasContent }
+            .map { alertTree($0) }
+        return watchSystemAlerts(in: trees)
     }
 
     private func alertTree(_ snapshot: any XCUIElementSnapshot) -> WatchAlertTree<any XCUIElementSnapshot> {
         WatchAlertTree(
-            element: snapshot, isAlert: snapshot.elementType == .alert,
+            element: snapshot, elementType: snapshot.elementType.rawValue, frame: snapshot.frame,
             label: snapshot.label, identifier: snapshot.identifier,
             children: snapshot.children.map { alertTree($0) }
         )
@@ -256,14 +257,28 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
     }
 
     func rotateCrown(delta: Double, velocity: Double) throws {
-        try watchVerifiedCrownRotation(snapshots: self, wake: {
+        try watchVerifiedCrownRotation(snapshots: self, focusedValue: {
+            try self.focusedCrownValue()
+        }, wake: { point in
             try self.performGesture {
-                // Touch the app's top-left margin, away from its crown-receiving controls.
-                self.app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.1)).tap()
+                self.app.coordinate(withNormalizedOffset: point).tap()
             }
         }, rotate: {
             try self.rotateFocusedCrown(delta: delta, velocity: velocity)
         })
+    }
+
+    private func focusedCrownValue() throws -> WatchCrownValue? {
+        guard app.state == .runningForeground, systemAlerts().isEmpty else { return nil }
+        let focused = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true"))
+        guard focused.count == 1 else { return nil }
+        let snapshot = try focused.element(boundBy: 0).snapshot()
+        let value = (snapshot.value as? String) ?? (snapshot.value as? NSNumber)?.stringValue
+        guard snapshot.isEnabled, let value, !value.isEmpty else { return nil }
+        return WatchCrownValue(
+            elementType: snapshot.elementType.rawValue, identifier: snapshot.identifier,
+            frame: snapshot.frame, value: value
+        )
     }
 
     private func rotateFocusedCrown(delta: Double, velocity: Double) throws {
@@ -304,66 +319,152 @@ func watchCrownChangedHierarchy(before: SdkViewHierarchy, after: SdkViewHierarch
     return old != new
 }
 
-/// Stabilizes the baseline, then retries an unchanged rotation once after a neutral touch wakes crown
-/// routing. Missing snapshots skip verification: an unverified rotation may already have taken effect
-/// and must not be repeated.
+/// A focused value is read separately because the wire hierarchy does not carry XCUI's value attribute.
+struct WatchCrownValue: Equatable {
+    let elementType: UInt
+    let identifier: String
+    let frame: CGRect
+    let value: String
+}
+
+/// XCUI raw types for controls that a touch can activate, including notification action cells.
+private let watchTapElementTypes: Set<UInt> = [
+    9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 22, 23, 24, 27, 30, 33, 34, 37, 38, 39, 40, 41, 42,
+    45, 47, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 62, 67, 75, 78, 79, 80, 81, 82,
+]
+
+/// Search a small interior grid, leaving the top navigation band and left/back area untouched.
+/// Failing to find a point is preferable to tapping a control or guessing at an unreadable screen.
+func watchCrownWakePoint(in hierarchy: SdkViewHierarchy) -> CGVector? {
+    guard hierarchy.screenWidth > 0, hierarchy.screenHeight > 0, let root = hierarchy.root,
+          root.bounds.left == 0, root.bounds.top == 0,
+          root.bounds.right == hierarchy.screenWidth, root.bounds.bottom == hierarchy.screenHeight
+    else { return nil }
+    let controlClasses = Set(watchTapElementTypes.union([21, 25]).map { "XCUIElementType(\($0))" })
+    func blocked(_ node: SdkViewNode, x: Double, y: Double) -> Bool {
+        let bounds = node.bounds
+        // Application/window labels describe the whole screen, not a tappable content element.
+        let labeledContent = !["XCUIElementType(2)", "XCUIElementType(4)"].contains(node.className)
+            && !(node.accessibilityLabel ?? "").isEmpty
+        let activates = controlClasses.contains(node.className)
+            || (node.isUserInteractionEnabled && (node.hasTapTarget || labeledContent))
+        if activates, bounds.right > bounds.left, bounds.bottom > bounds.top,
+           x >= Double(bounds.left) - 8, x <= Double(bounds.right) + 8,
+           y >= Double(bounds.top) - 8, y <= Double(bounds.bottom) + 8
+        { return true }
+        return (node.children ?? []).contains { blocked($0, x: x, y: y) }
+    }
+    for y in [0.5, 0.65, 0.8, 0.4] {
+        for x in [0.5, 0.65, 0.8, 0.35] where !blocked(
+            root, x: x * Double(hierarchy.screenWidth), y: y * Double(hierarchy.screenHeight)
+        ) {
+            return CGVector(dx: x, dy: y)
+        }
+    }
+    return nil
+}
+
+/// An unchanged tree alone cannot justify repeating a delta. Retry only when the same focused
+/// accessible value is unchanged, and the safe wake has not changed the screen or focused control.
+/// Missing snapshots skip verification because the rotation may already have taken effect.
 @MainActor
 func watchVerifiedCrownRotation(
-    snapshots: any WatchSnapshotSource, wake: () throws -> Void, rotate: () throws -> Void
+    snapshots: any WatchSnapshotSource, focusedValue: () throws -> WatchCrownValue?,
+    wake: (CGVector) throws -> Void, rotate: () throws -> Void
 )
     throws
 {
-    func baseline() -> SdkViewHierarchy? {
-        guard var previous = try? snapshots.snapshot() else { return nil }
+    func observation() throws -> (hierarchy: SdkViewHierarchy, value: WatchCrownValue?) {
+        let hierarchy = try snapshots.snapshot()
+        return (hierarchy, try? focusedValue())
+    }
+    func baseline() -> (hierarchy: SdkViewHierarchy, value: WatchCrownValue?)? {
+        guard var previous = try? observation() else { return nil }
         for _ in 0 ..< 2 {
-            guard let current = try? snapshots.snapshot() else { return nil }
-            if !watchCrownChangedHierarchy(before: previous, after: current) { return current }
+            guard let current = try? observation() else { return nil }
+            if !watchCrownChangedHierarchy(before: previous.hierarchy, after: current.hierarchy),
+               previous.value == current.value
+            { return current }
             previous = current
         }
-        return previous
+        return nil
+    }
+    func changed(
+        _ before: (hierarchy: SdkViewHierarchy, value: WatchCrownValue?),
+        _ after: (hierarchy: SdkViewHierarchy, value: WatchCrownValue?)
+    )
+        -> Bool
+    {
+        watchCrownChangedHierarchy(before: before.hierarchy, after: after.hierarchy)
+            || (before.value != nil && after.value != nil && before.value != after.value)
+    }
+    func unchanged() -> WatchCommandError {
+        .commandFailed(
+            "rotateCrown changed nothing the accessibility tree shows. A safe retry requires an unchanged "
+                + "focused accessibility value and a neutral wake point. No view may hold crown focus, or "
+                + "the scrolled content is already at its limit. Tap the view that should receive the crown, "
+                + "then observe before trying again."
+        )
     }
 
     let before = baseline()
     try rotate()
-    guard let before, let after = try? snapshots.snapshot(),
-          !watchCrownChangedHierarchy(before: before, after: after)
-    else {
-        return
-    }
+    guard let before, let after = try? observation(), !changed(before, after) else { return }
+    guard let point = watchCrownWakePoint(in: before.hierarchy) else { throw unchanged() }
 
-    try wake()
-    let retryBefore = baseline()
+    try wake(point)
+    // Without a readable value, wake routing for the next command but never repeat this delta.
+    guard let value = before.value, after.value == value,
+          let retryBefore = baseline(), retryBefore.value == value,
+          !watchCrownChangedHierarchy(before: after.hierarchy, after: retryBefore.hierarchy)
+    else { throw unchanged() }
     try rotate()
-    guard let retryBefore, let retryAfter = try? snapshots.snapshot(),
-          !watchCrownChangedHierarchy(before: retryBefore, after: retryAfter)
-    else {
-        return
-    }
-    throw WatchCommandError.commandFailed(
-        "rotateCrown changed nothing the accessibility tree shows, even after retrying once after a neutral touch: "
-            + "no view may hold crown focus, or the "
-            + "scrolled content is already at its limit. Tap the view that should receive the crown, then "
-            + "observe to confirm."
-    )
+    guard let retryAfter = try? observation(), !changed(retryBefore, retryAfter) else { return }
+    throw unchanged()
 }
 
 /// A value tree keeps alert selection independent of XCTest queries and simulator state.
 struct WatchAlertTree<Element> {
     let element: Element
-    var isAlert = false
+    var elementType: UInt = 1
+    var frame: CGRect = .zero
     var label = ""
     var identifier = ""
     var children: [WatchAlertTree<Element>] = []
 
     var hasContent: Bool {
-        !label.isEmpty || !identifier.isEmpty || children.contains { $0.hasContent }
+        // Container identifiers and status images do not make an alert capture coordinate taps.
+        // Short looks have static text but no buttons; permission choices may be below the screen.
+        if elementType == 25 { return false }
+        let contentType = elementType == 7 || elementType == 48 || watchTapElementTypes.contains(elementType)
+        return (contentType && (!label.isEmpty || !identifier.isEmpty)) || children.contains { $0.hasContent }
+    }
+
+    func matches(_ other: WatchAlertTree<Element>) -> Bool {
+        elementType == other.elementType && frame == other.frame && label == other.label
+            && identifier == other.identifier && children.count == other.children.count
+            && zip(children, other.children).allSatisfy { $0.0.matches($0.1) }
+    }
+
+    func containsAlert(_ alert: WatchAlertTree<Element>) -> Bool {
+        (elementType == 7 && matches(alert)) || children.contains { $0.containsAlert(alert) }
+    }
+
+    var outermostAlerts: [WatchAlertTree<Element>] {
+        if elementType == 7 { return hasContent ? [self] : [] }
+        return children.flatMap { $0.outermostAlerts }
     }
 }
 
-/// Keep the outermost populated alerts, preserving tree order without duplicating nested alerts.
+/// Alert queries form a forest: a nested alert can also appear as a separate query result.
+/// Compare captured structure, not snapshot object identity, which differs between query results.
+func watchSystemAlerts<Element>(in trees: [WatchAlertTree<Element>]) -> [Element] {
+    let alerts = trees.flatMap { $0.outermostAlerts }
+    return alerts.filter { alert in
+        !alerts.contains { other in other.children.contains { $0.containsAlert(alert) } }
+    }.map(\.element)
+}
+
 func watchSystemAlerts<Element>(in tree: WatchAlertTree<Element>) -> [Element] {
-    if tree.isAlert {
-        return tree.hasContent ? [tree.element] : []
-    }
-    return tree.children.flatMap { watchSystemAlerts(in: $0) }
+    watchSystemAlerts(in: [tree])
 }

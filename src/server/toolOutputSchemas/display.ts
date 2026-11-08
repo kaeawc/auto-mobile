@@ -183,25 +183,9 @@ export const layoutWarningSchema = z.object({
   confidence: z.enum(["high", "medium"]),
 });
 
-const layoutWarningsPerEntryDiffSchema = z
-  .object({
-    added: z.array(layoutWarningSchema),
-    removed: z.array(layoutWarningSchema),
-    scope: z
-      .object({
-        from: z.enum(["full", "truncated", "scoped"]).optional(),
-        to: z.enum(["full", "truncated", "scoped"]).optional(),
-      })
-      .strict()
-      .optional(),
-    total: z.object({ from: z.number().optional(), to: z.number().optional() }).strict().optional(),
-  })
+export const layoutWarningsDiffFieldSchema = z
+  .object({ from: z.unknown().optional(), to: z.unknown().optional() })
   .strict();
-
-export const layoutWarningsDiffFieldSchema = z.union([
-  z.object({ from: z.unknown().optional(), to: z.unknown().optional() }).strict(),
-  layoutWarningsPerEntryDiffSchema,
-]);
 
 /** Parse old captures leniently while requiring the stamp on emitted observations. */
 export const observationDisplaySchema = z

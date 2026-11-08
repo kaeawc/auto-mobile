@@ -6,8 +6,8 @@ import XCTest
 final class WatchCommandHandlerTests: XCTestCase {
     func testSystemAlertsIgnoreEmptyAlerts() {
         let tree = WatchAlertTree(element: "root", children: [
-            WatchAlertTree(element: "empty", isAlert: true),
-            WatchAlertTree(element: "empty descendants", isAlert: true, children: [
+            WatchAlertTree(element: "empty", elementType: 7),
+            WatchAlertTree(element: "empty descendants", elementType: 7, children: [
                 WatchAlertTree(element: "empty child"),
             ]),
             WatchAlertTree(element: "ordinary content", label: "App"),
@@ -17,9 +17,9 @@ final class WatchCommandHandlerTests: XCTestCase {
 
     func testSystemAlertsKeepLabelsAndIdentifiersInOrder() {
         let tree = WatchAlertTree(element: "root", children: [
-            WatchAlertTree(element: "permission", isAlert: true, label: "Allow"),
-            WatchAlertTree(element: "empty", isAlert: true),
-            WatchAlertTree(element: "notification", isAlert: true, identifier: "Invite"),
+            WatchAlertTree(element: "permission", elementType: 7, label: "Allow"),
+            WatchAlertTree(element: "empty", elementType: 7),
+            WatchAlertTree(element: "notification", elementType: 7, identifier: "Invite"),
         ])
         XCTAssertEqual(watchSystemAlerts(in: tree), ["permission", "notification"])
     }
@@ -27,15 +27,106 @@ final class WatchCommandHandlerTests: XCTestCase {
     func testSystemAlertsFindNestedContentWithoutDuplicatingAlerts() {
         let tree = WatchAlertTree(element: "root", children: [
             WatchAlertTree(element: "container", children: [
-                WatchAlertTree(element: "alert", isAlert: true, children: [
+                WatchAlertTree(element: "alert", elementType: 7, children: [
                     WatchAlertTree(element: "table", children: [
-                        WatchAlertTree(element: "text", label: "Join the meeting?"),
-                        WatchAlertTree(element: "nested alert", isAlert: true, identifier: "Invite"),
+                        WatchAlertTree(element: "text", elementType: 48, label: "Join the meeting?"),
+                        WatchAlertTree(element: "nested alert", elementType: 7, identifier: "Invite"),
                     ]),
                 ]),
             ]),
         ])
         XCTAssertEqual(watchSystemAlerts(in: tree), ["alert"])
+        let nested = tree.children[0].children[0].children[0].children[1]
+        // The production alert query can return a nested alert as a separate snapshot too.
+        XCTAssertEqual(watchSystemAlerts(in: [tree, nested]), ["alert"])
+        XCTAssertEqual(watchSystemAlerts(in: [nested, tree]), ["alert"])
+    }
+
+    func testProductionAlertSelectionUsesCapturedNotificationLooks() throws {
+        for name in ["notification-permission-alert", "notification-short-look", "notification-long-look"] {
+            let hierarchy = try capturedWatchHierarchy(name)
+            let tree = try capturedAlertTree(XCTUnwrap(hierarchy.root))
+            let queriedAlerts = tree.children.filter { $0.elementType == 7 }
+            XCTAssertFalse(queriedAlerts.isEmpty, name)
+            XCTAssertEqual(watchSystemAlerts(in: queriedAlerts), ["root.0"], name)
+            XCTAssertEqual(watchSystemAlerts(in: tree), ["root.0"], name)
+        }
+    }
+
+    func testCapturedStatusBarAlertsDoNotCaptureTapsOrAppearInObserve() throws {
+        for name in ["notification-permission-alert", "notification-long-look"] {
+            let hierarchy = try capturedWatchHierarchy(name)
+            var tree = try capturedAlertTree(XCTUnwrap(hierarchy.root))
+            let queriedAlerts = tree.children.filter { $0.elementType == 7 }
+            XCTAssertEqual(queriedAlerts.count, 2, name)
+            let statusAlert = try XCTUnwrap(queriedAlerts.last)
+            // Select the captured second root alert itself, without inventing a status-bar tree.
+            XCTAssertEqual(watchSystemAlerts(in: [statusAlert]), [], name)
+            // Removing only the real notification leaves the status alert and the captured app windows.
+            tree.children.removeFirst()
+            XCTAssertEqual(watchSystemAlerts(in: tree), [], name)
+        }
+    }
+
+    func testCrownWakeAvoidsCapturedBackButtonAndTextField() throws {
+        let hierarchy = try capturedWatchHierarchy("text-entry-field-empty")
+        let point = try XCTUnwrap(watchCrownWakePoint(in: hierarchy))
+        XCTAssertGreaterThanOrEqual(point.dx, 0.35)
+        XCTAssertGreaterThanOrEqual(point.dy, 0.4)
+        let root = try XCTUnwrap(hierarchy.root)
+        let controls = watchNodes(in: root).filter {
+            ["XCUIElementType(9)", "XCUIElementType(49)"].contains($0.className)
+        }
+        XCTAssertEqual(controls.count, 2)
+        for control in controls {
+            let x = Double(point.dx) * Double(hierarchy.screenWidth)
+            let y = Double(point.dy) * Double(hierarchy.screenHeight)
+            let bounds = control.bounds
+            XCTAssertFalse(
+                x >= Double(bounds.left) - 8 && x <= Double(bounds.right) + 8
+                    && y >= Double(bounds.top) - 8 && y <= Double(bounds.bottom) + 8
+            )
+        }
+    }
+
+    func testCrownWakeRejectsControlsAndEnabledTapTargets() {
+        for type in [9, 75, 42, 40, 49, 45, 50, 33, 39, 79] {
+            let hierarchy = crownHierarchy(children: [SdkViewNode(
+                className: "XCUIElementType(\(type))",
+                bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100)
+            )])
+            XCTAssertNil(watchCrownWakePoint(in: hierarchy), "type \(type)")
+        }
+        XCTAssertNil(watchCrownWakePoint(in: crownHierarchy(children: [SdkViewNode(
+            className: "XCUIElementType(1)",
+            bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100), hasTapTarget: true
+        )])))
+        XCTAssertNil(watchCrownWakePoint(in: crownHierarchy(children: [SdkViewNode(
+            className: "XCUIElementType(48)",
+            bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100), accessibilityLabel: "Custom tappable text"
+        )])))
+    }
+
+    func testCrownWakeFindsInteriorGapWithClearance() throws {
+        let hierarchy = crownHierarchy(children: [SdkViewNode(
+            className: "XCUIElementType(9)", bounds: SdkBounds(left: 30, top: 35, right: 60, bottom: 90)
+        )])
+        let point = try XCTUnwrap(watchCrownWakePoint(in: hierarchy))
+        XCTAssertEqual(point.dx, 0.8)
+        XCTAssertEqual(point.dy, 0.5)
+    }
+
+    func testCrownWakeRequiresReadableScreenAndRoot() {
+        XCTAssertNil(watchCrownWakePoint(in: SdkViewHierarchy(
+            screenScale: 1, screenWidth: 0, screenHeight: 100, root: nil
+        )))
+        XCTAssertNil(watchCrownWakePoint(in: SdkViewHierarchy(
+            screenScale: 1, screenWidth: 100, screenHeight: 100, root: nil
+        )))
+        XCTAssertNil(watchCrownWakePoint(in: SdkViewHierarchy(
+            screenScale: 1, screenWidth: 100, screenHeight: 100,
+            root: SdkViewNode(className: "Window", bounds: SdkBounds(left: 10, top: 0, right: 110, bottom: 100))
+        )))
     }
 
     func testCommandFailureCoordinatorScopesAndBoundsFailures() {
@@ -256,7 +347,7 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertFalse(response.success)
         XCTAssertEqual(response.requestId, "c")
         XCTAssertEqual(response.errorCode, "command_failed")
-        XCTAssertTrue(response.error?.contains("retrying once after a neutral touch") == true)
+        XCTAssertTrue(response.error?.contains("changed nothing") == true)
         XCTAssertEqual(source.rotations, 2)
         XCTAssertEqual(source.taps, 1)
         XCTAssertEqual(source.events, [
@@ -279,7 +370,7 @@ final class WatchCommandHandlerTests: XCTestCase {
     func testCrownStabilizesBaselineBeforeRotatingAndAfterTouch() {
         let source = ScriptedCrownSource(labels: [
             "launching", "crown 0", "crown 0", "crown 0",
-            "touch settling", "crown 0 focused", "crown 0 focused", "crown 8",
+            "touch settling", "crown 0", "crown 0", "crown 8",
         ])
         let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
         let response = handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8))
@@ -288,34 +379,140 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertEqual(source.taps, 1)
         XCTAssertEqual(source.events, [
             "snapshot:launching", "snapshot:crown 0", "snapshot:crown 0", "rotate", "snapshot:crown 0", "tap",
-            "snapshot:touch settling", "snapshot:crown 0 focused", "snapshot:crown 0 focused", "rotate",
+            "snapshot:touch settling", "snapshot:crown 0", "snapshot:crown 0", "rotate",
             "snapshot:crown 8",
         ])
     }
 
     func testCrownRetriesUnchangedRotationAfterOneTouch() {
         let source = ScriptedCrownSource(labels: [
-            "crown 0", "crown 0", "crown 0", "focused", "focused", "crown 8",
+            "crown 0", "crown 0", "crown 0", "crown 0", "crown 0", "crown 8",
         ])
+        source.dropsFirstRotation = true
         let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
         let response = handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8))
         XCTAssertTrue(response.success)
         XCTAssertEqual(source.rotations, 2)
+        XCTAssertEqual(source.appliedDelta, 2)
         XCTAssertEqual(source.taps, 1)
+        XCTAssertEqual(source.wakePoints.first?.dx, 0.5)
+        XCTAssertEqual(source.wakePoints.first?.dy, 0.5)
         XCTAssertEqual(source.events, [
             "snapshot:crown 0", "snapshot:crown 0", "rotate", "snapshot:crown 0", "tap",
-            "snapshot:focused", "snapshot:focused", "rotate", "snapshot:crown 8",
+            "snapshot:crown 0", "snapshot:crown 0", "rotate", "snapshot:crown 8",
         ])
     }
 
-    func testCrownBaselineStopsAfterThreeSnapshotsAndUsesLast() {
+    func testCrownDoesNotRepeatDeltaWhenItsEffectIsNotAccessible() {
+        let source = ScriptedCrownSource(labels: Array(repeating: "unchanged", count: 6))
+        source.exposesFocusedValue = false
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        let response = handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8))
+        XCTAssertFalse(response.success)
+        XCTAssertEqual(response.errorCode, "command_failed")
+        XCTAssertEqual(source.rotations, 1)
+        XCTAssertEqual(source.appliedDelta, 2)
+        XCTAssertEqual(source.taps, 1)
+        XCTAssertEqual(
+            source.events,
+            ["snapshot:unchanged", "snapshot:unchanged", "rotate", "snapshot:unchanged", "tap"]
+        )
+    }
+
+    func testCrownRecognizesFocusedValueChangeMissingFromWireHierarchy() {
+        let source = ScriptedCrownSource(labels: Array(repeating: "unchanged", count: 3))
+        source.focusedValues = [crownValue("0"), crownValue("0"), crownValue("2")]
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        XCTAssertTrue(handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8)).success)
+        XCTAssertEqual(source.rotations, 1)
+        XCTAssertEqual(source.appliedDelta, 2)
+        XCTAssertEqual(source.taps, 0)
+    }
+
+    func testCrownDoesNotWakeOrRetryWhenControlsCoverScreen() {
+        let source = ScriptedCrownSource(labels: Array(repeating: "unchanged", count: 6))
+        source.children = [SdkViewNode(
+            className: "XCUIElementType(75)", bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100)
+        )]
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        let response = handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8))
+        XCTAssertFalse(response.success)
+        XCTAssertEqual(response.errorCode, "command_failed")
+        XCTAssertEqual(source.rotations, 1)
+        XCTAssertEqual(source.taps, 0)
+        XCTAssertEqual(source.wakePoints.count, 0)
+    }
+
+    func testCrownDoesNotRetryWhenWakeChangesScreenOrFocus() {
+        let screenChanged = ScriptedCrownSource(labels: ["before", "before", "before", "after", "after"])
+        let focusChanged = ScriptedCrownSource(labels: Array(repeating: "unchanged", count: 5))
+        focusChanged.focusedValues = [
+            crownValue("0"), crownValue("0"), crownValue("0"),
+            crownValue("0", identifier: "other"), crownValue("0", identifier: "other"),
+        ]
+        let valueChanged = ScriptedCrownSource(labels: Array(repeating: "unchanged", count: 5))
+        valueChanged.focusedValues = [
+            crownValue("0"),
+            crownValue("0"),
+            crownValue("0"),
+            crownValue("2"),
+            crownValue("2"),
+        ]
+        for source in [screenChanged, focusChanged, valueChanged] {
+            let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+            let response = handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8))
+            XCTAssertFalse(response.success)
+            XCTAssertEqual(response.errorCode, "command_failed")
+            XCTAssertEqual(source.rotations, 1)
+            XCTAssertEqual(source.taps, 1)
+        }
+    }
+
+    func testCrownDoesNotRetryWhenFocusedValueIsLostOrUnreadable() {
+        let lost = ScriptedCrownSource(labels: Array(repeating: "unchanged", count: 3))
+        lost.focusedValues = [crownValue("0"), crownValue("0"), nil]
+        let unreadable = ScriptedCrownSource(labels: Array(repeating: "unchanged", count: 3))
+        unreadable.valueReadFails = true
+        for source in [lost, unreadable] {
+            let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+            XCTAssertFalse(handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8)).success)
+            XCTAssertEqual(source.rotations, 1)
+            XCTAssertEqual(source.taps, 1)
+        }
+    }
+
+    func testCrownDoesNotRetryWithoutPostWakeBaseline() {
+        let source = ScriptedCrownSource(labels: Array(repeating: "unchanged", count: 3))
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        XCTAssertFalse(handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8)).success)
+        XCTAssertEqual(source.rotations, 1)
+        XCTAssertEqual(source.taps, 1)
+    }
+
+    func testCrownGestureFailuresStopWithoutAnotherRotation() {
+        let wakeFailure = ScriptedCrownSource(labels: Array(repeating: "unchanged", count: 6))
+        wakeFailure.wakeFails = true
+        let rotateFailure = ScriptedCrownSource(labels: Array(repeating: "unchanged", count: 6))
+        rotateFailure.rotationFails = true
+        for (source, error, taps) in [(wakeFailure, "Wake failed", 1), (rotateFailure, "Rotation failed", 0)] {
+            let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+            let response = handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8))
+            XCTAssertFalse(response.success)
+            XCTAssertEqual(response.errorCode, "command_failed")
+            XCTAssertEqual(response.error, error)
+            XCTAssertEqual(source.rotations, 1)
+            XCTAssertEqual(source.taps, taps)
+        }
+    }
+
+    func testCrownUnstableBaselineStopsAfterThreeSnapshotsWithoutRetry() {
         let source = ScriptedCrownSource(labels: ["launching", "settling", "crown 0", "crown 8"])
         let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
         XCTAssertTrue(handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8)).success)
         XCTAssertEqual(source.rotations, 1)
         XCTAssertEqual(source.taps, 0)
         XCTAssertEqual(source.events, [
-            "snapshot:launching", "snapshot:settling", "snapshot:crown 0", "rotate", "snapshot:crown 8",
+            "snapshot:launching", "snapshot:settling", "snapshot:crown 0", "rotate",
         ])
     }
 
@@ -470,6 +667,15 @@ private final class FakeWatchSource: WatchSnapshotSource, WatchGesturePerformer 
 @MainActor
 private final class ScriptedCrownSource: WatchSnapshotSource, WatchGesturePerformer {
     private var labels: [String]
+    var children: [SdkViewNode] = []
+    var focusedValues: [WatchCrownValue?]?
+    var exposesFocusedValue = true
+    var valueReadFails = false
+    var wakeFails = false
+    var rotationFails = false
+    var dropsFirstRotation = false
+    private(set) var wakePoints: [CGVector] = []
+    private(set) var appliedDelta = 0.0
     private(set) var rotations = 0
     private(set) var taps = 0
     private(set) var events: [String] = []
@@ -484,18 +690,28 @@ private final class ScriptedCrownSource: WatchSnapshotSource, WatchGesturePerfor
             timestamp: Int64(labels.count), screenScale: 1, screenWidth: 100, screenHeight: 100,
             root: SdkViewNode(
                 className: "Window", bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100),
-                accessibilityLabel: label
+                accessibilityLabel: label, isUserInteractionEnabled: false, children: children
             )
         )
     }
 
-    func rotateCrown(delta _: Double, velocity _: Double) throws {
-        try watchVerifiedCrownRotation(snapshots: self, wake: {
+    func rotateCrown(delta: Double, velocity _: Double) throws {
+        try watchVerifiedCrownRotation(snapshots: self, focusedValue: {
+            if self.valueReadFails { throw WatchCommandError.commandFailed("Value unavailable") }
+            if let values = self.focusedValues, !values.isEmpty {
+                return self.focusedValues?.removeFirst()
+            }
+            return self.exposesFocusedValue ? crownValue("0") : nil
+        }, wake: { point in
             self.taps += 1
+            self.wakePoints.append(point)
             self.events.append("tap")
+            if self.wakeFails { throw WatchCommandError.commandFailed("Wake failed") }
         }, rotate: {
             self.rotations += 1
+            if !self.dropsFirstRotation || self.rotations > 1 { self.appliedDelta += delta }
             self.events.append("rotate")
+            if self.rotationFails { throw WatchCommandError.commandFailed("Rotation failed") }
         })
     }
 
@@ -508,4 +724,56 @@ private final class ScriptedCrownSource: WatchSnapshotSource, WatchGesturePerfor
     func swipe(_: WatchSwipeDirection, distance _: Double?) throws {}
     func typeText(_: String) throws {}
     func home() throws {}
+}
+
+private func crownValue(_ value: String, identifier: String = "focused") -> WatchCrownValue {
+    WatchCrownValue(
+        elementType: 33, identifier: identifier, frame: CGRect(x: 10, y: 10, width: 20, height: 20), value: value
+    )
+}
+
+private func crownHierarchy(children: [SdkViewNode]) -> SdkViewHierarchy {
+    SdkViewHierarchy(
+        timestamp: 0, screenScale: 1, screenWidth: 100, screenHeight: 100,
+        root: SdkViewNode(
+            className: "Window", bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100), children: children
+        )
+    )
+}
+
+private func capturedWatchHierarchy(_ name: String) throws -> SdkViewHierarchy {
+    let url = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent() // CtrlProxyWatchUITests
+        .deletingLastPathComponent() // Tests
+        .deletingLastPathComponent() // control-proxy
+        .deletingLastPathComponent() // ios
+        .deletingLastPathComponent() // repo root
+        .appendingPathComponent("test/fixtures/watchos-xcuitest/\(name).json")
+    let data = try Data(contentsOf: url)
+    let decoder = JSONDecoder()
+    if let hierarchy = try? decoder.decode(SdkViewHierarchy.self, from: data) {
+        return hierarchy
+    }
+    return try XCTUnwrap(decoder.decode(WatchResponse.self, from: data).data)
+}
+
+private func capturedAlertTree(_ node: SdkViewNode, path: String = "root") throws -> WatchAlertTree<String> {
+    let prefix = "XCUIElementType("
+    XCTAssertTrue(node.className.hasPrefix(prefix) && node.className.hasSuffix(")"))
+    let type = try XCTUnwrap(UInt(node.className.dropFirst(prefix.count).dropLast()))
+    return try WatchAlertTree(
+        element: path, elementType: type,
+        frame: CGRect(
+            x: CGFloat(node.bounds.left), y: CGFloat(node.bounds.top),
+            width: CGFloat(node.bounds.right - node.bounds.left), height: CGFloat(node.bounds.bottom - node.bounds.top)
+        ),
+        label: node.accessibilityLabel ?? "", identifier: node.accessibilityIdentifier ?? "",
+        children: (node.children ?? []).enumerated().map { index, child in
+            try capturedAlertTree(child, path: "\(path).\(index)")
+        }
+    )
+}
+
+private func watchNodes(in node: SdkViewNode) -> [SdkViewNode] {
+    [node] + (node.children ?? []).flatMap { watchNodes(in: $0) }
 }

@@ -131,6 +131,7 @@ import {
   DeviceAwareToolOptions,
   DeviceAwareToolRegistration,
   deviceReadOnlyMetadata,
+  embeddedSdkGateReason,
   InternalToolCallOptions,
   InternalToolCallRequest,
   pickToolTraits,
@@ -252,7 +253,7 @@ export class ToolRegistryClass {
       reasons.push(featureFlagDisabledMessage("debug", tool.name));
     }
     if (tool.embeddedSdkOnly && !serverConfig.isEmbeddedSdkEnabled()) {
-      reasons.push("embedded SDK mode is disabled; start the daemon with --embedded-sdk");
+      reasons.push(embeddedSdkGateReason(tool.embeddedSdkGateHint));
     }
     if (tool.planOnly) {
       reasons.push(PLAN_ONLY_GATE_REASON);
@@ -544,6 +545,7 @@ export class ToolRegistryClass {
       isDeviceReadOnlyCall: (args) => isDeviceReadOnlyCall(options, args),
       debugOnly: options.debugOnly ?? false,
       embeddedSdkOnly: options.embeddedSdkOnly ?? false,
+      ...(options.embeddedSdkGateHint ? { embeddedSdkGateHint: options.embeddedSdkGateHint } : {}),
       planExecutable: options.planExecutable ?? false,
       planOnly: options.planOnly ?? false,
       ...traits,

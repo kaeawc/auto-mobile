@@ -101,10 +101,9 @@ beforeAll(async () => {
 });
 afterEach(resetSystemTrayDependencies);
 
-function setup(read: (commands: string[]) => ObserveResult) {
+function setup(read: (commands: string[]) => ObserveResult, timer = new FakeTimer()) {
   const adb = new FakeAdbExecutor();
   const observer = new FakeObserveScreen();
-  const timer = new FakeTimer();
   timer.enableAutoAdvance();
   observer.setObserveResult(() => read(adb.getExecutedCommands()));
   setSystemTrayDependencies({ adbFactory: () => adb, observeScreenFactory: () => observer, timer });
@@ -386,19 +385,18 @@ describe("Wear dismiss started from inside an app restores the watch face (#1754
     // A slow watch: every cleanup read takes 400 ms and the emptied stream ignores Back. Without a
     // bounded wait one self-close wait plus one Back's polls (~10.8 s) outlasts the 10 s deadline.
     const model = dismissFromApp(Number.POSITIVE_INFINITY);
-    let clock: FakeTimer | undefined;
+    const clock = new FakeTimer();
     let readsAfterTap = 0;
-    const { adb, timer, tray } = setup((commands) => {
+    const { adb, tray } = setup((commands) => {
       const shown = model(commands);
       if (!commands.includes(TAP_X)) {
         return shown;
       }
       if (readsAfterTap++ >= READS_UNTIL_CLEANUP_DECIDES - 1) {
-        clock?.advanceTime(400);
+        clock.advanceTime(400);
       }
       return emptied;
-    });
-    clock = timer;
+    }, clock);
     await expect(dismiss(tray)).rejects.toThrow(
       "Watch notification stream did not close after returning to the previous screen.",
     );

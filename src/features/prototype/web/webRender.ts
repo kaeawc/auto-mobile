@@ -91,7 +91,7 @@ import {
   type PrototypeIconGlyphSource,
 } from "./webIconGlyphs";
 import { contentHeightBound, rowFillAxes, rowMeasured } from "./webRowAspect";
-import { withColumnHeights } from "./webIncomingHeight";
+import { repeatInstanceChildren, withColumnHeights } from "./webIncomingHeight";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
@@ -298,9 +298,10 @@ export type WebCellDecorator = (
 
 /** The children a container draws, each in its own scope and path: a repeat's once per row. */
 export function childEntries(node: Raw, scope: WebRenderScope, path: string): WebChildEntry[] {
-  const list = Array.isArray(node.children) ? node.children : [];
-  return rowScopes(node, scope).flatMap((itemScope) =>
-    list.map((entry, at) => ({ node: entry, scope: itemScope, path: `${path}.children[${at}]` })),
+  const scopes = rowScopes(node, scope);
+  const all = repeatInstanceChildren(node, path, scopes.map(prepareIn), scope.heightBound);
+  return scopes.flatMap((s, i) =>
+    all[i]!.map((entry, at) => ({ node: entry, scope: s, path: `${path}.children[${at}]` })),
   );
 }
 

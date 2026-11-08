@@ -10,7 +10,7 @@ import {
 } from "./FocusedTextClearVerifier";
 import { EventLastTyper } from "./EventLastTyper";
 import { EventAllTyper } from "./EventAllTyper";
-import { ImeCommitTyper } from "./ImeCommitTyper";
+import { ImeCommitTyper, imeTraceResultFields } from "./ImeCommitTyper";
 import { ImeRestore, type SendKeysImeRecoverySnapshot } from "./ImeRestore";
 import type { ImeCommitRouting, AndroidTypeOptions } from "./ImeTypes";
 import {
@@ -482,7 +482,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         committedGraphemes: result.committedGraphemes,
         ...imeCommitUnitFields(result),
         ...imeFailureFields(result),
-        ...this.imeTraceFields(),
+        ...this.imeTraceFields(result.success),
         ...(result.resolvedMode ? { resolvedMode: result.resolvedMode } : {}),
         ...iosBackendFields(result.iosBackend),
         ...this.imeResultFields(result.resolvedMode ?? baseResult.resolvedMode),
@@ -499,14 +499,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         success: false,
         error: errorMessage(error),
         ...caughtErrorCodeFields(error),
-        ...this.imeTraceFields(),
+        ...this.imeTraceFields(false),
       };
     }
   }
 
-  private imeTraceFields(): Pick<TextActionResult, "imeTrace"> {
-    const lines = this.imeTraceContext.getStore()?.lines;
-    return lines !== undefined ? { imeTrace: lines } : {};
+  private imeTraceFields(success: boolean): Pick<TextActionResult, "imeTrace"> {
+    return imeTraceResultFields(this.imeTraceContext.getStore()?.lines, success);
   }
 
   private imeResultFields(mode: ResolvedSendKeysTypingMode) {

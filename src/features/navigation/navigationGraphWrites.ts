@@ -1,4 +1,5 @@
 import type { NavigationRepository } from "../../db/navigationRepository";
+import type { BuildSourceRevision } from "../../models/BuildSourceRevision";
 import type { ScrollPosition, SelectedElement } from "../../utils/interfaces/NavigationGraph";
 
 /** Immutable provenance snapshot captured once per event and shared by its writes (#4984). */
@@ -7,6 +8,7 @@ export interface ResolvedProvenance {
   contentHash: string;
   deviceId: string;
   sessionUuid: string;
+  sourceRevision?: BuildSourceRevision;
 }
 
 /**
@@ -24,6 +26,7 @@ export async function recordNodeProvenance(
     appId,
     provenance.versionCode,
     provenance.contentHash,
+    provenance.sourceRevision,
   );
   await repository.recordNodeObservation(nodeId, {
     buildKeyId: buildKey.id,
@@ -47,6 +50,7 @@ export async function recordEdgeProvenance(
     appId,
     provenance.versionCode,
     provenance.contentHash,
+    provenance.sourceRevision,
   );
   await repository.recordEdgeObservation(edgeId, {
     buildKeyId: buildKey.id,

@@ -1,6 +1,4 @@
-import type { LayoutWarning, LayoutWarningsScope } from "../../../../models/ObservationInsets";
 import type { ObserveResult } from "../../../../models/ObserveResult";
-import { STABLE_VIEW_ID_PREFIX } from "../../android/StableNodeIdentity";
 import { boundsKey } from "./hierarchy";
 import {
   type ObserveDiff,
@@ -192,139 +190,6 @@ function layoutWarningsEqual(a: unknown, b: unknown): boolean {
   return valuesEqual(withoutDerivedConfidence(a), withoutDerivedConfidence(b));
 }
 
-/**
- * A capture-derived `s2-…` view id is regenerated whenever a neighbouring
- * subtree changes, so it is not part of a warning's identity (#11637): the
- * status bar's gesture-region warning would otherwise read as removed+added on
- * every tap. Real view ids and resource ids are kept.
- */
-function stableWarningViewId(warning: LayoutWarning): string | undefined {
-  const viewId = warning.element.viewId;
-  return viewId?.startsWith(STABLE_VIEW_ID_PREFIX) ? undefined : viewId;
-}
-
-/** Layout-warning identity is stable across bounds and confidence churn. */
-function layoutWarningIdentity(warning: LayoutWarning): string {
-  return [
-    warning.type,
-    stableWarningViewId(warning) ?? warning.element.resourceId ?? "",
-    warning.element.contentDesc ?? warning.element.text ?? "",
-  ].join("\0");
-}
-
-function layoutWarningWithoutConfidence(warning: LayoutWarning): Omit<LayoutWarning, "confidence"> {
-  return {
-    type: warning.type,
-    severity: warning.severity,
-    element: { ...warning.element, viewId: stableWarningViewId(warning) },
-    categories: warning.categories,
-    insetTypes: warning.insetTypes,
-    sides: warning.sides,
-    overflowPx: warning.overflowPx,
-    insetPx: warning.insetPx,
-    overlapPercent: warning.overlapPercent,
-  };
-}
-
-/**
- * SystemUI's own notification icons live in the status bar rather than app
- * content. #7217 excludes only that narrow false-positive family from compact
- * diffs; app warnings of the same type remain actionable diagnostics.
- */
-function isSystemUiStatusBarWarning(warning: LayoutWarning): boolean {
-  if (warning.type !== "important-content-under-inset") {
-    return false;
-  }
-  const { resourceId, contentDesc, text } = warning.element;
-  if (resourceId?.startsWith("com.android.systemui:id/")) {
-    return true;
-  }
-  return !resourceId && (contentDesc ?? text)?.endsWith("notification:") === true;
-}
-
-function layoutWarningsForPerEntryDiff(value: unknown): LayoutWarning[] {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return [];
-  }
-  const warnings = (value as Record<string, unknown>).warnings;
-  return Array.isArray(warnings)
-    ? (warnings.filter((warning): warning is LayoutWarning =>
-        Boolean(warning && typeof warning === "object" && !Array.isArray(warning)),
-      ) as LayoutWarning[])
-    : [];
-}
-
-function diffLayoutWarningsPerEntry(
-  baseline: unknown,
-  next: unknown,
-): {
-  added: LayoutWarning[];
-  removed: LayoutWarning[];
-  scope?: { from?: LayoutWarningsScope; to?: LayoutWarningsScope };
-  total?: { from?: number; to?: number };
-} {
-  const envelope = (value: unknown): { scope?: LayoutWarningsScope; total?: number } => {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      return {};
-    }
-    const record = value as Record<string, unknown>;
-    return {
-      scope: record.scope as LayoutWarningsScope | undefined,
-      total: record.total as number | undefined,
-    };
-  };
-  const baselineEnvelope = envelope(baseline);
-  const nextEnvelope = envelope(next);
-  const byIdentity = (warnings: LayoutWarning[]): Map<string, LayoutWarning[]> => {
-    const grouped = new Map<string, LayoutWarning[]>();
-    for (const warning of warnings.filter((warning) => !isSystemUiStatusBarWarning(warning))) {
-      const identity = layoutWarningIdentity(warning);
-      const entries = grouped.get(identity);
-      if (entries) {
-        entries.push(warning);
-      } else {
-        grouped.set(identity, [warning]);
-      }
-    }
-    return grouped;
-  };
-  const baselineByIdentity = byIdentity(layoutWarningsForPerEntryDiff(baseline));
-  const nextByIdentity = byIdentity(layoutWarningsForPerEntryDiff(next));
-  const added: LayoutWarning[] = [];
-  const removed: LayoutWarning[] = [];
-  for (const identity of new Set([...baselineByIdentity.keys(), ...nextByIdentity.keys()])) {
-    const from = baselineByIdentity.get(identity) ?? [];
-    const to = nextByIdentity.get(identity) ?? [];
-    const paired = Math.min(from.length, to.length);
-    for (let index = 0; index < paired; index++) {
-      if (
-        !valuesEqual(
-          layoutWarningWithoutConfidence(from[index]),
-          layoutWarningWithoutConfidence(to[index]),
-        )
-      ) {
-        removed.push(from[index]);
-        added.push(to[index]);
-      }
-    }
-    removed.push(...from.slice(paired));
-    added.push(...to.slice(paired));
-  }
-  const diff: {
-    added: LayoutWarning[];
-    removed: LayoutWarning[];
-    scope?: { from?: LayoutWarningsScope; to?: LayoutWarningsScope };
-    total?: { from?: number; to?: number };
-  } = { added, removed };
-  if (!valuesEqual(baselineEnvelope.scope, nextEnvelope.scope)) {
-    diff.scope = { from: baselineEnvelope.scope, to: nextEnvelope.scope };
-  }
-  if (!valuesEqual(baselineEnvelope.total, nextEnvelope.total)) {
-    diff.total = { from: baselineEnvelope.total, to: nextEnvelope.total };
-  }
-  return diff;
-}
-
 export function appendFieldChanges(
   diff: ObserveDiff,
   baseline: ObserveResult,
@@ -337,7 +202,7 @@ export function appendFieldChanges(
   const baseRecord: Record<string, unknown> = baseline;
   const nextRecord: Record<string, unknown> = next;
   for (const field of scalarFields) {
-    appendScalarFieldChange(fields, field, baseRecord, { nextRecord, cfg });
+    appendScalarFieldChange(fields, field, baseRecord, nextRecord);
   }
   // Element mirror fields (#3052): compare/emit the `node`-subtree-stripped form
   // (the subtree is redundant with the node diff and unbounded in size), with a
@@ -359,23 +224,13 @@ function appendScalarFieldChange(
   fields: NonNullable<ObserveDiff["fields"]>,
   field: string,
   baseRecord: Record<string, unknown>,
-  { nextRecord, cfg }: { nextRecord: Record<string, unknown>; cfg?: DiffObserveConfig },
+  nextRecord: Record<string, unknown>,
 ): void {
   const equal =
     field === "layoutWarnings"
       ? layoutWarningsEqual(baseRecord[field], nextRecord[field])
       : valuesEqual(baseRecord[field], nextRecord[field]);
-  if (field === "layoutWarnings" && cfg?.layoutWarningsDiffMode === "perEntry") {
-    const layoutWarnings = diffLayoutWarningsPerEntry(baseRecord[field], nextRecord[field]);
-    if (
-      layoutWarnings.added.length > 0 ||
-      layoutWarnings.removed.length > 0 ||
-      layoutWarnings.scope !== undefined ||
-      layoutWarnings.total !== undefined
-    ) {
-      fields[field] = layoutWarnings;
-    }
-  } else if (!equal) {
+  if (!equal) {
     fields[field] = { from: baseRecord[field], to: nextRecord[field] };
   }
 }

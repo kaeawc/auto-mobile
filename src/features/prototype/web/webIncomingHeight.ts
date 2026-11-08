@@ -65,10 +65,20 @@ function withHeight(entry: unknown, height: number | undefined): unknown {
 }
 
 /**
- * A column with each child carrying the share of its content height `content` it hands that child
- * (INCOMING_HEIGHT_KEY; see columnChildHeights); other nodes unchanged. The render scope already
- * passes every child the whole content height, which is all a row, a box or a repeat column (whose
- * children are one template) hands on, so only a plain column narrows it. A height that depends
+ * The containers that lay out their children as a column, and whether they apply `spacing`. A
+ * card lays out its content in a column, as Material's Card does, with no spacing. A Map, so a node
+ * type like `toString` cannot match an `Object.prototype` key.
+ */
+const COLUMN_PARENTS: ReadonlyMap<unknown, { readonly spacing: boolean }> = new Map([
+  ["column", { spacing: true }],
+  ["card", { spacing: false }],
+]);
+
+/**
+ * A column or card with each child carrying the share of its content height `content` it hands
+ * that child (INCOMING_HEIGHT_KEY; see columnChildHeights); other nodes unchanged. The render scope
+ * already passes every child the whole content height, which is all a row, a box or a repeat
+ * column (whose children are one template) hands on, so only a plain column or a card narrows it. A height that depends
  * on layout (a sibling's wrap height, the screen) is left out, so the bound stays an upper one.
  *
  * `prepare` resolves a child as rendering will (bound, visible, `styleWhen` merged).
@@ -80,19 +90,15 @@ export function withColumnHeights(
   content: number | undefined,
 ): Raw {
   const { children } = node;
-  if (
-    node.type !== "column" ||
-    node.repeat !== undefined ||
-    !Array.isArray(children) ||
-    content === undefined
-  ) {
+  const parent = COLUMN_PARENTS.get(node.type);
+  if (!parent || node.repeat !== undefined || !Array.isArray(children) || content === undefined) {
     return node;
   }
   const spacing = record(node.style)?.spacing;
   const heights = columnChildHeights(
     children.map((entry, index) => prepare(entry, childPath(path, index))),
     content,
-    typeof spacing === "number" ? spacing : 0,
+    parent.spacing && typeof spacing === "number" ? spacing : 0,
   );
   return { ...node, children: children.map((entry, index) => withHeight(entry, heights[index])) };
 }

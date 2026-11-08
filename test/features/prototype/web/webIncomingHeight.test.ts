@@ -103,3 +103,30 @@ test("a fill-height row below a 60 dp sibling in a 100 dp column caps its ratio 
     basis: 80,
   });
 });
+
+test("a card hands its children heights as a column does, with no spacing (#16690)", () => {
+  const card = withColumnHeights(
+    {
+      type: "card",
+      style: { spacing: 8 },
+      children: [
+        { type: "box", style: { height: { dp: 20 } } },
+        { type: "row", style: { weight: 1 } },
+      ],
+    },
+    "root",
+    prepare,
+    80,
+  );
+  // 80 dp of content: the box gets all of it, the weighted row what the box left; a card's
+  // children are not spaced, so `spacing` takes nothing.
+  expect(childrenOf(card).map(heightOf)).toEqual([80, 60]);
+  // An unbounded card hands nothing down.
+  const loose = { type: "card", children: [{ type: "row" }] };
+  expect(withColumnHeights(loose, "root", prepare, undefined)).toBe(loose);
+});
+
+test("only a column or card narrows its children a height (#16690)", () => {
+  const node = { type: "toString", style: { height: { dp: 50 } }, children: [{ type: "row" }] };
+  expect(withColumnHeights(node, "root", prepare, 50)).toBe(node);
+});

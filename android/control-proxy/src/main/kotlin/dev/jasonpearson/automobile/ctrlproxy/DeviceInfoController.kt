@@ -51,11 +51,15 @@ internal class DeviceInfoController(
   fun getForegroundActivity(
     rootPackage: String? = null,
     windowClass: String? = null,
+    windowPackage: String? = null,
   ): String? {
     return try {
       val pkg = rootPackage
       val className = windowClass
       if (pkg != null && className != null) {
+        // An overlay root may belong to a different package than the last activity event.
+        // Leave the component unknown so the host can use its ADB fallback.
+        if (windowPackage != null && windowPackage != pkg) return null
         if (isFrameworkViewClass(className)) {
           // Accessibility reports the root View class for many app windows,
           // which is not the resumed Activity and must not shadow the ADB

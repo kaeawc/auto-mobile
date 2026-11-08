@@ -91,12 +91,7 @@ export function withColumnHeights(
 ): Raw {
   const { children } = node;
   const parent = COLUMN_PARENTS.get(node.type);
-  if (
-    !parent ||
-    node.repeat !== undefined ||
-    !Array.isArray(children) ||
-    content === undefined
-  ) {
+  if (!parent || node.repeat !== undefined || !Array.isArray(children) || content === undefined) {
     return node;
   }
   const spacing = record(node.style)?.spacing;

@@ -1,5 +1,11 @@
 import { z } from "zod/v4";
-import type { BootedDevice, HighlightOperationResult, HighlightShape } from "../../models";
+import type {
+  BootedDevice,
+  HighlightBounds,
+  HighlightOperationResult,
+  HighlightShape,
+} from "../../models";
+import type { ScreenScaleMetadata } from "../../models/ScreenScaleMetadata";
 import {
   DefaultHostCommandExecutor,
   type HostChildProcess as ChildProcess,
@@ -29,6 +35,66 @@ export interface SimulatorHighlightsDependencies {
   executor?: HostProcessExecutor;
   timer?: Timer;
   resolveHelper?: () => Promise<string | null>;
+  /** The runner's last reported screen scale, or null when no hierarchy has carried one. */
+  screenScale?: () => ScreenScaleMetadata | null;
+}
+
+/** Source sizes within this many units of the device size count as that size (rounding). */
+const SOURCE_SIZE_TOLERANCE = 1;
+
+const sameSize = (
+  sourceWidth: number,
+  sourceHeight: number,
+  width: number,
+  height: number,
+): boolean =>
+  [
+    [width, height],
+    [height, width],
+  ].some(
+    ([w, h]) =>
+      Math.abs(sourceWidth - w) <= SOURCE_SIZE_TOLERANCE &&
+      Math.abs(sourceHeight - h) <= SOURCE_SIZE_TOLERANCE,
+  );
+
+/** Like `hosts`, injected dependencies never reach the process-wide runner client. */
+function screenScaleSource(
+  device: BootedDevice,
+  deps: SimulatorHighlightsDependencies | undefined,
+): () => ScreenScaleMetadata | null {
+  if (deps) {
+    return deps.screenScale ?? (() => null);
+  }
+  return () => iosCtrlProxyClientFor(device).getScreenScaleMetadata();
+}
+
+/**
+ * Source units per display point for `bounds`, so the helper does not have to guess it from the
+ * source size (#17354): 1 when the source is the screen in points, `nativeScale` when it is the
+ * screenshot in pixels. Undefined when the bounds already carry a scale, have no source size, or
+ * the source matches neither (the helper then keeps its size heuristic).
+ */
+export function resolveHighlightSourceScale(
+  bounds: HighlightBounds,
+  metadata: ScreenScaleMetadata | null,
+): number | undefined {
+  const { sourceWidth, sourceHeight } = bounds;
+  if (
+    !metadata ||
+    typeof sourceWidth !== "number" ||
+    typeof sourceHeight !== "number" ||
+    (typeof bounds.sourceScale === "number" && bounds.sourceScale > 0)
+  ) {
+    return undefined;
+  }
+  const { nativeScale, pixelWidth, pixelHeight } = metadata;
+  if (sameSize(sourceWidth, sourceHeight, pixelWidth / nativeScale, pixelHeight / nativeScale)) {
+    return 1;
+  }
+  if (sameSize(sourceWidth, sourceHeight, pixelWidth, pixelHeight)) {
+    return nativeScale;
+  }
+  return undefined;
 }
 
 const highlightTimeout = new Error("Simulator highlight deadline elapsed");
@@ -52,6 +118,7 @@ export class SimulatorHighlights {
   private readonly executor: HostProcessExecutor;
   private readonly timer: Timer;
   private readonly resolveHelper: () => Promise<string | null>;
+  private readonly screenScale: () => ScreenScaleMetadata | null;
 
   private readonly hosts: Map<string, OverlayHost>;
   private readonly supportedHelpers = new Map<string, boolean>();
@@ -64,6 +131,7 @@ export class SimulatorHighlights {
     this.fallback = deps?.fallback ?? (() => iosCtrlProxyClientFor(device));
     this.executor = deps?.executor ?? new DefaultHostCommandExecutor();
     this.timer = deps?.timer ?? defaultTimer;
+    this.screenScale = screenScaleSource(device, deps);
     this.hosts = deps ? new Map() : sharedHosts;
     this.resolveHelper =
       deps?.resolveHelper ??
@@ -124,7 +192,7 @@ export class SimulatorHighlights {
       }
       const key = `${helper}:${this.device.deviceId}`;
       const requestId = String(++nextRequestId);
-      const json = JSON.stringify({ requestId, id, shape });
+      const json = JSON.stringify({ requestId, id, shape: this.withSourceScale(shape) });
       let host = this.hosts.get(key);
       if (!host) {
         const child = this.executor.spawn(
@@ -146,6 +214,13 @@ export class SimulatorHighlights {
       logger.warn(`[SimulatorHighlights] Failed to send highlight: ${errorMessage(error)}`, error);
       return { success: false, error: String(error) };
     }
+  }
+
+  private withSourceScale(shape: HighlightShape): HighlightShape {
+    const sourceScale = resolveHighlightSourceScale(shape.bounds, this.screenScale());
+    return sourceScale === undefined
+      ? shape
+      : { ...shape, bounds: { ...shape.bounds, sourceScale } };
   }
 
   private waitForReply(

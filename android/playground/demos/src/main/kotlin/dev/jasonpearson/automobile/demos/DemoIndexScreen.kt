@@ -51,6 +51,7 @@ data class DemoIndexNavigation(
   val onNavigateToNetworkTest: () -> Unit = {},
   val onNavigateToDesignSystem: () -> Unit = {},
   val onNavigateToPointerProbe: () -> Unit = {},
+  val onNavigateToCollapsingComposer: () -> Unit = {},
   val onNavigateBack: () -> Unit = {},
 )
 
@@ -79,6 +80,7 @@ fun DemoIndexScreen(navigation: DemoIndexNavigation) {
         toolingDemos(
           navigation.onNavigateToDesignSystem,
           navigation.onNavigateToPointerProbe,
+          navigation.onNavigateToCollapsingComposer,
         )
 
     Scaffold(
@@ -258,6 +260,7 @@ private fun diagnosticDemos(
 private fun toolingDemos(
   onNavigateToDesignSystem: () -> Unit,
   onNavigateToPointerProbe: () -> Unit,
+  onNavigateToCollapsingComposer: () -> Unit,
 ): List<DemoEntry> =
   listOf(
     DemoEntry(
@@ -273,5 +276,13 @@ private fun toolingDemos(
       description = "Logs tool type, source, pressure, tilt and buttons of every MotionEvent.",
       buttonLabel = "Open Pointer Probe",
       onClick = onNavigateToPointerProbe,
+    ),
+    DemoEntry(
+      id = "demo_collapsing_composer",
+      title = "Collapsing Composer",
+      description =
+        "A message composer that collapses when the keyboard hides and preserves its draft.",
+      buttonLabel = "Open Collapsing Composer",
+      onClick = onNavigateToCollapsingComposer,
     ),
   )

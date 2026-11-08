@@ -35,6 +35,7 @@ const EXCLUDED_FILES = new Set([
   "release/ios-simulator-continuity.md",
   "release/device-claims-registry-migration.md",
   "design-docs/plat/ios/xctestrunner/ci-integration.md",
+  "decisions/androidx-baseline-profile-generator.md",
   "decisions/androidx-car-app-template-snapshots.md",
   "decisions/androidx-tv-fixture-libraries.md",
   "decisions/androidx-wear-fixture-libraries.md",

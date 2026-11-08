@@ -7,11 +7,23 @@ import { loadWorkflow, type WorkflowStep } from "../helpers/workflowSteps";
 // `cache-dependency-glob`, whose default (`**/uv.lock`, `**/requirements*.txt`,
 // ...) walks the whole workspace. A backgrounded setup-uv then scans
 // node_modules/ while `bun install` creates and deletes its .bun-tmp-* staging
-// dirs, and fails with ENOENT. Pinning the glob to the repo's only uv lockfile
-// keeps the walk out of node_modules/ whatever the step ordering.
+// dirs, and fails with ENOENT. Pinning the glob to an explicit list of the repo's
+// committed uv lockfiles keeps the walk out of node_modules/ whatever the step
+// ordering.
 
 const WORKFLOW_DIR = ".github/workflows";
-const UV_LOCK = "scripts/github/uv.lock";
+const UV_LOCKS = new Set(["scripts/github/uv.lock", "sdk/python/uv.lock"]);
+
+function pinsToUvLocks(glob: unknown): boolean {
+  if (typeof glob !== "string") {
+    return false;
+  }
+  const entries = glob
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  return entries.length > 0 && entries.every((entry) => UV_LOCKS.has(entry));
+}
 
 interface CachedUvStep {
   location: string;
@@ -39,9 +51,9 @@ describe("#17068 setup-uv cache glob stays out of node_modules", () => {
     expect(steps.length).toBeGreaterThan(0);
   });
 
-  test("every cached setup-uv step pins cache-dependency-glob to the uv lockfile", () => {
+  test("every cached setup-uv step pins cache-dependency-glob to committed uv lockfiles", () => {
     const offenders = steps
-      .filter(({ step }) => step.with?.["cache-dependency-glob"] !== UV_LOCK)
+      .filter(({ step }) => !pinsToUvLocks(step.with?.["cache-dependency-glob"]))
       .map(
         ({ location, step }) => `${location} -> ${String(step.with?.["cache-dependency-glob"])}`,
       );

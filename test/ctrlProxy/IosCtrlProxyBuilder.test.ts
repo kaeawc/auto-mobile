@@ -720,6 +720,52 @@ describe("IosCtrlProxyBuilder", function () {
       expect(result).toBe(false);
     });
 
+    // Windows has no POSIX exec bit; extraction there never stripped one.
+    test.skipIf(process.platform === "win32")(
+      "re-extracts a cached bundle whose runner lost its exec bit (#17216)",
+      async function () {
+        const derivedDataPath = path.join(tempDir, "DerivedData");
+        const productsDir = path.join(derivedDataPath, "Build", "Products");
+        const runnerApp = path.join(
+          productsDir,
+          "Debug-iphonesimulator",
+          "CtrlProxyUITests-Runner.app",
+        );
+        const runner = path.join(runnerApp, "CtrlProxyUITests-Runner");
+        const xctest = path.join(
+          runnerApp,
+          "PlugIns",
+          "CtrlProxyUITests.xctest",
+          "CtrlProxyUITests",
+        );
+        await fs.mkdir(path.dirname(xctest), { recursive: true });
+        await fs.writeFile(
+          path.join(productsDir, "AutoMobileTest_iphonesimulator.xctestrun"),
+          "mock",
+        );
+        await fs.writeFile(runner, "runner", { mode: 0o700 });
+        // As written by the pre-fix extractor: adm-zip's 0o666 default.
+        await fs.writeFile(xctest, "xctest");
+        await fs.chmod(xctest, 0o666);
+
+        const cacheDir = path.join(tempDir, "cache");
+        await fs.mkdir(cacheDir, { recursive: true });
+        await fs.writeFile(
+          path.join(cacheDir, "ctrl-proxy-ios-bundle.json"),
+          JSON.stringify({ checksum: "test-checksum", version: "latest", extractedAt: "x" }),
+        );
+        IosCtrlProxyBuilder.configure({ expectedChecksum: "test-checksum" });
+        const builder = IosCtrlProxyBuilder.getInstance({
+          derivedDataPath,
+          bundleCacheDir: cacheDir,
+        });
+
+        expect(await builder.needsRebuild("simulator")).toBe(true);
+        await fs.chmod(xctest, 0o700);
+        expect(await builder.needsRebuild("simulator")).toBe(false);
+      },
+    );
+
     test("fails closed on an unknown pin instead of reusing a cached bundle (#2746)", async function () {
       const prevVersion = process.env.AUTOMOBILE_VERSION;
       process.env.AUTOMOBILE_VERSION = "99.99.99";

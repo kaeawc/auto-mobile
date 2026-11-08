@@ -139,7 +139,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🎙️ <code>injectAudioInput</code>            | Emulator or simulator: play a WAV file or tone into the microphone. Off by default      |
 | ⏹️ <code>stopAudioInput</code>              | Stop an audio injection. Off by default                                                 |
 | 🔊 <code>captureAudio</code>                | Emulator or simulator: record audio output and report its level. Off by default         |
-| 📞 <code>phoneCall</code>                   | Simulate an incoming phone call                                                         |
+| 📞 <code>phoneCall</code>                   | Simulate an incoming phone call (iOS Simulator: accept/hold are partial)                |
 | 💬 <code>sendSms</code>                     | Simulate an incoming SMS                                                                |
 | 🎵 <code>mediaSession</code>                | Read or control Android media sessions                                                  |
 | 📣 <code>postNotification</code>            | Post notification via Android SDK hooks or iOS Simulator simctl push                    |

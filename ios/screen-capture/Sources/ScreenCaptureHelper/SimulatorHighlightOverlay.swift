@@ -35,7 +35,8 @@ enum SimulatorDisplayGeometry {
             width: bounds.height,
             height: bounds.width,
             sourceWidth: sourceHeight,
-            sourceHeight: sourceWidth
+            sourceHeight: sourceWidth,
+            sourceScale: bounds.sourceScale
         )
     }
 
@@ -158,16 +159,17 @@ enum SimulatorDisplayGeometry {
     @MainActor
     static func displayFrameLookup(
         for window: SimulatorOverlayTarget,
-        sourceSize: CGSize?
+        sourceSize: CGSize?,
+        sourceScale: Double? = nil
     )
         async -> DisplayFrameLookup
     {
         if displayFrame(window: window) != nil { return DisplayFrameLookup(frame: displayFrame(window:)) }
-        guard let relative = await DeviceHubDisplayLocator.locate(window: window, sourceSize: sourceSize)
-        else { return DisplayFrameLookup(frame: displayFrame(window:)) }
-        let tracker = DeviceHubDisplayTracker(relativeRect: relative, windowSize: window.frame.size) { current in
-            await DeviceHubDisplayLocator.locate(window: current, sourceSize: sourceSize)
+        let locate: @MainActor (SimulatorOverlayTarget) async -> CGRect? = { target in
+            await DeviceHubDisplayLocator.locate(window: target, sourceSize: sourceSize, sourceScale: sourceScale)
         }
+        guard let relative = await locate(window) else { return DisplayFrameLookup(frame: displayFrame(window:)) }
+        let tracker = DeviceHubDisplayTracker(relativeRect: relative, windowSize: window.frame.size, relocate: locate)
         return trackingLookup(tracker)
     }
 
@@ -361,7 +363,11 @@ final class SimulatorHighlightHost {
                 sourceSize = nil
             }
             let window = try SimulatorDisplayGeometry.find(deviceName: deviceName, sourceSize: sourceSize)
-            let lookup = await SimulatorDisplayGeometry.displayFrameLookup(for: window, sourceSize: sourceSize)
+            let lookup = await SimulatorDisplayGeometry.displayFrameLookup(
+                for: window,
+                sourceSize: sourceSize,
+                sourceScale: bounds.sourceScale
+            )
             return try SimulatorHighlightOverlay(
                 window: window,
                 request: request,

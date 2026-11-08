@@ -464,6 +464,18 @@ export const observeResultSchema = z
           .describe(
             "True when DO is required and the known foreground activity is not distraction optimized.",
           ),
+        hostRenderedUi: z
+          .object({
+            kind: z.literal("carAppLibrary"),
+            hostPackage: z
+              .string()
+              .optional()
+              .describe("The car host that drew the templates, when its resource ids name it."),
+          })
+          .optional()
+          .describe(
+            "Present when the foreground screen is Car App Library templates drawn by the car host, not the app's own views; absent otherwise.",
+          ),
       })
       .optional()
       .describe(

@@ -613,6 +613,7 @@ function penReader(tiltAxes?: TiltAxes) {
   const reader = new GetEventReader({
     adb,
     timer,
+    kernelReorderWindowMs: 0,
     density: 1,
     touchNode: touch!,
     scaler: scaler(1079, 1919),

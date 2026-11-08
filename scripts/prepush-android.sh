@@ -175,9 +175,38 @@ validate_root_gradle_configuration() {
   run_gradle help
 }
 
+# Runs the type-resolved Detekt tasks CI runs and fails when Gradle reports a
+# Detekt task SKIPPED: a disabled task (the plain `detekt` task is disabled by
+# the automobile.detekt convention) analyzes nothing, so it must not pass (#17039).
+run_detekt() {
+  local detekt_log status=0
+  # Report (or reject) the launcher JVM here: inside the pipeline subshell its
+  # state and any exit would not reach this shell.
+  report_gradle_jvm
+  detekt_log="$(mktemp)"
+  # errexit is paused only to remove the log before propagating a failure.
+  set +e
+  run_gradle --console=plain "$@" 2>&1 | tee "${detekt_log}"
+  status=$?
+  set -e
+  if [[ "${status}" -ne 0 ]]; then
+    rm -f "${detekt_log}"
+    return "${status}"
+  fi
+  local skipped
+  skipped="$(grep -E '^> Task [^ ]*:detekt[^ ]* SKIPPED$' "${detekt_log}" || true)"
+  rm -f "${detekt_log}"
+  if [[ -n "${skipped}" ]]; then
+    echo "error: Detekt tasks were SKIPPED, so they analyzed nothing:" >&2
+    printf '%s\n' "${skipped}" >&2
+    echo "Run the type-resolved detektMain/detektTest tasks CI runs instead." >&2
+    return 1
+  fi
+}
+
 run_full_scope_detekt() {
   echo "==> full-scope Detekt (Detekt config changed)"
-  run_gradle detektMain detektTest
+  run_detekt detektMain detektTest
 }
 
 run_sdk_api_check() {
@@ -325,10 +354,16 @@ for module_path in "${modules[@]+"${modules[@]}"}"; do
     test_tasks+=("${module_path}:test")
   else
     if [[ "${detekt_config_changed}" == "false" ]]; then
-      detekt_tasks+=("${module_path}:detekt")
+      # The plain `detekt` task is disabled; CI's Detekt job runs these.
+      detekt_tasks+=("${module_path}:detektMain" "${module_path}:detektTest")
     fi
     if grep -Eq 'alias\(libs\.plugins\.android\.(application|library)\)|id\("automobile\.android-(library|application)"\)' "${module_dir}/build.gradle.kts"; then
-      compile_tasks+=("${module_path}:compileDebugKotlin")
+      if [[ "${module_path}" == ":prototype-app-shell" ]]; then
+        # Template flavors (`base`, later `media`, ...) make the unflavored task name ambiguous.
+        compile_tasks+=("${module_path}:compileBaseDebugKotlin")
+      else
+        compile_tasks+=("${module_path}:compileDebugKotlin")
+      fi
     else
       compile_tasks+=("${module_path}:compileKotlin")
     fi
@@ -362,7 +397,7 @@ if [[ "${detekt_config_changed}" == "true" ]]; then
 else
   echo "==> scoped Detekt (${modules[*]})"
 fi
-run_gradle "${detekt_tasks[@]+"${detekt_tasks[@]}"}"
+run_detekt "${detekt_tasks[@]+"${detekt_tasks[@]}"}"
 
 echo "==> compile (${modules[*]})"
 run_gradle "${compile_tasks[@]+"${compile_tasks[@]}"}"

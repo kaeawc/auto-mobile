@@ -1,30 +1,20 @@
 package dev.jasonpearson.automobile.desktop.core.shell
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.hoverable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -37,7 +27,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 
 /** Represents which pane currently has keyboard focus. */
@@ -118,17 +107,27 @@ fun ThreePaneShell(
         handleShellKey(event, options, state, focus)
       },
     ) {
-      TitleBarSpacer()
-      PaneToggleToolbar(
-        PaneToggleOptions(
-          options.showLeftPane,
-          options.onToggleLeftPane,
-          options.showRightPane,
-          options.onToggleRightPane,
-          options.showBottomPane,
-          options.onToggleBottomPane,
-        ),
-      )
+      MacOSTitleBarSpacer(Modifier.fillMaxWidth())
+      Row(
+        Modifier.fillMaxWidth()
+          .height(28.dp)
+          .background(SharedTheme.globalColors.panelBackground)
+          .padding(horizontal = 8.dp),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        PaneToggleToolbar(
+          options =
+            PaneToggles(
+              showLeftPane = options.showLeftPane,
+              onToggleLeft = options.onToggleLeftPane,
+              showRightPane = options.showRightPane,
+              onToggleRight = options.onToggleRightPane,
+              showBottomPane = options.showBottomPane,
+              onToggleBottom = options.onToggleBottomPane,
+            ),
+        )
+      }
       ShellMainPanes(options, state, focus, Modifier.weight(1f))
       ShellBottomPane(options, state)
     }
@@ -136,26 +135,9 @@ fun ThreePaneShell(
   }
 }
 
-/** Builds the ordered list of visible panes given current visibility. */
-
-/** Cycles to the next or previous pane, skipping hidden panes. */
-
-/** Requests focus for the given pane. */
-
 // ---------------------------------------------------------------------------
 // Stub composables — replaced by real implementations when units 1-7 merge
 // ---------------------------------------------------------------------------
-
-/** Reserves space for the macOS native transparent title bar (28dp). */
-@Composable
-private fun TitleBarSpacer() {
-  val isMacOS = remember {
-    System.getProperty("os.name")?.lowercase()?.contains("mac") == true
-  }
-  if (isMacOS) {
-    Spacer(Modifier.fillMaxWidth().height(28.dp))
-  }
-}
 
 /** Thin vertical divider with horizontal drag-to-resize. Double-tap resets to default. */
 @Composable
@@ -202,93 +184,4 @@ internal fun formatElapsed(elapsedSeconds: Long): String {
   val minutes = elapsedSeconds / 60
   val seconds = elapsedSeconds % 60
   return if (minutes > 0) "${minutes}m ${seconds}s" else "${seconds}s"
-}
-
-/** Status bar showing failure counts, FPS, memory, and connection state. */
-
-/** Toolbar row with pane toggle buttons (Xcode-style). */
-private data class PaneToggleOptions(
-  val showLeftPane: Boolean,
-  val onToggleLeftPane: () -> Unit,
-  val showRightPane: Boolean,
-  val onToggleRightPane: () -> Unit,
-  val showBottomPane: Boolean,
-  val onToggleBottomPane: () -> Unit,
-)
-
-@Composable
-private fun PaneToggleToolbar(options: PaneToggleOptions) {
-  val showLeftPane = options.showLeftPane
-  val onToggleLeftPane = options.onToggleLeftPane
-  val showRightPane = options.showRightPane
-  val onToggleRightPane = options.onToggleRightPane
-  val showBottomPane = options.showBottomPane
-  val onToggleBottomPane = options.onToggleBottomPane
-
-  val colors = SharedTheme.globalColors
-  Row(
-    Modifier.fillMaxWidth()
-      .height(28.dp)
-      .background(colors.panelBackground)
-      .padding(horizontal = 8.dp),
-    horizontalArrangement = Arrangement.End,
-    verticalAlignment = Alignment.CenterVertically,
-  ) {
-    PaneToggleIcon(
-      label = "Left",
-      isActive = showLeftPane,
-      onClick = onToggleLeftPane,
-    )
-    Spacer(Modifier.width(4.dp))
-    PaneToggleIcon(
-      label = "Bottom",
-      isActive = showBottomPane,
-      onClick = onToggleBottomPane,
-    )
-    Spacer(Modifier.width(4.dp))
-    PaneToggleIcon(
-      label = "Right",
-      isActive = showRightPane,
-      onClick = onToggleRightPane,
-    )
-  }
-}
-
-@Composable
-private fun PaneToggleIcon(
-  label: String,
-  isActive: Boolean,
-  onClick: () -> Unit,
-) {
-  val colors = SharedTheme.globalColors
-  val interactionSource = remember { MutableInteractionSource() }
-  val isHovered by interactionSource.collectIsHoveredAsState()
-
-  val targetAlpha =
-    when {
-      isActive -> 0.15f
-      isHovered -> 0.10f
-      else -> 0f
-    }
-  val bgColor by
-    animateColorAsState(
-      targetValue = colors.text.normal.copy(alpha = targetAlpha),
-      animationSpec = tween(durationMillis = 100),
-      label = "paneToggleBg",
-    )
-
-  Text(
-    text = label,
-    fontSize = 10.sp,
-    color = if (isActive) colors.text.info else colors.text.normal.copy(alpha = 0.4f),
-    modifier =
-      Modifier.background(bgColor)
-        .hoverable(interactionSource)
-        .clickable(
-          interactionSource = interactionSource,
-          indication = null,
-          onClick = onClick,
-        )
-        .padding(horizontal = 6.dp, vertical = 2.dp),
-  )
 }

@@ -24,11 +24,13 @@ import {
   type WatchBootAdmission,
 } from "../../src/utils/ios-cmdline-tools/WatchSimulatorLifecycle";
 import { WatchSimulatorProvisioner } from "../../src/utils/ios-cmdline-tools/WatchSimulatorProvisioner";
+import { defaultWatchProvisioner } from "../../src/server/deviceToolsWatchProvision";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import type { AppleDevice } from "../../src/utils/ios-cmdline-tools/SimCtlSupport";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeSimulatorPairs } from "../fakes/FakeSimulatorPairs";
 import { withWireConnection } from "../helpers/mcpConnection";
 import {
   FakeWatchProvisionSimctl,
@@ -308,4 +310,41 @@ describe("provisionDevice on an Apple Watch simulator", () => {
     expect(watch).toMatchObject({ boot: true });
     expect(watch.readiness).toBeUndefined();
   });
+
+  test("a created watch notifies resource subscribers; adopting it does not", async () => {
+    await arrange();
+    let notified = 0;
+    setDeviceToolsDependencies({
+      notifyResourcesChanged: async () => {
+        notified += 1;
+      },
+    });
+
+    await provision({ device: WATCH });
+    expect(notified).toBe(1);
+
+    await provision({ device: WATCH, boot: false });
+    expect(notified).toBe(1);
+  });
+});
+
+test("the default provisioner's discard unpairs through the configured pair service", async () => {
+  const simctl = new FakeWatchProvisionSimctl([watchDevice()]);
+  const unpaired: string[] = [];
+  const pairs = new FakeSimulatorPairs().service();
+  pairs.unpairCreated = async (watch) => {
+    unpaired.push(watch);
+  };
+  const provisioner = defaultWatchProvisioner({ simulatorPairServiceFactory: () => pairs }, simctl);
+  const watch = watchDevice();
+  expect(
+    await provisioner.discardCreated({
+      ...watch,
+      deviceId: watch.udid,
+      platform: "watchos",
+      isRunning: false,
+    }),
+  ).toEqual({ deleted: true });
+  expect(unpaired).toEqual([watch.udid]);
+  expect(simctl.commands).toEqual([`delete ${watch.udid}`]);
 });

@@ -138,8 +138,12 @@ elif [[ "${#modules[@]}" -gt 0 ]]; then
           }
         }
       } while (changed)
-      for (module in selected)
-        if (selected[module] && android[module]) print module ":lintDebug"
+      for (module in selected) {
+        if (!selected[module] || !android[module]) continue
+        # Template flavors (`base`, later `media`, ...) make the unflavored task name ambiguous.
+        if (module == ":prototype-app-shell") print module ":lintBaseDebug"
+        else print module ":lintDebug"
+      }
     }
   ' ${settings[@]+"${settings[@]}"} ${build_files[@]+"${build_files[@]}"} | sort -u
 fi

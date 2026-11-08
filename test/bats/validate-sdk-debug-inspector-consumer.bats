@@ -48,6 +48,7 @@ XML
   : >"${work}/${DB_CLASS}"
   : >"${work}/${SP_CLASS}"
   : >"${work}/${KS_PROVIDER_CLASS}"
+  : >"${work}/${KS_FAULT_PLAN_CLASS}"
   ( cd "${work}" && zip -q -r classes.jar dev )
   ( cd "${work}" && zip -q "${FIX}/debug.aar" classes.jar )
 
@@ -222,6 +223,11 @@ XML
   [ "$(manifest_provider_match_count "${FIX}/release-manifest.xml" "" "" "\${applicationId}.automobile.keystore")" = "0" ]
   [ "$(aar_class_present "${FIX}/debug.aar" "$KS_PROVIDER_CLASS")" = "1" ]
   [ "$(aar_class_present "${FIX}/release.aar" "$KS_PROVIDER_CLASS")" = "0" ]
+}
+
+@test "Keystore fault plan class is debug only" {
+  [ "$(aar_class_present "${FIX}/debug.aar" "$KS_FAULT_PLAN_CLASS")" = "1" ]
+  [ "$(aar_class_present "${FIX}/release.aar" "$KS_FAULT_PLAN_CLASS")" = "0" ]
 }
 
 @test "Keystore authority check detects a different class claiming the release authority" {

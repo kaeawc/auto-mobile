@@ -1,0 +1,2 @@
+    topResumedActivity=ActivityRecord{33a7b5e u0 com.google.android.deskclock/com.android.deskclock.DeskClock t9}
+  ResumedActivity: ActivityRecord{33a7b5e u0 com.google.android.deskclock/com.android.deskclock.DeskClock t9}

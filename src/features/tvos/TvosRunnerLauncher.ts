@@ -4,8 +4,14 @@ import { ActionableError, toActionableError } from "../../models/ActionableError
 import { XcodebuildClient, type Xcodebuild } from "../../utils/ios-cmdline-tools/XcodebuildClient";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
-import { WebSocketTvosRunnerClient, type TvosRunnerClient } from "./TvosRunnerClient";
+import {
+  WebSocketTvosRunnerClient,
+  type TvosRunnerClient,
+  type TvosSocketFactory,
+} from "./TvosRunnerClient";
 import { tvosRunners } from "./TvosRunnerRegistry";
+import { tvosTargetApps } from "./TvosTargetApps";
+import type { VisionosTargetApps } from "../visionos/VisionosTargetApps";
 import type { IosCtrlProxyBuilder } from "../../ctrlProxy/IosCtrlProxyBuilder";
 import { rm } from "node:fs/promises";
 
@@ -24,6 +30,24 @@ interface TvosStartup {
   exited: boolean;
   unregister: () => void;
 }
+/** A runner client that names the device's last-launched app on hierarchy and text requests. */
+export function connectTvosRunnerClient(
+  url: string,
+  deviceId: string,
+  options: {
+    timer?: Timer;
+    factory?: TvosSocketFactory;
+    targetApps?: Pick<VisionosTargetApps, "get">;
+  } = {},
+): TvosRunnerClient {
+  const targetApps = options.targetApps ?? tvosTargetApps;
+  return new WebSocketTvosRunnerClient(url, {
+    timer: options.timer,
+    factory: options.factory,
+    foregroundApp: () => targetApps.get(deviceId),
+  });
+}
+
 /** Launch a prebuilt test bundle; the caller supplies its xctestrun and reserved localhost port. */
 export class XcodebuildTvosRunnerLauncher implements TvosRunnerLauncher {
   constructor(
@@ -122,7 +146,8 @@ export class XcodebuildTvosRunnerLauncher implements TvosRunnerLauncher {
     // xcodebuild returns before the bundle binds its socket. Retry only readiness, never actions.
     while (!state.exited) {
       const client = (
-        this.dependencies.connect ?? ((url) => new WebSocketTvosRunnerClient(url, { timer }))
+        this.dependencies.connect ??
+        ((url) => connectTvosRunnerClient(url, options.deviceId, { timer }))
       )(`ws://127.0.0.1:${options.port}/ws`);
       state.client = client;
       try {

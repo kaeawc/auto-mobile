@@ -9,6 +9,7 @@ import dev.jasonpearson.automobile.protocol.DeleteSavedPrototype
 import dev.jasonpearson.automobile.protocol.DiscoverKeystore
 import dev.jasonpearson.automobile.protocol.DismissPrototype
 import dev.jasonpearson.automobile.protocol.DragResult
+import dev.jasonpearson.automobile.protocol.ExportAttestation
 import dev.jasonpearson.automobile.protocol.GetCurrentFocus
 import dev.jasonpearson.automobile.protocol.GetDataStore
 import dev.jasonpearson.automobile.protocol.GetDeviceOwnerStatus
@@ -339,6 +340,7 @@ class CtrlProxyMessageHandler(
             request.scope,
             request.alias,
           )
+        is ExportAttestation -> actions.exportAttestation(request.requestId)
         is DiscoverKeystore -> actions.discoverKeystore(request.requestId, request.packageName)
         is GetSdkCapabilities ->
           actions.getSdkCapabilities(request.requestId, request.packageName, request.userId)
@@ -776,6 +778,7 @@ private class RequestRoute(request: WebSocketRequest) {
       is RemovePrototypeAsset -> RequestGroup.PROTOTYPE
       is ListPreferenceFiles,
       is GetPreferences,
+      is ExportAttestation,
       is DiscoverKeystore,
       is ResetKeystore,
       is GetSdkCapabilities,

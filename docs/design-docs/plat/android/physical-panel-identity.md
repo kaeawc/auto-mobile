@@ -35,7 +35,12 @@ the panel id, and pushed display transitions have never carried a panel key.
 - Discovery builds the panel inventory once from `dumpsys SurfaceFlinger --display-id`,
   `dumpsys display` (`DisplayDeviceInfo{... uniqueId="local:N", W x H ...}` records, one per
   physical panel whether or not it is active) and `cmd device_state print-states`. Roles come from
-  pixel area: the largest internal panel is `inner`, the smallest is `cover`.
+  pixel area: the largest internal panel is `inner`, the smallest is `cover`. When there are two
+  or more internal panels and no fold posture, `ro.build.characteristics` is read once. On an
+  `automotive` build, the first largest internal panel stays `inner` (the center display), every
+  other internal panel is `cluster` (the instrument cluster), and the inventory reports no
+  postures, so no message offers `setPosture` on a car. The cluster app's own virtual display
+  (`ClusterOsDouble-VD`) is reported under role `virtual`, as for any other app-created display.
 - Overlay displays (`overlay_display_devices`, `type OVERLAY`, `uniqueId="overlay:N"`) have no
   SurfaceFlinger physical id, so they join the inventory after the physical panels under role
   `overlay` with the whole `overlay:N` as key: a bare `N` could be mistaken for a logical display

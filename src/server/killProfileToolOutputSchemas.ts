@@ -7,6 +7,15 @@ const stepSchema = z
     command: z.string(),
     status: z.enum(["applied", "unsupported", "failed"]),
     reason: z.string().optional(),
+    observation: z
+      .object({
+        bootReceivers: z.array(z.string()),
+        bootPermissionGranted: z.boolean(),
+        stopped: z.boolean(),
+        bootBroadcastDelivered: z.boolean(),
+        pendingAlarms: z.number().int().nonnegative(),
+      })
+      .optional(),
   })
   .passthrough();
 

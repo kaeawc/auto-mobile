@@ -121,19 +121,10 @@ MOCK
   [[ "$output" != *"Homebrew"* ]]
 }
 
-# Skipping locally is a convenience; skipping in CI would silently retire the
-# wiring assertions below, which is the fail-green this guard exists to catch.
-wiring_requires_yq() {
-  command -v yq >/dev/null 2>&1 && return 0
-  if [[ -n "${CI:-}" ]]; then
-    echo "yq is required in CI to verify android-emulator action wiring" >&2
-    return 1
-  fi
-  skip "yq not installed"
-}
+load yq-helpers
 
 @test "the android-emulator action resolves the SDK before it boots the emulator (#4237)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   action=".github/actions/android-emulator/action.yml"
 
   ensure_index="$(yq -r \

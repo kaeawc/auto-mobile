@@ -40,6 +40,12 @@ export interface LaunchAppResult extends BaseActionResult {
    * dropping the observation when it still reports the previous app, the response
    * carries this marker naming why and what the stale observation actually showed.
    */
+  /**
+   * The launch path never observes, so foreground verification was not attempted
+   * (#17319): a tvOS, visionOS or watchOS launch goes straight through simctl. The
+   * response then leaves `verified` undefined instead of reporting a failure.
+   */
+  verificationSkipped?: "platform";
   observationOmitted?: {
     reason: "stale_launch_observation";
     expectedPackage: string;

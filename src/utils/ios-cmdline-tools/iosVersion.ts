@@ -66,43 +66,45 @@ export function iosVersionStringFromRuntimeId(
 }
 
 /**
- * Resolve the major iOS version for a booted simulator `udid` from the JSON
- * emitted by `simctl list devices <udid> --json`. The payload groups devices by
- * runtime identifier (e.g. `com.apple.CoreSimulator.SimRuntime.iOS-18-6`), so we
- * find the runtime whose device list contains the udid and read the version from
- * that identifier. Returns `null` when the udid is absent, the runtime carries no
- * iOS version token, or the JSON is malformed.
+ * Resolve the dotted iOS runtime version (e.g. `"26.5"`) of simulator `udid` from
+ * the JSON emitted by `simctl list devices <udid> --json`. The payload groups
+ * devices by runtime identifier (e.g. `com.apple.CoreSimulator.SimRuntime.iOS-18-6`),
+ * so we find the runtime whose device list contains the udid and read the version
+ * from that identifier. Returns `undefined` when the udid is absent, the runtime
+ * carries no iOS version token, or the JSON is malformed.
  */
-export function iosMajorVersionFromSimctlListDevices(json: string, udid: string): number | null {
+export function iosVersionFromSimctlListDevices(json: string, udid: string): string | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);
   } catch (error) {
     // Malformed/empty simctl output is a best-effort probe failure: the caller
     // treats an unresolved version as "unknown" and falls back accordingly.
-    logger.debug(`iosMajorVersionFromSimctlListDevices: could not parse simctl JSON: ${error}`);
-    return null;
+    logger.debug(`iosVersionFromSimctlListDevices: could not parse simctl JSON: ${error}`);
+    return undefined;
   }
 
   // `JSON.parse` accepts scalars ("null", "42", '"x"') that are not usable device
   // maps; guard the shape before indexing so a valid-but-wrong payload yields the
-  // documented "unknown" (null) rather than a TypeError.
+  // documented "unknown" rather than a TypeError.
   if (typeof parsed !== "object" || parsed === null) {
-    return null;
+    return undefined;
   }
   const devices = (parsed as { devices?: Record<string, Array<{ udid?: string }>> }).devices ?? {};
-  for (const [runtimeId, deviceList] of Object.entries(devices)) {
-    if (Array.isArray(deviceList) && deviceList.some((device) => device?.udid === udid)) {
-      const major = parseIosMajorVersion(iosVersionStringFromRuntimeId(runtimeId));
-      // Keep scanning: a udid should appear under exactly one runtime, but if an
-      // earlier-iterated runtime id carries no iOS version token, later runtimes
-      // may still resolve it rather than short-circuiting to null.
-      if (major !== null) {
-        return major;
-      }
-    }
-  }
-  return null;
+  // A udid should appear under exactly one runtime, but if an earlier runtime id
+  // carries no iOS version token, a later one may still resolve it.
+  return Object.entries(devices)
+    .filter(
+      ([, deviceList]) =>
+        Array.isArray(deviceList) && deviceList.some((device) => device?.udid === udid),
+    )
+    .map(([runtimeId]) => iosVersionStringFromRuntimeId(runtimeId))
+    .find((version) => parseIosMajorVersion(version) !== null);
+}
+
+/** The major iOS version of simulator `udid` from `simctl list devices` JSON, or `null`. */
+export function iosMajorVersionFromSimctlListDevices(json: string, udid: string): number | null {
+  return parseIosMajorVersion(iosVersionFromSimctlListDevices(json, udid));
 }
 
 function readVersionFieldString(

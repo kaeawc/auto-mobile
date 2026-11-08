@@ -156,7 +156,7 @@ const personaTool = defineDeviceTool({
   name: "manufacturerProfile",
   description:
     "Android: apply an OEM manufacturer profile (pixel-baseline, samsung-oneui, xiaomi-hyperos, oneplus-oxygenos, " +
-    "oppo-coloros, motorola) on a stock device by composing the keyboard profile, killProfile and displayProfile " +
+    "oppo-coloros, motorola, huawei-emui, vivo-funtouch, realme-ui, meizu-flyme, asus-zenui, sony-xperia, tecno-hios) on a stock device by composing the keyboard profile, killProfile and displayProfile " +
     "executors. describe reports every facet's evidence status (focused_trace | vendor_documented | cdd_derived | " +
     "inferred | experimental) and the OEM capabilities that cannot be emulated; apply with requires naming one of " +
     "those returns route_to_real_device and changes nothing. applying a different manufacturer profile resets the " +

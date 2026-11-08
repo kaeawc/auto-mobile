@@ -10,7 +10,9 @@
 import type { CtrlProxyPerfTiming, WebSocketMessage } from "./types";
 import { rewriteUnknownCommandError as rewritePlatformUnknownCommandError } from "../shared/rewriteUnknownCommandError";
 import type { KeyValueEntry } from "../../storage/storageTypes";
-import type { ZodTypeAny } from "zod";
+import { z, type ZodTypeAny } from "zod";
+
+const sceneIdentifiersSchema = z.array(z.string());
 import {
   iosSdkActionResultSchema,
   iosSdkBridgeFailure,
@@ -153,11 +155,11 @@ function decodeRunnerBusy(message: WebSocketMessage, requestId: string): Decoded
 }
 
 function shouldRecoverBusyRunner(message: WebSocketMessage): boolean {
-  // These commands have 5s/10s host waits, but timing out does not cancel the
+  // Rotate, link and launch have bounded host waits, but timing out does not cancel the
   // native call. Leave grace for completion and any explicit runner deadline.
   // Other commands (including potentially long text input) retain their policy.
   if (
-    !["request_activate_accessibility_link", "request_launch_app"].includes(
+    !["request_activate_accessibility_link", "request_launch_app", "request_rotate"].includes(
       message.blockingCommandType ?? "",
     )
   ) {
@@ -533,12 +535,14 @@ function decodeSdkBridgeResult(
   key: "observation" | "result",
   schema: typeof iosSdkObservationSchema | typeof iosSdkActionResultSchema,
 ): unknown {
+  const scenes = sceneIdentifiersSchema.safeParse(message.scenes);
   const raw = message[key];
   const parsed = raw === undefined ? undefined : schema.safeParse(raw);
   const invalid = parsed !== undefined && !parsed.success;
   return {
     success: invalid ? false : (message.success ?? false),
     available: message.available ?? false,
+    ...(scenes.success ? { scenes: scenes.data } : {}),
     [key]: parsed?.success ? parsed.data : undefined,
     failure: invalid ? "bad_reply" : iosSdkBridgeFailure(message.failure),
     error: invalid ? `The runner relayed a malformed SDK ${key}.` : message.error,
@@ -572,12 +576,14 @@ function decodeSdkWebResult(
   key: "snapshot" | "result",
   schema: typeof iosSdkWebSnapshotSchema | typeof iosSdkWebActionResultSchema,
 ): unknown {
+  const scenes = sceneIdentifiersSchema.safeParse(message.scenes);
   const value = parseRelayed(message[key], schema);
   const webViews = parseRelayed(message.webViews, iosSdkWebViewsSchema);
   const invalid = value.invalid || webViews.invalid;
   return {
     success: invalid ? false : (message.success ?? false),
     available: message.available ?? false,
+    ...(scenes.success ? { scenes: scenes.data } : {}),
     [key]: value.value,
     ...(key === "snapshot" ? webSnapshotFields(message, webViews.value) : {}),
     failure: invalid ? "bad_reply" : iosSdkWebFailure(message.failure),
@@ -640,6 +646,15 @@ const messageDecoders = new Map<
       success: message.success ?? false,
       issues: message.issues ?? [],
       unsupportedChecks: message.unsupportedChecks ?? [],
+      error: message.error,
+      totalTimeMs: message.totalTimeMs ?? 0,
+    }),
+  ],
+  [
+    "accessibility_focus_result",
+    (message) => ({
+      success: message.success ?? false,
+      errorCode: message.errorCode,
       error: message.error,
       totalTimeMs: message.totalTimeMs ?? 0,
     }),

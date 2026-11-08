@@ -1,5 +1,29 @@
-import type { DeviceFrame } from "./deviceFrames";
+import {
+  ABSOLUTE,
+  ALIGN_ITEMS,
+  ARIA_HIDDEN,
+  BACKGROUND_COLOR,
+  BORDER_BOX,
+  BORDER_RADIUS,
+  BOX_SIZING,
+  CENTER,
+  DATA_CHROME,
+  DATA_LEVEL,
+  DATA_STATUS,
+  FLEX,
+  FONT_SIZE,
+  FONT_WEIGHT,
+  INLINE_FLEX,
+  JUSTIFY_CONTENT,
+  POINTER_EVENTS,
+  Z_INDEX,
+} from "./webCss";
+import { paintsTopEdgeAt, topEdgePaintOrder, type WebScreenSize } from "./webLayoutPass";
+import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "./deviceFrames";
+import type { CssVars } from "./webCssLength";
 import { el, type WebChild, type WebElement } from "./webNodes";
+
+export type { WebScreenSize } from "./webLayoutPass";
 
 /**
  * The generic status bar a still draws per skin (#16546): never a picture of a real OS, only a
@@ -78,30 +102,56 @@ export function statusBarContentFor(
   return luminance(color) > 0.179 ? "dark" : "light";
 }
 
-function stretches(element: WebElement): boolean {
-  return element.style["align-self"] === "stretch" || element.style.width === "100%";
+/** A background that paints fully opaque once the element's composite opacity applies. */
+function opaqueBackground(element: WebElement, opacity: number): string | undefined {
+  const background = element.style[BACKGROUND_COLOR];
+  const alpha = parseCssColor(background)?.a;
+  return alpha !== undefined && alpha * opacity === 1 ? background : undefined;
 }
 
-function opaqueBackground(element: WebElement): string | undefined {
-  const background = element.style["background-color"];
-  return parseCssColor(background)?.a === 1 ? background : undefined;
-}
+/** Points sampled along the screen's top edge, evenly across its width. */
+const TOP_EDGE_SAMPLES = 64;
+
+/** The default Android frame's portrait screen, for a caller that names none. */
+const DEFAULT_SCREEN: WebScreenSize = (() => {
+  const { widthDp, heightDp } = deviceFrameOrThrow(defaultDeviceFrameId("android")).screen;
+  return { width: widthDp, height: heightDp };
+})();
 
 /**
- * The app's top colour: the innermost opaque background along the content's leading children that
- * spans the screen, since it paints over its ancestors (a top app bar over a root column), else
- * `fallback` (the screen background). The walk stops at an element padded by the top safe area,
- * whose children start below the status bar.
+ * The app's top colour, from paint (#16667): a layout pass places the content on the `screen`,
+ * and at points evenly across the screen's top edge the last opaque background painted there is
+ * the colour behind the status bar (else `fallback`, the screen background). The colour at the
+ * most points wins; a tie goes to the one met first from the left. A background counts only when
+ * its alpha times the element's composite opacity is 1. `vars` are the custom properties the
+ * screen defines, such as the safe-area insets top padding reads.
  */
-export function appTopColor(content: WebChild, fallback: string): string {
+export function appTopColor(
+  content: WebChild,
+  fallback: string,
+  screen: WebScreenSize = DEFAULT_SCREEN,
+  vars: CssVars = {},
+): string {
+  if (typeof content === "string") {
+    return fallback;
+  }
+  const opaque = topEdgePaintOrder(content, screen, vars).flatMap((box) => {
+    const color = opaqueBackground(box.element, box.opacity);
+    return color === undefined ? [] : [{ box, color }];
+  });
+  const votes = new Map<string, number>();
+  for (let index = 0; index < TOP_EDGE_SAMPLES; index++) {
+    const x = ((index + 0.5) * screen.width) / TOP_EDGE_SAMPLES;
+    const shown = opaque.filter(({ box }) => paintsTopEdgeAt(box, x)).at(-1)?.color ?? fallback;
+    votes.set(shown, (votes.get(shown) ?? 0) + 1);
+  }
   let top = fallback;
-  let current: WebChild | undefined = content;
-  for (let depth = 0; depth < 32 && current !== undefined && typeof current !== "string"; depth++) {
-    const background = depth === 0 || stretches(current) ? opaqueBackground(current) : undefined;
-    top = background ?? top;
-    // Top safe-area padding moves the children below the status area, so this background shows.
-    const clears: boolean = current.style["padding-top"]?.includes("--safe-top") ?? false;
-    current = clears ? undefined : current.children.find((child) => typeof child !== "string");
+  let most = 0;
+  for (const [color, count] of votes) {
+    if (count > most) {
+      top = color;
+      most = count;
+    }
   }
   return top;
 }
@@ -110,12 +160,12 @@ const px = (value: number): string => `${Number(value.toFixed(3))}px`;
 
 function wifiMark(on: boolean, color: string): WebElement {
   return el("span", {
-    attrs: { "data-status": "wifi", "data-level": on ? "on" : "off" },
+    attrs: { [DATA_STATUS]: "wifi", [DATA_LEVEL]: on ? "on" : "off" },
     style: {
       display: "inline-block",
       width: "15px",
       height: "11px",
-      "background-color": color,
+      [BACKGROUND_COLOR]: color,
       // A generic fan: wide at the top, narrowing to a point at the bottom.
       "clip-path": "polygon(0 30%, 50% 0, 100% 30%, 50% 100%)",
       opacity: on ? "1" : "0.35",
@@ -128,8 +178,8 @@ function cellularMark(bars: number, color: string): WebElement {
   return el(
     "span",
     {
-      attrs: { "data-status": "cellular", "data-level": String(filled) },
-      style: { display: "inline-flex", "align-items": "flex-end", gap: "1.5px", height: "11px" },
+      attrs: { [DATA_STATUS]: "cellular", [DATA_LEVEL]: String(filled) },
+      style: { display: INLINE_FLEX, [ALIGN_ITEMS]: "flex-end", gap: "1.5px", height: "11px" },
     },
     [0, 1, 2, 3].map((index) =>
       el("span", {
@@ -137,8 +187,8 @@ function cellularMark(bars: number, color: string): WebElement {
           display: "inline-block",
           width: "3px",
           height: px(4 + index * 2.33),
-          "border-radius": "1px",
-          "background-color": color,
+          [BORDER_RADIUS]: "1px",
+          [BACKGROUND_COLOR]: color,
           opacity: index < filled ? "1" : "0.35",
         },
       }),
@@ -151,29 +201,29 @@ function batteryMark(percent: number, color: string): WebElement {
   return el(
     "span",
     {
-      attrs: { "data-status": "battery", "data-level": String(level) },
-      style: { display: "inline-flex", "align-items": "center", gap: "1px" },
+      attrs: { [DATA_STATUS]: "battery", [DATA_LEVEL]: String(level) },
+      style: { display: INLINE_FLEX, [ALIGN_ITEMS]: CENTER, gap: "1px" },
     },
     [
       el(
         "span",
         {
           style: {
-            display: "inline-flex",
+            display: INLINE_FLEX,
             width: "22px",
             height: "11px",
             padding: "1px",
             border: `1px solid ${color}`,
-            "border-radius": "3px",
-            "box-sizing": "border-box",
+            [BORDER_RADIUS]: "3px",
+            [BOX_SIZING]: BORDER_BOX,
           },
         },
         [
           el("span", {
             style: {
               width: `${level}%`,
-              "border-radius": "1.5px",
-              "background-color": color,
+              [BORDER_RADIUS]: "1.5px",
+              [BACKGROUND_COLOR]: color,
             },
           }),
         ],
@@ -182,8 +232,8 @@ function batteryMark(percent: number, color: string): WebElement {
         style: {
           width: "1.5px",
           height: "4px",
-          "border-radius": "0 1px 1px 0",
-          "background-color": color,
+          [BORDER_RADIUS]: "0 1px 1px 0",
+          [BACKGROUND_COLOR]: color,
         },
       }),
     ],
@@ -209,7 +259,7 @@ function sides(
     const ear = px(Math.max(0, (width - cutout.widthDp) / 2));
     return {
       container: { padding: "0" },
-      side: { width: ear, "justify-content": "center" },
+      side: { width: ear, [JUSTIFY_CONTENT]: CENTER },
     };
   }
   return { container: { padding: "0 16px" }, side: {} };
@@ -232,37 +282,37 @@ export function renderStatusBar(input: WebStatusBarInput): WebElement {
   const side = (children: WebChild[]) =>
     el(
       "span",
-      { style: { display: "flex", "align-items": "center", gap: "5px", ...layout.side } },
+      { style: { display: FLEX, [ALIGN_ITEMS]: CENTER, gap: "5px", ...layout.side } },
       children,
     );
   return el(
     "div",
     {
       attrs: {
-        "data-chrome": "statusBar",
+        [DATA_CHROME]: "statusBar",
         "data-status-content": content,
-        "aria-hidden": "true",
+        [ARIA_HIDDEN]: "true",
       },
       style: {
-        position: "absolute",
+        position: ABSOLUTE,
         left: "0",
         right: "0",
         top: "0",
         height: px(frame.statusBarDp),
-        display: "flex",
-        "align-items": "center",
-        "justify-content": "space-between",
+        display: FLEX,
+        [ALIGN_ITEMS]: CENTER,
+        [JUSTIFY_CONTENT]: "space-between",
         ...layout.container,
-        "box-sizing": "border-box",
+        [BOX_SIZING]: BORDER_BOX,
         color,
-        "font-size": ios ? "16px" : "14px",
-        "font-weight": ios ? "600" : "500",
-        "z-index": "2",
-        "pointer-events": "none",
+        [FONT_SIZE]: ios ? "16px" : "14px",
+        [FONT_WEIGHT]: ios ? "600" : "500",
+        [Z_INDEX]: "2",
+        [POINTER_EVENTS]: "none",
       },
     },
     [
-      side([el("span", { attrs: { "data-status": "clock" } }, [state.clock])]),
+      side([el("span", { attrs: { [DATA_STATUS]: "clock" } }, [state.clock])]),
       side([
         cellularMark(state.cellularBars, color),
         wifiMark(state.wifi, color),

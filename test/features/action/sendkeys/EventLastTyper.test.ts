@@ -4,6 +4,7 @@ import {
   IME_COMMIT_READ_BACK_SETTLE_MS,
   CARET_UNKNOWN_WARNING,
 } from "../../../../src/features/action/SendKeys";
+import { ANDROID_TYPE_FOCUS_FAILURE } from "../../../../src/features/action/sendkeys/AndroidTypingConstants";
 import { eventHost } from "./EventTyperTestHarness";
 
 describe("EventLastTyper", () => {
@@ -29,7 +30,7 @@ describe("EventLastTyper", () => {
       }),
     ).toEqual({ success: true });
     expect(calls).toEqual([
-      { focus: "2", signal, error: expect.stringContaining("focused editable field") },
+      { focus: "2", signal, failure: ANDROID_TYPE_FOCUS_FAILURE },
       { insert: "😀", options: undefined, signal },
       { precedingState: true },
       { plan: { commands: ["shell input keyevent KEYCODE_A"] }, mutated: true, signal },

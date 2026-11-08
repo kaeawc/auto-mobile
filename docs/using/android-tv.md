@@ -126,9 +126,10 @@ right from wherever focus is, so it reaches the card only when focus starts in t
 Both are available only when the server runs with `--embedded-sdk` and the app embeds the
 AutoMobile SDK; see [Navigation graph](navigation-graph.md#availability).
 
-`focusNavigate` matches a target on the focused element or on a node inside its bounds, so a label
-on a child view of the focused row counts. A large focused container that holds the target also
-counts as focused. To land on the exact control `tapOn` would tap, name the target
+`focusNavigate` matches a target on the focused element or on a child label belonging to that
+control, so a card with its title in a child view counts. A focused scrollable container, or a
+container holding the target inside another focusable or clickable control, does not count for
+that child target; navigation continues until the control owns focus. To land on the exact control `tapOn` would tap, name the target
 with `until.label` or `until.elementId` alone: focus must then reach that control, and a focused
 row that only contains it does not count.
 

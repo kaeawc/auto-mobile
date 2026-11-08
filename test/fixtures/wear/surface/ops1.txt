@@ -1,0 +1,15 @@
+$ --es operation add-tile --ecn component com.google.android.contacts/com.google.android.wearable.contacts.tiles.FavoriteContactsTileService
+Broadcasting: Intent { act=com.google.android.wearable.app.DEBUG_SURFACE flg=0x400000 (has extras) }
+Broadcast completed: result=1, data="Index=[0]"
+$ --es operation show-tile --ecn component com.google.android.contacts/com.google.android.wearable.contacts.tiles.FavoriteContactsTileService
+Broadcasting: Intent { act=com.google.android.wearable.app.DEBUG_SURFACE flg=0x400000 (has extras) }
+Broadcast completed: result=3, data="Unrecognized operation show-tile"
+$ --es operation remove-tile --ecn component com.google.android.contacts/com.google.android.wearable.contacts.tiles.FavoriteContactsTileService
+Broadcasting: Intent { act=com.google.android.wearable.app.DEBUG_SURFACE flg=0x400000 (has extras) }
+Broadcast completed: result=1, data="Tile(s) removed."
+$ --es operation bogus
+Broadcasting: Intent { act=com.google.android.wearable.app.DEBUG_SURFACE flg=0x400000 (has extras) }
+Broadcast completed: result=3, data="Unrecognized operation bogus"
+$ --es operation add-tile
+Broadcasting: Intent { act=com.google.android.wearable.app.DEBUG_SURFACE flg=0x400000 (has extras) }
+Broadcast completed: result=3, data="A component name is required."

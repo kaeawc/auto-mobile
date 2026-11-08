@@ -68,6 +68,7 @@ object ValidTools {
         "provisionDevice",
         "recentApps",
         "ambient",
+        "wearSurface",
         "rotaryScroll",
         "rotateCrown",
         "recordDeviceGestures",

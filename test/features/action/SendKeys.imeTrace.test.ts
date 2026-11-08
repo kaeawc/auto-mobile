@@ -6,6 +6,7 @@ import { isDebugModeEnabled, setDebugModeEnabled } from "../../../src/utils/debu
 import type { ObserveResult } from "../../../src/models";
 import { DefaultSendKeysCommandExecutor, SendKeys } from "../../../src/features/action/SendKeys";
 import { clearAndroidImeQuarantine } from "../../../src/features/action/androidImeLock";
+import { IME_EDITOR_NONE_APPLIED_ERROR } from "../../../src/features/action/imeFailureDiagnostics";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { android, createSendKeysHarness, focused } from "./SendKeysTestHarness";
@@ -204,6 +205,28 @@ describe("IME trace opt-in", () => {
     ]);
     expect(result.success).toBe(false);
     expect(result.commands.map((command) => command.imeTrace)).toEqual([undefined, second]);
+  });
+
+  test("a failed restart retry keeps the trace of the attempt it replaced", async () => {
+    setDebugModeEnabled(true);
+    const h = harness("hello");
+    h.client.supportsImeTrace = async () => true;
+    const first = ["seq=1 t=0 event=commitStart", "seq=2 t=0 event=editorRestarted"];
+    const second = ["seq=3 t=0 event=commitStart", "seq=4 t=0 event=commitFinish success=false"];
+    let commits = 0;
+    h.client.commitViaIme = async () =>
+      ++commits === 1
+        ? {
+            success: false,
+            error: IME_EDITOR_NONE_APPLIED_ERROR,
+            insertedText: "",
+            imeTrace: first,
+          }
+        : { success: false, error: "commit failed", imeTrace: [...first, ...second] };
+    const result = await h.executor.type({ action: "type", text: "hello", mode: "ime" });
+    expect(commits).toBe(2);
+    expect(result.success).toBe(false);
+    expect(result.imeTrace).toEqual([...first, ...second]);
   });
 
   test("password failure redaction preserves text-free trace", async () => {

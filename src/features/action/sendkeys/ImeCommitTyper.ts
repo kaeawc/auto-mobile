@@ -478,6 +478,7 @@ export class ImeCommitTyper implements AndroidModeTyper {
       delivery,
       trace: trace ? true : undefined,
     });
+    this.recordImeTrace(result, trace);
     for (
       let attempt = 1;
       attempt <= IME_RESTART_RETRIES && isRetryableImeRestartWithNothingCommitted(result);
@@ -490,14 +491,19 @@ export class ImeCommitTyper implements AndroidModeTyper {
         delivery,
         trace: trace ? true : undefined,
       });
+      this.recordImeTrace(result, trace);
     }
+    return result;
+  }
+
+  /** Each attempt's own commit slice, so a restart retry keeps the attempt it replaced. */
+  private recordImeTrace(result: TextActionResult, trace: boolean): void {
     const traceState = this.host.imeTraceContext.getStore();
     if (trace && traceState && result.imeTrace !== undefined) {
       traceState.lines = [
         ...new Set([...(traceState.lines ?? []), ...currentCommitTrace(result.imeTrace)]),
       ].slice(-512);
     }
-    return result;
   }
 
   private async prepareImeCommitClear(

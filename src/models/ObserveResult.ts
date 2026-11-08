@@ -292,8 +292,9 @@ export type ObserveResult = {
     /** DO is required and a known foreground activity is not distraction optimized. */
     blocked: boolean;
     /**
-     * The foreground UI is Car App Library templates drawn by the car host (#17499); absent for an
-     * app's own views. Read it with `isCarAppHostRendered`.
+     * The foreground screen belongs to the Car App Library (#17499); `hostPackage` is present when
+     * host-drawn template nodes were seen. Absence is not proof of app-drawn views. Read it with
+     * `isCarAppHostRendered`.
      */
     hostRenderedUi?: import("./CarAppTemplates").CarAppHostRenderedUi;
   };

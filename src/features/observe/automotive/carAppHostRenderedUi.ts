@@ -44,7 +44,10 @@ export function detectCarAppHostRenderedUi(
     : undefined;
 }
 
-/** Whether `observe` marked the foreground UI as Car App Library templates drawn by the host. */
+/**
+ * Whether `observe` marked the foreground screen as a Car App Library screen. Require
+ * `hostPackage` as well when the caller needs host-drawn template nodes to have been seen.
+ */
 export function isCarAppHostRendered(result: Pick<ObserveResult, "automotive">): boolean {
   return result.automotive?.hostRenderedUi?.kind === "carAppLibrary";
 }

@@ -126,9 +126,10 @@ export type CarAppTemplateDocument = z.infer<typeof carAppTemplateDocumentSchema
 export type CarAppTemplates = z.infer<typeof carAppTemplatesSchema>;
 
 /**
- * `observe.automotive.hostRenderedUi` (#17499): the foreground UI is Car App Library templates drawn
- * by the car host, not the app's own views. `hostPackage` is present when a node carries the
- * templates host's resource-id prefix; the activity signal alone does not name the host.
+ * `observe.automotive.hostRenderedUi` (#17499): the foreground screen belongs to the Car App Library.
+ * With `hostPackage`, nodes carrying the templates host's resource-id prefix were seen, so the host
+ * drew templates. Without it, only the foreground activity is `CarAppActivity`: host templates whose
+ * nodes were not captured, or the library's own connection-error screen.
  */
 export interface CarAppHostRenderedUi {
   kind: "carAppLibrary";

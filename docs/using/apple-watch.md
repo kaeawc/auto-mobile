@@ -104,6 +104,7 @@ Besides the device management above, these tools accept a watch:
 - `listApps`
 - `launchApp`
 - `terminateApp`
+- `getLogs`
 
 <!-- watchos-supported-tools:end -->
 
@@ -138,13 +139,24 @@ Every other tool refuses a watch before doing anything, with:
   and duration cannot be set.
 - `pressButton` supports `home` only.
 - `rotateCrown` turns the Digital Crown by a signed, non-zero `delta`, with an optional positive
-  `velocity` (default 1). It is not listed by default; enable it with `setToolEnabled` (see
+  `velocity` (default 1). `delta` is measured in full crown revolutions: `1` is one complete turn,
+  `0.25` a quarter turn, and the sign sets the direction. How far a turn moves a control depends on
+  the app's crown binding (step size and sensitivity), so one revolution can cross a whole small
+  control: on a 0–10 control with step 1 and medium sensitivity, `0.25` moves about 3 steps, `0.5`
+  about 7, and `1` reaches the end. To reach an intermediate value, use fractional deltas and
+  `observe` between turns. A turn smaller than one step of the focused control (for example `0.1`
+  on that control) may not register and fails like a rotation at the limit; when `delta` is
+  between -1 and 1 the error says the turn may be too small. It is not listed by default; enable it with `setToolEnabled` (see
   [Dynamic Tools](dynamic-tools.md)). When the view hierarchy is
-  identical before and after a rotation, it retries once after a neutral touch to wake crown routing.
-  If the retry still changes nothing, it fails with an error: no view may hold crown focus, or the
-  content is already at its limit. Tap the view that should receive the crown, then retry.
-  This check is best effort: it cannot see a change that is not in the hierarchy, and it is skipped
-  when a hierarchy cannot be read. `observe` after rotating to confirm the app responded.
+  identical before and after a rotation, it may touch an unoccupied interior point to wake crown
+  routing, avoiding navigation and controls. It retries once only when the same focused control's
+  accessible value is also unchanged and the wake leaves the screen and focus unchanged. Without
+  a safe touch point or a comparable value, or if the retry still changes nothing, it fails with an
+  error. A wake without a retry prepares routing for the next command. No view may hold crown focus,
+  or the content may already be at its limit. Tap the view that should receive the crown, then observe
+  before trying again: a change that is not accessible may already have taken effect.
+  Verification is skipped when a stable hierarchy cannot be read. `observe` after rotating to confirm
+  the app responded.
 
   ```json
   { "name": "rotateCrown", "arguments": { "platform": "watchos", "delta": 2 } }
@@ -160,6 +172,10 @@ Every other tool refuses a watch before doing anything, with:
   is refused. `clearAppData` wipes the app's Documents, Library and tmp before launch. It does not
   observe the launched app: `verified` stays unset with `verificationSkipped: "platform"`.
 - `terminateApp` succeeds with `wasRunning: false` when the app was not running.
+- `getLogs` reads the watch simulator's unified log as on an iOS simulator: `appId` is required,
+  and lines from the app's subsystem or its process are returned. `tags`, `buffers` and
+  `includeSystem` are Android-only and are ignored with a warning. It is not listed by default;
+  enable it with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)).
 
 `sendKeys` accepts non-empty text only and appends to the focused field. Focus a field with
 `tapOn` first, or provide a selector with an exact `elementId` or `text` to focus it before typing.

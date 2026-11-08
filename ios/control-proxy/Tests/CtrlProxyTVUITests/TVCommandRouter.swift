@@ -4,6 +4,9 @@ import XCTest
 @MainActor
 final class TVCommandRouter {
     private let application: XCUIApplication
+    private var focusMemory = TVFocusMemory()
+    private var lastTarget: (app: XCUIApplication, packageName: String)?
+    private var launchGeneration = 0
 
     init(application: XCUIApplication) {
         self.application = application
@@ -17,7 +20,21 @@ final class TVCommandRouter {
     }
 
     /// Resolve the frontmost app per command; the host app is not necessarily in front.
-    private func target(requested: String?) -> (app: XCUIApplication, packageName: String) {
+    private func target(requested: String?) -> (app: XCUIApplication, packageName: String, processToken: Int?) {
+        // tvOS has no public process ID. Any observed foreground gap or target switch invalidates identity,
+        // including for a previously requested third-party app that is no longer among the probes.
+        if let lastTarget, lastTarget.app.state != .runningForeground { launchGeneration += 1 }
+        let resolved = foregroundTarget(requested: requested)
+        if resolved.packageName != lastTarget?.packageName { launchGeneration += 1 }
+        lastTarget = resolved
+        guard resolved.app.state == .runningForeground else {
+            launchGeneration += 1
+            return (resolved.app, resolved.packageName, nil)
+        }
+        return (resolved.app, resolved.packageName, launchGeneration)
+    }
+
+    private func foregroundTarget(requested: String?) -> (app: XCUIApplication, packageName: String) {
         let hostId = "dev.jasonpearson.automobile.ctrlproxy.tv"
         let hostState = Int(application.state.rawValue)
         guard hostState != TVTargetResolver.foregroundState else { return (application, hostId) }
@@ -50,11 +67,18 @@ final class TVCommandRouter {
                 let request = try decoder.decode(RequestHierarchy.self, from: data)
                 let resolved = target(requested: envelope.bundleId)
                 let snapshot = try resolved.app.snapshot()
+                let tree = sketch(snapshot)
+                focusMemory.observe(bundle: resolved.packageName, processToken: resolved.processToken, root: tree)
+                let resolution = TVTextEntryPolicy.resolve(
+                    root: tree, lastFocusedField: focusMemory.field(
+                        for: resolved.packageName, processToken: resolved.processToken
+                    )
+                )
                 return try JSONEncoder().encode(HierarchyUpdateResponse(
                     requestId: request.requestId,
                     data: ViewHierarchy(
                         packageName: resolved.packageName,
-                        hierarchy: element(snapshot),
+                        hierarchy: element(snapshot, node: tree, resolution: resolution),
                         screenWidth: ElementBounds.clampedInt(snapshot.frame.width),
                         screenHeight: ElementBounds.clampedInt(snapshot.frame.height)
                     )
@@ -69,6 +93,15 @@ final class TVCommandRouter {
                     throw CommandError.invalidParameter("frameContext", "unsupported on tvOS")
                 }
                 let startTime = Date()
+                if button == .select {
+                    let resolved = target(requested: envelope.bundleId)
+                    // Remote input still proceeds on failure, but identity must fail closed.
+                    let snapshot = try? resolved.app.snapshot()
+                    focusMemory.willSelect(
+                        bundle: resolved.packageName, processToken: resolved.processToken,
+                        snapshot: snapshot.map { sketch($0) }
+                    )
+                }
                 press(button)
                 return try JSONEncoder().encode(WebSocketResponse.success(
                     type: "press_button_result", requestId: requestId,
@@ -83,7 +116,7 @@ final class TVCommandRouter {
                 let startTime = Date()
                 let resolved = target(requested: envelope.bundleId)
                 let snapshot = try resolved.app.snapshot()
-                guard hasFocusedKeyboard(snapshot) else {
+                guard TVTextEntryPolicy.hasFocusedKeyboard(sketch(snapshot)) else {
                     throw CommandError.invalidParameter("text", "no focused text input")
                 }
                 resolved.app.typeText(request.text)
@@ -116,23 +149,32 @@ final class TVCommandRouter {
         }
     }
 
-    private func hasFocusedKeyboard(_ snapshot: any XCUIElementSnapshot) -> Bool {
-        (snapshot.hasFocus && snapshot.elementType == .keyboard)
-            || snapshot.children.contains { hasFocusedKeyboard($0) }
+    private func sketch(_ snapshot: any XCUIElementSnapshot) -> TVNodeSketch {
+        TVNodeSketch(
+            elementType: Int(snapshot.elementType.rawValue), identifier: snapshot.identifier,
+            label: snapshot.label, value: snapshot.value as? String, placeholder: snapshot.placeholderValue,
+            hasFocus: snapshot.hasFocus, children: snapshot.children.map { sketch($0) }
+        )
     }
 
-    private func element(_ snapshot: any XCUIElementSnapshot) -> UIElementInfo {
-        // Translate the captured spike's frame/id/type/hasFocus/enabled/selected fields into
-        // the existing hierarchy wire model. Focus is observed, never assigned directly.
-        UIElementInfo(
-            text: snapshot.label,
-            resourceId: snapshot.identifier,
-            className: String(snapshot.elementType.rawValue),
+    private func element(
+        _ snapshot: any XCUIElementSnapshot, node: TVNodeSketch,
+        resolution: TVTextEntryResolution, path: [Int] = []
+    )
+        -> UIElementInfo
+    {
+        let entryOverride = resolution.overrideEntry(at: path)
+        return UIElementInfo(
+            text: resolution.text(for: node, path: path),
+            resourceId: entryOverride == nil ? snapshot.identifier : entryOverride?.resourceId,
+            className: entryOverride?.className ?? String(snapshot.elementType.rawValue),
             bounds: ElementBounds(clamping: snapshot.frame),
             enabled: String(snapshot.isEnabled),
-            focused: String(snapshot.hasFocus),
+            focused: String(entryOverride?.focused ?? snapshot.hasFocus),
             selected: String(snapshot.isSelected),
-            node: snapshot.children.map { element($0) }
+            node: snapshot.children.enumerated().map { index, child in
+                element(child, node: node.children[index], resolution: resolution, path: path + [index])
+            }
         )
     }
 

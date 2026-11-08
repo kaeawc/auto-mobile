@@ -6,7 +6,7 @@ setting one up, the watch-specific behaviour, and what is out of scope.
 > [!NOTE]
 > **Verified on** a Wear OS 7.0 emulator (API 37 `android-wear-signed` image, `wearos_small_round`
 > profile, 384x384). Other images, square watches and physical watches are unverified. Sleep/wake
-> power-state changes have been measured; ambient mode itself has no usable readback.
+> and the watch face's ambient state have been measured.
 
 ## Create the emulator
 
@@ -158,7 +158,9 @@ flagged as below).
 The stream opens only from the watch face, so every action that opens it first leaves the app list
 (with `back`) or an app in front (with `home`), and the stream is closed back onto the watch face
 afterwards. If the watch face does not come back, the action fails without the open gesture; press
-the watch's side button and retry.
+the watch's side button and retry. If closing the stream after `dismiss` or `clearAll` leaves the
+app list in front instead of the watch face, the action reports `dismissal_unconfirmed` with its
+`dismissedCount`; press `back` to return to the watch face.
 
 A tap target whose centre falls outside the round display is refused; scroll it into view.
 Every action captures the configured action screenshot or accessibility audit from the final
@@ -177,13 +179,72 @@ form factor (phone, tablet, TV, automotive) it returns an error naming the form 
 changes nothing. A session recorded as a watch is trusted when the device does not report its
 form factor; otherwise it is refused too, so check the device with `listDevices` (`formFactor`).
 On a watch it sends `KEYCODE_SLEEP` for `enter` or `KEYCODE_WAKEUP` for `exit`, then reads
-wakefulness once. `success: true` means `Dozing` or `Asleep` for enter, or `Awake` for exit. A
-failed or unreadable state returns `success: false` with a `reason`; inspect `wakefulness` when
-present and use `observe` to check the current state.
+wakefulness and the watch face's ambient state once. The result reports:
 
-This is a power-state change. Wear exposes no ambient readback, so the result does not prove
-ambient mode. Hardware wake by tilt or touch remains untested. Command failures return an
-error; check the device connection before retrying.
+- `ambient`: `true` or `false` as the watch face reports it, or `"unknown"` when the device gave no
+  watch-face state.
+- `watchFaceVisible`: whether the watch face is on screen, when `ambient` is known.
+- `wakefulness`: `Awake`, `Dozing` or `Asleep`, when readable.
+
+`enter` succeeds when `ambient` is `true`; `exit` succeeds when `ambient` is `false` and
+wakefulness is `Awake`. When `ambient` is `"unknown"`, success falls back to wakefulness (`Dozing`
+or `Asleep` for enter, `Awake` for exit) and does not prove ambient mode. A failure returns
+`success: false` with a `reason`. If enter leaves wakefulness `Awake`, a stay-awake setting
+(`svc power stayon true`) is probably keeping the display on; turn it off and retry. If
+`watchFaceVisible` is `false`, an app is in front of the watch face.
+
+For visual proof, take a screenshot after `enter`: the watch face renders dimmed in ambient.
+Hardware wake by tilt or touch remains untested. Command failures return an error; check the
+device connection before retrying.
+
+## Tiles
+
+Enable `wearSurface` with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)). Call
+`listTileProviders` with no other argument to get the installed tile providers, then pass one
+provider's `component` (`<package>/<service>`) to a tile action:
+
+```json
+{
+  "name": "wearSurface",
+  "arguments": {
+    "action": "showTile",
+    "component": "com.google.android.contacts/com.google.android.wearable.contacts.tiles.FavoriteContactsTileService"
+  }
+}
+```
+
+| `action`            | Arguments              | `success: true` means                                                                 |
+| ------------------- | ---------------------- | ------------------------------------------------------------------------------------- |
+| `listTileProviders` | none                   | `providers` lists the installed tile providers (it may be empty)                      |
+| `addTile`           | `component`            | The tile is in the carousel at `index` (it may already have been there)               |
+| `removeTile`        | `component`            | The tile was removed or was not there; the watch does not say which                   |
+| `showTile`          | `component` or `index` | An observe after a 3 s settle shows a tile container in the foreground Wear system UI |
+
+The watch reports success for an `index` with no tile and for removing a tile that is absent, so
+only `showTile` checks the screen, and only its `verified: true` means AutoMobile saw a tile container in the foreground Wear system UI.
+`addTile` and `removeTile` always return `verified: false`. Every add, remove and show result
+carries `requested`, `broadcastResult` (`code`, `data` and a typed `outcome`: `added`, `removed`, `showRequested`,
+`providerNotFound`, `missingComponent`, `indexRequired`, `unrecognizedOperation` or `unknown`),
+`index` when known, and a `reason` on failure.
+
+- Indexes shift: a new tile is inserted at index 0 and pushes the others along. Prefer `showTile`
+  with `component`, which looks up the current index right before showing. That lookup adds the
+  tile when it is missing; `indexResolution` holds its reply.
+- `showTile` succeeds when a tile is visible, including a tile already on screen. A watch face
+  alone cannot verify a tile, even if its clock changes. Verification confirms a visible tile,
+  not its identity or requested index. Use `observe` to read the tile's content and `swipeOn`
+  left or right to move through the carousel.
+- Each `providers` entry has `component` (pass it as `component`), `packageName` and
+  `className`.
+- `addTile`, and `showTile` with `component`, first check the component against the installed
+  tile providers. A component that is not one fails with an error naming the valid components,
+  and nothing is sent. The `.Service` short form of a listed provider is accepted.
+- `providerNotFound` in `broadcastResult` means the watch refused a listed provider, for example
+  one disabled since the check; run `listTileProviders` again.
+- `unrecognizedOperation` means this Wear OS build does not accept the debug broadcasts.
+- Like `ambient`, it refuses any device not confirmed to be a watch and changes nothing.
+- The broadcasts were measured on the verified emulator; the tool itself is unverified on a
+  device, so check `broadcastResult` when a result surprises you.
 
 ## Prototypes
 
@@ -197,8 +258,8 @@ they stay tappable. Wear launchers are not expected to support pinned shortcuts,
 ## Not supported
 
 - Physical watches: only Wear OS emulators are matched and created.
-- Tiles, complications and watch faces.
+- Complications and watch faces, and listing the tiles in the carousel.
 - Tapping a notification's expanded content or its reply and action buttons without an explicit
   clickable label (see [Notifications](#notifications)).
-- Ambient-mode verification, hardware wake by tilt or touch, and a paired phone and watch.
+- Hardware wake by tilt or touch, and a paired phone and watch.
 - Watch-specific prototype components and round-aware prototype layout.

@@ -244,7 +244,7 @@ const flowRenderer =
       : { display: "block" };
     const inner = kit.child(scope, {
       inBox: false,
-      style: { ...scope.style, parentAxis: undefined },
+      style: { ...scope.style, parentAxis: undefined, weightsChildren: false },
     });
     const item = (entry: WebElement | undefined): WebElement | undefined =>
       entry &&
@@ -295,7 +295,7 @@ const listRenderer =
     });
     const inner = kit.child(scope, {
       inBox: false,
-      style: { ...scope.style, parentAxis: horizontal ? "row" : "column" },
+      style: { ...scope.style, parentAxis: horizontal ? "row" : "column", weightsChildren: false },
     });
     const cap = typeof node.maxItems === "number" ? node.maxItems : Number.POSITIVE_INFINITY;
     let rows = 0;

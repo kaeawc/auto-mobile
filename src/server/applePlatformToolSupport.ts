@@ -27,6 +27,8 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "launchApp",
     "terminateApp",
     "observe",
+    // simctl spawn <udid> log show, as on an iOS simulator (#17547).
+    "getLogs",
   ]),
   tvos: new Set<string>([
     "explore",
@@ -53,6 +55,10 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     // simctl io recordVideo / screenshot capture (#16725).
     "videoRecording",
     "compareScreenshot",
+    // XCUIRemote home press (#17525), simctl push (#17526), simctl privacy (#17527).
+    "homeScreen",
+    "postNotification",
+    "setAppPermissions",
   ]),
   // simctl lifecycle and app management; observe, tapOn and sendKeys go through the window-app XCUITest runner.
   visionos: new Set<string>([
@@ -74,6 +80,21 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
   ]),
 };
 
+/**
+ * Tools whose capability the tvOS simulator runtime itself lacks (#17529, captured on tvOS 26.5):
+ * `simctl ui appearance|content_size` and `simctl status_bar` fail with NSPOSIXErrorDomain code 45
+ * (Operation not supported), `simctl pbcopy|pbpaste` with "Pasteboard is not supported by this
+ * runtime" (SimError 403), and `simctl privacy` has no read verb. These refuse as "not available",
+ * not "not supported yet".
+ */
+const TVOS_UNAVAILABLE_CAPABILITIES: Readonly<Record<string, string>> = {
+  displayConfig: "the tvOS simulator runtime does not support appearance or content size changes",
+  statusBar: "the tvOS simulator runtime has no status bar override",
+  clipboard: "the tvOS simulator runtime has no pasteboard",
+  getAppPermissions:
+    "simctl cannot read app permissions on an Apple TV simulator; set them with setAppPermissions",
+};
+
 export function unsupportedPlatformToolMessage(
   toolName: string,
   platform: NonIosApplePlatform,
@@ -83,6 +104,9 @@ export function unsupportedPlatformToolMessage(
     ["tapAt", "swipeOn", "pinchOn", "multiTouch", "dragAndDrop", "tapAny"].includes(toolName)
   ) {
     return `${toolName} does not support tvOS touch gestures; use focus navigation via pressButton (up/down/left/right/select).`;
+  }
+  if (platform === "tvos" && Object.hasOwn(TVOS_UNAVAILABLE_CAPABILITIES, toolName)) {
+    return `${toolName} is not available on tvOS: ${TVOS_UNAVAILABLE_CAPABILITIES[toolName]}. Target an Android or iOS device instead.`;
   }
   return (
     `${toolName} does not support ${NON_IOS_APPLE_PLATFORM_LABELS[platform]} yet. ` +

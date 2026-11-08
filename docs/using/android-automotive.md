@@ -104,6 +104,16 @@ the known foreground activity is not distraction optimized. Unavailable service 
 fields; `blocked: false` alone does not establish that the app is usable. Other device types omit the
 entire `automotive` block.
 
+When the foreground screen is Car App Library templates drawn by the car host rather than the app's
+own views, `observe.automotive.hostRenderedUi` is `{ "kind": "carAppLibrary", "hostPackage": ... }`.
+`hostPackage` is `com.google.android.apps.automotive.templates.host` when the template nodes' resource
+ids name it. Without `hostPackage`, only the foreground activity
+(`androidx.car.app.activity.CarAppActivity`) identified the screen, which also matches the library's
+own error screen when it cannot reach the host. Other screens omit the field; so can a template screen
+whose capture was incomplete, so absence is not proof that the app drew the screen.
+The template rows, titles and the toolbar `Back` button are ordinary hierarchy nodes owned by the host,
+so tap them by text or resource id.
+
 ## Headless system user
 
 Most AAOS images run a headless system user (user 0 has no UI) and the driver is a secondary user,
@@ -203,6 +213,6 @@ screens are unchanged.
 
 ## Not supported
 
-- Android Auto projection and the Desktop Head Unit (see #14118).
+- Android Auto projection and the Desktop Head Unit; see [Android Auto and the Desktop Head Unit](android-auto.md).
 - Physical head units.
 - Car App Library templates as a prototype target.

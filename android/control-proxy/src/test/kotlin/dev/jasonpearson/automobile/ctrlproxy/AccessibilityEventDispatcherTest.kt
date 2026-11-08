@@ -11,6 +11,7 @@ class AccessibilityEventDispatcherTest {
   /** A service with a configurable number of connected clients, logging every update in order. */
   private class FakeService : AccessibilityEventDispatcher.Host {
     var clients = 1
+    var windowPackage: String? = null
     val calls = mutableListOf<String>()
 
     override fun forgetRememberedInsert() {
@@ -21,7 +22,8 @@ class AccessibilityEventDispatcherTest {
       calls += "selection:$fromIndex-$toIndex"
     }
 
-    override fun onWindowStateChanged(className: String?) {
+    override fun onWindowStateChanged(className: String?, packageName: String?) {
+      windowPackage = packageName
       calls += "window:$className"
     }
 
@@ -49,13 +51,23 @@ class AccessibilityEventDispatcherTest {
   @Test
   fun `an observed window change forgets the caret, navigates and refreshes`() {
     dispatcher.dispatch(
-      event(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED).apply { className = "app.Main" },
+      event(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED).apply {
+        className = "dev.jasonpearson.automobile.playground.MainActivity"
+        packageName = "dev.jasonpearson.automobile.playground"
+      },
     )
 
     assertEquals(
-      listOf("forget", "window:app.Main", "advance", "interaction:NAVIGATE", "refresh"),
+      listOf(
+        "forget",
+        "window:dev.jasonpearson.automobile.playground.MainActivity",
+        "advance",
+        "interaction:NAVIGATE",
+        "refresh",
+      ),
       service.calls,
     )
+    assertEquals("dev.jasonpearson.automobile.playground", service.windowPackage)
   }
 
   @Test

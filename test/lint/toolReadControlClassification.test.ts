@@ -61,6 +61,14 @@ const CLASSIFICATION: Classification = {
     "snapshotOf",
   ],
   perArgs: {
+    wearSurface: {
+      reads: [{ action: "listTileProviders" }],
+      controls: [
+        { action: "addTile", component: "com.example/.Tile" },
+        { action: "removeTile", component: "com.example/.Tile" },
+        { action: "showTile", index: 0 },
+      ],
+    },
     accessibility: { reads: [{}], controls: [{ talkback: true }, { voiceover: false }] },
     backgroundWork: {
       reads: [{ action: "list" }, { action: { listAlarms: true } }],

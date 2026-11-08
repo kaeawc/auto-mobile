@@ -39,7 +39,7 @@ export interface SmartStackWidgetCard extends SmartStackWidgetIdentity {
 }
 
 /** A system card such as `StackCollectionViewTriPlatterCell`, kept as a generic card. */
-export interface SmartStackSystemCard {
+interface SmartStackSystemCard {
   type: "system";
   /** The cell kind with the `StackCollectionView` prefix removed, e.g. `TriPlatterCell`. */
   cellKind: string;
@@ -49,7 +49,7 @@ export interface SmartStackSystemCard {
 
 export type SmartStackCard = SmartStackWidgetCard | SmartStackSystemCard;
 
-export interface SmartStackHeader {
+interface SmartStackHeader {
   bounds: Bounds;
   /** Header button labels in order: the date, then the spoken time. */
   labels: string[];
@@ -61,7 +61,7 @@ export interface WatchSmartStack {
   cards: SmartStackCard[];
 }
 
-export interface WatchClockFaceObservation {
+interface WatchClockFaceObservation {
   hierarchy: ViewHierarchyResult;
   smartStack: WatchSmartStack;
 }
@@ -181,11 +181,6 @@ function toSmartStack(
     ...(header ? { header } : {}),
     cards: cells.flatMap(({ card }) => (card ? [card] : [])),
   };
-}
-
-/** Read the Smart Stack header and cards from a clock-face hierarchy; empty when it is closed. */
-export function extractWatchSmartStack(root: WatchHierarchyNode): WatchSmartStack {
-  return toSmartStack(root, collectCells(root));
 }
 
 /**

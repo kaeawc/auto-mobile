@@ -13,16 +13,16 @@ export interface XcuiDebugLine {
 
 const SUBTREE_HEADER = "Element subtree:";
 const FRAME = /\{\{(-?[\d.]+), (-?[\d.]+)\}, \{(-?[\d.]+), (-?[\d.]+)\}\}/;
-// Quoted values end at the closing quote followed by another known field or the end of the line,
-// so a label holding an apostrophe or ", " still reads whole.
+// Quoted values end at the closing quote followed by the end of the line, another keyed field
+// (`, label: `) or a bare flag (`, Selected`), so a label holding an apostrophe, ", " or a field
+// name such as "value" still reads whole.
 const NEXT_FIELD =
-  "(?=$|, (?:identifier|label|value|placeholderValue|Selected|Disabled|Focused)\\b)";
+  "(?=$|, (?:(?:identifier|label|value|placeholderValue): |(?:Selected|Disabled|Focused)(?:,|$)))";
 const QUOTED_FIELDS = ["identifier", "label", "value"] as const;
+const QUOTED_PATTERNS = QUOTED_FIELDS.map(
+  (key) => [key, new RegExp(`, ${key}: '(.*?)'${NEXT_FIELD}`)] as const,
+);
 const TAPPABLE_TYPES = new Set(["Button", "Cell", "Link", "Switch", "Key"]);
-
-function readQuoted(fields: string, key: (typeof QUOTED_FIELDS)[number]): string | undefined {
-  return new RegExp(`, ${key}: '(.*?)'${NEXT_FIELD}`).exec(fields)?.[1];
-}
 
 function readFrame(fields: string): WatchHierarchyNode["bounds"] | undefined {
   const match = FRAME.exec(fields);
@@ -41,8 +41,8 @@ export function parseXcuiDebugLine(line: string): XcuiDebugLine | undefined {
   }
   const [, indent, type, fields] = match;
   const node: XcuiDebugLine = { depth: indent.length, type, frame: readFrame(fields) };
-  for (const key of QUOTED_FIELDS) {
-    const value = readQuoted(fields, key);
+  for (const [key, pattern] of QUOTED_PATTERNS) {
+    const value = pattern.exec(fields)?.[1];
     if (value !== undefined) {
       node[key] = value;
     }

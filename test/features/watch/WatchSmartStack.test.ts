@@ -146,6 +146,12 @@ describe("parseXcuiDebugDescription", () => {
     });
   });
 
+  test("keeps a quoted field name inside a label and stops at the next keyed field", () => {
+    expect(
+      parseXcuiDebugLine("  StaticText, 0x1, label: 'Reading 'high', value matters', value: '7'"),
+    ).toMatchObject({ label: "Reading 'high', value matters", value: "7" });
+  });
+
   test("gives a frameless line its parent's frame", () => {
     const dump = [
       "Element subtree:",

@@ -3,6 +3,12 @@ import {
   getLaunchObservationPackageNames,
   isLaunchPermissionDialogObservation,
 } from "../features/action/launchObservationPackages";
+import {
+  describeLaunchPermissionBlocker,
+  pairPermissionDialogWindow,
+  resolveLaunchPermissionBlocker,
+  type LaunchPermissionBlocker,
+} from "../features/action/launchPermissionBlocker";
 import { resolveMissingForegroundWindow } from "../features/observe/ObserveScreen";
 import { NodePrototypeAgentConnector } from "../features/prototype/ios/prototypeAgentClient";
 import {
@@ -118,7 +124,7 @@ function launchVerificationFailureReason(
   observedAppId: string | undefined,
   observation: LaunchAppResult["observation"],
 ): LaunchVerificationFailureReason | undefined {
-  if (isLaunchPermissionDialogObservation(observation)) {
+  if (isLaunchPermissionDialogObservation(observation, appId)) {
     return undefined;
   }
   if (observation === undefined) {
@@ -152,6 +158,14 @@ function launchVerificationFailureMessage(reason: LaunchVerificationFailureReaso
     return "no foreground application window could be observed after launch";
   }
   return reason;
+}
+
+/** Append the blocked launch's next step to the verification message (#17465). */
+function withBlockedNextStep(
+  message: string,
+  blockedBy: LaunchPermissionBlocker | undefined,
+): string {
+  return blockedBy ? `${message}; ${describeLaunchPermissionBlocker(blockedBy)}` : message;
 }
 
 function buildLaunchMessage(
@@ -200,6 +214,16 @@ function resolveLaunchObservedAppId(
   return getLaunchObservationPackageNames(observation)[0];
 }
 
+/** Report `activeWindow` from the dialog window alone, never mixed with the app behind it. */
+function pairLaunchObservationWindow(
+  observation: LaunchAppResult["observation"],
+): LaunchAppResult["observation"] {
+  const activeWindow = pairPermissionDialogWindow(observation?.activeWindow);
+  return observation && activeWindow !== observation.activeWindow
+    ? { ...observation, activeWindow }
+    : observation;
+}
+
 /**
  * Build the launchApp response from a successful launch result. `verified` is
  * `true` when every reconciled foreground package matches the requested app in
@@ -230,14 +254,29 @@ export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
       ? undefined
       : launchVerificationFailureReason(appId, observedAppId, result.observation);
   const verified = isVerified ? true : verifyFailureReason ? false : undefined;
+  // A successful launch behind a permission dialog is reported as blocked with
+  // the dialog's buttons as next steps, not as a plain success (#17465).
+  // An incomplete capture (no observation, or no foreground window) can keep a
+  // stale controller package; it is not evidence a dialog is showing.
+  const blockedBy =
+    isVerified ||
+    verifyFailureReason === "no_observation" ||
+    verifyFailureReason === "no_foreground_window"
+      ? undefined
+      : resolveLaunchPermissionBlocker(appId, result.observation);
+  const observation = pairLaunchObservationWindow(result.observation);
 
   return {
-    message: buildLaunchMessage(appId, verified, verifyFailureReason, result),
+    message: withBlockedNextStep(
+      buildLaunchMessage(appId, verified, verifyFailureReason, result),
+      blockedBy,
+    ),
     verified,
     ...(verifyFailureReason ? { verifyFailureReason } : {}),
     observedAppId,
-    observation: result.observation,
     ...result,
+    observation,
+    ...(blockedBy ? { blockedBy } : {}),
   };
 }
 

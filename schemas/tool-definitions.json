@@ -16764,6 +16764,30 @@
         "observedAppId": {
           "type": "string"
         },
+        "blockedBy": {
+          "description": "Present when the launched app is behind a permission dialog: tapOn one of actions, or pre-grant with setAppPermissions",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "permission_dialog"
+            },
+            "packageName": {
+              "type": "string"
+            },
+            "permission": {
+              "type": "string"
+            },
+            "actions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["kind", "packageName", "actions"],
+          "additionalProperties": false
+        },
         "prototypeAgent": {
           "type": "object",
           "properties": {

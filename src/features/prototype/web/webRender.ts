@@ -441,7 +441,10 @@ const line =
     // A wrap-sized line around a filling child grows to its parent on that axis, as a Compose
     // parent does around a fillMax child; otherwise it would shrink to nothing.
     const sized = columnSized(raw, scope, path);
-    const node = filling(sized, lineFillAxes(sized, scope, path, axis === "row" ? "width" : "height"));
+    const node = filling(
+      sized,
+      lineFillAxes(sized, scope, path, axis === "row" ? "width" : "height"),
+    );
     const inner = child(scope, {
       inBox: false,
       style: containerChildStyle(scope, node, axis),

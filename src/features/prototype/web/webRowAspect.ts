@@ -1,10 +1,5 @@
 import { record, type Raw } from "../prototypeTemplate";
-import {
-  INCOMING_HEIGHT_KEY,
-  ROW_BOUND_KEY,
-  ROW_MEASURE_KEY,
-  type RowMeasure,
-} from "./webStyle";
+import { INCOMING_HEIGHT_KEY, ROW_BOUND_KEY, ROW_MEASURE_KEY, type RowMeasure } from "./webStyle";
 
 /** The aspect ratio of a node with no authored width, height or weight, or undefined. */
 function freeAspectRatio(node: Raw | undefined): number | undefined {

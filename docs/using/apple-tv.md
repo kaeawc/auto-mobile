@@ -209,6 +209,13 @@ with `type` commands. Text is appended to the field.
 
 `explore` is available when the server runs with `--embedded-sdk`, like the other
 [navigation graph](navigation-graph.md) tools; the Apple TV app itself does not need the SDK.
+Without the flag, `explore` is missing from `tools/list` and a call fails with
+`Unknown tool: explore. embedded SDK mode is disabled; ...`, followed by these steps:
+
+1. Add `--embedded-sdk` to the AutoMobile MCP server command and reconnect. A running daemon
+   started without it is restarted with it.
+2. Enable `explore` for the session with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)).
+
 Launch the app with `launchApp`, then call `explore` with `platform: "tvos"`. Explore selects
 every item it can focus on a screen, observes after every remote press, records each screen a
 `select` opens in the navigation graph, and presses `menu` to go back.

@@ -429,7 +429,7 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
     }
   });
 
-  test("accepts full and per-entry layout-warning diff field shapes but rejects malformed arms", () => {
+  test("accepts the {from,to} layout-warning diff field shape and rejects any other", () => {
     const observation = (layoutWarnings?: ObserveResult["layoutWarnings"]): ObserveResult =>
       ({
         updatedAt: 1,
@@ -456,28 +456,16 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
       overlapPercent: 100,
       confidence: "high",
     };
-    const perEntry = diffObserveResult(
-      observation({ scope: "truncated", total: 100, warnings: [warning] }),
-      observation({ scope: "truncated", total: 140, warnings: [warning] }),
-      { layoutWarningsDiffMode: "perEntry" },
-    );
     const full = diffObserveResult(
       observation(),
       observation({ scope: "full", warnings: [warning] }),
     );
 
-    expect(() => observeDiffSchema.parse(perEntry)).not.toThrow();
     expect(() => observeDiffSchema.parse(full)).not.toThrow();
     expect(() =>
       observeDiffSchema.parse({
-        ...perEntry,
-        fields: { layoutWarnings: { added: "not-an-array" } },
-      }),
-    ).toThrow();
-    expect(() =>
-      observeDiffSchema.parse({
-        ...perEntry,
-        fields: { layoutWarnings: { added: [], removed: [], unexpected: true } },
+        ...full,
+        fields: { layoutWarnings: { added: [warning], removed: [] } },
       }),
     ).toThrow();
   });

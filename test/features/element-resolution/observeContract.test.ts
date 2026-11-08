@@ -184,7 +184,7 @@ describe("observe-to-resolve contract", () => {
     for (const { query } of cases) {
       counts[query.kind]++;
     }
-    expect(counts).toEqual({ elementId: 103, text: 97, testTag: 5 });
+    expect(counts).toEqual({ elementId: 101, text: 97, testTag: 5 });
     const tagCases = cases.filter(({ query }) => query.kind === "testTag");
     const unscopedTags = tagCases.filter(({ query }) => !query.container && !query.strategy);
     expect(unscopedTags.map(({ query }) => query.index)).toEqual([0, undefined, 1]);

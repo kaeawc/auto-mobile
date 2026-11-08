@@ -70,6 +70,19 @@ function expectedReplyType(requestType: string): string {
     : `${requestType.slice("request_".length)}_result`;
 }
 
+/**
+ * Only `request_hierarchy` makes the runner relaunch the app and retry (#17448), so only that
+ * reply may say a relaunch happened; inputs fail without one and point at observe instead.
+ */
+function accessibilityApiDisabledMessage(requestType: string): string {
+  const advice =
+    "Other apps on the simulator may still work. Use a screenshot (simctl/screenshot) to see the app instead.";
+  if (requestType === "request_hierarchy") {
+    return `The visionOS runner could not read this app's accessibility window even after relaunching the app. ${advice}`;
+  }
+  return `The visionOS runner could not read this app's accessibility window, so ${requestType} failed; the app was not relaunched. Observe the app first (observing relaunches it once to recover), then retry this step. ${advice}`;
+}
+
 function defaultTimeoutMs(command: VisionosCommand): number {
   return command.type === "request_hierarchy"
     ? VISIONOS_HIERARCHY_TIMEOUT_MS
@@ -185,7 +198,7 @@ export class WebSocketVisionosRunnerClient implements VisionosRunnerClient {
       if (runnerError.includes("kAXErrorAPIDisabled")) {
         pending.reject(
           new VisionosRunnerError(
-            "The visionOS runner could not read this app's accessibility window even after relaunching the app. Other apps on the simulator may still work. Use a screenshot (simctl/screenshot) to see the app instead.",
+            accessibilityApiDisabledMessage(pending.type),
             "accessibility_api_disabled",
             { cause: runnerError },
           ),

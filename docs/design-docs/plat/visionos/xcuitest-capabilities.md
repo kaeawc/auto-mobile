@@ -11,7 +11,8 @@ and `killDevice` use `simctl`; boot binds a session at `booted` readiness.
 `observe`, `tapOn` and `sendKeys` prepare a separate window-app XCUITest runner
 on demand. Provisioning still accepts only readiness `none`. The runner reports
 hierarchy and focus, taps enabled window and ornament elements by identifier (narrowed
-by exact type and label when shared), and appends text to a focused field;
+by exact type and label when shared; disabled twins never count as sharers), and appends text to a focused field;
+a missing or disabled target is an invalid `identifier` parameter, and remaining ambiguity is `ambiguous_element`;
 screenshots use `simctl`. iOS inventories exclude xrOS runtimes. `installApp`, `uninstallApp`, `launchApp`, `terminateApp` and
 `listApps` use `simctl`. All other device tools remain disabled.
 
@@ -69,9 +70,11 @@ retry fails, its error is returned.
 
 A runner error containing `kAXErrorAPIDisabled` maps to
 `accessibility_api_disabled`, with the runner's error preserved as `cause`.
-It means this app's accessibility window could not be read even after relaunch,
-not that accessibility is unavailable across the simulator. Other apps may
-still work; use a screenshot from `simctl` to see the affected app.
+It means this app's accessibility window could not be read, not that
+accessibility is unavailable across the simulator. Only a `request_hierarchy`
+message says the app was relaunched; a tap or text input message says no
+relaunch happened and to observe (which relaunches once) before retrying. Other
+apps may still work; use a screenshot from `simctl` to see the affected app.
 
 ## Decision
 

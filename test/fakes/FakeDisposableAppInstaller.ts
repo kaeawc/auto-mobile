@@ -11,6 +11,8 @@ export class FakeDisposableAppInstaller implements DisposableAppInstaller {
   readonly grants: { appId: string; grants: DisposableAppPermissionGrants }[] = [];
   readonly uninstalls: string[] = [];
 
+  /** When set, `applyPermissions` rejects with it after recording the grants. */
+  permissionFailure: Error | undefined;
   /** When set, `inspect` waits for it, so a test can interleave another operation. */
   inspectGate: Promise<void> | undefined;
   /** Called as `inspect` starts, before it waits on `inspectGate`. */
@@ -31,6 +33,9 @@ export class FakeDisposableAppInstaller implements DisposableAppInstaller {
 
   async applyPermissions(_deviceId: string, appId: string, grants: DisposableAppPermissionGrants) {
     this.grants.push({ appId, grants });
+    if (this.permissionFailure) {
+      throw this.permissionFailure;
+    }
   }
 
   async uninstall(deviceId: string, appId: string): Promise<void> {

@@ -32,7 +32,10 @@ enum VisionCommandPolicy {
 
     enum TapResolution: Equatable {
         case match(Int)
-        case none
+        /// No candidate has the identifier with the supplied type/label.
+        case missing
+        /// Candidates match the identifier, type and label, but none is enabled.
+        case disabled
         case ambiguous(Int)
     }
 
@@ -40,14 +43,15 @@ enum VisionCommandPolicy {
     static func tapResolution(
         candidates: [TapCandidate], label: String? = nil, elementType: UInt? = nil
     ) -> TapResolution {
-        let matches = candidates.indices.filter { index in
+        let selected = candidates.indices.filter { index in
             let candidate = candidates[index]
-            return candidate.isEnabled
-                && (label == nil || candidate.label == label)
+            return (label == nil || candidate.label == label)
                 && (elementType == nil || candidate.elementType == elementType)
         }
+        let matches = selected.filter { candidates[$0].isEnabled }
         if matches.count == 1 { return .match(matches[0]) }
-        return matches.isEmpty ? .none : .ambiguous(matches.count)
+        if matches.isEmpty { return selected.isEmpty ? .missing : .disabled }
+        return .ambiguous(matches.count)
     }
 
     enum TypingTarget: Equatable {

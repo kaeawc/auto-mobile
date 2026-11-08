@@ -113,6 +113,37 @@ test("maps Safari's captured AX window failure to per-app screenshot advice", as
   expect(failure?.message).not.toContain("Re-create");
   expect(failure?.message).not.toContain("disabled");
   expect(failure?.cause).toBe(safariHierarchyApiDisabled.error);
+  expect(failure?.message).not.toContain("not relaunched");
+  client.close();
+});
+
+test.each([
+  { type: "request_tap_element" as const, identifier: "orn" },
+  { type: "request_append_text" as const, text: "hello" },
+])("maps $type's AX window failure without claiming a relaunch", async (command) => {
+  const { socket, timer, client } = fixture();
+  socket.receive(connected);
+  const pending = client.request(command);
+  await drainMicrotasks(2);
+  socket.receive({
+    ...safariHierarchyApiDisabled,
+    requestId: socket.sent[0].requestId,
+  });
+  const failure = await pending.then(
+    () => undefined,
+    (error: unknown) => error as { cause?: unknown; errorCode?: string; message?: string },
+  );
+  expect(failure?.errorCode).toBe("accessibility_api_disabled");
+  expect(failure?.message).toContain("this app's accessibility window");
+  expect(failure?.message).toContain(`so ${command.type} failed`);
+  expect(failure?.message).toContain("the app was not relaunched");
+  expect(failure?.message).not.toContain("after relaunching");
+  expect(failure?.message).toContain("Observe the app first");
+  expect(failure?.message).toContain("retry this step");
+  expect(failure?.message).toContain("Other apps on the simulator may still work");
+  expect(failure?.message).toContain("simctl");
+  expect(failure?.cause).toBe(safariHierarchyApiDisabled.error);
+  expect(timer.getSleepHistory()).toEqual([]);
   client.close();
 });
 

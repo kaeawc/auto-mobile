@@ -789,6 +789,37 @@ describe("prototype web still (#16346)", () => {
     expect(style("after")).not.toHaveProperty("max-width");
   });
 
+  test("a nested capped row after an unsized aspect ratio keeps its parent's zero width (#16695)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          children: [
+            {
+              type: "row",
+              children: [
+                { type: "box", style: { aspectRatio: 2 } },
+                {
+                  type: "row",
+                  testTag: "nested",
+                  style: { maxWidth: 300 },
+                  children: [
+                    { type: "box", style: { aspectRatio: 1, maxWidth: 40 } },
+                    { type: "text", text: "b" },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      }),
+      "nested",
+    )[0]!;
+    // The outer row measures it against no width, which its own bound must not widen.
+    expect(row.style["max-width"]).toBe("0px");
+  });
+
   test("a later sibling's minWidth gives way to a capped aspect ratio (#16772)", () => {
     const row = byTag(
       renderPrototypeStill({
@@ -1024,6 +1055,53 @@ describe("prototype web still (#16346)", () => {
     });
     // A fullscreen window's height depends on bars and insets, so its root stays unbounded.
     expect(ratioIn({ type: "fullscreen" })).not.toHaveProperty("flex-basis");
+  });
+
+  test("a repeat column's instances each cap their aspect ratio by their own share (#16694)", () => {
+    const ratios = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          style: { height: { dp: 40 } },
+          repeat: { items: [{ id: 1 }, { id: 2 }] },
+          children: [
+            {
+              type: "row",
+              style: { weight: 1 },
+              children: [
+                { type: "box", testTag: "ratio", style: { aspectRatio: 2 } },
+                { type: "text", text: "b" },
+              ],
+            },
+          ],
+        },
+      }),
+      "ratio",
+    );
+    // Each of the two weighted instances gets 20 dp, so its ratio is at most 40 dp wide.
+    expect(ratios.map((ratio) => ratio.style["flex-basis"])).toEqual(["40px", "40px"]);
+  });
+
+  test("a repeated row around an unsized aspect ratio does not fill its parent (#16694)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          children: [
+            {
+              type: "row",
+              testTag: "line",
+              repeat: { items: [{ id: 1 }] },
+              children: [{ type: "box", style: { aspectRatio: 2 } }],
+            },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    expect(row.style).not.toHaveProperty("width");
   });
 
   test("an explicit wrap-width root keeps its content width in its window", () => {

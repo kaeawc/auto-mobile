@@ -445,7 +445,7 @@ export class SystemTray {
 
   private async resolveScope(args: SystemTrayArgs): Promise<NotificationScope> {
     const { device, signal } = this;
-    const notification = args.notification ?? {};
+    let notification = args.notification ?? {};
     let appLabel: string | null = null;
     let appMatchTexts: string[] = [];
     let installedApps: string[] = [];
@@ -477,6 +477,15 @@ export class SystemTray {
           signal,
         ));
       appMatchTexts = [appLabel, notification.appId].filter(Boolean) as string[];
+      if (device.platform !== "android") {
+        // An iOS lone banner names no app: only content this app posted can attribute it.
+        const { postedNotifications } = getSystemTrayDependencies();
+        const appId = notification.appId;
+        notification = {
+          ...notification,
+          postedContents: () => postedNotifications.postedBy(device.deviceId, appId),
+        };
+      }
     }
     return { notification, appLabel, appMatchTexts, installedApps };
   }
@@ -492,7 +501,7 @@ export class SystemTray {
     );
 
     if (!match) {
-      throw notificationNotFoundError(device, observation, awaitTimeoutMs);
+      throw notificationNotFoundError(device, observation, awaitTimeoutMs, notification);
     }
 
     await captureSystemTrayTerminalEvidence(device, observation, signal);
@@ -515,7 +524,12 @@ export class SystemTray {
     });
 
     if (!initialMatch.match) {
-      throw notificationNotFoundError(device, initialMatch.observation, awaitTimeoutMs);
+      throw notificationNotFoundError(
+        device,
+        initialMatch.observation,
+        awaitTimeoutMs,
+        notification,
+      );
     }
 
     const { observation: baseline, match } = await expandAndRematchIfCollapsed(
@@ -580,7 +594,12 @@ export class SystemTray {
     });
 
     if (!initialMatch.match) {
-      throw notificationNotFoundError(device, initialMatch.observation, awaitTimeoutMs);
+      throw notificationNotFoundError(
+        device,
+        initialMatch.observation,
+        awaitTimeoutMs,
+        notification,
+      );
     }
 
     const { match, observation: swipeObservation } = await expandAndRematchIfCollapsed(

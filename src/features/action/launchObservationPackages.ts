@@ -1,6 +1,7 @@
 import { CTRL_PROXY_PACKAGE } from "../../ctrlProxy/constants";
 import type { ObserveResult } from "../../models";
 import { isOwnPrototypeFocused } from "../observe/ownWindowFocus";
+import { hostsNotificationPermissionDialog } from "./launchPermissionBlocker";
 
 /**
  * The package that owns the foreground task, from the adb back stack. Used to
@@ -51,12 +52,25 @@ export function getLaunchObservationPackageNames(observation: ObserveResult | un
   return fallbackPackageName ? [fallbackPackageName] : [];
 }
 
-/** Whether launch observation is showing the accepted notification permission surface. */
+/**
+ * Whether a launch of `expectedPackageName` landed on the accepted notification
+ * permission surface. CtrlProxy can flag the dialog from an overlapping window
+ * while another app holds the primary window, so every reported foreground
+ * package must be the requested app or a permission controller; an unrelated
+ * app behind the flag is a wrong-app landing, not the accepted surface.
+ */
 export function isLaunchPermissionDialogObservation(
-  observation: Pick<ObserveResult, "notificationPermissionDetected" | "activeWindow"> | undefined,
+  observation: ObserveResult | undefined,
+  expectedPackageName: string,
 ): boolean {
-  return (
-    observation?.notificationPermissionDetected === true &&
-    observation.activeWindow?.type === "notification_permission_dialog"
+  if (
+    observation?.notificationPermissionDetected !== true ||
+    observation.activeWindow?.type !== "notification_permission_dialog"
+  ) {
+    return false;
+  }
+  return getLaunchObservationPackageNames(observation).every(
+    (packageName) =>
+      packageName === expectedPackageName || hostsNotificationPermissionDialog(packageName),
   );
 }

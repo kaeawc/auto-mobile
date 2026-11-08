@@ -91,6 +91,7 @@ describe("IOSCtrlProxyClient lazy build context", () => {
   let timer: FakeTimer;
   let source: FakeIosMetadataSource;
   let provider: FakeContentHashProvider;
+  let infoPlist: { info: Record<string, unknown>; readJsonFile(path: string): Promise<unknown> };
   let client: IOSCtrlProxyClient;
   let setContext: ReturnType<typeof spyOn<NavigationGraphManager, "setBuildContext">>;
   let onHierarchy: ReturnType<typeof spyOn>;
@@ -114,7 +115,7 @@ describe("IOSCtrlProxyClient lazy build context", () => {
       deviceConnectionLostNotifier: undefined,
       sdkEventIngestor: undefined,
       retryExecutor: undefined,
-      options: { iosSource: source, contentHashProvider: provider },
+      options: { iosSource: source, contentHashProvider: provider, infoPlistReader: infoPlist },
     });
     // Suppress unrelated foreground monitoring/SDK probing; exercise the real
     // hierarchy hook and manager context without navigation DB writes or sockets.
@@ -149,6 +150,10 @@ describe("IOSCtrlProxyClient lazy build context", () => {
     timer = new FakeTimer();
     source = new FakeIosMetadataSource();
     provider = new FakeContentHashProvider();
+    infoPlist = {
+      info: {},
+      readJsonFile: async () => infoPlist.info,
+    };
     harness.manager.clearBuildContext(appId);
     setContext = spyOn(harness.manager, "setBuildContext");
     client = createClient();
@@ -179,6 +184,22 @@ describe("IOSCtrlProxyClient lazy build context", () => {
       contentHash: "fake-content-hash",
     });
     expect(harness.manager.getDeviceIdForApp(appId)).toBe(simulatorId);
+  });
+
+  test("simulator provenance carries the bundle's declared git revision (#16954)", async () => {
+    infoPlist.info = {
+      "dev.jasonpearson.automobile.build.gitBranch": "main",
+      "dev.jasonpearson.automobile.build.gitSha": "abcdef1234567",
+    };
+    hierarchyUpdate();
+    await settle();
+    expect(setContext).toHaveBeenCalledWith({
+      appId,
+      deviceId: simulatorId,
+      versionCode: 42,
+      contentHash: "fake-content-hash",
+      sourceRevision: { gitBranch: "main", gitSha: "abcdef1234567" },
+    });
   });
 
   test("physical devices resolve device-only context once without metadata or hashing", async () => {

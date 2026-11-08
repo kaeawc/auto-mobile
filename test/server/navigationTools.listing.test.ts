@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { registerNavigationTools } from "../../src/server/navigationTools";
+import {
+  EXPLORE_EMBEDDED_SDK_GATE_HINT,
+  registerNavigationTools,
+} from "../../src/server/navigationTools";
+import { resolveTool } from "../../src/server/pipeline/ingress/routing";
+import { EMBEDDED_SDK_GATE_REASON } from "../../src/server/toolRegistryTypes";
+import { ToolUnavailableError } from "../../src/daemon/toolUnavailableError";
+import { DAEMON_TOOL_UNAVAILABLE_CODE } from "../../src/daemon/types";
 import { ToolRegistry, type RegisteredTool } from "../../src/server/toolRegistry";
 import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
 import { serverConfig } from "../../src/utils/ServerConfig";
@@ -43,6 +50,40 @@ describe("navigation tools listing (#4459)", () => {
       const reasons = ToolRegistry.getToolAvailabilityGateReasons(registered(name));
       expect(reasons).toEqual([expect.stringContaining("--embedded-sdk")]);
     }
+  });
+
+  test("explore's rejection names Apple TV and how to enable the flag (#17528)", () => {
+    serverConfig.setEmbeddedSdkEnabled(false);
+    expect(ToolRegistry.getToolAvailabilityGateReasons(registered("explore"))).toEqual([
+      `${EMBEDDED_SDK_GATE_REASON}. ${EXPLORE_EMBEDDED_SDK_GATE_HINT}`,
+    ]);
+    expect(EXPLORE_EMBEDDED_SDK_GATE_HINT).toContain("Apple TV (tvOS)");
+    expect(EXPLORE_EMBEDDED_SDK_GATE_HINT).toContain("Add --embedded-sdk");
+    for (const name of ["navigateTo", "getNavigationGraph"]) {
+      expect(ToolRegistry.getToolAvailabilityGateReasons(registered(name))).toEqual([
+        EMBEDDED_SDK_GATE_REASON,
+      ]);
+    }
+  });
+
+  test("a tvOS explore call without --embedded-sdk is refused with a typed error carrying the hint", () => {
+    serverConfig.setEmbeddedSdkEnabled(false);
+    let caught: unknown;
+    try {
+      resolveTool("explore", { platform: "tvos" });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ToolUnavailableError);
+    const refusal = caught as ToolUnavailableError;
+    expect(refusal.data).toEqual({ code: DAEMON_TOOL_UNAVAILABLE_CODE, toolName: "explore" });
+    expect(refusal.message).toBe(
+      `Unknown tool: explore. ${EMBEDDED_SDK_GATE_REASON}. ${EXPLORE_EMBEDDED_SDK_GATE_HINT}`,
+    );
+  });
+
+  test("with --embedded-sdk explore resolves for a tvOS call", () => {
+    expect(resolveTool("explore", { platform: "tvos" }).name).toBe("explore");
   });
 
   test("none are marked debugOnly or enabled by default", () => {

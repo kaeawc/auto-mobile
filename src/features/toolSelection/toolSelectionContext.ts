@@ -97,6 +97,12 @@ export type ToolSelectionContext = {
    * call, so a nested call never inherits a step's geometry.
    */
   tapAtPlanContext?: TapAtPlanContext;
+  /**
+   * The namespace a plan's `barrier` / `criticalSection` step scopes its lock under: the plan's
+   * base session UUID (#15663). Set by `callInternal` for that one step, so a nested call never
+   * inherits it and a direct call outside a plan stays unscoped.
+   */
+  planLockNamespace?: string;
   /** This device-aware call's recording context, set by its wrapper (#15663); never inherited. */
   toolCallRecording?: ToolCallRecordingContext;
 };
@@ -205,6 +211,11 @@ export function currentExecution(): ToolSelectionContext["execution"] {
 /** The transport deadline of the request the current call runs for, if it has one (#15663). */
 export function currentRequestDeadline(): RequestDeadline | undefined {
   return getToolSelectionContext()?.requestDeadline;
+}
+
+/** The plan-scoped lock namespace of the current `barrier` / `criticalSection` step, if any. */
+export function currentPlanLockNamespace(): string | undefined {
+  return getToolSelectionContext()?.planLockNamespace;
 }
 
 /** Whether the current device-aware call runs on the read-only device path (#10830). */

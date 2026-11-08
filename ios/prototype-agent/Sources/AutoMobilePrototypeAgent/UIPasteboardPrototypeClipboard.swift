@@ -32,7 +32,8 @@
             systemModules(
                 clipboard: UIPasteboardPrototypeClipboard(),
                 connectivity: NWPathConnectivitySource(),
-                links: UIKitLinkOpener()
+                links: UIKitLinkOpener(),
+                settings: UIKitSettingsURLOpener()
             )
     }
 #endif

@@ -7,8 +7,9 @@ public protocol FrameSink: AnyObject {
     func write(_ data: Data)
 }
 
-/// Snapshot of the raw-frame handoff. The video queue is structurally one slot:
-/// at most one newest frame can wait while stdout is blocked.
+/// Snapshot of the stdout handoff. Encoded records are never dropped, so the
+/// video frame queue depth is always 0; `droppedFrames` counts frames the encoder
+/// rejected before encoding.
 public struct FrameWriterMetrics: Codable, Equatable {
     public let captureTimestampMs: UInt32?
     public let frameQueueAgeMs: Double?
@@ -37,9 +38,8 @@ public struct FrameWriterMetrics: Codable, Equatable {
     }
 }
 
-/// Writes framed BGRA records to a `FrameSink` without blocking the capture
-/// callback. Pixel data is copied while the caller holds its CVPixelBuffer lock,
-/// then a serial output worker writes only the newest pending frame.
+/// Writes framed encoded-H.264 and audio records to a `FrameSink` through a serial
+/// output worker, so a slow stdout consumer never blocks the capture callback.
 ///
 /// `@unchecked Sendable`: every mutable field is confined to `stateLock`, and the
 /// serial `outputQueue` is the only writer thread (it takes records under the lock
@@ -47,29 +47,22 @@ public struct FrameWriterMetrics: Codable, Equatable {
 /// This matches the package's lock-confined-`Sendable` idiom (see `ForceKeyFrameLatch`).
 public final class FrameWriter: @unchecked Sendable {
     public struct Configuration {
-        /// Enough for current iPhone and iPad BGRA captures, while bounding raw
-        /// buffering to one frame when stdout's consumer is slow.
-        public static let defaultMaximumPendingFrameBytes = 32 * 1024 * 1024
         public static let defaultMaximumPendingAudioBytes = 64 * 1024
-        /// Bound on the ordered encoded-H.264 output queue (issue #4788). Unlike
-        /// raw frames, encoded records are never dropped — overflow is fatal — so
+        /// Bound on the ordered encoded-H.264 output queue (issue #4788). Encoded
+        /// records are never dropped — overflow is fatal — so
         /// this ceiling is a hard backstop against unbounded growth when stdout's
         /// consumer stalls, sized for several seconds of Baseline output.
         public static let defaultMaximumPendingEncodedBytes = 64 * 1024 * 1024
 
-        public let maximumPendingFrameBytes: Int
         public let maximumPendingAudioBytes: Int
         public let maximumPendingEncodedBytes: Int
 
         public init(
-            maximumPendingFrameBytes: Int = defaultMaximumPendingFrameBytes,
             maximumPendingAudioBytes: Int = defaultMaximumPendingAudioBytes,
             maximumPendingEncodedBytes: Int = defaultMaximumPendingEncodedBytes
         ) {
-            precondition(maximumPendingFrameBytes > 0)
             precondition(maximumPendingAudioBytes > 0)
             precondition(maximumPendingEncodedBytes > 0)
-            self.maximumPendingFrameBytes = maximumPendingFrameBytes
             self.maximumPendingAudioBytes = maximumPendingAudioBytes
             self.maximumPendingEncodedBytes = maximumPendingEncodedBytes
         }
@@ -83,7 +76,6 @@ public final class FrameWriter: @unchecked Sendable {
     }
 
     private enum RecordKind {
-        case frame
         case audio
         case encoded
     }
@@ -93,10 +85,6 @@ public final class FrameWriter: @unchecked Sendable {
     private let configuration: Configuration
     private let stateLock = NSLock()
     private let outputQueue = DispatchQueue(label: "automobile.screen-capture.stdout")
-    /// Recycles the large raw-frame payload slabs so a steady capture reuses buffers
-    /// instead of malloc/free-ing a multi-MB BGRA slab per frame (raw path only).
-    private let framePool = FrameBufferPool()
-    private var pendingFrame: PendingRecord?
     private var pendingAudio: [PendingRecord] = []
     private var pendingAudioBytes = 0
     private var pendingEncoded: [PendingRecord] = []
@@ -116,63 +104,6 @@ public final class FrameWriter: @unchecked Sendable {
         self.sink = sink
         self.startTime = startTime
         self.configuration = configuration
-    }
-
-    /// Copies an unlocked-safe frame and atomically replaces any unread older
-    /// frame. `false` means the raw frame exceeded the fixed memory budget.
-    @discardableResult
-    public func write(
-        width: Int,
-        height: Int,
-        bytesPerRow: Int,
-        baseAddress: UnsafeRawPointer,
-        timestamp: Date = Date()
-    )
-        -> Bool
-    {
-        let elapsedMs = max(0, timestamp.timeIntervalSince(startTime) * 1000)
-        let captureTimestampMs = UInt32(truncatingIfNeeded: UInt64(elapsedMs))
-
-        // `bytesPerRow * height` can overflow Int for pathological geometry;
-        // compute it defensively and drop the frame instead of trapping, before
-        // the memory-budget cap so the cap never sees a wrapped value.
-        let (payloadLength, overflow) = bytesPerRow.multipliedReportingOverflow(by: height)
-        guard !overflow, payloadLength <= configuration.maximumPendingFrameBytes else {
-            recordDroppedFrame(captureTimestampMs: captureTimestampMs)
-            return false
-        }
-
-        // The header fields are UInt32; a value that doesn't fit would trap on
-        // conversion, so drop the frame instead.
-        guard let headerWidth = UInt32(exactly: width),
-              let headerHeight = UInt32(exactly: height),
-              let headerBytesPerRow = UInt32(exactly: bytesPerRow)
-        else {
-            recordDroppedFrame(captureTimestampMs: captureTimestampMs)
-            return false
-        }
-
-        let header = FrameProtocol.encodeHeader(FrameProtocol.Header(
-            width: headerWidth,
-            height: headerHeight,
-            bytesPerRow: headerBytesPerRow,
-            timestampMs: captureTimestampMs
-        ))
-        // The capture callback owns the pixel-buffer lock. This one copy lets it release
-        // that lock before stdout can block on a slow Node consumer; the slab it copies
-        // into is drawn from `framePool` and returned when the record is done, so a
-        // steady capture avoids malloc/free-ing (and page-faulting) a fresh multi-MB
-        // buffer every frame.
-        let payload = framePool.makeData(copyingFrom: baseAddress, count: payloadLength)
-        let record = PendingRecord(
-            header: header,
-            payload: payload,
-            captureTimestampMs: captureTimestampMs,
-            enqueuedAt: Date()
-        )
-
-        enqueueFrame(record)
-        return true
     }
 
     /// Queues bounded, ordered audio records on the same serial writer. Unlike
@@ -243,14 +174,13 @@ public final class FrameWriter: @unchecked Sendable {
         return true
     }
 
-    public func metrics(now: Date = Date()) -> FrameWriterMetrics {
+    public func metrics() -> FrameWriterMetrics {
         stateLock.lock()
         defer { stateLock.unlock() }
-        let pending = pendingFrame
         return FrameWriterMetrics(
-            captureTimestampMs: pending?.captureTimestampMs ?? latestCaptureTimestampMs,
-            frameQueueAgeMs: pending.map { max(0, now.timeIntervalSince($0.enqueuedAt) * 1000) },
-            frameQueueDepth: pending == nil ? 0 : 1,
+            captureTimestampMs: latestCaptureTimestampMs,
+            frameQueueAgeMs: nil,
+            frameQueueDepth: 0,
             droppedFrames: droppedFrames,
             bytesQueued: queuedBytesLocked(),
             highWaterMarkBytes: highWaterMarkBytes,
@@ -272,29 +202,6 @@ public final class FrameWriter: @unchecked Sendable {
         outputQueue.sync {}
     }
 
-    private func recordDroppedFrame(captureTimestampMs: UInt32) {
-        stateLock.lock()
-        latestCaptureTimestampMs = captureTimestampMs
-        droppedFrames += 1
-        stateLock.unlock()
-    }
-
-    private func enqueueFrame(_ record: PendingRecord) {
-        stateLock.lock()
-        latestCaptureTimestampMs = record.captureTimestampMs
-        if pendingFrame != nil {
-            droppedFrames += 1
-        }
-        pendingFrame = record
-        highWaterMarkBytes = max(highWaterMarkBytes, queuedBytesLocked())
-        let shouldSchedule = !outputWorkerScheduled
-        outputWorkerScheduled = true
-        stateLock.unlock()
-        if shouldSchedule {
-            outputQueue.async { self.drain() }
-        }
-    }
-
     private func drain() {
         while let record = takeNextRecord() {
             let startedAt = Date()
@@ -311,14 +218,10 @@ public final class FrameWriter: @unchecked Sendable {
         stateLock.lock()
         defer { stateLock.unlock() }
 
-        // "Media" is a raw frame or an encoded record; only one of the two ever
-        // flows in a given run (raw path vs `--encode h264`). Alternate media
-        // with audio so neither starves — preserving the raw path's exact
-        // frame/audio ordering when no encoded records are present.
-        let mediaPending = pendingFrame != nil || !pendingEncoded.isEmpty
+        // Alternate encoded video with audio so neither starves.
+        let mediaPending = !pendingEncoded.isEmpty
         if mediaPending, !pendingAudio.isEmpty {
-            let lastWasMedia = lastWrittenRecordKind == .frame || lastWrittenRecordKind == .encoded
-            return lastWasMedia ? takeAudioLocked() : takeMediaLocked()
+            return lastWrittenRecordKind == .encoded ? takeAudioLocked() : takeMediaLocked()
         }
         if mediaPending {
             return takeMediaLocked()
@@ -330,23 +233,13 @@ public final class FrameWriter: @unchecked Sendable {
         return nil
     }
 
-    /// Encoded records take priority over a raw frame (they never coexist), and
-    /// are emitted strictly FIFO — they must not be reordered or dropped.
+    /// Encoded records are emitted strictly FIFO — they must not be reordered or dropped.
     private func takeMediaLocked() -> PendingRecord? {
-        if !pendingEncoded.isEmpty {
-            let encoded = pendingEncoded.removeFirst()
-            pendingEncodedBytes -= encoded.payload.count
-            lastWrittenRecordKind = .encoded
-            return encoded
-        }
-        return takeFrameLocked()
-    }
-
-    private func takeFrameLocked() -> PendingRecord? {
-        guard let frame = pendingFrame else { return nil }
-        pendingFrame = nil
-        lastWrittenRecordKind = .frame
-        return frame
+        guard !pendingEncoded.isEmpty else { return nil }
+        let encoded = pendingEncoded.removeFirst()
+        pendingEncodedBytes -= encoded.payload.count
+        lastWrittenRecordKind = .encoded
+        return encoded
     }
 
     private func takeAudioLocked() -> PendingRecord {
@@ -357,7 +250,7 @@ public final class FrameWriter: @unchecked Sendable {
     }
 
     private func queuedBytesLocked() -> Int {
-        (pendingFrame?.payload.count ?? 0) + pendingAudioBytes + pendingEncodedBytes
+        pendingAudioBytes + pendingEncodedBytes
     }
 }
 

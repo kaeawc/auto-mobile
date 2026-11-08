@@ -39,6 +39,12 @@ export interface StatusBarController {
   read(signal?: AbortSignal): Promise<string | null>;
 }
 
+/**
+ * A request the platform refused before running any device command, so the device is unchanged
+ * and nothing about it needs recording or clearing (#17054).
+ */
+export class StatusBarRequestRejectedError extends ActionableError {}
+
 export const STATUS_BAR_COMMAND_TIMEOUT_MS = 10_000;
 
 /** The fields a request set, in declaration order. */

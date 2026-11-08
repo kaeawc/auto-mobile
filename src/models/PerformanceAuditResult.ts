@@ -9,6 +9,11 @@ export interface PerformanceMetrics {
   p90Ms: number | null;
   p95Ms: number | null;
   p99Ms: number | null;
+  /**
+   * Why p50Ms-p99Ms are null although gfxinfo was read: it rendered no frames, and the
+   * percentiles it prints then are histogram bucket bounds, not measurements (#17307).
+   */
+  frameTimeUnmeasured?: string;
 
   // Jank indicators, measured over the audit window (PERF_AUDIT_WINDOW_MS) from
   // two cumulative gfxinfo readings (#10094).

@@ -7,6 +7,7 @@ import {
   contentInsets,
   declaredSize,
   shorthandValues,
+  sub,
   withAspectRatio,
   type Axis,
   type Len,
@@ -43,6 +44,10 @@ function layoutOf(element: WebElement): Layout {
   }
   return "flow";
 }
+
+/** Whether a flex line runs from its main-end (`row-reverse` or `column-reverse`). */
+const reversed = (element: WebElement): boolean =>
+  element.style["flex-direction"]?.trim().endsWith("-reverse") === true;
 
 /** Whether a child leaves the flow (absolute or fixed) and is placed against its container. */
 export const outOfFlow = (child: WebElement): boolean =>
@@ -516,28 +521,95 @@ function crossPlacement(child: WebElement, main: Axis, mainSize: Len, box: Conta
   return [alignOffset(align, box.content[cross], size), size];
 }
 
+/** The container-side keywords a reversed line swaps so they stay put once it is mirrored. */
+const SIDE_SWAP: Readonly<Record<string, string>> = {
+  start: "end",
+  end: "start",
+  left: "right",
+  right: "left",
+};
+
+/**
+ * `justify-content` as an offset from the line's main-start. `start`, `end`, `left` and `right`
+ * name the container's own sides, so in a reversed line they swap to stay put once the line is
+ * mirrored; `flex-start`, `flex-end` and the `space-*` arrangements follow the line. `left` and
+ * `right` mean `start` on a column, as CSS has them off the inline axis.
+ */
+function lineJustify(
+  justify: string | undefined,
+  main: Axis,
+  reverse: boolean,
+): string | undefined {
+  const physical =
+    main === "height" && (justify === "left" || justify === "right") ? "start" : justify;
+  if (!reverse) {
+    return physical;
+  }
+  return physical === undefined ? undefined : (SIDE_SWAP[physical] ?? physical);
+}
+
+/**
+ * Each item's offset from its line's main-start: the arrangement's lead, then each item's size,
+ * the gap and the arrangement's spacing in turn.
+ */
+function forwardOffsets(sizes: readonly Len[], gap: number, [lead, between]: [Len, Len]): Len[] {
+  let cursor = lead;
+  return sizes.map((size) => {
+    const offset = cursor;
+    cursor = add(add(add(cursor, size), gap), between);
+    return offset;
+  });
+}
+
+/**
+ * Each item's offset from its line's physical start. A reversed line runs from its main-end, so
+ * an item sits back from the end of the line by its forward offset and its own size. A line
+ * sized by its content has no free space, so there an item sits after the items that follow it
+ * in source order: the last one starts at the line's start even when another size is unknown.
+ */
+function physicalOffsets(
+  sizes: readonly Len[],
+  gap: number,
+  room: Len,
+  arranged: [Len, Len],
+): Len[] {
+  if (room !== undefined) {
+    return forwardOffsets(sizes, gap, arranged).map((offset, index) =>
+      sub(room, add(offset, sizes[index])),
+    );
+  }
+  return forwardOffsets([...sizes].reverse(), gap, [0, 0]).reverse();
+}
+
 /** A flex line: items grow into the free space, then the arrangement places them. */
 function placeLine(children: readonly WebChild[], main: Axis, box: Container): PlacedChild[] {
   const cross = crossOf(main);
   const items = children.map((child) => lineItem(child, main, box));
   const gap = mainGap(main, box);
+  const room = box.content[main];
   const gaps = gap * Math.max(0, items.length - 1);
-  const { sizes, remaining } = flexedSizes(items, box.content[main], gaps);
-  const [lead, between] = arrangement(box.parent.style["justify-content"], remaining, items.length);
+  const { sizes, remaining } = flexedSizes(items, room, gaps);
+  const reverse = reversed(box.parent);
+  const justify = lineJustify(box.parent.style["justify-content"], main, reverse);
+  const arranged = arrangement(justify, remaining, items.length);
+  const offsets = reverse
+    ? physicalOffsets(sizes, gap, room, arranged)
+    : forwardOffsets(sizes, gap, arranged);
   const placed: PlacedChild[] = [];
-  let cursor = add(startOf(box.content, main), lead);
   for (const [index, item] of items.entries()) {
     const size = sizes[index];
     if (item.element) {
       const [offset, crossSize] = crossPlacement(item.element, main, size, box);
-      const position: [Len, Len] = [cursor, add(startOf(box.content, cross), offset)];
+      const position: [Len, Len] = [
+        add(startOf(box.content, main), offsets[index]),
+        add(startOf(box.content, cross), offset),
+      ];
       const rect = oriented(main, position, [size, crossSize]);
       placed.push({
         element: item.element,
         rect: withAspectRatio(item.element, rect, box.content, box.vars),
       });
     }
-    cursor = add(add(add(cursor, size), gap), between);
   }
   return placed;
 }

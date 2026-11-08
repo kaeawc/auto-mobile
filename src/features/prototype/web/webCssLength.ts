@@ -1,6 +1,7 @@
 /**
- * Evaluates the CSS lengths the web still emits (`12px`, `50%`, `0`, `var(--safe-top)` and
- * `calc(a + b)` of those) to px, for the still's layout pass (#16667). Anything else is unknown.
+ * Evaluates the CSS lengths the web still emits (`12px`, `50%`, `0`, `var(--safe-top)`,
+ * `calc(a + b)` of those, and `min(...)`/`max(...)` of any of them) to px, for the still's layout
+ * pass (#16667). Anything else is unknown.
  */
 
 /** Custom properties in scope (`--safe-top` and the like), from the screen down. */
@@ -50,6 +51,38 @@ function sum(expression: string, percentBase: number | undefined): number | unde
   return total;
 }
 
+/** The comma-separated arguments of a `min(...)`/`max(...)`, split at the top nesting level only. */
+function topLevelArgs(inner: string): string[] {
+  const args: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < inner.length; index++) {
+    const char = inner[index];
+    depth += char === "(" ? 1 : char === ")" ? -1 : 0;
+    if (char === "," && depth === 0) {
+      args.push(inner.slice(start, index));
+      start = index + 1;
+    }
+  }
+  args.push(inner.slice(start));
+  return args;
+}
+
+/** `min(a, b)` or `max(a, b)`: known only when every argument is. */
+function extremum(
+  fn: string,
+  inner: string,
+  vars: CssVars,
+  percentBase: number | undefined,
+): number | undefined {
+  const values = topLevelArgs(inner).map((arg) => cssLength(arg, vars, percentBase));
+  const known = values.filter((value): value is number => value !== undefined);
+  if (known.length !== values.length) {
+    return undefined;
+  }
+  return fn === "min" ? Math.min(...known) : Math.max(...known);
+}
+
 /**
  * A length in px, or undefined when it is absent, not a length (`auto`, `fit-content`) or
  * depends on something unknown (a percentage of an unknown size, an unset variable).
@@ -65,6 +98,10 @@ export function cssLength(
   const substituted = substituteVars(value.trim(), vars);
   if (substituted === undefined) {
     return undefined;
+  }
+  const bounded = /^(min|max)\((.*)\)$/.exec(substituted);
+  if (bounded) {
+    return extremum(bounded[1]!, bounded[2]!, vars, percentBase);
   }
   // A difference of a group (`a - (b + c)`) would need real precedence; the still never emits one.
   if (/-\s*(?:calc)?\(/.test(substituted)) {

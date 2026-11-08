@@ -598,7 +598,11 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     }
     // Discovery re-stamps observedAt; the serial/UDID stays stable until
     // the daemon's removal/release hooks invalidate this device.
-    state.device = await this.hydrateDisplays(state, readyDevice, readyDevice.deviceId);
+    state.device = await this.hydrateDisplays(
+      state,
+      await this.sessionFormFactor.enrichUnpooled(readyDevice),
+      readyDevice.deviceId,
+    );
     logger.info(`[ToolRegistry] ${name}: Using device ${state.device.deviceId}`);
     return undefined;
   }

@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, spyOn, test, afterEach, mock } from "bun:test";
-import { PerformanceAudit } from "../../../src/features/performance/PerformanceAudit";
+import {
+  NO_FRAME_COUNT,
+  NO_FRAMES_RENDERED,
+  PerformanceAudit,
+} from "../../../src/features/performance/PerformanceAudit";
 import {
   PERF_AUDIT_WINDOW_MS,
   computeCpuUsagePercent,
@@ -334,6 +338,43 @@ describe("PerformanceAudit windowed CPU and jank", () => {
     expect(result.gfxinfoRaw).toBe(capturedGfxinfo);
   });
 
+  test("frame time: zero rendered frames reports no percentiles instead of gfxinfo's 4950 ms placeholders (#17307)", async () => {
+    // The captured dump reports "Total frames rendered: 0" with every percentile at 4950ms: the
+    // histogram's top bucket, not a measurement.
+    expect(capturedGfxinfo).toContain("Total frames rendered: 0");
+    expect(capturedGfxinfo).toContain("50th percentile: 4950ms");
+    factory
+      .getFakeClient()
+      .setCommandResult("shell dumpsys gfxinfo 'com.example'", capturedGfxinfo);
+
+    const result = await audit.collectGfxMetrics("com.example", perf);
+
+    expect(result.p50Ms).toBeNull();
+    expect(result.p90Ms).toBeNull();
+    expect(result.p95Ms).toBeNull();
+    expect(result.p99Ms).toBeNull();
+    expect(result.frameTimeUnmeasured).toBe(NO_FRAMES_RENDERED);
+    expect(audit.validateMetrics({ ...baseMetrics, ...result }, thresholds)).toEqual([]);
+  });
+
+  test("frame time: rendered frames keep their percentiles and no unmeasured note", async () => {
+    const rendered = capturedGfxinfo
+      .replace("Total frames rendered: 0", "Total frames rendered: 120")
+      .replace("50th percentile: 4950ms", "50th percentile: 9ms")
+      .replace("90th percentile: 4950ms", "90th percentile: 14ms")
+      .replace("95th percentile: 4950ms", "95th percentile: 18ms")
+      .replace("99th percentile: 4950ms", "99th percentile: 30ms");
+    factory.getFakeClient().setCommandResult("shell dumpsys gfxinfo 'com.example'", rendered);
+
+    const result = await audit.collectGfxMetrics("com.example", perf);
+
+    expect([result.p50Ms, result.p90Ms, result.p95Ms, result.p99Ms]).toEqual([9, 14, 18, 30]);
+    expect(result.frameTimeUnmeasured).toBeUndefined();
+    expect(
+      audit.validateMetrics({ ...baseMetrics, ...result }, thresholds).map((v) => v.metric),
+    ).toEqual(["p99"]);
+  });
+
   test("jank: an unreadable gfxinfo reading reports no figure rather than zero", async () => {
     factory.getFakeClient().setCommandResult("shell dumpsys gfxinfo 'com.example'", "");
 
@@ -341,6 +382,8 @@ describe("PerformanceAudit windowed CPU and jank", () => {
 
     expect(result.jankCount).toBeNull();
     expect(result.missedVsyncCount).toBeNull();
+    expect(result.p50Ms).toBeNull();
+    expect(result.frameTimeUnmeasured).toBe(NO_FRAME_COUNT);
   });
 
   test("collectMetrics measures both windows concurrently: one window of waiting, not two", async () => {

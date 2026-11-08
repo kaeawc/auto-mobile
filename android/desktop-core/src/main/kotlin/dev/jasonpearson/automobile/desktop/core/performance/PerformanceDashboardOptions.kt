@@ -13,6 +13,11 @@ data class PerformanceDashboardOptions(
   val clientProvider: (() -> AutoMobileClient)? = null,
   val observationStreamClient: ObservationStream? = null,
   val deviceId: String? = null,
+  /**
+   * The pane's device epoch. A new epoch of the same [deviceId] drops the shown run and reloads the
+   * device's audit history, so a rebooted device does not show the previous epoch's live metrics.
+   */
+  val deviceSessionUuid: String? = null,
   val connectionGeneration: Int = 0,
   val initialFps: Float? = null,
   val initialFrameTimeMs: Float? = null,

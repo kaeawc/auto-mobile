@@ -1,0 +1,51 @@
+name: "visionOS Simulator Smoke (Advisory)"
+
+# Advisory smoke test for the Apple Vision Pro simulator path (scripts/visionos/).
+# It runs nightly, on dispatch, and on pull requests only when labelled
+# `run-visionos-smoke`. It is never a required check and nothing depends on it.
+# It runs on the self-hosted Macs because only they carry a visionOS runtime.
+
+on:
+  pull_request:
+    types: [labeled, synchronize]
+  schedule:
+    - cron: "15 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ (github.event.action == 'labeled' && github.event.label.name != 'run-visionos-smoke') && github.run_id || 'run' }}
+  cancel-in-progress: true
+
+jobs:
+  visionos-smoke:
+    name: "visionOS Smoke (Advisory)"
+    if: vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.repository == 'kaeawc/auto-mobile') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'run-visionos-smoke') && (github.event.action != 'labeled' || github.event.label.name == 'run-visionos-smoke')))
+    runs-on: ${{ fromJSON('["self-hosted","automobile-mac"]') }}
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          clean: true
+
+      - name: "Report visionOS runtimes"
+        run: xcrun simctl list runtimes | grep -i xrOS || echo "no visionOS runtime installed"
+
+      - name: "Run visionOS simulator smoke test"
+        env:
+          SMOKE_OUT: ${{ runner.temp }}/visionos-smoke
+        run: bash scripts/visionos/smoke-visionos-simulator.sh "$SMOKE_OUT"
+
+      - name: "Upload smoke output"
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: visionos-smoke-output
+          path: ${{ runner.temp }}/visionos-smoke
+          if-no-files-found: ignore
+          retention-days: 14

@@ -62,13 +62,17 @@ internal class KeystoreStateHandlerMetadataTest : KeystoreStateHandlerTestBase()
       listOf(
         "containsAlias:aes",
         "entryCategory:aes",
+        "verifyUsable:aes",
         "containsAlias:cert",
         "entryCategory:cert",
+        "verifyUsable:cert",
         "containsAlias:missing",
         "containsAlias:private",
         "entryCategory:private",
+        "verifyUsable:private",
         "containsAlias:unknown",
         "entryCategory:unknown",
+        "verifyUsable:unknown",
       ),
       backend.calls,
     )

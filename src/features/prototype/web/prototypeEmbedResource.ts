@@ -2,7 +2,14 @@ import { createHash } from "node:crypto";
 import { requiredPrototypeCapabilities } from "../prototypeCapabilityGates";
 import type { ShownSpecJson } from "../PrototypeShownSpecs";
 import type { PrototypeSpecRevisionSource } from "../prototypeSpecRevisions";
-import { prototypeVariantIds, shownRevision } from "./prototypeWebResource";
+import { prototypeEmbedGlyphs } from "./prototypeEmbedGlyphs";
+import { materialIconGlyphs } from "./materialIconGlyphs";
+import type { PrototypeIconGlyphSource } from "./webIconGlyphs";
+import {
+  prototypeRevisionFilter,
+  prototypeVariantIds,
+  shownRevision,
+} from "./prototypeWebResource";
 
 /** The envelope's `format`, so an embedder can tell it from a bare spec. */
 export const PROTOTYPE_EMBED_FORMAT = "automobile-prototype-embed";
@@ -18,6 +25,14 @@ export interface PrototypeEmbedEnvelope {
   readonly version: typeof PROTOTYPE_EMBED_VERSION;
   readonly requires: readonly string[];
   readonly spec: ShownSpecJson;
+  /**
+   * Additive within version 1, present only when at least one glyph resolves: the glyph of
+   * every `<variant>/<name>` its icon fields, `state` and `data` can name, as SVG markup for a
+   * 24 x 24 viewBox, so an interactive renderer needs no icon set of its own.
+   */
+  readonly glyphs?: Readonly<Record<string, string>>;
+  /** Keys the glyph source has no glyph for; the renderer draws its placeholder for them. */
+  readonly iconMissing?: readonly string[];
 }
 
 /** Query parameters of `automobile:prototype/{id}/embed`, the id already decoded. */
@@ -25,13 +40,17 @@ export interface PrototypeEmbedResourceQuery {
   readonly id: string;
   readonly revision?: string;
   readonly variant?: string;
+  /** Only this MCP session's revisions (#17358); absent for every session's. */
+  readonly mcpSessionId?: string;
 }
 
 /** The web resource's `_meta` without `frame`: an envelope has no device frame. */
 export interface PrototypeEmbedResourceMeta {
   readonly revision: number;
   readonly deviceRevision?: number;
-  /** Kept revisions of the variant served, oldest first. */
+  /** The MCP session that produced the revision served, when known (#17358). */
+  readonly mcpSessionId?: string;
+  /** Kept revisions of the variant served (only the filtered session's), oldest first. */
   readonly revisions: readonly number[];
   /** Prototype ids of the variant group, in the web page's order. */
   readonly variants: readonly string[];
@@ -45,12 +64,18 @@ export interface PrototypeEmbedResource {
   readonly meta: PrototypeEmbedResourceMeta;
 }
 
-export function prototypeEmbedEnvelope(spec: ShownSpecJson): PrototypeEmbedEnvelope {
+export function prototypeEmbedEnvelope(
+  spec: ShownSpecJson,
+  glyphSource: PrototypeIconGlyphSource = materialIconGlyphs(),
+): PrototypeEmbedEnvelope {
+  const { glyphs, iconMissing } = prototypeEmbedGlyphs(spec, glyphSource);
   return {
     format: PROTOTYPE_EMBED_FORMAT,
     version: PROTOTYPE_EMBED_VERSION,
     requires: requiredPrototypeCapabilities(spec),
     spec,
+    ...(Object.keys(glyphs).length > 0 ? { glyphs } : {}),
+    ...(iconMissing.length > 0 ? { iconMissing } : {}),
   };
 }
 
@@ -62,19 +87,22 @@ export function readPrototypeEmbedResource(
   source: PrototypeSpecRevisionSource,
   query: PrototypeEmbedResourceQuery,
   rendererVersion: string,
+  glyphSource?: PrototypeIconGlyphSource,
 ): PrototypeEmbedResource {
   const variantIds = prototypeVariantIds(source, query.id);
   const shown = shownRevision(source, query, variantIds);
-  const envelope = prototypeEmbedEnvelope(shown.revision.spec);
+  const envelope = prototypeEmbedEnvelope(shown.revision.spec, glyphSource);
   const text = JSON.stringify(envelope);
-  const { deviceRevision } = shown.revision;
+  const { deviceRevision, mcpSessionId } = shown.revision;
+  const filter = prototypeRevisionFilter(query.mcpSessionId);
   return {
     text,
     envelope,
     meta: {
       revision: shown.revision.revision,
       ...(deviceRevision === undefined ? {} : { deviceRevision }),
-      revisions: source.history(shown.id).map((entry) => entry.revision),
+      ...(mcpSessionId === undefined ? {} : { mcpSessionId }),
+      revisions: source.history(shown.id, filter).map((entry) => entry.revision),
       variants: variantIds,
       sha256: createHash("sha256").update(text).digest("hex"),
       rendererVersion,

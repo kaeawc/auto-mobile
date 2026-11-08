@@ -9,7 +9,7 @@ import {
   INPUT_TEXT_SETTLEMENT_BASE_MS,
 } from "../../../../src/utils/android-cmdline-tools/AndroidInputText";
 import { TypingSession } from "../../../../src/features/action/sendkeys/TypingSession";
-import { ANDROID_TYPE_FOCUSED_INPUT_ERROR } from "../../../../src/features/action/sendkeys/AndroidTypingConstants";
+import { ANDROID_TYPE_FOCUS_FAILURE } from "../../../../src/features/action/sendkeys/AndroidTypingConstants";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { observation } from "./EventTyperTestHarness";
@@ -229,10 +229,21 @@ describe("KeyEventSupport", () => {
       unchangedWarning: "unchanged",
     });
     host.observer.execute = async () => ({ ...observation(), viewHierarchy: undefined });
-    expect(await support.requireFocusedAndroidInput(signal)).toMatchObject({ success: false });
+    expect(await support.requireFocusedAndroidInput(signal)).toEqual({
+      success: false,
+      error: "Android event delivery requires a focused editable field",
+    });
+    expect(await support.requireFocusedAndroidInput(signal, ANDROID_TYPE_FOCUS_FAILURE)).toEqual({
+      success: false,
+      error:
+        "No editable field has focus. Focus the target field first (tap it, or tapOn with focus), then retry sendKeys without a mode.",
+      errorCode: "NO_FOCUSED_EDITABLE",
+    });
     host.getTargetLayer = () => "prototype";
+    // The prototype bypass keys off the code, so a semantic-key focus check is still enforced.
+    expect(await support.requireFocusedAndroidInput(signal)).toMatchObject({ success: false });
     expect(
-      await support.requireFocusedAndroidInput(signal, ANDROID_TYPE_FOCUSED_INPUT_ERROR, "2"),
+      await support.requireFocusedAndroidInput(signal, ANDROID_TYPE_FOCUS_FAILURE, "2"),
     ).toEqual({ success: true, hierarchy: { hierarchy: {} } });
     expect(calls).toEqual([{ clear: true, signal, display: "2" }]);
   });

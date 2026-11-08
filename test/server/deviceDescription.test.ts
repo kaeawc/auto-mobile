@@ -41,6 +41,7 @@ const projectionKeys = {
   display: true,
   displays: true,
   capabilityInventory: true,
+  vehicle: true,
   image: true,
   availabilityError: true,
   runtime: true,
@@ -194,7 +195,7 @@ describe("device description projections", () => {
     expect(description.runtime.locked).toBeNull();
     expect(Object.keys(description).sort()).toEqual(
       Object.keys(projectionKeys)
-        .filter((key) => key !== "displays")
+        .filter((key) => key !== "displays" && key !== "vehicle")
         .sort(),
     );
   });
@@ -995,5 +996,88 @@ describe("device description projections", () => {
       ProjectionCanonicalExact<ReturnType<typeof projectBootedDevice>>,
     ] = [true, true, true, true];
     expect(subsets).toEqual([true, true, true, true]);
+  });
+});
+
+describe("automotive vehicle capabilities", () => {
+  const carImage = (tag: string): DeviceInfo => ({
+    name: `car ${tag}`,
+    platform: "android",
+    isRunning: false,
+    runtimeId: `system-images;android-34;${tag};x86_64`,
+  });
+
+  test.each<[string, "supported" | "unsupported"]>([
+    ["android-automotive", "supported"],
+    ["android-automotive-playstore", "unsupported"],
+  ])("derives motion for a %s image from its tag", (tag, motion) => {
+    const description = describeDevice({ kind: "image", image: carImage(tag) });
+    expect(description.formFactor).toBe("automotive");
+    expect(description.vehicle).toEqual({ motion, nightMode: "supported" });
+    expect(listDevicesEntrySchema.safeParse(description).success).toBe(true);
+  });
+
+  test("reports motion unknown when no car image tag identifies the build", () => {
+    const image: DeviceInfo = {
+      name: "car",
+      platform: "android",
+      isRunning: false,
+      formFactor: "automotive",
+    };
+    expect(describeDevice({ kind: "image", image }).vehicle).toEqual({
+      motion: "unknown",
+      nightMode: "supported",
+    });
+  });
+
+  test("derives a booted emulator's vehicle from its admitted image", () => {
+    const image = carImage("android-automotive");
+    const description = describeDevice({
+      kind: "booted",
+      device: { name: "car", platform: "android", deviceId: "emulator-5554" },
+      discovery: image,
+    });
+    expect(description.vehicle).toEqual({ motion: "supported", nightMode: "supported" });
+    expect(listDevicesEntrySchema.safeParse(description).success).toBe(true);
+  });
+
+  test("reports neither control on a physical head unit", () => {
+    const description = describeDevice({
+      kind: "booted",
+      device: {
+        name: "head unit",
+        platform: "android",
+        deviceId: "R58M123456",
+        formFactor: "automotive",
+      },
+    });
+    expect(description.isVirtual).toBe(false);
+    expect(description.vehicle).toEqual({ motion: "unsupported", nightMode: "unsupported" });
+  });
+
+  test("leaves phone descriptions without a vehicle key", () => {
+    const image = describeDevice(androidImage);
+    const booted = describeDevice({
+      kind: "booted",
+      device: {
+        name: "Pixel_9",
+        platform: "android",
+        deviceId: "emulator-5556",
+        formFactor: "phone",
+      },
+    });
+    expect("vehicle" in image).toBe(false);
+    expect("vehicle" in booted).toBe(false);
+    expect(Object.keys(image)).not.toContain("vehicle");
+  });
+
+  test("rejects a vehicle state outside the vocabulary", () => {
+    const description = describeDevice({ kind: "image", image: carImage("android-automotive") });
+    expect(() =>
+      listDevicesEntrySchema.parse({
+        ...description,
+        vehicle: { motion: "maybe", nightMode: "supported" },
+      }),
+    ).toThrow();
   });
 });

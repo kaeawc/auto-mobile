@@ -1,3 +1,7 @@
+import {
+  isAppleVisionProvisionRequest,
+  provisionAppleVisionDevice,
+} from "./deviceToolsAppleVisionProvision";
 import { isAppleTvProvisionRequest, provisionAppleTvDevice } from "./deviceToolsAppleTvProvision";
 import "./deviceLifecycleHost";
 import { startDeviceOutputSchema } from "./toolOutputSchemas";
@@ -82,13 +86,18 @@ export function registerDeviceTools() {
 
   // Register with the tool registry
   registerDeviceResourceTools(getDeviceToolsDependencies);
-  ToolRegistry.register("listDeviceImages", "List device images", listDeviceImagesSchema, {
-    handler: listDeviceImagesHandler,
-    defaultEnabled: true,
-    outputSchema: listDeviceImagesOutputSchema,
-    readOnly: true,
-    hostInventory: true,
-  });
+  ToolRegistry.register(
+    "listDeviceImages",
+    "List device images; when `truncated` is true the result was over 64 KiB and `images` is partial: read `artifact.resourceUri` or the resource_link for the full list",
+    listDeviceImagesSchema,
+    {
+      handler: listDeviceImagesHandler,
+      defaultEnabled: true,
+      outputSchema: listDeviceImagesOutputSchema,
+      readOnly: true,
+      hostInventory: true,
+    },
+  );
 
   ToolRegistry.register(
     "listDevices",
@@ -121,7 +130,7 @@ export function registerDeviceTools() {
 
   ToolRegistry.register(
     "getApple",
-    "Find or recover an iOS Simulator and prepare it for automation. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device.",
+    "Find or recover an iOS Simulator and prepare it for automation. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device. getApple does not create iOS simulators; use provisionDevice (opt-in via enableTools) to create and boot one from a runtime and device type, and deleteDevice to remove it.",
     getAppleSchema,
     {
       handler: (args, progress, signal) =>
@@ -154,12 +163,16 @@ export function registerDeviceTools() {
           ? acquireUndoneIfUndelivered(signal, () =>
               provisionWatchDevice(args, bindBootedDeviceSession, signal),
             )
-          : isAppleTvProvisionRequest(args)
+          : isAppleVisionProvisionRequest(args)
             ? acquireUndoneIfUndelivered(signal, () =>
-                provisionAppleTvDevice(args, bindBootedDeviceSession, signal),
+                provisionAppleVisionDevice(args, bindBootedDeviceSession, signal),
               )
-            : // The Android/iOS handler re-parses its own request with provisionDeviceSchema.
-              provisionDeviceHandler(args as Partial<ProvisionDeviceArgs>, progress, signal),
+            : isAppleTvProvisionRequest(args)
+              ? acquireUndoneIfUndelivered(signal, () =>
+                  provisionAppleTvDevice(args, bindBootedDeviceSession, signal),
+                )
+              : // The Android/iOS handler re-parses its own request with provisionDeviceSchema.
+                provisionDeviceHandler(args as Partial<ProvisionDeviceArgs>, progress, signal),
       defaultEnabled: false,
       outputSchema: provisionDeviceOutputSchema,
       transportRecovery: "connect",
@@ -170,6 +183,8 @@ export function registerDeviceTools() {
     handler: killDeviceHandler,
     defaultEnabled: true,
     transportRecovery: "connect",
+    // killDevice's holder check runs inside its handler; it flushes once the caller is admitted.
+    flushesImeRestoreAfterAdmission: true,
   });
 
   ToolRegistry.register(

@@ -31,7 +31,7 @@ class DeviceSessionSupersededForwarderTest {
     )
 
   @Test
-  fun `matching retired epoch dispatches the existing action and re-keys the live column`() =
+  fun `matching retired epoch ends that epoch and re-keys the live column`() =
     runTest(UnconfinedTestDispatcher()) {
       val vm = WorkspaceViewModel(this)
       val actions = mutableListOf<WorkspaceAction>()
@@ -43,7 +43,7 @@ class DeviceSessionSupersededForwarderTest {
 
       assertEquals(
         listOf(
-          WorkspaceAction.RefreshDeviceSessionUuids(mapOf(event.deviceId to event.successorUuid)),
+          WorkspaceAction.EndDeviceSession(event.deviceId, event.retiredUuid, event.successorUuid),
         ),
         actions,
       )
@@ -80,7 +80,7 @@ class DeviceSessionSupersededForwarderTest {
 
       assertEquals(
         listOf(
-          WorkspaceAction.RefreshDeviceSessionUuids(mapOf(event.deviceId to event.successorUuid)),
+          WorkspaceAction.EndDeviceSession(event.deviceId, event.retiredUuid, event.successorUuid),
         ),
         actions,
       )

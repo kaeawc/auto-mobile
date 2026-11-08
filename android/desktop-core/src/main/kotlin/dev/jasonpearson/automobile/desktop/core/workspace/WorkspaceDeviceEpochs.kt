@@ -1,0 +1,58 @@
+package dev.jasonpearson.automobile.desktop.core.workspace
+
+import kotlinx.coroutines.flow.update
+
+/** Actions that reflect what the device or daemon reported, rather than a user's choice. */
+internal fun WorkspaceViewModel.applyDeviceState(action: WorkspaceAction) {
+  when (action) {
+    is WorkspaceAction.SetLockStates -> setLockStates(action.locked)
+    is WorkspaceAction.RefreshDeviceSessionUuids -> refreshDeviceSessionUuids(action.sessionUuids)
+    is WorkspaceAction.EndDeviceSession -> endDeviceSession(action)
+    else -> Unit
+  }
+}
+
+/**
+ * Replace the column observing [action]'s retired epoch with a fresh column for its successor, or
+ * mark it ended when the daemon minted none.
+ */
+internal fun WorkspaceViewModel.endDeviceSession(action: WorkspaceAction.EndDeviceSession) {
+  val successorUuid =
+    action.successorUuid ?: return markDeviceSessionEnded(action.deviceId, action.retiredUuid)
+  val existing = columnFor(action.deviceId) ?: return
+  if (existing.deviceSessionUuid != action.retiredUuid) return
+  replaceEpoch(existing, existing.nextEpoch(existing.successorEpoch(successorUuid)))
+}
+
+/**
+ * A fresh column for [successorUuid], a new epoch of this column's device. It carries only the
+ * device's identity, so [nextEpoch] resets everything observed from the retired epoch.
+ */
+internal fun DeviceColumn.successorEpoch(successorUuid: String): DeviceColumn =
+  DeviceColumn(
+    deviceId = deviceId,
+    name = name,
+    platform = platform,
+    isVirtual = isVirtual,
+    deviceSessionUuid = successorUuid,
+  )
+
+/**
+ * Swap [retired]'s column for [next] (a new epoch of the same device) and drop the retired epoch's
+ * per-device caches: the navigation screenshot loader and any locale request still in flight.
+ */
+internal fun WorkspaceViewModel.replaceEpoch(retired: DeviceColumn, next: DeviceColumn) {
+  screenshotLoaderRegistry.forget(retired.deviceId)
+  localeJobs.remove(retired.deviceId)?.cancel()
+  _state.update { current ->
+    val content = current as? WorkspaceUiState.Content ?: return@update current
+    content.copy(
+      columns =
+        content.columns.map {
+          if (it.deviceId == retired.deviceId && it.deviceSessionUuid == retired.deviceSessionUuid)
+            next
+          else it
+        },
+    )
+  }
+}

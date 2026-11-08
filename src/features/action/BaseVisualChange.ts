@@ -56,7 +56,7 @@ import type { Window } from "../observe/interfaces/Window";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { isAdoptableCapture } from "../observe/isAdoptableCapture";
 import { hasWrongWindowEvidence } from "../observe/observationFreshness";
-import { RealObserveScreen } from "../observe/ObserveScreen";
+import { createActionObserveScreen } from "../observe/ObserveScreen";
 import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
 import { PredictionActionContext, PredictionAnalyzer } from "../observe/PredictionAnalyzer";
 import { RealSettleObserve } from "../observe/SettleObserve";
@@ -173,7 +173,7 @@ export class BaseVisualChange {
     // Honor the observer seam before constructing defaults: RealObserveScreen's
     // screenshot service starts host filesystem work and retention timers.
     this.observeScreen =
-      displayFence.observeScreen ?? new RealObserveScreen(device, this.adbFactory);
+      displayFence.observeScreen ?? createActionObserveScreen(device, this.adbFactory);
     // Forward the injected clock so the internal Window shares this instance's
     // timer: home-verification derives its outer deadline from `this.timer`, and
     // Window derives the per-subread budgets from ITS timer — they must be the

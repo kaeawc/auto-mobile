@@ -18,8 +18,11 @@ export interface TileProviderLister {
 
 const COMMAND_TIMEOUT_MS = 10_000;
 
-/** Package names are ASCII; class names are Java identifiers, which may be Unicode. */
-const COMPONENT_LINE = /^([A-Za-z0-9_.]+)\/([\p{L}\p{N}_.$]+)$/u;
+/**
+ * Package names are ASCII. Class names are Java identifiers: letters, digits, combining marks,
+ * connector punctuation (`_`) and currency symbols (`$`), joined by dots.
+ */
+const COMPONENT_LINE = /^([A-Za-z0-9_.]+)\/([\p{L}\p{N}\p{M}\p{Pc}\p{Sc}.]+)$/u;
 
 /**
  * Parse `cmd package query-services --components` output: one `<package>/<class>`

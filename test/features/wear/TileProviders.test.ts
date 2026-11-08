@@ -81,6 +81,13 @@ describe("parseTileProviderComponents", () => {
     ]);
   });
 
+  test("keeps class names with combining marks", () => {
+    const component = "com.example/com.example.Cafe\u0301Tile";
+    expect(parseTileProviderComponents(`${component}\n`).map((p) => p.component)).toEqual([
+      component,
+    ]);
+  });
+
   test("expands short class names and drops duplicates", () => {
     const parsed = parseTileProviderComponents("com.ex/.Tile\ncom.ex/com.ex.Tile\n");
     expect(parsed).toEqual([

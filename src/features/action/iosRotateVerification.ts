@@ -195,7 +195,7 @@ function sameIosDisplay(
   return beforeKey === undefined || afterKey === undefined || beforeKey === afterKey;
 }
 
-export function verifyIosRotation(
+function verifyCompletedIosRotation(
   result: RotateResult,
   requested: "portrait" | "landscape",
   previousObservation: ObserveResult | undefined,
@@ -261,4 +261,71 @@ export function restoreTargetIosOrientation(observation: ObserveResult | undefin
     return width > height ? "landscape" : "portrait";
   }
   return observedIosOrientation(observation);
+}
+
+/** Orientation shown by a display pixel read, or undefined when the read is indeterminate. */
+export function iosDisplayOrientationFromPixels(
+  pixelSize: { width: number; height: number } | undefined,
+): "portrait" | "landscape" | undefined {
+  if (
+    !pixelSize ||
+    !Number.isFinite(pixelSize.width) ||
+    !Number.isFinite(pixelSize.height) ||
+    pixelSize.width <= 0 ||
+    pixelSize.height <= 0 ||
+    pixelSize.width === pixelSize.height
+  ) {
+    return undefined;
+  }
+  return pixelSize.width > pixelSize.height ? "landscape" : "portrait";
+}
+
+/** Independent simulator display pixels take precedence over XCUIDevice orientation. */
+export function reconcileIosRotationWithDisplayRead(
+  verified: RotateResult,
+  requested: "portrait" | "landscape",
+  previousObservation: ObserveResult | undefined,
+  pixelSize: { width: number; height: number } | undefined,
+): RotateResult {
+  const current = iosDisplayOrientationFromPixels(pixelSize);
+  if (!verified.success || current === undefined || current === requested) {
+    return verified;
+  }
+  const claim = verified.rotationPerformed
+    ? `a completed rotation to ${requested}`
+    : `the device was already in ${requested} orientation`;
+  // The post-action observation carries the runner's claimed rotation and screen size, which the
+  // display contradicts; do not hand those dimensions to clients for later taps.
+  const rest: RotateResult = { ...verified };
+  delete rest.observation;
+  return {
+    ...rest,
+    success: false,
+    rotationPerformed: false,
+    currentOrientation: current,
+    error: `Rotation is not supported on ${rotationTargetName(previousObservation)} (the display is still ${current} after the runner reported ${claim}). Keep the current orientation.`,
+    message: `Failed to rotate to ${requested}; the display is still ${current}.`,
+  };
+}
+
+export function verifyIosRotation(
+  result: RotateResult,
+  requested: "portrait" | "landscape",
+  previousObservation: ObserveResult | undefined,
+  timedOut = false,
+): RotateResult {
+  if (!timedOut) {
+    return verifyCompletedIosRotation(result, requested, previousObservation);
+  }
+  const previous = observedIosOrientation(previousObservation);
+  return {
+    ...result,
+    success: false,
+    rotationPerformed: false,
+    previousOrientation:
+      previous === "unknown" ? normalizeIosOrientation(result.previousOrientation) : previous,
+    currentOrientation: "unknown",
+    error: `${result.error ?? "Rotate timed out"}; the orientation could not be confirmed.`,
+    message: `Failed to rotate to ${requested}; the orientation could not be confirmed.`,
+  };
 }

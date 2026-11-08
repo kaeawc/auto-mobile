@@ -162,3 +162,65 @@ set_paths() { printf '%s\n' "$@" > "$PREPUSH_CHANGED_FILES_FILE"; }
   run bash scripts/prepush.sh --base definitely-missing-ref
   [ "$status" -eq 2 ]
 }
+
+@test "cloud profile skips ios and names the CI job that covers it" {
+  set_paths src/a.ts ios/Sources/A.swift
+  run bash scripts/prepush.sh --profile cloud --list
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'SKIPPED by --profile cloud: ios (needs macOS and Xcode; CI iOS Build and Swift Packages cover it)'* ]]
+  [ "${lines[${#lines[@]}-1]}" = node ]
+  run bash scripts/prepush.sh --profile cloud
+  [ "$status" -eq 0 ]
+  ! grep -q '^ios ' "$LOG"
+  grep -q '^node --timing$' "$LOG"
+  [[ "$output" == *'ios                SKIP  needs macOS and Xcode'* ]]
+}
+
+@test "cloud profile skips android without an SDK and runs it with one" {
+  set_paths android/app/src/Main.kt
+  printf '#!/usr/bin/env bash\n' > "$TEST_ROOT/bin/java"; chmod +x "$TEST_ROOT/bin/java"
+  run env -u ANDROID_HOME -u ANDROID_SDK_ROOT -u JAVA_HOME bash scripts/prepush.sh --profile cloud
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'SKIPPED by --profile cloud: android (no Android SDK'* ]]
+  [[ "$output" == *'No pre-push gates selected'* ]]
+  [ ! -f "$LOG" ]
+  mkdir -p "$TEST_ROOT/sdk"
+  run env -u ANDROID_SDK_ROOT -u JAVA_HOME ANDROID_HOME="$TEST_ROOT/sdk" bash scripts/prepush.sh --profile cloud --list
+  [ "$status" -eq 0 ]; [ "$output" = android ]
+}
+
+@test "cloud profile skips android without java" {
+  set_paths android/app/src/Main.kt
+  mkdir -p "$TEST_ROOT/sdk" "$TEST_ROOT/nojava"
+  for tool in bash env cat sed sort wc tr dirname basename date git; do
+    if command -v "$tool" > /dev/null 2>&1; then ln -s "$(command -v "$tool")" "$TEST_ROOT/nojava/$tool"; fi
+  done
+  run env -u JAVA_HOME PATH="$TEST_ROOT/nojava" ANDROID_HOME="$TEST_ROOT/sdk" bash scripts/prepush.sh --profile cloud --list
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'android (no java (JAVA_HOME or PATH)'* ]]
+  # gradlew prefers JAVA_HOME, so a JDK there is enough even without java on PATH.
+  mkdir -p "$TEST_ROOT/jdk/bin"
+  printf '#!/usr/bin/env bash\n' > "$TEST_ROOT/jdk/bin/java"; chmod +x "$TEST_ROOT/jdk/bin/java"
+  run env PATH="$TEST_ROOT/nojava" JAVA_HOME="$TEST_ROOT/jdk" ANDROID_HOME="$TEST_ROOT/sdk" bash scripts/prepush.sh --profile cloud --list
+  [ "$status" -eq 0 ]; [ "$output" = android ]
+  # A JAVA_HOME without a java binary fails gradlew, so it skips even with java on PATH.
+  run env JAVA_HOME="$TEST_ROOT/sdk" ANDROID_HOME="$TEST_ROOT/sdk" bash scripts/prepush.sh --profile cloud --list
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'android (no java (JAVA_HOME or PATH)'* ]]
+}
+
+@test "default profile runs every selected lane and node without --timing" {
+  set_paths src/a.ts ios/Sources/A.swift
+  run bash scripts/prepush.sh
+  [ "$status" -eq 0 ]
+  grep -q '^ios ' "$LOG"
+  grep -q '^node $' "$LOG"
+  [[ "$output" != *SKIP* ]]
+}
+
+@test "unknown profile is a usage error" {
+  run bash scripts/prepush.sh --profile laptop --list
+  [ "$status" -eq 2 ]; [[ "$output" == *'Unknown profile: laptop'* ]]
+  run bash scripts/prepush.sh --profile
+  [ "$status" -eq 2 ]
+}

@@ -1,3 +1,9 @@
+import { verifyIosRotationDisplayRead, type IosDisplayPixelProbe } from "./iosRotateDisplayProbe";
+import {
+  awaitIosRunnerRecovery,
+  unrestoredIosOrientationWarning,
+  type IosRotateRunner,
+} from "./iosRotateRunnerRecovery";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
@@ -11,7 +17,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { ProgressCallback } from "./BaseVisualChange";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios";
+import { IOSCtrlProxyClient } from "../observe/ios";
 import { readWindowManagerRotation } from "../../utils/android-cmdline-tools/readWindowManagerRotation";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { restoreTargetIosOrientation, verifyIosRotation } from "./iosRotateVerification";
@@ -51,6 +57,7 @@ interface AndroidRotationWrites {
 }
 
 export interface RotateOptions {
+  iosDisplayPixelProbe?: IosDisplayPixelProbe;
   deadlineMs?: number;
   sessionRotation?: <T>(mutation: (slot?: RotationRestoreSlot) => Promise<T>) => Promise<T>;
 }
@@ -351,7 +358,8 @@ export class Rotate extends BaseVisualChange {
   ): Promise<RotateResult> {
     throwIfAborted(signal);
     let previousObservation: ObserveResult | undefined;
-    let runner: Pick<IosCtrlProxy, "requestRotate"> | undefined;
+    let runner: IOSCtrlProxyClient | undefined;
+    let timedOut = false;
     const result: RotateResult = await this.observedInteraction(
       async (observation) => {
         previousObservation = observation;
@@ -363,6 +371,11 @@ export class Rotate extends BaseVisualChange {
             awaitWhileRequestIsLive(client.requestRotate(orientation, 5000, perf), signal),
           );
 
+          timedOut = result.timedOut === true;
+          if (timedOut) {
+            // Start recovery before the post-action observation reads the possibly stalled runner.
+            client.ensureRecoveryStarted();
+          }
           if (!result.success) {
             return {
               success: false,
@@ -403,7 +416,19 @@ export class Rotate extends BaseVisualChange {
         skipUiStability: true,
       },
     );
-    const verified = verifyIosRotation(result, orientation, previousObservation);
+    let verified = verifyIosRotation(result, orientation, previousObservation, timedOut);
+    if (timedOut && runner) {
+      const warning = await awaitIosRunnerRecovery(runner, "rotate", signal);
+      return { ...verified, warning: [verified.warning, warning].filter(Boolean).join(" ") };
+    }
+    verified = await verifyIosRotationDisplayRead(verified, {
+      requested: orientation,
+      previousObservation,
+      device: this.device,
+      probe: this.options.iosDisplayPixelProbe,
+      timer: this.timer,
+      signal,
+    });
     return verified.success
       ? verified
       : await this.restoreIosOrientationAfterFailure(verified, runner, previousObservation, {
@@ -418,7 +443,7 @@ export class Rotate extends BaseVisualChange {
    */
   private async restoreIosOrientationAfterFailure(
     failed: RotateResult,
-    client: Pick<IosCtrlProxy, "requestRotate"> | undefined,
+    client: IosRotateRunner | undefined,
     previousObservation: ObserveResult | undefined,
     call: { perf: RotationPerf; signal?: AbortSignal },
   ): Promise<RotateResult> {
@@ -432,6 +457,11 @@ export class Rotate extends BaseVisualChange {
       const restored = await perf.track("iOSRotationRestore", () =>
         awaitWhileRequestIsLive(client.requestRotate(prior, 5000, perf), signal),
       );
+      if (restored.timedOut) {
+        client.ensureRecoveryStarted();
+        const recovery = await awaitIosRunnerRecovery(client, "rotate restore", signal);
+        return { ...failed, warning: `${unrestoredIosOrientationWarning(prior)} ${recovery}` };
+      }
       if (!restored.success) {
         throw new Error(restored.error ?? "runner reported failure");
       }
@@ -441,7 +471,7 @@ export class Rotate extends BaseVisualChange {
       logger.warn(`iOS rotation restore to ${prior} failed: ${errorMessage(error)}`, error);
       return {
         ...failed,
-        warning: `The device orientation could not be restored to ${prior} after the failed rotate; the next app may open rotated.`,
+        warning: unrestoredIosOrientationWarning(prior),
       };
     }
   }

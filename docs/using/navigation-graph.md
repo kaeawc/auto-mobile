@@ -54,7 +54,9 @@ of new things to try. On an Android TV it moves D-pad focus to an element and
 selects it instead, recorded as `focusNavigate` with `select: true`. It never
 explores the on-screen keyboard: when a field opens it over the app, `explore`
 presses back once to hide it, and it skips the keyboard's keys if it stays open.
-It interacts with the device, so run it on a test device and test account.
+It also hides a keyboard its last interaction opened before it returns. An
+element whose tap or select left the screen unchanged is not tried again on that
+screen. It interacts with the device, so run it on a test device and test account.
 
 | Parameter         | Default    | Meaning                                                                                                |
 | ----------------- | ---------- | ------------------------------------------------------------------------------------------------------ |

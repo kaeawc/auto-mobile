@@ -152,7 +152,10 @@ export function partitionToolSelectionNames(
     const tool = ToolRegistry.getRegisteredTool(toolName)!;
     const reasons = ToolRegistry.getToolAvailabilityGateReasons(tool);
     if (reasons.length > 0) {
-      throw new ActionableError(`Tool '${toolName}' is unavailable: ${reasons.join("; ")}.`);
+      const detail = reasons.join("; ");
+      // A flag gate's reason is a full sentence (#16906); do not double its period.
+      const end = detail.endsWith(".") ? "" : ".";
+      throw new ActionableError(`Tool '${toolName}' is unavailable: ${detail}${end}`);
     }
   }
   return {

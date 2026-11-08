@@ -23,6 +23,7 @@ import {
   frameOrientations,
   renderChromelessScreen,
   renderDeviceFrame,
+  safeAreaVars,
   screenSize,
   type WebOrientation,
 } from "./webFrame";
@@ -49,7 +50,13 @@ import {
   type WebScreenSize,
   type WebStatusBarContent,
 } from "./webStatusBar";
-import { cssColor, fontPx, themeTypography, type WebStyleContext } from "./webStyle";
+import {
+  cssColor,
+  fontPx,
+  INCOMING_HEIGHT_KEY,
+  themeTypography,
+  type WebStyleContext,
+} from "./webStyle";
 import { stillTextScale, type StillTextSize } from "./webTextScale";
 
 export interface PrototypeStillOptions {
@@ -172,19 +179,32 @@ function floatingWindow(placement: Raw, children: WebElement[]): WebElement {
 }
 
 /**
+ * The height a window hands its root (INCOMING_HEIGHT_KEY), where it is statically known: a
+ * sheet's dp `height`. A fullscreen window's height is the screen less bars and insets, known only
+ * at layout time, so it hands none.
+ */
+function windowHeight(placement: Raw | undefined): Raw {
+  const height = placement?.type === "sheet" ? placement.height : undefined;
+  return typeof height === "number" && Number.isFinite(height) && height >= 0
+    ? { [INCOMING_HEIGHT_KEY]: height }
+    : {};
+}
+
+/**
  * A fullscreen or sheet root fills its window on each axis it leaves unsized, as both devices do
- * (#16190); explicit sizes stay, and a floating root keeps its content size.
+ * (#16190); explicit sizes stay, and a floating root keeps its content size. A sheet's root also
+ * carries the sheet's height as its bound (see windowHeight).
  */
 function sizedRoot(spec: unknown): unknown {
   const root = record(record(spec)?.root);
-  const placement = record(record(record(spec)?.window)?.placement)?.type;
-  if (!root || placement === "floating") {
+  const placement = record(record(record(spec)?.window)?.placement);
+  if (!root || placement?.type === "floating") {
     return root;
   }
   const style = record(root.style) ?? {};
   return {
     ...root,
-    style: { width: "fill", height: "fill", ...style },
+    style: { width: "fill", height: "fill", ...style, ...windowHeight(placement) },
   };
 }
 
@@ -357,37 +377,29 @@ function screenBackground(style: WebStyleContext): string {
   );
 }
 
-/**
- * Whether the window's content starts at the top of the screen, behind the status bar: a
- * fullscreen window or a top sheet. A bottom sheet or floating window leaves the status area on
- * the screen background.
- */
-function coversStatusArea(spec: unknown): boolean {
-  const placement = record(record(record(spec)?.window)?.placement);
-  const type = placement?.type;
-  return (
-    type === undefined || type === "fullscreen" || (type === "sheet" && placement?.edge === "top")
-  );
-}
-
-/**
- * `window.statusBar` light or dark picks the content style; `auto` or none follows the app's top
- * colour (a fullscreen window's or top sheet's), as both platforms' edge-to-edge defaults do.
- */
+/** What the status bar's top colour is read from: the window's content on the screen. */
 interface StatusBarSample {
   readonly content: WebElement;
   readonly background: string;
   readonly dark: boolean;
   readonly screen: WebScreenSize;
+  /** The screen's custom properties: the safe-area insets. */
+  readonly vars: Readonly<Record<string, string>>;
 }
 
+/**
+ * `window.statusBar` light or dark picks the content style; `auto` or none follows the colour the
+ * window paints at the screen's top edge, as both platforms' edge-to-edge defaults do. The window
+ * placement is part of that layout, so a bottom sheet or a floating window leaves the screen
+ * background there.
+ */
 function stillStatusBarContent(spec: unknown, sample: StatusBarSample): WebStatusBarContent {
-  const { content, background, dark, screen } = sample;
+  const { content, background, dark, screen, vars } = sample;
   const authored = record(record(spec)?.window)?.statusBar;
   if (authored === "light" || authored === "dark") {
     return authored;
   }
-  const top = coversStatusArea(spec) ? appTopColor(content, background, screen) : background;
+  const top = appTopColor(content, background, screen, vars);
   return statusBarContentFor(top, dark ? "light" : "dark");
 }
 
@@ -461,6 +473,7 @@ export function renderPrototypeStill(
             background,
             dark,
             screen: screenSize(frame, orientation),
+            vars: safeAreaVars(frame, orientation),
           }),
           ...postureFrameOptions(view, fold),
         },

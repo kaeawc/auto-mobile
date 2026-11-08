@@ -29,7 +29,7 @@ export interface GetLogsRequest {
   maxLines?: number;
 }
 
-/** A returned line; iOS unified-log lines carry only a timestamp and the text. */
+/** A returned line; iOS and watchOS unified-log lines carry only a timestamp and the text. */
 export type GetLogsLine = Partial<Omit<LogLine, "message" | "timestamp">> & {
   timestamp: string;
   message: string;
@@ -172,8 +172,18 @@ export class GetLogs {
     );
     const maxLines = Math.min(request.maxLines ?? GET_LOGS_DEFAULT_MAX_LINES, GET_LOGS_MAX_LINES);
     const minPriority = request.minPriority ?? "V";
-    if (device.platform === "ios") {
-      return this.ios(request, { sinceSeconds, maxLines, minPriority }, warnings, signal);
+    if (device.platform === "ios" || device.platform === "watchos") {
+      return this.ios(
+        device.platform,
+        request,
+        { sinceSeconds, maxLines, minPriority },
+        warnings,
+        signal,
+      );
+    }
+    if (device.platform !== "android") {
+      // A platform without a log path never falls through to logcat (docs/decisions/watchos-platform.md).
+      throw new ActionableError(`getLogs does not support platform ${device.platform}.`);
     }
     const result = await this.deps.android().read(
       {
@@ -201,15 +211,17 @@ export class GetLogs {
   }
 
   private async ios(
+    platform: "ios" | "watchos",
     request: GetLogsRequest,
     window: GetLogsWindow,
     warnings: string[],
     signal?: AbortSignal,
   ): Promise<GetLogsResult> {
     const { sinceSeconds, maxLines, minPriority } = window;
+    const label = platform === "watchos" ? "watchOS" : "iOS";
     if (!request.appId) {
       throw new ActionableError(
-        "getLogs on iOS needs appId: the unified log is read per app subsystem.",
+        `getLogs on ${label} needs appId: the unified log is read per app subsystem.`,
       );
     }
     const ignored = [
@@ -218,7 +230,7 @@ export class GetLogs {
       ...(request.includeSystem ? ["includeSystem"] : []),
     ];
     if (ignored.length > 0) {
-      warnings.push(`Android-only filters ignored on iOS: ${ignored.join(", ")}.`);
+      warnings.push(`Android-only filters ignored on ${label}: ${ignored.join(", ")}.`);
     }
     const grep = compileGrep(request.grep);
     const source = this.deps.ios();
@@ -239,7 +251,7 @@ export class GetLogs {
     );
     const bounded = boundLines(lines, maxLines);
     return {
-      platform: "ios",
+      platform,
       appId: request.appId,
       sinceSeconds,
       lines: bounded.lines,

@@ -177,6 +177,11 @@ function stringProp(
   return typeof value === "string" ? value : "";
 }
 
+/** Leanback row headers hold focus while their content pane's card labels are hidden. */
+function isLeanbackRowHeader(element: Element | null): boolean {
+  return element !== null && stringProp(element, "resource-id").endsWith(":id/row_header");
+}
+
 /**
  * Label matching normalized as tapOn's touch resolver does (quotes, trimmed, whitespace collapsed,
  * case-insensitive), so ` Movies ` equals `Movies` and a wrapped `Sign\nin` matches `Sign in`.
@@ -835,14 +840,23 @@ export class FocusNavigate {
    * The best direction not yet pressed from the focused element. With the target on screen every
    * direction is a candidate, so focus can leave a container that traps it (#17209): directions
    * toward the target first, then the sideways escapes, then a direction that kept moving focus
-   * without getting closer (resumed for the rest of the call), and backing away last. Without a match on screen the only move is
-   * down, so an absent target scans down rather than wandering the whole screen.
+   * without getting closer (resumed for the rest of the call), and backing away last. Without a
+   * match, enter a Leanback header's content pane once with right; otherwise scan down.
    */
   private nextDirection(
     focused: Element | null,
     matches: readonly Element[],
     progress: FocusProgress,
   ): FocusNavigateDirection | undefined {
+    if (matches.length === 0 && isLeanbackRowHeader(focused)) {
+      if (!progress.tried.has("right")) {
+        return "right";
+      }
+      // A refused entry cannot reveal the cards; preserve the existing unchanged-focus exit.
+      if (progress.unchanged > 0 && progress.blocked.has("right")) {
+        return undefined;
+      }
+    }
     const toward = directionsToward(focused, matches, progress.arrivedBy);
     const candidates =
       focused && matches.length > 0 ? directionsWithFallbacks(toward) : [...toward];

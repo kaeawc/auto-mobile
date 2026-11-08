@@ -286,14 +286,20 @@ describe("a connection bound to the base session naming its own derived label se
               [INTERNAL_MCP_SESSION_PARAM]: OWNER,
             },
           });
-          expect(result.isError).not.toBe(true);
-          if (row.live) {
+          if (row.target === "foreign-owned") {
+            // Another connected client owns it and this connection holds no binding (#13540).
+            expect(result.isError).toBe(true);
+            expect(JSON.stringify(result)).toContain("read_session_not_bound");
+            expect(tools.runs.some((run) => run.sessionUuid === row.target)).toBe(false);
+          } else if (row.live) {
+            expect(result.isError).not.toBe(true);
             expect(tools.runs.at(-1)).toMatchObject({
               name: "observe",
               deviceId: third.deviceId,
               sessionUuid: row.target,
             });
           } else {
+            expect(result.isError).not.toBe(true);
             expect(tools.watcherReads).toEqual([third.deviceId]);
           }
           expect(binding).toBeDefined();

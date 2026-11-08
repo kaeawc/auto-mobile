@@ -63,6 +63,28 @@ export function filling(node: Raw, axes: readonly WebAxis[]): Raw {
   return { ...node, style: { ...fills, ...style } };
 }
 
+/** A spacer with no width, height or weight fills its parent, as the native spacer does. */
+export function isUnsizedSpacer(node: unknown): boolean {
+  const raw = record(node);
+  const style = record(raw?.style) ?? {};
+  return (
+    raw?.type === "spacer" &&
+    style.width === undefined &&
+    style.height === undefined &&
+    style.weight === undefined
+  );
+}
+
+/** An unsized spacer's missing width and height default to `fill`; other nodes are unchanged. */
+export function spacerFilled(node: Raw): Raw {
+  return isUnsizedSpacer(node) ? filling(node, ["width", "height"]) : node;
+}
+
+/** A row's main axis is its width and a column's its height; other containers have none. */
+export function lineMainAxis(raw: Raw): WebAxis | undefined {
+  return raw.type === "row" ? "width" : raw.type === "column" ? "height" : undefined;
+}
+
 /** The page a pager opens on: its numeric state value clamped to its pages and truncated, else 0. */
 export function pagerPage(
   node: Raw,

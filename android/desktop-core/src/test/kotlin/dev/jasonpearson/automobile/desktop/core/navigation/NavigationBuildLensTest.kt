@@ -229,4 +229,78 @@ class NavigationBuildLensTest {
       NavigationBuildLens.label(ProvenanceBuildKey(MultiBuildNavigationFixture.PACKAGE, 0, "")),
     )
   }
+
+  @Test
+  fun `labels prefer the declared branch and short sha`() {
+    val build = ProvenanceBuildKey(MultiBuildNavigationFixture.PACKAGE, 7, "hash")
+    assertEquals(
+      "feature/login@abcdef1",
+      NavigationBuildLens.label(build, BuildSourceRevision("feature/login", "abcdef1234567")),
+    )
+    assertEquals("v7 (hash)", NavigationBuildLens.label(build, null))
+  }
+
+  @Test
+  fun `graph labels use each build's declared revision and fall back for builds without one`() {
+    val declared = ProvenanceBuildKey(MultiBuildNavigationFixture.PACKAGE, 2, "hashB")
+    val plain = ProvenanceBuildKey(MultiBuildNavigationFixture.PACKAGE, 1, "hashA")
+    val revision = BuildSourceRevision("main", "0123456789abcdef")
+    fun record(build: ProvenanceBuildKey, rev: BuildSourceRevision?) =
+      ScreenProvenance(build, "emu", "s1", 100L, rev)
+    val graph =
+      NavigationGraph(
+        screens =
+          listOf(
+            ScreenNode(
+              id = "1",
+              name = "Home",
+              type = "screen",
+              packageName = MultiBuildNavigationFixture.PACKAGE,
+              transitionCount = 0,
+              discoveredAt = 0L,
+              provenance = listOf(record(declared, revision), record(plain, null)),
+            ),
+          ),
+        transitions = emptyList(),
+      )
+
+    assertEquals(
+      mapOf(declared to "main@0123456", plain to "v1 (hashA)"),
+      NavigationBuildLabels.labelsIn(graph),
+    )
+    // Identity is unchanged: the revision does not split or merge builds.
+    assertEquals(listOf(declared, plain), NavigationBuildLens.buildsIn(graph))
+  }
+
+  @Test
+  fun `builds declaring the same revision keep distinguishable labels`() {
+    val a = ProvenanceBuildKey(MultiBuildNavigationFixture.PACKAGE, 2, "hashB")
+    val b = ProvenanceBuildKey(MultiBuildNavigationFixture.PACKAGE, 1, "hashA")
+    val revision = BuildSourceRevision("main", "0123456789abcdef")
+    val graph =
+      NavigationGraph(
+        screens =
+          listOf(
+            ScreenNode(
+              id = "1",
+              name = "Home",
+              type = "screen",
+              packageName = MultiBuildNavigationFixture.PACKAGE,
+              transitionCount = 0,
+              discoveredAt = 0L,
+              provenance =
+                listOf(
+                  ScreenProvenance(a, "emu", "s1", 100L, revision),
+                  ScreenProvenance(b, "emu", "s1", 100L, revision),
+                ),
+            ),
+          ),
+        transitions = emptyList(),
+      )
+
+    assertEquals(
+      mapOf(a to "main@0123456 · v2 (hashB)", b to "main@0123456 · v1 (hashA)"),
+      NavigationBuildLabels.labelsIn(graph),
+    )
+  }
 }

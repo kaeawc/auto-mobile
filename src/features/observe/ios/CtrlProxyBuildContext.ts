@@ -17,6 +17,12 @@ import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import { exponentialBackoff } from "../../../utils/Backoff";
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
+import { PlistClient } from "../../../utils/ios-cmdline-tools/PlistClient";
+import type { BuildSourceRevision } from "../../../models/BuildSourceRevision";
+import {
+  readBundleSourceRevision,
+  type InfoPlistReader,
+} from "../../../utils/bundleSourceRevision";
 type NavGraph = ReturnType<typeof NavigationGraphManager.getInstance>;
 interface BuildContextHost {
   readonly device: BootedDevice;
@@ -65,6 +71,8 @@ export class CtrlProxyBuildContext {
   private appMetadata?: GetAppMetadata;
 
   private contentHashProvider?: ContentHashProvider;
+
+  private infoPlistReader?: InfoPlistReader;
 
   private readonly resolvedBuildContexts = new Map<string, NavigationBuildContext>();
 
@@ -169,8 +177,19 @@ export class CtrlProxyBuildContext {
         deviceId: this.host.device.deviceId,
         ...version,
         contentHash,
+        ...(await this.readSourceRevision(metadata.installPath)),
       },
     };
+  }
+
+  /** The bundle's declared git revision (#16954), as an optional context field. */
+  private async readSourceRevision(
+    installPath: string,
+  ): Promise<{ sourceRevision?: BuildSourceRevision }> {
+    // Simulator bundles live on the host, so their Info.plist is readable directly.
+    this.infoPlistReader ??= new PlistClient();
+    const sourceRevision = await readBundleSourceRevision(this.infoPlistReader, installPath);
+    return sourceRevision ? { sourceRevision } : {};
   }
 
   private async resolveBuildContext(
@@ -290,13 +309,22 @@ export class CtrlProxyBuildContext {
   }
   constructor(
     private readonly host: BuildContextHost,
-    options: { iosSource?: IosAppMetadataSource; contentHashProvider?: ContentHashProvider },
+    options: {
+      iosSource?: IosAppMetadataSource;
+      contentHashProvider?: ContentHashProvider;
+      infoPlistReader?: InfoPlistReader;
+    },
   ) {
     this.iosSource = options.iosSource;
     this.contentHashProvider = options.contentHashProvider;
+    this.infoPlistReader = options.infoPlistReader;
   }
   dependencies() {
-    return { iosSource: this.iosSource, contentHashProvider: this.contentHashProvider };
+    return {
+      iosSource: this.iosSource,
+      contentHashProvider: this.contentHashProvider,
+      infoPlistReader: this.infoPlistReader,
+    };
   }
   invalidateAll(): void {
     for (const appId of this.buildContextGeneration.keys()) {

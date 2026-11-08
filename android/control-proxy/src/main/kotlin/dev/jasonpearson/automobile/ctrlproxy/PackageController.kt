@@ -22,6 +22,10 @@ internal class PackageController(
 ) {
   companion object {
     private const val TAG = "CtrlProxy"
+
+    /** App-declared build provenance meta-data names (#16954), shared with the iOS keys. */
+    const val BUILD_GIT_BRANCH_KEY = "dev.jasonpearson.automobile.build.gitBranch"
+    const val BUILD_GIT_SHA_KEY = "dev.jasonpearson.automobile.build.gitSha"
   }
 
   /**
@@ -210,7 +214,10 @@ internal class PackageController(
     includePermissions: Boolean,
     startTime: Long,
   ) {
-    val flags = if (includePermissions) PackageManager.GET_PERMISSIONS else 0
+    // GET_META_DATA populates applicationInfo.metaData for the build provenance keys.
+    val flags =
+      (if (includePermissions) PackageManager.GET_PERMISSIONS else 0) or
+        PackageManager.GET_META_DATA
     val info =
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         packageManager()
@@ -261,6 +268,10 @@ internal class PackageController(
         mainActivity = mainActivity,
         error = null,
         totalTimeMs = totalTime,
+        // Raw declared strings; the daemon validates them. Non-string values (a numeric-only
+        // `android:value` is typed as a number) are not declarations and are ignored.
+        gitBranch = appInfo?.metaData?.getString(BUILD_GIT_BRANCH_KEY),
+        gitSha = appInfo?.metaData?.getString(BUILD_GIT_SHA_KEY),
       ),
     )
   }
@@ -334,6 +345,8 @@ internal class PackageController(
         mainActivity = outcome.mainActivity,
         totalTimeMs = outcome.totalTimeMs,
         error = outcome.error,
+        gitBranch = outcome.gitBranch,
+        gitSha = outcome.gitSha,
       )
     }
   }

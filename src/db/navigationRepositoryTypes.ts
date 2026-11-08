@@ -24,6 +24,8 @@ export interface NavigationNodeProvenanceRow {
   package_id: string;
   version_code: number;
   content_hash: string;
+  git_branch: string | null;
+  git_sha: string | null;
   device_id: string;
   session_uuid: string;
   last_seen_at: number;
@@ -38,6 +40,8 @@ export interface NavigationEdgeProvenanceRow {
   package_id: string;
   version_code: number;
   content_hash: string;
+  git_branch: string | null;
+  git_sha: string | null;
   device_id: string;
   session_uuid: string;
   last_seen_at: number;

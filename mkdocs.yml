@@ -243,6 +243,7 @@ nav:
       - "MCP SDK v2 adoption survey": design-docs/mcp/sdk-v2-adoption-survey.md
       - "Elicitation for an ambiguous device": design-docs/mcp/elicitation-ambiguous-device.md
       - "Live observe App shell": design-docs/mcp/observe-app-shell.md
+      - "Build source revision": design-docs/mcp/build-source-revision.md
       - "Session state record": design-docs/session-state-record.md
       - "Test runners": design-docs/plat/android/junit-runner/index.md
       - "Robolectric runtime jars": design-docs/plat/android/robolectric-android-all.md

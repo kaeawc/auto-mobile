@@ -1245,7 +1245,6 @@ test/features/preferences/AndroidSharedPreferencesMutationCoordinator.test.ts
 test/features/preferences/AppPreferences.test.ts
 test/features/preferences/preferenceValues.missingDefault.test.ts
 test/features/preferences/resolveAndroidPreferencesUser.test.ts
-test/features/prototype/PrototypeAdbReverseManager.test.ts
 test/features/prototype/PrototypeCommitGenerations.test.ts
 test/features/prototype/PrototypeEventBuffer.test.ts
 test/features/prototype/PrototypeEventCoordinator.test.ts
@@ -1293,7 +1292,6 @@ test/features/prototype/prototypeIosIconSymbols.test.ts
 test/features/prototype/prototypeIosSpecContract.test.ts
 test/features/prototype/prototypeLinkify.test.ts
 test/features/prototype/prototypeLoadingStates.test.ts
-test/features/prototype/prototypeLoopbackPorts.test.ts
 test/features/prototype/prototypeMenus.test.ts
 test/features/prototype/prototypeMissingAssets.test.ts
 test/features/prototype/prototypeMotionV2.test.ts
@@ -1887,11 +1885,9 @@ test/server/prototypeDisplay.test.ts
 test/server/prototypeDisplayAssets.test.ts
 test/server/prototypeInspect.test.ts
 test/server/prototypeIosResetRefusal.test.ts
-test/server/prototypePatchSettle.test.ts
 test/server/prototypePlatformTool.test.ts
 test/server/prototypeRequestTool.test.ts
 test/server/prototypeResources.test.ts
-test/server/prototypeReverse.test.ts
 test/server/prototypeSavedIos.test.ts
 test/server/prototypeShownOutcome.test.ts
 test/server/prototypeSuspendedRefusal.test.ts

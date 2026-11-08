@@ -85,6 +85,13 @@ export const ROW_MEASURE_KEY = "webRowMeasure";
 export const ROW_BOUND_KEY = "webRowBound";
 
 /**
+ * A style key the web renderer adds to a column's children, never authored: the tallest that
+ * column lets the child be (dp), as Compose's Column measures them in order. It is set only where
+ * the column's content height is statically known (see webIncomingHeight.ts).
+ */
+export const INCOMING_HEIGHT_KEY = "webIncomingHeight";
+
+/**
  * A row child's measure hint: `take` makes it the row's lone grower, `zero` measures it against no
  * width, and `shrink` sets how fast it gives up width, from its own `basis` when it has one. `later`
  * marks a sibling after a capped aspect ratio, whose authored `minWidth` holds only while width

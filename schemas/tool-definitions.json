@@ -9426,6 +9426,7 @@
               "uninstallApp",
               "videoRecording",
               "wakeAndUnlock",
+              "wearSurface",
               "windowMode"
             ]
           }
@@ -9591,6 +9592,7 @@
               "uninstallApp",
               "videoRecording",
               "wakeAndUnlock",
+              "wearSurface",
               "windowMode"
             ]
           }
@@ -42408,6 +42410,7 @@
               "uninstallApp",
               "videoRecording",
               "wakeAndUnlock",
+              "wearSurface",
               "windowMode"
             ]
           }
@@ -54873,6 +54876,7 @@
             "uninstallApp",
             "videoRecording",
             "wakeAndUnlock",
+            "wearSurface",
             "windowMode"
           ]
         },
@@ -55000,6 +55004,7 @@
               "uninstallApp",
               "videoRecording",
               "wakeAndUnlock",
+              "wearSurface",
               "windowMode"
             ]
           }
@@ -67296,6 +67301,170 @@
       },
       "required": ["message"],
       "additionalProperties": {}
+    }
+  },
+  {
+    "name": "wearSurface",
+    "title": "Manage Wear OS Tiles",
+    "annotations": {
+      "destructiveHint": true
+    },
+    "description": "Wear OS watches only (other form factors are refused without a change): tiles. addTile adds a tile provider to the carousel (idempotent; reports its index). removeTile removes it (also succeeds when it was absent). showTile scrolls the carousel to a tile by component (index resolved right before showing, adding the tile if absent) or by index, then observes; success requires the observe to confirm a tile container in the foreground Wear system UI. The debug broadcasts report success even when nothing happened, so verified is only true when an observe confirmed it.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "addTile and removeTile need component; showTile needs component (index resolved right before showing) or index",
+          "type": "string",
+          "enum": ["addTile", "showTile", "removeTile"]
+        },
+        "component": {
+          "description": "Tile provider service as <package>/<service>",
+          "type": "string",
+          "pattern": "^[A-Za-z][\\w.]*\\/\\.?[A-Za-z_][\\w.]*$"
+        },
+        "index": {
+          "description": "showTile only: carousel position; indexes shift when tiles are added",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios", "tvos", "visionos"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["addTile", "showTile", "removeTile"]
+        },
+        "requested": {
+          "type": "object",
+          "properties": {
+            "component": {
+              "type": "string"
+            },
+            "index": {
+              "type": "number"
+            }
+          },
+          "additionalProperties": false
+        },
+        "broadcastResult": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "indexResolution": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "index": {
+          "type": "number"
+        },
+        "verified": {
+          "description": "True only when an observe after the action confirmed it",
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "artifact": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "const": "json"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool": {
+              "type": "string"
+            },
+            "resourceUri": {
+              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
+              "type": "string"
+            }
+          },
+          "required": ["path", "format", "payload", "bytes", "tool"],
+          "additionalProperties": {}
+        }
+      },
+      "required": ["success", "action", "requested", "broadcastResult", "verified", "message"],
+      "additionalProperties": false,
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "data": {
+              "type": "string"
+            },
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "added",
+                "removed",
+                "showRequested",
+                "providerNotFound",
+                "missingComponent",
+                "indexRequired",
+                "unrecognizedOperation",
+                "unknown"
+              ]
+            },
+            "index": {
+              "type": "number"
+            },
+            "operation": {
+              "type": "string"
+            }
+          },
+          "required": ["code", "outcome"],
+          "additionalProperties": false
+        }
+      }
     }
   },
   {

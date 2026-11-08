@@ -197,6 +197,48 @@ For visual proof, take a screenshot after `enter`: the watch face renders dimmed
 Hardware wake by tilt or touch remains untested. Command failures return an error; check the
 device connection before retrying.
 
+## Tiles
+
+Enable `wearSurface` with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)), then call it
+with a tile provider's component (`<package>/<service>`):
+
+```json
+{
+  "name": "wearSurface",
+  "arguments": {
+    "action": "showTile",
+    "component": "com.google.android.contacts/com.google.android.wearable.contacts.tiles.FavoriteContactsTileService"
+  }
+}
+```
+
+| `action`     | Arguments              | `success: true` means                                                                 |
+| ------------ | ---------------------- | ------------------------------------------------------------------------------------- |
+| `addTile`    | `component`            | The tile is in the carousel at `index` (it may already have been there)               |
+| `removeTile` | `component`            | The tile was removed or was not there; the watch does not say which                   |
+| `showTile`   | `component` or `index` | An observe after a 3 s settle shows a tile container in the foreground Wear system UI |
+
+The watch reports success for an `index` with no tile and for removing a tile that is absent, so
+only `showTile` checks the screen, and only its `verified: true` means AutoMobile saw a tile container in the foreground Wear system UI.
+`addTile` and `removeTile` always return `verified: false`. Every result carries `requested`,
+`broadcastResult` (`code`, `data` and a typed `outcome`: `added`, `removed`, `showRequested`,
+`providerNotFound`, `missingComponent`, `indexRequired`, `unrecognizedOperation` or `unknown`),
+`index` when known, and a `reason` on failure.
+
+- Indexes shift: a new tile is inserted at index 0 and pushes the others along. Prefer `showTile`
+  with `component`, which looks up the current index right before showing. That lookup adds the
+  tile when it is missing; `indexResolution` holds its reply.
+- `showTile` succeeds when a tile is visible, including a tile already on screen. A watch face
+  alone cannot verify a tile, even if its clock changes. Verification confirms a visible tile,
+  not its identity or requested index. Use `observe` to read the tile's content and `swipeOn`
+  left or right to move through the carousel.
+- `providerNotFound` means the component is not a tile provider on this watch; list providers
+  with `adb shell cmd package query-services -a androidx.wear.tiles.action.BIND_TILE_PROVIDER`.
+- `unrecognizedOperation` means this Wear OS build does not accept the debug broadcasts.
+- Like `ambient`, it refuses any device not confirmed to be a watch and changes nothing.
+- The broadcasts were measured on the verified emulator; the tool itself is unverified on a
+  device, so check `broadcastResult` when a result surprises you.
+
 ## Prototypes
 
 `prototype` `show` renders on a watch with the phone overlay and components; there are no
@@ -209,7 +251,7 @@ they stay tappable. Wear launchers are not expected to support pinned shortcuts,
 ## Not supported
 
 - Physical watches: only Wear OS emulators are matched and created.
-- Tiles, complications and watch faces.
+- Complications and watch faces, and listing the tiles in the carousel.
 - Tapping a notification's expanded content or its reply and action buttons without an explicit
   clickable label (see [Notifications](#notifications)).
 - Hardware wake by tilt or touch, and a paired phone and watch.

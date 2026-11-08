@@ -9,8 +9,12 @@
 /* Begin PBXBuildFile section */
 		007B2120C2735B42A20C510B /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2F4747AC5700DF138836D5F /* Theme.swift */; };
 		15B37A3EDBAFD6BD0FC98BFC /* DemosTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25213AE8A9FD9A5B1EEFD97F /* DemosTab.swift */; };
+		18A7B9E31397B88F32AF38EE /* ShareSinkSummaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A0E49C79AD532DDF1FF940E /* ShareSinkSummaryTests.swift */; };
 		1EE5E98648A8DFD56C1EE62C /* FilesPickerProbeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06C02BE035F32E984F52B8D0 /* FilesPickerProbeUITests.swift */; };
+		208C23930D27A6D57A6AB9DD /* ShareSinkSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60750CB5B8FA6D4E22AFACC7 /* ShareSinkSummary.swift */; };
 		22E39FE3242348ED7A4EBEAC /* AutoMobileSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 3137B15D8D485C363DB78A3E /* AutoMobileSDK */; };
+		250F24881364FCEC2488B4F3 /* ShareSinkViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A85EB2B1336CA0F3C5D02D2B /* ShareSinkViewController.swift */; };
+		2625205697CDDCBC8D700CF2 /* ShareSinkSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60750CB5B8FA6D4E22AFACC7 /* ShareSinkSummary.swift */; };
 		2F8BA3EDD179892E3C489DCB /* FilesPickerProbeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C80CB4E7FD9E92FD2A08F2F /* FilesPickerProbeView.swift */; };
 		327A28D4620038BBA8D02656 /* Shapes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5122FF517804CD75B0F75CBA /* Shapes.swift */; };
 		32FCAE1924E826EF9F5C8A93 /* TapAtTargetsDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F1F7F4145845D9AD5D8C48E /* TapAtTargetsDemo.swift */; };
@@ -35,6 +39,7 @@
 		7FB8FD4A23F144C56E82ED91 /* AutoMobileSdkWire in Frameworks */ = {isa = PBXBuildFile; productRef = E7909901F9E62FDA576C6E64 /* AutoMobileSdkWire */; };
 		7FDB62C4B6F0092619122928 /* SemanticLinksDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAF63AC7E447335C9A68A4F7 /* SemanticLinksDemo.swift */; };
 		8BABD5EAF292349273BC02E7 /* AutoMobileSdkWire in Frameworks */ = {isa = PBXBuildFile; productRef = 22380480854B815D50B735C4 /* AutoMobileSdkWire */; };
+		8EA8396D167B94CD1E192D89 /* PlaygroundShareSink.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 36AB5EBCC198196FE5DA9934 /* PlaygroundShareSink.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		95CF2D08679D32C4A9966ACD /* CrayonSketchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11B156E0FBE749405E1F2D0D /* CrayonSketchTests.swift */; };
 		97CA6F2DE628A139094EF72D /* Colors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B46870C2DDF4A2F73A5778B /* Colors.swift */; };
 		A03793F43CE3F28402017D11 /* SdkContractRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6832B4473F28F2540F82E439 /* SdkContractRunner.swift */; };
@@ -63,6 +68,13 @@
 			remoteGlobalIDString = 739B1FD817D42F0264714A50;
 			remoteInfo = Playground;
 		};
+		A7BD38B01335B556153572D9 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DF84942AD828BBDD499F04C0 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A4AEF363DCB92541D8094DF4;
+			remoteInfo = PlaygroundShareSink;
+		};
 		BFE3470C534A49ECA416CB8A /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = DF84942AD828BBDD499F04C0 /* Project object */;
@@ -72,21 +84,38 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		7BEDB58AFB4CD0BF604A336D /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				8EA8396D167B94CD1E192D89 /* PlaygroundShareSink.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		06C02BE035F32E984F52B8D0 /* FilesPickerProbeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesPickerProbeUITests.swift; sourceTree = "<group>"; };
 		0C5B41C44C18F0045A6B61C2 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		11B156E0FBE749405E1F2D0D /* CrayonSketchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrayonSketchTests.swift; sourceTree = "<group>"; };
 		24F5CDEF4DC174B7ACDBB1C8 /* highlight-core */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "highlight-core"; path = "../highlight-core"; sourceTree = SOURCE_ROOT; };
 		25213AE8A9FD9A5B1EEFD97F /* DemosTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemosTab.swift; sourceTree = "<group>"; };
+		2A0E49C79AD532DDF1FF940E /* ShareSinkSummaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSinkSummaryTests.swift; sourceTree = "<group>"; };
 		2A8BC8E5B6EA4CEE87E3D905 /* PhotosAuthorizationProbeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosAuthorizationProbeTests.swift; sourceTree = "<group>"; };
 		2B46870C2DDF4A2F73A5778B /* Colors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Colors.swift; sourceTree = "<group>"; };
 		2E3EBAAF8B8FBFFD946B02E1 /* SdkContractStorageScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkContractStorageScenario.swift; sourceTree = "<group>"; };
 		32941883720B375F3B66BA7A /* SemanticLinkRotorDiscoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SemanticLinkRotorDiscoveryTests.swift; sourceTree = "<group>"; };
+		36AB5EBCC198196FE5DA9934 /* PlaygroundShareSink.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = PlaygroundShareSink.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		3CF899DC96DC92471BB6FC81 /* PlaygroundDatabaseFixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaygroundDatabaseFixture.swift; sourceTree = "<group>"; };
 		4D07338C21403ED20B1A11E4 /* SdkContractNavigationScenarioTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkContractNavigationScenarioTests.swift; sourceTree = "<group>"; };
 		5122FF517804CD75B0F75CBA /* Shapes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shapes.swift; sourceTree = "<group>"; };
 		51580F5FC5ADCD5576885563 /* Typography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Typography.swift; sourceTree = "<group>"; };
 		52535C47CE2D35FDF1493DF7 /* SdkContractNetworkScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkContractNetworkScenario.swift; sourceTree = "<group>"; };
+		60750CB5B8FA6D4E22AFACC7 /* ShareSinkSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSinkSummary.swift; sourceTree = "<group>"; };
 		60A7309625B075243845F7B6 /* SdkContractObservationScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkContractObservationScenario.swift; sourceTree = "<group>"; };
 		64FD18EC8D1B9A665615C374 /* SettingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsTab.swift; sourceTree = "<group>"; };
 		6832B4473F28F2540F82E439 /* SdkContractRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkContractRunner.swift; sourceTree = "<group>"; };
@@ -98,6 +127,7 @@
 		8C80CB4E7FD9E92FD2A08F2F /* FilesPickerProbeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesPickerProbeView.swift; sourceTree = "<group>"; };
 		98C8931C04A4164E76D17EEA /* SdkContractNavigationScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkContractNavigationScenario.swift; sourceTree = "<group>"; };
 		A14ADB69D8A746CDB99D61DE /* PlaygroundDatabaseFixtureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaygroundDatabaseFixtureTests.swift; sourceTree = "<group>"; };
+		A85EB2B1336CA0F3C5D02D2B /* ShareSinkViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSinkViewController.swift; sourceTree = "<group>"; };
 		AA0EB8290A6E5436B2C8CE6F /* auto-mobile-sdk */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "auto-mobile-sdk"; path = "../auto-mobile-sdk"; sourceTree = SOURCE_ROOT; };
 		B440AFD2C3249329A0069BD6 /* CrayonGrainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrayonGrainTests.swift; sourceTree = "<group>"; };
 		BDA9169E926B14087F3B1BA2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -114,6 +144,7 @@
 		D1D72A3B96460640F2B23D70 /* SdkContractLoopbackServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkContractLoopbackServer.swift; sourceTree = "<group>"; };
 		D3C4751E45B89784F7C11691 /* TapAtTargetLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TapAtTargetLayoutTests.swift; sourceTree = "<group>"; };
 		D61225B3155981050B6A59A6 /* AccessibilityRotorDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityRotorDemo.swift; sourceTree = "<group>"; };
+		D74ED15C1B5CB04633F80B3F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		DD50FBCE86DE338DFF1B3A8A /* SdkContractManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkContractManifest.swift; sourceTree = "<group>"; };
 		E1B25FBAC5217DE05EA701CF /* ShantellSans.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = ShantellSans.ttf; sourceTree = "<group>"; };
 		E36CCA31979717E4A6A47AA7 /* CrayonGrain.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = CrayonGrain.metal; sourceTree = "<group>"; };
@@ -162,6 +193,7 @@
 			children = (
 				E40DD68F934F5F0D2981ACA1 /* Playground.app */,
 				FAD793841AB97726998E94B5 /* PlaygroundFilesPickerUITests.xctest */,
+				36AB5EBCC198196FE5DA9934 /* PlaygroundShareSink.appex */,
 				CBBA4475C2A7A68AE3987086 /* PlaygroundTests.xctest */,
 			);
 			name = Products;
@@ -197,6 +229,17 @@
 				B44CF1DC2EC377D466AE8285 /* Fonts */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		8A9BF32760BFC5F9994CAB7F /* ShareSink */ = {
+			isa = PBXGroup;
+			children = (
+				D74ED15C1B5CB04633F80B3F /* Info.plist */,
+				60750CB5B8FA6D4E22AFACC7 /* ShareSinkSummary.swift */,
+				A85EB2B1336CA0F3C5D02D2B /* ShareSinkViewController.swift */,
+			);
+			name = ShareSink;
+			path = Sources/ShareSink;
 			sourceTree = "<group>";
 		};
 		A99B72DF7BBF7885110254C4 /* SdkContract */ = {
@@ -252,6 +295,7 @@
 				4D07338C21403ED20B1A11E4 /* SdkContractNavigationScenarioTests.swift */,
 				8A719AFBA1888450E8653AB6 /* SdkHighlightOverlayE2ETests.swift */,
 				32941883720B375F3B66BA7A /* SemanticLinkRotorDiscoveryTests.swift */,
+				2A0E49C79AD532DDF1FF940E /* ShareSinkSummaryTests.swift */,
 				D3C4751E45B89784F7C11691 /* TapAtTargetLayoutTests.swift */,
 			);
 			path = Tests;
@@ -273,6 +317,7 @@
 				C8708B4984B178C033908015 /* Configurations */,
 				0A0CCC846A066708EBAEA795 /* FilesPickerProbeUITests */,
 				75054112A41CDCE58ADACF92 /* Packages */,
+				8A9BF32760BFC5F9994CAB7F /* ShareSink */,
 				AABC9BE64A1302199D5D2AF8 /* Sources */,
 				B500CE1A6941BEA33903C091 /* Tests */,
 				3F6B916872C30820F6241E84 /* Products */,
@@ -325,10 +370,12 @@
 				E40BECB45945A673BB0CC3F9 /* Sources */,
 				C071FD4667C21888C52DF25C /* Resources */,
 				2F8D7CF22299B8D14091AB8E /* Frameworks */,
+				7BEDB58AFB4CD0BF604A336D /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				F4C777AEBADEC6D29356F783 /* PBXTargetDependency */,
 			);
 			name = Playground;
 			packageProductDependencies = (
@@ -357,6 +404,23 @@
 			productReference = FAD793841AB97726998E94B5 /* PlaygroundFilesPickerUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		A4AEF363DCB92541D8094DF4 /* PlaygroundShareSink */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9C47CF6EA92C4C838DE973B7 /* Build configuration list for PBXNativeTarget "PlaygroundShareSink" */;
+			buildPhases = (
+				C6CDA12F29F1156DC4E2D94B /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PlaygroundShareSink;
+			packageProductDependencies = (
+			);
+			productName = PlaygroundShareSink;
+			productReference = 36AB5EBCC198196FE5DA9934 /* PlaygroundShareSink.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -375,6 +439,9 @@
 					9586904FC044DFE3B2D9C272 = {
 						ProvisioningStyle = Automatic;
 						TestTargetID = 739B1FD817D42F0264714A50;
+					};
+					A4AEF363DCB92541D8094DF4 = {
+						ProvisioningStyle = Automatic;
 					};
 				};
 			};
@@ -398,6 +465,7 @@
 			projectRoot = "";
 			targets = (
 				739B1FD817D42F0264714A50 /* Playground */,
+				A4AEF363DCB92541D8094DF4 /* PlaygroundShareSink */,
 				21356511771170ED7D28D6F3 /* PlaygroundTests */,
 				9586904FC044DFE3B2D9C272 /* PlaygroundFilesPickerUITests */,
 			);
@@ -422,6 +490,15 @@
 			buildActionMask = 2147483647;
 			files = (
 				1EE5E98648A8DFD56C1EE62C /* FilesPickerProbeUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C6CDA12F29F1156DC4E2D94B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2625205697CDDCBC8D700CF2 /* ShareSinkSummary.swift in Sources */,
+				250F24881364FCEC2488B4F3 /* ShareSinkViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -473,6 +550,8 @@
 				B5F4CE8A9F2A76C8B397C48A /* SdkContractNavigationScenarioTests.swift in Sources */,
 				B3B613858665E331B7E7EB99 /* SdkHighlightOverlayE2ETests.swift in Sources */,
 				D12E3E79A9005EE401375ACD /* SemanticLinkRotorDiscoveryTests.swift in Sources */,
+				208C23930D27A6D57A6AB9DD /* ShareSinkSummary.swift in Sources */,
+				18A7B9E31397B88F32AF38EE /* ShareSinkSummaryTests.swift in Sources */,
 				F4307401FF6C106BC692F12E /* TapAtTargetLayoutTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -489,6 +568,11 @@
 			isa = PBXTargetDependency;
 			target = 739B1FD817D42F0264714A50 /* Playground */;
 			targetProxy = BFE3470C534A49ECA416CB8A /* PBXContainerItemProxy */;
+		};
+		F4C777AEBADEC6D29356F783 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A4AEF363DCB92541D8094DF4 /* PlaygroundShareSink */;
+			targetProxy = A7BD38B01335B556153572D9 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -546,6 +630,25 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5;
+			};
+			name = Debug;
+		};
+		2766824E7032D6FAFF23C43D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Sources/ShareSink/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.jasonpearson.automobile.Playground.ShareSink;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
@@ -620,6 +723,25 @@
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
+		};
+		8C1299DD7856988E4B8A4EA3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Sources/ShareSink/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.jasonpearson.automobile.Playground.ShareSink;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
 		};
 		8DC9C2FFC0FAB4DB86539DDE /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -714,6 +836,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		9C47CF6EA92C4C838DE973B7 /* Build configuration list for PBXNativeTarget "PlaygroundShareSink" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2766824E7032D6FAFF23C43D /* Debug */,
+				8C1299DD7856988E4B8A4EA3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		AC8DEF66CB98E0F46E3C6FE7 /* Build configuration list for PBXNativeTarget "PlaygroundTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

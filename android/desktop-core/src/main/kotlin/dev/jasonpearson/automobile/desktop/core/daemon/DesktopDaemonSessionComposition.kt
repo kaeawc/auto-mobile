@@ -130,21 +130,27 @@ enum class SessionReleaseReason {
   DEVICE_SWITCH;
 
   companion object {
-    /** Maps the daemon's `releaseReason` string (`src/daemon/sessionManager.ts`) to a notice. */
-    fun fromDaemon(daemonReason: String?): SessionReleaseReason =
+    /**
+     * Maps the daemon's `releaseReason` (the table in `src/models/releaseReasons.ts`) and the
+     * `idle` flag it sends beside an idle-window release (#11365) to a notice.
+     */
+    fun fromDaemon(daemonReason: String?, idle: Boolean = false): SessionReleaseReason =
       when {
+        idle -> IDLE
         daemonReason == null -> DAEMON_RELEASED
         daemonReason in IDLE_DAEMON_REASONS -> IDLE
         daemonReason in LAPSED_DAEMON_REASONS -> HEARTBEAT_LAPSED
-        daemonReason == "daemon-shutdown" || daemonReason.startsWith("device-restart") ->
+        daemonReason in RESTARTED_DAEMON_REASONS || daemonReason.startsWith("device-restart:") ->
           DAEMON_RESTARTED
         else -> DAEMON_RELEASED
       }
 
+    /** The reasons tagged `idle` (an older daemon may not send the flag). */
     private val IDLE_DAEMON_REASONS =
-      setOf("cleanup-expired", "lazy-expiry", "cli-idle-timeout", "idle", "autolock", "expired")
+      setOf("cleanup-expired", "lazy-expiry", "cli-idle-timeout", "expired", "replay-lease-expired")
     private val LAPSED_DAEMON_REASONS =
       setOf("heartbeat-timeout", "missing-first-heartbeat", "owner-disconnected")
+    private val RESTARTED_DAEMON_REASONS = setOf("daemon-shutdown", "daemon-restart")
   }
 }
 
@@ -160,6 +166,11 @@ data class DesktopDaemonSessionState(
    * plain watching, which needs no notice.
    */
   val heldElsewhereDeviceId: String? = null,
+  /**
+   * Who holds [heldElsewhereDeviceId]: another session, another daemon (with its PID when known) or
+   * a declared binding (#11365), for the pane's notice.
+   */
+  val heldElsewhereHolder: HeldElsewhereHolder? = null,
   /** Explicit "Take control" or "Retry" for a pane's device: exactly one fresh bind attempt. */
   val requestControl: (String) -> Unit = {},
   /**
@@ -339,6 +350,7 @@ internal class DesktopDaemonCompositionState {
   var bindErrorDeviceId by mutableStateOf<String?>(null)
   var inputDeviceId by mutableStateOf<String?>(null)
   var heldElsewhereDeviceId by mutableStateOf<String?>(null)
+  var heldElsewhereHolder by mutableStateOf<HeldElsewhereHolder?>(null)
   var idleReleasedDeviceId by mutableStateOf<String?>(null)
   var releaseReason by mutableStateOf<SessionReleaseReason?>(null)
   var carriedBindError by mutableStateOf<Pair<String, String>?>(null)
@@ -415,6 +427,7 @@ private fun DesktopDaemonCompositionState.VisiblePanesEffect(
       if (inputDeviceId != null && inputDeviceId !in visible) inputDeviceId = null
       if (heldElsewhereDeviceId != null && heldElsewhereDeviceId !in visible) {
         heldElsewhereDeviceId = null
+        heldElsewhereHolder = null
       }
     }
   }
@@ -479,7 +492,10 @@ private fun DesktopDaemonCompositionState.rememberRequestControl(
     return remember(socketPath) {
       { deviceId ->
         if (currentPanes.any { it.deviceId == deviceId }) {
-          if (heldElsewhereDeviceId == deviceId) heldElsewhereDeviceId = null
+          if (heldElsewhereDeviceId == deviceId) {
+            heldElsewhereDeviceId = null
+            heldElsewhereHolder = null
+          }
           idleReleasedDeviceId = null
           releaseReason = null
           carriedBindError = null
@@ -503,6 +519,7 @@ private fun DesktopDaemonCompositionState.rememberReportHeldElsewhere(
             "Device $deviceId is held by another session; watching only",
           )
           heldElsewhereDeviceId = deviceId
+          heldElsewhereHolder = HeldElsewhereHolder.AnotherSession
           // The daemon says this session does not hold it, whatever the last bind said: input stops
           // taking the no-wait path, and leaving the device lets the binding loop drop any hold.
           heldDevice.compareAndSet(deviceId, null)
@@ -598,6 +615,7 @@ private fun DesktopDaemonCompositionState.renderState(
     boundDeviceId = boundDeviceId,
     isRegistered = registered,
     heldElsewhereDeviceId = heldElsewhereDeviceId,
+    heldElsewhereHolder = heldElsewhereHolder,
     requestControl = actions.requestControl,
     bindErrorMessage = bindErrorMessage,
     bindErrorDeviceId = bindErrorDeviceId,

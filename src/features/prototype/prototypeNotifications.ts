@@ -1,3 +1,5 @@
+import { jsonCost } from "./prototypeJsonCost";
+import { MAX_PROTOTYPE_NOTIFICATION_BYTES } from "./prototypeNotificationLimits";
 import { record, type Raw } from "./prototypeTemplate";
 import type { PrototypePlatformError } from "./prototypePlatform";
 
@@ -102,4 +104,32 @@ function declaredChannels(root: Raw): Set<unknown> {
 
 function list(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
+}
+
+/** The parts of a resolved `notifications.post` record the total byte limit counts. */
+export interface PrototypeResolvedNotification {
+  title: string;
+  body?: string;
+  data?: unknown;
+}
+
+/**
+ * The post-time total check (#14280, #16864): UTF-8 bytes of the resolved title and body plus the
+ * JSON cost of `data` must fit `MAX_PROTOTYPE_NOTIFICATION_BYTES`, or the call fails with
+ * `invalid_args`.
+ */
+export function prototypeNotificationTotalError(
+  notification: PrototypeResolvedNotification,
+): (PrototypePlatformError & { code: "invalid_args" }) | undefined {
+  const total =
+    Buffer.byteLength(notification.title, "utf8") +
+    Buffer.byteLength(notification.body ?? "", "utf8") +
+    (notification.data === undefined ? 0 : jsonCost(notification.data));
+  return total <= MAX_PROTOTYPE_NOTIFICATION_BYTES
+    ? undefined
+    : {
+        code: "invalid_args",
+        path: "args",
+        message: `The resolved notification is ${total} bytes; the limit is ${MAX_PROTOTYPE_NOTIFICATION_BYTES} bytes`,
+      };
 }

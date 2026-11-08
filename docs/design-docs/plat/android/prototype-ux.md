@@ -2449,10 +2449,11 @@ must name a declared channel, a literal `actions` list needs unique ids, and `no
 exactly one of `id`, `group` or `all`; bound values are checked by the runtime. The bounds are named
 contract limits (`MAX_PROTOTYPE_NOTIFICATION_*`, `MAX_PROTOTYPE_NOTIFICATIONS_ACTIVE`) that the call, state
 and channel rules repeat. The runtime enforces the ones that apply after placeholders resolve: a reply of
-at most 1 KiB, a resolved notification of at most 4 KiB, and at most 4 updates per second per notification,
-coalesced to the latest. Title and body limits count characters, while the 4 KiB total counts UTF-8 bytes of
-the resolved record and is checked on its own: ASCII text at every per-field limit fits, but multibyte text
-at those limits can exceed it.
+at most 1 KiB, a resolved notification of at most 5 KiB, and at most 4 updates per second per notification,
+coalesced to the latest. Title and body limits count UTF-16 code units, while the 5 KiB total counts UTF-8
+bytes of the resolved title, body and `data` and is checked on its own (`invalid_args` when over). A code
+unit is at most 3 bytes, so every literal at the per-field limits fits (at most 4,480 bytes); text bound at
+post time can still exceed it, such as emoji counted per character (5,632 bytes at the limits).
 `notifications.schedule` takes the `post` arguments plus `delaySeconds` (a whole number, 1 to 604800)
 and needs `prototype_platform_notifications_scheduled_v1` as well; the same channel and action-id rules
 apply, and `notifications.scheduledFired` reports a scheduled notification that fired (#14283).

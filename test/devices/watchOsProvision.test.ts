@@ -248,6 +248,31 @@ describe("WatchSimulatorProvisioner", () => {
     expect(simctl.commands).toEqual([]);
   });
 
+  test("discardCreated cleans up owned pairs before deleting", async () => {
+    const simctl = new FakeWatchProvisionSimctl([EXISTING]);
+    const cleaned: string[] = [];
+    const provisioner = new WatchSimulatorProvisioner(
+      new WatchSimulatorInventory(simctl, "arm64"),
+      simctl,
+      {
+        unpairCreated: async (id) => {
+          expect(simctl.commands).toEqual([]);
+          cleaned.push(id);
+        },
+      },
+    );
+    expect(
+      await provisioner.discardCreated({
+        ...EXISTING,
+        deviceId: EXISTING.udid,
+        platform: "watchos",
+        isRunning: false,
+      }),
+    ).toEqual({ deleted: true });
+    expect(cleaned).toEqual([EXISTING.udid]);
+    expect(simctl.commands).toEqual([`delete ${EXISTING.udid}`]);
+  });
+
   test("discardCreated deletes the created watch, and reports a delete that failed", async () => {
     const { simctl, provisioner } = arrange([]);
     const { watch } = await provisioner.provision(request(), { allowCreate: true });

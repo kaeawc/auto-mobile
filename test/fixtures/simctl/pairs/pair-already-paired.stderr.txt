@@ -1,0 +1,6 @@
+An error was encountered processing the command (domain=com.apple.CoreSimulator.SimError, code=403):
+Unable to pair devices
+At least one of the requested devices is already paired with the maximum number of supported devices and cannot accept another pairing.
+Underlying error (domain=com.apple.CoreSimulator.SimDevicePairingTest, code=4):
+	Unable to pair devices
+	At least one of the requested devices is already paired with the maximum number of supported devices and cannot accept another pairing.

@@ -20,6 +20,7 @@ import { boundsArea, boundsEqual, intersectBounds } from "../../utils/bounds";
 import { compareSelectionRank } from "../utility/selectionRank";
 import type { Timer } from "../../utils/SystemTimer";
 import type { InputKeyName } from "./InputKey";
+import { textFieldToolkit } from "./textFieldToolkit";
 
 export const FOCUS_NAVIGATE_DIRECTIONS = ["up", "down", "left", "right"] as const;
 export type FocusNavigateDirection = (typeof FOCUS_NAVIGATE_DIRECTIONS)[number];
@@ -681,19 +682,18 @@ function describeEntry(entry: FocusPathEntry | undefined): string {
 }
 
 /**
- * Whether an editable field is a classic View `EditText`: its resource-id is package-qualified
- * (`pkg:id/name`). Compose reports `Modifier.testTag` as a bare resource-id or none at all, and a
- * Compose `TextField` on Android TV keeps focus on every D-pad direction even with the keyboard
+ * Whether the focused editable field is a classic View `EditText` (see {@link textFieldToolkit}).
+ * A Compose `TextField` on Android TV keeps focus on every D-pad direction even with the keyboard
  * hidden; only tab moves it out (#17441). A View field takes back then an arrow, and tab could
  * type a tab character into it, so tab is never pressed there.
  */
-function isViewTextField(element: Element): boolean {
-  return stringProp(element, "resource-id").includes(":id/");
+function isViewTextField(screen: FocusScreen, focused: Element): boolean {
+  return textFieldToolkit(focused, screen.hierarchy) === "view";
 }
 
 /** Whether tab is the escape from this focused element once no keyboard is shown over it. */
-function tabEscapes(focused: Element): boolean {
-  return !isEditableElementProperties(focused) || !isViewTextField(focused);
+function tabEscapes(screen: FocusScreen, focused: Element): boolean {
+  return !isEditableElementProperties(focused) || !isViewTextField(screen, focused);
 }
 
 /** The keys a caller presses to leave the field: back then down for a View field, else tab. */
@@ -711,10 +711,11 @@ function trapAdvice(viewField: boolean, escapes: readonly FocusTrapEscape[]): st
 /** The stuck message naming the trap, the escapes tried and what the caller can do instead. */
 function trapMessage(
   blocker: FocusNavigateBlocker,
-  focused: Element | null,
+  screen: FocusScreen,
   focusedElement: FocusPathEntry | undefined,
   escapes: readonly FocusTrapEscape[],
 ): string {
+  const { focused } = screen;
   const editable = focused !== null && isEditableElementProperties(focused);
   const holder = editable
     ? `the editable text field${describeEntry(focusedElement)}`
@@ -723,7 +724,7 @@ function trapMessage(
     blocker === "ime"
       ? `D-pad focus is trapped by the on-screen keyboard over ${holder}`
       : `D-pad focus is trapped in ${holder}`;
-  const viewField = editable && isViewTextField(focused);
+  const viewField = editable && isViewTextField(screen, focused);
   const tried =
     escapes.length > 0
       ? `; pressing ${escapes.join(" then ")} and every direction again did not move focus`
@@ -892,7 +893,7 @@ export class FocusNavigate {
     }
     return this.stopped("stuck", done.steps, done.path, {
       focusedElement,
-      message: trapMessage(blocker, screen.focused, focusedElement, trap.escapes),
+      message: trapMessage(blocker, screen, focusedElement, trap.escapes),
       blockedBy: blocker,
       escapes: trap.escapes,
     });
@@ -940,7 +941,7 @@ export class FocusNavigate {
     pressing: readonly FocusTrapEscape[],
   ): boolean {
     const { focused } = screen;
-    if (!focused || tried.includes("tab") || !tabEscapes(focused)) {
+    if (!focused || tried.includes("tab") || !tabEscapes(screen, focused)) {
       return false;
     }
     if (!isEditableElementProperties(focused)) {

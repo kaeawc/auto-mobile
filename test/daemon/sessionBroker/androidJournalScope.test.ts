@@ -263,6 +263,27 @@ describe("Android journal writer/reset scope", () => {
     expect(r.fallbacks()).toBe(0);
   });
 
+  test("postNotification to a baseline-held app reverts its posted and channel rows in place (#16510)", async () => {
+    const r = await rig("a.b");
+    r.port.unsupportedKinds.delete("notification");
+    const rows = deviceToolMutations("postNotification", { appId: "a.b", title: "Hi" }, "android");
+    for (const row of rows) {
+      await r.recorder.record({
+        ...row,
+        toolName: "postNotification",
+        priorValue: row.key.startsWith("channel:")
+          ? { state: "absent" }
+          : { state: "unobservable" },
+      });
+    }
+    expect(await r.reset()).toMatchObject({ outcome: "clean" });
+    expect(r.port.reverted.map((row) => row.key).sort()).toEqual([
+      "channel:a.b:automobile_test_notifications",
+      "posted:a.b",
+    ]);
+    expect(r.fallbacks()).toBe(0);
+  });
+
   const adapterCases: {
     name: string;
     args: Record<string, unknown>;

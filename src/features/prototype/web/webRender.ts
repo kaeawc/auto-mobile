@@ -431,7 +431,7 @@ function lineFillAxes(
 
 const prepareIn = (s: WebRenderScope) => (e: unknown, at: string) => preparedNode(e, s, at)?.styled;
 
-/** A column whose children carry the height share it hands each (see withColumnHeights). */
+/** A column or card whose children carry the height share it hands each (see withColumnHeights). */
 const columnSized = (raw: Raw, scope: WebRenderScope, path: string) =>
   withColumnHeights(raw, path, prepareIn(scope), contentHeightBound(raw.style, scope.heightBound));
 
@@ -809,8 +809,10 @@ const toggle =
   };
 
 const card: NodeRenderer = (raw, scope, path) => {
-  // A card hugs its content, but grows like a line around a child that fills.
-  const node = filling(raw, lineFillAxes(raw, scope, path));
+  // A card hugs its content, but grows like a line around a child that fills; each child carries
+  // the height the card's column hands it.
+  const sized = columnSized(raw, scope, path);
+  const node = filling(sized, lineFillAxes(sized, scope, path));
   const { attrs, style } = base(node, scope, {
     display: FLEX,
     [FLEX_DIRECTION]: COLUMN,

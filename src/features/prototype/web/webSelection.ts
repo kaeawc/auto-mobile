@@ -350,7 +350,7 @@ const searchBarRenderer =
     if (expanded && node.child !== undefined) {
       const inner = kit.child(scope, {
         inBox: false,
-        style: { ...scope.style, parentAxis: COLUMN },
+        style: { ...scope.style, parentAxis: COLUMN, weightsChildren: false },
       });
       const drawn = kit.renderNode(node.child, inner, `${path}.child`);
       results.push(...(drawn ? [drawn] : []));

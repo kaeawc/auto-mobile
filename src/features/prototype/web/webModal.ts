@@ -146,7 +146,9 @@ function dialogLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRen
     [BORDER_RADIUS]: "28px",
     [BACKGROUND_COLOR]: role("surfaceContainerHigh", scope),
   });
-  const inner = kit.child(hoisted, { style: { ...hoisted.style, parentAxis: COLUMN } });
+  const inner = kit.child(hoisted, {
+    style: { ...hoisted.style, parentAxis: COLUMN, weightsChildren: false },
+  });
   const content = kit.renderNode(node.child, inner, `${path}.child`);
   const body = content
     ? [

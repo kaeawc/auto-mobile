@@ -24,6 +24,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { DeviceStateCollector } from "../../../src/features/observe/collectors/DeviceStateCollector";
+import { fixtureHierarchy, readCarAppHostFixture } from "./automotive/carAppHostFixtures";
 
 const android: BootedDevice = { name: "Pixel", platform: "android", deviceId: "emulator-5554" };
 
@@ -398,6 +399,26 @@ describe("SingleDisplayReconcileStage automotive refresh", () => {
     });
 
     expect(run.result.automotive).toEqual(before);
+    expect(adb.getExecutedCommands()).toHaveLength(reads);
+  });
+
+  test("a hierarchy replaced under the same activity re-derives the host-rendered marker", async () => {
+    const { adb, collector, stage } = automotiveSetup();
+    const run = await collectedRun(collector);
+    expect(run.result.automotive?.hostRenderedUi).toBeUndefined();
+    const reads = adb.getExecutedCommands().length;
+    run.result.viewHierarchy = fixtureHierarchy(readCarAppHostFixture("list"));
+
+    await stage.reconcileSingleDisplay(run, {
+      earlyResult: undefined,
+      foregroundSnapshot: Promise.resolve(null),
+      foregroundIdentity: Promise.resolve(undefined),
+    });
+
+    expect(run.result.automotive?.hostRenderedUi).toEqual({
+      kind: "carAppLibrary",
+      hostPackage: "com.google.android.apps.automotive.templates.host",
+    });
     expect(adb.getExecutedCommands()).toHaveLength(reads);
   });
 });

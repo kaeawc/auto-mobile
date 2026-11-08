@@ -12,6 +12,7 @@ import { FakeWindow } from "../../../fakes/FakeWindow";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { createObserveResultForTest } from "../flatHierarchyBuilders";
 import type { BootedDevice } from "../../../../src/models";
+import { fixtureHierarchy, readCarAppHostFixture } from "../automotive/carAppHostFixtures";
 
 const capture = (name: string): string =>
   readFileSync(
@@ -154,4 +155,27 @@ test("parked non-DO activity is unblocked and signal reaches each read", async (
   expect(result.automotive?.drivingState).toBe("parked");
   expect(result.automotive?.foregroundActivity?.distractionOptimized).toBe(false);
   expect(adb.getCommandCalls().every((call) => call.signal === signal)).toBe(true);
+});
+
+test("a captured Car App Library template screen carries the host-rendered marker", async () => {
+  const { collector, result, adb } = setup();
+  const grid = readCarAppHostFixture("grid");
+  result.activeWindow = grid.activeWindow;
+  result.viewHierarchy = fixtureHierarchy(grid);
+  await collector.collectAutomotive(result);
+  expect(result.automotive?.hostRenderedUi).toEqual({
+    kind: "carAppLibrary",
+    hostPackage: "com.google.android.apps.automotive.templates.host",
+  });
+  expect(observeResultSchema.parse(result).automotive).toEqual(result.automotive);
+  const reads = adb.getExecutedCommands().length;
+  result.activeWindow = {
+    appId: "com.android.settings",
+    activityName: ".Settings",
+    layoutSeqSum: 0,
+  };
+  result.viewHierarchy = { hierarchy: { node: {} } };
+  await collector.refreshAutomotiveForegroundActivity(result);
+  expect(Object.hasOwn(result.automotive ?? {}, "hostRenderedUi")).toBe(false);
+  expect(adb.getExecutedCommands()).toHaveLength(reads + 1);
 });

@@ -7,6 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.tvfixture.player.FixturePlayerSession
 import dev.jasonpearson.automobile.tvfixture.player.PlayerCommand
 import dev.jasonpearson.automobile.tvfixture.player.PlayerState
@@ -22,6 +23,8 @@ class MainActivity : ComponentActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    // The SDK reports each screen as a navigation event, which explore and navigateTo rely on.
+    AutoMobileSDK.initialize(applicationContext)
     session = FixturePlayerSession(this, ::runCommand)
     session.publish(player)
     session.activate()

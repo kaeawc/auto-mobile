@@ -1,0 +1,8 @@
+before:  mWakefulness=Awake
+after KEYCODE_SLEEP:  mWakefulness=Dozing
+  dumpsys display:    mState=DOZE_SUSPEND
+  dumpsys wear_service:      watchFaceState=WatchFaceState{watchFaceVisible=true, inAmbient=true}
+after KEYCODE_WAKEUP: mWakefulness=Awake
+  dumpsys display:    mState=ON
+  dumpsys wear_service:      watchFaceState=WatchFaceState{watchFaceVisible=true, inAmbient=false}
+face not on screen (Settings in front): watchFaceState=WatchFaceState{watchFaceVisible=false, inAmbient=false}

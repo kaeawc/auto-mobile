@@ -14,7 +14,8 @@ function alternatives(key: SendKeysSemanticKey): string {
     case "previous":
       return "Use sendKeys with a selector for the previous field.";
     default:
-      return 'Use key:"enter", or tap the screen\'s submit control.';
+      // Enter inserts a newline in a multiline field, so it is only a fallback for single-line ones.
+      return 'Tap the screen\'s submit control, or on a single-line field use key:"enter"; observe the result before retrying.';
   }
 }
 
@@ -23,7 +24,12 @@ function cause(key: SendKeysSemanticKey, traversed: boolean): string {
     // The AutoMobile IME was not the active keyboard, so CtrlProxy looked for a neighbour itself.
     return `no ${key === "previous" ? "previous" : "next"} focusable field was found beside the focused field`;
   }
-  return `the focused field rejected the "${key}" editor action; its configured action may be another one, such as done`;
+  if (key === "next" || key === "previous") {
+    return `the focused field did not perform the "${key}" editor action; its configured action may be another one, such as done`;
+  }
+  // Below API 30 CtrlProxy injects KEYCODE_ENTER, and a failed injection reports the same reply,
+  // so the field may not have received the action at all.
+  return `the device reported the "${key}" action as not performed; the field may not accept it, or the key could not be delivered`;
 }
 
 /**

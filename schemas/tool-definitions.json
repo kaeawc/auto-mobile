@@ -52524,7 +52524,7 @@
       "additionalProperties": {},
       "$defs": {
         "__schema0": {
-          "description": "Stable failure code. NO_FOCUSED_EDITABLE: no editable field has focus; focus the field (tap it, or tapOn with focus), then retry sendKeys without a mode. EDITOR_ACTION_MISMATCH: the focused field did not carry out a semantic key (next, previous, done, search, send, go); use key:\"tab\" or a selector for the next field instead of next, or key:\"enter\" for a submit action.",
+          "description": "Stable failure code. NO_FOCUSED_EDITABLE: no editable field has focus; focus the field (tap it, or tapOn with focus), then retry sendKeys without a mode. EDITOR_ACTION_MISMATCH: the focused field did not carry out a semantic key (next, previous, done, search, send, go); use key:\"tab\" or a selector for the next field instead of next; for a submit action tap the submit control (key:\"enter\" only on a single-line field, since Enter adds a newline to a multiline one).",
           "type": "string"
         },
         "__schema1": {

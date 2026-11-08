@@ -4297,19 +4297,27 @@ describe("DefaultSendKeysCommandExecutor", () => {
 
   test.each([
     {
+      deviceError: "Action failed",
       approximated: undefined,
       cause:
-        'the focused field rejected the "next" editor action; its configured action may be another one, such as done',
+        'the focused field did not perform the "next" editor action; its configured action may be another one, such as done',
     },
     {
+      deviceError: undefined,
+      approximated: undefined,
+      cause:
+        'the focused field did not perform the "next" editor action; its configured action may be another one, such as done',
+    },
+    {
+      deviceError: "Action failed",
       approximated: true,
       cause: "no next focusable field was found beside the focused field",
     },
   ])(
-    "maps a bare device 'Action failed' on next to a typed failure (approximated=$approximated, #17463)",
-    async ({ approximated, cause }) => {
+    "maps device error $deviceError on next to a typed failure (approximated=$approximated, #17463)",
+    async ({ deviceError, approximated, cause }) => {
       const { client } = createTextClient();
-      client.ime = async () => ({ success: false, error: "Action failed", approximated });
+      client.ime = async () => ({ success: false, error: deviceError, approximated });
       const executor = new DefaultSendKeysCommandExecutor(
         androidDevice,
         createAdbFactory(new FakeAdbExecutor()),

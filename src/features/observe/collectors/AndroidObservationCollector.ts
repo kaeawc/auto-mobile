@@ -16,6 +16,7 @@ import {
   isAccessibilityViewClass,
   resolveBackStackActivityAttribution,
 } from "../ActiveWindowAttribution";
+import { pairPermissionDialogWindow } from "../../action/launchPermissionBlocker";
 import { deriveAndroidScreenIdentity } from "../android/AndroidScreenIdentity";
 import { displayTransitions } from "../DisplayTransition";
 import { resolveTargetDisplay } from "../DisplaySelection";
@@ -145,6 +146,8 @@ export class DefaultAndroidObservationCollector implements AndroidObservationCol
       await this.deps.deviceStateCollector().collectAutomotive(result, signal, context.displayId);
     }
 
+    // A permission dialog's window never hosts the app activity behind it (#17465).
+    result.activeWindow = pairPermissionDialogWindow(result.activeWindow);
     if (result.notificationPermissionDetected && result.activeWindow) {
       result.activeWindow.type = "notification_permission_dialog";
     }

@@ -213,6 +213,6 @@ screens are unchanged.
 
 ## Not supported
 
-- Android Auto projection and the Desktop Head Unit (see #14118).
+- Android Auto projection and the Desktop Head Unit; see [Android Auto and the Desktop Head Unit](android-auto.md).
 - Physical head units.
 - Car App Library templates as a prototype target.

@@ -15,6 +15,8 @@ AutoMobile never downloads simulator runtimes. Install one with Xcode first:
 xcodebuild -downloadPlatform tvOS
 ```
 
+tvOS 26.5 and tvOS 27.0 simulators are supported.
+
 The `automobile:devices/images/tvos` resource lists the installed tvOS runtimes, the Apple TV
 models and which runtimes each model supports, along with the configured Apple TV simulators. A `provisionDevice` request that names a missing or
 unavailable runtime fails, lists the available runtimes and repeats the install command.

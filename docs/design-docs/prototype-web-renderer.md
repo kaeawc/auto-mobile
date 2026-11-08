@@ -252,6 +252,32 @@ fullscreen, because the goldens draw the root and theme without the window's pla
 - **Output.** `<golden>.png` and, when any pixel differs, `<golden>.diff.png` go to
   `android-parity/` under the output directory, uploaded with the page check's artifact.
 
+## iOS parity check
+
+`webIosParityCases.ts` reuses the Android parity specs and content-only transforms, with a
+reasoned skip list for content-sized floating captures and host chrome. The standalone viewer
+recorder, `bash scripts/ios/prototype-record-goldens.sh <simulator-udid>`, requires an already
+booted iPhone 16 and the app built by `scripts/ios/prototype-viewer-build.sh`. It installs a fresh
+viewer per case, loads the emitted spec through `Documents/prototype/`, and sets light or dark
+appearance before launch. It refuses the CI iPhone, clears its status override and restores light
+appearance on exit. Optional `--viewer`, `--out` and golden names select the app, destination and cases.
+
+- **Geometry.** Goldens in `ios/prototype-agent/Goldens/iphone-16/` are the full 1179×2556 pixel
+  screenshot of the 393×852 pt screen at 3×, with the status bar pinned to 9:41. The viewer draws
+  content from the top edge under the status bar, so nothing is cropped; the comparison ignores the
+  clock and the signal/battery glyph rects, which the simulator draws over the content. The emitter
+  `scripts/prototype/ios-golden-specs.ts` writes content-only specs and `cases.json` with the
+  shared pixel geometry and case modes. The recorder checks the screenshot size.
+- **Rendering.** Chromium draws the `iphone-16` still with its iOS skin and safe-area environment
+  in a bare document. CSS removes the frame padding, background and corner radii; the whole
+  screen is clipped at 3×. Only the screen default font is pinned to DejaVu Sans.
+- **Budgets and output.** `test/fixtures/prototype-web/ios-parity-budgets.json` uses the Android
+  check's 0.1 pixel distance, runner allowance and `--update` / `--allow-grow` policy. Budgets are
+  measured with `--update` after recording. Directory-dependent unit tests require
+  complete case coverage, exact PNG sizes and matching budget keys. The opt-in advisory
+  `Prototype Web Screenshots` workflow runs both parity checks in Chromium and uploads iOS
+  captures and diffs under `ios-parity/`. Golden paths are exempt from LFS so checkout reads PNGs.
+
 ## Still renderer
 
 `renderPrototypeStill(spec, {frame, orientation, posture, mode, screen, locale, textSize, chromeless})` in

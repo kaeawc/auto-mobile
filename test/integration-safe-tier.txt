@@ -293,3 +293,5 @@ test/utils/image/backend/SharpBackend.integration.test.ts | safe | in-process sh
 test/utils/image/backend/resolveImageBackend.integration.test.ts | safe | in-process Jimp; injected sharp loader that throws L16
 test/utils/logger-close.integration.test.ts | safe | WriteStream on mkdtemp tmpdir L10/L39
 test/utils/screenshot/PerceptualHasher.integration.test.ts | safe | in-process Jimp and FakeImageBackend L137
+
+test/features/prototype/web/webIosParity.integration.test.ts | unsafe | opt-in headless Chromium parity capture; writes scratch/ screenshots and may update budgets

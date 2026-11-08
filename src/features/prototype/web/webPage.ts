@@ -52,6 +52,7 @@ import {
   type PrototypeWebImage,
   type WebImageBox,
   type WebImageDraw,
+  type WebImageFillExtent,
 } from "./webImages";
 import type { StillTextSize } from "./webTextScale";
 
@@ -91,10 +92,15 @@ export interface PrototypeWebPageInput {
   readonly images?: readonly PrototypeWebImage[];
 }
 
-/** An asset the page draws and the pixel boxes it is drawn in, to encode it at the right size. */
+/**
+ * An asset the page draws and the pixel boxes it is drawn in, to encode it at the right size;
+ * `compactBoxes`, present only when they differ, bound filled axes by the portrait width instead,
+ * for a smaller encode when the page's images do not all fit.
+ */
 export interface PrototypeWebImageRequest {
   readonly id: string;
   readonly boxes: readonly WebImageBox[];
+  readonly compactBoxes?: readonly WebImageBox[];
 }
 
 export interface PrototypeWebPage {
@@ -609,16 +615,26 @@ function imageRequests(
     ...revisions.filter((revision) => isPinned(revision) && !isShown(revision)),
     ...revisions.filter((revision) => !isPinned(revision)),
   ];
-  const boxes = new Map<string, Map<string, WebImageBox>>();
+  const draws = new Map<string, WebImageDraw[]>();
   for (const revision of ordered) {
     for (const draw of revision.screens.flat().flatMap((view) => view.draws)) {
-      const box = webImageBox(draw, screen);
-      const forAsset = boxes.get(draw.asset) ?? new Map<string, WebImageBox>();
-      forAsset.set(JSON.stringify(box), box);
-      boxes.set(draw.asset, forAsset);
+      draws.set(draw.asset, [...(draws.get(draw.asset) ?? []), draw]);
     }
   }
-  return [...boxes].map(([id, unique]) => ({ id, boxes: [...unique.values()] }));
+  const unique = (forAsset: readonly WebImageDraw[], fill: WebImageFillExtent) => [
+    ...new Map(
+      forAsset
+        .map((draw) => webImageBox(draw, screen, fill))
+        .map((box) => [JSON.stringify(box), box]),
+    ).values(),
+  ];
+  return [...draws].map(([id, forAsset]) => {
+    const boxes = unique(forAsset, "long");
+    const compactBoxes = unique(forAsset, "short");
+    return JSON.stringify(compactBoxes) === JSON.stringify(boxes)
+      ? { id, boxes }
+      : { id, boxes, compactBoxes };
+  });
 }
 
 /**

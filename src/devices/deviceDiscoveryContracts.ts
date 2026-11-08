@@ -18,6 +18,7 @@ import type {
 import type { EmulatorProcessStopper } from "../utils/android-cmdline-tools/EmulatorProcessStop";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import type { DiscoverySource } from "../utils/discoverySource";
+import type { SimulatorPair } from "../utils/ios-cmdline-tools/SimulatorPairs";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import { SimctlUnavailableError, type SimCtl } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../utils/logger";
@@ -263,6 +264,8 @@ export interface PlatformDeviceManager {
   withForeignAndroidSerialSource?(source: ForeignAndroidSerialSource): this;
   /** Canonical simulator family for shutdown; adapters without simulator inventories may omit it. */
   resolveKillDeviceTarget?(device: BootedDevice, signal?: AbortSignal): Promise<BootedDevice>;
+  /** Watch–iPhone simulator pairs over the same simctl; absent when no real simctl backs it. */
+  listSimulatorPairs?(signal?: AbortSignal): Promise<SimulatorPair[]>;
 
   /**
    * List all available device images for a specific platform

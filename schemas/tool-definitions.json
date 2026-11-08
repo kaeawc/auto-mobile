@@ -19306,6 +19306,33 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "simulatorPairs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "pairId": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": ["active", "inactive"]
+              },
+              "connection": {
+                "type": "string",
+                "enum": ["connected", "disconnected"]
+              },
+              "watch": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "phone": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            "required": ["pairId", "state", "connection", "watch", "phone"],
+            "additionalProperties": false
+          }
+        },
         "message": {
           "type": "string"
         },
@@ -19381,19 +19408,19 @@
                 ]
               },
               "deviceType": {
-                "$ref": "#/$defs/__schema0"
+                "$ref": "#/$defs/__schema1"
               },
               "model": {
-                "$ref": "#/$defs/__schema0"
+                "$ref": "#/$defs/__schema1"
               },
               "architecture": {
-                "$ref": "#/$defs/__schema0"
+                "$ref": "#/$defs/__schema1"
               },
               "osVersion": {
-                "$ref": "#/$defs/__schema0"
+                "$ref": "#/$defs/__schema1"
               },
               "apiLevel": {
-                "$ref": "#/$defs/__schema1"
+                "$ref": "#/$defs/__schema2"
               },
               "configuredRamMb": {
                 "anyOf": [
@@ -19442,19 +19469,19 @@
                 ]
               },
               "runtimeId": {
-                "$ref": "#/$defs/__schema0"
+                "$ref": "#/$defs/__schema1"
               },
               "runtime": {
                 "type": "object",
                 "properties": {
                   "deviceId": {
-                    "$ref": "#/$defs/__schema0"
+                    "$ref": "#/$defs/__schema1"
                   },
                   "connectionId": {
-                    "$ref": "#/$defs/__schema0"
+                    "$ref": "#/$defs/__schema1"
                   },
                   "deviceSessionUuid": {
-                    "$ref": "#/$defs/__schema0"
+                    "$ref": "#/$defs/__schema1"
                   },
                   "lifecycle": {
                     "type": "object",
@@ -19502,7 +19529,7 @@
                         "type": "object",
                         "properties": {
                           "sessionUuid": {
-                            "$ref": "#/$defs/__schema0"
+                            "$ref": "#/$defs/__schema1"
                           },
                           "ownership": {
                             "anyOf": [
@@ -19693,13 +19720,13 @@
                 "type": "object",
                 "properties": {
                   "width": {
-                    "$ref": "#/$defs/__schema1"
+                    "$ref": "#/$defs/__schema2"
                   },
                   "height": {
-                    "$ref": "#/$defs/__schema1"
+                    "$ref": "#/$defs/__schema2"
                   },
                   "density": {
-                    "$ref": "#/$defs/__schema1"
+                    "$ref": "#/$defs/__schema2"
                   },
                   "units": {
                     "type": "string",
@@ -19794,10 +19821,10 @@
                               "enum": ["supported", "unsupported", "unknown"]
                             },
                             "reason": {
-                              "$ref": "#/$defs/__schema0"
+                              "$ref": "#/$defs/__schema1"
                             },
                             "source": {
-                              "$ref": "#/$defs/__schema0"
+                              "$ref": "#/$defs/__schema1"
                             }
                           },
                           "required": ["id", "state", "reason", "source"],
@@ -19832,20 +19859,20 @@
                 "type": "object",
                 "properties": {
                   "path": {
-                    "$ref": "#/$defs/__schema0"
+                    "$ref": "#/$defs/__schema1"
                   },
                   "target": {
-                    "$ref": "#/$defs/__schema0"
+                    "$ref": "#/$defs/__schema1"
                   },
                   "basedOn": {
-                    "$ref": "#/$defs/__schema0"
+                    "$ref": "#/$defs/__schema1"
                   }
                 },
                 "required": ["path", "target", "basedOn"],
                 "additionalProperties": false
               },
               "availabilityError": {
-                "$ref": "#/$defs/__schema0"
+                "$ref": "#/$defs/__schema1"
               },
               "transportAliases": {
                 "type": "array",
@@ -19915,13 +19942,13 @@
               "type": "object",
               "properties": {
                 "limit": {
-                  "$ref": "#/$defs/__schema2"
-                },
-                "booted": {
                   "$ref": "#/$defs/__schema3"
                 },
-                "inFlight": {
+                "booted": {
                   "$ref": "#/$defs/__schema4"
+                },
+                "inFlight": {
+                  "$ref": "#/$defs/__schema5"
                 },
                 "processTable": {
                   "type": "object",
@@ -19962,13 +19989,13 @@
               "type": "object",
               "properties": {
                 "limit": {
-                  "$ref": "#/$defs/__schema2"
-                },
-                "booted": {
                   "$ref": "#/$defs/__schema3"
                 },
-                "inFlight": {
+                "booted": {
                   "$ref": "#/$defs/__schema4"
+                },
+                "inFlight": {
+                  "$ref": "#/$defs/__schema5"
                 },
                 "admissionsByReason": {
                   "type": "object",
@@ -20045,6 +20072,22 @@
       "additionalProperties": false,
       "$defs": {
         "__schema0": {
+          "type": "object",
+          "properties": {
+            "deviceId": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            }
+          },
+          "required": ["deviceId", "name", "state"],
+          "additionalProperties": false
+        },
+        "__schema1": {
           "anyOf": [
             {
               "type": "string"
@@ -20054,7 +20097,7 @@
             }
           ]
         },
-        "__schema1": {
+        "__schema2": {
           "anyOf": [
             {
               "type": "number"
@@ -20064,13 +20107,13 @@
             }
           ]
         },
-        "__schema2": {
-          "type": "number"
-        },
         "__schema3": {
           "type": "number"
         },
         "__schema4": {
+          "type": "number"
+        },
+        "__schema5": {
           "type": "number"
         }
       }

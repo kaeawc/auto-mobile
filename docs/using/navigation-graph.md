@@ -149,6 +149,12 @@ android {
 }
 ```
 
+In a detached checkout, which is common on CI, `git rev-parse --abbrev-ref HEAD`
+prints `HEAD`, so the build would be labeled `HEAD@<sha>`. On CI, take the branch
+from the CI environment instead (for example `GITHUB_HEAD_REF`, or
+`GITHUB_REF_NAME` on GitHub Actions), and leave both values out when no branch
+is known.
+
 On iOS, add the same two keys as strings to the app's `Info.plist`, for example
 from a build phase that runs `git rev-parse`. iOS builds are labeled on
 simulators only.

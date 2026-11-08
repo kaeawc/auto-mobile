@@ -450,3 +450,48 @@ test("a box of unmeasured height keeps square corners, since its height could sh
   expect(paintsTopEdgeAt(box, 200)).toBe(true);
   expect(paintsTopEdgeAt(box, 5)).toBe(true);
 });
+
+test("a ratio-derived flex basis is not clamped by the item's main-axis maximum", () => {
+  // CSS: bases 400 and 300 overflow 400 by 300, shared 4:3; both stay under their 240px maximum.
+  const item = (name: string, ratio: string) =>
+    named(name, {
+      flex: "1 1 auto",
+      height: "100%",
+      "aspect-ratio": ratio,
+      "min-width": "0",
+      "max-width": "240px",
+    });
+  const root = named("root", { display: "flex", "flex-direction": "column" }, [
+    named("row", { display: "flex", "flex-direction": "row", width: "400px", height: "800px" }, [
+      item("black", "0.5"),
+      item("white", "0.375"),
+    ]),
+  ]);
+  const painted = topEdgePaintOrder(root, SCREEN);
+  expect(rectOf(painted, "black")?.width).toBeCloseTo(228.57, 2);
+  expect(rectOf(painted, "white")?.left).toBeCloseTo(228.57, 2);
+  expect(rectOf(painted, "white")?.width).toBeCloseTo(171.43, 2);
+});
+
+test("shrink is weighted by the inner flex base size, excluding padding and border", () => {
+  // CSS: inner bases 120 and 320 share the 200px overflow 120:320.
+  const row = named("row", { display: "flex", "flex-direction": "row", width: "400px" }, [
+    named("black", { width: "280px", height: "10px", "min-width": "0", "padding-left": "160px" }),
+    named("white", { width: "320px", height: "10px", "min-width": "0" }),
+  ]);
+  const painted = topEdgePaintOrder(row, SCREEN);
+  expect(rectOf(painted, "black")?.width).toBeCloseTo(225.45, 2);
+  expect(rectOf(painted, "white")?.left).toBeCloseTo(225.45, 2);
+  expect(rectOf(painted, "white")?.width).toBeCloseTo(174.55, 2);
+});
+
+test("a growing item's content-sized basis keeps its padding", () => {
+  // CSS: empty items' auto bases are 0 and 100 (padding), so the 300px left splits 150/150.
+  const row = named("row", { display: "flex", "flex-direction": "row", width: "400px" }, [
+    named("black", { flex: "1 1 auto", height: "10px" }),
+    named("white", { flex: "1 1 auto", height: "10px", "padding-left": "100px" }),
+  ]);
+  const painted = topEdgePaintOrder(row, SCREEN);
+  expect(rectOf(painted, "black")?.width).toBe(150);
+  expect(rectOf(painted, "white")).toEqual({ left: 150, top: 0, width: 250, height: 10 });
+});

@@ -14,8 +14,10 @@ that names `platform: "tvos"` is refused before target resolution, and a
 resolved Apple TV device is refused at dispatch. Device-management tools that
 look up their own target (`killDevice` and similar) refuse a `tvos` request by
 name unless they are allowlisted. Refusals carry a generic "does not support
-tvOS yet" message, or a focus-navigation hint for touch gestures (`tapAt`,
-`swipeOn`, `pinchOn`, `multiTouch`, `dragAndDrop`, `tapAny`).
+tvOS yet" message, a "not available on tvOS" message naming the missing runtime
+capability (`displayConfig`, `statusBar`, `clipboard`, `getAppPermissions`), or a
+focus-navigation hint for touch gestures (`tapAt`, `swipeOn`, `pinchOn`,
+`multiTouch`, `dragAndDrop`, `tapAny`).
 
 ## Status values
 
@@ -47,14 +49,14 @@ tvOS yet" message, or a focus-navigation hint for touch gestures (`tapAt`,
 | `changeLocalization`          | not-supported     |                                                                                                                                                  |
 | `clearKeyValueFile`           | not-supported     |                                                                                                                                                  |
 | `clearMockNetwork`            | not-supported     |                                                                                                                                                  |
-| `clipboard`                   | refused-by-design | The tvOS simulator runtime has no pasteboard service; [#17529] makes the refusal say so.                                                         |
+| `clipboard`                   | refused-by-design | The tvOS simulator runtime has no pasteboard service; the refusal says so.                                                                       |
 | `compareScreenshot`           | pass              | Record and compare via `simctl io` screenshots.                                                                                                  |
 | `crashApp`                    | not-supported     | [#16723].                                                                                                                                        |
 | `criticalSection`             | not-supported     | Plan-only multi-device primitive.                                                                                                                |
 | `deleteDevice`                | pass              | Destroy with verified inventory absence.                                                                                                         |
 | `deleteKeychainItem`          | not-supported     |                                                                                                                                                  |
 | `deviceSnapshot`              | not-supported     |                                                                                                                                                  |
-| `displayConfig`               | refused-by-design | The tvOS simulator runtime has no appearance or content-size service; [#17529] makes the refusal say so.                                         |
+| `displayConfig`               | refused-by-design | The tvOS simulator runtime has no appearance or content-size service; the refusal says so.                                                       |
 | `displayProfile`              | refused-by-design | Android-only.                                                                                                                                    |
 | `dragAndDrop`                 | refused-by-design | No touch surface.                                                                                                                                |
 | `dragPath`                    | refused-by-design | No touch surface.                                                                                                                                |
@@ -64,7 +66,7 @@ tvOS yet" message, or a focus-navigation hint for touch gestures (`tapAt`,
 | `focusNavigate`               | pass              |                                                                                                                                                  |
 | `getAndroid`                  | host-only         | Android AVD discovery.                                                                                                                           |
 | `getApple`                    | host-only         | iOS Simulator discovery.                                                                                                                         |
-| `getAppPermissions`           | not-supported     | simctl has no permission read path on tvOS; the write side is [#17527].                                                                          |
+| `getAppPermissions`           | refused-by-design | simctl has no permission read verb; the refusal says so. `setAppPermissions` covers the write side.                                              |
 | `getDataStore`                | refused-by-design | Android-only (Jetpack DataStore).                                                                                                                |
 | `getDeepLinks`                | pass              |                                                                                                                                                  |
 | `getDeviceState`              | not-supported     |                                                                                                                                                  |
@@ -77,7 +79,7 @@ tvOS yet" message, or a focus-navigation hint for touch gestures (`tapAt`,
 | `heapDump`                    | refused-by-design | Android-only.                                                                                                                                    |
 | `highlight`                   | not-supported     |                                                                                                                                                  |
 | `hitTest`                     | refused-by-design | No touch surface.                                                                                                                                |
-| `homeScreen`                  | not-supported     | The remote home press reaches the home screen; [#17525].                                                                                         |
+| `homeScreen`                  | pass              | Presses the Siri Remote `home` button (same press as `pressButton home`); the result reports the press, not a checked home screen.               |
 | `hoverAt`                     | refused-by-design | No stylus or pointer.                                                                                                                            |
 | `identifyInteractions`        | not-supported     | Also behind the debug flag.                                                                                                                      |
 | `injectAudioInput`            | not-supported     |                                                                                                                                                  |
@@ -105,7 +107,7 @@ tvOS yet" message, or a focus-navigation hint for touch gestures (`tapAt`,
 | `phoneCall`                   | refused-by-design | No telephony.                                                                                                                                    |
 | `pinchOn`                     | refused-by-design | No touch surface.                                                                                                                                |
 | `portReverse`                 | refused-by-design | Android-only.                                                                                                                                    |
-| `postNotification`            | not-supported     | `simctl push` works on tvOS; [#17526].                                                                                                           |
+| `postNotification`            | pass              | `simctl push` to the app named by `appId` (required).                                                                                            |
 | `pressButton`                 | pass              | `up`, `down`, `left`, `right`, `select`, `menu`, `home`, `playPause`. Long press and `steps` are not supported ([#16726]).                       |
 | `prototype`                   | not-supported     |                                                                                                                                                  |
 | `provisionDevice`             | pass              | Boots with readiness `none`.                                                                                                                     |
@@ -126,7 +128,7 @@ tvOS yet" message, or a focus-navigation hint for touch gestures (`tapAt`,
 | `sendSms`                     | refused-by-design | No telephony.                                                                                                                                    |
 | `setActiveDevice`             | pass              |                                                                                                                                                  |
 | `setAppLinks`                 | refused-by-design | Android-only.                                                                                                                                    |
-| `setAppPermissions`           | not-supported     | `simctl privacy` works on tvOS; [#17527].                                                                                                        |
+| `setAppPermissions`           | pass              | `simctl privacy` grant, revoke or reset; changes are not read back (`verified: false`).                                                          |
 | `setDeviceResources`          | not-supported     |                                                                                                                                                  |
 | `setDeviceState`              | not-supported     |                                                                                                                                                  |
 | `setKeyValue`                 | not-supported     |                                                                                                                                                  |
@@ -140,7 +142,7 @@ tvOS yet" message, or a focus-navigation hint for touch gestures (`tapAt`,
 | `siri`                        | not-supported     |                                                                                                                                                  |
 | `snapshotOf`                  | not-supported     |                                                                                                                                                  |
 | `sqlQuery`                    | not-supported     |                                                                                                                                                  |
-| `statusBar`                   | refused-by-design | The tvOS simulator runtime has no status bar override; [#17529] makes the refusal say so.                                                        |
+| `statusBar`                   | refused-by-design | The tvOS simulator runtime has no status bar override; the refusal says so.                                                                      |
 | `stopAudioInput`              | not-supported     |                                                                                                                                                  |
 | `swipeAt`                     | refused-by-design | No touch surface. Siri Remote touch-surface swipes are [#16726].                                                                                 |
 | `swipeOn`                     | refused-by-design | No touch surface. Siri Remote touch-surface swipes are [#16726].                                                                                 |
@@ -155,15 +157,11 @@ tvOS yet" message, or a focus-navigation hint for touch gestures (`tapAt`,
 | `wakeAndUnlock`               | refused-by-design | No keyguard.                                                                                                                                     |
 | `windowMode`                  | refused-by-design | Android-only.                                                                                                                                    |
 
-Totals: 22 pass, 55 not-supported, 39 refused-by-design, 6 host-only. The tvOS
+Totals: 25 pass, 51 not-supported, 40 refused-by-design, 6 host-only. The tvOS
 allowlist also holds `startDevice`, which is not in the published tool
 definitions; it boots the simulator and connects the runner.
 
 [#16723]: https://github.com/kaeawc/auto-mobile/issues/16723
 [#16726]: https://github.com/kaeawc/auto-mobile/issues/16726
 [#17524]: https://github.com/kaeawc/auto-mobile/issues/17524
-[#17525]: https://github.com/kaeawc/auto-mobile/issues/17525
-[#17526]: https://github.com/kaeawc/auto-mobile/issues/17526
-[#17527]: https://github.com/kaeawc/auto-mobile/issues/17527
 [#17528]: https://github.com/kaeawc/auto-mobile/issues/17528
-[#17529]: https://github.com/kaeawc/auto-mobile/issues/17529

@@ -84,6 +84,8 @@ function installObserveFixture(): ToolFixture {
       appendRawViewHierarchy: screen.appendRawViewHierarchy.bind(screen),
       getMostRecentCachedObserveResult: screen.getMostRecentCachedObserveResult.bind(screen),
     }),
+    // The Car App template route reads the foreground app over adb; the benchmark has no device.
+    carAppTemplates: async () => undefined,
   });
   return {
     args: { platform: "android" },

@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.navigation3.runtime.EntryProviderScope
 import androidx.navigation3.runtime.NavKey
 import dev.jasonpearson.automobile.demos.BugReproScreen
+import dev.jasonpearson.automobile.demos.CollapsingComposerScreen
 import dev.jasonpearson.automobile.demos.ComposeSemanticLinksDemoScreen
 import dev.jasonpearson.automobile.demos.ContrastDemoScreen
 import dev.jasonpearson.automobile.demos.HandledExceptionDemoScreen
@@ -38,6 +39,9 @@ internal fun EntryProviderScope<NavKey>.demoScenarioNavigationEntries(state: Nav
   }
   entry<DemoNetworkTestDestination> { destination -> DemoNetworkTestEntry(destination, state) }
   entry<DemoPointerProbeDestination> { destination -> DemoPointerProbeEntry(destination, state) }
+  entry<DemoCollapsingComposerDestination> { destination ->
+    DemoCollapsingComposerEntry(destination, state)
+  }
 }
 
 @Composable
@@ -175,5 +179,21 @@ private fun DemoPointerProbeEntry(
   }
   Box(modifier = Modifier.destinationSemanticModifier<DemoPointerProbeDestination>()) {
     PointerProbeScreen(onNavigateBack = { backStack.popOrGoHome(HomeDestination()) })
+  }
+}
+
+@Composable
+private fun DemoCollapsingComposerEntry(
+  destination: DemoCollapsingComposerDestination,
+  state: NavigationState,
+) {
+  val (backStack, _, analyticsTracker) = state
+  Navigation3Adapter.TrackNavigation(destination)
+  LaunchedEffect(Unit) {
+    Log.d(TAG, "Navigated to CollapsingComposerScreen")
+    analyticsTracker.trackScreenView("CollapsingComposerScreen")
+  }
+  Box(modifier = Modifier.destinationSemanticModifier<DemoCollapsingComposerDestination>()) {
+    CollapsingComposerScreen(onNavigateBack = { backStack.popOrGoHome(HomeDestination()) })
   }
 }

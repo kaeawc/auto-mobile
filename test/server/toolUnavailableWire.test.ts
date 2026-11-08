@@ -2,6 +2,7 @@ import { ProtocolError } from "@modelcontextprotocol/client";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
+import { featureFlagDisabledMessage } from "../../src/features/featureFlags/featureFlagDisabledMessage";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { DAEMON_TOOL_UNAVAILABLE_CODE, DAEMON_UNKNOWN_TOOL_CODE } from "../../src/daemon/types";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -22,7 +23,7 @@ describe("gated tools carry a structured marker over the MCP wire (issue #10177)
   let restoreHermeticServer: () => void;
 
   const GATED = [
-    { name: "__gate_debug__", reason: "--debug is disabled; start the daemon with --debug" },
+    { name: "__gate_debug__", reason: featureFlagDisabledMessage("debug", "__gate_debug__") },
     {
       name: "__gate_embedded__",
       reason: "embedded SDK mode is disabled; start the daemon with --embedded-sdk",

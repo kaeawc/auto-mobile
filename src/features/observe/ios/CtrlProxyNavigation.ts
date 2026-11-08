@@ -176,6 +176,7 @@ export class CtrlProxyNavigation {
         success: false,
         totalTimeMs: timeout,
         error: `Rotate timed out after ${timeout}ms`,
+        timedOut: true,
         previousOrientation: "",
         currentOrientation: "",
         value: 0,

@@ -3,6 +3,7 @@ import { record, type Raw } from "../../../../src/features/prototype/prototypeTe
 import {
   aspectRatioCap,
   CAPPED_SHRINK,
+  contentHeightBound,
   isUnsizedAspectRatio,
   LATER_SHRINK,
   rowContentHeight,
@@ -303,6 +304,35 @@ test("a row's definite content height is its dp height or maxHeight less vertica
   expect(rowContentHeight({ height: { dp: 20 }, minHeight: 100 })).toBe(100);
   expect(rowContentHeight({ minHeight: 100 })).toBe(Infinity);
   expect(rowContentHeight(undefined)).toBe(Infinity);
+});
+
+test("a container's content height is capped by the bound it inherits (#16675)", () => {
+  expect(rowContentHeight({}, 100)).toBe(100);
+  expect(rowContentHeight({ padding: { top: 8, bottom: 8 } }, 116)).toBe(100);
+  expect(rowContentHeight({ height: { dp: 200 } }, 100)).toBe(100);
+  expect(rowContentHeight({ height: { dp: 60 } }, 100)).toBe(60);
+  expect(contentHeightBound({ height: { dp: 116 }, padding: { top: 8, bottom: 8 } })).toBe(100);
+  expect(contentHeightBound({ maxHeight: 50 }, 80)).toBe(50);
+  expect(contentHeightBound({}, undefined)).toBeUndefined();
+  expect(contentHeightBound(undefined, 30)).toBe(30);
+});
+
+test("an inherited height bound caps a row's aspect ratio as its own height does (#16675)", () => {
+  const row = {
+    type: "row",
+    children: [
+      { type: "box", style: { aspectRatio: 1 } },
+      { type: "box", style: { width: { dp: 40 } } },
+    ],
+  };
+  const inherited = rowMeasured(row, "root", shown, 100).children as unknown[];
+  const own = rowMeasured({ ...row, style: { height: { dp: 100 } } }, "root", shown)
+    .children as unknown[];
+  expect(styleOf(inherited[0])?.[ROW_MEASURE_KEY]).toEqual({ shrink: CAPPED_SHRINK, basis: 100 });
+  expect(styleOf(inherited[1])?.[ROW_MEASURE_KEY]).toEqual(styleOf(own[1])?.[ROW_MEASURE_KEY]);
+  // Unbounded, the ratio takes the rest and zeroes its later sibling.
+  const free = rowMeasured(row, "root", shown).children as unknown[];
+  expect(styleOf(free[1])?.[ROW_MEASURE_KEY]).toEqual({ zero: true });
 });
 
 test("a row's definite height caps its aspect ratios, as the incoming max height does natively", () => {

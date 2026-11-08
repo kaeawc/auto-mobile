@@ -155,7 +155,10 @@ export function laterMinStrut(style: unknown, context: WebStyleContext): number 
   return sized ? undefined : raw.minWidth;
 }
 
-/** Applied after the authored bounds: `zero` beats a `maxWidth`, an authored `minWidth` holds. */
+/**
+ * Applied after the authored bounds. A shrinking or taking child keeps an authored `minWidth`;
+ * `zero` beats both bounds, as `sizeIn` clamps an authored minimum into a zero incoming width.
+ */
 function rowMeasureStyle(css: Css, style: Raw, context: WebStyleContext) {
   const measure = record(style[ROW_MEASURE_KEY]);
   if (context.parentAxis !== "row" || !measure) {
@@ -175,6 +178,7 @@ function rowMeasureStyle(css: Css, style: Raw, context: WebStyleContext) {
     css[MIN_WIDTH] = "0";
   }
   if (measure.zero === true) {
+    css[MIN_WIDTH] = "0";
     css[MAX_WIDTH] = "0px";
   }
 }
@@ -456,8 +460,25 @@ export function nodeCss(style: unknown, context: WebStyleContext): Css {
   if (raw) {
     sizeStyle(css, raw, context);
     boxStyle(css, raw, context);
+    rowZeroedInline(css, raw, context);
   }
   return css;
+}
+
+/**
+ * A zeroed row child's horizontal padding and border sit inside its zero width, as Android sizes the
+ * node before its padding (and draws its border without taking layout space). CSS cannot shrink a
+ * box below its padding and border, so they are dropped on that axis to keep the box at 0 wide.
+ */
+function rowZeroedInline(css: Css, style: Raw, context: WebStyleContext) {
+  if (context.parentAxis !== "row" || record(style[ROW_MEASURE_KEY])?.zero !== true) {
+    return;
+  }
+  css["padding-inline-start"] = "0px";
+  css["padding-inline-end"] = "0px";
+  if (css.border !== undefined) {
+    css["border-inline-width"] = "0px";
+  }
 }
 
 const MAIN_ALIGN: Readonly<Record<string, string>> = {

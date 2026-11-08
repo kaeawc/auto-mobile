@@ -8,6 +8,7 @@ import { logger } from "../../../utils/logger";
 import { NoOpPerformanceTracker, PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { appendObserveError } from "../ObserveError";
 import { isFocusedSystemUiSurface } from "../Window";
+import { detectCarAppHostRenderedUi } from "../automotive/carAppHostRenderedUi";
 import type { BootedDevice, ObserveResult } from "../../../models";
 import type { Window } from "../interfaces/Window";
 import type { BackStack } from "../interfaces/BackStack";
@@ -83,6 +84,7 @@ export class DeviceStateCollector {
       distractionOptimized = activities?.has(fullName);
     }
     const { drivingState, uxRestrictions } = automotive;
+    const hostRenderedUi = detectCarAppHostRenderedUi(result);
     result.automotive = {
       ...(drivingState !== undefined ? { drivingState } : {}),
       ...(uxRestrictions ? { uxRestrictions } : {}),
@@ -91,6 +93,7 @@ export class DeviceStateCollector {
         : {}),
       blocked:
         uxRestrictions?.requiresDistractionOptimization === true && distractionOptimized === false,
+      ...(hostRenderedUi ? { hostRenderedUi } : {}),
     };
   }
 

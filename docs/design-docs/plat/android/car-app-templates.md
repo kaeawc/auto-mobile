@@ -75,6 +75,27 @@ first-record order, so it can change after `disable()` and `enable()`.
 - The block describes templates the app returned, never what the host rendered or hid (driving
   restrictions, list limits, host-side truncation). The `note` field says so on every block.
 
+## Host-rendered marker
+
+`carAppTemplates` covers only apps that opted in, and reports what they built. Independently of the
+SDK, `observe.automotive.hostRenderedUi` marks a foreground screen that the car host drew from
+templates. It is derived from the observation itself with no extra device reads, by two signals
+measured on API 34 ext9 AAOS (#16744):
+
+- any node `resource-id` starting `com.google.android.apps.automotive.templates.host:id/`, which also
+  sets `hostPackage`; the app contributes only container ids (`template_view_surface`,
+  `template_view_snapshot`) and nodes carry no package field;
+- `activeWindow.activityName == "androidx.car.app.activity.CarAppActivity"`, which alone gives the
+  marker without `hostPackage`.
+
+The marker is computed whenever the automotive block is built or its foreground activity refreshed,
+and again after reconciliation in case the hierarchy was replaced under the same activity. A stale
+marker is removed. Non-automotive observations have no `automotive` block, so they are unchanged.
+Action code should test it with `isCarAppHostRendered(result)`, or call `detectCarAppHostRenderedUi`
+on an observation that may lack the `automotive` block
+(`src/features/observe/automotive/carAppHostRenderedUi.ts`), rather than repeating the signals; the
+host ignores the BACK key on these screens (#17498).
+
 ## Back on host-rendered templates
 
 The AAOS templates host (`com.google.android.apps.automotive.templates.host`) renders template screens
@@ -88,7 +109,6 @@ non-empty bounds. The target is re-resolved from that interaction's own pre-tap 
 its `frameContext` and asserts the display fence before sending, so a screen that moved on is not tapped
 at stale coordinates. A tap that was dispatched without an acknowledged reply is reported as
 `indeterminate_outcome` with `retryable: false`, because it may already have navigated. The result names
-the tapped affordance in `backFallback`. Template detection is a local
-check in `src/features/action/carAppTemplateBack.ts`; it should switch to observe's host-rendered marker
-(#17499) once that exists. The unit fixtures are trimmed captures from an API 34 AAOS emulator under
-`test/fixtures/automotive/car-app-templates/`.
+the tapped affordance in `backFallback`. Template detection is `detectCarAppHostRenderedUi`, the same
+check behind the host-rendered marker. The unit fixtures are trimmed captures from an API 34 AAOS
+emulator under `test/fixtures/automotive/car-app-templates/`.

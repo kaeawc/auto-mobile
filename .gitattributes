@@ -15,6 +15,8 @@ test/fixtures/ios-notification-center/ios26-*.json text eol=lf
 test/fixtures/ios-typed-text/*.json text eol=lf
 test/fixtures/prototype-capabilities/*.json text eol=lf
 test/fixtures/android-wrapper-pruning/*.json text eol=lf
+# Car App Library host-template observe captures from #16744, committed verbatim.
+test/fixtures/automotive/car-app-host-templates/*.json text eol=lf
 # ProtoViewer iOS notices are compared byte-for-byte against the generator output.
 test/fixtures/protoviewer-notices/*.json text eol=lf
 ios/prototype-agent/ProtoViewer/Acknowledgements.generated.swift text eol=lf

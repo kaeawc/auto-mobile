@@ -2,7 +2,7 @@ import { ActionableError, type BootedDevice, type ObserveResult } from "../../..
 import { logger } from "../../../utils/logger";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../../utils/toolUtils";
 import { getSystemTrayDependencies } from "./dependencies";
-import { ensureSystemTrayOpen, observeSystemTray, sleep } from "./runtime";
+import { observeSystemTray, sleep } from "./runtime";
 import { isWatchAppList, isWearHierarchy, WEAR_SYSTEM_UI, watchStreamRoot } from "./watchHierarchy";
 
 const BACK = "shell input keyevent 4";

@@ -10,9 +10,9 @@ AutoMobile models Vision Pro simulators as platform `visionos`, form factor
 and `killDevice` use `simctl`; boot binds a session at `booted` readiness.
 `observe`, `tapOn` and `sendKeys` prepare a separate window-app XCUITest runner
 on demand. Provisioning still accepts only readiness `none`. The runner reports
-hierarchy and focus, taps uniquely identified window and ornament elements, and
-appends text to a focused field; screenshots use `simctl`. iOS inventories exclude
-xrOS runtimes. `installApp`, `uninstallApp`, `launchApp`, `terminateApp` and
+hierarchy and focus, taps enabled window and ornament elements by identifier (narrowed
+by exact type and label when shared), and appends text to a focused field;
+screenshots use `simctl`. iOS inventories exclude xrOS runtimes. `installApp`, `uninstallApp`, `launchApp`, `terminateApp` and
 `listApps` use `simctl`. All other device tools remain disabled.
 
 ## Environment

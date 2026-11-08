@@ -1,0 +1,2747 @@
+{
+  "viewHierarchy": {
+    "displayId": 0,
+    "hierarchy": {
+      "node": {
+        "windowId": 4,
+        "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+        ],
+        "visible-to-user": true,
+        "view-id": "s2-219eccf879b3c286",
+        "bounds": [
+          0,
+          0,
+          1920,
+          1080
+        ],
+        "node": {
+          "actions": [
+            "select",
+            "clear_selection",
+            "accessibility_focus"
+          ],
+          "resource-id": "android:id/content",
+          "visible-to-user": true,
+          "bounds": [
+            0,
+            0,
+            1920,
+            1080
+          ],
+          "node": {
+            "actions": [
+              "select",
+              "clear_selection",
+              "accessibility_focus"
+            ],
+            "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/browse_dummy",
+            "visible-to-user": true,
+            "bounds": [
+              0,
+              0,
+              1920,
+              1080
+            ],
+            "node": {
+              "actions": [
+                "focus",
+                "select",
+                "clear_selection",
+                "accessibility_focus"
+              ],
+              "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/browse_frame",
+              "visible-to-user": true,
+              "focusable": "true",
+              "bounds": [
+                0,
+                0,
+                1920,
+                1080
+              ],
+              "node": [
+                {
+                  "actions": [
+                    "select",
+                    "clear_selection",
+                    "accessibility_focus"
+                  ],
+                  "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/browse_container_dock",
+                  "visible-to-user": true,
+                  "bounds": [
+                    0,
+                    0,
+                    1920,
+                    1080
+                  ],
+                  "node": {
+                    "actions": [
+                      "select",
+                      "clear_selection",
+                      "accessibility_focus"
+                    ],
+                    "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/scale_frame",
+                    "visible-to-user": true,
+                    "bounds": [
+                      476,
+                      0,
+                      1920,
+                      1080
+                    ],
+                    "node": {
+                      "actions": [
+                        "focus",
+                        "select",
+                        "clear_selection",
+                        "accessibility_focus"
+                      ],
+                      "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/container_list",
+                      "visible-to-user": true,
+                      "collection-info": "rows:-1,cols:1",
+                      "class": "android.widget.GridView",
+                      "className": "android.widget.GridView",
+                      "focusable": "true",
+                      "bounds": [
+                        476,
+                        0,
+                        1920,
+                        1080
+                      ],
+                      "node": [
+                        {
+                          "actions": [
+                            "select",
+                            "clear_selection",
+                            "accessibility_focus"
+                          ],
+                          "collection-row-index": 0,
+                          "collection-column-index": 0,
+                          "visible-to-user": true,
+                          "collection-item-info": "row:0,col:0",
+                          "view-id": "s2-cbb2ee2aad540efe",
+                          "class": "android.widget.LinearLayout",
+                          "className": "android.widget.LinearLayout",
+                          "bounds": [
+                            476,
+                            335,
+                            1920,
+                            562
+                          ],
+                          "node": {
+                            "actions": [
+                              "focus",
+                              "select",
+                              "clear_selection",
+                              "accessibility_focus",
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "set_selection"
+                            ],
+                            "content-desc": "Featured",
+                            "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/row_content",
+                            "visible-to-user": true,
+                            "collection-info": "rows:1,cols:-1",
+                            "class": "android.widget.GridView",
+                            "className": "android.widget.GridView",
+                            "focusable": "true",
+                            "scrollable": "true",
+                            "bounds": [
+                              476,
+                              335,
+                              1920,
+                              562
+                            ],
+                            "node": [
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "collection-row-index": 0,
+                                "collection-column-index": 0,
+                                "visible-to-user": true,
+                                "collection-item-info": "row:0,col:0",
+                                "view-id": "s2-cd746532ef2189d6-1",
+                                "bounds": [
+                                  566,
+                                  354,
+                                  879,
+                                  530
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus"
+                                  ],
+                                  "visible-to-user": true,
+                                  "view-id": "s2-d1ee83cc694e91ca-1",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    566,
+                                    354,
+                                    879,
+                                    530
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                    "visible-to-user": true,
+                                    "class": "android.widget.ImageView",
+                                    "className": "android.widget.ImageView",
+                                    "bounds": [
+                                      566,
+                                      354,
+                                      879,
+                                      530
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "collection-row-index": 0,
+                                "collection-column-index": 1,
+                                "visible-to-user": true,
+                                "collection-item-info": "row:0,col:1",
+                                "view-id": "s2-cd746532ef2189d6-2",
+                                "bounds": [
+                                  892,
+                                  354,
+                                  1206,
+                                  530
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus"
+                                  ],
+                                  "visible-to-user": true,
+                                  "view-id": "s2-d1ee83cc694e91ca-2",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    892,
+                                    354,
+                                    1206,
+                                    530
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                    "visible-to-user": true,
+                                    "class": "android.widget.ImageView",
+                                    "className": "android.widget.ImageView",
+                                    "bounds": [
+                                      892,
+                                      354,
+                                      1206,
+                                      530
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "collection-row-index": 0,
+                                "collection-column-index": 2,
+                                "visible-to-user": true,
+                                "collection-item-info": "row:0,col:2",
+                                "view-id": "s2-cd746532ef2189d6-3",
+                                "bounds": [
+                                  1218,
+                                  354,
+                                  1532,
+                                  530
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus"
+                                  ],
+                                  "visible-to-user": true,
+                                  "view-id": "s2-d1ee83cc694e91ca-3",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    1218,
+                                    354,
+                                    1532,
+                                    530
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                    "visible-to-user": true,
+                                    "class": "android.widget.ImageView",
+                                    "className": "android.widget.ImageView",
+                                    "bounds": [
+                                      1218,
+                                      354,
+                                      1532,
+                                      530
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "collection-row-index": 0,
+                                "collection-column-index": 3,
+                                "visible-to-user": true,
+                                "collection-item-info": "row:0,col:3",
+                                "view-id": "s2-cd746532ef2189d6-4",
+                                "bounds": [
+                                  1545,
+                                  354,
+                                  1858,
+                                  530
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus"
+                                  ],
+                                  "visible-to-user": true,
+                                  "view-id": "s2-d1ee83cc694e91ca-4",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    1545,
+                                    354,
+                                    1858,
+                                    530
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                    "visible-to-user": true,
+                                    "class": "android.widget.ImageView",
+                                    "className": "android.widget.ImageView",
+                                    "bounds": [
+                                      1545,
+                                      354,
+                                      1858,
+                                      530
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "collection-row-index": 0,
+                                "collection-column-index": 4,
+                                "visible-to-user": true,
+                                "collection-item-info": "row:0,col:4",
+                                "view-id": "s2-cd746532ef2189d6-5",
+                                "bounds": [
+                                  1871,
+                                  354,
+                                  1920,
+                                  530
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus"
+                                  ],
+                                  "visible-to-user": true,
+                                  "view-id": "s2-d1ee83cc694e91ca-5",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    1871,
+                                    354,
+                                    1920,
+                                    530
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                    "visible-to-user": true,
+                                    "class": "android.widget.ImageView",
+                                    "className": "android.widget.ImageView",
+                                    "bounds": [
+                                      1871,
+                                      354,
+                                      1920,
+                                      530
+                                    ]
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "actions": [
+                            "select",
+                            "clear_selection",
+                            "accessibility_focus"
+                          ],
+                          "collection-row-index": 1,
+                          "collection-column-index": 0,
+                          "visible-to-user": true,
+                          "collection-item-info": "row:1,col:0",
+                          "view-id": "s2-bd7d206ef4d0b0d6",
+                          "class": "android.widget.LinearLayout",
+                          "className": "android.widget.LinearLayout",
+                          "bounds": [
+                            476,
+                            562,
+                            1920,
+                            751
+                          ],
+                          "node": {
+                            "actions": [
+                              "focus",
+                              "select",
+                              "clear_selection",
+                              "accessibility_focus",
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "set_selection"
+                            ],
+                            "content-desc": "Movies",
+                            "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/row_content",
+                            "visible-to-user": true,
+                            "collection-info": "rows:1,cols:-1",
+                            "class": "android.widget.GridView",
+                            "className": "android.widget.GridView",
+                            "focusable": "true",
+                            "scrollable": "true",
+                            "bounds": [
+                              476,
+                              562,
+                              1920,
+                              751
+                            ],
+                            "node": [
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "collection-row-index": 0,
+                                "collection-column-index": 0,
+                                "visible-to-user": true,
+                                "collection-item-info": "row:0,col:0",
+                                "view-id": "s2-cd746532ef2189d6-6",
+                                "bounds": [
+                                  566,
+                                  562,
+                                  879,
+                                  738
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus"
+                                  ],
+                                  "visible-to-user": true,
+                                  "view-id": "s2-d1ee83cc694e91ca-6",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    566,
+                                    562,
+                                    879,
+                                    738
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                    "visible-to-user": true,
+                                    "class": "android.widget.ImageView",
+                                    "className": "android.widget.ImageView",
+                                    "bounds": [
+                                      566,
+                                      562,
+                                      879,
+                                      738
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "collection-row-index": 0,
+                                "collection-column-index": 1,
+                                "visible-to-user": true,
+                                "collection-item-info": "row:0,col:1",
+                                "view-id": "s2-cd746532ef2189d6-7",
+                                "bounds": [
+                                  892,
+                                  562,
+                                  1206,
+                                  738
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus"
+                                  ],
+                                  "visible-to-user": true,
+                                  "view-id": "s2-d1ee83cc694e91ca-7",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    892,
+                                    562,
+                                    1206,
+                                    738
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                    "visible-to-user": true,
+                                    "class": "android.widget.ImageView",
+                                    "className": "android.widget.ImageView",
+                                    "bounds": [
+                                      892,
+                                      562,
+                                      1206,
+                                      738
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "collection-row-index": 0,
+                                "collection-column-index": 2,
+                                "visible-to-user": true,
+                                "collection-item-info": "row:0,col:2",
+                                "view-id": "s2-cd746532ef2189d6-8",
+                                "bounds": [
+                                  1218,
+                                  562,
+                                  1532,
+                                  738
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus"
+                                  ],
+                                  "visible-to-user": true,
+                                  "view-id": "s2-d1ee83cc694e91ca-8",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    1218,
+                                    562,
+                                    1532,
+                                    738
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                    "visible-to-user": true,
+                                    "class": "android.widget.ImageView",
+                                    "className": "android.widget.ImageView",
+                                    "bounds": [
+                                      1218,
+                                      562,
+                                      1532,
+                                      738
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "collection-row-index": 0,
+                                "collection-column-index": 3,
+                                "visible-to-user": true,
+                                "collection-item-info": "row:0,col:3",
+                                "view-id": "s2-cd746532ef2189d6-9",
+                                "bounds": [
+                                  1545,
+                                  562,
+                                  1858,
+                                  738
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus"
+                                  ],
+                                  "visible-to-user": true,
+                                  "view-id": "s2-d1ee83cc694e91ca-9",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    1545,
+                                    562,
+                                    1858,
+                                    738
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                    "visible-to-user": true,
+                                    "class": "android.widget.ImageView",
+                                    "className": "android.widget.ImageView",
+                                    "bounds": [
+                                      1545,
+                                      562,
+                                      1858,
+                                      738
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "collection-row-index": 0,
+                                "collection-column-index": 4,
+                                "visible-to-user": true,
+                                "collection-item-info": "row:0,col:4",
+                                "view-id": "s2-cd746532ef2189d6-10",
+                                "bounds": [
+                                  1871,
+                                  562,
+                                  1920,
+                                  738
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus"
+                                  ],
+                                  "visible-to-user": true,
+                                  "view-id": "s2-d1ee83cc694e91ca-10",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    1871,
+                                    562,
+                                    1920,
+                                    738
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                    "visible-to-user": true,
+                                    "class": "android.widget.ImageView",
+                                    "className": "android.widget.ImageView",
+                                    "bounds": [
+                                      1871,
+                                      562,
+                                      1920,
+                                      738
+                                    ]
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "actions": [
+                            "select",
+                            "clear_selection",
+                            "accessibility_focus"
+                          ],
+                          "collection-row-index": 2,
+                          "collection-column-index": 0,
+                          "visible-to-user": true,
+                          "collection-item-info": "row:2,col:0",
+                          "view-id": "s2-ef30ed9d7750b328",
+                          "class": "android.widget.LinearLayout",
+                          "className": "android.widget.LinearLayout",
+                          "bounds": [
+                            476,
+                            751,
+                            1920,
+                            940
+                          ],
+                          "node": {
+                            "actions": [
+                              "focus",
+                              "select",
+                              "clear_selection",
+                              "accessibility_focus",
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "set_selection"
+                            ],
+                            "content-desc": "Shows",
+                            "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/row_content",
+                            "visible-to-user": true,
+                            "collection-info": "rows:1,cols:-1",
+                            "class": "android.widget.GridView",
+                            "className": "android.widget.GridView",
+                            "focusable": "true",
+                            "scrollable": "true",
+                            "bounds": [
+                              476,
+                              751,
+                              1920,
+                              940
+                            ],
+                            "node": [
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "collection-row-index": 0,
+                                "collection-column-index": 0,
+                                "visible-to-user": true,
+                                "collection-item-info": "row:0,col:0",
+                                "view-id": "s2-cd746532ef2189d6-11",
+                                "bounds": [
+                                  566,
+                                  751,
+                                  879,
+                                  927
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus"
+                                  ],
+                                  "visible-to-user": true,
+                                  "view-id": "s2-d1ee83cc694e91ca-11",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    566,
+                                    751,
+                                    879,
+                                    927
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                    "visible-to-user": true,
+                                    "class": "android.widget.ImageView",
+                                    "className": "android.widget.ImageView",
+                                    "bounds": [
+                                      566,
+                                      751,
+                                      879,
+                                      927
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "collection-row-index": 0,
+                                "collection-column-index": 1,
+                                "visible-to-user": true,
+                                "collection-item-info": "row:0,col:1",
+                                "view-id": "s2-cd746532ef2189d6-12",
+                                "bounds": [
+                                  892,
+                                  751,
+                                  1206,
+                                  927
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus"
+                                  ],
+                                  "visible-to-user": true,
+                                  "view-id": "s2-d1ee83cc694e91ca-12",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    892,
+                                    751,
+                                    1206,
+                                    927
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                    "visible-to-user": true,
+                                    "class": "android.widget.ImageView",
+                                    "className": "android.widget.ImageView",
+                                    "bounds": [
+                                      892,
+                                      751,
+                                      1206,
+                                      927
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "collection-row-index": 0,
+                                "collection-column-index": 2,
+                                "visible-to-user": true,
+                                "collection-item-info": "row:0,col:2",
+                                "view-id": "s2-cd746532ef2189d6-13",
+                                "bounds": [
+                                  1218,
+                                  751,
+                                  1532,
+                                  927
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus"
+                                  ],
+                                  "visible-to-user": true,
+                                  "view-id": "s2-d1ee83cc694e91ca-13",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    1218,
+                                    751,
+                                    1532,
+                                    927
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                    "visible-to-user": true,
+                                    "class": "android.widget.ImageView",
+                                    "className": "android.widget.ImageView",
+                                    "bounds": [
+                                      1218,
+                                      751,
+                                      1532,
+                                      927
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "collection-row-index": 0,
+                                "collection-column-index": 3,
+                                "visible-to-user": true,
+                                "collection-item-info": "row:0,col:3",
+                                "view-id": "s2-cd746532ef2189d6-14",
+                                "bounds": [
+                                  1545,
+                                  751,
+                                  1858,
+                                  927
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus"
+                                  ],
+                                  "visible-to-user": true,
+                                  "view-id": "s2-d1ee83cc694e91ca-14",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    1545,
+                                    751,
+                                    1858,
+                                    927
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                    "visible-to-user": true,
+                                    "class": "android.widget.ImageView",
+                                    "className": "android.widget.ImageView",
+                                    "bounds": [
+                                      1545,
+                                      751,
+                                      1858,
+                                      927
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus"
+                                ],
+                                "collection-row-index": 0,
+                                "collection-column-index": 4,
+                                "visible-to-user": true,
+                                "collection-item-info": "row:0,col:4",
+                                "view-id": "s2-cd746532ef2189d6-15",
+                                "bounds": [
+                                  1871,
+                                  751,
+                                  1920,
+                                  927
+                                ],
+                                "node": {
+                                  "actions": [
+                                    "focus",
+                                    "select",
+                                    "clear_selection",
+                                    "click",
+                                    "accessibility_focus"
+                                  ],
+                                  "visible-to-user": true,
+                                  "view-id": "s2-d1ee83cc694e91ca-15",
+                                  "clickable": "true",
+                                  "focusable": "true",
+                                  "bounds": [
+                                    1871,
+                                    751,
+                                    1920,
+                                    927
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                    "visible-to-user": true,
+                                    "class": "android.widget.ImageView",
+                                    "className": "android.widget.ImageView",
+                                    "bounds": [
+                                      1871,
+                                      751,
+                                      1920,
+                                      927
+                                    ]
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "actions": [
+                    "select",
+                    "clear_selection",
+                    "accessibility_focus"
+                  ],
+                  "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/browse_headers_dock",
+                  "visible-to-user": true,
+                  "bounds": [
+                    0,
+                    0,
+                    640,
+                    1080
+                  ],
+                  "node": {
+                    "actions": [
+                      "select",
+                      "clear_selection",
+                      "accessibility_focus"
+                    ],
+                    "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/browse_headers_root",
+                    "visible-to-user": true,
+                    "class": "android.widget.RelativeLayout",
+                    "className": "android.widget.RelativeLayout",
+                    "bounds": [
+                      0,
+                      0,
+                      540,
+                      1080
+                    ],
+                    "node": [
+                      {
+                        "actions": [
+                          "focus",
+                          "select",
+                          "clear_selection",
+                          "accessibility_focus",
+                          "next_at_movement_granularity",
+                          "previous_at_movement_granularity",
+                          "set_selection"
+                        ],
+                        "content-desc": "Navigation menu",
+                        "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/browse_headers",
+                        "visible-to-user": true,
+                        "collection-info": "rows:-1,cols:1",
+                        "class": "android.widget.GridView",
+                        "className": "android.widget.GridView",
+                        "focusable": "true",
+                        "bounds": [
+                          0,
+                          0,
+                          524,
+                          1080
+                        ],
+                        "node": [
+                          {
+                            "actions": [
+                              "select",
+                              "clear_selection",
+                              "accessibility_focus"
+                            ],
+                            "collection-row-index": 0,
+                            "collection-column-index": 0,
+                            "visible-to-user": true,
+                            "collection-item-info": "row:0,col:0",
+                            "view-id": "s2-9a7c982c3cbb9cad~df87942f",
+                            "selected": "true",
+                            "bounds": [
+                              112,
+                              329,
+                              279,
+                              393
+                            ],
+                            "node": {
+                              "actions": [
+                                "clear_focus",
+                                "select",
+                                "clear_selection",
+                                "click",
+                                "accessibility_focus",
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "set_selection"
+                              ],
+                              "text": "Featured",
+                              "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/row_header",
+                              "visible-to-user": true,
+                              "clickable": "true",
+                              "focusable": "true",
+                              "focused": "true",
+                              "selected": "true",
+                              "bounds": [
+                                112,
+                                329,
+                                279,
+                                393
+                              ]
+                            }
+                          },
+                          {
+                            "actions": [
+                              "select",
+                              "clear_selection",
+                              "accessibility_focus"
+                            ],
+                            "collection-row-index": 1,
+                            "collection-column-index": 0,
+                            "visible-to-user": true,
+                            "collection-item-info": "row:1,col:0",
+                            "view-id": "s2-9a7c982c3cbb9cad~b53670b1",
+                            "bounds": [
+                              112,
+                              430,
+                              225,
+                              484
+                            ],
+                            "node": {
+                              "actions": [
+                                "focus",
+                                "select",
+                                "clear_selection",
+                                "click",
+                                "accessibility_focus",
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "set_selection"
+                              ],
+                              "text": "Movies",
+                              "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/row_header",
+                              "visible-to-user": true,
+                              "clickable": "true",
+                              "focusable": "true",
+                              "bounds": [
+                                112,
+                                430,
+                                225,
+                                484
+                              ]
+                            }
+                          },
+                          {
+                            "actions": [
+                              "select",
+                              "clear_selection",
+                              "accessibility_focus"
+                            ],
+                            "collection-row-index": 2,
+                            "collection-column-index": 0,
+                            "visible-to-user": true,
+                            "collection-item-info": "row:2,col:0",
+                            "view-id": "s2-9a7c982c3cbb9cad~8f5cd787",
+                            "bounds": [
+                              112,
+                              526,
+                              216,
+                              580
+                            ],
+                            "node": {
+                              "actions": [
+                                "focus",
+                                "select",
+                                "clear_selection",
+                                "click",
+                                "accessibility_focus",
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "set_selection"
+                              ],
+                              "text": "Shows",
+                              "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/row_header",
+                              "visible-to-user": true,
+                              "clickable": "true",
+                              "focusable": "true",
+                              "bounds": [
+                                112,
+                                526,
+                                216,
+                                580
+                              ]
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "actions": [
+                          "select",
+                          "clear_selection",
+                          "accessibility_focus"
+                        ],
+                        "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/fade_out_edge",
+                        "visible-to-user": true,
+                        "bounds": [
+                          500,
+                          0,
+                          524,
+                          1080
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "actions": [
+                    "select",
+                    "clear_selection",
+                    "accessibility_focus"
+                  ],
+                  "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/browse_title_group",
+                  "visible-to-user": true,
+                  "bounds": [
+                    0,
+                    0,
+                    1920,
+                    228
+                  ],
+                  "node": {
+                    "actions": [
+                      "select",
+                      "clear_selection",
+                      "accessibility_focus",
+                      "next_at_movement_granularity",
+                      "previous_at_movement_granularity",
+                      "set_selection"
+                    ],
+                    "text": "AutoMobile Leanback",
+                    "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/title_text",
+                    "visible-to-user": true,
+                    "bounds": [
+                      977,
+                      54,
+                      1808,
+                      174
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "packageName": "dev.jasonpearson.automobile.leanbackfixture",
+    "windows": [
+      {
+        "id": 4,
+        "displayId": 0,
+        "type": 1,
+        "windowLayer": 0,
+        "isActive": true,
+        "isFocused": true,
+        "bounds": [
+          0,
+          0,
+          1920,
+          1080
+        ],
+        "packageName": "dev.jasonpearson.automobile.leanbackfixture",
+        "hierarchy": {
+          "windowId": 4,
+          "actions": [
+            "select",
+            "clear_selection",
+            "accessibility_focus"
+          ],
+          "visible-to-user": true,
+          "view-id": "s2-219eccf879b3c286",
+          "bounds": [
+            0,
+            0,
+            1920,
+            1080
+          ],
+          "node": {
+            "actions": [
+              "select",
+              "clear_selection",
+              "accessibility_focus"
+            ],
+            "resource-id": "android:id/content",
+            "visible-to-user": true,
+            "view-id": "android:id/content",
+            "bounds": [
+              0,
+              0,
+              1920,
+              1080
+            ],
+            "node": {
+              "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus"
+              ],
+              "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/browse_dummy",
+              "visible-to-user": true,
+              "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/browse_dummy",
+              "bounds": [
+                0,
+                0,
+                1920,
+                1080
+              ],
+              "node": {
+                "actions": [
+                  "focus",
+                  "select",
+                  "clear_selection",
+                  "accessibility_focus"
+                ],
+                "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/browse_frame",
+                "visible-to-user": true,
+                "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/browse_frame",
+                "focusable": "true",
+                "bounds": [
+                  0,
+                  0,
+                  1920,
+                  1080
+                ],
+                "node": [
+                  {
+                    "actions": [
+                      "select",
+                      "clear_selection",
+                      "accessibility_focus"
+                    ],
+                    "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/browse_container_dock",
+                    "visible-to-user": true,
+                    "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/browse_container_dock",
+                    "bounds": [
+                      0,
+                      0,
+                      1920,
+                      1080
+                    ],
+                    "node": {
+                      "actions": [
+                        "select",
+                        "clear_selection",
+                        "accessibility_focus"
+                      ],
+                      "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/scale_frame",
+                      "visible-to-user": true,
+                      "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/scale_frame",
+                      "bounds": [
+                        476,
+                        0,
+                        1920,
+                        1080
+                      ],
+                      "node": {
+                        "actions": [
+                          "focus",
+                          "select",
+                          "clear_selection",
+                          "accessibility_focus"
+                        ],
+                        "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/container_list",
+                        "visible-to-user": true,
+                        "collection-info": "rows:-1,cols:1",
+                        "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/container_list",
+                        "class": "android.widget.GridView",
+                        "className": "android.widget.GridView",
+                        "focusable": "true",
+                        "bounds": [
+                          476,
+                          0,
+                          1920,
+                          1080
+                        ],
+                        "node": [
+                          {
+                            "actions": [
+                              "select",
+                              "clear_selection",
+                              "accessibility_focus"
+                            ],
+                            "collection-row-index": 0,
+                            "collection-column-index": 0,
+                            "visible-to-user": true,
+                            "collection-item-info": "row:0,col:0",
+                            "view-id": "s2-cbb2ee2aad540efe",
+                            "class": "android.widget.LinearLayout",
+                            "className": "android.widget.LinearLayout",
+                            "bounds": [
+                              476,
+                              335,
+                              1920,
+                              562
+                            ],
+                            "node": {
+                              "actions": [
+                                "focus",
+                                "select",
+                                "clear_selection",
+                                "accessibility_focus",
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "set_selection"
+                              ],
+                              "content-desc": "Featured",
+                              "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/row_content",
+                              "visible-to-user": true,
+                              "collection-info": "rows:1,cols:-1",
+                              "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/row_content",
+                              "class": "android.widget.GridView",
+                              "className": "android.widget.GridView",
+                              "focusable": "true",
+                              "scrollable": "true",
+                              "bounds": [
+                                476,
+                                335,
+                                1920,
+                                562
+                              ],
+                              "node": [
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "collection-row-index": 0,
+                                  "collection-column-index": 0,
+                                  "visible-to-user": true,
+                                  "collection-item-info": "row:0,col:0",
+                                  "view-id": "s2-cd746532ef2189d6-1",
+                                  "bounds": [
+                                    566,
+                                    354,
+                                    879,
+                                    530
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "focus",
+                                      "select",
+                                      "clear_selection",
+                                      "click",
+                                      "accessibility_focus"
+                                    ],
+                                    "visible-to-user": true,
+                                    "view-id": "s2-d1ee83cc694e91ca-1",
+                                    "clickable": "true",
+                                    "focusable": "true",
+                                    "bounds": [
+                                      566,
+                                      354,
+                                      879,
+                                      530
+                                    ],
+                                    "node": {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "visible-to-user": true,
+                                      "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "class": "android.widget.ImageView",
+                                      "className": "android.widget.ImageView",
+                                      "bounds": [
+                                        566,
+                                        354,
+                                        879,
+                                        530
+                                      ]
+                                    }
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "collection-row-index": 0,
+                                  "collection-column-index": 1,
+                                  "visible-to-user": true,
+                                  "collection-item-info": "row:0,col:1",
+                                  "view-id": "s2-cd746532ef2189d6-2",
+                                  "bounds": [
+                                    892,
+                                    354,
+                                    1206,
+                                    530
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "focus",
+                                      "select",
+                                      "clear_selection",
+                                      "click",
+                                      "accessibility_focus"
+                                    ],
+                                    "visible-to-user": true,
+                                    "view-id": "s2-d1ee83cc694e91ca-2",
+                                    "clickable": "true",
+                                    "focusable": "true",
+                                    "bounds": [
+                                      892,
+                                      354,
+                                      1206,
+                                      530
+                                    ],
+                                    "node": {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "visible-to-user": true,
+                                      "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "class": "android.widget.ImageView",
+                                      "className": "android.widget.ImageView",
+                                      "bounds": [
+                                        892,
+                                        354,
+                                        1206,
+                                        530
+                                      ]
+                                    }
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "collection-row-index": 0,
+                                  "collection-column-index": 2,
+                                  "visible-to-user": true,
+                                  "collection-item-info": "row:0,col:2",
+                                  "view-id": "s2-cd746532ef2189d6-3",
+                                  "bounds": [
+                                    1218,
+                                    354,
+                                    1532,
+                                    530
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "focus",
+                                      "select",
+                                      "clear_selection",
+                                      "click",
+                                      "accessibility_focus"
+                                    ],
+                                    "visible-to-user": true,
+                                    "view-id": "s2-d1ee83cc694e91ca-3",
+                                    "clickable": "true",
+                                    "focusable": "true",
+                                    "bounds": [
+                                      1218,
+                                      354,
+                                      1532,
+                                      530
+                                    ],
+                                    "node": {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "visible-to-user": true,
+                                      "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "class": "android.widget.ImageView",
+                                      "className": "android.widget.ImageView",
+                                      "bounds": [
+                                        1218,
+                                        354,
+                                        1532,
+                                        530
+                                      ]
+                                    }
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "collection-row-index": 0,
+                                  "collection-column-index": 3,
+                                  "visible-to-user": true,
+                                  "collection-item-info": "row:0,col:3",
+                                  "view-id": "s2-cd746532ef2189d6-4",
+                                  "bounds": [
+                                    1545,
+                                    354,
+                                    1858,
+                                    530
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "focus",
+                                      "select",
+                                      "clear_selection",
+                                      "click",
+                                      "accessibility_focus"
+                                    ],
+                                    "visible-to-user": true,
+                                    "view-id": "s2-d1ee83cc694e91ca-4",
+                                    "clickable": "true",
+                                    "focusable": "true",
+                                    "bounds": [
+                                      1545,
+                                      354,
+                                      1858,
+                                      530
+                                    ],
+                                    "node": {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "visible-to-user": true,
+                                      "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "class": "android.widget.ImageView",
+                                      "className": "android.widget.ImageView",
+                                      "bounds": [
+                                        1545,
+                                        354,
+                                        1858,
+                                        530
+                                      ]
+                                    }
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "collection-row-index": 0,
+                                  "collection-column-index": 4,
+                                  "visible-to-user": true,
+                                  "collection-item-info": "row:0,col:4",
+                                  "view-id": "s2-cd746532ef2189d6-5",
+                                  "bounds": [
+                                    1871,
+                                    354,
+                                    1920,
+                                    530
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "focus",
+                                      "select",
+                                      "clear_selection",
+                                      "click",
+                                      "accessibility_focus"
+                                    ],
+                                    "visible-to-user": true,
+                                    "view-id": "s2-d1ee83cc694e91ca-5",
+                                    "clickable": "true",
+                                    "focusable": "true",
+                                    "bounds": [
+                                      1871,
+                                      354,
+                                      1920,
+                                      530
+                                    ],
+                                    "node": {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "visible-to-user": true,
+                                      "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "class": "android.widget.ImageView",
+                                      "className": "android.widget.ImageView",
+                                      "bounds": [
+                                        1871,
+                                        354,
+                                        1920,
+                                        530
+                                      ]
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          },
+                          {
+                            "actions": [
+                              "select",
+                              "clear_selection",
+                              "accessibility_focus"
+                            ],
+                            "collection-row-index": 1,
+                            "collection-column-index": 0,
+                            "visible-to-user": true,
+                            "collection-item-info": "row:1,col:0",
+                            "view-id": "s2-bd7d206ef4d0b0d6",
+                            "class": "android.widget.LinearLayout",
+                            "className": "android.widget.LinearLayout",
+                            "bounds": [
+                              476,
+                              562,
+                              1920,
+                              751
+                            ],
+                            "node": {
+                              "actions": [
+                                "focus",
+                                "select",
+                                "clear_selection",
+                                "accessibility_focus",
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "set_selection"
+                              ],
+                              "content-desc": "Movies",
+                              "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/row_content",
+                              "visible-to-user": true,
+                              "collection-info": "rows:1,cols:-1",
+                              "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/row_content",
+                              "class": "android.widget.GridView",
+                              "className": "android.widget.GridView",
+                              "focusable": "true",
+                              "scrollable": "true",
+                              "bounds": [
+                                476,
+                                562,
+                                1920,
+                                751
+                              ],
+                              "node": [
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "collection-row-index": 0,
+                                  "collection-column-index": 0,
+                                  "visible-to-user": true,
+                                  "collection-item-info": "row:0,col:0",
+                                  "view-id": "s2-cd746532ef2189d6-6",
+                                  "bounds": [
+                                    566,
+                                    562,
+                                    879,
+                                    738
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "focus",
+                                      "select",
+                                      "clear_selection",
+                                      "click",
+                                      "accessibility_focus"
+                                    ],
+                                    "visible-to-user": true,
+                                    "view-id": "s2-d1ee83cc694e91ca-6",
+                                    "clickable": "true",
+                                    "focusable": "true",
+                                    "bounds": [
+                                      566,
+                                      562,
+                                      879,
+                                      738
+                                    ],
+                                    "node": {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "visible-to-user": true,
+                                      "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "class": "android.widget.ImageView",
+                                      "className": "android.widget.ImageView",
+                                      "bounds": [
+                                        566,
+                                        562,
+                                        879,
+                                        738
+                                      ]
+                                    }
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "collection-row-index": 0,
+                                  "collection-column-index": 1,
+                                  "visible-to-user": true,
+                                  "collection-item-info": "row:0,col:1",
+                                  "view-id": "s2-cd746532ef2189d6-7",
+                                  "bounds": [
+                                    892,
+                                    562,
+                                    1206,
+                                    738
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "focus",
+                                      "select",
+                                      "clear_selection",
+                                      "click",
+                                      "accessibility_focus"
+                                    ],
+                                    "visible-to-user": true,
+                                    "view-id": "s2-d1ee83cc694e91ca-7",
+                                    "clickable": "true",
+                                    "focusable": "true",
+                                    "bounds": [
+                                      892,
+                                      562,
+                                      1206,
+                                      738
+                                    ],
+                                    "node": {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "visible-to-user": true,
+                                      "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "class": "android.widget.ImageView",
+                                      "className": "android.widget.ImageView",
+                                      "bounds": [
+                                        892,
+                                        562,
+                                        1206,
+                                        738
+                                      ]
+                                    }
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "collection-row-index": 0,
+                                  "collection-column-index": 2,
+                                  "visible-to-user": true,
+                                  "collection-item-info": "row:0,col:2",
+                                  "view-id": "s2-cd746532ef2189d6-8",
+                                  "bounds": [
+                                    1218,
+                                    562,
+                                    1532,
+                                    738
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "focus",
+                                      "select",
+                                      "clear_selection",
+                                      "click",
+                                      "accessibility_focus"
+                                    ],
+                                    "visible-to-user": true,
+                                    "view-id": "s2-d1ee83cc694e91ca-8",
+                                    "clickable": "true",
+                                    "focusable": "true",
+                                    "bounds": [
+                                      1218,
+                                      562,
+                                      1532,
+                                      738
+                                    ],
+                                    "node": {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "visible-to-user": true,
+                                      "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "class": "android.widget.ImageView",
+                                      "className": "android.widget.ImageView",
+                                      "bounds": [
+                                        1218,
+                                        562,
+                                        1532,
+                                        738
+                                      ]
+                                    }
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "collection-row-index": 0,
+                                  "collection-column-index": 3,
+                                  "visible-to-user": true,
+                                  "collection-item-info": "row:0,col:3",
+                                  "view-id": "s2-cd746532ef2189d6-9",
+                                  "bounds": [
+                                    1545,
+                                    562,
+                                    1858,
+                                    738
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "focus",
+                                      "select",
+                                      "clear_selection",
+                                      "click",
+                                      "accessibility_focus"
+                                    ],
+                                    "visible-to-user": true,
+                                    "view-id": "s2-d1ee83cc694e91ca-9",
+                                    "clickable": "true",
+                                    "focusable": "true",
+                                    "bounds": [
+                                      1545,
+                                      562,
+                                      1858,
+                                      738
+                                    ],
+                                    "node": {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "visible-to-user": true,
+                                      "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "class": "android.widget.ImageView",
+                                      "className": "android.widget.ImageView",
+                                      "bounds": [
+                                        1545,
+                                        562,
+                                        1858,
+                                        738
+                                      ]
+                                    }
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "collection-row-index": 0,
+                                  "collection-column-index": 4,
+                                  "visible-to-user": true,
+                                  "collection-item-info": "row:0,col:4",
+                                  "view-id": "s2-cd746532ef2189d6-10",
+                                  "bounds": [
+                                    1871,
+                                    562,
+                                    1920,
+                                    738
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "focus",
+                                      "select",
+                                      "clear_selection",
+                                      "click",
+                                      "accessibility_focus"
+                                    ],
+                                    "visible-to-user": true,
+                                    "view-id": "s2-d1ee83cc694e91ca-10",
+                                    "clickable": "true",
+                                    "focusable": "true",
+                                    "bounds": [
+                                      1871,
+                                      562,
+                                      1920,
+                                      738
+                                    ],
+                                    "node": {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "visible-to-user": true,
+                                      "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "class": "android.widget.ImageView",
+                                      "className": "android.widget.ImageView",
+                                      "bounds": [
+                                        1871,
+                                        562,
+                                        1920,
+                                        738
+                                      ]
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          },
+                          {
+                            "actions": [
+                              "select",
+                              "clear_selection",
+                              "accessibility_focus"
+                            ],
+                            "collection-row-index": 2,
+                            "collection-column-index": 0,
+                            "visible-to-user": true,
+                            "collection-item-info": "row:2,col:0",
+                            "view-id": "s2-ef30ed9d7750b328",
+                            "class": "android.widget.LinearLayout",
+                            "className": "android.widget.LinearLayout",
+                            "bounds": [
+                              476,
+                              751,
+                              1920,
+                              940
+                            ],
+                            "node": {
+                              "actions": [
+                                "focus",
+                                "select",
+                                "clear_selection",
+                                "accessibility_focus",
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "set_selection"
+                              ],
+                              "content-desc": "Shows",
+                              "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/row_content",
+                              "visible-to-user": true,
+                              "collection-info": "rows:1,cols:-1",
+                              "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/row_content",
+                              "class": "android.widget.GridView",
+                              "className": "android.widget.GridView",
+                              "focusable": "true",
+                              "scrollable": "true",
+                              "bounds": [
+                                476,
+                                751,
+                                1920,
+                                940
+                              ],
+                              "node": [
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "collection-row-index": 0,
+                                  "collection-column-index": 0,
+                                  "visible-to-user": true,
+                                  "collection-item-info": "row:0,col:0",
+                                  "view-id": "s2-cd746532ef2189d6-11",
+                                  "bounds": [
+                                    566,
+                                    751,
+                                    879,
+                                    927
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "focus",
+                                      "select",
+                                      "clear_selection",
+                                      "click",
+                                      "accessibility_focus"
+                                    ],
+                                    "visible-to-user": true,
+                                    "view-id": "s2-d1ee83cc694e91ca-11",
+                                    "clickable": "true",
+                                    "focusable": "true",
+                                    "bounds": [
+                                      566,
+                                      751,
+                                      879,
+                                      927
+                                    ],
+                                    "node": {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "visible-to-user": true,
+                                      "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "class": "android.widget.ImageView",
+                                      "className": "android.widget.ImageView",
+                                      "bounds": [
+                                        566,
+                                        751,
+                                        879,
+                                        927
+                                      ]
+                                    }
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "collection-row-index": 0,
+                                  "collection-column-index": 1,
+                                  "visible-to-user": true,
+                                  "collection-item-info": "row:0,col:1",
+                                  "view-id": "s2-cd746532ef2189d6-12",
+                                  "bounds": [
+                                    892,
+                                    751,
+                                    1206,
+                                    927
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "focus",
+                                      "select",
+                                      "clear_selection",
+                                      "click",
+                                      "accessibility_focus"
+                                    ],
+                                    "visible-to-user": true,
+                                    "view-id": "s2-d1ee83cc694e91ca-12",
+                                    "clickable": "true",
+                                    "focusable": "true",
+                                    "bounds": [
+                                      892,
+                                      751,
+                                      1206,
+                                      927
+                                    ],
+                                    "node": {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "visible-to-user": true,
+                                      "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "class": "android.widget.ImageView",
+                                      "className": "android.widget.ImageView",
+                                      "bounds": [
+                                        892,
+                                        751,
+                                        1206,
+                                        927
+                                      ]
+                                    }
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "collection-row-index": 0,
+                                  "collection-column-index": 2,
+                                  "visible-to-user": true,
+                                  "collection-item-info": "row:0,col:2",
+                                  "view-id": "s2-cd746532ef2189d6-13",
+                                  "bounds": [
+                                    1218,
+                                    751,
+                                    1532,
+                                    927
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "focus",
+                                      "select",
+                                      "clear_selection",
+                                      "click",
+                                      "accessibility_focus"
+                                    ],
+                                    "visible-to-user": true,
+                                    "view-id": "s2-d1ee83cc694e91ca-13",
+                                    "clickable": "true",
+                                    "focusable": "true",
+                                    "bounds": [
+                                      1218,
+                                      751,
+                                      1532,
+                                      927
+                                    ],
+                                    "node": {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "visible-to-user": true,
+                                      "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "class": "android.widget.ImageView",
+                                      "className": "android.widget.ImageView",
+                                      "bounds": [
+                                        1218,
+                                        751,
+                                        1532,
+                                        927
+                                      ]
+                                    }
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "collection-row-index": 0,
+                                  "collection-column-index": 3,
+                                  "visible-to-user": true,
+                                  "collection-item-info": "row:0,col:3",
+                                  "view-id": "s2-cd746532ef2189d6-14",
+                                  "bounds": [
+                                    1545,
+                                    751,
+                                    1858,
+                                    927
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "focus",
+                                      "select",
+                                      "clear_selection",
+                                      "click",
+                                      "accessibility_focus"
+                                    ],
+                                    "visible-to-user": true,
+                                    "view-id": "s2-d1ee83cc694e91ca-14",
+                                    "clickable": "true",
+                                    "focusable": "true",
+                                    "bounds": [
+                                      1545,
+                                      751,
+                                      1858,
+                                      927
+                                    ],
+                                    "node": {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "visible-to-user": true,
+                                      "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "class": "android.widget.ImageView",
+                                      "className": "android.widget.ImageView",
+                                      "bounds": [
+                                        1545,
+                                        751,
+                                        1858,
+                                        927
+                                      ]
+                                    }
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "collection-row-index": 0,
+                                  "collection-column-index": 4,
+                                  "visible-to-user": true,
+                                  "collection-item-info": "row:0,col:4",
+                                  "view-id": "s2-cd746532ef2189d6-15",
+                                  "bounds": [
+                                    1871,
+                                    751,
+                                    1920,
+                                    927
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "focus",
+                                      "select",
+                                      "clear_selection",
+                                      "click",
+                                      "accessibility_focus"
+                                    ],
+                                    "visible-to-user": true,
+                                    "view-id": "s2-d1ee83cc694e91ca-15",
+                                    "clickable": "true",
+                                    "focusable": "true",
+                                    "bounds": [
+                                      1871,
+                                      751,
+                                      1920,
+                                      927
+                                    ],
+                                    "node": {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "visible-to-user": true,
+                                      "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/main_image",
+                                      "class": "android.widget.ImageView",
+                                      "className": "android.widget.ImageView",
+                                      "bounds": [
+                                        1871,
+                                        751,
+                                        1920,
+                                        927
+                                      ]
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "actions": [
+                      "select",
+                      "clear_selection",
+                      "accessibility_focus"
+                    ],
+                    "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/browse_headers_dock",
+                    "visible-to-user": true,
+                    "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/browse_headers_dock",
+                    "bounds": [
+                      0,
+                      0,
+                      640,
+                      1080
+                    ],
+                    "node": {
+                      "actions": [
+                        "select",
+                        "clear_selection",
+                        "accessibility_focus"
+                      ],
+                      "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/browse_headers_root",
+                      "visible-to-user": true,
+                      "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/browse_headers_root",
+                      "class": "android.widget.RelativeLayout",
+                      "className": "android.widget.RelativeLayout",
+                      "bounds": [
+                        0,
+                        0,
+                        540,
+                        1080
+                      ],
+                      "node": [
+                        {
+                          "actions": [
+                            "focus",
+                            "select",
+                            "clear_selection",
+                            "accessibility_focus",
+                            "next_at_movement_granularity",
+                            "previous_at_movement_granularity",
+                            "set_selection"
+                          ],
+                          "content-desc": "Navigation menu",
+                          "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/browse_headers",
+                          "visible-to-user": true,
+                          "collection-info": "rows:-1,cols:1",
+                          "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/browse_headers",
+                          "class": "android.widget.GridView",
+                          "className": "android.widget.GridView",
+                          "focusable": "true",
+                          "bounds": [
+                            0,
+                            0,
+                            524,
+                            1080
+                          ],
+                          "node": [
+                            {
+                              "actions": [
+                                "select",
+                                "clear_selection",
+                                "accessibility_focus"
+                              ],
+                              "collection-row-index": 0,
+                              "collection-column-index": 0,
+                              "visible-to-user": true,
+                              "collection-item-info": "row:0,col:0",
+                              "view-id": "s2-9a7c982c3cbb9cad~df87942f",
+                              "selected": "true",
+                              "bounds": [
+                                112,
+                                329,
+                                279,
+                                393
+                              ],
+                              "node": {
+                                "actions": [
+                                  "clear_focus",
+                                  "select",
+                                  "clear_selection",
+                                  "click",
+                                  "accessibility_focus",
+                                  "next_at_movement_granularity",
+                                  "previous_at_movement_granularity",
+                                  "set_selection"
+                                ],
+                                "text": "Featured",
+                                "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/row_header",
+                                "visible-to-user": true,
+                                "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/row_header",
+                                "clickable": "true",
+                                "focusable": "true",
+                                "focused": "true",
+                                "selected": "true",
+                                "bounds": [
+                                  112,
+                                  329,
+                                  279,
+                                  393
+                                ]
+                              }
+                            },
+                            {
+                              "actions": [
+                                "select",
+                                "clear_selection",
+                                "accessibility_focus"
+                              ],
+                              "collection-row-index": 1,
+                              "collection-column-index": 0,
+                              "visible-to-user": true,
+                              "collection-item-info": "row:1,col:0",
+                              "view-id": "s2-9a7c982c3cbb9cad~b53670b1",
+                              "bounds": [
+                                112,
+                                430,
+                                225,
+                                484
+                              ],
+                              "node": {
+                                "actions": [
+                                  "focus",
+                                  "select",
+                                  "clear_selection",
+                                  "click",
+                                  "accessibility_focus",
+                                  "next_at_movement_granularity",
+                                  "previous_at_movement_granularity",
+                                  "set_selection"
+                                ],
+                                "text": "Movies",
+                                "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/row_header",
+                                "visible-to-user": true,
+                                "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/row_header",
+                                "clickable": "true",
+                                "focusable": "true",
+                                "bounds": [
+                                  112,
+                                  430,
+                                  225,
+                                  484
+                                ]
+                              }
+                            },
+                            {
+                              "actions": [
+                                "select",
+                                "clear_selection",
+                                "accessibility_focus"
+                              ],
+                              "collection-row-index": 2,
+                              "collection-column-index": 0,
+                              "visible-to-user": true,
+                              "collection-item-info": "row:2,col:0",
+                              "view-id": "s2-9a7c982c3cbb9cad~8f5cd787",
+                              "bounds": [
+                                112,
+                                526,
+                                216,
+                                580
+                              ],
+                              "node": {
+                                "actions": [
+                                  "focus",
+                                  "select",
+                                  "clear_selection",
+                                  "click",
+                                  "accessibility_focus",
+                                  "next_at_movement_granularity",
+                                  "previous_at_movement_granularity",
+                                  "set_selection"
+                                ],
+                                "text": "Shows",
+                                "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/row_header",
+                                "visible-to-user": true,
+                                "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/row_header",
+                                "clickable": "true",
+                                "focusable": "true",
+                                "bounds": [
+                                  112,
+                                  526,
+                                  216,
+                                  580
+                                ]
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "actions": [
+                            "select",
+                            "clear_selection",
+                            "accessibility_focus"
+                          ],
+                          "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/fade_out_edge",
+                          "visible-to-user": true,
+                          "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/fade_out_edge",
+                          "bounds": [
+                            500,
+                            0,
+                            524,
+                            1080
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "actions": [
+                      "select",
+                      "clear_selection",
+                      "accessibility_focus"
+                    ],
+                    "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/browse_title_group",
+                    "visible-to-user": true,
+                    "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/browse_title_group",
+                    "bounds": [
+                      0,
+                      0,
+                      1920,
+                      228
+                    ],
+                    "node": {
+                      "actions": [
+                        "select",
+                        "clear_selection",
+                        "accessibility_focus",
+                        "next_at_movement_granularity",
+                        "previous_at_movement_granularity",
+                        "set_selection"
+                      ],
+                      "text": "AutoMobile Leanback",
+                      "resource-id": "dev.jasonpearson.automobile.leanbackfixture:id/title_text",
+                      "visible-to-user": true,
+                      "view-id": "dev.jasonpearson.automobile.leanbackfixture:id/title_text",
+                      "bounds": [
+                        977,
+                        54,
+                        1808,
+                        174
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    ],
+    "intentChooserDetected": false,
+    "notificationPermissionDetected": false,
+    "ctrlProxyIncomplete": null,
+    "sources": [
+      "control-proxy"
+    ],
+    "screenWidth": 1920,
+    "screenHeight": 1080,
+    "rotation": 0,
+    "systemInsets": {
+      "top": 0,
+      "bottom": 0,
+      "left": 0,
+      "right": 0
+    },
+    "insets": {
+      "available": true,
+      "source": "android-window-metrics",
+      "units": "physical-pixels",
+      "systemBars": {
+        "visible": {
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0
+        },
+        "stable": {
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0
+        }
+      },
+      "displayCutout": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "displayCutoutInfo": {
+        "classification": "none",
+        "bounds": null
+      },
+      "systemGestures": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "mandatorySystemGestures": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "tappableElement": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "systemChrome": {
+        "visibility": "hidden",
+        "statusBar": "hidden",
+        "navigationBar": "hidden",
+        "homeIndicatorAutoHideRequested": null,
+        "source": "android-window-insets"
+      }
+    },
+    "wakefulness": "Awake",
+    "foregroundActivity": "dev.jasonpearson.automobile.leanbackfixture/.MainActivity",
+    "density": 320,
+    "sdkInt": 36,
+    "deviceModel": "sdk_google_atv64_arm64",
+    "isEmulator": true,
+    "accessibilityTool": true,
+    "nativeScale": 1,
+    "pixelWidth": 1920,
+    "pixelHeight": 1080,
+    "updatedAt": 1794146250309,
+    "receivedAt": 1794146250783,
+    "fresh": true,
+    "frameContext": "c985f418-2135-4321-ba9d-e5e98e048843:58"
+  }
+}

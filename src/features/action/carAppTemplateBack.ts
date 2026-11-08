@@ -8,7 +8,11 @@ import type { Element } from "../../models/Element";
 import type { TapCoordinatesRequest } from "../../utils/interfaces/TapCoordinatesRequest";
 import type { A11yTapCoordinatesResult } from "../observe/android/types";
 import { DefaultElementParser } from "../utility/ElementParser";
+import { toActionableError } from "../../models/ActionableError";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { logger } from "../../utils/logger";
 import type { ObservedChangeOptions, ObservedEnvelope } from "./observedInteractionTypes";
+import type { DisplayFence } from "./visualChangeDisplayFence";
 
 /** Activity every Car App Library app runs its templates in on Android Automotive. */
 export const CAR_APP_ACTIVITY = "androidx.car.app.activity.CarAppActivity";
@@ -104,7 +108,7 @@ export interface TemplateHostBackTapClient {
 
 /** Runs one observed action, as `BaseVisualChange.observedInteraction` does. */
 export type ObservedInteractionRunner = (
-  block: (observation: ObserveResult) => Promise<PressButtonResult>,
+  block: (observation: ObserveResult, fence?: DisplayFence) => Promise<PressButtonResult>,
   options: ObservedChangeOptions,
 ) => Promise<PressButtonResult & ObservedEnvelope>;
 
@@ -149,29 +153,95 @@ export async function retryBackOnTemplateHost(
   if (!qualifiesForTemplateHostBack(result, context)) {
     return result;
   }
-  const target =
-    findTemplateHostBackTarget(result.observation?.viewHierarchy) ??
-    findTemplateHostBackTarget(context.prePress?.viewHierarchy);
-  if (!target) {
+  if (
+    !findTemplateHostBackTarget(result.observation?.viewHierarchy) &&
+    !findTemplateHostBackTarget(context.prePress?.viewHierarchy)
+  ) {
     return result;
   }
   const { button, keyCode } = result;
   const signal = context.options.signal;
   return deps.observedInteraction(
-    async (): Promise<PressButtonResult> => {
-      const tap = await deps
-        .tapClient()
-        .requestTapCoordinates({ x: target.x, y: target.y, signal });
-      return tap.success
-        ? { success: true, button, keyCode, backFallback: target.affordance }
-        : {
-            success: false,
-            button,
-            keyCode,
-            backFallback: target.affordance,
-            error: `BACK changed nothing on the Car App Library template and tapping the host Back affordance (${target.resourceId}) failed: ${tap.error ?? "unknown error"}`,
-          };
-    },
+    (observation, fence) =>
+      tapHostBack(observation, { button, keyCode, signal, fence, tapClient: deps.tapClient }),
     { ...context.options, changeExpected: true },
   );
+}
+
+interface HostBackTapInputs {
+  button: string;
+  keyCode: number;
+  signal?: AbortSignal;
+  fence?: DisplayFence;
+  tapClient: () => TemplateHostBackTapClient;
+}
+
+/**
+ * Taps the Back affordance resolved from the fallback's own fresh observation, bound to that
+ * frame (`frameContext`) and the display fence, so a screen that moved on is never tapped blind.
+ */
+async function tapHostBack(
+  observation: ObserveResult,
+  inputs: HostBackTapInputs,
+): Promise<PressButtonResult> {
+  const { button, keyCode } = inputs;
+  const target = findTemplateHostBackTarget(observation.viewHierarchy);
+  if (!target) {
+    return {
+      success: false,
+      button,
+      keyCode,
+      error: `${NO_VISUAL_CHANGE}: the Car App Library template host Back affordance was gone before the fallback tap`,
+    };
+  }
+  let dispatched = false;
+  let tap: A11yTapCoordinatesResult;
+  try {
+    tap = await inputs.tapClient().requestTapCoordinates({
+      x: target.x,
+      y: target.y,
+      signal: inputs.signal,
+      frameContext: observation.viewHierarchy?.frameContext,
+      beforeSend: () => inputs.fence?.assertCurrent(),
+      onDispatch: () => {
+        dispatched = true;
+      },
+    });
+  } catch (error) {
+    if (!dispatched) {
+      throw toActionableError(error, "Failed to tap the Car App Library template host Back");
+    }
+    logger.warn(`[PRESS_BUTTON] host Back tap lost after dispatch: ${errorMessage(error)}`, error);
+    return indeterminateHostBack(inputs, target, errorMessage(error));
+  }
+  if (tap.success) {
+    return { success: true, button, keyCode, backFallback: target.affordance };
+  }
+  if (dispatched && tap.acknowledged !== true) {
+    return indeterminateHostBack(inputs, target, tap.error);
+  }
+  return {
+    success: false,
+    button,
+    keyCode,
+    backFallback: target.affordance,
+    error: `BACK changed nothing on the Car App Library template and tapping the host Back affordance (${target.resourceId}) failed: ${tap.error ?? "unknown error"}`,
+  };
+}
+
+/** A dispatched host Back tap whose reply never came: it may have navigated, so never replay it. */
+function indeterminateHostBack(
+  inputs: HostBackTapInputs,
+  target: TemplateHostBackTarget,
+  reason: string | undefined,
+): PressButtonResult {
+  return {
+    success: false,
+    button: inputs.button,
+    keyCode: inputs.keyCode,
+    backFallback: target.affordance,
+    code: "indeterminate_outcome",
+    retryable: false,
+    error: `Host Back tap outcome is indeterminate: the tap on ${target.resourceId} was dispatched but no result was confirmed (${reason ?? "unknown error"}). It may have navigated back. Do not retry automatically. Observe before retrying.`,
+  };
 }

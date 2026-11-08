@@ -7,32 +7,56 @@ import {
   type TemplateHostBackTapClient,
 } from "../../../src/features/action/carAppTemplateBack";
 import type { ObservedChangeOptions } from "../../../src/features/action/observedInteractionTypes";
+import type { DisplayFence } from "../../../src/features/action/visualChangeDisplayFence";
 import type { ObserveResult, PressButtonResult } from "../../../src/models";
 import type { TapCoordinatesRequest } from "../../../src/utils/interfaces/TapCoordinatesRequest";
 import { carAppTemplateObservation } from "../../helpers/carAppTemplateFixtures";
 
 const OPTIONS: ObservedChangeOptions = { changeExpected: true };
 
+interface TapScript {
+  reply?: { success: boolean; error?: string; acknowledged?: boolean };
+  /** Whether the request reaches the device; `beforeSend` and `onDispatch` run only if it does. */
+  dispatch?: boolean;
+  /** Thrown after the dispatch decision, like a transport that loses the reply. */
+  throws?: Error;
+}
+
 class RecordingTapClient implements TemplateHostBackTapClient {
   readonly taps: Array<{ x: number; y: number }> = [];
-  constructor(private readonly reply: { success: boolean; error?: string } = { success: true }) {}
+  readonly requests: TapCoordinatesRequest[] = [];
+  constructor(private readonly script: TapScript = {}) {}
   async requestTapCoordinates(request: TapCoordinatesRequest) {
-    this.taps.push({ x: request.x, y: request.y });
-    return { ...this.reply, totalTimeMs: 0 };
+    this.requests.push(request);
+    if (this.script.dispatch !== false) {
+      request.beforeSend?.();
+      this.taps.push({ x: request.x, y: request.y });
+      request.onDispatch?.();
+    }
+    if (this.script.throws) {
+      throw this.script.throws;
+    }
+    return { ...(this.script.reply ?? { success: true, acknowledged: true }), totalTimeMs: 0 };
   }
 }
 
-/** Runs the block against the post-tap observation, as `observedInteraction` would after a change. */
-function fakeObservedInteraction(after: ObserveResult) {
+/**
+ * Hands the block `fresh` (the fallback's own pre-tap read) and reports `after` as the post-tap
+ * observation, as `observedInteraction` does.
+ */
+function fakeObservedInteraction(fresh: ObserveResult, after: ObserveResult = fresh) {
   const calls: ObservedChangeOptions[] = [];
+  const fenceChecks: number[] = [];
+  const fence: DisplayFence = { assertCurrent: () => void fenceChecks.push(1) };
   return {
     calls,
+    fenceChecks,
     run: async (
-      block: (observation: ObserveResult) => Promise<PressButtonResult>,
+      block: (observation: ObserveResult, fence?: DisplayFence) => Promise<PressButtonResult>,
       options: ObservedChangeOptions,
     ) => {
       calls.push(options);
-      return { ...(await block(after)), observation: after };
+      return { ...(await block(fresh, fence)), observation: after };
     },
   };
 }
@@ -112,13 +136,17 @@ describe("retryBackOnTemplateHost (#17498)", () => {
   ] as const)("no-op BACK on %s taps %s", async (name, affordance, point) => {
     const before = carAppTemplateObservation(name);
     const tapClient = new RecordingTapClient();
-    const observed = fakeObservedInteraction(carAppTemplateObservation("menu", { updatedAt: 2 }));
+    const observed = fakeObservedInteraction(
+      before,
+      carAppTemplateObservation("menu", { updatedAt: 2 }),
+    );
     const result = await retryBackOnTemplateHost(noChange(before), backContext(before), {
       tapClient: () => tapClient,
       observedInteraction: observed.run,
     });
     expect(tapClient.taps).toEqual([point]);
     expect(observed.calls).toEqual([{ changeExpected: true }]);
+    expect(observed.fenceChecks).toEqual([1]);
     expect(result).toMatchObject({ success: true, button: "back", keyCode: 4 });
     expect(result.backFallback).toBe(affordance);
     expect(result.error).toBeUndefined();
@@ -126,7 +154,9 @@ describe("retryBackOnTemplateHost (#17498)", () => {
 
   test("a failed tap is reported with the affordance it tried", async () => {
     const before = carAppTemplateObservation("pane");
-    const tapClient = new RecordingTapClient({ success: false, error: "gesture rejected" });
+    const tapClient = new RecordingTapClient({
+      reply: { success: false, error: "gesture rejected", acknowledged: true },
+    });
     const observed = fakeObservedInteraction(before);
     const result = await retryBackOnTemplateHost(noChange(before), backContext(before), {
       tapClient: () => tapClient,
@@ -136,6 +166,73 @@ describe("retryBackOnTemplateHost (#17498)", () => {
     expect(result.backFallback).toBe("toolbar_nav_icon");
     expect(result.error).toContain("car_ui_toolbar_nav_icon_container");
     expect(result.error).toContain("gesture rejected");
+    expect(result.code).toBeUndefined();
+  });
+
+  test("the tap targets the fresh observation's frame", async () => {
+    const before = carAppTemplateObservation("pane");
+    const fresh: ObserveResult = {
+      ...before,
+      viewHierarchy: { ...before.viewHierarchy!, frameContext: "frame-7" },
+    };
+    const tapClient = new RecordingTapClient();
+    const observed = fakeObservedInteraction(fresh);
+    await retryBackOnTemplateHost(noChange(before), backContext(before), {
+      tapClient: () => tapClient,
+      observedInteraction: observed.run,
+    });
+    expect(tapClient.requests.map((request) => request.frameContext)).toEqual(["frame-7"]);
+  });
+
+  test("a Back affordance gone from the fresh observation is not tapped", async () => {
+    const before = carAppTemplateObservation("pane");
+    const tapClient = new RecordingTapClient();
+    const observed = fakeObservedInteraction(carAppTemplateObservation("menu"));
+    const result = await retryBackOnTemplateHost(noChange(before), backContext(before), {
+      tapClient: () => tapClient,
+      observedInteraction: observed.run,
+    });
+    expect(tapClient.requests).toEqual([]);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("No visual change observed");
+    expect(result.backFallback).toBeUndefined();
+  });
+
+  test.each([
+    [
+      "an unacknowledged reply",
+      { reply: { success: false, error: "timeout", acknowledged: false } },
+    ],
+    ["a reply lost after dispatch", { throws: new Error("socket closed") }],
+  ] as const)("%s is indeterminate and not retryable", async (_label, script) => {
+    const before = carAppTemplateObservation("navigation-place-list");
+    const tapClient = new RecordingTapClient(script);
+    const result = await retryBackOnTemplateHost(noChange(before), backContext(before), {
+      tapClient: () => tapClient,
+      observedInteraction: fakeObservedInteraction(before).run,
+    });
+    expect(tapClient.taps).toEqual([{ x: 56, y: 132 }]);
+    expect(result).toMatchObject({
+      success: false,
+      code: "indeterminate_outcome",
+      retryable: false,
+      backFallback: "primary_header_action",
+    });
+    expect(result.error).toContain("Do not retry automatically");
+  });
+
+  test("a failure before dispatch throws instead of reporting indeterminate", async () => {
+    const before = carAppTemplateObservation("pane");
+    const tapClient = new RecordingTapClient({
+      dispatch: false,
+      throws: new Error("ctrl proxy not connected"),
+    });
+    await expect(
+      retryBackOnTemplateHost(noChange(before), backContext(before), {
+        tapClient: () => tapClient,
+        observedInteraction: fakeObservedInteraction(before).run,
+      }),
+    ).rejects.toThrow("ctrl proxy not connected");
   });
 
   const pane = carAppTemplateObservation("pane");

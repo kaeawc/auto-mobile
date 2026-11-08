@@ -84,6 +84,16 @@ describe("PressButton back on Car App Library templates (#17498)", () => {
     expect(result.observation).toBe(after);
   });
 
+  test("a host Back tap the template ignores still fails, naming what it tried", async () => {
+    const pane = carAppTemplateObservation("pane");
+    const { action, taps } = templateDevice(pane, pane, "androidx.car.app.activity.CarAppActivity");
+    const result = await action.execute("back");
+    expect(taps).toEqual([{ x: 56, y: 124 }]);
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("No visual change observed");
+    expect(result.backFallback).toBe("toolbar_nav_icon");
+  });
+
   test("a root template keeps the no-change failure and taps nothing", async () => {
     const menu = carAppTemplateObservation("menu");
     const { action, taps } = templateDevice(menu, menu, "androidx.car.app.activity.CarAppActivity");

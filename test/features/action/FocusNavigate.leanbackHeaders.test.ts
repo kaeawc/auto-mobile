@@ -115,6 +115,173 @@ function harness(canEnter = true, pane: ViewHierarchyResult = headers) {
   return { device, timer, observer, navigator: new FocusNavigate(observer, device, timer) };
 }
 
+/** Move only focus in the real content capture; the transient grid also shifts left to 100. */
+function contentFocusedAt(label?: string, scrollable = true): ViewHierarchyResult {
+  const copy = structuredClone(content);
+  eachNode(copy.hierarchy, (node) => {
+    delete node.focused;
+    if (String(node["resource-id"]).endsWith(":id/container_list")) {
+      node.scrollable = String(scrollable);
+      if (!label) {
+        node.focused = "true";
+        node.bounds = [100, 0, 1920, 1080];
+      }
+    }
+    if (label && node.clickable === "true") {
+      eachNode(node.node, (child) => {
+        if (child.text === label) {
+          node.focused = "true";
+        }
+      });
+    }
+  });
+  return copy;
+}
+
+/** RIGHT enters through a transient grid; later keys move among captured cards and rows. */
+class LeanbackRowEntry implements Pick<ObserveScreen, "execute">, FocusKeyPresser {
+  readonly keys: InputKeyName[] = [];
+  readonly selected: string[] = [];
+  private entered = false;
+  private row = "Featured";
+  private column = 1;
+  private remainingTransientReads: number;
+
+  constructor(transientReads = 1) {
+    this.remainingTransientReads = transientReads;
+  }
+
+  async execute(): Promise<ObserveResult> {
+    let viewHierarchy = headers;
+    if (this.entered) {
+      viewHierarchy =
+        this.remainingTransientReads-- > 0 ? contentFocusedAt() : contentFocusedAt(this.label);
+    }
+    return { viewHierarchy } as ObserveResult;
+  }
+
+  private get label(): string {
+    return `${this.row} ${String(this.column).padStart(2, "0")}`;
+  }
+
+  async press(key: InputKeyName): Promise<{ success: boolean }> {
+    this.keys.push(key);
+    if (!this.entered && key === "arrow_right") {
+      this.entered = true;
+    } else if (this.entered && this.remainingTransientReads <= 0) {
+      if (key === "arrow_right") {
+        this.column = Math.min(5, this.column + 1);
+      }
+      if (key === "arrow_left") {
+        this.column = Math.max(1, this.column - 1);
+      }
+      if (key === "arrow_down") {
+        this.row = "Movies";
+      }
+      if (key === "arrow_up") {
+        this.row = "Featured";
+      }
+      if (key === "enter") {
+        this.selected.push(this.label);
+      }
+    }
+    return { success: true };
+  }
+}
+
+describe("FocusNavigate Leanback row entry (#17563)", () => {
+  test.each([true, false])(
+    "a focused grid cannot borrow a card label (scrollable: %s)",
+    async (scrollable) => {
+      const device = {
+        execute: async () =>
+          ({ viewHierarchy: contentFocusedAt(undefined, scrollable) }) as ObserveResult,
+        press: async () => ({ success: true }),
+      };
+      const result = await new FocusNavigate(
+        createFocusNavigateObserver(device),
+        device,
+        new FakeTimer(),
+      ).execute({ until: { text: "Featured 02" }, maxSteps: 0, select: true });
+      expect(result).toMatchObject({ status: "max_steps", success: false, selected: false });
+      expect(result.focusedElement?.resourceId).toEndWith(":id/container_list");
+    },
+  );
+
+  test.each([
+    ["Featured 01", 1, ["arrow_right"]],
+    ["Featured 02", 1, ["arrow_right", "arrow_right"]],
+    ["Featured 05", 1, Array(5).fill("arrow_right")],
+    ["Movies 04", 1, ["arrow_right", "arrow_down", "arrow_right", "arrow_right", "arrow_right"]],
+    ["Featured 02", 10, undefined],
+  ] as const)(
+    "reaches the %s card after %i transient reads before selecting",
+    async (label, reads, keys) => {
+      const device = new LeanbackRowEntry(reads);
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const observer = createFocusNavigateObserver(device);
+      const result = await new FocusNavigate(observer, device, timer).execute({
+        until: { text: label },
+        select: true,
+        maxSteps: keys?.length,
+      });
+      const settled = await observer.read();
+      expect(result).toMatchObject({ success: true, status: "focused", selected: true });
+      expect(result.focusedElement?.descendantLabel).toBe(label);
+      expect(result.focusedElement?.bounds).toEqual(settled.focused?.bounds);
+      expect(result.focusedElement?.resourceId).toBeUndefined();
+      expect(device.selected).toEqual([label]);
+      expect(device.keys.filter((key) => key === "enter")).toHaveLength(1);
+      if (label !== "Featured 01") {
+        expect(result.steps).toBeGreaterThan(1);
+      }
+      if (keys) {
+        expect(device.keys).toEqual([...keys, "enter"]);
+      }
+      expect(timer.getSleepHistory().every((ms) => ms === 200)).toBe(true);
+      expect(timer.getSleepHistory().length).toBeGreaterThanOrEqual(result.steps + 1);
+    },
+  );
+
+  test("repeated transient reads do not trip explicit-direction stuck detection", async () => {
+    const device = new LeanbackRowEntry(10);
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const result = await new FocusNavigate(
+      createFocusNavigateObserver(device),
+      device,
+      timer,
+    ).execute({
+      until: { text: "Featured 02" },
+      direction: "right",
+      select: true,
+    });
+    expect(result).toMatchObject({ status: "focused", selected: true });
+    expect(device.selected).toEqual(["Featured 02"]);
+    expect(device.keys.slice(0, -1).every((key) => key === "arrow_right")).toBe(true);
+  });
+
+  test("a container that never settles stays bounded without selecting", async () => {
+    const device = new LeanbackRowEntry(Infinity);
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const result = await new FocusNavigate(
+      createFocusNavigateObserver(device),
+      device,
+      timer,
+    ).execute({
+      until: { text: "Featured 02" },
+      maxSteps: 8,
+      select: true,
+    });
+    expect(result).toMatchObject({ status: "max_steps", steps: 8, selected: false });
+    expect(device.keys).toEqual(Array(8).fill("arrow_right"));
+    expect(device.selected).toEqual([]);
+    expect(timer.getSleepHistory().length).toBeLessThanOrEqual(24);
+  });
+});
+
 describe("FocusNavigate Leanback headers (#17513)", () => {
   test("enters the content pane before steering toward an absent card", async () => {
     const { device, timer, observer, navigator } = harness();

@@ -165,6 +165,7 @@ nav:
       - "Device ownership": using/device-ownership.md
       - "Listing device images": using/device-images.md
       - "Usage skill": using/usage-skill.md
+      - "Python SDK": using/python-sdk.md
       - "Managed Macs and CI runners": using/managed-macs.md
       - "WebRTC Streaming": webrtc-streaming.md
   - "How it Works":

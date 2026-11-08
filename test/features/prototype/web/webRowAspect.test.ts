@@ -373,10 +373,48 @@ test("a row in a horizontal scroll is not bounded to the scroll's width", () => 
   expect(nodeCss({ maxWidth: 50, [ROW_BOUND_KEY]: true }, inScroll)["max-width"]).toBe("50px");
 });
 
+test("a zeroed row child gives up an authored minWidth, as sizeIn clamps it to no width", () => {
+  const context = { mode: "light" as const, palette: new Map(), parentAxis: "row" as const };
+  const zeroed = { minWidth: 100, [ROW_MEASURE_KEY]: { zero: true } };
+  expect(nodeCss(zeroed, context)).toMatchObject({ "min-width": "0", "max-width": "0px" });
+  // A shrinking child keeps its authored minimum.
+  const shrinking = { minWidth: 100, [ROW_MEASURE_KEY]: { shrink: LATER_SHRINK } };
+  expect(nodeCss(shrinking, context)["min-width"]).toBe("100px");
+});
+
 test("a nested bounded row that its parent row zeroes keeps no width", () => {
   const context = { mode: "light" as const, palette: new Map(), parentAxis: "row" as const };
   const nested = { [ROW_BOUND_KEY]: true, [ROW_MEASURE_KEY]: { zero: true } };
   expect(nodeCss(nested, context)["max-width"]).toBe("0px");
+});
+
+test("both row passes leave a nested capped row after an unsized ratio at zero width (#16695)", () => {
+  const nestedRow = (maxWidth?: number) => ({
+    type: "row",
+    ...(maxWidth === undefined ? {} : { style: { maxWidth } }),
+    children: [
+      { type: "box", style: { aspectRatio: 1, maxWidth: 40 } },
+      { type: "text", text: "b" },
+    ],
+  });
+  const context = { mode: "light" as const, palette: new Map(), parentAxis: "row" as const };
+  for (const maxWidth of [undefined, 300]) {
+    const outer = {
+      type: "row",
+      children: [{ type: "box", style: { aspectRatio: 2 } }, nestedRow(maxWidth)],
+    };
+    // The outer pass zeroes the nested row; the nested row's own pass then bounds it.
+    const zeroed = rowMeasured(outer, "r", shown).children;
+    expect(Array.isArray(zeroed)).toBe(true);
+    const nested = rowMeasured(
+      record(Array.isArray(zeroed) ? zeroed[1] : undefined)!,
+      "r.1",
+      shown,
+    );
+    const style = record(nested.style)!;
+    expect(style).toMatchObject({ [ROW_BOUND_KEY]: true, [ROW_MEASURE_KEY]: { zero: true } });
+    expect(nodeCss(style, context)["max-width"]).toBe("0px");
+  }
 });
 
 test("a container that authors a dp width or maxWidth bounds its children's width again", () => {

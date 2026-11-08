@@ -14,7 +14,6 @@ import {
   PROTOTYPE_ACCESSIBILITY_RULES,
 } from "../../features/prototype/prototypeAccessibilityLint";
 import { MAX_PROTOTYPE_PLACEHOLDER_FINDINGS } from "../../features/prototype/prototypePlaceholderLint";
-import { reverseOutputShape } from "../prototypeReverse";
 import {
   prototypeClearedOutputField,
   prototypeStorageOutputField,
@@ -634,7 +633,6 @@ export const prototypeOutputSchema = z.object({
     .describe(
       "show with element anchors: device timestamp of the hierarchy they were resolved against",
     ),
-  ...reverseOutputShape,
   deviceDroppedEvents: z
     .number()
     .int()

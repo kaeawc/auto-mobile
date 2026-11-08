@@ -385,6 +385,7 @@ export type CtrlProxyPressButtonResult = BaseResult;
 
 /** Rotate result from CtrlProxy iOS */
 export interface CtrlProxyRotateResult extends BaseResult {
+  timedOut?: boolean;
   previousOrientation: string;
   currentOrientation: string;
   value: number;

@@ -493,9 +493,9 @@ export class ImeCommitTyper implements AndroidModeTyper {
     }
     const traceState = this.host.imeTraceContext.getStore();
     if (trace && traceState && result.imeTrace !== undefined) {
-      traceState.lines = [...new Set([...(traceState.lines ?? []), ...result.imeTrace])].slice(
-        -512,
-      );
+      traceState.lines = [
+        ...new Set([...(traceState.lines ?? []), ...currentCommitTrace(result.imeTrace)]),
+      ].slice(-512);
     }
     return result;
   }
@@ -876,4 +876,15 @@ export class ImeCommitTyper implements AndroidModeTyper {
     }
     return true;
   }
+}
+
+/**
+ * The device returns its whole trace ring buffer, which still holds earlier
+ * commands' commits (#17464). Each commit records `event=commitStart` first, so
+ * only the lines from the last such marker belong to this commit. A snapshot
+ * with no marker (an older device build) is kept whole.
+ */
+export function currentCommitTrace(lines: readonly string[]): string[] {
+  const start = lines.findLastIndex((line) => / event=commitStart(?: |$)/.test(line));
+  return lines.slice(Math.max(start, 0));
 }

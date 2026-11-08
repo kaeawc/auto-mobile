@@ -481,7 +481,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         committedGraphemes: result.committedGraphemes,
         ...imeCommitUnitFields(result),
         ...imeFailureFields(result),
-        ...this.imeTraceFields(),
+        ...this.imeTraceFields(result.success),
         ...(result.resolvedMode ? { resolvedMode: result.resolvedMode } : {}),
         ...iosBackendFields(result.iosBackend),
         ...this.imeResultFields(result.resolvedMode ?? baseResult.resolvedMode),
@@ -498,14 +498,25 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         success: false,
         error: errorMessage(error),
         ...caughtErrorCodeFields(error),
-        ...this.imeTraceFields(),
+        ...this.imeTraceFields(false),
       };
     }
   }
 
-  private imeTraceFields(): Pick<TextActionResult, "imeTrace"> {
+  /**
+   * The IME trace is failure diagnostics (#17464): a successful command logs it
+   * at debug level instead of returning it in the response.
+   */
+  private imeTraceFields(success: boolean): Pick<TextActionResult, "imeTrace"> {
     const lines = this.imeTraceContext.getStore()?.lines;
-    return lines !== undefined ? { imeTrace: lines } : {};
+    if (lines === undefined) {
+      return {};
+    }
+    if (success) {
+      logger.debug(`[SendKeys] IME trace:\n${lines.join("\n")}`);
+      return {};
+    }
+    return { imeTrace: lines };
   }
 
   private imeResultFields(mode: ResolvedSendKeysTypingMode) {

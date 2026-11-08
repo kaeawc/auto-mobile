@@ -113,8 +113,11 @@ describe("buildPrototypeWebPage with images", () => {
   test("requests the newest revision's assets first, with each box once", () => {
     const built = buildPrototypeWebPage(page([feed("old", "shared"), feed("shared", "new")]));
     expect(built.imageRequests.map((request) => request.id)).toEqual(["shared", "new", "old"]);
-    // 200 dp crop at 2.625x, the same in both orientations.
-    expect(built.imageRequests[0]!.boxes).toEqual([{ height: 525, cover: true }]);
+    // 200 dp crop at 2.625x, its filled width at the long side, or the portrait width when compact.
+    expect(built.imageRequests[0]!.boxes).toEqual([{ width: 2423, height: 525, cover: true }]);
+    expect(built.imageRequests[0]!.compactBoxes).toEqual([
+      { width: 1079, height: 525, cover: true },
+    ]);
   });
 
   test("the same images yield the same bytes", () => {
@@ -220,7 +223,76 @@ describe("buildPrototypeWebPageWithImages", () => {
       encode,
     );
     expect(built.inlinedImages).toEqual(["a", "b"]);
-    expect(encode.boxes).toEqual([[{ height: 525, cover: true }], [{ height: 525, cover: true }]]);
+    const long = [{ width: 2423, height: 525, cover: true }];
+    expect(encode.boxes).toEqual([long, long]);
+  });
+
+  /** Encodes a long-side box (2423 px wide) to `large` bytes and any other box to `small`. */
+  function sizedByBox(large: number, small: number) {
+    const calls: string[] = [];
+    const encode: PrototypeWebImageEncoder = {
+      encode: async (bytes, boxes) => {
+        const wide = boxes.some((box) => (box.width ?? 0) > 2000);
+        calls.push(wide ? "long" : "compact");
+        return { bytes: new Uint8Array(wide ? large : small), width: 4, height: 3 };
+      },
+    };
+    return { calls, encode };
+  }
+
+  test("re-encodes at the portrait width when the long-side images do not all fit (#16605)", async () => {
+    const input = page([feed("a", "b", "c")]);
+    const placeholders = Buffer.byteLength(buildPrototypeWebPage(input).html);
+    // Room for one long-side image (about 4 KB of base64) or all three compact ones, not more.
+    const maxBytes = placeholders + 9000;
+    const { calls, encode } = sizedByBox(3000, 600);
+    const built = await buildPrototypeWebPageWithImages(
+      { ...input, maxBytes },
+      source(["a", "b", "c"]),
+      encode,
+    );
+    expect(built.inlinedImages).toEqual(["a", "b", "c"]);
+    expect(built.unsupportedNodes).toEqual([]);
+    expect(Buffer.byteLength(built.html)).toBeLessThanOrEqual(maxBytes);
+    expect(calls).toEqual(["long", "long", "long", "compact", "compact", "compact"]);
+    // The first image keeps its long-side encode: its 3000 bytes are in the page.
+    const sizes = [...built.html.matchAll(/base64,([^)]*)\)/g)].map(
+      (m) => Buffer.from(m[1]!, "base64").length,
+    );
+    expect(sizes).toEqual([3000, 600, 600]);
+  });
+
+  test("keeps every long-side encode when they all fit (#16605)", async () => {
+    const { calls, encode } = sizedByBox(3000, 600);
+    const built = await buildPrototypeWebPageWithImages(
+      page([feed("a", "b")]),
+      source(["a", "b"]),
+      encode,
+    );
+    expect(built.inlinedImages).toEqual(["a", "b"]);
+    expect(calls).toEqual(["long", "long"]);
+  });
+
+  test("a fixed-size image has no compact encode and keeps its overflow placeholder (#16605)", async () => {
+    const fixed = (asset: string) => ({
+      type: "image",
+      id: asset,
+      asset,
+      contentScale: "crop",
+      style: { width: { dp: 100 }, height: { dp: 100 } },
+    });
+    const spec = { id: "grid", root: { type: "column", children: [fixed("a"), fixed("b")] } };
+    const input = page([spec]);
+    expect(buildPrototypeWebPage(input).imageRequests[0]!.compactBoxes).toBeUndefined();
+    const maxBytes = Buffer.byteLength(buildPrototypeWebPage(input).html) + 6000;
+    const encode = encoder(3000);
+    const built = await buildPrototypeWebPageWithImages(
+      { ...input, maxBytes },
+      source(["a", "b"]),
+      encode,
+    );
+    expect(built.inlinedImages).toEqual(["a"]);
+    expect(encode.boxes).toHaveLength(2);
   });
 
   test("keeps the placeholder page when image markup alone overflows the budget", async () => {

@@ -1,3 +1,4 @@
+test/fixtures/visionos-settings/*.json text eol=lf
 test/fixtures/android-display/**/*.txt text eol=lf
 test/fixtures/wear/systemtray/*.xml text eol=lf
 test/fixtures/wear/systemtray/*.json text eol=lf
@@ -24,6 +25,7 @@ ios/prototype-agent/ProtoViewer/third-party-licenses/*.txt text eol=lf
 test/features/observe/activityActivitiesDumps/*.log text eol=lf
 test/fixtures/android-dumpsys-package/*.txt text eol=lf
 test/fixtures/android-notification-policy/*.txt text eol=lf
+test/fixtures/android-notification-channel/*.txt text eol=lf
 test/fixtures/android-notification-enabled/*.txt text eol=lf
 test/fixtures/android-app-links/*.txt text eol=lf
 test/fixtures/ios-simctl/*.txt text eol=lf

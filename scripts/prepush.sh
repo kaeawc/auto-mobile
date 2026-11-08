@@ -13,15 +13,18 @@ base_explicit=0
 all=0
 list=0
 changed_mode=0
+timing_mode=0
 profile=auto
 usage() {
   cat <<'EOF'
-Usage: scripts/prepush.sh [--base <ref>] [--all] [--list] [--changed] [--profile auto|cloud] [--help]
+Usage: scripts/prepush.sh [--base <ref>] [--all] [--list] [--changed] [--timing] [--profile auto|cloud] [--help]
 
 Select gates from changed paths (merge-base with origin/main plus working-tree
 changes). The default base falls back to main when origin/main is unavailable;
 an explicit base must resolve. --all selects every lane, --list prints the
-selected names without running them, and --changed forwards to the Node lane.
+selected names without running them, --changed forwards to the Node lane, and
+--timing forwards to it to force the 100 ms unit timing gate on macOS and
+Windows, where prepush-node.sh otherwise skips it.
 PREPUSH_CHANGED_FILES_FILE may provide newline-separated paths for testing.
 Lanes run serially: runtime-pins, node, shell, android, ios, integration,
 integration-safe. Each platform/Node lane owns its attestation; this dispatcher
@@ -40,6 +43,7 @@ while [[ $# -gt 0 ]]; do
     --all) all=1; shift ;;
     --list) list=1; shift ;;
     --changed) changed_mode=1; shift ;;
+    --timing) timing_mode=1; shift ;;
     --profile)
       [[ $# -ge 2 ]] || { echo "--profile requires auto or cloud" >&2; exit 2; }
       case "$2" in auto|cloud) profile="$2" ;; *) echo "Unknown profile: $2 (expected auto or cloud)" >&2; exit 2 ;; esac
@@ -64,11 +68,26 @@ else
   fi
 fi
 
+# Every path prepush-shell.sh selects a fast check or BATS file for. CI's
+# required "Shell Changed Files" job runs that same selector, so a path missing
+# here passes locally and fails that job (docs-github-markdown, mkdocs-nav and
+# xml on docs/ or XML-only changes; BATS files naming a scripts/*.ts input).
+# Keep in step with the case arms in scripts/prepush-shell.sh; the lane itself
+# exits in seconds when nothing applies.
+shell_lane_for_path() {
+  case "$1" in
+    scripts/*|*.sh|.githooks/*|test/bats/*|sdk/python/*) printf '%s\n' shell ;;
+    docs/*|docs-assets/*|mkdocs.yml|CHANGELOG.md|.github/*) printf '%s\n' shell ;;
+    skills/*|.agents/skills/*|AGENTS.md|.claude/commands/*|.claude-plugin/*|plugins/*) printf '%s\n' shell ;;
+    package.json|bun.lock|Dockerfile|*.xml|*test-plans/*.yaml|*test-plans/*.yml|.gitattributes|*/.gitattributes) printf '%s\n' shell ;;
+  esac
+}
+
 lane_for_path() {
   local path="$1"
   if [[ "$path" == package.json || "$path" == bun.lock ]]; then printf '%s\n' runtime-pins node integration; fi
   if [[ "$path" == src/* || ( "$path" == test/* && "$path" != test/bats/* ) || "$path" == schemas/* || "$path" == tsconfig*.json || "$path" == .oxlintrc.json || "$path" == oxlint-plugins/* || "$path" == turbo.json || "$path" == scripts/*.ts || "$path" == benchmark/agent/* ]]; then printf '%s\n' node; fi
-  if [[ "$path" == scripts/*.sh || "$path" == scripts/lib/* || "$path" == test/bats/* ]]; then printf '%s\n' shell; fi
+  shell_lane_for_path "$path"
   if [[ "$path" == android/* ]]; then printf '%s\n' android; fi
   if [[ "$path" == ios/* ]]; then printf '%s\n' ios; fi
   if [[ "$path" == *.integration.test.ts || "$path" == scripts/release/pin-runtime-deps.ts || "$path" == scripts/release/runtime-graph.json || "$path" == scripts/release/lib/runtime-pins.ts || "$path" == scripts/release/lib/runtime-roots.ts || "$path" == scripts/ci/assert-installed-runtime-graph.ts || "$path" == scripts/ci/verify-pinned-runtime-graph.sh || "$path" == package.json || "$path" == bun.lock ]]; then printf '%s\n' integration; fi
@@ -186,7 +205,7 @@ summary() {
 for lane in ${selected_lanes[@]+"${selected_lanes[@]}"}; do
   case "$lane" in
     runtime-pins) run_lane "$lane" bun scripts/release/pin-runtime-deps.ts --write; abort_if_failed; echo 'Reminder: commit package.json, bun.lock, and scripts/release/runtime-graph.json if changed.' ;;
-    node) args=(); if [[ "$changed_mode" -eq 1 ]]; then args+=(--changed); fi; if [[ "$profile" == cloud ]]; then args+=(--timing); fi; run_lane "$lane" bash "$SCRIPT_DIR/prepush-node.sh" ${args[@]+"${args[@]}"}; abort_if_failed ;;
+    node) args=(); if [[ "$changed_mode" -eq 1 ]]; then args+=(--changed); fi; if [[ "$profile" == cloud || "$timing_mode" -eq 1 ]]; then args+=(--timing); fi; run_lane "$lane" bash "$SCRIPT_DIR/prepush-node.sh" ${args[@]+"${args[@]}"}; abort_if_failed ;;
     shell) run_lane "$lane" bash "$SCRIPT_DIR/prepush-shell.sh" --base "$BASE"; abort_if_failed; case "$selected" in *" node "*) ;; *) run_lane 'shell format' bun run format; abort_if_failed ;; esac ;;
     android) run_lane "$lane" bash "$SCRIPT_DIR/prepush-android.sh" --base-ref "$BASE"; abort_if_failed ;;
     ios) run_lane "$lane" bash "$SCRIPT_DIR/prepush-ios.sh"; abort_if_failed ;;

@@ -120,11 +120,16 @@ internal class DesktopDaemonBinding(private val context: DesktopBindingContext) 
         )
         rotateSession = true
       }
-      result.refusal == SetActiveDeviceRefusal.HELD_BY_ANOTHER_SESSION -> {
+      // Held by another session, another daemon or a declared binding: watch it and wait for the
+      // user's Take control. Never re-sent on a cadence, even when the wire says retryable
+      // (owner decision 2026-11-07, #11365).
+      result.refusal?.heldElsewhere == true -> {
         state.heldElsewhereDeviceId = target.deviceId
+        state.heldElsewhereHolder = result.holder ?: HeldElsewhereHolder.AnotherSession
         state.gates.complete(target.deviceId, allowed = false)
         DESKTOP_DAEMON_COMPOSITION_LOG.info(
-          "Device ${target.deviceId} is held by another session; watching only: ${result.message}",
+          "Device ${target.deviceId} is held elsewhere (${result.refusal}); watching only: " +
+            "${result.message}",
         )
         if (session.holdsDevice) rotateSession = true else session.ensureRegistered()
       }
@@ -237,7 +242,7 @@ internal class DesktopDaemonBinding(private val context: DesktopBindingContext) 
     state.idleReleasedDeviceId = target.deviceId
     state.releaseReason =
       if (lapse is DaemonSessionNotFoundException) {
-        SessionReleaseReason.fromDaemon(lapse.releaseReason)
+        SessionReleaseReason.fromDaemon(lapse.releaseReason, lapse.idle)
       } else SessionReleaseReason.HEARTBEAT_LAPSED
     state.inputDeviceId = null
     state.pendingRecoveryRefresh.set(true)

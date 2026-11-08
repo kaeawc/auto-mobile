@@ -983,6 +983,11 @@ function iosPressFailureResult(
     keyCode: -1,
     code: "press_failed",
     retryable: false,
+    // HOME stays a plain failure here, but callers that must not replay it (systemTray's
+    // Notification Center close) need to tell a sent-but-unanswered press from a refusal (#14387).
+    ...(normalizedButton === "home" && result.dispatched !== undefined
+      ? { dispatched: result.dispatched, acknowledged: result.acknowledged }
+      : {}),
     error:
       result.error ??
       (PressButton.IOS_HARDWARE_BUTTONS.has(normalizedButton)

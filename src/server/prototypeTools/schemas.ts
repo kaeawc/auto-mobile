@@ -39,7 +39,6 @@ import {
 } from "../../features/prototype/prototypeValidation";
 import { getRemovedToolActionHint } from "../../utils/removedTools";
 import { addDeviceTargetingToSchema, withJsonSchemaOverride } from "../../utils/schemaHelpers";
-import {} from "../prototypeReverse";
 import { validatePrototypeSavedInput } from "../prototypeSavedActions";
 import { validatePrototypeStorageInput } from "../prototypeStorageAction";
 import {} from "../prototypeStorageOutput";

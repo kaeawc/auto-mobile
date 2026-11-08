@@ -34,7 +34,57 @@ final class WatchCommandHandlerTests: XCTestCase {
     }
 
     func testAllowlistContainsExactlySupportedCommands() {
-        XCTAssertEqual(WatchCommandHandler.supportedCommands, ["hierarchy", "tap", "swipe", "home", "crown", "type"])
+        XCTAssertEqual(WatchCommandHandler.supportedCommands, ["hierarchy", "tap", "swipe", "home", "crown", "type", "face"])
+    }
+
+    func testFaceOperationsAndDumpText() throws {
+        let source = FakeWatchSource()
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        for json in [
+            #"{"type":"face","op":"tap","x":0,"y":1}"#,
+            #"{"type":"face","op":"drag","fromX":0.5,"fromY":0.5,"toX":0.5,"toY":0.6}"#,
+            #"{"type":"face","op":"swipe","direction":"up"}"#,
+            #"{"type":"face","op":"swipe","direction":"down"}"#,
+            #"{"type":"face","op":"swipe","direction":"left"}"#,
+            #"{"type":"face","op":"swipe","direction":"right"}"#,
+        ] {
+            let response = handler.handle(Data(json.utf8))
+            XCTAssertTrue(response.success)
+            XCTAssertEqual(response.type, "face_result")
+        }
+        let response = handler.handle(Data(#"{"type":"face","op":"dump","requestId":"f"}"#.utf8))
+        XCTAssertTrue(response.success)
+        XCTAssertEqual(response.type, "face_result")
+        XCTAssertEqual(response.requestId, "f")
+        let decoded = try JSONDecoder().decode(WatchResponse.self, from: JSONEncoder().encode(response))
+        XCTAssertEqual(decoded.text, "clockface dump")
+        XCTAssertEqual(source.calls, [
+            "faceTap:0.0,1.0", "faceDrag:0.5,0.5,0.5,0.6",
+            "faceSwipe:up", "faceSwipe:down", "faceSwipe:left", "faceSwipe:right", "faceDump",
+        ])
+    }
+
+    func testFaceRejectsInvalidInputWithoutGestures() {
+        let source = FakeWatchSource()
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        for json in [
+            #"{"type":"face"}"#,
+            #"{"type":"face","op":"unknown"}"#,
+            #"{"type":"face","op":"tap","x":0}"#,
+            #"{"type":"face","op":"tap","x":-0.1,"y":0}"#,
+            #"{"type":"face","op":"tap","x":0,"y":1.1}"#,
+            #"{"type":"face","op":"tap","x":1e400,"y":0}"#,
+            #"{"type":"face","op":"tap","x":"0","y":0}"#,
+            #"{"type":"face","op":"drag","fromX":0,"fromY":0,"toX":1}"#,
+            #"{"type":"face","op":"drag","fromX":0,"fromY":0,"toX":1,"toY":2}"#,
+            #"{"type":"face","op":"swipe"}"#,
+            #"{"type":"face","op":"swipe","direction":"diagonal"}"#,
+        ] {
+            let response = handler.handle(Data(json.utf8))
+            XCTAssertFalse(response.success)
+            XCTAssertEqual(response.errorCode, "invalid_request")
+        }
+        XCTAssertEqual(source.calls, [])
     }
 
     func testEveryOtherCommandReturnsStructuredUnsupportedError() throws {
@@ -63,7 +113,7 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertEqual(event.type, "connected")
         XCTAssertEqual(event.id, 7)
         XCTAssertEqual(event.platform, "watchos")
-        XCTAssertEqual(event.supportedCommands, ["hierarchy", "tap", "swipe", "home", "crown", "type"])
+        XCTAssertEqual(event.supportedCommands, ["hierarchy", "tap", "swipe", "home", "crown", "type", "face"])
         XCTAssertEqual(event.supportedFeatures, [])
     }
 
@@ -272,6 +322,16 @@ private final class FakeWatchSource: WatchSnapshotSource, WatchGesturePerformer 
     var shouldFail = false
     var snapshotError: WatchCommandError?
 
+    func faceTap(x: Double, y: Double) throws { calls.append("faceTap:\(x),\(y)") }
+    func faceDrag(fromX: Double, fromY: Double, toX: Double, toY: Double) throws {
+        calls.append("faceDrag:\(fromX),\(fromY),\(toX),\(toY)")
+    }
+    func faceSwipe(_ direction: WatchSwipeDirection) throws { calls.append("faceSwipe:\(direction.rawValue)") }
+    func faceDump() throws -> String {
+        calls.append("faceDump")
+        return "clockface dump"
+    }
+
     func snapshot() throws -> SdkViewHierarchy {
         if let snapshotError { throw snapshotError }
         if shouldFail { throw WatchCommandError.commandFailed("Snapshot failed") }
@@ -335,6 +395,10 @@ private final class ScriptedCrownSource: WatchSnapshotSource, WatchGesturePerfor
         try watchVerifiedCrownRotation(snapshots: self) { rotations += 1 }
     }
 
+    func faceTap(x _: Double, y _: Double) throws {}
+    func faceDrag(fromX _: Double, fromY _: Double, toX _: Double, toY _: Double) throws {}
+    func faceSwipe(_: WatchSwipeDirection) throws {}
+    func faceDump() throws -> String { "" }
     func tap(x _: Double, y _: Double) throws {}
     func tap(identifier _: String) throws {}
     func swipe(_: WatchSwipeDirection, distance _: Double?) throws {}

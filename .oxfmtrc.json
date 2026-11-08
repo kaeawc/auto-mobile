@@ -36,6 +36,7 @@
     "test/fixtures/tvos-xcuitest/*.json",
     "test/fixtures/visionos-xcuitest/*.json",
     "test/fixtures/watchos-xcuitest/*.json",
+    "test/fixtures/watch/*.txt",
     "test/fixtures/ios-devicetype-order/*.json",
     "test/fixtures/ios-devicectl/motion-*.json",
     "test/fixtures/ios-rotate/*.json",

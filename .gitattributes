@@ -40,6 +40,7 @@ test/fixtures/ios-simctl/*.json text eol=lf
 test/fixtures/tvos-xcuitest/*.json text eol=lf
 test/fixtures/visionos-xcuitest/*.json text eol=lf
 test/fixtures/watchos-xcuitest/*.json text eol=lf
+test/fixtures/watch/*.txt text eol=lf
 test/fixtures/watchos-xcuitest/sdk-hierarchy-live.json text eol=lf
 test/fixtures/ios-simctl/*.plist text eol=lf
 test/fixtures/ios-notification-center/*.json text eol=lf

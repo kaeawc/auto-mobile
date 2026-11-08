@@ -3,7 +3,13 @@
 The XCUITest runner approach supports hierarchy, tap, and screenshot operations
 on the watchOS simulator, as demonstrated with Xcode 26.6, watchOS 26.5, and an
 unpaired Apple Watch Series 11 (46 mm) simulator. The probe app is a SwiftUI app
-with a counter button, a Crown value, and rows in a scroll view.
+with a counter button, a Crown value, and rows in a scroll view. The runner's
+`face` command targets `com.apple.clockface` for normalized taps, 0.1-second
+press-and-drag gestures, directional swipes, and text dumps. The Smart Stack
+widget driver uses a calibrated gallery position (steps from the bottom, default
+one) and the first widget preview; app and widget display names verify the
+resulting cell identifier. Header and cell polling each allow ten dumps separated
+by 250 ms. A successful gesture alone does not establish widget presence.
 
 ## Capability boundary
 

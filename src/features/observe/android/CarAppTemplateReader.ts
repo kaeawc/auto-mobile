@@ -57,6 +57,8 @@ export function parseCarAppTemplateCallOutput(output: string): unknown {
  */
 export class CarAppTemplateReader {
   private readonly quietUntil = new Map<string, number>();
+  /** The Android user each device's package was last read as; the hint for skipping a lookup. */
+  private readonly lastUser = new Map<string, number>();
   private readonly inFlight = new Map<string, Promise<CarAppTemplates | undefined>>();
 
   constructor(
@@ -64,9 +66,9 @@ export class CarAppTemplateReader {
     private readonly timer: Timer = defaultTimer,
   ) {}
 
-  /** Remembered quiet packages; expired entries are pruned on every write. */
+  /** Remembered quiet packages and user hints; expired entries are pruned on every write. */
   get quietEntryCount(): number {
-    return this.quietUntil.size;
+    return this.quietUntil.size + this.lastUser.size;
   }
 
   readonly resolve: CarAppTemplatesResolver = async (device, result) => {
@@ -95,20 +97,23 @@ export class CarAppTemplateReader {
     packageName: string,
     observedUserId: number | undefined,
   ): Promise<CarAppTemplates | undefined> {
-    const userId = observedUserId ?? (await this.foregroundUser(device, packageName));
+    const appKey = `${device.deviceId}\u0000${packageName}`;
+    const userId = observedUserId ?? (await this.lookUpUser(device, packageName, appKey));
     if (userId === undefined) {
       return undefined;
     }
-    const key = `${device.deviceId}\u0000${userId}\u0000${packageName}`;
-    if ((this.quietUntil.get(key) ?? 0) > this.timer.now()) {
+    const key = quietKey(appKey, userId);
+    if (this.isQuiet(key)) {
       return undefined;
     }
     const answer = await this.read(device, packageName, userId);
     if (answer.kind !== "document" || !answer.document.enabled) {
       this.quiet(key, quietIntervalMs(answer));
+      this.lastUser.set(appKey, userId);
       return undefined;
     }
     this.quietUntil.delete(key);
+    this.lastUser.delete(appKey);
     const { document } = answer;
     return {
       packageName,
@@ -117,6 +122,34 @@ export class CarAppTemplateReader {
       sessions: document.sessions,
       ...(document.error ? { error: document.error } : {}),
     };
+  }
+
+  /**
+   * The user to read as when the observation carries none. While the app's last-read user is still
+   * quiet, or a lookup just failed, no lookup runs, so an app without the route still costs about
+   * one adb call per TTL rather than a `dumpsys` on every observation.
+   */
+  private async lookUpUser(
+    device: BootedDevice,
+    packageName: string,
+    appKey: string,
+  ): Promise<number | undefined> {
+    const hinted = this.lastUser.get(appKey);
+    if (
+      this.isQuiet(quietKey(appKey, UNKNOWN_USER)) ||
+      (hinted !== undefined && this.isQuiet(quietKey(appKey, hinted)))
+    ) {
+      return undefined;
+    }
+    const userId = await this.foregroundUser(device, packageName);
+    if (userId === undefined) {
+      this.quiet(quietKey(appKey, UNKNOWN_USER), CAR_APP_ROUTE_FAILED_RETRY_MS);
+    }
+    return userId;
+  }
+
+  private isQuiet(key: string): boolean {
+    return (this.quietUntil.get(key) ?? 0) > this.timer.now();
   }
 
   /**
@@ -152,6 +185,11 @@ export class CarAppTemplateReader {
     for (const [entry, until] of this.quietUntil) {
       if (until <= now) {
         this.quietUntil.delete(entry);
+      }
+    }
+    for (const [appKey, userId] of this.lastUser) {
+      if (!this.quietUntil.has(quietKey(appKey, userId))) {
+        this.lastUser.delete(appKey);
       }
     }
     this.quietUntil.set(key, now + intervalMs);
@@ -190,6 +228,13 @@ export class CarAppTemplateReader {
     }
     return parseRouteOutput(packageName, output);
   }
+}
+
+/** Quiet-map user segment for a foreground lookup that named no usable user. */
+const UNKNOWN_USER = "?";
+
+function quietKey(appKey: string, userId: number | typeof UNKNOWN_USER): string {
+  return `${appKey}\u0000${userId}`;
 }
 
 /** `content call` against an authority no installed provider claims. */

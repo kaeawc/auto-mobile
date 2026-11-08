@@ -136,13 +136,17 @@ describe("CarAppTemplateReader (#16751)", () => {
   });
 
   test("skips the read when the foreground lookup names another app or fails", async () => {
-    const { adb, reader } = setup(() => bundle(enabledDocument));
-    adb.foreground = { packageName: "com.example.other", userId: 10 };
-    expect(await reader.resolve(android, observation("com.example.car"))).toBeUndefined();
-    adb.foreground = null;
-    expect(await reader.resolve(android, observation("com.example.car"))).toBeUndefined();
-    adb.foreground = new Error("dumpsys failed");
-    expect(await reader.resolve(android, observation("com.example.car"))).toBeUndefined();
+    const { adb, timer, reader } = setup(() => bundle(enabledDocument));
+    for (const foreground of [
+      { packageName: "com.example.other", userId: 10 },
+      null,
+      new Error("dumpsys failed"),
+    ]) {
+      adb.foreground = foreground;
+      expect(await reader.resolve(android, observation("com.example.car"))).toBeUndefined();
+      timer.advanceTime(CAR_APP_ROUTE_FAILED_RETRY_MS);
+    }
+    expect(adb.foregroundLookups).toBe(3);
     expect(adb.commands).toEqual([]);
 
     adb.foreground = { packageName: "com.example.car", userId: 0 };
@@ -151,11 +155,39 @@ describe("CarAppTemplateReader (#16751)", () => {
 
   test("the quiet TTL is per Android user", async () => {
     const { adb, reader } = setup(() => bundle({ schemaVersion: 1, enabled: false, sessions: [] }));
-    await reader.resolve(android, observation("com.example.car"));
-    adb.foreground = { packageName: "com.example.car", userId: 10 };
-    await reader.resolve(android, observation("com.example.car"));
+    await reader.resolve(android, observation("com.example.car", 0));
+    await reader.resolve(android, observation("com.example.car", 10));
     expect(adb.commands).toHaveLength(2);
     expect(adb.commands[1]).toContain("--user 10");
+  });
+
+  test("a quiet app makes no foreground lookup until its TTL passes", async () => {
+    const { adb, timer, reader } = setup(() => {
+      throw new Error("Could not find provider");
+    });
+    await reader.resolve(android, observation("com.example.car"));
+    await reader.resolve(android, observation("com.example.car"));
+    expect(adb.foregroundLookups).toBe(1);
+    expect(adb.commands).toHaveLength(1);
+
+    timer.advanceTime(CAR_APP_ROUTE_ABSENT_TTL_MS);
+    await reader.resolve(android, observation("com.example.car"));
+    expect(adb.foregroundLookups).toBe(2);
+    expect(adb.commands).toHaveLength(2);
+  });
+
+  test("a failed foreground lookup is retried after the failure interval", async () => {
+    const { adb, timer, reader } = setup(() => bundle(enabledDocument));
+    adb.foreground = new Error("no devices");
+    await reader.resolve(android, observation("com.example.car"));
+    timer.advanceTime(CAR_APP_ROUTE_FAILED_RETRY_MS - 1);
+    await reader.resolve(android, observation("com.example.car"));
+    expect(adb.foregroundLookups).toBe(1);
+
+    adb.foreground = { packageName: "com.example.car", userId: 0 };
+    timer.advanceTime(1);
+    expect(await reader.resolve(android, observation("com.example.car"))).toBeDefined();
+    expect(adb.foregroundLookups).toBe(2);
   });
 
   test("a failed read is retried after the short failure interval, not the absent TTL", async () => {
@@ -225,7 +257,7 @@ describe("CarAppTemplateReader (#16751)", () => {
     timer.advanceTime(CAR_APP_ROUTE_ABSENT_TTL_MS);
     adb.foreground = { packageName: "com.example.b", userId: 0 };
     await reader.resolve(android, observation("com.example.b"));
-    expect(reader.quietEntryCount).toBe(1);
+    expect(reader.quietEntryCount).toBe(2);
   });
 
   test("a route error is carried on the block", async () => {

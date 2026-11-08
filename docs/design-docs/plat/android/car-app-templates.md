@@ -39,7 +39,9 @@ override fun onGetTemplate(): Template =
   `carAppTemplates` block on the served `observe` copy, never on the cached observation. The user is
   the observation's when it carries one, otherwise the foreground lookup's; a lookup naming another
   package skips the read instead of falling back to user 0, so a secondary or work-profile app is
-  never read as the default user. Overlapping observations of one app share one read.
+  never read as the default user. While the user an app was last read as is still quiet (below), or a
+  lookup just failed, no lookup runs; a switch to another user's copy of that package is therefore
+  read once that entry expires. Overlapping observations of one app share one read.
 
 ## Stack walk
 

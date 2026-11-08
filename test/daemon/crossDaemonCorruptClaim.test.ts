@@ -41,7 +41,6 @@ describe("cross-daemon claim store: torn claims cannot exist and unreadable ones
     const source: DeviceOwnershipFileSource = {
       leasePath: () => undefined,
       claimPath: (id) => join(claimsDir, `${id}.lock`),
-      legacyClaimPath: () => undefined,
       read: (path) => readExclusiveLockContent(path),
       isUnreadable: (path) => lockFileIsUnreadable(path),
       isProcessRunning: (pid) => pid === selfPid,

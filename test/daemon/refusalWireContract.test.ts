@@ -84,6 +84,7 @@ import * as bootCapacity from "../../src/models/BootCapacityExhaustedError";
 import * as boundSessionRefusal from "../../src/daemon/deviceOutsideBoundSessionRefusal";
 import * as deviceOutsideBoundSession from "../../src/daemon/DeviceOutsideBoundSessionError";
 import * as sessionOutsideBoundSession from "../../src/daemon/SessionOutsideBoundSessionError";
+import * as readSessionNotBound from "../../src/daemon/ReadSessionNotBoundError";
 import * as planLockRefusal from "../../src/daemon/planExecutionInProgressRefusal";
 import * as adbTransportUnavailable from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import * as ambiguousTargetRefusal from "../../src/daemon/ambiguousDeviceTargetRefusal";
@@ -230,6 +231,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "models/BootCapacityExhaustedError": bootCapacity,
   "daemon/DeviceOutsideBoundSessionError": deviceOutsideBoundSession,
   "daemon/SessionOutsideBoundSessionError": sessionOutsideBoundSession,
+  "daemon/ReadSessionNotBoundError": readSessionNotBound,
   "daemon/planExecutionInProgressRefusal": planLockRefusal,
   "daemon/ambiguousDeviceTargetRefusal": ambiguousTargetRefusal,
   "utils/android-cmdline-tools/AdbDeviceTransportUnavailableError": adbTransportUnavailable,

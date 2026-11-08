@@ -473,4 +473,16 @@ describe("simulator display probe", () => {
     });
     expect(await probe.readPixelSize(simulator.deviceId, "primary-1")).toBeUndefined();
   });
+  test("a read failure after cancellation throws instead of reading as indeterminate", async () => {
+    const controller = new AbortController();
+    const probe = new SimulatorIosDisplayPixelProbe(simulator, {
+      async screenshot() {
+        controller.abort();
+        throw new Error("screenshot aborted");
+      },
+    });
+    await expect(
+      probe.readPixelSize(simulator.deviceId, "primary-1", controller.signal),
+    ).rejects.toThrow();
+  });
 });

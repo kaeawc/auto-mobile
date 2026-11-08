@@ -263,15 +263,11 @@ export function restoreTargetIosOrientation(observation: ObserveResult | undefin
   return observedIosOrientation(observation);
 }
 
-/** Independent simulator display pixels take precedence over XCUIDevice orientation. */
-export function reconcileIosRotationWithDisplayRead(
-  verified: RotateResult,
-  requested: "portrait" | "landscape",
-  previousObservation: ObserveResult | undefined,
+/** Orientation shown by a display pixel read, or undefined when the read is indeterminate. */
+export function iosDisplayOrientationFromPixels(
   pixelSize: { width: number; height: number } | undefined,
-): RotateResult {
+): "portrait" | "landscape" | undefined {
   if (
-    !verified.success ||
     !pixelSize ||
     !Number.isFinite(pixelSize.width) ||
     !Number.isFinite(pixelSize.height) ||
@@ -279,17 +275,31 @@ export function reconcileIosRotationWithDisplayRead(
     pixelSize.height <= 0 ||
     pixelSize.width === pixelSize.height
   ) {
-    return verified;
+    return undefined;
   }
-  const current = pixelSize.width > pixelSize.height ? "landscape" : "portrait";
-  if (current === requested) {
+  return pixelSize.width > pixelSize.height ? "landscape" : "portrait";
+}
+
+/** Independent simulator display pixels take precedence over XCUIDevice orientation. */
+export function reconcileIosRotationWithDisplayRead(
+  verified: RotateResult,
+  requested: "portrait" | "landscape",
+  previousObservation: ObserveResult | undefined,
+  pixelSize: { width: number; height: number } | undefined,
+): RotateResult {
+  const current = iosDisplayOrientationFromPixels(pixelSize);
+  if (!verified.success || current === undefined || current === requested) {
     return verified;
   }
   const claim = verified.rotationPerformed
     ? `a completed rotation to ${requested}`
     : `the device was already in ${requested} orientation`;
+  // The post-action observation carries the runner's claimed rotation and screen size, which the
+  // display contradicts; do not hand those dimensions to clients for later taps.
+  const rest: RotateResult = { ...verified };
+  delete rest.observation;
   return {
-    ...verified,
+    ...rest,
     success: false,
     rotationPerformed: false,
     currentOrientation: current,

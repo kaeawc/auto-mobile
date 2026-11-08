@@ -1,6 +1,9 @@
 import type { Timer } from "../../utils/SystemTimer";
-import { awaitWhileRequestIsLive } from "../../utils/toolUtils";
-import { reconcileIosRotationWithDisplayRead } from "./iosRotateVerification";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
+import {
+  iosDisplayOrientationFromPixels,
+  reconcileIosRotationWithDisplayRead,
+} from "./iosRotateVerification";
 import type { BootedDevice, ObserveResult, RotateResult } from "../../models";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { readImageHeaderDimensions } from "../../utils/screenshot/imageHeaderDimensions";
@@ -42,6 +45,8 @@ export class SimulatorIosDisplayPixelProbe implements IosDisplayPixelProbe {
       }
       return dimensions ?? undefined;
     } catch (error) {
+      // A cancelled request must surface as cancellation, not as an indeterminate read.
+      throwIfAborted(signal);
       logger.warn(`iOS rotate display probe failed: ${errorMessage(error)}`, error);
       return undefined;
     }
@@ -75,5 +80,7 @@ export async function verifyIosRotationDisplayRead(
     return first;
   }
   await awaitWhileRequestIsLive(timer.sleep(200), signal);
-  return reconcile(await probe.readPixelSize(device.deviceId, displayKey, signal));
+  const retry = await probe.readPixelSize(device.deviceId, displayKey, signal);
+  // An indeterminate retry cannot overturn the last valid frame's contradiction.
+  return iosDisplayOrientationFromPixels(retry) === undefined ? first : reconcile(retry);
 }

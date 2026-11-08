@@ -23,6 +23,7 @@ describe("iOS observed rotation verification (#8778)", () => {
   let recoveryStarts: number;
   let recoveryWaits: Array<[number, AbortSignal | undefined]>;
   let recoveryError: Error | undefined;
+  let recoveryOutcome: () => "recovered" | "timed_out";
   let instanceSpy: ReturnType<typeof spyOn>;
 
   test("restore state is unobservable and never reads defaulted Android orientation on iOS", async () => {
@@ -70,6 +71,7 @@ describe("iOS observed rotation verification (#8778)", () => {
     recoveryStarts = 0;
     recoveryWaits = [];
     recoveryError = undefined;
+    recoveryOutcome = () => "recovered";
     const probe: IosDisplayPixelProbe = {
       async readPixelSize(_deviceId, displayKey) {
         pixelReads.push(displayKey);
@@ -92,7 +94,7 @@ describe("iOS observed rotation verification (#8778)", () => {
         if (recoveryError) {
           throw recoveryError;
         }
-        return "recovered" as const;
+        return recoveryOutcome();
       },
       requestRotate: (...args: Parameters<IOSCtrlProxyClient["requestRotate"]>) =>
         runner.requestRotate(...args),
@@ -174,9 +176,83 @@ describe("iOS observed rotation verification (#8778)", () => {
       );
       if (!agrees) {
         expect(result.error).toContain("inner panel");
+        expect(result.observation).toBeUndefined();
       }
     },
   );
+
+  const timedOutRotate = () =>
+    runnerResult({
+      success: false,
+      timedOut: true,
+      error: "Rotate timed out after 5000ms",
+      rotationPerformed: false,
+    });
+
+  test("timeout starts recovery before the post-action observation", async () => {
+    spyOn(runner, "requestRotate").mockResolvedValue(timedOutRotate());
+    const startsAtObserve: number[] = [];
+    observe.setObserveResult((index) => {
+      startsAtObserve.push(recoveryStarts);
+      return createObserveResult(index === 0 ? 1 : 0);
+    });
+    const result = await rotate.execute("portrait");
+    expect(result.success).toBe(false);
+    expect(startsAtObserve[0]).toBe(0);
+    expect(startsAtObserve.slice(1).every((starts) => starts === 1)).toBe(true);
+    expect(startsAtObserve.length).toBeGreaterThan(1);
+    expect(recoveryStarts).toBe(1);
+  });
+
+  test("cancellation during timeout recovery throws instead of returning a warning", async () => {
+    spyOn(runner, "requestRotate").mockResolvedValue(timedOutRotate());
+    observe.setObserveSequence([createObserveResult(1), createObserveResult(0)]);
+    const controller = new AbortController();
+    recoveryOutcome = () => {
+      controller.abort();
+      return "timed_out";
+    };
+    await expect(rotate.execute("portrait", { signal: controller.signal })).rejects.toThrow();
+    expect(recoveryWaits).toHaveLength(1);
+  });
+
+  test("an indeterminate pixel retry keeps the first contradictory read", async () => {
+    const before = { ...createObserveResult(1), screenSize: { width: 951, height: 669 } };
+    observe.setObserveSequence([before, { ...before, rotation: 0 }]);
+    const call = spyOn(runner, "requestRotate").mockResolvedValue(
+      runnerResult({ value: 0, currentOrientation: "portrait", previousOrientation: "landscape" }),
+    );
+    pixelSizes = [{ width: 2853, height: 2007 }, undefined];
+    const result = await rotate.execute("portrait");
+    expect(result.success).toBe(false);
+    expect(result.currentOrientation).toBe("landscape");
+    expect(call.mock.calls.map((c) => c[0])).toEqual(["portrait", "landscape"]);
+  });
+
+  test("a timed-out restore after a pixel contradiction recovers the runner", async () => {
+    const before = { ...createObserveResult(1), screenSize: { width: 951, height: 669 } };
+    observe.setObserveSequence([before, { ...before, rotation: 0 }]);
+    const call = spyOn(runner, "requestRotate")
+      .mockResolvedValueOnce(
+        runnerResult({
+          value: 0,
+          currentOrientation: "portrait",
+          previousOrientation: "landscape",
+        }),
+      )
+      .mockResolvedValueOnce(timedOutRotate());
+    pixelSizes = [
+      { width: 2853, height: 2007 },
+      { width: 2853, height: 2007 },
+    ];
+    const result = await rotate.execute("portrait");
+    expect(result.success).toBe(false);
+    expect(call.mock.calls.map((c) => c[0])).toEqual(["portrait", "landscape"]);
+    expect(recoveryStarts).toBe(1);
+    expect(recoveryWaits).toEqual([[IOSCtrlProxyClient.OBSERVE_RECOVERY_WAIT_MS, undefined]]);
+    expect(result.warning).toContain("could not be restored to landscape");
+    expect(result.warning).toContain("rotate restore timeout: recovered (runner restarted)");
+  });
 
   test("reconciles runner size failure when observed portrait becomes landscape", async () => {
     const error = "Rotation is not supported on this display (the screen size did not change)";

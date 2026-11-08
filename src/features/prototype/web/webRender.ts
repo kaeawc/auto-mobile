@@ -296,25 +296,12 @@ export type WebCellDecorator = (
   authored: Raw,
 ) => WebElement | undefined;
 
-/**
- * The children a container draws, each in its own scope and path: a repeat's once per row. A
- * repeat column's instances are siblings, so with its content height `content` each instance's
- * children carry their own share of it (see repeatInstanceChildren).
- */
-export function childEntries(
-  node: Raw,
-  scope: WebRenderScope,
-  path: string,
-  content?: number,
-): WebChildEntry[] {
+/** The children a container draws, each in its own scope and path: a repeat's once per row. */
+export function childEntries(node: Raw, scope: WebRenderScope, path: string): WebChildEntry[] {
   const scopes = rowScopes(node, scope);
-  const lists = repeatInstanceChildren(node, path, scopes.map(prepareIn), content);
-  return scopes.flatMap((itemScope, index) =>
-    lists[index]!.map((entry, at) => ({
-      node: entry,
-      scope: itemScope,
-      path: `${path}.children[${at}]`,
-    })),
+  const all = repeatInstanceChildren(node, path, scopes.map(prepareIn), scope.heightBound);
+  return scopes.flatMap((s, i) =>
+    all[i]!.map((entry, at) => ({ node: entry, scope: s, path: `${path}.children[${at}]` })),
   );
 }
 
@@ -353,9 +340,8 @@ export function children(
   scope: WebRenderScope,
   path: string,
   cell?: WebCellDecorator,
-  content?: number,
 ): WebChild[] {
-  return childEntries(node, scope, path, content).flatMap((entry) =>
+  return childEntries(node, scope, path).flatMap((entry) =>
     renderOrSkip(entry.node, entry.scope, entry.path, cell),
   );
 }
@@ -467,8 +453,7 @@ const line =
     });
     const rowed = rowMeasured(node, path, prepareIn(inner), scope.heightBound);
     const { attrs, style } = base(rowed, scope, lineCss(axis, rowed.style));
-    // The inner scope's bound is this line's content height, which a repeat column shares out.
-    return el("div", { attrs, style }, children(rowed, inner, path, undefined, inner.heightBound));
+    return el("div", { attrs, style }, children(rowed, inner, path));
   };
 
 const box: NodeRenderer = (raw, scope, path) => {

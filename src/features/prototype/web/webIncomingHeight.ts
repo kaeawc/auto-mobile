@@ -117,7 +117,8 @@ export function withColumnHeights(
  * (INCOMING_HEIGHT_KEY). In a column with content height `content`, the instances are siblings,
  * so Compose's Column measures every expanded child in order (see columnChildHeights): two
  * weighted instances in a 40 dp column get 20 dp each, not 40. Any other repeat, or one with no
- * known content height, keeps the template as given.
+ * known content height, keeps the template as given. The renderer passes the bound its scope
+ * carries, which a line sets to its own content height for its children.
  *
  * `prepares` holds one PrepareChild per instance, resolving a template child in that instance's
  * scope (its placeholders bound, `visibleWhen` and `styleWhen` applied).

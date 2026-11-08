@@ -195,7 +195,7 @@ describe("a derived label session of a base another connection owns", () => {
     expect(pool.isSessionOwnedByOtherConnection(labelSession)).toBe(false);
   });
 
-  arranged("a read naming the derived session from another connection is not refused", async () => {
+  arranged("a read naming the derived session from another connection is refused", async () => {
     const before = manager.getSession(labelSession)!.lastUsedAt;
 
     const result = await fixture!.client.callTool({
@@ -203,8 +203,10 @@ describe("a derived label session of a base another connection owns", () => {
       arguments: { sessionUuid: labelSession, [INTERNAL_MCP_SESSION_PARAM]: OTHER },
     });
 
-    expect(result.isError).not.toBe(true);
-    expect(tools.runs.map((run) => run.deviceId)).toEqual([labelled.deviceId]);
+    // A sessionUuid is not a bearer capability (#13540), not even a derived label's.
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result)).toContain("read_session_not_bound");
+    expect(tools.runs).toEqual([]);
     expect(manager.getSession(labelSession)!.lastUsedAt).toBe(before);
   });
 

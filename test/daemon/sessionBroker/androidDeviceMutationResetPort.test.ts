@@ -10,6 +10,11 @@ import type {
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { createExecResult } from "../../../src/utils/execResult";
 import { shellQuote } from "../../../src/utils/shellQuote";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+const channelFixture = (name: string) =>
+  readFileSync(join(import.meta.dir, "../../fixtures/android-notification-channel", name), "utf8");
 
 const ABSENT: MutationValue = { state: "absent" };
 const present = (value: string | boolean): MutationValue => ({ state: "present", value });
@@ -255,6 +260,53 @@ describe("AndroidDeviceMutationResetPort", () => {
       expect(port.canRevert(posted("tool:postNotification"))).toBe(false);
       expect(port.canRevert(posted("posted:not a package"))).toBe(false);
       expect(port.canRevert(posted("posted:com.example;reboot"))).toBe(false);
+    });
+  });
+
+  describe("posted notification channel rows (#16510)", () => {
+    const channel = (key = "channel:com.example.probe:orders-v2", prior: MutationValue = ABSENT) =>
+      mutation("notification", key, prior);
+    const deleteCommand =
+      "shell am broadcast --include-stopped-packages -n 'com.example.probe/dev.jasonpearson.automobile.sdk.notifications.AutoMobileNotificationReceiver' -a dev.jasonpearson.automobile.sdk.NOTIFICATION_CHANNEL_DELETE --es channel_id 'orders-v2'";
+    const queryCommand =
+      "shell am broadcast --include-stopped-packages -n 'com.example.probe/dev.jasonpearson.automobile.sdk.notifications.AutoMobileNotificationReceiver' -a dev.jasonpearson.automobile.sdk.NOTIFICATION_CHANNEL_QUERY --es channel_id 'orders-v2'";
+    const answer = (command: string, fixture: string) =>
+      adb.setCommandResponse(command, createExecResult(channelFixture(fixture), ""));
+
+    test("deletes the session's channel through the SDK receiver and reads back that it is gone", async () => {
+      answer(deleteCommand, "am-broadcast-delete-absent.txt");
+      answer(queryCommand, "am-broadcast-query-absent.txt");
+      await port.revert(channel(), context);
+      expect(adb.getExecutedCommands()).toEqual([
+        deleteCommand,
+        queryCommand,
+        "shell am force-stop 'com.example.probe'",
+      ]);
+    });
+
+    test.each([
+      ["the delete still reports the channel", "am-broadcast-delete-present.txt", undefined],
+      [
+        "the read-back finds the channel",
+        "am-broadcast-delete-absent.txt",
+        "am-broadcast-query-present.txt",
+      ],
+      ["an SDK without the channel actions answers 0", "am-broadcast-query-old-sdk.txt", undefined],
+    ])("fails closed when %s", async (_label, deleteFixture, queryFixture) => {
+      answer(deleteCommand, deleteFixture);
+      if (queryFixture) {
+        answer(queryCommand, queryFixture);
+      }
+      await expect(port.revert(channel(), context)).rejects.toThrow("failed to confirm success");
+      expect(adb.getExecutedCommands()).not.toContain("shell am force-stop 'com.example.probe'");
+    });
+
+    test("only a channel the app did not have before the post is revertible", () => {
+      expect(port.canRevert(channel())).toBe(true);
+      expect(port.canRevert(channel(undefined, present(true)))).toBe(false);
+      expect(port.canRevert(channel(undefined, { state: "unobservable" }))).toBe(false);
+      expect(port.canRevert(channel("channel:com.example.probe:a b"))).toBe(false);
+      expect(port.canRevert(channel("channel:com.example;reboot:orders"))).toBe(false);
     });
   });
 

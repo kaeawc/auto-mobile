@@ -92,3 +92,18 @@ in-band `__mcpSessionId` argument). The socket server forwards its socket sessio
 in that header, and the desktop app sends one id per app session. Tool-to-session
 bindings live in a daemon-scoped store rather than on any one server. The design (#4678, #11820) and resolved questions are in
 [SDK v2 and stateless daemon layer](sdk-v2-stateless-migration.md).
+
+A `sessionUuid` on a read is not a bearer capability (owner decision 2026-11-07, #13540).
+Reads follow the ownership rule control calls follow (#11344): a `deviceReadOnly` call that
+names a session another connected client owns (a derived `base:label` session counts as its
+base) is refused before admission with the non-retryable `read_session_not_bound`
+(`ReadSessionNotBoundError`, carrying the session and `missingBinding: "session"`), unless
+the calling connection was granted that session by a broker binding or declared the
+session's owner token. The owning connection reads as before, and a session no connected
+client owns (its owner disconnected, such as a finished one-shot `--cli` call) stays
+readable by any connection, as it stays controllable. The check
+(`readSessionBindingRefusal`) runs in read-target resolution, so a refused read runs no
+readiness and records no activity. An id that names no live device session (an IDE
+observer session, #10968) still reads sessionlessly, and sessionless reads stay open
+(#10965). Calls with no connection identity (direct mode, and internal plan steps judged
+under their enclosing call) are not judged.

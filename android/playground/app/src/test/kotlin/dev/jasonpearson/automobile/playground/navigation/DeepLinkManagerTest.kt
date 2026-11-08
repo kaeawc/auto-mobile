@@ -132,6 +132,21 @@ class DeepLinkManagerTest {
   }
 
   @Test
+  fun testGenerateDemoCollapsingComposerUrl() {
+    assertEquals(
+      "automobile://playground/demos/input/collapsing_composer",
+      DeepLinkManager.buildUri(PATH_DEMO_COLLAPSING_COMPOSER),
+    )
+  }
+
+  @Test
+  fun testParseDemoCollapsingComposerDeepLink() {
+    val uri = Uri.parse("automobile://playground/demos/input/collapsing_composer")
+    assertTrue(DeepLinkManager.isValidDeepLink(uri))
+    assertEquals(DemoCollapsingComposerDestination, DeepLinkManager.parseDeepLink(uri))
+  }
+
+  @Test
   fun testParseInvalidScheme() {
     val uri = Uri.parse("https://playground/onboarding")
     val destination = DeepLinkManager.parseDeepLink(uri)
@@ -197,6 +212,12 @@ class DeepLinkManagerTest {
     val pointerProbeUri = Uri.parse("automobile://playground/demos/input/pointer_probe")
     assertEquals("Demo Pointer Probe", DeepLinkManager.getDestinationName(pointerProbeUri))
 
+    val collapsingComposerUri = Uri.parse("automobile://playground/demos/input/collapsing_composer")
+    assertEquals(
+      "Demo Collapsing Composer",
+      DeepLinkManager.getDestinationName(collapsingComposerUri),
+    )
+
     val invalidUri = Uri.parse("https://invalid.com")
     assertNull(DeepLinkManager.getDestinationName(invalidUri))
   }
@@ -204,7 +225,7 @@ class DeepLinkManagerTest {
   @Test
   fun testGetAllDeepLinks() {
     val allLinks = DeepLinkManager.getAllDeepLinks()
-    assertEquals(25, allLinks.size)
+    assertEquals(26, allLinks.size)
 
     val linkUrls = allLinks.map { it.second }
     assertTrue(linkUrls.all { it.startsWith("automobile://playground/") })
@@ -222,5 +243,6 @@ class DeepLinkManagerTest {
     assertTrue(linkUrls.contains("automobile://playground/demos/a11y/contrast"))
     assertTrue(linkUrls.contains("automobile://playground/demos/bugs/repro"))
     assertTrue(linkUrls.contains("automobile://playground/demos/input/pointer_probe"))
+    assertTrue(linkUrls.contains("automobile://playground/demos/input/collapsing_composer"))
   }
 }

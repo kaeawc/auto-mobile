@@ -39,6 +39,10 @@ import { deferTerminalScreenshot } from "../../utils/PostActionCaptureContext";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { RealObserveScreen } from "../observe/ObserveScreen";
+import {
+  a11yReplaceExpectedText,
+  observeAfterA11yReplace,
+} from "./sendkeys/A11yReplaceObservationFence";
 import { prototypeAgentRegistry } from "../prototype/ios/prototypeAgentInjection";
 import {
   AndroidPrototypeTextTargetReader,
@@ -765,7 +769,7 @@ export class SendKeys {
       execution,
       () => observeHierarchy(actionStartTimestamp),
       captureObservation,
-      signal,
+      { signal, a11yReplacedText: a11yReplaceExpectedText(commands, execution) },
     );
   }
 
@@ -774,15 +778,25 @@ export class SendKeys {
     execution: SendKeysCommandExecution,
     observe: () => Promise<ObserveResult>,
     capture: (observation: ObserveResult) => Promise<void>,
-    signal?: AbortSignal,
+    { signal, a11yReplacedText }: { signal?: AbortSignal; a11yReplacedText?: string },
   ): Promise<SendKeysResult> {
-    const observation = await observe();
-    const result = withImeEditorWarnings(
+    const fenced =
+      a11yReplacedText === undefined
+        ? { observation: await observe() }
+        : await observeAfterA11yReplace(a11yReplacedText, observe, {
+            timer: this.timer,
+            checkAbort: () => signal?.throwIfAborted(),
+          });
+    const observation = fenced.observation;
+    const built = withImeEditorWarnings(
       this.buildResult(execution.results, execution.failure, observation),
       execution.imeEditorState,
     );
+    const result = fenced.warning
+      ? { ...built, warnings: [...(built.warnings ?? []), fenced.warning] }
+      : built;
     if (
-      result.warnings?.length &&
+      built.warnings?.length &&
       hasImeKeyboardHiddenChange(execution.imeEditorState, observation)
     ) {
       await this.timer.sleep(IME_KEYBOARD_HIDDEN_SETTLE_MS);

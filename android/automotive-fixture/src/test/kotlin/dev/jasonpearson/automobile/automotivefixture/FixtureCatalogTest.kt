@@ -34,6 +34,7 @@ class FixtureCatalogTest {
         FixtureCatalog.homeRows,
         FixtureCatalog.templateMenu,
         FixtureCatalog.listTemplateRows,
+        FixtureCatalog.longListTemplateRows,
         FixtureCatalog.gridItems,
         FixtureCatalog.paneRows,
       )
@@ -45,14 +46,41 @@ class FixtureCatalogTest {
   }
 
   @Test
-  fun `template surfaces stay within the strictest host limits`() {
-    // Hosts cap list and grid templates at six items and panes at four rows.
+  fun `long list has thirty deterministic rows and a menu entry`() {
+    val rows = FixtureCatalog.longListTemplateRows
+    assertEquals(30, rows.size)
+    assertEquals("List long row 01", rows.first().title)
+    assertEquals("List long row 30", rows.last().title)
+    rows.forEachIndexed { index, row ->
+      val number = (index + 1).toString().padStart(2, '0')
+      assertEquals(
+        FixtureRow("list_long_row_$number", "List long row $number", "List long detail $number"),
+        row,
+      )
+    }
+    assertEquals(
+      FixtureRow("template_list_long", "List 30", "Thirty fixed rows"),
+      FixtureCatalog.templateMenu.last(),
+    )
+    assertEquals(5, FixtureCatalog.templateMenu.size)
+  }
+
+  @Test
+  fun `short template surfaces stay within the strictest host limits`() {
+    // Keep the original short surfaces within six items and panes within four rows.
+    // List 30 deliberately exercises template content beyond a host's visible row limit.
     assertTrue(FixtureCatalog.listTemplateRows.size <= 6)
     assertTrue(FixtureCatalog.gridItems.size <= 6)
     assertTrue(FixtureCatalog.paneRows.size <= 4)
     assertTrue(FixtureCatalog.pois.size <= 6)
     assertEquals(
-      listOf("template_list", "template_grid", "template_pane", "template_navigation"),
+      listOf(
+        "template_list",
+        "template_grid",
+        "template_pane",
+        "template_navigation",
+        "template_list_long",
+      ),
       FixtureCatalog.templateMenu.map { it.id },
     )
   }

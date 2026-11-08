@@ -10,7 +10,15 @@ import type { SearchableEntry } from "../utility/SearchableNode";
 
 /** Tap-target helpers shared by TapOnElement and its tap-point planner (#11833). */
 
-export type TapFocusFailure = "not-found" | "no-visible-tap-area" | "navigation-bar";
+/**
+ * Why a focus lookup failed. `not-found-inputs-listed` is a miss whose error already names the
+ * editable fields on screen, so the target did not scroll away (#17463).
+ */
+export type TapFocusFailure =
+  | "not-found"
+  | "not-found-inputs-listed"
+  | "no-visible-tap-area"
+  | "navigation-bar";
 
 export function pointInTapBounds(point: { x: number; y: number }, bounds: ElementBounds): boolean {
   return (

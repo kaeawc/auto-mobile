@@ -1,4 +1,5 @@
 import { baselineHoldsApp } from "../daemon/sessionBroker/mutations/appInventory";
+import { postedNotificationChannel } from "../daemon/sessionBroker/mutations/postedNotification";
 import type { DeviceBaseline } from "../daemon/sessionBroker/mutations/types";
 import {
   FALLBACK_OPAQUE_KEY_PREFIX,
@@ -20,6 +21,12 @@ export interface AppFallbackEvidence {
 function fallbackTarget(
   mutation: ToolMutation,
 ): { tool: (typeof APP_FALLBACK_TOOLS)[number]; appId: string | null; keepData: boolean } | null {
+  const channel =
+    mutation.kind === "notification" ? postedNotificationChannel(mutation.key) : undefined;
+  if (channel !== undefined) {
+    // Uninstalling a session-installed app removes its channels too, so cleaning covers the row.
+    return { tool: "postNotification", appId: channel.appId, keepData: false };
+  }
   if (!opaqueForcesFallback(mutation)) {
     return null;
   }
@@ -44,10 +51,11 @@ function fallbackTarget(
 }
 
 /**
- * Drops an app `fallback:` intent when the keep-booted clean already covers it, so the common
- * install, clear, test, uninstall flow does not escalate every reset. An app the baseline did not
- * hold and the session installed is removed (data included) by the clean; anything else, or an
- * unreadable baseline, keeps the intent. Data-kept uninstalls always keep it because removed
+ * Drops an app `fallback:` intent, or a posted notification-channel row, when the keep-booted
+ * clean already covers it, so the common install, clear, test, uninstall flow does not escalate
+ * every reset. An app the baseline did not hold and the session installed is removed (data and
+ * notification channels included) by the clean; anything else, or an unreadable baseline, keeps
+ * the intent. Data-kept uninstalls always keep it because removed
  * packages are invisible to the clean inventory.
  */
 export async function withoutSessionCoveredFallbacks<Mutation extends ToolMutation>(

@@ -485,10 +485,19 @@ describe("Highlight Tools Registration", () => {
 
     expect(payload.success).toBe(true);
     // iOS selector path must attach source dims so the in-app SDK can map
-    // device-coordinate bounds into its own view space (issue #2682).
+    // device-coordinate bounds into its own view space (issue #2682), and the
+    // point scale so the simulator helper need not guess it (#17354).
     expect(addCalls[0]?.shape).toEqual({
       type: "circle",
-      bounds: { x: 12, y: 124, width: 366, height: 44, sourceWidth: 390, sourceHeight: 844 },
+      bounds: {
+        x: 12,
+        y: 124,
+        width: 366,
+        height: 44,
+        sourceWidth: 390,
+        sourceHeight: 844,
+        sourceScale: 1,
+      },
     });
   });
 
@@ -539,7 +548,15 @@ describe("Highlight Tools Registration", () => {
 
     expect(addCalls[0]?.shape).toEqual({
       type: "circle",
-      bounds: { x: 12, y: 124, width: 366, height: 44, sourceWidth: 390, sourceHeight: 844 },
+      bounds: {
+        x: 12,
+        y: 124,
+        width: 366,
+        height: 44,
+        sourceWidth: 390,
+        sourceHeight: 844,
+        sourceScale: 1,
+      },
     });
   });
 

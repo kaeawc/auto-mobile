@@ -73,6 +73,39 @@ iOS URIs have no user query.
   simulator, provide the watch app’s bundle ID as `appId` to deliver a push to that watch.
 - `clipboard` sets, reads, pastes, or clears clipboard content.
 
+## Phone calls and SMS
+
+`phoneCall` and `sendSms` are off by default; enable them before use.
+
+| Device              | `phoneCall`                                       | `sendSms`                                 |
+| ------------------- | ------------------------------------------------- | ----------------------------------------- |
+| Android emulator    | All actions                                       | Supported                                 |
+| Android physical    | Not supported                                     | Not supported                             |
+| iOS Simulator + SDK | `call`, `cancel`, `busy`; `accept`/`hold` partial | SMS-style notification from the app's SDK |
+| iOS physical        | Not supported                                     | Not supported                             |
+
+On iOS the app under test must embed the AutoMobile iOS SDK; without it both tools
+fail with an error asking for the SDK.
+
+The iOS Simulator cannot answer or hold a CallKit call: its call service ends the
+call instead. `phoneCall` with `accept` or `hold` on a simulator therefore sends
+nothing to the app and returns, without an error:
+
+```json
+{
+  "success": false,
+  "supported": "partial",
+  "reason": "ios_simulator_callkit_limit",
+  "action": "accept",
+  "message": "The iOS Simulator cannot accept or hold a CallKit call: ..."
+}
+```
+
+Check `supported` and `reason` rather than treating this as a failure, and drive
+the in-call state with `call`, `cancel` and `busy` instead. Every other failure
+(missing `phoneNumber`, no SDK, an SDK rejection, an unsupported device) is
+returned as a tool error.
+
 ## Reaching a host server from the device
 
 When an app or browser on an Android device must reach a server on your

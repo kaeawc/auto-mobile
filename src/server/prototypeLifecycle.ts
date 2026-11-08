@@ -1,4 +1,3 @@
-import type { PrototypeAdbReverseManager } from "../features/prototype/PrototypeAdbReverseManager";
 import type { PrototypeEventCoordinator } from "../features/prototype/PrototypeEventCoordinator";
 
 export interface PrototypeEventLifecycle {
@@ -34,13 +33,8 @@ export interface PrototypeEventLifecycle {
 export function subscribePrototypeCleanup(
   lifecycle: PrototypeEventLifecycle,
   events: Pick<PrototypeEventCoordinator, "releaseDevice" | "releaseSession">,
-  reverses: PrototypeAdbReverseManager,
 ): { ensureSubscribed: () => void; unsubscribe: () => void } {
-  // The reverses this host created end with the device's prototypes (#12530).
-  const releaseDevice = (deviceId: string) => {
-    events.releaseDevice(deviceId);
-    void reverses.releaseAll(deviceId);
-  };
+  const releaseDevice = (deviceId: string) => events.releaseDevice(deviceId);
   const cleanups = [
     lifecycle.subscribeSessionRelease((sessionUuid, releasedDeviceId) => {
       events.releaseSession(sessionUuid);

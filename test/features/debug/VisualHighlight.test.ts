@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { VisualHighlight } from "../../../src/features/debug/VisualHighlight";
+import {
+  deviceHighlightShapeSchema,
+  highlightShapeSchema,
+  VisualHighlight,
+} from "../../../src/features/debug/VisualHighlight";
 import { VisualHighlightClient } from "../../../src/features/debug/VisualHighlightClient";
 import type { HighlightDeviceClient } from "../../../src/features/debug/VisualHighlight";
 import type { BootedDevice, HighlightOperationResult, HighlightShape } from "../../../src/models";
@@ -32,6 +36,47 @@ describe("VisualHighlight", () => {
 
     bounds: { x: 5, y: 10, width: 45, height: 30 },
   };
+
+  test("forwards a daemon-resolved sourceScale to the device client (#17354)", async () => {
+    const sent: HighlightShape[] = [];
+    const fakeClient: HighlightDeviceClient = {
+      requestAddHighlight: async (_id, shape) => {
+        sent.push(shape);
+        return { success: true };
+      },
+    };
+    const shape: HighlightShape = {
+      type: "circle",
+      bounds: { ...highlightShape.bounds, sourceWidth: 390, sourceHeight: 844, sourceScale: 1 },
+    };
+
+    await new VisualHighlight(iosDevice, null, fakeClient).addHighlight("scaled", shape);
+
+    expect(sent).toEqual([shape]);
+  });
+
+  test("sourceScale is daemon-only and needs a source size", () => {
+    const scaled = {
+      type: "circle",
+      bounds: { ...highlightShape.bounds, sourceWidth: 600, sourceHeight: 900, sourceScale: 3 },
+    };
+    expect(deviceHighlightShapeSchema.safeParse(scaled).success).toBe(true);
+    // The tool's caller-facing schema is unchanged: callers cannot send a scale.
+    expect(highlightShapeSchema.safeParse(scaled).success).toBe(false);
+    const withoutSource = deviceHighlightShapeSchema.safeParse({
+      type: "circle",
+      bounds: { ...highlightShape.bounds, sourceScale: 3 },
+    });
+    expect(withoutSource.success).toBe(false);
+    for (const sourceScale of [0, -1, Number.POSITIVE_INFINITY]) {
+      expect(
+        deviceHighlightShapeSchema.safeParse({
+          type: "circle",
+          bounds: { ...highlightShape.bounds, sourceWidth: 600, sourceHeight: 900, sourceScale },
+        }).success,
+      ).toBe(false);
+    }
+  });
 
   test("addHighlight returns parsed highlight response", async () => {
     const response: HighlightOperationResult = {

@@ -1,0 +1,1532 @@
+{
+ "type": "hierarchy_update",
+ "success": true,
+ "data": {
+  "screenHeight": 223,
+  "screenWidth": 187,
+  "screenScale": 1,
+  "timestamp": 1794073949152,
+  "root": {
+   "isOccluded": false,
+   "className": "XCUIElementType(2)",
+   "isAccessibilityElement": false,
+   "cornerRadius": 0,
+   "accessibilityIdentifier": "",
+   "gestureRecognizers": [],
+   "isAccessibilityFocused": false,
+   "children": [
+    {
+     "children": [
+      {
+       "children": [
+        {
+         "children": [
+          {
+           "accessibilityIdentifier": "",
+           "hasTapTarget": false,
+           "accessibilityCustomActions": [],
+           "children": [
+            {
+             "hasTapTarget": false,
+             "cornerRadius": 0,
+             "accessibilityTraits": [],
+             "isAccessibilityElement": false,
+             "accessibilityCustomActions": [],
+             "borderWidth": 0,
+             "isLayerNode": false,
+             "bounds": {
+              "top": 0,
+              "bottom": 223,
+              "right": 187,
+              "left": 0
+             },
+             "className": "XCUIElementType(1)",
+             "alpha": 1,
+             "accessibilityIdentifier": "",
+             "accessibilityElementsHidden": false,
+             "isHidden": false,
+             "children": [],
+             "isUserInteractionEnabled": true,
+             "isOccluded": false,
+             "isAccessibilityFocused": false,
+             "gestureRecognizers": [],
+             "accessibilityLabel": ""
+            },
+            {
+             "className": "XCUIElementType(1)",
+             "isOccluded": false,
+             "accessibilityTraits": [],
+             "accessibilityIdentifier": "",
+             "borderWidth": 0,
+             "isHidden": false,
+             "alpha": 1,
+             "gestureRecognizers": [],
+             "children": [
+              {
+               "hasTapTarget": false,
+               "cornerRadius": 0,
+               "accessibilityTraits": [],
+               "isAccessibilityElement": false,
+               "accessibilityCustomActions": [],
+               "borderWidth": 0,
+               "isLayerNode": false,
+               "bounds": {
+                "top": 0,
+                "bottom": 61,
+                "right": 187,
+                "left": 0
+               },
+               "className": "XCUIElementType(1)",
+               "alpha": 1,
+               "accessibilityIdentifier": "",
+               "accessibilityElementsHidden": false,
+               "isHidden": false,
+               "children": [
+                {
+                 "cornerRadius": 0,
+                 "accessibilityCustomActions": [],
+                 "isAccessibilityElement": false,
+                 "isAccessibilityFocused": false,
+                 "accessibilityElementsHidden": false,
+                 "className": "XCUIElementType(1)",
+                 "accessibilityIdentifier": "",
+                 "isLayerNode": false,
+                 "alpha": 1,
+                 "isOccluded": false,
+                 "hasTapTarget": false,
+                 "children": [
+                  {
+                   "isOccluded": false,
+                   "cornerRadius": 0,
+                   "borderWidth": 0,
+                   "isLayerNode": false,
+                   "accessibilityIdentifier": "",
+                   "isUserInteractionEnabled": true,
+                   "hasTapTarget": false,
+                   "accessibilityTraits": [],
+                   "accessibilityCustomActions": [],
+                   "isAccessibilityElement": false,
+                   "accessibilityLabel": "",
+                   "isHidden": false,
+                   "alpha": 1,
+                   "className": "XCUIElementType(1)",
+                   "children": [
+                    {
+                     "borderWidth": 0,
+                     "accessibilityLabel": "",
+                     "hasTapTarget": false,
+                     "children": [
+                      {
+                       "isHidden": false,
+                       "hasTapTarget": false,
+                       "isAccessibilityFocused": false,
+                       "borderWidth": 0,
+                       "gestureRecognizers": [],
+                       "isAccessibilityElement": false,
+                       "accessibilityLabel": "",
+                       "isOccluded": false,
+                       "accessibilityIdentifier": "",
+                       "className": "XCUIElementType(1)",
+                       "bounds": {
+                        "top": 13,
+                        "bottom": 61,
+                        "right": 180,
+                        "left": 6
+                       },
+                       "accessibilityCustomActions": [],
+                       "accessibilityTraits": [],
+                       "children": [
+                        {
+                         "hasTapTarget": false,
+                         "isOccluded": false,
+                         "alpha": 1,
+                         "accessibilityTraits": [],
+                         "className": "XCUIElementType(1)",
+                         "isAccessibilityElement": false,
+                         "isLayerNode": false,
+                         "isHidden": false,
+                         "isUserInteractionEnabled": true,
+                         "cornerRadius": 0,
+                         "accessibilityElementsHidden": false,
+                         "bounds": {
+                          "top": 13,
+                          "bottom": 61,
+                          "right": 180,
+                          "left": 6
+                         },
+                         "gestureRecognizers": [],
+                         "accessibilityIdentifier": "",
+                         "accessibilityCustomActions": [],
+                         "children": [
+                          {
+                           "isAccessibilityFocused": false,
+                           "accessibilityLabel": "",
+                           "isHidden": false,
+                           "isUserInteractionEnabled": true,
+                           "borderWidth": 0,
+                           "cornerRadius": 0,
+                           "hasTapTarget": false,
+                           "children": [
+                            {
+                             "accessibilityElementsHidden": false,
+                             "hasTapTarget": false,
+                             "isAccessibilityFocused": false,
+                             "gestureRecognizers": [],
+                             "cornerRadius": 0,
+                             "accessibilityCustomActions": [],
+                             "isAccessibilityElement": false,
+                             "bounds": {
+                              "top": 13,
+                              "bottom": 61,
+                              "right": 180,
+                              "left": 6
+                             },
+                             "isLayerNode": false,
+                             "borderWidth": 0,
+                             "isHidden": false,
+                             "accessibilityTraits": [],
+                             "alpha": 1,
+                             "className": "XCUIElementType(1)",
+                             "accessibilityLabel": "",
+                             "accessibilityIdentifier": "",
+                             "isUserInteractionEnabled": true,
+                             "isOccluded": false,
+                             "children": [
+                              {
+                               "isOccluded": false,
+                               "children": [],
+                               "isHidden": false,
+                               "bounds": {
+                                "top": 13,
+                                "bottom": 61,
+                                "right": 180,
+                                "left": 6
+                               },
+                               "accessibilityTraits": [],
+                               "accessibilityCustomActions": [],
+                               "className": "XCUIElementType(1)",
+                               "accessibilityElementsHidden": false,
+                               "isAccessibilityFocused": false,
+                               "borderWidth": 0,
+                               "gestureRecognizers": [],
+                               "cornerRadius": 0,
+                               "accessibilityLabel": "",
+                               "accessibilityIdentifier": "",
+                               "alpha": 1,
+                               "isAccessibilityElement": false,
+                               "isLayerNode": false,
+                               "hasTapTarget": false,
+                               "isUserInteractionEnabled": true
+                              }
+                             ]
+                            }
+                           ],
+                           "bounds": {
+                            "top": 13,
+                            "bottom": 61,
+                            "right": 180,
+                            "left": 6
+                           },
+                           "accessibilityElementsHidden": false,
+                           "gestureRecognizers": [],
+                           "accessibilityCustomActions": [],
+                           "isAccessibilityElement": false,
+                           "alpha": 1,
+                           "isLayerNode": false,
+                           "isOccluded": false,
+                           "accessibilityTraits": [],
+                           "className": "XCUIElementType(1)",
+                           "accessibilityIdentifier": ""
+                          },
+                          {
+                           "isAccessibilityFocused": false,
+                           "accessibilityLabel": "",
+                           "isHidden": false,
+                           "isUserInteractionEnabled": true,
+                           "borderWidth": 0,
+                           "cornerRadius": 0,
+                           "hasTapTarget": false,
+                           "children": [
+                            {
+                             "accessibilityTraits": [],
+                             "isLayerNode": false,
+                             "borderWidth": 0,
+                             "isOccluded": false,
+                             "className": "XCUIElementType(1)",
+                             "bounds": {
+                              "bottom": 61,
+                              "right": 180,
+                              "top": 13,
+                              "left": 6
+                             },
+                             "isAccessibilityElement": false,
+                             "children": [],
+                             "isAccessibilityFocused": false,
+                             "hasTapTarget": false,
+                             "gestureRecognizers": [],
+                             "accessibilityCustomActions": [],
+                             "alpha": 1,
+                             "accessibilityIdentifier": "",
+                             "isHidden": false,
+                             "accessibilityLabel": "",
+                             "isUserInteractionEnabled": true,
+                             "cornerRadius": 0,
+                             "accessibilityElementsHidden": false
+                            }
+                           ],
+                           "bounds": {
+                            "bottom": 61,
+                            "right": 180,
+                            "top": 13,
+                            "left": 6
+                           },
+                           "accessibilityElementsHidden": false,
+                           "gestureRecognizers": [],
+                           "accessibilityCustomActions": [],
+                           "isAccessibilityElement": false,
+                           "alpha": 1,
+                           "isLayerNode": false,
+                           "isOccluded": false,
+                           "accessibilityTraits": [],
+                           "className": "XCUIElementType(1)",
+                           "accessibilityIdentifier": ""
+                          }
+                         ],
+                         "accessibilityLabel": "",
+                         "isAccessibilityFocused": false,
+                         "borderWidth": 0
+                        }
+                       ],
+                       "isUserInteractionEnabled": true,
+                       "cornerRadius": 0,
+                       "alpha": 1,
+                       "isLayerNode": false,
+                       "accessibilityElementsHidden": false
+                      }
+                     ],
+                     "isAccessibilityElement": false,
+                     "isOccluded": false,
+                     "className": "XCUIElementType(1)",
+                     "accessibilityCustomActions": [],
+                     "cornerRadius": 0,
+                     "isAccessibilityFocused": false,
+                     "accessibilityIdentifier": "",
+                     "bounds": {
+                      "top": 13,
+                      "bottom": 61,
+                      "right": 180,
+                      "left": 6
+                     },
+                     "isLayerNode": false,
+                     "isUserInteractionEnabled": true,
+                     "accessibilityElementsHidden": false,
+                     "gestureRecognizers": [],
+                     "isHidden": false,
+                     "alpha": 1,
+                     "accessibilityTraits": []
+                    },
+                    {
+                     "isOccluded": false,
+                     "gestureRecognizers": [],
+                     "accessibilityCustomActions": [],
+                     "borderWidth": 0,
+                     "cornerRadius": 0,
+                     "isAccessibilityFocused": false,
+                     "accessibilityTraits": [],
+                     "bounds": {
+                      "bottom": 53,
+                      "right": 46,
+                      "top": 21,
+                      "left": 14
+                     },
+                     "isLayerNode": false,
+                     "isHidden": false,
+                     "accessibilityLabel": "CtrlProxyWatch",
+                     "accessibilityIdentifier": "",
+                     "children": [
+                      {
+                       "isLayerNode": false,
+                       "cornerRadius": 0,
+                       "bounds": {
+                        "bottom": 53,
+                        "right": 46,
+                        "top": 21,
+                        "left": 14
+                       },
+                       "isHidden": false,
+                       "borderWidth": 0,
+                       "isOccluded": false,
+                       "accessibilityLabel": "CtrlProxyWatch",
+                       "accessibilityTraits": [],
+                       "accessibilityCustomActions": [],
+                       "alpha": 1,
+                       "children": [],
+                       "isUserInteractionEnabled": true,
+                       "gestureRecognizers": [],
+                       "accessibilityIdentifier": "",
+                       "isAccessibilityFocused": false,
+                       "isAccessibilityElement": false,
+                       "hasTapTarget": false,
+                       "accessibilityElementsHidden": false,
+                       "className": "XCUIElementType(43)"
+                      }
+                     ],
+                     "className": "XCUIElementType(1)",
+                     "isAccessibilityElement": false,
+                     "accessibilityElementsHidden": false,
+                     "alpha": 1,
+                     "isUserInteractionEnabled": true,
+                     "hasTapTarget": false
+                    },
+                    {
+                     "isOccluded": false,
+                     "gestureRecognizers": [],
+                     "accessibilityCustomActions": [],
+                     "borderWidth": 0,
+                     "cornerRadius": 0,
+                     "isAccessibilityFocused": false,
+                     "accessibilityTraits": [],
+                     "bounds": {
+                      "bottom": 37,
+                      "right": 168,
+                      "top": 22,
+                      "left": 58
+                     },
+                     "isLayerNode": false,
+                     "isHidden": false,
+                     "accessibilityLabel": "Invite",
+                     "accessibilityIdentifier": "",
+                     "children": [],
+                     "className": "XCUIElementType(48)",
+                     "isAccessibilityElement": false,
+                     "accessibilityElementsHidden": false,
+                     "alpha": 1,
+                     "isUserInteractionEnabled": true,
+                     "hasTapTarget": false
+                    },
+                    {
+                     "isOccluded": false,
+                     "gestureRecognizers": [],
+                     "accessibilityCustomActions": [],
+                     "borderWidth": 0,
+                     "cornerRadius": 0,
+                     "isAccessibilityFocused": false,
+                     "accessibilityTraits": [],
+                     "bounds": {
+                      "bottom": 51,
+                      "right": 168,
+                      "top": 37,
+                      "left": 58
+                     },
+                     "isLayerNode": false,
+                     "isHidden": false,
+                     "accessibilityLabel": "Join the meeting?",
+                     "accessibilityIdentifier": "",
+                     "children": [],
+                     "className": "XCUIElementType(48)",
+                     "isAccessibilityElement": false,
+                     "accessibilityElementsHidden": false,
+                     "alpha": 1,
+                     "isUserInteractionEnabled": true,
+                     "hasTapTarget": false
+                    }
+                   ],
+                   "isAccessibilityFocused": false,
+                   "gestureRecognizers": [],
+                   "bounds": {
+                    "top": 13,
+                    "bottom": 61,
+                    "right": 180,
+                    "left": 6
+                   },
+                   "accessibilityElementsHidden": false
+                  }
+                 ],
+                 "bounds": {
+                  "top": 13,
+                  "bottom": 61,
+                  "right": 180,
+                  "left": 6
+                 },
+                 "borderWidth": 0,
+                 "accessibilityLabel": "",
+                 "isUserInteractionEnabled": true,
+                 "accessibilityTraits": [],
+                 "gestureRecognizers": [],
+                 "isHidden": false
+                }
+               ],
+               "isUserInteractionEnabled": true,
+               "isOccluded": false,
+               "isAccessibilityFocused": false,
+               "gestureRecognizers": [],
+               "accessibilityLabel": ""
+              }
+             ],
+             "isAccessibilityElement": false,
+             "cornerRadius": 0,
+             "accessibilityCustomActions": [],
+             "isAccessibilityFocused": false,
+             "hasTapTarget": false,
+             "accessibilityElementsHidden": false,
+             "accessibilityLabel": "",
+             "isLayerNode": false,
+             "bounds": {
+              "top": 0,
+              "bottom": 223,
+              "right": 187,
+              "left": 0
+             },
+             "isUserInteractionEnabled": true
+            }
+           ],
+           "gestureRecognizers": [],
+           "borderWidth": 0,
+           "isLayerNode": false,
+           "accessibilityLabel": "",
+           "isUserInteractionEnabled": true,
+           "isAccessibilityElement": false,
+           "cornerRadius": 0,
+           "className": "XCUIElementType(46)",
+           "alpha": 1,
+           "isHidden": false,
+           "isOccluded": false,
+           "accessibilityElementsHidden": false,
+           "isAccessibilityFocused": false,
+           "accessibilityTraits": [],
+           "bounds": {
+            "top": 0,
+            "bottom": 223,
+            "right": 187,
+            "left": 0
+           }
+          }
+         ],
+         "className": "XCUIElementType(1)",
+         "accessibilityTraits": [],
+         "isAccessibilityElement": false,
+         "isUserInteractionEnabled": true,
+         "hasTapTarget": false,
+         "alpha": 1,
+         "bounds": {
+          "top": 0,
+          "bottom": 223,
+          "right": 187,
+          "left": 0
+         },
+         "isHidden": false,
+         "cornerRadius": 0,
+         "gestureRecognizers": [],
+         "accessibilityCustomActions": [],
+         "accessibilityElementsHidden": false,
+         "isAccessibilityFocused": false,
+         "accessibilityLabel": "",
+         "accessibilityIdentifier": "",
+         "borderWidth": 0,
+         "isLayerNode": false,
+         "isOccluded": false
+        }
+       ],
+       "gestureRecognizers": [],
+       "isAccessibilityElement": false,
+       "isAccessibilityFocused": false,
+       "hasTapTarget": false,
+       "className": "XCUIElementType(1)",
+       "accessibilityTraits": [],
+       "borderWidth": 0,
+       "isUserInteractionEnabled": true,
+       "isHidden": false,
+       "accessibilityCustomActions": [],
+       "isLayerNode": false,
+       "cornerRadius": 0,
+       "alpha": 1,
+       "accessibilityLabel": "",
+       "isOccluded": false,
+       "accessibilityElementsHidden": false,
+       "bounds": {
+        "top": 0,
+        "bottom": 223,
+        "right": 187,
+        "left": 0
+       },
+       "accessibilityIdentifier": ""
+      }
+     ],
+     "accessibilityCustomActions": [],
+     "alpha": 1,
+     "isAccessibilityElement": false,
+     "bounds": {
+      "top": 0,
+      "bottom": 223,
+      "right": 187,
+      "left": 0
+     },
+     "accessibilityLabel": "",
+     "isUserInteractionEnabled": true,
+     "accessibilityTraits": [],
+     "className": "XCUIElementType(7)",
+     "isOccluded": false,
+     "cornerRadius": 0,
+     "accessibilityElementsHidden": false,
+     "accessibilityIdentifier": "",
+     "isAccessibilityFocused": false,
+     "gestureRecognizers": [],
+     "borderWidth": 0,
+     "isLayerNode": false,
+     "isHidden": false,
+     "hasTapTarget": false
+    },
+    {
+     "className": "XCUIElementType(4)",
+     "isOccluded": false,
+     "accessibilityTraits": [],
+     "accessibilityIdentifier": "",
+     "borderWidth": 0,
+     "isHidden": false,
+     "alpha": 1,
+     "gestureRecognizers": [],
+     "children": [
+      {
+       "children": [
+        {
+         "children": [
+          {
+           "children": [
+            {
+             "accessibilityIdentifier": "",
+             "hasTapTarget": false,
+             "accessibilityCustomActions": [],
+             "children": [
+              {
+               "hasTapTarget": false,
+               "cornerRadius": 0,
+               "accessibilityTraits": [],
+               "isAccessibilityElement": false,
+               "accessibilityCustomActions": [],
+               "borderWidth": 0,
+               "isLayerNode": false,
+               "bounds": {
+                "bottom": 40,
+                "right": 187,
+                "top": 0,
+                "left": 0
+               },
+               "className": "XCUIElementType(21)",
+               "alpha": 1,
+               "accessibilityIdentifier": "_TtGC7SwiftUI32NavigationStackHosting",
+               "accessibilityElementsHidden": false,
+               "isHidden": false,
+               "children": [
+                {
+                 "isAccessibilityElement": false,
+                 "accessibilityCustomActions": [],
+                 "accessibilityElementsHidden": false,
+                 "accessibilityTraits": [],
+                 "borderWidth": 0,
+                 "isHidden": false,
+                 "isUserInteractionEnabled": true,
+                 "isLayerNode": false,
+                 "gestureRecognizers": [],
+                 "className": "XCUIElementType(1)",
+                 "cornerRadius": 0,
+                 "accessibilityLabel": "",
+                 "isAccessibilityFocused": false,
+                 "bounds": {
+                  "bottom": 0,
+                  "right": 0,
+                  "top": 0,
+                  "left": 0
+                 },
+                 "children": [],
+                 "alpha": 1,
+                 "isOccluded": false,
+                 "accessibilityIdentifier": "",
+                 "hasTapTarget": false
+                }
+               ],
+               "isUserInteractionEnabled": true,
+               "isOccluded": false,
+               "isAccessibilityFocused": false,
+               "gestureRecognizers": [],
+               "accessibilityLabel": ""
+              },
+              {
+               "className": "XCUIElementType(1)",
+               "accessibilityElementsHidden": false,
+               "isLayerNode": false,
+               "isAccessibilityFocused": false,
+               "alpha": 1,
+               "gestureRecognizers": [],
+               "isHidden": false,
+               "borderWidth": 0,
+               "isUserInteractionEnabled": true,
+               "children": [
+                {
+                 "isAccessibilityFocused": false,
+                 "accessibilityCustomActions": [],
+                 "accessibilityTraits": [],
+                 "alpha": 1,
+                 "children": [
+                  {
+                   "accessibilityElementsHidden": false,
+                   "isUserInteractionEnabled": true,
+                   "accessibilityTraits": [],
+                   "cornerRadius": 0,
+                   "accessibilityCustomActions": [],
+                   "isAccessibilityFocused": false,
+                   "bounds": {
+                    "bottom": 223,
+                    "right": 187,
+                    "top": 0,
+                    "left": 0
+                   },
+                   "alpha": 1,
+                   "hasTapTarget": false,
+                   "isAccessibilityElement": false,
+                   "isHidden": false,
+                   "borderWidth": 0,
+                   "isLayerNode": false,
+                   "isOccluded": false,
+                   "children": [
+                    {
+                     "isOccluded": false,
+                     "accessibilityLabel": "",
+                     "isUserInteractionEnabled": true,
+                     "children": [
+                      {
+                       "accessibilityTraits": [],
+                       "children": [],
+                       "gestureRecognizers": [],
+                       "isLayerNode": false,
+                       "isHidden": false,
+                       "isAccessibilityElement": false,
+                       "bounds": {
+                        "bottom": 97,
+                        "right": 152,
+                        "top": 77,
+                        "left": 34
+                       },
+                       "accessibilityIdentifier": "ctrlproxy-crown",
+                       "isUserInteractionEnabled": true,
+                       "alpha": 1,
+                       "accessibilityLabel": "CtrlProxy Watch",
+                       "isOccluded": false,
+                       "hasTapTarget": false,
+                       "accessibilityElementsHidden": false,
+                       "isAccessibilityFocused": false,
+                       "accessibilityCustomActions": [],
+                       "borderWidth": 0,
+                       "cornerRadius": 0,
+                       "className": "XCUIElementType(48)"
+                      },
+                      {
+                       "accessibilityTraits": [],
+                       "children": [],
+                       "gestureRecognizers": [],
+                       "isLayerNode": false,
+                       "isHidden": false,
+                       "isAccessibilityElement": false,
+                       "bounds": {
+                        "bottom": 137,
+                        "right": 134,
+                        "top": 117,
+                        "left": 52
+                       },
+                       "accessibilityIdentifier": "ctrlproxy-crown-value",
+                       "isUserInteractionEnabled": true,
+                       "alpha": 1,
+                       "accessibilityLabel": "crown 0.00",
+                       "isOccluded": false,
+                       "hasTapTarget": false,
+                       "accessibilityElementsHidden": false,
+                       "isAccessibilityFocused": false,
+                       "accessibilityCustomActions": [],
+                       "borderWidth": 0,
+                       "cornerRadius": 0,
+                       "className": "XCUIElementType(48)"
+                      },
+                      {
+                       "accessibilityTraits": [],
+                       "children": [],
+                       "gestureRecognizers": [],
+                       "isLayerNode": false,
+                       "isHidden": false,
+                       "isAccessibilityElement": false,
+                       "bounds": {
+                        "bottom": 87,
+                        "right": 93,
+                        "top": 87,
+                        "left": 93
+                       },
+                       "accessibilityIdentifier": "ctrlproxy-non-hittable",
+                       "isUserInteractionEnabled": true,
+                       "alpha": 1,
+                       "accessibilityLabel": "Non-hittable fixture",
+                       "isOccluded": false,
+                       "hasTapTarget": false,
+                       "accessibilityElementsHidden": false,
+                       "isAccessibilityFocused": false,
+                       "accessibilityCustomActions": [],
+                       "borderWidth": 0,
+                       "cornerRadius": 0,
+                       "className": "XCUIElementType(1)"
+                      },
+                      {
+                       "accessibilityTraits": [],
+                       "children": [],
+                       "gestureRecognizers": [],
+                       "isLayerNode": false,
+                       "isHidden": false,
+                       "isAccessibilityElement": false,
+                       "bounds": {
+                        "bottom": 158,
+                        "right": 175,
+                        "top": 138,
+                        "left": 11
+                       },
+                       "accessibilityIdentifier": "watch-notification-status",
+                       "isUserInteractionEnabled": true,
+                       "alpha": 1,
+                       "accessibilityLabel": "notification auth false",
+                       "isOccluded": false,
+                       "hasTapTarget": false,
+                       "accessibilityElementsHidden": false,
+                       "isAccessibilityFocused": false,
+                       "accessibilityCustomActions": [],
+                       "borderWidth": 0,
+                       "cornerRadius": 0,
+                       "className": "XCUIElementType(48)"
+                      },
+                      {
+                       "accessibilityTraits": [],
+                       "children": [
+                        {
+                         "gestureRecognizers": [],
+                         "cornerRadius": 0,
+                         "isLayerNode": false,
+                         "className": "XCUIElementType(75)",
+                         "isUserInteractionEnabled": true,
+                         "accessibilityTraits": [],
+                         "hasTapTarget": false,
+                         "borderWidth": 0,
+                         "isOccluded": false,
+                         "accessibilityCustomActions": [],
+                         "isAccessibilityElement": false,
+                         "isHidden": false,
+                         "isAccessibilityFocused": false,
+                         "bounds": {
+                          "bottom": 214,
+                          "right": 185,
+                          "top": 163,
+                          "left": 2
+                         },
+                         "children": [
+                          {
+                           "accessibilityLabel": "",
+                           "isAccessibilityElement": false,
+                           "isAccessibilityFocused": false,
+                           "gestureRecognizers": [],
+                           "isUserInteractionEnabled": true,
+                           "cornerRadius": 0,
+                           "accessibilityCustomActions": [],
+                           "isLayerNode": false,
+                           "accessibilityTraits": [],
+                           "isHidden": false,
+                           "children": [
+                            {
+                             "gestureRecognizers": [],
+                             "cornerRadius": 0,
+                             "hasTapTarget": false,
+                             "alpha": 1,
+                             "accessibilityCustomActions": [],
+                             "accessibilityTraits": [],
+                             "borderWidth": 0,
+                             "isUserInteractionEnabled": true,
+                             "accessibilityIdentifier": "",
+                             "children": [],
+                             "className": "XCUIElementType(1)",
+                             "isAccessibilityElement": false,
+                             "isAccessibilityFocused": false,
+                             "accessibilityElementsHidden": false,
+                             "bounds": {
+                              "bottom": 214,
+                              "right": 185,
+                              "top": 163,
+                              "left": 2
+                             },
+                             "isLayerNode": false,
+                             "isHidden": false,
+                             "isOccluded": false,
+                             "accessibilityLabel": ""
+                            }
+                           ],
+                           "borderWidth": 0,
+                           "hasTapTarget": false,
+                           "accessibilityElementsHidden": false,
+                           "alpha": 1,
+                           "className": "XCUIElementType(1)",
+                           "bounds": {
+                            "bottom": 214,
+                            "right": 185,
+                            "top": 163,
+                            "left": 2
+                           },
+                           "isOccluded": false,
+                           "accessibilityIdentifier": ""
+                          },
+                          {
+                           "accessibilityLabel": "",
+                           "isAccessibilityElement": false,
+                           "isAccessibilityFocused": false,
+                           "gestureRecognizers": [],
+                           "isUserInteractionEnabled": true,
+                           "cornerRadius": 0,
+                           "accessibilityCustomActions": [],
+                           "isLayerNode": false,
+                           "accessibilityTraits": [],
+                           "isHidden": false,
+                           "children": [
+                            {
+                             "bounds": {
+                              "bottom": 214,
+                              "right": 185,
+                              "top": 163,
+                              "left": 2
+                             },
+                             "className": "XCUIElementType(1)",
+                             "isLayerNode": false,
+                             "isOccluded": false,
+                             "children": [
+                              {
+                               "hasTapTarget": false,
+                               "accessibilityLabel": "",
+                               "cornerRadius": 0,
+                               "alpha": 1,
+                               "isAccessibilityFocused": false,
+                               "isUserInteractionEnabled": true,
+                               "bounds": {
+                                "bottom": 214,
+                                "right": 185,
+                                "top": 163,
+                                "left": 2
+                               },
+                               "accessibilityElementsHidden": false,
+                               "children": [
+                                {
+                                 "cornerRadius": 0,
+                                 "isUserInteractionEnabled": true,
+                                 "hasTapTarget": false,
+                                 "accessibilityTraits": [],
+                                 "accessibilityElementsHidden": false,
+                                 "accessibilityCustomActions": [],
+                                 "isHidden": false,
+                                 "accessibilityIdentifier": "watch-smoke-row",
+                                 "bounds": {
+                                  "bottom": 214,
+                                  "right": 185,
+                                  "top": 163,
+                                  "left": 2
+                                 },
+                                 "gestureRecognizers": [],
+                                 "borderWidth": 0,
+                                 "isAccessibilityElement": false,
+                                 "isLayerNode": false,
+                                 "isAccessibilityFocused": false,
+                                 "children": [],
+                                 "alpha": 1,
+                                 "className": "XCUIElementType(9)",
+                                 "accessibilityLabel": "watch-smoke-row",
+                                 "isOccluded": false
+                                }
+                               ],
+                               "isOccluded": false,
+                               "accessibilityIdentifier": "",
+                               "accessibilityCustomActions": [],
+                               "className": "XCUIElementType(1)",
+                               "accessibilityTraits": [],
+                               "gestureRecognizers": [],
+                               "isAccessibilityElement": false,
+                               "borderWidth": 0,
+                               "isLayerNode": false,
+                               "isHidden": false
+                              }
+                             ],
+                             "accessibilityTraits": [],
+                             "hasTapTarget": false,
+                             "alpha": 1,
+                             "isHidden": false,
+                             "borderWidth": 0,
+                             "isUserInteractionEnabled": true,
+                             "isAccessibilityFocused": false,
+                             "cornerRadius": 0,
+                             "accessibilityLabel": "",
+                             "gestureRecognizers": [],
+                             "accessibilityCustomActions": [],
+                             "accessibilityIdentifier": "",
+                             "accessibilityElementsHidden": false,
+                             "isAccessibilityElement": false
+                            }
+                           ],
+                           "borderWidth": 0,
+                           "hasTapTarget": false,
+                           "accessibilityElementsHidden": false,
+                           "alpha": 1,
+                           "className": "XCUIElementType(1)",
+                           "bounds": {
+                            "bottom": 214,
+                            "right": 185,
+                            "top": 163,
+                            "left": 2
+                           },
+                           "isOccluded": false,
+                           "accessibilityIdentifier": ""
+                          }
+                         ],
+                         "accessibilityIdentifier": "",
+                         "alpha": 1,
+                         "accessibilityElementsHidden": false,
+                         "accessibilityLabel": "watch-smoke-row"
+                        },
+                        {
+                         "gestureRecognizers": [],
+                         "cornerRadius": 0,
+                         "isLayerNode": false,
+                         "className": "XCUIElementType(75)",
+                         "isUserInteractionEnabled": true,
+                         "accessibilityTraits": [],
+                         "hasTapTarget": false,
+                         "borderWidth": 0,
+                         "isOccluded": false,
+                         "accessibilityCustomActions": [],
+                         "isAccessibilityElement": false,
+                         "isHidden": false,
+                         "isAccessibilityFocused": false,
+                         "bounds": {
+                          "bottom": 270,
+                          "right": 185,
+                          "top": 219,
+                          "left": 2
+                         },
+                         "children": [
+                          {
+                           "accessibilityTraits": [],
+                           "accessibilityIdentifier": "",
+                           "cornerRadius": 0,
+                           "hasTapTarget": false,
+                           "bounds": {
+                            "bottom": 270,
+                            "left": 2,
+                            "right": 185,
+                            "top": 219
+                           },
+                           "isAccessibilityFocused": false,
+                           "isUserInteractionEnabled": true,
+                           "accessibilityElementsHidden": false,
+                           "isAccessibilityElement": false,
+                           "isHidden": false,
+                           "children": [
+                            {
+                             "className": "XCUIElementType(1)",
+                             "accessibilityIdentifier": "",
+                             "children": [],
+                             "gestureRecognizers": [],
+                             "cornerRadius": 0,
+                             "isLayerNode": false,
+                             "accessibilityLabel": "",
+                             "isOccluded": false,
+                             "borderWidth": 0,
+                             "isAccessibilityElement": false,
+                             "isHidden": false,
+                             "bounds": {
+                              "top": 219,
+                              "bottom": 270,
+                              "right": 185,
+                              "left": 2
+                             },
+                             "alpha": 1,
+                             "isAccessibilityFocused": false,
+                             "isUserInteractionEnabled": true,
+                             "accessibilityCustomActions": [],
+                             "accessibilityTraits": [],
+                             "accessibilityElementsHidden": false,
+                             "hasTapTarget": false
+                            }
+                           ],
+                           "gestureRecognizers": [],
+                           "accessibilityLabel": "",
+                           "alpha": 1,
+                           "isLayerNode": false,
+                           "accessibilityCustomActions": [],
+                           "borderWidth": 0,
+                           "className": "XCUIElementType(1)",
+                           "isOccluded": false
+                          },
+                          {
+                           "accessibilityCustomActions": [],
+                           "accessibilityElementsHidden": false,
+                           "accessibilityLabel": "",
+                           "isHidden": false,
+                           "accessibilityTraits": [],
+                           "children": [
+                            {
+                             "cornerRadius": 0,
+                             "accessibilityLabel": "",
+                             "isUserInteractionEnabled": true,
+                             "accessibilityTraits": [],
+                             "className": "XCUIElementType(1)",
+                             "isAccessibilityElement": false,
+                             "accessibilityElementsHidden": false,
+                             "borderWidth": 0,
+                             "isLayerNode": false,
+                             "accessibilityCustomActions": [],
+                             "gestureRecognizers": [],
+                             "isHidden": false,
+                             "alpha": 1,
+                             "children": [
+                              {
+                               "accessibilityLabel": "",
+                               "cornerRadius": 0,
+                               "isLayerNode": false,
+                               "accessibilityCustomActions": [],
+                               "isHidden": false,
+                               "isUserInteractionEnabled": true,
+                               "gestureRecognizers": [],
+                               "children": [
+                                {
+                                 "accessibilityCustomActions": [],
+                                 "hasTapTarget": false,
+                                 "accessibilityTraits": [],
+                                 "isLayerNode": false,
+                                 "isOccluded": false,
+                                 "isAccessibilityElement": false,
+                                 "isHidden": false,
+                                 "accessibilityElementsHidden": false,
+                                 "className": "XCUIElementType(9)",
+                                 "cornerRadius": 0,
+                                 "borderWidth": 0,
+                                 "gestureRecognizers": [],
+                                 "accessibilityIdentifier": "watch-text-entry",
+                                 "accessibilityLabel": "Text entry",
+                                 "isAccessibilityFocused": false,
+                                 "alpha": 1,
+                                 "bounds": {
+                                  "right": 185,
+                                  "left": 2,
+                                  "bottom": 270,
+                                  "top": 219
+                                 },
+                                 "isUserInteractionEnabled": true,
+                                 "children": []
+                                }
+                               ],
+                               "borderWidth": 0,
+                               "hasTapTarget": false,
+                               "accessibilityTraits": [],
+                               "className": "XCUIElementType(1)",
+                               "isAccessibilityElement": false,
+                               "accessibilityIdentifier": "",
+                               "isAccessibilityFocused": false,
+                               "alpha": 1,
+                               "accessibilityElementsHidden": false,
+                               "bounds": {
+                                "right": 185,
+                                "left": 2,
+                                "bottom": 270,
+                                "top": 219
+                               },
+                               "isOccluded": false
+                              }
+                             ],
+                             "isOccluded": false,
+                             "hasTapTarget": false,
+                             "isAccessibilityFocused": false,
+                             "accessibilityIdentifier": "",
+                             "bounds": {
+                              "bottom": 270,
+                              "left": 2,
+                              "right": 185,
+                              "top": 219
+                             }
+                            }
+                           ],
+                           "borderWidth": 0,
+                           "isLayerNode": false,
+                           "alpha": 1,
+                           "bounds": {
+                            "bottom": 270,
+                            "left": 2,
+                            "right": 185,
+                            "top": 219
+                           },
+                           "gestureRecognizers": [],
+                           "isUserInteractionEnabled": true,
+                           "className": "XCUIElementType(1)",
+                           "isOccluded": false,
+                           "cornerRadius": 0,
+                           "accessibilityIdentifier": "",
+                           "isAccessibilityFocused": false,
+                           "isAccessibilityElement": false,
+                           "hasTapTarget": false
+                          }
+                         ],
+                         "accessibilityIdentifier": "",
+                         "alpha": 1,
+                         "accessibilityElementsHidden": false,
+                         "accessibilityLabel": "Text entry"
+                        }
+                       ],
+                       "gestureRecognizers": [],
+                       "isLayerNode": false,
+                       "isHidden": false,
+                       "isAccessibilityElement": false,
+                       "bounds": {
+                        "bottom": 223,
+                        "right": 187,
+                        "top": 163,
+                        "left": 0
+                       },
+                       "accessibilityIdentifier": "",
+                       "isUserInteractionEnabled": true,
+                       "alpha": 1,
+                       "accessibilityLabel": "",
+                       "isOccluded": false,
+                       "hasTapTarget": false,
+                       "accessibilityElementsHidden": false,
+                       "isAccessibilityFocused": false,
+                       "accessibilityCustomActions": [],
+                       "borderWidth": 0,
+                       "cornerRadius": 0,
+                       "className": "XCUIElementType(32)"
+                      }
+                     ],
+                     "isAccessibilityElement": false,
+                     "accessibilityElementsHidden": false,
+                     "cornerRadius": 0,
+                     "accessibilityIdentifier": "",
+                     "accessibilityCustomActions": [],
+                     "gestureRecognizers": [],
+                     "accessibilityTraits": [],
+                     "isLayerNode": false,
+                     "alpha": 1,
+                     "bounds": {
+                      "bottom": 223,
+                      "right": 187,
+                      "top": 0,
+                      "left": 0
+                     },
+                     "className": "XCUIElementType(1)",
+                     "borderWidth": 0,
+                     "isHidden": false,
+                     "hasTapTarget": false,
+                     "isAccessibilityFocused": false
+                    }
+                   ],
+                   "gestureRecognizers": [],
+                   "className": "XCUIElementType(1)",
+                   "accessibilityLabel": "",
+                   "accessibilityIdentifier": ""
+                  }
+                 ],
+                 "accessibilityElementsHidden": false,
+                 "cornerRadius": 0,
+                 "isLayerNode": false,
+                 "isHidden": false,
+                 "isUserInteractionEnabled": true,
+                 "accessibilityIdentifier": "",
+                 "hasTapTarget": false,
+                 "className": "XCUIElementType(1)",
+                 "bounds": {
+                  "bottom": 223,
+                  "right": 187,
+                  "top": 0,
+                  "left": 0
+                 },
+                 "accessibilityLabel": "",
+                 "borderWidth": 0,
+                 "isAccessibilityElement": false,
+                 "gestureRecognizers": [],
+                 "isOccluded": false
+                }
+               ],
+               "accessibilityTraits": [],
+               "accessibilityCustomActions": [],
+               "bounds": {
+                "bottom": 223,
+                "right": 187,
+                "top": 0,
+                "left": 0
+               },
+               "accessibilityIdentifier": "",
+               "hasTapTarget": false,
+               "accessibilityLabel": "",
+               "cornerRadius": 0,
+               "isOccluded": false,
+               "isAccessibilityElement": false
+              }
+             ],
+             "gestureRecognizers": [],
+             "borderWidth": 0,
+             "isLayerNode": false,
+             "accessibilityLabel": "",
+             "isUserInteractionEnabled": true,
+             "isAccessibilityElement": false,
+             "cornerRadius": 0,
+             "className": "XCUIElementType(1)",
+             "alpha": 1,
+             "isHidden": false,
+             "isOccluded": false,
+             "accessibilityElementsHidden": false,
+             "isAccessibilityFocused": false,
+             "accessibilityTraits": [],
+             "bounds": {
+              "bottom": 223,
+              "right": 187,
+              "top": 0,
+              "left": 0
+             }
+            }
+           ],
+           "className": "XCUIElementType(1)",
+           "accessibilityTraits": [],
+           "isAccessibilityElement": false,
+           "isUserInteractionEnabled": true,
+           "hasTapTarget": false,
+           "alpha": 1,
+           "bounds": {
+            "bottom": 223,
+            "right": 187,
+            "top": 0,
+            "left": 0
+           },
+           "isHidden": false,
+           "cornerRadius": 0,
+           "gestureRecognizers": [],
+           "accessibilityCustomActions": [],
+           "accessibilityElementsHidden": false,
+           "isAccessibilityFocused": false,
+           "accessibilityLabel": "",
+           "accessibilityIdentifier": "",
+           "borderWidth": 0,
+           "isLayerNode": false,
+           "isOccluded": false
+          }
+         ],
+         "gestureRecognizers": [],
+         "isAccessibilityElement": false,
+         "isAccessibilityFocused": false,
+         "hasTapTarget": false,
+         "className": "XCUIElementType(1)",
+         "accessibilityTraits": [],
+         "borderWidth": 0,
+         "isUserInteractionEnabled": true,
+         "isHidden": false,
+         "accessibilityCustomActions": [],
+         "isLayerNode": false,
+         "cornerRadius": 0,
+         "alpha": 1,
+         "accessibilityLabel": "",
+         "isOccluded": false,
+         "accessibilityElementsHidden": false,
+         "bounds": {
+          "bottom": 223,
+          "right": 187,
+          "top": 0,
+          "left": 0
+         },
+         "accessibilityIdentifier": ""
+        }
+       ],
+       "accessibilityCustomActions": [],
+       "alpha": 1,
+       "isAccessibilityElement": false,
+       "bounds": {
+        "bottom": 223,
+        "right": 187,
+        "top": 0,
+        "left": 0
+       },
+       "accessibilityLabel": "",
+       "isUserInteractionEnabled": true,
+       "accessibilityTraits": [],
+       "className": "XCUIElementType(1)",
+       "isOccluded": false,
+       "cornerRadius": 0,
+       "accessibilityElementsHidden": false,
+       "accessibilityIdentifier": "",
+       "isAccessibilityFocused": false,
+       "gestureRecognizers": [],
+       "borderWidth": 0,
+       "isLayerNode": false,
+       "isHidden": false,
+       "hasTapTarget": false
+      }
+     ],
+     "isAccessibilityElement": false,
+     "cornerRadius": 0,
+     "accessibilityCustomActions": [],
+     "isAccessibilityFocused": false,
+     "hasTapTarget": false,
+     "accessibilityElementsHidden": false,
+     "accessibilityLabel": "",
+     "isLayerNode": false,
+     "bounds": {
+      "bottom": 223,
+      "right": 187,
+      "top": 0,
+      "left": 0
+     },
+     "isUserInteractionEnabled": true
+    },
+    {
+     "children": [],
+     "className": "XCUIElementType(4)",
+     "accessibilityTraits": [],
+     "isAccessibilityElement": false,
+     "isUserInteractionEnabled": true,
+     "hasTapTarget": false,
+     "alpha": 1,
+     "bounds": {
+      "right": 185,
+      "left": 179,
+      "bottom": 84,
+      "top": 37
+     },
+     "isHidden": false,
+     "cornerRadius": 0,
+     "gestureRecognizers": [],
+     "accessibilityCustomActions": [],
+     "accessibilityElementsHidden": false,
+     "isAccessibilityFocused": false,
+     "accessibilityIdentifier": "",
+     "accessibilityLabel": "",
+     "borderWidth": 0,
+     "isLayerNode": false,
+     "isOccluded": false
+    },
+    {
+     "children": [
+      {
+       "className": "XCUIElementType(25)",
+       "isOccluded": false,
+       "accessibilityTraits": [],
+       "accessibilityIdentifier": "",
+       "borderWidth": 0,
+       "isHidden": false,
+       "alpha": 1,
+       "gestureRecognizers": [],
+       "children": [
+        {
+         "gestureRecognizers": [],
+         "cornerRadius": 0,
+         "isLayerNode": false,
+         "className": "XCUIElementType(1)",
+         "isUserInteractionEnabled": true,
+         "accessibilityTraits": [],
+         "hasTapTarget": false,
+         "borderWidth": 0,
+         "isOccluded": false,
+         "accessibilityCustomActions": [],
+         "isAccessibilityElement": false,
+         "isHidden": false,
+         "isAccessibilityFocused": false,
+         "bounds": {
+          "right": 187,
+          "left": 0,
+          "bottom": 35,
+          "top": 0
+         },
+         "children": [],
+         "accessibilityIdentifier": "",
+         "alpha": 1,
+         "accessibilityElementsHidden": false,
+         "accessibilityLabel": ""
+        },
+        {
+         "gestureRecognizers": [],
+         "cornerRadius": 0,
+         "isLayerNode": false,
+         "className": "XCUIElementType(1)",
+         "isUserInteractionEnabled": true,
+         "accessibilityTraits": [],
+         "hasTapTarget": false,
+         "borderWidth": 0,
+         "isOccluded": false,
+         "accessibilityCustomActions": [],
+         "isAccessibilityElement": false,
+         "isHidden": false,
+         "isAccessibilityFocused": false,
+         "bounds": {
+          "right": 187,
+          "left": 0,
+          "bottom": 35,
+          "top": 0
+         },
+         "children": [],
+         "accessibilityIdentifier": "",
+         "alpha": 1,
+         "accessibilityElementsHidden": false,
+         "accessibilityLabel": ""
+        }
+       ],
+       "isAccessibilityElement": false,
+       "cornerRadius": 0,
+       "accessibilityCustomActions": [],
+       "isAccessibilityFocused": false,
+       "hasTapTarget": false,
+       "accessibilityElementsHidden": false,
+       "accessibilityLabel": "",
+       "isLayerNode": false,
+       "bounds": {
+        "right": 187,
+        "left": 0,
+        "bottom": 35,
+        "top": 0
+       },
+       "isUserInteractionEnabled": true
+      }
+     ],
+     "className": "XCUIElementType(4)",
+     "accessibilityTraits": [],
+     "isAccessibilityElement": false,
+     "isUserInteractionEnabled": true,
+     "hasTapTarget": false,
+     "alpha": 1,
+     "bounds": {
+      "right": 187,
+      "left": 0,
+      "bottom": 223,
+      "top": 0
+     },
+     "isHidden": false,
+     "cornerRadius": 0,
+     "gestureRecognizers": [],
+     "accessibilityCustomActions": [],
+     "accessibilityElementsHidden": false,
+     "isAccessibilityFocused": false,
+     "accessibilityIdentifier": "",
+     "accessibilityLabel": "",
+     "borderWidth": 0,
+     "isLayerNode": false,
+     "isOccluded": false
+    }
+   ],
+   "accessibilityElementsHidden": false,
+   "accessibilityCustomActions": [],
+   "accessibilityLabel": "CtrlProxyWatch",
+   "accessibilityTraits": [],
+   "isLayerNode": false,
+   "alpha": 1,
+   "bounds": {
+    "top": 0,
+    "bottom": 223,
+    "right": 187,
+    "left": 0
+   },
+   "isHidden": false,
+   "hasTapTarget": false,
+   "borderWidth": 0,
+   "isUserInteractionEnabled": true
+  }
+ },
+ "requestId": "1"
+}

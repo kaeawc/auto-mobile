@@ -10,6 +10,11 @@ enum VisionCommandPolicy {
         supportedCommands.contains(command)
     }
 
+    /// An app launched before XCTest may lack an accessible main window until relaunched.
+    static func shouldRelaunchForSnapshotError(_ description: String) -> Bool {
+        description.contains("kAXErrorAPIDisabled")
+    }
+
     /// Keyboard-key sequences `typeText` interprets as deletion (XCUIKeyboardKey.delete is U+0008
     /// on iOS-family platforms and U+007F on macOS; forwardDelete is U+F728). Append-only text
     /// must not erase content already in the field.
@@ -17,6 +22,32 @@ enum VisionCommandPolicy {
 
     static func containsDeleteKey(_ text: String) -> Bool {
         text.contains { deleteKeySequences.contains($0) }
+    }
+
+    struct TapCandidate {
+        let elementType: UInt
+        let label: String
+        let isEnabled: Bool
+    }
+
+    enum TapResolution: Equatable {
+        case match(Int)
+        case none
+        case ambiguous(Int)
+    }
+
+    /// Indices refer to the original identifier query, so the router taps the snapshotted element.
+    static func tapResolution(
+        candidates: [TapCandidate], label: String? = nil, elementType: UInt? = nil
+    ) -> TapResolution {
+        let matches = candidates.indices.filter { index in
+            let candidate = candidates[index]
+            return candidate.isEnabled
+                && (label == nil || candidate.label == label)
+                && (elementType == nil || candidate.elementType == elementType)
+        }
+        if matches.count == 1 { return .match(matches[0]) }
+        return matches.isEmpty ? .none : .ambiguous(matches.count)
     }
 
     enum TypingTarget: Equatable {

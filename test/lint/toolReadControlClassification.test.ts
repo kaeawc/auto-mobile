@@ -171,6 +171,7 @@ const CLASSIFICATION: Classification = {
     "recentApps",
     "rotaryScroll",
     "ambient",
+    "wearSurface",
     "rotateCrown",
     "reconcileDeviceResources",
     "recordDeviceGestures",

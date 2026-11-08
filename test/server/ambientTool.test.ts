@@ -3,9 +3,8 @@ import {
   ambientSchema,
   ambientResultSchema,
   createAmbientHandler,
-  traitsFormFactorRead,
-  type FormFactorRead,
 } from "../../src/server/ambientTool";
+import { traitsFormFactorRead, type FormFactorRead } from "../../src/server/requireWatch";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import type { Ambient, AmbientAction } from "../../src/features/wear/Ambient";
 import type { TraitFormFactor } from "../../src/utils/android-cmdline-tools/deviceTraits";
@@ -133,13 +132,14 @@ describe("ambient tool", () => {
 
   test("the traits reader reports the announced form factor and undefined on a failed read", async () => {
     const traits = new FakeDeviceTraits(androidDeviceTraits({ formFactor: "watch" }));
-    const read = traitsFormFactorRead(traits, new FakeAdbClientFactory());
+    const read = traitsFormFactorRead(traits, new FakeAdbClientFactory(), "ambient");
     expect(await read(android)).toBe("watch");
     traits.setTraits(androidDeviceTraits({ formFactor: null }));
     expect(await read(android)).toBeNull();
     const failing = traitsFormFactorRead(
       new FakeDeviceTraits(new Error("getprop timed out")),
       new FakeAdbClientFactory(),
+      "ambient",
     );
     expect(await failing(android)).toBeUndefined();
   });

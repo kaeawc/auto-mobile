@@ -1,6 +1,6 @@
 import { record, type Raw } from "../prototypeTemplate";
 import { ownHeight, type PrepareChild } from "./webRowAspect";
-import { INCOMING_HEIGHT_KEY } from "./webStyle";
+import { INCOMING_ALLOCATED_KEY, INCOMING_HEIGHT_KEY } from "./webStyle";
 
 const weightOf = (node: Raw | undefined): number | undefined => {
   const weight = record(node?.style)?.weight;
@@ -64,12 +64,17 @@ export function columnChildHeights(
 
 const childPath = (path: string, index: number) => `${path}.children[${index}]`;
 
-function withHeight(entry: unknown, height: number | undefined): unknown {
+/**
+ * `entry` with `height` as its incoming height, marked as an allocation (INCOMING_ALLOCATED_KEY)
+ * when `allocated` (a weighted child's share), so its own dp height does not cap it.
+ */
+function withHeight(entry: unknown, height: number | undefined, allocated: boolean): unknown {
   const node = record(entry);
   if (!node || height === undefined || height === Infinity) {
     return entry;
   }
-  return { ...node, style: { ...record(node.style), [INCOMING_HEIGHT_KEY]: height } };
+  const style = { ...record(node.style), [INCOMING_HEIGHT_KEY]: height };
+  return { ...node, style: allocated ? { ...style, [INCOMING_ALLOCATED_KEY]: true } : style };
 }
 
 /**
@@ -104,12 +109,18 @@ export function withColumnHeights(
     return node;
   }
   const spacing = record(node.style)?.spacing;
+  const prepared = children.map((entry, index) => prepare(entry, childPath(path, index)));
   const heights = columnChildHeights(
-    children.map((entry, index) => prepare(entry, childPath(path, index))),
+    prepared,
     content,
     parent.spacing && typeof spacing === "number" ? spacing : 0,
   );
-  return { ...node, children: children.map((entry, index) => withHeight(entry, heights[index])) };
+  return {
+    ...node,
+    children: children.map((entry, index) =>
+      withHeight(entry, heights[index], weightOf(prepared[index]) !== undefined),
+    ),
+  };
 }
 
 /**
@@ -139,6 +150,9 @@ export function repeatInstanceChildren(
   const spacing = record(node.style)?.spacing;
   const heights = columnChildHeights(prepared, content, typeof spacing === "number" ? spacing : 0);
   return prepares.map((_prepare, instance) =>
-    template.map((entry, index) => withHeight(entry, heights[instance * template.length + index])),
+    template.map((entry, index) => {
+      const at = instance * template.length + index;
+      return withHeight(entry, heights[at], weightOf(prepared[at]) !== undefined);
+    }),
   );
 }

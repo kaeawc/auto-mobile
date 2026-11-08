@@ -6,7 +6,7 @@ setting one up, the watch-specific behaviour, and what is out of scope.
 > [!NOTE]
 > **Verified on** a Wear OS 7.0 emulator (API 37 `android-wear-signed` image, `wearos_small_round`
 > profile, 384x384). Other images, square watches and physical watches are unverified. Sleep/wake
-> power-state changes have been measured; ambient mode itself has no usable readback.
+> and the watch face's ambient state have been measured.
 
 ## Create the emulator
 
@@ -177,13 +177,23 @@ form factor (phone, tablet, TV, automotive) it returns an error naming the form 
 changes nothing. A session recorded as a watch is trusted when the device does not report its
 form factor; otherwise it is refused too, so check the device with `listDevices` (`formFactor`).
 On a watch it sends `KEYCODE_SLEEP` for `enter` or `KEYCODE_WAKEUP` for `exit`, then reads
-wakefulness once. `success: true` means `Dozing` or `Asleep` for enter, or `Awake` for exit. A
-failed or unreadable state returns `success: false` with a `reason`; inspect `wakefulness` when
-present and use `observe` to check the current state.
+wakefulness and the watch face's ambient state once. The result reports:
 
-This is a power-state change. Wear exposes no ambient readback, so the result does not prove
-ambient mode. Hardware wake by tilt or touch remains untested. Command failures return an
-error; check the device connection before retrying.
+- `ambient`: `true` or `false` as the watch face reports it, or `"unknown"` when the device gave no
+  watch-face state.
+- `watchFaceVisible`: whether the watch face is on screen, when `ambient` is known.
+- `wakefulness`: `Awake`, `Dozing` or `Asleep`, when readable.
+
+`enter` succeeds when `ambient` is `true`; `exit` succeeds when `ambient` is `false` and
+wakefulness is `Awake`. When `ambient` is `"unknown"`, success falls back to wakefulness (`Dozing`
+or `Asleep` for enter, `Awake` for exit) and does not prove ambient mode. A failure returns
+`success: false` with a `reason`. If enter leaves wakefulness `Awake`, a stay-awake setting
+(`svc power stayon true`) is probably keeping the display on; turn it off and retry. If
+`watchFaceVisible` is `false`, an app is in front of the watch face.
+
+For visual proof, take a screenshot after `enter`: the watch face renders dimmed in ambient.
+Hardware wake by tilt or touch remains untested. Command failures return an error; check the
+device connection before retrying.
 
 ## Tiles
 
@@ -242,5 +252,5 @@ they stay tappable. Wear launchers are not expected to support pinned shortcuts,
 - Complications and watch faces, and listing the tiles in the carousel.
 - Tapping a notification's expanded content or its reply and action buttons without an explicit
   clickable label (see [Notifications](#notifications)).
-- Ambient-mode verification, hardware wake by tilt or touch, and a paired phone and watch.
+- Hardware wake by tilt or touch, and a paired phone and watch.
 - Watch-specific prototype components and round-aware prototype layout.

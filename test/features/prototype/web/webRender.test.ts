@@ -1034,6 +1034,32 @@ describe("prototype web still (#16346)", () => {
     expect(ratioIn({ style: { weight: 1 } })).toMatchObject({ "flex-basis": "80px" });
   });
 
+  test("a weighted row's dp height does not cap the share its column allocates (#16701)", () => {
+    const ratio = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          style: { height: { dp: 100 } },
+          children: [
+            { type: "box", style: { height: { dp: 20 } } },
+            {
+              type: "row",
+              style: { weight: 1, height: { dp: 20 } },
+              children: [
+                { type: "box", testTag: "ratio", style: { aspectRatio: 2 } },
+                { type: "text", text: "b" },
+              ],
+            },
+          ],
+        },
+      }),
+      "ratio",
+    )[0]!.style;
+    // The row is sized to its 80 dp share, not its 20 dp height, so the ratio is at most 160 dp.
+    expect(ratio).toMatchObject({ "flex-basis": "160px" });
+  });
+
   test("a sheet window hands its height to a fill row at the root (#16690)", () => {
     const ratioIn = (placement: Record<string, unknown>) =>
       byTag(

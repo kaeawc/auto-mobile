@@ -1,5 +1,11 @@
 import { record, type Raw } from "../prototypeTemplate";
-import { INCOMING_HEIGHT_KEY, ROW_BOUND_KEY, ROW_MEASURE_KEY, type RowMeasure } from "./webStyle";
+import {
+  INCOMING_ALLOCATED_KEY,
+  INCOMING_HEIGHT_KEY,
+  ROW_BOUND_KEY,
+  ROW_MEASURE_KEY,
+  type RowMeasure,
+} from "./webStyle";
 
 /** The aspect ratio of a node with no authored width, height or weight, or undefined. */
 function freeAspectRatio(node: Raw | undefined): number | undefined {
@@ -56,9 +62,14 @@ const side = (padding: Raw | undefined, name: string) =>
  */
 export function ownHeight(style: Raw | undefined): number {
   const dp = record(style?.height)?.dp;
+  return clampedHeight(style, typeof dp === "number" ? dp : Infinity);
+}
+
+/** `height` held under the node's `maxHeight`, then raised to its `minHeight`, which wins. */
+function clampedHeight(style: Raw | undefined, height: number): number {
   const max = typeof style?.maxHeight === "number" ? style.maxHeight : Infinity;
   const min = typeof style?.minHeight === "number" ? style.minHeight : 0;
-  return Math.max(Math.min(typeof dp === "number" ? dp : Infinity, max), min);
+  return Math.max(Math.min(height, max), min);
 }
 
 /**
@@ -69,6 +80,11 @@ export function ownHeight(style: Raw | undefined): number {
  * padding. Compose's `sizeIn` then `aspectRatio` on a child
  * respects that incoming max height. Infinity when nothing bounds it.
  *
+ * A column's weight allocation (INCOMING_ALLOCATED_KEY) instead takes the place of the node's dp
+ * height, as CSS's `flex: w w 0` replaces its `height` and Compose's weight fixes its constraints.
+ * The share is then clamped by the node's `maxHeight` and `minHeight`, as CSS still applies both
+ * to a flex item.
+ *
  * The inherited bound is the parent's whole content height; a column narrows it per child to
  * what its earlier siblings left (see webIncomingHeight.ts).
  */
@@ -77,7 +93,8 @@ export function rowContentHeight(style: Raw | undefined, inherited = Infinity): 
   const padding = record(style?.padding);
   const incoming = style?.[INCOMING_HEIGHT_KEY];
   const handed = typeof incoming === "number" ? incoming : Infinity;
-  const height = Math.min(own, inherited, handed);
+  const allocated = style?.[INCOMING_ALLOCATED_KEY] === true && handed !== Infinity;
+  const height = allocated ? clampedHeight(style, handed) : Math.min(own, inherited, handed);
   return Math.max(0, height - side(padding, "top") - side(padding, "bottom"));
 }
 

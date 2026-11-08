@@ -10,7 +10,7 @@ Form-factor support, navigation contracts and remaining verification gaps.
 | Form factor                                  | Verdict            | Smallest useful tool surface                                                                       | Main risk                                                                        |
 | -------------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | Android TV / Google TV                       | **Go**             | `focusNavigate`, a `select` key on `sendKeys` only if `enter` falls short, TV form-factor matching | Google TV and no-touchscreen devices unverified; child-label `focusNavigate` gap |
-| Wear OS                                      | **Conditional go** | rotary scroll, `isScreenRound` in `observe`, ambient toggle                                        | Ambient has power-state readback only; hardware wake is untested                 |
+| Wear OS                                      | **Conditional go** | rotary scroll, `isScreenRound` in `observe`, ambient toggle                                        | Ambient reads `inAmbient` from `dumpsys wear_service`; hardware wake is untested |
 | Android Auto (projection to a DHU)           | **No-go**          | none                                                                                               | The car UI is not in any accessibility tree AutoMobile can read                  |
 | Android Automotive OS (an AAOS system image) | **Go**             | existing tools; rotary `pressButton` buttons; `vehicle` `deviceCondition`                          | Play Store `user` images refuse vehicle-motion injection; secondary displays     |
 
@@ -24,7 +24,7 @@ Android Auto projects a phone's UI to a head unit; Automotive OS is a full Andro
 - **CtrlProxy.** `minSdk` 24 (`android/gradle/libs.versions.toml`) is not a blocker. The manifest declares no `<uses-feature>` and only a `LAUNCHER` category (no `LEANBACK_LAUNCHER`). The accessibility config requests window content, interactive windows and gesture dispatch.
 - **Input.** `sendKeys` supports arrows (`KEYCODE_DPAD_*`), enter, tab, escape, backspace, delete (`INPUT_KEY_CODE_MAP`, `src/features/action/InputKey.ts`); there is no D-pad centre, menu or media key. `pressButton` sends back/home/recent as global actions with ADB fallback, plus volume/power via ADB.
 - **Focus.** `observe` returns `focusedElement` (`ActiveWindowAttribution.ts`, `HierarchyFocus.ts`) from the `focused` property; TalkBack focus is separate (`accessibility-focused`).
-- `observe` reports `isScreenRound` for `watch` devices; `ambient` changes power state with no Wear ambient readback.
+- `observe` reports `isScreenRound` for `watch` devices; `ambient` changes power state and reads the watch face's `inAmbient` back from `dumpsys wear_service`.
 
 ## Hypotheses to confirm
 
@@ -112,7 +112,7 @@ and nothing asks for audio.
 Hierarchy and tap path should match a phone's; the gaps are three Wear-specific inputs, none confirmed.
 
 - **Rotary.** `rotaryScroll({ delta })` (`src/features/wear/RotaryScroll.ts`, opt-in like `windowMode`) tries, in order, `adb shell input rotaryencoder scroll --axis SCROLL,<-delta>`, `adb emu event send EV_REL:REL_WHEEL:<delta>` (emulator serials only) and a vertical centre-column `input swipe` sized from `wm size`. After each it re-reads the CtrlProxy hierarchy; a candidate counts only if the structural fingerprint changed. The result names the first working `method` and lists every attempt; on a device whose `ro.build.characteristics` does not name `watch` (device traits `formFactor`) the input is still sent and the result carries a `warning`. The hierarchy has no scroll offset, so a list already at its end reports `unchanged`, and an unreadable hierarchy (CtrlProxy disconnected) makes no attempt. The native SCROLL axis command is confirmed on a Wear OS emulator, with its sign inverted relative to delta: positive delta reveals lower items. The emulator-console `REL_WHEEL` mapping and sign, and physical-device behaviour, remain unconfirmed (checklist row 6).
-- **Ambient.** `ambient({ action: "enter" | "exit" })` sends `KEYCODE_SLEEP` or `KEYCODE_WAKEUP` through the existing power client, then reads wakefulness once. Enter succeeds on `Dozing` or `Asleep`; exit succeeds on `Awake`. This is a power-state change with no Wear ambient readback, so success does not prove ambient mode. Hardware wake by tilt or touch remains untested.
+- **Ambient.** `ambient({ action: "enter" | "exit" })` sends `KEYCODE_SLEEP` or `KEYCODE_WAKEUP` through the existing power client, then reads wakefulness and `watchFaceState=WatchFaceState{watchFaceVisible=…, inAmbient=…}` from `dumpsys wear_service` (parsed in `src/features/wear/wearServiceDumpsys.ts`, shared with watch-face observation). Enter succeeds on `inAmbient=true`; exit on `inAmbient=false` with `Awake`. Without that line (or when the read fails) the result reports `ambient: "unknown"` and falls back to wakefulness: enter on `Dozing` or `Asleep`, exit on `Awake`. On the API 37 image `KEYCODE_SLEEP` also takes the display to `DOZE_SUSPEND`, and `svc power stayon true` keeps it awake. Hardware wake by tilt or touch remains untested.
 - **Round screens.** `observe` reports `isScreenRound` for `watch` devices (`BootedDevice.formFactor`), read over adb from `dumpsys display` (`FLAG_ROUND` on the default display's `DisplayInfo`/`DisplayDeviceInfo` record), not from the CtrlProxy.
 - **Swipe-to-dismiss.** Wear OS 3+ back is a right-swipe from the left edge; the `back` global action should work; check a left-edge `swipeOn`.
 
@@ -228,18 +228,18 @@ Needs no device to build; phones, tablets and foldables keep the same geometry p
 
 Record command, image id and API level.
 
-| #   | Image                                    | Check                                                                                                                                                                              |
-| --- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | TV (`android-tv` or `google-tv`, API 34) | `avdmanager create avd` with `--device tv_1080p` succeeds; the AVD boots                                                                                                           |
-| 2   | TV                                       | `adb install` of the CtrlProxy APK succeeds; the service can be enabled from the host; `observe` returns a hierarchy                                                               |
-| 3   | TV                                       | `sendKeys` with `arrow_right` moves focus and `observe.focusedElement` changes; `enter` and, if that does not work, `KEYCODE_DPAD_CENTER` activate the focused item                |
-| 4   | TV                                       | `tapOn` works on an image with no touchscreen                                                                                                                                      |
-| 5   | Wear (`android-wear`, API 34)            | The same install, enable and `observe` checks as TV                                                                                                                                |
-| 6   | Wear                                     | Each rotary candidate against a `ScalingLazyColumn`: which one changes the scroll position                                                                                         |
-| 7   | Wear                                     | `ambient` uses `KEYCODE_SLEEP`/`KEYCODE_WAKEUP` as a power-state change; wakefulness is read once, with no Wear ambient readback. Hardware wake by tilt or touch remains untested. |
-| 8   | Wear                                     | `isScreenRound` is true on `wearos_small_round`; the left-edge swipe dismisses a screen                                                                                            |
-| 9   | Automotive (`android-automotive`)        | Behavior of the cluster and passenger displays (install, enable and `observe` are in the baseline above)                                                                           |
-| 10  | Any                                      | `sdkmanager --list` shows the tags named above; `avdmanager list device` shows the profile ids                                                                                     |
+| #   | Image                                    | Check                                                                                                                                                                    |
+| --- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | TV (`android-tv` or `google-tv`, API 34) | `avdmanager create avd` with `--device tv_1080p` succeeds; the AVD boots                                                                                                 |
+| 2   | TV                                       | `adb install` of the CtrlProxy APK succeeds; the service can be enabled from the host; `observe` returns a hierarchy                                                     |
+| 3   | TV                                       | `sendKeys` with `arrow_right` moves focus and `observe.focusedElement` changes; `enter` and, if that does not work, `KEYCODE_DPAD_CENTER` activate the focused item      |
+| 4   | TV                                       | `tapOn` works on an image with no touchscreen                                                                                                                            |
+| 5   | Wear (`android-wear`, API 34)            | The same install, enable and `observe` checks as TV                                                                                                                      |
+| 6   | Wear                                     | Each rotary candidate against a `ScalingLazyColumn`: which one changes the scroll position                                                                               |
+| 7   | Wear                                     | `ambient` uses `KEYCODE_SLEEP`/`KEYCODE_WAKEUP`; `inAmbient` in `dumpsys wear_service` follows it (verified on API 37). Hardware wake by tilt or touch remains untested. |
+| 8   | Wear                                     | `isScreenRound` is true on `wearos_small_round`; the left-edge swipe dismisses a screen                                                                                  |
+| 9   | Automotive (`android-automotive`)        | Behavior of the cluster and passenger displays (install, enable and `observe` are in the baseline above)                                                                 |
+| 10  | Any                                      | `sdkmanager --list` shows the tags named above; `avdmanager list device` shows the profile ids                                                                           |
 
 ## Not covered
 

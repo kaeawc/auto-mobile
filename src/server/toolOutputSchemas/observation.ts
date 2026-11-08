@@ -464,6 +464,20 @@ export const observeResultSchema = z
           .describe(
             "True when DO is required and the known foreground activity is not distraction optimized.",
           ),
+        hostRenderedUi: z
+          .object({
+            kind: z.literal("carAppLibrary"),
+            hostPackage: z
+              .string()
+              .optional()
+              .describe("The car host that drew the templates, when its resource ids name it."),
+          })
+          .optional()
+          .describe(
+            "Present when the foreground screen is Car App Library templates drawn by the car host, not the app's own views. " +
+              "With hostPackage, template nodes from that host were seen; without it, only the foreground activity is CarAppActivity, which also covers the library's own connection-error screen. " +
+              "Absence means neither signal was seen (for example an incomplete capture), not proof that the screen is app-drawn.",
+          ),
       })
       .optional()
       .describe(

@@ -173,13 +173,8 @@ export class GetLogs {
     const maxLines = Math.min(request.maxLines ?? GET_LOGS_DEFAULT_MAX_LINES, GET_LOGS_MAX_LINES);
     const minPriority = request.minPriority ?? "V";
     if (device.platform === "ios" || device.platform === "watchos") {
-      return this.ios(
-        device.platform,
-        request,
-        { sinceSeconds, maxLines, minPriority },
-        warnings,
-        signal,
-      );
+      const window = { platform: device.platform, sinceSeconds, maxLines, minPriority };
+      return this.ios(request, window, warnings, signal);
     }
     if (device.platform !== "android") {
       // A platform without a log path never falls through to logcat (docs/decisions/watchos-platform.md).
@@ -211,13 +206,12 @@ export class GetLogs {
   }
 
   private async ios(
-    platform: "ios" | "watchos",
     request: GetLogsRequest,
-    window: GetLogsWindow,
+    window: GetLogsWindow & { platform: "ios" | "watchos" },
     warnings: string[],
     signal?: AbortSignal,
   ): Promise<GetLogsResult> {
-    const { sinceSeconds, maxLines, minPriority } = window;
+    const { platform, sinceSeconds, maxLines, minPriority } = window;
     const label = platform === "watchos" ? "watchOS" : "iOS";
     if (!request.appId) {
       throw new ActionableError(

@@ -22,3 +22,7 @@ twice, under `hierarchy` and under `windows[n].hierarchy`, as separate
 deserialized objects. The `EditText` therefore appears as two entries with
 different `source` references, which the #8998 test (one shared object) never
 exercised.
+
+| Files                                                                     | Capture                                                                                                                                                                                                                                                                                                            |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `leanback-headers-pane-focused.json`, `leanback-row-content-focused.json` | API 36 `android-tv` `tv_1080p` emulator, captured 2026-11-08 on main `ad27fab2b2b` with `observe project:full` in the Leanback fixture app. DPAD_LEFT x5 reaches the headers (Featured focused, card labels absent); then DPAD_RIGHT enters the content pane (Featured 01 focused, Featured 01–05 labels present). |

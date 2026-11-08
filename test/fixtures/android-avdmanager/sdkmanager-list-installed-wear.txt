@@ -1,0 +1,1 @@
+  system-images/android-37.0/android-wear-signed/arm64-v8a                      1.0.0                              Wear OS 7.0 ARM 64 v8a System Image (signed)              

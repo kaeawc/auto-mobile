@@ -105,7 +105,7 @@ const killProfileTool = defineDeviceTool({
   description:
     "Android: simulate an OEM background-kill policy (Samsung sleeping apps, Xiaomi autostart off, OnePlus " +
     "deep optimization, recents swipe, Motorola adaptive battery, user-restricted, exact alarms denied) on a " +
-    "stock device with standby buckets, appops, Doze and force-stop. Each profile reports its evidence status " +
+    "stock device with standby buckets, appops, Doze, permission revocation, foreground-change kills, timed screen-off cleanup, boot-receiver observations and force-stop. Each profile reports its evidence status " +
     "and each step applied | unsupported | failed. apply is idempotent and records the state before the first " +
     "change; reset restores it, and in a daemon session release or rebind does too. list shows the catalog " +
     "and the OEM behaviour that cannot be simulated. Simulates effects, not firmware.",

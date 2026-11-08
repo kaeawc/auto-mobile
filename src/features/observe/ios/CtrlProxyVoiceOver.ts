@@ -15,6 +15,8 @@ import type {
   CtrlProxyVoiceOverResult,
   CtrlProxyActionResult,
   CtrlProxyMagicTapResult,
+  CtrlProxyAccessibilityFocusResult,
+  AccessibilityFocusSelector,
 } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 import { combineWithAmbientAbort, getAbortSignal } from "../../../utils/AbortContext";
@@ -62,6 +64,37 @@ export class CtrlProxyVoiceOver {
 
   constructor(context: DelegateContext) {
     this.context = context;
+  }
+
+  async requestAccessibilityFocus(
+    selector: AccessibilityFocusSelector,
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<CtrlProxyAccessibilityFocusResult> {
+    const failure = (
+      error: string,
+      errorCode: CtrlProxyAccessibilityFocusResult["errorCode"] = "sdk_unavailable",
+    ): CtrlProxyAccessibilityFocusResult => ({
+      success: false,
+      errorCode,
+      error,
+      totalTimeMs: 0,
+    });
+    return sendCommand<CtrlProxyAccessibilityFocusResult>(this.context, {
+      idPrefix: "accessibilityFocus",
+      responseType: "accessibility_focus_result",
+      messageType: "request_accessibility_focus",
+      params: { ...selector },
+      timeoutMs,
+      perf,
+      abortSignal: signal,
+      cancelScreenshotBackoff: false,
+      notConnectedError: () => failure("Not connected to CtrlProxy"),
+      unsupportedCommandError: (_type, error) => failure(error, "unsupported"),
+      timeoutError: () =>
+        failure("Timeout waiting for accessibility_focus_result; focus may have been posted."),
+    });
   }
 
   /** Invoke the foreground app's SDK responder chain, even with VoiceOver off. */

@@ -26,7 +26,7 @@ final class PrototypeAgentRuntimeIsolationTests: XCTestCase {
     }
 
     private final class Services: PrototypeHapticsPlayer, PrototypeSoundPlayer,
-        PrototypeConnectivitySource, PrototypeLinkOpener
+        PrototypeConnectivitySource, PrototypeLinkOpener, PrototypeSettingsURLOpener
     {
         func perform(_: PrototypeHapticEffect) -> PrototypeFeedbackOutcome {
             XCTFail("Capability inspection must not play haptics")
@@ -40,6 +40,13 @@ final class PrototypeAgentRuntimeIsolationTests: XCTestCase {
 
         func start(_: @escaping @MainActor @Sendable (PrototypeConnectivityReading) -> Void) {
             XCTFail("Capability inspection must not start connectivity monitoring")
+        }
+
+        var appSettingsURL: URL? { URL(string: "app-settings:") }
+        var notificationSettingsURL: URL? { URL(string: "app-settings:notifications") }
+        func open(_: URL) async -> Bool {
+            XCTFail("Capability inspection must not open settings")
+            return false
         }
 
         func stop() {}
@@ -68,16 +75,18 @@ final class PrototypeAgentRuntimeIsolationTests: XCTestCase {
         let services = Services()
         let registries = [
             PrototypePlatformRegistry.feedbackModules(
-                haptics: services, sound: services, connectivity: services, links: services,
+                haptics: services, sound: services, connectivity: services, links: services, settings: services,
                 bundle: BundleWithAllKeys()
             ),
             PrototypePlatformRegistry.systemModules(
-                clipboard: FakePrototypeClipboard(), connectivity: services, links: services,
+                clipboard: FakePrototypeClipboard(), connectivity: services, links: services, settings: services,
                 bundle: BundleWithAllKeys()
             ),
         ]
         for registry in registries {
             XCTAssertFalse(registry.modules.isEmpty)
+            XCTAssertTrue(registry.capabilities.contains("prototype_platform_settings_v1"))
+            XCTAssertNotNil(registry.modules["settings"])
             for name in registry.modules.keys {
                 _ = try XCTUnwrap(contract.platformModules[name], "Unknown production module: \(name)")
                 XCTAssertNil(permissioned[name], "Permissioned production module: \(name)")

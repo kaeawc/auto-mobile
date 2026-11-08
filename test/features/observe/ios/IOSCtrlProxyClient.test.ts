@@ -38,6 +38,7 @@ import {
   installDeviceDataStreamSocketServerForTesting,
 } from "../../../../src/daemon/deviceDataStreamSocketServer";
 import { SimCtlClient } from "../../../../src/utils/ios-cmdline-tools/SimCtlClient";
+import { DevicectlPanelScreenshotSource } from "../../../../src/utils/ios-cmdline-tools/DevicectlPanelScreenshotSource";
 import { FakeIOSCtrlProxyManager } from "../../../fakes/FakeIOSCtrlProxyManager";
 import { PortManager } from "../../../../src/utils/PortManager";
 import { displayTransitions } from "../../../../src/features/observe/DisplayTransition";
@@ -187,6 +188,10 @@ describe("IOSCtrlProxyClient", function () {
       data: "runner",
     });
     const simctl = spyOn(SimCtlClient.prototype, "screenshot").mockResolvedValue(Buffer.alloc(0));
+    // No unique active live display: the stale hierarchy still must not pick a panel.
+    const live = spyOn(DevicectlPanelScreenshotSource.prototype, "readDisplays").mockResolvedValue(
+      [],
+    );
     try {
       expect((await ctrlProxyClient.requestScreenshot()).data).toBe("runner");
       expect(runner).toHaveBeenCalledTimes(1);
@@ -194,6 +199,7 @@ describe("IOSCtrlProxyClient", function () {
     } finally {
       runner.mockRestore();
       simctl.mockRestore();
+      live.mockRestore();
       displayTransitions.reset(testDevice.deviceId);
     }
   });

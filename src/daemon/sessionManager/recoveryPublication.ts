@@ -46,6 +46,7 @@ import {
   SessionReleaseSnapshot,
 } from "../sessionManager";
 import {
+  persistedCliIdleWindowMarker,
   type RehydrationRowOutcome,
   type PersistedSessionRecovery,
 } from "../sessionManager/internalContracts";
@@ -331,6 +332,7 @@ export class SessionRecoveryPublication {
       releaseReason,
       releasedAtMs,
       terminal: isTerminalReleaseReason(releaseReason),
+      ...persistedCliIdleWindowMarker(persisted),
       heartbeat: {
         lastHeartbeatMs: persisted.last_used_at_ms,
         hasReceivedHeartbeat: persisted.has_received_heartbeat === 1,

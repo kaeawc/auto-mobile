@@ -23,12 +23,19 @@ function scriptedFake(): ScriptedDeviceManager {
 
 // The real manager runs over stubbed emulator and simctl seams: no adb, no Xcode, no device.
 function scriptedReal(): ScriptedDeviceManager {
-  const images: Record<Platform, DeviceInfo[]> = { android: [], ios: [], watchos: [], tvos: [] };
+  const images: Record<Platform, DeviceInfo[]> = {
+    android: [],
+    ios: [],
+    watchos: [],
+    tvos: [],
+    visionos: [],
+  };
   const booted: Record<Platform, BootedDevice[]> = {
     android: [],
     ios: [],
     watchos: [],
     tvos: [],
+    visionos: [],
   };
   const failing = new Set<Platform>();
   const androidBooted = async (): Promise<BootedDevice[]> => {

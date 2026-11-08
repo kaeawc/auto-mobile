@@ -103,6 +103,18 @@ describe("PlanValidator", () => {
       expect(() => PlanValidator.validate(plan)).toThrow("do not mix formats");
     });
 
+    test("accepts an Apple TV device and refuses an Apple Watch device", () => {
+      const plan = (platform: string) => ({
+        name: "TV",
+        devices: [{ label: "tv", platform }],
+        steps: [{ tool: "pressButton", params: { button: "down", device: "tv" } }],
+      });
+      expect(() => PlanValidator.validateUntrusted(plan("tvos"))).not.toThrow();
+      expect(() => PlanValidator.validateUntrusted(plan("watchos"))).toThrow(
+        "Invalid device platform",
+      );
+    });
+
     test("throws with a platform message on invalid device platform", () => {
       const plan = {
         name: "Test",

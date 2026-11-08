@@ -1,0 +1,41 @@
+{
+  "description": "The delivered location.updated data for a fix carries only accuracyM and approximate. The Android and iOS runtimes replay these cases, so coordinates never leave the device in the event.",
+  "cases": [
+    {
+      "name": "precise fix with every optional field",
+      "fix": {
+        "latitude": 37.7749,
+        "longitude": -122.4194,
+        "accuracyM": 12.5,
+        "altitudeM": 16,
+        "speedMps": 3.2,
+        "bearingDeg": 270,
+        "timestampMs": 1700000000000,
+        "approximate": false
+      },
+      "expected": { "accuracyM": 12.5, "approximate": false }
+    },
+    {
+      "name": "approximate-only grant",
+      "fix": {
+        "latitude": 51.5,
+        "longitude": -0.12,
+        "accuracyM": 3000,
+        "timestampMs": 1700000001000,
+        "approximate": true
+      },
+      "expected": { "accuracyM": 3000, "approximate": true }
+    },
+    {
+      "name": "zero accuracy at the origin",
+      "fix": {
+        "latitude": 0,
+        "longitude": 0,
+        "accuracyM": 0,
+        "timestampMs": 0,
+        "approximate": false
+      },
+      "expected": { "accuracyM": 0, "approximate": false }
+    }
+  ]
+}

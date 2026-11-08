@@ -5,7 +5,7 @@ version: 2.1
 # REQUIRED dynamic-config project setting, and
 # docs/design-docs/ci/macos-capacity-plan.md for where every macOS job runs.
 #
-# CircleCI runs ONE macOS job at a time for this organization (#11010), so this
+# CircleCI runs ONE macOS job at a time for this organization (#11010), so the
 # file holds exactly three kinds of work:
 #
 # 1. Pull requests: only `ios-playground-tests` (advisory Playground design-system
@@ -126,6 +126,8 @@ commands:
           command: |
             bun_version="$(jq -r '.packageManager | sub("^bun@"; "")' package.json)"
             curl -fsSL https://bun.sh/install | bash -s "bun-v${bun_version}"
+            # The installer leaves no `bunx` on PATH here; bun runs as bunx when invoked by that name.
+            ln -sf "${HOME}/.bun/bin/bun" "${HOME}/.bun/bin/bunx"
             echo 'export PATH="${HOME}/.bun/bin:${PATH}"' >> "${BASH_ENV}"
 
   # Mirror of .github/actions/setup-auto-mobile-npm-package: Bun, ripgrep,
@@ -136,13 +138,23 @@ commands:
       - run:
           name: "Install ripgrep"
           command: |
-            if ! command -v rg >/dev/null 2>&1; then
-              bash .github/actions/setup-ripgrep/install-ripgrep.sh --install-dir "${HOME}/.local/bin"
-              echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${BASH_ENV}"
-            fi
+            mkdir -p ci-logs
+            {
+              if ! command -v rg >/dev/null 2>&1; then
+                bash .github/actions/setup-ripgrep/install-ripgrep.sh --install-dir "${HOME}/.local/bin"
+                echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${BASH_ENV}"
+              fi
+            } 2>&1 | tee -a ci-logs/setup.log
       - run:
           name: "Install dependencies"
-          command: bash scripts/ci/install-bun-deps.sh
+          # install-bun-deps.sh only puts node_modules/.bin on $GITHUB_PATH, so
+          # expose it here for bare `turbo` calls in later steps.
+          command: |
+            mkdir -p ci-logs
+            {
+              bash scripts/ci/install-bun-deps.sh
+              echo "export PATH=\"${PWD}/node_modules/.bin:\${PATH}\"" >> "${BASH_ENV}"
+            } 2>&1 | tee -a ci-logs/setup.log
       - run:
           name: "Build AutoMobile"
           environment:
@@ -150,10 +162,14 @@ commands:
             TURBO_NO_UPDATE_NOTIFIER: "1"
             DO_NOT_TRACK: "1"
             NO_COLOR: "1"
-          command: bunx turbo run build --output-logs=errors-only
+          command: |
+            mkdir -p ci-logs
+            { bun x turbo run build --output-logs=errors-only; } 2>&1 | tee -a ci-logs/setup.log
       - run:
           name: "Globally Install AutoMobile"
-          command: bun add -g .
+          command: |
+            mkdir -p ci-logs
+            { bun add -g .; } 2>&1 | tee -a ci-logs/setup.log
 
   # Post-merge coalescing (#11010): halt (successfully) when a newer main commit
   # changes the same path group, because that commit's pipeline runs this job on

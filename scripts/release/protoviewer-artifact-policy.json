@@ -23,6 +23,11 @@
         "permission": "android.permission.DUMP"
       },
       {
+        "kind": "provider",
+        "name": "dev.jasonpearson.automobile.protoviewer.McpProvider",
+        "permission": "android.permission.DUMP"
+      },
+      {
         "kind": "receiver",
         "name": "androidx.profileinstaller.ProfileInstallReceiver",
         "permission": "android.permission.DUMP"

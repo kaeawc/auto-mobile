@@ -7,7 +7,6 @@ import type { ProtoViewerShareFiles } from "../../features/prototype/protoViewer
 import type { DeviceWindowCacheInvalidator } from "../../features/observe/DeviceWindowCacheInvalidator";
 import type { HierarchyCapture } from "../../features/observe/HierarchyCapture";
 import type { PrototypeResult } from "../../features/observe/android/ctrlProxyProtocol";
-import type { PrototypeAdbReverseManager } from "../../features/prototype/PrototypeAdbReverseManager";
 import type { PrototypeCommitGenerations } from "../../features/prototype/PrototypeCommitGenerations";
 import type { PrototypeEventCoordinator } from "../../features/prototype/PrototypeEventCoordinator";
 import type { PrototypeStatusStore } from "../../features/prototype/PrototypeStatusStore";
@@ -121,7 +120,6 @@ export type PrototypeHandlerDependencies = {
   target: PrototypeTarget;
   assetReaders: AssetReaders;
   commits: PrototypeCommitGenerations;
-  reverses: PrototypeAdbReverseManager;
   cacheInvalidator: DeviceWindowCacheInvalidator;
   now: () => number;
   timer?: Timer;

@@ -30,6 +30,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.desktop.core.daemon.awaitFreshScreenshot
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.shell.VerticalSplitOptions
 import dev.jasonpearson.automobile.desktop.core.shell.VerticalSplitPane
@@ -37,7 +38,6 @@ import java.util.Base64
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -70,52 +70,66 @@ internal fun DeviceColumnView(
           .focusDeviceColumn(column, focused, onAction),
     ) {
       DeviceColumnHeader(column, displayName, onAction)
-      val tool = column.activeTool
-      VerticalSplitPane(
-        options =
-          VerticalSplitOptions(
-            showSecond = tool != null,
-            firstPaneFraction = firstPaneFraction(column),
-            minFirstDp = 48.dp,
-            minSecondDp = 48.dp,
-            onFractionChanged = {
-              onAction(WorkspaceAction.SetFirstPaneFraction(column.deviceId, it))
-            },
-          ),
-        first = {
-          PaneMainContent(
-            column = column,
-            onAction = onAction,
-            modifier = Modifier.fillMaxSize(),
-            options =
-              PaneContent(
-                inspectContent = inspectContent,
-                streamContent = streamContent,
-                observationStreamFactory = observationStreamFactory,
-                screenshotSaver = screenshotSaver,
-                externalCaptureRequest = externalCaptureRequest,
-              ),
-          )
-        },
-        second = {
-          if (tool != null) {
-            DockedFacet(
-              column = column,
-              tool = tool,
-              onAction = onAction,
-              modifier = Modifier.fillMaxSize(),
-              options =
-                DockedFacetContent(
-                  facetContent = facetContent,
-                  canDiff = canDiff,
-                ),
-            )
-          }
-        },
-        modifier = Modifier.weight(1f),
-      )
+      if (column.sessionEnded) {
+        // No stream or facet may compose here: each would re-attach to the dead epoch.
+        DeviceSessionEndedPane(Modifier.weight(1f).fillMaxWidth())
+      } else {
+        PaneSplit(column, onAction, Modifier.weight(1f))
+      }
     }
   }
+}
+
+@Composable
+private fun DeviceColumnContent.PaneSplit(
+  column: DeviceColumn,
+  onAction: (WorkspaceAction) -> Unit,
+  modifier: Modifier,
+) {
+  val tool = column.activeTool
+  VerticalSplitPane(
+    options =
+      VerticalSplitOptions(
+        showSecond = tool != null,
+        firstPaneFraction = firstPaneFraction(column),
+        minFirstDp = 48.dp,
+        minSecondDp = 48.dp,
+        onFractionChanged = {
+          onAction(WorkspaceAction.SetFirstPaneFraction(column.deviceId, it))
+        },
+      ),
+    first = {
+      PaneMainContent(
+        column = column,
+        onAction = onAction,
+        modifier = Modifier.fillMaxSize(),
+        options =
+          PaneContent(
+            inspectContent = inspectContent,
+            streamContent = streamContent,
+            observationStreamFactory = observationStreamFactory,
+            screenshotSaver = screenshotSaver,
+            externalCaptureRequest = externalCaptureRequest,
+          ),
+      )
+    },
+    second = {
+      if (tool != null) {
+        DockedFacet(
+          column = column,
+          tool = tool,
+          onAction = onAction,
+          modifier = Modifier.fillMaxSize(),
+          options =
+            DockedFacetContent(
+              facetContent = facetContent,
+              canDiff = canDiff,
+            ),
+        )
+      }
+    },
+    modifier = modifier,
+  )
 }
 
 /**
@@ -190,16 +204,11 @@ internal fun StreamArea(
         onHandledCapture(externalCaptureRequest)
       }
 
-      // Each Screenshot tap bumps captureRequest, re-running this effect: open a fresh per-device
-      // stream,
-      // ask for an observation, take the first screenshot frame the subscription delivers, write
-      // its
-      // PNG
-      // bytes to disk, and report where. Bounded by a timeout so a gone device can't hang the
-      // coroutine,
-      // and the stream is always disposed — including on cancellation when the pane closes or a
-      // newer
-      // tap
+      // Each Screenshot tap bumps captureRequest, re-running this effect: lease the device's
+      // stream (the hub's shared one when the app has a hub, otherwise a fresh per-device stream),
+      // take the first screenshot captured after the tap, write its PNG bytes to disk, and report
+      // where. Bounded by a timeout so a gone device can't hang the coroutine, and the stream is
+      // always released, including on cancellation when the pane closes or a newer tap
       // supersedes it.
       CaptureScreenshot(memory, column)
 
@@ -302,6 +311,19 @@ internal fun DockedFacet(
  * [WorkspaceShell]'s `streamContent` slot; tests and previews keep this so composing the shell
  * never opens a relay socket.
  */
+/** Body of a pane whose device epoch ended with no successor; the header's ✕ closes it. */
+@Composable
+internal fun DeviceSessionEndedPane(modifier: Modifier) {
+  Box(
+    modifier.semantics { contentDescription = DEVICE_SESSION_ENDED_DESCRIPTION },
+    contentAlignment = Alignment.Center,
+  ) {
+    Text("Device disconnected", color = MaterialTheme.colorScheme.outline)
+  }
+}
+
+internal const val DEVICE_SESSION_ENDED_DESCRIPTION = "Device disconnected"
+
 @Composable
 fun WorkspaceStreamPlaceholder() {
   Text("stream", color = MaterialTheme.colorScheme.outline)
@@ -341,9 +363,14 @@ internal fun Modifier.focusDeviceColumn(
 @Composable
 internal fun StreamContent.CaptureScreenshot(memory: StreamCaptureMemory, column: DeviceColumn) {
   with(memory) {
+    // With a hub the capture leases the pane's shared stream, so it opens no socket of its own.
+    val streamFactory =
+      hubObservationFactory(LocalDaemonStreamHub.current, column) {
+        observationStreamFactory(column.deviceId)
+      }
     LaunchedEffect(column.deviceId, captureRequest) {
       if (captureRequest == 0) return@LaunchedEffect
-      val stream = observationStreamFactory(column.deviceId)
+      val stream = streamFactory()
       try {
         val base64 =
           withContext(ioDispatcher) {
@@ -352,11 +379,9 @@ internal fun StreamContent.CaptureScreenshot(memory: StreamCaptureMemory, column
               column.deviceId,
               deviceSessionUuid = column.deviceSessionUuid,
             )
-            stream.requestObservation(column.deviceId)
+            // Never the frame a shared stream replays: it can be one cadence interval old.
             withTimeoutOrNull(SCREENSHOT_CAPTURE_TIMEOUT_MS) {
-              stream.screenshotUpdates
-                .first { !it.screenshotBase64.isNullOrEmpty() }
-                .screenshotBase64
+              stream.awaitFreshScreenshot(column.deviceId).screenshotBase64
             }
           }
         savedNotice =

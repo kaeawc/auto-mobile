@@ -11,7 +11,7 @@ import type { ViewHierarchy, HierarchyReadOptions } from "../interfaces/ViewHier
 import type { Timer } from "../../../utils/SystemTimer";
 import type { AdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { extractHierarchyScreenSize } from "../hierarchyScreenSize";
+import { resolveActionableHierarchyScreenSize } from "../HierarchyNormalization";
 
 export interface HierarchyCollectOptions {
   queryOptions?: ViewHierarchyQueryOptions;
@@ -294,7 +294,11 @@ export class HierarchyCollector {
     viewHierarchy: ObserveResult["viewHierarchy"],
     iosMultiPanel = false,
   ): { width: number; height: number } | null {
-    return extractHierarchyScreenSize(viewHierarchy, iosMultiPanel);
+    // A projected capture records its size: re-deriving it from the corrected root plus the
+    // runner's stale pixel metadata would swap a Duo inner panel back to portrait (#17306).
+    return viewHierarchy
+      ? resolveActionableHierarchyScreenSize(viewHierarchy, iosMultiPanel)
+      : null;
   }
 
   /**

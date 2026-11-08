@@ -1,0 +1,54 @@
+{
+  "success": true,
+  "packageName": "com.google.android.contacts",
+  "observation": {
+    "updatedAt": "2026-11-07T00:00:00.000Z",
+    "screenSize": { "width": 1080, "height": 2400 },
+    "systemInsets": { "top": 0, "right": 0, "bottom": 0, "left": 0 },
+    "activeWindow": {
+      "appId": "com.google.android.permissioncontroller",
+      "activityName": "com.google.android.apps.contacts.activities.PeopleActivity",
+      "layoutSeqSum": 0,
+      "type": "notification_permission_dialog"
+    },
+    "notificationPermissionDetected": true,
+    "viewHierarchy": {
+      "hierarchy": {},
+      "packageName": "com.google.android.permissioncontroller"
+    },
+    "elements": {
+      "clickable": [
+        {
+          "bounds": { "left": 28, "top": 824, "right": 1052, "bottom": 1645 },
+          "resource-id": "com.android.permissioncontroller:id/grant_singleton",
+          "package": "com.google.android.permissioncontroller",
+          "clickable": true
+        },
+        {
+          "bounds": { "left": 28, "top": 824, "right": 1052, "bottom": 1645 },
+          "resource-id": "com.android.permissioncontroller:id/grant_dialog",
+          "package": "com.google.android.permissioncontroller",
+          "content-desc": "Allow Contacts to send you notifications?",
+          "clickable": true
+        },
+        {
+          "bounds": { "left": 84, "top": 1374, "right": 996, "bottom": 1500 },
+          "resource-id": "com.android.permissioncontroller:id/permission_allow_button",
+          "package": "com.google.android.permissioncontroller",
+          "text": "Allow",
+          "clickable": true
+        },
+        {
+          "bounds": { "left": 84, "top": 1500, "right": 996, "bottom": 1626 },
+          "resource-id": "com.android.permissioncontroller:id/permission_deny_button",
+          "package": "com.google.android.permissioncontroller",
+          "text": "Don’t allow",
+          "clickable": true
+        }
+      ],
+      "scrollable": [],
+      "text": [],
+      "media": []
+    }
+  }
+}

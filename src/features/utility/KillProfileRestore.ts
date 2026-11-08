@@ -23,7 +23,7 @@ export const defaultKillProfileShellFactory: KillProfileShellFactory = (device) 
 export interface KillProfileRestoreAction {
   /** `battery`, `deviceIdle`, `standbyBucket:<pkg>` or `appOp:<op>:<pkg>`. */
   key: string;
-  /** The package the facet belongs to; undefined for device-wide battery and Doze state. */
+  /** The package the facet belongs to; undefined for device-wide battery, Doze and screen state. */
   appId?: string;
   /**
    * The adb command that restores the facet, or null when the facet was already in the

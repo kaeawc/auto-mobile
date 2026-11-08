@@ -355,6 +355,25 @@ describe("pressButtonHandler (registered handler wiring)", () => {
     expect(response.isError).toBeUndefined();
     expect(parsePayload(response).message).toBe("Pressed button back");
   });
+
+  test("forwards a select hold duration to the press (#16734)", async () => {
+    const calls: unknown[] = [];
+    interactionDeps.pressButtonFactory = () => ({
+      execute: async (_button: string, call?: unknown) => {
+        calls.push(call);
+        return fakeResult({ success: true, button: "select", keyCode: 23, durationMs: 1200 });
+      },
+    });
+
+    const response = (await pressButtonHandler(
+      fakeDevice,
+      { button: "select", durationMs: 1200, platform: "android" },
+      { deps: interactionDeps },
+    )) as ToolResponse;
+    expect(response.isError).toBeUndefined();
+    expect(calls).toEqual([expect.objectContaining({ durationMs: 1200 })]);
+    expect(parsePayload(response)).toMatchObject({ durationMs: 1200 });
+  });
 });
 
 describe("rotateHandler (registered handler wiring)", () => {

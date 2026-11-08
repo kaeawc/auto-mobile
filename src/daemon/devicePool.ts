@@ -8,6 +8,7 @@ import {
   iosDeviceOwnershipFileSource,
   watchDeviceOwnershipFileSource,
   tvDeviceOwnershipFileSource,
+  visionDeviceOwnershipFileSource,
 } from "./foreignDeviceOwnership";
 export * from "./devicePoolParts/contracts";
 export { classifyPoolStatus, type GenericAvailability, type PoolStatusBucket } from "./deviceHold";
@@ -128,11 +129,16 @@ export class DevicePool {
       watchDeviceOwnershipFileSource,
     );
     const tv = new ForwardLeaseForeignDeviceOwnership(process.pid, tvDeviceOwnershipFileSource);
+    const vision = new ForwardLeaseForeignDeviceOwnership(
+      process.pid,
+      visionDeviceOwnershipFileSource,
+    );
     return new DevicePool({
       foreignDeviceOwnership: android,
       iosForeignDeviceOwnership: ios,
       watchForeignDeviceOwnership: watch,
       tvForeignDeviceOwnership: tv,
+      visionForeignDeviceOwnership: vision,
       ...deps,
     });
   }
@@ -660,6 +666,12 @@ export class DevicePool {
     ...args: Parameters<PoolOps["declareMcpSessionLivenessOwnerToken"]>
   ): ReturnType<PoolOps["declareMcpSessionLivenessOwnerToken"]> {
     return this.parts.connectionClaims.declareMcpSessionLivenessOwnerToken(...args);
+  }
+
+  connectionPresentsSessionOwnerToken(
+    ...args: Parameters<PoolOps["connectionPresentsSessionOwnerToken"]>
+  ): ReturnType<PoolOps["connectionPresentsSessionOwnerToken"]> {
+    return this.parts.connectionClaims.connectionPresentsSessionOwnerToken(...args);
   }
 
   beginMcpSessionOwnerCall(

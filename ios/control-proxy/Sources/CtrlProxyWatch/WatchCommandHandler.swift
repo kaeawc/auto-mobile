@@ -10,7 +10,8 @@ protocol WatchSnapshotSource {
 protocol WatchGesturePerformer {
     func tap(x: Double, y: Double) throws
     func tap(identifier: String) throws
-    func swipe(_ direction: WatchSwipeDirection) throws
+    func swipe(_ direction: WatchSwipeDirection, distance: Double?) throws
+    func typeText(_ text: String) throws
     func home() throws
     func rotateCrown(delta: Double, velocity: Double) throws
 }
@@ -71,7 +72,7 @@ struct WatchResponse: Codable {
 
 @MainActor
 final class WatchCommandHandler {
-    nonisolated static let supportedCommands = ["hierarchy", "tap", "swipe", "home", "crown"]
+    nonisolated static let supportedCommands = ["hierarchy", "tap", "swipe", "home", "crown", "type"]
 
     private let snapshotSource: any WatchSnapshotSource
     private let gestures: any WatchGesturePerformer
@@ -105,7 +106,16 @@ final class WatchCommandHandler {
                 }
             case "swipe":
                 let swipe = try JSONDecoder().decode(Swipe.self, from: data)
-                try gestures.swipe(swipe.direction)
+                if let distance = swipe.distance, !(distance.isFinite && distance > 0 && distance <= 1) {
+                    throw WatchCommandError.invalidRequest("swipe distance must be a finite fraction in (0, 1]")
+                }
+                try gestures.swipe(swipe.direction, distance: swipe.distance)
+            case "type":
+                let input = try JSONDecoder().decode(TextInput.self, from: data)
+                guard let text = input.text, !text.isEmpty else {
+                    throw WatchCommandError.invalidRequest("type requires non-empty text")
+                }
+                try gestures.typeText(text)
             case "home":
                 try gestures.home()
             case "crown":
@@ -145,6 +155,11 @@ final class WatchCommandHandler {
 
     private struct Swipe: Decodable {
         let direction: WatchSwipeDirection
+        let distance: Double?
+    }
+
+    private struct TextInput: Decodable {
+        let text: String?
     }
 
     private struct Crown: Decodable {

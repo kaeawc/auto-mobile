@@ -7,7 +7,7 @@ import { FakeIosSdkTriggerSender } from "../../fakes/FakeIosSdkTriggerSender";
 import { FakeDeviceTraits, androidDeviceTraits } from "../../fakes/FakeDeviceTraits";
 
 const iosDevice = {
-  deviceId: "00008101-001C711E0EE0001E",
+  deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
   platform: "ios",
   name: "iPhone",
 } as BootedDevice;
@@ -197,28 +197,103 @@ describe("Telephony", () => {
       });
     });
 
-    test("each phoneCall action maps to the callkit trigger of the same name", async () => {
-      for (const action of ["call", "accept", "cancel", "busy"] as const) {
+    test("physical iOS phoneCall is unsupported without sending an SDK trigger", async () => {
+      const physicalDevice = {
+        ...iosDevice,
+        deviceId: "00008101-001C711E0EE0001E",
+      };
+      telephony = new Telephony(physicalDevice, { iosSdkTriggers: () => sender });
+
+      const result = await telephony.phoneCall({ action: "call", phoneNumber: "5551234567" });
+
+      expect(result).toMatchObject({
+        success: false,
+        supported: false,
+        action: "call",
+        phoneNumber: "5551234567",
+      });
+      expect(result.error).toContain("needs the app's AutoMobile SDK on the iOS Simulator");
+      expect(result.error).toContain(
+        "a physical iOS device has no public API for call or SMS simulation",
+      );
+      expect(sender.requests).toEqual([]);
+    });
+
+    test("physical iOS sendSms is unsupported without sending an SDK trigger", async () => {
+      const physicalDevice = {
+        ...iosDevice,
+        deviceId: "00008101-001C711E0EE0001E",
+      };
+      telephony = new Telephony(physicalDevice, { iosSdkTriggers: () => sender });
+
+      const result = await telephony.sendSms({ phoneNumber: "5551234567", message: "hello" });
+
+      expect(result).toMatchObject({
+        success: false,
+        supported: false,
+        phoneNumber: "5551234567",
+        messageLength: 5,
+      });
+      expect(result.error).toContain("needs the app's AutoMobile SDK on the iOS Simulator");
+      expect(result.error).toContain(
+        "a physical iOS device has no public API for call or SMS simulation",
+      );
+      expect(sender.requests).toEqual([]);
+    });
+
+    test("call/cancel/busy map to the callkit trigger of the same name", async () => {
+      for (const action of ["call", "cancel", "busy"] as const) {
         const result = await telephony.phoneCall({ action, phoneNumber: "+15551234567" });
         expect(result).toMatchObject({ success: true, supported: true, action });
         expect(result.message).toContain("CallKit");
       }
-      const hold = await telephony.phoneCall({ action: "hold" });
-      expect(hold.success).toBe(true);
 
       expect(sender.requests).toEqual([
         { module: "callkit", trigger: "call", payload: { phoneNumber: "+15551234567" } },
-        { module: "callkit", trigger: "accept", payload: { phoneNumber: "+15551234567" } },
         { module: "callkit", trigger: "cancel", payload: { phoneNumber: "+15551234567" } },
         { module: "callkit", trigger: "busy", payload: { phoneNumber: "+15551234567" } },
-        { module: "callkit", trigger: "hold" },
       ]);
     });
 
+    // Owner decision on #1581, option (a): the simulator's call service ends a call
+    // the moment CallKit is asked to answer or hold it, so these are a documented
+    // simulator limit. No trigger is sent (it would end the ringing call).
+    test("accept and hold report supported:partial with a reason and send no trigger", async () => {
+      const accept = await telephony.phoneCall({ action: "accept", phoneNumber: "+15551234567" });
+      const hold = await telephony.phoneCall({ action: "hold" });
+
+      expect(accept).toMatchObject({
+        success: false,
+        supported: "partial",
+        reason: "ios_simulator_callkit_limit",
+        action: "accept",
+        phoneNumber: "+15551234567",
+      });
+      expect(hold).toMatchObject({
+        success: false,
+        supported: "partial",
+        reason: "ios_simulator_callkit_limit",
+        action: "hold",
+      });
+      expect(accept.message).toContain("iOS Simulator cannot accept or hold");
+      expect(accept.error).toBeUndefined();
+      expect(sender.requests).toEqual([]);
+    });
+
+    test("physical iOS accept stays supported:false, not partial", async () => {
+      telephony = new Telephony(
+        { ...iosDevice, deviceId: "00008101-001C711E0EE0001E" },
+        { iosSdkTriggers: () => sender },
+      );
+      const result = await telephony.phoneCall({ action: "accept", phoneNumber: "5551234567" });
+      expect(result).toMatchObject({ success: false, supported: false });
+      expect(result.reason).toBeUndefined();
+    });
+
     test("phoneNumber is still required except for hold, before any trigger", async () => {
-      const result = await telephony.phoneCall({ action: "accept" });
+      const result = await telephony.phoneCall({ action: "cancel" });
       expect(result.success).toBe(false);
-      expect(result.error).toContain("phoneNumber is required for action 'accept'");
+      expect(result.error).toContain("phoneNumber is required for action 'cancel'");
       expect(sender.requests).toEqual([]);
     });
 
@@ -291,7 +366,7 @@ describe("Telephony", () => {
         reason: "no_call_for_number",
         totalTimeMs: 0,
       };
-      const result = await telephony.phoneCall({ action: "accept", phoneNumber: "555" });
+      const result = await telephony.phoneCall({ action: "cancel", phoneNumber: "555" });
       expect(result.error).toBe(
         "phoneCall on iOS failed in the app's AutoMobile SDK: no_call_for_number.",
       );
@@ -311,7 +386,7 @@ describe("Telephony", () => {
 
     test("a thrown runner error becomes a typed failure", async () => {
       sender.error = new Error("socket closed");
-      const result = await telephony.phoneCall({ action: "hold" });
+      const result = await telephony.phoneCall({ action: "call", phoneNumber: "555" });
       expect(result.success).toBe(false);
       expect(result.error).toContain("socket closed");
     });

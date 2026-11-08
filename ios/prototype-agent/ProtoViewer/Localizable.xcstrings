@@ -1,6 +1,17 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Copy diagnostics": {
+      "comment": "PrototypeScreen actions menu: copies app and OS versions, renderer capabilities and fixed failure codes to the clipboard for support. Does not copy prototype content.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy diagnostics"
+          }
+        }
+      }
+    },
     "Network on": {
       "comment": "PrototypeScreen chrome: Label, message, or action in this screen.",
       "localizations": {

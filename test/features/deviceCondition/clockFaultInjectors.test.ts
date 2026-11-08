@@ -9,6 +9,7 @@ import { deviceConditionInputSchema } from "../../../src/features/deviceConditio
 import { resolveIosRefusalInjector } from "../../../src/features/deviceCondition/iosRefusalInjector";
 import { DeviceClockRestoreRegistry } from "../../../src/features/utility/DeviceClock";
 import { FakeDeviceClockAdapter } from "../../fakes/FakeDeviceClockAdapter";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 const HOST_NOW = Date.parse("2026-10-28T12:00:00Z");
 const DAY = 86_400;
@@ -28,9 +29,13 @@ function harness(device: BootedDevice = emulator, automaticTime: 0 | 1 = 1): Har
   clock.automaticTime = automaticTime;
   const registry = new DeviceClockRestoreRegistry();
   const invalidated: string[] = [];
+  // Auto-advance resolves the restore read-back's settle waits without real delays.
+  const hostClock = new FakeTimer();
+  hostClock.setCurrentTime(HOST_NOW);
+  hostClock.enableAutoAdvance();
   const injector = createClockSkewFaultInjector(device, {
     adapter: () => clock,
-    hostClock: { now: () => HOST_NOW },
+    hostClock,
     registry,
     invalidate: (deviceId) => invalidated.push(deviceId),
   });

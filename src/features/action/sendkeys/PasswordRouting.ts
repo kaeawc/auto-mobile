@@ -5,7 +5,7 @@ import type { KeyEventPlan } from "../../../utils/android-cmdline-tools/asciiKey
 import { hasFocusedTextInput } from "../ClearText";
 import { focusedImeFieldClass } from "../imeFailureDiagnostics";
 import {
-  ANDROID_TYPE_FOCUSED_INPUT_ERROR,
+  NoFocusedEditableError,
   isPrintableAscii,
   segmentGraphemes,
 } from "./AndroidTypingConstants";
@@ -144,7 +144,7 @@ export class PasswordRouting {
       // Auto insert already reads focus for password routing. Reject before dispatch
       // rather than trusting an IME acknowledgement with no readable editable target.
       if (operation === "insert" && this.deps.targetLayer() !== "prototype") {
-        throw new ActionableError(ANDROID_TYPE_FOCUSED_INPUT_ERROR);
+        throw new NoFocusedEditableError();
       }
       // Replace still dispatches; distinguish absent focus from a focused non-password field.
       return undefined;

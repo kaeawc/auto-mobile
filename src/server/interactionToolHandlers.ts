@@ -1,3 +1,4 @@
+import { sendKeysToAppleRunner } from "../features/visionos/AppleRunnerActionDispatch";
 import {
   ActionableError,
   BootedDevice,
@@ -41,7 +42,6 @@ import type {
 } from "./interactionTools/dependencies";
 import { IOSCtrlProxyClient, type IosCtrlProxy } from "../features/observe/ios";
 import { HandleIntentChooser } from "../features/action/HandleIntentChooser";
-import { tvosSendKeys } from "../features/tvos/TvosActions";
 import { SendKeys } from "../features/action/SendKeys";
 import { TapOnElement } from "../features/action/TapOnElement";
 import { nodeAttributes } from "../models/ViewHierarchyResult";
@@ -298,6 +298,15 @@ export const buildOpenLinkPayload = (
     candidates: waitOutcome.candidates,
   };
 };
+
+/**
+ * An openLink call succeeds only when the link opened and, with a waitFor, the wait matched.
+ * A timed-out wait keeps its diagnostics in the payload but marks the envelope isError (#16902).
+ */
+export const openLinkSucceeded = (
+  openResult: Pick<OpenURLResult, "success">,
+  waitOutcome: Pick<OpenLinkWaitOutcome, "awaitTimeout"> | null,
+): boolean => openResult.success && !waitOutcome?.awaitTimeout;
 
 export function formatClipboardMessage(result: ClipboardResult): string {
   if (!result.success) {
@@ -742,8 +751,8 @@ export const createSendKeysHandler =
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
-    if (device.platform === "tvos") {
-      const result = await tvosSendKeys(device.deviceId, args.commands, args.selector, {
+    if (device.platform !== "android" && device.platform !== "ios") {
+      const result = await sendKeysToAppleRunner(device, args.commands, args.selector, {
         ...args,
         signal,
       });
@@ -884,7 +893,7 @@ export const createOpenLinkHandler =
     const response = createStructuredToolResponse(
       buildOpenLinkPayload(args.url, effectiveResult, waitOutcome),
     );
-    return withIsErrorOnFailure(response, effectiveResult.success);
+    return withIsErrorOnFailure(response, openLinkSucceeded(effectiveResult, waitOutcome));
   };
 
 export const createShakeHandler =

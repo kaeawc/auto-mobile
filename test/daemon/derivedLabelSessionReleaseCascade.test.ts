@@ -181,6 +181,35 @@ describe("derived label sessions are released with their base (#11091)", () => {
     expect(elsewhere.abortController.signal.aborted).toBe(false);
   });
 
+  // #16971: a label ended by its base's cli-idle-timeout reports the base's window, the one that
+  // expired, on its cut call and on its own release.
+  test.each([
+    ["cli-idle-timeout", 300_000],
+    ["explicit-release", undefined],
+  ] as const)(
+    "a label ended by its base's %s reports the base's cli idle window only for that reason",
+    async (reason, expectedWindowMs) => {
+      manager.adoptCliLivenessPolicy("base", 300_000);
+      const onDerived = tracker.startExecution("input/tap", undefined, "base:B");
+      tracker.bindDeviceExecution(onDerived.id, "device-B");
+
+      await manager.releaseSession("base", reason);
+      await cascade.settled();
+
+      expect(sessionReleaseThatCancelledCall(onDerived.cancelReason)?.details).toEqual({
+        sessionUuid: "base:B",
+        reason,
+        ...(reason === "cli-idle-timeout" ? { idle: true } : {}),
+        ...(expectedWindowMs === undefined ? {} : { idleTimeoutMs: expectedWindowMs }),
+      });
+      for (const label of ["base:B", "base:C"]) {
+        const release = manager.getTerminalReleaseSnapshot(label);
+        expect(release?.releaseReason).toBe(reason);
+        expect(release?.cliIdleTimeoutMs).toBe(expectedWindowMs);
+      }
+    },
+  );
+
   test("the index survives the base's cache losing its label map", async () => {
     manager.clearSessionCache("base");
     expect(manager.getDeviceLabels("base")).toBeUndefined();

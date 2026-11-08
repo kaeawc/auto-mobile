@@ -195,7 +195,7 @@ describe("selected-display observe retry", () => {
     expect(h.timer.getSleepHistory()).toEqual([]);
   });
 
-  test("explicit observer failure keeps its existing display-routing refusal", async () => {
+  test("explicit observer failure preserves the hierarchy failure", async () => {
     const h = selectedDisplayHarness({
       read: () => {
         throw new Error("Device fake hierarchy read timed out");
@@ -203,9 +203,7 @@ describe("selected-display observe retry", () => {
     });
     await expect(
       h.screen.execute({ ...readOptions, observerMode: true, display: "inner" }),
-    ).rejects.toThrow(
-      "CtrlProxy APK too old for display routing; update it and retry the observation.",
-    );
+    ).rejects.toThrow("Device fake hierarchy read timed out");
     expect(h.capture.requests).toHaveLength(1);
     expect(h.timer.getSleepHistory()).toEqual([]);
   });
@@ -231,4 +229,17 @@ describe("selected-display observe retry", () => {
       }
     },
   );
+});
+
+test("explicit observer preserves an untracked-display refusal through final binding", async () => {
+  const refusal =
+    "Display 2 exposes no accessibility windows on this device: the accessibility service does not track this display (overlay displays are not tracked).";
+  const h = selectedDisplayHarness({
+    read: () => {
+      throw new DisplaySelectionError(refusal);
+    },
+  });
+  await expect(
+    h.screen.execute({ ...readOptions, observerMode: true, display: "inner" }),
+  ).rejects.toThrow(refusal);
 });

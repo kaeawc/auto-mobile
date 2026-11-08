@@ -75,6 +75,11 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
     reason: "Read-only prebuilt tvOS runner artifact.",
   },
   {
+    name: "AUTOMOBILE_VISIONOS_RUNNER_XCTESTRUN",
+    kind: "input",
+    reason: "Read-only prebuilt visionOS runner artifact.",
+  },
+  {
     name: "AUTOMOBILE_WATCH_RUNNER_XCTESTRUN",
     kind: "input",
     reason: "Read-only prebuilt watchOS runner artifact.",
@@ -156,6 +161,11 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
     name: "AUTOMOBILE_IOS_PROTOTYPE_VIEWER",
     kind: "input",
     reason: "Read-only viewer template archive.",
+  },
+  {
+    name: "AUTOMOBILE_ANDROID_PROTOTYPE_APP_TEMPLATE",
+    kind: "input",
+    reason: "Read-only disposable-app template directory.",
   },
 ];
 /** Non-path product reads, derived from the same AST scan as docs conformance.
@@ -274,6 +284,8 @@ export const NON_PATH_ENV_VARIABLES: readonly string[] = [
   "AUTOMOBILE_PORT_RANGE_END",
   "AUTOMOBILE_PORT_RANGE_SIZE",
   "AUTOMOBILE_PORT_RANGE_START",
+  "AUTOMOBILE_PORT_REVERSE_ALLOWED_PORTS",
+  "AUTOMOBILE_PORT_REVERSE_RECONCILE_INTERVAL_MS",
   "AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS",
   "AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS",
   "AUTOMOBILE_REQUIRE_VIDEO_SERVER",

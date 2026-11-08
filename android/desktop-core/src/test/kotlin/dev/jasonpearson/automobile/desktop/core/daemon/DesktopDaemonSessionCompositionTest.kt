@@ -327,23 +327,71 @@ internal class DesktopDaemonSessionCompositionTest : DesktopDaemonSessionComposi
     }
 
   @Test
-  fun `daemon release reasons map to notice reasons (#10730)`() {
+  fun `every daemon release reason maps to a notice reason (#10730, #11365)`() {
+    // Every literal and family in src/models/releaseReasons.ts, plus the proxy-local reasons.
     val expected =
       mapOf(
-        "cleanup-expired" to SessionReleaseReason.IDLE,
-        "lazy-expiry" to SessionReleaseReason.IDLE,
-        "autolock" to SessionReleaseReason.IDLE,
-        "heartbeat-timeout" to SessionReleaseReason.HEARTBEAT_LAPSED,
-        "owner-disconnected" to SessionReleaseReason.HEARTBEAT_LAPSED,
-        "daemon-shutdown" to SessionReleaseReason.DAEMON_RESTARTED,
-        "device-restart:Pixel_8" to SessionReleaseReason.DAEMON_RESTARTED,
         "explicit-release" to SessionReleaseReason.DAEMON_RELEASED,
+        "lazy-expiry" to SessionReleaseReason.IDLE,
+        "cleanup-expired" to SessionReleaseReason.IDLE,
+        "cli-idle-timeout" to SessionReleaseReason.IDLE,
+        "missing-first-heartbeat" to SessionReleaseReason.HEARTBEAT_LAPSED,
+        "heartbeat-timeout" to SessionReleaseReason.HEARTBEAT_LAPSED,
+        "rehydration-owner-timeout" to SessionReleaseReason.DAEMON_RELEASED,
+        "restart-recovery-timeout" to SessionReleaseReason.DAEMON_RELEASED,
+        "owner-disconnected" to SessionReleaseReason.HEARTBEAT_LAPSED,
+        "binding-ownership-lost" to SessionReleaseReason.DAEMON_RELEASED,
+        "managed-slot-ownership-lost" to SessionReleaseReason.DAEMON_RELEASED,
+        "device-killed" to SessionReleaseReason.DAEMON_RELEASED,
+        "session-creation-cancelled" to SessionReleaseReason.DAEMON_RELEASED,
+        "session-creation-timeout" to SessionReleaseReason.DAEMON_RELEASED,
+        "allocation-rollback" to SessionReleaseReason.DAEMON_RELEASED,
+        "plan-auto-release" to SessionReleaseReason.DAEMON_RELEASED,
+        "superseded" to SessionReleaseReason.DAEMON_RELEASED,
+        "daemon-shutdown" to SessionReleaseReason.DAEMON_RESTARTED,
+        "daemon-restart" to SessionReleaseReason.DAEMON_RESTARTED,
+        "expired" to SessionReleaseReason.IDLE,
+        "identity-recovery-owned-by-other-daemon" to SessionReleaseReason.DAEMON_RELEASED,
+        "device-disconnected:emulator-5554" to SessionReleaseReason.DAEMON_RELEASED,
+        "device-disconnected-during-session-create:emulator-5554" to
+          SessionReleaseReason.DAEMON_RELEASED,
+        "device-restart:Pixel_8" to SessionReleaseReason.DAEMON_RESTARTED,
+        "replay-lease-expired" to SessionReleaseReason.IDLE,
+        "session-not-found" to SessionReleaseReason.DAEMON_RELEASED,
+        "liveness-owner-conflict" to SessionReleaseReason.DAEMON_RELEASED,
+        "released" to SessionReleaseReason.DAEMON_RELEASED,
+        // Stale wordings no daemon sends any more are no longer special.
+        "idle" to SessionReleaseReason.DAEMON_RELEASED,
+        "autolock" to SessionReleaseReason.DAEMON_RELEASED,
         "something-new" to SessionReleaseReason.DAEMON_RELEASED,
       )
     expected.forEach { (daemonReason, reason) ->
       assertEquals(reason, SessionReleaseReason.fromDaemon(daemonReason), daemonReason)
     }
     assertEquals(SessionReleaseReason.DAEMON_RELEASED, SessionReleaseReason.fromDaemon(null))
+  }
+
+  @Test
+  fun `the daemon's idle flag makes any release reason an idle release (#11365)`() {
+    assertEquals(SessionReleaseReason.IDLE, SessionReleaseReason.fromDaemon("a-new-idle", true))
+    assertEquals(SessionReleaseReason.IDLE, SessionReleaseReason.fromDaemon(null, idle = true))
+  }
+
+  @Test
+  fun `a heartbeat answer carrying idle shows the idle notice (#11365)`() = runComposeUiTest {
+    val transport = RecordingDaemonTransport()
+    val host = start(transport, listOf(pixel))
+    assertTrue(input(host, pixel.deviceId))
+    tick()
+
+    transport.releasedSessions += "session-1"
+    transport.releaseReasons["session-1"] = "a-future-idle-reason"
+    transport.idleReleases += "session-1"
+    tick()
+    settle()
+    repeat(2) { tick() }
+
+    assertEquals(SessionReleaseReason.IDLE, host.state().releaseReason)
   }
 
   @Test

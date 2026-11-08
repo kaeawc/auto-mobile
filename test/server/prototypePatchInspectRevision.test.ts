@@ -37,7 +37,6 @@ function shownPrototype(
         },
         supportsPatch: async () => true,
         specRefusal: async () => undefined,
-        settleSpec: async () => {},
         platform: "android",
         queue: createPrototypePatchQueue(),
         retire: () => {},

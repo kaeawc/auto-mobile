@@ -11,7 +11,12 @@ import {
 import { TargetFocus } from "./sendkeys/TargetFocus";
 import { TargetState } from "./sendkeys/TargetState";
 import { CommandRunner } from "./sendkeys/CommandRunner";
-import { withImeEditorWarnings, type ImeEditorState } from "./sendkeys/ImeEditorState";
+import {
+  hasImeKeyboardHiddenChange,
+  readImeEditorState,
+  withImeEditorWarnings,
+  type ImeEditorState,
+} from "./sendkeys/ImeEditorState";
 import {
   SendKeysRequestBudget,
   isSendKeysBudgetExhausted,
@@ -62,6 +67,8 @@ import { FieldTypeDetector } from "./FieldTypeDetector";
 import { iosSdkBridgeTarget } from "../observe/ios/iosSdkObservationMerge";
 import { iosSdkWebValueTarget } from "../observe/ios/iosSdkWebMerge";
 import { type KeyboardIdentity } from "./AndroidImeCatalog";
+
+const IME_KEYBOARD_HIDDEN_SETTLE_MS = 400;
 
 export { DefaultSendKeysCommandExecutor };
 export type { SendKeysPlatformDependencies };
@@ -682,24 +689,25 @@ export class SendKeys {
     return this.requestBudget.executeBoundedIosIme(commands, key, options);
   }
 
-  private async executeUnbounded(
-    commands: SendKeysCommand[],
-    selector?: SendKeysSelector,
-    progress?: ProgressCallback,
-    { signal, ...routing }: SendKeysRouting & { signal?: AbortSignal } = {},
-  ): Promise<SendKeysResult> {
-    signal?.throwIfAborted();
-    const preflight = this.preflightCommands(commands);
-    const observe = async (minTimestamp?: number) => {
-      await progress?.(commands.length, commands.length, "Observing final keyboard input state");
-      const capture = this.observer.captureScreenshot?.bind(this.observer);
-      const observation = await this.observer.execute({
-        ...(routing.display === undefined ? {} : { display: routing.display }),
+  /** Split hierarchy reads from evidence capture so only the reported frame is captured. */
+  private terminalObservers(
+    commandCount: number,
+    progress: ProgressCallback | undefined,
+    display: string | undefined,
+    signal?: AbortSignal,
+  ) {
+    const capture = this.observer.captureScreenshot?.bind(this.observer);
+    const observeHierarchy = async (minTimestamp?: number) => {
+      await progress?.(commandCount, commandCount, "Observing final keyboard input state");
+      return this.observer.execute({
+        ...(display === undefined ? {} : { display }),
         signal,
         freshness: "fresh",
         minTimestamp,
         ...(capture ? { skipScreenshot: true, skipAccessibilityAudit: true } : {}),
       });
+    };
+    const captureObservation = async (observation: ObserveResult) => {
       if (
         capture &&
         !deferTerminalScreenshot(observation, (chosen, requestSignal) =>
@@ -708,6 +716,27 @@ export class SendKeys {
       ) {
         await capture(undefined, { signal, observation });
       }
+    };
+    return { observeHierarchy, captureObservation };
+  }
+
+  private async executeUnbounded(
+    commands: SendKeysCommand[],
+    selector?: SendKeysSelector,
+    progress?: ProgressCallback,
+    { signal, ...routing }: SendKeysRouting & { signal?: AbortSignal } = {},
+  ): Promise<SendKeysResult> {
+    signal?.throwIfAborted();
+    const preflight = this.preflightCommands(commands);
+    const { observeHierarchy, captureObservation } = this.terminalObservers(
+      commands.length,
+      progress,
+      routing.display,
+      signal,
+    );
+    const observe = async (minTimestamp?: number) => {
+      const observation = await observeHierarchy(minTimestamp);
+      await captureObservation(observation);
       return observation;
     };
     // Accept hierarchy updates emitted while focus or command delivery is completing.
@@ -730,11 +759,45 @@ export class SendKeys {
       return terminal;
     }
     signal?.throwIfAborted();
-    const observation = await observe(actionStartTimestamp);
-    return withImeEditorWarnings(
+    return this.observeImeEditorResult(
+      execution,
+      () => observeHierarchy(actionStartTimestamp),
+      captureObservation,
+      signal,
+    );
+  }
+
+  /** Captures evidence only for the observation the result reports. */
+  private async observeImeEditorResult(
+    execution: SendKeysCommandExecution,
+    observe: () => Promise<ObserveResult>,
+    capture: (observation: ObserveResult) => Promise<void>,
+    signal?: AbortSignal,
+  ): Promise<SendKeysResult> {
+    const observation = await observe();
+    const result = withImeEditorWarnings(
       this.buildResult(execution.results, execution.failure, observation),
       execution.imeEditorState,
     );
+    if (
+      result.warnings?.length &&
+      hasImeKeyboardHiddenChange(execution.imeEditorState, observation)
+    ) {
+      await this.timer.sleep(IME_KEYBOARD_HIDDEN_SETTLE_MS);
+      signal?.throwIfAborted();
+      const settledObservation = await observe();
+      // An unreadable confirmation (e.g. a critical fallback) cannot overturn the sampled changes.
+      if (readImeEditorState(settledObservation).keyboardVisible !== undefined) {
+        await capture(settledObservation);
+        return withImeEditorWarnings(
+          this.buildResult(execution.results, execution.failure, settledObservation),
+          execution.imeEditorState,
+        );
+      }
+      logger.warn("sendKeys could not confirm the hidden IME keyboard; keeping the first sample");
+    }
+    await capture(observation);
+    return result;
   }
 
   private terminalCommandFailure(

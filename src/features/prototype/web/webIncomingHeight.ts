@@ -1,5 +1,5 @@
 import { record, type Raw } from "../prototypeTemplate";
-import { clampedHeight, ownHeight, type PrepareChild } from "./webRowAspect";
+import { ownHeight, type PrepareChild } from "./webRowAspect";
 import { INCOMING_ALLOCATED_KEY, INCOMING_HEIGHT_KEY } from "./webStyle";
 
 const weightOf = (node: Raw | undefined): number | undefined => {
@@ -42,11 +42,10 @@ function frame(style: Raw | undefined): number {
  * Each weighted node's height out of `free`, as CSS's flexible-length algorithm resolves
  * `flex: w w 0` items: each starts at its frame (see frame), and what the frames leave is split
  * over the unfrozen weights (only that fraction of the initial free space when the weights sum
- * below 1). Each target is clamped by its node's `maxHeight` then `minHeight` (see clampedHeight)
- * and never below its frame; the min violators freeze when the clamps add height, the max
- * violators when they take it away, every target when they cancel, and the loop repeats until
- * every target is frozen. A target clamped by its own bound so hands what it gives up to its
- * siblings.
+ * below 1). A weight pins its share on both devices, so the node's `maxHeight` and `minHeight` do
+ * not clamp it (the renderer drops them; see sizeStyle), but a target never goes below its frame;
+ * those so raised freeze, and the loop repeats until every target is frozen, handing what a frame
+ * takes from its siblings' shares.
  */
 function weightShares(nodes: readonly Raw[], free: number): Map<Raw, number> {
   const frozen = new Map<Raw, number>();
@@ -62,7 +61,7 @@ function weightShares(nodes: readonly Raw[], free: number): Map<Raw, number> {
     const space = weights < 1 && Math.abs(fraction) < Math.abs(left) ? fraction : left;
     const targets = open.map((node) => {
       const share = base(node) + (space * (weightOf(node) ?? 0)) / weights;
-      const height = Math.max(base(node), clampedHeight(record(node.style), share));
+      const height = Math.max(base(node), share);
       return { node, share, height };
     });
     const violation = targets.reduce((sum, target) => sum + target.height - target.share, 0);
@@ -81,9 +80,9 @@ function weightShares(nodes: readonly Raw[], free: number): Map<Raw, number> {
  * The incoming max height of each child of a column with content height `content`, as Compose's
  * Column measures them: each unweighted child in order against what its earlier siblings and the
  * spacing left, then each weighted child against its weight's share of what every unweighted
- * child and the spacing left, with a share its own bound clamps handed to its weighted siblings
- * (see weightShares). A sibling with no dp height counts as its minHeight, so the result
- * is an upper bound when one depends on layout. Hidden children (undefined) get no height.
+ * child and the spacing left, each share at least its frame (see weightShares). A sibling with
+ * no dp height counts as its minHeight, so the result is an upper bound when one depends on
+ * layout. Hidden children (undefined) get no height.
  *
  * CSS gives a `fill` child `flex: 1 1 auto`, which shares the height with its weighted siblings;
  * the bound follows Compose instead, where the `fill` child takes it all.
@@ -115,11 +114,30 @@ export function columnChildHeights(
   );
 }
 
+/**
+ * Whether a column's weight shares are exact: every visible unweighted child has a dp height or
+ * fills what is left (see takenHeight). A wrap-sized sibling counts as its minHeight, so with one
+ * present each share is only an upper bound, and a weighted child keeps its own height as a bound
+ * too rather than being marked as an allocation.
+ */
+export function exactWeightShares(children: readonly (Raw | undefined)[]): boolean {
+  return children.every((node) => {
+    const height = record(node?.style)?.height;
+    return (
+      node === undefined ||
+      weightOf(node) !== undefined ||
+      height === "fill" ||
+      typeof record(height)?.dp === "number"
+    );
+  });
+}
+
 const childPath = (path: string, index: number) => `${path}.children[${index}]`;
 
 /**
  * `entry` with `height` as its incoming height, marked as an allocation (INCOMING_ALLOCATED_KEY)
- * when `allocated` (a weighted child's share), so its own dp height does not cap it.
+ * when `allocated` (a weighted child's exact share; see exactWeightShares), so its own dp height
+ * and height bounds do not cap it.
  */
 function withHeight(entry: unknown, height: number | undefined, allocated: boolean): unknown {
   const node = record(entry);
@@ -168,10 +186,11 @@ export function withColumnHeights(
     content,
     parent.spacing && typeof spacing === "number" ? spacing : 0,
   );
+  const exact = exactWeightShares(prepared);
   return {
     ...node,
     children: children.map((entry, index) =>
-      withHeight(entry, heights[index], weightOf(prepared[index]) !== undefined),
+      withHeight(entry, heights[index], exact && weightOf(prepared[index]) !== undefined),
     ),
   };
 }
@@ -202,10 +221,11 @@ export function repeatInstanceChildren(
   );
   const spacing = record(node.style)?.spacing;
   const heights = columnChildHeights(prepared, content, typeof spacing === "number" ? spacing : 0);
+  const exact = exactWeightShares(prepared);
   return prepares.map((_prepare, instance) =>
     template.map((entry, index) => {
       const at = instance * template.length + index;
-      return withHeight(entry, heights[at], weightOf(prepared[at]) !== undefined);
+      return withHeight(entry, heights[at], exact && weightOf(prepared[at]) !== undefined);
     }),
   );
 }

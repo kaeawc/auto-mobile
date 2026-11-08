@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { record, type Raw } from "../../../../src/features/prototype/prototypeTemplate";
 import {
   columnChildHeights,
+  exactWeightShares,
   repeatInstanceChildren,
   withColumnHeights,
 } from "../../../../src/features/prototype/web/webIncomingHeight";
@@ -15,6 +16,7 @@ import {
   INCOMING_ALLOCATED_KEY,
   INCOMING_HEIGHT_KEY,
   nodeCss,
+  ROW_BOUND_KEY,
   ROW_MEASURE_KEY,
 } from "../../../../src/features/prototype/web/webStyle";
 
@@ -194,12 +196,12 @@ test("only a column or card narrows its children a height (#16690)", () => {
 test("a column's weight allocation sizes a child past its own dp height (#16701)", () => {
   const allocated = { [INCOMING_HEIGHT_KEY]: 80, [INCOMING_ALLOCATED_KEY]: true };
   expect(rowContentHeight({ ...allocated, weight: 1, height: { dp: 20 } })).toBe(80);
-  // CSS still applies max-height and then min-height to a flex item, so both clamp the share.
+  // Both devices pin a weighted axis to its share, so its height bounds do not clamp it (#16698).
   expect(rowContentHeight({ ...allocated, weight: 1, maxHeight: 50, padding: { top: 5 } })).toBe(
-    45,
+    75,
   );
-  expect(rowContentHeight({ ...allocated, weight: 1, minHeight: 100 })).toBe(100);
-  expect(rowContentHeight({ ...allocated, weight: 1, minHeight: 100, maxHeight: 50 })).toBe(100);
+  expect(rowContentHeight({ ...allocated, weight: 1, minHeight: 100 })).toBe(80);
+  expect(rowContentHeight({ ...allocated, weight: 1, minHeight: 100, maxHeight: 50 })).toBe(80);
   // Without the mark, the incoming height is a ceiling the child's own height can undercut.
   expect(rowContentHeight({ [INCOMING_HEIGHT_KEY]: 80, weight: 1, height: { dp: 20 } })).toBe(20);
   // A mark with no incoming height bounds nothing.
@@ -257,38 +259,88 @@ test("only a weighted child of a column, card or repeat column is marked as allo
   expect(css).toEqual({ "box-sizing": "border-box" });
 });
 
-test("a clamped weighted child hands what it leaves to its weighted siblings, as CSS flex does (#16763)", () => {
+const light = { mode: "light", palette: new Map() } as const;
+
+test("a weight drops the authored bounds on its main axis, as both devices pin it to its share (#16698)", () => {
+  const bounds = { minWidth: 10, maxWidth: 20, minHeight: 30, maxHeight: 40 };
+  const inColumn = nodeCss(
+    { weight: 1, height: { dp: 10 }, ...bounds },
+    { ...light, parentAxis: "column", weightsChildren: true },
+  );
+  expect(inColumn).toMatchObject({ flex: "1 1 0", "min-height": "0", "min-width": "10px" });
+  expect(inColumn["max-height"]).toBeUndefined();
+  expect(inColumn["max-width"]).toBe("20px");
+  const inRow = nodeCss(
+    { weight: 1, ...bounds },
+    { ...light, parentAxis: "row", weightsChildren: true },
+  );
+  expect(inRow).toMatchObject({ flex: "1 1 0", "min-width": "0", "min-height": "30px" });
+  expect(inRow["max-width"]).toBeUndefined();
+  expect(inRow["max-height"]).toBe("40px");
+  // A line that shares no weight (a scroll, sheet or stack) keeps every bound, as native does.
+  const inScroll = nodeCss({ weight: 1, ...bounds }, { ...light, parentAxis: "column" });
+  expect(inScroll).toMatchObject({ "min-height": "30px", "max-height": "40px" });
+  // Unweighted, every bound holds.
+  expect(nodeCss(bounds, { ...light, parentAxis: "column" })).toMatchObject({
+    "min-height": "30px",
+    "max-height": "40px",
+  });
+});
+
+test("a weight share is exact only when every unweighted sibling's height is known (#16698)", () => {
+  const dp = { type: "box", style: { height: { dp: 10 } } };
+  const weighted = { type: "row", style: { weight: 1, height: { dp: 10 } } };
+  expect(exactWeightShares([dp, undefined, weighted])).toBe(true);
+  expect(exactWeightShares([{ type: "box", style: { height: "fill" } }, weighted])).toBe(true);
+  expect(exactWeightShares([{ type: "column" }, weighted])).toBe(false);
+  expect(exactWeightShares([{ type: "text", style: { minHeight: 30 } }, weighted])).toBe(false);
+  // A wrap sibling of unknown height leaves the share an upper bound: the row keeps its dp height,
+  // so its aspect ratio errs small rather than overflowing a share it may not get.
+  const children = [
+    { type: "column", children: [{ type: "box", style: { height: { dp: 80 } } }] },
+    { ...weighted, children: [{ type: "box", style: { aspectRatio: 2 } }, { type: "text" }] },
+  ];
+  const column = withColumnHeights({ type: "column", children }, "root", prepare, 100);
+  const row = record(record(childrenOf(column)[1])?.style);
+  expect(row?.[INCOMING_ALLOCATED_KEY]).toBeUndefined();
+  expect(rowContentHeight(row)).toBe(10);
+  const repeat = { type: "column", repeat: { items: [{}, {}] }, children };
+  const instances = repeatInstanceChildren(repeat, "root", [prepare, prepare], 100);
+  expect(
+    instances.map((entries) => record(record(entries[1])?.style)?.[INCOMING_ALLOCATED_KEY]),
+  ).toEqual([undefined, undefined]);
+});
+
+test("a weighted row bounded around a capped aspect ratio keeps its share over its maxWidth (#16698)", () => {
+  const row = { weight: 1, maxWidth: 20, [ROW_BOUND_KEY]: true };
+  const weighting = { ...light, parentAxis: "row", weightsChildren: true } as const;
+  expect(nodeCss(row, weighting)["max-width"]).toBe("100%");
+  // In a column the weight pins its height, so the authored maxWidth still bounds it.
+  expect(nodeCss(row, { ...weighting, parentAxis: "column" })["max-width"]).toBe("min(100%, 20px)");
+  expect(nodeCss({ maxWidth: 20, [ROW_BOUND_KEY]: true }, light)["max-width"]).toBe(
+    "min(100%, 20px)",
+  );
+});
+
+test("a weighted child's height bounds do not move its share, as both devices pin it (#16698, #16763)", () => {
   const weighted = (weight: number, bounds: Raw = {}) => ({
     type: "row",
     style: { weight, ...bounds },
   });
-  // The issue's case: CSS freezes the 20 dp row at its maxHeight and grows its sibling to 80.
+  // The renderer drops a weighted column child's min/max height, so CSS and the bound split evenly.
   expect(columnChildHeights([weighted(1, { maxHeight: 20 }), weighted(1)], 100, 0)).toEqual([
-    20, 80,
+    50, 50,
   ]);
-  // A minHeight above the share takes height from the siblings.
   expect(columnChildHeights([weighted(1, { minHeight: 70 }), weighted(1)], 100, 0)).toEqual([
-    70, 30,
+    50, 50,
   ]);
-  // Freezing one share can push another past its bound, so the loop runs until none moves.
   expect(
     columnChildHeights(
       [weighted(1, { maxHeight: 10 }), weighted(1, { maxHeight: 40 }), weighted(2)],
       100,
       0,
     ),
-  ).toEqual([10, 30, 60]);
-  expect(
-    columnChildHeights(
-      [weighted(1, { maxHeight: 10 }), weighted(1, { maxHeight: 25 }), weighted(2)],
-      100,
-      0,
-    ),
-  ).toEqual([10, 25, 65]);
-  // Min and max violations that cancel out freeze every share where it is clamped.
-  expect(
-    columnChildHeights([weighted(1, { maxHeight: 40 }), weighted(1, { minHeight: 60 })], 100, 0),
-  ).toEqual([40, 60]);
+  ).toEqual([25, 25, 50]);
   // Unweighted siblings, spacing and hidden children are taken off before the weights share.
   expect(
     columnChildHeights(
@@ -301,18 +353,10 @@ test("a clamped weighted child hands what it leaves to its weighted siblings, as
       100,
       5,
     ),
-  ).toEqual([100, undefined, 10, 60]);
-  // Every share clamped by its own max leaves the rest unallocated.
-  expect(
-    columnChildHeights([weighted(1, { maxHeight: 10 }), weighted(1, { maxHeight: 20 })], 100, 0),
-  ).toEqual([10, 20]);
-  // Mins past the free space each keep their min, as CSS's min-height wins over the container.
-  expect(
-    columnChildHeights([weighted(1, { minHeight: 80 }), weighted(1, { minHeight: 40 })], 100, 0),
-  ).toEqual([80, 40]);
+  ).toEqual([100, undefined, 17.5, 52.5]);
 });
 
-test("a weighted row beside a maxHeight-clamped sibling caps its aspect ratio by the redistributed share (#16763)", () => {
+test("a weighted row beside a maxHeight-bounded sibling caps its aspect ratio by its pinned share (#16698, #16763)", () => {
   const column = withColumnHeights(
     {
       type: "column",
@@ -329,13 +373,13 @@ test("a weighted row beside a maxHeight-clamped sibling caps its aspect ratio by
     prepare,
     100,
   );
-  expect(childrenOf(column).map(heightOf)).toEqual([20, 80]);
+  expect(childrenOf(column).map(heightOf)).toEqual([50, 50]);
   const ratio = childrenOf(
     rowMeasured(record(childrenOf(column)[1])!, "root.children[1]", prepare, 100),
   );
   expect(record(record(ratio[0])?.style)?.[ROW_MEASURE_KEY]).toEqual({
     shrink: CAPPED_SHRINK,
-    basis: 160,
+    basis: 100,
   });
 });
 
@@ -345,20 +389,10 @@ test("weights summing below 1 take only that fraction of the free space, as CSS 
     style: { weight, ...bounds },
   });
   expect(columnChildHeights([weighted(0.5)], 100, 0)).toEqual([50]);
-  // Freezing a sibling leaves 0.5 of weight, which takes half the initial free space, not the rest.
-  expect(columnChildHeights([weighted(0.5, { maxHeight: 20 }), weighted(0.5)], 100, 0)).toEqual([
-    20, 50,
-  ]);
-  expect(
-    columnChildHeights([weighted(0.25, { maxHeight: 10 }), weighted(0.25), weighted(0.25)], 100, 0),
-  ).toEqual([10, 25, 25]);
-  expect(columnChildHeights([weighted(0.25, { minHeight: 60 }), weighted(0.25)], 100, 0)).toEqual([
-    60, 25,
-  ]);
-  // When less is left than that fraction, the rest is what the weights share.
-  expect(columnChildHeights([weighted(0.4, { minHeight: 90 }), weighted(0.4)], 100, 0)).toEqual([
-    90, 10,
-  ]);
+  expect(columnChildHeights([weighted(0.25), weighted(0.25)], 100, 0)).toEqual([25, 25]);
+  // A frame comes off first: 60 dp of padding leaves 40, of which the 0.5 of weight takes half.
+  const padded = weighted(0.25, { padding: { top: 30, bottom: 30 } });
+  expect(columnChildHeights([padded, weighted(0.25)], 100, 0)).toEqual([70, 10]);
 });
 
 test("a weighted child's padding and border are its flex base, which its share grows from (#16763)", () => {
@@ -368,18 +402,17 @@ test("a weighted child's padding and border are its flex base, which its share g
   });
   const padded = (top: number, bounds: Raw = {}) =>
     weighted(1, { padding: { top, bottom: top }, ...bounds });
-  // border-box keeps the 50 dp of padding above a maxHeight of 20, so the sibling gets 50.
-  expect(columnChildHeights([padded(25, { maxHeight: 20 }), weighted(1)], 100, 0)).toEqual([
-    50, 50,
-  ]);
   // The share grows on top of the padding: 70 dp of padding leaves 30 to split 1:3.
   expect(columnChildHeights([padded(35), weighted(3)], 100, 0)).toEqual([77.5, 22.5]);
-  expect(columnChildHeights([padded(30, { minHeight: 10 }), weighted(1)], 100, 0)).toEqual([
-    80, 20,
+  // Its height bounds do not clamp the share, as the renderer drops them (#16698).
+  expect(columnChildHeights([padded(25, { maxHeight: 20 }), weighted(1)], 100, 0)).toEqual([
+    75, 25,
   ]);
   expect(columnChildHeights([padded(10, { maxHeight: 40 }), weighted(1)], 100, 0)).toEqual([
-    40, 60,
+    60, 40,
   ]);
+  // A frame larger than the free space keeps its frame, and its sibling gets nothing.
+  expect(columnChildHeights([padded(60), weighted(1)], 100, 0)).toEqual([120, 0]);
   // A solid border counts on both edges; a gradient border is drawn as an overlay and does not.
   const bordered = (border: Raw) => weighted(1, { border });
   expect(columnChildHeights([bordered({ width: 10 }), weighted(1)], 100, 0)).toEqual([60, 40]);

@@ -51,32 +51,48 @@ const side = (padding: Raw | undefined, name: string) =>
   typeof padding?.[name] === "number" ? padding[name] : 0;
 
 /**
- * The tallest a row lets its children be, when the row authors a definite one: its dp `height`
- * (coerced into its `minHeight`, as `sizeIn` applies before the height) or its `maxHeight`, less
- * its vertical padding. Compose's `sizeIn` then `aspectRatio` on a child respects that incoming
- * max height. Infinity when the row's height comes from elsewhere.
+ * The tallest a row or box lets its children be: its dp `height` (coerced into its `minHeight`, as
+ * `sizeIn` applies before the height) or its `maxHeight`, capped by the bound it inherited from a
+ * row or box ancestor (`inherited`; Compose constrains a wrap or fill node by its parent's max
+ * height too), less its vertical padding. Compose's `sizeIn` then `aspectRatio` on a child
+ * respects that incoming max height. Infinity when nothing bounds it.
+ *
+ * The inherited bound is the parent's whole content height. A column measures its children in
+ * order, so a child after earlier siblings may in fact get less; the bound is an upper limit.
  */
-export function rowContentHeight(style: Raw | undefined): number {
+export function rowContentHeight(style: Raw | undefined, inherited = Infinity): number {
   const dp = record(style?.height)?.dp;
   const max = typeof style?.maxHeight === "number" ? style.maxHeight : Infinity;
   const min = typeof style?.minHeight === "number" ? style.minHeight : 0;
-  const height = Math.max(Math.min(typeof dp === "number" ? dp : Infinity, max), min);
+  const own = Math.max(Math.min(typeof dp === "number" ? dp : Infinity, max), min);
   const padding = record(style?.padding);
+  const height = Math.min(own, inherited);
   return Math.max(0, height - side(padding, "top") - side(padding, "bottom"));
+}
+
+/** The content height bound a row or box passes its children (see rowContentHeight), if any. */
+export function contentHeightBound(style: unknown, inherited?: number): number | undefined {
+  const bound = rowContentHeight(record(style), inherited ?? Infinity);
+  return bound === Infinity ? undefined : bound;
 }
 
 /**
  * The axes a row grows on to its parent: width when its unsized aspect-ratio child takes all the
  * remaining width, since a wrap-sized Compose Row then reaches its max width.
  */
-export function rowFillAxes(node: Raw, path: string, prepare: PrepareChild): "width"[] {
+export function rowFillAxes(
+  node: Raw,
+  path: string,
+  prepare: PrepareChild,
+  inherited = Infinity,
+): "width"[] {
   const fills =
     node.type === "row" &&
     Array.isArray(node.children) &&
     node.children.some((entry, index) =>
       isUnsizedAspectRatio(
         prepare(entry, childPath(path, index)),
-        rowContentHeight(record(node.style)),
+        rowContentHeight(record(node.style), inherited),
       ),
     );
   return fills ? ["width"] : [];
@@ -88,12 +104,17 @@ export function rowFillAxes(node: Raw, path: string, prepare: PrepareChild): "wi
  * Compose Row never measures wider than its max, but the child's width (its cap) would grow a
  * wrap-sized CSS row past it, so the cap shrinks inside the row instead.
  */
-export function rowMeasured(node: Raw, path: string, prepare: PrepareChild): Raw {
+export function rowMeasured(
+  node: Raw,
+  path: string,
+  prepare: PrepareChild,
+  inherited = Infinity,
+): Raw {
   if (node.type !== "row" || node.repeat !== undefined || !Array.isArray(node.children)) {
     return node;
   }
   const styled = node.children.map((entry, index) => prepare(entry, childPath(path, index)));
-  const height = rowContentHeight(record(node.style));
+  const height = rowContentHeight(record(node.style), inherited);
   const children = rowSequentialChildren(node.children, (_entry, index) => styled[index], height);
   if (children === node.children) {
     return node;

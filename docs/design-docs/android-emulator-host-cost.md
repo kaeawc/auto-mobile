@@ -27,6 +27,8 @@ From `EmulatorLauncher.startClaimedEmulatorProcess` and the AVD hardware fields 
 | Cameras        | AVD value (back `emulated`, front `none` on every sampled AVD)                                             | `config.ini`                            |
 | CPU, RAM       | AVD value; `provisionDevice` accepts `cpuCores` (1-16) and `memoryMb` (at least 2048)                      | `provisionDeviceSpecSchemas.ts`         |
 
+With `AUTOMOBILE_EMULATOR_NETSIM_ISOLATION=true`, each newly spawned emulator owns a private netsimd started after boot admission and connected through `-packet-streamer-endpoint`, isolating BLE peripherals across sessions; explicit endpoints take precedence, and emulator exit or launch failure stops only its owned daemon.
+
 Since #6800, headless launches no longer imply audio off (`device-resources.md`, "Android
 provisioning hardware"). The CI action passes the opposite set: `-no-window -gpu swiftshader
 -noaudio -no-boot-anim -camera-back none` and `-no-snapshot-save`

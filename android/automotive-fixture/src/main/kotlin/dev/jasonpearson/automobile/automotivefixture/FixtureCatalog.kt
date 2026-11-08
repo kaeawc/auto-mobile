@@ -52,11 +52,19 @@ object FixtureCatalog {
       FixtureRow("template_grid", "Grid template", "Six fixed tiles"),
       FixtureRow("template_pane", "Pane template", "Four fixed rows"),
       FixtureRow("template_navigation", "Navigation template", "Four fixed places"),
+      FixtureRow("template_list_long", "List 30", "Thirty fixed rows"),
     )
 
   /** Six rows: within the list-template row limit on every host. */
   val listTemplateRows: List<FixtureRow> =
     (1..6).map { FixtureRow("list_row_$it", "List row $it", "List detail $it") }
+
+  /** Thirty fixed rows to exercise long template snapshots, regardless of host truncation. */
+  val longListTemplateRows: List<FixtureRow> =
+    (1..30).map { index ->
+      val number = index.toString().padStart(2, '0')
+      FixtureRow("list_long_row_$number", "List long row $number", "List long detail $number")
+    }
 
   val gridItems: List<FixtureRow> =
     (1..6).map { FixtureRow("grid_item_$it", "Tile $it", "Grid detail $it") }

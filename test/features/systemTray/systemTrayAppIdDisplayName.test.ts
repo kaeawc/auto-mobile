@@ -67,7 +67,7 @@ const install = (
     },
   });
   registerInteractionTools();
-  return { labelLookups };
+  return { labelLookups, observer };
 };
 
 const find = (notification: Record<string, string>) =>
@@ -157,6 +157,22 @@ describe("systemTray find with appId on an iOS lone banner", () => {
     install(listedApps, ios26TrayOpenHome, ledger);
     const payload = toolJson(await find({ title: banner.title, appId: "com.apple.Preferences" }));
     expect(payload).toMatchObject({ success: true, match: { app: { text: "Settings" } } });
+  });
+
+  test("matches content posted while find is already waiting", async () => {
+    const ledger = new InMemoryPostedNotificationLedger();
+    const { observer } = install(listedApps, ios26TrayOpenHome, ledger);
+    let reads = 0;
+    observer.setObserveResult(() => {
+      reads += 1;
+      if (reads === 2) {
+        ledger.record(iosDevice.deviceId, "com.apple.Preferences", banner);
+      }
+      return ios26TrayOpenHome;
+    });
+    const payload = toolJson(await find({ title: banner.title, appId: "com.apple.Preferences" }));
+    expect(payload).toMatchObject({ success: true, match: { app: { text: "Settings" } } });
+    expect(reads).toBeGreaterThanOrEqual(2);
   });
 
   test("does not match content another app posted", async () => {

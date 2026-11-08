@@ -467,7 +467,8 @@ const findIosShortLookContentText = (node: ViewHierarchyNode): string | undefine
 
 /**
  * Whether a short-look label leads with an app name: the segments ahead of the
- * row's own title (or body) are more than its time alone.
+ * row's own title (or body) are more than its time alone. The name itself may be
+ * any text, digits included.
  */
 const iosShortLookLabelNamesApp = (node: ViewHierarchyNode, label: string): boolean => {
   const content = findIosShortLookContentText(node);
@@ -476,9 +477,26 @@ const iosShortLookLabelNamesApp = (node: ViewHierarchyNode, label: string): bool
     return false;
   }
   const segments = label.slice(0, contentAt).split(", ");
-  const name = segments[0].trim();
-  return segments.length >= 2 && /\p{L}/u.test(name);
+  return segments.length >= 2 && segments[0].trim().length > 0;
 };
+
+const collectTextsByResourceId = (node: ViewHierarchyNode, resourceId: string): string[] => {
+  const props = getNodeProperties(node);
+  const text = rawNodeValue(props, "text");
+  const own = rawResourceId(props) === resourceId && typeof text === "string" ? [text] : [];
+  return [
+    ...own,
+    ...getDirectChildNodes(node).flatMap((child) => collectTextsByResourceId(child, resourceId)),
+  ];
+};
+
+/** The title and body labels an iOS short-look row renders. */
+export const collectIosShortLookContent = (
+  node: ViewHierarchyNode,
+): { titles: string[]; bodies: string[] } => ({
+  titles: collectTextsByResourceId(node, IOS_NOTIFICATION_CONTENT_RESOURCE_IDS[0]),
+  bodies: collectTextsByResourceId(node, IOS_NOTIFICATION_CONTENT_RESOURCE_IDS[1]),
+});
 
 /**
  * The element of a row that names the posting app: the Android `app_name_text`

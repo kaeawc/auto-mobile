@@ -155,7 +155,8 @@ accessibility label leads with the app's display name
 (`"MESSAGES, Grouped, now, <title>, <body>"`), and only that leading name is
 compared. A lone banner's label starts at its time (`"now, <title>, <body>"`)
 and names no app, so it is attributed only when `postNotification` posted its
-title and body for that app on that device in this server process; otherwise
+exact title and body (the alert iOS displays, after any raw `aps` override) for
+that app, and no other app, on that device in this server process; otherwise
 the not-found error says the banner cannot be attributed. Each row is
 attributed by its own evidence, never by another row's. An Android row that
 renders no attribution element (for example a header-less Silent row) falls

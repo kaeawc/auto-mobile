@@ -21,6 +21,7 @@ import {
   type SystemTrayNotificationMatch,
   type SystemTrayTextMatch,
   type NotificationAttribution,
+  collectIosShortLookContent,
   collectNotificationAttributions,
   collectNotificationCandidates,
   collectOutermostNotificationRows,
@@ -138,6 +139,11 @@ const resolveAttributionMatch = (
   return partial ? { text: partial.text, matchType: "partial" } : null;
 };
 
+// Ownership evidence is exact: the row's own title label carries the posted
+// title and its body label the posted body, case included.
+const rowFieldShows = (rowTexts: string[], posted: string): boolean =>
+  !posted.trim() || rowTexts.some((text) => text.trim() === posted.trim());
+
 /**
  * An iOS lone banner names no app, so it belongs to the requested app only when
  * that app posted the row's title and body through postNotification (#17445).
@@ -146,16 +152,17 @@ const rowShowsPostedContent = (
   row: ViewHierarchyNode,
   postedContents: SystemTrayNotificationArgs["postedContents"],
 ): boolean => {
-  if (!postedContents || postedContents.length === 0) {
+  const contents = postedContents?.() ?? [];
+  if (contents.length === 0) {
     return false;
   }
-  const rowTexts = new Set(
-    collectNodeSubtreeTextCandidates(row).map((text) => text.trim().toLowerCase()),
+  const { titles, bodies } = collectIosShortLookContent(row);
+  return contents.some(
+    (content) =>
+      Boolean(content.title.trim() || content.body.trim()) &&
+      rowFieldShows(titles, content.title) &&
+      rowFieldShows(bodies, content.body),
   );
-  return postedContents.some((content) => {
-    const texts = [content.title, content.body].map((text) => text.trim()).filter(Boolean);
-    return texts.length > 0 && texts.every((text) => rowTexts.has(text.toLowerCase()));
-  });
 };
 
 const postedAppMatch = (appMatchTexts: string[], appId: string): SystemTrayTextMatch => ({

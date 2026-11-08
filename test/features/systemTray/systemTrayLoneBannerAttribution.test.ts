@@ -71,7 +71,7 @@ describe("iOS lone banner app attribution", () => {
   test("matches the banner for the app that posted its content", () => {
     const match = findBestNotificationMatch(
       loneBannerTray(),
-      { title: BANNER.title, appId: "com.apple.Preferences", postedContents: [BANNER] },
+      { title: BANNER.title, appId: "com.apple.Preferences", postedContents: () => [BANNER] },
       SETTINGS,
     );
     expect(match?.match.matches).toEqual({
@@ -83,7 +83,7 @@ describe("iOS lone banner app attribution", () => {
   test("matches an appId-only query for the app that posted the banner", () => {
     const match = findBestNotificationMatch(
       loneBannerTray(),
-      { appId: "com.apple.Preferences", postedContents: [BANNER] },
+      { appId: "com.apple.Preferences", postedContents: () => [BANNER] },
       SETTINGS,
     );
     expect(match?.match.matches.app).toEqual({ text: "Settings", matchType: "exact" });
@@ -96,11 +96,43 @@ describe("iOS lone banner app attribution", () => {
         {
           title: BANNER.title,
           appId: "com.apple.Preferences",
-          postedContents: [{ title: BANNER.title, body: "another body" }],
+          postedContents: () => [{ title: BANNER.title, body: "another body" }],
         },
         SETTINGS,
       ),
     ).toBeNull();
+  });
+
+  test("does not take posted content that differs in case as ownership", () => {
+    const posted = { title: BANNER.title.toUpperCase(), body: BANNER.body };
+    expect(
+      findBestNotificationMatch(
+        loneBannerTray(),
+        { title: BANNER.title, appId: "com.apple.Preferences", postedContents: () => [posted] },
+        SETTINGS,
+      ),
+    ).toBeNull();
+  });
+
+  test("does not take a posted title and body swapped between fields as ownership", () => {
+    const swapped = { title: BANNER.body, body: BANNER.title };
+    expect(
+      findBestNotificationMatch(
+        loneBannerTray(),
+        { title: BANNER.title, appId: "com.apple.Preferences", postedContents: () => [swapped] },
+        SETTINGS,
+      ),
+    ).toBeNull();
+  });
+
+  test("matches a banner posted with a body alone", () => {
+    const bodyOnly = { title: "", body: BANNER.body };
+    const match = findBestNotificationMatch(
+      loneBannerTray(),
+      { body: BANNER.body, appId: "com.apple.Preferences", postedContents: () => [bodyOnly] },
+      SETTINGS,
+    );
+    expect(match?.match.matches.app).toEqual({ text: "Settings", matchType: "exact" });
   });
 
   test("does not attribute the banner to an app with no posted content", () => {
@@ -140,7 +172,7 @@ describe("iOS tray with rows from two apps", () => {
     expect(
       findBestNotificationMatch(
         twoAppTray(),
-        { title: "mt0091c", appId: "com.apple.Preferences", postedContents: [BANNER] },
+        { title: "mt0091c", appId: "com.apple.Preferences", postedContents: () => [BANNER] },
         SETTINGS,
       ),
     ).toBeNull();
@@ -149,7 +181,7 @@ describe("iOS tray with rows from two apps", () => {
   test("matches the lone banner beside a stack for the app that posted it", () => {
     const match = findBestNotificationMatch(
       twoAppTray(),
-      { title: BANNER.title, appId: "com.apple.Preferences", postedContents: [BANNER] },
+      { title: BANNER.title, appId: "com.apple.Preferences", postedContents: () => [BANNER] },
       SETTINGS,
     );
     expect(match?.match.matches.app).toEqual({ text: "Settings", matchType: "exact" });
@@ -162,5 +194,21 @@ describe("iOS tray with rows from two apps", () => {
         appId: "com.apple.Preferences",
       }),
     ).toBe(false);
+  });
+});
+
+describe("iOS stacked row app names", () => {
+  test("attributes a stack whose app name has no letters", () => {
+    // Derived from the capture: the Messages stack renamed to a digits-only app.
+    const tray = JSON.parse(
+      JSON.stringify(iosMessagesGroupedTray.viewHierarchy).replaceAll(
+        "MESSAGES, Grouped",
+        "123, Grouped",
+      ),
+    ) as ViewHierarchyResult;
+    const match = findBestNotificationMatch(tray, { title: "mt0091c", appId: "com.example.n" }, [
+      "123",
+    ]);
+    expect(match?.match.matches.app).toEqual({ text: "123", matchType: "exact" });
   });
 });

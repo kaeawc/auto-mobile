@@ -8,11 +8,12 @@ export interface SystemTrayNotificationArgs {
   appId?: string;
   tapActionLabel?: string;
   /**
-   * Content `appId` posted through `postNotification`, filled in by systemTray on
-   * iOS and never taken from tool input: the only evidence that attributes a lone
-   * banner, whose row names no app (#17445).
+   * Reads the content `appId` posted through `postNotification`, filled in by
+   * systemTray on iOS and never taken from tool input: the only evidence that
+   * attributes a lone banner, whose row names no app (#17445). Read on every
+   * match, so a post that lands while systemTray waits still counts.
    */
-  postedContents?: readonly PostedNotificationContent[];
+  postedContents?: () => readonly PostedNotificationContent[];
 }
 
 export interface SystemTrayArgs {

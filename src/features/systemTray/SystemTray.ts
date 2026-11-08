@@ -479,12 +479,11 @@ export class SystemTray {
       appMatchTexts = [appLabel, notification.appId].filter(Boolean) as string[];
       if (device.platform !== "android") {
         // An iOS lone banner names no app: only content this app posted can attribute it.
+        const { postedNotifications } = getSystemTrayDependencies();
+        const appId = notification.appId;
         notification = {
           ...notification,
-          postedContents: getSystemTrayDependencies().postedNotifications.postedBy(
-            device.deviceId,
-            notification.appId,
-          ),
+          postedContents: () => postedNotifications.postedBy(device.deviceId, appId),
         };
       }
     }

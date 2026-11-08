@@ -239,10 +239,9 @@ export class PostNotification {
         warning,
       };
     }
-    this.postedNotifications.record(this.device.deviceId, bundleId, {
-      title: options.title,
-      body: options.body,
-    });
+    if (built.alert) {
+      this.postedNotifications.record(this.device.deviceId, bundleId, built.alert);
+    }
     return {
       success: true,
       supported: true,

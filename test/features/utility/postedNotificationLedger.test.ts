@@ -14,12 +14,20 @@ describe("InMemoryPostedNotificationLedger", () => {
     ]);
   });
 
-  test("gives identical content to the app that posted it last", () => {
+  test("leaves content two apps posted attributed to neither", () => {
     const ledger = new InMemoryPostedNotificationLedger();
     ledger.record("sim-a", "com.x", { title: "same", body: "text" });
     ledger.record("sim-a", "com.y", { title: "same", body: "text" });
+    ledger.record("sim-a", "com.x", { title: "same", body: "text" });
     expect(ledger.postedBy("sim-a", "com.x")).toEqual([]);
-    expect(ledger.postedBy("sim-a", "com.y")).toEqual([{ title: "same", body: "text" }]);
+    expect(ledger.postedBy("sim-a", "com.y")).toEqual([]);
+  });
+
+  test("keeps content one app posted twice attributed to it", () => {
+    const ledger = new InMemoryPostedNotificationLedger();
+    ledger.record("sim-a", "com.x", { title: "same", body: "text" });
+    ledger.record("sim-a", "com.x", { title: "same", body: "text" });
+    expect(ledger.postedBy("sim-a", "com.x")).toEqual([{ title: "same", body: "text" }]);
   });
 
   test("keeps only the newest records per device", () => {

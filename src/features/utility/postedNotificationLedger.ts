@@ -21,7 +21,8 @@ export interface PostedNotificationLookup {
 const MAX_RECORDS_PER_DEVICE = 100;
 
 interface PostedRecord extends PostedNotificationContent {
-  appId: string;
+  /** Every app that posted this exact content; more than one leaves it unattributed. */
+  appIds: ReadonlySet<string>;
 }
 
 const sameContent = (left: PostedNotificationContent, right: PostedNotificationContent): boolean =>
@@ -35,18 +36,20 @@ export class InMemoryPostedNotificationLedger
   constructor(private readonly maxRecordsPerDevice = MAX_RECORDS_PER_DEVICE) {}
 
   record(deviceId: string, appId: string, content: PostedNotificationContent): void {
-    // The newest post of identical content owns it, so a row repeating another
-    // app's earlier text is never attributed to that earlier app.
-    const kept = (this.byDevice.get(deviceId) ?? []).filter(
-      (record) => !sameContent(record, content),
-    );
-    const records = [{ appId, title: content.title, body: content.body }, ...kept];
+    const existing = this.byDevice.get(deviceId) ?? [];
+    const previous = existing.find((record) => sameContent(record, content));
+    // Identical content from two apps proves neither owns a row showing it.
+    const appIds = new Set([...(previous?.appIds ?? []), appId]);
+    const records = [
+      { title: content.title, body: content.body, appIds },
+      ...existing.filter((record) => record !== previous),
+    ];
     this.byDevice.set(deviceId, records.slice(0, this.maxRecordsPerDevice));
   }
 
   postedBy(deviceId: string, appId: string): PostedNotificationContent[] {
     return (this.byDevice.get(deviceId) ?? [])
-      .filter((record) => record.appId === appId)
+      .filter((record) => record.appIds.size === 1 && record.appIds.has(appId))
       .map(({ title, body }) => ({ title, body }));
   }
 }

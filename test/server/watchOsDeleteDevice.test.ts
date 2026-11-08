@@ -318,6 +318,10 @@ describe("deleteDevice on an Apple Watch simulator", () => {
 
   test("a watch that is not listed is already absent, with no simctl command", async () => {
     const { simctl } = await arrange([]);
+    const pairFake = new FakeSimulatorPairs();
+    const pairs = pairFake.service();
+    // #17447: the post-delete capture has no pair; an already-absent watch needs no unpair.
+    setDeviceToolsDependencies({ simulatorPairServiceFactory: () => pairs });
 
     const result = toolJson(await remove(target("00000000-0000-4000-8000-000000000000")));
 
@@ -326,6 +330,7 @@ describe("deleteDevice on an Apple Watch simulator", () => {
       command: { stop: "not_required", destroy: "not_required" },
     });
     expect(simctl.commands).toEqual([]);
+    expect(pairFake.calls).toEqual([]);
   });
 
   test("a stableName that does not match the watch is refused before any command", async () => {

@@ -32,36 +32,54 @@ export interface HighlightDeviceClient {
 const normalizeNullableNumber = (value: number | null | undefined): number | undefined =>
   value === null ? undefined : value;
 
-const highlightBoundsSchema: z.ZodType<HighlightBounds> = z
-  .object({
-    x: z.number().int(),
-    y: z.number().int(),
-    width: z.number().int().positive("bounds.width must be a positive integer"),
-    height: z.number().int().positive("bounds.height must be a positive integer"),
-    sourceWidth: z.number().int().positive().nullable().optional(),
-    sourceHeight: z.number().int().positive().nullable().optional(),
-  })
-  .strict()
-  .superRefine((value, ctx) => {
-    const sourceWidth = normalizeNullableNumber(value.sourceWidth);
-    const sourceHeight = normalizeNullableNumber(value.sourceHeight);
-    const hasSourceWidth = sourceWidth !== undefined;
-    const hasSourceHeight = sourceHeight !== undefined;
+const highlightBoundsFields = {
+  x: z.number().int(),
+  y: z.number().int(),
+  width: z.number().int().positive("bounds.width must be a positive integer"),
+  height: z.number().int().positive("bounds.height must be a positive integer"),
+  sourceWidth: z.number().int().positive().nullable().optional(),
+  sourceHeight: z.number().int().positive().nullable().optional(),
+};
 
-    if (hasSourceWidth !== hasSourceHeight) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "bounds.sourceWidth and bounds.sourceHeight must be provided together",
-      });
-    }
-  });
+const refineSourceDimensions = (
+  value: Pick<HighlightBounds, "sourceWidth" | "sourceHeight" | "sourceScale">,
+  ctx: z.RefinementCtx,
+): void => {
+  const hasSourceWidth = normalizeNullableNumber(value.sourceWidth) !== undefined;
+  const hasSourceHeight = normalizeNullableNumber(value.sourceHeight) !== undefined;
 
-export const highlightShapeSchema: z.ZodType<HighlightShape> = z
-  .object({
-    type: z.literal("circle"),
-    bounds: highlightBoundsSchema,
-  })
-  .strict();
+  if (hasSourceWidth !== hasSourceHeight) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "bounds.sourceWidth and bounds.sourceHeight must be provided together",
+    });
+  }
+  if (normalizeNullableNumber(value.sourceScale) !== undefined && !hasSourceWidth) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "bounds.sourceScale requires bounds.sourceWidth and bounds.sourceHeight",
+    });
+  }
+};
+
+const shapeSchemaFor = (bounds: z.ZodType<HighlightBounds>): z.ZodType<HighlightShape> =>
+  z.object({ type: z.literal("circle"), bounds }).strict();
+
+/** The `highlight` tool's caller-facing shape: the daemon, not the caller, supplies the scale. */
+export const highlightShapeSchema = shapeSchemaFor(
+  z.object(highlightBoundsFields).strict().superRefine(refineSourceDimensions),
+);
+
+/** A shape the daemon sends to a device: the tool shape plus the daemon-resolved `sourceScale`. */
+export const deviceHighlightShapeSchema = shapeSchemaFor(
+  z
+    .object({
+      ...highlightBoundsFields,
+      sourceScale: z.number().finite().positive().nullable().optional(),
+    })
+    .strict()
+    .superRefine(refineSourceDimensions),
+);
 
 const highlightResponseSchema: z.ZodType<HighlightOperationResult> = z
   .object({
@@ -131,7 +149,7 @@ export class VisualHighlight {
   }
 
   private parseHighlightShape(shape: HighlightShape): HighlightShape {
-    const result = highlightShapeSchema.safeParse(shape);
+    const result = deviceHighlightShapeSchema.safeParse(shape);
     if (!result.success) {
       const message = result.error.issues.map((issue) => issue.message).join("; ");
       throw new ActionableError(message);

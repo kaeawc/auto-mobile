@@ -49,27 +49,22 @@ function rowsMovedAndCheckboxToggled(copy: ObserveResult): void {
       n.checked = "false";
     }
   });
-  const warnings = copy.layoutWarnings!.warnings.map((warning): LayoutWarning =>
-    Array.isArray(warning.element.bounds)
-      ? {
-          ...warning,
-          element: {
-            ...warning.element,
-            bounds: warning.element.bounds.map((v, i) => (i % 2 === 1 ? v + 155 : v)) as [
-              number,
-              number,
-              number,
-              number,
-            ],
-          },
-        }
-      : warning,
-  );
+  // The capture stores compacted `[l, t, r, b]` bounds; shift each row down by one row height.
+  const warnings = copy.layoutWarnings!.warnings.map((warning): LayoutWarning => {
+    const [left, top, right, bottom]: number[] = Object.values(warning.element.bounds);
+    return {
+      ...warning,
+      element: {
+        ...warning.element,
+        bounds: { left, top: top + 155, right, bottom: bottom + 155 },
+      },
+    };
+  });
   // Keyboard edge keys (the issue's first sendKeys) appear as new warnings.
   const key = (text: string, left: number): LayoutWarning => ({
     type: "interaction-in-system-gesture-region",
     severity: "info",
-    element: { contentDesc: text, bounds: [left, 1900, left + 98, 2050] },
+    element: { contentDesc: text, bounds: { left, top: 1900, right: left + 98, bottom: 2050 } },
     categories: ["interaction"],
     insetTypes: ["systemGestures"],
     sides: [left === 0 ? "left" : "right"],

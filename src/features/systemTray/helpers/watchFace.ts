@@ -2,7 +2,7 @@ import { ActionableError, type BootedDevice, type ObserveResult } from "../../..
 import { logger } from "../../../utils/logger";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../../utils/toolUtils";
 import { getSystemTrayDependencies } from "./dependencies";
-import { ensureSystemTrayOpen, observeSystemTray, sleep } from "./runtime";
+import { observeSystemTray, sleep } from "./runtime";
 import { isWatchAppList, isWearHierarchy, WEAR_SYSTEM_UI, watchStreamRoot } from "./watchHierarchy";
 
 const BACK = "shell input keyevent 4";
@@ -108,18 +108,4 @@ export async function returnToWatchFace(
   }
   await sleep(SETTLE_MS, signal);
   return readWatch(device, signal);
-}
-
-/** A fresh read of the watch, brought back to the watch face when it was elsewhere. */
-export async function readWatchFace(
-  device: BootedDevice,
-  signal?: AbortSignal,
-): Promise<ObserveResult> {
-  return returnToWatchFace(device, await readWatch(device, signal), signal);
-}
-
-/** The `open` action: return to the watch face, then open the stream from there. */
-export async function openWatchStream(device: BootedDevice, timeout: number, signal?: AbortSignal) {
-  const initialObservation = await readWatchFace(device, signal);
-  return ensureSystemTrayOpen(device, timeout, { signal, initialObservation });
 }

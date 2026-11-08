@@ -108,6 +108,9 @@ describe("iOS saved prototype tool actions", () => {
       iosSavedPrototypeInstaller: backend ?? installer,
       protoViewerFactory: () => ({
         installed: async () => false,
+        capabilities: async () => {
+          throw new Error("Absent ProtoViewer must not be asked for capabilities");
+        },
         importBundle: async () => {
           throw new Error("Absent ProtoViewer must not import");
         },

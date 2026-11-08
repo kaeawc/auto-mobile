@@ -20,8 +20,14 @@ import { IOSCtrlProxyClient } from "../../observe/ios";
 import type { IosLockStateInvalidator } from "../../observe/ios/CachedIosLockStateProbe";
 import { ListInstalledApps } from "../../observe/ListInstalledApps";
 import { RealObserveScreen } from "../../observe/ObserveScreen";
+import { createProductionDevicectlPanelScreenshotSource } from "../../../utils/ios-cmdline-tools/DevicectlPanelScreenshotSource";
+import type { DevicectlDisplayInfoSource } from "../../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
 import type { TapCoordinatesRequest } from "../../observe/shared/SharedGestureDelegate";
 import type { SwipeRequest } from "../../observe/shared/types";
+import {
+  defaultPostedNotificationLedger,
+  type PostedNotificationLookup,
+} from "../../utility/postedNotificationLedger";
 import { SearchableHierarchy } from "../../utility/SearchableNode";
 import { createNotificationUIDetector } from "../createNotificationUIDetector";
 import type { IosGestureResult } from "../IosNotificationUIDetector";
@@ -70,6 +76,8 @@ export interface SystemTrayDependencies {
   timer: Timer;
   /** Delay between retries of a transiently failing pre-swipe clearAll step. */
   backoff: BackoffPolicy;
+  /** What postNotification posted on iOS: the only owner evidence for a lone banner. */
+  postedNotifications: PostedNotificationLookup;
 }
 
 // Pre-swipe retries wait briefly: the failures they absorb are load spikes that
@@ -80,6 +88,11 @@ const defaultSystemTrayBackoff = exponentialBackoff({
 });
 
 let systemTrayDependencies: SystemTrayDependencies | null = null;
+
+export const createSystemTrayObserveScreen = (
+  device: BootedDevice,
+  iosDisplayInfoSource: DevicectlDisplayInfoSource = createProductionDevicectlPanelScreenshotSource(),
+): SystemTrayObserver => new RealObserveScreen(device, undefined, { iosDisplayInfoSource });
 
 // Keep the dispatch markers so a sent-but-unanswered gesture stays distinguishable from a refusal.
 const toIosGestureResult = (result: IosGestureResult): IosGestureResult => ({
@@ -119,7 +132,7 @@ const defaultIosClientFactory: (device: BootedDevice) => SystemTrayIosClient = (
 export const getSystemTrayDependencies = (): SystemTrayDependencies => {
   if (!systemTrayDependencies) {
     systemTrayDependencies = {
-      observeScreenFactory: (device) => new RealObserveScreen(device),
+      observeScreenFactory: (device) => createSystemTrayObserveScreen(device),
       adbFactory: (device) => defaultAdbClientFactory.create(device),
       iosClientFactory: defaultIosClientFactory,
       pressButtonFactory: (device) => new PressButton(device),
@@ -131,6 +144,7 @@ export const getSystemTrayDependencies = (): SystemTrayDependencies => {
       },
       timer: defaultTimer,
       backoff: defaultSystemTrayBackoff,
+      postedNotifications: defaultPostedNotificationLedger,
       appInventoryFactory: (device) =>
         new ListInstalledApps(device, undefined, null, { cacheEnabled: false }),
       appLabelResolver: resolveAppLabel,
@@ -150,6 +164,7 @@ export const setSystemTrayDependencies = (overrides: Partial<SystemTrayDependenc
     pressButtonFactory: overrides.pressButtonFactory ?? current.pressButtonFactory,
     timer: overrides.timer ?? current.timer,
     backoff: overrides.backoff ?? current.backoff,
+    postedNotifications: overrides.postedNotifications ?? current.postedNotifications,
     appInventoryFactory: overrides.appInventoryFactory ?? current.appInventoryFactory,
     appLabelResolver: overrides.appLabelResolver ?? current.appLabelResolver,
   };

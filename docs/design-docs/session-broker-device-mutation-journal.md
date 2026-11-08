@@ -136,6 +136,27 @@ ambiguous user, an unreadable API level or grant, the app-op path below API 33,
 notification-policy access, the exact-alarm app-op and device-wide `reset` keep
 escalating rows. Runtime rows for an app absent from the readable baseline
 inventory are not journaled: cleaning uninstalls that app and its permission state.
+An Android `postNotification` naming its `appId` journals `notification:posted:<package>`,
+which the port reverts by force-stopping that app for every user (the system cancels
+all of the app's notifications, including any it showed before the session) and
+reading `cmd notification list` back: the revert succeeds only when every line is a
+notification key and none names the package. Posting also persists a notification
+channel (the caller's `channelId`, or the SDK default `automobile_test_notifications`),
+which a force-stop keeps and the shell cannot delete, so the call also journals
+`notification:channel:<package>:<channelId>`. Its prior is read before the post by asking
+the app's SDK receiver (`NOTIFICATION_CHANNEL_QUERY`, an explicit `am broadcast` that
+answers result 3 absent or 4 present). Only an `absent` prior is revertible: the port
+broadcasts `NOTIFICATION_CHANNEL_DELETE`, sends the query again and requires both to
+answer absent, then force-stops the app. A channel the app already had (the post may
+have renamed it), an unreadable prior (including an SDK without the channel actions,
+which answers 0) or a failed read-back escalates. Android keeps a deleted channel's
+record and restores it if the app recreates the same id; no app-visible state differs.
+The channel row is dropped when the session installed an app the baseline did not
+hold, since uninstalling it removes its channels. A channel id outside
+`[A-Za-z0-9_.-]{1,200}` journals the escalating `postNotification` app fallback
+instead. A call without an `appId`, or with an `imagePath` (the image
+upload can overwrite a baseline file under `/sdcard/Download/automobile`, which file
+cleaning does not restore), keeps an escalating row.
 
 On iOS, sanitize covers session-installed apps and app groups through inventory
 cleaning, absolute keychain/permission/location/status-bar/clipboard resets,

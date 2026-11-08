@@ -59,6 +59,8 @@ interface AcceptedShow {
   spec?: ShownSpecJson;
   replaceOthers?: boolean;
   variant?: PrototypeSpecVariant;
+  /** The MCP connection that issued the show, recorded on its spec revision (#17358). */
+  mcpSessionId?: string;
 }
 /** Tracks acknowledged device specs, forgetting outcomes whose wire order is indeterminate. */
 export class PrototypeShownSpecs {
@@ -143,6 +145,7 @@ export class PrototypeShownSpecs {
         spec: shown.spec,
         platform: state.platform,
         variant: shown.variant,
+        mcpSessionId: shown.mcpSessionId,
       });
     } else {
       state.entries.delete(shown.id);
@@ -183,7 +186,7 @@ export class PrototypeShownSpecs {
     deviceId: string,
     id: string,
     version: number,
-    patched: { spec: ShownSpecJson; deviceRevision?: number },
+    patched: { spec: ShownSpecJson; deviceRevision?: number; mcpSessionId?: string },
   ): boolean {
     const state = this.devices.get(deviceId);
     if (!state) {
@@ -197,6 +200,7 @@ export class PrototypeShownSpecs {
         spec: patched.spec,
         platform: state.platform,
         deviceRevision: patched.deviceRevision,
+        mcpSessionId: patched.mcpSessionId,
       });
     } else {
       this.abandon(deviceId);

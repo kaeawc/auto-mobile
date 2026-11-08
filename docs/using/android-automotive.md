@@ -26,8 +26,27 @@ Pass that to `startDevice`. AutoMobile picks only from installed `android-automo
 `maxOsVersion` range, an ABI your machine can run) and creates the AVD with the
 `automotive_1024p_landscape` profile. A phone, tablet or foldable request never gets a car image. If no
 car image is installed in the range, the error names the `sdkmanager` command to run. Asking again
-reuses the car emulator instead of creating another. Creating and booting a car emulator this way is
-unverified on a device.
+reuses the car emulator instead of creating another. Creating and booting a car emulator this way works
+with an `android-automotive` image; with a Play Store car image it is unverified.
+
+If the test will drive the car, ask for that up front so you never get a Play image:
+
+```json
+{
+  "platform": "android",
+  "formFactor": "automotive",
+  "createIfMissing": true,
+  "requires": { "vehicle": { "motion": "supported" } }
+}
+```
+
+`requires.vehicle.motion: "supported"` (on `startDevice` and `getAndroid`) matches only an emulator
+built from an `android-automotive` image and creates one from such an image instead of the Play
+image. If none is installed in the range, the error names the `sdkmanager` package to install. It is
+refused for a non-automotive request. A booted car emulator's `traits.vehicle` in the booted-devices
+resource reports `motion` (`supported`, `unsupported`, or `unknown` when the build props could not be
+read) and `nightMode` (`supported`). A physical head unit reports both `unsupported`, because vehicle
+state is injected on emulators only. Other devices have no `vehicle` field.
 
 To choose the exact image and profile yourself, call `provisionDevice` with an `android-automotive`
 system image as `runtime` and an automotive profile as `deviceType`:
@@ -70,11 +89,20 @@ device `requires` clause.
 
 ## What to expect
 
-An AAOS image is a normal Android build, so the tools that need only adb and the accessibility tree
-(`observe`, `tapOn`, `swipeOn`, `sendKeys`, `launchApp`) are expected to work unchanged. Layout is wide and
-landscape, and the cluster or passenger displays may appear as extra displays. The pass/fail matrix from
-the baseline run will live in `docs/design-docs/plat/android/form-factors.md`; until it exists, treat all
-of this as unverified.
+An AAOS image is a normal Android build, so the tools that need only adb and the accessibility tree work
+unchanged: on an API 34 `android-automotive` emulator `observe`, screenshots, `tapOn`, `tapAt`, `swipeOn`,
+`launchApp`, `listApps`, `pressButton` `home` and `performanceTrace` all pass. Layout is wide and landscape.
+Behaviour on the cluster and passenger displays is unchecked. The full pass/fail matrix,
+including which car-service commands each image accepts, is in
+[Android form factors](../design-docs/plat/android/form-factors.md#automotive-baseline-on-an-emulator).
+
+On automotive devices, `observe.automotive` reports `drivingState` (`parked`, `idling`, or `moving`),
+`uxRestrictions.requiresDistractionOptimization`, the numeric `uxRestrictions.activeRestrictions`
+bitmask for the observed display, and `foregroundActivity.distractionOptimized` when the foreground
+activity and its DO status are known. `blocked` is true when distraction optimization is required and
+the known foreground activity is not distraction optimized. Unavailable service reads omit the affected
+fields; `blocked: false` alone does not establish that the app is usable. Other device types omit the
+entire `automotive` block.
 
 ## Headless system user
 
@@ -107,6 +135,12 @@ by default; see [Device condition fixtures](device-condition.md). The `vehicle` 
 
 `vehicle.motion` needs a non-user image (userdebug or eng, such as `android-automotive` API 34 ext9); on a `user` build such as the Play Store AAOS image it returns `unsupported`; `vehicle.nightMode` works on both.
 
+To check before calling, read `vehicle` in a device's `listDevices` or `getAndroid` description. It is
+present only on automotive devices, as `{ "motion": ..., "nightMode": ... }` with each value
+`supported`, `unsupported` or `unknown`: an `android-automotive` image reports motion `supported`, an
+`android-automotive-playstore` image reports it `unsupported`, and motion is `unknown` when no car image
+tag is known. A physical head unit reports both `unsupported`.
+
 Motion uses gear and parking-brake events with continuous speed events that renew while driving is
 active. The result includes `Current Driving State`: driving must remain MOVING (2) for two seconds;
 parked accepts PARKED (0) or IDLING (1). Night mode uses the car service's day/night override and checks
@@ -122,7 +156,9 @@ physical head units and iOS return `unsupported`.
 `pressButton` accepts `rotary_rotate_cw` and `rotary_rotate_ccw` (with `steps`, 1 to 50),
 `rotary_nudge_up`, `rotary_nudge_down`, `rotary_nudge_left`, `rotary_nudge_right` and `rotary_select`.
 Nudges and select send the rotary navigation key events; rotation uses the car service's rotary
-injection. Other devices refuse these buttons. Unverified on an emulator.
+injection. Rotation and nudges move focus on an emulator; `rotary_select` succeeds but its effect depends
+on the focused item. Other devices refuse these buttons. The Wear-only `rotaryScroll` warns on a car and
+falls back to a swipe.
 
 ## Prototypes
 
@@ -132,6 +168,38 @@ wide landscape layout that was not designed for it. A successful `show` on a car
 reports `pinned: "unsupported"` when the car launcher cannot pin shortcuts. Whether the dismiss button
 clears the car system bars and whether a prototype stays visible while driving restrictions are on is
 unverified.
+
+## Car App Library templates in `observe`
+
+An app built on the Car App Library (`androidx.car.app`) can report its template stack to `observe`, on a
+phone emulator or on AAOS, without a head unit. The block appears only for a debug build of an app that
+enabled the AutoMobile SDK template route; the app-side setup is in the
+[design doc](../design-docs/plat/android/car-app-templates.md#app-setup). While the foreground app has the
+route on, `observe` carries a `carAppTemplates` block:
+
+- `sessions[]`: one per screen stack, with `screens[]` listed root first; the top screen has `top: true`.
+- Each screen: `screenClass`, `marker`, and the `template` it last recorded (absent if it never did).
+- Each template: `type` (`ListTemplate`, `GridTemplate`, `PaneTemplate`, `MessageTemplate`,
+  `SearchTemplate`, `TabTemplate`, `NavigationTemplate`, ...), `title`, `headerActions`, `items` (title,
+  texts, `hasImage`, `toggle` checked state, `browsable`), `actions`, `actionStrips` and, for tabs,
+  `tabs` and `tabContent`.
+- Every element has a stable path `id`, such as `session0/screen1/template/items/2`.
+
+The block reports what the app built, not what the car host rendered; its `note` says so. If the app's
+main thread did not answer in time, the block has `error: "main_thread_timeout"` and no sessions. Apps
+that do not enable the route add nothing to `observe`.
+
+### Back on Car App Library templates
+
+On an Android Automotive emulator, the Car App Library templates host ignores the BACK key, so
+`pressButton` `back` first sees no change. If the screen then shows one of the host's recognized Back
+controls (the toolbar Back on list, grid, pane and detail screens, or the unlabelled header button on a
+navigation place list), `pressButton` taps it. A press that popped the screen this way succeeds with
+`backFallback` set to `toolbar_nav_icon` or `primary_header_action`. When no recognized control is
+visible, such as on a root template, the press still fails with `No visual change observed`. If the tap
+was sent but its result never arrived, the press reports `code: "indeterminate_outcome"` with
+`retryable: false`: observe before pressing again, because the screen may already have gone back. Other
+screens are unchanged.
 
 ## Not supported
 

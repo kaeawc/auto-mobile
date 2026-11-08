@@ -429,6 +429,47 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     expect(receivedOptions).toEqual({ stdio: ["ignore", "ignore", "pipe"] });
   });
 
+  test("records an Apple TV simulator through simctl recordVideo on its default display (#16725)", async function () {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const stderr = new PassThrough();
+    const child = new FakeRecordingProcess({ stderr });
+    let receivedArgs: string[] = [];
+    let displayProbes = 0;
+    const simctl = simctlWith({
+      isAvailable: async () => true,
+      enumerateDisplays: async () => {
+        displayProbes++;
+        return [];
+      },
+      startCommandArgs: async (args: string[]) => {
+        receivedArgs = args;
+        timer.setTimeout(() => {
+          child.emit("spawn");
+          stderr.write("Recording started\n");
+        }, 0);
+        return child;
+      },
+    });
+    backend = new FfmpegVideoProcessingBackend(undefined, {
+      simctlFactory: () => simctl,
+      ffmpegClient: availableFfmpegClient(),
+      timer,
+    });
+    mockConfig.device = { name: "Apple TV 4K", platform: "tvos", deviceId: "tv-udid" };
+
+    const handle = await backend.start(mockConfig);
+
+    expect(receivedArgs).toEqual([
+      "io",
+      "tv-udid",
+      "recordVideo",
+      path.join(mockConfig.outputDirectory, "test-recording-raw.mov"),
+    ]);
+    expect(displayProbes).toBe(0);
+    expect(handle.liveCapturePath).toBe(receivedArgs[3]);
+  });
+
   // A fake capture process: emits "spawn" then, when asked, the recordVideo start
   // handshake. kill() emits "exit" so waitForExit's SIGINT teardown resolves.
   function makeCaptureChild(emitHandshake: boolean, timer: Timer = defaultTimer): ChildProcess {

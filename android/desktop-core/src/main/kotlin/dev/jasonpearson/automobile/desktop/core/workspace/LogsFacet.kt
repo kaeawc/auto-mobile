@@ -6,6 +6,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import dev.jasonpearson.automobile.desktop.core.daemon.DaemonStreamHub
+import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamKey
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushClient
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushSocketClient
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
@@ -28,17 +30,20 @@ internal fun createLogsTelemetryClient(sessionUuidProvider: (() -> String?)? = n
  * is created via [telemetryClientFactory] and connected to [column]'s device while the facet is
  * shown, then disposed when it leaves composition or the device changes.
  *
- * [telemetryClientFactory] is injected (defaulting to a real per-device
- * [TelemetryPushSocketClient]) so the per-device connect/dispose lifecycle can be verified with a
- * fake instead of real socket I/O.
+ * With a [streamHub] the client is a lease on the hub's one shared telemetry connection, routed by
+ * the pane's [DeviceColumn.deviceSessionUuid]; without one it is a dedicated per-pane
+ * [TelemetryPushSocketClient]. [telemetryClientFactory] is injected so the connect/dispose
+ * lifecycle can be verified with a fake instead of real socket I/O.
  */
 @Composable
 fun LogsFacet(
   column: DeviceColumn,
   // An omitted provider retains legacy behavior; a supplied provider gates registration/release.
   sessionUuidProvider: (() -> String?)? = null,
-  telemetryClientFactory: (String) -> TelemetryPushClient = {
-    createLogsTelemetryClient(sessionUuidProvider = sessionUuidProvider)
+  streamHub: DaemonStreamHub? = LocalDaemonStreamHub.current,
+  telemetryClientFactory: (String) -> TelemetryPushClient = { deviceId ->
+    streamHub?.telemetryClient(DeviceStreamKey(deviceId, column.deviceSessionUuid))
+      ?: createLogsTelemetryClient(sessionUuidProvider = sessionUuidProvider)
   },
 ) {
   val graph = LocalAutoMobileGraph.current

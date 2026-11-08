@@ -1,5 +1,9 @@
 import { access } from "node:fs/promises";
-import { join } from "node:path";
+import {
+  CTRL_PROXY_PROJECT_RELATIVE_PATH,
+  locateCtrlProxyProject,
+  type CtrlProxyProjectLocatorDependencies,
+} from "../../ctrlProxy/CtrlProxyProjectLocator";
 import type { IosCtrlProxyBuilder } from "../../ctrlProxy/IosCtrlProxyBuilder";
 import { ENV, readEnvTrimmed } from "../../config/env";
 import { ActionableError } from "../../models/ActionableError";
@@ -7,6 +11,8 @@ import { SingleFlight } from "../../utils/cache/SingleFlight";
 import { XcodebuildClient, type Xcodebuild } from "../../utils/ios-cmdline-tools/XcodebuildClient";
 import { runWithAbortSignal } from "../../utils/AbortContext";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
+
+const WATCH_SCHEME = "CtrlProxyWatch";
 
 /** Finds local watch artifacts, building the checked-in watch scheme when necessary. */
 export class WatchRunnerArtifacts {
@@ -23,6 +29,7 @@ export class WatchRunnerArtifacts {
       xcodebuild?: Pick<Xcodebuild, "executeCommand">;
       override?: () => string | undefined;
       access?: (file: string) => Promise<unknown>;
+      projectLocator?: Omit<CtrlProxyProjectLocatorDependencies, "access">;
     },
   ) {}
 
@@ -48,27 +55,21 @@ export class WatchRunnerArtifacts {
         await runWithAbortSignal(buildSignal, async () => {
           const build = async () => {
             buildSignal?.throwIfAborted();
-            const projectPath = join(
-              paths.projectRoot,
-              "ios",
-              "control-proxy",
-              "CtrlProxy.xcodeproj",
-            );
-            try {
-              await (this.dependencies.access ?? access)(projectPath);
-            } catch (cause) {
-              throw new ActionableError(
-                `Watch runner project is unavailable; set ${ENV.WATCH_RUNNER_XCTESTRUN.name} to a prebuilt watch runner xctestrun. The published package does not include the watch project.`,
-                { cause },
-              );
+            const location = await locateCtrlProxyProject(paths.projectRoot, {
+              ...this.dependencies.projectLocator,
+              access: this.dependencies.access,
+            });
+            if (!location.found) {
+              throw missingProjectError(location.checked, paths.derivedDataPath);
             }
+            const projectPath = location.projectPath;
             await (this.dependencies.xcodebuild ?? new XcodebuildClient()).executeCommand(
               [
                 "build-for-testing",
                 "-project",
                 projectPath,
                 "-scheme",
-                "CtrlProxyWatch",
+                WATCH_SCHEME,
                 "-destination",
                 "generic/platform=watchOS Simulator",
                 "-derivedDataPath",
@@ -80,7 +81,7 @@ export class WatchRunnerArtifacts {
             const built = await builder.getXctestrunPath("watchSimulator");
             if (!built) {
               throw new ActionableError(
-                `No watchsimulator xctestrun found in ${paths.derivedDataPath}/Build/Products after building CtrlProxyWatch; set ${ENV.WATCH_RUNNER_XCTESTRUN.name} to a prebuilt watch runner.`,
+                `No watchsimulator xctestrun found in ${paths.derivedDataPath}/Build/Products after building ${WATCH_SCHEME}; set ${ENV.WATCH_RUNNER_XCTESTRUN.name} to a prebuilt watch runner.`,
               );
             }
             return built;
@@ -93,4 +94,20 @@ export class WatchRunnerArtifacts {
       { cancelWhenAllWaitersAbort: true },
     );
   }
+}
+
+function buildCommand(projectPath: string, derivedDataPath: string): string {
+  return `xcodebuild build-for-testing -project ${projectPath} -scheme ${WATCH_SCHEME} -destination 'generic/platform=watchOS Simulator' -derivedDataPath ${derivedDataPath} CODE_SIGNING_ALLOWED=NO`;
+}
+
+/** Names every place searched and each way to supply the runner (#17285). */
+function missingProjectError(checked: string[], derivedDataPath: string): ActionableError {
+  return new ActionableError(
+    [
+      `The ${WATCH_SCHEME} watch runner is not built in ${derivedDataPath} and ${CTRL_PROXY_PROJECT_RELATIVE_PATH} was not found at: ${checked.join(", ")}.`,
+      `From an AutoMobile checkout, set ${ENV.PROJECT_ROOT.name} to the checkout root and retry startDevice to build it automatically,`,
+      `or build it yourself: ${buildCommand(`<checkout>/${CTRL_PROXY_PROJECT_RELATIVE_PATH}`, derivedDataPath)}.`,
+      `The published package does not include the watch project; there, set ${ENV.WATCH_RUNNER_XCTESTRUN.name} to a prebuilt watch runner xctestrun.`,
+    ].join(" "),
+  );
 }

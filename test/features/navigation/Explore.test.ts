@@ -456,9 +456,9 @@ describe("Explore", () => {
         );
 
         expect(fakeGraph.getMethodCallCount("getStats")).toBe(1);
-        // The recorded event names its app, so the final report exports that app's graph.
-        expect(fakeGraph.getMethodCallCount("exportGraph")).toBe(1);
-        expect(fakeGraph.getMethodCallCount("exportGraphForApp")).toBe(1);
+        // The requested package names the graph both reads export, never the graph's current app.
+        expect(fakeGraph.getMethodCallCount("exportGraph")).toBe(0);
+        expect(fakeGraph.getMethodCallCount("exportGraphForApp")).toBe(2);
         expect(progressMessages).toContain("Explored 1 new screens (1/1 interactions)");
         expect(result.screensDiscovered).toBe(1);
       });
@@ -585,12 +585,13 @@ describe("Explore", () => {
       });
     }
 
-    test("a relaunched root tries its buttons then stops without Back", async () => {
+    test("a relaunched root tries its button once, then stops without Back", async () => {
       const run = rootRun("Continue as Guest", "Login", launcher);
       try {
         const result = await runExplore(explore, { packageName: target, timeoutMs: 90000 });
-        expect(run.actions).toEqual(["launch", "tap:guest", "tap:guest"]);
-        expect(result.interactionsPerformed).toBe(2);
+        // The tap left Login unchanged, so it is not retried there (#17442).
+        expect(run.actions).toEqual(["launch", "tap:guest"]);
+        expect(result.interactionsPerformed).toBe(1);
         expect(result.stopReason).toBe(rootStop);
         expect(result.durationMs).toBe(1000);
       } finally {
@@ -857,9 +858,9 @@ describe("Explore", () => {
         ],
         currentScreen: null,
       };
-      const targetExport = spyOn(fakeGraph, "exportGraphForApp").mockResolvedValue(
-        finalTargetGraph,
-      );
+      const targetExport = spyOn(fakeGraph, "exportGraphForApp")
+        .mockResolvedValueOnce(targetGraph)
+        .mockResolvedValue(finalTargetGraph);
       const launch = spyOn(LaunchApp.prototype, "execute").mockResolvedValue({
         success: true,
         packageName: "com.test.app",
@@ -1183,6 +1184,29 @@ describe("Explore", () => {
       expect([...seams.loopDetection]).toEqual([["A", 1]]);
       expect(seams.previousScreen).toBe("A");
       expect(seams.consecutiveNoChangeCount).toBe(0);
+    });
+
+    // #17284: one interaction then a no-change streak reported "after 40
+    // interactions"; the stop reason must count what was actually performed.
+    test("stuck-screen stop reports the interactions actually performed", async () => {
+      explore = new Explore(device, mockAdb, fakeTimer, { navigationManager: fakeGraph });
+      spyOn(explore.observeScreen, "execute").mockResolvedValue(createMockObservation());
+      const seams = executionSeams(explore);
+      let calls = 0;
+      spyOn(seams, "performInteraction").mockImplementation(async () => {
+        calls++;
+        fakeGraph.setCurrentScreenValue("A");
+        return calls === 1;
+      });
+
+      const result = await runExplore(explore, { maxInteractions: 8, timeoutMs: 60_000_000 });
+
+      const limit = Explore.MAX_CONSECUTIVE_NO_CHANGE;
+      expect(result.interactionsPerformed).toBe(1);
+      expect(calls).toBe(1 + limit);
+      expect(result.stopReason).toBe(
+        `Screen appears stuck - no changes detected after ${limit} consecutive attempts (1 interaction performed)`,
+      );
     });
 
     for (const reachesDestination of [true, false]) {
@@ -2536,6 +2560,8 @@ describe("Explore", () => {
       explore.performInteraction = async () => {
         const success = outcomes.shift() ?? true;
         log.push(success ? "interaction:ok" : "interaction:fail");
+        // Each successful interaction lands on a new screen, so its element stays selectable.
+        fakeGraph.setCurrentScreenValue(`Screen${log.length}`);
         return success;
       };
       explore.resetToHome = async () => {

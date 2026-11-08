@@ -21,6 +21,7 @@ import {
   systemTrayHandler,
 } from "./interactionToolHandlers";
 import type { InteractionToolDependencies } from "./interactionTools/dependencies";
+import { withTvosOpenLink } from "./tvosOpenLink";
 import {
   pressButtonHandler,
   rotateHandler,
@@ -139,7 +140,7 @@ const NAV_PLAN_SKELETON = { ...NAV, ...PLAN_SKELETON } as const;
 export const pressButtonTool = defineDeviceTool({
   name: "pressButton",
   description:
-    "Press a device or navigation button. On tvOS, use up/down/left/right to navigate focus, select, menu, home or playPause; long press and steps are unsupported. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware. Android-only system actions: lock, power_dialog, quick_settings, screenshot, split_screen (raw system toggle; windowMode places a chosen app) and dismiss_notification_shade; each needs the API level and CtrlProxy APK that supports it and otherwise returns unsupported_system_action. Android Automotive only: rotary_rotate_cw / rotary_rotate_ccw (steps detents), rotary_nudge_up/down/left/right and rotary_select drive a rotary controller; other devices refuse them. lock leaves the device locked (wakeAndUnlock); power_dialog and quick_settings stay open until back/home.",
+    "Press a device or navigation button. On tvOS, use up/down/left/right to navigate focus, select, menu, home or playPause; long press and steps are unsupported. On Android (TV remotes), up/down/left/right/select send D-pad keys and playPause, fastForward, rewind, next and previous send media keys; select with durationMs is a long press of D-pad center (API 35+). On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware. Android-only system actions: lock, power_dialog, quick_settings, screenshot, split_screen (raw system toggle; windowMode places a chosen app) and dismiss_notification_shade; each needs the API level and CtrlProxy APK that supports it and otherwise returns unsupported_system_action. Android Automotive only: rotary_rotate_cw / rotary_rotate_ccw (steps detents), rotary_nudge_up/down/left/right and rotary_select drive a rotary controller; other devices refuse them. lock leaves the device locked (wakeAndUnlock); power_dialog and quick_settings stay open until back/home.",
   input: pressButtonInput,
   options: {
     outputSchema: pressButtonResultSchema,
@@ -349,6 +350,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     sendKeysSchema,
     {
       handler: createSendKeysHandler(deps),
+      keepsImeRestorePending: true,
       defaultEnabled: true,
       supportsProgress: true,
       outputSchema: sendKeysResultSchema,
@@ -363,7 +365,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     'Open URL in browser. A transient Android ADB failure returns device_transport_unavailable (retryable: true, retryAfterMs, deviceId). dispatched is false before dispatch or "unknown" after transport loss (true is reserved for confirmed dispatch). For "unknown", the link may already have opened: observe before reissuing a single-use link.',
     openLinkSchema,
     {
-      handler: createOpenLinkHandler(deps),
+      handler: withTvosOpenLink(createOpenLinkHandler(deps), deps),
       defaultEnabled: false,
       outputSchema: openLinkResultSchema,
       ...PLAN_SKELETON,
@@ -372,7 +374,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
 
   ToolRegistry.registerDeviceAware(
     "tapOn",
-    "Tap an element by text/content-desc, resource-id, or Android test tag; use sibling for adjacent controls.",
+    "Tap an element by text/content-desc, resource-id, or Android test tag; use sibling for adjacent controls. On an Android device without a touchscreen (TV), a plain text or elementId tap (no sibling, container, index or other touch-only option) moves D-pad focus to the match and presses enter only once focus reaches it.",
     tapOnSchema,
     {
       handler: (device, args, progress, signal) =>

@@ -107,6 +107,34 @@ describe("NavigationGraphManager provenance write path", () => {
     expect(edgeObs[0].session_uuid).toBe(SESSION);
   });
 
+  test("stamps the declared git revision on the build key without changing its identity (#16954)", async () => {
+    await manager.setCurrentApp(APP);
+    const build = { appId: APP, deviceId: "emu-1", versionCode: 7, contentHash: "hashA" };
+    manager.setBuildContext({
+      ...build,
+      sourceRevision: { gitBranch: "main", gitSha: "1111111aaaa" },
+    });
+    await manager.recordNavigationEvent(navEvent("Home", 100));
+    // Same build key, rebuilt from a later commit: the latest declaration wins.
+    manager.setBuildContext({
+      ...build,
+      sourceRevision: { gitBranch: "main", gitSha: "2222222bbbb" },
+    });
+    await manager.recordNavigationEvent(navEvent("Details", 200));
+    // A context without a declaration never clears the recorded one.
+    manager.setBuildContext(build);
+    await manager.recordNavigationEvent(navEvent("Home", 300));
+
+    const buildKeys = await db.selectFrom("navigation_build_keys").selectAll().execute();
+    expect(buildKeys).toHaveLength(1);
+    expect(buildKeys[0]).toMatchObject({
+      version_code: 7,
+      content_hash: "hashA",
+      git_branch: "main",
+      git_sha: "2222222bbbb",
+    });
+  });
+
   test("falls back to the default build key when the build context is for a different app", async () => {
     await manager.setCurrentApp(APP);
     // Context resolved for another app must not stamp APP's provenance.

@@ -23,6 +23,15 @@ class PrototypeCapabilityAdvertisementTest {
   }
 
   @Test
+  fun `CtrlProxy advertises overlay window controls and keyboard dismissal`() {
+    val commands =
+      WebSocketServer(port = 0, scope = scope, options = WebSocketServerOptions(sdkInt = { 36 }))
+        .supportedCommands()
+    assertTrue("prototype_platform_window_controls_v1" in commands)
+    assertTrue("prototype_hide_keyboard_v1" in commands)
+  }
+
+  @Test
   fun `renderer capabilities are advertised by CtrlProxy`() {
     val commands =
       WebSocketServer(port = 0, scope = scope, options = WebSocketServerOptions(sdkInt = { 36 }))
@@ -59,6 +68,7 @@ class PrototypeCapabilityAdvertisementTest {
         "prototype_platform_connectivity_v1",
         "prototype_platform_haptics_v1",
         "prototype_platform_links_v1",
+        "prototype_platform_settings_v1",
         "prototype_platform_sound_v1",
         "prototype_platform_test_v1",
       ),

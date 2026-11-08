@@ -1,35 +1,117 @@
+import {
+  ABSOLUTE,
+  ALIGN_ITEMS,
+  ALIGN_SELF,
+  COLUMN,
+  DATA_WINDOW,
+  FLEX,
+  FLEX_DIRECTION,
+  JUSTIFY_CONTENT,
+  RELATIVE,
+  STRETCH,
+} from "./webCss";
 import { prototypeSpecForDevice } from "../prototypeComponents";
+import type { PrototypeFormatLogger } from "../prototypeFormat";
 import { resolvePrototypeStrings } from "../prototypeStrings";
 import { prototypeRolePalette, type PrototypeColorMode } from "../prototypeContrast";
+import { prototypeDrawnPalette } from "../prototypeSeedScheme";
 import { record, type Raw } from "../prototypeTemplate";
 import { defaultDeviceFrameId, deviceFrameOrThrow, type DeviceFrame } from "./deviceFrames";
-import { renderDeviceFrame, screenSize, type WebOrientation } from "./webFrame";
+import { PrototypeWebInputError } from "./prototypeWebInputError";
+import type { PrototypeIconGlyphSource } from "./webIconGlyphs";
+import {
+  frameOrientations,
+  renderChromelessScreen,
+  renderDeviceFrame,
+  safeAreaVars,
+  screenSize,
+  type WebOrientation,
+} from "./webFrame";
+import { markInitialFocus } from "./webFocus";
+import {
+  frameInPosture,
+  layoutSize,
+  webFold,
+  type FramePosture,
+  type WebFold,
+  type WebPostureView,
+} from "./webFold";
 import { el, type WebElement } from "./webNodes";
+import { stillPlatformState } from "./webPlatformState";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
+import type { WebSkinId } from "./webSkin";
+import { resolveWebStillAppearance, webAuthoredBackground } from "./webStillAppearance";
 import type { WebStackScreens } from "./webStack";
-import { cssColor, themeTypography, type WebStyleContext } from "./webStyle";
-
-/** The still renders in one fixed locale, so the same spec renders the same bytes. */
-const STILL_LOCALE = "en-US";
+import type { WebImageDraw } from "./webImages";
+import { localeLayoutDirection, stillLocale } from "./webLocale";
+import {
+  appTopColor,
+  statusBarContentFor,
+  type WebScreenSize,
+  type WebStatusBarContent,
+} from "./webStatusBar";
+import {
+  cssColor,
+  fontPx,
+  INCOMING_HEIGHT_KEY,
+  themeTypography,
+  type WebStyleContext,
+} from "./webStyle";
+import { stillTextScale, type StillTextSize } from "./webTextScale";
 
 export interface PrototypeStillOptions {
   /** A device frame id; defaults to the platform's default frame. */
   readonly frame?: string;
   readonly platform?: "android" | "ios";
+  /** The platform skin components draw in; defaults to the frame's platform. */
+  readonly skin?: WebSkinId;
+  /** One of the frame's orientations; defaults to its first (landscape for a TV or car). */
   readonly orientation?: WebOrientation;
+  /**
+   * A foldable frame's posture (#16445); defaults to `opened`, else the frame's first. A frame
+   * without postures takes none.
+   */
+  readonly posture?: string;
+  /** The system setting: decides only when the spec's theme and authored background do not. */
   readonly mode?: PrototypeColorMode;
   /** The clock derived relative times read; fixed so the same input renders the same bytes. */
   readonly nowMs?: number;
   /** A screen of the outermost stack to draw instead of its start; an unknown id draws the start. */
   readonly screen?: string;
+  /**
+   * Draws the frame's screen alone, without the device or its insets: the content path a
+   * renderer's goldens capture (#16534).
+   */
+  readonly chromeless?: boolean;
+  /** Asset ids the page can inline, to their CSS slots; any other asset draws a placeholder. */
+  readonly imageSlots?: ReadonlyMap<string, number>;
+  /**
+   * Where icons find their glyphs (the server passes the Material Icons Android draws). Used only
+   * for an Android frame: an iOS frame keeps the placeholder until its glyph set is decided
+   * (#16526). Without one every icon draws the placeholder.
+   */
+  readonly glyphs?: PrototypeIconGlyphSource;
+  /**
+   * The host locale (BCP 47, default `en-US`): string tables, formatting, and the layout direction
+   * of a window that sets no `layoutDirection`.
+   */
+  readonly locale?: string;
+  /** The system text size: `fontScale` on an Android frame, `contentSize` on an iOS one. */
+  readonly textSize?: StillTextSize;
+  /** Traces rejected derived formats; the server passes its logger, a browser embed none. */
+  readonly logger?: PrototypeFormatLogger;
 }
 
 export interface PrototypeStill {
   readonly element: WebElement;
   readonly frame: string;
+  /** The posture drawn; absent for a frame without postures. */
+  readonly posture?: FramePosture;
   readonly unsupportedNodes: readonly UnsupportedWebNode[];
   /** The outermost stack drawn, if any: its screens and the one drawn. */
   readonly stack?: WebStackScreens;
+  /** Every image drawn with a bound asset, in tree order. */
+  readonly imageDraws: readonly WebImageDraw[];
 }
 
 const GRAVITY_ALIGN: Readonly<Record<string, [string, string]>> = {
@@ -47,11 +129,11 @@ const GRAVITY_ALIGN: Readonly<Record<string, [string, string]>> = {
 // Window content start-aligns, so an explicit `wrap` root keeps its content width; a filling root
 // stretches itself.
 const LAYER = {
-  position: "absolute",
+  position: ABSOLUTE,
   inset: "0",
-  display: "flex",
-  "flex-direction": "column",
-  "align-items": "flex-start",
+  display: FLEX,
+  [FLEX_DIRECTION]: COLUMN,
+  [ALIGN_ITEMS]: "flex-start",
 };
 
 function sheetWindow(placement: Raw, children: WebElement[], layered: boolean): WebElement {
@@ -60,14 +142,14 @@ function sheetWindow(placement: Raw, children: WebElement[], layered: boolean): 
     "div",
     {
       style: {
-        display: "flex",
-        "flex-direction": "column",
-        "align-items": "flex-start",
+        display: FLEX,
+        [FLEX_DIRECTION]: COLUMN,
+        [ALIGN_ITEMS]: "flex-start",
         // A sheet spans the screen width (native MATCH_PARENT); its content keeps start alignment.
-        "align-self": "stretch",
+        [ALIGN_SELF]: STRETCH,
         height: `${height}px`,
         // Layers cover this region, not the whole screen.
-        ...(layered ? { position: "relative" } : {}),
+        ...(layered ? { position: RELATIVE } : {}),
       },
     },
     children,
@@ -75,7 +157,7 @@ function sheetWindow(placement: Raw, children: WebElement[], layered: boolean): 
   const edge = placement.edge === "top" ? "flex-start" : "flex-end";
   return el(
     "div",
-    { attrs: { "data-window": "sheet" }, style: { ...LAYER, "justify-content": edge } },
+    { attrs: { [DATA_WINDOW]: "sheet" }, style: { ...LAYER, [JUSTIFY_CONTENT]: edge } },
     [sheet],
   );
 }
@@ -89,46 +171,66 @@ function floatingWindow(placement: Raw, children: WebElement[]): WebElement {
   return el(
     "div",
     {
-      attrs: { "data-window": "floating" },
-      style: { ...LAYER, display: "grid", "align-items": vertical, "justify-items": horizontal },
+      attrs: { [DATA_WINDOW]: "floating" },
+      style: { ...LAYER, display: "grid", [ALIGN_ITEMS]: vertical, "justify-items": horizontal },
     },
     [floating],
   );
 }
 
 /**
+ * The height a window hands its root (INCOMING_HEIGHT_KEY), where it is statically known: a
+ * sheet's dp `height`. A fullscreen window's height is the screen less bars and insets, known only
+ * at layout time, so it hands none.
+ */
+function windowHeight(placement: Raw | undefined): Raw {
+  const height = placement?.type === "sheet" ? placement.height : undefined;
+  return typeof height === "number" && Number.isFinite(height) && height >= 0
+    ? { [INCOMING_HEIGHT_KEY]: height }
+    : {};
+}
+
+/**
  * A fullscreen or sheet root fills its window on each axis it leaves unsized, as both devices do
- * (#16190); explicit sizes stay, and a floating root keeps its content size.
+ * (#16190); explicit sizes stay, and a floating root keeps its content size. A sheet's root also
+ * carries the sheet's height as its bound (see windowHeight).
  */
 function sizedRoot(spec: unknown): unknown {
   const root = record(record(spec)?.root);
-  const placement = record(record(record(spec)?.window)?.placement)?.type;
-  if (!root || placement === "floating") {
+  const placement = record(record(record(spec)?.window)?.placement);
+  if (!root || placement?.type === "floating") {
     return root;
   }
   const style = record(root.style) ?? {};
   return {
     ...root,
-    style: { width: "fill", height: "fill", ...style },
+    style: { width: "fill", height: "fill", ...style, ...windowHeight(placement) },
   };
 }
 
+/** The explicit `window.layoutDirection`, else `rtl` for an RTL locale, else none. */
+function windowDirection(spec: unknown, locale: string): "ltr" | "rtl" | undefined {
+  const authored = record(record(spec)?.window)?.layoutDirection;
+  if (authored === "rtl" || authored === "ltr") {
+    return authored;
+  }
+  return localeLayoutDirection(locale) === "rtl" ? "rtl" : undefined;
+}
+
 /**
- * Window placement inside the screen: fullscreen fills it; a sheet is `height` dp at its `edge`;
- * a floating window sits at its `gravity`, moved by its `offset`.
- */
-/**
- * The window's content with the spec's explicit layout direction, so rows, start/end alignment and
- * logical padding follow it; the device chrome around it is never mirrored.
+ * The window's content with its layout direction, so rows, start/end alignment and logical padding
+ * follow it; the device chrome around it is never mirrored. An explicit `window.layoutDirection`
+ * wins; otherwise the host locale decides, and an LTR locale leaves the page's own direction.
  */
 function placed(
   spec: unknown,
   content: WebElement | undefined,
   layers: readonly WebElement[],
+  locale: string,
 ): WebElement {
   const window = placedWindow(spec, content, layers);
-  const direction = record(record(spec)?.window)?.layoutDirection;
-  if (direction !== "rtl" && direction !== "ltr") {
+  const direction = windowDirection(spec, locale);
+  if (direction === undefined) {
     return window;
   }
   // In RTL the logical start is the physical right, so the logical insets swap sides.
@@ -143,7 +245,11 @@ function placed(
   };
 }
 
-/** The window region holds the content, then its layers; a floating window's transform anchors them. */
+/**
+ * Window placement inside the screen: fullscreen fills it; a sheet is `height` dp at its `edge`;
+ * a floating window sits at its `gravity`, moved by its `offset`. The window region holds the
+ * content, then its layers; a floating window's transform anchors them.
+ */
 function placedWindow(
   spec: unknown,
   content: WebElement | undefined,
@@ -157,42 +263,111 @@ function placedWindow(
   if (placement.type === "floating") {
     return floatingWindow(placement, children);
   }
-  return el("div", { attrs: { "data-window": "fullscreen" }, style: LAYER }, children);
+  return el("div", { attrs: { [DATA_WINDOW]: "fullscreen" }, style: LAYER }, children);
+}
+
+function glyphScope(
+  options: PrototypeStillOptions,
+  frame: DeviceFrame,
+): { glyphs?: PrototypeIconGlyphSource } {
+  return options.glyphs && frame.platform === "android" ? { glyphs: options.glyphs } : {};
+}
+
+/** The host locale and fixed zone keep a still's bytes stable; the logger is optional for a browser embed. */
+function stillFormat(options: PrototypeStillOptions, locale: string): WebRenderScope["format"] {
+  return {
+    locale,
+    timeZone: "UTC",
+    nowMs: options.nowMs ?? 0,
+    ...(options.logger === undefined ? {} : { logger: options.logger }),
+  };
+}
+
+/** The posture's panel is the active panel; its hinge, when it folds that panel, sets the posture. */
+function platformStateFor(
+  platform: "android" | "ios",
+  screenDp: { widthDp: number; heightDp: number },
+  fold: WebFold | undefined,
+) {
+  return stillPlatformState({
+    platform,
+    ...screenDp,
+    ...(fold ? { fold: { posture: fold.posture, hinge: fold.band.axis } } : {}),
+  });
 }
 
 function stillScope(
   expanded: unknown,
   options: PrototypeStillOptions,
-  frame: DeviceFrame,
+  view: WebPostureView,
+  {
+    orientation,
+    locale,
+    fold,
+  }: { orientation: WebOrientation; locale: string; fold: WebFold | undefined },
 ): WebRenderScope {
+  const { frame } = view;
   const spec = record(expanded) ?? {};
-  // An explicit theme mode wins, as on the devices; `system` or none falls back to the caller's.
-  const authored = record(spec.theme)?.mode;
-  const mode = authored === "light" || authored === "dark" ? authored : (options.mode ?? "light");
-  return {
+  // The spec lays out on the active panel, minus an occluding hinge.
+  const size = layoutSize(screenSize(frame, orientation), fold);
+  const screenDp = { widthDp: size.width, heightDp: size.height };
+  // The skin decides every look the devices draw differently, glass included.
+  const skin = options.skin ?? frame.platform;
+  const textScale = stillTextScale(frame.platform, options.textSize);
+  // Conditions and pager pages do not depend on the mode, so the walk reads a light scope.
+  const scope: WebRenderScope = {
     style: {
-      mode,
-      palette: prototypeRolePalette(expanded, mode),
-      parentAxis: "column",
+      mode: "light",
+      palette: prototypeDrawnPalette(expanded, "light"),
+      parentAxis: COLUMN,
       typography: themeTypography(expanded),
+      ...(textScale ? { textScale } : {}),
+      platform: skin,
+      ...(windowDirection(spec, locale) === "rtl" ? { rtl: true } : {}),
     },
-    condition: { state: record(spec.state) ?? {}, platform: frame.platform },
+    condition: {
+      state: record(spec.state) ?? {},
+      platform: frame.platform,
+      platformState: platformStateFor(frame.platform, screenDp, fold),
+    },
     data: spec.data,
     spec,
-    format: { locale: STILL_LOCALE, timeZone: "UTC", nowMs: options.nowMs ?? 0 },
+    format: stillFormat(options, locale),
     instances: [],
     inBox: false,
     unsupported: [],
-    screenWidth: screenSize(frame, options.orientation ?? "portrait").width,
-    ...(options.screen === undefined ? {} : { screen: options.screen }),
+    skin,
+    ...glyphScope(options, frame),
+    screenWidth: size.width,
+    screenHeight: size.height,
+    ...optionalScope(options),
     stacks: [],
     layers: [],
+    imageDraws: [],
+  };
+  // The caller's mode is only the system setting; the spec decides first, as on the devices.
+  const { mode, surface } = resolveWebStillAppearance(
+    expanded,
+    webAuthoredBackground(spec.root, scope, "root"),
+    options.mode ?? "light",
+  );
+  return {
+    ...scope,
+    style: { ...scope.style, mode, palette: prototypeDrawnPalette(expanded, mode, surface) },
+  };
+}
+
+/** The scope fields only some callers set: the screen to draw and the inlinable images' slots. */
+function optionalScope(options: PrototypeStillOptions): Partial<WebRenderScope> {
+  return {
+    ...(options.screen === undefined ? {} : { screen: options.screen }),
+    ...(options.imageSlots === undefined ? {} : { imageSlots: options.imageSlots }),
   };
 }
 
 /**
- * The theme's `background` role (else `surface`); a seed or device scheme leaves both unresolved,
- * so the Material 3 baseline background for the mode stands in.
+ * The theme's `background` role (else `surface`), from the baseline, seed or overrides; the
+ * Material 3 baseline background for the mode stands in should neither resolve.
  */
 function screenBackground(style: WebStyleContext): string {
   return (
@@ -202,30 +377,115 @@ function screenBackground(style: WebStyleContext): string {
   );
 }
 
+/** What the status bar's top colour is read from: the window's content on the screen. */
+interface StatusBarSample {
+  readonly content: WebElement;
+  readonly background: string;
+  readonly dark: boolean;
+  readonly screen: WebScreenSize;
+  /** The screen's custom properties: the safe-area insets. */
+  readonly vars: Readonly<Record<string, string>>;
+}
+
+/**
+ * `window.statusBar` light or dark picks the content style; `auto` or none follows the colour the
+ * window paints at the screen's top edge, as both platforms' edge-to-edge defaults do. The window
+ * placement is part of that layout, so a bottom sheet or a floating window leaves the screen
+ * background there.
+ */
+function stillStatusBarContent(spec: unknown, sample: StatusBarSample): WebStatusBarContent {
+  const { content, background, dark, screen, vars } = sample;
+  const authored = record(record(spec)?.window)?.statusBar;
+  if (authored === "light" || authored === "dark") {
+    return authored;
+  }
+  const top = appTopColor(content, background, screen, vars);
+  return statusBarContentFor(top, dark ? "light" : "dark");
+}
+
+/** The requested orientation, which the frame must support, else the frame's default. */
+function stillOrientation(
+  frame: DeviceFrame,
+  requested: WebOrientation | undefined,
+): WebOrientation {
+  const supported = frameOrientations(frame);
+  if (requested === undefined) {
+    return supported[0]!;
+  }
+  if (!supported.includes(requested)) {
+    throw new PrototypeWebInputError(
+      `Device frame "${frame.id}" has no ${requested} view. Its orientations: ${supported.join(", ")}`,
+    );
+  }
+  return requested;
+}
+
+/** The posture a foldable frame is drawn in; none for a frame without postures. */
+function postureOf(view: WebPostureView): { posture?: FramePosture } {
+  return view.posture ? { posture: view.posture } : {};
+}
+
+/** The posture a foldable frame names, and the fold it draws over the active panel. */
+function postureFrameOptions(
+  view: WebPostureView,
+  fold: WebFold | undefined,
+): { posture?: FramePosture; fold?: WebFold } {
+  return { ...postureOf(view), ...(fold ? { fold } : {}) };
+}
+
 export function renderPrototypeStill(
   spec: unknown,
   options: PrototypeStillOptions = {},
 ): PrototypeStill {
-  const frame = deviceFrameOrThrow(
-    options.frame ?? defaultDeviceFrameId(options.platform ?? "android"),
+  const view = frameInPosture(
+    deviceFrameOrThrow(options.frame ?? defaultDeviceFrameId(options.platform ?? "android")),
+    options.posture,
   );
-  // Components expand, then string tables resolve for the still's fixed locale, as on devices.
-  const expanded = resolvePrototypeStrings(prototypeSpecForDevice(spec), [STILL_LOCALE]);
-  const scope = stillScope(expanded, options, frame);
+  const { frame } = view;
+  const locale = stillLocale(options.locale);
+  // Components expand, then string tables resolve for the host locale, as on devices.
+  const expanded = resolvePrototypeStrings(prototypeSpecForDevice(spec), [locale]);
+  const orientation = stillOrientation(frame, options.orientation);
+  const fold = webFold(view, orientation);
+  const scope = stillScope(expanded, options, view, { orientation, locale, fold });
   const root = renderWebNode(sizedRoot(expanded), scope, "root");
   const dark = scope.style.mode === "dark";
   const textColor = cssColor("onSurface", scope.style) ?? (dark ? "#e6e0e9" : "#1d1b20");
-  const element = renderDeviceFrame(
-    frame,
-    options.orientation ?? "portrait",
-    { dark, textColor, background: screenBackground(scope.style) },
-    placed(expanded, root, scope.layers),
-  );
+  const background = screenBackground(scope.style);
+  const placedContent = placed(expanded, root, scope.layers, locale);
+  // A d-pad device always has a focused item, so a TV still shows where focus starts.
+  const content = frame.input === "dpad" ? markInitialFocus(placedContent) : placedContent;
+  const paint = {
+    dark,
+    textColor,
+    background,
+    ...(scope.style.textScale ? { fontSize: fontPx(14, scope.style) } : {}),
+  };
+  const element = options.chromeless
+    ? renderChromelessScreen(frame, orientation, paint, content)
+    : renderDeviceFrame(
+        frame,
+        orientation,
+        {
+          ...paint,
+          statusBarContent: stillStatusBarContent(expanded, {
+            content,
+            background,
+            dark,
+            screen: screenSize(frame, orientation),
+            vars: safeAreaVars(frame, orientation),
+          }),
+          ...postureFrameOptions(view, fold),
+        },
+        content,
+      );
   const stack = scope.stacks?.[0];
   return {
     element,
     frame: frame.id,
+    ...postureOf(view),
     unsupportedNodes: scope.unsupported,
     ...(stack ? { stack } : {}),
+    imageDraws: scope.imageDraws ?? [],
   };
 }

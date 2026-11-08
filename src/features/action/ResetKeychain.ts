@@ -1,4 +1,9 @@
 import type { KeystoreResetBackend } from "../storage/keystoreReset";
+import {
+  validateKeystoreFaultRequest,
+  type KeystoreFaultBackend,
+  type KeystoreFaultMethod,
+} from "../storage/keystoreFault";
 import { ActionableError, toActionableError } from "../../models";
 import type { BootedDevice, ExecResult, ResetKeychainResult } from "../../models";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
@@ -29,6 +34,15 @@ export interface ResetKeychainOptions {
   confirm?: boolean;
   scope?: string;
   alias?: string;
+  /**
+   * `reset` (default) deletes secure state. `injectFault` and `clearFaults` (Android only) arm or
+   * disarm debug-SDK Keystore faults on declared aliases (#16867, #17298).
+   */
+  action?: "reset" | KeystoreFaultMethod;
+  /** injectFault only: the SDK fault kind. */
+  kind?: string;
+  /** injectFault with kind DELAY only: milliseconds per Keystore operation. */
+  delayMs?: number;
   /**
    * Whether the caller supplied an explicit device-bound selector (a `deviceId`,
    * a `device` label, or a `sessionUuid`) rather than letting the device be
@@ -67,6 +81,7 @@ export class ResetKeychain {
     device: BootedDevice,
     simctl: SimctlKeychainClient | null = null,
     private readonly keystore: KeystoreResetBackend | null = null,
+    private readonly keystoreFaults: KeystoreFaultBackend | null = null,
   ) {
     this.device = device;
     this.simctl = simctl ?? new SimCtlClient(device);
@@ -85,6 +100,14 @@ export class ResetKeychain {
         `Refusing to reset secure state without an explicit device target. ` +
           `Provide a deviceId, a device label, or a sessionUuid.`,
       );
+    }
+
+    const action = options.action ?? "reset";
+    if (action !== "injectFault" && (options.kind !== undefined || options.delayMs !== undefined)) {
+      throw new ActionableError("kind and delayMs apply only to action: injectFault.");
+    }
+    if (action !== "reset") {
+      return this.updateAndroidFaults(action, options);
     }
 
     if (this.device.platform === "android") {
@@ -162,5 +185,55 @@ export class ResetKeychain {
       exceededRequestedScope: false,
       message: `Android Keystore reset: ${state.status ?? state.outcome}; ${state.deletedCount} aliases deleted.`,
     };
+  }
+
+  /**
+   * Arms or disarms debug-SDK Keystore faults through the app's provider. It shares reset's
+   * targeting, confirm:false and declared-selector rules; the SDK enforces opt-in and the
+   * mutation gate. Invalid kinds and selectors get the provider's own refusal without a call.
+   */
+  private async updateAndroidFaults(
+    method: KeystoreFaultMethod,
+    options: ResetKeychainOptions,
+  ): Promise<ResetKeychainResult> {
+    if (this.device.platform !== "android") {
+      throw new ActionableError(
+        `${method} is supported only on Android apps that include the AutoMobile debug SDK.`,
+      );
+    }
+    if (options.confirm === false) {
+      throw new ActionableError(
+        `Refusing to ${method} for '${options.appId}' because confirm is false. ` +
+          `Set confirm: true to proceed.`,
+      );
+    }
+    const request = {
+      scope: options.scope,
+      alias: options.alias,
+      kind: options.kind,
+      delayMs: options.delayMs,
+    };
+    const state =
+      validateKeystoreFaultRequest(method, request) ??
+      (await this.requireFaultBackend(method).updateKeystoreFaults(options.appId, method, request));
+    const detail = state.reason ? `${state.outcome} (${state.reason})` : state.outcome;
+    return {
+      ...state,
+      action: method,
+      success: state.outcome === "ok",
+      deviceId: this.device.deviceId,
+      platform: "android",
+      requestedAppId: options.appId,
+      scope: "app",
+      exceededRequestedScope: false,
+      message: `Android Keystore ${method}: ${detail}.`,
+    };
+  }
+
+  private requireFaultBackend(method: KeystoreFaultMethod): KeystoreFaultBackend {
+    if (!this.keystoreFaults) {
+      throw new ActionableError(`Android Keystore ${method} is unavailable in this entry point.`);
+    }
+    return this.keystoreFaults;
   }
 }

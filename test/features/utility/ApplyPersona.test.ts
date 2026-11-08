@@ -33,6 +33,13 @@ describe("OEM persona catalog (#14055)", () => {
       "oneplus-oxygenos",
       "oppo-coloros",
       "motorola",
+      "huawei-emui",
+      "vivo-funtouch",
+      "realme-ui",
+      "meizu-flyme",
+      "asus-zenui",
+      "sony-xperia",
+      "tecno-hios",
     ]);
     for (const id of OEM_PERSONA_IDS) {
       const persona = OEM_PERSONAS[id];
@@ -54,6 +61,44 @@ describe("OEM persona catalog (#14055)", () => {
       expect(
         NON_EMULATABLE_CAPABILITIES[entry.id as keyof typeof NON_EMULATABLE_CAPABILITIES],
       ).toBe(entry.note);
+    }
+  });
+
+  test.each([
+    ["huawei-emui", "huawei-powergenie", "https://dontkillmyapp.com/huawei"],
+    ["vivo-funtouch", "vivo-autostart", "https://dontkillmyapp.com/vivo"],
+    ["realme-ui", "realme-power-saver", "https://dontkillmyapp.com/realme"],
+    ["meizu-flyme", "meizu-flyme-background", "https://dontkillmyapp.com/meizu"],
+    ["asus-zenui", "asus-power-master", "https://dontkillmyapp.com/asus"],
+    ["sony-xperia", "sony-stamina", "https://dontkillmyapp.com/sony"],
+    ["tecno-hios", "tecno-app-halt", "https://dontkillmyapp.com/tecno"],
+  ] as const)("%s describes the vendor kill evidence source", (id, killId, source) => {
+    const description = describePersona(id);
+    expect(description.catalogVersion).toBe(2);
+    expect(description.persona.version).toBe(1);
+    expect(OEM_PERSONAS[id]).toMatchObject({
+      version: 1,
+      keyboardProfileId: "gboard",
+      killProfile: killId,
+      nonEmulatable: ["oem-systemui"],
+    });
+    expect(OEM_PERSONAS[id].displayProfile).toBeUndefined();
+    expect(description.facets.map((facet) => facet.facet)).toEqual(["keyboard", "kill"]);
+    expect(description.facets.find((facet) => facet.facet === "kill")?.evidence).toEqual({
+      status: "inferred",
+      note: KILL_PROFILES[killId].evidenceNote,
+      source,
+    });
+  });
+
+  test("every manufacturer describe output retains its kill evidence source", () => {
+    for (const id of OEM_PERSONA_IDS) {
+      const persona = OEM_PERSONAS[id];
+      if (persona.killProfile) {
+        expect(
+          describePersona(id).facets.find((facet) => facet.facet === "kill")?.evidence.source,
+        ).toBe(KILL_PROFILES[persona.killProfile].source);
+      }
     }
   });
 

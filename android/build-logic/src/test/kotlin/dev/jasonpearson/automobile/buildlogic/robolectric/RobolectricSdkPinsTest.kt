@@ -115,6 +115,53 @@ class RobolectricSdkPinsTest {
     )
   }
 
+  @Test
+  fun sourceSdksCollectsNumericAndVersionCodeLevels() {
+    val source =
+      """
+      @Config(manifest = Config.NONE, sdk = [28])
+      class A {
+        @Config(sdk = [29, Build.VERSION_CODES.R], shadows = [S::class]) fun a() {}
+        // @Config(sdk = [31]) is a comment, not a level
+        @Config(sdk = Config.OLDEST_SDK) fun b() {}
+        @Config(sdk = [Build.VERSION_CODES.UNKNOWN_CODE]) fun c() {}
+        @org.robolectric.annotation.Config(sdk = [33]) fun d() {}
+      }
+      """
+    assertEquals(setOf(23, 28, 29, 30, 33), RobolectricSdkPins.sourceSdks(source, oldestSdk = 23))
+  }
+
+  @Test
+  fun sourceSdksParsesEachEntryOfAMixedList() {
+    assertEquals(
+      setOf(23, 34),
+      RobolectricSdkPins.sourceSdks("@Config(sdk = [Config.OLDEST_SDK, 34])", oldestSdk = 23),
+    )
+  }
+
+  @Test
+  fun sourceSdksReadsJavaBraceArrays() {
+    assertEquals(
+      setOf(28, 29),
+      RobolectricSdkPins.sourceSdks("@Config(sdk = {28, Build.VERSION_CODES.Q})", oldestSdk = 23),
+    )
+  }
+
+  @Test
+  fun sourceViolationsFlagsAFloatingConstantInsideAList() {
+    assertEquals(
+      1,
+      RobolectricSdkPins.sourceViolations("@Config(sdk = [Config.NEWEST_SDK, 30])", "T.kt", 35)
+        .size,
+    )
+  }
+
+  @Test
+  fun propertiesSdkReadsTheNumericPin() {
+    assertEquals(24, RobolectricSdkPins.propertiesSdk("# c\nsdk=24\n"))
+    assertEquals(null, RobolectricSdkPins.propertiesSdk("sdk=latest\n"))
+  }
+
   private fun violations(
     properties: String?,
     targetSdk: Int? = 36,

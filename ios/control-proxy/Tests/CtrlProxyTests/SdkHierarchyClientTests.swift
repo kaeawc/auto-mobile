@@ -115,6 +115,37 @@ final class SdkHierarchyClientTests: XCTestCase {
         XCTAssertEqual(sent, .noReply)
     }
 
+    func testAccessibilityFocusPostPreservesSelectorAndTypedStatus() async throws {
+        for code in [nil, "voiceover_off", "element_not_found", "invalid_selector"] as [String?] {
+            var reply = ["status": code == nil ? "ok" : "error"]
+            reply["errorCode"] = code
+            let transport = try StubHTTPTransport(status: 200, body: JSONEncoder().encode(reply))
+            let request = RequestAccessibilityFocus(
+                requestId: "focus-1",
+                resourceId: "save",
+                text: "Save",
+                contentDesc: "Button"
+            )
+            let result = try await makeClient(transport).performAccessibilityFocus(request)
+            XCTAssertEqual(result?.status, code == nil ? "ok" : "error")
+            XCTAssertEqual(result?.errorCode?.rawValue, code)
+            let http = try XCTUnwrap(transport.recordedRequests.first)
+            XCTAssertEqual(http.httpMethod, "POST")
+            XCTAssertEqual(http.url?.path, "/accessibility/focus")
+            let body = try JSONDecoder().decode([String: String].self, from: XCTUnwrap(http.httpBody))
+            XCTAssertEqual(body, ["resourceId": "save", "text": "Save", "contentDesc": "Button"])
+        }
+        for outcome in [
+            StubOutcome.transportError,
+            .respond(status: 501, body: Data()),
+            .respond(status: 200, body: Data("{}".utf8)),
+        ] {
+            let result = try await makeClient(StubHTTPTransport([outcome]))
+                .performAccessibilityFocus(.init(text: "Save"))
+            XCTAssertNil(result)
+        }
+    }
+
     func testMagicTapPostPreservesHandledFalseAndFailures() async throws {
         for handled in [true, false] {
             let transport = StubHTTPTransport(status: 200, body: Data("{\"handled\":\(handled)}".utf8))

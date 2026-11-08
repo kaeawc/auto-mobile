@@ -1081,6 +1081,10 @@ data class PrototypeStatusEntry(
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER)
   val feedbackLog: List<PrototypeFeedbackEntry> = emptyList(),
+  /** Requested orientation, best effort for overlays; absent when no request was made. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val orientation: String? = null,
+  /** `unsupported` when a style was requested: overlays do not own the status bar. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val statusBar: String? = null,
 )
 
 /**
@@ -1157,6 +1161,14 @@ data class KeystoreResetResult(
   override val timestamp: Long,
   override val requestId: String? = null,
   val state: KeystoreResetState,
+) : WebSocketResponse(), CorrelatedResponse
+
+@Serializable
+@SerialName("attestation_chain")
+data class AttestationChainResult(
+  override val timestamp: Long,
+  override val requestId: String? = null,
+  val certificateChainBase64: List<String>,
 ) : WebSocketResponse(), CorrelatedResponse
 
 @Serializable
@@ -1325,6 +1337,13 @@ data class PackageInfoResult(
   val mainActivity: String? = null,
   val totalTimeMs: Long,
   val error: String? = null,
+  /**
+   * The app's `dev.jasonpearson.automobile.build.gitBranch` manifest meta-data, when declared
+   * (#16954). Display metadata for the build; never part of its identity.
+   */
+  val gitBranch: String? = null,
+  /** The app's `dev.jasonpearson.automobile.build.gitSha` manifest meta-data, when declared. */
+  val gitSha: String? = null,
 ) : WebSocketResponse(), CorrelatedResponse
 
 @Serializable

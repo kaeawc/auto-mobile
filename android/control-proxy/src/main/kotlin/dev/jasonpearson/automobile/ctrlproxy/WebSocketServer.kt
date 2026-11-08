@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 import android.util.Log
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.pointer.PointerInjectionSupport
+import dev.jasonpearson.automobile.ctrlproxy.prototype.HostPrototypeChannelTransport
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeDisplayRouting
 import dev.jasonpearson.automobile.protocol.*
 import dev.jasonpearson.automobile.protocol.WebSocketRequest as ProtocolRequest
@@ -397,6 +398,7 @@ class WebSocketServer(
     add("prototype_search_bar_v1")
     add("prototype_rich_text_v1")
     add("prototype_keyframes_v1")
+    add("prototype_loops_v1")
     add("prototype_motion_tokens_v1")
     // {data, empty} conditions and style shimmer for loading placeholders (#14207).
     addAll(listOf("prototype_loading_states_v1", "prototype_style_polish_v2"))
@@ -452,6 +454,8 @@ class WebSocketServer(
     // show_prototype honours window.backdrop (#15126): API 31+ blur-behind, else a tonal fill; the
     // show result reports backdrop blur or fallback.
     add("prototype_backdrop_v1")
+    add("prototype_platform_window_controls_v1")
+    add("prototype_hide_keyboard_v1")
     // A device-persistent prototype buffers its events while no host is connected and replays them,
     // and inspect_prototypes reports what it is showing. Older hosts never send inspect_prototypes.
     add("prototype_persistence_replay_v1")
@@ -1313,6 +1317,10 @@ class WebSocketServer(
   internal suspend fun handleClientMessage(message: String, connection: ConnectedClient) {
     if (message.startsWith(PrototypeNetworkFrames.RESPONSE_PREFIX)) {
       options.onPrototypeResponse(message)
+      return
+    }
+    if (message.startsWith(HostPrototypeChannelTransport.FRAME_PREFIX)) {
+      options.onPrototypeChannelFrame(message)
       return
     }
     val handler = options.messageHandler

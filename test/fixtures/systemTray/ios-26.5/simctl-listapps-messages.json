@@ -1,0 +1,25 @@
+{
+  "com.apple.MobileSMS": {
+    "ApplicationType": "System",
+    "Bundle": "file:///Library/Developer/CoreSimulator/Volumes/iOS_23F79/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS%2026.5.simruntime/Contents/Resources/RuntimeRoot/Applications/MobileSMS.app/",
+    "CFBundleDisplayName": "Messages",
+    "CFBundleExecutable": "MobileSMS",
+    "CFBundleIdentifier": "com.apple.MobileSMS",
+    "CFBundleName": "MobileSMS",
+    "CFBundleVersion": "1.0",
+    "GroupContainers": {},
+    "Path": "/Library/Developer/CoreSimulator/Volumes/iOS_23F79/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/Applications/MobileSMS.app",
+    "SBAppTags": []
+  },
+  "com.apple.Preferences": {
+    "ApplicationType": "System",
+    "CFBundleDisplayName": "Settings",
+    "CFBundleExecutable": "Preferences",
+    "CFBundleIdentifier": "com.apple.Preferences",
+    "CFBundleName": "Preferences",
+    "CFBundleVersion": "1.0",
+    "GroupContainers": {},
+    "Path": "/Library/Developer/CoreSimulator/Volumes/iOS_23F79/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/Applications/Preferences.app",
+    "SBAppTags": []
+  }
+}

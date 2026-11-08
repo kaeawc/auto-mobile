@@ -45,6 +45,10 @@ data class PrototypeWindowMetadata(
    * alone, with no live window to count.
    */
   val motion: PrototypeMotionState? = null,
+  /** Requested orientation, best effort for overlays; absent when no request was made. */
+  val orientation: String? = null,
+  /** `unsupported` when a status bar style was requested: overlays do not own the status bar. */
+  val statusBar: String? = null,
 )
 
 /**

@@ -3,6 +3,21 @@ import QuartzCore
 import XCTest
 
 final class HandDrawnCircleTests: XCTestCase {
+    func testBoundsDecodeSourceScaleWhenPresentAndNilFromOlderDaemons() throws {
+        let decoder = JSONDecoder()
+        let withScale = try decoder.decode(
+            CircleBounds.self,
+            from: Data(#"{"x":1,"y":2,"width":3,"height":4,"sourceWidth":600,"sourceHeight":900,"sourceScale":3}"#.utf8)
+        )
+        XCTAssertEqual(withScale.sourceScale, 3)
+        let legacy = try decoder.decode(
+            CircleBounds.self,
+            from: Data(#"{"x":1,"y":2,"width":3,"height":4,"sourceWidth":600,"sourceHeight":900}"#.utf8)
+        )
+        XCTAssertNil(legacy.sourceScale)
+        XCTAssertEqual(legacy.sourceWidth, 600)
+    }
+
     func testAndroidGeometryAndPressureVariation() {
         let circle = HandDrawnCircle(random: { 0.5 })
         XCTAssertEqual(circle.startAngle, -90)

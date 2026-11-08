@@ -51,7 +51,8 @@ export function createIosDriver(udid: string, runner: ToolRunner): SmokeDriver {
     },
     viewer: new IosProtoViewer({
       deviceId: udid,
-      simctl: new DefaultIosProtoViewerSimctl(new SimCtlClient()),
+      // The candidate under test is the store build; a `.dev` install beside it must not answer.
+      simctl: new DefaultIosProtoViewerSimctl(new SimCtlClient(), [PROTOVIEWER_PACKAGE]),
       files: new NodeIosProtoViewerFiles(),
       timer: defaultTimer,
       ids: defaultIdGenerator,

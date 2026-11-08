@@ -34,7 +34,6 @@ import type { BootedDevice } from "../../models";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { logger } from "../../utils/logger";
-import { withReverseReport } from "../prototypeReverse";
 import { performPrototypeClearStorage } from "../prototypeStorageAction";
 import type { ProgressCallback } from "../toolRegistry";
 import { dataInput, prototypeSchema, stateInput } from "./schemas";
@@ -56,6 +55,9 @@ const devicePrototypeEntrySchema = z.object({
       "Android: the prototype exists but is not visible, and why; absent when visible, when suspended, or with an older CtrlProxy",
     ),
   suspended: z.boolean().optional(),
+  // Absent from a CtrlProxy without window controls; a malformed value is dropped, not guessed.
+  orientation: z.enum(["portrait", "landscape", "unlocked"]).optional().catch(undefined),
+  statusBar: z.enum(["unsupported"]).optional().catch(undefined),
   // Absent from a device without prototype_appearance_v1; a malformed one is dropped, not guessed.
   appearance: z.unknown().optional().transform(parsePrototypeAppearance),
   storage: z.unknown().optional().transform(parsePrototypeStorageReport),
@@ -230,7 +232,7 @@ export function isDeviceRequestAction(
 
 export async function deviceRequestAction(
   args: z.infer<typeof prototypeSchema>,
-  host: Pick<PrototypeHandlerDependencies, "store" | "events" | "reverses">,
+  host: Pick<PrototypeHandlerDependencies, "store" | "events">,
   device: BootedDevice,
   {
     target,
@@ -244,8 +246,7 @@ export async function deviceRequestAction(
   if (args.action === "clearStorage") {
     return performPrototypeClearStorage(target, args, host.store, device.deviceId);
   }
-  const inspected = await inspectDevice(host, target, scope, { timeoutMs: args.timeoutMs, signal });
-  return withReverseReport(inspected, host.reverses.report(device.deviceId));
+  return inspectDevice(host, target, scope, { timeoutMs: args.timeoutMs, signal });
 }
 
 const iosAgentStatusSchema = z.object({
@@ -359,7 +360,7 @@ export function statusOutput(
   events: PrototypeEventCoordinator,
   scope: PrototypeScope,
   options: { deviceDark: "fresh" | "cached" },
-): Pick<PrototypeOutput, "prototypes" | "lastResult"> {
+): Pick<PrototypeOutput, "prototypes" | "lastResult" | "platformStatus"> {
   const status = store.status(scope);
   return {
     ...status,

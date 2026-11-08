@@ -21,38 +21,84 @@ object RobolectricSdkPins {
       "BAKLAVA" to 36,
     )
 
-  fun sourceViolations(sourceText: String, filePath: String, maxSupportedSdk: Int): List<String> {
+  private sealed interface SdkRef {
+    data class Level(val sdk: Int) : SdkRef
+
+    data class UnknownVersionCode(val name: String) : SdkRef
+
+    data class ConfigConstant(val name: String) : SdkRef
+  }
+
+  private fun sdkRefs(sourceText: String): Sequence<SdkRef> = sequence {
     val text = sourceText.replace(Regex("(?s)/\\*.*?\\*/|//[^\\n]*"), " ")
-    val violations = mutableListOf<String>()
-    val annotations = Regex("@Config\\s*\\((.*?)\\)", RegexOption.DOT_MATCHES_ALL)
-    val sdkArgs = Regex("\\bsdk\\s*=\\s*(\\[[^]]*]|[A-Za-z0-9_.]+)", RegexOption.DOT_MATCHES_ALL)
+    val annotations = Regex("@(?:[\\w.]+\\.)?Config\\s*\\((.*?)\\)", RegexOption.DOT_MATCHES_ALL)
+    // Kotlin `sdk = [a, b]`, Java `sdk = {a, b}`, or a single value.
+    val sdkArgs =
+      Regex("\\bsdk\\s*=\\s*(\\[[^]]*]|\\{[^}]*}|[A-Za-z0-9_.]+)", RegexOption.DOT_MATCHES_ALL)
     val entries = Regex("Build\\.VERSION_CODES\\.([A-Z][A-Z0-9_]*)|(?<![\\w.])(\\d+)")
     for (annotation in annotations.findAll(text)) {
       for (arg in sdkArgs.findAll(annotation.groupValues[1])) {
-        val value = arg.groupValues[1].trim().removePrefix("[").removeSuffix("]")
-        if (value.startsWith("Config.")) {
-          val constant = value.removePrefix("Config.")
-          if (constant in setOf("NEWEST_SDK", "ALL_SDKS", "TARGET_SDK")) {
-            violations +=
-              "$filePath: @Config sdk=$constant floats with the SDK or targetSdk; use a numeric literal."
+        val items = arg.groupValues[1].trim().trim('[', ']', '{', '}').split(',')
+        for (item in items.map { it.trim() }.filter { it.isNotEmpty() }) {
+          if (item.startsWith("Config.")) {
+            yield(SdkRef.ConfigConstant(item.removePrefix("Config.")))
+            continue
           }
-          continue
-        }
-        for (entry in entries.findAll(value)) {
-          val name = entry.groupValues[1]
-          val sdk =
-            if (name.isNotEmpty()) versionCodes[name] else entry.groupValues[2].toIntOrNull()
-          if (sdk == null) {
-            violations += "$filePath: unknown SDK version code $name; use a numeric literal."
-          } else if (sdk > maxSupportedSdk) {
-            violations +=
-              "$filePath: explicit Robolectric SDK $sdk exceeds supported maximum $maxSupportedSdk."
+          for (entry in entries.findAll(item)) {
+            val name = entry.groupValues[1]
+            val sdk =
+              if (name.isNotEmpty()) versionCodes[name] else entry.groupValues[2].toIntOrNull()
+            yield(if (sdk == null) SdkRef.UnknownVersionCode(name) else SdkRef.Level(sdk))
           }
         }
       }
     }
-    return violations
   }
+
+  fun sourceViolations(sourceText: String, filePath: String, maxSupportedSdk: Int): List<String> =
+    sdkRefs(sourceText)
+      .mapNotNull { ref ->
+        when (ref) {
+          is SdkRef.ConfigConstant ->
+            if (ref.name in setOf("NEWEST_SDK", "ALL_SDKS", "TARGET_SDK")) {
+              "$filePath: @Config sdk=${ref.name} floats with the SDK or targetSdk; use a numeric literal."
+            } else {
+              null
+            }
+          is SdkRef.UnknownVersionCode ->
+            "$filePath: unknown SDK version code ${ref.name}; use a numeric literal."
+          is SdkRef.Level ->
+            if (ref.sdk > maxSupportedSdk) {
+              "$filePath: explicit Robolectric SDK ${ref.sdk} exceeds supported maximum $maxSupportedSdk."
+            } else {
+              null
+            }
+        }
+      }
+      .toList()
+
+  /**
+   * SDK levels a test source asks Robolectric for through `@Config(sdk = ...)`. `Config.OLDEST_SDK`
+   * maps to [oldestSdk]; the floating constants are rejected by [sourceViolations] and skipped.
+   */
+  fun sourceSdks(sourceText: String, oldestSdk: Int): Set<Int> =
+    sdkRefs(sourceText)
+      .mapNotNull { ref ->
+        when (ref) {
+          is SdkRef.Level -> ref.sdk
+          is SdkRef.ConfigConstant -> if (ref.name == "OLDEST_SDK") oldestSdk else null
+          is SdkRef.UnknownVersionCode -> null
+        }
+      }
+      .toSet()
+
+  /** The numeric `sdk=` pin in a robolectric.properties file, or null when it has none. */
+  fun propertiesSdk(propertiesText: String): Int? =
+    Properties()
+      .apply { load(StringReader(propertiesText)) }
+      .getProperty("sdk")
+      ?.trim()
+      ?.toIntOrNull()
 
   fun propertiesViolations(
     propertiesText: String,

@@ -94,6 +94,25 @@ export function quoteForWindowsCmd(value: string): string {
   return `"${value.replace(/%/g, "%%")}"`;
 }
 
+/**
+ * Node refuses to execFile a `.bat`/`.cmd` directly on Windows, so route batch files
+ * through the command processor with every argument quoted; other files pass through.
+ */
+export function windowsBatchInvocation(
+  path: string,
+  args: string[],
+  environment: NodeJS.ProcessEnv = process.env,
+): { command: string; args: string[] } {
+  if (!/\.(bat|cmd)$/i.test(path)) {
+    return { command: path, args };
+  }
+  const command = `"${[quoteForWindowsCmd(path), ...args.map(quoteForWindowsCmd)].join(" ")}"`;
+  return {
+    command: readEnvRaw(AMBIENT_ENV.COMSPEC, environment) ?? "cmd.exe",
+    args: ["/d", "/v:off", "/s", "/c", command],
+  };
+}
+
 export class SdkManagerClient {
   private static readonly homebrewWarningLoggers = new WeakSet<object>();
 
@@ -357,11 +376,7 @@ export class SdkManagerClient {
     if (this.dependencies.platform !== "win32" || !path.toLowerCase().endsWith(".bat")) {
       return { command: path, args };
     }
-    const command = `"${[quoteForWindowsCmd(path), ...args.map(quoteForWindowsCmd)].join(" ")}"`;
-    return {
-      command: readEnvRaw(AMBIENT_ENV.COMSPEC, environment) ?? "cmd.exe",
-      args: ["/d", "/v:off", "/s", "/c", command],
-    };
+    return windowsBatchInvocation(path, args, environment);
   }
 }
 

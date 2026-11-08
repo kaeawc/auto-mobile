@@ -1,3 +1,4 @@
+import { isRecord } from "./pipeline/isRecord";
 import { isDeviceBindingTool } from "../daemon/deviceSessionResult";
 import type { z, ZodType } from "zod/v4";
 import { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
@@ -36,6 +37,7 @@ import {
 } from "../features/toolSelection/toolSelectionContext";
 import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
 import { isDebugModeEnabled } from "../utils/debug";
+import { featureFlagDisabledMessage } from "../features/featureFlags/featureFlagDisabledMessage";
 import { throwDeviceLostFromAbortSignal } from "../utils/deviceLossOutcome";
 import {
   InternalToolName,
@@ -61,6 +63,7 @@ import {
   clearSessionlessAutolockAttribution,
   runWithDeviceCallRequestDeadline,
   invokeResolvedDeviceHandler,
+  flushPendingImeRestoreBeforeTool,
   refuseInternalControlOnForeignOwnedSession,
   sessionDisplayPinnedHandler,
 } from "./pipeline/deviceCallDispatch";
@@ -246,7 +249,7 @@ export class ToolRegistryClass {
   getToolAvailabilityGateReasons(tool: RegisteredTool): string[] {
     const reasons: string[] = [];
     if (tool.debugOnly && !isDebugModeEnabled()) {
-      reasons.push("--debug is disabled; start the daemon with --debug");
+      reasons.push(featureFlagDisabledMessage("debug", tool.name));
     }
     if (tool.embeddedSdkOnly && !serverConfig.isEmbeddedSdkEnabled()) {
       reasons.push("embedded SDK mode is disabled; start the daemon with --embedded-sdk");
@@ -299,6 +302,24 @@ export class ToolRegistryClass {
       schema,
       handler: async (args, progress, signal) => {
         await assertSessionBrokerToolCall(name, false, args);
+        const sessionUuid =
+          nonBlankSessionUuid(args.sessionUuid) ?? getToolSelectionContext()?.routingSessionUuid;
+        const nestedDeviceId =
+          isRecord(args.device) && typeof args.device.deviceId === "string"
+            ? args.device.deviceId
+            : undefined;
+        const deviceId =
+          typeof args.deviceId === "string"
+            ? args.deviceId
+            : (nestedDeviceId ??
+              (sessionUuid
+                ? (defaultDaemonContext.sessionManager()?.getDeviceForSession(sessionUuid) ??
+                  undefined)
+                : undefined));
+        await flushPendingImeRestoreBeforeTool(
+          options.keepsImeRestorePending || options.flushesImeRestoreAfterAdmission,
+          deviceId,
+        );
         const response = await handler(args, progress, signal);
         if (isDeviceBindingTool(name)) {
           // Ingress binds and heartbeats the session these results name after the handler
@@ -328,6 +349,7 @@ export class ToolRegistryClass {
       appUiResourceUri: options.appUiResourceUri,
       selectsActiveDevice: options.selectsActiveDevice,
       hostInventory: options.hostInventory,
+      keepsImeRestorePending: options.keepsImeRestorePending,
     });
   }
 
@@ -379,8 +401,8 @@ export class ToolRegistryClass {
     // A UI interaction answers the device's system-alert policy first (#14106).
     const erased = eraseDeviceAware(inSchema, inHandler, inOptions);
     const { schema, handler, options } = gateUiInteraction(erased);
-    const pinnedHandler = sessionDisplayPinnedHandler({ name, schema, handler });
     const traits = pickToolTraits(options);
+    const pinnedHandler = sessionDisplayPinnedHandler({ name, schema, handler, traits });
     // Device-aware tools may reconnect before dispatch. Replaying an ambiguous
     // delivery requires an explicit per-tool opt-in.
     const transportRecovery = this.prepareDeviceAwareRegistration(name, options);

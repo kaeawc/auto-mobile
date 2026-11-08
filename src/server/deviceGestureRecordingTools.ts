@@ -71,7 +71,12 @@ const recordDeviceGesturesTool = async (
 const exportPlanSchema = addSessionUuidToSchema(
   z
     .object({
-      recordingId: z.string().optional().describe("Recording ID"),
+      recordingId: z
+        .string()
+        .optional()
+        .describe(
+          "recordDeviceGestures recordingId; defaults to the active recording. For recordToolCalls plans use recordToolCalls action=end",
+        ),
       planName: z.string().optional().describe("Plan name"),
       resourceLink: resourceLinkField(),
     })

@@ -1,3 +1,4 @@
+import { watchPairResultSchema } from "../../utils/ios-cmdline-tools/SimulatorPairs";
 import { disabledResourcesSchema } from "../../utils/deviceResourceSchemas";
 import { z } from "zod/v4";
 import { deviceDescriptionSchema } from "../../daemon/deviceDescription";
@@ -45,7 +46,8 @@ const watchStartDeviceReadinessSchema = z.object({
 export const startDeviceOutputSchema = z
   .object({
     ...deviceDescriptionSchema.partial().shape,
-    platform: z.enum(["android", "ios", "watchos", "tvos"]).optional(),
+    platform: z.enum(["android", "ios", "watchos", "tvos", "visionos"]).optional(),
+    pair: watchPairResultSchema.optional(),
     message: z.string(),
     deviceIdentity: z.unknown().optional(),
     processId: z.number().nullable().optional(),
@@ -106,6 +108,19 @@ const deviceStateOutputFields = {
           .passthrough(),
       ),
       postures: z.array(observationDisplaySchema.unwrap().shape.posture),
+      current: z
+        .object({
+          posture: observationDisplaySchema.unwrap().shape.posture,
+          activePanel: z
+            .object({ key: z.string(), role: observationDisplaySchema.unwrap().shape.role })
+            .passthrough()
+            .optional(),
+        })
+        .passthrough()
+        .optional()
+        .describe(
+          "Android foldables only: the committed device_state posture and the panel behind the default display, read live on every call.",
+        ),
     })
     .passthrough()
     .optional(),

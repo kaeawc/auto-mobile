@@ -154,6 +154,11 @@ object DeepLinkManager {
           Log.d(TAG, "Parsed as DemoPointerProbeDestination")
           DemoPointerProbeDestination
         },
+      PATH_DEMO_COLLAPSING_COMPOSER to
+        { _: String ->
+          Log.d(TAG, "Parsed as DemoCollapsingComposerDestination")
+          DemoCollapsingComposerDestination
+        },
     )
 
   private fun parseParameterizedPath(path: String): AppDestination? =
@@ -268,6 +273,7 @@ object DeepLinkManager {
       PATH_DEMO_A11Y_TAP_TARGETS to "Demo Tap Targets",
       PATH_DEMO_BUG_REPRO to "Demo Bug Repro",
       PATH_DEMO_POINTER_PROBE to "Demo Pointer Probe",
+      PATH_DEMO_COLLAPSING_COMPOSER to "Demo Collapsing Composer",
     )
 
   private fun parameterizedDestinationName(path: String): String? =
@@ -287,14 +293,11 @@ object DeepLinkManager {
       return null
     }
 
-    // Extract path from scheme-specific part for opaque URIs
-    val ssp = uri.schemeSpecificPart
-    if (ssp == null || !ssp.startsWith(HOST)) {
+    val path = extractPath(uri)
+    if (path == null) {
       Log.d(TAG, "Invalid URI format, returning null destination name")
       return null
     }
-
-    val path = if (ssp.length > HOST.length) ssp.substring(HOST.length) else ""
 
     val destinationName = destinationNames[path] ?: parameterizedDestinationName(path)
 
@@ -354,15 +357,15 @@ object DeepLinkManager {
         "Demo Tap Targets" to generateDemoTapTargetsUrl(),
         "Demo Bug Repro" to generateDemoBugReproUrl(),
         "Demo Pointer Probe" to generateDemoPointerProbeUrl(),
+        "Demo Collapsing Composer" to buildUri(PATH_DEMO_COLLAPSING_COMPOSER),
       )
     Log.d(TAG, "Generated ${deepLinks.size} deep links")
     return deepLinks
   }
 
   internal fun buildUri(path: String): String {
-    // Build opaque URI in format "automobile:playground/path" instead of
-    // "automobile://playground/path"
-    val uri = "$SCHEME:$HOST$path"
+    // The hierarchical form is required by the manifest intent filter.
+    val uri = "$SCHEME://$HOST$path"
     Log.d(TAG, "Built URI with path '$path': $uri")
     return uri
   }

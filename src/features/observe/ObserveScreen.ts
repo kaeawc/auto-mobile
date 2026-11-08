@@ -1,3 +1,6 @@
+import type { DevicectlDisplayInfoSource } from "../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
+import { createProductionDevicectlPanelScreenshotSource } from "../../utils/ios-cmdline-tools/DevicectlPanelScreenshotSource";
+import { IosSdkMultiSceneError } from "./ios/sdkObservationBridge";
 import { AllDisplaysObservation } from "./AllDisplaysObservation";
 import { SingleDisplayCaptureStage } from "./SingleDisplayCaptureStage";
 import { SingleDisplayReconcileStage } from "./SingleDisplayReconcileStage";
@@ -263,7 +266,9 @@ export class RealObserveScreen implements ObserveScreen {
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    dependencies?: ObserveScreenDependencies,
+    dependencies?: ObserveScreenDependencies & {
+      iosDisplayInfoSource?: DevicectlDisplayInfoSource;
+    },
     {
       timer = defaultTimer,
       idGenerator = defaultIdGenerator,
@@ -363,7 +368,9 @@ export class RealObserveScreen implements ObserveScreen {
         ? new IosDisplayBindingCollector(displayBindingDeps)
         : new AndroidDisplayBindingCollector(displayBindingDeps);
     this.iosCollector = new DefaultIosObservationCollector({
+      iosDisplayInfoSource: dependencies?.iosDisplayInfoSource,
       hierarchyCollector: () => this.hierarchyCollector,
+      sdkBridge: dependencies?.sdkBridge,
       viewHierarchy: () => this.viewHierarchy,
       device: () => this.device,
     });
@@ -402,6 +409,7 @@ export class RealObserveScreen implements ObserveScreen {
       staleRecovery: () => this.staleRecovery,
       displayBinding: () => this.displayBinding,
       platformValidator: () => this.platformValidator,
+      deviceStateCollector: () => this.deviceStateCollector,
       reconcileActiveWindowAttribution: (result, options) =>
         this.reconcileActiveWindowAttribution(result, options),
       isConfirmedFrameworkErrorDialog: (viewHierarchy, signal) =>
@@ -630,6 +638,9 @@ export class RealObserveScreen implements ObserveScreen {
       await this.settleStage.settleSingleDisplay(run, captured, reconciled);
       return await this.enrichStage.publishSingleDisplay(run);
     } catch (err) {
+      if (err instanceof IosSdkMultiSceneError) {
+        throw err;
+      }
       return await this.captureStage.failSingleDisplay(err, intent);
     }
   }
@@ -971,4 +982,22 @@ export class RealObserveScreen implements ObserveScreen {
   private resolveObservationTimestampMs(result: ObserveResult): number | undefined {
     return result.viewHierarchy?.updatedAt;
   }
+}
+
+/**
+ * The observer an action tool takes its post-action observation with. On iOS it reads the live
+ * CoreDevice panel like `observe` does, so the two agree on which iPhone Duo panel is active
+ * (#17046); an observer built by hand has no panel source and falls back to the runner's size.
+ */
+export function createActionObserveScreen(
+  device: BootedDevice,
+  adbFactory?: AdbClientFactory,
+): RealObserveScreen {
+  return new RealObserveScreen(
+    device,
+    adbFactory,
+    device.platform === "ios"
+      ? { iosDisplayInfoSource: createProductionDevicectlPanelScreenshotSource() }
+      : undefined,
+  );
 }

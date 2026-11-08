@@ -88,6 +88,34 @@ describe("Lifecycle journal intents (#14359)", () => {
     ).toEqual([{ kind: "installed-app", key: "a.b" }]);
   });
 
+  test("an Android postNotification keeps its channel row unless the session installed the app (#16510)", async () => {
+    const rows = deviceToolMutations("postNotification", { appId: "a.b", title: "Hi" }, "android");
+    const posted = { kind: "notification", key: "posted:a.b" };
+    // Uninstalling a session-installed app removes its channel; otherwise reset deletes it in place.
+    expect(rows).toEqual([
+      posted,
+      { kind: "notification", key: "channel:a.b:automobile_test_notifications" },
+    ]);
+    expect(
+      await withoutSessionCoveredFallbacks(
+        rows,
+        evidence({ installed: ["a.b"], baselineApps: [] }),
+      ),
+    ).toEqual([posted]);
+    expect(
+      await withoutSessionCoveredFallbacks(
+        rows,
+        evidence({ installed: [], baselineApps: ["a.b"] }),
+      ),
+    ).toEqual(rows);
+    expect(
+      await withoutSessionCoveredFallbacks(
+        rows,
+        evidence({ installed: ["a.b"], baselineApps: null }),
+      ),
+    ).toEqual(rows);
+  });
+
   test("uninstallApp records the installed-app row and the fallback", () => {
     expect(deviceToolMutations("uninstallApp", { appId: "a.b" }, "ios")).toEqual([
       { kind: "installed-app", key: "a.b" },

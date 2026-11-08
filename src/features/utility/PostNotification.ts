@@ -11,6 +11,7 @@ import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
+import { parseIosMajorVersion } from "../../utils/ios-cmdline-tools/iosVersion";
 import { fileURLToPath } from "url";
 import path from "path";
 import { DefaultFileSystem, type FileSystem } from "../../utils/filesystem/DefaultFileSystem";
@@ -19,6 +20,14 @@ import { shellQuote } from "../../utils/shellQuote";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 import { ANDROID_PACKAGE_NAME_PATTERN } from "../../utils/androidPackageName";
 import { buildIosPushPayload } from "./iosPushPayload";
+import {
+  defaultPostedNotificationLedger,
+  type PostedNotificationRecorder,
+} from "./postedNotificationLedger";
+import {
+  defaultBulletinBoardReader,
+  type IosNotificationAuthorizationReader,
+} from "./ios/IosNotificationAuthorizationReader";
 
 export { ANDROID_PACKAGE_NAME_PATTERN } from "../../utils/androidPackageName";
 
@@ -34,11 +43,11 @@ export interface PostNotificationOptions {
   imagePath?: string;
   actions?: PostNotificationAction[];
   channelId?: string;
-  /** iOS: `aps.category`, naming a UNNotificationCategory the app registered (#14097). */
+  /** iOS/watchOS: `aps.category`, naming a UNNotificationCategory the app registered (#14097). */
   category?: string;
-  /** iOS: raw APNs JSON merged over the generated payload (#14097). */
+  /** iOS/watchOS: raw APNs JSON merged over the generated payload (#14097). */
   payload?: Record<string, unknown>;
-  /** Android package name or iOS bundle identifier to target; required on iOS. */
+  /** Android package name or iOS/watchOS bundle identifier to target; required on iOS/watchOS. */
   appId?: string;
 }
 
@@ -94,6 +103,26 @@ function preserveOrExplainSimctlPushError(error: string): string {
   return error;
 }
 
+// Detect whether the argument is a factory (has create method) or an executor.
+function resolveAdb(
+  device: BootedDevice,
+  adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null,
+): { adbFactory: AdbClientFactory; adb: AdbExecutor } {
+  if (
+    adbFactoryOrExecutor &&
+    typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function"
+  ) {
+    const adbFactory = adbFactoryOrExecutor as AdbClientFactory;
+    return { adbFactory, adb: adbFactory.create(device) };
+  }
+  if (adbFactoryOrExecutor) {
+    // Legacy path: wrap the executor in a factory for downstream dependencies
+    const executor = adbFactoryOrExecutor as AdbExecutor;
+    return { adbFactory: { create: () => executor }, adb: executor };
+  }
+  return { adbFactory: defaultAdbClientFactory, adb: defaultAdbClientFactory.create(device) };
+}
+
 export class PostNotification {
   private device: BootedDevice;
   private adb: AdbExecutor;
@@ -101,6 +130,11 @@ export class PostNotification {
   private window: WindowInterface;
   private simctl: Pick<SimCtlClient, "pushNotification">;
   private fileSystem: FileSystem;
+  private notificationAuthorization:
+    | Pick<IosNotificationAuthorizationReader, "read">
+    | null
+    | undefined;
+  private postedNotifications: PostedNotificationRecorder;
 
   constructor(
     device: BootedDevice,
@@ -109,31 +143,22 @@ export class PostNotification {
       window = null,
       simctl = null,
       fileSystem = null,
+      notificationAuthorization,
+      postedNotifications = defaultPostedNotificationLedger,
     }: {
       adbFactoryOrExecutor?: AdbClientFactory | AdbExecutor | null;
       window?: WindowInterface | null;
       simctl?: Pick<SimCtlClient, "pushNotification"> | null;
       fileSystem?: FileSystem | null;
+      notificationAuthorization?: Pick<IosNotificationAuthorizationReader, "read"> | null;
+      postedNotifications?: PostedNotificationRecorder;
     } = {},
   ) {
     this.device = device;
     this.fileSystem = fileSystem ?? new DefaultFileSystem();
-    // Detect if the argument is a factory (has create method) or an executor
-    if (
-      adbFactoryOrExecutor &&
-      typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function"
-    ) {
-      this.adbFactory = adbFactoryOrExecutor as AdbClientFactory;
-      this.adb = this.adbFactory.create(device);
-    } else if (adbFactoryOrExecutor) {
-      // Legacy path: wrap the executor in a factory for downstream dependencies
-      const executor = adbFactoryOrExecutor as AdbExecutor;
-      this.adb = executor;
-      this.adbFactory = { create: () => executor };
-    } else {
-      this.adbFactory = defaultAdbClientFactory;
-      this.adb = this.adbFactory.create(device);
-    }
+    this.notificationAuthorization = notificationAuthorization;
+    this.postedNotifications = postedNotifications;
+    ({ adbFactory: this.adbFactory, adb: this.adb } = resolveAdb(device, adbFactoryOrExecutor));
     this.window = window || new Window(device, this.adbFactory);
     this.simctl = simctl || new SimCtlClient(device);
   }
@@ -150,6 +175,7 @@ export class PostNotification {
         case "android":
           return await this.executeAndroid(options, signal);
         case "ios":
+        case "watchos":
           return await this.executeIos(options);
         default:
           return {
@@ -170,14 +196,15 @@ export class PostNotification {
     }
   }
 
-  /** iOS: deliver a simulated remote push via `simctl push` (simulator only). */
+  /** iOS/watchOS: deliver a simulated remote push via `simctl push` (simulator only). */
   private async executeIos(options: PostNotificationOptions): Promise<PostNotificationResult> {
+    const platformLabel = this.device.platform === "watchos" ? "watchOS" : "iOS";
     const bundleId = options.appId;
     if (!bundleId) {
       return {
         success: false,
         supported: false,
-        error: "appId (bundle identifier) is required to post a notification on iOS.",
+        error: `appId (bundle identifier) is required to post a notification on ${platformLabel}.`,
       };
     }
 
@@ -187,8 +214,7 @@ export class PostNotification {
         success: false,
         supported: false,
         appId: bundleId,
-        error:
-          "postNotification on iOS is only supported on simulators (simctl push); physical iOS devices are not supported.",
+        error: `postNotification on ${platformLabel} is only supported on simulators (simctl push); physical ${platformLabel} devices are not supported.`,
       };
     }
 
@@ -196,6 +222,11 @@ export class PostNotification {
     const warning = built.warnings.join(" ") || undefined;
     if (!built.ok) {
       return { success: false, supported: true, appId: bundleId, error: built.error, warning };
+    }
+
+    const refusal = await this.checkIosNotificationAuthorization(bundleId, warning);
+    if (refusal) {
+      return refusal;
     }
 
     const result = await this.simctl.pushNotification(this.device.deviceId, bundleId, built.json);
@@ -208,6 +239,9 @@ export class PostNotification {
         warning,
       };
     }
+    if (built.alert) {
+      this.postedNotifications.record(this.device.deviceId, bundleId, built.alert);
+    }
     return {
       success: true,
       supported: true,
@@ -216,6 +250,34 @@ export class PostNotification {
       channelId: options.channelId,
       warning,
     };
+  }
+
+  private async checkIosNotificationAuthorization(
+    bundleId: string,
+    warning: string | undefined,
+  ): Promise<PostNotificationResult | undefined> {
+    const iosMajor = parseIosMajorVersion(this.device.iosVersion ?? this.device.osVersion);
+    if (iosMajor !== null && iosMajor < 27) {
+      const reader = this.notificationAuthorization ?? defaultBulletinBoardReader();
+      const authorization = await reader.read(this.device.deviceId, bundleId);
+      if (authorization.allowed !== true) {
+        const detail = [
+          `Notification authorization status is ${authorization.authorizationStatus ?? "unknown"}.`,
+          authorization.warning || authorization.error,
+        ]
+          .filter(Boolean)
+          .join(" ");
+        return {
+          success: false,
+          supported: true,
+          appId: bundleId,
+          error: `${NOTIFICATION_AUTHORIZATION_GUIDANCE} ${detail}`,
+          warning,
+        };
+      }
+    }
+
+    return undefined;
   }
 
   /** Android: post a local notification through the AutoMobile SDK BroadcastReceiver. */

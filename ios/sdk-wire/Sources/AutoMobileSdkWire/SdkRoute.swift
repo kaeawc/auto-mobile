@@ -8,6 +8,7 @@ public enum SdkRoute: String, CaseIterable, Sendable {
     case networkMock = "/network/mock"
     case networkErrorSimulation = "/network/error-simulation"
     case networkFaultRules = "/network/fault-rules"
+    case accessibilityFocus = "/accessibility/focus"
     case magicTap = "/accessibility/magic-tap"
     case highlight = "/highlight"
     case dbCoreDataQuery = "/db/core-data/query"

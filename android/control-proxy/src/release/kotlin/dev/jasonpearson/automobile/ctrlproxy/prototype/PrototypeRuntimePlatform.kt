@@ -4,8 +4,8 @@ import android.content.Context
 import dev.jasonpearson.automobile.prototype.*
 
 /**
- * Haptics, sound, the clipboard, connectivity and outbound links need no runtime permission the
- * overlay would have to request.
+ * Haptics, sound, the clipboard, connectivity, outbound links and settings deep links need no
+ * runtime permission the overlay would have to request.
  */
 internal fun prototypeRuntimePlatform(
   context: Context,
@@ -15,5 +15,6 @@ internal fun prototypeRuntimePlatform(
     prototypeFeedbackModules(context) +
       listOfNotNull(clipboard?.let { PrototypeClipboardModule(it) }) +
       PrototypeConnectivityModule(AndroidConnectivitySource(context)) +
-      PrototypeLinksModule(AndroidUrlOpener(SystemLinkGateway(context))),
+      PrototypeLinksModule(AndroidUrlOpener(SystemLinkGateway(context))) +
+      PrototypeSettingsModule(AndroidSettingsOpener(SystemSettingsGateway(context))),
   )

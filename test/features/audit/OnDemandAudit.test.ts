@@ -111,6 +111,22 @@ describe("OnDemandAudit (#14075)", () => {
     expect(compared.failed).toBe(false);
   });
 
+  test("a call cancelled during the audit does not record a baseline (#17281)", async () => {
+    engines.violations = [violation("small", "error")];
+    const controller = new AbortController();
+    const audited = engines.accessibility.bind(engines);
+    engines.accessibility = async (...args) => {
+      const result = await audited(...args);
+      controller.abort(new Error("cancelled"));
+      return result;
+    };
+
+    await expect(
+      audit().run({ baseline: { name: "home", mode: "record" }, signal: controller.signal }),
+    ).rejects.toThrow("cancelled");
+    expect(engines.savedBaselines.has("home")).toBe(false);
+  });
+
   test("comparing against a missing baseline is an error", async () => {
     const result = await audit().run({ baseline: { name: "none", mode: "compare" } });
 
@@ -140,6 +156,40 @@ describe("OnDemandAudit (#14075)", () => {
 
     expect(engines.calls).toEqual(["observe"]);
     expect(result.unsupported?.performance).toContain("not in the foreground");
+  });
+
+  test("refuses an accessibility audit of an appId that is not in the foreground (#17281)", async () => {
+    engines.violations = [violation("small", "error")];
+
+    const result = await audit().run({ appId: "com.other", kinds: ["accessibility", "memory"] });
+
+    expect(engines.calls).toEqual(["observe"]);
+    expect(result.success).toBe(false);
+    expect(result.accessibility).toBeUndefined();
+    expect(result.error).toBe(
+      "The accessibility audit checks the foreground screen; com.other is not in the foreground (com.example is). Bring com.other to the foreground or omit appId.",
+    );
+  });
+
+  test("audits a requested appId that is in the foreground", async () => {
+    const result = await audit().run({ appId: "com.example" });
+
+    expect(engines.calls).toEqual(["observe", "accessibility:com.example:/tmp/shot.png"]);
+    expect(result.success).toBe(true);
+  });
+
+  test("failOn counts a requested check that could not run (#17281)", async () => {
+    const input = { kinds: ["performance", "memory"] as const, appId: "com.other" };
+
+    const reported = await audit().run(input);
+    expect(reported.failed).toBe(false);
+    expect(reported.success).toBe(true);
+
+    const failing = await audit().run({ ...input, failOn: "error" });
+    expect(failing.unsupported?.performance).toContain("not in the foreground");
+    expect(failing.memory?.passed).toBe(true);
+    expect(failing.failed).toBe(true);
+    expect(failing.success).toBe(false);
   });
 
   test("no foreground app and no appId is an error", async () => {

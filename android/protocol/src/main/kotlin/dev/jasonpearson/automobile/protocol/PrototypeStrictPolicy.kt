@@ -34,7 +34,10 @@ internal object PrototypeStrictPolicy {
     if (library && window?.text("persistence") == "device")
       return PrototypeSpecError("window.persistence", "Privileged window")
     if (!library) return null
-    return hostRequestError(context) ?: hostChannelError(spec) ?: secureLibraryError(spec, context)
+    return hostRequestError(context)
+      ?: hostChannelError(spec)
+      ?: secureLibraryError(spec, context)
+      ?: PrototypeLibraryModuleRule.sensitiveError(spec, context)
   }
 
   private fun hostRequestError(context: PrototypeStateChecks.Context): PrototypeSpecError? {
@@ -58,10 +61,16 @@ internal object PrototypeStrictPolicy {
     val secure = secureStateKeys(scopes, context)
     if (secure.isEmpty()) return null
     val channels = (spec["channels"] as? JsonObject).orEmpty()
+    // A web view loads its url from the page host, so the url is a request sink (#16573).
+    val webViews = context.nodes.filter { it.value.text("type") == "webView" }
     val requests =
       context.actions.filter { it.value.text("type") == "request" }.map { it.path } +
-        channels.keys.map { PrototypeValidationPaths.keyPath("channels", it) }
-    val channelFields = mutableListOf<Field>()
+        channels.keys.map { PrototypeValidationPaths.keyPath("channels", it) } +
+        webViews.map { it.path }
+    val channelFields =
+      webViews
+        .mapNotNull { (node, path) -> node.text("url")?.let { Field(it, "$path.url", false) } }
+        .toMutableList()
     for ((id, raw) in channels) {
       val channel = raw.jsonObject
       val at = PrototypeValidationPaths.keyPath("channels", id)
@@ -253,8 +262,13 @@ internal object PrototypeStrictPolicy {
     spec["root"]?.let { scanner.scan(it) }
     (spec["channels"] as? JsonObject).orEmpty().values.forEach { scanner.scan(it) }
     scanner.platform(spec)
-    (spec["platform"] as? JsonObject)?.get("on")?.let { scanner.scan(it) }
+    val handlers = (spec["platform"] as? JsonObject)?.get("on")
+    handlers?.let { scanner.scan(it) }
+    (handlers as? JsonObject)?.keys?.forEach { event ->
+      PrototypePlatformModules.eventCapability(event)?.let(scanner.result::add)
+    }
     if ("hideKeyboard" in locatedActionTypes(spec)) scanner.result.add("prototype_hide_keyboard_v1")
+    scanner.result.addAll(PrototypeMapBackends.backendCapabilities(spec))
     return scanner.result
   }
 
@@ -338,6 +352,7 @@ internal object PrototypeStrictPolicy {
       "shimmer" to "loading_states",
       "effects" to "effects",
       "keyframes" to "keyframes",
+      "attentionLoop" to "loops",
       "sharedKey" to "shared_element",
     )
 
@@ -424,8 +439,15 @@ internal object PrototypeStrictPolicy {
         key == "linkify" ->
           (child as? JsonObject)?.get("onTap")?.let { scan(it, "onTap", routeAlias) }
         key !in
-          listOf("series", "effects", "keyframes", "scrollLinked", "scrollTransition", "press") ->
-          scan(child, key, routeAlias)
+          listOf(
+            "series",
+            "effects",
+            "keyframes",
+            "attentionLoop",
+            "scrollLinked",
+            "scrollTransition",
+            "press",
+          ) -> scan(child, key, routeAlias)
       }
     }
 

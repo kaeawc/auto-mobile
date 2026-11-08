@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.sdk.keystore
 
+import android.os.Build
+import android.security.keystore.KeyGenParameterSpec
 import dev.jasonpearson.automobile.sdk.InspectorRegistration
 import dev.jasonpearson.automobile.sdk.removeIfIdentical
 import java.util.concurrent.ConcurrentHashMap
@@ -18,6 +20,21 @@ import java.util.concurrent.ConcurrentHashMap
 object KeystoreTestState {
   @Volatile private var enabled = false
   private val scopes = ConcurrentHashMap<String, Set<String>>()
+
+  /** Installed only by the debug fault plan; release builds keep it null (#17300). */
+  @Volatile internal var keyGenerationGate: KeyGenerationGate? = null
+
+  /**
+   * Call immediately before generating a key from [spec] with KeyGenerator or KeyPairGenerator.
+   * When the debug SDK has a STRONGBOX_UNAVAILABLE fault armed for the spec's declared alias and
+   * [spec] requests StrongBox, this throws StrongBoxUnavailableException, as key generation does on
+   * a device without StrongBox. A no-op in release builds, below API 28, and with no fault armed.
+   */
+  fun checkKeyGeneration(spec: KeyGenParameterSpec) {
+    val gate = keyGenerationGate ?: return
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+    gate.check(spec.keystoreAlias, spec.isStrongBoxBacked)
+  }
 
   fun setEnabled(value: Boolean) {
     enabled = value
@@ -44,4 +61,8 @@ object KeystoreTestState {
     enabled = false
     scopes.clear()
   }
+}
+
+internal fun interface KeyGenerationGate {
+  fun check(alias: String, strongBoxRequested: Boolean)
 }

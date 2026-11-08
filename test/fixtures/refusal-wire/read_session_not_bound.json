@@ -1,0 +1,13 @@
+{
+  "code": "read_session_not_bound",
+  "builder": "ReadSessionNotBoundError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"observe refused: device session 11111111-2222-4333-8444-555555555555 is owned by another connected client and this connection does not hold its binding (code read_session_not_bound). A sessionUuid alone does not authorize a read; hold the session binding or present its owner token. Read on the connection that owns the session (or present its owner token), or leave sessionUuid out and name the device by deviceId for a sessionless read.\",\"code\":\"read_session_not_bound\",\"action\":\"observe\",\"sessionUuid\":\"11111111-2222-4333-8444-555555555555\",\"missingBinding\":\"session\",\"remedy\":\"Read on the connection that owns the session (or present its owner token), or leave sessionUuid out and name the device by deviceId for a sessionless read.\",\"retryable\":false}"
+      }
+    ],
+    "isError": true
+  }
+}

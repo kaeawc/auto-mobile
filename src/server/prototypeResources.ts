@@ -14,11 +14,14 @@ import {
   type NativePrototypeSources,
 } from "../features/prototype/nativePrototype";
 import {
+  PROTOTYPE_EJECT_TEMPLATE,
+  PROTOTYPE_EJECT_URI,
   PROTOTYPE_NATIVE_ASSET_TEMPLATE,
   PROTOTYPE_NATIVE_ASSET_URI,
   PROTOTYPE_NATIVE_TEMPLATE,
   PROTOTYPE_NATIVE_URI,
 } from "../features/prototype/nativePrototypeUris";
+import { readPrototypeEject } from "../features/prototype/prototypeEject";
 import { defaultSavedPrototypeMirror } from "../features/prototype/savedPrototypeMirror";
 import { getMcpServerVersion, releaseVersion } from "../utils/mcpVersion";
 import {
@@ -31,9 +34,11 @@ import type {
 } from "../features/prototype/prototypeSpecRevisions";
 import {
   PROTOTYPE_COMPOSE_TEMPLATE,
+  PROTOTYPE_EMBED_TEMPLATE,
   PROTOTYPE_SWIFTUI_TEMPLATE,
   PROTOTYPE_WEB_TEMPLATE,
   prototypeResourceName,
+  prototypeEmbedUri,
   prototypeResourceUri,
   prototypeWebUri,
   type PrototypeResourceFormat,
@@ -47,9 +52,23 @@ import {
 import {
   prototypeVariantIds,
   readPrototypeWebResource,
+  type PrototypeWebImageSources,
   type PrototypeWebResourceQuery,
 } from "../features/prototype/web/prototypeWebResource";
+import {
+  SharpPrototypeWebImageEncoder,
+  type PrototypeWebAssetSource,
+} from "../features/prototype/web/webImageEncoding";
+import {
+  defaultPrototypeAssetCache,
+  type PrototypeAssetCache,
+} from "../features/prototype/prototypeAssetCache";
+import {
+  readPrototypeEmbedResource,
+  type PrototypeEmbedResourceQuery,
+} from "../features/prototype/web/prototypeEmbedResource";
 import { logger } from "../utils/logger";
+import { errorMessage } from "../models/describeUnknownError";
 import { decodeSegmentOrThrow } from "./resourceUriSegments";
 import type { ResourceContent } from "./resourceRegistry";
 
@@ -69,12 +88,64 @@ export function defaultNativePrototypeSources(): NativePrototypeSources {
 export interface PrototypeWebSources {
   readonly revisions: PrototypeSpecRevisionSource;
   readonly rendererVersion: () => string;
+  /** Asset bytes and the encoder for the web page's images; without it images stay placeholders. */
+  readonly images?: PrototypeWebImageSources;
+}
+
+/**
+ * Asset bytes the host cached when it uploaded them to a device showing one of the variants
+ * (Android caches uploads per device). Asset ids are chosen per device and the page holds one
+ * image per id, so when two devices cached different bytes under the id, it stays a placeholder
+ * rather than drawing one device's image in another's variant. A device whose cache cannot be read
+ * is skipped.
+ */
+export function cachedPrototypeWebAssets(
+  devicesShowing: (id: string) => readonly string[],
+  cache: Pick<PrototypeAssetCache, "get">,
+): (variantIds: readonly string[]) => PrototypeWebAssetSource {
+  return (variantIds) => ({
+    get: async (assetId) => {
+      const devices = [...new Set(variantIds.flatMap((id) => devicesShowing(id)))];
+      let found: Awaited<ReturnType<PrototypeAssetCache["get"]>>;
+      for (const device of devices) {
+        let asset: Awaited<ReturnType<PrototypeAssetCache["get"]>>;
+        try {
+          asset = await cache.get(device, assetId);
+        } catch (error) {
+          // Another device may still have the asset; without one the image keeps its placeholder.
+          logger.warn(
+            `[PROTOTYPE] Asset cache read failed for ${assetId} on ${device}: ${errorMessage(error)}`,
+            error,
+          );
+          continue;
+        }
+        if (!asset) {
+          continue;
+        }
+        if (found && !Buffer.from(found.bytes).equals(Buffer.from(asset.bytes))) {
+          logger.warn(
+            `[PROTOTYPE] Devices showing ${variantIds.join(", ")} cached different bytes for asset ${assetId}; the web page keeps its placeholder.`,
+          );
+          return undefined;
+        }
+        found ??= asset;
+      }
+      return found;
+    },
+  });
 }
 
 export function defaultPrototypeWebSources(): PrototypeWebSources {
   return {
     revisions: daemonPrototypeSpecRevisions(),
     rendererVersion: () => releaseVersion(getMcpServerVersion()),
+    images: {
+      assets: cachedPrototypeWebAssets(
+        (id) => daemonPrototypeShownSpecs()?.devicesShowing(id) ?? [],
+        defaultPrototypeAssetCache(),
+      ),
+      encoder: new SharpPrototypeWebImageEncoder(),
+    },
   };
 }
 
@@ -93,14 +164,36 @@ function readUri(
   return query ? `${uri}?${query}` : uri;
 }
 
-function readWeb(sources: PrototypeWebSources, query: PrototypeWebResourceQuery): ResourceContent {
-  const web = readPrototypeWebResource(sources.revisions, query, sources.rendererVersion());
-  const { frame, revision, variant } = query;
+async function readWeb(
+  sources: PrototypeWebSources,
+  query: PrototypeWebResourceQuery,
+): Promise<ResourceContent> {
+  const web = await readPrototypeWebResource(
+    sources.revisions,
+    query,
+    sources.rendererVersion(),
+    sources.images,
+  );
+  const { frame, revision, variant, mcpSessionId } = query;
   return {
-    uri: readUri(query.id, "web", { frame, revision, variant }),
+    uri: readUri(query.id, "web", { frame, revision, variant, mcpSessionId }),
     mimeType: "text/html",
     text: web.html,
     _meta: { ...web.meta },
+  };
+}
+
+function readEmbed(
+  sources: PrototypeWebSources,
+  query: PrototypeEmbedResourceQuery,
+): ResourceContent {
+  const embed = readPrototypeEmbedResource(sources.revisions, query, sources.rendererVersion());
+  const { revision, variant, mcpSessionId } = query;
+  return {
+    uri: readUri(query.id, "embed", { revision, variant, mcpSessionId }),
+    mimeType: "application/json",
+    text: embed.text,
+    _meta: { ...embed.meta },
   };
 }
 
@@ -115,9 +208,9 @@ function readSource(
     query,
     sources.rendererVersion(),
   );
-  const { frame, revision } = query;
+  const { frame, revision, mcpSessionId } = query;
   return {
-    uri: readUri(query.id, format, { frame, revision }),
+    uri: readUri(query.id, format, { frame, revision, mcpSessionId }),
     mimeType: file.mimeType,
     text: file.text,
     _meta: { ...file.meta },
@@ -130,7 +223,7 @@ interface PerIdFormat {
   readonly title: string;
   description(id: string): string;
   readonly mimeType: string;
-  read(sources: PrototypeWebSources, id: string): ResourceContent;
+  read(sources: PrototypeWebSources, id: string): ResourceContent | Promise<ResourceContent>;
 }
 
 const sourceFormat = (format: PrototypeSourceFormat, label: string): PerIdFormat => ({
@@ -150,6 +243,14 @@ const PER_ID_FORMATS: readonly PerIdFormat[] = [
       `Prototype ${id} as a self-contained HTML page in a device frame (latest revision)`,
     mimeType: "text/html",
     read: (sources, id) => readWeb(sources, { id }),
+  },
+  {
+    format: "embed",
+    title: "embed",
+    description: (id) =>
+      `Prototype ${id} as an embed envelope for the web library: its spec and required capabilities (latest revision)`,
+    mimeType: "application/json",
+    read: (sources, id) => readEmbed(sources, { id }),
   },
   sourceFormat("compose", "Compose"),
   sourceFormat("swiftui", "SwiftUI"),
@@ -199,8 +300,8 @@ function syncWebResources(sources: PrototypeWebSources): boolean {
 }
 
 /**
- * A new revision changes every format of its id, and the web page of every variant sharing its
- * group (only the web page shows variants).
+ * A new revision changes every format of its id, and the web page and embed envelope of every
+ * variant sharing its group (only those two report variants).
  */
 async function onWebRevision(
   sources: PrototypeWebSources,
@@ -220,7 +321,7 @@ async function onWebRevision(
   const current = known.has(event.id) ? prototypeVariantIds(sources.revisions, event.id) : [];
   const ids = new Set([...(known.has(event.id) ? [event.id] : []), ...current, ...former]);
   const uris = new Set([
-    ...[...ids].map(prototypeWebUri),
+    ...[...ids].flatMap((id) => [prototypeWebUri(id), prototypeEmbedUri(id)]),
     ...(known.has(event.id) ? perIdUris(event.id) : []),
   ]);
   if (uris.size > 0) {
@@ -260,13 +361,14 @@ function registerSourceTemplate(
   label: string,
 ): void {
   ResourceRegistry.registerTemplate(template, `Prototype as one ${label} file`, {
-    description: `A shown prototype as one ${label} source file: the spec inlined as a string constant, a header naming the renderer library, required capabilities and asset URIs, and a preview sized to the frame (frame: a device frame id; revision: a kept spec revision, default the latest)`,
+    description: `A shown prototype as one ${label} source file: the spec inlined as a string constant, a header naming the renderer library, required capabilities and asset URIs, and a preview sized to the frame (frame: a device frame id; revision: a kept spec revision, default the latest; mcpSessionId: only the revisions that MCP session produced)`,
     mimeType: prototypeSourceMimeType(format),
     handler: async (params: Record<string, string>) =>
       readSource(sources, format, {
         id: decodeSegmentOrThrow(params.id ?? ""),
         frame: params.frame,
         revision: params.revision,
+        mcpSessionId: params.mcpSessionId,
       }),
   });
 }
@@ -274,7 +376,7 @@ function registerSourceTemplate(
 function registerPrototypeWebResources(sources: PrototypeWebSources): void {
   ResourceRegistry.registerTemplate(PROTOTYPE_WEB_TEMPLATE, "Prototype as a web page", {
     description:
-      "A shown prototype as one self-contained HTML page in a device frame (frame: a device frame id; revision: a kept spec revision, default the latest; variant: the prototype id of its variant group shown first)",
+      "A shown prototype as one self-contained HTML page in a device frame (frame: a device frame id; revision: a kept spec revision, default the latest; variant: the prototype id of its variant group shown first; mcpSessionId: only the revisions that MCP session produced)",
     mimeType: "text/html",
     handler: async (params: Record<string, string>) =>
       readWeb(sources, {
@@ -282,6 +384,19 @@ function registerPrototypeWebResources(sources: PrototypeWebSources): void {
         frame: params.frame,
         revision: params.revision,
         variant: params.variant,
+        mcpSessionId: params.mcpSessionId,
+      }),
+  });
+  ResourceRegistry.registerTemplate(PROTOTYPE_EMBED_TEMPLATE, "Prototype as an embed envelope", {
+    description:
+      'A shown prototype as {format: "automobile-prototype-embed", version: 1, requires, spec} for the web renderer library, requires being the capabilities the spec needs (revision: a kept spec revision, default the latest; variant: the prototype id of its variant group to serve; mcpSessionId: only the revisions that MCP session produced)',
+    mimeType: "application/json",
+    handler: async (params: Record<string, string>) =>
+      readEmbed(sources, {
+        id: decodeSegmentOrThrow(params.id ?? ""),
+        revision: params.revision,
+        variant: params.variant,
+        mcpSessionId: params.mcpSessionId,
       }),
   });
   registerSourceTemplate(sources, PROTOTYPE_COMPOSE_TEMPLATE, "compose", "Jetpack Compose");
@@ -310,7 +425,8 @@ export function prototypeWebNotificationsSettled(): Promise<void> {
 
 /**
  * Registers the `prototype` authoring guide, its icon lookup (#11052), the native-code
- * resources (#13729) and the per-prototype web page and Compose/SwiftUI files (#16345).
+ * resources (#13729), the eject scaffold (#14129), the per-prototype web page and
+ * Compose/SwiftUI files (#16345) and the per-prototype embed envelope (#16452).
  */
 export function registerPrototypeResources(
   nativeSources: NativePrototypeSources = defaultNativePrototypeSources(),
@@ -353,6 +469,21 @@ export function registerPrototypeResources(
         uri: query ? `${PROTOTYPE_NATIVE_URI}?${query}` : PROTOTYPE_NATIVE_URI,
         mimeType: "application/json",
         text: JSON.stringify(native, null, 2),
+      };
+    },
+  });
+
+  ResourceRegistry.registerTemplate(PROTOTYPE_EJECT_TEMPLATE, "Prototype ejected to app code", {
+    description:
+      "A one-shot Jetpack Compose or SwiftUI scaffold of the prototype that the app owns, with no renderer dependency: layout, text, buttons, fields, lists and stack navigation, TODO stubs for the rest",
+    mimeType: "application/json",
+    handler: async (params: Record<string, string>) => {
+      const ejected = await readPrototypeEject(params, nativeSources);
+      const query = new URLSearchParams(params).toString();
+      return {
+        uri: query ? `${PROTOTYPE_EJECT_URI}?${query}` : PROTOTYPE_EJECT_URI,
+        mimeType: "application/json",
+        text: JSON.stringify(ejected, null, 2),
       };
     },
   });

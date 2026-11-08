@@ -571,7 +571,9 @@ function createAdbFactory(adb: FakeAdbExecutor): AdbClientFactory {
 const priorImeIdForFake = "com.example.keyboard/.Ime";
 const commitImeIdForFake = "dev.jasonpearson.automobile.ctrlproxy/.ime.CtrlProxyIme";
 const typeFocusedInputError =
-  'Android event delivery requires a focused editable field. For printable ASCII, mode: "imeKeyEvents" types without requiring a focused editable node.';
+  "No editable field has focus. Focus the target field first (tap it, or tapOn with focus), then retry sendKeys without a mode.";
+/** Every Android typing mode name; the no-focus remedy must name none of them (#17165). */
+const typingModeNames = /\b(?:imeKeyEvents|eventAll|eventLast|eventOnly|a11y|ime)\b/;
 
 describe("SendKeys", () => {
   test("sendKeys with a not-fresh current hierarchy still delivers keys", async () => {
@@ -757,7 +759,16 @@ describe("SendKeys", () => {
       completedCommands: 0,
       failedIndex: 0,
       error: typeFocusedInputError,
-      commands: [{ index: 0, action: "type", success: false, error: typeFocusedInputError }],
+      errorCode: "NO_FOCUSED_EDITABLE",
+      commands: [
+        {
+          index: 0,
+          action: "type",
+          success: false,
+          error: typeFocusedInputError,
+          errorCode: "NO_FOCUSED_EDITABLE",
+        },
+      ],
     });
     expect(textClient.calls).toEqual([]);
     expect(adb.getExecutedCommands()).toEqual([]);
@@ -796,7 +807,8 @@ describe("SendKeys", () => {
       ).toMatchObject({
         success: false,
         partialApplication: true,
-        error: expect.stringContaining("Android event delivery requires a focused editable field"),
+        error: expect.stringContaining(typeFocusedInputError),
+        errorCode: "NO_FOCUSED_EDITABLE",
       });
       expect(observer.calls).toBe(operation === "replace" ? 2 : 1);
       expect(textClient.commitViaImeCalls).toHaveLength(1);
@@ -849,21 +861,24 @@ describe("SendKeys", () => {
     ).toMatchObject({
       success: false,
       partialApplication: true,
-      error: expect.stringContaining("Android event delivery requires a focused editable field"),
+      error: expect.stringContaining(typeFocusedInputError),
+      errorCode: "NO_FOCUSED_EDITABLE",
     });
     expect(observer.calls).toBe(3);
     expect(textClient.commitViaImeCalls).toHaveLength(1);
   });
 
   test.each([undefined, "ime", "eventLast", "eventAll", "eventOnly"] as const)(
-    "type refusal offers mode imeKeyEvents (requested=%s)",
+    "type refusal directs focus and a default-mode retry with a stable code (requested=%s)",
     async (mode) => {
       const observer = createObserver(focusedAndroidObservation("", { focused: "false" }, 0));
       const { executor } = imeVerificationHarness(observer);
       const result = await executor.type({ action: "type", text: "a", mode });
       expect(result.success).toBe(false);
-      expect(result.error).toContain('mode: "imeKeyEvents"');
-      expect(result.error).toContain("types without requiring a focused editable node");
+      expect(result.errorCode).toBe("NO_FOCUSED_EDITABLE");
+      expect(result.error).toStartWith(typeFocusedInputError);
+      expect(result.error).not.toMatch(typingModeNames);
+      expect(result.error).not.toContain("event delivery");
     },
   );
 
@@ -989,6 +1004,14 @@ describe("SendKeys", () => {
         (options) => options?.freshness === "fresh" && options.minTimestamp === undefined,
       ),
     ).toEqual([
+      {
+        signal: undefined,
+        freshness: "fresh",
+        display: "external",
+        skipScreenshot: true,
+        hierarchyOnly: true,
+        skipAccessibilityAudit: true,
+      },
       {
         signal: undefined,
         freshness: "fresh",

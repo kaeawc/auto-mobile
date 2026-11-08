@@ -72,7 +72,9 @@ struct PrototypeContractValidator {
     var nodes = 0
     var images = 0
     var effects = PrototypeEffectUses()
+    var loopNodes = 0
     var keyframeNodes = 0
+    var videoNodes = 0
     var referenceDepth: [String: Int] = [:]
 
     static func validateRequestBody(_ value: JSONValue, path: String) throws {
@@ -225,10 +227,16 @@ struct PrototypeContractValidator {
             if nodes > PrototypeLimits.maxNodes { throw Self.invalid(path, "Node limit exceeded") }
             if depth + 1 > PrototypeLimits.maxDepth { throw Self.invalid(path, "Tree depth limit exceeded") }
             if node["type"] == .string("image") { images += max(1, Self.imageUses(node["asset"])) }
+            if node["type"] == .string("videoPlayer") { images += Self.imageUses(node["poster"]) }
             if images > (limits["MAX_PROTOTYPE_IMAGES"] ?? 0) { throw Self.invalid(path, "Image limit exceeded") }
             if node["keyframes"] != nil { keyframeNodes += 1 }
             if keyframeNodes > (limits["MAX_PROTOTYPE_KEYFRAME_NODES"] ?? 0) {
                 throw Self.invalid("\(path).keyframes", "Keyframe node limit exceeded")
+            }
+            try PrototypeLoops.charge(node, path: path, count: &loopNodes)
+            if node["type"] == .string("videoPlayer") { videoNodes += 1 }
+            if videoNodes > (limits["MAX_PROTOTYPE_VIDEO_NODES"] ?? 0) {
+                throw Self.invalid(path, "Video node limit exceeded")
             }
             effects.add(PrototypeEffectUses(node: node))
             if effects.total > (limits["MAX_PROTOTYPE_EFFECTS"] ?? 0) {

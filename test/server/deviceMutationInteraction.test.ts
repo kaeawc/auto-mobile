@@ -130,6 +130,11 @@ describe("Interaction journal intents (#14359)", () => {
       "right",
       "select",
       "playPause",
+      // Media transport keys act on the app's playback session only (#16734).
+      "fastForward",
+      "rewind",
+      "next",
+      "previous",
       "home",
       "back",
       "menu",
@@ -404,4 +409,54 @@ test("iOS volume presses force fallback; Android presses do not", () => {
       deviceToolMutations("pressButton", { button }, "android").some(opaqueForcesFallback),
     ).toBe(false);
   }
+});
+
+describe("postNotification journal row (#14364)", () => {
+  test("an Android call naming its app journals a posted row plus the channel it creates (#16510)", () => {
+    expect(
+      deviceToolMutations("postNotification", { appId: "com.example.app", title: "Hi" }, "android"),
+    ).toEqual([
+      { kind: "notification", key: "posted:com.example.app" },
+      { kind: "notification", key: "channel:com.example.app:automobile_test_notifications" },
+    ]);
+    expect(
+      deviceToolMutations(
+        "postNotification",
+        { appId: "com.example.app", title: "Hi", channelId: "orders-v2" },
+        "android",
+      ),
+    ).toEqual([
+      { kind: "notification", key: "posted:com.example.app" },
+      { kind: "notification", key: "channel:com.example.app:orders-v2" },
+    ]);
+  });
+
+  test("a channel id the journal cannot name keeps the app fallback", () => {
+    expect(
+      deviceToolMutations(
+        "postNotification",
+        { appId: "com.example.app", title: "Hi", channelId: "has space" },
+        "android",
+      ),
+    ).toEqual([
+      { kind: "notification", key: "posted:com.example.app" },
+      { kind: "opaque", key: opaqueIntentKey("postNotification", "com.example.app") },
+    ]);
+  });
+
+  test.each([
+    [{ title: "Hi" }, "android"],
+    [{ appId: "not a package", title: "Hi" }, "android"],
+    [{ appId: "com.example.app", title: "Hi" }, "ios"],
+    [{ appId: "com.example.app", title: "Hi" }, undefined],
+    [
+      { appId: "com.example.app", title: "Hi", imageType: "bigPicture", imagePath: "/a.png" },
+      "android",
+    ],
+    [{ appId: "com.example.app", title: "Hi", imagePath: "/a.png" }, "android"],
+  ] as const)("%p on %p keeps the escalating tool row", (args, platform) => {
+    expect(deviceToolMutations("postNotification", { ...args }, platform)).toEqual([
+      { kind: "notification", key: "tool:postNotification" },
+    ]);
+  });
 });

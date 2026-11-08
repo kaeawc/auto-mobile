@@ -97,10 +97,11 @@ host_heavy_tsgo() {
   bunx tsgo --noEmit -p "$tsconfig" ${threads:+--checkers "$threads"}
 }
 
-# Only the linter's own stderr is dropped, so the helper's messages stay visible.
+# Only the linter's own stderr goes to OXLINT_STDERR_FILE (default: dropped), so the helper's
+# messages stay visible while a caller can still report a tsgolint crash's output.
 host_heavy_oxlint_type_aware() {
   local threads="$1"
-  bunx oxlint --type-aware --format json ${threads:+--threads "$threads"} 2> /dev/null
+  bunx oxlint --type-aware --format json ${threads:+--threads "$threads"} 2> "${OXLINT_STDERR_FILE:-/dev/null}"
 }
 
 # The fast oxlint stage of scripts/lint.sh (Rust, one thread per core by default). The cap is the

@@ -59,6 +59,7 @@ private fun DemoIndexEntry(destination: DemoIndexDestination, state: NavigationS
           onNavigateToHandledException = { backStack.add(DemoHandledExceptionDestination) },
           onNavigateToNetworkTest = { backStack.add(DemoNetworkTestDestination) },
           onNavigateToPointerProbe = { backStack.add(DemoPointerProbeDestination) },
+          onNavigateToCollapsingComposer = { backStack.add(DemoCollapsingComposerDestination) },
           onNavigateToDesignSystem = { backStack.add(DesignSystemDemoDestination) },
           onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
         ),

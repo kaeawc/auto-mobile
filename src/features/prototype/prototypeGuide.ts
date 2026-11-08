@@ -27,7 +27,7 @@ import {
   GUIDE_TEMPLATES,
 } from "./prototypeGuideProse";
 import {
-  GUIDE_DEVICE_LOOPBACK,
+  GUIDE_DEVICE_DESTINATIONS,
   GUIDE_PLATFORM,
   GUIDE_MEDIA_ACTIONS,
   GUIDE_NOTIFICATIONS,
@@ -360,7 +360,7 @@ export function renderPrototypeGuide(): string {
     renderTheme(),
     GUIDE_APPEARANCE,
     GUIDE_CHECKS,
-    GUIDE_DEVICE_LOOPBACK,
+    GUIDE_DEVICE_DESTINATIONS,
     renderIcons(),
     renderPlatformDifferences(),
     renderNativeCode(),

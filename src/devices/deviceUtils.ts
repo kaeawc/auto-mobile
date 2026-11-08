@@ -30,6 +30,11 @@ import {
 } from "../utils/ios-cmdline-tools/DevicectlDeviceLister";
 import { resolveIosLifecycleBackend } from "../utils/ios-cmdline-tools/IosLifecycleBackend";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
+import { canDiscoverIosLocally } from "./iosLocalDiscovery";
+import {
+  SimulatorPairService,
+  type SimulatorPair,
+} from "../utils/ios-cmdline-tools/SimulatorPairs";
 import { AppleVisionSimulatorInventory } from "../utils/ios-cmdline-tools/AppleVisionSimulatorInventory";
 import { AppleTvSimulatorInventory } from "../utils/ios-cmdline-tools/AppleTvSimulatorInventory";
 import { resolveSimulatorKillTarget } from "./appleTvDiscovery";
@@ -111,6 +116,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   private appleVisionSimulators?: Pick<AppleVisionSimulatorInventory, "listAppleVisionSimulators">;
   private appleTvSimulators?: Pick<AppleTvSimulatorInventory, "listAppleTvSimulators">;
   private watchSimulators?: Pick<WatchSimulatorInventory, "listWatchSimulators">;
+  private simulatorPairs?: Pick<SimulatorPairService, "list">;
   private readonly physicalIosDevices: IosPhysicalDeviceLister;
   private readonly lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
   private readonly timer: Pick<Timer, "now">;
@@ -143,6 +149,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     this.simctl = simctl || new SimCtlClient();
     if (this.simctl instanceof SimCtlClient) {
       this.watchSimulators = new WatchSimulatorInventory(this.simctl);
+      this.simulatorPairs = new SimulatorPairService(this.simctl);
       this.appleVisionSimulators = new AppleVisionSimulatorInventory(this.simctl);
       this.appleTvSimulators = new AppleTvSimulatorInventory(this.simctl);
     }
@@ -170,6 +177,20 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   withWatchSimulators(source: Pick<WatchSimulatorInventory, "listWatchSimulators">): this {
     this.watchSimulators = source;
     return this;
+  }
+
+  /** Watch–iPhone simulator pairs; injectable for unit tests (#17418). */
+  withSimulatorPairs(source: Pick<SimulatorPairService, "list">): this {
+    this.simulatorPairs = source;
+    return this;
+  }
+
+  /** Lists pairs only when a real (or injected) pair source exists; a fake simctl lists none. */
+  async listSimulatorPairs(signal?: AbortSignal): Promise<SimulatorPair[]> {
+    if (!this.simulatorPairs || !(await this.canDiscoverIosLocally(signal))) {
+      return [];
+    }
+    return this.simulatorPairs.list(signal);
   }
 
   withForeignAndroidSerialSource(source: ForeignAndroidSerialSource): this {
@@ -225,23 +246,8 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     return bootAdmissionServices.androidColdBootAdmitter();
   }
 
-  private async canDiscoverIosLocally(signal?: AbortSignal): Promise<boolean> {
-    const discoverySignal = combineWithAmbientAbort(signal);
-    discoverySignal?.throwIfAborted();
-    if (process.platform === "darwin") {
-      return true;
-    }
-
-    try {
-      const available = await this.simctl.isAvailable({ signal: discoverySignal });
-      discoverySignal?.throwIfAborted();
-      return available;
-    } catch (error) {
-      discoverySignal?.throwIfAborted();
-      // simctl.isAvailable() throws on non-macOS hosts/missing Xcode tools; treat as "no local iOS discovery".
-      logger.debug(`src/utils/deviceUtils.ts fallback failed: ${error}`, error);
-      return false;
-    }
+  private canDiscoverIosLocally(signal?: AbortSignal): Promise<boolean> {
+    return canDiscoverIosLocally(this.simctl, signal);
   }
 
   private async listIosDeviceImagesIfAvailable(options: {

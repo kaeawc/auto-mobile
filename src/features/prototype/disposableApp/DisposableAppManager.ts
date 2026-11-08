@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { ActionableError } from "../../../models/ActionableError";
+import { errorMessage } from "../../../models/describeUnknownError";
 import type { Timer } from "../../../utils/SystemTimer";
 import { logger } from "../../../utils/logger";
 import type { PrototypeJson } from "../prototypeJson";
@@ -200,7 +201,8 @@ export class DisposableAppManager {
     await installer.install(input.deviceId, stamped.artifactPath, {
       reset: input.app.reset === true,
     });
-    await installer.applyPermissions(input.deviceId, appId, grants);
+    // Record the app as soon as it is on the device, so a permission failure below cannot leave
+    // it untracked or keep a previous install's expiry for the sweep to act on (#16506).
     const installedAt = this.deps.timer.now();
     const expiresAt = lifetime === null ? null : installedAt + lifetime;
     await this.deps.registry.put(input.deviceId, {
@@ -214,6 +216,14 @@ export class DisposableAppManager {
       installedAt,
       expiresAt,
     });
+    try {
+      await installer.applyPermissions(input.deviceId, appId, grants);
+    } catch (error) {
+      throw new ActionableError(
+        `${appId} is installed on ${input.deviceId} (expires ${isoOrNull(expiresAt) ?? "never"}), but its permissions were not applied: ${errorMessage(error)}. Reinstall it with installApp to retry, or uninstall it with uninstallApp.`,
+        { cause: error },
+      );
+    }
     return {
       appId,
       platform: input.platform,

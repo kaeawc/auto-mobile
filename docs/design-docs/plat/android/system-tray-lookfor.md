@@ -150,11 +150,17 @@ bound the operation.
 the id itself) only against a row's attribution element, so another app's name
 in a title or body never attributes the row to that app. On Android that is the
 `app_name_text` header label; a group child is attributed by its group's header.
-On iOS no separate label exists: the `NotificationShortLookView` accessibility
-label leads with the app's display name (`"MESSAGES, now, <title>, <body>"`),
-and only that leading name is compared. A row that renders no attribution
-element (for example a header-less Silent row) falls back to matching the app
-filter against all of its text.
+On iOS no separate label exists: a stacked row's `NotificationShortLookView`
+accessibility label leads with the app's display name
+(`"MESSAGES, Grouped, now, <title>, <body>"`), and only that leading name is
+compared. A lone banner's label starts at its time (`"now, <title>, <body>"`)
+and names no app, so it is attributed only when `postNotification` posted its
+exact title and body (the alert iOS displays, after any raw `aps` override) for
+that app, and no other app, on that device in this server process; otherwise
+the not-found error says the banner cannot be attributed. Each row is
+attributed by its own evidence, never by another row's. An Android row that
+renders no attribution element (for example a header-less Silent row) falls
+back to matching the app filter against all of its text.
 
 ### Collapsed notification group handling
 

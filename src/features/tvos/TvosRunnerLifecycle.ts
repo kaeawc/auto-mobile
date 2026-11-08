@@ -6,6 +6,7 @@ import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { combineAbortSignals } from "../../utils/AbortContext";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../utils/PortManager";
+import { TvosRunnerReleaseProvider } from "./TvosRunnerReleaseProvider";
 import { TvosRunnerArtifacts } from "./TvosRunnerArtifacts";
 import { XcodebuildTvosRunnerLauncher, type TvosRunnerLauncher } from "./TvosRunnerLauncher";
 import { tvosRunners } from "./TvosRunnerRegistry";
@@ -187,6 +188,7 @@ export function getTvosRunnerLifecycle(): TvosRunnerLifecycle {
   if (!defaultLifecycle) {
     defaultLifecycle = new TvosRunnerLifecycle({
       artifacts: new TvosRunnerArtifacts({
+        release: new TvosRunnerReleaseProvider(),
         builder: {
           getXctestrunPath: (platform) => getDefaultBuilder().getXctestrunPath(platform),
           getConfig: () => getDefaultBuilder().getConfig(),

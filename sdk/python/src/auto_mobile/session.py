@@ -321,7 +321,7 @@ class McpSession:
         reauthenticated = False
         reresolved = False
         while True:
-            token = self._token_provider.read()
+            token = self._read_token()
             if token is None:
                 raise DaemonAuthenticationError(
                     "No daemon HTTP token is published. Is the daemon running? "
@@ -341,14 +341,23 @@ class McpSession:
                 response = await self._transport.post(
                     port, MCP_STREAMABLE_PATH, headers, payload, remaining
                 )
-            except (ConnectionRefusedError, ConnectionResetError, FileNotFoundError) as error:
-                # Nothing was delivered. The daemon may have restarted on another port.
+            except (ConnectionRefusedError, FileNotFoundError) as error:
+                # The connection was never established, so nothing was delivered. The
+                # daemon may have restarted on another port.
                 if not reresolved:
                     reresolved = True
                     if await self._resolve_port(refresh=True) != port:
                         continue
                 raise DaemonUnavailableError(
                     f"Could not reach the AutoMobile daemon on 127.0.0.1:{port}: {error}"
+                ) from error
+            except ConnectionError as error:
+                # A reset or broken pipe can arrive after the request was written and run,
+                # so it is never re-sent. Forget the port so the next request re-resolves it.
+                self._port = None
+                raise DaemonUnavailableError(
+                    f"Connection to the AutoMobile daemon on 127.0.0.1:{port} was lost; "
+                    f"the request may already have run: {error}"
                 ) from error
             if response.status == 401:
                 # A daemon restart publishes a new token: re-read the file once and retry.
@@ -373,6 +382,16 @@ class McpSession:
                 await self._sleep(retry_after)
                 continue
             return response
+
+    def _read_token(self) -> str | None:
+        try:
+            return self._token_provider.read()
+        except DaemonAuthenticationError:
+            raise
+        except OSError as error:
+            raise DaemonAuthenticationError(
+                f"Could not read the daemon HTTP token: {error.strerror or error}"
+            ) from error
 
     async def _resolve_port(self, *, refresh: bool) -> int:
         if self._port is None or refresh:

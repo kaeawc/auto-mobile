@@ -11,6 +11,7 @@ import type {
   NewNavigationSuggestionObservation,
 } from "./types";
 import { logger } from "../utils/logger";
+import type { BuildSourceRevision } from "../models/BuildSourceRevision";
 import type {
   NavigationEdgeProvenanceRow,
   NavigationNodeProvenanceRow,
@@ -201,23 +202,32 @@ export async function getSuggestions(
 export async function getOrCreateBuildKey(
   ctx: NavigationQueryContext,
   appId: string,
-  versionCode: number,
-  contentHash: string,
+  {
+    versionCode,
+    contentHash,
+    sourceRevision,
+  }: { versionCode: number; contentHash: string; sourceRevision?: BuildSourceRevision },
 ): Promise<NavigationBuildKey> {
   const db = ctx.getDb();
   const newBuildKey: NewNavigationBuildKey = {
     app_id: appId,
     version_code: versionCode,
     content_hash: contentHash,
+    git_branch: sourceRevision?.gitBranch ?? null,
+    git_sha: sourceRevision?.gitSha ?? null,
   };
 
   return db
     .insertInto("navigation_build_keys")
     .values(newBuildKey)
     .onConflict((oc) =>
-      oc.columns(["app_id", "version_code", "content_hash"]).doUpdateSet((eb) => ({
-        app_id: eb.ref("navigation_build_keys.app_id"),
-      })),
+      oc.columns(["app_id", "version_code", "content_hash"]).doUpdateSet((eb) =>
+        // A declared revision is display metadata: the latest one wins (#16954). An
+        // absent one (old build, unreadable manifest) never clears a recorded one.
+        sourceRevision
+          ? { git_branch: sourceRevision.gitBranch, git_sha: sourceRevision.gitSha }
+          : { app_id: eb.ref("navigation_build_keys.app_id") },
+      ),
     )
     .returningAll()
     .executeTakeFirstOrThrow();
@@ -312,6 +322,8 @@ export async function getNodeProvenanceForApp(
         "bk.app_id as package_id",
         "bk.version_code as version_code",
         "bk.content_hash as content_hash",
+        "bk.git_branch as git_branch",
+        "bk.git_sha as git_sha",
         "obs.device_id as device_id",
         "obs.session_uuid as session_uuid",
         "obs.last_seen_at as last_seen_at",
@@ -341,6 +353,8 @@ export async function getEdgeProvenanceForApp(
         "bk.app_id as package_id",
         "bk.version_code as version_code",
         "bk.content_hash as content_hash",
+        "bk.git_branch as git_branch",
+        "bk.git_sha as git_sha",
         "obs.device_id as device_id",
         "obs.session_uuid as session_uuid",
         "obs.last_seen_at as last_seen_at",

@@ -2448,10 +2448,12 @@ most 64), `importance` one of `min`, `low`, `default` or `high`, and an optional
 must name a declared channel, a literal `actions` list needs unique ids, and `notifications.cancel` takes
 exactly one of `id`, `group` or `all`; bound values are checked by the runtime. The bounds are named
 contract limits (`MAX_PROTOTYPE_NOTIFICATION_*`, `MAX_PROTOTYPE_NOTIFICATIONS_ACTIVE`) that the call, state
-and channel rules repeat. The runtime enforces the ones that apply after placeholders resolve: a reply of
-at most 1 KiB, a resolved notification of at most 5 KiB, and at most 4 updates per second per notification,
-coalesced to the latest. Title and body limits count UTF-16 code units, while the 5 KiB total counts UTF-8
-bytes of the resolved title, body and `data` and is checked on its own (`invalid_args` when over). A code
+and channel rules repeat. Spec validation checks literal values only. The limits that apply after
+placeholders resolve belong to the device runtime that posts the notification: a reply of at most 1 KiB, a
+resolved notification of at most 5 KiB, and at most 4 updates per second per notification, coalesced to the
+latest. No runtime posts notifications yet, so none of these is enforced today; the host never posts one.
+Title and body limits count UTF-16 code units, while the 5 KiB total counts UTF-8 bytes of the resolved
+title, body and `data` and is meant to fail the call on its own (`invalid_args` when over). A code
 unit is at most 3 bytes, so every literal at the per-field limits fits (at most 4,480 bytes); text bound at
 post time can still exceed it, such as emoji counted per character (5,632 bytes at the limits).
 `notifications.schedule` takes the `post` arguments plus `delaySeconds` (a whole number, 1 to 604800)
@@ -4932,6 +4934,9 @@ and `uninstallApp` actions remain separate from this artifact pipeline.
 - **Registry.** `disposable-apps.json` under the AutoMobile data dir is keyed by device id. Each
   record holds appId, slug, platform, label, spec sha256, template, signer, installedAt and
   expiresAt. Writes are serialized and atomic. A corrupt file or record is skipped with a warning.
+  An install writes its record, with the new expiresAt, as soon as the package is on the device and
+  before permissions are applied. A permission failure then surfaces as an error saying the app is
+  installed without its permissions, and the sweep still sees the current TTL.
 - **Lifecycle.** `ttlHours` defaults to 72, accepts 0 to 720, and 0 means no expiry. Re-installing
   a slug updates the app in place and keeps its storage unless `reset` is set. The expiry sweep and
   uninstall refuse ids outside the prefix. They also refuse installed packages whose signer differs

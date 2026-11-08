@@ -1,3 +1,4 @@
+import { watchPairResultSchema } from "../../utils/ios-cmdline-tools/SimulatorPairs";
 import { disabledResourcesSchema } from "../../utils/deviceResourceSchemas";
 import { z } from "zod/v4";
 import { deviceDescriptionSchema } from "../../daemon/deviceDescription";
@@ -46,6 +47,7 @@ export const startDeviceOutputSchema = z
   .object({
     ...deviceDescriptionSchema.partial().shape,
     platform: z.enum(["android", "ios", "watchos", "tvos", "visionos"]).optional(),
+    pair: watchPairResultSchema.optional(),
     message: z.string(),
     deviceIdentity: z.unknown().optional(),
     processId: z.number().nullable().optional(),

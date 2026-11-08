@@ -62,6 +62,25 @@ export function screenSize(frame: DeviceFrame, orientation: WebOrientation) {
     : { width: heightDp, height: widthDp };
 }
 
+/** The safe-area insets as the custom properties `safeAreaPadding` and the chrome read. */
+export function safeAreaVars(
+  frame: DeviceFrame,
+  orientation: WebOrientation,
+): Record<string, string> {
+  return insetVars(frame.safeArea[orientation]);
+}
+
+function insetVars(insets: DeviceFrame["safeArea"]["portrait"]): Record<string, string> {
+  return {
+    "--safe-top": px(insets.top),
+    "--safe-bottom": px(insets.bottom),
+    "--safe-left": px(insets.left),
+    "--safe-right": px(insets.right),
+    "--safe-start": "var(--safe-left)",
+    "--safe-end": "var(--safe-right)",
+  };
+}
+
 /**
  * Where a portrait point lands after rotating the device a quarter turn counter-clockwise, which
  * moves the top edge (and so the cutout) to the left edge.
@@ -350,12 +369,7 @@ function screenStyle(
     color: options.textColor,
     [FONT_FAMILY]: "system-ui, -apple-system, Roboto, sans-serif",
     [FONT_SIZE]: options.fontSize ?? "14px",
-    "--safe-top": px(insets.top),
-    "--safe-bottom": px(insets.bottom),
-    "--safe-left": px(insets.left),
-    "--safe-right": px(insets.right),
-    "--safe-start": "var(--safe-left)",
-    "--safe-end": "var(--safe-right)",
+    ...insetVars(insets),
   };
 }
 

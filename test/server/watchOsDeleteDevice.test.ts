@@ -1,3 +1,4 @@
+import { FakeSimulatorPairs } from "../fakes/FakeSimulatorPairs";
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { toolJson } from "../helpers/toolResponse";
@@ -166,6 +167,23 @@ describe("deleteDevice on an Apple Watch simulator", () => {
       .flat()
       .map((device) => device.udid);
 
+  test("unpairs daemon-owned pairs before deleting the watch", async () => {
+    const watch = watchDevice({ name: NAME });
+    const f = await arrange([watch]);
+    const pairs = new FakeSimulatorPairs().service();
+    const calls: string[] = [];
+    pairs.unpairCreated = async (id) => {
+      calls.push(id);
+      expect(f.simctl.commands).toEqual([]);
+    };
+    setDeviceToolsDependencies({ simulatorPairServiceFactory: () => pairs });
+    await ToolRegistry.getTool("deleteDevice")!.handler({
+      target: { platform: "watchos", stableId: watch.udid },
+    });
+    expect(calls).toEqual([watch.udid]);
+    expect(f.simctl.commands).toEqual([`delete ${watch.udid}`]);
+  });
+
   test("deletes a stopped watch and confirms it absent from a fresh listing", async () => {
     const watch = watchDevice({ name: NAME });
     const { simctl } = await arrange([watch]);
@@ -300,6 +318,10 @@ describe("deleteDevice on an Apple Watch simulator", () => {
 
   test("a watch that is not listed is already absent, with no simctl command", async () => {
     const { simctl } = await arrange([]);
+    const pairFake = new FakeSimulatorPairs();
+    const pairs = pairFake.service();
+    // #17447: the post-delete capture has no pair; an already-absent watch needs no unpair.
+    setDeviceToolsDependencies({ simulatorPairServiceFactory: () => pairs });
 
     const result = toolJson(await remove(target("00000000-0000-4000-8000-000000000000")));
 
@@ -308,6 +330,7 @@ describe("deleteDevice on an Apple Watch simulator", () => {
       command: { stop: "not_required", destroy: "not_required" },
     });
     expect(simctl.commands).toEqual([]);
+    expect(pairFake.calls).toEqual([]);
   });
 
   test("a stableName that does not match the watch is refused before any command", async () => {

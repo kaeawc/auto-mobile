@@ -30,9 +30,14 @@ describe("InMemoryPostedNotificationLedger", () => {
     expect(ledger.postedBy("sim-a", "com.x")).toEqual([{ title: "same", body: "text" }]);
   });
 
-  test("keeps only the newest records per device", () => {
-    const ledger = new InMemoryPostedNotificationLedger(2);
-    ["a", "b", "c"].forEach((title) => ledger.record("sim-a", "com.x", { title, body: "" }));
-    expect(ledger.postedBy("sim-a", "com.x").map(({ title }) => title)).toEqual(["c", "b"]);
+  test("still sees a collision after many other posts", () => {
+    const ledger = new InMemoryPostedNotificationLedger();
+    ledger.record("sim-a", "com.x", { title: "same", body: "text" });
+    for (let index = 0; index < 150; index++) {
+      ledger.record("sim-a", "com.z", { title: `filler ${index}`, body: "" });
+    }
+    ledger.record("sim-a", "com.y", { title: "same", body: "text" });
+    expect(ledger.postedBy("sim-a", "com.y")).toEqual([]);
+    expect(ledger.postedBy("sim-a", "com.x")).toEqual([]);
   });
 });

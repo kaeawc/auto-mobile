@@ -18,37 +18,36 @@ export interface PostedNotificationLookup {
   postedBy(deviceId: string, appId: string): PostedNotificationContent[];
 }
 
-const MAX_RECORDS_PER_DEVICE = 100;
-
 interface PostedRecord extends PostedNotificationContent {
   /** Every app that posted this exact content; more than one leaves it unattributed. */
   appIds: ReadonlySet<string>;
 }
 
-const sameContent = (left: PostedNotificationContent, right: PostedNotificationContent): boolean =>
-  left.title === right.title && left.body === right.body;
+// A post is a deliberate tool call, so the ledger keeps every distinct content it
+// has seen: forgetting one would let a later identical post from another app look
+// unambiguous while the first app's banner is still in the tray.
+const contentKey = ({ title, body }: PostedNotificationContent): string =>
+  JSON.stringify([title, body]);
 
 export class InMemoryPostedNotificationLedger
   implements PostedNotificationRecorder, PostedNotificationLookup
 {
-  private readonly byDevice = new Map<string, PostedRecord[]>();
-
-  constructor(private readonly maxRecordsPerDevice = MAX_RECORDS_PER_DEVICE) {}
+  private readonly byDevice = new Map<string, Map<string, PostedRecord>>();
 
   record(deviceId: string, appId: string, content: PostedNotificationContent): void {
-    const existing = this.byDevice.get(deviceId) ?? [];
-    const previous = existing.find((record) => sameContent(record, content));
+    const records = this.byDevice.get(deviceId) ?? new Map<string, PostedRecord>();
+    const key = contentKey(content);
+    const previous = records.get(key);
     // Identical content from two apps proves neither owns a row showing it.
     const appIds = new Set([...(previous?.appIds ?? []), appId]);
-    const records = [
-      { title: content.title, body: content.body, appIds },
-      ...existing.filter((record) => record !== previous),
-    ];
-    this.byDevice.set(deviceId, records.slice(0, this.maxRecordsPerDevice));
+    records.delete(key);
+    records.set(key, { title: content.title, body: content.body, appIds });
+    this.byDevice.set(deviceId, records);
   }
 
   postedBy(deviceId: string, appId: string): PostedNotificationContent[] {
-    return (this.byDevice.get(deviceId) ?? [])
+    return [...(this.byDevice.get(deviceId)?.values() ?? [])]
+      .reverse()
       .filter((record) => record.appIds.size === 1 && record.appIds.has(appId))
       .map(({ title, body }) => ({ title, body }));
   }

@@ -11,6 +11,12 @@ internal class CtrlProxyMessageHandlerStorageTest : CtrlProxyMessageHandlerFixtu
   // ---------------------------------------------------------------------------
 
   @Test
+  fun `dispatches attestation export without app selectors`() = runTest {
+    dispatch("""{"type":"export_attestation","requestId":"att1"}""")
+    assertEquals("exportAttestation" to listOf<Any?>("att1"), lastCall)
+  }
+
+  @Test
   fun `dispatches scoped reset_keystore`() = runTest {
     dispatch(
       """{"type":"reset_keystore","requestId":"kr1","packageName":"com.example","scope":"login","alias":"token"}""",

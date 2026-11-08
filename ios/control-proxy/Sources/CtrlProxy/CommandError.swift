@@ -11,6 +11,7 @@ public enum CommandError: LocalizedError, Sendable {
     case gestureBoundExceeded(command: String, phase: String, boundMs: Int64, elapsedMs: Int64)
     case queryBoundExceeded(command: String, boundMs: Int64, elapsedMs: Int64)
     case deadlineExceeded(command: String, deadlineMs: Int64, gestureCompleted: Bool)
+    case noFocusedTextInput
 
     /// Machine-readable code for the wire's additive `errorCode` field; `nil` for errors the host
     /// tells apart by wording alone. The host reads the code first and matches the wording only
@@ -26,7 +27,7 @@ public enum CommandError: LocalizedError, Sendable {
         case .hierarchyCaptureFailed:
             return "hierarchy_capture_failed"
         case .unknownCommand, .missingParameter, .invalidParameter, .executionFailed,
-             .queryBoundExceeded:
+             .queryBoundExceeded, .noFocusedTextInput:
             return nil
         }
     }
@@ -43,6 +44,8 @@ public enum CommandError: LocalizedError, Sendable {
             return "Invalid value '\(value)' for parameter '\(param)'"
         case let .executionFailed(reason):
             return "Command execution failed: \(reason)"
+        case .noFocusedTextInput:
+            return "no_focused_text_input: no text field has focus and the last tapped element is not a single text field; focus one with tapOn first"
         case let .hierarchyCaptureFailed(reason):
             return "Could not capture the view hierarchy to validate the frame context; the gesture was not sent: \(reason)"
         case let .gestureBoundExceeded(command, phase, boundMs, elapsedMs):

@@ -7,6 +7,9 @@ setup() {
   FIXTURES="$(mktemp -d)"
   ARGS_FILE="$(mktemp)"
   FAKE_HOME="$(mktemp -d)"
+  # The CI step that runs this file exports the real lane budgets, and GitHub
+  # sets RUNNER_ENVIRONMENT; clear them so budget tests choose their own.
+  unset AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS AUTOMOBILE_BATS_UNIT_BUDGET_GITHUB_HOSTED_SECONDS RUNNER_ENVIRONMENT
 
 cat > "$STUB_BIN/bats" <<EOF
 #!/usr/bin/env bash
@@ -426,6 +429,7 @@ fixture_list_file() {
   AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS=420 run enforce_unit_budget 468 "$FIXTURES/durations.tsv"
   [ "$status" -eq 1 ]
   [[ "$output" == *"BATS unit lane took 468s, exceeding 420s"* ]]
+  printf '%s\n' "$output" | grep -qx -- '::error title=BATS unit lane budget::BATS unit lane took 468s, exceeding 420s; a test also failed, see its not ok line'
   report="$(printf '%s\n' "$output" | sed -n '/^Slowest/,$p')"
   [ "$(printf '%s\n' "$report" | sed -n '1p')" = "Slowest 10 BATS files (seconds):" ]
   [ "$(printf '%s\n' "$report" | sed -n '2p')" = "  91s test/bats/serial-slow.bats" ]
@@ -436,6 +440,21 @@ fixture_list_file() {
   [[ "$report" != *"ctrl-proxy-xcodegen-drift.bats"* ]]
 }
 
+@test "a budget breach annotates the lane total and serial pass for classify-failure" {
+  source "$SCRIPT"
+  AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS=420 run enforce_unit_budget 440 "$FIXTURES/absent-durations.tsv" 167 true
+  [ "$status" -eq 1 ]
+  printf '%s\n' "$output" | grep -qx -- '::error title=BATS unit lane budget::BATS unit lane took 440s, exceeding 420s (serial pass 167s); no test failed'
+}
+
+@test "a budget breach with a failing test never claims no test failed" {
+  source "$SCRIPT"
+  AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS=420 run enforce_unit_budget 440 "$FIXTURES/absent-durations.tsv" 167 false
+  [ "$status" -eq 1 ]
+  printf '%s\n' "$output" | grep -qx -- '::error title=BATS unit lane budget::BATS unit lane took 440s, exceeding 420s (serial pass 167s); a test also failed, see its not ok line'
+  [[ "$output" != *"no test failed"* ]]
+}
+
 @test "no budget breach prints nothing extra" {
   source "$SCRIPT"
   fixture_list_file "$FIXTURES/list"
@@ -443,6 +462,66 @@ fixture_list_file() {
   AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS=420 run enforce_unit_budget 300 "$FIXTURES/durations.tsv"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+@test "a github-hosted runner uses the github-hosted budget" {
+  source "$SCRIPT"
+  RUNNER_ENVIRONMENT=github-hosted AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS=420 \
+    AUTOMOBILE_BATS_UNIT_BUDGET_GITHUB_HOSTED_SECONDS=450 \
+    run enforce_unit_budget 440 "$FIXTURES/absent-durations.tsv" 150 true
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "the github-hosted budget is still a regression guard" {
+  source "$SCRIPT"
+  RUNNER_ENVIRONMENT=github-hosted AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS=420 \
+    AUTOMOBILE_BATS_UNIT_BUDGET_GITHUB_HOSTED_SECONDS=450 \
+    run enforce_unit_budget 451 "$FIXTURES/absent-durations.tsv" 160 true
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"exceeding 450s (budget for runner environment github-hosted)"* ]]
+  printf '%s\n' "$output" | grep -qx -- '::error title=BATS unit lane budget::BATS unit lane took 451s, exceeding 450s (serial pass 160s); no test failed'
+}
+
+@test "a self-hosted runner keeps the base budget" {
+  source "$SCRIPT"
+  RUNNER_ENVIRONMENT=self-hosted AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS=420 \
+    AUTOMOBILE_BATS_UNIT_BUDGET_GITHUB_HOSTED_SECONDS=450 \
+    run enforce_unit_budget 440 "$FIXTURES/absent-durations.tsv" 150 true
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"exceeding 420s (budget for runner environment self-hosted)"* ]]
+}
+
+@test "a github-hosted runner without its own budget falls back to the base budget" {
+  source "$SCRIPT"
+  RUNNER_ENVIRONMENT=github-hosted AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS=420 \
+    run enforce_unit_budget 440 "$FIXTURES/absent-durations.tsv" 150 true
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"exceeding 420s"* ]]
+}
+
+@test "the github-hosted budget alone does not apply off GitHub-hosted runners" {
+  source "$SCRIPT"
+  AUTOMOBILE_BATS_UNIT_BUDGET_GITHUB_HOSTED_SECONDS=450 \
+    run enforce_unit_budget 900 "$FIXTURES/absent-durations.tsv"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a malformed github-hosted budget is rejected on any runner" {
+  source "$SCRIPT"
+  RUNNER_ENVIRONMENT=self-hosted AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS=420 \
+    AUTOMOBILE_BATS_UNIT_BUDGET_GITHUB_HOSTED_SECONDS=45o \
+    run enforce_unit_budget 300 "$FIXTURES/absent-durations.tsv"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"AUTOMOBILE_BATS_UNIT_BUDGET_GITHUB_HOSTED_SECONDS must be a positive integer"* ]]
+}
+
+@test "a malformed base budget is still rejected" {
+  source "$SCRIPT"
+  AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS=0 run enforce_unit_budget 300 "$FIXTURES/absent-durations.tsv"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS must be a positive integer"* ]]
 }
 
 @test "a missing job log is noted and does not fail the pass" {

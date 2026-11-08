@@ -154,6 +154,11 @@ object DeepLinkManager {
           Log.d(TAG, "Parsed as DemoPointerProbeDestination")
           DemoPointerProbeDestination
         },
+      PATH_DEMO_COLLAPSING_COMPOSER to
+        { _: String ->
+          Log.d(TAG, "Parsed as DemoCollapsingComposerDestination")
+          DemoCollapsingComposerDestination
+        },
     )
 
   private fun parseParameterizedPath(path: String): AppDestination? =
@@ -268,6 +273,7 @@ object DeepLinkManager {
       PATH_DEMO_A11Y_TAP_TARGETS to "Demo Tap Targets",
       PATH_DEMO_BUG_REPRO to "Demo Bug Repro",
       PATH_DEMO_POINTER_PROBE to "Demo Pointer Probe",
+      PATH_DEMO_COLLAPSING_COMPOSER to "Demo Collapsing Composer",
     )
 
   private fun parameterizedDestinationName(path: String): String? =
@@ -351,6 +357,7 @@ object DeepLinkManager {
         "Demo Tap Targets" to generateDemoTapTargetsUrl(),
         "Demo Bug Repro" to generateDemoBugReproUrl(),
         "Demo Pointer Probe" to generateDemoPointerProbeUrl(),
+        "Demo Collapsing Composer" to buildUri(PATH_DEMO_COLLAPSING_COMPOSER),
       )
     Log.d(TAG, "Generated ${deepLinks.size} deep links")
     return deepLinks

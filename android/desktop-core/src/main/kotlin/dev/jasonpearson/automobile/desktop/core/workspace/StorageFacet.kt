@@ -25,6 +25,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.DesktopInputAllocation
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.allocatingClientProvider
+import dev.jasonpearson.automobile.desktop.core.daemon.reconnectBackoffMs
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.datasource.InstalledApp
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
@@ -81,12 +82,13 @@ private sealed interface StorageFacetState {
  * testable without real MCP; the default reads the device's installed-app list through the DI
  * graph. An app-list failure surfaces a retryable error rather than being masked as "no app".
  *
- * While the dashboard is shown, a per-pane [ObservationStream] created via
- * [observationStreamFactory] is connected to [column]'s device so live `storage_update` frames flow
- * into the key-value inspector (issue #4709), mirroring how [PerformanceFacet] drives its metrics.
- * The stream reconnects automatically if it drops while the facet is open (see
- * [rememberReconnectingObservationStream]); the factory, [backoffDelay], and [socketAvailable] are
- * injected so the per-device connect/dispose lifecycle can be verified with a
+ * While the dashboard is shown, [column]'s device observation stream is connected so live
+ * `storage_update` frames flow into the key-value inspector (issue #4709), mirroring how
+ * [PerformanceFacet] drives its metrics. With the app's [LocalDaemonStreamHub] that is a lease on
+ * the device's shared stream, whose storage subscriptions, acknowledgements and updates stay this
+ * pane's own (#17012); without one, a per-pane stream from [observationStreamFactory]. Either way
+ * it is revived if it drops while the facet is open; the factory, [backoffDelay], and
+ * [socketAvailable] are injected so the per-device connect/dispose lifecycle can be verified with a
  * [FakeObservationStream] and virtual time. Because each pane resolves its own device-scoped
  * stream, panes in a multi-device workspace stay isolated (the dashboard also filters updates to
  * [column]'s device and app).
@@ -193,19 +195,18 @@ private fun ResolvedStorageFacet(
   packageName: String,
 ) {
   with(options) {
-    // Per-pane stream lives only while the dashboard is shown, and reconnects automatically.
-    // It is disposed when this branch leaves composition or the device changes.
+    // A lease on the app hub's shared device stream (its own per-pane stream without a hub) that
+    // lives only while the dashboard is shown and is revived after a drop. Releasing it on leaving
+    // composition or a device change also releases the files it subscribed.
     val stream =
-      rememberReconnectingObservationStream(
-        dev.jasonpearson.automobile.desktop.core.workspace.ReconnectingObservationOptions(
-          deviceId = column.deviceId,
-          deviceSessionUuid = column.deviceSessionUuid,
+      rememberPaneObservationState(
+          column,
+          { observationStreamFactory(column.deviceId) },
+          backoffDelay,
+          socketAvailable,
           requireDeviceSessionUuid = true,
-          streamFactory = { observationStreamFactory(column.deviceId) },
-          backoffDelay = backoffDelay,
-          socketAvailable = socketAvailable,
-        ),
-      )
+        )
+        .stream
     StorageDashboard(
       StorageDashboardOptions(
         dataSourceMode = DataSourceMode.Real,

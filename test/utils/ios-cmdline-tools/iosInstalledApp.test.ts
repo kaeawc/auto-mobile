@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   getIosInstalledAppBundleId,
+  getIosInstalledAppDisplayName,
   getIosInstalledAppPath,
   normalizeIosDevicePath,
 } from "../../../src/utils/ios-cmdline-tools/iosInstalledApp";
@@ -13,6 +14,18 @@ describe("getIosInstalledAppBundleId", () => {
       "com.example.c",
     );
     expect(getIosInstalledAppBundleId({ other: "com.example.d" })).toBeUndefined();
+  });
+});
+
+describe("getIosInstalledAppDisplayName", () => {
+  test("prefers CFBundleDisplayName over the executable-style CFBundleName", () => {
+    expect(
+      getIosInstalledAppDisplayName({ CFBundleName: "MobileSMS", CFBundleDisplayName: "Messages" }),
+    ).toBe("Messages");
+    expect(getIosInstalledAppDisplayName({ name: " Files " })).toBe("Files");
+    expect(getIosInstalledAppDisplayName({ CFBundleDisplayName: " ", bundleId: "a.b" })).toBe(
+      undefined,
+    );
   });
 });
 

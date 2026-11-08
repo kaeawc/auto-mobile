@@ -29,10 +29,16 @@ function importSpecifiersInOrder(file: string): string[] {
 }
 
 describe("boot admission wiring at process entries", () => {
-  test("src/index.ts is the only process entry in src/", () => {
-    const entries = typeScriptFiles(path.join(ROOT, "src"))
+  // Reading every file under src/ grows with the tree, so the scan runs in the hook (which the
+  // 100 ms budget excludes) and the test only asserts on its result.
+  let entries: string[] = [];
+  beforeAll(() => {
+    entries = typeScriptFiles(path.join(ROOT, "src"))
       .filter((file) => readGuardFile(file).includes("import.meta.main"))
       .map((file) => relativePosix(ROOT, file));
+  });
+
+  test("src/index.ts is the only process entry in src/", () => {
     // A new entry must install the boot admission wiring and be added here deliberately.
     expect(entries).toEqual(["src/index.ts"]);
   });

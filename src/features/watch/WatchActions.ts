@@ -12,7 +12,8 @@ import type {
 } from "../../models";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { normalizeWatchHierarchy } from "./WatchHierarchy";
-import { type WatchRunnerClient } from "./WatchRunnerClient";
+import { type WatchCommand, type WatchRunnerClient } from "./WatchRunnerClient";
+import { WatchRunnerError } from "./WatchRunnerError";
 import { watchRunners } from "./WatchRunnerRegistry";
 
 export function unsupportedWatchAction(action: string): never {
@@ -21,7 +22,14 @@ export function unsupportedWatchAction(action: string): never {
   );
 }
 
+/**
+ * Fraction of the screen extent one lookFor swipe moves the content. The runner's default swipe
+ * scrolls about two screens on a watch, so a target one screen away is skipped between reads.
+ */
+export const WATCH_LOOK_FOR_SWIPE_DISTANCE = 0.4;
+
 export interface WatchCrownOptions {
+  /** Signed crown turn in full revolutions (XCUI `rotateDigitalCrown(delta:)`): 1 is one turn. */
   delta: number;
   velocity?: number;
 }
@@ -29,6 +37,27 @@ export interface WatchCrownOptions {
 // Simulator crown rotation has not replied within the 5 s default.
 // This bounds when the call is reported as a timeout, not its expected duration.
 export const CROWN_REQUEST_TIMEOUT_MS = 30_000;
+
+const CROWN_UNCHANGED_PREFIX = "rotateCrown changed nothing";
+
+/**
+ * The runner cannot tell a turn too small to cross one step of the focused control from a control
+ * at its limit or no crown focus. For a sub-revolution delta, name the size as a possible cause.
+ */
+export function crownUnchangedHint(error: unknown, delta: number): unknown {
+  if (
+    !(error instanceof WatchRunnerError) ||
+    !error.message.startsWith(CROWN_UNCHANGED_PREFIX) ||
+    Math.abs(delta) >= 1
+  ) {
+    return error;
+  }
+  return new WatchRunnerError(
+    `${error.message} A delta of ${delta} is ${Math.abs(delta)} of one crown revolution and may be ` +
+      "smaller than one step of the focused control; if it is not at its limit, try a larger delta.",
+    error.errorCode,
+  );
+}
 
 export async function watchRotateCrown(
   device: Pick<BootedDevice, "deviceId" | "platform">,
@@ -48,9 +77,14 @@ export async function watchRotateCrown(
     throw new ActionableError("rotateCrown velocity must be a finite number greater than zero.");
   }
   signal?.throwIfAborted();
-  await watchRunners
-    .require(device.deviceId)
-    .request({ type: "crown", delta, velocity }, signal, { timeoutMs: CROWN_REQUEST_TIMEOUT_MS });
+  try {
+    await watchRunners
+      .require(device.deviceId)
+      .request({ type: "crown", delta, velocity }, signal, { timeoutMs: CROWN_REQUEST_TIMEOUT_MS });
+  } catch (error) {
+    // Runner failures are already structured; only an unchanged sub-revolution turn gains a hint.
+    throw crownUnchangedHint(error, delta);
+  }
   return { success: true, delta, velocity };
 }
 
@@ -104,10 +138,51 @@ function matches(element: Element, selector: { elementId?: string; text?: string
   );
 }
 
+/**
+ * The runner exposes a populated text field's value (or a placeholder) as a same-type, same-bounds
+ * child that repeats the field's identifier. An identifier match must count the field once, or an
+ * index over several fields sharing an identifier lands on the first field's alias.
+ */
+function dropIdentifierAliases(candidates: readonly Element[]): Element[] {
+  const seen = new Set<string>();
+  return candidates.filter((element) => {
+    const { left, top, right, bottom } = element.bounds;
+    const key = `${element["resource-id"] ?? element["view-id"]}|${element.class}|${left},${top},${right},${bottom}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function matchWatchTapCandidates(
+  available: readonly Element[],
+  selector: { elementId?: string; text?: string },
+): Element[] {
+  const matched = available.filter((element) => matches(element, selector));
+  return selector.elementId !== undefined ? dropIdentifierAliases(matched) : matched;
+}
+
+/** Stable input-first ordering for sendKeys; ordinary taps retain hierarchy order. */
+export function orderWatchTapCandidates(
+  candidates: readonly Element[],
+  preferTextInput: boolean,
+): Element[] {
+  const isTextInput = (element: Element) =>
+    ["XCUIElementType(45)", "XCUIElementType(49)", "XCUIElementType(50)"].includes(
+      element.class ?? "",
+    );
+  return preferTextInput
+    ? candidates.toSorted((a, b) => Number(isTextInput(b)) - Number(isTextInput(a)))
+    : [...candidates];
+}
+
 export async function watchTapOn(
   deviceId: string,
   options: TapOnElementOptions,
   signal?: AbortSignal,
+  preferTextInput = false,
 ): Promise<TapOnElementResult> {
   // Must precede hierarchy reads, not just the tap itself: long press is never advertised.
   if (options.action !== "tap") {
@@ -120,7 +195,10 @@ export async function watchTapOn(
   signal?.throwIfAborted();
   const client = watchRunners.require(deviceId);
   const { all, available } = await elements(client, signal);
-  const candidates = available.filter((element) => matches(element, options));
+  const candidates = orderWatchTapCandidates(
+    matchWatchTapCandidates(available, options),
+    options.text !== undefined && preferTextInput,
+  );
   const element = candidates[options.index ?? 0];
   if (!element) {
     throw new ActionableError(
@@ -179,6 +257,12 @@ function validateWatchSwipe(options: SwipeOnOptions): number {
   return maxSwipes;
 }
 
+function swipeCommand(direction: "up" | "down" | "left" | "right", lookFor: boolean): WatchCommand {
+  return lookFor
+    ? { type: "swipe", direction, distance: WATCH_LOOK_FOR_SWIPE_DISTANCE }
+    : { type: "swipe", direction };
+}
+
 export async function watchSwipeOn(
   deviceId: string,
   options: SwipeOnOptions,
@@ -206,7 +290,7 @@ export async function watchSwipeOn(
     if (found || count >= maxSwipes) {
       break;
     }
-    await client.request({ type: "swipe", direction }, signal);
+    await client.request(swipeCommand(direction, !!options.lookFor), signal);
     count++;
   }
   return {

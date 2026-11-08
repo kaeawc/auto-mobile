@@ -48,16 +48,24 @@ abstract class VerifyR8KeptClassesTask : DefaultTask() {
   @TaskAction
   fun verify() {
     val prefixes = ownedPackagePrefixes.get()
+    // Stream the mapping: reading it whole OOMed the shared CI daemon beside a concurrent R8 run
+    // (#17158).
     val result =
-      R8KeptClasses.analyze(
-        mappingFile.get().asFile.readText(),
-        mergedManifest.get().asFile.readText(),
-        namespace.get(),
-        readClasses(classJars.get().map { it.asFile }, classDirs.get().map { it.asFile }, prefixes),
-        prefixes,
-        requiredMembers.get(),
-        keptSerializablePrefixes.orNull?.takeIf { it.isNotEmpty() } ?: prefixes,
-      )
+      mappingFile.get().asFile.bufferedReader().useLines { mappingLines ->
+        R8KeptClasses.analyze(
+          mappingLines,
+          mergedManifest.get().asFile.readText(),
+          namespace.get(),
+          readClasses(
+            classJars.get().map { it.asFile },
+            classDirs.get().map { it.asFile },
+            prefixes,
+          ),
+          prefixes,
+          requiredMembers.get(),
+          keptSerializablePrefixes.orNull?.takeIf { it.isNotEmpty() } ?: prefixes,
+        )
+      }
     val report = reportFile.get().asFile
     report.parentFile.mkdirs()
     report.writeText(result.report())

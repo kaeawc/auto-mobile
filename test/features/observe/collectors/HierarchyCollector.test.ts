@@ -3,6 +3,10 @@ import { HierarchyCollector } from "../../../../src/features/observe/collectors/
 import { FakeViewHierarchy } from "../../../fakes/FakeViewHierarchy";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { projectActionableHierarchy } from "../../../../src/features/observe/HierarchyNormalization";
+import duoInnerPlaygroundHierarchy from "../../../fixtures/ios-duo/observe-inner-playground-hierarchy-17306.json";
+import duoDemosRawHierarchy from "../../../fixtures/ios-duo/issue8379-demos-raw-hierarchy.json";
+import { wireCapture } from "../../../helpers/wireCapture";
 import { createObserveResultForTest } from "../flatHierarchyBuilders";
 import type { AdbClientFactory } from "../../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type {
@@ -352,6 +356,26 @@ describe("HierarchyCollector", () => {
         hierarchy: { bounds: { left: 0, top: 0, right: 402, bottom: 874 } },
       });
       expect(size).toEqual({ width: 402, height: 874 });
+    });
+
+    // A projected Duo inner-panel capture has a landscape root but the runner's portrait pixel
+    // metadata; the collector must report the recorded landscape size (#17306).
+    test("keeps a projected demos capture's recorded landscape size", () => {
+      const projected = projectActionableHierarchy(
+        "ios",
+        wireCapture(structuredClone(duoDemosRawHierarchy)),
+        false,
+      );
+      expect(collector.extractScreenSize(projected, false)).toEqual({ width: 951, height: 669 });
+    });
+
+    test("keeps a projected capture's recorded landscape size", () => {
+      const projected = projectActionableHierarchy(
+        "ios",
+        wireCapture(structuredClone(duoInnerPlaygroundHierarchy)),
+        true,
+      );
+      expect(collector.extractScreenSize(projected, true)).toEqual({ width: 951, height: 669 });
     });
 
     test("returns null when bounds are missing", () => {

@@ -1,72 +1,129 @@
 package dev.jasonpearson.automobile.protocol
 
-import dev.jasonpearson.automobile.protocol.PrototypePlatformModules.member
+import dev.jasonpearson.automobile.protocol.PrototypePlatformModules.callDefinition
+import dev.jasonpearson.automobile.protocol.PrototypeSensitiveSinkIndex.Companion.overlaps
 import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.flag
-import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.keyPath
 import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.text
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.*
 
-/**
- * Library-only R2 data flow (#15635), matching TypeScript's `prototypeSensitiveSinkErrors` and
- * Swift's `PrototypeSensitiveSinkRules`: a `/data` pointer written by a `sensitive` platform call
- * may not reach a request or channel wire field. Literal `{value}` payloads stay opaque.
- */
+/** R2: sensitive call results and platform state cannot reach network or storage sinks. */
 internal object PrototypeSensitiveSinkRules {
-  const val MESSAGE = "Sensitive value cannot be bound into a request"
-  private const val BUDGET_BYTES = 4_194_304L
+  private const val MAX_COPY_TAINT_CHECKS = 4_000_000
+  private const val CHECK_MESSAGE = "Secure copy taint analysis exceeds 4000000 overlap checks"
 
   private data class Field(
     val text: String,
     val path: String,
-    val dataPointer: Boolean = false,
+    val pointerSource: String? = null,
     val itemBinding: Boolean = false,
-  )
-
-  fun error(spec: JsonObject, context: PrototypeStateChecks.Context): PrototypeSpecError? =
-    errors(spec, context).firstOrNull()
-
-  /** Every sink path in authored path order; strict validation has already accepted repeats. */
-  fun errors(spec: JsonObject, context: PrototypeStateChecks.Context): List<PrototypeSpecError> {
-    val taints = sensitivePointers(spec, context)
-    if (taints.isEmpty()) return emptyList()
-    val sinks = sinkFields(spec, context).sortedBy { it.path }
-    val scopes = PrototypeRepeatValidator.scopes(spec)
-    budgetError(sinks, scopes)?.let {
-      return listOf(it)
+  ) {
+    fun reaches(
+      texts: List<String>,
+      source: String,
+      index: PrototypeSensitiveSinkIndex,
+    ): Boolean {
+      val pointers =
+        if (pointerSource == null) texts.flatMap { PrototypeDataText.pointers(it, source) }
+        else if (pointerSource == source) listOf(this.text) else emptyList()
+      return pointers.any { index.overlaps(it, pointerSource == null) }
     }
-    // Data-backed rows are rebuilt from live data, so any read of a tainted row is a sink.
-    val taintedRows = context.nodes.mapNotNull { node -> taintedRow(node, taints) }
-    return sinks
-      .filter { field -> readsTaintedRow(field, taintedRows) || reaches(field, scopes, taints) }
-      .map { PrototypeSpecError(it.path, MESSAGE) }
   }
 
-  /** The `(path, alias)` of a data-backed repeat whose items pointer overlaps a taint. */
-  private fun taintedRow(
-    node: PrototypeStateChecks.Located,
-    taints: List<String>,
-  ): Pair<String, String>? {
-    val repeat = node.value["repeat"] as? JsonObject
-    val alias = repeat?.text("as")
-    val pointer = repeat?.member("items")?.text("path")?.takeIf(PrototypeDataPointer::isValid)
-    val tainted =
-      pointer != null && taints.any { overlaps(it, pointer, pointerIndexWildcard = false) }
-    return if (tainted && alias != null) node.path to alias else null
+  fun errors(spec: JsonObject, context: PrototypeStateChecks.Context): List<PrototypeSpecError> =
+    scan(spec, context).errors
+
+  data class Scan(val errors: List<PrototypeSpecError>, val checks: Int)
+
+  /** Counts sink trie-node visits, excluding construction and copy propagation. */
+  fun scan(spec: JsonObject, context: PrototypeStateChecks.Context): Scan {
+    val budget = PrototypeSensitiveSinkIndex.Budget(MAX_COPY_TAINT_CHECKS)
+    val platformTaints = sensitivePlatformPointers(spec)
+    val seeds = sensitiveDataPointers(spec, context)
+    if (seeds.isEmpty() && platformTaints.isEmpty()) return Scan(emptyList(), budget.checks)
+    val dataTaints =
+      PrototypeCopyTaint.propagate(seeds, platformTaints, context, ::overlaps)
+        ?: return Scan(
+          listOf(
+            PrototypeSpecError("$", CHECK_MESSAGE),
+          ),
+          budget.checks,
+        )
+    val dataIndex = PrototypeSensitiveSinkIndex(dataTaints, budget::visit)
+    val platformIndex = PrototypeSensitiveSinkIndex(platformTaints, budget::visit)
+    val fields = sinkFields(spec, context).sortedBy { it.path }
+    val validRepeats = PrototypeRepeatValidator.validate(spec) == null
+    val scopes = if (validRepeats) PrototypeRepeatValidator.scopes(spec) else emptyList()
+    budgetError(fields, scopes, validRepeats)?.let {
+      return Scan(listOf(it), budget.checks)
+    }
+    val taintedRows = taintedRows(context, dataIndex)
+    val errors =
+      fields
+        .filter { field ->
+          if (budget.checks > MAX_COPY_TAINT_CHECKS) return@filter false
+          val rowRead = taintedRows.any { (path, alias) ->
+            field.path.startsWith("$path.children[") &&
+              (field.itemBinding ||
+                (field.pointerSource == null &&
+                  PrototypeRepeatTemplate.fieldReferences(field.text, alias).isNotEmpty()))
+          }
+          val texts = boundTexts(field, scopes, validRepeats)
+          rowRead ||
+            field.reaches(texts, "data", dataIndex) ||
+            field.reaches(texts, "platform", platformIndex)
+        }
+        .map { field ->
+          PrototypeSpecError(
+            field.path,
+            if (field.path.startsWith("storage.keys[")) "Sensitive value cannot be persisted"
+            else "Sensitive value cannot be bound into a request",
+          )
+        }
+    return Scan(
+      if (budget.checks > MAX_COPY_TAINT_CHECKS) listOf(PrototypeSpecError("$", CHECK_MESSAGE))
+      else errors,
+      budget.checks,
+    )
+  }
+
+  private fun sensitiveDataPointers(
+    spec: JsonObject,
+    context: PrototypeStateChecks.Context,
+  ): List<String> =
+    PrototypePlatformUses.uses(spec, context)
+      .filterIsInstance<PrototypePlatformUses.Use.Call>()
+      .filter { callDefinition(it.action.text("call"))?.second?.flag("sensitive") == true }
+      .mapNotNull { it.action.text("into")?.let(PrototypeDataWriter::pathPointer) }
+
+  private fun sensitivePlatformPointers(spec: JsonObject): List<String> {
+    val declared =
+      ((spec["requires"] as? JsonObject)?.get("platform") as? JsonArray)
+        .orEmpty()
+        .mapNotNull { (it as? JsonPrimitive)?.content }
+        .toSet()
+    return PrototypeSpecContract.contract
+      .getValue("platformModules")
+      .jsonObject
+      .filterKeys { it in declared }
+      .flatMap { (module, raw) ->
+        (raw.jsonObject["state"] as? JsonObject).orEmpty().mapNotNull { (key, entry) ->
+          if (entry.jsonObject.flag("sensitive")) "/$module/$key" else null
+        }
+      }
   }
 
   private fun budgetError(
-    sinks: List<Field>,
+    fields: List<Field>,
     scopes: List<PrototypeRepeatValidator.Scope>,
+    validRepeats: Boolean,
   ): PrototypeSpecError? {
+    if (!validRepeats) return null
     var bytes = 0L
-    for (field in sinks) {
+    for (field in fields) {
       val scope = scopes.firstOrNull { field.path.startsWith("${it.path}.children[") }
       bytes +=
         field.text.toByteArray(Charsets.UTF_8).size.toLong() * maxOf(1, scope?.items?.size ?: 1)
-      if (bytes > BUDGET_BYTES)
+      if (bytes > 4194304)
         return PrototypeSpecError(
           field.path,
           "Secure binding scan exceeds 4194304 expanded UTF-8 bytes",
@@ -75,111 +132,82 @@ internal object PrototypeSensitiveSinkRules {
     return null
   }
 
-  private fun readsTaintedRow(field: Field, rows: List<Pair<String, String>>): Boolean =
-    rows.any { (path, alias) ->
-      field.path.startsWith("$path.children[") &&
-        (field.itemBinding ||
-          (!field.dataPointer &&
-            PrototypeRepeatTemplate.fieldReferences(field.text, alias).isNotEmpty()))
+  private fun taintedRows(
+    context: PrototypeStateChecks.Context,
+    index: PrototypeSensitiveSinkIndex,
+  ): List<Pair<String, String>> =
+    context.nodes.mapNotNull { node ->
+      val repeat = node.value["repeat"] as? JsonObject
+      val pointer = (repeat?.get("items") as? JsonObject)?.text("path")
+      val alias = repeat?.text("as")
+      if (alias != null && index.isTaintedPointer(pointer)) node.path to alias else null
     }
 
-  private fun reaches(
+  private fun boundTexts(
     field: Field,
     scopes: List<PrototypeRepeatValidator.Scope>,
-    taints: List<String>,
-  ): Boolean {
-    // Typed pointers are literal at runtime. Derived text has no host-side instance, so an
-    // empty binding falls back to the authored data placeholders.
-    val pointers =
-      if (field.dataPointer) listOf(field.text)
-      else
-        PrototypeRepeatValidator.keyInstances(
-            scopes,
-            JsonObject(mapOf("stateKey" to JsonPrimitive(field.text))),
-            field.path,
-          )
-          .mapNotNull { (value, _) -> value.text("stateKey") }
-          .ifEmpty { listOf(field.text) }
-          .flatMap(PrototypeDataText::pointers)
-    return pointers.any { pointer ->
-      taints.any { overlaps(it, pointer, pointerIndexWildcard = !field.dataPointer) }
+    validRepeats: Boolean,
+  ): List<String> {
+    // Typed pointers stay literal. Derived fields have no instances, so retain authored text.
+    if (field.pointerSource != null || !validRepeats) return listOf(field.text)
+    return PrototypeRepeatValidator.keyInstances(
+        scopes,
+        buildJsonObject { put("stateKey", field.text) },
+        field.path,
+      )
+      .mapNotNull { (value, _) -> value.text("stateKey") }
+      .ifEmpty { listOf(field.text) }
+  }
+
+  private fun bindingFields(raw: JsonElement?, path: String, text: Boolean = false): List<Field> {
+    val fields = mutableListOf<Field>()
+    if (text && raw is JsonPrimitive && raw.isString) fields.add(Field(raw.content, path))
+    val form = raw as? JsonObject ?: return fields
+    if ("state" in form) return fields
+    for (source in listOf("data", "platform")) {
+      form.text(source)?.let { fields.add(Field(it, path, pointerSource = source)) }
     }
+    if (form.text("item") != null) fields.add(Field("", path, itemBinding = true))
+    return fields
   }
 
   private fun sinkFields(spec: JsonObject, context: PrototypeStateChecks.Context): List<Field> {
-    val sinks = SinkCollector()
-    for (action in context.actions) {
-      if (action.value.text("type") == "request") sinks.request(action.value, action.path)
+    val fields = mutableListOf<Field>()
+    for (action in context.actions.filter { it.value.text("type") == "request" }) {
+      PrototypeBindableFields.firstAction<Boolean>(action.value, action.path) { raw, path, kind ->
+        if (inRequest(path, action.path)) {
+          if (kind == PrototypeBindableKind.REQUEST_TEXT)
+            fields.addAll(bindingFields(raw, path, text = true))
+          else if (kind == PrototypeBindableKind.EMIT_BINDING)
+            fields.addAll(bindingFields(raw, path))
+        }
+        null
+      }
     }
     for ((id, raw) in (spec["channels"] as? JsonObject).orEmpty()) {
-      val at = keyPath("channels", id)
-      val channel = raw as? JsonObject
-      sinks.binding(channel?.get("url"), "$at.url", text = true)
-      sinks.entries(channel?.get("headers"), "$at.headers", text = true)
-    }
-    return sinks.fields
-  }
-
-  /** Wire fields of requests and channels: literal text, typed `{data}` and row `{item}` forms. */
-  private class SinkCollector {
-    val fields = mutableListOf<Field>()
-
-    fun binding(raw: JsonElement?, path: String, text: Boolean = false) {
-      if (text && raw is JsonPrimitive && raw.isString) fields.add(Field(raw.content, path))
-      val form = raw as? JsonObject ?: return
-      if (form.containsKey("state")) return
-      form.text("data")?.let { fields.add(Field(it, path, dataPointer = true)) }
-      if (form.text("item") != null) fields.add(Field("", path, itemBinding = true))
-    }
-
-    fun entries(raw: JsonElement?, path: String, text: Boolean) {
-      for ((name, value) in (raw as? JsonObject).orEmpty()) {
-        binding(value, keyPath(path, name), text)
+      val channel = raw.jsonObject
+      val at = PrototypeValidationPaths.keyPath("channels", id)
+      fields.addAll(bindingFields(channel["url"], "$at.url", text = true))
+      for ((name, value) in (channel["headers"] as? JsonObject).orEmpty()) {
+        fields.addAll(
+          bindingFields(value, PrototypeValidationPaths.keyPath("$at.headers", name), text = true),
+        )
       }
     }
-
-    fun request(value: JsonObject, at: String) {
-      binding(value["url"], "$at.url", text = true)
-      entries(value["headers"], "$at.headers", text = true)
-      entries(value["query"], "$at.query", text = true)
-      val body = value["body"] as? JsonObject
-      val parts = body?.get("multipart") as? JsonArray
-      when {
-        parts != null ->
-          parts.forEachIndexed { index, part ->
-            binding((part as? JsonObject)?.get("value"), "$at.body.multipart[$index].value")
-          }
-        body?.get("form") is JsonObject -> entries(body["form"], "$at.body.form", text = false)
-        body?.get("file") == null -> binding(value["body"], "$at.body")
+    ((spec["storage"] as? JsonObject)?.get("keys") as? JsonArray).orEmpty().forEachIndexed {
+      index,
+      raw ->
+      val key = (raw as? JsonPrimitive)?.takeIf { it.isString }?.content.orEmpty()
+      if (key.startsWith("data:") && PrototypeDataPointer.isValid(key.drop(5))) {
+        fields.add(Field(key.drop(5), "storage.keys[$index]", pointerSource = "data"))
       }
     }
+    return fields.distinctBy { it.path }
   }
 
-  /** The `/data` pointers written by the `into` of every `sensitive` call, in authored order. */
-  private fun sensitivePointers(
-    spec: JsonObject,
-    context: PrototypeStateChecks.Context,
-  ): List<String> =
-    PrototypePlatformUses.uses(spec, context)
-      .filterIsInstance<PrototypePlatformUses.Use.Call>()
-      .filter {
-        PrototypePlatformModules.callDefinition(it.action.text("call"))
-          ?.second
-          ?.flag("sensitive") == true
-      }
-      .mapNotNull { use -> use.action.text("into")?.let(PrototypeDataWriter::pathPointer) }
-
-  /**
-   * Segment-wise prefix overlap: binding a parent carries its sensitive member. A `{index}` taint
-   * segment stands for any row; text sinks also keep `{index}` they could not expand.
-   */
-  private fun overlaps(taint: String, pointer: String, pointerIndexWildcard: Boolean): Boolean {
-    val left = taint.substring(1).split('/')
-    val right = pointer.substring(1).split('/')
-    return left.zip(right).all { (taintSegment, segment) ->
-      taintSegment == segment ||
-        taintSegment == "{index}" ||
-        (pointerIndexWildcard && segment == "{index}")
-    }
-  }
+  private fun inRequest(path: String, at: String): Boolean =
+    path == "$at.url" ||
+      path == "$at.body" ||
+      path.startsWith("$at.body.") ||
+      listOf("headers", "query").any { path.startsWith("$at.$it.") || path.startsWith("$at.$it[") }
 }

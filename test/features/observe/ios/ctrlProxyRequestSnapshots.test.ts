@@ -207,6 +207,16 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
       }),
   },
   {
+    name: "request_accessibility_focus",
+    builder: "CtrlProxyVoiceOver.requestAccessibilityFocus",
+    invoke: (h) =>
+      new CtrlProxyVoiceOver(h.context).requestAccessibilityFocus({
+        resourceId: "save",
+        text: "Save",
+        contentDesc: "Button",
+      }),
+  },
+  {
     name: "request_magic_tap",
     builder: "CtrlProxyVoiceOver.requestMagicTap",
     invoke: (h) => new CtrlProxyVoiceOver(h.context).requestMagicTap(),

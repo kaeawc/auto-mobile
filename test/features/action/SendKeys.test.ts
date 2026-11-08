@@ -571,7 +571,9 @@ function createAdbFactory(adb: FakeAdbExecutor): AdbClientFactory {
 const priorImeIdForFake = "com.example.keyboard/.Ime";
 const commitImeIdForFake = "dev.jasonpearson.automobile.ctrlproxy/.ime.CtrlProxyIme";
 const typeFocusedInputError =
-  'Android event delivery requires a focused editable field. For printable ASCII, mode: "imeKeyEvents" types without requiring a focused editable node.';
+  "No editable field has focus. Focus the target field first (tap it, or tapOn with focus), then retry sendKeys without a mode.";
+/** Every Android typing mode name; the no-focus remedy must name none of them (#17165). */
+const typingModeNames = /\b(?:imeKeyEvents|eventAll|eventLast|eventOnly|a11y|ime)\b/;
 
 describe("SendKeys", () => {
   test("sendKeys with a not-fresh current hierarchy still delivers keys", async () => {
@@ -757,7 +759,16 @@ describe("SendKeys", () => {
       completedCommands: 0,
       failedIndex: 0,
       error: typeFocusedInputError,
-      commands: [{ index: 0, action: "type", success: false, error: typeFocusedInputError }],
+      errorCode: "NO_FOCUSED_EDITABLE",
+      commands: [
+        {
+          index: 0,
+          action: "type",
+          success: false,
+          error: typeFocusedInputError,
+          errorCode: "NO_FOCUSED_EDITABLE",
+        },
+      ],
     });
     expect(textClient.calls).toEqual([]);
     expect(adb.getExecutedCommands()).toEqual([]);
@@ -796,7 +807,8 @@ describe("SendKeys", () => {
       ).toMatchObject({
         success: false,
         partialApplication: true,
-        error: expect.stringContaining("Android event delivery requires a focused editable field"),
+        error: expect.stringContaining(typeFocusedInputError),
+        errorCode: "NO_FOCUSED_EDITABLE",
       });
       expect(observer.calls).toBe(operation === "replace" ? 2 : 1);
       expect(textClient.commitViaImeCalls).toHaveLength(1);
@@ -849,21 +861,24 @@ describe("SendKeys", () => {
     ).toMatchObject({
       success: false,
       partialApplication: true,
-      error: expect.stringContaining("Android event delivery requires a focused editable field"),
+      error: expect.stringContaining(typeFocusedInputError),
+      errorCode: "NO_FOCUSED_EDITABLE",
     });
     expect(observer.calls).toBe(3);
     expect(textClient.commitViaImeCalls).toHaveLength(1);
   });
 
   test.each([undefined, "ime", "eventLast", "eventAll", "eventOnly"] as const)(
-    "type refusal offers mode imeKeyEvents (requested=%s)",
+    "type refusal directs focus and a default-mode retry with a stable code (requested=%s)",
     async (mode) => {
       const observer = createObserver(focusedAndroidObservation("", { focused: "false" }, 0));
       const { executor } = imeVerificationHarness(observer);
       const result = await executor.type({ action: "type", text: "a", mode });
       expect(result.success).toBe(false);
-      expect(result.error).toContain('mode: "imeKeyEvents"');
-      expect(result.error).toContain("types without requiring a focused editable node");
+      expect(result.errorCode).toBe("NO_FOCUSED_EDITABLE");
+      expect(result.error).toStartWith(typeFocusedInputError);
+      expect(result.error).not.toMatch(typingModeNames);
+      expect(result.error).not.toContain("event delivery");
     },
   );
 
@@ -4275,8 +4290,82 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(result).toMatchObject({
       success: false,
       error: "Android event delivery requires a focused editable field",
+      errorCode: "NO_FOCUSED_EDITABLE",
     });
     expect(calls).toEqual([]);
+  });
+
+  test.each([
+    {
+      deviceError: "Action failed",
+      approximated: undefined,
+      cause:
+        'the focused field did not perform the "next" editor action; its configured action may be another one, such as done',
+    },
+    {
+      deviceError: undefined,
+      approximated: undefined,
+      cause:
+        'the focused field did not perform the "next" editor action; its configured action may be another one, such as done',
+    },
+    {
+      deviceError: "Action failed",
+      approximated: true,
+      cause: "no next focusable field was found beside the focused field",
+    },
+  ])(
+    "maps device error $deviceError on next to a typed failure (approximated=$approximated, #17463)",
+    async ({ deviceError, approximated, cause }) => {
+      const { client } = createTextClient();
+      client.ime = async () => ({ success: false, error: deviceError, approximated });
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(new FakeAdbExecutor()),
+        createObserver(focusedAndroidObservation()),
+        { textClient: client },
+      );
+
+      const result = await executor.key({ action: "key", key: "next" });
+
+      expect(result).toMatchObject({
+        success: false,
+        errorCode: "EDITOR_ACTION_MISMATCH",
+        error: `key "next" was not applied: ${cause}. Use key:"tab" to move focus, or sendKeys with a selector for the next field.`,
+      });
+    },
+  );
+
+  test("maps a bare device failure on search to a typed submit-key failure (#17463)", async () => {
+    const { client } = createTextClient();
+    client.ime = async () => ({ success: false, error: "Action failed" });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(new FakeAdbExecutor()),
+      createObserver(focusedAndroidObservation()),
+      { textClient: client },
+    );
+
+    const result = await executor.key({ action: "key", key: "search" });
+
+    expect(result).toMatchObject({ success: false, errorCode: "EDITOR_ACTION_MISMATCH" });
+    expect(result.error).toContain("the key could not be delivered");
+    expect(result.error).toContain("a multiline field can insert a newline");
+  });
+
+  test("keeps a descriptive device error for a semantic key", async () => {
+    const { client } = createTextClient();
+    client.ime = async () => ({ success: false, error: "IME action timed out after 5000ms" });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(new FakeAdbExecutor()),
+      createObserver(focusedAndroidObservation()),
+      { textClient: client },
+    );
+
+    const result = await executor.key({ action: "key", key: "next" });
+
+    expect(result.error).toBe("IME action timed out after 5000ms");
+    expect(result.errorCode).toBeUndefined();
   });
 
   test("iOS accepts every mode and reports its XCUITest mechanism", async () => {

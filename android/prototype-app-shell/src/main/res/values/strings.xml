@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<resources>
+  <string name="app_name">Prototype</string>
+  <string name="prototype_missing_spec">Prototype not found</string>
+  <string name="prototype_corrupt_spec">Prototype cannot be opened</string>
+  <string name="prototype_error_body">Reinstall this app with a valid prototype.</string>
+  <string name="prototype_close">Close</string>
+</resources>

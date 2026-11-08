@@ -391,6 +391,8 @@ describe("binding Android family constraints", () => {
     ["android-tv", "phone"],
     ["android-wear", "tablet"],
     ["android-automotive", "tv"],
+    ["google-xr", "phone"],
+    ["ai-glasses", "xr-headset"],
   ] as const)(
     "a %s runtime conflicts with deviceFamily %s even when deviceType is defaulted",
     async (tag, deviceFamily) => {
@@ -431,6 +433,22 @@ describe("binding Android family constraints", () => {
             deviceType,
             deviceFamily: "automotive",
           },
+          {},
+        ),
+      ).toMatchObject({ kind: "resolved", resolvedSpec: { deviceType } });
+    },
+  );
+
+  test.each([
+    ["google-xr", "xr-headset", "xr_headset_device"],
+    ["ai-glasses", "xr-glasses", "ai_glasses_device"],
+  ] as const)(
+    "a family-only %s runtime with deviceFamily %s creates %s (#16838)",
+    async (tag, deviceFamily, deviceType) => {
+      expect(
+        await new DefaultManagedSpecResolver().resolve(
+          "android",
+          { runtime: `system-images;android-34;${tag};x86_64`, deviceFamily },
           {},
         ),
       ).toMatchObject({ kind: "resolved", resolvedSpec: { deviceType } });

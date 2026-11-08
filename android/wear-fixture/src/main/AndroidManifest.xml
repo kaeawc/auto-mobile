@@ -1,0 +1,30 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-feature android:name="android.hardware.type.watch" />
+  <!-- The notification and ongoing activity need this grant on API 33+; the app asks on first use. -->
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  <application android:allowBackup="false" android:fullBackupContent="false" android:dataExtractionRules="@xml/data_extraction_rules" android:icon="@drawable/ic_fixture" android:label="@string/app_name" android:supportsRtl="true" android:theme="@android:style/Theme.DeviceDefault">
+    <!-- Runs without a paired phone. -->
+    <meta-data android:name="com.google.android.wearable.standalone" android:value="true" />
+    <!-- An empty taskAffinity keeps the fixture in its own entry in Wear recents. -->
+    <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop" android:taskAffinity="">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+      </intent-filter>
+    </activity>
+    <service android:name=".tile.FixtureTileService" android:exported="true" android:icon="@drawable/ic_fixture" android:label="@string/tile_label" android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
+      <intent-filter>
+        <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
+      </intent-filter>
+      <meta-data android:name="androidx.wear.tiles.PREVIEW" android:resource="@drawable/ic_fixture" />
+    </service>
+    <service android:name=".complication.FixtureComplicationService" android:exported="true" android:icon="@drawable/ic_fixture" android:label="@string/complication_label" android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
+      <intent-filter>
+        <action android:name="android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST" />
+      </intent-filter>
+      <meta-data android:name="android.support.wearable.complications.SUPPORTED_TYPES" android:value="SHORT_TEXT,RANGED_VALUE" />
+      <!-- Values are fixed, so the watch face never needs to poll. -->
+      <meta-data android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS" android:value="0" />
+    </service>
+  </application>
+</manifest>

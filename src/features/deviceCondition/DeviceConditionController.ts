@@ -48,6 +48,13 @@ export interface DeviceConditionApplyOutcome {
   detail?: string;
   /** Run on restore; absent when nothing changed. Idempotent. */
   reset?: (signal?: AbortSignal) => Promise<void>;
+  /**
+   * Verifies this outcome's `reset` after restore runs it, in place of the injector-wide
+   * `isClean`. An injector whose later callers can take over the key scopes verification to the
+   * state this outcome created, so a superseded obligation retires without reading the current
+   * owner's state as its own failure.
+   */
+  isClean?: (signal?: AbortSignal) => Promise<boolean>;
 }
 
 /** A reset the controller still owes, newest registered last. */
@@ -139,7 +146,7 @@ export class DeviceConditionController {
         this.resets.push({
           key: change.key,
           reset: outcome.reset,
-          isClean: (s) => injector.isClean(s),
+          isClean: outcome.isClean ?? ((s) => injector.isClean(s)),
         });
         this.recoveryFailures.delete(change.key);
       }
@@ -155,7 +162,7 @@ export class DeviceConditionController {
         this.resets.push({
           key: change.key,
           reset: error.owedReset,
-          isClean: (s) => injector.isClean(s),
+          isClean: error.owedIsClean ?? ((s) => injector.isClean(s)),
         });
         this.recoveryFailures.delete(change.key);
       }

@@ -1,0 +1,65 @@
+[
+  {
+    "name": "timers fire on the fake clock",
+    "spec": {
+      "id": "trace-timers",
+      "window": { "placement": { "type": "fullscreen" } },
+      "state": { "ticks": 0, "done": false },
+      "root": { "type": "text", "text": "Timers" }
+    },
+    "steps": [
+      {
+        "actions": [
+          {
+            "type": "startTimer",
+            "id": "once",
+            "afterMs": 300,
+            "actions": [{ "type": "setState", "key": "done", "value": true }]
+          },
+          {
+            "type": "startTimer",
+            "id": "tick",
+            "afterMs": 100,
+            "everyMs": 100,
+            "maxRuns": 5,
+            "actions": [{ "type": "increment", "key": "ticks" }]
+          }
+        ],
+        "expect": { "state": { "ticks": 0, "done": false } }
+      },
+      { "advanceMs": 100, "expect": { "state": { "ticks": 1, "done": false } } },
+      { "advanceMs": 200, "expect": { "state": { "ticks": 3, "done": true } } },
+      {
+        "actions": [{ "type": "cancelTimer", "id": "tick" }],
+        "expect": { "state": { "ticks": 3, "done": true } }
+      },
+      { "advanceMs": 1000, "expect": { "state": { "ticks": 3, "done": true } } }
+    ]
+  },
+  {
+    "name": "a repeating timer stops after maxRuns",
+    "spec": {
+      "id": "trace-timer-runs",
+      "window": { "placement": { "type": "fullscreen" } },
+      "state": { "ticks": 0 },
+      "root": { "type": "text", "text": "Timers" }
+    },
+    "steps": [
+      {
+        "actions": [
+          {
+            "type": "startTimer",
+            "id": "tick",
+            "afterMs": 100,
+            "everyMs": 200,
+            "maxRuns": 3,
+            "actions": [{ "type": "increment", "key": "ticks" }]
+          }
+        ],
+        "expect": { "state": { "ticks": 0 } }
+      },
+      { "advanceMs": 300, "expect": { "state": { "ticks": 2 } } },
+      { "advanceMs": 2000, "expect": { "state": { "ticks": 3 } } }
+    ]
+  }
+]

@@ -25,6 +25,12 @@ export interface DeviceDataFilter {
   deviceId: string | null;
   screenshotIntervalMs: number | null;
   hierarchyIntervalMs: number | null;
+  /**
+   * A lifecycle-only subscription receives only `device_session_started` /
+   * `device_session_ended` frames, and never counts as a subscriber for polling,
+   * cadence or device-lease activity. Absent means a full subscription.
+   */
+  lifecycleOnly?: boolean;
 }
 
 /**

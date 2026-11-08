@@ -84,7 +84,8 @@ jobs:
           GH_TOKEN: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
         run: scripts/changelog/update_changelog_from_issues.sh
 
-      # The bump and changelog steps write .claude-plugin/{marketplace,plugin}.json
+      # The bump and changelog steps write .claude-plugin/marketplace.json,
+      # plugins/auto-mobile/.claude-plugin/plugin.json
       # and CHANGELOG.md, and the commit below carries [skip ci] so the Check
       # Formatting gate never runs on it. Format the tree here so those generated
       # files land oxfmt-clean on main instead of reddening the next PR (#5817).
@@ -246,6 +247,14 @@ jobs:
       APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
       APPLE_NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY_BASE64 }}
 
+  build-candidate-tvos-runner:
+    needs: prepare-version
+    uses: ./.github/workflows/build-tvos-runner.yml
+    with:
+      checkout-ref: ${{ needs.prepare-version.outputs.release_commit }}
+      upload-artifact: true
+      artifact-retention-days: 90
+
   # Ad-hoc-signed universal iOS simulator prototype agent; needs no secrets.
   build-candidate-prototype-agent:
     needs: prepare-version
@@ -333,6 +342,7 @@ jobs:
         build-candidate-lmk-pressure,
         build-candidate-screen-capture-helper,
         build-candidate-audio-loopback-helper,
+        build-candidate-tvos-runner,
         build-candidate-prototype-agent,
         build-candidate-prototype-viewer,
         build-candidate-network-filter-identity-probe,
@@ -365,12 +375,42 @@ jobs:
           VIDEO_JAR_SHA256: ${{ needs.build-candidate-video-server-jar.outputs.sha256 }}
           SCREEN_CAPTURE_HELPER_SHA256: ${{ needs.build-candidate-screen-capture-helper.outputs.sha256 }}
           AUDIO_LOOPBACK_HELPER_SHA256: ${{ needs.build-candidate-audio-loopback-helper.outputs.sha256 }}
+          TVOS_RUNNER_SHA256: ${{ needs.build-candidate-tvos-runner.outputs.sha256 }}
           PROTOTYPE_AGENT_SHA256: ${{ needs.build-candidate-prototype-agent.outputs.sha256 }}
           PROTOTYPE_VIEWER_SHA256: ${{ needs.build-candidate-prototype-viewer.outputs.sha256 }}
           NETWORK_FILTER_SHA256: ${{ needs.build-candidate-network-filter-identity-probe.outputs.sha256 }}
           LMK_PRESSURE_ARM64_SHA256: ${{ needs.build-candidate-lmk-pressure.outputs.arm64_sha256 }}
           LMK_PRESSURE_X86_64_SHA256: ${{ needs.build-candidate-lmk-pressure.outputs.x86_64_sha256 }}
         run: bash scripts/generate-release-constants.sh
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+          no-cache: true
+
+      - name: Install Bun dependencies
+        run: bun install --frozen-lockfile
+
+      # The step above pins this version in src/constants/release.ts, and the
+      # capability guard fails on main for any pinned version the manifest does
+      # not know (#17109). Record it here so the same [skip ci] commit carries
+      # both. The ref is the commit the artifacts were built from; the tag is
+      # created later on this job's commit, whose Kotlin/Swift sources are the
+      # same. The second run fails closed if the pin still has no entry.
+      - name: Record artifact capabilities
+        env:
+          VERSION: ${{ inputs.version }}
+          BUILT_REF: ${{ needs.prepare-version.outputs.release_commit }}
+        run: |
+          set -euo pipefail
+          bun scripts/release/check-artifact-capabilities.ts --record "$VERSION" --ref "$BUILT_REF"
+          bun scripts/release/check-artifact-capabilities.ts
+
+      # The recorder writes JSON.stringify output, which oxfmt reflows; the
+      # commit carries [skip ci], so format here as prepare-version does (#5817).
+      - name: Format generated files
+        run: bun run format
 
       - name: Commit release constants to staging ref
         id: commit
@@ -394,12 +434,13 @@ jobs:
             for path in "${changed_files[@]}"; do
               case "$path" in
                 .claude-plugin/marketplace.json | \
-                .claude-plugin/plugin.json | \
+                plugins/auto-mobile/.claude-plugin/plugin.json | \
                 CHANGELOG.md | \
                 android/gradle.properties | \
                 android/*/build.gradle.kts | \
                 ios/XCTestRunner/Sources/XCTestRunner/AutoMobileVersion.swift | \
                 package.json | \
+                scripts/release/artifact-capabilities.json | \
                 server.json | \
                 src/constants/release.ts)
                   ;;
@@ -446,6 +487,7 @@ jobs:
         build-candidate-lmk-pressure,
         build-candidate-screen-capture-helper,
         build-candidate-audio-loopback-helper,
+        build-candidate-tvos-runner,
         build-candidate-prototype-agent,
         build-candidate-prototype-viewer,
         build-candidate-protoviewer-artifact-policy,
@@ -512,6 +554,12 @@ jobs:
           name: audio-loopback-helper
           path: /tmp
 
+      - name: "Download tvos-runner"
+        uses: actions/download-artifact@v7
+        with:
+          name: tvos-runner
+          path: /tmp
+
       - name: "Download prototype-agent"
         uses: actions/download-artifact@v7
         with:
@@ -561,6 +609,7 @@ jobs:
           bash scripts/ci/verify-artifact-sha256.sh /tmp/automobile-lmk-pressure-x86_64 lmkpressurex8664
           bash scripts/ci/verify-artifact-sha256.sh /tmp/screen-capture-helper-macos-universal.zip screencapturehelper
           bash scripts/ci/verify-artifact-sha256.sh /tmp/audio-loopback-helper-macos-universal.zip audioloopbackhelper
+          bash scripts/ci/verify-artifact-sha256.sh /tmp/tvos-runner-macos.zip tvosrunner
           bash scripts/ci/verify-artifact-sha256.sh /tmp/AutoMobilePrototypeAgent.dylib prototypeagent
           bash scripts/ci/verify-artifact-sha256.sh /tmp/AutoMobilePrototypeViewer.zip prototypeviewer
           # Structural prototype-agent checks (lipo/vtool/codesign) run in the macOS builder
@@ -616,7 +665,7 @@ jobs:
             --arg tag_sha "$TAG_SHA" \
             --arg prepare_run_id "$PREPARE_RUN_ID" \
             '{tag: $tag, tag_sha: $tag_sha, prepare_run_id: $prepare_run_id,
-              artifacts: ["control-proxy-apk", "protoviewer-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "lmk-pressure", "screen-capture-helper", "audio-loopback-helper", "prototype-agent", "prototype-viewer", "network-filter", "automobile-desktop-macos", "automobile-desktop-windows", "automobile-desktop-linux"]}' \
+              artifacts: ["control-proxy-apk", "protoviewer-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "lmk-pressure", "screen-capture-helper", "audio-loopback-helper", "tvos-runner", "prototype-agent", "prototype-viewer", "network-filter", "automobile-desktop-macos", "automobile-desktop-windows", "automobile-desktop-linux"]}' \
             > /tmp/release-artifact-provenance.json
 
       - name: Upload release artifact provenance

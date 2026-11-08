@@ -24,6 +24,7 @@ const scopeFor = (data: unknown): WebRenderScope => ({
   inBox: false,
   unsupported: [],
   screenWidth: 412,
+  screenHeight: 915,
   layers: [],
 });
 

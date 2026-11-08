@@ -35,6 +35,54 @@ function heldEmulator(): PooledDevice {
   };
 }
 
+test("unpooled emulator is enriched from watch config without mutating readiness", async () => {
+  const timer = new FakeTimer();
+  const reader = new FakeAvdConfigReader({ deviceName: "wearos_small_round" });
+  const resolver = new HeldDeviceFormFactorResolver(reader, timer);
+
+  expect(await resolver.enrichUnpooled(emulator)).toEqual({ ...emulator, formFactor: "watch" });
+  expect(emulator).not.toHaveProperty("formFactor");
+  expect(reader.readConfigCalls).toEqual([emulator.name]);
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("unpooled hung config returns readiness unchanged at the default deadline", async () => {
+  const timer = new FakeTimer();
+  const reader: AvdConfigReader = { readConfig: () => new Promise(() => {}) };
+  const resolver = new HeldDeviceFormFactorResolver(reader, timer);
+  const result = resolver.enrichUnpooled(emulator);
+
+  expect(timer.getPendingTimeouts()).toEqual([2000]);
+  timer.advanceTime(1999);
+  expect(timer.getPendingTimeoutCount()).toBe(1);
+  timer.advanceTime(1);
+  expect(await result).toBe(emulator);
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test.each([
+  { ...emulator, formFactor: "phone" as const },
+  { ...emulator, formFactor: "watch" as const },
+  { ...emulator, deviceId: "physical-usb" },
+  { ...emulator, deviceId: "127.0.0.1:5555" },
+  { ...emulator, platform: "ios" as const },
+])("unpooled ineligible device is unchanged without reading config: %j", async (device) => {
+  const timer = new FakeTimer();
+  const reader = new FakeAvdConfigReader({ deviceName: "wearos_small_round" });
+  const resolver = new HeldDeviceFormFactorResolver(reader, timer);
+
+  expect(await resolver.enrichUnpooled(device)).toBe(device);
+  expect(reader.readConfigCalls).toEqual([]);
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("unpooled device without an injected config reader is unchanged", async () => {
+  const timer = new FakeTimer();
+  const resolver = new HeldDeviceFormFactorResolver(undefined, timer);
+  expect(await resolver.enrichUnpooled(emulator)).toBe(emulator);
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+});
+
 test("held-session hung config read returns without form factor at the default deadline", async () => {
   const timer = new FakeTimer();
   const reader: AvdConfigReader = { readConfig: () => new Promise(() => {}) };
@@ -78,7 +126,7 @@ function readAccess(device: BootedDevice, avdConfigReader: AvdConfigReader, with
       ? {
           listBootedWithStatus: async () => ({
             devices: [device],
-            scanned: { android: true, ios: true, watchos: false, tvos: false },
+            scanned: { android: true, ios: true, watchos: false, tvos: false, visionos: false },
           }),
         }
       : {}),

@@ -69,9 +69,10 @@ enablement, running and compatibility flags; nullable installed and expected che
 runner `version`; and nullable `supportedCommandsComplete` / `supportedFeaturesComplete` flags.
 The booted resource's top-level `serviceStatus` is a resource-specific diagnostic sibling, not a
 `DeviceDescription` alias. Canonical top-level `formFactor` always uses `phone`, `tablet`,
-`foldable`, `tv`, `watch`, `automotive`, or `unknown`. Android derives `tv`, `watch` and
-`automotive` from the system-image tag (`android-tv`, `android-wear`, `android-automotive`, ...)
-first, then the avdmanager profile id, then geometry.
+`foldable`, `tv`, `watch`, `automotive`, `xr-headset`, `xr-glasses`, or `unknown`. Android derives
+`tv`, `watch`, `automotive`, `xr-headset` and `xr-glasses` from the system-image tag (`android-tv`,
+`android-wear`, `android-automotive`, `google-xr`, `ai-glasses`, ...) first, then the avdmanager
+profile id, then geometry.
 
 `DeviceResource` describes observed resource state for one device. Its `resources`
 property is a JSON object keyed by logical resource name. `AndroidDeviceResource`

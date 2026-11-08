@@ -3,6 +3,7 @@ import { serverConfig } from "../../utils/ServerConfig";
 import { observationOfPayload, stringifyToolResponse } from "../../utils/toolUtils";
 import type { readToolEnvelopePayload } from "../../daemon/toolEnvelopePayload";
 import { isRecord } from "../pipeline/isRecord";
+import { boundsKey } from "../../features/observe/output/resultOutput/hierarchy";
 import { requiredOutputSchemaKeys } from "./responseArtifacts";
 import type { FinalizeToolResponseContext } from "./contracts";
 
@@ -92,6 +93,37 @@ function actionMetadataDeviceId(
   return typeof deviceId === "string" && deviceId.length > 0 ? deviceId : undefined;
 }
 
+/**
+ * Attributes that name a node. Everything else on a raw element (its `node`
+ * subtree, `actions`, `hierarchyDepth`, focus/selection state, a regenerated
+ * synthetic `view-id`) can differ between two reads of the same node.
+ */
+const ACTION_ELEMENT_IDENTITY_KEYS = [
+  "class",
+  "package",
+  "resource-id",
+  "test-tag",
+  "text",
+  "content-desc",
+  "ios-accessibility-identifier",
+  "ios-accessibility-label",
+] as const;
+
+/**
+ * `element` and `selectedElement.matchedElement` are often the same node read
+ * from captures moments apart, so a deep-equality test let both through
+ * (#11637, #17464). Compare what names the node and where it is instead.
+ */
+function isSameActionElement(element: unknown, matched: unknown): boolean {
+  if (!isRecord(element) || !isRecord(matched)) {
+    return false;
+  }
+  return (
+    boundsKey(element.bounds) === boundsKey(matched.bounds) &&
+    ACTION_ELEMENT_IDENTITY_KEYS.every((key) => element[key] === matched[key])
+  );
+}
+
 function hasDuplicateActionElement(
   payload: Record<string, unknown>,
   outputSchema: unknown,
@@ -99,7 +131,7 @@ function hasDuplicateActionElement(
   return (
     payload.element !== undefined &&
     isRecord(payload.selectedElement) &&
-    isDeepStrictEqual(payload.element, payload.selectedElement.matchedElement) &&
+    isSameActionElement(payload.element, payload.selectedElement.matchedElement) &&
     !requiredOutputSchemaKeys(outputSchema).includes("element")
   );
 }

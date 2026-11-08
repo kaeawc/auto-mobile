@@ -11,9 +11,11 @@ import androidx.compose.runtime.setValue
 import dev.jasonpearson.automobile.desktop.core.control.DeviceControlSession
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
+import dev.jasonpearson.automobile.desktop.core.daemon.jitteredReconnectBackoffMs
 import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorState
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.domain.DeviceFrameSnapshot
+import kotlinx.coroutines.delay
 
 private val LOG = LoggerFactory.getLogger("WorkspaceDeviceControl")
 
@@ -117,12 +119,15 @@ fun rememberWorkspaceDeviceControl(
     val stream =
       key(sessionUuidProvider, sessionUuid) {
         if (enabled && (sessionUuidProvider == null || sessionUuid != null))
-          rememberReconnectingObservationStream(
-            dev.jasonpearson.automobile.desktop.core.workspace.ReconnectingObservationOptions(
-              deviceId = column.deviceId,
-              streamFactory = streamFactory,
-            ),
-          )
+          // With the app's stream hub, a lease on the device's shared stream, whose cadence the
+          // hub merges with every other lease's by taking the fastest (#17012).
+          rememberPaneObservationState(
+              column,
+              streamFactory,
+              backoffDelay = { attempt -> delay(jitteredReconnectBackoffMs(attempt)) },
+              socketAvailable = { ObservationStreamClient.socketExists() },
+            )
+            .stream
         else null
       }
 
@@ -131,7 +136,7 @@ fun rememberWorkspaceDeviceControl(
     // (~3s screenshots), so after a tap the retained snapshot ages out before a superseding pair
     // arrives and control disarms — "one click works, then nothing". Mirrors the Live Layout
     // cadence;
-    // setCadence is re-applied across reconnects by the client, and is a no-op when unchanged.
+    // setCadence is re-applied across reconnects, and is a no-op when unchanged.
     LaunchedEffect(stream, enabled) {
       stream?.setCadence(
         screenshotIntervalMs = if (enabled) CONTROL_SCREENSHOT_INTERVAL_MS else null,

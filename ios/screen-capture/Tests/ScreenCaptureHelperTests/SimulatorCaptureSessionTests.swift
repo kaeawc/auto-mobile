@@ -181,6 +181,7 @@ final class SimulatorCaptureSessionTests: XCTestCase {
         return SimulatorCaptureSession(
             writer: writer,
             diagnosticSink: { diagnostics.record($0) },
+            encode: .init(bitrate: .videoToolboxDefault),
             onFatalError: onFatalError
         )
     }
@@ -207,6 +208,7 @@ final class SimulatorCaptureSessionTests: XCTestCase {
             writer: FrameWriter(sink: MemorySink()),
             diagnosticSink: { diagnostics.record($0) },
             uptime: { now },
+            encode: .init(bitrate: .videoToolboxDefault),
             onFatalError: { _ in }
         )
         session.windowID = 91

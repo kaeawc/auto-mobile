@@ -69,8 +69,124 @@ iOS URIs have no user query.
 - `biometricAuth` simulates a match or failure on supported emulators and iOS
   simulators, and every result in apps that embed the AutoMobile SDK.
 - `wakeAndUnlock` wakes an Android device and unlocks it with an optional PIN.
-- `postNotification` creates a notification for notification-flow tests.
+- `postNotification` creates a notification for notification-flow tests. On a watchOS
+  simulator, provide the watch app’s bundle ID as `appId` to deliver a push to that watch.
+  On iOS a single notification shows no app name, so `systemTray` can match it by
+  `appId` only when it was posted with `postNotification`; otherwise omit `appId`.
 - `clipboard` sets, reads, pastes, or clears clipboard content.
+
+## Phone calls and SMS
+
+`phoneCall` and `sendSms` are off by default; enable them before use.
+
+| Device              | `phoneCall`                                       | `sendSms`                                 |
+| ------------------- | ------------------------------------------------- | ----------------------------------------- |
+| Android emulator    | All actions                                       | Supported                                 |
+| Android physical    | Not supported                                     | Not supported                             |
+| iOS Simulator + SDK | `call`, `cancel`, `busy`; `accept`/`hold` partial | SMS-style notification from the app's SDK |
+| iOS physical        | Not supported                                     | Not supported                             |
+
+On iOS the app under test must embed the AutoMobile iOS SDK; without it `sendSms`
+and `phoneCall` `call`, `cancel` and `busy` fail with an error asking for the SDK.
+
+The iOS Simulator cannot answer or hold a CallKit call: its call service ends the
+call instead. `phoneCall` with `accept` or `hold` on a simulator therefore sends
+nothing to the app and returns, without an error and whether or not the app embeds
+the SDK or a `phoneNumber` is given:
+
+```json
+{
+  "success": false,
+  "supported": "partial",
+  "reason": "ios_simulator_callkit_limit",
+  "action": "accept",
+  "message": "The iOS Simulator cannot accept or hold a CallKit call: ..."
+}
+```
+
+Check `supported` and `reason` rather than treating this as a failure, and drive
+the in-call state with `call`, `cancel` and `busy` instead. Every other failure
+(missing `phoneNumber`, no SDK, an SDK rejection, an unsupported device) is
+returned as a tool error.
+
+## Reaching a host server from the device
+
+When an app or browser on an Android device must reach a server on your
+machine at exactly `http://localhost:<port>` (an OAuth redirect URI, a local
+mock backend), use `portReverse` instead of running `adb reverse` yourself:
+
+- `ensure` with `ports: [{ devicePort, hostPort? }]` adds each mapping
+  (`hostPort` defaults to `devicePort`). Calling it again is a no-op.
+  With `reclaimStale: true`, a mapping left behind by a crashed session, a
+  daemon restart or another tool is replaced instead of reported as a conflict,
+  but only when your session holds the device, no running session owns the
+  mapping, its host side is `tcp:<H>`, and nothing on your machine accepts a
+  connection on port `H`. That mapping's result carries
+  `reclaimed: { host, reason: "host_refused" }`. When adb talks to a server on
+  another machine (`ANDROID_ADB_SERVER_ADDRESS` or `ADB_SERVER_SOCKET`), host
+  ports cannot be checked, so nothing is reclaimed.
+- `list` returns every reverse on the device; `owned: true` marks the ones
+  your session created, `owner: "prototype"` marks one a shown or saved
+  prototype's `via: "device"` request uses, and `hostListening` says whether a server on your
+  machine accepts connections on each mapping's `tcp:` host port (absent when
+  it could not be checked).
+- `list` and `verify` give each port a `deviceListener`: `{ kind: "none" }`
+  (nothing listens on the device port), `{ kind: "reverse" }` (the reverse
+  itself), `{ kind: "process", uid, package? }` (an app or other process on the
+  device holds the port; `package` is set when exactly one package has that
+  uid) or `{ kind: "unsupported", detail }` (the device would not show its
+  listening sockets).
+- `verify` reports whether ports (default: all of yours) are mapped now. With
+  `probe: true` it also connects to each mapped port from the device (about a
+  second, all ports at once) and reports `reachable` (your host server accepted
+  and kept the connection open), `unreachable` or `probe_unsupported`. Ports
+  that are not mapped stay `missing` and are not probed. `unreachable` carries a
+  `probeReason`: `closed` (the mapping exists but nothing is listening on the
+  host port), `refused` (nothing is listening on the device port) or `timeout`
+  (the device did not answer). `probe_unsupported` means the device shell has no
+  usable connect command; `probeDetail` holds what it printed. A host server
+  that closes idle connections within a second reads as `closed`.
+  A TCP connect succeeds for any server, including the wrong one on a reused
+  host port. To check the right service answers, pass
+  `probe: { http: { path, expectStatus, hostHeader?, expectBodyContains?, timeoutMs? } }`:
+  the device sends `GET <path>` through each mapping and reports `httpStatus`.
+  A port is `reachable` when the status is in `expectStatus` (and the body
+  contains `expectBodyContains`, when given); otherwise `unreachable` with
+  `probeReason` `http_status` (another status), `http_body` (the text is
+  missing), `no_http_response` (the connection ended, or something answered,
+  without an HTTP response; `probeDetail` shows what came back), `refused` or
+  `timeout`. `path` must start with `/` and contain no spaces; `hostHeader`
+  defaults to `localhost:<devicePort>`; `timeoutMs` (1000-10000, default 2000)
+  is rounded up to whole seconds. Responses over 256 KB are not read and report
+  `timeout`.
+- `remove` deletes mappings your session created. A port a prototype also uses
+  is reported `released`: your session no longer owns it, and it stays on the
+  device until the prototype is dismissed. Likewise `ensure` on a prototype's
+  port to the same host port shares it (`present`) instead of conflicting.
+
+AutoMobile owns the mappings it creates for your session. If one disappears
+(an adb server restart, `adb reconnect`, `adb root`/`unroot`, an emulator
+restart, or `adb reverse --remove` run outside AutoMobile), AutoMobile re-adds
+it on its own once it sees the device's adb connection recover or on its
+periodic check (every 30 s by default), and otherwise the next `ensure`, `list`
+or `verify` call re-adds it. Either way, that next call lists it in `restored`; a mapping it
+could not re-add is listed in `restoreFailures` and retried on the next call. Your mappings are removed when your session is
+released or leaves the device. Mappings made without a session stay until the
+device disconnects; AutoMobile stops tracking them then, and a device that stays
+connected keeps them until you run `adb reverse --remove`.
+
+Errors come back with `errorCode`:
+
+| `errorCode`                       | Meaning and what to do                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `port_reverse_conflict`           | The device port is already mapped by someone else or to another host port. Nothing changed; pick another port or remove the existing mapping. `conflicts` lists each port's `conflictKind` (also given at the top level when every port has the same one): `other_session` (another running session owns it), `prototype` (a prototype's request uses it, mapped to another host port), `external_live` (made outside AutoMobile and its host port accepts connections) or `external_unknown` (made outside AutoMobile and its host port was not shown to be live; retry with `reclaimStale: true` to replace it if it is stale). |
+| `port_reverse_device_port_in_use` | A process on the device already listens on the device port, so the reverse cannot be added. The message names its uid and package; stop it or pick another device port.                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `port_reverse_reclaim_failed`     | `reclaimStale` found a stale mapping but could not remove it, or it changed just before removal. That mapping was left as it was and this call\'s new mappings were rolled back; a stale mapping the same call already reclaimed stays removed. Call `list` to see the current mappings.                                                                                                                                                                                                                                                                                                                                          |
+| `port_reverse_not_owned`          | `remove` named a port your session did not create. Nothing was removed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `port_reverse_port_refused`       | A port is below 1024 or outside `AUTOMOBILE_PORT_REVERSE_ALLOWED_PORTS`, or `ports` was missing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+
+On iOS the tool returns `status: "not_applicable"`: a simulator shares the
+host's network, so `localhost:<port>` already reaches your machine.
 
 For a clean app start, use `launchApp` with `clearAppData: true` where the
 platform supports it. Use `observe` after preparation to confirm the expected

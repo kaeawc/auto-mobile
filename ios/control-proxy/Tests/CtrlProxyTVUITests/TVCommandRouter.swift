@@ -12,6 +12,25 @@ final class TVCommandRouter {
     private struct Envelope: Decodable {
         let type: String
         let requestId: String?
+        /// Optional hint naming the app in front; the runner probes first-party apps otherwise.
+        let bundleId: String?
+    }
+
+    /// Resolve the frontmost app per command; the host app is not necessarily in front.
+    private func target(requested: String?) -> (app: XCUIApplication, packageName: String) {
+        let hostId = "dev.jasonpearson.automobile.ctrlproxy.tv"
+        let hostState = Int(application.state.rawValue)
+        guard hostState != TVTargetResolver.foregroundState else { return (application, hostId) }
+        let candidates = TVTargetResolver.candidateBundleIds(requested: requested).map {
+            (bundleId: $0, state: Int(XCUIApplication(bundleIdentifier: $0).state.rawValue))
+        }
+        switch TVTargetResolver.resolve(hostState: hostState, candidates: candidates) {
+        case .host: return (application, hostId)
+        case let .app(bundleId): return (XCUIApplication(bundleIdentifier: bundleId), bundleId)
+        case .home:
+            let homeId = TVTargetResolver.homeScreenBundleId
+            return (XCUIApplication(bundleIdentifier: homeId), homeId)
+        }
     }
 
     func handle(_ data: Data) -> Data {
@@ -29,11 +48,12 @@ final class TVCommandRouter {
             switch envelope.type {
             case "request_hierarchy":
                 let request = try decoder.decode(RequestHierarchy.self, from: data)
-                let snapshot = try application.snapshot()
+                let resolved = target(requested: envelope.bundleId)
+                let snapshot = try resolved.app.snapshot()
                 return try JSONEncoder().encode(HierarchyUpdateResponse(
                     requestId: request.requestId,
                     data: ViewHierarchy(
-                        packageName: "dev.jasonpearson.automobile.ctrlproxy.tv",
+                        packageName: resolved.packageName,
                         hierarchy: element(snapshot),
                         screenWidth: ElementBounds.clampedInt(snapshot.frame.width),
                         screenHeight: ElementBounds.clampedInt(snapshot.frame.height)
@@ -61,11 +81,12 @@ final class TVCommandRouter {
                     throw CommandError.invalidParameter("frameContext", "unsupported on tvOS")
                 }
                 let startTime = Date()
-                let snapshot = try application.snapshot()
+                let resolved = target(requested: envelope.bundleId)
+                let snapshot = try resolved.app.snapshot()
                 guard hasFocusedKeyboard(snapshot) else {
                     throw CommandError.invalidParameter("text", "no focused text input")
                 }
-                application.typeText(request.text)
+                resolved.app.typeText(request.text)
                 return try JSONEncoder().encode(WebSocketResponse.success(
                     type: ResponseType.appendTextResult.rawValue, requestId: request.requestId,
                     totalTimeMs: Int64(Date().timeIntervalSince(startTime) * 1000)
@@ -104,7 +125,12 @@ final class TVCommandRouter {
         // Translate the captured spike's frame/id/type/hasFocus/enabled/selected fields into
         // the existing hierarchy wire model. Focus is observed, never assigned directly.
         UIElementInfo(
-            text: snapshot.label,
+            text: TVElementText.text(
+                label: snapshot.label,
+                value: snapshot.value as? String,
+                isTextInput: [.textField, .secureTextField, .searchField, .textView].contains(snapshot.elementType),
+                isSecure: snapshot.elementType == .secureTextField
+            ),
             resourceId: snapshot.identifier,
             className: String(snapshot.elementType.rawValue),
             bounds: ElementBounds(clamping: snapshot.frame),

@@ -18,6 +18,7 @@ import {
   addDeviceTargetingToSchema,
   platformSchema,
   responseShapeControlFields,
+  watchAwarePlatformSchema,
   withCanonicalDiscriminatedUnionJsonSchema,
   withJsonSchemaOverride,
 } from "../../utils/schemaHelpers";
@@ -155,7 +156,7 @@ export const sendKeysSchema = withJsonSchemaOverride(
             `One to ${SEND_KEYS_MAX_COMMANDS} commands executed serially; execution stops on the first failure`,
           ),
         // #5870: Device or session targeting resolves the platform.
-        platform: platformSchema.optional(),
+        platform: watchAwarePlatformSchema(),
         ...responseShapeControlFields,
       })
       .strict(),

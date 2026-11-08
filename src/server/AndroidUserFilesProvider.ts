@@ -1,4 +1,5 @@
 import { type AppFileWriteProvider, type PutAppFileProviderRequest } from "./appFileService";
+import type { PutAppFileWriteEffect } from "./appFileContract";
 import { getSharedStorageService, type SharedStorageService } from "./sharedStorageService";
 import { ActionableError } from "../models";
 
@@ -37,15 +38,12 @@ export class AndroidUserFilesProvider implements AppFileWriteProvider {
       signal: request.signal,
       rollbackOnFailure: true,
     });
+    const location =
+      `device ${result.deviceId}, resolved profile ${result.userId}, ` +
+      `namespace ${result.namespace}`;
     return result.files.map((staged) => ({
       effects: [
-        {
-          type: "document_picker",
-          status: "completed" as const,
-          reason:
-            `document fixture is available in Downloads for device ${result.deviceId}, ` +
-            `resolved profile ${result.userId}, namespace ${result.namespace}`,
-        },
+        documentPickerEffect(staged.mediaIndexing.status === "completed", location),
         {
           type: "media_index",
           status: staged.mediaIndexing.status,
@@ -56,4 +54,24 @@ export class AndroidUserFilesProvider implements AppFileWriteProvider {
       ],
     }));
   }
+}
+
+/**
+ * The system document picker lists Downloads from MediaStore, so a file is pickable only once the
+ * scanner has indexed it. The effect is completed only when its MediaStore row was confirmed.
+ */
+function documentPickerEffect(indexed: boolean, location: string): PutAppFileWriteEffect {
+  return indexed
+    ? {
+        type: "document_picker",
+        status: "completed",
+        reason: `MediaStore verified the file in Downloads for ${location}`,
+      }
+    : {
+        type: "document_picker",
+        status: "notRequested",
+        reason:
+          `file is in Downloads for ${location} but was not media-scanned; ` +
+          "the system document picker may not list it. Set target.indexMedia to true to scan it",
+      };
 }

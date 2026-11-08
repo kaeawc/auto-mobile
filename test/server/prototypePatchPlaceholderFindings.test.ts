@@ -26,7 +26,6 @@ function dependencies(): PrototypePatchDependencies {
     transport: { patch: async () => ({ success: true, delivery: "answered" }) },
     supportsPatch: async () => true,
     specRefusal: async () => undefined,
-    settleSpec: async () => {},
     platform: "android",
     queue: createPrototypePatchQueue(),
     retire: () => {},

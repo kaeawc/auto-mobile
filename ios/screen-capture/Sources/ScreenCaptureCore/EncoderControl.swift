@@ -61,9 +61,9 @@ public final class ForceKeyFrameLatch: @unchecked Sendable {
     }
 }
 
-/// Pure drop-policy decisions for the encoded path (issue #4788). Unlike the raw
-/// path's newest-wins replacement — which would corrupt the encoder's reference
-/// chain — encoded output drops late frames at the ENCODER INPUT when the
+/// Pure drop-policy decisions for the encoded path (issue #4788). Newest-wins
+/// replacement of output records would corrupt the encoder's reference chain,
+/// so encoded output drops late frames at the ENCODER INPUT when the
 /// encoder is behind, and NEVER drops an emitted encoded record. An overflowing
 /// output queue is fatal (the supervisor relaunches) rather than silently
 /// corrupting the stream.

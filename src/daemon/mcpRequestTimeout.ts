@@ -20,6 +20,11 @@ import {
   APP_FILE_PUSH_TIMEOUT_MS,
   FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
 } from "../features/storage/fileTransferTimeout";
+import { resolveKillProfileBudgetMs } from "../features/utility/killProfileTimeout";
+import {
+  SYSTEM_TRAY_LIST_MCP_TIMEOUT_HEADROOM_MS,
+  WATCH_LIST_SCAN_TIMEOUT_MS,
+} from "../features/systemTray/watchListTimeout";
 export {
   SNAPSHOT_MCP_TIMEOUT_HEADROOM_MS,
   WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
@@ -495,6 +500,18 @@ const ARGUMENT_BUDGET_RESOLVERS: ReadonlyMap<string, (args: Record<string, unkno
     ],
     ["putAppFile", (args) => resolveFileTransferBudgetMs(args, APP_FILE_PUSH_TIMEOUT_MS)],
     ["prototype", resolvePrototypeAwaitBudgetMs],
+    ["killProfile", resolveKillProfileBudgetMs],
+    [
+      "systemTray",
+      (args) =>
+        args.action === "list"
+          ? resolveArgumentTimeoutBudgetMs(
+              args.awaitTimeout,
+              WATCH_LIST_SCAN_TIMEOUT_MS,
+              SYSTEM_TRAY_LIST_MCP_TIMEOUT_HEADROOM_MS,
+            )
+          : 0,
+    ],
   ]);
 
 function resolveArgumentBudgetToolBudgetMs(request: DaemonRequest): number {

@@ -156,6 +156,10 @@ class TestableDeviceDataStreamSocketServer extends DeviceDataStreamSocketServer 
   errorConnectionForTest(socket: FakeSocket): void {
     this.onConnectionError(socket, new Error("socket error"));
   }
+
+  checkKeepaliveForTest(): void {
+    this.checkKeepalive();
+  }
 }
 
 describe("DeviceDataStreamSocketServer", () => {
@@ -3377,6 +3381,147 @@ describe("DeviceDataStreamSocketServer", () => {
         });
         expect(f[0]).not.toHaveProperty("successorSessionUuid");
         expect(f[0]).not.toHaveProperty("reason");
+      });
+
+      describe("lifecycle-only subscriptions (#17061)", () => {
+        const subscribeLifecycleOnly = async (lifecycleOnly: unknown): Promise<FakeSocket> => {
+          const socket = new FakeSocket();
+          await server.processLineForTest(
+            socket,
+            JSON.stringify({
+              id: "sub-lifecycle",
+              command: "subscribe",
+              deviceSessionUuid: "session-device-a",
+              lifecycleOnly,
+            }),
+          );
+          return socket;
+        };
+
+        it("receives the epoch's lifecycle frames and no device frames", async () => {
+          server.sessionResolver.bind("device-a", "session-device-a");
+          const socket = await subscribeLifecycleOnly(true);
+
+          server.pushHierarchyUpdate("device-a", hierarchy);
+          server.pushScreenshotUpdate("device-a", "png", { screenWidth: 1, screenHeight: 1 });
+          server.pushDeviceSessionEnded(record());
+
+          expect(
+            frames(socket)
+              .filter((f) => f.type !== "subscription_response")
+              .map((f) => f.type),
+          ).toEqual(["device_session_ended"]);
+        });
+
+        it("is not a subscriber for polling, cadence or lease activity", async () => {
+          server.sessionResolver.bind("device-a", "session-device-a");
+          await subscribeLifecycleOnly(true);
+
+          expect(server.hasSubscriberForDevice("device-a")).toBe(false);
+          expect(server.getHierarchyIntervalMsForDevice("device-a")).toBe(2_147_483_647);
+
+          // Another client that leaves hierarchy cadence at its default keeps that default.
+          server.simulateSubscription({
+            deviceId: "device-a",
+            deviceSessionUuid: "session-device-a",
+          });
+          expect(server.getHierarchyIntervalMsForDevice("device-a")).toBe(1000);
+          expect(server.getScreenshotIntervalMsForDevice("device-a")).toBe(3000);
+        });
+
+        describe("cadence notifications (#17085)", () => {
+          let screenshotChanges: Array<string | null>;
+          let hierarchyChanges: Array<string | null>;
+
+          beforeEach(() => {
+            screenshotChanges = [];
+            hierarchyChanges = [];
+            server.setOnScreenshotCadenceChanged((deviceId) => screenshotChanges.push(deviceId));
+            server.setOnHierarchyCadenceChanged((deviceId) => hierarchyChanges.push(deviceId));
+            server.sessionResolver.bind("device-a", "session-device-a");
+          });
+
+          const lifecycleSubscriptionId = (socket: FakeSocket): string => {
+            const response = frames(socket).find((f) => f.type === "subscription_response");
+            const id = (response as { subscriptionId?: unknown } | undefined)?.subscriptionId;
+            if (typeof id !== "string") {
+              throw new Error("lifecycle-only subscribe returned no subscriptionId");
+            }
+            return id;
+          };
+
+          it("subscribe and unsubscribe fire neither cadence callback", async () => {
+            const socket = await subscribeLifecycleOnly(true);
+            await server.processLineForTest(
+              socket,
+              JSON.stringify({
+                id: "unsub-lifecycle",
+                command: "unsubscribe",
+                subscriptionId: lifecycleSubscriptionId(socket),
+              }),
+            );
+
+            expect(server.getSubscriberCount()).toBe(0);
+            expect(screenshotChanges).toEqual([]);
+            expect(hierarchyChanges).toEqual([]);
+          });
+
+          it("connection close and error fire neither cadence callback", async () => {
+            const closed = await subscribeLifecycleOnly(true);
+            const errored = await subscribeLifecycleOnly(true);
+
+            server.closeConnectionForTest(closed);
+            server.errorConnectionForTest(errored);
+
+            expect(server.getSubscriberCount()).toBe(0);
+            expect(screenshotChanges).toEqual([]);
+            expect(hierarchyChanges).toEqual([]);
+          });
+
+          it("keepalive removal fires neither cadence callback", async () => {
+            const socket = await subscribeLifecycleOnly(true);
+            socket.destroy();
+
+            server.checkKeepaliveForTest();
+
+            expect(server.getSubscriberCount()).toBe(0);
+            expect(screenshotChanges).toEqual([]);
+            expect(hierarchyChanges).toEqual([]);
+          });
+
+          it("a rejected non-boolean lifecycleOnly fires neither cadence callback", async () => {
+            await subscribeLifecycleOnly("yes");
+
+            expect(server.getSubscriberCount()).toBe(0);
+            expect(screenshotChanges).toEqual([]);
+            expect(hierarchyChanges).toEqual([]);
+          });
+
+          it("a normal subscription still notifies on subscribe and unsubscribe", async () => {
+            const socket = await subscribeLifecycleOnly(false);
+            await server.processLineForTest(
+              socket,
+              JSON.stringify({
+                id: "unsub-normal",
+                command: "unsubscribe",
+                subscriptionId: lifecycleSubscriptionId(socket),
+              }),
+            );
+
+            expect(screenshotChanges).toEqual(["device-a", "device-a"]);
+            expect(hierarchyChanges).toEqual(["device-a", "device-a"]);
+          });
+        });
+
+        it("rejects a non-boolean lifecycleOnly without subscribing", async () => {
+          server.sessionResolver.bind("device-a", "session-device-a");
+          const socket = await subscribeLifecycleOnly("yes");
+
+          expect(socket.getWrittenDataString()).toContain("lifecycleOnly must be a boolean");
+          expect(socket.getWrittenDataString()).toContain('"success":false');
+          server.pushDeviceSessionEnded(record());
+          expect(frames(socket).filter((f) => f.type === "device_session_ended")).toHaveLength(0);
+        });
       });
 
       it("restore boundary carries reason and restored pushes use the new UUID", () => {

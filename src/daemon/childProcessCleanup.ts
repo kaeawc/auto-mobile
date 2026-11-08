@@ -1,3 +1,4 @@
+import { stopVisionosRunners } from "../features/visionos/VisionosRunnerLifecycle";
 import { invalidateAndroidInventoryProvenanceAndCatalog } from "../utils/AndroidInventoryInvalidation";
 import type { VideoRecordingRecord } from "../db/videoRecordingRepository";
 import {
@@ -36,6 +37,7 @@ export interface DaemonChildProcessCleanupDependencies {
   shutdownIOSCtrlProxies(): Promise<void>;
   stopWatchRunners(): void;
   stopTvosRunners?(): void;
+  stopVisionosRunners?(): void;
   timer?: Timer;
   timeoutMs?: number;
 }
@@ -53,6 +55,7 @@ const defaultDependencies: DaemonChildProcessCleanupDependencies = {
   shutdownIOSCtrlProxies: () => IOSCtrlProxyManager.shutdownAll(),
   stopWatchRunners,
   stopTvosRunners,
+  stopVisionosRunners,
 };
 
 /**
@@ -66,6 +69,7 @@ export async function cleanupDaemonChildProcesses(
   dependencies.shutdownInventoryReads?.();
   dependencies.stopWatchRunners();
   dependencies.stopTvosRunners?.();
+  dependencies.stopVisionosRunners?.();
   const timer = dependencies.timer ?? defaultTimer;
   const timeoutMs = dependencies.timeoutMs ?? CHILD_PROCESS_CLEANUP_TIMEOUT_MS;
   const recordingIds = new Set<string>();

@@ -9,3 +9,14 @@ android/desktop-app/.* run-main-desktop true
 android/desktop-core/.* run-main-desktop true
 \.circleci/.* run-main-desktop true
 scripts/ci/circleci-main-superseded\.sh run-main-desktop true
+src/.* run-main-linux true
+test/.* run-main-linux true
+scripts/.* run-main-linux true
+benchmark/.* run-main-linux true
+schemas/.* run-main-linux true
+package\.json run-main-linux true
+bun\.lock run-main-linux true
+bunfig\.toml run-main-linux true
+turbo\.json run-main-linux true
+tsconfig[^/]*\.json run-main-linux true
+\.circleci/.* run-main-linux true

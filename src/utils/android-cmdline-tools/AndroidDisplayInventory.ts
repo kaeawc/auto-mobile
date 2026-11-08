@@ -4,7 +4,12 @@ import type { DisplayInventoryOutcome } from "../../models/DeviceInfo";
 import type { AdbCommandRunner } from "./interfaces/AdbExecutor";
 import { logger } from "../logger";
 import { errorMessage } from "../describeUnknownError";
-import { parseSurfaceFlingerDisplayIds } from "./AndroidDisplayParsers";
+import { BUILD_CHARACTERISTICS_PROP, parseTraitFormFactor } from "./deviceTraits";
+import {
+  parseSurfaceFlingerDisplayIds,
+  virtualDisplayKey,
+  virtualDisplayOwnerPackage,
+} from "./AndroidDisplayParsers";
 
 interface AndroidDisplayRecord {
   key: string;
@@ -99,14 +104,60 @@ function parseDisplayType(value: string | undefined): AndroidDisplayRecord["type
   }
 }
 
-/** Overlay displays keep their whole `overlay:<n>` id; physical panels key by the bare id. */
+/**
+ * Overlay displays keep their whole `overlay:<n>` id, app-created virtual displays key as
+ * `virtual:<package>:<name>`, and physical panels key by the bare id.
+ */
 function displayRecordKey(
   type: AndroidDisplayRecord["type"] | undefined,
   uniqueId: string,
 ): string | undefined {
-  return type === "OVERLAY"
-    ? /^overlay:.+$/.exec(uniqueId)?.[0]
-    : /^(?:local|external|virtual):(.+)$/.exec(uniqueId)?.[1];
+  if (type === "OVERLAY") {
+    return /^overlay:.+$/.exec(uniqueId)?.[0];
+  }
+  return (
+    (type === "VIRTUAL" ? virtualDisplayKey(uniqueId) : undefined) ??
+    /^(?:local|external|virtual):(.+)$/.exec(uniqueId)?.[1]
+  );
+}
+
+/**
+ * Owners of AutoMobile's own virtual displays. The video server runs under `app_process` as the
+ * shell uid, so its recording display is owned by `com.android.shell`; listing it would change the
+ * inventory, and every inventory-keyed cache, each time a recording starts or stops.
+ */
+const SELF_OWNED_VIRTUAL_DISPLAY_PACKAGES: readonly string[] = ["com.android.shell"];
+const SELF_OWNED_VIRTUAL_DISPLAY_PACKAGE_PREFIX = "dev.jasonpearson.automobile";
+
+function isSelfOwnedVirtualDisplay(key: string): boolean {
+  const owner = virtualDisplayOwnerPackage(key);
+  return (
+    owner !== undefined &&
+    (SELF_OWNED_VIRTUAL_DISPLAY_PACKAGES.includes(owner) ||
+      owner === SELF_OWNED_VIRTUAL_DISPLAY_PACKAGE_PREFIX ||
+      owner.startsWith(`${SELF_OWNED_VIRTUAL_DISPLAY_PACKAGE_PREFIX}.`))
+  );
+}
+
+/**
+ * App-created virtual displays that tools may target. AutoMobile's own displays are left out, and
+ * so is any key two live displays share (one app showing two same-named displays), because a key
+ * that names two displays cannot target either.
+ */
+function addressableVirtualRecords(
+  records: readonly AndroidDisplayRecord[],
+): AndroidDisplayRecord[] {
+  const virtuals = records.filter(
+    (record) =>
+      record.type === "VIRTUAL" &&
+      record.key.startsWith("virtual:") &&
+      !isSelfOwnedVirtualDisplay(record.key),
+  );
+  const counts = new Map<string, number>();
+  for (const record of virtuals) {
+    counts.set(record.key, (counts.get(record.key) ?? 0) + 1);
+  }
+  return virtuals.filter((record) => counts.get(record.key) === 1);
 }
 
 function parseAndroidDisplayDeviceInfo(line: string): AndroidDisplayRecord | undefined {
@@ -191,58 +242,107 @@ export function parseAndroidPostures(output: string): Posture[] {
 }
 
 /**
- * Split display-service records into SurfaceFlinger-backed physical panels and overlay displays.
- * Overlay displays (`settings put global overlay_display_devices ...`) have no SurfaceFlinger
- * physical id; they are kept so tools can address them by their `overlay:<n>` key.
+ * Split display-service records into SurfaceFlinger-backed physical panels and addressable
+ * non-panel displays. Overlay displays (`settings put global overlay_display_devices ...`) and
+ * app-created virtual displays (`DisplayManager.createVirtualDisplay`) have no SurfaceFlinger
+ * physical id; they are kept so tools can address them by their `overlay:<n>` or
+ * `virtual:<package>:<name>` key.
  */
 function partitionDisplayRecords(
   physicalIdsOutput: string,
   displayDeviceInfosOutput: string,
-): { physical: AndroidDisplayRecord[]; overlays: AndroidDisplayRecord[] } {
+): {
+  physical: AndroidDisplayRecord[];
+  overlays: AndroidDisplayRecord[];
+  virtuals: AndroidDisplayRecord[];
+} {
   const ids = parseSurfaceFlingerDisplayIds(physicalIdsOutput);
   const records = parseAndroidDisplayDeviceInfos(displayDeviceInfosOutput);
   return {
     physical: records.filter((record) => record.type !== "OVERLAY" && ids.has(record.key)),
     overlays: records.filter((record) => record.type === "OVERLAY"),
+    virtuals: addressableVirtualRecords(records),
   };
 }
 
 /** Join SurfaceFlinger physical IDs to display service physical-panel records, then overlays. */
+/** Inventory parse options that the display dumps alone cannot establish. */
+export interface AndroidDisplayParseOptions {
+  /** The device positively announced an automotive build (`ro.build.characteristics`). */
+  automotive?: boolean;
+}
+
+/**
+ * Role of each physical record. On a handheld, two differently sized built-in panels are a
+ * foldable's inner and cover panels. On a car they are the center display and the instrument
+ * cluster: the first largest built-in panel keeps `inner`, every other built-in one is `cluster`.
+ */
+function physicalPanelRoles(
+  records: readonly AndroidDisplayRecord[],
+  automotive: boolean,
+): PanelRole[] {
+  const internal = records.filter((record) => record.type === "INTERNAL");
+  const area = (record: AndroidDisplayRecord) => record.sizePx.width * record.sizePx.height;
+  const areas = internal.map(area);
+  const largest = Math.max(...areas);
+  const smallest = Math.min(...areas);
+  const primary = internal.find((record) => area(record) === largest);
+  return records.map((record) => {
+    if (record.type !== "INTERNAL") {
+      return "external";
+    }
+    if (automotive && internal.length > 1) {
+      return record === primary ? "inner" : "cluster";
+    }
+    if (internal.length > 1 && largest > smallest) {
+      return area(record) === largest ? "inner" : area(record) === smallest ? "cover" : "unknown";
+    }
+    return "unknown";
+  });
+}
+
 export function parseAndroidDeviceDisplays(
   physicalIdsOutput: string,
   displayDeviceInfosOutput: string,
   statesOutput: string,
+  options: AndroidDisplayParseOptions = {},
 ): DeviceDisplays | undefined {
-  const { physical: records, overlays } = partitionDisplayRecords(
-    physicalIdsOutput,
-    displayDeviceInfosOutput,
-  );
-  // Single-screen devices without an overlay display retain their pre-existing inventory JSON
-  // shape; overlays alone (no readable physical panel) cannot establish an inventory.
-  if (records.length === 0 || records.length + overlays.length < 2) {
+  const {
+    physical: records,
+    overlays,
+    virtuals,
+  } = partitionDisplayRecords(physicalIdsOutput, displayDeviceInfosOutput);
+  // Single-screen devices without an overlay or virtual display retain their pre-existing
+  // inventory JSON shape; those alone (no readable physical panel) cannot establish an inventory.
+  if (records.length === 0 || records.length + overlays.length + virtuals.length < 2) {
     return undefined;
   }
-  const internal = records.filter((record) => record.type === "INTERNAL");
-  const areas = internal.map((record) => record.sizePx.width * record.sizePx.height);
-  const largest = Math.max(...areas);
-  const smallest = Math.min(...areas);
-  const panels: DisplayPanel[] = records.map((record) => {
-    let role: PanelRole = "unknown";
-    if (record.type !== "INTERNAL") {
-      role = "external";
-    } else if (internal.length > 1 && largest > smallest) {
-      const area = record.sizePx.width * record.sizePx.height;
-      role = area === largest ? "inner" : area === smallest ? "cover" : "unknown";
-    }
-    return { key: record.key, role, sizePx: record.sizePx };
-  });
-  // Physical panels come first so inventory-order fallbacks never land on an overlay.
-  const overlayPanels: DisplayPanel[] = overlays.map((record) => ({
+  const automotive = options.automotive === true;
+  const roles = physicalPanelRoles(records, automotive);
+  const panels: DisplayPanel[] = records.map((record, index) => ({
     key: record.key,
-    role: "overlay",
+    role: roles[index],
     sizePx: record.sizePx,
   }));
-  return { panels: [...panels, ...overlayPanels], postures: parseAndroidPostures(statesOutput) };
+  // Physical panels come first so inventory-order fallbacks never land on an overlay or virtual
+  // display.
+  const nonPanel = (role: PanelRole) => (record: AndroidDisplayRecord) => ({
+    key: record.key,
+    role,
+    sizePx: record.sizePx,
+  });
+  return {
+    panels: [...panels, ...overlays.map(nonPanel("overlay")), ...virtuals.map(nonPanel("virtual"))],
+    postures: automotive ? carPostures(statesOutput) : parseAndroidPostures(statesOutput),
+  };
+}
+
+/**
+ * A car reports no fold posture; the `unknown` placeholder a handheld inventory carries would
+ * otherwise read as posture support and offer setPosture as a remedy.
+ */
+function carPostures(statesOutput: string): Posture[] {
+  return parseAndroidPostures(statesOutput).filter((posture) => posture !== "unknown");
 }
 
 /** Distinguish a proven single panel from a failed physical-display join. */
@@ -251,20 +351,56 @@ export function parseAndroidDeviceDisplayOutcome(
   displayDeviceInfosOutput: string,
   statesOutput: string,
 ): DisplayInventoryOutcome {
-  const { physical: matched, overlays } = partitionDisplayRecords(
-    physicalIdsOutput,
-    displayDeviceInfosOutput,
-  );
+  const {
+    physical: matched,
+    overlays,
+    virtuals,
+  } = partitionDisplayRecords(physicalIdsOutput, displayDeviceInfosOutput);
   if (matched.length === 0) {
     return { kind: "unreadable", reason: "no matched physical display records" };
   }
-  if (matched.length === 1 && overlays.length === 0) {
+  if (matched.length === 1 && overlays.length === 0 && virtuals.length === 0) {
     return { kind: "single" };
   }
   // The existing parser owns panel roles and posture extraction.
   return parseAndroidDeviceDisplays(physicalIdsOutput, displayDeviceInfosOutput, statesOutput)
     ? { kind: "multi" }
     : { kind: "unreadable", reason: "physical display records could not be parsed" };
+}
+
+/**
+ * Only an inventory with two or more built-in panels and no fold posture can be a car's center
+ * display plus instrument cluster, so phones and foldables never pay for the build probe.
+ */
+function mayBeCarDisplays(displays: DeviceDisplays | undefined): boolean {
+  const builtIn = displays?.panels.filter(
+    (panel) => panel.role === "inner" || panel.role === "cover" || panel.role === "unknown",
+  );
+  return (
+    (builtIn?.length ?? 0) > 1 &&
+    displays?.postures.every((posture) => posture === "unknown") === true
+  );
+}
+
+async function readsAsAutomotive(adb: AdbCommandRunner, signal?: AbortSignal): Promise<boolean> {
+  try {
+    const result = await adb.executeCommand(`shell getprop ${BUILD_CHARACTERISTICS_PROP}`, {
+      timeoutMs: 2000,
+      noRetry: true,
+      signal,
+    });
+    signal?.throwIfAborted();
+    return parseTraitFormFactor(result.stdout) === "automotive";
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
+    // The build class is advisory: an unreadable prop keeps today's handheld classification.
+    logger.warn(
+      `Android build characteristics unavailable for display roles: ${errorMessage(error)}`,
+    );
+    return false;
+  }
 }
 
 /** Optional, bounded inventory enrichment through the device-bound ADB seam. */
@@ -319,11 +455,15 @@ export async function readAndroidDeviceDisplaysChecked(
   if (outcome.kind === "unreadable") {
     logger.warn(`Android display inventory could not be read: ${outcome.reason}`);
   }
+  const handheld =
+    outcome.kind === "multi"
+      ? parseAndroidDeviceDisplays(output(0), output(1), output(2))
+      : undefined;
+  const automotive = mayBeCarDisplays(handheld) && (await readsAsAutomotive(adb, signal));
   return {
-    displays:
-      outcome.kind === "multi"
-        ? parseAndroidDeviceDisplays(output(0), output(1), output(2))
-        : undefined,
+    displays: automotive
+      ? parseAndroidDeviceDisplays(output(0), output(1), output(2), { automotive })
+      : handheld,
     degraded: results[0].status === "rejected" || results[1].status === "rejected",
     outcome,
   };

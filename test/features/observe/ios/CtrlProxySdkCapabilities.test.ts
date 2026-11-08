@@ -85,7 +85,7 @@ const available: ProbeReply = {
   success: true,
   available: true,
   bundleId: "com.example.sdk",
-  capabilities: ["database", "highlight", "network_mocking", "magic_tap"],
+  capabilities: ["database", "highlight", "network_mocking", "magic_tap", "accessibility_focus"],
 };
 const timeoutFailure = {
   code: "timeout",
@@ -505,7 +505,13 @@ describe("SDK capability transport uncertainty", () => {
     expect(timer.now()).toBe(IOS_HIERARCHY_REQUEST_TIMEOUT_MS);
   });
 
-  test.each(["database", "network_mocking", "highlight", "magic_tap"] as const)(
+  test.each([
+    "database",
+    "network_mocking",
+    "highlight",
+    "magic_tap",
+    "accessibility_focus",
+  ] as const)(
     "%s gates propagate a retryable disconnection instead of SDK absence",
     async (capability) => {
       const { probe, state } = createHarness();

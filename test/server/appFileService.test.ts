@@ -98,6 +98,9 @@ describe("AppFileService", () => {
         if (cleanupFails) {
           adb.setCommandError("shell rm -f", new Error("cleanup denied"));
         }
+        // a.txt is a document and is confirmed in the MediaStore file collection; b.png never
+        // reaches the images collection, so the batch fails on it.
+        adb.setCommandResponse("content://media/external_primary/file", execResult("Row: 0 _id=1"));
         const sharedStorageService = createSharedStorageServiceForTesting({
           adbFactory: adbFactoryFor(adb),
           timer,
@@ -1213,6 +1216,45 @@ describe("AppFileService", () => {
     ]);
   });
 
+  test("reports document_picker completed only after MediaStore confirms each scanned file (#17264)", async () => {
+    const executor = new FakeAdbExecutor();
+    executor.setCommandResponse("content query", execResult("Row: 0 _id=7"));
+    const sharedStorageService = createSharedStorageServiceForTesting({
+      adbFactory: adbFactoryFor(executor),
+      timer: new FakeTimer(),
+      createUserResolver: () => ({ resolve: async () => ({ userId: 0, source: "primary" }) }),
+    });
+    const service = createAppFileServiceForTesting({ sharedStorageService });
+    const names = ["a.pdf", "a.txt", "a.doc", "a.png", "clip.mp4"];
+
+    const result = await service.putFile({
+      device: { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
+      target: { domain: "user_files", namespace: "picker-docs", indexMedia: true },
+      files: names.map((destinationPath) => ({ contentText: "x", destinationPath })),
+    });
+
+    expect(result.files.map((file) => file.effects)).toEqual(
+      names.map(() => [
+        {
+          type: "document_picker",
+          status: "completed",
+          reason:
+            "MediaStore verified the file in Downloads for device emulator-5554, resolved profile 0, namespace picker-docs",
+        },
+        { type: "media_index", status: "completed" },
+      ]),
+    );
+    const commands = executor.getExecutedCommands();
+    expect(commands.filter((command) => command.includes("MEDIA_SCANNER_SCAN_FILE"))).toHaveLength(
+      names.length,
+    );
+    expect(
+      commands.filter((command) =>
+        command.includes("--uri content://media/external_primary/file "),
+      ),
+    ).toHaveLength(3);
+  });
+
   test("stages user_files in the resolved profile Downloads namespace with document-picker effects", async () => {
     const executor = new FakeAdbExecutor();
     let resolveCalls = 0;
@@ -1240,20 +1282,26 @@ describe("AppFileService", () => {
       ],
     });
 
-    expect(result.files.map((file) => file.effects[0])).toEqual([
-      {
-        type: "document_picker",
-        status: "completed",
-        reason:
-          "document fixture is available in Downloads for device emulator-5554, resolved profile 10, namespace picker-run",
-      },
-      {
-        type: "document_picker",
-        status: "completed",
-        reason:
-          "document fixture is available in Downloads for device emulator-5554, resolved profile 10, namespace picker-run",
-      },
-    ]);
+    // indexMedia defaults to false: the files are not scanned, so the picker is not claimed.
+    expect(result.files.map((file) => file.effects)).toEqual(
+      [1, 2].map(() => [
+        {
+          type: "document_picker",
+          status: "notRequested",
+          reason:
+            "file is in Downloads for device emulator-5554, resolved profile 10, namespace picker-run but was not media-scanned; " +
+            "the system document picker may not list it. Set target.indexMedia to true to scan it",
+        },
+        {
+          type: "media_index",
+          status: "notRequested",
+          reason: "media indexing was disabled by indexMedia=false",
+        },
+      ]),
+    );
+    expect(
+      executor.getExecutedCommands().some((command) => command.includes("MEDIA_SCANNER_SCAN_FILE")),
+    ).toBe(false);
     expect(
       executor
         .getExecutedCommands()

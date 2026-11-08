@@ -66,7 +66,7 @@ describe("sharedStorageService pushes through a hidden temp file", () => {
   test("pushes beside the destination, then renames into place (one extra adb call per file)", async () => {
     const { executor, stage } = setup();
 
-    await stage({ files: [fileAt("docs/a.txt")] });
+    await stage({ indexMedia: false, files: [fileAt("docs/a.txt")] });
 
     const temp = `${DIR}/docs/.automobile-t-1.part`;
     // Before: resolve user, mkdir x2, push. After: the same plus one `mv -f` per file.

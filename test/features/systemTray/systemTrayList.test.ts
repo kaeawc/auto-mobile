@@ -7,6 +7,7 @@ import generatedDefinitions from "../../../schemas/tool-definitions.json";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import {
   listSystemTrayNotifications,
+  listSystemTrayNotificationsForClear,
   NotificationShadeNotOpenError,
   waitForNotificationMatch,
   resolveUniqueTrayAppLabel,
@@ -2842,6 +2843,55 @@ describe("systemTray list prototype tags", () => {
       undefined,
       "proto:kept",
     ]);
+  });
+
+  // #16512: A and B render identical text; A is cancelled while the shade is
+  // paged, so the after dump names only B for the row retained from page one.
+  const cancelledMidScan = (adb: FakeAdbExecutor, ...extra: string[]) =>
+    adb.setCommandResponseSequence("dumpsys notification", [
+      execResult(
+        dumpsys(
+          record("proto:a", "Same", "Body of Same", { id: 1 }),
+          record("proto:b", "Same", "Body of Same", { id: 2 }),
+          ...extra,
+        ),
+      ),
+      execResult(dumpsys(record("proto:b", "Same", "Body of Same", { id: 2 }), ...extra)),
+    ]);
+
+  test("keeps a retained header row untagged when a competitor is cancelled mid-scan", async () => {
+    const { adb } = setup([page(row("Same")), page(row("Later"))]);
+    cancelledMidScan(adb, record("proto:later", "Later", "Body of Later", { id: 3 }));
+    const result = await list();
+    expect(result.swipes).toBe(1);
+    expect(result.notifications).toMatchObject([
+      { title: "Same", ownership: "header" },
+      { title: "Later", ownership: "header", tag: "proto:later" },
+    ]);
+    expect(result.notifications[0]).not.toHaveProperty("tag");
+    // One pre-swipe read for the header page and one after the scan.
+    expect(adb.getExecutedCommands().filter((command) => command.includes("dumpsys"))).toEqual([
+      "shell dumpsys notification --noredact",
+      "shell dumpsys notification --noredact",
+    ]);
+  });
+
+  test("keeps a retained header-less row untagged when a competitor is cancelled mid-scan", async () => {
+    const { adb } = setup([page(silentRow("Same")), page(silentRow("Later"))]);
+    cancelledMidScan(adb, record("proto:later", "Later", "Body of Later", { id: 3 }));
+    const result = await list();
+    expect(result.swipes).toBe(1);
+    expect(result.notifications).toMatchObject([
+      { title: "Same", ownership: "dumpsys" },
+      { title: "Later", ownership: "dumpsys", tag: "proto:later" },
+    ]);
+    expect(result.notifications[0]).not.toHaveProperty("tag");
+  });
+
+  test("does not read a tag snapshot before swiping when tags are not requested", async () => {
+    const { adb } = setup([page(row("Same")), page(row("Later"))]);
+    await listSystemTrayNotificationsForClear(device, APP, "Messages", { awaitTimeoutMs: 5000 });
+    expect(adb.getExecutedCommands().some((command) => command.includes("dumpsys"))).toBe(false);
   });
 
   test("lists header rows without tags when the dump cannot be read", async () => {

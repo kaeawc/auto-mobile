@@ -105,7 +105,13 @@ also reads pen data (**Source**):
 
 - **Pen nodes.** `InputNodeDiscovery.ts` finds the touch node and any separate
   single-touch pen node (`ABS_X`/`ABS_Y` plus `BTN_TOOL_PEN` or `BTN_TOOL_RUBBER`), and
-  `GetEventReader` runs one `getevent -lt` process per node. An all-node `getevent -lt`
+  `GetEventReader` runs one `getevent -lt` process per node. The recording session shares
+  one merge across the primary and hotplug pen readers, ordering by bracketed kernel
+  timestamp within a 50 ms reorder window before reconstruction, with
+  insertion order for ties and original host arrival times preserved. Trailing lines
+  drain on a timer; unstamped lines pass through immediately. Stopping a reader drops
+  only its nodes' pending lines.
+  An all-node `getevent -lt`
   monitor watches add/remove notifications throughout recording. Added nodes are probed
   with `getevent -lp <path>`; only pen-kind nodes get a reader and a timeline following
   the current display geometry. Removal stops that reader and cancels pending discovery.

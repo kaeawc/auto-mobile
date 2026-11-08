@@ -2,14 +2,19 @@ import type { BootedDevice } from "../../models";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { SystemTrayArgs, SystemTrayNotificationArgs } from "./systemTrayTypes";
 import type { ProgressCallback } from "../action/BaseVisualChange";
-import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosInstalledApp";
+import {
+  getIosInstalledAppBundleId,
+  getIosInstalledAppDisplayName,
+} from "../../utils/ios-cmdline-tools/iosInstalledApp";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { createNotificationUIDetector } from "./createNotificationUIDetector";
+import { WatchSystemTray } from "./WatchSystemTray";
 import {
   getSystemTrayDependencies,
+  notificationNotFoundError,
   waitForNotificationMatch,
   clearMatchingSystemTrayNotifications,
   clearIosSystemTrayNotifications,
@@ -193,10 +198,16 @@ const readCompleteTrayAppIds = async (
   ];
 };
 
-const readCompleteIosTrayAppIds = async (
+/** Bundle ids plus each app's display name, which is what iOS notification rows carry (#17388). */
+interface IosTrayApps {
+  appIds: string[];
+  displayNames: Map<string, string>;
+}
+
+const readCompleteIosTrayApps = async (
   device: BootedDevice,
   signal?: AbortSignal,
-): Promise<string[]> => {
+): Promise<IosTrayApps> => {
   throwIfAborted(signal);
   const inventory = await awaitWhileRequestIsLive(
     Promise.resolve(
@@ -211,9 +222,27 @@ const readCompleteIosTrayAppIds = async (
       `Cannot verify notification ownership because the installed apps could not be listed; the installed-app inventory is incomplete.${reason}`,
     );
   }
-  return inventory.apps
-    .map(getIosInstalledAppBundleId)
-    .filter((bundleId): bundleId is string => bundleId !== undefined);
+  const appIds: string[] = [];
+  const namesByBundleId = new Map<string, string>();
+  const nameCounts = new Map<string, number>();
+  for (const app of inventory.apps) {
+    const bundleId = getIosInstalledAppBundleId(app);
+    if (bundleId === undefined) {
+      continue;
+    }
+    appIds.push(bundleId);
+    const displayName = getIosInstalledAppDisplayName(app);
+    if (displayName !== undefined) {
+      namesByBundleId.set(bundleId, displayName);
+      nameCounts.set(displayName, (nameCounts.get(displayName) ?? 0) + 1);
+    }
+  }
+  // A name shared by several installed apps cannot attribute a row to one of
+  // them, so only unambiguous names are matchable; bundle ids always are.
+  const displayNames = new Map(
+    [...namesByBundleId].filter(([, name]) => nameCounts.get(name) === 1),
+  );
+  return { appIds, displayNames };
 };
 
 function applyStalledClearAll(
@@ -296,6 +325,11 @@ export class SystemTray {
     const { signal } = this;
     try {
       throwIfAborted(signal);
+      if (this.device.platform === "android" && this.device.formFactor === "watch") {
+        const watch = await new WatchSystemTray(this.device, signal).execute(args);
+        await captureSystemTrayTerminalEvidence(this.device, watch.observation, signal);
+        return watch.outcome;
+      }
       const awaitTimeoutMs = resolveSystemTrayAwaitTimeout(args.awaitTimeout);
       switch (args.action) {
         case "open":
@@ -418,19 +452,30 @@ export class SystemTray {
 
     if (notification.appId) {
       throwIfAborted(signal);
-      installedApps =
-        device.platform === "android"
-          ? await awaitWhileRequestIsLive(readCompleteTrayAppIds(device, signal), signal)
-          : await readCompleteIosTrayAppIds(device, signal);
+      let iosDisplayNames: Map<string, string> | undefined;
+      if (device.platform === "android") {
+        installedApps = await awaitWhileRequestIsLive(
+          readCompleteTrayAppIds(device, signal),
+          signal,
+        );
+      } else {
+        const iosApps = await readCompleteIosTrayApps(device, signal);
+        installedApps = iosApps.appIds;
+        iosDisplayNames = iosApps.displayNames;
+      }
       if (!installedApps.includes(notification.appId)) {
         throw new ActionableError(`App ${notification.appId} is not installed.`);
       }
 
       throwIfAborted(signal);
-      appLabel = await awaitWhileRequestIsLive(
-        getSystemTrayDependencies().appLabelResolver(device, notification.appId, signal),
-        signal,
-      );
+      // iOS rows show the display name ("MESSAGES"), never the bundle id; the
+      // listing already carries it, so no per-app lookup is needed (#17388).
+      appLabel =
+        iosDisplayNames?.get(notification.appId) ??
+        (await awaitWhileRequestIsLive(
+          getSystemTrayDependencies().appLabelResolver(device, notification.appId, signal),
+          signal,
+        ));
       appMatchTexts = [appLabel, notification.appId].filter(Boolean) as string[];
     }
     return { notification, appLabel, appMatchTexts, installedApps };
@@ -447,7 +492,7 @@ export class SystemTray {
     );
 
     if (!match) {
-      throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
+      throw notificationNotFoundError(device, observation, awaitTimeoutMs);
     }
 
     await captureSystemTrayTerminalEvidence(device, observation, signal);
@@ -470,7 +515,7 @@ export class SystemTray {
     });
 
     if (!initialMatch.match) {
-      throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
+      throw notificationNotFoundError(device, initialMatch.observation, awaitTimeoutMs);
     }
 
     const { observation: baseline, match } = await expandAndRematchIfCollapsed(
@@ -535,7 +580,7 @@ export class SystemTray {
     });
 
     if (!initialMatch.match) {
-      throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
+      throw notificationNotFoundError(device, initialMatch.observation, awaitTimeoutMs);
     }
 
     const { match, observation: swipeObservation } = await expandAndRematchIfCollapsed(

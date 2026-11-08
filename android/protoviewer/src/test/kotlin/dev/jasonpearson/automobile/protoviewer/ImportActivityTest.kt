@@ -35,8 +35,16 @@ class ImportActivityTest {
         UnconfinedTestDispatcher(),
         importer = importer,
         settings = FakeSettingsStore(),
+        blocklist = FakeContentBlocklist(),
       )
     }
+  }
+
+  @Test
+  fun onlyTheLibrarysHiddenRejectionGetsTheHiddenMessage() {
+    assertTrue(LibraryImportResult.Rejected("library", LibraryError.Hidden.name).isHidden)
+    assertFalse(LibraryImportResult.Rejected("library", LibraryError.Limit.name).isHidden)
+    assertFalse(LibraryImportResult.Rejected("spec.json", LibraryError.Hidden.name).isHidden)
   }
 
   @Test

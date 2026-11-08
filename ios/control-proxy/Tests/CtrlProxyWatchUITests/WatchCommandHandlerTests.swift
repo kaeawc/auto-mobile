@@ -33,8 +33,8 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertFalse(coordinator.recordDeflectedFailure("After truncated gesture"))
     }
 
-    func testAllowlistContainsExactlyHierarchyTapSwipeHomeAndCrown() {
-        XCTAssertEqual(WatchCommandHandler.supportedCommands, ["hierarchy", "tap", "swipe", "home", "crown"])
+    func testAllowlistContainsExactlySupportedCommands() {
+        XCTAssertEqual(WatchCommandHandler.supportedCommands, ["hierarchy", "tap", "swipe", "home", "crown", "type"])
     }
 
     func testEveryOtherCommandReturnsStructuredUnsupportedError() throws {
@@ -63,7 +63,7 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertEqual(event.type, "connected")
         XCTAssertEqual(event.id, 7)
         XCTAssertEqual(event.platform, "watchos")
-        XCTAssertEqual(event.supportedCommands, ["hierarchy", "tap", "swipe", "home", "crown"])
+        XCTAssertEqual(event.supportedCommands, ["hierarchy", "tap", "swipe", "home", "crown", "type"])
         XCTAssertEqual(event.supportedFeatures, [])
     }
 
@@ -81,6 +81,50 @@ final class WatchCommandHandlerTests: XCTestCase {
             XCTAssertTrue(handler.handle(Data("{\"type\":\"swipe\",\"direction\":\"\(direction)\"}".utf8)).success)
         }
         XCTAssertEqual(source.calls, ["hierarchy", "tap:12.5,20.0", "tap:counter", "up", "down", "left", "right"])
+    }
+
+    func testSwipeDistanceIsForwardedAndValidated() {
+        let source = FakeWatchSource()
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        XCTAssertTrue(handler.handle(Data(#"{"type":"swipe","direction":"up","distance":0.4}"#.utf8)).success)
+        XCTAssertEqual(source.calls, ["up:0.4"])
+        for distance in ["0", "-0.1", "1.5"] {
+            let command = "{\"type\":\"swipe\",\"direction\":\"up\",\"distance\":\(distance)}"
+            XCTAssertFalse(handler.handle(Data(command.utf8)).success)
+        }
+        XCTAssertEqual(source.calls, ["up:0.4"])
+    }
+
+    func testTypeReturnsResultAndUsesInjectedGesture() {
+        let source = FakeWatchSource()
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        let response = handler.handle(Data(#"{"type":"type","requestId":"t","text":"Hello 🐾"}"#.utf8))
+        XCTAssertTrue(response.success)
+        XCTAssertEqual(response.type, "type_result")
+        XCTAssertEqual(response.requestId, "t")
+        XCTAssertEqual(source.calls, ["type:Hello 🐾"])
+    }
+
+    func testTypeRejectsEmptyOrMissingTextWithoutGestures() {
+        let source = FakeWatchSource()
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        for json in [#"{"type":"type","text":""}"#, #"{"type":"type"}"#] {
+            let response = handler.handle(Data(json.utf8))
+            XCTAssertFalse(response.success)
+            XCTAssertEqual(response.errorCode, "invalid_request")
+            XCTAssertEqual(response.error, "type requires non-empty text")
+        }
+        XCTAssertEqual(source.calls, [])
+    }
+
+    func testTypeFailureBecomesStructuredError() {
+        let source = FakeWatchSource()
+        source.shouldFail = true
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        let response = handler.handle(Data(#"{"type":"type","text":"Hello"}"#.utf8))
+        XCTAssertFalse(response.success)
+        XCTAssertEqual(response.errorCode, "command_failed")
+        XCTAssertEqual(response.error, "No focused text field; tap the field first")
     }
 
     func testHomeReturnsResultAndUsesInjectedGesture() {
@@ -101,6 +145,50 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertEqual(response.type, "crown_result")
         XCTAssertEqual(response.requestId, "c")
         XCTAssertEqual(source.calls, ["crown:0.5,1.0"])
+    }
+
+    func testCrownEffectComparesNodeTreeNotTimestamp() {
+        func hierarchy(_ label: String, timestamp: Int64) -> SdkViewHierarchy {
+            SdkViewHierarchy(
+                timestamp: timestamp, screenScale: 1, screenWidth: 208, screenHeight: 248,
+                root: SdkViewNode(
+                    className: "Window", bounds: SdkBounds(left: 0, top: 0, right: 208, bottom: 248),
+                    accessibilityLabel: label
+                )
+            )
+        }
+        XCTAssertFalse(watchCrownChangedHierarchy(
+            before: hierarchy("crown 0.00", timestamp: 1), after: hierarchy("crown 0.00", timestamp: 2)
+        ))
+        XCTAssertTrue(watchCrownChangedHierarchy(
+            before: hierarchy("crown 0.00", timestamp: 1), after: hierarchy("crown 8.71", timestamp: 2)
+        ))
+    }
+
+    func testUnchangedHierarchyAfterCrownReturnsCommandFailed() throws {
+        let source = ScriptedCrownSource(labels: ["crown 0", "crown 0", "crown 0"])
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        let response = handler.handle(Data(#"{"type":"crown","requestId":"c","delta":2}"#.utf8))
+        XCTAssertFalse(response.success)
+        XCTAssertEqual(response.requestId, "c")
+        XCTAssertEqual(response.errorCode, "command_failed")
+        XCTAssertEqual(source.rotations, 1)
+    }
+
+    func testChangedHierarchyAfterCrownSucceeds() {
+        let source = ScriptedCrownSource(labels: ["crown 0", "crown 0", "crown 8"])
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        let response = handler.handle(Data(#"{"type":"crown","requestId":"c","delta":2}"#.utf8))
+        XCTAssertTrue(response.success)
+        XCTAssertEqual(response.type, "crown_result")
+    }
+
+    func testCrownVerificationSkippedWhenSnapshotsUnavailable() {
+        let source = ScriptedCrownSource(labels: [])
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        let response = handler.handle(Data(#"{"type":"crown","requestId":"c","delta":2}"#.utf8))
+        XCTAssertTrue(response.success)
+        XCTAssertEqual(source.rotations, 1)
     }
 
     func testCrownUsesExplicitVelocity() {
@@ -205,8 +293,13 @@ private final class FakeWatchSource: WatchSnapshotSource, WatchGesturePerformer 
         calls.append("tap:\(identifier)")
     }
 
-    func swipe(_ direction: WatchSwipeDirection) throws {
-        calls.append(direction.rawValue)
+    func swipe(_ direction: WatchSwipeDirection, distance: Double?) throws {
+        calls.append(distance.map { "\(direction.rawValue):\($0)" } ?? direction.rawValue)
+    }
+
+    func typeText(_ text: String) throws {
+        if shouldFail { throw WatchCommandError.commandFailed("No focused text field; tap the field first") }
+        calls.append("type:\(text)")
     }
 
     func home() throws {
@@ -216,4 +309,35 @@ private final class FakeWatchSource: WatchSnapshotSource, WatchGesturePerformer 
     func rotateCrown(delta: Double, velocity: Double) throws {
         calls.append("crown:\(delta),\(velocity)")
     }
+}
+
+/// Drives the production crown verification through the handler with scripted snapshots.
+@MainActor
+private final class ScriptedCrownSource: WatchSnapshotSource, WatchGesturePerformer {
+    private var labels: [String]
+    private(set) var rotations = 0
+
+    init(labels: [String]) { self.labels = labels }
+
+    func snapshot() throws -> SdkViewHierarchy {
+        guard !labels.isEmpty else { throw WatchCommandError.commandFailed("Snapshot failed") }
+        let label = labels.removeFirst()
+        return SdkViewHierarchy(
+            timestamp: Int64(labels.count), screenScale: 1, screenWidth: 100, screenHeight: 100,
+            root: SdkViewNode(
+                className: "Window", bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100),
+                accessibilityLabel: label
+            )
+        )
+    }
+
+    func rotateCrown(delta _: Double, velocity _: Double) throws {
+        try watchVerifiedCrownRotation(snapshots: self) { rotations += 1 }
+    }
+
+    func tap(x _: Double, y _: Double) throws {}
+    func tap(identifier _: String) throws {}
+    func swipe(_: WatchSwipeDirection, distance _: Double?) throws {}
+    func typeText(_: String) throws {}
+    func home() throws {}
 }

@@ -63,6 +63,11 @@ SCRIPT
   cat > "${MOCK_BIN}/plutil" <<'SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
+printf 'plutil %s\n' "$*" >> "$BUILD_LOG"
+if [[ "$1 ${3:-} ${4:-} ${5:-}" == '-extract raw -o -' ]]; then
+  python3 -c 'import plistlib, sys; print(plistlib.load(open(sys.argv[2], "rb"))[sys.argv[1]])' "$2" "$6"
+  exit 0
+fi
 [[ "$1" == -replace || "$1" == -lint ]]
 SCRIPT
   cat > "${MOCK_BIN}/codesign" <<'SCRIPT'
@@ -194,6 +199,8 @@ compiles = [line for line in lines if ' swiftc ' in line]
 assert len(compiles) == 2
 assert all('-D PROTOVIEWER_ALLOW_CLEARTEXT' in line for line in compiles)
 assert all('PROTOVIEWER_ALLOW_CLEARTEXT' not in line for line in lines if line not in compiles)
+# A cleartext build is a dev build: it never keeps the store bundle ID (#14144).
+assert 'plutil -replace CFBundleIdentifier -string dev.jasonpearson.automobile.protoviewer.dev ' in '\n'.join(lines) + ' '
 # Agent, MCP-direct viewer and release entry points must not gain the dev opt-in.
 for path in Path(sys.argv[2]).glob('*.sh'):
     if path.name != 'protoviewer-build.sh':
@@ -208,6 +215,9 @@ PY
   run cat "$BUILD_LOG"
   [[ "$output" == *' swiftc '* ]]
   [[ "$output" != *'PROTOVIEWER_ALLOW_CLEARTEXT'* ]]
+  # Release-style builds keep the store bundle ID the artifact policy pins.
+  [[ "$output" == *'-replace CFBundleIdentifier -string dev.jasonpearson.automobile.protoviewer '* ]]
+  [[ "$output" != *'protoviewer.dev'* ]]
 }
 
 @test "compiles both string catalogs into localized bundle resources" {

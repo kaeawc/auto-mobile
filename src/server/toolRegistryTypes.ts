@@ -65,6 +65,8 @@ export interface InternalToolCallOptions {
   forPlan?: boolean;
   /** A plan step's tapAt geometry, for this one call (#15663). */
   tapAtPlanContext?: TapAtPlanContext;
+  /** A plan step's lock namespace, for this one call (#15663). */
+  planLockNamespace?: string;
   sessionUuid?: string;
   targetDevice?: BootedDevice;
   sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled">;
@@ -85,6 +87,8 @@ export interface InternalToolInvocationContext {
   args: Record<string, unknown>;
   /** Always present, so a nested call replaces rather than inherits a step's geometry. */
   tapAtPlanContext: TapAtPlanContext | undefined;
+  /** Always present, so a nested call never inherits a step's lock namespace. */
+  planLockNamespace: string | undefined;
   routingSessionUuid?: string;
   toolSelectionProfileUuid?: string;
   sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled">;
@@ -128,7 +132,7 @@ export interface ToolRegistrationOptions {
    */
   hidden?: boolean;
   outputSchema?: ZodType;
-  /** Accept the plan executor's internal coordination namespace. */
+  /** Run plan steps under the plan's lock namespace (`currentPlanLockNamespace`). */
   acceptsPlanLockNamespace?: boolean;
   /**
    * MCP Apps UI resource this tool renders through (issue #4669). When set, the
@@ -153,6 +157,13 @@ export interface PlainToolOptions<T = Record<string, unknown>> extends ToolRegis
   hostInventory?: boolean;
   /** See {@link ToolTraits.keepsImeRestorePending}. */
   keepsImeRestorePending?: boolean;
+  /**
+   * The handler flushes its target device's pending IME restore itself, once it has admitted the
+   * caller for that device; the registry never flushes before dispatch (#16579). A lifecycle tool
+   * whose ownership check runs inside the handler declares this, so a refused call never consumes
+   * another session's pending restore.
+   */
+  flushesImeRestoreAfterAdmission?: boolean;
 }
 
 /**

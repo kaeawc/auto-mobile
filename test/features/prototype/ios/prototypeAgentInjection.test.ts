@@ -12,6 +12,10 @@ import {
   type PrototypeAgentConnect,
 } from "../../../../src/features/prototype/ios/prototypeAgentInjection";
 import { PROTOTYPE_AGENT_PROTOCOL_VERSION } from "../../../../src/features/prototype/ios/prototypeAgentClient";
+import {
+  DEFAULT_CONNECT_ATTEMPTS,
+  DEFAULT_CONNECT_RETRY_DELAY_MS,
+} from "../../../../src/features/prototype/ios/RetryingPrototypeAgentConnector";
 import { noPrototypeAgentConnections } from "../../../../src/features/prototype/ios/iosPrototypeTransport";
 import type { BootedDevice } from "../../../../src/models";
 import { CountingIdGenerator } from "../../../../src/utils/IdGenerator";
@@ -389,6 +393,31 @@ describe("RetryingPrototypeAgentConnector", () => {
     ).rejects.toThrow("ECONNREFUSED");
     expect(inner.ports).toEqual([8770, 8770, 8770]);
     expect(timer.getSleepHistory()).toEqual([200, 200]);
+  });
+
+  test("the default budget waits out an agent that binds seconds after launch", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const socket = new FakePrototypeAgentSocket();
+    // A cold first launch on a fresh simulator: the listener is up only after ~10 s.
+    let refusals = 50;
+    const inner = {
+      async connect() {
+        if (refusals-- > 0) {
+          throw new Error("ECONNREFUSED");
+        }
+        return socket;
+      },
+    };
+
+    const connected = await new RetryingPrototypeAgentConnector(inner, timer).connect(8770);
+
+    expect(connected).toBe(socket);
+    const waited = timer.getSleepHistory().reduce((total, ms) => total + ms, 0);
+    expect(waited).toBe(10_000);
+    expect((DEFAULT_CONNECT_ATTEMPTS - 1) * DEFAULT_CONNECT_RETRY_DELAY_MS).toBeGreaterThanOrEqual(
+      14_000,
+    );
   });
 
   test("the production connect completes the authenticated handshake", async () => {

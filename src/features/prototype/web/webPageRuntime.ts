@@ -47,6 +47,28 @@ export function prototypeWebScreenView<View extends { dataset: { screen?: string
   return views.find((view) => view.dataset.screen === screen) ?? views[0];
 }
 
+/** Where the viewer is among the pre-rendered views' dimensions besides the screen. */
+export interface PrototypeWebViewKey {
+  readonly variant: string;
+  readonly revision: string;
+  readonly orientation: string;
+  /** Empty for a frame without postures, whose views carry none. */
+  readonly posture: string;
+}
+
+/** Whether a view belongs to the key: its variant, revision, orientation and posture (#16445). */
+export function prototypeWebViewMatches(
+  dataset: { readonly [name: string]: string | undefined },
+  key: PrototypeWebViewKey,
+): boolean {
+  return (
+    dataset.variant === key.variant &&
+    dataset.revision === key.revision &&
+    dataset.orientation === key.orientation &&
+    (dataset.posture ?? "") === key.posture
+  );
+}
+
 /** One rotation turn: the keyframes of the view turning away and of the view turning in. */
 export interface PrototypeWebRotation {
   readonly durationMs: number;
@@ -84,6 +106,61 @@ export function prototypeWebRotation(
       { transform: at(0), opacity: 1, offset: 1 },
     ],
   };
+}
+
+/**
+ * The status bar clock's text for a moment (#16585): local hours and minutes in the stills' fixed
+ * `9:41` form, so a page whose browser clock is frozen at 9:41 draws the same bytes as the still.
+ */
+export function prototypeWebClockText(now: Date): string {
+  const hours = now.getHours() % 12 || 12;
+  return `${hours}:${String(now.getMinutes()).padStart(2, "0")}`;
+}
+
+/** Milliseconds from `nowMs` to the next minute boundary, when the clock's text next changes. */
+export function prototypeWebClockDelay(nowMs: number): number {
+  return 60_000 - (((nowMs % 60_000) + 60_000) % 60_000);
+}
+
+/** The time source and timer the status bar clock runs on: the browser's in the page, a fake in tests. */
+export interface PrototypeWebClock {
+  now(): number;
+  schedule(run: () => void, ms: number): void;
+}
+
+/** The page's clock: the browser's own time and timers, since the page has no Timer seam to import. */
+export function prototypeWebBrowserClock(): PrototypeWebClock {
+  return {
+    now: () => Date.now(),
+    schedule: (run, ms) => void globalThis.setTimeout(run, ms),
+  };
+}
+
+/**
+ * Keeps every status bar clock (`[data-status="clock"]`) under `root` on the clock's local time:
+ * writes the text now and again at each minute boundary. Nothing is scheduled without a clock.
+ */
+export function prototypeWebStartClock(
+  root: { querySelectorAll(selector: string): Iterable<{ textContent: string | null }> },
+  clock: PrototypeWebClock,
+  format: {
+    readonly clockText: typeof prototypeWebClockText;
+    readonly clockDelay: typeof prototypeWebClockDelay;
+  },
+): void {
+  const marks = Array.from(root.querySelectorAll('[data-status="clock"]'));
+  if (marks.length === 0) {
+    return;
+  }
+  const tick = () => {
+    const now = clock.now();
+    const text = format.clockText(new Date(now));
+    marks.forEach((mark) => {
+      mark.textContent = text;
+    });
+    clock.schedule(tick, format.clockDelay(now));
+  };
+  tick();
 }
 
 /** The elements one turn moves. */
@@ -130,12 +207,18 @@ export interface PrototypeWebRuntimeRules {
   readonly fitScale: typeof prototypeWebFitScale;
   readonly wheelFactor: typeof prototypeWebWheelFactor;
   readonly screenView: typeof prototypeWebScreenView;
+  readonly viewMatches: typeof prototypeWebViewMatches;
   readonly rotation: typeof prototypeWebRotation;
   readonly animateTurn: typeof prototypeWebAnimateTurn;
+  readonly clockText: typeof prototypeWebClockText;
+  readonly clockDelay: typeof prototypeWebClockDelay;
+  readonly startClock: typeof prototypeWebStartClock;
+  readonly browserClock: typeof prototypeWebBrowserClock;
 }
 
 export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
-  const { zoomScale, fitScale: fitted, wheelFactor, screenView, rotation, animateTurn } = rules;
+  const { zoomScale, fitScale: fitted, wheelFactor, screenView, viewMatches } = rules;
+  const { rotation, animateTurn } = rules;
   const doc = document;
   const stage = doc.querySelector<HTMLElement>("[data-stage]");
   const viewport = doc.querySelector<HTMLElement>("[data-viewport]");
@@ -146,12 +229,16 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
   const pick = (name: string) => doc.querySelector<HTMLElement>(`[data-control="${name}"]`);
   const variantSelect = pick("variant") as HTMLSelectElement | null;
   const screenSelect = pick("screen") as HTMLSelectElement | null;
+  const postureSelect = pick("layout-posture") as HTMLSelectElement | null;
   const revisionList = pick("revisions");
   const zoomLabel = pick("zoom-level");
+  const bodyData = (name: string) => doc.body.dataset[name] ?? "";
   const state = {
-    variant: doc.body.dataset.variant ?? "",
-    revision: doc.body.dataset.revision ?? "",
-    orientation: "portrait" as "portrait" | "landscape",
+    variant: bodyData("variant"),
+    revision: bodyData("revision"),
+    // The frame's first orientation: landscape for a TV or car, which never leaves it.
+    orientation: bodyData("orientation") as "portrait" | "landscape",
+    posture: bodyData("posture"),
     // The first apply sets the shown view's screen.
     screen: "",
     scale: 1,
@@ -159,13 +246,7 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
     y: 0,
     fit: true,
   };
-  const revisionViews = () =>
-    views.filter(
-      (view) =>
-        view.dataset.variant === state.variant &&
-        view.dataset.revision === state.revision &&
-        view.dataset.orientation === state.orientation,
-    );
+  const revisionViews = () => views.filter((view) => viewMatches(view.dataset, state));
   const current = () => screenView(revisionViews(), state.screen);
   // The picker lists the shown revision's own screens, so it never offers a view the page lacks.
   // A revision without the chosen screen shows its start, which becomes the chosen screen.
@@ -175,7 +256,8 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
     if (!screenSelect) {
       return;
     }
-    const key = `${state.variant} ${state.revision}`;
+    // Each orientation and posture can show a different stack, so it lists its own screens.
+    const key = `${state.variant} ${state.revision} ${state.orientation} ${state.posture}`;
     if (key !== listed) {
       listed = key;
       const screens = revisionViews().flatMap((view) => view.dataset.screen ?? []);
@@ -240,8 +322,11 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
     state.variant = variantSelect.value;
     const option = variantSelect.selectedOptions[0];
     state.revision = option?.dataset.latest ?? state.revision;
-    state.fit = true;
-    apply();
+    fitView();
+  });
+  postureSelect?.addEventListener("change", () => {
+    state.posture = postureSelect.value;
+    fitView();
   });
   screenSelect?.addEventListener("change", () => {
     state.screen = screenSelect.value;
@@ -285,5 +370,7 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
   });
   viewport.addEventListener("dblclick", fitView);
   globalThis.addEventListener("resize", apply);
+  // Every view's status bar clock follows the browser clock (#16585).
+  rules.startClock(doc, rules.browserClock(), rules);
   apply();
 }

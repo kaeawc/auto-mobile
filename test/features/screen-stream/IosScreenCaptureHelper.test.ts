@@ -17,8 +17,6 @@ import {
   parseCaptureIdleMarker,
   NATIVE_FRAME_METRICS_PREFIX,
   type CaptureTarget,
-  type DecodedFrame,
-  type FrameDeliveryScheduler,
   type MalformedFrameError,
 } from "../../../src/features/screen-stream";
 
@@ -27,17 +25,6 @@ const testNativeHelperRegistry = new NativeHelperRegistry({
   control: new FakeNativeHelperProcessControl(),
   logger: new FakeLogger(),
 });
-
-function encodeFrame(
-  width: number,
-  height: number,
-  bytesPerRow: number,
-  timestampMs: number,
-  fill: number,
-): Buffer {
-  const header = encodeFrameHeader({ width, height, bytesPerRow, timestampMs });
-  return Buffer.concat([header, Buffer.alloc(height * bytesPerRow, fill)]);
-}
 
 function encodeAudio(pcm16le: Buffer): Buffer {
   const header = encodeFrameHeader({
@@ -75,27 +62,6 @@ function withFakeSpawner(
 
 function flush(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
-}
-
-async function flushFrameDelivery(): Promise<void> {
-  await flush();
-  await flush();
-}
-
-class ManualFrameDeliveryScheduler implements FrameDeliveryScheduler {
-  private callbacks: Array<() => void> = [];
-
-  schedule(callback: () => void): void {
-    this.callbacks.push(callback);
-  }
-
-  runNext(): void {
-    this.callbacks.shift()?.();
-  }
-
-  get size(): number {
-    return this.callbacks.length;
-  }
 }
 
 describe("IosScreenCaptureHelper", () => {
@@ -183,77 +149,6 @@ describe("IosScreenCaptureHelper", () => {
       expect(() => helper.start()).toThrow(/simulator fps must be an integer in \[5, 60\]/);
     },
   );
-
-  test("coalesces a burst into the newest decoded frame", async () => {
-    const { fake, helper } = withFakeSpawner();
-    const frames: DecodedFrame[] = [];
-    helper.on("frame", (f) => frames.push(f));
-    helper.start();
-
-    const buf = Buffer.concat([encodeFrame(1, 1, 4, 10, 0x11), encodeFrame(1, 1, 4, 20, 0x22)]);
-    fake.stdout.push(buf);
-    await flushFrameDelivery();
-
-    expect(frames).toHaveLength(1);
-    expect(frames[0].header.timestampMs).toBe(20);
-    expect(frames[0].pixels[0]).toBe(0x22);
-  });
-
-  test("bounds the pending frame and recovers with the newest frame once delivery runs", async () => {
-    const fake = new FakeChildProcess();
-    const scheduler = new ManualFrameDeliveryScheduler();
-    let now = 1_000;
-    const helper = new IosScreenCaptureHelper({
-      nativeHelperRegistry: testNativeHelperRegistry,
-      binaryPath: "/fake/screen-capture-helper",
-      target: { kind: "device" },
-      now: () => now,
-      frameDeliveryScheduler: scheduler,
-      spawner: () => fake,
-    });
-    const frames: DecodedFrame[] = [];
-    helper.on("frame", (frame) => frames.push(frame));
-    helper.start();
-
-    fake.stdout.push(
-      Buffer.concat([
-        encodeFrame(1, 1, 4, 10, 0x10),
-        encodeFrame(1, 1, 4, 20, 0x20),
-        encodeFrame(1, 1, 4, 30, 0x30),
-      ]),
-    );
-
-    await flush();
-    now += 25;
-    expect(scheduler.size).toBe(1);
-    expect(helper.getFrameMetrics()).toEqual({
-      captureTimestampMs: 30,
-      frameAgeMs: 25,
-      queueDepth: 1,
-      droppedFrames: 2,
-      bytesQueued: 4,
-      highWaterMarkBytes: 4,
-      maxFrameBytes: 32 * 1024 * 1024,
-    });
-
-    scheduler.runNext();
-
-    expect(frames).toHaveLength(1);
-    expect(frames[0].header.timestampMs).toBe(30);
-    expect(frames[0].pixels).toEqual(Buffer.alloc(4, 0x30));
-    expect(helper.getFrameMetrics().queueDepth).toBe(0);
-  });
-
-  test("simulator target also emits frame events", async () => {
-    const { fake, helper } = withFakeSpawner({ kind: "simulator", windowID: 1 });
-    const frames: DecodedFrame[] = [];
-    helper.on("frame", (f) => frames.push(f));
-    helper.start();
-    fake.stdout.push(encodeFrame(2, 2, 8, 33, 0xfa));
-    await flushFrameDelivery();
-    expect(frames).toHaveLength(1);
-    expect(frames[0].header.width).toBe(2);
-  });
 
   test("passes --audio only for an explicitly audio-enabled simulator target", () => {
     const { spawnArgs, helper } = withFakeSpawner({ kind: "simulator", windowID: 1, audio: true });
@@ -495,13 +390,13 @@ describe("IosScreenCaptureHelper", () => {
     helper.on("malformed", (e) => malformed.push(e));
     helper.start();
 
-    // Valid marker + checksum, but a zero-width frame is implausible.
-    const badHeader = encodeFrameHeader({ width: 0, height: 1, bytesPerRow: 4, timestampMs: 0 });
+    // Valid marker + checksum, but the helper no longer streams raw frames.
+    const badHeader = encodeFrameHeader({ width: 2, height: 2, bytesPerRow: 8, timestampMs: 0 });
     fake.stdout.push(badHeader);
     await flush();
 
     expect(malformed).toHaveLength(1);
-    expect(malformed[0].reason).toBe("header_width_zero");
+    expect(malformed[0].reason).toBe("header_unsupported_record");
   });
 
   test("emits stderr lines and flushes a trailing partial line on exit", async () => {

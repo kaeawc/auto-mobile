@@ -1,5 +1,5 @@
 import type { DeviceSession } from "../../db/types";
-import { PlanLabelRegistry } from "../planLabelRegistry";
+import { type EndedLabelBase, PlanLabelRegistry } from "../planLabelRegistry";
 import { isRecoverableDaemonReleaseReason, isTerminalReleaseReason } from "../releaseReasons";
 import { TerminalSessionError } from "../sessionErrors";
 import {
@@ -10,7 +10,12 @@ import {
   type SessionReleaseSnapshot,
 } from "../sessionManager";
 import { SessionSlotShadowProbe } from "../sessionSlotShadowProbe";
-import { type SessionLifecycleSlots } from "./internalContracts";
+import {
+  cliIdleWindowMarker,
+  persistedCliIdleWindowMs,
+  persistedInheritedCliIdleWindowMs,
+  type SessionLifecycleSlots,
+} from "./internalContracts";
 
 export interface SessionPlanLabelsHost {
   refuseLabelMintOutsidePlanAllocation(sessionId: string, deviceId: string): void;
@@ -33,17 +38,21 @@ export interface SessionPlanLabelsHost {
     afterDelete?: () => void,
   ): void;
   readonly slotShadowProbe: SessionSlotShadowProbe<Session>;
-  readonly sessionSlots: Pick<SessionLifecycleSlots, "deleteTerminalReasonState" | "hasRecovery">;
+  readonly sessionSlots: Pick<
+    SessionLifecycleSlots,
+    "deleteTerminalReasonState" | "hasRecovery" | "getTerminalSnapshot"
+  >;
   releaseSnapshotFromPersisted(
     sessionId: string,
     persisted: DeviceSession,
     releaseReason: string,
   ): SessionReleaseSnapshot;
+  readPersistedSession(sessionId: string): Promise<DeviceSession | undefined>;
   sessionNow(): number;
   peekSession(sessionId: string): Session | null;
   ownershipSessionUuid(sessionId: string): string;
   readonly sessions: Pick<Map<string, Session>, "get">;
-  endedBaseOfLabel(label: Session): { baseSessionId: string; releaseReason: string } | undefined;
+  endedBaseOfLabel(label: Session): EndedLabelBase | undefined;
 }
 
 export class SessionPlanLabels {
@@ -100,10 +109,10 @@ export class SessionPlanLabels {
    * run that minted the label is still running, a row waiting out a recoverable handoff (a device
    * restart) is recovered as before.
    */
-  refusePlanLabelSessionOutsideItsRun(
+  async refusePlanLabelSessionOutsideItsRun(
     sessionId: string,
     persisted: DeviceSession | undefined,
-  ): void {
+  ): Promise<void> {
     if (persisted?.source !== PLAN_LABEL_SESSION_SOURCE) {
       return;
     }
@@ -114,12 +123,21 @@ export class SessionPlanLabels {
     if (recoverable && this.host.planLabels.isRunning(sessionId)) {
       return;
     }
+    // A label on its own `cli-idle` policy keeps its own window. Otherwise its row records only an
+    // inherited `cli-idle-timeout`, and the window is its base's.
+    const inheritedWindowMs =
+      persistedCliIdleWindowMs(persisted) === undefined
+        ? await persistedInheritedCliIdleWindowMs(sessionId, persisted, (id) =>
+            this.host.readPersistedSession(id),
+          )
+        : undefined;
     throw new TerminalSessionError(sessionId, {
       ...this.host.releaseSnapshotFromPersisted(
         sessionId,
         persisted,
         persisted.release_reason ?? PLAN_AUTO_RELEASE_REASON,
       ),
+      ...cliIdleWindowMarker(inheritedWindowMs),
       terminal: true,
     });
   }
@@ -178,10 +196,13 @@ export class SessionPlanLabels {
    * that are already gone; the caller checks each one.
    */
   takeDerivedLabelSessions(baseSessionId: string, releaseReason?: string): string[] {
+    // The base's terminal release is fenced before it is announced, so its snapshot holds the
+    // window that expired; each label's own release reports it (#16971).
     return this.host.planLabels.takeDerivedLabelSessions(
       baseSessionId,
       releaseReason,
       isTerminalReleaseReason,
+      this.host.sessionSlots.getTerminalSnapshot(baseSessionId)?.cliIdleTimeoutMs,
     );
   }
 }

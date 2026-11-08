@@ -23,11 +23,24 @@ import {
   getSafeExplorationCandidates,
   planExplorationDryRun,
 } from "./ExploreDryRun";
-import { ExploreElementActions } from "./ExploreElementActions";
+import {
+  ExploreElementActions,
+  focusDrivenActions,
+  type FocusDrivenActions,
+} from "./ExploreElementActions";
+import { RevealedListRows } from "./RevealedListRows";
+import { drivesFocus, touchInputMode, type InputModeResolver } from "./focusDrivenInput";
 import { getElementKey } from "./ExploreElementExtraction";
 import { ExplorePermissionDialog } from "./ExplorePermissionDialog";
+import { ExploreImeDismissal } from "./ExploreImeFilter";
+import { recordScreenVisit } from "./ExploreLoopDetection";
 import { ExplorePlatformRecovery } from "./ExplorePlatformRecovery";
-import { generateExplorationReport, isExplorationResetDue } from "./ExploreReporting";
+import {
+  exportTargetGraph,
+  generateExplorationReport,
+  isExplorationResetDue,
+  reportExplorationProgress,
+} from "./ExploreReporting";
 import { explorationSafetyStopReason } from "./ExploreSafety";
 import { DEFAULT_EXPLORE_TIMEOUT_MS } from "./exploreTimeout";
 import type {
@@ -38,6 +51,7 @@ import type {
   ExploreExecutionResult,
   ExploreOptions,
   ExploreResult,
+  ExploreSessionOptions,
   GraphTraversalState,
   TrackedElement,
 } from "./ExploreTypes";
@@ -47,7 +61,7 @@ import {
   markEdgeTraversed,
   validateNavigation,
 } from "./ExploreValidateMode";
-import { selectValidateElement } from "./ExploreValidationSelection";
+import { selectValidateElement, skipUndispatchedEdge } from "./ExploreValidationSelection";
 import { registeredInternalToolCaller as toolCaller } from "./InternalToolCaller";
 import {
   NavigationGraphManager,
@@ -72,12 +86,6 @@ export const DEFAULT_MAX_INTERACTIONS = 200;
  * automatically discovering navigation paths, prioritizing likely navigation elements,
  * avoiding redundant interactions, and efficiently covering unexplored screens.
  */
-/** The session an exploration records under and the dialog-tap seam its blocker handlers use. */
-export interface ExploreSessionOptions {
-  sessionUuid?: string;
-  tapActionFactory?: DialogTapActionFactory;
-}
-
 export class Explore extends BaseVisualChange {
   private navigationManager: NavigationGraphService;
   private exploredElements: Map<string, TrackedElement>;
@@ -98,6 +106,7 @@ export class Explore extends BaseVisualChange {
   private pendingBackScreen: string | null = null;
   private awaitingRelaunchScreen: boolean = false;
   private hasObservedTargetApp: boolean = false;
+  private readonly imeDismissal = new ExploreImeDismissal();
   /**
    * Withdraws the record of the last successful recorded action. A gesture that
    * caused no navigation would otherwise stay correlatable for the manager's
@@ -112,6 +121,9 @@ export class Explore extends BaseVisualChange {
   private currentElementConfidence: number = 0;
   private sessionUuid?: string;
   private readonly tapActionFactory?: DialogTapActionFactory;
+  private readonly inputMode: InputModeResolver;
+  private readonly focusActions: FocusDrivenActions;
+  private readonly revealedRows = new RevealedListRows();
 
   // Constants for safety limits
   static readonly MAX_CONSECUTIVE_NO_CHANGE = 40;
@@ -126,6 +138,9 @@ export class Explore extends BaseVisualChange {
       navigationManager,
       sessionUuid,
       tapActionFactory,
+      inputMode = touchInputMode,
+      focusNavigatorFactory,
+      focusListAdvancerFactory,
     }: ExploreSessionOptions & { navigationManager?: NavigationGraphService } = {},
   ) {
     super(device, { adb, timer });
@@ -134,6 +149,13 @@ export class Explore extends BaseVisualChange {
     this.elementParser = new DefaultElementParser();
     this.sessionUuid = sessionUuid;
     this.tapActionFactory = tapActionFactory;
+    this.inputMode = inputMode;
+    this.focusActions = focusDrivenActions(device, timer, {
+      observeScreen: () => this.observeScreen,
+      adbFactory: this.adbFactory,
+      focusNavigatorFactory,
+      focusListAdvancerFactory,
+    });
   }
 
   /**
@@ -224,7 +246,7 @@ export class Explore extends BaseVisualChange {
       }
 
       // Capture initial graph state
-      const initialGraph = await this.navigationManager.exportGraph();
+      const initialGraph = await exportTargetGraph(this.navigationManager, this.targetPackageName);
       const initialNodeCount = initialGraph.nodes.length;
 
       // Initialize graph traversal for validate mode
@@ -279,6 +301,7 @@ export class Explore extends BaseVisualChange {
     this.recordedBackEdge = null;
     this.awaitingRelaunchScreen = false;
     this.hasObservedTargetApp = false;
+    this.imeDismissal.reset();
     this.elementSelections = [];
     this.explorationPath = [];
     this.interactionCount = 0;
@@ -286,6 +309,7 @@ export class Explore extends BaseVisualChange {
     this.consecutiveBackCount = 0;
     this.consecutiveNoChangeCount = 0;
     this.permissionDialog.reset();
+    this.revealedRows.clear();
     this.stopReason = "";
     this.previousScreen = null;
     this.consecutiveOutOfAppCount = 0;
@@ -448,6 +472,10 @@ export class Explore extends BaseVisualChange {
       if (enforcement === "stop") {
         return "break";
       }
+      const pressBack = () => this.platformRecovery().pressBack(signal);
+      if (await this.imeDismissal.dismiss(observation, this.targetPackageName, pressBack, signal)) {
+        return "continue";
+      }
     }
 
     this.recordCurrentScreenInPath();
@@ -520,56 +548,21 @@ export class Explore extends BaseVisualChange {
 
   private recordSuccessfulScreenChange(): void {
     const newScreen = this.navigationManager.getCurrentScreen();
-
-    // Check if we navigated to a different screen
-    if (this.previousScreen !== null && newScreen && newScreen !== this.previousScreen) {
-      // We changed screens - check if we've been to this screen before
-      const visitCount = this.loopDetection.get(newScreen) ?? 0;
-      if (visitCount > 0) {
-        // We're returning to a previously visited screen - increment loop counter
-        this.loopDetection.set(newScreen, visitCount + 1);
-        logger.debug(`[Explore] Returning to screen ${newScreen}, visit count: ${visitCount + 1}`);
-      } else {
-        // First visit to this screen - initialize counter
-        this.loopDetection.set(newScreen, 1);
-      }
-    } else if (newScreen && this.previousScreen === null) {
-      // First screen we're tracking
-      this.loopDetection.set(newScreen, 1);
-    }
-
-    // Update previous screen for next iteration
-    if (newScreen) {
-      this.previousScreen = newScreen;
-    }
+    this.previousScreen = recordScreenVisit(this.loopDetection, this.previousScreen, newScreen);
   }
 
   private async reportProgressAndReset(context: ExplorationLoopContext): Promise<void> {
     const { progress, mode, maxInteractions, initialNodeCount, options, resetInterval, signal } =
       context;
-    // Report progress
     if (progress) {
-      if (mode === "validate" && this.graphTraversalState) {
-        // Report graph traversal progress
-        const edgesTraversed = this.graphTraversalState.traversedEdges.size;
-        const totalEdges = this.graphTraversalState.totalEdgesInGraph;
-        const coveragePercent =
-          totalEdges > 0 ? Math.round((edgesTraversed / totalEdges) * 100) : 0;
-        await progress(
-          this.interactionCount,
-          maxInteractions,
-          `Validating graph: ${edgesTraversed}/${totalEdges} edges traversed (${coveragePercent}%) - ${this.interactionCount}/${maxInteractions} interactions`,
-        );
-      } else {
-        // Report discovery progress
-        const currentStats = await this.navigationManager.getStats();
-        const currentNodeCount = currentStats.nodeCount;
-        await progress(
-          this.interactionCount,
-          maxInteractions,
-          `Explored ${currentNodeCount - initialNodeCount} new screens (${this.interactionCount}/${maxInteractions} interactions)`,
-        );
-      }
+      await reportExplorationProgress(progress, {
+        mode,
+        maxInteractions,
+        initialNodeCount,
+        interactionCount: this.interactionCount,
+        graphTraversalState: this.graphTraversalState,
+        navigationManager: this.navigationManager,
+      });
     }
 
     // Periodic reset if configured
@@ -677,6 +670,7 @@ export class Explore extends BaseVisualChange {
       consecutiveBackCount: this.consecutiveBackCount,
       consecutiveNoChangeCount: this.consecutiveNoChangeCount,
       maxConsecutiveNoChange: Explore.MAX_CONSECUTIVE_NO_CHANGE,
+      interactionsPerformed: this.interactionCount,
       loopDetection: this.loopDetection,
       getCurrentScreen: () => this.navigationManager.getCurrentScreen(),
     });
@@ -704,7 +698,7 @@ export class Explore extends BaseVisualChange {
 
       // Validate selection also handles empty leaf screens and missing elements.
       if (mode === "validate" && this.graphTraversalState) {
-        return this.selectValidateElement(safeCandidates);
+        return this.selectValidateElement(safeCandidates, viewHierarchy);
       }
 
       if (safeCandidates.length === 0 || !viewHierarchy) {
@@ -728,7 +722,7 @@ export class Explore extends BaseVisualChange {
       );
     });
   }
-  private selectValidateElement(candidates: Element[]): Element | null {
+  private selectValidateElement(candidates: Element[], hierarchy: ObserveResult["viewHierarchy"]) {
     const selection = {
       stopReason: this.stopReason,
       currentTargetEdge: this.currentTargetEdge,
@@ -741,6 +735,7 @@ export class Explore extends BaseVisualChange {
         graphTraversalState: this.graphTraversalState,
         navigationManager: this.navigationManager,
         timer: this.timer,
+        hierarchy,
       },
       selection,
     );
@@ -854,15 +849,20 @@ export class Explore extends BaseVisualChange {
       tracked.lastInteractionScreen = currentScreen;
       this.exploredElements.set(elementKey, tracked);
 
-      // Check if element is scrollable - perform swipe instead of tap
-      const isScrollable = isTruthy(element.scrollable);
-
-      const success = isScrollable
-        ? await this.swipeContainer(element, observation, progress, signal)
-        : await this.tapElement(element, observation, progress, signal);
-      // Reset consecutive back count since we did a swipe or tap (not when
-      // there was no tap target to dispatch).
-      if (success !== null) {
+      // The first call probes the device; a cancel must not wait out its adb timeouts.
+      const inputMode = await awaitWhileRequestIsLive(this.inputMode(), signal);
+      const success = drivesFocus(inputMode, this.currentTargetEdge?.interaction)
+        ? await this.elementActions().focusSelectElement(element, observation, {
+            signal,
+            recorded: this.currentTargetEdge?.interaction,
+          })
+        : isTruthy(element.scrollable)
+          ? await this.elementActions().swipeContainer(element, observation, progress, signal)
+          : await this.tapElement(element, observation, progress, signal);
+      // Nothing dispatched: skip a validate edge rather than retry it; else reset the back count.
+      if (success === null) {
+        skipUndispatchedEdge(this.graphTraversalState, this.currentTargetEdge, this.timer);
+      } else {
         this.consecutiveBackCount = 0;
       }
       return success ?? false;
@@ -870,16 +870,6 @@ export class Explore extends BaseVisualChange {
       logger.warn(`[Explore] Failed to interact with element: ${error}`);
       return false;
     }
-  }
-
-  /** Swipe a scrollable container; the swipeOn record needs a selector to replay it. */
-  private async swipeContainer(
-    element: Element,
-    observation: ObserveResult,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-  ): Promise<boolean> {
-    return this.elementActions().swipeContainer(element, observation, progress, signal);
   }
 
   /** Tap an element by selector, else its centre; null when it has no tap target. */
@@ -1046,6 +1036,8 @@ export class Explore extends BaseVisualChange {
       device: this.device,
       adb: this.adb,
       timer: this.timer,
+      ...this.focusActions,
+      revealedRows: this.revealedRows,
       runRecorded: (toolName, args, observation, run) =>
         this.runRecorded(toolName, args, observation, run),
     });

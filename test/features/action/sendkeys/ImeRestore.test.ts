@@ -8,6 +8,8 @@ import {
 import { AUTO_MOBILE_IME_ID } from "../../../../src/features/action/AndroidImeCatalog";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { ImeRestorationError } from "../../../../src/features/action/sendkeys/ImeRestorationError";
+import { clearAndroidImeQuarantine } from "../../../../src/features/action/androidImeLock";
 
 function harness() {
   const adb = new FakeAdbExecutor();
@@ -127,5 +129,51 @@ describe("ImeRestore", () => {
     });
     expect(recovered).toBe(true);
     expect(adb.getExecutedCommands()).toContain(`shell ime disable ${AUTO_MOBILE_IME_ID}`);
+  });
+
+  test("a release forced mid-restore fences the subtype write and ime disable (#16580)", async () => {
+    const { restoration, adb, host } = harness();
+    const original = "com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME";
+    host.session.imeUserId = 0;
+    const both = createExecResult(`${original}\n${AUTO_MOBILE_IME_ID}\n`, "");
+    adb.setCommandResponse("shell ime list -a -s", both);
+    adb.setCommandResponse("shell ime list -s", both);
+    adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+      createExecResult(`${AUTO_MOBILE_IME_ID}\n`, ""),
+      createExecResult(`${original}\n`, ""),
+    ]);
+    const ownership = new AbortController();
+    // The release is forced while `ime set` runs: the restore already holds the IME lock.
+    adb.abortAfterCommand("shell ime set", ownership);
+    try {
+      await expect(
+        restoration.restoreIme(original, false, { id: 7 }, ownership.signal),
+      ).rejects.toBeInstanceOf(ImeRestorationError);
+      const commands = adb.getExecutedCommands();
+      expect(commands).toContain(`shell ime set ${original}`);
+      expect(commands.some((c) => c.includes("selected_input_method_subtype 7"))).toBe(false);
+      expect(commands.some((c) => c.startsWith("shell ime disable"))).toBe(false);
+    } finally {
+      clearAndroidImeQuarantine(host.device.deviceId);
+    }
+  });
+
+  test("an already-lost ownership signal dispatches no IME write at all", async () => {
+    const { restoration, adb, host } = harness();
+    host.session.imeUserId = 0;
+    const ownership = new AbortController();
+    ownership.abort(new Error("forced"));
+    try {
+      await expect(
+        restoration.restoreIme(null, false, { id: null }, ownership.signal),
+      ).rejects.toBeInstanceOf(ImeRestorationError);
+      expect(
+        adb
+          .getExecutedCommands()
+          .some((c) => c.includes(" put ") || c.includes(" delete ") || c.includes("ime disable")),
+      ).toBe(false);
+    } finally {
+      clearAndroidImeQuarantine(host.device.deviceId);
+    }
   });
 });

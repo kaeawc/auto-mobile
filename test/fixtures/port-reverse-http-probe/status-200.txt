@@ -1,0 +1,8 @@
+HTTP/1.0 200 OK
+Server: BaseHTTP/0.6 Python/3.11.18
+Date: Fri, 06 Nov 2026 03:29:35 GMT
+Content-Type: text/plain
+Content-Length: 36
+
+{"name":"mock-backend","ready":true}
+automobile-probe-exit=124

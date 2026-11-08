@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import type { CtrlProxyStorage } from "../../../src/features/observe/android/CtrlProxyStorage";
-import { isCtrlProxyStorageUnavailableError } from "../../../src/features/observe/android/CtrlProxyStorage";
+import {
+  isCtrlProxyStorageUnavailableError,
+  KEYSTORE_MAX_INJECTED_DELAY_MS,
+  KEYSTORE_RESET_TIMEOUT_MS,
+} from "../../../src/features/observe/android/CtrlProxyStorage";
+import { DEFAULT_MCP_REQUEST_TIMEOUT_MS } from "../../../src/daemon/mcpRequestTimeout";
 import {
   ctrlProxyRequests,
   serializeCtrlProxyRequest,
@@ -579,6 +584,59 @@ test("Keystore reset timeout is a structured unavailable result", async () => {
     const pending = h.storage.resetKeystore("pkg", "login", undefined, 50);
     await flushDispatch();
     h.timer.advanceTime(50);
+    expect(await pending).toMatchObject({
+      outcome: "unavailable",
+      reason: "BRIDGE_UNAVAILABLE",
+      deletedCount: 0,
+    });
+  } finally {
+    void h.client.close();
+  }
+});
+
+test("Keystore reset waits out the SDK's maximum injected delay and reports the outcome", async () => {
+  // #17291: DELAY 2000 on two aliases (contains + delete each) took 8 s and the old 5 s bridge
+  // deadline reported BRIDGE_UNAVAILABLE while the provider finished deleting.
+  expect(KEYSTORE_RESET_TIMEOUT_MS).toBeGreaterThan(KEYSTORE_MAX_INJECTED_DELAY_MS);
+  expect(KEYSTORE_RESET_TIMEOUT_MS).toBeLessThan(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+  const h = await harness();
+  try {
+    const pending = h.storage.resetKeystore("pkg", "fixture");
+    await flushDispatch();
+    const request = JSON.parse(h.socket.frames.at(-1)!);
+    h.timer.advanceTime(KEYSTORE_MAX_INJECTED_DELAY_MS + 1_200);
+    await flushDispatch();
+    expect(h.manager.getPendingCount()).toBe(1);
+    h.manager.resolve<{ state: unknown }>(request.requestId, {
+      state: {
+        schemaVersion: 1,
+        capability: "storage.keystore",
+        outcome: "ok",
+        bridgeAvailable: true,
+        requestedScope: "fixture",
+        status: "deleted",
+        deletedCount: 2,
+        aliases: [
+          { alias: "aes", outcome: "deleted" },
+          { alias: "cert", outcome: "deleted" },
+        ],
+      },
+    });
+    expect(await pending).toMatchObject({ outcome: "ok", status: "deleted", deletedCount: 2 });
+  } finally {
+    void h.client.close();
+  }
+});
+
+test("Keystore reset default deadline still bounds a provider that never answers", async () => {
+  const h = await harness();
+  try {
+    const pending = h.storage.resetKeystore("pkg", "fixture");
+    await flushDispatch();
+    h.timer.advanceTime(KEYSTORE_RESET_TIMEOUT_MS - 1);
+    await flushDispatch();
+    expect(h.manager.getPendingCount()).toBe(1);
+    h.timer.advanceTime(1);
     expect(await pending).toMatchObject({
       outcome: "unavailable",
       reason: "BRIDGE_UNAVAILABLE",

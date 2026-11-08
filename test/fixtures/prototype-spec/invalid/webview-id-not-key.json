@@ -1,0 +1,25 @@
+{
+  "spec": {
+    "id": "webview-id-not-key",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["webview"]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "webView",
+          "id": "browser-pane",
+          "url": "https://example.com/post",
+          "allowedOrigins": ["https://example.com"]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].id"
+}

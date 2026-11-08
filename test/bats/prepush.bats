@@ -67,13 +67,13 @@ set_paths() { printf '%s\n' "$@" > "$PREPUSH_CHANGED_FILES_FILE"; }
   [ "$status" -eq 0 ]; grep -q '^ios ' "$LOG"
 }
 
-@test "package and bun lock select pins, node, and integration in lane order" {
+@test "package and bun lock select pins, node, shell, and integration in lane order" {
   for path in package.json bun.lock; do
     : > "$LOG"
     set_paths "$path"
     run bash scripts/prepush.sh --list
     [ "$status" -eq 0 ]
-    [ "$output" = $'runtime-pins\nnode\nintegration' ]
+    [ "$output" = $'runtime-pins\nnode\nshell\nintegration' ]
     run bash scripts/prepush.sh
     [ "$status" -eq 0 ]
     grep -q 'bun scripts/release/pin-runtime-deps.ts --write' "$LOG"
@@ -106,10 +106,39 @@ set_paths() { printf '%s\n' "$@" > "$PREPUSH_CHANGED_FILES_FILE"; }
   ! grep -q attestations "$LOG"
 }
 
-@test "docs-only has no gates" {
-  set_paths docs/readme.md
+@test "a path no lane validates has no gates" {
+  set_paths LICENSE
   run bash scripts/prepush.sh
   [ "$status" -eq 0 ]; [[ "$output" == *'No pre-push gates selected for 1 changed paths.'* ]]
+}
+
+@test "docs, skills, workflow, XML and test-plan paths select the shell lane" {
+  # Each is a path scripts/prepush-shell.sh (CI's required "Shell Changed
+  # Files" job) selects a check for; none selected a lane before.
+  for path in docs/design-docs/ci/a.md docs/using/a.md mkdocs.yml docs-assets/src/a.ts CHANGELOG.md \
+    .github/workflows/a.yml .github/actions/a/action.yml .github/CONTRIBUTING.md .githooks/pre-push \
+    skills/a/SKILL.md .agents/skills/a/SKILL.md AGENTS.md .claude/commands/a.md .claude-plugin/plugin.json \
+    plugins/a/x.json Dockerfile android/app/src/main/res/values/strings.xml test/test-plans/a.yaml \
+    .gitattributes ios/a/.gitattributes scripts/shellcheck/sete-baseline.txt scripts/ci/known-flakes.txt; do
+    set_paths "$path"
+    run bash scripts/prepush.sh --list
+    [ "$status" -eq 0 ]
+    [[ $'\n'"$output"$'\n' == *$'\nshell\n'* ]] || { echo "no shell lane for $path: $output"; return 1; }
+  done
+}
+
+@test "docs-only runs the shell lane and its formatter" {
+  set_paths docs/readme.md
+  run bash scripts/prepush.sh
+  [ "$status" -eq 0 ]
+  grep -q '^shell --base origin/main$' "$LOG"
+  grep -q 'bun run format' "$LOG"
+}
+
+@test "scripts TypeScript selects node and shell" {
+  set_paths scripts/prototype/generate-prototype-spec-models.ts
+  run bash scripts/prepush.sh --list
+  [ "$status" -eq 0 ]; [ "$output" = $'node\nshell' ]
 }
 
 @test "changed forwarded only to node" {
@@ -132,4 +161,81 @@ set_paths() { printf '%s\n' "$@" > "$PREPUSH_CHANGED_FILES_FILE"; }
   unset PREPUSH_CHANGED_FILES_FILE
   run bash scripts/prepush.sh --base definitely-missing-ref
   [ "$status" -eq 2 ]
+}
+
+@test "cloud profile skips ios and names the CI job that covers it" {
+  set_paths src/a.ts ios/Sources/A.swift
+  run bash scripts/prepush.sh --profile cloud --list
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'SKIPPED by --profile cloud: ios (needs macOS and Xcode; CI iOS Build and Swift Packages cover it)'* ]]
+  [ "${lines[${#lines[@]}-1]}" = node ]
+  run bash scripts/prepush.sh --profile cloud
+  [ "$status" -eq 0 ]
+  ! grep -q '^ios ' "$LOG"
+  grep -q '^node --timing$' "$LOG"
+  [[ "$output" == *'ios                SKIP  needs macOS and Xcode'* ]]
+}
+
+@test "cloud profile skips android without an SDK and runs it with one" {
+  set_paths android/app/src/Main.kt
+  printf '#!/usr/bin/env bash\n' > "$TEST_ROOT/bin/java"; chmod +x "$TEST_ROOT/bin/java"
+  run env -u ANDROID_HOME -u ANDROID_SDK_ROOT -u JAVA_HOME bash scripts/prepush.sh --profile cloud
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'SKIPPED by --profile cloud: android (no Android SDK'* ]]
+  [[ "$output" == *'No pre-push gates selected'* ]]
+  [ ! -f "$LOG" ]
+  mkdir -p "$TEST_ROOT/sdk"
+  run env -u ANDROID_SDK_ROOT -u JAVA_HOME ANDROID_HOME="$TEST_ROOT/sdk" bash scripts/prepush.sh --profile cloud --list
+  [ "$status" -eq 0 ]; [ "$output" = android ]
+}
+
+@test "cloud profile skips android without java" {
+  set_paths android/app/src/Main.kt
+  mkdir -p "$TEST_ROOT/sdk" "$TEST_ROOT/nojava"
+  for tool in bash env cat sed sort wc tr dirname basename date git; do
+    if command -v "$tool" > /dev/null 2>&1; then ln -s "$(command -v "$tool")" "$TEST_ROOT/nojava/$tool"; fi
+  done
+  run env -u JAVA_HOME PATH="$TEST_ROOT/nojava" ANDROID_HOME="$TEST_ROOT/sdk" bash scripts/prepush.sh --profile cloud --list
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'android (no java (JAVA_HOME or PATH)'* ]]
+  # gradlew prefers JAVA_HOME, so a JDK there is enough even without java on PATH.
+  mkdir -p "$TEST_ROOT/jdk/bin"
+  printf '#!/usr/bin/env bash\n' > "$TEST_ROOT/jdk/bin/java"; chmod +x "$TEST_ROOT/jdk/bin/java"
+  run env PATH="$TEST_ROOT/nojava" JAVA_HOME="$TEST_ROOT/jdk" ANDROID_HOME="$TEST_ROOT/sdk" bash scripts/prepush.sh --profile cloud --list
+  [ "$status" -eq 0 ]; [ "$output" = android ]
+  # A JAVA_HOME without a java binary fails gradlew, so it skips even with java on PATH.
+  run env JAVA_HOME="$TEST_ROOT/sdk" ANDROID_HOME="$TEST_ROOT/sdk" bash scripts/prepush.sh --profile cloud --list
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'android (no java (JAVA_HOME or PATH)'* ]]
+}
+
+@test "default profile runs every selected lane and node without --timing" {
+  set_paths src/a.ts ios/Sources/A.swift
+  run bash scripts/prepush.sh
+  [ "$status" -eq 0 ]
+  grep -q '^ios ' "$LOG"
+  grep -q '^node $' "$LOG"
+  [[ "$output" != *SKIP* ]]
+}
+
+@test "unknown profile is a usage error" {
+  run bash scripts/prepush.sh --profile laptop --list
+  [ "$status" -eq 2 ]; [[ "$output" == *'Unknown profile: laptop'* ]]
+  run bash scripts/prepush.sh --profile
+  [ "$status" -eq 2 ]
+}
+
+@test "timing forwards to node with changed, and only to node" {
+  set_paths src/a.ts android/a.kt
+  run bash scripts/prepush.sh --changed --timing
+  [ "$status" -eq 0 ]
+  grep -q '^node --changed --timing$' "$LOG"
+  grep -q '^android --base-ref origin/main$' "$LOG"
+}
+
+@test "cloud profile with timing passes --timing once" {
+  set_paths src/a.ts
+  run bash scripts/prepush.sh --profile cloud --timing
+  [ "$status" -eq 0 ]
+  grep -q '^node --timing$' "$LOG"
 }

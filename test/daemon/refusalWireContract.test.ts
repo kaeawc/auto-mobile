@@ -84,6 +84,7 @@ import * as bootCapacity from "../../src/models/BootCapacityExhaustedError";
 import * as boundSessionRefusal from "../../src/daemon/deviceOutsideBoundSessionRefusal";
 import * as deviceOutsideBoundSession from "../../src/daemon/DeviceOutsideBoundSessionError";
 import * as sessionOutsideBoundSession from "../../src/daemon/SessionOutsideBoundSessionError";
+import * as readSessionNotBound from "../../src/daemon/ReadSessionNotBoundError";
 import * as planLockRefusal from "../../src/daemon/planExecutionInProgressRefusal";
 import * as adbTransportUnavailable from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import * as ambiguousTargetRefusal from "../../src/daemon/ambiguousDeviceTargetRefusal";
@@ -230,6 +231,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "models/BootCapacityExhaustedError": bootCapacity,
   "daemon/DeviceOutsideBoundSessionError": deviceOutsideBoundSession,
   "daemon/SessionOutsideBoundSessionError": sessionOutsideBoundSession,
+  "daemon/ReadSessionNotBoundError": readSessionNotBound,
   "daemon/planExecutionInProgressRefusal": planLockRefusal,
   "daemon/ambiguousDeviceTargetRefusal": ambiguousTargetRefusal,
   "utils/android-cmdline-tools/AdbDeviceTransportUnavailableError": adbTransportUnavailable,
@@ -257,6 +259,8 @@ const INSTALLER_ERROR_EXEMPTION =
   "Host installer library errors; no MCP/tool boundary until #12257 wires the installer.";
 
 const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
+  "features/portReverse/PortReverseError":
+    "portReverse (#17099) catches PortReverseError in its own handler and returns errorCode and ports in its structured result (portReverseResultSchema); it is never thrown through the refusal paths.",
   "features/prototype/bundle/bundleContract":
     "Internal ZIP/manifest parsing control flow caught by readPrototypeBundle and exportPrototypeBundle and returned as corpus-tested BundleRejection values; BundleFailure never escapes as an MCP/tool or daemon refusal.",
   "features/action/androidLaunchIntent":

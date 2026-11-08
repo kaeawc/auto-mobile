@@ -88,8 +88,23 @@ ignored with a startup log message because they have no configurable
 enable/disable state. Persisted session choices take precedence over CLI values,
 which take precedence over environment values and built-in defaults.
 
-Some tools also require a process option such as `--debug`, `--embedded-sdk`,
-or `--tool-call-recording`. Plan-only tools are never shown in public discovery.
+Some tools also require a process option such as `--debug` or `--embedded-sdk`.
+`recordToolCalls` needs no process option: `setToolEnabled` lists it, and its
+`tool-call-recording` feature flag is on by default.
+
+A call refused because a feature flag is off names the tool, the flag and both
+ways to turn it on, for example:
+
+```text
+recordToolCalls is behind the 'tool-call-recording' feature flag, which is disabled. Enable it with `auto-mobile --daemon set-feature-flag tool-call-recording true` or in the IDE plugin under Settings > AutoMobile > Feature Flags, then retry the call.
+```
+
+Debug-only tools (`debug`), `recordToolCalls` `begin`/`end`
+(`tool-call-recording`) and `setDeviceState` `deviceCondition`
+(`device-condition`) refuse this way. MCP clients cannot change a flag: it applies
+to the whole daemon, so an operator sets it from a shell or the IDE plugin.
+
+Plan-only tools are never shown in public discovery.
 
 If a tool is missing, check its exact name and required process options, then
 refresh discovery after the `notifications/tools/list_changed` notification.

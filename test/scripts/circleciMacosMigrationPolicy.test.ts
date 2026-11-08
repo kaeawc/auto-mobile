@@ -36,6 +36,7 @@ interface CircleJob {
   environment?: Record<string, string>;
   steps?: CircleStep[];
   docker?: unknown;
+  executor?: string | { name?: string };
 }
 
 interface CircleConfig {
@@ -157,9 +158,10 @@ describe("CircleCI macOS policy (#10887, #11010)", () => {
     const keys = typeof restore === "string" ? undefined : restore?.restore_cache?.keys;
     expect(keys).toEqual(['spm-v2-{{ checksum "/tmp/spm-lock.txt" }}']);
     const saveKeys = Object.values(config.jobs ?? {}).flatMap((job) =>
-      (job.steps ?? []).flatMap((step) =>
-        typeof step !== "string" && step.save_cache ? [step.save_cache.key] : [],
-      ),
+      (job.steps ?? []).flatMap((step) => {
+        const key = typeof step === "string" ? undefined : step.save_cache?.key;
+        return typeof key === "string" && key.startsWith("spm-") ? [key] : [];
+      }),
     );
     expect(saveKeys.length).toBeGreaterThan(0);
     for (const key of saveKeys) {
@@ -180,6 +182,17 @@ describe("CircleCI macOS policy (#10887, #11010)", () => {
     expect(prMapping().has("run-prototype-simulator")).toBe(false);
     const iosWorkflow = loadCircle(CONTINUE).workflows?.["ios-macos"];
     expect(invocations(iosWorkflow).map(([key]) => key)).toEqual(["ios-playground-tests"]);
+  });
+
+  test("every continued job runs on the macOS executor and PRs set only run-ios (#17345)", () => {
+    const continued = loadCircle(CONTINUE);
+    expect(Object.keys(continued.executors ?? {})).toEqual(["ios"]);
+    for (const [name, job] of Object.entries(continued.jobs ?? {})) {
+      expect(job.docker, `${name} must not run on a Docker (Linux) executor`).toBeUndefined();
+      const executor = job.executor;
+      expect(typeof executor === "string" ? executor : executor?.name, name).toBe("ios");
+    }
+    expect([...prMapping().keys()]).toEqual(PR_PARAMETERS);
   });
 
   test("no CircleCI job mirrors a required GitHub check name", () => {

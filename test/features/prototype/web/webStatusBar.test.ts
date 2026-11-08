@@ -504,6 +504,58 @@ test("a growing child held short by a maximum height does not reach the top of a
   expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
 });
 
+test("a row-bound min() maximum width binds only below the screen width", () => {
+  const header = (maxWidth: number) =>
+    renderPrototypeStill({
+      id: "row-bound",
+      window: { placement: { type: "fullscreen" } },
+      theme: { mode: "light" },
+      root: {
+        type: "column",
+        style: { width: "fill", height: "fill", background: "#000000" },
+        children: [
+          {
+            type: "row",
+            style: { width: "fill", height: { dp: 80 }, maxWidth, background: "#ffffff" },
+            children: [{ type: "box", style: { aspectRatio: 1, maxWidth } }],
+          },
+        ],
+      },
+    });
+  expect(statusBarOf(header(1000).element)?.attrs["data-status-content"]).toBe("dark");
+  expect(statusBarOf(header(20).element)?.attrs["data-status-content"]).toBe("light");
+});
+
+test("a full-width child inside a wrap-sized column does not cover the status bar", () => {
+  const still = renderPrototypeStill({
+    id: "wrap-ancestor",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "box",
+      style: { width: "fill", height: "fill" },
+      children: [
+        { type: "column", style: { width: "fill", height: "fill", background: "#000000" } },
+        {
+          type: "column",
+          style: { width: "fill", height: "fill" },
+          children: [
+            {
+              type: "column",
+              style: { width: "wrap" },
+              children: [
+                { type: "column", style: { width: "fill", background: "#ffffff" } },
+                { type: "text", text: "x", style: { width: { dp: 20 } } },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
 test("a transparent root does not set the status bar content in a still", () => {
   const still = renderPrototypeStill({
     id: "alpha",

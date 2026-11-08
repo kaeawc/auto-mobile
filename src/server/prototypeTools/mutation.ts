@@ -147,7 +147,14 @@ export async function performPrototypeAction(
     scope,
     queue,
     signal,
-  }: { scope: PrototypeScope; queue: PrototypePatchQueue; signal?: AbortSignal },
+    mcpSessionId,
+  }: {
+    scope: PrototypeScope;
+    queue: PrototypePatchQueue;
+    signal?: AbortSignal;
+    /** The MCP connection issuing the call, recorded on the spec revision it adds (#17358). */
+    mcpSessionId?: string;
+  },
 ): Promise<PrototypeOutput> {
   if (args.action === "patch") {
     const { store, target, cacheInvalidator } = dependencies;
@@ -173,20 +180,33 @@ export async function performPrototypeAction(
         platform: device.platform === "android" ? "android" : "ios",
         queue,
         retire: (result) => retireObservation(cacheInvalidator, device, result),
+        mcpSessionId,
       },
       device.deviceId,
       { id: args.id!, ops: args.ops, baseRevision: args.baseRevision, timeoutMs: args.timeoutMs },
       signal,
     );
   }
-  return performMutation(dependencies, device, { ...args, action: args.action }, { scope, signal });
+  return performMutation(
+    dependencies,
+    device,
+    { ...args, action: args.action },
+    { scope, signal, mcpSessionId },
+  );
+}
+
+interface MutationCallOptions {
+  scope: PrototypeScope;
+  signal?: AbortSignal;
+  /** The MCP connection issuing the call, recorded on the spec revision it adds (#17358). */
+  mcpSessionId?: string;
 }
 
 async function performMutation(
   dependencies: PrototypeHandlerDependencies,
   device: BootedDevice,
   args: Omit<z.infer<typeof prototypeSchema>, "action"> & { action: PrototypeMutation },
-  { scope, signal }: { scope: PrototypeScope; signal?: AbortSignal },
+  { scope, signal, mcpSessionId }: MutationCallOptions,
 ): Promise<PrototypeOutput> {
   const { store, events, target: prototypeTarget, commits } = dependencies;
   const target = mutationTarget(args);
@@ -207,6 +227,7 @@ async function performMutation(
     generation: generation,
     sent: false,
     startedFreshEvents: false,
+    mcpSessionId,
   };
   const reversing = reverseLifecycle(dependencies, device, args, target);
   try {
@@ -513,6 +534,8 @@ interface ShowOrdering {
   /** This call created the fresh event epoch; unsent refusals must not clear another call's. */
   startedFreshEvents: boolean;
   specTicket?: number;
+  /** The MCP connection issuing the show, recorded on its spec revision (#17358). */
+  mcpSessionId?: string;
 }
 
 function withdrawGeneration(ordering: ShowOrdering): void {
@@ -529,7 +552,9 @@ function endShownSpec(
 ): void {
   if (ordering.specTicket !== undefined) {
     const { shown, refusal } = outcome ? shownSpecOutcome(outcome) : {};
-    store.shownSpecs.endShow(ordering.scope.deviceId, ordering.specTicket, shown, refusal);
+    const { mcpSessionId } = ordering;
+    const attributed = shown && mcpSessionId !== undefined ? { ...shown, mcpSessionId } : shown;
+    store.shownSpecs.endShow(ordering.scope.deviceId, ordering.specTicket, attributed, refusal);
   }
 }
 

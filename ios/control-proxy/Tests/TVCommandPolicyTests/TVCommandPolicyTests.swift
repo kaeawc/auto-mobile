@@ -60,4 +60,35 @@ final class TVCommandPolicyTests: XCTestCase {
         ])
         XCTAssertEqual(event["supportedFeatures"] as? [String], [])
     }
+
+    func testHostStaysTargetWhileFrontmost() {
+        XCTAssertEqual(
+            TVTargetResolver.resolve(hostState: 4, candidates: [("com.apple.TVSettings", 4)]), .host
+        )
+    }
+
+    func testForegroundCandidateIsTargetedWhenHostIsBackgrounded() {
+        let candidates = [("com.apple.TVMusic", 2), ("com.apple.TVSettings", 4)]
+        XCTAssertEqual(
+            TVTargetResolver.resolve(hostState: 3, candidates: candidates),
+            .app(bundleId: "com.apple.TVSettings")
+        )
+    }
+
+    func testHomeScreenIsTargetedWhenNothingKnownIsForeground() {
+        XCTAssertEqual(
+            TVTargetResolver.resolve(hostState: 3, candidates: [("com.apple.TVSettings", 2)]), .home
+        )
+        XCTAssertEqual(TVTargetResolver.resolve(hostState: 1, candidates: []), .home)
+    }
+
+    func testRequestedBundleIdIsProbedFirstWithoutDuplicates() {
+        XCTAssertEqual(
+            TVTargetResolver.candidateBundleIds(requested: " com.example.app ").first, "com.example.app"
+        )
+        let ids = TVTargetResolver.candidateBundleIds(requested: "com.apple.TVSettings")
+        XCTAssertEqual(ids.first, "com.apple.TVSettings")
+        XCTAssertEqual(ids.filter { $0 == "com.apple.TVSettings" }.count, 1)
+        XCTAssertEqual(TVTargetResolver.candidateBundleIds(requested: nil), TVTargetResolver.systemAppBundleIds)
+    }
 }

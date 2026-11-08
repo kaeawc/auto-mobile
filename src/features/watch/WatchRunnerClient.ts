@@ -6,11 +6,12 @@ import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { isWatchHierarchy, type WatchHierarchy } from "./WatchHierarchy";
 
 export type WatchCommand =
+  | { type: "type"; text: string }
   | { type: "hierarchy" | "home" }
   | { type: "tap"; identifier: string }
   | { type: "tap"; x: number; y: number }
   | { type: "crown"; delta: number; velocity?: number }
-  | { type: "swipe"; direction: "up" | "down" | "left" | "right" };
+  | { type: "swipe"; direction: "up" | "down" | "left" | "right"; distance?: number };
 
 export interface WatchRunnerClient {
   /** Registered clients remain reusable until a permanent connection failure or close. */

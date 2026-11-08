@@ -12,8 +12,12 @@ export interface FailureObservationSummary {
   viewHierarchy?: unknown;
   /** Present when observe was run with raw: true. */
   rawViewHierarchy?: unknown;
-  /** Visible text from elements.clickable / .text / .scrollable (capped). */
+  /**
+   * Visible text from `elements` buckets (when present) and `skeleton` / `context`
+   * row labels and sublabels (capped).
+   */
   visibleTextsSample?: string[];
+  /** `elements[].resourceId` and `skeleton` / `context` row `elementId`s (capped). */
   resourceIdsSample?: string[];
   /** Present when observe failed or payload could not be parsed. */
   observeError?: string;

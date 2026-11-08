@@ -17,7 +17,7 @@
     /// `PrototypeHostLayer`). Each lays out the whole window the same way and draws only its own layer,
     /// so their `.global` frames, and the hit rects reported from them, are both window coordinates.
     @MainActor
-    final class PrototypeLayersViewController: UIViewController, UIGestureRecognizerDelegate {
+    final class PrototypeLayersViewController: PrototypeWindowControlsViewController, UIGestureRecognizerDelegate {
         private let model: PrototypeModel
         private let page: UIHostingController<PrototypeRootView>
         private let top: UIHostingController<PrototypeRootView>

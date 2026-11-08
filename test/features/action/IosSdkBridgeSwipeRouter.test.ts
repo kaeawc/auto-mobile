@@ -264,3 +264,22 @@ describe("IosSdkBridgeSwipeRunner (#5159)", () => {
     expect(iosSdkBridgeSwipeTimeoutMs(MAX_SETTIMEOUT_DELAY_MS)).toBe(MAX_SETTIMEOUT_DELAY_MS);
   });
 });
+
+test("multi_scene rejects without an XCTest fallback", async () => {
+  const message =
+    "The app has 2 connected scenes (scene-a, scene-b). SDK observation needs one scene; XCTest does not stand in for this result.";
+  const reply: CtrlProxySdkActionResult = {
+    success: false,
+    available: true,
+    failure: "multi_scene",
+    scenes: ["scene-a", "scene-b"],
+    totalTimeMs: 0,
+  };
+  const { swipe, xctest } = runner(reply);
+  await expect(
+    swipe.executeSwipeGesture(
+      request({ containerElement: bridgeList, sdkObservation: bridgeScreen }),
+    ),
+  ).rejects.toThrow(message);
+  expect(xctest.requests).toEqual([]);
+});

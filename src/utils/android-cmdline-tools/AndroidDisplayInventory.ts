@@ -4,6 +4,7 @@ import type { DisplayInventoryOutcome } from "../../models/DeviceInfo";
 import type { AdbCommandRunner } from "./interfaces/AdbExecutor";
 import { logger } from "../logger";
 import { errorMessage } from "../describeUnknownError";
+import { BUILD_CHARACTERISTICS_PROP, parseTraitFormFactor } from "./deviceTraits";
 import {
   parseSurfaceFlingerDisplayIds,
   virtualDisplayKey,
@@ -265,10 +266,46 @@ function partitionDisplayRecords(
 }
 
 /** Join SurfaceFlinger physical IDs to display service physical-panel records, then overlays. */
+/** Inventory parse options that the display dumps alone cannot establish. */
+export interface AndroidDisplayParseOptions {
+  /** The device positively announced an automotive build (`ro.build.characteristics`). */
+  automotive?: boolean;
+}
+
+/**
+ * Role of each physical record. On a handheld, two differently sized built-in panels are a
+ * foldable's inner and cover panels. On a car they are the center display and the instrument
+ * cluster: the first largest built-in panel keeps `inner`, every other built-in one is `cluster`.
+ */
+function physicalPanelRoles(
+  records: readonly AndroidDisplayRecord[],
+  automotive: boolean,
+): PanelRole[] {
+  const internal = records.filter((record) => record.type === "INTERNAL");
+  const area = (record: AndroidDisplayRecord) => record.sizePx.width * record.sizePx.height;
+  const areas = internal.map(area);
+  const largest = Math.max(...areas);
+  const smallest = Math.min(...areas);
+  const primary = internal.find((record) => area(record) === largest);
+  return records.map((record) => {
+    if (record.type !== "INTERNAL") {
+      return "external";
+    }
+    if (automotive && internal.length > 1) {
+      return record === primary ? "inner" : "cluster";
+    }
+    if (internal.length > 1 && largest > smallest) {
+      return area(record) === largest ? "inner" : area(record) === smallest ? "cover" : "unknown";
+    }
+    return "unknown";
+  });
+}
+
 export function parseAndroidDeviceDisplays(
   physicalIdsOutput: string,
   displayDeviceInfosOutput: string,
   statesOutput: string,
+  options: AndroidDisplayParseOptions = {},
 ): DeviceDisplays | undefined {
   const {
     physical: records,
@@ -280,20 +317,13 @@ export function parseAndroidDeviceDisplays(
   if (records.length === 0 || records.length + overlays.length + virtuals.length < 2) {
     return undefined;
   }
-  const internal = records.filter((record) => record.type === "INTERNAL");
-  const areas = internal.map((record) => record.sizePx.width * record.sizePx.height);
-  const largest = Math.max(...areas);
-  const smallest = Math.min(...areas);
-  const panels: DisplayPanel[] = records.map((record) => {
-    let role: PanelRole = "unknown";
-    if (record.type !== "INTERNAL") {
-      role = "external";
-    } else if (internal.length > 1 && largest > smallest) {
-      const area = record.sizePx.width * record.sizePx.height;
-      role = area === largest ? "inner" : area === smallest ? "cover" : "unknown";
-    }
-    return { key: record.key, role, sizePx: record.sizePx };
-  });
+  const automotive = options.automotive === true;
+  const roles = physicalPanelRoles(records, automotive);
+  const panels: DisplayPanel[] = records.map((record, index) => ({
+    key: record.key,
+    role: roles[index],
+    sizePx: record.sizePx,
+  }));
   // Physical panels come first so inventory-order fallbacks never land on an overlay or virtual
   // display.
   const nonPanel = (role: PanelRole) => (record: AndroidDisplayRecord) => ({
@@ -303,8 +333,16 @@ export function parseAndroidDeviceDisplays(
   });
   return {
     panels: [...panels, ...overlays.map(nonPanel("overlay")), ...virtuals.map(nonPanel("virtual"))],
-    postures: parseAndroidPostures(statesOutput),
+    postures: automotive ? carPostures(statesOutput) : parseAndroidPostures(statesOutput),
   };
+}
+
+/**
+ * A car reports no fold posture; the `unknown` placeholder a handheld inventory carries would
+ * otherwise read as posture support and offer setPosture as a remedy.
+ */
+function carPostures(statesOutput: string): Posture[] {
+  return parseAndroidPostures(statesOutput).filter((posture) => posture !== "unknown");
 }
 
 /** Distinguish a proven single panel from a failed physical-display join. */
@@ -328,6 +366,41 @@ export function parseAndroidDeviceDisplayOutcome(
   return parseAndroidDeviceDisplays(physicalIdsOutput, displayDeviceInfosOutput, statesOutput)
     ? { kind: "multi" }
     : { kind: "unreadable", reason: "physical display records could not be parsed" };
+}
+
+/**
+ * Only an inventory with two or more built-in panels and no fold posture can be a car's center
+ * display plus instrument cluster, so phones and foldables never pay for the build probe.
+ */
+function mayBeCarDisplays(displays: DeviceDisplays | undefined): boolean {
+  const builtIn = displays?.panels.filter(
+    (panel) => panel.role === "inner" || panel.role === "cover" || panel.role === "unknown",
+  );
+  return (
+    (builtIn?.length ?? 0) > 1 &&
+    displays?.postures.every((posture) => posture === "unknown") === true
+  );
+}
+
+async function readsAsAutomotive(adb: AdbCommandRunner, signal?: AbortSignal): Promise<boolean> {
+  try {
+    const result = await adb.executeCommand(`shell getprop ${BUILD_CHARACTERISTICS_PROP}`, {
+      timeoutMs: 2000,
+      noRetry: true,
+      signal,
+    });
+    signal?.throwIfAborted();
+    return parseTraitFormFactor(result.stdout) === "automotive";
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
+    // The build class is advisory: an unreadable prop keeps today's handheld classification.
+    logger.warn(
+      `Android build characteristics unavailable for display roles: ${errorMessage(error)}`,
+    );
+    return false;
+  }
 }
 
 /** Optional, bounded inventory enrichment through the device-bound ADB seam. */
@@ -382,11 +455,15 @@ export async function readAndroidDeviceDisplaysChecked(
   if (outcome.kind === "unreadable") {
     logger.warn(`Android display inventory could not be read: ${outcome.reason}`);
   }
+  const handheld =
+    outcome.kind === "multi"
+      ? parseAndroidDeviceDisplays(output(0), output(1), output(2))
+      : undefined;
+  const automotive = mayBeCarDisplays(handheld) && (await readsAsAutomotive(adb, signal));
   return {
-    displays:
-      outcome.kind === "multi"
-        ? parseAndroidDeviceDisplays(output(0), output(1), output(2))
-        : undefined,
+    displays: automotive
+      ? parseAndroidDeviceDisplays(output(0), output(1), output(2), { automotive })
+      : handheld,
     degraded: results[0].status === "rejected" || results[1].status === "rejected",
     outcome,
   };

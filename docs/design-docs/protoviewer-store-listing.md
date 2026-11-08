@@ -24,8 +24,9 @@ also reads, so a future upload lane needs no conversion. `en-US` is required; an
 directory is validated by the same rules. Neither store has a repository-hosted source of truth
 today: the stores keep whatever was last uploaded, and this tree is what gets uploaded.
 
-The text is provisional until the owner decisions in #14143 (policy positioning, review notes) and
-#14144 (store name and URLs) land. The privacy URL points at a page that does not exist yet.
+The text is provisional until the owner decision in #14143 (policy positioning, review notes) lands.
+The name is ProtoViewer on both stores, and the privacy and support URLs are docs-site pages
+(`docs/protoviewer/privacy.md`, `docs/protoviewer/support.md`), per #14144.
 
 ## Validation
 
@@ -49,7 +50,8 @@ check. It reads files only. Lengths count Unicode code points, as the consoles d
 It also rejects missing required files, empty or whitespace-padded files, CRLF line endings,
 multi-line titles, keywords with spaces around commas, duplicate keywords, a keyword that repeats the
 app name, a subtitle equal to the name, unknown files in a locale directory, and a locale directory
-that is not a store locale code. The two icon layers must be well-formed SVG on the shared
+that is not a store locale code. The privacy and support URLs must be pages under the mkdocs
+`site_url` whose Markdown source exists under `docs/`. The two icon layers must be well-formed SVG on the shared
 `0 0 108 108` canvas. The rules and limits live in `scripts/store-listing/storeListing.ts`.
 
 ## Icons

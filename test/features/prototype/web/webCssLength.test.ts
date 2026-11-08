@@ -25,3 +25,11 @@ test("resolves variables, nested variables and calc sums", () => {
   expect(cssLength("calc(0px + var(--safe-start))", vars)).toBe(8);
   expect(cssLength("calc(100% - 10px)", vars, 200)).toBe(190);
 });
+
+test("min() and max() take the extreme of their arguments when every one is known", () => {
+  expect(cssLength("min(100%, 20px)", {}, 400)).toBe(20);
+  expect(cssLength("min(100%, 1000px)", {}, 400)).toBe(400);
+  expect(cssLength("max(10px, calc(50% - 4px))", {}, 400)).toBe(196);
+  expect(cssLength("min(280px, calc(100% - 48px))", {}, 300)).toBe(252);
+  expect(cssLength("min(100%, 20px)", {})).toBeUndefined();
+});

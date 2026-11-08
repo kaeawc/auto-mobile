@@ -31,12 +31,16 @@ class ObservationStreamDeviceSessionTest {
   }
 
   @Test
-  fun `plain ended session emits nothing`() = runTest {
+  fun `ended session without a successor emits exactly one ended event`() = runTest {
     val client = ObservationStreamClient()
     try {
       client.deviceEvents.test {
         client.handleMessage(
           """{"type":"device_session_ended","deviceId":"emulator-5554","deviceSessionUuid":"retired","platform":"android","timestamp":123}""",
+        )
+        assertEquals(
+          DeviceStreamEvent.DeviceSessionEnded("emulator-5554", "retired", 123L),
+          awaitItem(),
         )
         expectNoEvents()
       }
@@ -73,6 +77,9 @@ class ObservationStreamDeviceSessionTest {
             """{"type":"device_session_ended","deviceId":" ","deviceSessionUuid":"retired","successorSessionUuid":"successor"}""",
             """{"type":"device_session_ended","deviceId":"emulator-5554","deviceSessionUuid":" ","successorSessionUuid":"successor"}""",
             """{"type":"device_session_ended","deviceId":"emulator-5554","deviceSessionUuid":"retired","successorSessionUuid":" "}""",
+            """{"type":"device_session_ended","deviceSessionUuid":"retired"}""",
+            """{"type":"device_session_ended","deviceId":"emulator-5554"}""",
+            """{"type":"device_session_ended","deviceId":"emulator-5554","deviceSessionUuid":" "}""",
           )
         malformedFrames.forEach { client.handleMessage(it) }
         expectNoEvents()

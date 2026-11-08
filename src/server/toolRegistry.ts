@@ -37,6 +37,7 @@ import {
 } from "../features/toolSelection/toolSelectionContext";
 import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
 import { isDebugModeEnabled } from "../utils/debug";
+import { featureFlagDisabledMessage } from "../features/featureFlags/featureFlagDisabledMessage";
 import { throwDeviceLostFromAbortSignal } from "../utils/deviceLossOutcome";
 import {
   InternalToolName,
@@ -248,7 +249,7 @@ export class ToolRegistryClass {
   getToolAvailabilityGateReasons(tool: RegisteredTool): string[] {
     const reasons: string[] = [];
     if (tool.debugOnly && !isDebugModeEnabled()) {
-      reasons.push("--debug is disabled; start the daemon with --debug");
+      reasons.push(featureFlagDisabledMessage("debug", tool.name));
     }
     if (tool.embeddedSdkOnly && !serverConfig.isEmbeddedSdkEnabled()) {
       reasons.push("embedded SDK mode is disabled; start the daemon with --embedded-sdk");
@@ -315,7 +316,10 @@ export class ToolRegistryClass {
                 ? (defaultDaemonContext.sessionManager()?.getDeviceForSession(sessionUuid) ??
                   undefined)
                 : undefined));
-        await flushPendingImeRestoreBeforeTool(options.keepsImeRestorePending, deviceId);
+        await flushPendingImeRestoreBeforeTool(
+          options.keepsImeRestorePending || options.flushesImeRestoreAfterAdmission,
+          deviceId,
+        );
         const response = await handler(args, progress, signal);
         if (isDeviceBindingTool(name)) {
           // Ingress binds and heartbeats the session these results name after the handler

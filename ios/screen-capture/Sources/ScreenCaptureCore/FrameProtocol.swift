@@ -8,7 +8,8 @@ import Foundation
 ///     │ magic(4)│ checksum(4) │ width(4) │ height(4) │ bytesPerRow │ timestampMs │
 ///     └─────────┴─────────────┴──────────┴───────────┴─────────────┴─────────────┘
 ///
-/// Followed by `height * bytesPerRow` bytes of BGRA pixel data. `magic` is a
+/// Followed by the record payload (an Annex-B H.264 access unit or PCM16LE audio;
+/// see the discriminators below). `magic` is a
 /// fixed sync marker ("AMF1" on the wire) and `checksum` is a CRC-32 (IEEE) over
 /// the 16 field bytes that follow it, so the decoder can recover frame
 /// boundaries deterministically after corruption (issue #4270). The TypeScript

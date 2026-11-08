@@ -16,12 +16,7 @@ import {
 } from "../features/observe/android/CtrlProxyForwardLease";
 import { createBindingExecOwnerLiveness } from "./sessionBroker/registry/ownerLiveness";
 import type { BindingRegistry } from "./sessionBroker/registry/bindingRegistry";
-import {
-  DEVICE_ALLOCATION_CLAIM_SUBDIR,
-  deviceAllocationClaimPath,
-  iosDeviceAllocationClaimPath,
-} from "./foreignDeviceOwnership";
-import { getSharedAutoMobileDir } from "../utils/tempDir";
+import { deviceAllocationClaimPath, iosDeviceAllocationClaimPath } from "./foreignDeviceOwnership";
 
 /**
  * Read-only composition of the places that each claim to say who owns a device (#11811 step a).
@@ -30,7 +25,6 @@ import { getSharedAutoMobileDir } from "../utils/tempDir";
  */
 export type DeviceOwnershipSourceName =
   | "claim_file"
-  | "legacy_claim_file"
   | "forward_lease"
   | "exec_owner"
   | "device_claims"
@@ -57,7 +51,7 @@ export interface DeviceRef {
 export interface DeviceOwnershipSources {
   /** Devices any store mentions, so a check can walk them without knowing ids up front. */
   listDevices(): Promise<DeviceRef[]>;
-  /** Lock-file owners (allocation claim, 0.0.84 claim, CtrlProxy forwarding lease). */
+  /** Lock-file owners (allocation claim, CtrlProxy forwarding lease). */
   lockFileOwners(device: DeviceRef): DeviceOwnerRecord[];
   /** The persisted binding's live execution owner for the device, if any. */
   execOwner(device: DeviceRef): Promise<DeviceOwnerRecord | undefined>;
@@ -202,7 +196,6 @@ export function createDefaultDeviceOwnershipSources(
         ? iosDeviceAllocationClaimPath("probe", env)
         : deviceAllocationClaimPath("probe", env),
     );
-  const legacyDir = (): string => getSharedAutoMobileDir(DEVICE_ALLOCATION_CLAIM_SUBDIR);
 
   const record = (
     source: DeviceOwnershipSourceName,
@@ -248,7 +241,6 @@ export function createDefaultDeviceOwnershipSources(
         ...tabled,
         ...idsIn(claimDir("android"), "android"),
         ...idsIn(claimDir("ios"), "ios"),
-        ...idsIn(legacyDir(), "android"),
         ...idsIn(ctrlProxyForwardLeaseDir(), "android"),
       ];
       const seen = new Set<string>();
@@ -265,7 +257,6 @@ export function createDefaultDeviceOwnershipSources(
       const name = ctrlProxyForwardLeaseFileName(deviceId);
       const found = [
         record("claim_file", join(claimDir(platform), name)),
-        platform === "android" ? record("legacy_claim_file", join(legacyDir(), name)) : undefined,
         platform === "android"
           ? record("forward_lease", join(ctrlProxyForwardLeaseDir(), name))
           : undefined,

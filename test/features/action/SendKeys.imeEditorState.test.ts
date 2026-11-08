@@ -80,18 +80,31 @@ test("IME warnings are additive to existing result fields and optional in the ou
 });
 
 let serial = 0;
-function harness(after: ObserveResult, baselineUnavailable = false) {
+function harness(
+  after: ObserveResult,
+  baselineUnavailable = false,
+  settled: ObserveResult = after,
+) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   let committed = false;
+  const terminalReads: Parameters<SendKeysObserver["execute"]>[0][] = [];
   const reads: Parameters<SendKeysObserver["execute"]>[0][] = [];
+  const captured: (ObserveResult | undefined)[] = [];
   const observer: SendKeysObserver = {
+    captureScreenshot: async (_path, options) => {
+      captured.push(options?.observation);
+    },
     execute: async (options) => {
       reads.push(options);
       if (baselineUnavailable && reads.length === 1) {
         throw new Error("diagnostic hierarchy unavailable");
       }
-      return committed && !options?.hierarchyOnly ? after : frame();
+      if (committed && !options?.hierarchyOnly) {
+        terminalReads.push(options);
+        return terminalReads.length === 1 ? after : settled;
+      }
+      return frame();
     },
   };
   const device = { ...android, deviceId: `ime-editor-16428-${++serial}` };
@@ -108,7 +121,7 @@ function harness(after: ObserveResult, baselineUnavailable = false) {
     timer,
     timestampProvider: { now: async () => 1 },
   });
-  return { ...h, action, timer, reads };
+  return { ...h, action, timer, reads, terminalReads, captured };
 }
 
 test("sendKeys warns when IME typing loses focus without changing delivery", async () => {
@@ -130,13 +143,69 @@ test("sendKeys omits warnings when the editor keeps focus and keyboard visibilit
   const result = await h.action.execute([{ action: "type", text: "日本語😀", mode: "ime" }]);
   expect(result.success).toBe(true);
   expect(result).not.toHaveProperty("warnings");
+  expect(h.terminalReads).toHaveLength(1);
+  expect(h.timer.getSleepHistory()).toEqual([]);
 });
 
 test("sendKeys reports a visible-to-hidden keyboard even when focus remains", async () => {
   const h = harness(frame("composer", false));
   const result = await h.action.execute([{ action: "type", text: "日本語😀", mode: "ime" }]);
   expect(result.warnings).toEqual([expect.stringContaining("keyboard became hidden")]);
+  expect(h.timer.getSleepHistory()).toEqual([400]);
+  expect(h.terminalReads).toHaveLength(2);
 });
+
+// Captured on-device 2026-11-07, emulator API 35, issue #16428: mInputShown stayed
+// true while the post-call observation lacked the keyboard summary during the IME swap.
+test("sendKeys settles a transient hidden keyboard and returns the fresh observation", async () => {
+  const settled = frame();
+  const h = harness(frame("composer", false), false, settled);
+  const result = await h.action.execute([{ action: "type", text: "日本語😀", mode: "ime" }]);
+  expect(result).not.toHaveProperty("warnings");
+  expect(result.observation).toBe(settled);
+  expect(h.timer.getSleepHistory()).toEqual([400]);
+  expect(h.terminalReads).toHaveLength(2);
+  expect(h.terminalReads[1]).toEqual(h.terminalReads[0]);
+  expect(h.terminalReads[1]).toMatchObject({ freshness: "fresh", minTimestamp: 1 });
+  expect(h.captured).toEqual([settled]);
+});
+
+test("sendKeys captures the first observation once when no settle is needed", async () => {
+  const after = frame(false);
+  const h = harness(after);
+  await h.action.execute([{ action: "type", text: "日本語😀", mode: "ime" }]);
+  expect(h.captured).toEqual([after]);
+});
+
+test("an unreadable settle confirmation keeps the first sample's warnings", async () => {
+  const first = frame(false, false);
+  const fallback: ObserveResult = { ...focused, viewHierarchy: undefined };
+  const h = harness(first, false, fallback);
+  const result = await h.action.execute([{ action: "type", text: "日本語😀", mode: "ime" }]);
+  expect(result.observation).toBe(first);
+  expect(result.warnings).toEqual([
+    expect.stringContaining("focused editor lost focus and the keyboard became hidden"),
+  ]);
+  expect(h.timer.getSleepHistory()).toEqual([400]);
+  expect(h.captured).toEqual([first]);
+});
+
+for (const focus of [false, "other"] as const) {
+  test(`sendKeys retains the latest focus warning when the keyboard recovers (${focus})`, async () => {
+    const settled = frame(focus);
+    const h = harness(frame("composer", false), false, settled);
+    const result = await h.action.execute([{ action: "type", text: "日本語😀", mode: "ime" }]);
+    expect(result.warnings).toEqual([
+      expect.stringContaining(
+        focus === false ? "focused editor lost focus" : "focused editor changed",
+      ),
+    ]);
+    expect(result.warnings?.[0]).not.toContain("keyboard became hidden");
+    expect(result.observation).toBe(settled);
+    expect(h.timer.getSleepHistory()).toEqual([400]);
+    expect(h.terminalReads).toHaveLength(2);
+  });
+}
 
 test("auto IME typing reuses the password-routing observation for its baseline", async () => {
   const h = harness(frame(false));
@@ -167,6 +236,8 @@ test("an explicit key that can dismiss or move focus does not blame IME typing",
     { action: "key", key: "enter" },
   ]);
   expect(result).not.toHaveProperty("warnings");
+  expect(h.timer.getSleepHistory()).toEqual([]);
+  expect(h.terminalReads).toHaveLength(1);
 });
 
 test("an unavailable diagnostic baseline does not prevent an IME commit", async () => {

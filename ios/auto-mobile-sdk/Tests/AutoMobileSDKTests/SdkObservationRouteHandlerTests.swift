@@ -5,9 +5,10 @@ import XCTest
 
 #if DEBUG && !os(watchOS)
     private actor FixedProvider: AutoMobileObservationProvider {
+        private(set) var calls = 0
         let snapshot: AutoMobileObservationSnapshot
         init(_ snapshot: AutoMobileObservationSnapshot) { self.snapshot = snapshot }
-        func captureObservation() async -> AutoMobileObservationSnapshot { snapshot }
+        func captureObservation() async -> AutoMobileObservationSnapshot { calls += 1; return snapshot }
     }
 
     private actor CountingExecutor: AutoMobileActionExecutor {
@@ -16,6 +17,12 @@ import XCTest
             calls += 1
             return AutoMobileActionResult(status: .accepted, durationMs: 3)
         }
+    }
+
+    private struct FixedSceneInventory: SdkSceneInventory {
+        let identifiers: [String]
+        @MainActor
+        func connectedSceneIdentifiers() -> [String] { identifiers }
     }
 
     /// #5159: the observation routes serve the registered bridge and fail closed with typed errors.
@@ -51,7 +58,7 @@ import XCTest
                 AutoMobileObservationBridge(provider: FixedProvider(snapshot), executor: executor),
                 supportedActions: supportedActions
             )
-            return SdkObservationRouteHandler(registry: registry)
+            return SdkObservationRouteHandler(registry: registry, sceneInventory: FixedSceneInventory(identifiers: []))
         }
 
         private func body(_ action: AutoMobileAction) throws -> Data {
@@ -63,6 +70,45 @@ import XCTest
             return try JSONDecoder().decode(AutoMobileActionResult.self, from: response.body)
         }
 
+        func testSceneInventoryGuardsBothRoutesBeforeTouchingTheBridge() async throws {
+            for scenes in [[], ["scene-a"], ["scene-b", "scene-a"]] {
+                let provider = FixedProvider(snapshot)
+                let executor = CountingExecutor()
+                let registry = AutoMobileObservationRegistry()
+                registry.register(
+                    AutoMobileObservationBridge(provider: provider, executor: executor),
+                    supportedActions: Set(AutoMobileActionKind.allCases)
+                )
+                let routes = SdkObservationRouteHandler(
+                    registry: registry,
+                    sceneInventory: FixedSceneInventory(identifiers: scenes)
+                )
+                let observation = await routes.observe()
+                let action = try await routes.perform(body: body(.tap(observationIdentity: 7, elementId: "submit")))
+                if scenes.count > 1 {
+                    for response in [observation, action] {
+                        XCTAssertEqual(response.statusCode, 409)
+                        XCTAssertEqual(
+                            try JSONDecoder().decode(SdkMultiSceneError.self, from: response.body),
+                            SdkMultiSceneError(scenes: scenes)
+                        )
+                    }
+                    let captures = await provider.calls
+                    let executions = await executor.calls
+                    XCTAssertEqual(captures, 0)
+                    XCTAssertEqual(executions, 0)
+                    // Even malformed actions cannot bypass the scene guard.
+                    let malformed = await routes.perform(body: nil)
+                    XCTAssertEqual(malformed.statusCode, 409)
+                } else {
+                    XCTAssertEqual(observation.statusCode, 200)
+                    XCTAssertEqual(try result(action).status, .accepted)
+                    let executions = await executor.calls
+                    XCTAssertEqual(executions, 1)
+                }
+            }
+        }
+
         func testSnapshotReturnsTheBridgeObservation() async throws {
             let response = await handler().observe()
             XCTAssertEqual(response.statusCode, 200)
@@ -70,7 +116,10 @@ import XCTest
         }
 
         func testMissingBridgeAnswers503() async {
-            let unregistered = SdkObservationRouteHandler(registry: AutoMobileObservationRegistry())
+            let unregistered = SdkObservationRouteHandler(
+                registry: AutoMobileObservationRegistry(),
+                sceneInventory: FixedSceneInventory(identifiers: [])
+            )
             let snapshotResponse = await unregistered.observe()
             XCTAssertEqual(snapshotResponse.statusCode, 503)
             XCTAssertEqual(String(data: snapshotResponse.body, encoding: .utf8), #"{"error":"bridge_not_registered"}"#)

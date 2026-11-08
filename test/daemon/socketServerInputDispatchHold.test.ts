@@ -611,3 +611,36 @@ test.each([...variants])(
     await finishSockets(f);
   },
 );
+
+// #16908: the copy a dispatched input makes of the release keeps the CLI session's idle window.
+test("a dispatched input cut by a cli idle release keeps the idle window on its frame", async () => {
+  const variant = variants[0];
+  const sessionId = "cli-idle-hold-session";
+  const f = socketHarness(
+    createFakeDaemonState(
+      new Map([[sessionId, createFakeSession(sessionId, "A", variantPlatform(variant))]]),
+    ),
+  );
+  const first = runner();
+  transport(variant, first);
+  f.socket.send({
+    ...inputFrame(variant),
+    params: { ...inputFrame(variant).params, sessionUuid: sessionId },
+  });
+  await drainUntil(() => first.dispatched, { description: "cli idle dispatch" });
+  const release = new SessionReleasedDuringCallError(sessionId, "cli-idle-timeout", 300_000);
+  expect(await executionTracker.cancelSessionUuidExecutions(sessionId, release)).toBe(1);
+  await drainMicrotasks(100);
+  first.reply();
+  await drainUntil(() => f.socket.responses.some((r) => r.id === "A"), {
+    description: "cli idle release answer",
+  });
+  const response = f.socket.responses.find((r) => r.id === "A")!;
+  expect({ ...response }).toMatchObject({
+    success: false,
+    code: "session_ownership_lost",
+    error: expect.stringContaining("outcome is indeterminate"),
+    details: { reason: "cli-idle-timeout", idle: true, idleTimeoutMs: 300_000 },
+  });
+  await finishSockets(f);
+});

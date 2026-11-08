@@ -213,6 +213,8 @@ export class DeepLinkManager implements DeepLinkManager {
   async getDeepLinks(appId: string): Promise<DeepLinkResult> {
     switch (this.device?.platform) {
       case "ios":
+      // An Apple TV simulator's bundle is a host path too, read the same way (#16724).
+      case "tvos":
         return this.getDeepLinksIos(appId);
       case "android":
       default:
@@ -315,9 +317,9 @@ export class DeepLinkManager implements DeepLinkManager {
    * from the installed `.app`'s `Info.plist` (`CFBundleURLTypes`); universal-link
    * hosts from the code-signing entitlements (`com.apple.developer.associated-domains`).
    *
-   * Simulators only — the `.app` bundle is a host filesystem path
-   * (`get_app_container ... app`), so host-side metadata clients can read it
-   * directly. Physical devices return an explicit "not yet implemented" failure.
+   * On a simulator (iPhone or Apple TV) the `.app` bundle is a host filesystem path
+   * (`get_app_container ... app`), so host-side metadata clients read it directly.
+   * A physical iPhone copies the bundle off the device first; a physical Apple TV is refused.
    * @param bundleId - The iOS bundle identifier
    * @returns Promise with deep link information
    */
@@ -329,6 +331,12 @@ export class DeepLinkManager implements DeepLinkManager {
       logger.info(`[DeepLinkManager] Querying iOS deep links for bundle: ${bundleId}`);
 
       if (resolveIosDeviceKind({ deviceId: udid }) !== "simulator") {
+        if (this.device!.platform === "tvos") {
+          return this.emptyIosResult(
+            bundleId,
+            `getDeepLinks supports only Apple TV simulators; ${udid} is not a simulator UDID.`,
+          );
+        }
         return await this.getDeepLinksIosPhysical(udid, bundleId, signal);
       }
 

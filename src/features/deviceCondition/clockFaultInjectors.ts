@@ -49,7 +49,7 @@ import { createSerializer, rejectValue, unsupported } from "./injectorSupport";
 export interface ClockFaultInjectorDeps {
   /** A fresh adapter per operation, so it carries the clock registry's current incarnation signal. */
   adapter: () => DeviceClockAdapter;
-  hostClock: Pick<Timer, "now">;
+  hostClock: Pick<Timer, "now" | "sleep">;
   registry: DeviceClockRestoreRegistry;
   invalidate: (deviceId: string) => void;
 }
@@ -159,7 +159,7 @@ export function createClockSkewFaultInjector(
 /** The injectable seams a test overrides; production uses the default adb factory and clock registry. */
 export interface ClockFaultResolverDeps {
   adbFactory?: AdbClientFactory;
-  hostClock?: Pick<Timer, "now">;
+  hostClock?: Pick<Timer, "now" | "sleep">;
   registry?: DeviceClockRestoreRegistry;
   cache?: Map<string, DeviceConditionInjector>;
 }

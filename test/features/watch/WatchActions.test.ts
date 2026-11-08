@@ -7,6 +7,7 @@ import {
   watchTapAt,
   watchSwipeOn,
   watchPress,
+  orderWatchTapCandidates,
 } from "../../../src/features/watch/WatchActions";
 import { FakeWatchRunnerClient } from "../../fakes/FakeWatchRunnerClient";
 import hierarchy from "../../fixtures/watchos-xcuitest/sdk-hierarchy-live.json";
@@ -18,9 +19,47 @@ import { PressButton } from "../../../src/features/action/PressButton";
 import { SendKeys } from "../../../src/features/action/SendKeys";
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import { MultiTouchGesture } from "../../../src/features/action/MultiTouchGesture";
-import type { BootedDevice } from "../../../src/models";
+import type { BootedDevice, Element } from "../../../src/models";
 import { ActionableError } from "../../../src/models/ActionableError";
 import * as watchActions from "../../../src/features/watch/WatchActions";
+import xcuiHierarchy from "../../fixtures/watchos-xcuitest/hierarchy.json";
+
+describe("watch tap candidate ordering", () => {
+  // Fake candidates shaped like the captured XCUITest nodes, without parsing a hierarchy.
+  const candidate = (type: number): Element => {
+    const [x, y, width, height] = xcuiHierarchy.frame;
+    return {
+      class: `XCUIElementType(${type})`,
+      text: "helloAB",
+      bounds: { left: x, top: y, right: x + width, bottom: y + height },
+    };
+  };
+
+  test("prefers every input type and preserves order within both groups without mutation", () => {
+    const label = candidate(48);
+    const field = candidate(49);
+    const button = candidate(9);
+    const secure = candidate(50);
+    const search = candidate(45);
+    const otherField = candidate(49);
+    const candidates = [label, field, button, secure, search, otherField];
+    const ordered = orderWatchTapCandidates(candidates, true);
+    const expected = [field, secure, search, otherField, label, button];
+    ordered.forEach((element, index) => expect(element).toBe(expected[index]));
+    expect(candidates).toEqual([label, field, button, secure, search, otherField]);
+  });
+
+  test("ordinary taps keep hierarchy order even with matching inputs", () => {
+    const candidates = [candidate(48), candidate(49), candidate(45), candidate(50)];
+    expect(orderWatchTapCandidates(candidates, false)).toEqual(candidates);
+  });
+
+  test("falls back to other matches in order and handles empty candidates", () => {
+    const candidates = [candidate(48), candidate(9), { ...candidate(1), class: undefined }];
+    expect(orderWatchTapCandidates(candidates, true)).toEqual(candidates);
+    expect(orderWatchTapCandidates([], true)).toEqual([]);
+  });
+});
 
 const device: BootedDevice = { deviceId: "watch-actions", platform: "watchos", name: "Watch" };
 let client: FakeWatchRunnerClient;
@@ -30,6 +69,38 @@ beforeEach(() => {
   unregister = watchRunners.register(device.deviceId, client);
 });
 afterEach(() => unregister());
+
+describe("watch tap by shared identifier with value aliases", () => {
+  const field = (top: number, label: string, children: object[] = []) => ({
+    className: "XCUIElementType(49)",
+    accessibilityIdentifier: "repeated-field",
+    accessibilityLabel: label,
+    bounds: { left: 2, top, right: 180, bottom: top + 40 },
+    children,
+  });
+  const alias = (top: number, value: string) => field(top, value);
+  const tree = {
+    ...hierarchy,
+    root: {
+      ...hierarchy.root,
+      children: [
+        field(10, "First", [alias(10, "alpha")]),
+        field(60, "Second", [alias(60, "beta")]),
+      ],
+    },
+  };
+
+  test("elementId index addresses the second field, not the first field's value alias", async () => {
+    const aliasClient = new FakeWatchRunnerClient(tree);
+    const release = watchRunners.register("watch-alias", aliasClient);
+    try {
+      await watchTapOn("watch-alias", { elementId: "repeated-field", index: 1, action: "tap" });
+      expect(aliasClient.commands.at(-1)).toEqual({ type: "tap", x: 91, y: 80 });
+    } finally {
+      release();
+    }
+  });
+});
 
 describe("watch actions", () => {
   test.each([0.5, -0.5])("rotates the crown by signed delta %s", async (delta) => {
@@ -198,9 +269,13 @@ describe("watch actions", () => {
       }),
     ).toMatchObject({ found: false, scrollIterations: 2 });
     expect(client.commands.filter((command) => command.type === "swipe")).toEqual([
-      { type: "swipe", direction: "down" },
-      { type: "swipe", direction: "down" },
+      { type: "swipe", direction: "down", distance: watchActions.WATCH_LOOK_FOR_SWIPE_DISTANCE },
+      { type: "swipe", direction: "down", distance: watchActions.WATCH_LOOK_FOR_SWIPE_DISTANCE },
     ]);
+  });
+  test("lookFor swipes move less than one screen so consecutive reads overlap", () => {
+    expect(watchActions.WATCH_LOOK_FOR_SWIPE_DISTANCE).toBeGreaterThan(0);
+    expect(watchActions.WATCH_LOOK_FOR_SWIPE_DISTANCE).toBeLessThan(1);
   });
   test("long press, pinch, multi-touch and text reject before any command", async () => {
     const timer = new FakeTimer();

@@ -23,6 +23,11 @@ export interface PrototypeSpecRevision {
   /** Host clock time the revision was recorded. */
   readonly time: number;
   readonly variant?: PrototypeSpecVariant;
+  /**
+   * The MCP connection whose show or patch produced the revision (#17358), when the call had one.
+   * The daemon's store is shared by every connection, so a client compares this with its own.
+   */
+  readonly mcpSessionId?: string;
   /** UTF-8 size of the spec JSON, counted against {@link MAX_PROTOTYPE_SPEC_REVISION_BYTES}. */
   readonly bytes: number;
 }
@@ -35,12 +40,23 @@ export interface PrototypeSpecRevisionRecorder {
       spec: ShownSpecJson;
       platform?: PrototypePlatformName;
       variant?: PrototypeSpecVariant;
+      mcpSessionId?: string;
     },
   ): void;
-  recordPatch(
-    id: string,
-    patched: { spec: ShownSpecJson; platform?: PrototypePlatformName; deviceRevision?: number },
-  ): void;
+  recordPatch(id: string, patched: PrototypeSpecPatchRecord): void;
+}
+
+/** What a landed patch reports to {@link PrototypeSpecRevisionRecorder.recordPatch}. */
+export interface PrototypeSpecPatchRecord {
+  readonly spec: ShownSpecJson;
+  readonly platform?: PrototypePlatformName;
+  readonly deviceRevision?: number;
+  readonly mcpSessionId?: string;
+}
+
+/** Narrows a revision lookup to the revisions one MCP connection produced (#17358). */
+export interface PrototypeSpecRevisionFilter {
+  readonly mcpSessionId?: string;
 }
 
 export type PrototypeSpecRevisionEvent =
@@ -53,10 +69,20 @@ export type PrototypeSpecRevisionEvent =
 export interface PrototypeSpecRevisionSource {
   /** Ids with at least one kept revision, in the order they first appeared. */
   ids(): readonly string[];
-  /** Kept revisions of an id, oldest first. Throws an ActionableError for an unknown id. */
-  history(id: string): readonly PrototypeSpecRevision[];
-  /** One kept revision (default the latest). Throws an ActionableError when unknown or evicted. */
-  revision(id: string, revision?: number): PrototypeSpecRevision;
+  /**
+   * Kept revisions of an id, oldest first, optionally only those `filter` matches (possibly none).
+   * Throws an ActionableError for an unknown id.
+   */
+  history(id: string, filter?: PrototypeSpecRevisionFilter): readonly PrototypeSpecRevision[];
+  /**
+   * One kept revision (default the latest `filter` matches). Throws an ActionableError when
+   * unknown, evicted, or not produced by the filtered session.
+   */
+  revision(
+    id: string,
+    revision?: number,
+    filter?: PrototypeSpecRevisionFilter,
+  ): PrototypeSpecRevision;
   onRevision(listener: (event: PrototypeSpecRevisionEvent) => void): () => void;
 }
 
@@ -75,6 +101,13 @@ interface History {
   lastSequence: number;
   variant?: PrototypeSpecVariant;
   readonly kept: (PrototypeSpecRevision & { readonly sequence: number })[];
+}
+
+function matchesFilter(
+  entry: PrototypeSpecRevision,
+  filter: PrototypeSpecRevisionFilter | undefined,
+): boolean {
+  return filter?.mcpSessionId === undefined || entry.mcpSessionId === filter.mcpSessionId;
 }
 
 /** In-memory spec revisions for the daemon session (#16345). Device state edits never add one. */
@@ -103,18 +136,21 @@ export class PrototypeSpecRevisions
       spec: ShownSpecJson;
       platform?: PrototypePlatformName;
       variant?: PrototypeSpecVariant;
+      mcpSessionId?: string;
     },
   ): void {
     const history = this.historyFor(id);
     // Each show states its variant afresh; a show without one leaves the group.
     history.variant = shown.variant ? { ...shown.variant } : undefined;
-    this.append(id, history, { operation: "show", spec: shown.spec, platform: shown.platform });
+    this.append(id, history, {
+      operation: "show",
+      spec: shown.spec,
+      platform: shown.platform,
+      mcpSessionId: shown.mcpSessionId,
+    });
   }
 
-  recordPatch(
-    id: string,
-    patched: { spec: ShownSpecJson; platform?: PrototypePlatformName; deviceRevision?: number },
-  ): void {
+  recordPatch(id: string, patched: PrototypeSpecPatchRecord): void {
     this.append(id, this.historyFor(id), { operation: "patch", ...patched });
   }
 
@@ -124,13 +160,22 @@ export class PrototypeSpecRevisions
       .map(([id]) => id);
   }
 
-  history(id: string): readonly PrototypeSpecRevision[] {
-    return this.known(id).kept.map(({ sequence: _sequence, ...revision }) => revision);
+  history(id: string, filter?: PrototypeSpecRevisionFilter): readonly PrototypeSpecRevision[] {
+    return this.known(id)
+      .kept.filter((entry) => matchesFilter(entry, filter))
+      .map(({ sequence: _sequence, ...revision }) => revision);
   }
 
-  revision(id: string, revision?: number): PrototypeSpecRevision {
+  revision(
+    id: string,
+    revision?: number,
+    filter?: PrototypeSpecRevisionFilter,
+  ): PrototypeSpecRevision {
     const kept = this.history(id);
     const latest = kept.at(-1)!;
+    if (filter?.mcpSessionId !== undefined) {
+      return this.sessionRevision(id, kept, revision, filter.mcpSessionId);
+    }
     if (revision === undefined) {
       return latest;
     }
@@ -147,6 +192,34 @@ export class PrototypeSpecRevisions
     }
     throw new ActionableError(
       `Prototype "${id}" has no revision ${revision}. Kept revisions: ${keptList} (latest ${latest.revision}).`,
+    );
+  }
+
+  /** A revision lookup restricted to one MCP connection's revisions (#17358). */
+  private sessionRevision(
+    id: string,
+    kept: readonly PrototypeSpecRevision[],
+    revision: number | undefined,
+    mcpSessionId: string,
+  ): PrototypeSpecRevision {
+    const own = kept.filter((entry) => entry.mcpSessionId === mcpSessionId);
+    const found =
+      revision === undefined ? own.at(-1) : own.find((entry) => entry.revision === revision);
+    if (found) {
+      return found;
+    }
+    const ownList = own.length > 0 ? own.map((entry) => entry.revision).join(", ") : "none";
+    if (kept.some((entry) => entry.revision === revision)) {
+      throw new ActionableError(
+        `Revision ${revision} of prototype "${id}" was produced by another MCP session. Kept revisions of session "${mcpSessionId}": ${ownList}.`,
+      );
+    }
+    if (revision !== undefined) {
+      // Not kept at all: the unfiltered lookup throws its evicted or unknown revision error.
+      this.revision(id, revision);
+    }
+    throw new ActionableError(
+      `Prototype "${id}" has no kept revision from MCP session "${mcpSessionId}"; show or patch it from that session first.`,
     );
   }
 
@@ -183,7 +256,10 @@ export class PrototypeSpecRevisions
   private append(
     id: string,
     history: History,
-    entry: Pick<PrototypeSpecRevision, "operation" | "spec" | "platform" | "deviceRevision">,
+    entry: Pick<
+      PrototypeSpecRevision,
+      "operation" | "spec" | "platform" | "deviceRevision" | "mcpSessionId"
+    >,
   ): void {
     const spec = structuredClone(entry.spec);
     const bytes = Buffer.byteLength(JSON.stringify(spec));
@@ -198,6 +274,7 @@ export class PrototypeSpecRevisions
       ...(entry.platform === undefined ? {} : { platform: entry.platform }),
       time: this.clock.now(),
       ...(history.variant ? { variant: { ...history.variant } } : {}),
+      ...(entry.mcpSessionId === undefined ? {} : { mcpSessionId: entry.mcpSessionId }),
       bytes,
       sequence,
     });

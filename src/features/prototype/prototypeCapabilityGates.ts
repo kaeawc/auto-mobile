@@ -1,3 +1,8 @@
+import {
+  PROTOTYPE_LOOPS_CAPABILITY,
+  prototypeLoopFields,
+  prototypeLoopsUnsupportedMessage,
+} from "./prototypeLoops";
 import { prototypeGlassFields, prototypeScrollEdgeEffectFields } from "./prototypeGlass";
 import {
   PROTOTYPE_ADAPTIVE_CAPABILITY,
@@ -105,7 +110,7 @@ import {
   PROTOTYPE_PLATFORM_MODULE_GATES,
   prototypePlatformFields,
   prototypePlatformUnsupportedMessage,
-} from "./prototypePlatform";
+} from "./prototypePlatformGates";
 import {
   prototypeDataActionFields,
   prototypeDataActionsUnsupportedMessage,
@@ -252,6 +257,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     fields: prototypeScrollEdgeEffectFields,
     unsupportedMessage: (fields) =>
       `The device does not advertise prototype_scroll_edge_effect_v1, required by ${fields[0]}. Nothing was shown.`,
+  },
+  {
+    capability: PROTOTYPE_LOOPS_CAPABILITY,
+    fields: prototypeLoopFields,
+    unsupportedMessage: prototypeLoopsUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_MOTION_TOKENS_CAPABILITY,

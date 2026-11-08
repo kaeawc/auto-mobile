@@ -39,6 +39,174 @@ final class TVCommandPolicyTests: XCTestCase {
         XCTAssertEqual(TVElementText.text(label: "Name", value: "hello", isTextInput: true, isSecure: false), "Name hello")
     }
 
+    func testCapturedClosedFieldText() {
+        XCTAssertEqual(TVElementText.text(
+            label: "", value: nil, placeholder: "Text", isTextInput: true, isSecure: false
+        ), "")
+        XCTAssertEqual(TVElementText.text(
+            label: "Label", value: nil, placeholder: "Placeholder", isTextInput: true, isSecure: false
+        ), "Label")
+        XCTAssertEqual(TVElementText.text(
+            label: "Label", value: "hello", placeholder: "Placeholder", isTextInput: true, isSecure: false
+        ), "Label hello")
+        XCTAssertEqual(TVElementText.text(
+            label: "", value: "••••••", placeholder: "Secret", isTextInput: true, isSecure: true
+        ), "")
+    }
+
+    func testIOSStylePlaceholderValueIsEmpty() {
+        // Synthetic iOS-style variant; no tvOS capture produced value == placeholderValue.
+        XCTAssertEqual(TVElementText.text(
+            label: "Label", value: "Placeholder", placeholder: "Placeholder", isTextInput: true, isSecure: false
+        ), "Label")
+    }
+
+    func testSecureMetadataDetection() {
+        XCTAssertTrue(TVSecureField.isSecure(elementType: 50, identifier: "", label: "", placeholder: nil))
+        for type in [45, 49, 52] {
+            for keyword in ["PASSWORD", "Passcode", "passwd", "Secret", "Enter PIN", "pin-code"] {
+                let cases: [(String, String, String?)] = [(keyword, "", nil), ("", keyword, nil), ("", "", keyword)]
+                for metadata in cases {
+                    XCTAssertTrue(TVSecureField.isSecure(
+                        elementType: type, identifier: metadata.0, label: metadata.1, placeholder: metadata.2
+                    ), keyword)
+                }
+            }
+            for label in ["Pinned items", "spinning", "Label"] {
+                XCTAssertFalse(TVSecureField.isSecure(
+                    elementType: type, identifier: "", label: label, placeholder: nil
+                ))
+            }
+        }
+        XCTAssertFalse(TVSecureField.isSecure(
+            elementType: 48, identifier: "password", label: "Secret", placeholder: "PIN"
+        ))
+    }
+
+    private var labeledField: TVFocusedField {
+        TVFocusedField(identifier: "am-labeled-field", label: "Label", placeholder: "Placeholder", isSecure: false)
+    }
+
+    /// Captured tvOS tree, omitting the 40 key nodes and retaining the entry container and prompt.
+    private func keyboardTree(value: String, prompt: String = "Placeholder", button: String = "next") -> TVNodeSketch {
+        let entryChildren = value.isEmpty ? [TVNodeSketch(elementType: 48, label: prompt)] : []
+        return TVNodeSketch(elementType: 2, label: "AutoMobileTVTest", children: [
+            TVNodeSketch(elementType: 4, children: [
+                TVNodeSketch(elementType: 1, children: [
+                    TVNodeSketch(elementType: 1, children: [
+                        TVNodeSketch(elementType: 48, label: prompt),
+                        TVNodeSketch(elementType: 1, children: [
+                            TVNodeSketch(elementType: 1, children: [
+                                TVNodeSketch(elementType: 52, label: "", value: value),
+                            ] + entryChildren),
+                        ]),
+                        TVNodeSketch(elementType: 19, label: "Keyboard", hasFocus: true, children: [
+                            TVNodeSketch(elementType: 1, children: [
+                                TVNodeSketch(elementType: 1, identifier: "UIKeyboardLayoutStar Preview"),
+                            ]),
+                        ]),
+                        TVNodeSketch(elementType: 9, label: button, children: [
+                            TVNodeSketch(elementType: 48, label: button),
+                        ]),
+                    ]),
+                ]),
+            ]),
+        ])
+    }
+
+    func testCapturedKeyboardEntryReportsRememberedLabeledField() throws {
+        for (value, expected) in [("hello", "Label hello"), ("", "Label")] {
+            let root = keyboardTree(value: value)
+            let entry = try XCTUnwrap(TVTextEntryPolicy.resolve(
+                root: root, hasFocusedKeyboard: TVTextEntryPolicy.hasFocusedKeyboard(root), lastFocusedField: labeledField
+            ))
+            XCTAssertEqual(entry.path, [0, 0, 0, 1, 0, 0])
+            XCTAssertEqual(entry.className, "49")
+            XCTAssertTrue(entry.focused)
+            XCTAssertEqual(entry.resourceId, "am-labeled-field")
+            XCTAssertEqual(entry.text, expected)
+        }
+    }
+
+    func testCapturedSecureKeyboardEntryNeverEmitsPlaintext() throws {
+        let root = keyboardTree(value: "s3cret", prompt: "Secret", button: "done")
+        let field = TVFocusedField(identifier: "am-secure-field", label: "", placeholder: "Secret", isSecure: true)
+        let entry = try XCTUnwrap(TVTextEntryPolicy.resolve(
+            root: root, hasFocusedKeyboard: true, lastFocusedField: field
+        ))
+        XCTAssertEqual(entry.text, "")
+        XCTAssertEqual(entry.resourceId, "am-secure-field")
+        // A label is still allowed for a secure field; its value is never used.
+        let labeledSecure = TVFocusedField(
+            identifier: field.identifier, label: "Secret", placeholder: "Secret", isSecure: true
+        )
+        XCTAssertEqual(TVTextEntryPolicy.resolve(
+            root: root, hasFocusedKeyboard: true, lastFocusedField: labeledSecure
+        )?.text, "Secret")
+    }
+
+    func testUnknownKeyboardEntryWithholdsValue() throws {
+        let root = keyboardTree(value: "s3cret", prompt: "Secret", button: "done")
+        let entry = try XCTUnwrap(TVTextEntryPolicy.resolve(
+            root: root, hasFocusedKeyboard: true, lastFocusedField: nil
+        ))
+        XCTAssertEqual(entry.text, "")
+        XCTAssertNil(entry.resourceId)
+    }
+
+    func testNormalFocusedFieldIsNotOverridden() {
+        let root = TVNodeSketch(
+            elementType: 49, identifier: "am-labeled-field", label: "Label", value: "hello",
+            placeholder: "Placeholder", hasFocus: true
+        )
+        XCTAssertFalse(TVTextEntryPolicy.hasFocusedKeyboard(root))
+        XCTAssertNil(TVTextEntryPolicy.resolve(
+            root: root, hasFocusedKeyboard: TVTextEntryPolicy.hasFocusedKeyboard(root), lastFocusedField: labeledField
+        ))
+        XCTAssertEqual(TVTextEntryPolicy.rememberedField(in: root, previous: nil), labeledField)
+    }
+
+    func testKeyboardSubtreeIsExcludedFromEntryLookup() throws {
+        // Synthetic placement checks subtree exclusion and first depth-first match.
+        var root = keyboardTree(value: "hello")
+        root.children.insert(TVNodeSketch(elementType: 19, hasFocus: true, children: [
+            TVNodeSketch(elementType: 52, value: "inside keyboard"),
+        ]), at: 0)
+        root.children.append(TVNodeSketch(elementType: 49, value: "later field"))
+        let entry = try XCTUnwrap(TVTextEntryPolicy.resolve(
+            root: root, hasFocusedKeyboard: true, lastFocusedField: labeledField
+        ))
+        XCTAssertEqual(entry.path, [1, 0, 0, 1, 0, 0])
+        XCTAssertEqual(entry.text, "Label hello")
+    }
+
+    func testRemembersCapturedFocusedFieldsAndRetainsThemAcrossKeyboardClose() {
+        let closed = TVNodeSketch(elementType: 2, children: [
+            TVNodeSketch(elementType: 49, identifier: "am-text-field", placeholder: "Text", hasFocus: true),
+            TVNodeSketch(elementType: 49, identifier: "am-labeled-field", label: "Label", placeholder: "Placeholder"),
+            TVNodeSketch(elementType: 50, identifier: "am-secure-field", placeholder: "Secret"),
+        ])
+        let field = TVTextEntryPolicy.rememberedField(in: closed, previous: nil)
+        XCTAssertEqual(field, TVFocusedField(
+            identifier: "am-text-field", label: "", placeholder: "Text", isSecure: false
+        ))
+        XCTAssertEqual(TVTextEntryPolicy.rememberedField(in: keyboardTree(value: "hello"), previous: field), field)
+        var unfocused = closed
+        unfocused.children[0].hasFocus = false
+        XCTAssertEqual(TVTextEntryPolicy.rememberedField(in: unfocused, previous: field), field)
+        unfocused.children[2].hasFocus = true
+        XCTAssertEqual(TVTextEntryPolicy.rememberedField(in: unfocused, previous: field), TVFocusedField(
+            identifier: "am-secure-field", label: "", placeholder: "Secret", isSecure: true
+        ))
+    }
+
+    func testFocusedFieldLookupExcludesUnfocusedKeyboardSubtree() {
+        let root = TVNodeSketch(elementType: 19, children: [
+            TVNodeSketch(elementType: 52, hasFocus: true),
+        ])
+        XCTAssertNil(TVTextEntryPolicy.rememberedField(in: root, previous: nil))
+    }
+
     func testOnlyHierarchyRemotePressAppendTextAndScreenshotAreSupported() {
         XCTAssertEqual(TVCommandPolicy.supportedCommands, [
             "request_hierarchy", "request_press_button", "request_append_text", "request_screenshot",

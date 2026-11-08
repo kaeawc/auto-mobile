@@ -4,6 +4,7 @@ import XCTest
 @MainActor
 final class TVCommandRouter {
     private let application: XCUIApplication
+    private var lastFocusedField: TVFocusedField?
 
     init(application: XCUIApplication) {
         self.application = application
@@ -50,11 +51,17 @@ final class TVCommandRouter {
                 let request = try decoder.decode(RequestHierarchy.self, from: data)
                 let resolved = target(requested: envelope.bundleId)
                 let snapshot = try resolved.app.snapshot()
+                let tree = sketch(snapshot)
+                lastFocusedField = TVTextEntryPolicy.rememberedField(in: tree, previous: lastFocusedField)
+                let entry = TVTextEntryPolicy.resolve(
+                    root: tree, hasFocusedKeyboard: TVTextEntryPolicy.hasFocusedKeyboard(tree),
+                    lastFocusedField: lastFocusedField
+                )
                 return try JSONEncoder().encode(HierarchyUpdateResponse(
                     requestId: request.requestId,
                     data: ViewHierarchy(
                         packageName: resolved.packageName,
-                        hierarchy: element(snapshot),
+                        hierarchy: element(snapshot, entry: entry),
                         screenWidth: ElementBounds.clampedInt(snapshot.frame.width),
                         screenHeight: ElementBounds.clampedInt(snapshot.frame.height)
                     )
@@ -69,6 +76,15 @@ final class TVCommandRouter {
                     throw CommandError.invalidParameter("frameContext", "unsupported on tvOS")
                 }
                 let startTime = Date()
+                if button == .select {
+                    let resolved = target(requested: envelope.bundleId)
+                    // Best effort: a failed snapshot must not prevent remote input.
+                    if let snapshot = try? resolved.app.snapshot() {
+                        lastFocusedField = TVTextEntryPolicy.rememberedField(
+                            in: sketch(snapshot), previous: lastFocusedField
+                        )
+                    }
+                }
                 press(button)
                 return try JSONEncoder().encode(WebSocketResponse.success(
                     type: "press_button_result", requestId: requestId,
@@ -83,7 +99,7 @@ final class TVCommandRouter {
                 let startTime = Date()
                 let resolved = target(requested: envelope.bundleId)
                 let snapshot = try resolved.app.snapshot()
-                guard hasFocusedKeyboard(snapshot) else {
+                guard TVTextEntryPolicy.hasFocusedKeyboard(sketch(snapshot)) else {
                     throw CommandError.invalidParameter("text", "no focused text input")
                 }
                 resolved.app.typeText(request.text)
@@ -116,28 +132,38 @@ final class TVCommandRouter {
         }
     }
 
-    private func hasFocusedKeyboard(_ snapshot: any XCUIElementSnapshot) -> Bool {
-        (snapshot.hasFocus && snapshot.elementType == .keyboard)
-            || snapshot.children.contains { hasFocusedKeyboard($0) }
+    private func sketch(_ snapshot: any XCUIElementSnapshot) -> TVNodeSketch {
+        TVNodeSketch(
+            elementType: Int(snapshot.elementType.rawValue), identifier: snapshot.identifier,
+            label: snapshot.label, value: snapshot.value as? String, placeholder: snapshot.placeholderValue,
+            hasFocus: snapshot.hasFocus, children: snapshot.children.map { sketch($0) }
+        )
     }
 
-    private func element(_ snapshot: any XCUIElementSnapshot) -> UIElementInfo {
-        // Translate the captured spike's frame/id/type/hasFocus/enabled/selected fields into
-        // the existing hierarchy wire model. Focus is observed, never assigned directly.
-        UIElementInfo(
-            text: TVElementText.text(
+    private func element(
+        _ snapshot: any XCUIElementSnapshot, entry: TVKeyboardEntry?, path: [Int] = []
+    ) -> UIElementInfo {
+        let entryOverride = entry.flatMap { $0.path == path ? $0 : nil }
+        return UIElementInfo(
+            text: entryOverride?.text ?? TVElementText.text(
                 label: snapshot.label,
                 value: snapshot.value as? String,
+                placeholder: snapshot.placeholderValue,
                 isTextInput: [.textField, .secureTextField, .searchField, .textView].contains(snapshot.elementType),
-                isSecure: snapshot.elementType == .secureTextField
+                isSecure: TVSecureField.isSecure(
+                    elementType: Int(snapshot.elementType.rawValue), identifier: snapshot.identifier,
+                    label: snapshot.label, placeholder: snapshot.placeholderValue
+                )
             ),
-            resourceId: snapshot.identifier,
-            className: String(snapshot.elementType.rawValue),
+            resourceId: entryOverride == nil ? snapshot.identifier : entryOverride?.resourceId,
+            className: entryOverride?.className ?? String(snapshot.elementType.rawValue),
             bounds: ElementBounds(clamping: snapshot.frame),
             enabled: String(snapshot.isEnabled),
-            focused: String(snapshot.hasFocus),
+            focused: String(entryOverride?.focused ?? snapshot.hasFocus),
             selected: String(snapshot.isSelected),
-            node: snapshot.children.map { element($0) }
+            node: snapshot.children.enumerated().map { index, child in
+                element(child, entry: entry, path: path + [index])
+            }
         )
     }
 

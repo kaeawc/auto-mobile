@@ -1,3 +1,5 @@
+import Foundation
+
 // Kept independent of XCTest and UIKit so macOS SwiftPM tests cover the capability boundary.
 enum TVCommandPolicy {
     static let supportedCommands = [
@@ -15,10 +17,101 @@ enum TVRemoteButton: String, CaseIterable {
 }
 
 enum TVElementText {
-    static func text(label: String, value: String?, isTextInput: Bool, isSecure: Bool) -> String {
-        guard !isSecure, isTextInput, let value, !value.isEmpty else { return label }
+    static func text(
+        label: String, value: String?, placeholder: String? = nil, isTextInput: Bool, isSecure: Bool
+    ) -> String {
+        guard !isSecure, isTextInput, let value, !value.isEmpty,
+              value != placeholder else { return label }
         // Emit the value alone for an empty or matching label; otherwise join label and value with one space.
         return label.isEmpty || label == value ? value : "\(label) \(value)"
+    }
+}
+
+enum TVSecureField {
+    static func isSecure(elementType: Int, identifier: String, label: String, placeholder: String?) -> Bool {
+        if elementType == 50 { return true }
+        guard [45, 49, 52].contains(elementType) else { return false }
+        // XCUIElementAttributes exposes no secure-text-entry trait; use field metadata as a fallback.
+        return [identifier, label, placeholder ?? ""].contains {
+            $0.range(
+                of: #"password|passcode|passwd|secret|\bpin\b"#, options: [.regularExpression, .caseInsensitive]
+            ) != nil
+        }
+    }
+}
+
+struct TVFocusedField: Equatable {
+    let identifier: String
+    let label: String
+    let placeholder: String?
+    let isSecure: Bool
+}
+
+struct TVNodeSketch {
+    let elementType: Int
+    var identifier = ""
+    var label = ""
+    var value: String?
+    var placeholder: String?
+    var hasFocus = false
+    var children: [TVNodeSketch] = []
+}
+
+struct TVKeyboardEntry: Equatable {
+    let path: [Int]
+    let resourceId: String?
+    let text: String
+    let className = "49"
+    let focused = true
+}
+
+enum TVTextEntryPolicy {
+    static func hasFocusedKeyboard(_ root: TVNodeSketch) -> Bool {
+        (root.elementType == 19 && root.hasFocus) || root.children.contains { hasFocusedKeyboard($0) }
+    }
+
+    /// Keep the previous field when no field is focused, including after the keyboard closes.
+    static func rememberedField(in root: TVNodeSketch, previous: TVFocusedField?) -> TVFocusedField? {
+        guard !hasFocusedKeyboard(root) else { return previous }
+        return focusedField(in: root) ?? previous
+    }
+
+    private static func focusedField(in node: TVNodeSketch) -> TVFocusedField? {
+        guard node.elementType != 19 else { return nil }
+        if node.hasFocus, [45, 49, 50, 52].contains(node.elementType) {
+            return TVFocusedField(
+                identifier: node.identifier, label: node.label, placeholder: node.placeholder,
+                isSecure: TVSecureField.isSecure(
+                    elementType: node.elementType, identifier: node.identifier,
+                    label: node.label, placeholder: node.placeholder
+                )
+            )
+        }
+        return node.children.lazy.compactMap { focusedField(in: $0) }.first
+    }
+
+    static func resolve(
+        root: TVNodeSketch, hasFocusedKeyboard: Bool, lastFocusedField: TVFocusedField?
+    ) -> TVKeyboardEntry? {
+        guard hasFocusedKeyboard else { return nil }
+        return entry(in: root, path: [], field: lastFocusedField)
+    }
+
+    private static func entry(in node: TVNodeSketch, path: [Int], field: TVFocusedField?) -> TVKeyboardEntry? {
+        guard node.elementType != 19 else { return nil }
+        if [52, 49].contains(node.elementType) {
+            return TVKeyboardEntry(
+                path: path, resourceId: field?.identifier,
+                text: TVElementText.text(
+                    label: field?.label ?? "", value: node.value, placeholder: field?.placeholder,
+                    isTextInput: true, isSecure: field?.isSecure ?? true
+                )
+            )
+        }
+        for (index, child) in node.children.enumerated() {
+            if let match = entry(in: child, path: path + [index], field: field) { return match }
+        }
+        return nil
     }
 }
 

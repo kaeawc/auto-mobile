@@ -195,7 +195,9 @@ from the layout.
 ## Enter text
 
 Select a text field with `pressButton select` to open the on-screen keyboard, then call `sendKeys`
-with `type` commands. Text is appended to the field.
+with `type` commands. Text is appended to the field. While the keyboard is open, the hierarchy
+reports the remembered field's identifier, label, focus and current text. Secure values are hidden;
+text is also withheld when the field was not observed before the keyboard opened.
 
 - `operation: "replace"`, key commands, clear commands and selectors are refused.
 - To change existing text, edit it on the on-screen keyboard with `pressButton`, then type.

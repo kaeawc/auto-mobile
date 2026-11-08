@@ -1,0 +1,8 @@
+$ xcrun simctl ui <udid> appearance dark
+An error was encountered processing the command (domain=NSPOSIXErrorDomain, code=45): ... Operation not supported
+$ xcrun simctl ui <udid> content_size large     -> same, code=45
+$ xcrun simctl status_bar <udid> override --time 9:41  -> same, code=45
+$ xcrun simctl pbcopy <udid>
+Pasteboard is not supported by this runtime.   (SimError code=403)
+$ xcrun simctl openurl <udid> https://example.com
+Simulator device failed to open https://example.com. (LSApplicationWorkspaceErrorDomain, code=115)

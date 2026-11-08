@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { z } from "zod/v4";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -139,17 +141,56 @@ describe("assertToolSupportsDevicePlatform", () => {
     }
   });
 
-  test("admits postNotification on watchOS while refusing tvOS", () => {
-    expect(() => assertToolSupportsDevicePlatform("postNotification", watch)).not.toThrow();
-    expect(() =>
-      assertRequestedPlatformSupported("postNotification", { platform: "watchos" }),
-    ).not.toThrow();
-    expect(() => assertToolSupportsDevicePlatform("postNotification", appleTv)).toThrow(
-      "does not support tvOS yet",
+  test("admits postNotification on watchOS and tvOS", () => {
+    for (const [device, platform] of [
+      [watch, "watchos"],
+      [appleTv, "tvos"],
+    ] as const) {
+      expect(() => assertToolSupportsDevicePlatform("postNotification", device)).not.toThrow();
+      expect(() =>
+        assertRequestedPlatformSupported("postNotification", { platform }),
+      ).not.toThrow();
+    }
+  });
+
+  test("says a capability the tvOS runtime lacks is not available, not unsupported yet (#17529)", () => {
+    // Every simctl capability these tools wrap fails on a tvOS 26.5 simulator.
+    const capture = readFileSync(
+      join(import.meta.dir, "../fixtures/tvos-simctl/unsupported-capabilities.txt"),
+      "utf8",
     );
-    expect(() =>
-      assertRequestedPlatformSupported("postNotification", { platform: "tvos" }),
-    ).toThrow("does not support tvOS yet");
+    for (const failure of [
+      "ui <udid> appearance dark",
+      "ui <udid> content_size large",
+      "status_bar <udid> override",
+      "pbcopy <udid>",
+    ]) {
+      expect(capture).toContain(failure);
+    }
+    expect(capture).toContain("code=45");
+    expect(capture).toContain("Pasteboard is not supported by this runtime.");
+    for (const tool of ["displayConfig", "statusBar", "clipboard"]) {
+      expect(APPLE_PLATFORM_SUPPORTED_TOOLS.tvos.has(tool)).toBe(false);
+      const message = unsupportedPlatformToolMessage(tool, "tvos");
+      expect(message.startsWith(`${tool} is not available on tvOS: `)).toBe(true);
+      expect(message).not.toContain("yet");
+      expect(() => assertToolSupportsDevicePlatform(tool, appleTv)).toThrow(
+        new ActionableError(message),
+      );
+      expect(() => assertRequestedPlatformSupported(tool, { platform: "tvos" })).toThrow(
+        new ActionableError(message),
+      );
+    }
+    expect(unsupportedPlatformToolMessage("clipboard", "tvos")).toBe(
+      "clipboard is not available on tvOS: the tvOS simulator runtime has no pasteboard. Target an Android or iOS device instead.",
+    );
+    // The reason table is tvOS-only and ignores inherited object keys.
+    expect(unsupportedPlatformToolMessage("clipboard", "watchos")).toBe(
+      "clipboard does not support watchOS yet. Target an Android or iOS device instead.",
+    );
+    expect(unsupportedPlatformToolMessage("toString", "tvos")).toBe(
+      "toString does not support tvOS yet. Target an Android or iOS device instead.",
+    );
   });
 
   test("never rejects an Android or iOS device", () => {

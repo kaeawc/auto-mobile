@@ -1,0 +1,2 @@
+$ xcrun simctl privacy <udid> grant photos dev.jasonpearson.automobile.ctrlproxy.tv
+$ xcrun simctl privacy <udid> reset all dev.jasonpearson.automobile.ctrlproxy.tv

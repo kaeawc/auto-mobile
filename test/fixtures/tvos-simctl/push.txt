@@ -1,0 +1,2 @@
+$ xcrun simctl push <udid> dev.jasonpearson.automobile.ctrlproxy.tv - <<< '{"aps":{"alert":"x"}}'
+Notification sent to 'dev.jasonpearson.automobile.ctrlproxy.tv'

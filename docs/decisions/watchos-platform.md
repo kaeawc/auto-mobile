@@ -52,7 +52,8 @@ unavailable, and a broker binding never reuses one.
 
 - **Fail closed at the tool boundary.** Every device-aware tool rejects a watch or an Apple TV with
   an `ActionableError` naming the platform (`<tool> does not support watchOS yet`, `<tool> does
-  not support tvOS yet`) after device resolution and before
+  not support tvOS yet`; `<tool> is not available on tvOS` for a capability the tvOS simulator
+  runtime itself lacks, such as the status bar or pasteboard) after device resolution and before
   navigation recording, mutation journaling, audits or the handler run. The gate is in the
   registry's shared device dispatch, so a newly registered tool is covered without any change.
 - **One allowlist map.** `APPLE_PLATFORM_SUPPORTED_TOOLS` (`src/server/applePlatformToolSupport.ts`)

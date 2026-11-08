@@ -291,3 +291,5 @@ test/fixtures/prototype-a11y/*.json text eol=lf
 test/fixtures/android-stamp/AndroidManifest.xml text eol=lf
 # Verbatim com.apple.clockface XCUI debugDescription captures (#17482).
 test/fixtures/watchos-clockface/*.txt text eol=lf
+# Verbatim tvOS 26.5 simctl captures from #17526, #17527 and #17529.
+test/fixtures/tvos-simctl/*.txt text eol=lf

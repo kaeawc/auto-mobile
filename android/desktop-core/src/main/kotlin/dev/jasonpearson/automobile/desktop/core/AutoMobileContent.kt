@@ -2083,6 +2083,7 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
                   ) {
                     DeviceViewingNotice(
                       onTakeControl = { desktopSessionState.requestControl(noticeDeviceId) },
+                      holder = desktopSessionState.heldElsewhereHolder,
                     )
                   }
                   // Released after inactivity: still controllable; the next input allocates it

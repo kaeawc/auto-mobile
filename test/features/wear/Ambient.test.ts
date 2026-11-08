@@ -10,14 +10,19 @@ import { ActionableError, type ExecResult } from "../../../src/models";
 
 type Wakefulness = "Awake" | "Asleep" | "Dozing";
 
-// Verbatim Wear OS 7.0 / API 37 emulator capture from #17519.
-const lines = readFileSync(
-  join(import.meta.dir, "../../fixtures/wear/wear-service/ambient-readback.txt"),
+// Whole raw dumpsys wear_service captures from a Wear OS 7.0 / API 37 emulator.
+const AMBIENT_CAPTURE = readFileSync(
+  join(import.meta.dir, "../../fixtures/wear/wear-service/ambient-after-sleep.txt"),
   "utf8",
-).split("\n");
-const AMBIENT_LINE = lines[3] ?? "";
-const INTERACTIVE_LINE = lines[6] ?? "";
-const FACE_HIDDEN_LINE = lines[7] ?? "";
+);
+const INTERACTIVE_CAPTURE = readFileSync(
+  join(import.meta.dir, "../../fixtures/wear/wear-service/interactive-watch-face.txt"),
+  "utf8",
+);
+const SETTINGS_CAPTURE = readFileSync(
+  join(import.meta.dir, "../../fixtures/wear/wear-service/interactive-settings-front.txt"),
+  "utf8",
+);
 
 const output = (stdout: string): ExecResult => ({
   stdout,
@@ -30,7 +35,7 @@ const output = (stdout: string): ExecResult => ({
 class FakeAmbientAdb implements AmbientAdb {
   readonly calls: string[] = [];
   wakefulness: Wakefulness | null = "Dozing";
-  wearService = AMBIENT_LINE;
+  wearService = AMBIENT_CAPTURE;
   error?: Error;
   readError?: Error;
   wearServiceError?: Error;
@@ -78,8 +83,8 @@ async function run(action: AmbientAction, wakefulness: Wakefulness | null, wearS
 }
 
 describe("ambient readback from dumpsys wear_service", () => {
-  test("enter: captured inAmbient=true line succeeds and reports ambient", async () => {
-    const result = await run("enter", "Dozing", AMBIENT_LINE);
+  test("enter: captured inAmbient=true dump succeeds and reports ambient", async () => {
+    const result = await run("enter", "Dozing", AMBIENT_CAPTURE);
     expect(result).toMatchObject({
       success: true,
       action: "enter",
@@ -92,32 +97,32 @@ describe("ambient readback from dumpsys wear_service", () => {
     expect(result.message).not.toContain("no ambient readback");
   });
 
-  test("exit: captured inAmbient=false line with Awake succeeds", async () => {
-    const result = await run("exit", "Awake", INTERACTIVE_LINE);
+  test("exit: captured inAmbient=false dump with Awake succeeds", async () => {
+    const result = await run("exit", "Awake", INTERACTIVE_CAPTURE);
     expect(result).toMatchObject({ success: true, ambient: false, wakefulness: "Awake" });
   });
 
   test("enter: Dozing wakefulness without inAmbient=true is a failure", async () => {
-    const result = await run("enter", "Dozing", INTERACTIVE_LINE);
+    const result = await run("enter", "Dozing", INTERACTIVE_CAPTURE);
     expect(result).toMatchObject({ success: false, ambient: false });
     expect(result.reason).toContain("inAmbient=false");
   });
 
   test("enter: Settings in front reports the face is not on screen", async () => {
-    const result = await run("enter", "Dozing", FACE_HIDDEN_LINE);
+    const result = await run("enter", "Dozing", SETTINGS_CAPTURE);
     expect(result).toMatchObject({ success: false, ambient: false, watchFaceVisible: false });
     expect(result.reason).toContain("watchFaceVisible=false");
   });
 
   test("enter: display kept awake points at the stay-awake setting", async () => {
-    const result = await run("enter", "Awake", INTERACTIVE_LINE);
+    const result = await run("enter", "Awake", INTERACTIVE_CAPTURE);
     expect(result.success).toBe(false);
     expect(result.reason).toContain("Observed wakefulness Awake");
     expect(result.reason).toContain("svc power stayon");
   });
 
   test("exit: still in ambient is a failure", async () => {
-    const result = await run("exit", "Awake", AMBIENT_LINE);
+    const result = await run("exit", "Awake", AMBIENT_CAPTURE);
     expect(result).toMatchObject({ success: false, ambient: true });
   });
 });

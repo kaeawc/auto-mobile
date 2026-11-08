@@ -8,54 +8,48 @@ import {
 } from "../../../src/features/wear/wearServiceDumpsys";
 import type { ExecResult } from "../../../src/models";
 
-// Verbatim Wear OS 7.0 / API 37 emulator capture from #17519.
-const capture = readFileSync(
-  join(import.meta.dir, "../../fixtures/wear/wear-service/ambient-readback.txt"),
+// Whole raw dumpsys wear_service captures from a Wear OS 7.0 / API 37 emulator.
+const ambientCapture = readFileSync(
+  join(import.meta.dir, "../../fixtures/wear/wear-service/ambient-after-sleep.txt"),
   "utf8",
 );
-const lines = capture.split("\n").filter((line) => line.length > 0);
-const line = (prefix: string) => {
-  const found = lines.find((candidate) => candidate.startsWith(prefix));
-  if (!found) {
-    throw new Error(`fixture line missing: ${prefix}`);
-  }
-  return found;
-};
+const interactiveCapture = readFileSync(
+  join(import.meta.dir, "../../fixtures/wear/wear-service/interactive-watch-face.txt"),
+  "utf8",
+);
+const settingsCapture = readFileSync(
+  join(import.meta.dir, "../../fixtures/wear/wear-service/interactive-settings-front.txt"),
+  "utf8",
+);
 
 describe("dumpsys wear_service watch-face state", () => {
-  test("fixture keeps its eight captured lines", () => {
-    expect(lines).toHaveLength(8);
+  test.each([
+    ["ambient after sleep", ambientCapture],
+    ["interactive watch face", interactiveCapture],
+    ["Settings in front", settingsCapture],
+  ])("%s capture contains exactly one watchFaceState occurrence", (_name, capture) => {
+    expect(capture.match(/watchFaceState=/g)).toHaveLength(1);
   });
 
   test("after KEYCODE_SLEEP: visible face in ambient", () => {
-    expect(parseWatchFaceState(lines[3] ?? "")).toEqual({
+    expect(parseWatchFaceState(ambientCapture)).toEqual({
       watchFaceVisible: true,
       inAmbient: true,
     });
   });
 
-  test("after KEYCODE_WAKEUP: visible face out of ambient", () => {
-    expect(parseWatchFaceState(lines[6] ?? "")).toEqual({
+  test("interactive watch face: visible face out of ambient", () => {
+    expect(parseWatchFaceState(interactiveCapture)).toEqual({
       watchFaceVisible: true,
       inAmbient: false,
     });
   });
 
   test("Settings in front: face not visible, not ambient", () => {
-    expect(parseWatchFaceState(line("face not on screen"))).toEqual({
+    expect(parseWatchFaceState(settingsCapture)).toEqual({
       watchFaceVisible: false,
       inAmbient: false,
     });
-  });
-
-  test.each([
-    line("before:"),
-    line("after KEYCODE_SLEEP:"),
-    lines[2] ?? "",
-    line("after KEYCODE_WAKEUP:"),
-    lines[5] ?? "",
-  ])("line without watchFaceState is no reading: %s", (text) => {
-    expect(parseWatchFaceState(text)).toBeNull();
   });
 
   test.each([
@@ -72,7 +66,7 @@ describe("dumpsys wear_service watch-face state", () => {
       execute: async (args): Promise<ExecResult> => {
         calls.push(args);
         return {
-          stdout: lines[3] ?? "",
+          stdout: ambientCapture,
           stderr: "",
           toString: () => "",
           trim: () => "",
@@ -80,7 +74,9 @@ describe("dumpsys wear_service watch-face state", () => {
         };
       },
     };
-    expect(parseWatchFaceState(await readWearServiceDumpsys(adb))?.inAmbient).toBe(true);
+    const stdout = await readWearServiceDumpsys(adb);
+    expect(stdout).toBe(ambientCapture);
+    expect(parseWatchFaceState(stdout)).toEqual({ watchFaceVisible: true, inAmbient: true });
     expect(calls).toEqual([["shell", "dumpsys", "wear_service"]]);
   });
 });

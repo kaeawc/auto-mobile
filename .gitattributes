@@ -291,5 +291,5 @@ test/fixtures/prototype-a11y/*.json text eol=lf
 test/fixtures/android-stamp/AndroidManifest.xml text eol=lf
 # Verbatim com.apple.clockface XCUI debugDescription captures (#17482).
 test/fixtures/watchos-clockface/*.txt text eol=lf
-# Verbatim Wear OS 7.0 dumpsys captures from #17519; parsed byte-for-byte.
+# Whole raw dumpsys wear_service captures from a Wear OS 7.0 / API 37 emulator.
 test/fixtures/wear/wear-service/*.txt text eol=lf

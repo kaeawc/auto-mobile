@@ -54,4 +54,6 @@ data class HomeDestination(
 
 @Serializable data object DemoPointerProbeDestination : AppDestination
 
+@Serializable data object DemoCollapsingComposerDestination : AppDestination
+
 @Serializable data object DesignSystemDemoDestination : AppDestination

@@ -83,6 +83,16 @@ describe("prototype web page images with sharp", () => {
     expect(page.inlinedImages).toEqual(ids);
     expect(page.unsupportedNodes).toEqual([]);
     expect(Buffer.byteLength(page.html)).toBeLessThan(MAX_PROTOTYPE_WEB_PAGE_BYTES);
+    // No fill-width photo is encoded narrower than the portrait view draws it, 411 dp at 2.625x
+    // (#16605); those that fit the budget keep the landscape width.
+    const sharp = await loadSharp();
+    const widths = await Promise.all(
+      [...page.html.matchAll(/data:image\/webp;base64,([^)]*)\)/g)].map(
+        async (match) => (await sharp(Buffer.from(match[1]!, "base64")).metadata()).width,
+      ),
+    );
+    expect(widths).toHaveLength(ids.length);
+    expect(Math.min(...widths)).toBeGreaterThanOrEqual(1079);
   }, 30_000);
 
   test("re-encodes a fixture asset as WebP at the largest size drawn, never enlarged", async () => {

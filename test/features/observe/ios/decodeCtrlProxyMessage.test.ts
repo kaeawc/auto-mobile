@@ -22,6 +22,21 @@ const msg = <T extends { type: string }>(partial: T) => ({
 });
 
 describe("decodeCtrlProxyMessage", () => {
+  test.each([
+    [36700, true],
+    [20000, undefined],
+  ] as const)("rotate busy at %i ms", (blockingElapsedMs, stalled) => {
+    expect(
+      decodeCtrlProxyMessage(
+        msg({
+          type: "error",
+          error: "runner_busy",
+          blockingCommandType: "request_rotate",
+          blockingElapsedMs,
+        }),
+      )?.runnerStalled,
+    ).toBe(stalled);
+  });
   test.each(["request_activate_accessibility_link", "request_launch_app"])(
     "classifies prolonged %s blocking without encouraging action replay",
     (blockingCommandType) => {

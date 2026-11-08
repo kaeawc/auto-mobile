@@ -143,12 +143,15 @@ needs Android 15 (API 35) or newer.
 If focus cannot reach the match, the call fails without pressing `enter`; observe and retry, or
 move closer with `focusNavigate`. When an editable text field or the on-screen keyboard holds focus,
 the walk first hides a shown keyboard with back (and presses tab when the focused element is not a
-text field, since tab would type into one), then tries every direction again. If focus still does
-not move, `focusNavigation.status` is `stuck`, `focusNavigation.blockedBy` is `ime` or `editable`,
-`focusNavigation.escapes` lists the keys tried, and the error names the trapped field: hide the
-keyboard with `pressButton` `back`, press `pressButton` `down` to move focus out of the field,
-observe, then retry. An IME action such as `sendKeys` key `next` or `done` does not move D-pad focus
-out of the field.
+text field), then tries every direction again. A Compose text field keeps focus on every D-pad
+direction, so when focus still has not moved the walk presses tab once and tries again. A classic
+View `EditText` (a package-qualified `resource-id` such as `com.example:id/search`) never gets tab,
+since tab could type into it. If focus still does not move, `focusNavigation.status` is `stuck`,
+`focusNavigation.blockedBy` is `ime` or `editable`, `focusNavigation.escapes` lists the keys tried
+(`back`, `tab`), and the error names the trapped field and what to do: for a View field, hide the
+keyboard with `pressButton` `back`, press `pressButton` `down`, observe, then retry; for a Compose
+field, hide the keyboard with `pressButton` `back`, then press `sendKeys` key `tab`. An IME action
+such as `sendKeys` key `next` or `done` does not move D-pad focus out of the field.
 `focusNavigate` returns the same `blockedBy` and `escapes`. Other selectors (`testTag`, `textAny`,
 `accessibilityLink`), actions other than `tap` and `longPress`, and the options `sibling`, `container`, `index`, `searchUntil`, `ensureChecked`,
 `subtext`, `layer`, `display` and a `selectionStrategy` other than `first` still need a touchscreen. `swipeOn` needs a touchscreen too;

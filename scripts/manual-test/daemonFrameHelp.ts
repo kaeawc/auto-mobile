@@ -54,7 +54,8 @@ Examples (source the private env through the generated wrappers):
   <batch>/bin/frame1 heartbeat SESSION --count 1
   <batch>/bin/frame1 send daemon/session-info '{"sessionId":"SESSION"}'
   <batch>/bin/frame1 send tools/call @params.json --mode cancel-keep-open:5000 --cancel-after-ms 100
-  <batch>/bin/frame1 send tools/call '{"name":"observe","arguments":{"sessionUuid":"{{clientSessionId:b}}"}}' --broker-binding a
+  <batch>/bin/frame1 send tools/call '{"name":"observe","arguments":{"sessionUuid":"{{ownSessionId}}"}}' --broker-binding a
+  <batch>/bin/frame1 send tools/call '{"name":"observe","arguments":{"sessionUuid":"{{clientSessionId:b}}"}}' --broker-binding a --expect-refused
   <batch>/bin/frame1 send tools/call '{"name":"startDevice","arguments":{}}' --broker-binding a --expect-refused
   <batch>/bin/frame1 send daemon/releaseBrokerSession '{"sessionId":"{{ownSessionId}}"}' --broker-binding a --token-of b --expect-refused`;
 }

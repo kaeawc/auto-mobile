@@ -22,6 +22,7 @@ export type DevicePoolReads = Pick<
   | "isShutdownReserved"
   | "isSessionOwnedByOtherConnection"
   | "isSessionOwnedByConnection"
+  | "connectionPresentsSessionOwnerToken"
   | "waitForEmulatorLossIncident"
   | "resolveAutolockSessionForMcpSession"
   | "resolveOwnedDeviceSessionForMcpSession"

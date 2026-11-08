@@ -1051,7 +1051,9 @@ describe("criticalSection tool", () => {
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('Plan execution is using gated tool "mockPlanExecutableHiddenStep"'),
     );
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("--debug is disabled"));
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("behind the 'debug' feature flag, which is disabled"),
+    );
 
     warnSpy.mockRestore();
   });

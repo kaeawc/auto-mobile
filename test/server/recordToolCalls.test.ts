@@ -23,6 +23,7 @@ import {
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FEATURE_FLAG_DEFINITIONS } from "../../src/features/featureFlags/FeatureFlagDefinitions";
 import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
+import { featureFlagDisabledMessage } from "../../src/features/featureFlags/featureFlagDisabledMessage";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -97,9 +98,9 @@ describe("recordToolCalls connection scope and direct transport teardown", () =>
   test("recording is on by default so an MCP-only client can begin once the tool is enabled", () => {
     const flag = FEATURE_FLAG_DEFINITIONS.find(({ key }) => key === "tool-call-recording");
     expect(flag?.defaultValue).toBe(true);
-    const disabledError = TOOL_CALL_RECORDING_DISABLED_ERROR;
-    expect(disabledError).toContain("--tool-call-recording");
-    expect(disabledError).toContain("IDE plugin");
+    expect(TOOL_CALL_RECORDING_DISABLED_ERROR).toBe(
+      featureFlagDisabledMessage("tool-call-recording", "recordToolCalls"),
+    );
   });
 
   test("argument values are discoverable from the published schemas", () => {

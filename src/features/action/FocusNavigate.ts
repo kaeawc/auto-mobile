@@ -654,7 +654,7 @@ function isExhausted(
 interface ExitContext {
   screen: FocusScreen;
   focusedElement: FocusPathEntry | undefined;
-  /** Escapes already pressed; set once, so a second stuck read gives up. */
+  /** Escapes already pressed, in order; each key is pressed at most once per call. */
   trap: { escapes?: FocusTrapEscape[] };
   select: boolean;
   signal: AbortSignal | undefined;
@@ -680,13 +680,42 @@ function describeEntry(entry: FocusPathEntry | undefined): string {
   return ` at [${left},${top}][${right},${bottom}]`;
 }
 
+/**
+ * Whether an editable field is a classic View `EditText`: its resource-id is package-qualified
+ * (`pkg:id/name`). Compose reports `Modifier.testTag` as a bare resource-id or none at all, and a
+ * Compose `TextField` on Android TV keeps focus on every D-pad direction even with the keyboard
+ * hidden; only tab moves it out (#17441). A View field takes back then an arrow, and tab could
+ * type a tab character into it, so tab is never pressed there.
+ */
+function isViewTextField(element: Element): boolean {
+  return stringProp(element, "resource-id").includes(":id/");
+}
+
+/** Whether tab is the escape from this focused element once no keyboard is shown over it. */
+function tabEscapes(focused: Element): boolean {
+  return !isEditableElementProperties(focused) || !isViewTextField(focused);
+}
+
+/** The keys a caller presses to leave the field: back then down for a View field, else tab. */
+function trapAdvice(viewField: boolean, escapes: readonly FocusTrapEscape[]): string {
+  // An IME action (sendKeys next/done) does not move D-pad focus out of a TV text field (#17378).
+  if (viewField) {
+    return "Hide the keyboard with pressButton back, press pressButton down to move focus out of the field, observe, then retry";
+  }
+  if (escapes.includes("tab")) {
+    return "Focus did not leave the field with back, the D-pad or tab; observe, then retry from another route";
+  }
+  return "Hide the keyboard with pressButton back, press sendKeys key tab to move focus out of the field (D-pad arrows do not leave a Compose text field), observe, then retry";
+}
+
 /** The stuck message naming the trap, the escapes tried and what the caller can do instead. */
 function trapMessage(
   blocker: FocusNavigateBlocker,
-  editable: boolean,
+  focused: Element | null,
   focusedElement: FocusPathEntry | undefined,
   escapes: readonly FocusTrapEscape[],
 ): string {
+  const editable = focused !== null && isEditableElementProperties(focused);
   const holder = editable
     ? `the editable text field${describeEntry(focusedElement)}`
     : `the focused element${describeEntry(focusedElement)}`;
@@ -694,13 +723,14 @@ function trapMessage(
     blocker === "ime"
       ? `D-pad focus is trapped by the on-screen keyboard over ${holder}`
       : `D-pad focus is trapped in ${holder}`;
+  const viewField = editable && isViewTextField(focused);
   const tried =
     escapes.length > 0
       ? `; pressing ${escapes.join(" then ")} and every direction again did not move focus`
-      : "; arrow keys do not leave it and tab would type into it";
-  // An IME action (sendKeys next/done) does not move D-pad focus out of a TV text field (#17378):
-  // only back to hide the keyboard, then an arrow, leaves it.
-  return `${trap}${tried}. Hide the keyboard with pressButton back, press pressButton down to move focus out of the field, observe, then retry`;
+      : viewField
+        ? "; arrow keys do not leave it and tab would type into it"
+        : "; arrow keys do not leave it";
+  return `${trap}${tried}. ${trapAdvice(viewField, escapes)}`;
 }
 
 export class FocusNavigate {
@@ -844,8 +874,8 @@ export class FocusNavigate {
   }
 
   /**
-   * For a stuck exit with a keyboard or editable field holding focus: "escaped" after the first
-   * escape keys were pressed, else the stuck result naming the trap. Undefined without a trap.
+   * For a stuck exit with a keyboard or editable field holding focus: "escaped" after new escape
+   * keys were pressed, else the stuck result naming the trap. Undefined without a trap.
    */
   private async trapOutcome(
     done: FocusNavigateResult,
@@ -855,32 +885,33 @@ export class FocusNavigate {
     if (!blocker) {
       return undefined;
     }
-    if (trap.escapes === undefined) {
-      trap.escapes = await this.escapeTrap(screen, signal);
-      if (trap.escapes.length > 0) {
-        return "escaped";
-      }
+    const pressed = await this.escapeTrap(screen, trap.escapes ?? [], signal);
+    trap.escapes = [...(trap.escapes ?? []), ...pressed];
+    if (pressed.length > 0) {
+      return "escaped";
     }
-    const editable = screen.focused !== null && isEditableElementProperties(screen.focused);
     return this.stopped("stuck", done.steps, done.path, {
       focusedElement,
-      message: trapMessage(blocker, editable, focusedElement, trap.escapes),
+      message: trapMessage(blocker, screen.focused, focusedElement, trap.escapes),
       blockedBy: blocker,
       escapes: trap.escapes,
     });
   }
 
   /**
-   * Leave a keyboard or text-field focus trap (#17356): hide a shown keyboard with back, and press
-   * tab when the focused element is not editable (tab escapes a slider, #17209, but types a tab
-   * character into a text field). Returns the escapes pressed; empty when none applies.
+   * Leave a keyboard or text-field focus trap (#17356), each key at most once per call: hide a
+   * shown keyboard with back, and press tab when nothing is left over the focused element and tab
+   * escapes it: a non-editable element (a slider, #17209) right after back, a Compose text field
+   * once the directions retried with the keyboard hidden did not move focus (#17441). A View
+   * `EditText` never gets tab. Returns the escapes pressed on this read; empty when none applies.
    */
   private async escapeTrap(
     screen: FocusScreen,
+    tried: readonly FocusTrapEscape[],
     signal: AbortSignal | undefined,
   ): Promise<FocusTrapEscape[]> {
     const escapes: FocusTrapEscape[] = [];
-    if (screen.imeVisible && this.keyboard) {
+    if (screen.imeVisible && this.keyboard && !tried.includes("back")) {
       throwIfAborted(signal);
       const hidden = await this.keyboard.hideKeyboard(signal);
       if (!hidden.success) {
@@ -888,7 +919,7 @@ export class FocusNavigate {
       }
       escapes.push("back");
     }
-    if (screen.focused && !isEditableElementProperties(screen.focused)) {
+    if (this.shouldPressTab(screen, tried, escapes)) {
       throwIfAborted(signal);
       const pressed = await this.keys.press("tab", signal);
       if (!pressed.success) {
@@ -897,6 +928,25 @@ export class FocusNavigate {
       escapes.push("tab");
     }
     return escapes;
+  }
+
+  /**
+   * Tab after back on the same read only for a non-editable element; an editable field first
+   * retries every direction with the keyboard hidden, and gets tab on a later read.
+   */
+  private shouldPressTab(
+    screen: FocusScreen,
+    tried: readonly FocusTrapEscape[],
+    pressing: readonly FocusTrapEscape[],
+  ): boolean {
+    const { focused } = screen;
+    if (!focused || tried.includes("tab") || !tabEscapes(focused)) {
+      return false;
+    }
+    if (!isEditableElementProperties(focused)) {
+      return tried.length === 0;
+    }
+    return pressing.length === 0 && screen.imeVisible !== true;
   }
 
   /** With `select`, activate a focused target with the select key; a refused key fails the call. */

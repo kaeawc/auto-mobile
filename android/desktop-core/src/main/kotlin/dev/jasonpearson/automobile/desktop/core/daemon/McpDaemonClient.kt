@@ -300,6 +300,7 @@ private constructor(
       throw DaemonSessionNotFoundException(
         response.error ?: "Session not found",
         response.releaseReason,
+        idle = response.idle == true,
       )
     }
     ensureSuccess(response)
@@ -517,6 +518,11 @@ data class DaemonResponse(
    * `heartbeat-timeout`, `cleanup-expired`); absent for a UUID it never issued (#10730).
    */
   val releaseReason: String? = null,
+  /**
+   * With a session-not-found [code]: true when [releaseReason] is an idle-window release
+   * (`idleReleaseField` in `src/models/releaseReasons.ts`); absent otherwise.
+   */
+  val idle: Boolean? = null,
   /** Whether retrying the same call can succeed (failure frames, `src/daemon/types.ts`). */
   val retryable: Boolean? = null,
   /**
@@ -550,9 +556,15 @@ internal val sharedDaemonCapabilities = ConcurrentHashMap<SocketIdentity, Set<St
 
 open class DaemonUnavailableException(message: String) : McpConnectionException(message)
 
-/** The daemon answered "session not found" and, for a session it released, [releaseReason] why. */
-class DaemonSessionNotFoundException(message: String, val releaseReason: String?) :
-  DaemonUnavailableException(message)
+/**
+ * The daemon answered "session not found" and, for a session it released, [releaseReason] why;
+ * [idle] when that release ended the session's idle window.
+ */
+class DaemonSessionNotFoundException(
+  message: String,
+  val releaseReason: String?,
+  val idle: Boolean = false,
+) : DaemonUnavailableException(message)
 
 /** The wire `code` of a session-not-found answer (`DAEMON_SESSION_NOT_FOUND_CODE` in types.ts). */
 internal const val SESSION_NOT_FOUND_CODE = "daemon_session_not_found"

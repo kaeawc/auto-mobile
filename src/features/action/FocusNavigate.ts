@@ -507,11 +507,17 @@ function isActionable(element: Element): boolean {
   return isTruthyFlag(element.clickable) || isTruthyFlag(element.focusable);
 }
 
-/** Match each contained node independently, preserving the focused container's identity. */
+/** Bounds containment for flattened observations, whose focused node may be a separate object. */
+function containsElement(parent: Element, child: Element): boolean {
+  const intersection = intersectBounds(parent.bounds, child.bounds);
+  return intersection !== null && boundsEqual(intersection, child.bounds);
+}
+
+/** Match labels owned by the focused control, rather than labels of controls inside a list. */
 function describeFocus(
   screen: FocusScreen,
   target: FocusNavigateTarget,
-): { focusedElement: FocusPathEntry | undefined; matches: boolean } {
+): { focusedElement: FocusPathEntry | undefined; matches: boolean; containsTarget: boolean } {
   const { focused } = screen;
   // The observer supplies flattened nodes, so require full bounds containment, not overlap.
   const contained = focused
@@ -519,26 +525,40 @@ function describeFocus(
         if (element === focused) {
           return false;
         }
-        const intersection = intersectBounds(focused.bounds, element.bounds);
-        return intersection !== null && boundsEqual(intersection, element.bounds);
+        return containsElement(focused, element);
       })
     : [];
   // A pinned target is the control a touch tap would act on; an independently actionable child
   // (a Delete button in a focused row) must own focus itself, not borrow its parent's.
-  const matchingDescendant = contained.find(
+  const candidates = contained.filter((element) => elementMatchesTarget(element, target));
+  const matchingDescendant = candidates.find(
     (element) =>
-      elementMatchesTarget(element, target) && !(target.atBounds && isActionable(element)),
+      !(target.atBounds && isActionable(element)) &&
+      !isTruthyFlag(focused?.scrollable) &&
+      !contained.some(
+        (owner) =>
+          isActionable(owner) &&
+          focused !== null &&
+          !boundsEqual(owner.bounds, focused.bounds) &&
+          containsElement(owner, element),
+      ),
   );
   const matches = Boolean(focused && (elementMatchesTarget(focused, target) || matchingDescendant));
   // Prefer a visible label: a resource-id is usually shared by every card in a row (a Leanback
   // ImageCardView's first child is its `main_image`), so it cannot tell cards apart (#17376).
-  const label =
-    matchingDescendant ??
-    contained.find(
-      (element) => stringProp(element, "text") || stringProp(element, "content-desc"),
-    ) ??
-    contained.find((element) => stringProp(element, "resource-id"));
-  return { focusedElement: focused ? pathEntry(focused, label) : undefined, matches };
+  const containsTarget = !matches && candidates.length > 0;
+  const label = containsTarget
+    ? undefined
+    : (matchingDescendant ??
+      contained.find(
+        (element) => stringProp(element, "text") || stringProp(element, "content-desc"),
+      ) ??
+      contained.find((element) => stringProp(element, "resource-id")));
+  return {
+    focusedElement: focused ? pathEntry(focused, label) : undefined,
+    matches,
+    containsTarget,
+  };
 }
 
 /**
@@ -575,10 +595,10 @@ interface FocusProgress {
   resume(direction: FocusNavigateDirection): void;
   /**
    * Records an observation and the focused element's distance to the target (undefined when
-   * either is missing); returns true when focus differs from the previous one.
+   * either is missing). Container-only focus leaves the last control's progress intact.
    */
-  observe(key: string, distance: number | undefined): boolean;
-  pressed(direction: FocusNavigateDirection): void;
+  observe(key: string, distance: number | undefined, containsTarget: boolean): void;
+  pressed(direction: FocusNavigateDirection, containsTarget: boolean): void;
 }
 
 interface ElementMemory {
@@ -649,9 +669,12 @@ function createFocusProgress(): FocusProgress {
     },
     stalled: stall.stalled,
     resume: (direction) => stall.resume(direction),
-    observe(key, distance) {
+    observe(key, distance, containsTarget) {
+      // A container read cannot prove a refused arrow or movement away from the target.
+      if (containsTarget) {
+        return;
+      }
       const didNotMove = previousKey !== undefined && key === previousKey;
-      const moved = key !== previousKey;
       unchanged = didNotMove ? unchanged + 1 : 0;
       if (!didNotMove) {
         memory = memoryByElement.get(key) ?? { blocked: new Set(), tried: new Set() };
@@ -663,9 +686,11 @@ function createFocusProgress(): FocusProgress {
       arrivedBy = didNotMove ? arrivedBy : lastDirection;
       previousKey = key;
       lastDirection = undefined;
-      return moved;
     },
-    pressed(direction) {
+    pressed(direction, containsTarget) {
+      if (containsTarget) {
+        return;
+      }
       memory.tried.add(direction);
       lastDirection = direction;
     },
@@ -796,22 +821,28 @@ export class FocusNavigate {
     let progress = createFocusProgress();
     const planTarget = createTargetPlanner();
     const trap: ExitContext["trap"] = {};
+    let lastDirection: FocusNavigateDirection | undefined;
 
     for (;;) {
       throwIfAborted(signal);
-      const screen = await this.observer.read(signal);
+      const { screen, focusedElement, matches, containsTarget, onScreen } = await this.readFocus(
+        options,
+        path,
+        maxSteps > 0,
+      );
       const { focused } = screen;
-      const until = resolveTarget(screen, options);
-      const { focusedElement, matches } = describeFocus(screen, until);
-      const onScreen = screen.elements.filter((element) => elementMatchesTarget(element, until));
       const key = focusKey(focusedElement);
-      if (progress.observe(key, distanceToNearest(focused, onScreen)) && focusedElement) {
-        path.push(focusedElement);
-      }
+      progress.observe(key, distanceToNearest(focused, onScreen), containsTarget);
 
       const direction =
-        options.direction ?? this.nextDirection(screen, planTarget(focused, onScreen), progress);
-      const exhausted = isExhausted(options, progress, direction);
+        options.direction ??
+        this.nextDirection(
+          screen,
+          planTarget(focused, onScreen),
+          progress,
+          containsTarget ? lastDirection : undefined,
+        );
+      const exhausted = !containsTarget && isExhausted(options, progress, direction);
       const done = this.exitFor(focusedElement, matches, {
         steps,
         stuck: exhausted ? stuckMessage(progress) : undefined,
@@ -838,10 +869,37 @@ export class FocusNavigate {
         throw new ActionableError("focusNavigate has no direction to press");
       }
       await this.press(direction, signal);
-      progress.pressed(direction);
+      progress.pressed(direction, containsTarget);
+      lastDirection = direction;
       steps += 1;
       // The settle is the walk's longest wait (up to the tool's 5 s cap): a cancel ends it.
       await awaitWhileRequestIsLive(this.timer.sleep(settleMs), signal);
+    }
+  }
+
+  /** Re-read transient list focus twice before continuing the last press; maxSteps still bounds it. */
+  private async readFocus(
+    options: FocusNavigateOptions,
+    path: FocusPathEntry[],
+    canSettle: boolean,
+  ) {
+    for (let retry = 0; ; retry += 1) {
+      throwIfAborted(options.signal);
+      const screen = await this.observer.read(options.signal);
+      const until = resolveTarget(screen, options);
+      const description = describeFocus(screen, until);
+      const { focusedElement, containsTarget } = description;
+      if (focusedElement && focusKey(focusedElement) !== focusKey(path.at(-1))) {
+        path.push(focusedElement);
+      }
+      if (!containsTarget || !canSettle || retry >= 2) {
+        const onScreen = screen.elements.filter((element) => elementMatchesTarget(element, until));
+        return { screen, ...description, onScreen };
+      }
+      await awaitWhileRequestIsLive(
+        this.timer.sleep(options.settleMs ?? FOCUS_NAVIGATE_DEFAULT_SETTLE_MS),
+        options.signal,
+      );
     }
   }
 
@@ -883,7 +941,12 @@ export class FocusNavigate {
     screen: Pick<FocusScreen, "focused" | "elements">,
     matches: readonly Element[],
     progress: FocusProgress,
+    continuing?: FocusNavigateDirection,
   ): FocusNavigateDirection | undefined {
+    // A transient list has no meaningful card centre to steer from; keep entering that row.
+    if (continuing) {
+      return continuing;
+    }
     const { focused } = screen;
     const entry =
       matches.length === 0 ? leanbackEntry(focused, screen.elements, progress) : undefined;

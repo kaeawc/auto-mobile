@@ -83,6 +83,22 @@ final class SimulatorHighlightTests: XCTestCase {
         XCTAssertLessThanOrEqual(abs(scaled.midY - 147), 1)
     }
 
+    func testOrientedBoundsKeepsSourceScaleWhenRotating() {
+        let bounds = CircleBounds(
+            x: 100,
+            y: 200,
+            width: 120,
+            height: 120,
+            sourceWidth: 2853,
+            sourceHeight: 2007,
+            sourceScale: 3
+        )
+        let oriented = SimulatorDisplayGeometry.orientedBounds(bounds, targetSize: CGSize(width: 615, height: 875))
+        XCTAssertEqual(oriented.sourceWidth, 2007)
+        XCTAssertEqual(oriented.sourceHeight, 2853)
+        XCTAssertEqual(oriented.sourceScale, 3)
+    }
+
     func testOrientedBoundsLeavesMatchingOrientationUnchanged() {
         let bounds = CircleBounds(x: 12, y: 34, width: 56, height: 78, sourceWidth: 466, sourceHeight: 678)
         let oriented = SimulatorDisplayGeometry.orientedBounds(bounds, targetSize: CGSize(width: 466, height: 678))

@@ -13,22 +13,41 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.desktop.core.daemon.HeldElsewhereHolder
 import dev.jasonpearson.automobile.desktop.core.daemon.SessionReleaseReason
 
 /**
- * Shown while the picked device is held by another session, so this pane only views it (#10660).
- * The pane never takes the device on its own, even after the holder releases it; [onTakeControl] is
- * the explicit action that makes one bind attempt.
+ * Shown while the picked device is held elsewhere, so this pane only views it (#10660, #11365):
+ * another session, another AutoMobile daemon, or a declared binding ([holder]; null reads as
+ * another session). The pane never takes the device on its own, even after the holder releases it;
+ * [onTakeControl] is the explicit action that makes one bind attempt.
  */
 @Composable
-fun DeviceViewingNotice(onTakeControl: () -> Unit, modifier: Modifier = Modifier) {
+fun DeviceViewingNotice(
+  onTakeControl: () -> Unit,
+  modifier: Modifier = Modifier,
+  holder: HeldElsewhereHolder? = null,
+) {
   PaneSessionNotice(
-    text = "Viewing only: another session controls this device",
+    text = heldElsewhereNoticeText(holder),
     actionLabel = "Take control",
     onAction = onTakeControl,
     modifier = modifier,
   )
 }
+
+/** The pane notice for a device held elsewhere, naming who holds it. */
+internal fun heldElsewhereNoticeText(holder: HeldElsewhereHolder?): String =
+  when (holder) {
+    is HeldElsewhereHolder.AnotherDaemon ->
+      "Viewing only: held elsewhere by another AutoMobile daemon" +
+        (holder.pid?.let { " (PID $it)" } ?: "")
+    is HeldElsewhereHolder.Binding ->
+      "Viewing only: held elsewhere, reserved for " +
+        (holder.declaredBinding?.let { "binding $it" } ?: "a binding")
+    HeldElsewhereHolder.AnotherSession,
+    null -> "Viewing only: another session controls this device"
+  }
 
 /**
  * Shown while the session no longer holds the picked device although the user did not leave it

@@ -10,6 +10,7 @@ import {
   getToolCallRecordingStatus,
 } from "../daemon/toolCallRecordingManager";
 import { serverConfig } from "../utils/ServerConfig";
+import { featureFlagDisabledMessage } from "../features/featureFlags/featureFlagDisabledMessage";
 import { currentAutolockMcpSessionId } from "../features/toolSelection/toolSelectionContext";
 
 // ============================================================================
@@ -20,9 +21,10 @@ import { currentAutolockMcpSessionId } from "../features/toolSelection/toolSelec
 // (e.g., after context compaction when the agent may have lost awareness).
 // ============================================================================
 
-export const TOOL_CALL_RECORDING_DISABLED_ERROR =
-  "Tool call recording is disabled: the 'tool-call-recording' feature flag was turned off. " +
-  "Re-enable it by restarting the server with --tool-call-recording, or in the IDE plugin's feature flags.";
+export const TOOL_CALL_RECORDING_DISABLED_ERROR = featureFlagDisabledMessage(
+  "tool-call-recording",
+  "recordToolCalls",
+);
 
 const recordToolCallsSchema = addSessionUuidToSchema(
   z

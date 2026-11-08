@@ -184,8 +184,10 @@ test("rival token cannot release a new mint and a tokenless release keeps today'
     token: "rival-token",
     client: (daemon) => new FakeDaemonClient({ daemon }),
   });
+  // A sessionUuid is not a bearer capability (#13540): the minter is connected, so the rival's
+  // read is refused.
   const named = await rival.callTool("observe", { sessionUuid: id });
-  expect(named).not.toMatchObject({ isError: true });
+  expect(JSON.stringify(named)).toContain("read_session_not_bound");
   const response = await s.daemonMethod(
     "daemon/releaseSession",
     { sessionId: id, livenessOwnerToken: "rival-token" },

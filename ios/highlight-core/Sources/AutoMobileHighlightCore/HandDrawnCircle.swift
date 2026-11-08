@@ -18,9 +18,20 @@ public struct CircleBounds: Codable {
     public let height: Int
     public let sourceWidth: Int?
     public let sourceHeight: Int?
-    public init(x: Int, y: Int, width: Int, height: Int, sourceWidth: Int?, sourceHeight: Int?) {
+    /// Source units per display point, when the daemon knows it (1 for points, the device scale for
+    /// screenshot pixels). Absent from older daemons.
+    public let sourceScale: Double?
+    public init(
+        x: Int,
+        y: Int,
+        width: Int,
+        height: Int,
+        sourceWidth: Int?,
+        sourceHeight: Int?,
+        sourceScale: Double? = nil
+    ) {
         self.x = x; self.y = y; self.width = width; self.height = height
-        self.sourceWidth = sourceWidth; self.sourceHeight = sourceHeight
+        self.sourceWidth = sourceWidth; self.sourceHeight = sourceHeight; self.sourceScale = sourceScale
     }
 
     public func scaled(to size: CGSize) -> CGRect? {

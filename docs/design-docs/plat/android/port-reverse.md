@@ -4,8 +4,7 @@
 mappings for its session. `PortReverseManager`
 (`src/features/portReverse/PortReverseManager.ts`) holds the state; the adb
 commands and the `adb reverse --list` parser live in one place,
-`src/utils/android-cmdline-tools/adbReverse.ts`, which the prototype reverse
-manager (#12530) also uses.
+`src/utils/android-cmdline-tools/adbReverse.ts`.
 
 ## Ownership
 
@@ -43,27 +42,14 @@ manager (#12530) also uses.
   `adb reverse --remove` takes no host argument, so a re-point between that read
   and the removal cannot be detected. Ownership is dropped only once removal
   succeeds or the mapping is gone or re-pointed. `--remove-all` is never used.
-- The prototype manager and this one keep separate owner maps but share one
-  ownership view (`AdbReverseOwnership`), where each answers from its own state
-  whether it holds a device port and to which host port (#17253). A prototype
-  joins a session's port only when `--list` shows it still mapped to the
-  session's host port; a lost one is added, a re-pointed one left alone, and
-  one re-pointed after the join is re-checked with `--list` and left in place
-  when the prototype releases it.
-  `ensure` on a prototype-held port to the same host port joins it (status
-  `present`) while it still maps where the prototype set it, and to another
-  host port is a `prototype` conflict; a re-pointed one is external. A failed
-  `ensure` gives its joined ports back with its adds. Neither manager removes a
-  port the other still holds at the same host port: `remove` of a shared port drops the session's
-  ownership and reports `released` with `owner: "prototype"`, and the last
-  holder removes the mapping. Both managers run every operation on a device
-  through the view's one per-device queue (`exclusive`), so a `--list`, the
-  ownership decision on it and the add or removal that follows never interleave
-  with the other manager's work on that device; a prototype show therefore waits
-  behind a session's in-flight call on the same device, probes included. A task
-  must never wait for another task on the same device. A session's pending removal
-  counts as a hold, and is dropped without removing when a prototype holds the
-  port. The view is in memory and per process.
+- The manager registers with an ownership view (`AdbReverseOwnership`) built for
+  sharing ports with another manager (#17253) and runs every operation on a
+  device through its per-device queue (`exclusive`), so a `--list`, the
+  ownership decision on it and the add or removal that follows never
+  interleave. A task must never wait for another task on the same device. No
+  other manager registers: prototypes make no `adb reverse`, so a prototype
+  hold, the `prototype` conflict and `owner: "prototype"` are never reported.
+  The view is in memory and per process.
 
 ## Device listeners
 

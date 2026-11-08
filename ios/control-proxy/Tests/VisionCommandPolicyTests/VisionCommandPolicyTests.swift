@@ -3,6 +3,23 @@ import Foundation
 import XCTest
 
 final class VisionCommandPolicyTests: XCTestCase {
+    func testHierarchyRelaunchRequiresTheAXDisabledMarker() {
+        for description in [
+            "Error getting main window kAXErrorAPIDisabled",
+            #"Error Domain=com.apple.dt.xctest.automation-support.error Code=8 "Error getting main window kAXErrorAPIDisabled""#,
+        ] {
+            XCTAssertTrue(VisionCommandPolicy.shouldRelaunchForSnapshotError(description), description)
+        }
+        for description in [
+            "",
+            "element not found",
+            "Error getting main window kAXErrorCannotComplete",
+            #"Error Domain=com.apple.dt.xctest.automation-support.error Code=8 "Other failure""#,
+        ] {
+            XCTAssertFalse(VisionCommandPolicy.shouldRelaunchForSnapshotError(description), description)
+        }
+    }
+
     func testOnlyWindowHierarchyIdentifierTapAndAppendTextAreSupported() {
         XCTAssertEqual(VisionCommandPolicy.supportedCommands, [
             "request_hierarchy", "request_tap_element", "request_append_text",
@@ -23,6 +40,37 @@ final class VisionCommandPolicyTests: XCTestCase {
         ] {
             XCTAssertFalse(VisionCommandPolicy.supports(command), command)
         }
+    }
+
+    func testTapResolutionNarrowsIdentifierSharersByTypeAndLabel() {
+        let candidates = [
+            VisionCommandPolicy.TapCandidate(elementType: 21, label: "", isEnabled: true),
+            VisionCommandPolicy.TapCandidate(elementType: 9, label: "General", isEnabled: true),
+            VisionCommandPolicy.TapCandidate(elementType: 9, label: "Other", isEnabled: true),
+        ]
+        XCTAssertEqual(VisionCommandPolicy.tapResolution(candidates: candidates), .ambiguous(3))
+        XCTAssertEqual(VisionCommandPolicy.tapResolution(candidates: candidates, label: "General"), .match(1))
+        XCTAssertEqual(VisionCommandPolicy.tapResolution(candidates: candidates, elementType: 21), .match(0))
+        XCTAssertEqual(
+            VisionCommandPolicy.tapResolution(candidates: candidates, label: "General", elementType: 9), .match(1)
+        )
+        XCTAssertEqual(
+            VisionCommandPolicy.tapResolution(candidates: candidates, label: "General", elementType: 21), .none
+        )
+        XCTAssertEqual(VisionCommandPolicy.tapResolution(candidates: candidates, label: ""), .match(0))
+    }
+
+    func testTapResolutionRequiresExactlyOneEnabledMatch() {
+        let enabled = VisionCommandPolicy.TapCandidate(elementType: 9, label: "General", isEnabled: true)
+        let disabled = VisionCommandPolicy.TapCandidate(elementType: 9, label: "General", isEnabled: false)
+        XCTAssertEqual(VisionCommandPolicy.tapResolution(candidates: []), .none)
+        XCTAssertEqual(VisionCommandPolicy.tapResolution(candidates: [disabled]), .none)
+        XCTAssertEqual(VisionCommandPolicy.tapResolution(candidates: [disabled, enabled]), .match(1))
+        XCTAssertEqual(
+            VisionCommandPolicy.tapResolution(candidates: [enabled, enabled], label: "General", elementType: 9),
+            .ambiguous(2)
+        )
+        XCTAssertEqual(VisionCommandPolicy.tapResolution(candidates: [enabled]), .match(0))
     }
 
     func testTargetBundleIdComesFromEnvironment() {

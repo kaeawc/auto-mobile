@@ -10,6 +10,7 @@ import { ActionableError, BootedDevice } from "../../src/models";
 import { Telephony } from "../../src/features/action/Telephony";
 import { FakeIosSdkTriggerSender } from "../fakes/FakeIosSdkTriggerSender";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { phoneCallResultSchema } from "../../src/server/telephonyToolOutputSchemas";
 
 // telephonyTools.ts had ZERO test mentions repo-wide (issue #4181, rank 4b).
 // The handlers map a failed Telephony result to an ActionableError. iOS routes
@@ -85,6 +86,47 @@ describe("telephonyTools handlers", () => {
       "callkit.call",
       "messages.sms",
     ]);
+  });
+});
+
+describe("telephonyTools iOS simulator partial support (#1581)", () => {
+  test("phoneCall accept returns a partial result instead of throwing", async () => {
+    const sender = new FakeIosSdkTriggerSender();
+    const { phoneCall } = iosHandlers(sender);
+    const response = await phoneCall(iosDevice, { action: "accept", phoneNumber: "5551234567" });
+    expect(response.error).toBeUndefined();
+    expect(response.structuredContent).toMatchObject({
+      success: false,
+      supported: "partial",
+      reason: "ios_simulator_callkit_limit",
+      action: "accept",
+    });
+    expect(phoneCallResultSchema.safeParse(response.structuredContent).success).toBe(true);
+    expect(sender.requests).toEqual([]);
+  });
+
+  test("phoneCall hold returns a partial result that matches the output schema", async () => {
+    const { phoneCall } = iosHandlers(new FakeIosSdkTriggerSender());
+    const response = await phoneCall(iosDevice, { action: "hold" });
+    expect(response.structuredContent).toMatchObject({ supported: "partial", action: "hold" });
+    expect(phoneCallResultSchema.safeParse(response.structuredContent).success).toBe(true);
+  });
+
+  test("a success result still matches the output schema", async () => {
+    const { phoneCall } = iosHandlers(new FakeIosSdkTriggerSender());
+    const response = await phoneCall(iosDevice, { action: "call", phoneNumber: "5551234567" });
+    expect(phoneCallResultSchema.safeParse(response.structuredContent).success).toBe(true);
+  });
+
+  test("the output schema rejects a failure that is not partial", () => {
+    expect(
+      phoneCallResultSchema.safeParse({
+        success: false,
+        supported: false,
+        action: "accept",
+        message: "x",
+      }).success,
+    ).toBe(false);
   });
 });
 

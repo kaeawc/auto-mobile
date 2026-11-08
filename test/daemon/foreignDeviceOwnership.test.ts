@@ -51,17 +51,19 @@ const metadata = (socketPath: string) => JSON.stringify({ socketPath, acquiredAt
 class FakeOwnershipFiles implements DeviceOwnershipFileSource {
   readonly files = new Map<string, LockContent>();
   readonly alive = new Set<number>([SELF_PID, FOREIGN_PID]);
+  /** Paths whose lock file exists but names no readable PID. */
+  readonly unreadable = new Set<string>();
   leasePath(deviceId: string): string {
     return `/leases/${deviceId}.lock`;
   }
   claimPath(deviceId: string): string {
     return `/claims/${deviceId}.lock`;
   }
-  legacyClaimPath(deviceId: string): string {
-    return `/coord/device-allocations/${deviceId}.lock`;
-  }
   read(path: string): LockContent | undefined {
     return this.files.get(path);
+  }
+  isUnreadable(path: string): boolean {
+    return this.unreadable.has(path);
   }
   isProcessRunning(pid: number): boolean {
     return this.alive.has(pid);
@@ -568,37 +570,36 @@ describe("ForwardLeaseForeignDeviceOwnership", () => {
   });
 });
 
-describe("legacy 0.0.84 coordination-directory claims (#10708)", () => {
-  test("a live legacy claim is a foreign owner while its owner uses the device", async () => {
-    const { files, probe, ownerOf } = harness();
-    files.files.set("/coord/device-allocations/d.lock", {
-      pid: FOREIGN_PID,
-      token: "t",
-      metadata: metadata("/old"),
-    });
-    probe.reports.set("/old", status(FOREIGN_PID, "old-session"));
-    expect(await ownerOf("d")).toBe(FOREIGN_PID);
+describe("0.0.84 coordination-directory claims (#11811 E1)", () => {
+  // The 0.0.84 reader is gone: mixed versions are unsupported since 0.0.89.
+  const OLD_PATH = "/coord/device-allocations/d.lock";
 
-    probe.reports.set("/old", status(FOREIGN_PID, null));
+  test("a live claim at the 0.0.84 location is not a foreign owner", async () => {
+    const { files, probe, ownership, ownerOf } = harness();
+    files.files.set(OLD_PATH, { pid: FOREIGN_PID, token: "t", metadata: metadata("/old") });
+    probe.reports.set("/old", status(FOREIGN_PID, "old-session"));
+
     expect(await ownerOf("d")).toBeUndefined();
+    expect(ownership.foreignClaimUnreadable("d")).toBe(false);
   });
 
-  test("claim loses to a live legacy claim and never writes the legacy location", async () => {
-    const { files, probe, ownership } = harness();
-    files.files.set("/coord/device-allocations/d.lock", {
-      pid: FOREIGN_PID,
-      token: "t",
-      metadata: metadata("/old"),
-    });
-    probe.reports.set("/old", status(FOREIGN_PID, "old-session"));
-    expect(await ownership.claim("d")).toBe(false);
-    expect(files.files.has("/claims/d.lock")).toBe(false);
+  test("an unreadable claim at the 0.0.84 location does not block the device", async () => {
+    const { files, ownership } = harness();
+    files.unreadable.add(OLD_PATH);
 
-    // Once the older daemon lets the device go, the claim goes to the new location only.
-    probe.reports.set("/old", status(FOREIGN_PID, null));
+    await ownership.refresh(["d"]);
+    expect(ownership.foreignClaimUnreadable("d")).toBe(false);
+    expect(await ownership.claim("d")).toBe(true);
+  });
+
+  test("claim takes the device despite a live 0.0.84 claim and writes only the current location", async () => {
+    const { files, probe, ownership } = harness();
+    files.files.set(OLD_PATH, { pid: FOREIGN_PID, token: "t", metadata: metadata("/old") });
+    probe.reports.set("/old", status(FOREIGN_PID, "old-session"));
+
     expect(await ownership.claim("d")).toBe(true);
     expect(files.files.get("/claims/d.lock")?.pid).toBe(SELF_PID);
-    expect(files.files.get("/coord/device-allocations/d.lock")?.pid).toBe(FOREIGN_PID);
+    expect(files.files.get(OLD_PATH)?.pid).toBe(FOREIGN_PID);
   });
 });
 
@@ -681,8 +682,6 @@ describe("daemons in different coordination directories on one adb server (#1070
     const source: DeviceOwnershipFileSource = {
       leasePath: (deviceId) => join(coordinationDir, "ctrl-proxy-forwards", `${deviceId}.lock`),
       claimPath: (deviceId) => deviceAllocationClaimPath(deviceId, env, home),
-      legacyClaimPath: (deviceId) =>
-        join(coordinationDir, "device-allocations", `${deviceId}.lock`),
       read: (path) => readExclusiveLockContent(path),
       isProcessRunning,
       tryAcquire: (path, owner) => {

@@ -38,7 +38,7 @@ function stateValue(key: unknown, ctx: AdaptiveContext): unknown {
 function slot(name: string, ctx: AdaptiveContext): WebChild[] {
   const inner = ctx.kit.child(ctx.scope, {
     inBox: false,
-    style: { ...ctx.scope.style, parentAxis: "column" },
+    style: { ...ctx.scope.style, parentAxis: "column", weightsChildren: false },
   });
   const drawn = ctx.kit.renderNode(ctx.node[name], inner, `${ctx.path}.${name}`);
   return drawn ? [drawn] : [];

@@ -80,7 +80,7 @@ export function hoistedScope(scope: WebRenderScope): WebRenderScope {
     ...scope,
     inBox: false,
     consumedInsets: [],
-    style: { ...scope.style, parentAxis: COLUMN },
+    style: { ...scope.style, parentAxis: COLUMN, weightsChildren: false },
   };
 }
 
@@ -189,7 +189,9 @@ function sheetLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRend
   // An authored background that resolves paints the sheet; otherwise (none, or an unresolved
   // colour) it keeps the `surface` the devices fall back to, under any authored gradient.
   const style = base[BACKGROUND_COLOR] ? base : { ...base, [BACKGROUND_COLOR]: skin.surface };
-  const inner = kit.child(hoisted, { style: { ...hoisted.style, parentAxis: COLUMN } });
+  const inner = kit.child(hoisted, {
+    style: { ...hoisted.style, parentAxis: COLUMN, weightsChildren: false },
+  });
   const content = kit.renderNode(node.child, inner, `${path}.child`);
   const scrim = el("div", {
     attrs: { [DATA_PART]: "scrim" },

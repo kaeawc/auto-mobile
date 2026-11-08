@@ -22846,6 +22846,22 @@
             "blocked": {
               "description": "True when DO is required and the known foreground activity is not distraction optimized.",
               "type": "boolean"
+            },
+            "hostRenderedUi": {
+              "description": "Present when the foreground screen is Car App Library templates drawn by the car host, not the app's own views. With hostPackage, template nodes from that host were seen; without it, only the foreground activity is CarAppActivity, which also covers the library's own connection-error screen. Absence means neither signal was seen (for example an incomplete capture), not proof that the screen is app-drawn.",
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "carAppLibrary"
+                },
+                "hostPackage": {
+                  "description": "The car host that drew the templates, when its resource ids name it.",
+                  "type": "string"
+                }
+              },
+              "required": ["kind"],
+              "additionalProperties": false
             }
           },
           "required": ["blocked"],
@@ -48309,7 +48325,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "watchOS only: rotate the Apple Watch Digital Crown by a signed, non-zero delta, with optional positive velocity (default: 1). Target an Apple Watch session. Observe afterward to check the app's response.",
+    "description": "watchOS only: rotate the Apple Watch Digital Crown by a signed, non-zero delta in full revolutions (1 = one turn; use fractions such as 0.25 for small changes), with optional positive velocity (default: 1). Target an Apple Watch session. Observe afterward to check the app's response.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -48320,7 +48336,7 @@
           "const": "watchos"
         },
         "delta": {
-          "description": "Signed, non-zero Digital Crown rotation delta",
+          "description": "Signed, non-zero crown turn in full revolutions: 1 is one full turn, 0.25 a quarter turn. How many value steps a turn moves depends on the app's crown step and sensitivity. Fractions are accepted; a turn smaller than one step of the focused control may not register",
           "type": "number"
         },
         "velocity": {

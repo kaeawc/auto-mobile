@@ -100,15 +100,54 @@ function isVisible(node: WatchHierarchyNode): boolean {
   return !node.isHidden && !node.isOccluded && (node.alpha ?? 1) > 0;
 }
 
+/**
+ * XCUIElementType raw values (the runner reports `XCUIElementType(<rawValue>)`) whose
+ * elements activate on tap: buttons, cells/rows, links, menu items, switches/toggles,
+ * keys and text inputs. The runner's `hasTapTarget` is always false for XCUI snapshots,
+ * so without this every watch row has no affordance (#17548).
+ */
+const TAP_ELEMENT_TYPES: ReadonlySet<number> = new Set([
+  9, 10, 12, 14, 15, 16, 17, 20, 27, 30, 40, 41, 42, 45, 49, 50, 52, 54, 56, 59, 60, 75, 80,
+]);
+/** searchField, textField, secureTextField, textView. */
+const TEXT_INPUT_ELEMENT_TYPES: ReadonlySet<number> = new Set([45, 49, 50, 52]);
+/** table, collectionView, scrollView. */
+const SCROLL_ELEMENT_TYPES: ReadonlySet<number> = new Set([26, 32, 46]);
+
+function xcuiElementType(className: string): number | undefined {
+  const match = /^XCUIElementType\((\d+)\)$/.exec(className);
+  return match ? Number(match[1]) : undefined;
+}
+
+function hasElementType(node: WatchHierarchyNode, types: ReadonlySet<number>): boolean {
+  const type = xcuiElementType(node.className);
+  return type !== undefined && types.has(type);
+}
+
+/** Affordance fields from the wire tap flag and the XCUI element type; disabled controls get none. */
+function affordanceFields(
+  node: WatchHierarchyNode,
+  enabled: boolean,
+): Pick<CtrlProxyNode, "clickable" | "scrollable" | "actions"> {
+  const tappable = enabled && hasElementType(node, TAP_ELEMENT_TYPES);
+  const input = enabled && hasElementType(node, TEXT_INPUT_ELEMENT_TYPES);
+  return {
+    clickable: String((node.hasTapTarget ?? false) || tappable),
+    scrollable: hasElementType(node, SCROLL_ELEMENT_TYPES) ? "true" : undefined,
+    actions: input ? ["set_text"] : undefined,
+  };
+}
+
 function convertNode(node: WatchHierarchyNode): CtrlProxyNode {
+  const enabled = node.isUserInteractionEnabled ?? true;
   return {
     text: node.accessibilityLabel ?? undefined,
     resourceId: node.accessibilityIdentifier ?? undefined,
     role: node.role ?? undefined,
     className: node.className,
     bounds: node.bounds,
-    enabled: String(node.isUserInteractionEnabled ?? true),
-    clickable: String(node.hasTapTarget ?? false),
+    enabled: String(enabled),
+    ...affordanceFields(node, enabled),
     focusable: String(node.isAccessibilityElement ?? false),
     accessibilityFocused: String(node.isAccessibilityFocused ?? false),
     extras: node.accessibilityTraits?.length

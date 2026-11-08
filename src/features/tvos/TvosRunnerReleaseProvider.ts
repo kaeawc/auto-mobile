@@ -8,6 +8,7 @@ import {
   TVOS_RUNNER_ARCHIVE_FILENAME,
 } from "../../constants/release";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
+import { errorMessage } from "../../utils/describeUnknownError";
 import type { ChecksumCalculator } from "../../utils/ChecksumCalculator";
 import type { FileDownloader } from "../../utils/FileDownloader";
 import { DefaultIOSCtrlProxyBundleDownloader } from "../../utils/IOSCtrlProxyBundleDownloader";
@@ -151,7 +152,7 @@ export class TvosRunnerReleaseProvider {
     expected: string,
     destination: string,
     metadataPath: string,
-  ): Promise<string> {
+  ): Promise<string | null> {
     if (this.deps.cacheDir === undefined) {
       ensureSecureTempDirSync(CACHE_SUBDIR);
     } else {
@@ -162,6 +163,51 @@ export class TvosRunnerReleaseProvider {
     const archivePath = path.join(staging, TVOS_RUNNER_ARCHIVE_FILENAME);
     const extracted = path.join(staging, "extracted");
     let relativeXctestrun: string | undefined;
+    let downloaded = false;
+    try {
+      await this.fetch({
+        expected,
+        archivePath,
+        metadataPath,
+        destination,
+        extracted,
+        staging,
+        onDownloaded: () => {
+          downloaded = true;
+        },
+        onPublished: (relative) => {
+          relativeXctestrun = relative;
+        },
+      });
+    } catch (error) {
+      if (downloaded) {
+        // A downloaded archive that fails verification or extraction must fail closed.
+        throw error;
+      }
+      // Offline, a missing release asset or an outage must not block the local source build.
+      logger.warn(
+        `[TVOS_RUNNER] Unable to download the released tvOS runner; falling back to a local build: ${errorMessage(error)}`,
+        error,
+      );
+      return null;
+    }
+    if (!relativeXctestrun) {
+      throw new ActionableError("tvOS runner extraction did not publish an xctestrun.");
+    }
+    return path.join(destination, relativeXctestrun);
+  }
+
+  private async fetch(request: {
+    expected: string;
+    archivePath: string;
+    metadataPath: string;
+    destination: string;
+    extracted: string;
+    staging: string;
+    onDownloaded(): void;
+    onPublished(relativeXctestrun: string): void;
+  }): Promise<void> {
+    const { expected, archivePath, metadataPath, destination, extracted, staging } = request;
     await this.cache.fetch({
       label: "[TVOS_RUNNER]",
       expectedSha256: expected,
@@ -170,7 +216,10 @@ export class TvosRunnerReleaseProvider {
       metadataPath,
       metadataMode: 0o600,
       downloadTimeoutMs: this.deps.downloadTimeoutMs ?? 120_000,
-      afterDownload: (file) => fs.chmod(file, 0o600),
+      afterDownload: async (file) => {
+        request.onDownloaded();
+        await fs.chmod(file, 0o600);
+      },
       mismatchError: (want, actual) =>
         new ActionableError(
           `tvOS runner checksum verification failed. Expected: ${want}, Got: ${actual}. The release archive is corrupted or tampered.`,
@@ -191,7 +240,7 @@ export class TvosRunnerReleaseProvider {
             "tvOS runner archive must contain exactly one appletvsimulator xctestrun in Build/Products.",
           );
         }
-        relativeXctestrun = path.relative(extracted, xctestrun);
+        request.onPublished(path.relative(extracted, xctestrun));
         await fs.chmod(extracted, 0o700);
         await fs.rm(destination, { recursive: true, force: true });
         await fs.rename(extracted, destination);
@@ -199,9 +248,5 @@ export class TvosRunnerReleaseProvider {
       },
       settle: () => fs.rm(staging, { recursive: true, force: true }),
     });
-    if (!relativeXctestrun) {
-      throw new ActionableError("tvOS runner extraction did not publish an xctestrun.");
-    }
-    return path.join(destination, relativeXctestrun);
   }
 }

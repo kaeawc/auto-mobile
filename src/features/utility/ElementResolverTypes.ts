@@ -38,6 +38,13 @@ export interface ResolutionIntent {
   negative?: boolean;
   /** Action targets may use Android editable hints only after primary text misses. */
   allowHintFallback?: boolean;
+  /**
+   * Resolver-internal: match only the Android editable-hint tier. Set when a focus-input
+   * lookup's primary text matches yield no editable target, so an input whose field name
+   * is only its hint (skeleton `sublabel`) stays addressable beside an unrelated "Add phone"
+   * button or a "Phone" icon (#17463).
+   */
+  hintTierOnly?: boolean;
   matchMode?: MatchMode;
   ref?: ElementReference;
 }

@@ -92,6 +92,13 @@ export const ROW_BOUND_KEY = "webRowBound";
 export const INCOMING_HEIGHT_KEY = "webIncomingHeight";
 
 /**
+ * A style key the web renderer adds beside INCOMING_HEIGHT_KEY, never authored: true when that
+ * height is a column's weight allocation, which sizes the child outright rather than capping it
+ * (see rowContentHeight in webRowAspect.ts).
+ */
+export const INCOMING_ALLOCATED_KEY = "webIncomingAllocated";
+
+/**
  * A row child's measure hint: `take` makes it the row's lone grower, `zero` measures it against no
  * width, and `shrink` sets how fast it gives up width, from its own `basis` when it has one. `later`
  * marks a sibling after a capped aspect ratio, whose authored `minWidth` holds only while width

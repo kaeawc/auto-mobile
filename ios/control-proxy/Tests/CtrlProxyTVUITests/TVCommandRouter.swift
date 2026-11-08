@@ -125,7 +125,12 @@ final class TVCommandRouter {
         // Translate the captured spike's frame/id/type/hasFocus/enabled/selected fields into
         // the existing hierarchy wire model. Focus is observed, never assigned directly.
         UIElementInfo(
-            text: snapshot.label,
+            text: TVElementText.text(
+                label: snapshot.label,
+                value: snapshot.value as? String,
+                isTextInput: [.textField, .secureTextField, .searchField, .textView].contains(snapshot.elementType),
+                isSecure: snapshot.elementType == .secureTextField
+            ),
             resourceId: snapshot.identifier,
             className: String(snapshot.elementType.rawValue),
             bounds: ElementBounds(clamping: snapshot.frame),

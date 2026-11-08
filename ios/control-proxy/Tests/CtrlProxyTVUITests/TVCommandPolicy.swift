@@ -34,10 +34,17 @@ enum TVSecureField {
         if elementType == 50 { return true }
         guard [45, 49, 52].contains(elementType) else { return false }
         // XCUIElementAttributes exposes no secure-text-entry trait; use field metadata as a fallback.
-        return [identifier, label, placeholder ?? ""].contains {
-            $0.range(
-                of: #"password|passcode|passwd|secret|\bpin\b"#, options: [.regularExpression, .caseInsensitive]
-            ) != nil
+        return [identifier, label, placeholder ?? ""].contains { metadata in
+            if metadata.range(
+                of: #"password|passcode|passwd|secret"#, options: [.regularExpression, .caseInsensitive]
+            ) != nil { return true }
+            // Split camelCase and acronyms before treating punctuation and digits as token boundaries.
+            let tokens = metadata.replacingOccurrences(
+                of: #"(\p{Ll})(\p{Lu})"#, with: "$1 $2", options: .regularExpression
+            ).replacingOccurrences(
+                of: #"(\p{Lu})(\p{Lu}\p{Ll})"#, with: "$1 $2", options: .regularExpression
+            ).components(separatedBy: CharacterSet.letters.inverted)
+            return tokens.contains { $0.lowercased() == "pin" }
         }
     }
 }
@@ -89,27 +96,34 @@ struct TVTextEntryResolution {
     }
 }
 
-/// Retain identity only for the current target app and invalidate it before a keyboard select.
+/// Retain identity only for a known generation of the current target app.
 struct TVFocusMemory {
     private var bundleId: String?
+    private var processToken: Int?
     private var remembered: TVFocusedField?
 
-    func field(for bundle: String) -> TVFocusedField? {
-        bundle == bundleId ? remembered : nil
-    }
-
-    mutating func observe(bundle: String, root: TVNodeSketch) {
-        remembered = TVTextEntryPolicy.rememberedField(in: root, previous: field(for: bundle))
-        bundleId = bundle
-    }
-
-    mutating func willSelect(bundle: String, snapshot: TVNodeSketch?) {
-        guard let snapshot, !TVTextEntryPolicy.hasKeyboard(snapshot) else {
-            bundleId = bundle
+    mutating func field(for bundle: String, processToken: Int?) -> TVFocusedField? {
+        guard let processToken, bundle == bundleId, processToken == self.processToken else {
             remembered = nil
-            return
+            return nil
         }
-        observe(bundle: bundle, root: snapshot)
+        return remembered
+    }
+
+    mutating func observe(bundle: String, processToken: Int?, root: TVNodeSketch) {
+        let previous = field(for: bundle, processToken: processToken)
+        bundleId = bundle
+        self.processToken = processToken
+        remembered = processToken == nil ? nil : TVTextEntryPolicy.rememberedField(in: root, previous: previous)
+    }
+
+    mutating func willSelect(bundle: String, processToken: Int?, snapshot: TVNodeSketch?) {
+        bundleId = bundle
+        self.processToken = processToken
+        remembered = nil
+        guard processToken != nil, let snapshot, !TVTextEntryPolicy.hasKeyboard(snapshot) else { return }
+        // A select can open a different field: only the input focused in this snapshot is evidence.
+        remembered = TVTextEntryPolicy.rememberedField(in: snapshot, previous: nil)
     }
 }
 
@@ -155,7 +169,8 @@ enum TVTextEntryPolicy {
         guard keyboardPresent else { return TVTextEntryResolution(keyboardPresent: false, entry: nil) }
         let candidates = entries(in: root, path: [])
         // A prompt identifies a session, not which of multiple inputs owns the value.
-        let field = candidates.count == 1 ? matchingField(in: root, previous: lastFocusedField) : nil
+        guard candidates.count == 1 else { return TVTextEntryResolution(keyboardPresent: true, entry: nil) }
+        let field = matchingField(in: root, previous: lastFocusedField)
         let entry = candidates.first.map { candidate in
             let node = candidate.node
             return TVKeyboardEntry(
@@ -173,10 +188,8 @@ enum TVTextEntryPolicy {
     }
 
     private static func matchingField(in root: TVNodeSketch, previous: TVFocusedField?) -> TVFocusedField? {
-        guard let previous else { return nil }
-        if let prompt = prompt(in: root), prompt != previous.placeholder, prompt != previous.label {
-            return nil
-        }
+        guard let previous, let prompt = prompt(in: root), !prompt.isEmpty,
+              prompt == previous.placeholder || prompt == previous.label else { return nil }
         return previous
     }
 

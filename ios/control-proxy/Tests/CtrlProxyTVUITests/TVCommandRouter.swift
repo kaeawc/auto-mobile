@@ -5,6 +5,8 @@ import XCTest
 final class TVCommandRouter {
     private let application: XCUIApplication
     private var focusMemory = TVFocusMemory()
+    private var lastTarget: (app: XCUIApplication, packageName: String)?
+    private var launchGeneration = 0
 
     init(application: XCUIApplication) {
         self.application = application
@@ -18,7 +20,21 @@ final class TVCommandRouter {
     }
 
     /// Resolve the frontmost app per command; the host app is not necessarily in front.
-    private func target(requested: String?) -> (app: XCUIApplication, packageName: String) {
+    private func target(requested: String?) -> (app: XCUIApplication, packageName: String, processToken: Int?) {
+        // tvOS has no public process ID. Any observed foreground gap or target switch invalidates identity,
+        // including for a previously requested third-party app that is no longer among the probes.
+        if let lastTarget, lastTarget.app.state != .runningForeground { launchGeneration += 1 }
+        let resolved = foregroundTarget(requested: requested)
+        if resolved.packageName != lastTarget?.packageName { launchGeneration += 1 }
+        lastTarget = resolved
+        guard resolved.app.state == .runningForeground else {
+            launchGeneration += 1
+            return (resolved.app, resolved.packageName, nil)
+        }
+        return (resolved.app, resolved.packageName, launchGeneration)
+    }
+
+    private func foregroundTarget(requested: String?) -> (app: XCUIApplication, packageName: String) {
         let hostId = "dev.jasonpearson.automobile.ctrlproxy.tv"
         let hostState = Int(application.state.rawValue)
         guard hostState != TVTargetResolver.foregroundState else { return (application, hostId) }
@@ -52,9 +68,11 @@ final class TVCommandRouter {
                 let resolved = target(requested: envelope.bundleId)
                 let snapshot = try resolved.app.snapshot()
                 let tree = sketch(snapshot)
-                focusMemory.observe(bundle: resolved.packageName, root: tree)
+                focusMemory.observe(bundle: resolved.packageName, processToken: resolved.processToken, root: tree)
                 let resolution = TVTextEntryPolicy.resolve(
-                    root: tree, lastFocusedField: focusMemory.field(for: resolved.packageName)
+                    root: tree, lastFocusedField: focusMemory.field(
+                        for: resolved.packageName, processToken: resolved.processToken
+                    )
                 )
                 return try JSONEncoder().encode(HierarchyUpdateResponse(
                     requestId: request.requestId,
@@ -80,7 +98,8 @@ final class TVCommandRouter {
                     // Remote input still proceeds on failure, but identity must fail closed.
                     let snapshot = try? resolved.app.snapshot()
                     focusMemory.willSelect(
-                        bundle: resolved.packageName, snapshot: snapshot.map { sketch($0) }
+                        bundle: resolved.packageName, processToken: resolved.processToken,
+                        snapshot: snapshot.map { sketch($0) }
                     )
                 }
                 press(button)

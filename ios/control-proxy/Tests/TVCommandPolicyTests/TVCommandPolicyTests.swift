@@ -86,6 +86,24 @@ final class TVCommandPolicyTests: XCTestCase {
         ))
     }
 
+    func testPINMetadataTokensIncludeCamelCaseButExcludeWordFragments() {
+        let secure = [
+            "pinCode", "pin_field", "userPIN", "PIN", "Enter your PIN", "accountPin", "PINCode", "user-pin",
+            "pin2Code", "user2PIN", "2pin", "pin2",
+        ]
+        let plain = ["spinner", "pinned", "shipping", "mapping", "opinion", "pinterest", "pinnacle"]
+        for (values, expected) in [(secure, true), (plain, false)] {
+            for value in values {
+                let metadata: [(String, String, String?)] = [(value, "", nil), ("", value, nil), ("", "", value)]
+                for (identifier, label, placeholder) in metadata {
+                    XCTAssertEqual(TVSecureField.isSecure(
+                        elementType: 49, identifier: identifier, label: label, placeholder: placeholder
+                    ), expected, value)
+                }
+            }
+        }
+    }
+
     private var labeledField: TVFocusedField {
         TVFocusedField(identifier: "am-labeled-field", label: "Label", placeholder: "Placeholder", isSecure: false)
     }
@@ -145,9 +163,14 @@ final class TVCommandPolicyTests: XCTestCase {
 
     func testCapturedKeyboardEntryReportsRememberedLabeledField() throws {
         for (value, expected) in [("hello", "Label hello"), ("", "Label")] {
+            var memory = TVFocusMemory()
+            let bundle = "dev.jasonpearson.automobile.ctrlproxy.tv"
+            memory.observe(bundle: bundle, processToken: 1, root: closedLabeledField)
             let root = keyboardTree(value: value)
+            // The app may open its keyboard itself; positive same-generation evidence still permits text.
+            memory.observe(bundle: bundle, processToken: 1, root: root)
             let entry = try XCTUnwrap(TVTextEntryPolicy.resolve(
-                root: root, lastFocusedField: labeledField
+                root: root, lastFocusedField: memory.field(for: bundle, processToken: 1)
             ).entry)
             XCTAssertEqual(entry.path, [0, 0, 0, 1, 0, 0])
             XCTAssertEqual(entry.className, "49")
@@ -195,19 +218,18 @@ final class TVCommandPolicyTests: XCTestCase {
         XCTAssertEqual(TVTextEntryPolicy.rememberedField(in: root, previous: nil), labeledField)
     }
 
-    func testKeyboardSubtreeIsExcludedAndMultipleEntriesWithholdValues() throws {
+    func testKeyboardSubtreeIsExcludedAndMultipleEntriesWithholdValues() {
         // Synthetic placement checks subtree exclusion and ambiguous attribution.
         var root = keyboardTree(value: "hello")
         root.children.insert(TVNodeSketch(elementType: 19, hasFocus: true, children: [
             TVNodeSketch(elementType: 52, value: "inside keyboard"),
         ]), at: 0)
         root.children.append(TVNodeSketch(elementType: 49, value: "later field"))
-        let entry = try XCTUnwrap(TVTextEntryPolicy.resolve(
-            root: root, lastFocusedField: labeledField
-        ).entry)
-        XCTAssertEqual(entry.path, [1, 0, 0, 1, 0, 0])
-        XCTAssertEqual(entry.text, "")
-        XCTAssertNil(entry.resourceId)
+        let resolution = TVTextEntryPolicy.resolve(root: root, lastFocusedField: labeledField)
+        XCTAssertTrue(resolution.keyboardPresent)
+        XCTAssertNil(resolution.entry)
+        XCTAssertNil(resolution.overrideEntry(at: [1, 0, 0, 1, 0, 0]))
+        XCTAssertNil(resolution.overrideEntry(at: [2]))
         XCTAssertFalse(emittedTexts(in: root, field: labeledField).contains { $0.contains("hello") })
         XCTAssertFalse(emittedTexts(in: root, field: labeledField).contains { $0.contains("inside keyboard") })
         XCTAssertFalse(emittedTexts(in: root, field: labeledField).contains { $0.contains("later field") })
@@ -279,6 +301,45 @@ final class TVCommandPolicyTests: XCTestCase {
         XCTAssertFalse(emittedTexts(in: root, field: labeledField).contains { $0.contains("s3cret") })
     }
 
+    func testEmptyPromptNeverAttributesRememberedPlainFieldToSecureEntry() throws {
+        let bundle = "dev.jasonpearson.automobile.ctrlproxy.tv"
+        for (type, identifier) in [(50, ""), (49, "userPIN"), (49, "")] {
+            var memory = TVFocusMemory()
+            memory.observe(bundle: bundle, processToken: 1, root: TVNodeSketch(
+                elementType: 49, identifier: "am-text-field", placeholder: "", hasFocus: true
+            ))
+            XCTAssertNotNil(memory.field(for: bundle, processToken: 1))
+            var root = keyboardTree(value: "s3cret", prompt: "")
+            root.children[0].children[0].children[0].children[1].children[0].children[0] = TVNodeSketch(
+                elementType: type, identifier: identifier, value: "s3cret", placeholder: ""
+            )
+            let previous = memory.field(for: bundle, processToken: 1)
+            // Check resolution directly as well as through observation, so neither layer can mask a leak.
+            memory.observe(bundle: bundle, processToken: 1, root: root)
+            XCTAssertNil(memory.field(for: bundle, processToken: 1))
+            for field in [previous, memory.field(for: bundle, processToken: 1)] {
+                let entry = try XCTUnwrap(TVTextEntryPolicy.resolve(root: root, lastFocusedField: field).entry)
+                XCTAssertNil(entry.resourceId)
+                XCTAssertFalse(entry.text.contains("s3cret"))
+                XCTAssertFalse(emittedTexts(in: root, field: field).contains { $0.contains("s3cret") })
+            }
+        }
+    }
+
+    func testMissingPromptNeverAttributesRememberedField() throws {
+        let root = TVNodeSketch(elementType: 2, children: [
+            TVNodeSketch(elementType: 49, value: "s3cret"),
+            TVNodeSketch(elementType: 19, children: [
+                TVNodeSketch(elementType: 48, label: "Placeholder"),
+            ]),
+        ])
+        XCTAssertNil(TVTextEntryPolicy.rememberedField(in: root, previous: labeledField))
+        let entry = try XCTUnwrap(TVTextEntryPolicy.resolve(root: root, lastFocusedField: labeledField).entry)
+        XCTAssertNil(entry.resourceId)
+        XCTAssertFalse(entry.text.contains("s3cret"))
+        XCTAssertFalse(emittedTexts(in: root, field: labeledField).contains { $0.contains("s3cret") })
+    }
+
     func testPromptCanMatchRememberedLabelAndIgnoresKeyboardStaticText() throws {
         var root = keyboardTree(value: "hello", prompt: "Label")
         root.children.insert(TVNodeSketch(elementType: 19, children: [
@@ -319,16 +380,16 @@ final class TVCommandPolicyTests: XCTestCase {
     func testReviewReproBSelectOnNextClearsIdentityBeforeSecureFieldSwitch() throws {
         var memory = TVFocusMemory()
         let bundle = "dev.jasonpearson.automobile.ctrlproxy.tv"
-        memory.observe(bundle: bundle, root: closedLabeledField)
-        XCTAssertEqual(memory.field(for: bundle), labeledField)
+        memory.observe(bundle: bundle, processToken: 1, root: closedLabeledField)
+        XCTAssertEqual(memory.field(for: bundle, processToken: 1), labeledField)
         let onNext = keyboardTree(value: "", keyboardFocused: false)
-        memory.observe(bundle: bundle, root: onNext)
-        XCTAssertEqual(memory.field(for: bundle), labeledField)
-        memory.willSelect(bundle: bundle, snapshot: onNext)
-        XCTAssertNil(memory.field(for: bundle))
+        memory.observe(bundle: bundle, processToken: 1, root: onNext)
+        XCTAssertEqual(memory.field(for: bundle, processToken: 1), labeledField)
+        memory.willSelect(bundle: bundle, processToken: 1, snapshot: onNext)
+        XCTAssertNil(memory.field(for: bundle, processToken: 1))
         let secureUp = keyboardTree(value: "s3cret", prompt: "Secret", button: "done")
-        memory.observe(bundle: bundle, root: secureUp)
-        let field = memory.field(for: bundle)
+        memory.observe(bundle: bundle, processToken: 1, root: secureUp)
+        let field = memory.field(for: bundle, processToken: 1)
         XCTAssertNil(field)
         let entry = try XCTUnwrap(TVTextEntryPolicy.resolve(root: secureUp, lastFocusedField: field).entry)
         XCTAssertNil(entry.resourceId)
@@ -343,11 +404,14 @@ final class TVCommandPolicyTests: XCTestCase {
         ]
         for snapshot in snapshots {
             var memory = TVFocusMemory()
-            memory.observe(bundle: bundle, root: closedLabeledField)
-            memory.willSelect(bundle: bundle, snapshot: snapshot)
-            XCTAssertNil(memory.field(for: bundle))
+            memory.observe(bundle: bundle, processToken: 1, root: closedLabeledField)
+            memory.willSelect(bundle: bundle, processToken: 1, snapshot: snapshot)
+            XCTAssertNil(memory.field(for: bundle, processToken: 1))
             let root = keyboardTree(value: "s3cret", prompt: "Secret")
-            XCTAssertFalse(emittedTexts(in: root, field: memory.field(for: bundle)).contains { $0.contains("s3cret") })
+            XCTAssertFalse(
+                emittedTexts(in: root, field: memory.field(for: bundle, processToken: 1))
+                    .contains { $0.contains("s3cret") }
+            )
         }
     }
 
@@ -355,24 +419,81 @@ final class TVCommandPolicyTests: XCTestCase {
         var memory = TVFocusMemory()
         let bundleA = "dev.jasonpearson.automobile.ctrlproxy.tv"
         let bundleB = "com.apple.TVSettings"
-        memory.willSelect(bundle: bundleA, snapshot: closedLabeledField)
-        XCTAssertEqual(memory.field(for: bundleA), labeledField)
-        XCTAssertNil(memory.field(for: bundleB))
+        memory.willSelect(bundle: bundleA, processToken: 1, snapshot: closedLabeledField)
+        XCTAssertEqual(memory.field(for: bundleA, processToken: 1), labeledField)
+        XCTAssertNil(memory.field(for: bundleB, processToken: 1))
         let root = keyboardTree(value: "s3cret", prompt: "Secret")
-        memory.observe(bundle: bundleB, root: root)
-        XCTAssertNil(memory.field(for: bundleB))
-        XCTAssertNil(memory.field(for: bundleA))
-        XCTAssertFalse(emittedTexts(in: root, field: memory.field(for: bundleB)).contains { $0.contains("s3cret") })
+        memory.observe(bundle: bundleB, processToken: 1, root: root)
+        XCTAssertNil(memory.field(for: bundleB, processToken: 1))
+        XCTAssertNil(memory.field(for: bundleA, processToken: 1))
+        XCTAssertFalse(
+            emittedTexts(in: root, field: memory.field(for: bundleB, processToken: 1))
+                .contains { $0.contains("s3cret") }
+        )
+    }
+
+    func testSelectFromFocusedButtonClearsRememberedField() throws {
+        var memory = TVFocusMemory()
+        let bundle = "dev.jasonpearson.automobile.ctrlproxy.tv"
+        memory.observe(bundle: bundle, processToken: 1, root: closedLabeledField)
+        XCTAssertEqual(memory.field(for: bundle, processToken: 1), labeledField)
+        memory.willSelect(bundle: bundle, processToken: 1, snapshot: TVNodeSketch(elementType: 2, children: [
+            TVNodeSketch(elementType: 9, label: "Sign in", hasFocus: true),
+        ]))
+        XCTAssertNil(memory.field(for: bundle, processToken: 1))
+        // A matching prompt cannot revive identity cleared by the button select.
+        let root = keyboardTree(value: "s3cret")
+        memory.observe(bundle: bundle, processToken: 1, root: root)
+        let field = memory.field(for: bundle, processToken: 1)
+        let entry = try XCTUnwrap(TVTextEntryPolicy.resolve(root: root, lastFocusedField: field).entry)
+        XCTAssertNil(entry.resourceId)
+        XCTAssertFalse(entry.text.contains("s3cret"))
+        XCTAssertFalse(emittedTexts(in: root, field: field).contains { $0.contains("s3cret") })
+    }
+
+    func testSameBundleProcessTokenChangeOrNilDiscardsRememberedField() throws {
+        let bundle = "dev.jasonpearson.automobile.ctrlproxy.tv"
+        for token in [2, nil] as [Int?] {
+            var memory = TVFocusMemory()
+            memory.observe(bundle: bundle, processToken: 1, root: closedLabeledField)
+            XCTAssertEqual(memory.field(for: bundle, processToken: 1), labeledField)
+            let root = keyboardTree(value: "s3cret")
+            memory.observe(bundle: bundle, processToken: token, root: root)
+            let field = memory.field(for: bundle, processToken: token)
+            XCTAssertNil(field)
+            let entry = try XCTUnwrap(TVTextEntryPolicy.resolve(root: root, lastFocusedField: field).entry)
+            XCTAssertNil(entry.resourceId)
+            XCTAssertFalse(entry.text.contains("s3cret"))
+            XCTAssertFalse(emittedTexts(in: root, field: field).contains { $0.contains("s3cret") })
+            memory.observe(bundle: bundle, processToken: 1, root: root)
+            XCTAssertNil(memory.field(for: bundle, processToken: 1))
+        }
+    }
+
+    func testUnknownOrChangedProcessTokenLookupCannotReviveMemory() {
+        let bundle = "dev.jasonpearson.automobile.ctrlproxy.tv"
+        for token in [2, nil] as [Int?] {
+            var memory = TVFocusMemory()
+            memory.willSelect(bundle: bundle, processToken: 1, snapshot: closedLabeledField)
+            XCTAssertEqual(memory.field(for: bundle, processToken: 1), labeledField)
+            XCTAssertNil(memory.field(for: bundle, processToken: token))
+            XCTAssertNil(memory.field(for: bundle, processToken: 1))
+            memory.observe(bundle: bundle, processToken: nil, root: closedLabeledField)
+            XCTAssertNil(memory.field(for: bundle, processToken: nil))
+            memory.willSelect(bundle: bundle, processToken: nil, snapshot: closedLabeledField)
+            XCTAssertNil(memory.field(for: bundle, processToken: nil))
+            XCTAssertNil(memory.field(for: bundle, processToken: 1))
+        }
     }
 
     func testMemoryObservationDiscardsMismatchedPrompt() {
         var memory = TVFocusMemory()
         let bundle = "dev.jasonpearson.automobile.ctrlproxy.tv"
-        memory.observe(bundle: bundle, root: closedLabeledField)
-        memory.observe(bundle: bundle, root: keyboardTree(value: "s3cret", prompt: "Secret"))
-        XCTAssertNil(memory.field(for: bundle))
-        memory.observe(bundle: bundle, root: keyboardTree(value: "hello"))
-        XCTAssertNil(memory.field(for: bundle))
+        memory.observe(bundle: bundle, processToken: 1, root: closedLabeledField)
+        memory.observe(bundle: bundle, processToken: 1, root: keyboardTree(value: "s3cret", prompt: "Secret"))
+        XCTAssertNil(memory.field(for: bundle, processToken: 1))
+        memory.observe(bundle: bundle, processToken: 1, root: keyboardTree(value: "hello"))
+        XCTAssertNil(memory.field(for: bundle, processToken: 1))
     }
 
     func testWithoutKeyboardPlainFieldsStillEmitLabelAndValue() {

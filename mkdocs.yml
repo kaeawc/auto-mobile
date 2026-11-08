@@ -111,6 +111,7 @@ not_in_nav: |
   /release/ios-simulator-continuity.md
   /release/device-claims-registry-migration.md
   /design-docs/plat/ios/xctestrunner/ci-integration.md
+  /decisions/androidx-baseline-profile-generator.md
   /decisions/androidx-car-app-template-snapshots.md
   /decisions/androidx-tv-fixture-libraries.md
   /decisions/androidx-wear-fixture-libraries.md
@@ -200,6 +201,7 @@ nav:
       - "Android emulator optimization": design-docs/android-emulator-optimization.md
       - "Android emulator host cost": design-docs/android-emulator-host-cost.md
       - "Android port reverse ownership": design-docs/plat/android/port-reverse.md
+      - "CtrlProxy baseline profile": design-docs/plat/android/ctrlproxy-baseline-profile.md
       - "Android prototype specification": design-docs/plat/android/prototype-ux.md
       - "Prototype performance measurement": design-docs/plat/android/prototype-performance-measurement.md
       - "Prototype Compose compiler report": design-docs/plat/android/prototype-compose-compiler-report.md

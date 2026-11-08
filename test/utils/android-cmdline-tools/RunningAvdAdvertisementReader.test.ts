@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   TmpdirRunningAvdAdvertisementReader,
   runningAvdAdvertisementDirs,
+  netsimDiscoveryDir,
 } from "../../../src/utils/android-cmdline-tools/RunningAvdAdvertisementReader";
 
 const AVD = "am-api36-ga-arm64";
@@ -138,4 +139,40 @@ describe("default advertised-PID liveness (#11103)", () => {
       expect(await reader.isAvdAdvertisedRunning(AVD)).toBe(true);
     },
   );
+});
+
+describe("netsimDiscoveryDir", () => {
+  test("uses the measured macOS temp directory even with XDG_RUNTIME_DIR set", () => {
+    expect(
+      netsimDiscoveryDir({
+        platform: "darwin",
+        tmpDir: "/var/folders/xy/T",
+        env: { XDG_RUNTIME_DIR: "/ignored" },
+      }),
+    ).toBe("/var/folders/xy/T");
+  });
+
+  test("uses XDG_RUNTIME_DIR on Linux", () => {
+    expect(
+      netsimDiscoveryDir({
+        platform: "linux",
+        tmpDir: "/tmp",
+        env: { XDG_RUNTIME_DIR: "/run/user/1000" },
+      }),
+    ).toBe("/run/user/1000");
+  });
+
+  test("falls back to the temp directory on Linux without XDG_RUNTIME_DIR", () => {
+    expect(netsimDiscoveryDir({ platform: "linux", tmpDir: "/tmp", env: {} })).toBe("/tmp");
+  });
+
+  test("uses the Windows temp directory even with XDG_RUNTIME_DIR set", () => {
+    expect(
+      netsimDiscoveryDir({
+        platform: "win32",
+        tmpDir: "C:\\Temp",
+        env: { XDG_RUNTIME_DIR: "/ignored" },
+      }),
+    ).toBe("C:\\Temp");
+  });
 });

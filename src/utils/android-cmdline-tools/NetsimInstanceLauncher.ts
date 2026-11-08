@@ -7,6 +7,7 @@ import { logger } from "../logger";
 import { defaultRandom, type Random } from "../Random";
 import type { Timer } from "../SystemTimer";
 import { parseDiscoveryIni } from "./emulatorGrpc/emulatorGrpcDiscovery";
+import { netsimDiscoveryDir, type AdvertisementHost } from "./RunningAvdAdvertisementReader";
 
 export interface NetsimInstance {
   instance: number;
@@ -24,8 +25,8 @@ interface NetsimInstanceLauncherOptions {
   spawnFn: SpawnFn;
   timer: Timer;
   random?: Random;
-  fs?: Pick<FileSystem, "existsSync" | "readFile">;
-  tmpDir?: string;
+  fs?: Pick<FileSystem, "existsSync" | "readFile" | "unlink">;
+  host?: Pick<AdvertisementHost, "platform" | "tmpDir" | "env">;
   platform?: NodeJS.Platform;
 }
 
@@ -35,19 +36,25 @@ const startingInstances = new Set<string>();
 export class DefaultNetsimInstanceLauncher implements NetsimInstanceLauncher {
   private readonly fs;
   private readonly random;
-  private readonly tmpDir;
+  private readonly discoveryDir;
 
   constructor(private readonly options: NetsimInstanceLauncherOptions) {
     this.fs = options.fs ?? new DefaultFileSystem();
     this.random = options.random ?? defaultRandom;
-    this.tmpDir = options.tmpDir ?? tmpdir();
+    this.discoveryDir = netsimDiscoveryDir(
+      options.host ?? {
+        platform: options.platform ?? process.platform,
+        tmpDir: tmpdir(),
+        env: process.env,
+      },
+    );
   }
 
   private claimInstance(): { instance: number; iniPath: string } {
     const first = Math.floor(this.random.next() * 900);
     for (let offset = 0; offset < 900; offset++) {
       const instance = 100 + ((first + offset) % 900);
-      const iniPath = path.join(this.tmpDir, `netsim_${instance}.ini`);
+      const iniPath = path.join(this.discoveryDir, `netsim_${instance}.ini`);
       if (!startingInstances.has(iniPath) && !this.fs.existsSync(iniPath)) {
         startingInstances.add(iniPath);
         return { instance, iniPath };
@@ -74,7 +81,7 @@ export class DefaultNetsimInstanceLauncher implements NetsimInstanceLauncher {
 
   private async startClaimed(instance: number, iniPath: string): Promise<NetsimInstance> {
     const { spawnFn } = this.options;
-    const platform = this.options.platform ?? process.platform;
+    const platform = this.options.host?.platform ?? this.options.platform ?? process.platform;
     const paths = platform === "win32" ? path.win32 : path;
     const binary = paths.join(
       paths.dirname(this.options.emulatorPath()),
@@ -93,15 +100,21 @@ export class DefaultNetsimInstanceLauncher implements NetsimInstanceLauncher {
       logger.warn("Private netsimd process failed", error);
     });
     const stop = () => {
-      if (stopped || ended || pid === undefined) {
+      if (stopped || pid === undefined) {
         return;
       }
       stopped = true;
-      try {
-        child.kill();
-      } catch (error) {
-        logger.warn("Failed to stop private netsimd child", error);
+      if (!ended) {
+        try {
+          child.kill();
+        } catch (error) {
+          logger.warn("Failed to stop private netsimd child", error);
+        }
       }
+      void this.fs.unlink(iniPath).catch((error) => {
+        // Only our claimed ini is removed; missing or unremovable stale files are safe to leave for collision checks.
+        logger.debug("Failed to remove private netsimd ini", error);
+      });
     };
     const checkRunning = () => {
       if (spawnError) {

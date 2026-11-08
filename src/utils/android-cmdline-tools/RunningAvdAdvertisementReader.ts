@@ -44,6 +44,16 @@ export interface AdvertisementHost {
   env: Readonly<Record<string, string | undefined>>;
 }
 
+export function netsimDiscoveryDir(
+  host: Pick<AdvertisementHost, "platform" | "tmpDir" | "env">,
+): string {
+  // Measured on macOS: netsimd -i N writes netsim_N.ini in os.tmpdir().
+  if (host.platform === "darwin" || host.platform === "win32") {
+    return host.tmpDir;
+  }
+  return readEnvRaw(AMBIENT_ENV.XDG_RUNTIME_DIR, host.env) || host.tmpDir;
+}
+
 /**
  * Candidate `avd/running` discovery directories, most specific first. The
  * emulator (`EmulatorAdvertisement` / `ConfigDirs::getDiscoveryDirectory`)

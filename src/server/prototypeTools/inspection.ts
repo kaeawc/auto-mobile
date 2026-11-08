@@ -34,7 +34,6 @@ import type { BootedDevice } from "../../models";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { logger } from "../../utils/logger";
-import { withReverseReport } from "../prototypeReverse";
 import { performPrototypeClearStorage } from "../prototypeStorageAction";
 import type { ProgressCallback } from "../toolRegistry";
 import { dataInput, prototypeSchema, stateInput } from "./schemas";
@@ -233,7 +232,7 @@ export function isDeviceRequestAction(
 
 export async function deviceRequestAction(
   args: z.infer<typeof prototypeSchema>,
-  host: Pick<PrototypeHandlerDependencies, "store" | "events" | "reverses">,
+  host: Pick<PrototypeHandlerDependencies, "store" | "events">,
   device: BootedDevice,
   {
     target,
@@ -247,8 +246,7 @@ export async function deviceRequestAction(
   if (args.action === "clearStorage") {
     return performPrototypeClearStorage(target, args, host.store, device.deviceId);
   }
-  const inspected = await inspectDevice(host, target, scope, { timeoutMs: args.timeoutMs, signal });
-  return withReverseReport(inspected, host.reverses.report(device.deviceId));
+  return inspectDevice(host, target, scope, { timeoutMs: args.timeoutMs, signal });
 }
 
 const iosAgentStatusSchema = z.object({

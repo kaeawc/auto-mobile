@@ -33,6 +33,7 @@ import { drivesFocus, touchInputMode, type InputModeResolver } from "./focusDriv
 import { getElementKey } from "./ExploreElementExtraction";
 import { ExplorePermissionDialog } from "./ExplorePermissionDialog";
 import { ExploreImeDismissal } from "./ExploreImeFilter";
+import { ExploreNoEffectElements } from "./ExploreNoEffectElements";
 import { recordScreenVisit } from "./ExploreLoopDetection";
 import { ExplorePlatformRecovery } from "./ExplorePlatformRecovery";
 import {
@@ -106,7 +107,10 @@ export class Explore extends BaseVisualChange {
   private pendingBackScreen: string | null = null;
   private awaitingRelaunchScreen: boolean = false;
   private hasObservedTargetApp: boolean = false;
-  private readonly imeDismissal = new ExploreImeDismissal();
+  private readonly imeDismissal = new ExploreImeDismissal((signal) =>
+    this.platformRecovery().pressBack(signal),
+  );
+  private readonly noEffectElements = new ExploreNoEffectElements();
   /**
    * Withdraws the record of the last successful recorded action. A gesture that
    * caused no navigation would otherwise stay correlatable for the manager's
@@ -267,6 +271,7 @@ export class Explore extends BaseVisualChange {
         progress,
         signal,
       });
+      await this.imeDismissal.dismissOnExit(this.observeScreen, this.targetPackageName, signal);
 
       perf.end();
       return await this.generateReport(initialGraph, startTime, signal?.aborted === true);
@@ -302,6 +307,7 @@ export class Explore extends BaseVisualChange {
     this.awaitingRelaunchScreen = false;
     this.hasObservedTargetApp = false;
     this.imeDismissal.reset();
+    this.noEffectElements.clear();
     this.elementSelections = [];
     this.explorationPath = [];
     this.interactionCount = 0;
@@ -338,6 +344,7 @@ export class Explore extends BaseVisualChange {
       if (preparation === "continue") {
         continue;
       }
+      this.imeDismissal.settled();
 
       // Select next element to interact with
       const nextElement = await this.selectNextElement(observation, strategy, mode, perf);
@@ -367,6 +374,8 @@ export class Explore extends BaseVisualChange {
         perf,
         signal,
       });
+      this.imeDismissal.interacted(nextElement);
+      this.noEffectElements.interacted(nextElement, interactionSuccess);
 
       if (!(await this.recordInteractionResult(interactionSuccess, mode, isNewInteraction))) {
         break;
@@ -472,8 +481,7 @@ export class Explore extends BaseVisualChange {
       if (enforcement === "stop") {
         return "break";
       }
-      const pressBack = () => this.platformRecovery().pressBack(signal);
-      if (await this.imeDismissal.dismiss(observation, this.targetPackageName, pressBack, signal)) {
+      if (await this.imeDismissal.dismiss(observation, this.targetPackageName, signal)) {
         return "continue";
       }
     }
@@ -701,6 +709,13 @@ export class Explore extends BaseVisualChange {
         return this.selectValidateElement(safeCandidates, viewHierarchy);
       }
 
+      const currentScreen = this.navigationManager.getCurrentScreen();
+      // Elements whose last interaction left this screen unchanged are not retried (#17442).
+      const elements = this.noEffectElements.selectable(
+        currentScreen,
+        safeCandidates,
+        viewHierarchy,
+      );
       if (safeCandidates.length === 0 || !viewHierarchy) {
         return null;
       }
@@ -710,16 +725,11 @@ export class Explore extends BaseVisualChange {
       this.currentTargetEdge = null;
       this.currentElementConfidence = 0;
 
-      return selectDiscoveryElement(
-        { elements: safeCandidates, hierarchy: viewHierarchy },
-        strategy,
-        mode,
-        {
-          currentScreen: this.navigationManager.getCurrentScreen(),
-          exploredElements: this.exploredElements,
-          elementSelections: this.elementSelections,
-        },
-      );
+      return selectDiscoveryElement({ elements, hierarchy: viewHierarchy }, strategy, mode, {
+        currentScreen,
+        exploredElements: this.exploredElements,
+        elementSelections: this.elementSelections,
+      });
     });
   }
   private selectValidateElement(candidates: Element[], hierarchy: ObserveResult["viewHierarchy"]) {

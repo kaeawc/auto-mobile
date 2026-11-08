@@ -52,6 +52,7 @@ Use these for stable, repeatable AutoMobile demos tied to docs/using workflows.
 - **Tap Targets Demo**: `automobile://playground/demos/a11y/tap_targets`
 - **Bug Repro Demo**: `automobile://playground/demos/bugs/repro`
 - **Pointer Probe Demo**: `automobile://playground/demos/input/pointer_probe`
+- **Collapsing Composer Demo**: `automobile://playground/demos/input/collapsing_composer` — hides the composer and clears focus after the keyboard goes from visible to hidden. Tap **Tap to write** to reopen it; **Draft: <text>** retains the text.
 
 ## Testing with ADB
 

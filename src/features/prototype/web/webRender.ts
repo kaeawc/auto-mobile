@@ -91,6 +91,7 @@ import {
   type PrototypeIconGlyphSource,
 } from "./webIconGlyphs";
 import { contentHeightBound, rowFillAxes, rowMeasured } from "./webRowAspect";
+import { withColumnHeights } from "./webIncomingHeight";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
 export interface UnsupportedWebNode {
@@ -408,10 +409,11 @@ function lineFillAxes(
 ): WebAxis[] {
   // Each repeat row binds its own placeholders, as `children` renders it (#16803).
   const rows = rowScopes(raw, scope);
-  if (!Array.isArray(raw.children) || rows.length === 0) {
+  const sized = columnSized(raw, scope, path);
+  if (!Array.isArray(sized.children) || rows.length === 0) {
     return [];
   }
-  const list: unknown[] = raw.children;
+  const list: unknown[] = sized.children;
   const own = rowFillAxes(raw, path, prepareIn(scope), scope.heightBound);
   // Children see the bound this container passes them, as rendering gives it (see `line`, `box`).
   const bound = BOUNDING_CONTAINERS.has(String(raw.type))
@@ -429,12 +431,20 @@ function lineFillAxes(
 
 const prepareIn = (s: WebRenderScope) => (e: unknown, at: string) => preparedNode(e, s, at)?.styled;
 
+/** A column whose children carry the height share it hands each (see withColumnHeights). */
+const columnSized = (raw: Raw, scope: WebRenderScope, path: string) =>
+  withColumnHeights(raw, path, prepareIn(scope), contentHeightBound(raw.style, scope.heightBound));
+
 const line =
   (axis: "row" | "column"): NodeRenderer =>
   (raw, scope, path) => {
     // A wrap-sized line around a filling child grows to its parent on that axis, as a Compose
     // parent does around a fillMax child; otherwise it would shrink to nothing.
-    const node = filling(raw, lineFillAxes(raw, scope, path, axis === "row" ? "width" : "height"));
+    const sized = columnSized(raw, scope, path);
+    const node = filling(
+      sized,
+      lineFillAxes(sized, scope, path, axis === "row" ? "width" : "height"),
+    );
     const inner = child(scope, {
       inBox: false,
       style: containerChildStyle(scope, node, axis),

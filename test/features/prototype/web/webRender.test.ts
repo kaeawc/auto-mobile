@@ -940,6 +940,36 @@ describe("prototype web still (#16346)", () => {
     expect(byTag(shown, "inner")[0]!.style["max-width"]).toBe("100%");
   });
 
+  test("a row whose height comes from fill or a weight caps its aspect ratio by it (#16686)", () => {
+    const ratioIn = (row: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          root: {
+            type: "column",
+            style: { height: { dp: 100 } },
+            children: [
+              { type: "box", style: { height: { dp: 60 } } },
+              {
+                ...row,
+                type: "row",
+                children: [
+                  { type: "box", testTag: "ratio", style: { aspectRatio: 2 } },
+                  { type: "text", text: "b" },
+                ],
+              },
+            ],
+          },
+        }),
+        "ratio",
+      )[0]!.style;
+    // 100 dp less the 60 dp sibling leaves 40 dp, so the ratio is at most 80 dp wide.
+    expect(ratioIn({ style: { height: "fill" } })).toMatchObject({ "flex-basis": "80px" });
+    expect(ratioIn({ style: { weight: 1 } })).toMatchObject({ "flex-basis": "80px" });
+    // A wrap row is bounded by what is left too.
+    expect(ratioIn({})).toMatchObject({ "flex-basis": "80px", width: "80px" });
+  });
+
   test("an explicit wrap-width root keeps its content width in its window", () => {
     const layerOf = (placement: Record<string, unknown>) =>
       find(

@@ -1,5 +1,5 @@
 import { record, type Raw } from "../prototypeTemplate";
-import { ROW_BOUND_KEY, ROW_MEASURE_KEY, type RowMeasure } from "./webStyle";
+import { INCOMING_HEIGHT_KEY, ROW_BOUND_KEY, ROW_MEASURE_KEY, type RowMeasure } from "./webStyle";
 
 /** The aspect ratio of a node with no authored width, height or weight, or undefined. */
 function freeAspectRatio(node: Raw | undefined): number | undefined {
@@ -51,22 +51,33 @@ const side = (padding: Raw | undefined, name: string) =>
   typeof padding?.[name] === "number" ? padding[name] : 0;
 
 /**
- * The tallest a row or box lets its children be: its dp `height` (coerced into its `minHeight`, as
- * `sizeIn` applies before the height) or its `maxHeight`, capped by the bound it inherited from a
- * row or box ancestor (`inherited`; Compose constrains a wrap or fill node by its parent's max
- * height too), less its vertical padding. Compose's `sizeIn` then `aspectRatio` on a child
- * respects that incoming max height. Infinity when nothing bounds it.
- *
- * The inherited bound is the parent's whole content height. A column measures its children in
- * order, so a child after earlier siblings may in fact get less; the bound is an upper limit.
+ * The height a node's own size takes, as CSS and Compose's `sizeIn` then `height` resolve it: its
+ * dp `height` (else unbounded) held under `maxHeight`, then raised to `minHeight`, which wins.
  */
-export function rowContentHeight(style: Raw | undefined, inherited = Infinity): number {
+export function ownHeight(style: Raw | undefined): number {
   const dp = record(style?.height)?.dp;
   const max = typeof style?.maxHeight === "number" ? style.maxHeight : Infinity;
   const min = typeof style?.minHeight === "number" ? style.minHeight : 0;
-  const own = Math.max(Math.min(typeof dp === "number" ? dp : Infinity, max), min);
+  return Math.max(Math.min(typeof dp === "number" ? dp : Infinity, max), min);
+}
+
+/**
+ * The tallest a row or box lets its children be: its dp `height` (coerced into its `minHeight`, as
+ * `sizeIn` applies before the height) or its `maxHeight`, capped by the bound it inherited from a
+ * row, column or box ancestor (`inherited`; Compose constrains a wrap or fill node by its parent's
+ * max height too) and by the share a column hands it (INCOMING_HEIGHT_KEY), less its vertical
+ * padding. Compose's `sizeIn` then `aspectRatio` on a child
+ * respects that incoming max height. Infinity when nothing bounds it.
+ *
+ * The inherited bound is the parent's whole content height; a column narrows it per child to
+ * what its earlier siblings left (see webIncomingHeight.ts).
+ */
+export function rowContentHeight(style: Raw | undefined, inherited = Infinity): number {
+  const own = ownHeight(style);
   const padding = record(style?.padding);
-  const height = Math.min(own, inherited);
+  const incoming = style?.[INCOMING_HEIGHT_KEY];
+  const handed = typeof incoming === "number" ? incoming : Infinity;
+  const height = Math.min(own, inherited, handed);
   return Math.max(0, height - side(padding, "top") - side(padding, "bottom"));
 }
 

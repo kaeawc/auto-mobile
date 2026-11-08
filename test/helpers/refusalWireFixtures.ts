@@ -107,6 +107,7 @@ import {
   ProvisionDeviceCreateRejectedError,
 } from "../../src/devices/exactDeviceProvisioning";
 import { DeviceOutsideBrokerGrantError } from "../../src/daemon/sessionBroker/connectionRefusal";
+import { ReadSessionNotBoundError } from "../../src/daemon/ReadSessionNotBoundError";
 import {
   DeviceAssignedToBindingError,
   BindingDiscoveryIncompleteError,
@@ -786,6 +787,11 @@ const BUILDERS: readonly FixtureEntry[] = [
     "device_outside_bound_session.other_session",
     "SessionOutsideBoundSessionError via shapeToolCallError",
     () => shaped(new SessionOutsideBoundSessionError(SESSION, "other-session")),
+  ],
+  [
+    "read_session_not_bound",
+    "ReadSessionNotBoundError via shapeToolCallError",
+    () => shaped(new ReadSessionNotBoundError("observe", SESSION)),
   ],
   [
     "daemon_shutting_down",

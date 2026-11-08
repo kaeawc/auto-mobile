@@ -29,10 +29,13 @@ targets:
       - path: Sources
         excludes:
           - "*.xcassets"
+          - ShareSink
       - path: Sources/Theme
       - path: Sources/Assets.xcassets
         type: folder
     dependencies:
+      - target: PlaygroundShareSink
+        embed: true
       - package: AutoMobileSDK
       - package: AutoMobileSdkWire
     settings:
@@ -43,6 +46,20 @@ targets:
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: NO
 
+  PlaygroundShareSink:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Sources/ShareSink
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.Playground.ShareSink
+        INFOPLIST_FILE: Sources/ShareSink/Info.plist
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: NO
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
+
   PlaygroundTests:
     type: bundle.unit-test
     platform: iOS
@@ -50,6 +67,7 @@ targets:
       - path: Tests
         excludes:
           - FilesPickerProbeUITests
+      - path: Sources/ShareSink/ShareSinkSummary.swift
     dependencies:
       - target: Playground
       - package: AutoMobileHighlightCore

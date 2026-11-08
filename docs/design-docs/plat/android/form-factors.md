@@ -68,6 +68,12 @@ touchscreen and leanback optional, so it installs on any TV or phone image at AP
 cards, search text and player tracks come from each module's catalog object; screen tags, button labels
 and the player's state lines are the ones listed below. Changing either is a contract change.
 
+Both embed the AutoMobile SDK and report each screen as an SDK navigation event, so `explore` records
+them in the navigation graph and `navigateTo` can replay them. Screen names are part of the contract:
+`BrowseDestination`, `SearchDestination`, `DetailDestination` (argument `cardId`) and
+`PlayerDestination`; the Leanback fixture has only Browse and Detail. A screen is reported when it is
+shown and again whenever the app resumes on it.
+
 `android/tv-fixture` (`dev.jasonpearson.automobile.tvfixture`, launcher "AutoMobile TV Fixture") is
 Compose for TV (`androidx.tv:tv-material`). Compose test tags are exposed as resource ids.
 

@@ -140,12 +140,11 @@ Every other tool refuses a watch before doing anything, with:
 - `rotateCrown` turns the Digital Crown by a signed, non-zero `delta`, with an optional positive
   `velocity` (default 1). It is not listed by default; enable it with `setToolEnabled` (see
   [Dynamic Tools](dynamic-tools.md)). When the view hierarchy is
-  identical before and after a rotation, it fails with an error: no view may hold crown focus (for
-  example after launching the app outside AutoMobile; tap the view that should receive the crown,
-  then retry) or the content is already at its limit. This check is best effort: it cannot see a
-  change that is not in the hierarchy, and it is skipped when a hierarchy cannot be read, so the
-  first rotation after a cold launch can still report success. `observe` after rotating to confirm
-  the app responded.
+  identical before and after a rotation, it retries once after a neutral touch to wake crown routing.
+  If the retry still changes nothing, it fails with an error: no view may hold crown focus, or the
+  content is already at its limit. Tap the view that should receive the crown, then retry.
+  This check is best effort: it cannot see a change that is not in the hierarchy, and it is skipped
+  when a hierarchy cannot be read. `observe` after rotating to confirm the app responded.
 
   ```json
   { "name": "rotateCrown", "arguments": { "platform": "watchos", "delta": 2 } }

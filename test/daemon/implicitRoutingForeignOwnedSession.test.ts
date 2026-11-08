@@ -310,7 +310,9 @@ describe("the implicit routing session of a call that names none", () => {
 
       const read = await stranger.call("observe", { sessionUuid: HOLDER });
 
-      expect(isToolError(read)).toBe(false);
+      // A sessionUuid is not a bearer capability (#13540): the stranger's read is refused.
+      expect(isToolError(read)).toBe(true);
+      expect(JSON.stringify(read)).toContain("read_session_not_bound");
       await expectStrangerRefused();
       expect(sessionManager.getSession(HOLDER)!.lastUsedAt).toBe(before);
     },
@@ -617,13 +619,15 @@ describe("the implicit routing session of a call that names none", () => {
       },
     );
 
-    arranged("is still answered when it is a read, and does not extend the session", async () => {
+    arranged("is refused when it is a read, and does not extend the session", async () => {
       const before = sessionManager.getSession(HOLDER)!.lastUsedAt;
       timer.advanceTime(60_000);
 
       const read = await stranger.call("observe", marked);
 
-      expect(isToolError(read)).toBe(false);
+      // Marking another connection's session as bound does not hold its binding (#13540).
+      expect(isToolError(read)).toBe(true);
+      expect(JSON.stringify(read)).toContain("read_session_not_bound");
       expect(sessionManager.getSession(HOLDER)!.lastUsedAt).toBe(before);
     });
 

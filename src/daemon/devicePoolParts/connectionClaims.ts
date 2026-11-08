@@ -16,6 +16,8 @@ export interface ConnectionClaimsOperations {
   hasAcquiredDeviceSession(mcpSessionId: string, sessionId: string): boolean;
   /** Remember the connection's identity before acquisition, even with no retained sessions. */
   declareMcpSessionLivenessOwnerToken(mcpSessionId: string, token: string): void;
+  /** Whether the connection declared the owner token of `sessionId`'s owning session (#13540). */
+  connectionPresentsSessionOwnerToken(sessionId: string, mcpSessionId: string): boolean;
   registerMcpSessionOwnerCallReader(): void;
   /** Only a still-connected caller presenting the mint's token defends its claim lease. */
   beginMcpSessionOwnerCall(mcpSessionId: string, token: string): () => void;
@@ -151,6 +153,16 @@ export class DevicePoolConnectionClaims {
     this.state.mcpSessionLivenessOwnerTokens.set(mcpSessionId, token);
   }
 
+  /** Whether the connection declared the owner token of `sessionId`'s owning session (#13540). */
+  connectionPresentsSessionOwnerToken(sessionId: string, mcpSessionId: string): boolean {
+    const token = this.state.mcpSessionLivenessOwnerTokens.get(mcpSessionId);
+    if (token === undefined) {
+      return false;
+    }
+    const owner = this.state.sessionManager.peekSession(this.ownershipSessionId(sessionId));
+    return owner?.livenessOwnerToken === token;
+  }
+
   registerMcpSessionOwnerCallReader(): void {
     this.state.sessionManager.setOwnerConnectedAtReader?.((session, at) => {
       const ownerId = this.ownershipSessionId(session.sessionId);
@@ -271,6 +283,8 @@ export function connectConnectionClaims(
     hasAcquiredDeviceSession: (...args) => part().hasAcquiredDeviceSession(...args),
     declareMcpSessionLivenessOwnerToken: (...args) =>
       seams.declareMcpSessionLivenessOwnerToken(...args),
+    connectionPresentsSessionOwnerToken: (...args) =>
+      part().connectionPresentsSessionOwnerToken(...args),
     registerMcpSessionOwnerCallReader: (...args) =>
       part().registerMcpSessionOwnerCallReader(...args),
     beginMcpSessionOwnerCall: (...args) => seams.beginMcpSessionOwnerCall(...args),

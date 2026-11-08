@@ -19,6 +19,19 @@ function arrange() {
 }
 
 describe("watch runner protocol", () => {
+  test.each([{ text: "clockface dump", data: "fallback" }, { data: "fallback" }])(
+    "face replies prefer text with data fallback: %j",
+    async (payload) => {
+      const { client, socket } = arrange();
+      socket.receive({ type: "connected", platform: "watchos", supportedCommands: ["face"] });
+      const pending = client.request({ type: "face", op: "dump" });
+      await drainMicrotasks(2);
+      expect(socket.sent[0]).toEqual({ type: "face", op: "dump", requestId: "1" });
+      socket.receive({ type: "face_result", requestId: "1", success: true, ...payload });
+      expect(await pending).toBe("text" in payload ? payload.text : payload.data);
+      client.close();
+    },
+  );
   test("a disconnected client is unusable and rejects later requests", async () => {
     const { client, socket } = arrange();
     socket.connected();

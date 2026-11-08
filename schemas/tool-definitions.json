@@ -697,7 +697,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Wear OS watches only (other form factors are refused without a change): power-state change. enter sends KEYCODE_SLEEP, exit sends KEYCODE_WAKEUP, then reads wakefulness once. Enter succeeds on Dozing or Asleep; exit succeeds on Awake. Wear exposes no ambient readback, so success does not prove ambient mode. Hardware wake by tilt or touch is untested.",
+    "description": "Wear OS watches only (other form factors are refused without a change): enter sends KEYCODE_SLEEP, exit sends KEYCODE_WAKEUP, then reads wakefulness and the watch face's inAmbient from dumpsys wear_service, reported as ambient (true, false or \"unknown\"). Enter succeeds when inAmbient is true; exit when inAmbient is false and wakefulness is Awake. Without that readback, enter succeeds on Dozing or Asleep and exit on Awake. Hardware wake by tilt or touch is untested.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -735,6 +735,20 @@
         "action": {
           "type": "string",
           "enum": ["enter", "exit"]
+        },
+        "ambient": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string",
+              "const": "unknown"
+            }
+          ]
+        },
+        "watchFaceVisible": {
+          "type": "boolean"
         },
         "wakefulness": {
           "type": "string",
@@ -777,7 +791,7 @@
           "additionalProperties": {}
         }
       },
-      "required": ["success", "action", "message"],
+      "required": ["success", "action", "ambient", "message"],
       "additionalProperties": false
     }
   },
@@ -50897,7 +50911,7 @@
       "additionalProperties": {},
       "$defs": {
         "__schema0": {
-          "description": "Stable failure code. NO_FOCUSED_EDITABLE: no editable field has focus; focus the field (tap it, or tapOn with focus), then retry sendKeys without a mode.",
+          "description": "Stable failure code. NO_FOCUSED_EDITABLE: no editable field has focus; focus the field (tap it, or tapOn with focus), then retry sendKeys without a mode. EDITOR_ACTION_MISMATCH: the device reported a semantic key (next, previous, done, search, send, go) as not performed, either because the focused field did not carry out the action or, for done/search/send/go below Android API 30, because the Enter key could not be delivered; observe the screen before retrying. Instead of next use key:\"tab\" or a selector for the next field; for a submit action tap the submit control if there is one, otherwise key:\"enter\" may submit, though a multiline field can insert a newline instead.",
           "type": "string"
         },
         "__schema1": {

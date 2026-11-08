@@ -1,5 +1,10 @@
 import type { TapOnCall } from "./ActionCall";
-import { TapTargetUnavailableError, findTapTargetNode } from "./tapTargetSupport";
+import {
+  TapTargetUnavailableError,
+  findTapTargetNode,
+  type TapFocusFailure,
+} from "./tapTargetSupport";
+import { describeInputCandidates, onScreenInputCandidates } from "./focusInputCandidates";
 import { TapElementFinder } from "./tapElementFinder";
 import { TapPointPlanner } from "./tapPointPlanner";
 import type { AndroidTapVerification, TapVerificationOptions } from "./tapVerificationOptions";
@@ -122,6 +127,27 @@ export interface TapTargetResolverHost {
 }
 
 /** Resolves targets from fresh hierarchies and verifies focus and checked state. */
+/**
+ * A focus miss names the editable fields on screen. They are visible, so the miss is a naming
+ * problem rather than a scroll one, and the reason tells sendKeys not to suggest scrolling (#17463).
+ */
+function focusMissDetails(
+  options: TapOnElementOptions,
+  observeResult: ObserveResult | undefined,
+  notFoundError: string,
+): { baseError: string; reason: TapFocusFailure } {
+  const inputs =
+    options.action === "focus" && observeResult
+      ? onScreenInputCandidates(observeResult.viewHierarchy, observeResult.screenSize)
+      : [];
+  return inputs.length > 0
+    ? {
+        baseError: `${notFoundError}. ${describeInputCandidates(inputs)}`,
+        reason: "not-found-inputs-listed",
+      }
+    : { baseError: notFoundError, reason: "not-found" };
+}
+
 export class TapTargetResolver {
   constructor(private readonly host: TapTargetResolverHost) {}
 
@@ -779,11 +805,12 @@ export class TapTargetResolver {
   ): Promise<never> {
     this.assertContainerFound(options, containerFound);
     const containerHint = this.containerHint(options);
-    const baseError = this.elementNotFoundMessage(options, containerHint);
+    const notFoundError = this.elementNotFoundMessage(options, containerHint);
+    const { baseError, reason: notFound } = focusMissDetails(options, observeResult, notFoundError);
 
     if (selection?.onlyKeyboardKeyMatch) {
       throw new TapTargetUnavailableError(
-        `${baseError}. The only match is a soft-keyboard key, which observe does not list; ` +
+        `${notFoundError}. The only match is a soft-keyboard key, which observe does not list; ` +
           "use sendKeys or pressButton to drive the keyboard, or dismiss the keyboard first.",
         "not-found",
       );
@@ -806,10 +833,10 @@ export class TapTargetResolver {
           visionAnalyzer: this.host.visionAnalyzer(),
         },
       );
-      throw new TapTargetUnavailableError(enrichedMsg, "not-found");
+      throw new TapTargetUnavailableError(enrichedMsg, notFound);
     }
 
-    throw new TapTargetUnavailableError(baseError, "not-found");
+    throw new TapTargetUnavailableError(baseError, notFound);
   }
 
   private assertContainerFound(options: TapOnElementOptions, containerFound: boolean): void {

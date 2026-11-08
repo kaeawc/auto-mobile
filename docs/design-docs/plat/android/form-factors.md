@@ -10,7 +10,7 @@ Form-factor support, navigation contracts and remaining verification gaps.
 | Form factor                                  | Verdict            | Smallest useful tool surface                                                                       | Main risk                                                                        |
 | -------------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | Android TV / Google TV                       | **Go**             | `focusNavigate`, a `select` key on `sendKeys` only if `enter` falls short, TV form-factor matching | Google TV and no-touchscreen devices unverified; child-label `focusNavigate` gap |
-| Wear OS                                      | **Conditional go** | rotary scroll, `isScreenRound` in `observe`, ambient toggle                                        | Ambient has power-state readback only; hardware wake is untested                 |
+| Wear OS                                      | **Conditional go** | rotary scroll, `isScreenRound` in `observe`, ambient toggle                                        | Ambient reads `inAmbient` from `dumpsys wear_service`; hardware wake is untested |
 | Android Auto (projection to a DHU)           | **No-go**          | none                                                                                               | The car UI is not in any accessibility tree AutoMobile can read                  |
 | Android Automotive OS (an AAOS system image) | **Go**             | existing tools; rotary `pressButton` buttons; `vehicle` `deviceCondition`                          | Play Store `user` images refuse vehicle-motion injection; secondary displays     |
 
@@ -24,7 +24,7 @@ Android Auto projects a phone's UI to a head unit; Automotive OS is a full Andro
 - **CtrlProxy.** `minSdk` 24 (`android/gradle/libs.versions.toml`) is not a blocker. The manifest declares no `<uses-feature>` and only a `LAUNCHER` category (no `LEANBACK_LAUNCHER`). The accessibility config requests window content, interactive windows and gesture dispatch.
 - **Input.** `sendKeys` supports arrows (`KEYCODE_DPAD_*`), enter, tab, escape, backspace, delete (`INPUT_KEY_CODE_MAP`, `src/features/action/InputKey.ts`); there is no D-pad centre, menu or media key. `pressButton` sends back/home/recent as global actions with ADB fallback, plus volume/power via ADB.
 - **Focus.** `observe` returns `focusedElement` (`ActiveWindowAttribution.ts`, `HierarchyFocus.ts`) from the `focused` property; TalkBack focus is separate (`accessibility-focused`).
-- `observe` reports `isScreenRound` for `watch` devices; `ambient` changes power state with no Wear ambient readback.
+- `observe` reports `isScreenRound` for `watch` devices; `ambient` changes power state and reads the watch face's `inAmbient` back from `dumpsys wear_service`.
 
 ## Hypotheses to confirm
 
@@ -112,13 +112,50 @@ and nothing asks for audio.
 Hierarchy and tap path should match a phone's; the gaps are three Wear-specific inputs, none confirmed.
 
 - **Rotary.** `rotaryScroll({ delta })` (`src/features/wear/RotaryScroll.ts`, opt-in like `windowMode`) tries, in order, `adb shell input rotaryencoder scroll --axis SCROLL,<-delta>`, `adb emu event send EV_REL:REL_WHEEL:<delta>` (emulator serials only) and a vertical centre-column `input swipe` sized from `wm size`. After each it re-reads the CtrlProxy hierarchy; a candidate counts only if the structural fingerprint changed. The result names the first working `method` and lists every attempt; on a device whose `ro.build.characteristics` does not name `watch` (device traits `formFactor`) the input is still sent and the result carries a `warning`. The hierarchy has no scroll offset, so a list already at its end reports `unchanged`, and an unreadable hierarchy (CtrlProxy disconnected) makes no attempt. The native SCROLL axis command is confirmed on a Wear OS emulator, with its sign inverted relative to delta: positive delta reveals lower items. The emulator-console `REL_WHEEL` mapping and sign, and physical-device behaviour, remain unconfirmed (checklist row 6).
-- **Ambient.** `ambient({ action: "enter" | "exit" })` sends `KEYCODE_SLEEP` or `KEYCODE_WAKEUP` through the existing power client, then reads wakefulness once. Enter succeeds on `Dozing` or `Asleep`; exit succeeds on `Awake`. This is a power-state change with no Wear ambient readback, so success does not prove ambient mode. Hardware wake by tilt or touch remains untested.
+- **Ambient.** `ambient({ action: "enter" | "exit" })` sends `KEYCODE_SLEEP` or `KEYCODE_WAKEUP` through the existing power client, then reads wakefulness and `watchFaceState=WatchFaceState{watchFaceVisible=…, inAmbient=…}` from `dumpsys wear_service` (parsed in `src/features/wear/wearServiceDumpsys.ts`, shared with watch-face observation). Enter succeeds on `inAmbient=true`; exit on `inAmbient=false` with `Awake`. Without that line (or when the read fails) the result reports `ambient: "unknown"` and falls back to wakefulness: enter on `Dozing` or `Asleep`, exit on `Awake`. On the API 37 image `KEYCODE_SLEEP` also takes the display to `DOZE_SUSPEND`, and `svc power stayon true` keeps it awake. Hardware wake by tilt or touch remains untested.
 - **Round screens.** `observe` reports `isScreenRound` for `watch` devices (`BootedDevice.formFactor`), read over adb from `dumpsys display` (`FLAG_ROUND` on the default display's `DisplayInfo`/`DisplayDeviceInfo` record), not from the CtrlProxy.
 - **Swipe-to-dismiss.** Wear OS 3+ back is a right-swipe from the left edge; the `back` global action should work; check a left-edge `swipeOn`.
 
 ## Android Auto (DHU): no-go
 
 The DHU is a host desktop app; the phone's Android Auto app streams the car UI as video over an ADB-forwarded socket (`tcp:5277`), and Car App Library templates are rendered by the host, not the app under test. So the phone's accessibility tree has no car screen, and driving the DHU is desktop automation outside the ADB model. `androidx.car.app.testing` (`TestCarContext`, `ScreenController`) tests templates in unit tests and is the recommended route.
+
+### Measured on a Play phone emulator
+
+Measured on a Mac arm64 host with DHU 2.1 (`Build: 2022-12-15-495527557`) against a `google_apis_playstore` API 36 phone emulator.
+
+- **The Play image's Android Auto is a stub.** There is no head-unit server to project from until a person signs in to Play or sideloads a trusted Android Auto APK:
+
+  ```
+  package:com.google.android.projection.gearhead
+      versionName=1.2.551000-stub
+  ```
+
+  `com.android.settings.action.SETTINGS` resolves to `com.google.android.projection.gearhead/com.google.android.apps.auto.components.app.stubapp.StubSettingsActivity`; starting it ends on `com.android.vending/com.google.android.finsky.unauthenticated.activity.UnauthenticatedMainActivity` (the Play sign-in wall), so Developer settings and **Start head unit server** are unreachable. Automated lanes must not sign in, so this step stays with a person.
+
+- **The DHU exits against the stub.** With `adb forward tcp:5277 tcp:5277` and `desktop-head-unit --headless -a localhost:5277`, the DHU connects at the adb layer and exits when the transport drops, because nothing listens on the phone's 5277:
+
+  ```
+  [W]: No configuration specified - using default values.
+  [E]: Could not load configuration from '~/.android/headunit.ini'.
+  BoringSSL is the SSL implementation used in the receiver-lib.
+  Starting link. Requested protocol version: 1.7
+  [I]: Connecting over ADB to localhost:5277...
+  [I]: connected.
+  Android Auto - Desktop Head Unit
+    Build: 2022-12-15-495527557
+    Version: 2.1-mac-arm64
+
+  > [E]: Failed to read from transport - disconnect. Exiting...
+  ```
+
+  (The `connected.` line carries ANSI colour codes in the raw output.)
+
+- **Console commands.** Read from the installed binary's strings, not from a live `help`: `dpad <up|down|left|right|click|back|soft left|soft right|flick left|flick right|rotate left|rotate right|ul|ur|dl|dr|0-9|#|*|+>`, `rotary`, `day`, `night`, `mic begin|reject|repeat`, `focus <audio|nav|video|video toggle>`, `screenshot <filename.png>` ("Save screenshot to filename in PNG format."), `sleep <seconds>` and `quit`. There is no coordinate `tap` command: touch comes from the DHU window pointer, so an automated driver would go through `dpad`/`rotary` or window-level input.
+
+- **Shipped configs.** `extras/google/auto/config` ships `all_720p auxillary_nav cluster default default_1080p default_6in default_720p default_sensors default_wide hybrid loaded_720p rotary touchpad` (`.ini`), selected with `-c`/`--config`. `default.ini` is `resolution = 800x480`, `dpi = 160`, `framerate = 30`.
+
+- **Unverified.** A live `help`, `screenshot` and phone-side `observe` during projection need a real projection session and are unverified until a person completes the Play sign-in step. Projected UI is expected to be absent from the phone-side `observe`, because the host renders it into the head unit.
 
 ## Android Automotive OS: go
 
@@ -228,18 +265,18 @@ Needs no device to build; phones, tablets and foldables keep the same geometry p
 
 Record command, image id and API level.
 
-| #   | Image                                    | Check                                                                                                                                                                              |
-| --- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | TV (`android-tv` or `google-tv`, API 34) | `avdmanager create avd` with `--device tv_1080p` succeeds; the AVD boots                                                                                                           |
-| 2   | TV                                       | `adb install` of the CtrlProxy APK succeeds; the service can be enabled from the host; `observe` returns a hierarchy                                                               |
-| 3   | TV                                       | `sendKeys` with `arrow_right` moves focus and `observe.focusedElement` changes; `enter` and, if that does not work, `KEYCODE_DPAD_CENTER` activate the focused item                |
-| 4   | TV                                       | `tapOn` works on an image with no touchscreen                                                                                                                                      |
-| 5   | Wear (`android-wear`, API 34)            | The same install, enable and `observe` checks as TV                                                                                                                                |
-| 6   | Wear                                     | Each rotary candidate against a `ScalingLazyColumn`: which one changes the scroll position                                                                                         |
-| 7   | Wear                                     | `ambient` uses `KEYCODE_SLEEP`/`KEYCODE_WAKEUP` as a power-state change; wakefulness is read once, with no Wear ambient readback. Hardware wake by tilt or touch remains untested. |
-| 8   | Wear                                     | `isScreenRound` is true on `wearos_small_round`; the left-edge swipe dismisses a screen                                                                                            |
-| 9   | Automotive (`android-automotive`)        | Behavior of the cluster and passenger displays (install, enable and `observe` are in the baseline above)                                                                           |
-| 10  | Any                                      | `sdkmanager --list` shows the tags named above; `avdmanager list device` shows the profile ids                                                                                     |
+| #   | Image                                    | Check                                                                                                                                                                    |
+| --- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | TV (`android-tv` or `google-tv`, API 34) | `avdmanager create avd` with `--device tv_1080p` succeeds; the AVD boots                                                                                                 |
+| 2   | TV                                       | `adb install` of the CtrlProxy APK succeeds; the service can be enabled from the host; `observe` returns a hierarchy                                                     |
+| 3   | TV                                       | `sendKeys` with `arrow_right` moves focus and `observe.focusedElement` changes; `enter` and, if that does not work, `KEYCODE_DPAD_CENTER` activate the focused item      |
+| 4   | TV                                       | `tapOn` works on an image with no touchscreen                                                                                                                            |
+| 5   | Wear (`android-wear`, API 34)            | The same install, enable and `observe` checks as TV                                                                                                                      |
+| 6   | Wear                                     | Each rotary candidate against a `ScalingLazyColumn`: which one changes the scroll position                                                                               |
+| 7   | Wear                                     | `ambient` uses `KEYCODE_SLEEP`/`KEYCODE_WAKEUP`; `inAmbient` in `dumpsys wear_service` follows it (verified on API 37). Hardware wake by tilt or touch remains untested. |
+| 8   | Wear                                     | `isScreenRound` is true on `wearos_small_round`; the left-edge swipe dismisses a screen                                                                                  |
+| 9   | Automotive (`android-automotive`)        | Behavior of the cluster and passenger displays (install, enable and `observe` are in the baseline above)                                                                 |
+| 10  | Any                                      | `sdkmanager --list` shows the tags named above; `avdmanager list device` shows the profile ids                                                                           |
 
 ## Not covered
 

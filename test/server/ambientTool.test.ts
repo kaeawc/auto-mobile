@@ -24,7 +24,7 @@ function recordingPort(calls: AmbientAction[]): Ambient {
   return {
     change: async (action) => {
       calls.push(action);
-      return { success: true, action, wakefulness: "Dozing", message: "changed" };
+      return { success: true, action, ambient: true, wakefulness: "Dozing", message: "changed" };
     },
   };
 }
@@ -54,10 +54,11 @@ describe("ambient tool", () => {
           return {
             success,
             action,
-            wakefulness: "Awake",
-            message:
-              "power-state change; Wear exposes no ambient readback; this does not prove ambient mode.",
-            ...(success ? {} : { reason: "Observed wakefulness Awake" }),
+            ambient: success,
+            watchFaceVisible: true,
+            wakefulness: success ? "Dozing" : "Awake",
+            message: "Ambient read from dumpsys wear_service.",
+            ...(success ? {} : { reason: "inAmbient=false" }),
           };
         },
       };
@@ -65,6 +66,7 @@ describe("ambient tool", () => {
       expect(calls).toEqual(["enter"]);
       expect(ambientResultSchema.safeParse(toolJson(response)).success).toBe(true);
       expect(toolJson(response).success).toBe(success);
+      expect(toolJson(response).ambient).toBe(success);
       expect(response.isError ?? false).toBe(!success);
     },
   );

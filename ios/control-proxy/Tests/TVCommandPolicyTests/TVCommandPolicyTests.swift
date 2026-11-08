@@ -4,6 +4,41 @@ import Foundation
 import XCTest
 
 final class TVCommandPolicyTests: XCTestCase {
+    func testTextInputEmitsValueWhenLabelIsEmpty() {
+        XCTAssertEqual(TVElementText.text(label: "", value: "hello", isTextInput: true, isSecure: false), "hello")
+    }
+
+    func testTextInputDoesNotDuplicateMatchingLabelAndValue() {
+        XCTAssertEqual(TVElementText.text(label: "hello", value: "hello", isTextInput: true, isSecure: false), "hello")
+    }
+
+    func testTextInputFallsBackToLabelForEmptyOrMissingValue() {
+        for value in ["", nil] as [String?] {
+            XCTAssertEqual(TVElementText.text(label: "Name", value: value, isTextInput: true, isSecure: false), "Name")
+        }
+    }
+
+    func testSecureInputNeverEmitsValue() {
+        for label in ["Password", ""] {
+            for value in ["secret", "", nil] as [String?] {
+                for isTextInput in [true, false] {
+                    XCTAssertEqual(
+                        TVElementText.text(label: label, value: value, isTextInput: isTextInput, isSecure: true),
+                        label
+                    )
+                }
+            }
+        }
+    }
+
+    func testNonTextInputIgnoresValue() {
+        XCTAssertEqual(TVElementText.text(label: "Volume", value: "50%", isTextInput: false, isSecure: false), "Volume")
+    }
+
+    func testTextInputJoinsDistinctLabelAndValueWithSingleSpace() {
+        XCTAssertEqual(TVElementText.text(label: "Name", value: "hello", isTextInput: true, isSecure: false), "Name hello")
+    }
+
     func testOnlyHierarchyRemotePressAppendTextAndScreenshotAreSupported() {
         XCTAssertEqual(TVCommandPolicy.supportedCommands, [
             "request_hierarchy", "request_press_button", "request_append_text", "request_screenshot",

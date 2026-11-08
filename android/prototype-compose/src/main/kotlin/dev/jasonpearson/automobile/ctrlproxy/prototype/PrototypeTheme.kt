@@ -118,7 +118,14 @@ internal fun prototypeRoleSurfaceDark(colors: PrototypeSpecThemeColors?): Boolea
     prototypeColor(it).luminance() < DARK_LUMINANCE_CEILING
   }
 
-/** The theme the author painted, or null when the spec paints no opaque background. */
+/** A closed sheet, dialog or other modal draws nothing, so it cannot paint the screen colour. */
+private fun drawsInPlace(node: PrototypeRenderNode): Boolean =
+  node.visible && (node.role !in PROTOTYPE_MODAL_ROLES || node.sheetOpen)
+
+/**
+ * The theme the author painted, or null when the spec paints no opaque background. The walk takes
+ * the first child that draws: a scroll's child, a stack's current screen, a pager's current page.
+ */
 internal fun prototypeAuthoredTheme(root: PrototypeRenderNode): PrototypeThemeSpec? {
   var node: PrototypeRenderNode? = root
   while (node != null) {
@@ -127,7 +134,7 @@ internal fun prototypeAuthoredTheme(root: PrototypeRenderNode): PrototypeThemeSp
       return PrototypeThemeSpec(background.luminance() < DARK_LUMINANCE_CEILING, background)
     node =
       if (node.role == "pager") node.children.getOrNull(node.page)
-      else node.children.firstOrNull { it.visible }
+      else node.children.firstOrNull(::drawsInPlace)
   }
   return null
 }

@@ -1,4 +1,5 @@
 import path from "path";
+import { NON_IOS_APPLE_PLATFORM_LABELS } from "../../../models/Platform";
 import type {
   BootedDevice,
   InstallAppResult,
@@ -23,6 +24,8 @@ import type { InstallAppCall } from "../InstallAppTypes";
 import type { LaunchAppCall } from "../LaunchAppTypes";
 import { PACKAGE_NOT_INSTALLED_ERROR } from "../LaunchPackageRemovedError";
 import type { UninstallAppCall } from "../UninstallApp";
+import { visionosTargetApps, type VisionosTargetApps } from "../../visionos/VisionosTargetApps";
+import { tvosTargetApps } from "../../tvos/TvosTargetApps";
 
 /** The simctl calls a watch app manager makes; nothing else on the client is reachable. */
 export type WatchAppsSimctl = Pick<
@@ -36,7 +39,7 @@ export type WatchAppsSimctl = Pick<
 >;
 
 /** How clearAppData finds and removes the watch app's data container (tests inject both). */
-export type WatchDataWipe = Pick<IosClearDataBackendDeps, "rm" | "containerOwnership">;
+export type WatchDataWipe = Pick<IosClearDataBackendDeps, "appDataFs" | "containerOwnership">;
 
 /** Reads `CFBundleIdentifier` from a `.app` bundle's Info.plist. */
 export type WatchBundleIdReader = Pick<PlistReader, "extractRawFile">;
@@ -61,11 +64,11 @@ function androidOnlyLaunchOptions(call: LaunchAppCall): string[] {
 }
 
 /** A watch simulator installs only a `.app` bundle built for the watchOS simulator. */
-function assertAppBundle(artifactPath: string): void {
+function assertAppBundle(artifactPath: string, label: string): void {
   const extension = path.posix.extname(artifactPath.replace(/[\\/]+$/, "")).toLowerCase();
   if (extension !== ".app") {
     throw new ActionableError(
-      `installApp on watchOS needs a .app bundle built for the watchOS simulator; ` +
+      `installApp on ${label} needs a .app bundle built for the ${label} simulator; ` +
         `'${extension || artifactPath}' is not supported (.ipa, .apk, .apks and .aab are not).`,
     );
   }
@@ -82,6 +85,7 @@ export class WatchAppManager {
   /** The daemon chdirs at startup, so a relative path names the directory it was launched in. */
   private readonly resolveArtifactPath: (artifactPath: string) => string;
   private readonly dataWipe: WatchDataWipe;
+  private readonly targetApps: VisionosTargetApps;
 
   constructor(
     private readonly device: BootedDevice,
@@ -91,7 +95,9 @@ export class WatchAppManager {
       resolveArtifactPath = (artifactPath) =>
         resolvePathFromDaemonLaunchWorkingDirectory(artifactPath),
       dataWipe = {},
+      targetApps = device.platform === "tvos" ? tvosTargetApps : visionosTargetApps,
     }: {
+      targetApps?: VisionosTargetApps;
       simctl?: WatchAppsSimctl;
       plist?: WatchBundleIdReader;
       resolveArtifactPath?: (artifactPath: string) => string;
@@ -102,16 +108,28 @@ export class WatchAppManager {
     this.plist = plist;
     this.resolveArtifactPath = resolveArtifactPath;
     this.dataWipe = dataWipe;
+    this.targetApps = targetApps;
+  }
+
+  // Preserve the existing watchOS/tvOS wording; visionOS names its own platform.
+  private get platformLabel(): string {
+    return NON_IOS_APPLE_PLATFORM_LABELS[
+      this.device.platform === "visionos" ? "visionos" : "watchos"
+    ];
+  }
+
+  private get deviceLabel(): string {
+    return this.device.platform === "visionos" ? this.platformLabel : "watch";
   }
 
   async install(artifactPath: string, call: InstallAppCall = {}): Promise<InstallAppResult> {
     const unsupported = androidOnlyInstallOptions(call);
     if (unsupported.length > 0) {
       throw new ActionableError(
-        `installApp on watchOS does not support: ${unsupported.join(", ")} (Android only).`,
+        `installApp on ${this.platformLabel} does not support: ${unsupported.join(", ")} (Android only).`,
       );
     }
-    assertAppBundle(artifactPath);
+    assertAppBundle(artifactPath, this.platformLabel);
     const appPath = this.resolveArtifactPath(artifactPath);
     const bundleId = await this.readBundleId(appPath, call.signal);
     const upgrade = await this.isInstalled(bundleId, call.signal);
@@ -123,7 +141,7 @@ export class WatchAppManager {
   async uninstall(appId: string, call: UninstallAppCall = {}): Promise<UninstallAppResult> {
     if (call.keepData) {
       throw new ActionableError(
-        "uninstallApp on watchOS cannot keep app data: simctl uninstall always removes it. " +
+        `uninstallApp on ${this.platformLabel} cannot keep app data: simctl uninstall always removes it. ` +
           "Omit keepData or pass keepData: false.",
       );
     }
@@ -133,7 +151,7 @@ export class WatchAppManager {
     ];
     if (unsupported.length > 0) {
       throw new ActionableError(
-        `uninstallApp on watchOS does not support: ${unsupported.join(", ")} (Android only).`,
+        `uninstallApp on ${this.platformLabel} does not support: ${unsupported.join(", ")} (Android only).`,
       );
     }
     const wasInstalled = await this.isInstalled(appId, call.signal);
@@ -141,6 +159,8 @@ export class WatchAppManager {
       call.signal?.throwIfAborted();
       await this.simctl.uninstallApp(appId, this.device.deviceId, { signal: call.signal });
     }
+    // A runner automating this app (its own host app included) is dead once the app is gone.
+    this.targetApps.uninstalled(this.device.deviceId, appId);
     return { success: true, packageName: appId, keepData: false, wasInstalled };
   }
 
@@ -153,7 +173,7 @@ export class WatchAppManager {
     const unsupported = androidOnlyLaunchOptions(call);
     if (unsupported.length > 0) {
       throw new ActionableError(
-        `launchApp on watchOS does not support: ${unsupported.join(", ")} (Android only).`,
+        `launchApp on ${this.platformLabel} does not support: ${unsupported.join(", ")} (Android only).`,
       );
     }
     if (!(await this.isInstalled(appId, call.signal))) {
@@ -170,6 +190,14 @@ export class WatchAppManager {
       { launchArguments: call.launchArguments },
       this.device.deviceId,
     );
+    if (
+      launched.success &&
+      (this.device.platform === "visionos" || this.device.platform === "tvos")
+    ) {
+      // The visionOS runner automates the app the session launched last; the tvOS runner reads
+      // it as the foreground-app hint for hierarchy and text requests (#17310).
+      this.targetApps.launched(this.device.deviceId, appId);
+    }
     return launched.success
       ? { success: true, packageName: appId, pid: launched.pid }
       : { success: false, packageName: appId, error: launched.error };
@@ -177,6 +205,18 @@ export class WatchAppManager {
 
   /** `simctl terminate` on the watch; an app with no running process is already terminated. */
   async terminate(appId: string, call: { signal?: AbortSignal } = {}): Promise<TerminateAppResult> {
+    const result = await this.terminateProcess(appId, call);
+    if (result.success) {
+      // Any effective success means the app no longer runs, so the runner must not keep targeting it.
+      this.targetApps.terminated(this.device.deviceId, appId);
+    }
+    return result;
+  }
+
+  private async terminateProcess(
+    appId: string,
+    call: { signal?: AbortSignal },
+  ): Promise<TerminateAppResult> {
     if (!(await this.isInstalled(appId, call.signal))) {
       return {
         success: true,
@@ -202,7 +242,7 @@ export class WatchAppManager {
         };
       }
       logger.warn(
-        `[watchOS] simctl terminate ${appId} on ${this.device.deviceId} failed: ${message}`,
+        `[${this.platformLabel}] simctl terminate ${appId} on ${this.device.deviceId} failed: ${message}`,
       );
       return { success: false, packageName: appId, error: message };
     }
@@ -224,7 +264,7 @@ export class WatchAppManager {
       return {
         success: false,
         packageName: appId,
-        error: `Could not stop ${appId} on watch ${deviceId} before launching: ${stopError}`,
+        error: `Could not stop ${appId} on ${this.deviceLabel} ${deviceId} before launching: ${stopError}`,
       };
     }
     if (!call.clearAppData) {
@@ -239,7 +279,7 @@ export class WatchAppManager {
       : {
           success: false,
           packageName: appId,
-          error: `Could not clear app data for ${appId} on watch ${deviceId}: ${cleared.error}`,
+          error: `Could not clear app data for ${appId} on ${this.deviceLabel} ${deviceId}: ${cleared.error}`,
         };
   }
 
@@ -253,7 +293,9 @@ export class WatchAppManager {
       if (isProcessAlreadyGoneError(message)) {
         return undefined;
       }
-      logger.warn(`[watchOS] Could not stop ${appId} on ${this.device.deviceId}: ${message}`);
+      logger.warn(
+        `[${this.platformLabel}] Could not stop ${appId} on ${this.device.deviceId}: ${message}`,
+      );
       return message;
     }
   }

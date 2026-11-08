@@ -1,3 +1,6 @@
+import type { SimulatorPairService } from "../../../utils/ios-cmdline-tools/SimulatorPairs";
+import type { AppleVisionSimulatorProvisioner } from "../../../utils/ios-cmdline-tools/AppleVisionSimulatorProvisioner";
+import type { AppleVisionSimulatorBoot } from "../../../utils/ios-cmdline-tools/AppleVisionSimulatorBoot";
 import type { PendingImeRestoreRegistry } from "../../action/sendkeys/PendingImeRestore";
 import type { AppleTvSimulatorProvisioner } from "../../../utils/ios-cmdline-tools/AppleTvSimulatorProvisioner";
 import type { AppleTvSimulatorBoot } from "../../../utils/ios-cmdline-tools/AppleTvSimulatorBoot";
@@ -116,6 +119,10 @@ export interface DeviceToolsDependencies {
   syncInstalledAppResourceRegistry: () => Promise<boolean>;
   ensureCtrlProxyReady?: (request: RunnerReadinessRequest) => Promise<void>;
   /** Apple Watch simulator lookup and boot for startDevice (#14908); defaults to simctl. */
+  simulatorPairServiceFactory?: () => Pick<
+    SimulatorPairService,
+    "ensure" | "refresh" | "list" | "unpairCreated"
+  >;
   watchSimulatorLifecycleFactory?: () => Pick<WatchSimulatorLifecycle, "findWatch" | "boot">;
   /** Process-wide watch runner owner, shared by startup and teardown. */
   tvosRunnerLifecycleFactory?: () => Pick<TvosRunnerLifecycle, "start" | "attach" | "stop">;
@@ -130,6 +137,13 @@ export interface DeviceToolsDependencies {
   /** Exact Apple TV adoption, creation and verified deletion. */
   appleTvSimulatorProvisionerFactory?: () => Pick<
     AppleTvSimulatorProvisioner,
+    "provision" | "discardCreated" | "find" | "deleteAndConfirmAbsent"
+  >;
+  /** Apple Vision Pro boot through shared simctl readiness and simulator capacity admission. */
+  appleVisionSimulatorBootFactory?: () => Pick<AppleVisionSimulatorBoot, "boot" | "stopColdBooted">;
+  /** Exact Apple Vision Pro adoption, creation and verified deletion. */
+  appleVisionSimulatorProvisionerFactory?: () => Pick<
+    AppleVisionSimulatorProvisioner,
     "provision" | "discardCreated" | "find" | "deleteAndConfirmAbsent"
   >;
   deviceCreationGateFactory: () => DeviceCreationGate;

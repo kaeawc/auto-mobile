@@ -172,6 +172,7 @@ const STRICT_DAEMON_COMMANDS: Partial<Record<string, DaemonCommandFlagSpec>> = {
   // and `session-info a --jsno` would drop the typo'd flag (#11612).
   "session-info": { launchFlags: false, booleanFlags: [DAEMON_JSON_FLAG], positionals: 1 },
   "release-session": { launchFlags: false, booleanFlags: [DAEMON_JSON_FLAG], positionals: 1 },
+  "set-feature-flag": { launchFlags: false, booleanFlags: [DAEMON_JSON_FLAG], positionals: 2 },
   "session-request-status": {
     launchFlags: false,
     valueFlags: ["--liveness-owner-token"],
@@ -246,6 +247,9 @@ export function printDaemonUsageError(message: string): void {
     console.log("  active-sessions       List held sessions and why each holds its device");
     console.log("  session-info <id>     Get information about a session");
     console.log("  release-session <id>  Release a session and free its device");
+    console.log(
+      "  set-feature-flag <key> <true|false>  Set a feature flag (e.g. device-condition) without the IDE",
+    );
     console.log("  session-request-status <request-id> --liveness-owner-token <token> --json");
     console.log("  abandon-session-request <request-id> --liveness-owner-token <token> --json");
     console.log("  release-broker-session <session-uuid> --liveness-owner-token <token> --json");

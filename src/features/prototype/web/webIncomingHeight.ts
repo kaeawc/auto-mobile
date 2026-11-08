@@ -1,38 +1,6 @@
 import { record, type Raw } from "../prototypeTemplate";
-import type { PrepareChild } from "./webRowAspect";
-import { INCOMING_HEIGHT_KEY, WEIGHTED_HEIGHT_KEY } from "./webStyle";
-
-const finite = (value: unknown): number =>
-  typeof value === "number" && Number.isFinite(value) ? value : Infinity;
-
-const side = (padding: Raw | undefined, name: string) =>
-  typeof padding?.[name] === "number" ? padding[name] : 0;
-
-/**
- * The height a node's own size takes, as CSS and Compose's `sizeIn` then `height` resolve it: its
- * dp `height` (else unbounded) held under `maxHeight`, then raised to `minHeight`, which wins.
- */
-function ownHeight(style: Raw | undefined): number {
-  const capped = Math.min(finite(record(style?.height)?.dp), finite(style?.maxHeight));
-  const floor = typeof style?.minHeight === "number" ? style.minHeight : 0;
-  return Math.max(floor, capped);
-}
-
-/**
- * The tallest a node lets its children be: its own height (see ownHeight) within the height its
- * parent hands it (INCOMING_HEIGHT_KEY), less its vertical padding. A `fill` or wrap-sized node is
- * bounded by the incoming height alone, as Compose's incoming max height bounds it. A column's
- * weighted child marked with an exact share (WEIGHTED_HEIGHT_KEY) takes it whole, whatever its dp
- * height and height bounds, as Compose's fixed weight constraints and SwiftUI's weighted axis pin it. Infinity when
- * no bound is statically known.
- */
-export function contentHeight(style: Raw | undefined): number {
-  const incoming = finite(style?.[INCOMING_HEIGHT_KEY]);
-  const bound =
-    style?.[WEIGHTED_HEIGHT_KEY] === true ? incoming : Math.min(incoming, ownHeight(style));
-  const padding = record(style?.padding);
-  return Math.max(0, bound - side(padding, "top") - side(padding, "bottom"));
-}
+import { ownHeight, type PrepareChild } from "./webRowAspect";
+import { INCOMING_ALLOCATED_KEY, INCOMING_HEIGHT_KEY } from "./webStyle";
 
 const weightOf = (node: Raw | undefined): number | undefined => {
   const weight = record(node?.style)?.weight;
@@ -40,14 +8,16 @@ const weightOf = (node: Raw | undefined): number | undefined => {
 };
 
 /**
- * The height an unweighted child takes: its dp height clamped by its bounds (see ownHeight). With
- * no dp height it wraps its content, which is only known at layout time, so it counts as its
+ * The height an unweighted child takes when `remaining` is left: its dp height clamped by its
+ * bounds (see ownHeight). A `fill` child takes everything left, within its bounds, as Compose's
+ * `fillMaxHeight` does in a Column, so a later sibling, weighted or not, gets nothing. With no dp
+ * height it wraps its content, which is only known at layout time, so it counts as its
  * `minHeight` (else 0), never its `maxHeight`, and the rest is an upper bound.
  */
-const fixedHeight = (node: Raw): number => {
+const takenHeight = (node: Raw, remaining: number): number => {
   const style = record(node.style);
-  if (weightOf(node) !== undefined) {
-    return 0;
+  if (style?.height === "fill") {
+    return Math.min(remaining, ownHeight(style));
   }
   const floor = typeof style?.minHeight === "number" ? style.minHeight : 0;
   return typeof record(style?.height)?.dp === "number" ? ownHeight(style) : floor;
@@ -55,10 +25,13 @@ const fixedHeight = (node: Raw): number => {
 
 /**
  * The incoming max height of each child of a column with content height `content`, as Compose's
- * Column measures them: an unweighted child against what its earlier siblings and the spacing
- * left, then each weighted child against its weight's share of what every unweighted child and
- * the spacing left. A sibling with no dp height counts as 0, so the result is an upper bound when
- * one depends on layout. Hidden children (undefined) get no height.
+ * Column measures them: each unweighted child in order against what its earlier siblings and the
+ * spacing left, then each weighted child against its weight's share of what every unweighted
+ * child and the spacing left. A sibling with no dp height counts as its minHeight, so the result
+ * is an upper bound when one depends on layout. Hidden children (undefined) get no height.
+ *
+ * CSS gives a `fill` child `flex: 1 1 auto`, which shares the height with its weighted siblings;
+ * the bound follows Compose instead, where the `fill` child takes it all.
  */
 export function columnChildHeights(
   children: readonly (Raw | undefined)[],
@@ -66,81 +39,141 @@ export function columnChildHeights(
   spacing: number,
 ): (number | undefined)[] {
   const visible = children.filter((node): node is Raw => node !== undefined);
-  const used = visible.reduce((sum, node) => sum + fixedHeight(node), 0);
   const gaps = spacing * Math.max(0, visible.length - 1);
   const weights = visible.reduce((sum, node) => sum + (weightOf(node) ?? 0), 0);
-  const share = Math.max(0, content - used - gaps) / (weights || 1);
   const heights: (number | undefined)[] = [];
   let before = 0;
+  let used = 0;
   for (const node of children) {
-    const weight = weightOf(node);
-    if (!node) {
+    if (!node || weightOf(node) !== undefined) {
       heights.push(undefined);
-    } else if (weight !== undefined) {
-      heights.push(share * weight);
-    } else {
-      heights.push(Math.max(0, content - before));
-      before += fixedHeight(node) + spacing;
+      continue;
     }
+    const incoming = Math.max(0, content - before);
+    const taken = takenHeight(node, incoming);
+    heights.push(incoming);
+    before += taken + spacing;
+    used += taken;
   }
-  return heights;
+  const share = Math.max(0, content - used - gaps) / (weights || 1);
+  return children.map((node, index) => {
+    const weight = weightOf(node);
+    return node && weight !== undefined ? share * weight : heights[index];
+  });
 }
 
 /**
- * Whether a column's weight shares are exact: every visible unweighted child has a dp height. A
- * wrap-sized sibling counts as its minHeight (see fixedHeight), so with one present each share is
- * only an upper bound, and a weighted child keeps its own height as a bound too.
+ * Whether a column's weight shares are exact: every visible unweighted child has a dp height or
+ * fills what is left (see takenHeight). A wrap-sized sibling counts as its minHeight, so with one
+ * present each share is only an upper bound, and a weighted child keeps its own height as a bound
+ * too rather than being marked as an allocation.
  */
 export function exactWeightShares(children: readonly (Raw | undefined)[]): boolean {
-  return children.every(
-    (node) =>
+  return children.every((node) => {
+    const height = record(node?.style)?.height;
+    return (
       node === undefined ||
       weightOf(node) !== undefined ||
-      typeof record(record(node.style)?.height)?.dp === "number",
-  );
+      height === "fill" ||
+      typeof record(height)?.dp === "number"
+    );
+  });
 }
 
 const childPath = (path: string, index: number) => `${path}.children[${index}]`;
 
-function withHeight(entry: unknown, height: number | undefined, weighted: boolean): unknown {
+/**
+ * `entry` with `height` as its incoming height, marked as an allocation (INCOMING_ALLOCATED_KEY)
+ * when `allocated` (a weighted child's exact share; see exactWeightShares), so its own dp height
+ * and height bounds do not cap it.
+ */
+function withHeight(entry: unknown, height: number | undefined, allocated: boolean): unknown {
   const node = record(entry);
   if (!node || height === undefined || height === Infinity) {
     return entry;
   }
-  const mark = weighted ? { [WEIGHTED_HEIGHT_KEY]: true } : {};
-  return { ...node, style: { ...record(node.style), [INCOMING_HEIGHT_KEY]: height, ...mark } };
+  const style = { ...record(node.style), [INCOMING_HEIGHT_KEY]: height };
+  return { ...node, style: allocated ? { ...style, [INCOMING_ALLOCATED_KEY]: true } : style };
 }
 
 /**
- * A row, column or box with each child carrying the incoming max height it hands that child
- * (INCOMING_HEIGHT_KEY), where the node's own content height is statically known; other nodes
- * unchanged. A row or box hands every child its content height. A column measures its children
- * in order (see columnChildHeights) and, when its shares are exact (see exactWeightShares), marks
- * each weighted child (WEIGHTED_HEIGHT_KEY), except a repeat, whose children are one template, so each
- * gets the whole content height as a bound. A height that depends on layout (a sibling's wrap
- * height, the screen) is left out, so the bound stays an upper one or is absent.
+ * The containers that lay out their children as a column, and whether they apply `spacing`. A
+ * card lays out its content in a column, as Material's Card does, with no spacing. A Map, so a node
+ * type like `toString` cannot match an `Object.prototype` key.
+ */
+const COLUMN_PARENTS: ReadonlyMap<unknown, { readonly spacing: boolean }> = new Map([
+  ["column", { spacing: true }],
+  ["card", { spacing: false }],
+]);
+
+/**
+ * A column or card with each child carrying the share of its content height `content` it hands
+ * that child (INCOMING_HEIGHT_KEY; see columnChildHeights); other nodes unchanged. The render scope
+ * already passes every child the whole content height, which is all a row or a box hands on, so
+ * only a plain column or a card narrows it; a repeat column's children are one template, so
+ * repeatInstanceChildren hands each instance its own share instead. A height that depends on
+ * layout (a sibling's wrap height, the screen) is left out, so the bound stays an upper one.
  *
  * `prepare` resolves a child as rendering will (bound, visible, `styleWhen` merged).
  */
-export function withChildHeights(node: Raw, path: string, prepare: PrepareChild): Raw {
-  const { type, children } = node;
-  if ((type !== "row" && type !== "column" && type !== "box") || !Array.isArray(children)) {
+export function withColumnHeights(
+  node: Raw,
+  path: string,
+  prepare: PrepareChild,
+  content: number | undefined,
+): Raw {
+  const { children } = node;
+  const parent = COLUMN_PARENTS.get(node.type);
+  if (!parent || node.repeat !== undefined || !Array.isArray(children) || content === undefined) {
     return node;
   }
-  const style = record(node.style);
-  const content = contentHeight(style);
-  if (content === Infinity) {
-    return node;
-  }
-  if (type !== "column" || node.repeat !== undefined) {
-    return { ...node, children: children.map((entry) => withHeight(entry, content, false)) };
-  }
+  const spacing = record(node.style)?.spacing;
   const prepared = children.map((entry, index) => prepare(entry, childPath(path, index)));
-  const spacing = typeof style?.spacing === "number" ? style.spacing : 0;
-  const heights = columnChildHeights(prepared, content, spacing);
-  const exact = exactWeightShares(prepared);
-  const marked = children.map((entry, index) =>
-    withHeight(entry, heights[index], exact && weightOf(prepared[index]) !== undefined),
+  const heights = columnChildHeights(
+    prepared,
+    content,
+    parent.spacing && typeof spacing === "number" ? spacing : 0,
   );
-  return { ...node, children: marked };
+  const exact = exactWeightShares(prepared);
+  return {
+    ...node,
+    children: children.map((entry, index) =>
+      withHeight(entry, heights[index], exact && weightOf(prepared[index]) !== undefined),
+    ),
+  };
+}
+
+/**
+ * A repeat's template children once per instance, each carrying the incoming max height it gets
+ * (INCOMING_HEIGHT_KEY). In a column with content height `content`, the instances are siblings,
+ * so Compose's Column measures every expanded child in order (see columnChildHeights): two
+ * weighted instances in a 40 dp column get 20 dp each, not 40. Any other repeat, or one with no
+ * known content height, keeps the template as given. The renderer passes the bound its scope
+ * carries, which a line sets to its own content height for its children.
+ *
+ * `prepares` holds one PrepareChild per instance, resolving a template child in that instance's
+ * scope (its placeholders bound, `visibleWhen` and `styleWhen` applied).
+ */
+export function repeatInstanceChildren(
+  node: Raw,
+  path: string,
+  prepares: readonly PrepareChild[],
+  content: number | undefined,
+): unknown[][] {
+  const template = Array.isArray(node.children) ? node.children : [];
+  if (node.type !== "column" || node.repeat === undefined || content === undefined) {
+    return prepares.map(() => template);
+  }
+  const prepared = prepares.flatMap((prepare) =>
+    template.map((entry, index) => prepare(entry, childPath(path, index))),
+  );
+  const spacing = record(node.style)?.spacing;
+  const heights = columnChildHeights(prepared, content, typeof spacing === "number" ? spacing : 0);
+  const exact = exactWeightShares(prepared);
+  return prepares.map((_prepare, instance) =>
+    template.map((entry, index) => {
+      const at = instance * template.length + index;
+      return withHeight(entry, heights[at], exact && weightOf(prepared[at]) !== undefined);
+    }),
+  );
 }

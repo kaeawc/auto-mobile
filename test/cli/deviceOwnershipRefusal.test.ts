@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import {
   resetCliOutputSinksForTesting,
   resetDaemonProxyFactoryForTesting,
@@ -190,6 +190,25 @@ describe("--cli surfaces a held-device refusal", () => {
   let isolatedCliDataDir: IsolatedCliDataDir;
   let exitCodes: number[];
   let stderr: string[];
+
+  // CI's per-test time excludes only beforeAll: pay the first runCliCommand's one-time cost
+  // (tool registry, argument parsing, profile store) here, not in the first timed test.
+  beforeAll(async () => {
+    const warmDir = isolateCliDataDir("cli-ownership-warm-");
+    setCliOutputSinksForTesting({ stdout: { write: () => {} }, stderr: { write: () => {} } });
+    setDaemonProxyFactoryForTesting((): any => ({
+      callTool: async () => ({ success: true }),
+      adoptCliSessionLiveness: async (): Promise<string | undefined> => undefined,
+      close: async (): Promise<void> => {},
+    }));
+    try {
+      await runCliCommand(["observe"]);
+    } finally {
+      resetCliOutputSinksForTesting();
+      resetDaemonProxyFactoryForTesting();
+      warmDir.restore();
+    }
+  });
 
   beforeEach(() => {
     isolatedCliDataDir = isolateCliDataDir();

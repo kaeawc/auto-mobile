@@ -22,6 +22,7 @@ import { awaitWhileRequestIsLive } from "../utils/toolUtils";
 import { type AndroidCtrlProxy } from "../features/observe/android/AndroidCtrlProxyClient";
 import { FamilyMutationPriorReader } from "./deviceMutationFamilyPriorReader";
 import { DeviceStateMutationPriorReader } from "./deviceMutationDeviceStatePriorReader";
+import { NotificationChannelMutationPriorReader } from "./deviceMutationNotificationChannelPriorReader";
 
 function stateField(entry: ToolMutation): DeviceStateField | undefined {
   const settingFields: Readonly<Record<string, DeviceStateField>> = {
@@ -120,6 +121,8 @@ export interface MutationObservationReaders {
   dataReader?: MutationPriorReader;
   /** Priors for the `power:*` intents of setDeviceState (#14359). */
   deviceStateReader?: MutationPriorReader;
+  /** Priors for the notification-channel rows of an Android postNotification (#16510). */
+  notificationChannelReader?: MutationPriorReader;
 }
 
 /** The device readers a {@link DefaultMutationPriorReader} reads priors through; each defaults to the real one. */
@@ -136,6 +139,7 @@ export class DefaultMutationPriorReader implements MutationPriorReader {
   private readonly observationReaders: MutationObservationReaders;
   private readonly dataReader: MutationPriorReader;
   private readonly deviceStateReader: MutationPriorReader;
+  private readonly notificationChannelReader: MutationPriorReader;
   private readonly settingsAccess: Pick<DeviceSettingsAccess, "read">;
   private readonly clipboardFor: (device: BootedDevice) => Pick<Clipboard, "execute">;
   private readonly biometricsFor: (
@@ -160,6 +164,8 @@ export class DefaultMutationPriorReader implements MutationPriorReader {
     this.dataReader = observationReaders.dataReader ?? new FamilyMutationPriorReader();
     this.deviceStateReader =
       observationReaders.deviceStateReader ?? new DeviceStateMutationPriorReader();
+    this.notificationChannelReader =
+      observationReaders.notificationChannelReader ?? new NotificationChannelMutationPriorReader();
     this.observationReaders = {
       screenReaderFor:
         observationReaders.screenReaderFor ??
@@ -209,8 +215,8 @@ export class DefaultMutationPriorReader implements MutationPriorReader {
     const keyboardProfile = await this.readKeyboardProfile(device, mutations, signal);
     const dataPriors = await this.dataReader.read(device, mutations, signal);
     const familyPriors = mergePriors(
-      dataPriors,
-      await this.deviceStateReader.read(device, mutations, signal),
+      mergePriors(dataPriors, await this.deviceStateReader.read(device, mutations, signal)),
+      await this.notificationChannelReader.read(device, mutations, signal),
     );
     signal?.throwIfAborted();
     const priorsByKey: Readonly<Record<string, Readonly<Record<string, MutationValue>>>> = {

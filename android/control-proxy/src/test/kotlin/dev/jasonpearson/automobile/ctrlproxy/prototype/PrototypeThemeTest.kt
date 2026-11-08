@@ -56,6 +56,50 @@ class PrototypeThemeTest {
   }
 
   @Test
+  fun `a closed sheet is passed over and an open one paints the screen colour`() {
+    fun spec(open: Boolean) =
+      PrototypeSpec(
+        "panel",
+        PrototypeWindow(PrototypeFullscreenPlacement()),
+        mapOf("open" to PrototypeScalar.BooleanValue(open)),
+        PrototypeBoxNode(
+          children =
+            listOf(
+              PrototypeBottomSheetNode(
+                style = styled("#000000"),
+                child = PrototypeTextNode(text = "inside"),
+                openWhen = PrototypeSheetCondition("open", true),
+                detents = listOf(PrototypeDetent.Full),
+              ),
+              PrototypeBoxNode(style = styled("#FAFAFA"), children = emptyList()),
+            ),
+        ),
+      )
+    assertEquals(false, prototypeAuthoredTheme(mapPrototypeSpec(spec(false)).root)?.dark)
+    assertEquals(true, prototypeAuthoredTheme(mapPrototypeSpec(spec(true)).root)?.dark)
+  }
+
+  @Test
+  fun `a scroll's child and a stack's start screen continue the chain`() {
+    val scroll =
+      PrototypeScrollNode(
+        child = PrototypeBoxNode(style = styled("#111111"), children = emptyList()),
+      )
+    assertEquals(true, prototypeAuthoredTheme(model(scroll).root)?.dark)
+    val stack =
+      PrototypeStackNode(
+        id = "nav",
+        start = "home",
+        screens =
+          mapOf(
+            "detail" to PrototypeBoxNode(style = styled("#FAFAFA"), children = emptyList()),
+            "home" to PrototypeBoxNode(style = styled("#111111"), children = emptyList()),
+          ),
+      )
+    assertEquals(true, prototypeAuthoredTheme(model(stack).root)?.dark)
+  }
+
+  @Test
   fun `a spec with no opaque background follows the device setting`() {
     val root = model(PrototypeBoxNode(style = styled("#80000000"), children = emptyList())).root
     assertNull(prototypeAuthoredTheme(root))

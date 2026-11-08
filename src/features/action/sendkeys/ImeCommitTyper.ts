@@ -1,5 +1,5 @@
 import type { TypingSession } from "./TypingSession";
-import { ANDROID_TYPE_FOCUSED_INPUT_ERROR } from "./AndroidTypingConstants";
+import { ANDROID_TYPE_FOCUS_FAILURE, type FocusedInputFailure } from "./AndroidTypingConstants";
 import type {
   SendKeysTextClient,
   SendKeysOperation,
@@ -104,11 +104,11 @@ export interface ImeCommitTyperHost {
   withTextWarnings(result: TextActionResult, warnings: Array<string | undefined>): TextActionResult;
   requireFocusedAndroidInput(
     signal?: AbortSignal,
-    error?: string,
+    failure?: FocusedInputFailure,
     display?: string,
   ): Promise<
     | { success: true; hierarchy: NonNullable<ObserveResult["viewHierarchy"]> }
-    | { success: false; error: string }
+    | ({ success: false } & FocusedInputFailure)
   >;
   readFocusedText(observation: ObserveResult): string | undefined;
   readFocusedTextSnapshot(observation: ObserveResult): { text: string; length: number } | undefined;
@@ -478,6 +478,7 @@ export class ImeCommitTyper implements AndroidModeTyper {
       delivery,
       trace: trace ? true : undefined,
     });
+    this.recordImeTrace(result, trace);
     for (
       let attempt = 1;
       attempt <= IME_RESTART_RETRIES && isRetryableImeRestartWithNothingCommitted(result);
@@ -490,14 +491,19 @@ export class ImeCommitTyper implements AndroidModeTyper {
         delivery,
         trace: trace ? true : undefined,
       });
-    }
-    const traceState = this.host.imeTraceContext.getStore();
-    if (trace && traceState && result.imeTrace !== undefined) {
-      traceState.lines = [...new Set([...(traceState.lines ?? []), ...result.imeTrace])].slice(
-        -512,
-      );
+      this.recordImeTrace(result, trace);
     }
     return result;
+  }
+
+  /** Each attempt's own commit slice, so a restart retry keeps the attempt it replaced. */
+  private recordImeTrace(result: TextActionResult, trace: boolean): void {
+    const traceState = this.host.imeTraceContext.getStore();
+    if (trace && traceState && result.imeTrace !== undefined) {
+      traceState.lines = [
+        ...new Set([...(traceState.lines ?? []), ...currentCommitTrace(result.imeTrace)]),
+      ].slice(-512);
+    }
   }
 
   private async prepareImeCommitClear(
@@ -760,7 +766,7 @@ export class ImeCommitTyper implements AndroidModeTyper {
       checkAbort: (error) => this.host.checkAbort(signal, error),
       lacksRequiredFocus: (observation) => this.imeReadBackLacksRequiredFocus(observation, routing),
       focusedText: (observation) => this.readImeCommitText(observation, operation, text),
-      focusError: ANDROID_TYPE_FOCUSED_INPUT_ERROR,
+      focusError: ANDROID_TYPE_FOCUS_FAILURE,
       passwordField: routing.passwordField,
       // Explicit modes skip the pre-type observe; the read-back still shows a password field.
       isPasswordField: (observation) => {
@@ -876,4 +882,33 @@ export class ImeCommitTyper implements AndroidModeTyper {
     }
     return true;
   }
+}
+
+/**
+ * The device returns its whole trace ring buffer, which still holds earlier
+ * commands' commits (#17464). Each commit records `event=commitStart` first, so
+ * only the lines from the last such marker belong to this commit. A snapshot
+ * with no marker (an older device build) is kept whole.
+ */
+export function currentCommitTrace(lines: readonly string[]): string[] {
+  const start = lines.findLastIndex((line) => / event=commitStart(?: |$)/.test(line));
+  return lines.slice(Math.max(start, 0));
+}
+
+/**
+ * The IME trace is failure diagnostics (#17464): a successful command logs it
+ * at debug level instead of returning it in the response.
+ */
+export function imeTraceResultFields(
+  lines: string[] | undefined,
+  success: boolean,
+): { imeTrace?: string[] } {
+  if (lines === undefined) {
+    return {};
+  }
+  if (success) {
+    logger.debug(`[SendKeys] IME trace:\n${lines.join("\n")}`);
+    return {};
+  }
+  return { imeTrace: lines };
 }

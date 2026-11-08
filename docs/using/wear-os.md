@@ -6,21 +6,49 @@ setting one up, the watch-specific behaviour, and what is out of scope.
 > [!NOTE]
 > **Verified on** a Wear OS 7.0 emulator (API 37 `android-wear-signed` image, `wearos_small_round`
 > profile, 384x384). Other images, square watches and physical watches are unverified. Sleep/wake
-> power-state changes have been measured; ambient mode itself has no usable readback.
+> and the watch face's ambient state have been measured.
 
-## Create the emulator by hand
+## Create the emulator
 
-AutoMobile does not pick a watch for you: `provisionDevice` never chooses a Wear OS image for a
-default Android device, and asking for `formFactor: "watch"` with `createIfMissing` fails with an
-error. Create the AVD with the Android command-line tools, or pass `provisionDevice` an explicit
-Wear OS `runtime` and `deviceType` (unverified).
+Install a Wear OS system image, then ask for a watch and let AutoMobile create it:
 
 ```bash
-# Pick a Wear OS system image. Use API 34 or newer; API 37 is the verified one.
-sdkmanager --list | grep android-wear
+# Use API 34 or newer; API 37 is the verified one.
 sdkmanager "system-images;android-37.0;android-wear-signed;arm64-v8a"
+```
 
-# List device profiles and pick a round one.
+```json
+{ "platform": "android", "formFactor": "watch", "createIfMissing": true }
+```
+
+Pass that to `startDevice`. AutoMobile picks only from installed `android-wear-signed`,
+`android-wear` and `android-wear-cn` images (in that order, newest API level in your
+`minOsVersion` / `maxOsVersion` range, an ABI your machine can run) and creates the AVD with the
+round `wearos_small_round` profile. A phone, tablet or foldable request never gets a Wear image. If
+no Wear image is installed in the range, the error names the `sdkmanager` command to run; nothing is
+downloaded. Asking again reuses the watch instead of creating another.
+
+To pick the screen shape, add `requires.screenRound`:
+
+```json
+{
+  "platform": "android",
+  "formFactor": "watch",
+  "createIfMissing": true,
+  "requires": { "screenRound": false }
+}
+```
+
+`true` matches only a watch whose profile is round and `false` only a square one, so an existing
+watch of the other shape is not reused; a new watch is created with `wearos_small_round` or
+`wearos_square`. A watch whose profile names no shape never satisfies `screenRound`. Leave it out to
+accept any watch and create a round one. `screenRound` on anything but an Android watch request
+fails without creating a device. Square watches are unverified.
+
+You can still create the AVD by hand:
+
+```bash
+# List device profiles and pick one.
 avdmanager list device | grep -i wear
 
 avdmanager create avd \
@@ -94,6 +122,48 @@ neither native method works. Check `attempts` on other images.
 `swipeOn` with `lookFor` still scrolls with touch swipes on a watch, which is enough for the
 system lists tested.
 
+## Notifications
+
+An alert covering the watch is dismissed with Back before the notification stream opens.
+On a watch, `systemTray` drives the Wear OS notification stream instead of the phone shade:
+`open` swipes the stream up from the bottom edge and reports `opened: true` once the stream is on
+screen; `close` goes back and reports `closed: true` only after the stream is gone. Either fails
+when the screen does not change; when the stream is already in the requested state, it succeeds
+with `skipped: true`. `list` and `clearAll`
+require `notification.appId`; `find`, `tap`, `dismiss`, `list` and `clearAll` scroll the stream
+from its top, and an already-open stream is scrolled back to the top first and left open
+afterwards. If the top cannot be reached within `awaitTimeout`, the action fails with
+`notification_not_found` instead of scanning from the middle (`list` instead returns no cards,
+flagged as below).
+
+- `list` returns each card once with its app label, `title`, `body`, `texts` and `bounds`; `id`
+  is `null` and `actions` is empty. Without `awaitTimeout` it scans for up to 30 s, enough for a
+  full scroll of a typical stream. When the scan stops before the end of the stream, it still
+  succeeds with the cards read so far, `incomplete: true` and `incompleteReason`: `deadline`
+  (time ran out), `page_limit` (too many pages) or `rewind` (the top was not reached, so no cards
+  were read). Retry with a larger `awaitTimeout` to read the rest.
+- `tap` opens the card, then taps `tapActionLabel` (or the card's title or body) in the expanded
+  card, scrolling the stream when the action sits below the screen edge. If that text is not a
+  single clickable target there, it fails rather than guessing and collapses the card; retry with
+  an explicit `tapActionLabel`.
+- `dismiss` swipes the card sideways, taps the X button when the swipe only reveals it (Wear OS
+  7), and reports `dismissal_unconfirmed` unless the removal is
+  confirmed: with `appId`, by one of the app's active notifications showing the card's title
+  and body going away; otherwise by one fewer such card being shown. Of two identical cards,
+  removing one counts as a dismissal.
+- `clearAll` taps the stream's **Clear all** only when every active notification belongs to
+  `appId`; otherwise, or when `title` or `body` narrows it, it dismisses matching cards one by
+  one.
+
+The stream opens only from the watch face, so every action that opens it first leaves the app list
+(with `back`) or an app in front (with `home`), and the stream is closed back onto the watch face
+afterwards. If the watch face does not come back, the action fails without the open gesture; press
+the watch's side button and retry.
+
+A tap target whose centre falls outside the round display is refused; scroll it into view.
+Every action captures the configured action screenshot or accessibility audit from the final
+screen, as on a phone.
+
 ## Ambient power state
 
 Enable `ambient` with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)), then call:
@@ -102,15 +172,28 @@ Enable `ambient` with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)), 
 { "name": "ambient", "arguments": { "action": "enter" } }
 ```
 
-Use `action: "exit"` to wake the device. This Android-only tool sends `KEYCODE_SLEEP` for
-`enter` or `KEYCODE_WAKEUP` for `exit`, then reads wakefulness once. `success: true` means
-`Dozing` or `Asleep` for enter, or `Awake` for exit. A failed or unreadable state returns
-`success: false` with a `reason`; inspect `wakefulness` when present and use `observe` to
-check the current state.
+Use `action: "exit"` to wake the device. This tool runs only on a Wear OS watch: on any other
+form factor (phone, tablet, TV, automotive) it returns an error naming the form factor and
+changes nothing. A session recorded as a watch is trusted when the device does not report its
+form factor; otherwise it is refused too, so check the device with `listDevices` (`formFactor`).
+On a watch it sends `KEYCODE_SLEEP` for `enter` or `KEYCODE_WAKEUP` for `exit`, then reads
+wakefulness and the watch face's ambient state once. The result reports:
 
-This is a power-state change. Wear exposes no ambient readback, so the result does not prove
-ambient mode. Hardware wake by tilt or touch remains untested. Command failures return an
-error; check the device connection before retrying.
+- `ambient`: `true` or `false` as the watch face reports it, or `"unknown"` when the device gave no
+  watch-face state.
+- `watchFaceVisible`: whether the watch face is on screen, when `ambient` is known.
+- `wakefulness`: `Awake`, `Dozing` or `Asleep`, when readable.
+
+`enter` succeeds when `ambient` is `true`; `exit` succeeds when `ambient` is `false` and
+wakefulness is `Awake`. When `ambient` is `"unknown"`, success falls back to wakefulness (`Dozing`
+or `Asleep` for enter, `Awake` for exit) and does not prove ambient mode. A failure returns
+`success: false` with a `reason`. If enter leaves wakefulness `Awake`, a stay-awake setting
+(`svc power stayon true`) is probably keeping the display on; turn it off and retry. If
+`watchFaceVisible` is `false`, an app is in front of the watch face.
+
+For visual proof, take a screenshot after `enter`: the watch face renders dimmed in ambient.
+Hardware wake by tilt or touch remains untested. Command failures return an error; check the
+device connection before retrying.
 
 ## Prototypes
 
@@ -123,8 +206,9 @@ they stay tappable. Wear launchers are not expected to support pinned shortcuts,
 
 ## Not supported
 
-- Choosing or creating a Wear OS emulator from `formFactor` alone, and physical watches.
-- Notifications, tiles, complications and watch faces (`systemTray` is built for the phone
-  notification shade).
-- Ambient-mode verification, hardware wake by tilt or touch, and a paired phone and watch.
+- Physical watches: only Wear OS emulators are matched and created.
+- Tiles, complications and watch faces.
+- Tapping a notification's expanded content or its reply and action buttons without an explicit
+  clickable label (see [Notifications](#notifications)).
+- Hardware wake by tilt or touch, and a paired phone and watch.
 - Watch-specific prototype components and round-aware prototype layout.

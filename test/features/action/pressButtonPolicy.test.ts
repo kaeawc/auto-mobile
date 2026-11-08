@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  isHoldablePressButton,
   isInPlacePressButton,
   isNavigationPressButton,
   resolveAndroidKeyCode,
@@ -17,18 +18,34 @@ describe("pressButtonPolicy", () => {
     expect(isNavigationPressButton("Camera")).toBe(true);
   });
 
+  // Android TV remote keys share the tvOS remote names (#16734).
   test.each([
-    ["up", false],
-    ["down", false],
-    ["left", false],
-    ["right", false],
-    ["select", true],
-    ["playPause", false],
-  ] as const)("classifies remote %s without adding an Android keycode", (button, navigation) => {
-    for (const value of [button, button.toUpperCase()]) {
-      expect(isNavigationPressButton(value)).toBe(navigation);
-      expect(isInPlacePressButton(value)).toBe(!navigation);
-      expect(resolveAndroidKeyCode(value)).toBeUndefined();
+    ["up", false, 19],
+    ["down", false, 20],
+    ["left", false, 21],
+    ["right", false, 22],
+    ["select", true, 23],
+    ["playPause", false, 85],
+    ["next", false, 87],
+    ["previous", false, 88],
+    ["rewind", false, 89],
+    ["fastForward", false, 90],
+  ] as const)(
+    "classifies remote %s and resolves its Android keycode",
+    (button, navigation, code) => {
+      for (const value of [button, button.toUpperCase()]) {
+        expect(isNavigationPressButton(value)).toBe(navigation);
+        expect(isInPlacePressButton(value)).toBe(!navigation);
+        expect(resolveAndroidKeyCode(value)).toBe(code);
+      }
+    },
+  );
+
+  test("only select accepts a hold duration", () => {
+    expect(isHoldablePressButton("select")).toBe(true);
+    expect(isHoldablePressButton("SELECT")).toBe(true);
+    for (const button of ["up", "playPause", "home", "power", undefined]) {
+      expect(isHoldablePressButton(button)).toBe(false);
     }
   });
 

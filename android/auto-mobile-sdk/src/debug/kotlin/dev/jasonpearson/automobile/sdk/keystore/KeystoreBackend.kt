@@ -19,6 +19,7 @@ internal enum class EntryCategory {
  * AndroidKeyStore directly implements isKeyEntry/isCertificateEntry; entryInstanceOf can load a
  * certificate internally. Key subtypes therefore remain reserved; real key entries report KEY. A
  * false presence result means not present or not observable: the SPI swallows metadata errors.
+ * [verifyUsable] loads a key handle internally to begin one operation but never returns it.
  */
 internal interface KeystoreBackend {
   fun deleteAlias(alias: String)
@@ -26,11 +27,18 @@ internal interface KeystoreBackend {
   fun containsAlias(alias: String): Boolean
 
   fun entryCategory(alias: String): EntryCategory
+
+  /**
+   * For a present auth-bound key, begins one operation and throws UserNotAuthenticatedException or
+   * KeyPermanentlyInvalidatedException when the key cannot be used. Returns normally for ordinary
+   * keys and whenever the check is inconclusive (#17294).
+   */
+  fun verifyUsable(alias: String)
 }
 
 internal class AndroidKeystoreBackend : KeystoreBackend {
   // Lazy: disabled/discovery/undeclared requests never open AndroidKeyStore.
-  private val store by lazy { KeyStore.getInstance("AndroidKeyStore").apply { load(null) } }
+  private val store by lazy { KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) } }
 
   override fun deleteAlias(alias: String) = store.deleteEntry(alias)
 
@@ -42,6 +50,10 @@ internal class AndroidKeystoreBackend : KeystoreBackend {
       store.isCertificateEntry(alias) -> EntryCategory.CERTIFICATE
       else -> EntryCategory.UNKNOWN
     }
+
+  override fun verifyUsable(alias: String) = runUsabilityCheck {
+    store.getKey(alias, null)?.let(::beginUsabilityProbe)
+  }
 }
 
 internal enum class DeviceLockState {

@@ -4,6 +4,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
+import dev.jasonpearson.automobile.desktop.core.daemon.HierarchyStreamUpdate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -97,4 +98,46 @@ class WorkspaceDeviceControlTest {
       assertEquals(1, factoryCalls)
       assertTrue(fake.disconnectCallCount >= 1)
     }
+
+  @Test
+  fun `reports the foreground app from the control stream's hierarchy frames`() = runComposeUiTest {
+    val fake = FakeObservationStream()
+    val reported = mutableListOf<Pair<String, String>>()
+    setContent {
+      rememberWorkspaceDeviceControl(
+        dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceDeviceControlOptions(
+          column = DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
+          clientProvider = { null },
+          enabled = true,
+          streamFactory = { fake },
+          onForegroundApp = { deviceId, packageName -> reported += deviceId to packageName },
+        ),
+      )
+    }
+    waitForIdle()
+
+    fun emit(deviceId: String, packageName: String?) {
+      runOnIdle {
+        fake.emitHierarchy(
+          HierarchyStreamUpdate(
+            deviceId = deviceId,
+            timestamp = 1L,
+            data = null,
+            packageName = packageName,
+          ),
+        )
+      }
+      waitForIdle()
+    }
+    emit("dev-1", "com.example.first")
+    emit("dev-1", " ")
+    emit("dev-1", null)
+    emit("dev-2", "com.example.other")
+    emit("dev-1", "com.example.second")
+
+    assertEquals(
+      listOf("dev-1" to "com.example.first", "dev-1" to "com.example.second"),
+      reported,
+    )
+  }
 }

@@ -8,6 +8,10 @@ import { elementSchema, selectedElementSchema } from "./elements";
 import { observationBackendFields, observationOutputSchema } from "./observation";
 import { observationDiffMetadataSchema, tapEffectSchema } from "./observationMetadata";
 import { platformSchema } from "../../utils/schemaHelpers";
+import {
+  FOCUS_NAVIGATE_BLOCKERS,
+  FOCUS_NAVIGATE_STATUSES,
+} from "../../features/action/FocusNavigate";
 
 /** A successful openurl may still need a foreground confirmation before the next action. */
 export const openLinkResultSchema = z
@@ -57,10 +61,18 @@ export const keyboardResultSchema = z
   })
   .passthrough();
 
+/** A command's stable failure code; the envelope repeats the failed command's code. */
+const sendKeysErrorCodeSchema = z
+  .string()
+  .describe(
+    "Stable failure code. NO_FOCUSED_EDITABLE: no editable field has focus; focus the field (tap it, or tapOn with focus), then retry sendKeys without a mode.",
+  );
+
 /** IME fields live on each command result, never on the sendKeys envelope. */
 export const sendKeysResultSchema = z
   .object({
     warnings: z.array(z.string()).optional(),
+    errorCode: sendKeysErrorCodeSchema.optional(),
     pinnedDisplay: pinnedDisplaySchema.optional(),
     displayInventory: displayInventoryUnavailableSchema.optional(),
     staleDisplay: staleDisplaySchema.optional(),
@@ -71,6 +83,7 @@ export const sendKeysResultSchema = z
             pinnedDisplay: pinnedDisplaySchema.optional(),
             displayInventory: displayInventoryUnavailableSchema.optional(),
             staleDisplay: staleDisplaySchema.optional(),
+            errorCode: sendKeysErrorCodeSchema.optional(),
             imeFailure: z
               .object({
                 stage: z.enum([
@@ -173,7 +186,19 @@ export const launchAppResultSchema = z
     verifiedBy: z.string().optional(),
     verified: z.boolean().optional(),
     verifyFailureReason: z.string().optional(),
+    verificationSkipped: z.literal("platform").optional(),
     observedAppId: z.string().optional(),
+    blockedBy: z
+      .object({
+        kind: z.literal("permission_dialog"),
+        packageName: z.string(),
+        permission: z.string().optional(),
+        actions: z.array(z.string()),
+      })
+      .optional()
+      .describe(
+        "Present when the launched app is behind a permission dialog: tapOn one of actions, or pre-grant with setAppPermissions",
+      ),
     prototypeAgent: z
       .object({
         port: z.number().int(),
@@ -244,6 +269,32 @@ export const tapOnResultSchema = z
     selectionStarted: z.boolean().optional(),
     searchUntil: tapOnSearchUntilSchema.optional(),
     screenReaderNavigation: screenReaderNavigationSchema.optional(),
+    inputMethod: z
+      .literal("dpad")
+      .optional()
+      .describe(
+        "Present when the Android device has no touchscreen and the D-pad was used instead of a touch tap; enter is pressed only after focus reaches the target",
+      ),
+    focusNavigation: z
+      .object({
+        status: z.enum(FOCUS_NAVIGATE_STATUSES),
+        steps: z.number(),
+        path: z.array(z.record(z.string(), z.unknown())),
+        focusedElement: z.record(z.string(), z.unknown()).optional(),
+        blockedBy: z
+          .enum(FOCUS_NAVIGATE_BLOCKERS)
+          .optional()
+          .describe(
+            "On stuck: the on-screen keyboard (ime) or editable text field (editable) that held focus",
+          ),
+        escapes: z
+          .array(z.enum(["back", "tab"]))
+          .optional()
+          .describe("On stuck with blockedBy: the keys pressed to leave the trap before giving up"),
+      })
+      .passthrough()
+      .optional()
+      .describe("The D-pad focus walk, when inputMethod is dpad"),
     debug: z.any().optional(),
   })
   .passthrough();

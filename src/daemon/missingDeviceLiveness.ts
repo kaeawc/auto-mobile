@@ -621,7 +621,7 @@ export class MissingDeviceLiveness {
 
 /**
  * Each platform's cache bypass. The watch listing has no cache, so it reads fresh as is (#14908);
- * Apple TV simulators are not discovered yet, so there is no listing to bypass.
+ * Apple TV and Vision Pro simulators are not discovered yet, so there is no listing to bypass.
  */
 function freshPresenceOptions(platform: Platform): BootedDeviceDiscoveryOptions {
   switch (platform) {
@@ -631,6 +631,7 @@ function freshPresenceOptions(platform: Platform): BootedDeviceDiscoveryOptions 
       return { bypassIosDeviceListCache: true };
     case "watchos":
     case "tvos":
+    case "visionos":
       return {};
   }
 }

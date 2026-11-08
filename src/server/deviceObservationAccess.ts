@@ -42,10 +42,12 @@ export interface DeviceObservationAccess {
 }
 
 /** What a read lists: Android and iOS, or an explicitly resolved watchOS or tvOS target. */
-export type ReadListingScope = "either" | "watchos" | "tvos";
+export type ReadListingScope = "either" | "watchos" | "tvos" | "visionos";
 
 function readListingScope(platform: SomePlatform): ReadListingScope {
-  return platform === "watchos" || platform === "tvos" ? platform : "either";
+  return platform === "watchos" || platform === "tvos" || platform === "visionos"
+    ? platform
+    : "either";
 }
 
 export const defaultDeviceObservationAccess: DeviceObservationAccess = {
@@ -69,7 +71,9 @@ export interface DeviceReadRetryOptions {
 function incompleteReadPlatform(listing: BootedResourceReadListing, platform: SomePlatform) {
   // "either" never scans watches or TVs; their discovery gaps matter only on their own reads.
   const platforms =
-    platform === "watchos" || platform === "tvos" ? [platform] : (["android", "ios"] as const);
+    platform === "watchos" || platform === "tvos" || platform === "visionos"
+      ? [platform]
+      : (["android", "ios"] as const);
   return platforms.find(
     (p) =>
       (platform === "either" || platform === p) &&
@@ -105,7 +109,7 @@ async function findObservationReadTarget(
     return await new DefaultRetryExecutor(retry.timer).executeOrThrow(
       async () => {
         signal?.throwIfAborted();
-        // A read of watchOS or tvOS lists that platform; other reads list Android and iOS only.
+        // A read of watchOS, tvOS or visionOS lists that platform; other reads list Android and iOS only.
         const scope = readListingScope(targetPlatform);
         const listing: BootedResourceReadListing = access.listBootedWithStatus
           ? await access.listBootedWithStatus(signal, scope)
@@ -116,6 +120,7 @@ async function findObservationReadTarget(
                 ios: scope === "either",
                 watchos: scope === "watchos",
                 tvos: scope === "tvos",
+                visionos: scope === "visionos",
               },
             };
         signal?.throwIfAborted();
@@ -270,6 +275,28 @@ export class HeldDeviceFormFactorResolver {
   async enrich(device: BootedDevice, pooled: PooledDevice | null): Promise<BootedDevice> {
     const formFactor = await this.resolve(device, pooled);
     return formFactor === undefined ? device : { ...device, formFactor };
+  }
+
+  /** Legacy readiness has no pool incarnation to cache; optional metadata stays bounded. */
+  async enrichUnpooled(device: BootedDevice): Promise<BootedDevice> {
+    if (!this.reader) {
+      return device;
+    }
+    const formFactor = await raceWithDeadline(
+      enrichBootedDeviceFormFactor(device, this.reader).then((enriched) => enriched.formFactor),
+      {
+        timer: this.timer,
+        timeoutMs: this.timeoutMs,
+        label: `AVD form factor read for ${device.name}`,
+      },
+    ).catch((error) => {
+      // Optional host metadata may time out; readiness remains usable without a form factor.
+      logger.debug(`AVD form factor unavailable for ${device.name}: ${errorMessage(error)}`);
+      return undefined;
+    });
+    return formFactor === undefined || formFactor === device.formFactor
+      ? device
+      : { ...device, formFactor };
   }
 
   private resolve(

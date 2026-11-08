@@ -37,6 +37,7 @@ import {
 } from "../features/toolSelection/toolSelectionContext";
 import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
 import { isDebugModeEnabled } from "../utils/debug";
+import { featureFlagDisabledMessage } from "../features/featureFlags/featureFlagDisabledMessage";
 import { throwDeviceLostFromAbortSignal } from "../utils/deviceLossOutcome";
 import {
   InternalToolName,
@@ -130,6 +131,7 @@ import {
   DeviceAwareToolOptions,
   DeviceAwareToolRegistration,
   deviceReadOnlyMetadata,
+  embeddedSdkGateReason,
   InternalToolCallOptions,
   InternalToolCallRequest,
   pickToolTraits,
@@ -248,10 +250,10 @@ export class ToolRegistryClass {
   getToolAvailabilityGateReasons(tool: RegisteredTool): string[] {
     const reasons: string[] = [];
     if (tool.debugOnly && !isDebugModeEnabled()) {
-      reasons.push("--debug is disabled; start the daemon with --debug");
+      reasons.push(featureFlagDisabledMessage("debug", tool.name));
     }
     if (tool.embeddedSdkOnly && !serverConfig.isEmbeddedSdkEnabled()) {
-      reasons.push("embedded SDK mode is disabled; start the daemon with --embedded-sdk");
+      reasons.push(embeddedSdkGateReason(tool.embeddedSdkGateHint));
     }
     if (tool.planOnly) {
       reasons.push(PLAN_ONLY_GATE_REASON);
@@ -543,6 +545,7 @@ export class ToolRegistryClass {
       isDeviceReadOnlyCall: (args) => isDeviceReadOnlyCall(options, args),
       debugOnly: options.debugOnly ?? false,
       embeddedSdkOnly: options.embeddedSdkOnly ?? false,
+      ...(options.embeddedSdkGateHint ? { embeddedSdkGateHint: options.embeddedSdkGateHint } : {}),
       planExecutable: options.planExecutable ?? false,
       planOnly: options.planOnly ?? false,
       ...traits,

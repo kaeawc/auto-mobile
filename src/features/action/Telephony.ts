@@ -3,7 +3,13 @@ import {
   defaultDeviceTraits,
   type DeviceTraits,
 } from "../../utils/android-cmdline-tools/deviceTraits";
-import { BootedDevice, PhoneCallAction, PhoneCallResult, SendSmsResult } from "../../models";
+import {
+  BootedDevice,
+  PhoneCallAction,
+  PhoneCallPartialReason,
+  PhoneCallResult,
+  SendSmsResult,
+} from "../../models";
 import {
   EmulatorConsoleClient,
   RealEmulatorConsoleClient,
@@ -24,6 +30,10 @@ import {
   type IosSdkTriggerSenderFactory,
 } from "./IosSdkTrigger";
 import type { CtrlProxySdkTriggerResult } from "../observe/ios/types";
+import { isIosSimulatorDevice } from "./IosSimulatorPermissions";
+
+const IOS_PHYSICAL_TELEPHONY_UNSUPPORTED_ERROR =
+  "Telephony on iOS needs the app's AutoMobile SDK on the iOS Simulator; a physical iOS device has no public API for call or SMS simulation.";
 
 /**
  * Factory for building an EmulatorConsoleClient for a specific emulator console port.
@@ -37,6 +47,14 @@ export const defaultEmulatorConsoleClientFactory: EmulatorConsoleClientFactory =
     new NetEmulatorConsoleTransport(),
     new FileEmulatorConsoleAuthTokenReader(),
   );
+
+/**
+ * phoneCall actions the iOS Simulator cannot perform (#1581, owner decision option (a)):
+ * callservicesd ends the call within milliseconds of a CallKit answer or hold request,
+ * because the simulator has no in-call UI host. Sending the trigger would end the call.
+ */
+const IOS_SIMULATOR_PARTIAL_ACTIONS: ReadonlySet<PhoneCallAction> = new Set(["accept", "hold"]);
+const IOS_SIMULATOR_CALLKIT_LIMIT: PhoneCallPartialReason = "ios_simulator_callkit_limit";
 
 /** iOS SDK trigger modules that stand in for the Android emulator console (#1580). */
 export const IOS_CALLKIT_MODULE = "callkit";
@@ -213,7 +231,27 @@ export class Telephony {
    * tool's actions one to one.
    */
   private async phoneCallIos(options: PhoneCallOptions): Promise<PhoneCallResult> {
+    if (!isIosSimulatorDevice(this.device)) {
+      return {
+        success: false,
+        action: options.action,
+        phoneNumber: options.phoneNumber,
+        supported: false,
+        error: IOS_PHYSICAL_TELEPHONY_UNSUPPORTED_ERROR,
+      };
+    }
     const base = { action: options.action, phoneNumber: options.phoneNumber };
+    if (IOS_SIMULATOR_PARTIAL_ACTIONS.has(options.action)) {
+      return {
+        ...base,
+        success: false,
+        supported: "partial",
+        reason: IOS_SIMULATOR_CALLKIT_LIMIT,
+        message:
+          `The iOS Simulator cannot accept or hold a CallKit call: its call service ends the call ` +
+          `instead. '${options.action}' was not sent. Use call, cancel or busy on the simulator.`,
+      };
+    }
     if (options.action !== "hold" && !options.phoneNumber) {
       return {
         ...base,
@@ -246,6 +284,15 @@ export class Telephony {
 
   /** iOS: the app's in-app SDK posts an SMS-style local notification (`messages` module). */
   private async sendSmsIos(options: SendSmsOptions): Promise<SendSmsResult> {
+    if (!isIosSimulatorDevice(this.device)) {
+      return {
+        success: false,
+        phoneNumber: options.phoneNumber,
+        messageLength: options.message.length,
+        supported: false,
+        error: IOS_PHYSICAL_TELEPHONY_UNSUPPORTED_ERROR,
+      };
+    }
     const base = { phoneNumber: options.phoneNumber, messageLength: options.message.length };
     try {
       // Same body constraints as the Android console path, so both platforms reject the same input.

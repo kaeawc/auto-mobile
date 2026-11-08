@@ -1,6 +1,6 @@
 import type { DeviceDiscoveryError } from "./DeviceDiscoveryError";
 import { ActionableError } from "./ActionableError";
-import type { Platform } from "./Platform";
+import { PLATFORM_LABELS, type Platform } from "./Platform";
 
 /**
  * Booted-device discovery did not complete this sweep (adb/simctl
@@ -24,7 +24,7 @@ export class BootedDeviceDiscoveryIncompleteError extends ActionableError {
   ) {
     super(
       message ??
-        `discovery_incomplete: ${platform === "android" ? "Android" : "iOS"} booted-device ` +
+        `discovery_incomplete: ${PLATFORM_LABELS[platform]} booted-device ` +
           "discovery was incomplete and is retryable" +
           (discoveryError ? `: ${discoveryError.message}` : "."),
     );

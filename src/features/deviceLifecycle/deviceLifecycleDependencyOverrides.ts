@@ -78,6 +78,19 @@ function discoveryDependencyOverrides(
   };
 }
 
+function visionLifecycleDependencyOverrides(
+  deps: Partial<DeviceToolsDependencies>,
+  currentDeps: DeviceToolsDependencies,
+) {
+  return {
+    appleVisionSimulatorBootFactory:
+      deps.appleVisionSimulatorBootFactory ?? currentDeps.appleVisionSimulatorBootFactory,
+    appleVisionSimulatorProvisionerFactory:
+      deps.appleVisionSimulatorProvisionerFactory ??
+      currentDeps.appleVisionSimulatorProvisionerFactory,
+  };
+}
+
 function readinessDependencyOverrides(
   deps: Partial<DeviceToolsDependencies>,
   currentDeps: DeviceToolsDependencies,
@@ -85,6 +98,8 @@ function readinessDependencyOverrides(
   return {
     ...resourceNotificationDependencyOverrides(deps, currentDeps),
     ensureCtrlProxyReady: deps.ensureCtrlProxyReady ?? currentDeps.ensureCtrlProxyReady,
+    simulatorPairServiceFactory:
+      deps.simulatorPairServiceFactory ?? currentDeps.simulatorPairServiceFactory,
     watchSimulatorLifecycleFactory:
       deps.watchSimulatorLifecycleFactory ?? currentDeps.watchSimulatorLifecycleFactory,
     tvosRunnerLifecycleFactory:
@@ -97,6 +112,7 @@ function readinessDependencyOverrides(
       deps.appleTvSimulatorBootFactory ?? currentDeps.appleTvSimulatorBootFactory,
     appleTvSimulatorProvisionerFactory:
       deps.appleTvSimulatorProvisionerFactory ?? currentDeps.appleTvSimulatorProvisionerFactory,
+    ...visionLifecycleDependencyOverrides(deps, currentDeps),
     deviceCreationGateFactory:
       deps.deviceCreationGateFactory ?? currentDeps.deviceCreationGateFactory,
     deviceProvisionerFactory: deps.deviceProvisionerFactory ?? currentDeps.deviceProvisionerFactory,

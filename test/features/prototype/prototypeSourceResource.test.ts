@@ -116,6 +116,20 @@ describe.each(["compose", "swiftui"] as const)("readPrototypeSourceResource(%s)"
     );
   });
 
+  test("a TV or car preview is sized in landscape, its only orientation (#16446)", () => {
+    const file = readPrototypeSourceResource(
+      store(),
+      format,
+      { id: "checkout", frame: "android-tv-1080p" },
+      "v",
+    );
+    expect(file.text).toContain(
+      format === "compose"
+        ? '@Preview(name = "Android TV (1080p)", widthDp = 960, heightDp = 540)'
+        : ".frame(width: 960, height: 540)",
+    );
+  });
+
   test.each([
     [{ id: "nope" }, 'Unknown prototype "nope"'],
     [{ id: "checkout", frame: "nokia-3310" }, 'Unknown device frame "nokia-3310". Valid frames:'],

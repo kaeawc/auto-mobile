@@ -2,10 +2,11 @@ import Foundation
 
 /// Parsed CLI arguments for the screen-capture helper.
 public struct CommandLineOptions: Equatable {
-    /// In-helper H.264 encode settings (issue #4788). Absent means the default
-    /// raw-BGRA path with zero behavior change. The bitrate *policy* stays in the
-    /// TypeScript supervisor (which flag it passes); the helper only carries the
-    /// choice and does the pixel-dimension arithmetic it alone knows pre-encode.
+    /// In-helper H.264 encode settings (issue #4788). Every capture mode encodes
+    /// in-process; the helper no longer streams raw BGRA. The bitrate *policy*
+    /// stays in the TypeScript supervisor (which flag it passes); the helper only
+    /// carries the choice and does the pixel-dimension arithmetic it alone knows
+    /// pre-encode.
     public struct EncodeSettings: Equatable {
         public enum Bitrate: Equatable {
             /// `--bitrate-bps <n>`: operator override, used verbatim.
@@ -27,11 +28,11 @@ public struct CommandLineOptions: Equatable {
 
     public enum Mode: Equatable {
         case listDevices
-        /// Physical USB-connected iOS device capture (AVFoundation). `encode` is
-        /// absent on the raw-BGRA path and present under `--encode h264` (#4790).
-        case capture(deviceID: String?, encode: EncodeSettings?)
+        /// Physical USB-connected iOS device capture (AVFoundation), encoded
+        /// in-process under `--encode h264` (#4790).
+        case capture(deviceID: String?, encode: EncodeSettings)
         case listSimulators
-        case captureSimulator(windowID: UInt32, fps: Int, audio: Bool, encode: EncodeSettings?)
+        case captureSimulator(windowID: UInt32, fps: Int, audio: Bool, encode: EncodeSettings)
         case highlightSimulator(deviceName: String, json: String)
         case help
     }
@@ -161,7 +162,7 @@ public struct CommandLineOptions: Equatable {
                     throw ParseError.missingValue(flag: arg)
                 }
                 // Only H.264 exists today; reject anything else so a typo fails
-                // loudly instead of silently taking the raw path.
+                // loudly instead of silently producing no video.
                 guard value == "h264" else {
                     throw ParseError.invalidValue(flag: arg, value: value)
                 }
@@ -210,12 +211,16 @@ public struct CommandLineOptions: Equatable {
             }
             try validateCaptureMode()
             try validateEncodeOptions()
-            let encodeSettings = makeEncodeSettings()
             if listDevices {
                 return CommandLineOptions(mode: .listDevices)
             }
             if listSimulators {
                 return CommandLineOptions(mode: .listSimulators)
+            }
+            // Raw BGRA streaming was removed: a capture without --encode would have
+            // nothing to emit, so fail loudly instead of silently idling.
+            guard let encodeSettings = makeEncodeSettings() else {
+                throw ParseError.conflictingFlags("capture requires --encode h264")
             }
             if let windowID = simulatorWindowID {
                 return CommandLineOptions(
@@ -330,10 +335,10 @@ public struct CommandLineOptions: Equatable {
                                 values waste CPU for typical MCP workloads.
         --audio                 Capture Simulator window audio as 8 kHz mono PCM16LE.
 
-    ENCODE OPTIONS (in-helper H.264; works with --simulator-window or a device):
-        --encode h264           Encode H.264 (Baseline 4.2) in-process instead of
-                                streaming raw BGRA. Captures 420v (NV12) and emits
-                                Annex-B encoded-video records. Default: raw BGRA.
+    ENCODE OPTIONS (in-helper H.264; required with --simulator-window or a device):
+        --encode h264           Encode H.264 (Baseline 4.2) in-process. Captures 420v
+                                (NV12) and emits Annex-B encoded-video records.
+                                Required for every capture mode.
         --bitrate-bps <n>       Operator override for the average bitrate (bps).
                                 Honored for both the Simulator and device paths.
         --bits-per-pixel <x>    Compute the bitrate from the delivered pixel
@@ -348,8 +353,8 @@ public struct CommandLineOptions: Equatable {
 
         -h, --help              Show this help.
 
-    Frames are written to stdout: \(FrameProtocol.headerSize)-byte little-endian header
-    (magic, CRC-32 checksum, width, height, bytesPerRow, timestampMs) followed by
-    height * bytesPerRow bytes of BGRA pixel data.
+    Records are written to stdout: \(FrameProtocol.headerSize)-byte little-endian header
+    (magic, CRC-32 checksum, width, height, bytesPerRow, timestampMs) followed by the
+    record payload (an Annex-B H.264 access unit, or PCM16LE audio).
     """
 }

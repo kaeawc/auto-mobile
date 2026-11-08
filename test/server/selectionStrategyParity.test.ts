@@ -266,8 +266,8 @@ describe("highlight resolver parity on a captured hierarchy", () => {
       { deviceId: "capture", name: "Captured Android", platform: "android" },
       highlightSchema.parse(selector),
     );
-    expect(toolJson(result)).toEqual({ success: true });
     const bounds = tap.chosen!.bounds!;
+    expect(toolJson(result)).toMatchObject({ success: true, element: { bounds } });
     expect(shapes).toEqual([
       {
         type: "circle",
@@ -303,7 +303,15 @@ describe("highlight resolver parity on a captured hierarchy", () => {
         selectionStrategy: "unique",
       }),
     );
-    expect(toolJson(result)).toEqual({ success: true });
+    expect(toolJson(result)).toEqual({
+      success: true,
+      element: {
+        bounds: { left: 20, top: 40, right: 220, bottom: 100 },
+        class: "android.widget.Button",
+        "resource-id": "example.app:id/action",
+        text: "Open",
+      },
+    });
     expect(shapes).toEqual([{ type: "circle", bounds: { x: 20, y: 40, width: 200, height: 60 } }]);
   });
 

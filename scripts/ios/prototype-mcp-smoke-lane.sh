@@ -38,6 +38,8 @@ smoke_script="${PROTOTYPE_MCP_SMOKE_SCRIPT:-${script_dir}/prototype-mcp-smoke.sh
 export AUTO_MOBILE_CMD="${AUTO_MOBILE_CMD:-bun run src/index.ts --debug --embedded-sdk --cli}"
 log_dir="${PROTOTYPE_MCP_SMOKE_LOG_DIR:-scratch/prototype-mcp-smoke-lane/ios-${requested}}"
 mkdir -p "${log_dir}"
+# The smoke saves launch-failure diagnostics here, inside the uploaded artifact (#17160).
+export PROTOTYPE_SMOKE_DIAG_DIR="${PROTOTYPE_SMOKE_DIAG_DIR:-${log_dir}/diagnostics}"
 exec > >(tee "${log_dir}/smoke.log") 2>&1
 
 fail() {

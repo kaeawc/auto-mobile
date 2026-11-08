@@ -38,6 +38,7 @@ add_check() {
 
 add_check "ktfmt" "ONLY_TOUCHED_FILES=${KTFMT_ONLY_TOUCHED_FILES:-true} \"$PROJECT_ROOT/scripts/ktfmt/validate_ktfmt.sh\"" "format,kotlin" "Validate Kotlin formatting"
 add_check "element-resolution-ratchet" "bash \"$PROJECT_ROOT/scripts/check-element-resolution-ratchet.sh\"" "lint,typescript" "Forbid growth of finding-keyed element-resolution exceptions"
+add_check "android-parity-budgets" "bash \"$PROJECT_ROOT/scripts/prototype/check-android-parity-budgets.sh\"" "lint,typescript" "Forbid raising a web-vs-Android parity budget without a Parity-Budget-Grow trailer (#16610)"
 add_check "shared-process-allowlist" "bun \"$PROJECT_ROOT/scripts/test/classify-shared-safe.ts\" --check" "lint,conventions,typescript" "Keep unit files that share Bun processes free of shared-state signals (#10583)"
 add_check "node-format" "bun --cwd \"$PROJECT_ROOT\" run format:check" "format,typescript" "Check Node TypeScript formatting"
 add_check "yaml" "bun \"$PROJECT_ROOT/scripts/validate-yaml.ts\"" "config,yaml" "Validate test plan YAML files"
@@ -89,6 +90,7 @@ add_check "desktop-core-unified" "\"$PROJECT_ROOT/scripts/android/validate-no-de
 add_check "workflow-assertion-triggers" "\"$PROJECT_ROOT/scripts/ci/validate_workflow_assertion_triggers.sh\"" "config,ci" "Ensure workflow-YAML assertion tests are triggered by the paths they assert"
 add_check "github-python-lock" "cd \"$PROJECT_ROOT/scripts/github\" && uv sync --locked --no-install-project" "config,dependencies" "Validate the GitHub documentation Python lockfile"
 add_check "manual-test-python" "\"$PROJECT_ROOT/scripts/validate_manual_test_python.sh\"" "config,dependencies" "Validate the private Python MCP stdio harness"
+add_check "python-sdk" "\"$PROJECT_ROOT/scripts/validate_python_sdk.sh\"" "lint,python" "Lint, format-check, typecheck and test the Python SDK (sdk/python, uv + ruff + mypy)"
 
 print_usage() {
   cat <<'EOF'

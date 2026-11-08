@@ -11,6 +11,7 @@ import {
   type ObserveDiff,
   sanitizeObserveResult,
   DIFF_SCALAR_FIELDS,
+  SKELETON_DIFF_SCALAR_FIELDS,
   DIFF_ELEMENT_FIELDS,
   DIFF_IGNORED_ATTRS,
 } from "../../../../src/features/observe/output/ObserveResultOutput";
@@ -863,6 +864,32 @@ describe("diffObserveResult", () => {
     expect(DIFF_SCALAR_FIELDS).toContain("awaitDuration");
   });
 
+  test("an automotive-only state change survives action observation diffs", () => {
+    const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
+    const parked: ObserveResult["automotive"] = {
+      drivingState: "parked",
+      uxRestrictions: { requiresDistractionOptimization: false, activeRestrictions: 0 },
+      foregroundActivity: { distractionOptimized: false },
+      blocked: false,
+    };
+    const moving: ObserveResult["automotive"] = {
+      drivingState: "moving",
+      uxRestrictions: { requiresDistractionOptimization: true, activeRestrictions: 511 },
+      foregroundActivity: { distractionOptimized: false },
+      blocked: true,
+    };
+
+    const diff = diffObserveResult(
+      obs({ ...node }, { automotive: parked }),
+      obs({ ...node }, { automotive: moving }),
+    );
+
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    expect(diff.changed).toEqual([]);
+    expect(diff.fields).toEqual({ automotive: { from: parked, to: moving } });
+  });
+
   test("timeout reason gains, changes and removals survive action observation diffs", () => {
     const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
     const timeoutReason =
@@ -907,108 +934,13 @@ describe("diffObserveResult", () => {
     expect(DIFF_SCALAR_FIELDS).toContain("layoutWarnings");
   });
 
-  test("skeleton layout-warning diffs emit per-entry additions and removals", () => {
+  // #17464: the skeleton projection omits advisory warnings, so its diff must too.
+  test("skeleton scalar fields leave layout-warning churn out of the diff", () => {
     const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
-    const warning = (text: string): LayoutWarning => ({
-      type: "important-content-under-inset",
-      severity: "warning",
-      element: { text, bounds: { left: 0, top: 0, right: 100, bottom: 30 } },
-      categories: ["text"],
-      insetTypes: ["safeArea"],
-      sides: ["top"],
-      overflowPx: { top: 30 },
-      insetPx: { top: 59.5 },
-      overlapPercent: 100,
-      confidence: "high",
-    });
-    const removed = warning("Old title");
-    const added = warning("New title");
-
-    const diff = diffObserveResult(
-      obs(node, { layoutWarnings: { scope: "full", warnings: [removed] } }),
-      obs(node, { layoutWarnings: { scope: "full", warnings: [added] } }),
-      { layoutWarningsDiffMode: "perEntry" },
-    );
-
-    expect<unknown>(diff.fields!.layoutWarnings).toEqual({ added: [added], removed: [removed] });
-  });
-
-  test("skeleton layout-warning diffs emit envelope-only changes", () => {
-    const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
-    const warning: LayoutWarning = {
-      type: "important-content-under-inset",
-      severity: "warning",
-      element: { text: "Title", bounds: { left: 0, top: 0, right: 100, bottom: 30 } },
-      categories: ["text"],
-      insetTypes: ["safeArea"],
-      sides: ["top"],
-      overflowPx: { top: 30 },
-      insetPx: { top: 59.5 },
-      overlapPercent: 100,
-      confidence: "high",
-    };
-    const warnings = [warning];
-
-    const diff = diffObserveResult(
-      obs(node, { layoutWarnings: { scope: "truncated", total: 100, warnings } }),
-      obs(node, { layoutWarnings: { scope: "truncated", total: 140, warnings } }),
-      { layoutWarningsDiffMode: "perEntry" },
-    );
-
-    expect(diff.fields!.layoutWarnings).toEqual({
-      added: [],
-      removed: [],
-      total: { from: 100, to: 140 },
-    });
-  });
-
-  test("skeleton layout-warning diffs ignore confidence-only churn and systemui notification chrome", () => {
-    const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
-    const appWarning = (confidence: LayoutWarning["confidence"]): LayoutWarning => ({
-      type: "important-content-under-inset",
-      severity: "warning",
-      element: { text: "Title", bounds: { left: 0, top: 0, right: 100, bottom: 30 } },
-      categories: ["text"],
-      insetTypes: ["safeArea"],
-      sides: ["top"],
-      overflowPx: { top: 30 },
-      insetPx: { top: 59.5 },
-      overlapPercent: 100,
-      confidence,
-    });
-    const systemUiWarning = (description: string) => ({
-      ...appWarning("high"),
-      element: { contentDesc: description, bounds: { left: 0, top: 0, right: 100, bottom: 30 } },
-    });
-
-    expect(
-      diffObserveResult(
-        obs(node, { layoutWarnings: { scope: "full", warnings: [appWarning("high")] } }),
-        obs(node, { layoutWarnings: { scope: "full", warnings: [appWarning("medium")] } }),
-        { layoutWarningsDiffMode: "perEntry" },
-      ).fields,
-    ).toBeUndefined();
-    expect(
-      diffObserveResult(
-        obs(node, {
-          layoutWarnings: { scope: "full", warnings: [systemUiWarning("Messages notification:")] },
-        }),
-        obs(node, {
-          layoutWarnings: { scope: "full", warnings: [systemUiWarning("Clock notification:")] },
-        }),
-        { layoutWarningsDiffMode: "perEntry" },
-      ).fields,
-    ).toBeUndefined();
-  });
-
-  // #11637: a warning on the same node whose only difference is the regenerated
-  // synthetic `s2-` view id (same bounds) is not a change.
-  test("skeleton layout-warning diffs ignore a regenerated synthetic view id (#11637)", () => {
-    const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
-    const statusBarWarning = (viewId: string): LayoutWarning => ({
+    const warningAt = (bottom: number): LayoutWarning => ({
       type: "interaction-in-system-gesture-region",
       severity: "info",
-      element: { viewId, bounds: { left: 0, top: 0, right: 1080, bottom: 136 } },
+      element: { viewId: "s2-aaaa", bounds: { left: 0, top: 0, right: 1080, bottom } },
       categories: ["interaction"],
       insetTypes: ["systemGestures"],
       sides: ["top"],
@@ -1019,43 +951,15 @@ describe("diffObserveResult", () => {
     });
 
     const diff = diffObserveResult(
-      obs(node, {
-        layoutWarnings: { scope: "full", warnings: [statusBarWarning("s2-bf13aa90c1d2e3f4")] },
-      }),
-      obs(node, {
-        layoutWarnings: { scope: "full", warnings: [statusBarWarning("s2-9bf0aa90c1d2e3f4")] },
-      }),
-      { layoutWarningsDiffMode: "perEntry" },
+      obs(node, { layoutWarnings: { scope: "full", warnings: [warningAt(136)] } }),
+      obs(node, { layoutWarnings: { scope: "full", warnings: [warningAt(200)] } }),
+      { scalarFields: SKELETON_DIFF_SCALAR_FIELDS },
     );
 
     expect(diff.fields).toBeUndefined();
-  });
-
-  test("skeleton layout-warning diffs still report a moved warning with a synthetic id", () => {
-    const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
-    const warningAt = (viewId: string, bottom: number): LayoutWarning => ({
-      type: "interaction-in-system-gesture-region",
-      severity: "info",
-      element: { viewId, bounds: { left: 0, top: 0, right: 1080, bottom } },
-      categories: ["interaction"],
-      insetTypes: ["systemGestures"],
-      sides: ["top"],
-      overflowPx: { top: 10 },
-      insetPx: { top: 24 },
-      overlapPercent: 40,
-      confidence: "medium",
-    });
-
-    const diff = diffObserveResult(
-      obs(node, { layoutWarnings: { scope: "full", warnings: [warningAt("s2-aaaa", 136)] } }),
-      obs(node, { layoutWarnings: { scope: "full", warnings: [warningAt("s2-bbbb", 200)] } }),
-      { layoutWarningsDiffMode: "perEntry" },
+    expect(SKELETON_DIFF_SCALAR_FIELDS).toEqual(
+      DIFF_SCALAR_FIELDS.filter((field) => field !== "layoutWarnings"),
     );
-
-    expect(diff.fields!.layoutWarnings).toMatchObject({
-      added: [{ element: { bounds: { bottom: 200 } } }],
-      removed: [{ element: { bounds: { bottom: 136 } } }],
-    });
   });
 
   test("skeleton added and removed nodes retain compact actionable rows and keys", () => {
@@ -2556,6 +2460,10 @@ describe("diffObserveResult — all DIFF_SCALAR_FIELDS members (P6)", () => {
       to: { locked: true, keyguardShowing: true, secure: true },
     },
     deviceLockUnknown: { from: undefined, to: { reason: "timeout" } },
+    automotive: {
+      from: { drivingState: "parked", blocked: false },
+      to: { drivingState: "moving", blocked: true },
+    },
     awaitTimeout: { from: false, to: true },
     awaitDuration: { from: undefined, to: 250 },
     timeoutReason: { from: undefined, to: "posture wait timed out" },
@@ -2567,6 +2475,7 @@ describe("diffObserveResult — all DIFF_SCALAR_FIELDS members (P6)", () => {
   // DIFF_SCALAR_FIELDS (which would silently undiff it) reddens here rather than
   // just removing a generated row. `updatedAt` must stay OUT (churns every capture).
   const EXPECTED_SCALARS = [
+    "automotive",
     "awaitDuration",
     "awaitTimeout",
     "deviceLock",

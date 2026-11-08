@@ -10,19 +10,30 @@ import {
   getToolCallRecordingStatus,
 } from "../daemon/toolCallRecordingManager";
 import { serverConfig } from "../utils/ServerConfig";
+import { featureFlagDisabledMessage } from "../features/featureFlags/featureFlagDisabledMessage";
 import { currentAutolockMcpSessionId } from "../features/toolSelection/toolSelectionContext";
 
 // ============================================================================
 // Tool Call Recording — "recordToolCalls" tool
-// begin/end are gated by the "tool-call-recording" feature flag.
+// begin/end are gated by the "tool-call-recording" feature flag, which is on by
+// default so an MCP-only client can record once it enables the tool (#16891).
 // status bypasses the flag so agents can always probe recording state
 // (e.g., after context compaction when the agent may have lost awareness).
 // ============================================================================
 
+export const TOOL_CALL_RECORDING_DISABLED_ERROR = featureFlagDisabledMessage(
+  "tool-call-recording",
+  "recordToolCalls",
+);
+
 const recordToolCallsSchema = addSessionUuidToSchema(
   z
     .object({
-      action: z.enum(["begin", "end", "status"]),
+      action: z
+        .enum(["begin", "end", "status"])
+        .describe(
+          "begin starts recording this connection's tool calls; end stops and returns the YAML plan; status reports state",
+        ),
       planName: z.string().optional().describe("Plan name for action=end"),
     })
     .strict(),
@@ -72,8 +83,7 @@ const recordToolCallsTool = async (params: {
     return withIsErrorOnFailure(
       createStructuredToolResponse({
         success: false,
-        error:
-          "Tool call recording is disabled. Enable the 'tool-call-recording' feature flag first.",
+        error: TOOL_CALL_RECORDING_DISABLED_ERROR,
       }),
       false,
     );
@@ -121,7 +131,7 @@ export const registerToolCallRecordingTools = () => {
   // tool call recording — begin/end gated by "tool-call-recording" feature flag; status always available.
   ToolRegistry.register(
     "recordToolCalls",
-    "Record MCP tool calls to YAML. begin/end require tool-call-recording; status always works.",
+    "Record MCP tool calls to a YAML plan: action begin, end (returns the plan), or status.",
     recordToolCallsSchema,
     {
       handler: recordToolCallsTool,

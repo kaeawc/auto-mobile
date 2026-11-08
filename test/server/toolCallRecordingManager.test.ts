@@ -222,6 +222,19 @@ describe("toolCallRecordingManager", () => {
       expect(() => stopToolCallRecording()).toThrow("No active tool call recording");
     });
 
+    test("no-recording error names the public tool call and connection scope (#17053)", () => {
+      let message = "";
+      try {
+        stopToolCallRecording({ connectionId: "A" });
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+      expect(message).toContain('Call recordToolCalls with action: "begin" first.');
+      expect(message).toContain("scoped to the MCP connection");
+      expect(message).not.toContain("startToolCallRecording");
+      expect(message).not.toContain("stopToolCallRecording");
+    });
+
     test("throws when no steps were recorded", () => {
       const timer = new FakeTimer();
       timer.setCurrentTime(1000);

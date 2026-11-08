@@ -9,7 +9,10 @@ import type { DeviceSettingKey } from "../models/DeviceSettingDefaults";
 import type { Platform } from "../models";
 import { opaqueIntentKey } from "../daemon/sessionBroker/mutations/types";
 import { appLocaleJournalKey } from "../daemon/sessionBroker/appLocaleJournalKey";
-import { postedNotificationKey } from "../daemon/sessionBroker/mutations/postedNotification";
+import {
+  postedNotificationChannelKey,
+  postedNotificationKey,
+} from "../daemon/sessionBroker/mutations/postedNotification";
 import type { DeviceMutationInput } from "../daemon/sessionBroker/mutations/types";
 import { isRecord } from "./pipeline/isRecord";
 import { KEYBOARD_READ_ACTIONS } from "./interactionToolTypes";
@@ -269,25 +272,47 @@ function familyToolMutations(
   return undefined;
 }
 
+/**
+ * The rows of an Android `postNotification` naming its app, or undefined for any other call.
+ * An image upload overwrites shared storage cleaning does not restore, so it keeps the tool row.
+ */
+function postedNotificationMutations(
+  name: string,
+  args: Record<string, unknown>,
+  platform?: Platform,
+): ToolMutation[] | undefined {
+  const appId =
+    name === "postNotification" &&
+    platform === "android" &&
+    typeof args.appId === "string" &&
+    args.imagePath === undefined
+      ? args.appId
+      : undefined;
+  const posted = appId === undefined ? undefined : postedNotificationKey(appId);
+  if (appId === undefined || posted === undefined) {
+    return undefined;
+  }
+  // The named app's SDK receiver posts it; force-stopping that app cancels it (#14364). Posting
+  // also persists a notification channel, journaled so reset can delete it through the same
+  // receiver (#16510); a channel id the journal cannot name keeps the app fallback.
+  const channel = postedNotificationChannelKey(appId, args.channelId);
+  return [
+    mutation("notification", posted),
+    channel === undefined
+      ? appFallback("postNotification", appId)
+      : mutation("notification", channel),
+  ];
+}
+
 /** Tools whose intent is fixed by their name (and, for two, an action). */
 function namedToolMutations(
   name: string,
   args: Record<string, unknown>,
   platform?: Platform,
 ): ToolMutation[] | undefined {
-  // An image upload overwrites shared storage cleaning does not restore, so it keeps the tool row.
-  const posted =
-    name === "postNotification" &&
-    platform === "android" &&
-    typeof args.appId === "string" &&
-    args.imagePath === undefined
-      ? postedNotificationKey(args.appId)
-      : undefined;
+  const posted = postedNotificationMutations(name, args, platform);
   if (posted !== undefined) {
-    // The named app's SDK receiver posts it; force-stopping that app cancels it (#14364). Posting
-    // also persists a notification channel, which only uninstalling a session-installed app
-    // removes, so the app fallback stays unless the session installed the app.
-    return [mutation("notification", posted), appFallback("postNotification", args.appId)];
+    return posted;
   }
   if (name === "rotate") {
     return rotationMutations(args);

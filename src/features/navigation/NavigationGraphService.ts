@@ -1,4 +1,5 @@
 import type { NavigationEdgeTarget } from "../../db/navigationRepository";
+import type { BuildSourceRevision } from "../../models/BuildSourceRevision";
 import type { TestCoverageSession } from "../../db/types";
 import type { BackStackInfo } from "../../models";
 
@@ -135,6 +136,8 @@ export interface NavigationBuildContext {
   /** Non-integer platform version, retained in memory/wire only; DB identity uses 0 + hash. */
   versionKey?: string;
   contentHash: string;
+  /** Git branch/sha the app declared (#16954); display metadata, not build identity. */
+  sourceRevision?: BuildSourceRevision;
 }
 
 export interface NavigationBuildContextChange {

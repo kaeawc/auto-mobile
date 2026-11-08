@@ -5,6 +5,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { AndroidTransportAliases } from "../../src/utils/androidSerial";
+import { adbTransportRecoveredSignal } from "../../src/utils/android-cmdline-tools/adbTransportRecoveredSignal";
 import { createExecResult } from "../../src/utils/execResult";
 import type { BootedDevice } from "../../src/models";
 import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
@@ -500,4 +501,35 @@ test("concurrent refresh and disconnect monitor do not probe twice or fail disco
 
 afterEach(() => {
   DaemonState.getInstance().reset();
+});
+
+test("an alias-only offline reconnect reports the canonical serial recovered (#17168)", async () => {
+  const received: string[][] = [];
+  class AliasOfflineManager extends FakeDeviceManager {
+    async getAndroidOfflineDeviceIds() {
+      return new Set<string>();
+    }
+    async getAndroidListedDeviceStates() {
+      return new Map([["localhost:5555", "offline"]]);
+    }
+    async recoverAndroidOfflineDevices(ids: Iterable<string>) {
+      received.push([...ids]);
+    }
+  }
+  const recovered: string[] = [];
+  const stop = adbTransportRecoveredSignal.subscribe((deviceId, reason) =>
+    recovered.push(`${deviceId} ${reason}`),
+  );
+  const { daemon, monitor } = monitorHarness(new AliasOfflineManager());
+  spyOn(daemon.testHooks.devicePool, "getAndroidTransportAliases").mockImplementation(
+    (deviceId: string) => (deviceId === "emulator-5554" ? ["localhost:5555"] : []),
+  );
+  try {
+    await monitor.run();
+    expect(received).toEqual([["localhost:5555"]]);
+    expect(recovered).toEqual(["emulator-5554 adb_reconnect"]);
+  } finally {
+    stop();
+    await monitor.stop();
+  }
 });

@@ -34,9 +34,11 @@ import {
   type HierarchyCapture,
   type HierarchySnapshot,
 } from "../observe/HierarchyCapture";
-import { extractHierarchyScreenSize } from "../observe/hierarchyScreenSize";
 import { nodeBounds } from "../../models/ViewHierarchyResult";
-import { getProjectedHierarchyScreenSize } from "../observe/HierarchyNormalization";
+import {
+  getProjectedHierarchyScreenSize,
+  resolveActionableHierarchyScreenSize,
+} from "../observe/HierarchyNormalization";
 import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
 import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
@@ -833,8 +835,10 @@ export class PinchOn extends BaseVisualChange {
     observeResult: ObserveResult,
     snapshot: HierarchySnapshot,
   ): ObserveResult {
+    // The projection rewrites the Duo root to the landscape screen; re-extracting from that root
+    // would pair it with the runner's stale portrait metadata and swap back to portrait (#17306).
     const freshSize =
-      extractHierarchyScreenSize(snapshot.hierarchy) ??
+      resolveActionableHierarchyScreenSize(snapshot.hierarchy) ??
       (snapshot.hierarchy.screenWidth && snapshot.hierarchy.screenHeight
         ? { width: snapshot.hierarchy.screenWidth, height: snapshot.hierarchy.screenHeight }
         : observeResult.screenSize);

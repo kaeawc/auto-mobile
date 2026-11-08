@@ -155,6 +155,8 @@ data class SetActiveDeviceResult(
   val message: String? = null,
   /** Why the daemon refused, when it is a refusal the session loop acts on (#10682). */
   @Transient val refusal: SetActiveDeviceRefusal? = null,
+  /** Who holds the device, when [refusal] is a held-elsewhere refusal (#11365). */
+  @Transient val holder: HeldElsewhereHolder? = null,
 )
 
 @Serializable

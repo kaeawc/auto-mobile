@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DualTrackRecorder } from "../../../../src/features/record/android/DualTrackRecorder";
 import { GetEventReader } from "../../../../src/features/record/android/GetEventReader";
+import { TouchFrameReconstructor } from "../../../../src/features/record/android/TouchFrameReconstructor";
 import { parseInputNodes } from "../../../../src/features/record/android/InputNodeDiscovery";
 import type {
   A11ySource,
@@ -145,6 +146,7 @@ async function setup({ present = false, monitorFailure = false, penOnly = false 
       previous = frame.deviceMs;
       send(pen, frame.text.replaceAll(`${penPath}: `, ""));
     }
+    timer.advanceTime(50);
   };
   const penSpawns = (): number =>
     adb.spawn.mock.calls.filter(([args]) => args.at(-1) === penPath).length;
@@ -166,6 +168,39 @@ async function setup({ present = false, monitorFailure = false, penOnly = false 
 }
 
 describe("recording a hotplugged uinput pen", () => {
+  test.each([false, true])(
+    "primary and pen readers share kernel ordering (initially present: %s)",
+    async (present) => {
+      const ctx = await setup({ present });
+      if (!present) {
+        await ctx.add();
+      }
+      const frames = captureFrames(stroke);
+      const earlier = frames[0].text.replaceAll(`${penPath}: `, "");
+      const later = frames[1].text.replaceAll(`${penPath}: `, "");
+      const seen: string[] = [];
+      const original = TouchFrameReconstructor.prototype.feedLine;
+      spyOn(TouchFrameReconstructor.prototype, "feedLine").mockImplementation(function (
+        this: TouchFrameReconstructor,
+        line,
+        arrivedAt,
+      ) {
+        seen.push(line);
+        return original.call(this, line, arrivedAt);
+      });
+      ctx.send(ctx.touch, later);
+      ctx.timer.advanceTime(20);
+      ctx.send(ctx.pen, earlier);
+      expect(seen).toEqual([]);
+      ctx.timer.advanceTime(30);
+      expect(seen).toEqual([
+        ...earlier.split("\n").filter(Boolean),
+        ...later.split("\n").filter(Boolean),
+      ]);
+      expect(ctx.timer.getSleepHistory()).toEqual([]);
+    },
+  );
+
   test("a pen added after start uses captured axes and emits a stroke with point pressures", async () => {
     const ctx = await setup();
     expect(ctx.penSpawns()).toBe(0);
@@ -221,6 +256,7 @@ describe("recording a hotplugged uinput pen", () => {
       ctx.warn.mock.calls.some(([message]) => String(message).includes("monitor unavailable")),
     ).toBe(true);
     ctx.send(ctx.touch, fingerTap);
+    ctx.timer.advanceTime(50);
     expect(ctx.gestures.map((event) => event.type)).toEqual(["tap"]);
     expect(ctx.recorder.touchTrackFailure).toBeUndefined();
     expect(ctx.touch.killed).toBe(false);
@@ -318,6 +354,7 @@ describe("recording a hotplugged uinput pen", () => {
         ctx.warn.mock.calls.some(([message]) => String(message).includes("monitor diagnostics")),
       ).toBe(true);
       ctx.send(ctx.touch, "[ 1.0] EV_KEY KEY_BACK DOWN\n");
+      ctx.timer.advanceTime(50);
       expect(ctx.gestures[0]?.type).toBe("pressButton");
       expect(ctx.recorder.touchTrackFailure).toBeUndefined();
       ctx.send(ctx.monitor, penAdd);
@@ -368,6 +405,7 @@ describe("recording a hotplugged uinput pen", () => {
       ctx.timer.advanceTime(16);
       ctx.send(next, frame.text.replaceAll(`${penPath}: `, ""));
     }
+    ctx.timer.advanceTime(50);
     expect(ctx.gestures[0]?.type).toBe("stroke");
   });
 });

@@ -8,11 +8,16 @@ const PIXEL_ORIENTATION_TOLERANCE_POINTS = 1;
 function pixelsProveSwappedOrientation(
   hierarchy: Pick<
     ViewHierarchyResult,
-    "pixelWidth" | "pixelHeight" | "nativeScale" | "screenScale"
+    "pixelWidth" | "pixelHeight" | "nativeScale" | "screenScale" | "projectedScreenSize"
   >,
   width: number,
   height: number,
 ): boolean {
+  // Projection already corrected this root; stale runner pixels must not swap it back.
+  const projected = hierarchy.projectedScreenSize;
+  if (projected?.width === width && projected.height === height) {
+    return false;
+  }
   if (typeof hierarchy.screenScale !== "number" || !Number.isFinite(hierarchy.screenScale)) {
     return false;
   }

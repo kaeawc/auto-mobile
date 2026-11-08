@@ -4,7 +4,7 @@ import XCTest
 
 final class SdkRouteAndErrorTests: XCTestCase {
     func testRoutesAreUniqueAbsolutePathsWithAMethodEach() {
-        XCTAssertEqual(SdkRoute.allCases.count, 22)
+        XCTAssertEqual(SdkRoute.allCases.count, 23)
         XCTAssertEqual(Set(SdkRoute.allCases.map(\.path)).count, SdkRoute.allCases.count)
         for route in SdkRoute.allCases {
             XCTAssertTrue(route.path.hasPrefix("/"), route.path)
@@ -23,6 +23,8 @@ final class SdkRouteAndErrorTests: XCTestCase {
     func testThePathsTheRunnerDialsAreTheOnesTheSdkServes() {
         XCTAssertEqual(SdkRoute.freshHierarchy.path, "/hierarchy/fresh")
         XCTAssertEqual(SdkRoute.networkFaultRules.path, "/network/fault-rules")
+        XCTAssertEqual(SdkRoute.accessibilityFocus.path, "/accessibility/focus")
+        XCTAssertEqual(SdkRoute.accessibilityFocus.method, "POST")
         XCTAssertEqual(SdkRoute.magicTap.path, "/accessibility/magic-tap")
         XCTAssertEqual(SdkRoute.dbTableStructure.path, "/db/table-structure")
         XCTAssertEqual(SdkRoute.observationSnapshot.path, "/observation/snapshot")

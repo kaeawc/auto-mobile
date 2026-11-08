@@ -120,6 +120,10 @@
         }
 
         #if !canImport(UIKit)
+            func testHttpAccessibilityFocusWithoutUIKitReturns501UnknownAndEmptyBody() throws {
+                try assertPost("/accessibility/focus", body: "{}", status: "501 Unknown", expected: "")
+            }
+
             func testHttpMagicTapWithoutUIKitReturns501UnknownAndEmptyBody() throws {
                 try assertPost("/accessibility/magic-tap", body: "", status: "501 Unknown", expected: "")
             }
@@ -421,7 +425,7 @@
             let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any])
             let capabilities = try XCTUnwrap(object["capabilities"] as? [String])
             #if canImport(UIKit)
-                let expectedCapabilities = ["network-fault-rules", "magic-tap", "sdk-trigger"]
+                let expectedCapabilities = ["network-fault-rules", "magic-tap", "accessibility-focus", "sdk-trigger"]
             #else
                 let expectedCapabilities = ["network-fault-rules", "sdk-trigger"]
             #endif

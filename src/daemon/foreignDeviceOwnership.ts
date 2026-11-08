@@ -99,12 +99,6 @@ export interface DeviceOwnershipFileSource {
   leasePath(deviceId: string): string | undefined;
   /** The allocation claim file for the device; creating its directory is left to `tryAcquire`. */
   claimPath(deviceId: string): string;
-  /**
-   * The coordination-directory claim file 0.0.84 daemons write (#10707). Read-only: a newer
-   * daemon still honours it so it does not take a device an older daemon claimed (#10708).
-   * Undefined for a platform 0.0.84 never claimed (iOS).
-   */
-  legacyClaimPath(deviceId: string): string | undefined;
   read(path: string): LockContent | undefined;
   /** Whether a lock file exists at `path` but is empty or names no readable PID. */
   isUnreadable?(path: string): boolean;
@@ -242,11 +236,6 @@ const defaultDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
       ctrlProxyForwardLeaseFileName(deviceId),
     ),
   claimPath: (deviceId) => deviceAllocationClaimPath(deviceId),
-  legacyClaimPath: (deviceId) =>
-    join(
-      getSharedAutoMobileDir(DEVICE_ALLOCATION_CLAIM_SUBDIR),
-      ctrlProxyForwardLeaseFileName(deviceId),
-    ),
   read: (path) => readExclusiveLockContent(path),
   isUnreadable: (path) => lockFileIsUnreadable(path),
   isProcessRunning: (pid) => isProcessRunning(pid),
@@ -284,13 +273,12 @@ export function iosDeviceAllocationClaimPath(
 
 /**
  * The iOS file source (#10980): only the allocation claim. iOS has no CtrlProxy forwarding lease
- * file and no 0.0.84-format claim to honour.
+ * file.
  */
 export const iosDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
   ...defaultDeviceOwnershipFileSource,
   leasePath: () => undefined,
   claimPath: (udid) => iosDeviceAllocationClaimPath(udid),
-  legacyClaimPath: () => undefined,
 };
 
 /**
@@ -353,6 +341,36 @@ export const tvDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
   claimPath: (udid) => tvDeviceAllocationClaimPath(udid),
 };
 
+/**
+ * The scope Apple Vision Pro simulator claims live under. Like an iOS simulator, a headset
+ * belongs to the user's CoreSimulator set, so every daemon on the host contends for one claim per
+ * UDID; headsets keep their own namespace so a headset claim is never read as an iOS one.
+ */
+export const VISION_SIMULATOR_CLAIM_SCOPE = "vision-simulators";
+
+/** Where an Apple Vision Pro simulator's allocation claim lives, keyed by its UDID. */
+export function visionDeviceAllocationClaimPath(
+  udid: string,
+  env: NodeJS.ProcessEnv = process.env,
+  homeDir?: string,
+): string {
+  return join(
+    getAdbServerScopedAutoMobileDir(
+      VISION_SIMULATOR_CLAIM_SCOPE,
+      DEVICE_ALLOCATION_CLAIM_SUBDIR,
+      env,
+      homeDir,
+    ),
+    ctrlProxyForwardLeaseFileName(udid),
+  );
+}
+
+/** The headset file source: only the allocation claim, as for iOS simulators. */
+export const visionDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
+  ...iosDeviceOwnershipFileSource,
+  claimPath: (udid) => visionDeviceAllocationClaimPath(udid),
+};
+
 /** The clock a foreign-ownership reader runs on, and its CtrlProxy forward evidence. */
 export interface ForeignOwnershipOptions {
   /** This daemon's own control socket path (defaults to the CtrlProxy forward-lease socket). */
@@ -369,7 +387,6 @@ export interface ForeignOwnershipOptions {
  * the files alone decide when no table can. The claim lives in a directory
  * scoped to the ADB server rather than to the coordination directory, so daemons with different
  * `AUTOMOBILE_COORDINATION_DIR` values on one adb server still see each other's claims (#10708).
- * A 0.0.84 daemon's claim in the coordination directory (#10707) is still read, never written.
  * All use the forwarding lease's lock format, including the owner's control socket, whose
  * absolute path any daemon on the host can probe.
  *
@@ -512,13 +529,10 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     await this.refresh([deviceId]);
   }
 
-  /** A claim file (ours or a 0.0.84 daemon's) exists but names no PID: its writer is unknown. */
+  /** A claim file exists but names no PID: its writer is unknown. */
   private hasUnreadableClaim(deviceId: string): boolean {
-    const paths = [
-      this.resolvePath(() => this.source.claimPath(deviceId), deviceId),
-      this.resolvePath(() => this.source.legacyClaimPath(deviceId), deviceId),
-    ];
-    return paths.some((path) => path !== undefined && this.source.isUnreadable?.(path) === true);
+    const path = this.resolvePath(() => this.source.claimPath(deviceId), deviceId);
+    return path !== undefined && this.source.isUnreadable?.(path) === true;
   }
 
   foreignOwnerPid(deviceId: string): number | undefined {
@@ -546,8 +560,8 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
   /**
    * The host-wide table decides the claim (#11811 step d), and for one more release the winner also
    * writes its claim file, so a daemon that cannot use the table and falls back to the files still
-   * sees it (owner decision 2026-11-02, option A2). A claim file or 0.0.84 claim a live foreign
-   * daemon holds refuses the claim. Undefined when no table can decide (watch and TV have none; no
+   * sees it (owner decision 2026-11-02, option A2). A claim file a live foreign daemon holds
+   * refuses the claim. Undefined when no table can decide (watch and TV have none; no
    * registry; a failed write): the claim files decide, as before.
    */
   private async claimInTable(
@@ -589,15 +603,13 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     return live !== undefined;
   }
 
-  /** The live foreign owner a claim file (this release's or a 0.0.84 one) names, if any. */
+  /** The live foreign owner the claim file names, if any. */
   private async fileClaimOwner(deviceId: string): Promise<number | undefined> {
     const path = this.resolvePath(() => this.source.claimPath(deviceId), deviceId);
     const held = path === undefined ? undefined : this.source.read(path);
-    const fileOwner =
-      path !== undefined && held !== undefined && held.pid !== this.selfPid
-        ? await this.evaluateOwner(path, deviceId, "claim")
-        : undefined;
-    return fileOwner ?? (await this.legacyClaimOwner(deviceId));
+    return path !== undefined && held !== undefined && held.pid !== this.selfPid
+      ? this.evaluateOwner(path, deviceId, "claim")
+      : undefined;
   }
 
   /** Whether the claim file for `deviceId` still names this owner. */
@@ -619,10 +631,6 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     if (path === undefined) {
       // No claim can be published; allocation proceeds as it did before claims existed.
       return "unpublished";
-    }
-    if ((await this.legacyClaimOwner(deviceId)) !== undefined) {
-      // A 0.0.84 daemon claimed the device in its coordination directory and still uses it.
-      return "refused";
     }
     let acquired: boolean;
     try {
@@ -715,22 +723,13 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
   private async readForeignOwner(deviceId: string): Promise<number | undefined> {
     const leasePath = this.resolvePath(() => this.source.leasePath(deviceId), deviceId);
     const claimPath = this.resolvePath(() => this.source.claimPath(deviceId), deviceId);
-    const [lease, claimOwner, legacyOwner] = await Promise.all([
+    const [lease, claimOwner] = await Promise.all([
       leasePath === undefined ? undefined : this.evaluateLock(leasePath, deviceId, "lease"),
       claimPath === undefined ? undefined : this.evaluateOwner(claimPath, deviceId, "claim"),
-      this.legacyClaimOwner(deviceId),
     ]);
-    const tableOwner = await this.tableOwnerUnlessAFileDecides(
-      deviceId,
-      lease,
-      claimOwner ?? legacyOwner,
-    );
-    this.noteIdleLeaseHolder(
-      deviceId,
-      lease?.idleSocketPath,
-      claimOwner ?? legacyOwner ?? tableOwner,
-    );
-    return lease?.pid ?? claimOwner ?? legacyOwner ?? tableOwner;
+    const tableOwner = await this.tableOwnerUnlessAFileDecides(deviceId, lease, claimOwner);
+    this.noteIdleLeaseHolder(deviceId, lease?.idleSocketPath, claimOwner ?? tableOwner);
+    return lease?.pid ?? claimOwner ?? tableOwner;
   }
 
   /** An idle lease holder is asked to give the lease up only when nothing else owns the device. */
@@ -753,12 +752,10 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
   private async tableOwnerUnlessAFileDecides(
     deviceId: string,
     lease: { pid: number; idleSocketPath?: string } | undefined,
-    claimOrLegacyOwner: number | undefined,
+    claimOwner: number | undefined,
   ): Promise<number | undefined> {
     const busyLeasePid = lease?.idleSocketPath === undefined ? lease?.pid : undefined;
-    return (claimOrLegacyOwner ?? busyLeasePid) === undefined
-      ? this.tableClaimOwner(deviceId)
-      : undefined;
+    return (claimOwner ?? busyLeasePid) === undefined ? this.tableClaimOwner(deviceId) : undefined;
   }
 
   /**
@@ -785,12 +782,6 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
       );
       return undefined;
     }
-  }
-
-  /** The live foreign owner of a 0.0.84-format claim in the coordination directory, if any. */
-  private async legacyClaimOwner(deviceId: string): Promise<number | undefined> {
-    const path = this.resolvePath(() => this.source.legacyClaimPath(deviceId), deviceId);
-    return path === undefined ? undefined : this.evaluateOwner(path, deviceId, "claim");
   }
 
   private resolvePath(resolve: () => string | undefined, deviceId: string): string | undefined {

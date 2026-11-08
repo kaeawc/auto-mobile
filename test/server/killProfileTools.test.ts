@@ -35,6 +35,10 @@ describe("killProfile tool (#14051)", () => {
     adb.setAndroidApiLevel(34);
     adb.setCommandResponse("shell pm path", createExecResult("package:/data/app/base.apk\n", ""));
     adb.setCommandResponse("shell appops get", createExecResult("No operations.\n", ""));
+    adb.setCommandResponseSequence(`shell appops get '${APP}' RUN_ANY_IN_BACKGROUND`, [
+      createExecResult("No operations.\n", ""),
+      createExecResult("RUN_ANY_IN_BACKGROUND: ignore\n", ""),
+    ]);
     registerKillProfileSessionCleanup(manager, { registry, shellFor: () => adb, timer });
     handler = createKillProfileHandler({
       sessionManager: () => manager,
@@ -57,6 +61,35 @@ describe("killProfile tool (#14051)", () => {
         .success,
     ).toBe(false);
     expect(killProfileSchema.safeParse({ action: "list", extra: 1 }).success).toBe(false);
+  });
+
+  test("new profile ids and structured boot observations are typed on the wire", () => {
+    for (const profile of ["samsung-foreground-kill", "screen-off-stop"]) {
+      expect(killProfileSchema.safeParse({ action: "apply", appId: APP, profile }).success).toBe(
+        true,
+      );
+    }
+    const observation = {
+      bootReceivers: [`${APP}/.BootReceiver`],
+      bootPermissionGranted: true,
+      stopped: false,
+      bootBroadcastDelivered: true,
+      pendingAlarms: 2,
+    };
+    const payload = {
+      success: true,
+      message: "checked",
+      action: "apply",
+      deviceId: emulator.deviceId,
+      steps: [{ step: "boot receiver check", command: "", status: "applied", observation }],
+    };
+    expect(killProfileResultSchema.parse(payload).steps?.[0].observation).toEqual(observation);
+    expect(
+      killProfileResultSchema.safeParse({
+        ...payload,
+        steps: [{ ...payload.steps[0], observation: { ...observation, pendingAlarms: "two" } }],
+      }).success,
+    ).toBe(false);
   });
 
   test("list returns the catalog and the non-emulatable behaviour without touching the device", async () => {

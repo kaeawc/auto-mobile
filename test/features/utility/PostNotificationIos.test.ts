@@ -1,6 +1,8 @@
 import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { PostNotification } from "../../../src/features/utility/PostNotification";
+import { InMemoryPostedNotificationLedger } from "../../../src/features/utility/postedNotificationLedger";
+import type { NotificationPolicyAccessState } from "../../../src/features/utility/NotificationPolicy";
 import { BootedDevice } from "../../../src/models";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { macOsOnlyTest } from "../../helpers/macOsHost";
@@ -30,6 +32,83 @@ describe("PostNotification - iOS Simulator", () => {
   beforeEach(() => {
     warn = spyOn(logger, "warn").mockImplementation(() => {});
     simctl = new FakeSimctl();
+  });
+
+  test.each<{
+    name: string;
+    iosVersion?: string;
+    authorization: NotificationPolicyAccessState;
+    shouldRead: boolean;
+    shouldPost: boolean;
+  }>([
+    {
+      name: "iOS 26.5 refuses notDetermined authorization",
+      iosVersion: "26.5",
+      authorization: { supported: true, allowed: false, authorizationStatus: "notDetermined" },
+      shouldRead: true,
+      shouldPost: false,
+    },
+    {
+      name: "iOS 26.5 refuses unreadable authorization",
+      iosVersion: "26.5",
+      authorization: { supported: true, allowed: null, warning: "No notification section found." },
+      shouldRead: true,
+      shouldPost: false,
+    },
+    {
+      name: "iOS 26.5 posts with granted authorization",
+      iosVersion: "26.5",
+      authorization: { supported: true, allowed: true, authorizationStatus: "authorized" },
+      shouldRead: true,
+      shouldPost: true,
+    },
+    {
+      name: "iOS 27.1 posts without reading authorization",
+      iosVersion: "27.1",
+      authorization: { supported: true, allowed: false },
+      shouldRead: false,
+      shouldPost: true,
+    },
+    {
+      name: "unknown iOS version posts without reading authorization",
+      authorization: { supported: true, allowed: false },
+      shouldRead: false,
+      shouldPost: true,
+    },
+  ])("$name", async ({ iosVersion, authorization, shouldRead, shouldPost }) => {
+    const readCalls: [string, string][] = [];
+    const notificationAuthorization = {
+      read: async (deviceId: string, bundleId: string) => {
+        readCalls.push([deviceId, bundleId]);
+        return authorization;
+      },
+    };
+    const postedNotifications = new InMemoryPostedNotificationLedger();
+    const result = await new PostNotification(
+      { ...makeDevice(SIM_UDID), iosVersion },
+      { simctl, notificationAuthorization, postedNotifications },
+    ).execute({ title: "t", body: "b", appId: "com.x" });
+
+    // systemTray attributes an iOS lone banner only by content recorded here (#17445).
+    expect(postedNotifications.postedBy(SIM_UDID, "com.x")).toEqual(
+      shouldPost ? [{ title: "t", body: "b" }] : [],
+    );
+    expect(result.success).toBe(shouldPost);
+    expect(result.supported).toBe(true);
+    expect(result.appId).toBe("com.x");
+    expect(pushCalls()).toHaveLength(shouldPost ? 1 : 0);
+    expect(readCalls).toEqual(shouldRead ? [[SIM_UDID, "com.x"]] : []);
+    if (shouldPost) {
+      expect(result.method).toBe("simctlPush");
+    } else {
+      expect(result.error).toContain(
+        "has not been granted notification authorization on this simulator",
+      );
+      expect(result.error).toContain(authorization.authorizationStatus ?? "unknown");
+      if (authorization.warning) {
+        expect(result.error).toContain(authorization.warning);
+      }
+    }
   });
 
   test("logs unexpected push rejections and preserves the top-level failure", async () => {

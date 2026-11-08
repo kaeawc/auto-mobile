@@ -138,21 +138,28 @@ enum DeviceHubDisplayLocator {
         )
     }
 
-    /// `sourceSize` in display points: the smallest whole scale from 1 to 3 that brings the long edge
-    /// within `maxDisplayPointsLongEdge`. The bezel is fixed in points, so the display must be too;
-    /// otherwise the same bounds sent as screenshot pixels would be placed differently.
-    static func pointSize(of sourceSize: CGSize) -> CGSize {
-        let longEdge = max(sourceSize.width, sourceSize.height)
-        let scale = (1 ... 3).first { longEdge / CGFloat($0) <= maxDisplayPointsLongEdge } ?? 3
-        return CGSize(width: sourceSize.width / CGFloat(scale), height: sourceSize.height / CGFloat(scale))
+    /// `sourceSize` in display points. The bezel is fixed in points, so the display must be too;
+    /// otherwise the same bounds sent as screenshot pixels would be placed differently. The daemon's
+    /// `sourceScale` (source units per point) is used when present. Without it (older daemons) the
+    /// scale is guessed: the smallest whole scale from 1 to 3 that brings the long edge within
+    /// `maxDisplayPointsLongEdge`.
+    static func pointSize(of sourceSize: CGSize, sourceScale: Double? = nil) -> CGSize {
+        let scale: CGFloat
+        if let sourceScale, sourceScale.isFinite, sourceScale > 0 {
+            scale = CGFloat(sourceScale)
+        } else {
+            let longEdge = max(sourceSize.width, sourceSize.height)
+            scale = CGFloat((1 ... 3).first { longEdge / CGFloat($0) <= maxDisplayPointsLongEdge } ?? 3)
+        }
+        return CGSize(width: sourceSize.width / scale, height: sourceSize.height / scale)
     }
 
     /// The display inside the drawn device. With the source size, the zoom follows from the
     /// device width; the display keeps the source aspect, in the orientation Device Hub drew.
-    static func displayRect(deviceBounds: CGRect, sourceSize: CGSize?) -> CGRect? {
+    static func displayRect(deviceBounds: CGRect, sourceSize: CGSize?, sourceScale: Double? = nil) -> CGRect? {
         guard deviceBounds.width > 0, deviceBounds.height > 0 else { return nil }
         guard let rawSize = sourceSize, rawSize.width > 0, rawSize.height > 0 else { return nil }
-        let sourceSize = pointSize(of: rawSize)
+        let sourceSize = pointSize(of: rawSize, sourceScale: sourceScale)
         let drawnLandscape = deviceBounds.width > deviceBounds.height
         let sourceLandscape = sourceSize.width > sourceSize.height
         let oriented = drawnLandscape == sourceLandscape
@@ -170,7 +177,7 @@ enum DeviceHubDisplayLocator {
     }
 
     /// Display rectangle in window points, or nil when Device Hub's layout cannot be read.
-    static func locate(window: SimulatorOverlayTarget, sourceSize: CGSize?) async -> CGRect? {
+    static func locate(window: SimulatorOverlayTarget, sourceSize: CGSize?, sourceScale: Double?) async -> CGRect? {
         guard let sourceSize,
               let element = SimulatorDisplayGeometry.windowElement(window),
               let region = detailRegion(
@@ -180,7 +187,7 @@ enum DeviceHubDisplayLocator {
               let pixels = await capture(window: window),
               let bounds = drawnBounds(in: pixels, region: region, windowSize: window.frame.size)
         else { return nil }
-        return displayRect(deviceBounds: bounds, sourceSize: sourceSize)
+        return displayRect(deviceBounds: bounds, sourceSize: sourceSize, sourceScale: sourceScale)
     }
 
     static func accessibilityLayout(of window: AXUIElement) -> AccessibilityLayout {

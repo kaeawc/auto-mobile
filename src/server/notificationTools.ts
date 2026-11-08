@@ -66,7 +66,7 @@ const postNotificationCommonShape = {
 };
 
 const postNotificationAppIdDescription =
-  "Android target package name or iOS/watchOS target bundle ID (required on iOS/watchOS); Android defaults to the live foreground app when omitted";
+  "Android target package name or iOS/watchOS/tvOS target bundle ID (required on iOS/watchOS/tvOS); Android defaults to the live foreground app when omitted";
 
 const androidAppIdInvalidMessage = "appId must be an Android package name";
 
@@ -85,7 +85,7 @@ export function checkPostNotificationPlatformConstraints(
   platform: Platform | undefined,
   args: { appId?: string },
 ): { path: "appId"; message: string } | null {
-  if ((platform === "ios" || platform === "watchos") && !args.appId) {
+  if ((platform === "ios" || platform === "watchos" || platform === "tvos") && !args.appId) {
     return { path: "appId", message: `appId is required when platform is ${platform}` };
   }
   if (platform === "android" && args.appId && !ANDROID_PACKAGE_NAME_PATTERN.test(args.appId)) {
@@ -121,7 +121,7 @@ export const postNotificationSchema = withAppIdAliases(
     }),
     (jsonSchema) => {
       jsonSchema.if = {
-        properties: { platform: { enum: ["ios", "watchos"] } },
+        properties: { platform: { enum: ["ios", "watchos", "tvos"] } },
         required: ["platform"],
       };
       jsonSchema.then = { required: ["appId"] };
@@ -259,7 +259,7 @@ export function registerNotificationTools(deps: NotificationToolDependencies = {
 
   ToolRegistry.registerDeviceAware(
     "postNotification",
-    "Post notification via Android SDK hooks or iOS/watchOS simulator simctl push.",
+    "Post notification via Android SDK hooks or iOS/watchOS/tvOS simulator simctl push.",
     postNotificationSchema,
     {
       handler: createPostNotificationHandler(deps),

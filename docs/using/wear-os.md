@@ -239,6 +239,59 @@ only `showTile` checks the screen, and only its `verified: true` means AutoMobil
 - The broadcasts were measured on the verified emulator; the tool itself is unverified on a
   device, so check `broadcastResult` when a result surprises you.
 
+## Watch faces and complications
+
+`wearSurface` also switches the watch face and fills complication slots. Name a resource-only
+(Watch Face Format) face by its bare package (`com.google.wear.offhand`) and a classic face as
+`<package>/<class>`; never pass `<package>/_placeholder_`. Complication types are the androidx
+type ints (`SHORT_TEXT` = 3, `RANGED_VALUE` = 5), and `provider` is the data source service as
+`<package>/<service>`.
+
+```json
+{
+  "name": "wearSurface",
+  "arguments": {
+    "action": "setComplication",
+    "watchFace": "com.google.wear.offhand",
+    "slot": 11,
+    "type": 5,
+    "provider": "com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.BatteryProviderService"
+  }
+}
+```
+
+| `action`            | Arguments                               | `success: true` means                                     |
+| ------------------- | --------------------------------------- | --------------------------------------------------------- |
+| `setWatchFace`      | `watchFace`                             | The face is the active one, with the reply's favorite id  |
+| `unsetWatchFace`    | none                                    | The face active before `setWatchFace` is active again     |
+| `setComplication`   | `watchFace`, `slot`, `type`, `provider` | The active face's slot shows that provider with that type |
+| `unsetComplication` | `watchFace`, `slot`, `provider`         | The active face's slot is empty                           |
+
+The watch accepts a request before applying it, so each action reads `dumpsys wear_service` back
+for up to about 5 s and sets `applied: true` (and `verified: true`) only when the change shows
+there. Results carry `requested`, `broadcastResult` (`code`, `data`, `accepted`, `favoriteId`),
+`favoriteId`, the last `readback` (`activeFace`, `favoriteId` and the active face's `slots`), and
+on failure a typed `error` with a `reason`:
+
+| `error`                   | Meaning and what to do                                                                     |
+| ------------------------- | ------------------------------------------------------------------------------------------ |
+| `not_applied`             | Accepted but not shown, typically a `type` the provider does not support: try another type |
+| `face_not_installed`      | No such face package (or class): check the name                                            |
+| `slot_out_of_range`       | The face has no such slot, or it is not the active face: `setWatchFace` first              |
+| `invalid_face_id`         | A `_placeholder_` class: pass a resource-only face as its bare package                     |
+| `unsupported_face`        | The fallback face has no slots: set another face first                                     |
+| `debug_surface_disabled`  | The debug receiver is off on this build: enable developer options and retry                |
+| `watch_face_not_switched` | `unsetWatchFace` with nothing to revert                                                    |
+| `missing_argument`        | The watch rejected the extras it was sent                                                  |
+| `unknown_reply`           | A reply this release does not know: check `broadcastResult`                                |
+
+- Slots belong to the active face, so set the face before its complications. List a face's slot
+  ids by reading `slots` from a `setWatchFace` result.
+- The tool does not check that `provider` is a complication data source before sending; list
+  them with `adb shell cmd package query-services -a android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST`.
+- The broadcasts and readbacks were measured on a Wear OS 7 emulator; the tool itself is
+  unverified on a device.
+
 ## Prototypes
 
 `prototype` `show` renders on a watch with the phone overlay and components; there are no
@@ -251,7 +304,7 @@ they stay tappable. Wear launchers are not expected to support pinned shortcuts,
 ## Not supported
 
 - Physical watches: only Wear OS emulators are matched and created.
-- Complications and watch faces, and listing the tiles in the carousel.
+- Listing the tiles in the carousel, and listing watch faces or complication providers.
 - Tapping a notification's expanded content or its reply and action buttons without an explicit
   clickable label (see [Notifications](#notifications)).
 - Hardware wake by tilt or touch, and a paired phone and watch.

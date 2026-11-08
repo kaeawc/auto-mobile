@@ -177,6 +177,8 @@ function broadcastMutations(
  * The Wear OS tile carousel has no readable prior and no revert, so `addTile` and `removeTile`
  * record a `fallback:` opaque intent per tile provider. `showTile` only scrolls the carousel (a
  * component target may add the tile while resolving its index, so it records like `addTile`).
+ * Watch face changes have no revert this tool can prove (unsetWatchFace only undoes the last
+ * setWatchFace), so they record one opaque intent for the active face and one per face slot.
  */
 function wearSurfaceMutations(
   args: Record<string, unknown>,
@@ -184,6 +186,13 @@ function wearSurfaceMutations(
 ): ToolMutation[] {
   if (platform === "ios" || (args.action === "showTile" && args.component === undefined)) {
     return [];
+  }
+  if (args.action === "setWatchFace" || args.action === "unsetWatchFace") {
+    return [{ kind: "opaque", key: opaqueIntentKey("wearSurface", "watchFace") }];
+  }
+  if (args.action === "setComplication" || args.action === "unsetComplication") {
+    const slot = [args.watchFace ?? null, args.slot ?? null];
+    return [{ kind: "opaque", key: opaqueIntentKey("wearSurface", "complication", ...slot) }];
   }
   const action = args.action === "showTile" ? "addTile" : args.action;
   return [{ kind: "opaque", key: opaqueIntentKey("wearSurface", action, args.component ?? null) }];

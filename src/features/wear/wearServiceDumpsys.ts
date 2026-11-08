@@ -52,3 +52,48 @@ export function parseWatchFaceState(dumpsys: string): WatchFaceState | null {
   }
   return { watchFaceVisible, inAmbient };
 }
+
+/** A `WatchFaceId[<package>,<class|null>]`; resource-only (WFF) faces have a null class. */
+export interface WatchFaceIdReading {
+  package: string;
+  className: string | null;
+}
+
+/** One `ComplicationsConfigController` active-config line: the live state of the active face. */
+export interface ComplicationSlotReading {
+  slot: number;
+  type: number;
+  /** `<package>/<class>` of the provider, or null for an empty slot. */
+  provider: string | null;
+}
+
+export interface WatchFaceReading {
+  activeFace?: WatchFaceIdReading;
+  /** The active face's favorite id (`favoriteId=<n>` in the watch_faces section). */
+  favoriteId?: number;
+  slots: ComplicationSlotReading[];
+}
+
+const ACTIVE_FACE = /activeWatchFaceComponent=WatchFaceId\[([^,\]]+),([^\]]*)\]/;
+const FAVORITE_ID = /(?:^|\s)favoriteId=(\d+)/m;
+const ACTIVE_CONFIG =
+  /^\s*id=\d+ slot=(\d+) type=(\d+) configActionPending=\S+ provider=(?:null|ComponentInfo\{([^}]*)\})/gm;
+
+/** Reads the active face and its live complication slots; absent lines leave fields unset. */
+export function parseWatchFaceReading(dumpsys: string): WatchFaceReading {
+  const text = dumpsys.replace(/\r\n/g, "\n");
+  const face = ACTIVE_FACE.exec(text);
+  const favorite = FAVORITE_ID.exec(text);
+  const slots = [...text.matchAll(ACTIVE_CONFIG)].map((match) => ({
+    slot: Number(match[1]),
+    type: Number(match[2]),
+    provider: match[3] ?? null,
+  }));
+  return {
+    ...(face
+      ? { activeFace: { package: face[1], className: face[2] === "null" ? null : face[2] } }
+      : {}),
+    ...(favorite ? { favoriteId: Number(favorite[1]) } : {}),
+    slots,
+  };
+}

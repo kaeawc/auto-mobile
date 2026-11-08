@@ -1,3 +1,4 @@
+import type { BuildSourceRevision } from "../../models/BuildSourceRevision";
 import type {
   NavigationEdgeProvenanceRow,
   NavigationEdgeTarget,
@@ -215,6 +216,15 @@ function compareProvenanceRecords(
   return 0;
 }
 
+/** Stored revisions were validated on write; both columns are set or neither is. */
+function sourceRevisionOf(row: { git_branch: string | null; git_sha: string | null }): {
+  sourceRevision?: BuildSourceRevision;
+} {
+  return row.git_branch !== null && row.git_sha !== null
+    ? { sourceRevision: { gitBranch: row.git_branch, gitSha: row.git_sha } }
+    : {};
+}
+
 function nodeProvenanceRowToRecord(row: NavigationNodeProvenanceRow): NavigationProvenanceRecord {
   return {
     buildKey: {
@@ -225,6 +235,7 @@ function nodeProvenanceRowToRecord(row: NavigationNodeProvenanceRow): Navigation
     deviceId: row.device_id,
     sessionUuid: row.session_uuid,
     lastSeen: row.last_seen_at,
+    ...sourceRevisionOf(row),
   };
 }
 
@@ -238,6 +249,7 @@ function edgeProvenanceRowToRecord(row: NavigationEdgeProvenanceRow): Navigation
     deviceId: row.device_id,
     sessionUuid: row.session_uuid,
     lastSeen: row.last_seen_at,
+    ...sourceRevisionOf(row),
   };
 }
 

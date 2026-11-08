@@ -188,6 +188,17 @@ export const launchAppResultSchema = z
     verifyFailureReason: z.string().optional(),
     verificationSkipped: z.literal("platform").optional(),
     observedAppId: z.string().optional(),
+    blockedBy: z
+      .object({
+        kind: z.literal("permission_dialog"),
+        packageName: z.string(),
+        permission: z.string().optional(),
+        actions: z.array(z.string()),
+      })
+      .optional()
+      .describe(
+        "Present when the launched app is behind a permission dialog: tapOn one of actions, or pre-grant with setAppPermissions",
+      ),
     prototypeAgent: z
       .object({
         port: z.number().int(),

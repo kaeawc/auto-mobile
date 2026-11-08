@@ -5,7 +5,7 @@ import {
   inheritsOwnerLabel,
 } from "../../utility/SearchableLabels";
 import type { SearchableEntry } from "../../utility/SearchableNode";
-import { isImeKeyEntry, toSearchable } from "../../utility/SearchableNode";
+import { isImeKeyEntry, searchableNativeId, toSearchable } from "../../utility/SearchableNode";
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../models/ViewHierarchyResult";
 import {
   applicationWindowCoverIndex,
@@ -649,6 +649,12 @@ export interface SkeletonProjectionResult {
    * array means what its schema says: actionable-only.
    */
   context: SkeletonElement[];
+  /**
+   * Rows dropped from `skeleton` as shadows of a sibling at identical bounds
+   * (#17465). Never emitted; diff replay reads them so a changed shadowed node
+   * keeps its selector index.
+   */
+  shadowed?: SkeletonElement[];
 }
 
 /**
@@ -763,6 +769,79 @@ function iosRowRefusedByTap(
   }).coveredBy;
 }
 
+/** Whether two rows sit at identical bounds in the same window and state. */
+function sameTarget(a: SkeletonAccumulator, b: SkeletonAccumulator): boolean {
+  return (
+    a.bounds.every((edge, index) => edge === b.bounds[index]) &&
+    a.provenance?.group === b.provenance?.group &&
+    a.enabled === b.enabled &&
+    a.occluded === b.occluded
+  );
+}
+
+/** A row that carries nothing beyond its id, bounds and affordances. */
+function isBareRow(acc: SkeletonAccumulator): boolean {
+  return (
+    acc.label === undefined &&
+    acc.sublabel === undefined &&
+    acc.editableHint === undefined &&
+    acc.checked === undefined &&
+    acc.selected === undefined &&
+    acc.stateDescription === undefined &&
+    acc.semanticLinks === undefined
+  );
+}
+
+function hasAffordancesOf(owner: SkeletonAccumulator, row: SkeletonAccumulator): boolean {
+  return [...row.affordances].every((affordance) => owner.affordances.has(affordance));
+}
+
+/** A resource id outranks a generated view id as the row to keep. */
+function hasNativeId(acc: SkeletonAccumulator): boolean {
+  return acc.target !== undefined && searchableNativeId(acc.target) !== undefined;
+}
+
+/** Whether `other` is the bare twin to keep in place of bare `row` (later index loses ties). */
+function isPreferredBareTwin(
+  row: SkeletonAccumulator,
+  other: SkeletonAccumulator,
+  otherFirst: boolean,
+): boolean {
+  if (!isBareRow(other) || !hasAffordancesOf(row, other)) {
+    return false;
+  }
+  const rowNative = hasNativeId(row);
+  const otherNative = hasNativeId(other);
+  return otherNative === rowNative ? otherFirst : otherNative;
+}
+
+/**
+ * Drop a bare (unlabelled, stateless) row whose bounds, window and affordances a
+ * sibling row already covers (#17465): a dialog's wrapper and content panel at
+ * the same frame are one target, and two rows for it read as two. A labelled
+ * sibling wins; between bare twins with the same affordances the one with a
+ * resource id wins, then the first.
+ */
+function dropShadowedRows(rows: SkeletonAccumulator[]): SkeletonAccumulator[] {
+  return rows.filter((row, index) => {
+    if (!isBareRow(row)) {
+      return true;
+    }
+    return !rows.some(
+      (other, otherIndex) =>
+        other !== row &&
+        sameTarget(row, other) &&
+        hasAffordancesOf(other, row) &&
+        (other.label !== undefined || isPreferredBareTwin(row, other, otherIndex < index)),
+    );
+  });
+}
+
+/** The replay-only `shadowed` field, present only when a row was dropped. */
+function shadowedRows(shadowed: SkeletonAccumulator[]): Pick<SkeletonProjectionResult, "shadowed"> {
+  return shadowed.length > 0 ? { shadowed: shadowed.map(toSkeletonEntry) } : {};
+}
+
 /**
  * Project the flattened `elements` block into the actionable `skeleton` and
  * informational `context` arrays (issue #6221 item 1): merge + dedup the
@@ -802,8 +881,11 @@ export function projectSkeleton(
     markIosRowsRefusedByTap(kept, elements, viewport, options.iosHierarchy);
   }
   markAppRowsCoveredByApplicationWindow(kept, androidHierarchy, viewport);
-  const actionable = kept.filter((acc) => acc.affordances.size > 0);
-  const nonActionable = kept.filter((acc) => acc.affordances.size === 0);
+  const distinct = dropShadowedRows(kept);
+  const emitted = new Set(distinct);
+  const shadowed = kept.filter((acc) => !emitted.has(acc));
+  const actionable = distinct.filter((acc) => acc.affordances.size > 0);
+  const nonActionable = distinct.filter((acc) => acc.affordances.size === 0);
 
   // One row for the whole IME window, appended last: the keyboard is a mode, not
   // a list of targets, so it must never come before the app's own affordances.
@@ -814,7 +896,8 @@ export function projectSkeleton(
 
   // Number emitted rows against the same complete captured candidate set used
   // by positional resolution. Promoted sources and their owners share a slot.
-  assignDuplicateIndexes(actionable, viewport, getSearchableEntries(elements));
+  // Shadowed rows keep their slot so diff replay still indexes their selector.
+  assignDuplicateIndexes([...actionable, ...shadowed], viewport, getSearchableEntries(elements));
 
   return {
     // Report only observed IME identity; missing capture evidence does not mean hidden.
@@ -824,6 +907,7 @@ export function projectSkeleton(
         (ime ? { visible: true, package: ime.package } : undefined)),
     skeleton: actionable.map(toSkeletonEntry),
     context: collapseSystemUiBlock(nonActionable).map(toSkeletonEntry),
+    ...shadowedRows(shadowed),
   };
 }
 
@@ -854,7 +938,7 @@ export function projectSkeletonReplayRows(
       continue;
     }
     const { elementId, displayedLabel, affordances } = toSkeletonSearchable(element);
-    const matches = projection.skeleton.filter(
+    const matches = [...projection.skeleton, ...(projection.shadowed ?? [])].filter(
       (row) =>
         row.elementId === elementId && row.bounds.every((edge, index) => edge === bounds[index]),
     );

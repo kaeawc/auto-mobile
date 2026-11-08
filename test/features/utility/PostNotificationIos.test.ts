@@ -1,6 +1,7 @@
 import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { PostNotification } from "../../../src/features/utility/PostNotification";
+import { InMemoryPostedNotificationLedger } from "../../../src/features/utility/postedNotificationLedger";
 import type { NotificationPolicyAccessState } from "../../../src/features/utility/NotificationPolicy";
 import { BootedDevice } from "../../../src/models";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
@@ -82,11 +83,16 @@ describe("PostNotification - iOS Simulator", () => {
         return authorization;
       },
     };
+    const postedNotifications = new InMemoryPostedNotificationLedger();
     const result = await new PostNotification(
       { ...makeDevice(SIM_UDID), iosVersion },
-      { simctl, notificationAuthorization },
+      { simctl, notificationAuthorization, postedNotifications },
     ).execute({ title: "t", body: "b", appId: "com.x" });
 
+    // systemTray attributes an iOS lone banner only by content recorded here (#17445).
+    expect(postedNotifications.postedBy(SIM_UDID, "com.x")).toEqual(
+      shouldPost ? [{ title: "t", body: "b" }] : [],
+    );
     expect(result.success).toBe(shouldPost);
     expect(result.supported).toBe(true);
     expect(result.appId).toBe("com.x");

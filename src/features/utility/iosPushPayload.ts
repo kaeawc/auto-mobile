@@ -32,7 +32,13 @@ export interface IosPushPayloadOptions {
 }
 
 export type IosPushPayloadBuild =
-  | { ok: true; json: string; warnings: string[] }
+  | {
+      ok: true;
+      json: string;
+      warnings: string[];
+      /** The title and body iOS displays, or undefined when the sent alert hides them. */
+      alert?: { title: string; body: string };
+    }
   | { ok: false; error: string; warnings: string[] };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -45,6 +51,23 @@ function toImageUrl(imagePath: string): string {
     return imagePath;
   }
   return pathToFileURL(resolvePathFromDaemonLaunchWorkingDirectory(imagePath)).href;
+}
+
+/**
+ * The displayed title and body of an `aps.alert`, which a raw payload may replace:
+ * a string alert is the body alone; an object reads its literal title and body.
+ * A localized alert (`title-loc-key`, `loc-key`) shows text this side cannot know.
+ */
+function effectiveAlert(alert: unknown): { title: string; body: string } | undefined {
+  if (typeof alert === "string") {
+    return { title: "", body: alert };
+  }
+  if (!isPlainObject(alert) || "title-loc-key" in alert || "loc-key" in alert) {
+    return undefined;
+  }
+  const title = typeof alert.title === "string" ? alert.title : "";
+  const body = typeof alert.body === "string" ? alert.body : "";
+  return title || body ? { title, body } : undefined;
 }
 
 function imageFields(
@@ -121,5 +144,5 @@ export function buildIosPushPayload(
       warnings,
     };
   }
-  return { ok: true, json, warnings };
+  return { ok: true, json, warnings, alert: effectiveAlert(aps.alert) };
 }

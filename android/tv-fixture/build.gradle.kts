@@ -16,6 +16,7 @@ android {
     versionCode = 1
   }
   buildFeatures { compose = true }
+  testOptions { unitTests.isIncludeAndroidResources = true }
 }
 
 dependencies {
@@ -25,7 +26,11 @@ dependencies {
   implementation(libs.compose.ui.core)
   implementation(libs.compose.ui.foundation)
   implementation(libs.tv.material)
+  // AutoMobile SDK: each screen reports a navigation event so explore and navigateTo work (#17421).
+  implementation(projects.autoMobileSdk)
 
   testImplementation(libs.junit)
   testImplementation(libs.robolectric)
+  testImplementation(libs.compose.ui.junit)
+  debugImplementation(libs.compose.ui.test.manifest)
 }

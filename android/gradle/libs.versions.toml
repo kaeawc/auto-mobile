@@ -102,6 +102,10 @@ aboutlibraries = "15.3.0"
 # Conveyor's in-app update control API (SoftwareUpdateController). Versioned independently of the
 # `conveyor` Gradle plugin above — this is the runtime library the desktop app links against.
 conveyor-control = "1.1"
+# Baseline profile generator (Macrobenchmark) and the on-device installer that applies the
+# profile to sideloaded CtrlProxy APKs.
+androidx-benchmark = "1.5.0"
+androidx-profileinstaller = "1.4.1"
 
 [plugins]
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "build-kotlin" }
@@ -226,6 +230,9 @@ ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negoti
 
 # OkHttp libraries
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
+androidx-benchmark-macro-junit4 = { module = "androidx.benchmark:benchmark-macro-junit4", version.ref = "androidx-benchmark" }
+androidx-baselineprofile-gradle-plugin = { module = "androidx.benchmark:benchmark-baseline-profile-gradle-plugin", version.ref = "androidx-benchmark" }
+androidx-profileinstaller = { module = "androidx.profileinstaller:profileinstaller", version.ref = "androidx-profileinstaller" }
 okhttp-sse = { module = "com.squareup.okhttp3:okhttp-sse", version.ref = "okhttp" }
 okhttp-mockwebserver = { module = "com.squareup.okhttp3:mockwebserver3", version.ref = "okhttp" }
 

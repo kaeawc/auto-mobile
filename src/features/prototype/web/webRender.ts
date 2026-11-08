@@ -448,7 +448,7 @@ const line =
     );
     const inner = child(scope, {
       inBox: false,
-      style: containerChildStyle(scope, node, axis, true),
+      style: containerChildStyle(scope, node, axis),
       heightBound: contentHeightBound(node.style, scope.heightBound),
     });
     const rowed = rowMeasured(node, path, prepareIn(inner), scope.heightBound);
@@ -829,10 +829,7 @@ const card: NodeRenderer = (raw, scope, path) => {
           "onSurface",
         )),
   });
-  const inner = child(scope, {
-    inBox: false,
-    style: containerChildStyle(scope, node, "column", true),
-  });
+  const inner = child(scope, { inBox: false, style: containerChildStyle(scope, node, "column") });
   return el("div", { attrs, style }, children(node, inner, path));
 };
 

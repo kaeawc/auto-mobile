@@ -534,6 +534,9 @@ interface ContainerScope {
   readonly style: WebStyleContext;
 }
 
+/** The containers that share their main axis by `weight`, as a native Row, Column or card does. */
+const WEIGHTING_PARENTS: ReadonlySet<unknown> = new Set(["row", "column", "card"]);
+
 /**
  * What a container's children see: the axis it lays them out on, whether it shares that axis by
  * weight (`weightsChildren`: a row, column or card), and an unbounded width only while
@@ -544,7 +547,6 @@ export function containerChildStyle(
   scope: ContainerScope,
   node: Raw,
   parentAxis: "row" | "column" | undefined,
-  weightsChildren = false,
 ): WebStyleContext {
   const style = record(node.style);
   const definite =
@@ -552,7 +554,7 @@ export function containerChildStyle(
   return {
     ...scope.style,
     parentAxis,
-    weightsChildren,
+    weightsChildren: parentAxis !== undefined && WEIGHTING_PARENTS.has(node.type),
     unboundedWidth: scope.style.unboundedWidth === true && !definite,
   };
 }

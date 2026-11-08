@@ -1,6 +1,7 @@
 import { toActionableError } from "../../models/ActionableError";
 import type { AdbCommandRunner } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { Timer } from "../../utils/SystemTimer";
+import { requireTileProvider, type TileProvider, type TileProviderLister } from "./TileProviders";
 
 /**
  * Wear OS tile carousel control over the system debug broadcasts (#17495, measured in #16824).
@@ -16,7 +17,12 @@ export const WEAR_SYSUI_PACKAGE = "com.google.android.clockwork.sysui";
 export const SHOW_TILE_SETTLE_MS = 3_000;
 const COMMAND_TIMEOUT_MS = 10_000;
 
-export const WEAR_SURFACE_ACTIONS = ["addTile", "showTile", "removeTile"] as const;
+export const WEAR_SURFACE_ACTIONS = [
+  "addTile",
+  "showTile",
+  "removeTile",
+  "listTileProviders",
+] as const;
 export type WearSurfaceAction = (typeof WEAR_SURFACE_ACTIONS)[number];
 
 /** `<package>/<service>`; the service may use the `.Name` shorthand. No shell metacharacters. */
@@ -136,7 +142,19 @@ export interface WearSurfaceResult {
   reason?: string;
 }
 
+/** listTileProviders: a read of the installed tile provider services; nothing is broadcast. */
+export interface TileProviderListResult {
+  success: true;
+  action: "listTileProviders";
+  requested: Record<string, never>;
+  providers: TileProvider[];
+  verified: false;
+  message: string;
+}
+
 export interface WearSurface {
+  listTileProviders(signal?: AbortSignal): Promise<TileProviderListResult>;
+  /** Throws TileProviderNotFoundError, without broadcasting, when component is not a tile provider. */
   addTile(component: string, signal?: AbortSignal): Promise<WearSurfaceResult>;
   removeTile(component: string, signal?: AbortSignal): Promise<WearSurfaceResult>;
   showTile(target: TileTarget, signal?: AbortSignal): Promise<WearSurfaceResult>;
@@ -146,6 +164,8 @@ export interface WearSurfaceDeps {
   adb: AdbCommandRunner;
   timer: Timer;
   observe: SurfaceObserver;
+  /** Checked before every `add-tile` so an unknown component fails typed, with nothing sent. */
+  tileProviders: TileProviderLister;
 }
 
 const FAILURE_REASONS: Partial<Record<BroadcastOutcome, string>> = {
@@ -168,6 +188,21 @@ function failureReason(reply: ClassifiedBroadcast): string {
 
 export class AdbWearSurface implements WearSurface {
   constructor(private readonly deps: WearSurfaceDeps) {}
+
+  async listTileProviders(signal?: AbortSignal): Promise<TileProviderListResult> {
+    const providers = await this.deps.tileProviders.list(signal);
+    return {
+      success: true,
+      action: "listTileProviders",
+      requested: {},
+      providers,
+      verified: false,
+      message:
+        providers.length > 0
+          ? `${providers.length} tile provider(s); pass one as component to addTile, showTile or removeTile.`
+          : "No tile providers are installed on this watch.",
+    };
+  }
 
   async addTile(component: string, signal?: AbortSignal): Promise<WearSurfaceResult> {
     const reply = await this.addTileBroadcast(component, signal);
@@ -270,7 +305,9 @@ export class AdbWearSurface implements WearSurface {
     };
   }
 
+  /** Throws TileProviderNotFoundError before broadcasting when component is not a tile provider. */
   private async addTileBroadcast(component: string, signal?: AbortSignal) {
+    await requireTileProvider(this.deps.tileProviders, component, signal);
     return classifyBroadcast(
       "add-tile",
       await this.broadcast(

@@ -1,0 +1,16 @@
+$ --es operation add-tile --ecn component com.google.android.contacts/com.google.android.wearable.contacts.tiles.singlecontact.SingleContactTileService
+Broadcast completed: result=1, data="Index=[0]"
+$ --es operation add-tile --ecn component com.google.android.contacts/com.google.android.wearable.contacts.tiles.FavoriteContactsTileService
+Broadcast completed: result=1, data="Index=[1]"
+$ --es operation add-tile --ecn component com.google.android.contacts/com.google.android.wearable.contacts.tiles.FavoriteContactsTileService --ei index 2
+Broadcast completed: result=1, data="Index=[1]"
+$ --es operation show-tile --ei index 1
+Broadcast completed: result=1
+$ --es operation remove-tile --ecn component com.google.android.contacts/com.google.android.wearable.contacts.tiles.singlecontact.SingleContactTileService
+Broadcast completed: result=1, data="Tile(s) removed."
+$ --es operation remove-tile --ecn component com.google.android.contacts/com.google.android.wearable.contacts.tiles.singlecontact.SingleContactTileService
+Broadcast completed: result=1, data="Tile(s) removed."
+$ --es operation remove-tile
+Broadcast completed: result=3, data="A component name is required."
+$ --es operation remove-tile --ecn component com.google.android.contacts/com.google.android.wearable.contacts.tiles.FavoriteContactsTileService
+Broadcast completed: result=1, data="Tile(s) removed."

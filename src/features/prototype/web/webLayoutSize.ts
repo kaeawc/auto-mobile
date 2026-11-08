@@ -170,7 +170,7 @@ export function contentBox(element: WebElement, rect: WebRect, vars: CssVars): W
 }
 
 /** An element's `aspect-ratio` as width over height, if it has a usable one. */
-function aspectRatioOf(element: WebElement): number | undefined {
+export function aspectRatioOf(element: WebElement): number | undefined {
   const [width, height = "1"] = (element.style["aspect-ratio"] ?? "").split("/");
   const ratio = Number(width) / Number(height);
   return Number.isFinite(ratio) && ratio > 0 ? ratio : undefined;

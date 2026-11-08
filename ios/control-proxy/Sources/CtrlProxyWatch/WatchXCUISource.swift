@@ -65,6 +65,7 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
         }
     }
 
+    private lazy var clockface = XCUIApplication(bundleIdentifier: "com.apple.clockface")
     private let app: XCUIApplication
     private let system: XCUIApplication
     private let failureCoordinator: CommandFailureCoordinator
@@ -144,6 +145,38 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
             isUserInteractionEnabled: snapshot.isEnabled,
             children: children
         )
+    }
+
+    func faceTap(x: Double, y: Double) throws {
+        try performGesture {
+            clockface.coordinate(withNormalizedOffset: CGVector(dx: x, dy: y)).tap()
+        }
+    }
+
+    func faceDrag(fromX: Double, fromY: Double, toX: Double, toY: Double) throws {
+        try performGesture {
+            clockface.coordinate(withNormalizedOffset: CGVector(dx: fromX, dy: fromY)).press(
+                forDuration: 0.1,
+                thenDragTo: clockface.coordinate(withNormalizedOffset: CGVector(dx: toX, dy: toY))
+            )
+        }
+    }
+
+    func faceSwipe(_ direction: WatchSwipeDirection) throws {
+        try performGesture {
+            switch direction {
+            case .up: clockface.swipeUp()
+            case .down: clockface.swipeDown()
+            case .left: clockface.swipeLeft()
+            case .right: clockface.swipeRight()
+            }
+        }
+    }
+
+    func faceDump() throws -> String {
+        var text = ""
+        try performGesture { text = clockface.debugDescription }
+        return text
     }
 
     func tap(x: Double, y: Double) throws {

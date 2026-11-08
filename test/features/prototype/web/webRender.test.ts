@@ -789,6 +789,37 @@ describe("prototype web still (#16346)", () => {
     expect(style("after")).not.toHaveProperty("max-width");
   });
 
+  test("a nested capped row after an unsized aspect ratio keeps its parent's zero width (#16695)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          children: [
+            {
+              type: "row",
+              children: [
+                { type: "box", style: { aspectRatio: 2 } },
+                {
+                  type: "row",
+                  testTag: "nested",
+                  style: { maxWidth: 300 },
+                  children: [
+                    { type: "box", style: { aspectRatio: 1, maxWidth: 40 } },
+                    { type: "text", text: "b" },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      }),
+      "nested",
+    )[0]!;
+    // The outer row measures it against no width, which its own bound must not widen.
+    expect(row.style["max-width"]).toBe("0px");
+  });
+
   test("a later sibling's minWidth gives way to a capped aspect ratio (#16772)", () => {
     const row = byTag(
       renderPrototypeStill({
@@ -1001,6 +1032,32 @@ describe("prototype web still (#16346)", () => {
     // 100 dp less the 60 dp sibling leaves 40 dp, so the ratio is at most 80 dp wide.
     expect(ratioIn({ style: { height: "fill" } })).toMatchObject({ "flex-basis": "80px" });
     expect(ratioIn({ style: { weight: 1 } })).toMatchObject({ "flex-basis": "80px" });
+  });
+
+  test("a weighted row's dp height does not cap the share its column allocates (#16701)", () => {
+    const ratio = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          style: { height: { dp: 100 } },
+          children: [
+            { type: "box", style: { height: { dp: 20 } } },
+            {
+              type: "row",
+              style: { weight: 1, height: { dp: 20 } },
+              children: [
+                { type: "box", testTag: "ratio", style: { aspectRatio: 2 } },
+                { type: "text", text: "b" },
+              ],
+            },
+          ],
+        },
+      }),
+      "ratio",
+    )[0]!.style;
+    // The row is sized to its 80 dp share, not its 20 dp height, so the ratio is at most 160 dp.
+    expect(ratio).toMatchObject({ "flex-basis": "160px" });
   });
 
   test("a sheet window hands its height to a fill row at the root (#16690)", () => {

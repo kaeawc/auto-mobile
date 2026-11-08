@@ -21,6 +21,8 @@ const ambientInput = z.strictObject({ action: z.enum(["enter", "exit"]) });
 export const ambientResultSchema = z.object({
   success: z.boolean(),
   action: z.enum(["enter", "exit"]),
+  ambient: z.union([z.boolean(), z.literal("unknown")]),
+  watchFaceVisible: z.boolean().optional(),
   wakefulness: z.enum(["Awake", "Asleep", "Dozing"]).optional(),
   message: z.string(),
   reason: z.string().optional(),
@@ -94,7 +96,7 @@ export const createAmbientHandler =
 const ambientTool = defineDeviceTool({
   name: "ambient",
   description:
-    "Wear OS watches only (other form factors are refused without a change): power-state change. enter sends KEYCODE_SLEEP, exit sends KEYCODE_WAKEUP, then reads wakefulness once. Enter succeeds on Dozing or Asleep; exit succeeds on Awake. Wear exposes no ambient readback, so success does not prove ambient mode. Hardware wake by tilt or touch is untested.",
+    'Wear OS watches only (other form factors are refused without a change): enter sends KEYCODE_SLEEP, exit sends KEYCODE_WAKEUP, then reads wakefulness and the watch face\'s inAmbient from dumpsys wear_service, reported as ambient (true, false or "unknown"). Enter succeeds when inAmbient is true; exit when inAmbient is false and wakefulness is Awake. Without that readback, enter succeeds on Dozing or Asleep and exit on Awake. Hardware wake by tilt or touch is untested.',
   input: ambientInput,
   handler: createAmbientHandler(),
   options: { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: ambientResultSchema },

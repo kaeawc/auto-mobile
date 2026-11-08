@@ -92,6 +92,13 @@ export const ROW_BOUND_KEY = "webRowBound";
 export const INCOMING_HEIGHT_KEY = "webIncomingHeight";
 
 /**
+ * A style key the web renderer adds beside INCOMING_HEIGHT_KEY, never authored: true when that
+ * height is a column's weight allocation, which sizes the child outright rather than capping it
+ * (see rowContentHeight in webRowAspect.ts).
+ */
+export const INCOMING_ALLOCATED_KEY = "webIncomingAllocated";
+
+/**
  * A row child's measure hint: `take` makes it the row's lone grower, `zero` measures it against no
  * width, and `shrink` sets how fast it gives up width, from its own `basis` when it has one. `later`
  * marks a sibling after a capped aspect ratio, whose authored `minWidth` holds only while width
@@ -155,7 +162,10 @@ export function laterMinStrut(style: unknown, context: WebStyleContext): number 
   return sized ? undefined : raw.minWidth;
 }
 
-/** Applied after the authored bounds: `zero` beats a `maxWidth`, an authored `minWidth` holds. */
+/**
+ * Applied after the authored bounds. A shrinking or taking child keeps an authored `minWidth`;
+ * `zero` beats both bounds, as `sizeIn` clamps an authored minimum into a zero incoming width.
+ */
 function rowMeasureStyle(css: Css, style: Raw, context: WebStyleContext) {
   const measure = record(style[ROW_MEASURE_KEY]);
   if (context.parentAxis !== "row" || !measure) {
@@ -175,6 +185,7 @@ function rowMeasureStyle(css: Css, style: Raw, context: WebStyleContext) {
     css[MIN_WIDTH] = "0";
   }
   if (measure.zero === true) {
+    css[MIN_WIDTH] = "0";
     css[MAX_WIDTH] = "0px";
   }
 }
@@ -456,8 +467,25 @@ export function nodeCss(style: unknown, context: WebStyleContext): Css {
   if (raw) {
     sizeStyle(css, raw, context);
     boxStyle(css, raw, context);
+    rowZeroedInline(css, raw, context);
   }
   return css;
+}
+
+/**
+ * A zeroed row child's horizontal padding and border sit inside its zero width, as Android sizes the
+ * node before its padding (and draws its border without taking layout space). CSS cannot shrink a
+ * box below its padding and border, so they are dropped on that axis to keep the box at 0 wide.
+ */
+function rowZeroedInline(css: Css, style: Raw, context: WebStyleContext) {
+  if (context.parentAxis !== "row" || record(style[ROW_MEASURE_KEY])?.zero !== true) {
+    return;
+  }
+  css["padding-inline-start"] = "0px";
+  css["padding-inline-end"] = "0px";
+  if (css.border !== undefined) {
+    css["border-inline-width"] = "0px";
+  }
 }
 
 const MAIN_ALIGN: Readonly<Record<string, string>> = {

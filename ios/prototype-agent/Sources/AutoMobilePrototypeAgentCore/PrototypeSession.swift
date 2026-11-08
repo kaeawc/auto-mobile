@@ -274,7 +274,7 @@ struct PrototypeSession {
         // A stored path (`stack:<id>`, #14188) applies at a fresh show; a same-id in-place show's
         // retained paths win over it.
         let restored = (restoredStacks ?? [:]).mapValues { PrototypeStackSnapshot(entries: $0) }
-        let retainedStacks = keepNavigation ? Set(stacks.keys) : []
+        let previousStacks = keepNavigation ? stacks : [:]
         rebuildNavigation(
             for: spec.root,
             keepingPages: keepNavigation ? pages : [:],
@@ -293,9 +293,16 @@ struct PrototypeSession {
         revisions[spec.id] = shownRevision
         stateRevisions = state.keys.reduce(into: [:]) { $0[$1] = shownRevision }
         self.spec = spec
+        // A same-id show retains a stack when at least one of its entries still fits, as on Android.
+        var retainedStacks = Set(previousStacks.compactMap { id, snapshot in
+            stackNodes[id].flatMap { node in
+                snapshot.entries.contains { PrototypeStackRoutes.isValid([$0], stack: node) } ? id : nil
+            }
+        })
         if !rebindRoutes() {
             // The bound tree does not fit the show's limits: every stack starts over at its start.
             rebuildNavigation(for: spec.root, keepingPages: pages, keepingStacks: [:])
+            retainedStacks = []
         }
         // Every stack's initial top runs its onEnter, restored paths included; retained ones do not.
         pendingEnters = stacks.keys.filter { !retainedStacks.contains($0) }
@@ -932,8 +939,10 @@ struct PrototypeSession {
     private mutating func runPendingEnters() -> [PrototypeEvent] {
         let ids = pendingEnters
         pendingEnters = []
+        let initial = stacks.mapValues(\.entries)
         var events: [PrototypeEvent] = []
-        for id in ids where isShown {
+        // A stack an earlier onEnter already navigated has entered its new top, so it is not entered again.
+        for id in ids where isShown && stacks[id]?.entries == initial[id] {
             events += runEnter(id)
         }
         return events

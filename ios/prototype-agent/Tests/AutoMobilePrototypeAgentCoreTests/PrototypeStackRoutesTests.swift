@@ -203,4 +203,18 @@ final class PrototypeStackRoutesTests: XCTestCase {
         XCTAssertEqual(fields.typed("{route.n}"), .number(2))
         XCTAssertEqual(fields.typed("#{route.n}"), .string("#2"))
     }
+
+    func testRoutePlaceholdersBindUpsertDataPathsAndImageAssets() throws {
+        let binder = PrototypeRouteBinder.Fields(params: ["id": .string("a/b"), "img": .string("thumb")])
+        var upsert = try XCTUnwrap(
+            json(#"{"type":"upsertData","path":"/data/posts/{route.id}/tags","key":"id","value":{"state":"x"}}"#)
+                .objectFields
+        )
+        binder.action(&upsert)
+        XCTAssertEqual(upsert["path"], .string("/data/posts/a~1b/tags"))
+        XCTAssertEqual(upsert["key"], .string("id"))
+        var image = try XCTUnwrap(json(#"{"type":"image","asset":"{route.img}"}"#).objectFields)
+        binder.node(&image)
+        XCTAssertEqual(image["asset"], .string("thumb"))
+    }
 }

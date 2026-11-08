@@ -220,7 +220,11 @@ function stringList(value: unknown): string[] {
  * fit.
  */
 function storedStackFits(value: unknown): boolean {
-  return Array.isArray(value) && value.length > 0;
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((entry: unknown) => typeof record(entry)?.screen === "string")
+  );
 }
 
 /** Applies one stored value onto the restore; false leaves it untouched (the value does not fit). */

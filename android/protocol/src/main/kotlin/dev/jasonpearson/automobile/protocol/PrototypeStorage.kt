@@ -266,7 +266,13 @@ object PrototypeStorageRestorer {
     // A stored stack path lives in the runtime, not the spec: only its shape is checked here, and
     // the runtime starts the stack at `start` when its screens or params no longer fit (#14188).
     if (storageKey.startsWith(PrototypeRouteRuntime.STACK_STORAGE_PREFIX))
-      restored.takeIf { value is JsonArray && value.isNotEmpty() }
+      restored.takeIf {
+        value is JsonArray &&
+          value.isNotEmpty() &&
+          value.all { entry ->
+            ((entry as? JsonObject)?.get("screen") as? JsonPrimitive)?.isString == true
+          }
+      }
     else
       when (val key = PrototypeStorageKey.parse(storageKey)) {
         is PrototypeStorageKey.State -> {

@@ -46,6 +46,9 @@ class PrototypeRoutesRuntimeTest {
           {"type":"setStack","stack":"nav","path":[{"screen":"feed"},
             {"screen":"post","params":{"postId":"41"}},
             {"screen":"profile","params":{"userId":"ada"}}]}]},
+        {"type":"button","label":"Open and count","onTap":[
+          {"type":"push","stack":"nav","screen":"post","params":{"postId":"1"}},
+          {"type":"increment","key":"count"}]},
         {"type":"button","label":"Bad state","onTap":[
           {"type":"push","stack":"nav","screen":"post","params":{"postId":{"state":"count"}}}]}]}"""
 
@@ -326,5 +329,17 @@ class PrototypeRoutesRuntimeTest {
     runtime.shown()
     runtime.flushStorage()
     assertNull(store.stored("routes")?.values?.get("stack:nav"))
+  }
+
+  @Test
+  fun `a later write in the list keeps what the pushed screen's onEnter wrote`() = runTest {
+    val entering =
+      """{"post":{"params":{"postId":"string"},
+        "onEnter":[{"type":"setState","key":"confirm","value":"{route.postId}"}]},
+        "profile":{"params":{"userId":"string"}}}"""
+    val runtime = runtime(spec(routes = entering))
+    runtime.handle(runtime.button("Open and count"))
+    assertEquals(PrototypeScalar.Text("1"), runtime.current.state["confirm"])
+    assertEquals(PrototypeScalar.Numeric(4.0), runtime.current.state["count"])
   }
 }

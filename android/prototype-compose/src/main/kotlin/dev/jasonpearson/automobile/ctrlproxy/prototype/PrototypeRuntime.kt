@@ -216,11 +216,14 @@ class PrototypeRuntime(
   suspend fun shown(preservingState: Boolean = false) {
     appeared = if (preservingState) visibleAppearances().keys else emptySet()
     // Each stack's first screen enters once per show (#14188); a preserving show skips only the
-    // stacks whose paths it kept, so a stack new to the replacement still enters.
+    // stacks whose paths it kept, so a stack new to the replacement still enters. A stack an
+    // earlier
+    // onEnter already navigated has entered its new top, so it is not entered again.
     if (current.active) {
-      current.stacks.keys
+      val initial = current.stacks
+      initial.keys
         .filter { !preservingState || it !in retainedStackIds }
-        .forEach { enter(it) }
+        .forEach { if (current.stacks[it] == initial[it]) enter(it) }
     }
     if (!preservingState) handle(PrototypeInteraction.TimerFire(emptyList()))
   }
@@ -742,9 +745,14 @@ class PrototypeRuntime(
         is PrototypeCancelTimerAction -> timerEngine.cancel(action.id)
         else ->
           writes[index]?.let { (key, planned) ->
-            // A data write earlier in this list may have added rows that bind this key, so a
-            // value planned against the old data is checked again against the data as it is now.
-            if (current.spec.data === plannedData) writeInteractionSpec(planned)
+            // A data write earlier in this list may have added rows that bind this key, and a
+            // route onEnter may have written other keys (#14188), so a value planned against
+            // anything but the current data and state is checked again against them instead.
+            if (
+              current.spec.data === plannedData &&
+                planned.state.orEmpty() - key == current.state - key
+            )
+              writeInteractionSpec(planned)
             else
               writeInteractionSpec(
                 validated(current.spec, mapOf(key to planned.state.orEmpty().getValue(key))),

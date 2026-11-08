@@ -258,7 +258,7 @@ enum PrototypeRouteBinder {
                 field(&value, "name")
                 bindings(&value, "context")
                 keys(&value, "requireValid")
-            case "setData", "appendData", "prependData", "removeData":
+            case "setData", "appendData", "prependData", "upsertData", "removeData":
                 field(&value, "path", .pointer)
                 if type != "removeData", let raw = value["value"] { value["value"] = binding(raw) }
             case "request", "platform":
@@ -316,6 +316,7 @@ enum PrototypeRouteBinder {
 
         private func componentFields(_ value: inout Object, type: String) {
             switch type {
+            case "image": field(&value, "asset")
             case "text":
                 field(&value, "text")
                 object(&value, "linkify") { actions(&$0) }

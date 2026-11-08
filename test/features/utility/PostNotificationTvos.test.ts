@@ -1,6 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { PostNotification } from "../../../src/features/utility/PostNotification";
 import type { BootedDevice } from "../../../src/models";
 import {
@@ -14,13 +12,12 @@ import {
   assertToolSupportsDevicePlatform,
 } from "../../../src/server/applePlatformToolSupport";
 
+import { loadTvosSimctlFixture } from "../../helpers/tvosSimctlFixtures";
+
 // `simctl push` on a tvOS 26.5 Apple TV simulator, captured in #17526.
-const capture = readFileSync(
-  join(import.meta.dir, "../../fixtures/tvos-simctl/push.txt"),
-  "utf8",
-).split("\n");
-const CAPTURED_BUNDLE_ID = capture[0].split(" ")[4];
-const CAPTURED_STDOUT = `${capture[1]}\n`;
+const capture = loadTvosSimctlFixture("push");
+// Bundle ID used in the capture.
+const BUNDLE = "dev.jasonpearson.automobile.ctrlproxy.tv";
 
 const TV_UDID = "5B7E1C3D-2A4F-4E6B-8C9D-1E2F3A4B5C6D";
 const tv: BootedDevice = { name: "Apple TV 4K", deviceId: TV_UDID, platform: "tvos" };
@@ -40,17 +37,17 @@ function memoryFileSystem(): SimCtlFileSystem & { writes: Map<string, string> } 
 }
 
 function simctlWithPushResult(push: () => ReturnType<typeof createExecResult>) {
-  const calls: string[][] = [];
+  const calls: Array<{ file: string; args: string[] }> = [];
   const fileSystem = memoryFileSystem();
-  const execAsync = async (_file: string, args: string[]) => {
-    calls.push(args);
+  const execAsync = async (file: string, args: string[]) => {
+    calls.push({ file, args });
     if (args.join(" ") === "simctl --version") {
       return createExecResult("simctl version 1.0.0", "");
     }
     return args[1] === "push" ? push() : createExecResult("", "");
   };
   const simctl = new SimCtlClient(tv, execAsync, { fileSystem, platform: "darwin" });
-  return { simctl, fileSystem, pushCalls: () => calls.filter((args) => args[1] === "push") };
+  return { simctl, fileSystem, pushCalls: () => calls.filter(({ args }) => args[1] === "push") };
 }
 
 describe("postNotification on an Apple TV simulator (#17526)", () => {
@@ -65,7 +62,7 @@ describe("postNotification on an Apple TV simulator (#17526)", () => {
 
   test("pushes the APNs payload with simctl push and reports the captured delivery", async () => {
     const { simctl, fileSystem, pushCalls } = simctlWithPushResult(() =>
-      createExecResult(CAPTURED_STDOUT, ""),
+      createExecResult(capture.stdout, capture.stderr),
     );
     const notificationAuthorization = {
       read: async () => {
@@ -76,24 +73,29 @@ describe("postNotification on an Apple TV simulator (#17526)", () => {
     const result = await new PostNotification(tv, { simctl, notificationAuthorization }).execute({
       title: "x",
       body: "y",
-      appId: CAPTURED_BUNDLE_ID,
+      appId: BUNDLE,
     });
 
+    expect(capture.exitCode).toBe(0);
+    expect(capture.stderr).toBe("");
     expect(result).toEqual({
       success: true,
       supported: true,
       method: "simctlPush",
-      appId: CAPTURED_BUNDLE_ID,
+      appId: BUNDLE,
       channelId: undefined,
       warning: undefined,
     });
     expect(pushCalls()).toHaveLength(1);
-    const [, , udid, bundleId, payloadPath] = pushCalls()[0];
-    expect([udid, bundleId]).toEqual([TV_UDID, CAPTURED_BUNDLE_ID]);
+    const { file, args } = pushCalls()[0];
+    const payloadPath = args[4];
+    // The capture used stdin ("-"); production supplies the equivalent APNs file.
+    expect(file).toBe("xcrun");
+    expect(args).toEqual(["simctl", "push", TV_UDID, BUNDLE, payloadPath]);
     expect(payloadPath.endsWith("payload.apns")).toBe(true);
     expect(JSON.parse(fileSystem.writes.get(payloadPath) ?? "{}")).toMatchObject({
       aps: { alert: { title: "x", body: "y" } },
-      "Simulator Target Bundle": CAPTURED_BUNDLE_ID,
+      "Simulator Target Bundle": BUNDLE,
     });
   });
 
@@ -116,7 +118,7 @@ describe("postNotification on an Apple TV simulator (#17526)", () => {
     const result = await new PostNotification(tv, { simctl }).execute({
       title: "T",
       body: "B",
-      appId: CAPTURED_BUNDLE_ID,
+      appId: BUNDLE,
     });
 
     expect(result.success).toBe(false);

@@ -144,6 +144,13 @@ export const startDeviceParametersSchema = z.object({
     })
     .optional()
     .describe("Desired screen dimensions"),
+  pairWithDeviceId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "watchOS only: iPhone simulator UDID to pair and activate before boot; does not boot the phone",
+    ),
   deviceId: z.string().optional(),
   preferRunning: z.boolean().optional().describe("Prefer already-booted device (default true)"),
   timeoutMs: z
@@ -239,6 +246,7 @@ export const startDeviceSchema = z.preprocess(
 export const watchStartDeviceParametersSchema = z
   .object({
     platform: z.literal("watchos"),
+    pairWithDeviceId: startDeviceParametersSchema.shape.pairWithDeviceId,
     deviceId: z.string().min(1).optional().describe("Apple Watch simulator UDID"),
     name: z.string().min(1).optional().describe("Exact Apple Watch simulator name"),
     timeoutMs: startDeviceParametersSchema.shape.timeoutMs.describe("Total boot timeout in ms"),

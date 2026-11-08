@@ -11,6 +11,7 @@ import {
   MAX_PROTOTYPE_NOTIFICATION_TITLE_LENGTH,
   MAX_PROTOTYPE_NOTIFICATIONS_ACTIVE,
 } from "../../../src/features/prototype/prototypeNotificationLimits";
+import { prototypeNotificationTotalError } from "../../../src/features/prototype/prototypeNotifications";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 
 const notifications = contract.platformModules.notifications;
@@ -73,10 +74,17 @@ describe("notification contract limits (#14280)", () => {
     expect(notifications.state.active.value.max).toBe(MAX_PROTOTYPE_NOTIFICATIONS_ACTIVE);
   });
 
-  // Title and body limits count characters; the total is UTF-8 bytes of the resolved record and is
-  // enforced on its own, so multibyte text at the per-field limits can still exceed it.
+  test("the resolved notification total is 5 KiB (#16864)", () => {
+    expect(MAX_PROTOTYPE_NOTIFICATION_BYTES).toBe(5120);
+  });
+
+  // Title and body limits count UTF-16 code units, while the total is UTF-8 bytes of the resolved
+  // record. One code unit is at most 3 UTF-8 bytes, so every literal that passes the per-field
+  // limits fits the total; text bound at post time is still measured on its own (#16864).
   const utf8 = (text: string) => new TextEncoder().encode(text).length;
   const dataBytes = MAX_PROTOTYPE_NOTIFICATION_DATA_BYTES;
+  // `{"d":"…"}` is 8 bytes of JSON around the string.
+  const dataOf = (bytes: number) => ({ d: "x".repeat(bytes - 8) });
 
   test("ASCII content at every per-field limit fits the total byte budget", () => {
     const title = "t".repeat(MAX_PROTOTYPE_NOTIFICATION_TITLE_LENGTH);
@@ -86,10 +94,42 @@ describe("notification contract limits (#14280)", () => {
     );
   });
 
-  test("multibyte content at the per-field limits can exceed the total byte budget", () => {
+  test("3-byte content at every per-field limit passes validation and fits the total", () => {
     const title = "\u4e2d".repeat(MAX_PROTOTYPE_NOTIFICATION_TITLE_LENGTH);
     const body = "\u4e2d".repeat(MAX_PROTOTYPE_NOTIFICATION_BODY_LENGTH);
-    expect(utf8(title) + utf8(body) + dataBytes).toBeGreaterThan(MAX_PROTOTYPE_NOTIFICATION_BYTES);
+    expect(errorPath(postSpec({ title, body, data: dataOf(dataBytes) }))).toBeUndefined();
+    expect(utf8(title) + utf8(body) + dataBytes).toBe(4480);
+    expect(
+      prototypeNotificationTotalError({ title, body, data: dataOf(dataBytes) }),
+    ).toBeUndefined();
+  });
+
+  test("an emoji-heavy notification of 5,632 bytes is still refused with invalid_args", () => {
+    const emoji = "\u{1F600}";
+    const title = emoji.repeat(MAX_PROTOTYPE_NOTIFICATION_TITLE_LENGTH);
+    const body = emoji.repeat(MAX_PROTOTYPE_NOTIFICATION_BODY_LENGTH);
+    expect(utf8(title) + utf8(body) + dataBytes).toBe(5632);
+    expect(prototypeNotificationTotalError({ title, body, data: dataOf(dataBytes) })).toEqual({
+      code: "invalid_args",
+      path: "args",
+      message: "The resolved notification is 5632 bytes; the limit is 5120 bytes",
+    });
+  });
+
+  test("the total accepts its boundary and refuses one byte past it", () => {
+    const title = "t".repeat(MAX_PROTOTYPE_NOTIFICATION_TITLE_LENGTH);
+    const data = dataOf(dataBytes);
+    // Only text bound at post time can reach the total; literals top out at 4,480 bytes.
+    const body = "\u4e2d".repeat(1322) + "bb";
+    expect(utf8(title) + utf8(body) + dataBytes).toBe(MAX_PROTOTYPE_NOTIFICATION_BYTES);
+    expect(prototypeNotificationTotalError({ title, body, data })).toBeUndefined();
+    expect(prototypeNotificationTotalError({ title, body: `${body}b`, data })?.code).toBe(
+      "invalid_args",
+    );
+  });
+
+  test("the total counts a notification without body or data", () => {
+    expect(prototypeNotificationTotalError({ title: "Ada" })).toBeUndefined();
   });
 
   test("each string limit accepts its boundary and rejects one past it", () => {

@@ -1,4 +1,5 @@
 import { ActionableError, toActionableError } from "../../models/ActionableError";
+import type { Element } from "../../models/Element";
 import type { TapOnElementOptions, TapOnElementResult } from "../../models";
 import type {
   SendKeysCommand,
@@ -35,7 +36,16 @@ function assertVisionosTapOptions(options: TapOnElementOptions): void {
   }
 }
 
-/** Ornament frames are scene-local. Resolve a match, then dispatch its unique identifier. */
+// The shared iOS resolver also ranks geometry, windows and ancestry. Here only the runner's
+// explicit clickable flag and identifier are relevant; preserve capture order within each tier.
+function tapCandidateRank(element: Element): number {
+  if (element.enabled !== "false" && element["resource-id"]) {
+    return element.clickable === "true" ? 0 : 1;
+  }
+  return 2;
+}
+
+/** Ornament frames are scene-local. Resolve by identifier, optionally narrowed by type and label. */
 export async function visionosTapOn(
   deviceId: string,
   options: TapOnElementOptions,
@@ -54,27 +64,56 @@ async function tapOnce(
   const client = await requireVisionosRunner(deviceId, signal);
   const tree = normalizeVisionosHierarchy(await client.hierarchy(signal));
   const all = new DefaultElementParser().flattenViewHierarchy(tree).map(({ element }) => element);
-  const candidates = all.filter(
-    (element) =>
-      (options.elementId === undefined ||
-        element["resource-id"] === options.elementId ||
-        element["view-id"] === options.elementId) &&
-      (options.text === undefined || element.text === options.text),
-  );
+  const candidates = all
+    .filter(
+      (element) =>
+        (options.elementId === undefined ||
+          element["resource-id"] === options.elementId ||
+          element["view-id"] === options.elementId) &&
+        (options.text === undefined || element.text === options.text),
+    )
+    .sort((a, b) => tapCandidateRank(a) - tapCandidateRank(b));
   const target = candidates[options.index ?? 0];
-  const identifier = target?.["resource-id"];
-  if (
-    !target ||
-    !identifier ||
-    target.enabled === "false" ||
-    all.filter((element) => element["resource-id"] === identifier).length !== 1
-  ) {
+  if (!target) {
     throw new ActionableError(
-      "No uniquely identified enabled visionOS element matched; observe and use its identifier or exact text.",
+      "No visionOS element matched the selector and index; observe and use its identifier or exact text.",
+    );
+  }
+  const identifier = target["resource-id"];
+  if (!identifier) {
+    throw new ActionableError(
+      "The matched visionOS element has no accessibility identifier; use an identified control's text or elementId.",
+    );
+  }
+  if (target.enabled === "false") {
+    throw new ActionableError(
+      "The matched visionOS element is disabled; observe and select an enabled control.",
+    );
+  }
+  const sharers = all.filter((element) => element["resource-id"] === identifier);
+  const narrowed = sharers.filter(
+    (element) => element.class === target.class && (element.text ?? "") === (target.text ?? ""),
+  );
+  if (sharers.length > 1 && narrowed.length !== 1) {
+    const details = narrowed.map(
+      (element) =>
+        `className=${element.class}, text=${JSON.stringify(element.text ?? "")}, bounds=${JSON.stringify(element.bounds)}`,
+    );
+    throw new ActionableError(
+      `The visionOS match was ambiguous for identifier '${identifier}'; candidates: ${details.join("; ")}. Pass index or a distinct text/elementId to select a distinguishable target.`,
     );
   }
   signal?.throwIfAborted();
-  await client.request({ type: "request_tap_element", identifier }, signal);
+  await client.request(
+    {
+      type: "request_tap_element",
+      identifier,
+      ...(sharers.length > 1
+        ? { label: target.text ?? "", elementType: Number(target.class) }
+        : {}),
+    },
+    signal,
+  );
   return { success: true, action: "tap", element: target };
 }
 

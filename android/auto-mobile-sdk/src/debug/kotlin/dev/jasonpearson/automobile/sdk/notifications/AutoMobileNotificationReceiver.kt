@@ -1,8 +1,10 @@
 package dev.jasonpearson.automobile.sdk.notifications
 
+import android.app.NotificationManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.util.Log
 import androidx.annotation.VisibleForTesting
 import dev.jasonpearson.automobile.sdk.AutoMobileNotifications
@@ -14,10 +16,42 @@ import org.json.JSONException
 
 class AutoMobileNotificationReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent?) {
-    if (intent?.action != AutoMobileNotifications.ACTION_POST_NOTIFICATION) {
-      return
+    when (intent?.action) {
+      AutoMobileNotifications.ACTION_POST_NOTIFICATION -> post(context, intent)
+      ACTION_CHANNEL_QUERY,
+      ACTION_CHANNEL_DELETE -> resultCode = channelResultCode(context, intent)
     }
+  }
 
+  /**
+   * Answers a host channel request with the channel's state after the action: 3 absent, 4 present,
+   * 0 when the request names no channel or the action failed.
+   */
+  @VisibleForTesting
+  internal fun channelResultCode(context: Context, intent: Intent): Int {
+    val channelId = intent.getStringExtra(AutoMobileNotifications.EXTRA_CHANNEL_ID)
+    if (channelId.isNullOrBlank()) {
+      Log.w(TAG, "Missing channel id in notification channel request")
+      return RESULT_ERROR
+    }
+    return try {
+      val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+      if (
+        intent.action == ACTION_CHANNEL_DELETE && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+      ) {
+        manager.deleteNotificationChannel(channelId)
+      }
+      val exists =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+          manager.getNotificationChannel(channelId) != null
+      if (exists) RESULT_CHANNEL_PRESENT else RESULT_CHANNEL_ABSENT
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed to handle notification channel request", e)
+      RESULT_ERROR
+    }
+  }
+
+  private fun post(context: Context, intent: Intent) {
     try {
       val title = intent.getStringExtra(AutoMobileNotifications.EXTRA_TITLE).orEmpty()
       val body = intent.getStringExtra(AutoMobileNotifications.EXTRA_BODY).orEmpty()
@@ -86,9 +120,19 @@ class AutoMobileNotificationReceiver : BroadcastReceiver() {
   }
 
   companion object {
+    /** Host query: does the channel named by the channel id extra exist? */
+    internal const val ACTION_CHANNEL_QUERY =
+      "dev.jasonpearson.automobile.sdk.NOTIFICATION_CHANNEL_QUERY"
+
+    /** Host request: delete the channel named by the channel id extra, then report its state. */
+    internal const val ACTION_CHANNEL_DELETE =
+      "dev.jasonpearson.automobile.sdk.NOTIFICATION_CHANNEL_DELETE"
+
     private const val TAG = "AutoMobileNotifReceiver"
     private const val RESULT_SUCCESS = 1
     private const val RESULT_POSTED_WITHOUT_IMAGE = 2
     private const val RESULT_ERROR = 0
+    private const val RESULT_CHANNEL_ABSENT = 3
+    private const val RESULT_CHANNEL_PRESENT = 4
   }
 }

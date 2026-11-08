@@ -68,6 +68,12 @@ touchscreen and leanback optional, so it installs on any TV or phone image at AP
 cards, search text and player tracks come from each module's catalog object; screen tags, button labels
 and the player's state lines are the ones listed below. Changing either is a contract change.
 
+Both embed the AutoMobile SDK and report each screen as an SDK navigation event, so `explore` records
+them in the navigation graph and `navigateTo` can replay them. Screen names are part of the contract:
+`BrowseDestination`, `SearchDestination`, `DetailDestination` (argument `cardId`) and
+`PlayerDestination`; the Leanback fixture has only Browse and Detail. A screen is reported when it is
+shown and again whenever the app resumes on it.
+
 `android/tv-fixture` (`dev.jasonpearson.automobile.tvfixture`, launcher "AutoMobile TV Fixture") is
 Compose for TV (`androidx.tv:tv-material`). Compose test tags are exposed as resource ids.
 
@@ -179,8 +185,11 @@ All text and ids come from `FixtureCatalog` and `MediaBrowseTree`; changing them
 - `FixtureMediaBrowserService`: a framework `MediaBrowserService` serving two albums and a playlist of
   three tracks each; playing an item only updates the session state.
 - `FixtureCarAppService` (navigation category, launcher "AutoMobile Templates" via `CarAppActivity`):
-  list, grid, pane and place-list navigation templates with fixed rows and four fixed places. It accepts
-  every templates host, so a non-Play image needs a templates host of its own to render it.
+  list, grid, pane and place-list navigation templates with fixed rows and four fixed places, plus a
+  `List 30` screen with `List long row 01`..`List long row 30` (`list_long_row_01`..`list_long_row_30`).
+  Debug builds enable the AutoMobile SDK template route and record every screen's returned template,
+  including all thirty rows regardless of host truncation; release builds omit the SDK. It accepts every
+  templates host, so a non-Play image needs a templates host of its own to render it.
 
 ### Wear fixture app
 

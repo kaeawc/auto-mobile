@@ -48,12 +48,24 @@ describe("webImageBox", () => {
     });
   });
 
-  test("crop and fill cover only the fixed axes", () => {
+  test("crop and fill cover the fixed axes, a wrapped axis left to the image", () => {
     expect(webImageBox({ asset: "a", heightDp: 200, scale: "crop" }, PIXEL)).toEqual({
       height: 525,
       cover: true,
     });
     expect(webImageBox({ asset: "a", scale: "fill" }, PIXEL).cover).toBe(false);
+  });
+
+  test("crop covers a filled axis at the long side, or the portrait width when compact (#16605)", () => {
+    const feed = { asset: "a", heightDp: 200, widthFill: true, scale: "crop" } as const;
+    expect(webImageBox(feed, PIXEL)).toEqual({ width: 2402, height: 525, cover: true });
+    expect(webImageBox(feed, PIXEL, "short")).toEqual({ width: 1082, height: 525, cover: true });
+    // A 4000x4000 source is encoded at the landscape width, not its own 4000 px nor 525 px.
+    const square = { width: 4000, height: 4000 };
+    expect(webImageScaleFactor(square, [webImageBox(feed, PIXEL)])).toBe(2402 / 4000);
+    expect(webImageScaleFactor(square, [webImageBox(feed, PIXEL, "short")])).toBe(1082 / 4000);
+    const column = { asset: "a", widthDp: 120, heightFill: true, scale: "fill" } as const;
+    expect(webImageBox(column, PIXEL, "short")).toEqual({ width: 315, height: 1082, cover: true });
   });
 });
 
@@ -80,7 +92,7 @@ describe("webImageDraw and webImageRule", () => {
   test("records fixed dp sizes and the content scale", () => {
     expect(
       webImageDraw("a", { style: { width: { dp: 120 }, height: "fill" }, contentScale: "crop" }),
-    ).toEqual({ asset: "a", widthDp: 120, scale: "crop" });
+    ).toEqual({ asset: "a", widthDp: 120, heightFill: true, scale: "crop" });
   });
 
   test("the rule sets the slot's image, transparent placeholder, aspect ratio and tint switch", () => {
@@ -115,7 +127,9 @@ describe("an image with an inlinable asset", () => {
     expect(rendered.unsupportedNodes).toEqual([
       { type: "image", id: "hero", path: "root", reason: "assetOverBudget", asset: "photo" },
     ]);
-    expect(rendered.imageDraws).toEqual([{ asset: "photo", heightDp: 200, scale: "crop" }]);
+    expect(rendered.imageDraws).toEqual([
+      { asset: "photo", heightDp: 200, widthFill: true, scale: "crop" },
+    ]);
   });
 
   test("keeps the image's aspect ratio on an axis left to wrap", () => {

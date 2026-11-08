@@ -10,9 +10,9 @@ AutoMobile models Vision Pro simulators as platform `visionos`, form factor
 and `killDevice` use `simctl`; boot binds a session at `booted` readiness.
 `observe`, `tapOn` and `sendKeys` prepare a separate window-app XCUITest runner
 on demand. Provisioning still accepts only readiness `none`. The runner reports
-hierarchy and focus, taps uniquely identified window and ornament elements, and
-appends text to a focused field; screenshots use `simctl`. iOS inventories exclude
-xrOS runtimes. `installApp`, `uninstallApp`, `launchApp`, `terminateApp` and
+hierarchy and focus, taps enabled window and ornament elements by identifier (narrowed
+by exact type and label when shared), and appends text to a focused field;
+screenshots use `simctl`. iOS inventories exclude xrOS runtimes. `installApp`, `uninstallApp`, `launchApp`, `terminateApp` and
 `listApps` use `simctl`. All other device tools remain disabled.
 
 ## Environment
@@ -58,6 +58,20 @@ limit); it does not request a hierarchy. The first hierarchy for a built-in app
 such as Settings or Safari took about 8 s, so a hierarchy-based readiness check
 timed out on every attempt (#17199). Hierarchy requests default to a 20 s budget;
 taps and text input keep 5 s.
+
+A target app process launched before the runner can fail `snapshot()` with
+`Error getting main window kAXErrorAPIDisabled` even while Settings and other
+apps on the same simulator remain accessible. For `request_hierarchy` only,
+the runner matches that marker in the error description, terminates and launches
+the target app once, then retries the snapshot once (#17448). Relaunching can
+reset the app's transient state. Other errors do not trigger a relaunch; if the
+retry fails, its error is returned.
+
+A runner error containing `kAXErrorAPIDisabled` maps to
+`accessibility_api_disabled`, with the runner's error preserved as `cause`.
+It means this app's accessibility window could not be read even after relaunch,
+not that accessibility is unavailable across the simulator. Other apps may
+still work; use a screenshot from `simctl` to see the affected app.
 
 ## Decision
 

@@ -47,8 +47,7 @@ import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbCl
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { performPrototypePatch, type PrototypePatchQueue } from "../prototypePatchAction";
-import { patchReverseStaging, reverseLifecycle } from "../prototypeReverse";
-import { isIndeterminate, shownSpecOutcome } from "../prototypeShownOutcome";
+import { shownSpecOutcome } from "../prototypeShownOutcome";
 import { sendPrototype, stageAssets } from "./assets";
 import { appLayerGrant, preflightMutation, specCapabilityRefusal } from "./preflight";
 import { prototypeSchema } from "./schemas";
@@ -158,7 +157,6 @@ export async function performPrototypeAction(
 ): Promise<PrototypeOutput> {
   if (args.action === "patch") {
     const { store, target, cacheInvalidator } = dependencies;
-    const patchReverse = patchReverseStaging(dependencies, device, args.id!);
     return performPrototypePatch(
       {
         store,
@@ -167,16 +165,13 @@ export async function performPrototypeAction(
           target.android
             ? target.android.supportsCommand(PROTOTYPE_PATCH_CAPABILITY)
             : target.ios?.supportsCapability(PROTOTYPE_PATCH_CAPABILITY) === true,
-        // A patched node may add or drop a via "device" localhost request (#12530): staged here.
         specRefusal: async (spec) =>
           (await specCapabilityRefusal(target, spec, signal, { env: dependencies.env }))?.error ??
           (await cachedPrototypeShaderAssetProblem(
             spec,
             device.deviceId,
             dependencies.shaderAssetCache ?? defaultPrototypeAssetCache(),
-          )) ??
-          patchReverse.stage(spec),
-        settleSpec: patchReverse.settle,
+          )),
         platform: device.platform === "android" ? "android" : "ios",
         queue,
         retire: (result) => retireObservation(cacheInvalidator, device, result),
@@ -229,7 +224,6 @@ async function performMutation(
     startedFreshEvents: false,
     mcpSessionId,
   };
-  const reversing = reverseLifecycle(dependencies, device, args, target);
   try {
     const resolved = await preflightWithGeneration(ordering, () =>
       preflightMutation(
@@ -259,7 +253,6 @@ async function performMutation(
     if (stage.failure) {
       withdrawGeneration(ordering);
     }
-    const reverseReport = await reversing.prepare([resolved.failure, stage.failure]);
     const { result, warning, mutationReply } = await withdrawOnAbort(
       ordering,
       undefined,
@@ -313,7 +306,6 @@ async function performMutation(
         all: sendArgs.all,
       },
     );
-    await reversing.settle(result.success, shown !== undefined, isIndeterminate(result));
     const placed = {
       ...placedDisplay(args, shown, comparable, result.success),
       chrome: resolved.chrome,
@@ -350,7 +342,6 @@ async function performMutation(
       ...anchorsOutput(resolved),
       ...(await showAdviceOutput(authoredArgs, device, dependencies, { result, signal })),
       ...visibility,
-      ...reversing.output(reverseReport, result.success),
       ...missingAssetsOutput(result, [warning, placed.warning, visibilityWarning], legacy, spec),
     };
   } catch (error) {
@@ -361,7 +352,6 @@ async function performMutation(
     // Rethrow the original error to preserve abort and ActionableError identity after binding cleanup.
     throw error;
   } finally {
-    await reversing.abandon(ordering.sent);
     endShownSpec(store, ordering);
     settleGeneration(ordering);
   }

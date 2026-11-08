@@ -71,6 +71,8 @@ iOS URIs have no user query.
 - `wakeAndUnlock` wakes an Android device and unlocks it with an optional PIN.
 - `postNotification` creates a notification for notification-flow tests. On a watchOS
   simulator, provide the watch app’s bundle ID as `appId` to deliver a push to that watch.
+  On iOS a single notification shows no app name, so `systemTray` can match it by
+  `appId` only when it was posted with `postNotification`; otherwise omit `appId`.
 - `clipboard` sets, reads, pastes, or clears clipboard content.
 
 ## Phone calls and SMS

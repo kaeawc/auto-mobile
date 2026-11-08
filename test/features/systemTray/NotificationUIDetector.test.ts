@@ -25,6 +25,7 @@ import type { NotificationUIDetector } from "../../../src/utils/interfaces/Notif
 import type { SystemTrayDependencies } from "../../../src/features/systemTray/systemTrayHelpers";
 import { fixedBackoff } from "../../../src/utils/Backoff";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { InMemoryPostedNotificationLedger } from "../../../src/features/utility/postedNotificationLedger";
 import { readFileSync } from "node:fs";
 import { wireCapture } from "../../helpers/wireCapture";
 import { convertIosHierarchy } from "../../helpers/iosHierarchyConverter";
@@ -835,6 +836,7 @@ describe("NotificationUIDetector", () => {
       }),
       timer: new FakeTimer(),
       backoff: fixedBackoff(0),
+      postedNotifications: new InMemoryPostedNotificationLedger(),
     });
 
     it("returns an AndroidNotificationUIDetector for Android devices", () => {

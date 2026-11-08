@@ -147,6 +147,7 @@ for (const invalidPort of ["0", "65536", "53078garbage", "53078.5"]) {
     await expect(started).rejects.toThrow("within 5 seconds");
     expect(h.child.killed).toBe(true);
     expect(h.timer.getSleepHistory()).toHaveLength(50);
+    h.timer.reset();
   });
 }
 
@@ -169,8 +170,8 @@ for (const { platform, env, directory } of [
 ] as const) {
   test(`collision check and poll share ${directory} on ${platform}`, async () => {
     const h = harness(platform, env);
-    const existing = path.join(directory, "netsim_100.ini");
-    const claimed = path.join(directory, "netsim_101.ini");
+    const existing = path.posix.join(directory, "netsim_100.ini");
+    const claimed = path.posix.join(directory, "netsim_101.ini");
     const reads: string[] = [];
     const readFile = h.fs.readFile.bind(h.fs);
     h.fs.readFile = async (file) => {

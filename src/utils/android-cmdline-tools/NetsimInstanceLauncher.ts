@@ -37,10 +37,15 @@ export class DefaultNetsimInstanceLauncher implements NetsimInstanceLauncher {
   private readonly fs;
   private readonly random;
   private readonly discoveryDir;
+  private readonly platform: NodeJS.Platform;
+  /** Path flavour of the target platform, never the test host's, so injected paths stay stable. */
+  private readonly paths: typeof path.posix;
 
   constructor(private readonly options: NetsimInstanceLauncherOptions) {
     this.fs = options.fs ?? new DefaultFileSystem();
     this.random = options.random ?? defaultRandom;
+    this.platform = options.host?.platform ?? options.platform ?? process.platform;
+    this.paths = this.platform === "win32" ? path.win32 : path.posix;
     this.discoveryDir = netsimDiscoveryDir(
       options.host ?? {
         platform: options.platform ?? process.platform,
@@ -54,7 +59,7 @@ export class DefaultNetsimInstanceLauncher implements NetsimInstanceLauncher {
     const first = Math.floor(this.random.next() * 900);
     for (let offset = 0; offset < 900; offset++) {
       const instance = 100 + ((first + offset) % 900);
-      const iniPath = path.join(this.discoveryDir, `netsim_${instance}.ini`);
+      const iniPath = this.paths.join(this.discoveryDir, `netsim_${instance}.ini`);
       if (!startingInstances.has(iniPath) && !this.fs.existsSync(iniPath)) {
         startingInstances.add(iniPath);
         return { instance, iniPath };
@@ -81,11 +86,9 @@ export class DefaultNetsimInstanceLauncher implements NetsimInstanceLauncher {
 
   private async startClaimed(instance: number, iniPath: string): Promise<NetsimInstance> {
     const { spawnFn } = this.options;
-    const platform = this.options.host?.platform ?? this.options.platform ?? process.platform;
-    const paths = platform === "win32" ? path.win32 : path;
-    const binary = paths.join(
-      paths.dirname(this.options.emulatorPath()),
-      platform === "win32" ? "netsimd.exe" : "netsimd",
+    const binary = this.paths.join(
+      this.paths.dirname(this.options.emulatorPath()),
+      this.platform === "win32" ? "netsimd.exe" : "netsimd",
     );
     const child = spawnFn(binary, ["-i", String(instance), "--no-web-ui"], { stdio: "ignore" });
     const pid = child.pid;

@@ -13,6 +13,10 @@ import {
   verifyImeCommitResult,
   verifyImeInsertedText,
 } from "../../../src/features/action/imeFailureDiagnostics";
+import {
+  IME_PARTIAL_COMMIT_NEXT_STEP,
+  IME_REFORMATTED_DIGITS_CONFIRMED_WARNING,
+} from "../../../src/features/action/imePartialCommitGuidance";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { android, createSendKeysHarness, focused } from "./SendKeysTestHarness";
 
@@ -137,7 +141,9 @@ describe("IME failure diagnostics", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe(
-      "IME partial commit: sent <password, 7 characters> but the focused field holds a different value",
+      "IME partial commit: sent <password, 7 characters> but the focused field holds a different value. " +
+        "The device reported the commit complete, but the editor's read-back does not match. " +
+        IME_PARTIAL_COMMIT_NEXT_STEP,
     );
     expect(result.imeFailure).toMatchObject({
       expectedText: "<password, 7 characters>",
@@ -1033,4 +1039,70 @@ test.each([true, false])("verification honours editorConsumed=%s", (editorConsum
   if (!editorConsumed) {
     expect(result.error).toContain("IME partial commit");
   }
+});
+
+describe("IME commit into a field that reformats as you type (#17462)", () => {
+  // Captured from the dogfood run: sent "5125550142" into a Contacts phone field holding "+1".
+  function verifyPhone(insertedText: string, fieldText: string) {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    return verifyImeCommitResult({ success: true, insertedText }, "5125550142", {
+      timer,
+      settleMs: 1,
+      observe: async () => field(fieldText),
+      checkAbort: () => {},
+      lacksRequiredFocus: () => false,
+      focusedText: () => fieldText,
+      focusError: { error: "unfocused" },
+    });
+  }
+
+  test("dropped digits fail with the digit count and an a11y replace next step", async () => {
+    const result = await verifyPhone(" 512-555", "+1 512-555");
+
+    expect(result.success).toBe(false);
+    expect(result.partialApplication).toBe(true);
+    expect(result.error).toBe(
+      'IME partial commit: sent "5125550142" but the editor inserted " 512-555". ' +
+        "The device reported the commit complete, but the editor's read-back does not match. " +
+        "The field appears to reformat input as you type and kept 6 of 10 digits. " +
+        'Retry with operation: "replace", mode: "a11y" to set the whole value at once, ' +
+        "or type the missing digits in a separate command.",
+    );
+    expect(result.imeFailure).toMatchObject({ stage: "verification", observedText: " 512-555" });
+  });
+
+  test("a formatter's separators around every sent digit verify cleanly", async () => {
+    const result = await verifyPhone(" 512-555-0142", "+1 512-555-0142");
+
+    expect(result).toEqual({ success: true, insertedText: " 512-555-0142" });
+  });
+
+  test("a restart-garbled delta is reconciled when the field kept every digit", async () => {
+    const result = await verifyPhone("0142", "+1 512-555-0142");
+
+    expect(result.success).toBe(true);
+    expect(result.warning).toBe(IME_REFORMATTED_DIGITS_CONFIRMED_WARNING);
+    expect(result).not.toHaveProperty("imeFailure");
+  });
+
+  test("a device-reported failure is never upgraded by matching field digits", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const result = await verifyImeCommitResult(
+      { success: false, insertedText: "0142", error: "device failure" },
+      "5125550142",
+      {
+        timer,
+        settleMs: 1,
+        observe: async () => field("+1 512-555-0142"),
+        checkAbort: () => {},
+        lacksRequiredFocus: () => false,
+        focusedText: () => "+1 512-555-0142",
+        focusError: { error: "unfocused" },
+      },
+    );
+
+    expect(result.success).toBe(false);
+  });
 });

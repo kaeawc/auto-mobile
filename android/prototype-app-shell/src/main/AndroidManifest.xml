@@ -4,10 +4,9 @@
   <!-- AndroidX's dynamic receiver permission is unused by the shell. -->
   <permission android:name="${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" tools:node="remove"/>
   <uses-permission android:name="${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" tools:node="remove"/>
-  <!-- Backup is off for disposable apps, so there is nothing for data extraction rules to scope. -->
-  <application android:allowBackup="false" android:fullBackupContent="false" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:label="@string/app_name" android:theme="@style/Theme.PrototypeApp.Splash" android:supportsRtl="true" android:usesCleartextTraffic="false" tools:ignore="DataExtractionRules">
-    <!-- Compose brings a shell-only profiling receiver; disposable apps do not expose it. Lint cannot
-         resolve the class it removes. -->
+  <application android:allowBackup="false" android:fullBackupContent="false" android:dataExtractionRules="@xml/data_extraction_rules" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:label="@string/app_name" android:theme="@style/Theme.PrototypeApp.Splash" android:supportsRtl="true" android:usesCleartextTraffic="false">
+    <!-- Compose brings a shell-only profiling receiver; disposable apps do not expose it.
+         Its class is stripped on purpose, so MissingClass does not apply to this removal. -->
     <receiver android:name="androidx.profileinstaller.ProfileInstallReceiver" tools:node="remove" tools:ignore="MissingClass"/>
     <!-- The renderer's debug dependency includes a Compose test host, not app UI. -->
     <activity android:name="androidx.activity.ComponentActivity" tools:node="remove"/>

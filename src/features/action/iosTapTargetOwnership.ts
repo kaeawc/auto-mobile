@@ -341,6 +341,32 @@ interface OwnershipQuery {
   isValid: (point: TapPoint | null) => point is TapPoint;
 }
 
+function nearestAncestorOfClass(
+  nodes: readonly SearchableEntry[],
+  node: SearchableEntry | undefined,
+  className: string,
+): SearchableEntry | undefined {
+  for (let parent = node?.parentIndex; parent !== undefined; parent = nodes[parent].parentIndex) {
+    if (nodes[parent].className === className) {
+      return nodes[parent];
+    }
+  }
+  return undefined;
+}
+
+function canCoverTargetLayer(
+  nodes: readonly SearchableEntry[],
+  node: SearchableEntry,
+  target: SearchableEntry,
+): boolean {
+  const alert = nearestAncestorOfClass(nodes, target, "UIAlertController");
+  // Unstamped system alerts can share the app's rank despite appearing above it.
+  return (
+    node.windowRank <= target.windowRank &&
+    (node.windowRank < target.windowRank || !alert || isDescendant(nodes, node, alert))
+  );
+}
+
 function isOverlay(query: OwnershipQuery, node: SearchableEntry, scroll: SearchableEntry): boolean {
   const { nodes, target, matched } = query;
   return (
@@ -351,7 +377,7 @@ function isOverlay(query: OwnershipQuery, node: SearchableEntry, scroll: Searcha
     node.properties.visible !== "false" &&
     node.properties.hidden !== true &&
     node.properties.hidden !== "true" &&
-    node.windowRank <= target.windowRank &&
+    canCoverTargetLayer(nodes, node, target) &&
     node.rootGroup === target.rootGroup &&
     ![target, ...matched].some((anchor) => isRelated(nodes, node, anchor)) &&
     (!isDescendant(nodes, node, scroll) || node.index > target.index)

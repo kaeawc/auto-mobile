@@ -320,6 +320,37 @@ internal class ObservationStreamClientTest : ObservationStreamClientFixture() {
   }
 
   @Test
+  fun `a lifecycle-only client asks the daemon for lifecycle frames only`() = runBlocking {
+    val tempSocket = Files.createTempFile("obs-stream-lifecycle", ".sock")
+    val factory = RecordingTransportFactory(blocking = true)
+    val client =
+      ObservationStreamClient(
+          transportFactory = factory,
+          socketPathProvider = { tempSocket.toString() },
+        )
+        .apply { lifecycleOnly = true }
+    try {
+      client.connect("emulator-5554", "epoch-a")
+      val transport = factory.opened.single()
+      transport.awaitReadEntered()
+      val subscribe =
+        transport.writtenFrames().lineSequence().first { it.contains("\"command\":\"subscribe\"") }
+      assertTrue(subscribe.contains("\"lifecycleOnly\":true"), subscribe)
+      assertTrue(subscribe.contains("\"deviceSessionUuid\":\"epoch-a\""), subscribe)
+    } finally {
+      client.dispose()
+      factory.opened.firstOrNull()?.releaseEof()
+      Files.deleteIfExists(tempSocket)
+    }
+  }
+
+  @Test
+  fun `an ordinary subscribe omits the lifecycle-only flag`() {
+    val frame = captureCommandFrame("subscribe", sessionUuid = null) {}
+    assertFalse(frame.contains("lifecycleOnly"), frame)
+  }
+
+  @Test
   fun `registration precedes subscribe and observation polling`() = runBlocking {
     val socketPath = Files.createTempFile("obs-stream-register-order", ".sock")
     val events = mutableListOf<String>()

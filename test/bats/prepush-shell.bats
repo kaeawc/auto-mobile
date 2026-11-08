@@ -626,6 +626,15 @@ EOF
   grep -Fqx -- '--only codex-skills,claude-plugin' "${FAST_LOG}"
 }
 
+@test "a changed plugin package file selects the Claude plugin check" {
+  commit_change "plugins/auto-mobile/hooks.json" '{"hooks": {}}'
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only codex-skills,claude-plugin' "${FAST_LOG}"
+}
+
 @test "a changed BATS file runs without a fast validation selection" {
   commit_change "test/bats/only-this.bats" '@test "fails" { false; }'
 
@@ -819,6 +828,13 @@ FIXTURE
   run bash scripts/prepush-shell.sh --base base
   [ "${status}" -eq 0 ]
   grep -Fqx -- '--only stdlib-first,manual-test-python' "${FAST_LOG}"
+}
+
+@test "changed Python SDK sources select python-sdk" {
+  commit_change "sdk/python/src/auto_mobile/client.py" "# fixture"
+  run bash scripts/prepush-shell.sh --base base
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only python-sdk' "${FAST_LOG}"
 }
 
 @test "changed Python validation script selects manual-test-python" {

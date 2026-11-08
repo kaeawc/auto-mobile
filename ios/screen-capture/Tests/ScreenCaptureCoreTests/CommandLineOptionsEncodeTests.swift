@@ -1,9 +1,8 @@
 @testable import ScreenCaptureCore
 import XCTest
 
-/// Parsing tests for the `--encode h264` flag family (issue #4788). Without the
-/// flag the mode carries `encode: nil` — the guarantee that the raw path is
-/// unchanged starts here.
+/// Parsing tests for the `--encode h264` flag family (issue #4788). Every capture
+/// mode carries its encode settings; there is no raw-BGRA mode to fall back to.
 final class CommandLineOptionsEncodeTests: XCTestCase {
     private func parse(_ args: [String]) throws -> CommandLineOptions {
         try CommandLineOptions.parse(["screen-capture-helper"] + args)

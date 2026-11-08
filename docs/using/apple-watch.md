@@ -7,8 +7,8 @@ up, the supported tools and what is out of scope.
 ## Supported watches
 
 - Simulators only. A physical Apple Watch is not supported.
-- Standalone watch apps only. AutoMobile never pairs a watch with an iPhone simulator, so flows
-  that need a companion iPhone app cannot be tested.
+- Standalone and companion watch apps. Pair a watch with an iPhone simulator using `startDevice`
+  with `pairWithDeviceId`.
 - Any Apple Watch device type and watchOS runtime installed in Xcode. Install a missing runtime
   with `xcodebuild -downloadPlatform watchOS`; AutoMobile never downloads one.
 
@@ -19,6 +19,7 @@ A watch never appears in an iOS listing or iOS tool result. Every watch call nam
 
 Read the `automobile:devices/images/watchos` resource. It lists existing watch simulators
 (`watchosCount`) and the catalog of installed watchOS runtimes and Apple Watch device types.
+`listDevices` with `platform: "watchos"` lists the booted watches.
 
 Create a watch with `provisionDevice`, passing exact identifiers from that catalog:
 
@@ -43,19 +44,39 @@ A watch with that name (and `deviceId`, if given) and the same runtime and devic
 A new watch is created only when no watch has that name, no `deviceId` is given and device
 creation is enabled. Two watches with the same name need `deviceId`. A watch with
 that name but a different runtime or device type is an error: use another name, or delete that
-watch first. `resources`, `enableTools` and `readiness: "automation"` are refused.
+watch first. A missing `spec` or field, or an identifier the host does not list, is refused with
+an example and the accepted identifiers. `resources`, `enableTools` and `readiness: "automation"`
+are refused.
 
 Boot an existing watch and start a session with `startDevice`, naming it by exact UDID or exact
-name. Every other option is refused.
+name. Optional `timeoutMs` bounds startup; `pairWithDeviceId` names an iPhone simulator UDID.
 
 ```json
 { "name": "startDevice", "arguments": { "platform": "watchos", "deviceId": "<watch UDID>" } }
 ```
 
+With `pairWithDeviceId`, the watch is paired and the pair activated before boot. The phone is
+never booted by this call: boot it separately with `startDevice`, `platform: "ios"`.
+The result includes `pair` with `pairId`, `state` (`active` or `inactive`), `connection`
+(`connected` or `disconnected`), `phoneDeviceId`, and `created`. `created: false` means an
+existing pair was reused. Connection is sampled after watch boot and may still be disconnected.
+If `startDevice` fails after pairing, a pair it created is unpaired again; a reused pair is kept.
+A watch already paired to another phone is refused with its pair ID and phone name/UDID:
+unpair it first or pass that phone. A missing or non-iOS simulator UDID is refused; choose an
+iPhone simulator from the device images. One phone may have several watches.
+
+`listDevices` for `ios`, `watchos` or no platform includes `simulatorPairs` when pairs are available. Each
+entry has `pairId`, `state`, `connection`, and `watch`/`phone` objects with `deviceId`, `name`,
+and device `state`. Pair information is omitted if none exist or the pair listing fails.
+Deleting a watch automatically unpairs only pairs created by the current daemon.
+
 `startDevice` also starts the watch automation runner. If the runner cannot start, the session is
 still bound at readiness `booted`, the response message says why, and `observe` returns a
-screenshot only. Set `AUTOMOBILE_WATCH_RUNNER_XCTESTRUN` to a prebuilt runner when using the
-published package (see [Environment variables](environment-variables.md)).
+screenshot only. From an AutoMobile checkout, `startDevice` builds the runner itself when the
+checkout is the directory AutoMobile was started from, or is named by `AUTOMOBILE_PROJECT_ROOT`;
+the response message lists every location checked and the build command when it cannot find the
+project. Set `AUTOMOBILE_WATCH_RUNNER_XCTESTRUN` to a prebuilt runner when using the published
+package (see [Environment variables](environment-variables.md)).
 
 To pick a watch for a connection without a session, call `setActiveDevice` with
 `platform: "watchos"`. A call that does not name `watchos` never reaches a watch.
@@ -73,9 +94,11 @@ Besides the device management above, these tools accept a watch:
 - `observe`
 - `tapOn`
 - `tapAt`
+- `sendKeys`
 - `swipeOn`
 - `pressButton`
 - `rotateCrown`
+- `postNotification`
 - `installApp`
 - `uninstallApp`
 - `listApps`
@@ -92,38 +115,67 @@ Every other tool refuses a watch before doing anything, with:
 
 ### What each tool does on a watch
 
-- `observe` returns a screenshot. With the automation runner connected and the runner's target
-  app in the foreground it also returns the view hierarchy; otherwise the result carries
-  `hierarchyUnavailable` and no hierarchy fields. With a hierarchy, bounds and `screenSize` are in
+- `observe` returns a screenshot. With the automation runner connected it also returns the target
+  app's view hierarchy and on-screen system alerts, including the notification permission prompt,
+  notification short look and long look with action buttons, even when the app is not in the
+  foreground. If the hierarchy cannot be read, the result carries `hierarchyUnavailable` and no
+  hierarchy fields. With a hierarchy, bounds and `screenSize` are in
   points and `screenshotImageSize` is in pixels; a screenshot-only result reports `screenSize` in
   pixels. Check `screenSize.units` (`points` or `physical-pixels`) before using it for `tapAt`,
-  which takes points. `waitFor`, `settled`, `raw`, `includeExtras`, `scope`,
-  `layer`, `skipBackStack`, `crop`, `screenshotOptions` and `screenshot: "none"` are refused.
+  which takes points. With the runner connected, an element `waitFor` re-reads the hierarchy until
+  it matches or `timeout` elapses; `waitFor` with `for`, `posture`, `activeDisplay` or
+  `activeWindow`, and `waitFor` without a runner, are refused. `settled`, `raw`, `includeExtras`,
+  `scope`, `layer`, `skipBackStack`, `crop`, `screenshotOptions` and `screenshot: "none"` are
+  refused.
 - `tapOn` takes a `selector` with an exact `elementId` or `text`, and an optional `index`. Only
-  elements wholly on screen match. Only `action: "tap"` is supported.
+  elements wholly on screen match, including notification action buttons. Only `action: "tap"`
+  is supported. The notification permission prompt scrolls: use `rotateCrown` to bring `Allow`
+  wholly into view before selecting it with `tapOn`.
 - `tapAt` takes absolute coordinates in points.
 - `swipeOn` swipes in a direction. With `lookFor` it swipes until an exact `text` or `elementId`
-  is on screen, up to `maxSwipes` (default 10, maximum 100). Coordinates and duration cannot be set.
+  is on screen, up to `maxSwipes` (default 10, maximum 100). Each `lookFor` step is a short, slow drag (about
+  one row on a list) so consecutive reads overlap and nearby targets are not skipped. Coordinates
+  and duration cannot be set.
 - `pressButton` supports `home` only.
 - `rotateCrown` turns the Digital Crown by a signed, non-zero `delta`, with an optional positive
   `velocity` (default 1). It is not listed by default; enable it with `setToolEnabled` (see
-  [Dynamic Tools](dynamic-tools.md)).
+  [Dynamic Tools](dynamic-tools.md)). When the view hierarchy is
+  identical before and after a rotation, it retries once after a neutral touch to wake crown routing.
+  If the retry still changes nothing, it fails with an error: no view may hold crown focus, or the
+  content is already at its limit. Tap the view that should receive the crown, then retry.
+  This check is best effort: it cannot see a change that is not in the hierarchy, and it is skipped
+  when a hierarchy cannot be read. `observe` after rotating to confirm the app responded.
 
   ```json
   { "name": "rotateCrown", "arguments": { "platform": "watchos", "delta": 2 } }
   ```
 
 - `installApp` takes a watch simulator `.app` bundle. `uninstallApp` refuses `keepData: true`.
+- `postNotification` sends a simulated push to the watch app named by `appId`. The simulator
+  cannot pre-grant notification authorization (`simctl privacy` refuses it on watchOS): the app
+  must request permission, and you answer the prompt with `tapOn`, scrolling with `rotateCrown`
+  first if needed. A notification banner disappears after a few seconds, so call `observe`
+  immediately after the push to inspect its short look; the long look exposes its action buttons.
 - `launchApp` reports an app that is not installed without launching anything. `prototype: true`
-  is refused. `clearAppData` wipes the app's Documents, Library and tmp before launch.
+  is refused. `clearAppData` wipes the app's Documents, Library and tmp before launch. It does not
+  observe the launched app: `verified` stays unset with `verificationSkipped: "platform"`.
 - `terminateApp` succeeds with `wasRunning: false` when the app was not running.
+
+`sendKeys` accepts non-empty text only and appends to the focused field. Focus a field with
+`tapOn` first, or provide a selector with an exact `elementId` or `text` to focus it before typing.
+Selector `text` matches a field's label, value or placeholder; matching text fields are preferred over static text.
+On watchOS a focused field opens the keyboard, and the text is typed through that keyboard. Input
+fails when no text field or keyboard is up. Commands that clear, replace or press keys are refused.
 
 ## Limits
 
 - No physical Apple Watch and no paired iPhone (see above).
-- The automation runner reads the view hierarchy of its own bundled watch app only, and its target
-  cannot be changed yet. For any other app, including yours, `observe` is screenshot-only and
-  `tapOn` and `swipeOn` with `lookFor` cannot match elements.
-- No text input, pinch, multi-touch or drag.
+- The automation runner reads the view hierarchy of one target app at a time, plus on-screen system
+  alerts and notifications. It starts on its own
+  bundled watch app; `launchApp` restarts it targeting the launched app, and fails with the reason
+  if that restart fails even though the app itself launched. A runner AutoMobile did not start
+  keeps its target. Other apps' own elements are unavailable to `observe`, `tapOn` and `swipeOn`
+  with `lookFor`; on-screen system alerts and notifications remain available.
+- No pinch, multi-touch or drag.
 - Prototypes do not run on a watch. To mock up a watch screen, use a watch-sized prototype spec on a
   phone instead (see [Watch-sized mockups](../tools.md#watch-sized-mockups)).

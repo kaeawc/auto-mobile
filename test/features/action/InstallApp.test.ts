@@ -318,29 +318,85 @@ describe("InstallApp", () => {
   describe("install-aware user targeting with a running work profile", () => {
     const apkPath = "/tmp/app-debug.apk";
 
-    const setup = (installed: { personal: boolean; work: boolean }) => {
+    const setup = (
+      installed: { personal: boolean; work: boolean },
+      targetDevice: BootedDevice = device,
+      currentUser = "10",
+    ) => {
       fakeLocator.setTool({ tool: "aapt2", path: "/sdk/build-tools/35.0.0/aapt2" });
       fakeHost.setCommandResponse(
         "aapt2",
         createExecResult("package: name='com.example.app' versionCode='1'"),
       );
       fakeAdb.setForegroundApp({ packageName: "com.android.launcher3", userId: 0 });
-      fakeAdb.setUsers([
-        { userId: 0, name: "Owner", flags: 0x4c13, running: true },
-        { userId: 10, name: "Work profile", flags: 0x1030, running: true },
-      ]);
+      fakeAdb.setUsers(
+        targetDevice.formFactor === "automotive"
+          ? [
+              { userId: 0, name: "Driver:813", flags: 0x13, running: true },
+              { userId: 10, name: "Driver:402", flags: 0, running: true },
+            ]
+          : [
+              { userId: 0, name: "Owner", flags: 0x4c13, running: true },
+              { userId: 10, name: "Work profile", flags: 0x1030, running: true },
+            ],
+      );
+      fakeAdb.setCommandResponse("shell am get-current-user", createExecResult(currentUser));
       const listing = (isInstalled: boolean) =>
         createExecResult(isInstalled ? "package:com.example.app" : "");
       fakeAdb.setCommandResponse("shell pm list packages --user 0", listing(installed.personal));
       fakeAdb.setCommandResponse("shell pm list packages --user 10", listing(installed.work));
       fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
       fakeAdb.setCommandResponse(`install --user 10 -r "${apkPath}"`, createExecResult("Success"));
-      return new InstallApp(device, fakeAdbFactory, {
+      return new InstallApp(targetDevice, fakeAdbFactory, {
         hostExecutor: fakeHost,
         buildToolsLocator: fakeLocator,
         performanceTrackerFactory: () => createPerformanceTracker(true, fakeTimer),
       });
     };
+
+    const automotiveDevice: BootedDevice = { ...device, formFactor: "automotive" };
+
+    test("automotive install targets the foreground driver user even when user 0 has the app", async () => {
+      const result = await setup({ personal: true, work: false }, automotiveDevice).execute(
+        apkPath,
+      );
+      expect(result).toMatchObject({ success: true, userId: 10 });
+      expect(fakeAdb.wasCommandExecuted(`install --user 10 -r "${apkPath}"`)).toBe(true);
+      expect(fakeAdb.wasCommandExecuted(`install --user 0 -r "${apkPath}"`)).toBe(false);
+    });
+
+    test("automotive current user 0 is honored", async () => {
+      const result = await setup({ personal: true, work: false }, automotiveDevice, "0").execute(
+        apkPath,
+      );
+      expect(result).toMatchObject({ success: true, userId: 0 });
+      expect(fakeAdb.wasCommandExecuted(`install --user 0 -r "${apkPath}"`)).toBe(true);
+    });
+
+    test("unreadable automotive current user falls back to the primary user", async () => {
+      const result = await setup(
+        { personal: false, work: true },
+        automotiveDevice,
+        "unreadable",
+      ).execute(apkPath);
+      expect(result).toMatchObject({ success: true, userId: 0 });
+      expect(fakeAdb.wasCommandExecuted(`install --user 0 -r "${apkPath}"`)).toBe(true);
+    });
+
+    test("explicit userId 0 wins on automotive devices", async () => {
+      const result = await setup({ personal: true, work: false }, automotiveDevice).execute(
+        apkPath,
+        { userId: 0 },
+      );
+      expect(result).toMatchObject({ success: true, userId: 0 });
+      expect(fakeAdb.wasCommandExecuted(`install --user 0 -r "${apkPath}"`)).toBe(true);
+    });
+
+    test("non-automotive device keeps existing user resolution", async () => {
+      const result = await setup({ personal: true, work: false }, device).execute(apkPath);
+      expect(result).toMatchObject({ success: true, userId: 0 });
+      expect(fakeAdb.wasCommandExecuted("shell am get-current-user")).toBe(false);
+    });
 
     test("reinstalls a personal-only app for the personal user instead of adding a work copy", async () => {
       const result = await setup({ personal: true, work: false }).execute(apkPath);

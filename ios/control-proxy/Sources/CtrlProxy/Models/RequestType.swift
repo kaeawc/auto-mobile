@@ -54,6 +54,7 @@ public enum RequestType: String, CaseIterable, Sendable {
     case getCurrentFocus = "get_current_focus"
     case getTraversalOrder = "get_traversal_order"
     case addHighlight = "add_highlight"
+    case accessibilityFocus = "request_accessibility_focus"
     case magicTap = "request_magic_tap"
     case sdkTrigger = "request_sdk_trigger"
     case sdkObservation = "request_sdk_observation"
@@ -131,6 +132,7 @@ extension RequestType {
         case .getCurrentFocus: return .currentFocusResult
         case .getTraversalOrder: return .traversalOrderResult
         case .addHighlight: return .highlightResponse
+        case .accessibilityFocus: return .accessibilityFocusResult
         case .magicTap: return .magicTapResult
         case .requestAccessibilityAudit: return .accessibilityAuditResult
         case .sdkTrigger: return .sdkTriggerResult

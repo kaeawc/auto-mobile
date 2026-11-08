@@ -1,0 +1,26 @@
+{
+  "spec": {
+    "id": "webview-url-platform-undeclared",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["webview"]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "webView",
+          "id": "article",
+          "url": "https://example.com/{platform:/device/os}",
+          "allowedOrigins": ["https://example.com"]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].url",
+  "expectedMessage": "Platform module device is not declared in requires.platform"
+}

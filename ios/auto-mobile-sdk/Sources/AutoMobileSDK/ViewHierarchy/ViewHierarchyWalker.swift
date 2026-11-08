@@ -508,7 +508,7 @@
         /// Flatten a view's accessibility elements, preferring the array property and
         /// falling back to the `UIAccessibilityContainer` protocol methods (some
         /// SwiftUI backing views populate only the latter).
-        private static func accessibilityElements(of view: UIView) -> [NSObject] {
+        static func accessibilityElements(of view: NSObject) -> [NSObject] {
             if let array = view.accessibilityElements as? [NSObject], !array.isEmpty {
                 return array
             }
@@ -578,7 +578,7 @@
         /// implements `accessibilityIdentifier` but does not declare
         /// `UIAccessibilityIdentification` conformance, so the protocol cast misses
         /// it; fall back to the KVC-exposed getter, guarded by `responds(to:)`.
-        private static func accessibilityIdentifier(of object: NSObject) -> String? {
+        static func accessibilityIdentifier(of object: NSObject) -> String? {
             if let identified = object as? UIAccessibilityIdentification,
                let identifier = identified.accessibilityIdentifier, !identifier.isEmpty
             {

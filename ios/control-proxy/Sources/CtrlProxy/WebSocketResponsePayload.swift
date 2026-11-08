@@ -19,6 +19,7 @@ extension RotateResponse: WebSocketResponsePayload {}
 extension HingeAngleResponse: WebSocketResponsePayload {}
 extension CurrentFocusResponse: WebSocketResponsePayload {}
 extension TraversalOrderResponse: WebSocketResponsePayload {}
+extension AccessibilityFocusResponse: WebSocketResponsePayload {}
 extension MagicTapResponse: WebSocketResponsePayload {}
 extension SdkObservationResponse: WebSocketResponsePayload {}
 extension SdkActionResponse: WebSocketResponsePayload {}

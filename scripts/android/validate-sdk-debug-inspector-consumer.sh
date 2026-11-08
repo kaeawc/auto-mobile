@@ -139,6 +139,8 @@ DB_PROVIDER_CLASS="dev/jasonpearson/automobile/sdk/database/DatabaseInspectorPro
 SP_PROVIDER_CLASS="dev/jasonpearson/automobile/sdk/storage/SharedPreferencesInspectorProvider.class"
 KS_PROVIDER="dev.jasonpearson.automobile.sdk.keystore.KeystoreStateProvider"
 KS_PROVIDER_CLASS="dev/jasonpearson/automobile/sdk/keystore/KeystoreStateProvider.class"
+# Keystore fault injection, including STRONGBOX_UNAVAILABLE (#17300), is debug only.
+KS_FAULT_PLAN_CLASS="dev/jasonpearson/automobile/sdk/keystore/KeystoreFaultPlan.class"
 
 fail() {
   echo "error: $*" >&2
@@ -214,6 +216,7 @@ run_validation() {
   # gates. `[ ... ]` is a builtin, so testing the captured value is fine.
   local db_debug sp_debug db_class_debug sp_class_debug
   local db_release sp_release db_class_release sp_class_release ks_debug ks_release ks_class_debug ks_class_release ks_authority_release
+  local ks_fault_debug ks_fault_release
 
   # AC1 -- published debug AAR declares all exported inspection providers.
   db_debug="$(manifest_provider_count "${tmp}/debug-manifest.xml" "$DB_PROVIDER")"
@@ -232,6 +235,8 @@ run_validation() {
 
   ks_class_debug="$(aar_class_present "$debug_aar" "$KS_PROVIDER_CLASS")"
   [ "$ks_class_debug" = "1" ] || fail "AC2: debug AAR classes.jar is missing ${KS_PROVIDER_CLASS}"
+  ks_fault_debug="$(aar_class_present "$debug_aar" "$KS_FAULT_PLAN_CLASS")"
+  [ "$ks_fault_debug" = "1" ] || fail "AC2: debug AAR classes.jar is missing ${KS_FAULT_PLAN_CLASS}"
 
   # AC3 -- published release AAR declares and packages no inspection providers. Scoped to the inspection providers by name (not "any provider present"),
   # so a legitimate release-safe provider added later under src/main does not
@@ -250,6 +255,8 @@ run_validation() {
   if [ "$ks_class_release" != "0" ] || [ "$db_class_release" != "0" ] || [ "$sp_class_release" != "0" ]; then
     fail "AC3: release AAR classes.jar contains an inspection provider class; it must package none"
   fi
+  ks_fault_release="$(aar_class_present "$release_aar" "$KS_FAULT_PLAN_CLASS")"
+  [ "$ks_fault_release" = "0" ] || fail "AC3: release AAR classes.jar contains ${KS_FAULT_PLAN_CLASS}; Keystore fault injection is debug only"
 
   # AC4 -- module metadata routes each build type to the correct AAR.
   local debug_routed release_routed

@@ -7,6 +7,7 @@ import {
   iosMajorVersionFromSimctlListDevices,
   iosMajorVersionFromDevicectlDetails,
   iosVersionStringFromRuntimeId,
+  iosVersionFromSimctlListDevices,
 } from "../../../src/utils/ios-cmdline-tools/iosVersion";
 
 describe("compareIosVersions", () => {
@@ -252,5 +253,22 @@ describe("iosMajorVersionFromDevicectlDetails", () => {
 
   test("returns null for a non-object scalar payload", () => {
     expect(iosMajorVersionFromDevicectlDetails("42")).toBeNull();
+  });
+});
+
+describe("iosVersionFromSimctlListDevices", () => {
+  test("returns the dotted runtime version of the listed udid", () => {
+    const json = JSON.stringify({
+      devices: {
+        "com.apple.CoreSimulator.SimRuntime.iOS-27-0": [{ udid: "OTHER" }],
+        "com.apple.CoreSimulator.SimRuntime.iOS-26-5": [{ udid: "TARGET" }],
+      },
+    });
+    expect(iosVersionFromSimctlListDevices(json, "TARGET")).toBe("26.5");
+  });
+
+  test("returns undefined for malformed JSON or an absent udid", () => {
+    expect(iosVersionFromSimctlListDevices("not json", "TARGET")).toBeUndefined();
+    expect(iosVersionFromSimctlListDevices('{"devices":{}}', "TARGET")).toBeUndefined();
   });
 });

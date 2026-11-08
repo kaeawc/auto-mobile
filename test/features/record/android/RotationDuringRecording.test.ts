@@ -217,6 +217,7 @@ function tap(pipeline: Awaited<ReturnType<typeof setupTapPipeline>>, holdMs = 12
   pipeline.feed(TAP_DOWN);
   pipeline.timer.advanceTime(holdMs);
   pipeline.feed(TAP_UP);
+  pipeline.timer.advanceTime(50);
 }
 
 describe("DualTrackRecorder geometry timeline (#10174)", () => {
@@ -408,6 +409,7 @@ describe("DualTrackRecorder geometry timeline (#10174)", () => {
     rotate(p, 1);
     p.timer.advanceTime(64);
     p.feed(TAP_UP);
+    p.timer.advanceTime(50);
 
     const { steps, geometryWarnings } = await p.recorder.stop();
 

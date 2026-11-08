@@ -70,7 +70,10 @@ test("included Android modules with unit tests have an explicit CI task or reaso
     }
   }
   const covered = (module: string) =>
-    [":test", ":testDebugUnitTest", ":check"].some((task) => tokens.has(`${module}${task}`));
+    // :testBaseDebugUnitTest is the flavored form (prototype-app-shell's `base` template flavor).
+    [":test", ":testDebugUnitTest", ":testBaseDebugUnitTest", ":check"].some((task) =>
+      tokens.has(`${module}${task}`),
+    );
   for (const [module, reason] of Object.entries(EXEMPT_MODULES)) {
     expect(modules).toContain(module);
     expect(reason.trim().length).toBeGreaterThan(0);

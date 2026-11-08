@@ -16,7 +16,8 @@ setup() {
   mkdir -p .circleci ios docs
   printf '%s\n' \
     'ios/.* run-main-ios true' \
-    'android/desktop-app/.* run-main-desktop true' > .circleci/main-macos-paths.txt
+    'android/desktop-app/.* run-main-desktop true' \
+    'Package\.swift run-main-ios true' > .circleci/main-macos-paths.txt
   commit_file README.md base
 }
 
@@ -73,6 +74,28 @@ commit_file() {
   commit_file docs/x.md three > /dev/null
   run bash "${script}" run-main-ios
   [ "$status" -eq 0 ]
+}
+
+@test "coalesces the desktop group on its own paths" {
+  CIRCLE_SHA1="$(commit_file android/desktop-app/a.kt one)"
+  export CIRCLE_SHA1
+  commit_file docs/b.md two > /dev/null
+  run bash "${script}" run-main-desktop
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no commit after"* ]]
+  commit_file android/desktop-app/c.kt three > /dev/null
+  run bash "${script}" run-main-desktop
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"also changes android/desktop-app/c.kt"* ]]
+}
+
+@test "matches an escaped literal path in the mapping" {
+  CIRCLE_SHA1="$(commit_file ios/a.swift one)"
+  export CIRCLE_SHA1
+  commit_file Package.swift two > /dev/null
+  run bash "${script}" run-main-ios
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"also changes Package.swift"* ]]
 }
 
 @test "runs when newer main commits touch only other path groups" {

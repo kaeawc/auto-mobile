@@ -148,6 +148,24 @@ final class ElementLocatorTests: XCTestCase {
         XCTAssertNil(ElementLocator.depthCapTruncationReason(depth: 30, maxDepth: 30, hasChildren: false))
     }
 
+    func testOffscreenFilterBounds_landscapeWindowWidensPortraitRoot() {
+        // Captured on an unfolded iPhone Duo (#17305): root 669x951, window 951x669.
+        let bounds = ElementLocator.offscreenFilterBounds(
+            rootFrame: CGRect(x: 0, y: 0, width: 669, height: 951),
+            windowFrames: [CGRect(x: 0, y: 0, width: 951, height: 669)]
+        )
+        XCTAssertTrue(bounds.contains(CGRect(x: 881, y: 435, width: 44, height: 58)))
+    }
+
+    func testOffscreenFilterBounds_ignoresEmptyAndNonFiniteWindows() {
+        let root = CGRect(x: 0, y: 0, width: 402, height: 874)
+        let bounds = ElementLocator.offscreenFilterBounds(
+            rootFrame: root,
+            windowFrames: [.zero, CGRect(x: 0, y: 0, width: CGFloat.infinity, height: 10), root]
+        )
+        XCTAssertEqual(bounds, root)
+    }
+
     func testForegroundBundleId_switcherOwnsForegroundOverAppCards() {
         XCTAssertEqual(
             ElementLocator.foregroundBundleId(

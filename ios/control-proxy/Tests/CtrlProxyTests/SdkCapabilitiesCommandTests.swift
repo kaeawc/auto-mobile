@@ -400,7 +400,7 @@ final class SdkCapabilitiesCommandTests: XCTestCase {
             serverInfo: SdkHierarchyServerInfo(
                 status: "ok",
                 bundleId: "com.example.sdk",
-                capabilities: ["network-fault-rules", "magic-tap"]
+                capabilities: ["network-fault-rules", "magic-tap", "accessibility-focus"]
             )
         )
         let handler = handler(foregroundBundleId: "com.example.sdk", sdkClient: sdkClient)
@@ -416,6 +416,7 @@ final class SdkCapabilitiesCommandTests: XCTestCase {
         XCTAssertEqual(capabilityResponse?.bundleId, "com.example.sdk")
         XCTAssertTrue(capabilityResponse?.capabilities.contains("network_error_simulation") == true)
         XCTAssertTrue(capabilityResponse?.capabilities.contains("magic_tap") == true)
+        XCTAssertTrue(capabilityResponse?.capabilities.contains("accessibility_focus") == true)
         XCTAssertEqual(networkResponse?.success, true)
         let callCount = await sdkClient.networkErrorCallCount()
         XCTAssertEqual(callCount, 1)
@@ -531,6 +532,7 @@ final class SdkCapabilitiesCommandTests: XCTestCase {
         ) as? SdkCapabilitiesResponse
         XCTAssertEqual(response?.available, true)
         XCTAssertFalse(response?.capabilities.contains("magic_tap") == true)
+        XCTAssertFalse(response?.capabilities.contains("accessibility_focus") == true)
         XCTAssertTrue(response?.capabilities.contains("highlight") == true)
     }
 

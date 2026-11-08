@@ -1,0 +1,389 @@
+{
+  "hierarchy": {
+    "node": {
+      "$": {
+        "text": "Playground",
+        "class": "XCUIApplication",
+        "bounds": [0, 0, 669, 951],
+        "view-id": "s2-47fb9d5b538fa955"
+      },
+      "extras": { "sdk.isUserInteractionEnabled": "false" },
+      "node": [
+        {
+          "$": {
+            "resource-id": "Discover",
+            "class": "UINavigationBar",
+            "bounds": [0, 24, 951, 82],
+            "view-id": "Discover"
+          },
+          "extras": {
+            "sdk.gestureRecognizers": "_UIPointerInteractionHoverGestureRecognizer(enabled),_UIPointerInteractionHoverGestureRecognizer(enabled),_UIPointerInteractionPressGestureRecognizer(enabled)"
+          },
+          "node": [
+            {
+              "$": {
+                "text": "Discover",
+                "class": "UILabel",
+                "bounds": [20, 31, 134, 65],
+                "role": "heading",
+                "view-id": "s2-eda8cdaefaf8e047"
+              },
+              "extras": {
+                "sdk.accessibilityTraits": "header",
+                "sdk.isAccessibilityElement": "true",
+                "sdk.isUserInteractionEnabled": "false"
+              },
+              "role": "heading"
+            },
+            {
+              "$": {
+                "text": "Search videos",
+                "class": "UISearchBar",
+                "bounds": [627, 26, 867, 70],
+                "clickable": "true",
+                "role": "textfield",
+                "hint-text": "Search videos",
+                "view-id": "s2-03144510d78b1e13",
+                "actions": ["set_text", "clear_text"]
+              },
+              "extras": {
+                "sdk.gestureRecognizers": "_UIPointerInteractionHoverGestureRecognizer(enabled),_UIPointerInteractionHoverGestureRecognizer(enabled),_UIPointerInteractionPressGestureRecognizer(enabled)"
+              },
+              "node": {
+                "$": {
+                  "text": "Search",
+                  "resource-id": "magnifyingglass",
+                  "class": "UIImageView",
+                  "bounds": [639, 38, 659, 57],
+                  "clickable": "true",
+                  "role": "image",
+                  "view-id": "magnifyingglass"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "$": {
+            "class": "UICollectionView",
+            "bounds": [0, 0, 951, 669],
+            "scrollable": "true",
+            "role": "list",
+            "view-id": "s2-cc91fd4aa83e883d"
+          },
+          "extras": {
+            "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIPassthroughScrollGestureRecognizer(enabled),_UIPassthroughGateGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIDoubleTapInteractionGestureRecognizer(enabled)",
+            "sdk.hasTapTarget": "true"
+          },
+          "node": [
+            {
+              "$": {
+                "class": "UITableViewCell",
+                "bounds": [20, 82, 867, 162],
+                "clickable": "true",
+                "role": "listitem",
+                "view-id": "s2-c3bdcd6a59715e61"
+              },
+              "node": {
+                "$": {
+                  "text": "Getting Started with SwiftUI, 10:23",
+                  "class": "UIButton",
+                  "bounds": [20, 82, 867, 162],
+                  "clickable": "true",
+                  "role": "button",
+                  "view-id": "s2-00e13a56259db7ea"
+                },
+                "node": [
+                  {
+                    "$": {
+                      "text": "Getting Started with SwiftUI",
+                      "class": "UILabel",
+                      "bounds": [112, 101, 344, 122],
+                      "role": "text",
+                      "view-id": "s2-21605c38bcd74b35"
+                    }
+                  },
+                  {
+                    "$": {
+                      "text": "Facetime Video Call",
+                      "resource-id": "video.fill",
+                      "class": "UIImageView",
+                      "bounds": [56, 112, 85, 131],
+                      "clickable": "true",
+                      "role": "image",
+                      "view-id": "video.fill"
+                    },
+                    "extras": { "sdk.isLayerNode": "true", "sdk.isUserInteractionEnabled": "false" }
+                  },
+                  {
+                    "$": {
+                      "text": "10:23",
+                      "class": "UILabel",
+                      "bounds": [112, 126, 144, 143],
+                      "role": "text",
+                      "view-id": "s2-02dadf71edddf60d"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "$": {
+                "class": "UITableViewCell",
+                "bounds": [20, 162, 867, 242],
+                "clickable": "true",
+                "role": "listitem",
+                "view-id": "s2-258690f178b9e41f"
+              },
+              "node": {
+                "$": {
+                  "text": "Advanced Animations, 15:45",
+                  "class": "UIButton",
+                  "bounds": [20, 162, 867, 242],
+                  "clickable": "true",
+                  "role": "button",
+                  "view-id": "s2-caa672df8852c93c"
+                },
+                "node": [
+                  {
+                    "$": {
+                      "text": "Advanced Animations",
+                      "class": "UILabel",
+                      "bounds": [112, 181, 286, 202],
+                      "role": "text",
+                      "view-id": "s2-6dfdd143c9e3ea57"
+                    }
+                  },
+                  {
+                    "$": {
+                      "text": "Magic Wand With Stars",
+                      "resource-id": "wand.and.stars",
+                      "class": "UIImageView",
+                      "bounds": [57, 190, 81, 213],
+                      "clickable": "true",
+                      "role": "image",
+                      "view-id": "wand.and.stars"
+                    },
+                    "extras": {
+                      "sdk.backgroundColor": "#F3E8D8FF",
+                      "sdk.cornerRadius": "8.0",
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false"
+                    }
+                  },
+                  {
+                    "$": {
+                      "text": "15:45",
+                      "class": "UILabel",
+                      "bounds": [112, 206, 142, 223],
+                      "role": "text",
+                      "view-id": "s2-cadab454ffc60ba3"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "$": {
+                "class": "UITableViewCell",
+                "bounds": [20, 242, 867, 322],
+                "clickable": "true",
+                "role": "listitem",
+                "view-id": "s2-81800f2f562e373b"
+              },
+              "node": {
+                "$": {
+                  "text": "Building Custom Components, 22:10",
+                  "class": "UIButton",
+                  "bounds": [20, 242, 867, 322],
+                  "clickable": "true",
+                  "role": "button",
+                  "view-id": "s2-773f8504cc96e493"
+                },
+                "node": [
+                  {
+                    "$": {
+                      "text": "Building Custom Components",
+                      "class": "UILabel",
+                      "bounds": [112, 261, 340, 282],
+                      "role": "text",
+                      "view-id": "s2-3091c87a08798e0e"
+                    }
+                  },
+                  {
+                    "$": {
+                      "text": "Cube",
+                      "resource-id": "cube.fill",
+                      "class": "UIImageView",
+                      "bounds": [58, 269, 81, 295],
+                      "clickable": "true",
+                      "role": "image",
+                      "view-id": "cube.fill"
+                    },
+                    "extras": { "sdk.isLayerNode": "true", "sdk.isUserInteractionEnabled": "false" }
+                  },
+                  {
+                    "$": {
+                      "text": "22:10",
+                      "class": "UILabel",
+                      "bounds": [112, 286, 144, 303],
+                      "role": "text",
+                      "view-id": "s2-6cd9f82b3cdb0b47"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "$": {
+                "class": "UITableViewCell",
+                "bounds": [20, 322, 867, 402],
+                "clickable": "true",
+                "role": "listitem",
+                "view-id": "s2-899aaa17d394ad63"
+              },
+              "node": {
+                "$": {
+                  "text": "State Management Deep Dive, 18:30",
+                  "class": "UIButton",
+                  "bounds": [20, 322, 867, 402],
+                  "clickable": "true",
+                  "role": "button",
+                  "view-id": "s2-09be14575b71b0aa"
+                },
+                "node": [
+                  {
+                    "$": {
+                      "text": "State Management Deep Dive",
+                      "class": "UILabel",
+                      "bounds": [112, 341, 347, 362],
+                      "role": "text",
+                      "view-id": "s2-9dbaf1d3b6e32f29"
+                    }
+                  },
+                  {
+                    "$": {
+                      "text": "Syncing",
+                      "resource-id": "arrow.triangle.2.circlepath",
+                      "class": "UIImageView",
+                      "bounds": [55, 350, 84, 374],
+                      "clickable": "true",
+                      "role": "image",
+                      "view-id": "arrow.triangle.2.circlepath"
+                    },
+                    "extras": { "sdk.isLayerNode": "true", "sdk.isUserInteractionEnabled": "false" }
+                  },
+                  {
+                    "$": {
+                      "text": "18:30",
+                      "class": "UILabel",
+                      "bounds": [112, 366, 144, 383],
+                      "role": "text",
+                      "view-id": "s2-f814e6ed1a5ced23"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "$": {
+                "class": "UITableViewCell",
+                "bounds": [20, 402, 867, 482],
+                "clickable": "true",
+                "role": "listitem",
+                "view-id": "s2-283ba983fbe83997"
+              },
+              "node": {
+                "$": {
+                  "text": "Networking Best Practices, 12:55",
+                  "class": "UIButton",
+                  "bounds": [20, 402, 867, 482],
+                  "clickable": "true",
+                  "role": "button",
+                  "view-id": "s2-f5415ff41170aed8"
+                },
+                "node": [
+                  {
+                    "$": {
+                      "text": "Networking Best Practices",
+                      "class": "UILabel",
+                      "bounds": [112, 421, 321, 442],
+                      "role": "text",
+                      "view-id": "s2-5cced247d831b73a"
+                    }
+                  },
+                  {
+                    "$": {
+                      "text": "Network Nodes Connected By Lines",
+                      "resource-id": "network",
+                      "class": "UIImageView",
+                      "bounds": [58, 430, 82, 454],
+                      "clickable": "true",
+                      "role": "image",
+                      "view-id": "network"
+                    },
+                    "extras": { "sdk.isLayerNode": "true", "sdk.isUserInteractionEnabled": "false" }
+                  },
+                  {
+                    "$": {
+                      "text": "12:55",
+                      "class": "UILabel",
+                      "bounds": [112, 446, 142, 463],
+                      "role": "text",
+                      "view-id": "s2-8ae2649718861a75"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "$": {
+            "text": "Toolbar",
+            "resource-id": "Toolbar",
+            "class": "UIToolbar",
+            "bounds": [0, 0, 951, 669],
+            "view-id": "Toolbar"
+          }
+        },
+        {
+          "$": {
+            "text": "Toolbar",
+            "resource-id": "Toolbar",
+            "class": "UIToolbar",
+            "bounds": [0, 0, 951, 669],
+            "view-id": "Toolbar"
+          }
+        }
+      ]
+    }
+  },
+  "packageName": "dev.jasonpearson.automobile.Playground",
+  "updatedAt": 1794009615837,
+  "windows": [
+    { "bounds": [0, 0, 669, 951], "id": 0, "isActive": true, "isFocused": true, "type": 1 }
+  ],
+  "screenScale": 3,
+  "screenWidth": 951,
+  "screenHeight": 669,
+  "nativeScale": 3,
+  "pixelWidth": 2853,
+  "pixelHeight": 2007,
+  "systemInsets": { "bottom": 34, "left": 0, "right": 84, "top": 0 },
+  "insets": {
+    "available": true,
+    "displayCutoutInfo": { "classification": "unknown" },
+    "safeArea": { "bottom": 34, "left": 0, "right": 84, "top": 0 },
+    "source": "ios-sdk-safe-area",
+    "systemChrome": {
+      "homeIndicatorAutoHideRequested": false,
+      "source": "ios-status-bar-manager",
+      "statusBar": "visible",
+      "visibility": "visible"
+    },
+    "units": "points"
+  },
+  "frameContext": "FFEA511C-4CF0-48BB-ADB4-0B121AB7DDCA:2:c09ded5cc70a3e82",
+  "fresh": true
+}

@@ -1,4 +1,4 @@
-import { Element, ObserveResult } from "../../models";
+import { Element, ObserveResult, type ViewHierarchyResult } from "../../models";
 import { PerformanceTracker } from "../../utils/PerformanceTracker";
 import { type NavigationGraphService } from "./NavigationGraphManager";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
@@ -17,6 +17,7 @@ import {
   extractScrollableContainers,
 } from "./ExploreElementExtraction";
 import { rankElementsForDryRun } from "./ExploreElementScoring";
+import { withoutImeWindows } from "./ExploreImeFilter";
 import type { ExploreDryRunResult, ExploreOptions, TrackedElement } from "./ExploreTypes";
 
 interface DryRunPlanningContext {
@@ -47,12 +48,20 @@ export function getSafeExplorationCandidates(
     return [];
   }
 
-  const navigationElements = extractNavigationElements(viewHierarchy, elementParser);
-  const scrollableContainers = extractScrollableContainers(viewHierarchy, elementParser);
+  return navigationCandidates(withoutImeWindows(viewHierarchy), elementParser);
+}
+
+/** Navigation candidates outside the soft keyboard, under the permission deny-label policy. */
+function navigationCandidates(
+  appHierarchy: ViewHierarchyResult,
+  elementParser: ElementParser,
+): Element[] {
+  const navigationElements = extractNavigationElements(appHierarchy, elementParser);
+  const scrollableContainers = extractScrollableContainers(appHierarchy, elementParser);
   // Retain the permission fast-path's conservative deny-label policy at selection.
   return filterPermissionNavigationCandidates(
     [...navigationElements, ...scrollableContainers],
-    extractAllElements(viewHierarchy, elementParser),
+    extractAllElements(appHierarchy, elementParser),
   );
 }
 /** Plan from a single captured hierarchy without dispatching any interaction. */
@@ -80,12 +89,9 @@ export async function planExplorationDryRun(
   const edges =
     currentScreen !== "unknown" ? await context.navigationManager.getEdgesFrom(currentScreen) : [];
 
-  const navigationElements = extractNavigationElements(viewHierarchy, context.elementParser);
-  const scrollableContainers = extractScrollableContainers(viewHierarchy, context.elementParser);
-  const allCandidates = [...navigationElements, ...scrollableContainers];
-  const safeCandidates = filterPermissionNavigationCandidates(
-    allCandidates,
-    extractAllElements(viewHierarchy, context.elementParser),
+  const safeCandidates = navigationCandidates(
+    withoutImeWindows(viewHierarchy),
+    context.elementParser,
   );
 
   if (safeCandidates.length === 0) {

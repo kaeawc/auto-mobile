@@ -139,8 +139,8 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     key: "tool-call-recording",
     label: "Tool call recording",
     description:
-      "Enable the recordToolCalls tool to capture MCP tool calls as replayable YAML test plans.",
-    defaultValue: false,
+      "Allow recordToolCalls begin/end to capture MCP tool calls as replayable YAML test plans. On by default; the tool itself is still opt-in via setToolEnabled.",
+    defaultValue: true,
   },
   {
     key: "navigation-screenshots",

@@ -118,6 +118,8 @@ internal data class PackageInfoOutcome(
   val mainActivity: String?,
   val error: String?,
   val totalTimeMs: Long,
+  val gitBranch: String? = null,
+  val gitSha: String? = null,
 )
 
 internal data class LaunchIntentOutcome(

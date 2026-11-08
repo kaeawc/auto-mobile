@@ -160,6 +160,61 @@ class McpDaemonClientSetActiveDeviceTest {
   }
 
   @Test
+  fun `another daemon's claim is held elsewhere, naming its PID, although the wire says retryable`() {
+    val case = RefusalWireFixtures.case("device_owned_by_other_daemon")
+    assertEquals(true, case.retryable)
+    val result = bind(case.result.toString())
+    assertFalse(result.success)
+    assertEquals(SetActiveDeviceRefusal.HELD_BY_ANOTHER_DAEMON, result.refusal)
+    assertTrue(result.refusal?.heldElsewhere == true)
+    assertEquals(HeldElsewhereHolder.AnotherDaemon(pid = 4242), result.holder)
+  }
+
+  @Test
+  fun `another daemon's claim with no PID in its message is held elsewhere with no PID`() {
+    val payload = buildJsonObject {
+      put("success", false)
+      put("error", "Device 'emulator-5554' is claimed by another AutoMobile daemon (code x).")
+      put("code", "device_owned_by_other_daemon")
+      put("deviceId", "emulator-5554")
+      put("retryable", true)
+      put("retryAfterMs", 2000)
+    }
+      .toString()
+    val result = bind(errorText(payload))
+    assertEquals(SetActiveDeviceRefusal.HELD_BY_ANOTHER_DAEMON, result.refusal)
+    assertEquals(HeldElsewhereHolder.AnotherDaemon(pid = null), result.holder)
+  }
+
+  @Test
+  fun `a device assigned to a binding is held elsewhere naming the binding`() {
+    val result = bind(RefusalWireFixtures.case("device_assigned_to_binding").result.toString())
+    assertEquals(SetActiveDeviceRefusal.ASSIGNED_TO_BINDING, result.refusal)
+    assertEquals(HeldElsewhereHolder.Binding(declaredBinding = 0), result.holder)
+  }
+
+  @Test
+  fun `another session's typed refusal is held elsewhere by another session`() {
+    val result = bind(RefusalWireFixtures.case("device_owned_by_other_session").result.toString())
+    assertEquals(SetActiveDeviceRefusal.HELD_BY_ANOTHER_SESSION, result.refusal)
+    assertEquals(HeldElsewhereHolder.AnotherSession, result.holder)
+  }
+
+  @Test
+  fun `a suspect session is an ordinary bind error, not held elsewhere or released`() {
+    val result = bind(RefusalWireFixtures.case("daemon_session_suspect").result.toString())
+    assertFalse(result.success)
+    assertEquals(null, result.refusal)
+    assertEquals(null, result.holder)
+  }
+
+  @Test
+  fun `a released session names no holder`() {
+    val terminal = RefusalWireFixtures.all().first { it.acquireNewSession }
+    assertEquals(null, bind(terminal.result.toString()).holder, terminal.name)
+  }
+
+  @Test
   fun `a wrapped terminal session message is a released session`() {
     val text =
       "Error: Failed to set active device: Session s1 was released and cannot be reused. " +

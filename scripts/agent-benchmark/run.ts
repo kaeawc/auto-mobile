@@ -387,7 +387,7 @@ const realFs: HarnessFs = {
 
 /**
  * The canonical ownership rules daemons use before allocating a device (the CtrlProxy
- * forwarding lease, current and 0.0.84 allocation claims, unreadable claims, and live
+ * forwarding lease, allocation claims, unreadable claims, and live
  * CtrlProxy forwards, each confirmed against its owner), then this process's own claim.
  * The claim names no control socket: the harness serves none, so other daemons judge it
  * by this process's liveness alone instead of lapsing it after their startup grace.

@@ -1,6 +1,5 @@
 export {
   encodeFrameHeader,
-  type DecodedFrame,
   type DecodedAudio,
   type DecodedEncodedVideo,
   type MalformedFrameError,
@@ -18,7 +17,6 @@ export {
   type EncodeSettings,
   type EncodeBitratePolicy,
   type IosScreenCaptureHelperOptions,
-  type FrameDeliveryScheduler,
   type NativeFrameMetrics,
   type IosScreenCaptureReadiness,
   type IosScreenCaptureReadinessPhase,

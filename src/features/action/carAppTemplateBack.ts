@@ -164,7 +164,14 @@ export async function retryBackOnTemplateHost(
   return deps.observedInteraction(
     (observation, fence) =>
       tapHostBack(observation, { button, keyCode, signal, fence, tapClient: deps.tapClient }),
-    { ...context.options, changeExpected: true },
+    // The tap target comes from this interaction's own pre-tap read, so that read gets the
+    // wrong-window refusal and display refresh a selector-resolved gesture gets.
+    {
+      ...context.options,
+      changeExpected: true,
+      usesObservationForResolution: true,
+      resolvesTargetFromRead: true,
+    },
   );
 }
 

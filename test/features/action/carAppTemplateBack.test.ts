@@ -145,7 +145,9 @@ describe("retryBackOnTemplateHost (#17498)", () => {
       observedInteraction: observed.run,
     });
     expect(tapClient.taps).toEqual([point]);
-    expect(observed.calls).toEqual([{ changeExpected: true }]);
+    expect(observed.calls).toEqual([
+      { changeExpected: true, usesObservationForResolution: true, resolvesTargetFromRead: true },
+    ]);
     expect(observed.fenceChecks).toEqual([1]);
     expect(result).toMatchObject({ success: true, button: "back", keyCode: 4 });
     expect(result.backFallback).toBe(affordance);

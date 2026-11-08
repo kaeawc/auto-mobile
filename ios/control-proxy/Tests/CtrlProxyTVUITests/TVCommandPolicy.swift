@@ -1,3 +1,5 @@
+import Foundation
+
 // Kept independent of XCTest and UIKit so macOS SwiftPM tests cover the capability boundary.
 enum TVCommandPolicy {
     static let supportedCommands = [
@@ -15,10 +17,79 @@ enum TVRemoteButton: String, CaseIterable {
 }
 
 enum TVElementText {
-    static func text(label: String, value: String?, isTextInput: Bool, isSecure: Bool) -> String {
-        guard !isSecure, isTextInput, let value, !value.isEmpty else { return label }
+    static func text(
+        label: String, value: String?, placeholder: String? = nil, isTextInput: Bool, isSecure: Bool
+    )
+        -> String
+    {
+        guard !isSecure, isTextInput, let value, !value.isEmpty,
+              value != placeholder else { return label }
         // Emit the value alone for an empty or matching label; otherwise join label and value with one space.
         return label.isEmpty || label == value ? value : "\(label) \(value)"
+    }
+}
+
+enum TVSecureField {
+    static func isSecure(elementType: Int, identifier: String, label: String, placeholder: String?) -> Bool {
+        if elementType == 50 { return true }
+        guard [45, 49, 52].contains(elementType) else { return false }
+        // XCUIElementAttributes exposes no secure-text-entry trait; use field metadata as a fallback.
+        return [identifier, label, placeholder ?? ""].contains { metadata in
+            if metadata.range(
+                of: #"password|passcode|passwd|secret"#, options: [.regularExpression, .caseInsensitive]
+            ) != nil { return true }
+            // Split camelCase and acronyms before treating punctuation and digits as token boundaries.
+            let tokens = metadata.replacingOccurrences(
+                of: #"(\p{Ll})(\p{Lu})"#, with: "$1 $2", options: .regularExpression
+            ).replacingOccurrences(
+                of: #"(\p{Lu})(\p{Lu}\p{Ll})"#, with: "$1 $2", options: .regularExpression
+            ).components(separatedBy: CharacterSet.letters.inverted)
+            return tokens.contains { $0.lowercased() == "pin" }
+        }
+    }
+}
+
+struct TVNodeSketch {
+    let elementType: Int
+    var identifier = ""
+    var label = ""
+    var value: String?
+    var placeholder: String?
+    var hasFocus = false
+    var children: [TVNodeSketch] = []
+}
+
+struct TVTextEntryResolution {
+    let keyboardPresent: Bool
+
+    /// A system keyboard can expose secure input as an ordinary text view. Withhold all input values.
+    func text(for node: TVNodeSketch) -> String {
+        TVElementText.text(
+            label: node.label, value: node.value, placeholder: node.placeholder,
+            isTextInput: TVTextEntryPolicy.isTextInput(node.elementType),
+            isSecure: keyboardPresent || TVSecureField.isSecure(
+                elementType: node.elementType, identifier: node.identifier,
+                label: node.label, placeholder: node.placeholder
+            )
+        )
+    }
+}
+
+enum TVTextEntryPolicy {
+    static func isTextInput(_ elementType: Int) -> Bool {
+        [45, 49, 50, 52].contains(elementType)
+    }
+
+    static func hasKeyboard(_ root: TVNodeSketch) -> Bool {
+        root.elementType == 19 || root.children.contains { hasKeyboard($0) }
+    }
+
+    static func hasFocusedKeyboard(_ root: TVNodeSketch) -> Bool {
+        (root.elementType == 19 && root.hasFocus) || root.children.contains { hasFocusedKeyboard($0) }
+    }
+
+    static func resolve(root: TVNodeSketch) -> TVTextEntryResolution {
+        TVTextEntryResolution(keyboardPresent: hasKeyboard(root))
     }
 }
 

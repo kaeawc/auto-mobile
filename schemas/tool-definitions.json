@@ -9426,6 +9426,7 @@
               "uninstallApp",
               "videoRecording",
               "wakeAndUnlock",
+              "wearSurface",
               "windowMode"
             ]
           }
@@ -9591,6 +9592,7 @@
               "uninstallApp",
               "videoRecording",
               "wakeAndUnlock",
+              "wearSurface",
               "windowMode"
             ]
           }
@@ -22844,6 +22846,22 @@
             "blocked": {
               "description": "True when DO is required and the known foreground activity is not distraction optimized.",
               "type": "boolean"
+            },
+            "hostRenderedUi": {
+              "description": "Present when the foreground screen is Car App Library templates drawn by the car host, not the app's own views. With hostPackage, template nodes from that host were seen; without it, only the foreground activity is CarAppActivity, which also covers the library's own connection-error screen. Absence means neither signal was seen (for example an incomplete capture), not proof that the screen is app-drawn.",
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "carAppLibrary"
+                },
+                "hostPackage": {
+                  "description": "The car host that drew the templates, when its resource ids name it.",
+                  "type": "string"
+                }
+              },
+              "required": ["kind"],
+              "additionalProperties": false
             }
           },
           "required": ["blocked"],
@@ -27559,7 +27577,7 @@
     "annotations": {
       "destructiveHint": false
     },
-    "description": "Post notification via Android SDK hooks or iOS/watchOS simulator simctl push.",
+    "description": "Post notification via Android SDK hooks or iOS/watchOS/tvOS simulator simctl push.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -27622,7 +27640,7 @@
           "additionalProperties": {}
         },
         "appId": {
-          "description": "Android target package name or iOS/watchOS target bundle ID (required on iOS/watchOS); Android defaults to the live foreground app when omitted",
+          "description": "Android target package name or iOS/watchOS/tvOS target bundle ID (required on iOS/watchOS/tvOS); Android defaults to the live foreground app when omitted",
           "type": "string",
           "minLength": 1,
           "maxLength": 256,
@@ -42392,6 +42410,7 @@
               "uninstallApp",
               "videoRecording",
               "wakeAndUnlock",
+              "wearSurface",
               "windowMode"
             ]
           }
@@ -48306,7 +48325,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "watchOS only: rotate the Apple Watch Digital Crown by a signed, non-zero delta, with optional positive velocity (default: 1). Target an Apple Watch session. Observe afterward to check the app's response.",
+    "description": "watchOS only: rotate the Apple Watch Digital Crown by a signed, non-zero delta in full revolutions (1 = one turn; use fractions such as 0.25 for small changes), with optional positive velocity (default: 1). Target an Apple Watch session. Observe afterward to check the app's response.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -48317,7 +48336,7 @@
           "const": "watchos"
         },
         "delta": {
-          "description": "Signed, non-zero Digital Crown rotation delta",
+          "description": "Signed, non-zero crown turn in full revolutions: 1 is one full turn, 0.25 a quarter turn. How many value steps a turn moves depends on the app's crown step and sensitivity. Fractions are accepted; a turn smaller than one step of the focused control may not register",
           "type": "number"
         },
         "velocity": {
@@ -51433,7 +51452,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": ["android", "ios", "tvos"]
         },
         "action": {
           "type": "string",
@@ -54857,6 +54876,7 @@
             "uninstallApp",
             "videoRecording",
             "wakeAndUnlock",
+            "wearSurface",
             "windowMode"
           ]
         },
@@ -54984,6 +55004,7 @@
               "uninstallApp",
               "videoRecording",
               "wakeAndUnlock",
+              "wearSurface",
               "windowMode"
             ]
           }
@@ -67280,6 +67301,191 @@
       },
       "required": ["message"],
       "additionalProperties": {}
+    }
+  },
+  {
+    "name": "wearSurface",
+    "title": "Manage Wear OS Tiles",
+    "annotations": {
+      "destructiveHint": true
+    },
+    "description": "Wear OS watches only (other form factors are refused without a change): tiles. listTileProviders lists the installed tile provider components. addTile adds a tile provider to the carousel (idempotent; reports its index; a component that is not a tile provider fails before anything is sent, naming the valid ones). removeTile removes it (also succeeds when it was absent). showTile scrolls the carousel to a tile by component (index resolved right before showing, adding the tile if absent) or by index, then observes; success requires the observe to confirm a tile container in the foreground Wear system UI. The debug broadcasts report success even when nothing happened, so verified is only true when an observe confirmed it.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "listTileProviders takes no other argument; addTile and removeTile need component; showTile needs component (index resolved right before showing) or index",
+          "type": "string",
+          "enum": ["addTile", "showTile", "removeTile", "listTileProviders"]
+        },
+        "component": {
+          "description": "Tile provider service as <package>/<service>",
+          "type": "string",
+          "pattern": "^[A-Za-z][\\w.]*\\/\\.?[A-Za-z_][\\w.]*$"
+        },
+        "index": {
+          "description": "showTile only: carousel position; indexes shift when tiles are added",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios", "tvos", "visionos"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["addTile", "showTile", "removeTile", "listTileProviders"]
+        },
+        "requested": {
+          "type": "object",
+          "properties": {
+            "component": {
+              "type": "string"
+            },
+            "index": {
+              "type": "number"
+            }
+          },
+          "additionalProperties": false
+        },
+        "broadcastResult": {
+          "description": "The broadcast that performed the action; absent for listTileProviders",
+          "$ref": "#/$defs/__schema0"
+        },
+        "indexResolution": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "index": {
+          "type": "number"
+        },
+        "providers": {
+          "description": "listTileProviders only: installed tile provider services",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string"
+              },
+              "packageName": {
+                "type": "string"
+              },
+              "className": {
+                "type": "string"
+              }
+            },
+            "required": ["component", "packageName", "className"],
+            "additionalProperties": false
+          }
+        },
+        "verified": {
+          "description": "True only when an observe after the action confirmed it",
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "artifact": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "const": "json"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool": {
+              "type": "string"
+            },
+            "resourceUri": {
+              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
+              "type": "string"
+            }
+          },
+          "required": ["path", "format", "payload", "bytes", "tool"],
+          "additionalProperties": {}
+        }
+      },
+      "required": ["success", "action", "requested", "verified", "message"],
+      "additionalProperties": false,
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "data": {
+              "type": "string"
+            },
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "added",
+                "removed",
+                "showRequested",
+                "providerNotFound",
+                "missingComponent",
+                "indexRequired",
+                "unrecognizedOperation",
+                "unknown"
+              ]
+            },
+            "index": {
+              "type": "number"
+            },
+            "operation": {
+              "type": "string"
+            }
+          },
+          "required": ["code", "outcome"],
+          "additionalProperties": false
+        }
+      }
     }
   },
   {

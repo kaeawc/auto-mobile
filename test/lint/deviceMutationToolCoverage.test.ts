@@ -92,6 +92,7 @@ describe("device mutation tool coverage", () => {
     "rotate",
     "sendBroadcast",
     "backgroundWork",
+    "wearSurface",
     "launchApp",
     "measureStartup",
     "installApp",

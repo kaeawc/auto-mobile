@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { ActiveWindowInfo } from "../../src/models/ActiveWindowInfo";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 import type { ViewHierarchyNode } from "../../src/models/ViewHierarchyResult";
-import { TEMPLATES_HOST_ID_PREFIX } from "../../src/features/action/carAppTemplateBack";
+import { HOST_RESOURCE_ID_PREFIX } from "../../src/features/observe/automotive/carAppHostRenderedUi";
 import { buildObserveResult } from "./observeFixture";
 
 /** Trimmed `observe --project full` captures from #16744 / #17498 (AAOS API 34 ext9, userdebug). */
@@ -43,7 +43,7 @@ function toNode(trimmed: TrimmedNode): ViewHierarchyNode {
   const [left, top, right, bottom] = trimmed.bounds;
   const node: ViewHierarchyNode = {
     "resource-id": trimmed.id.startsWith("host:")
-      ? `${TEMPLATES_HOST_ID_PREFIX}${trimmed.id.slice("host:".length)}`
+      ? `${HOST_RESOURCE_ID_PREFIX}${trimmed.id.slice("host:".length)}`
       : trimmed.id,
     bounds: { left, top, right, bottom },
   };

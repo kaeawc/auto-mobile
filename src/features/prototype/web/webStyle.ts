@@ -38,6 +38,11 @@ export interface WebStyleContext {
   /** The flex direction of the parent, when it lays children out in a line. */
   readonly parentAxis?: "row" | "column";
   /**
+   * Whether the parent shares its main axis by `weight`, as a native Row, Column or card does
+   * (Compose's `Modifier.weight`); a scroll, sheet or stack lays children out in a line without it.
+   */
+  readonly weightsChildren?: boolean;
+  /**
    * Inside a horizontal scroll, where Compose measures content against an unbounded width (and
    * descendants inherit it), so a row is not bounded to its parent's width there.
    */
@@ -309,28 +314,55 @@ function paintStyle(css: Css, style: Raw, context: WebStyleContext) {
   }
 }
 
-function sizeStyle(css: Css, style: Raw, context: WebStyleContext) {
-  dimension(css, "width", style.width, context);
-  dimension(css, "height", style.height, context);
-  if (typeof style.weight === "number" && context.parentAxis) {
-    css.flex = `${style.weight} ${style.weight} 0`;
-    css[context.parentAxis === "row" ? "min-width" : "min-height"] = "0";
-  }
-  for (const [field, property] of [
-    ["minWidth", "min-width"],
-    ["maxWidth", "max-width"],
-    ["minHeight", "min-height"],
-    ["maxHeight", "max-height"],
-  ] as const) {
-    if (typeof style[field] === "number") {
+const SIZE_BOUNDS = [
+  ["minWidth", "min-width", "row"],
+  ["maxWidth", "max-width", "row"],
+  ["minHeight", "min-height", "column"],
+  ["maxHeight", "max-height", "column"],
+] as const;
+
+/**
+ * The authored min/max bounds, except on the main axis of a weighted child whose parent shares by
+ * weight: both devices pin that axis to its share, so the bounds there do not apply.
+ */
+function boundsStyle(css: Css, style: Raw, pinnedAxis: WebStyleContext["parentAxis"]) {
+  for (const [field, property, axis] of SIZE_BOUNDS) {
+    if (typeof style[field] === "number" && axis !== pinnedAxis) {
       css[property] = px(style[field] as number);
     }
   }
-  if (style[ROW_BOUND_KEY] === true && context.unboundedWidth !== true) {
-    // An authored maxWidth intersects the parent's width, as Compose's sizeIn does.
-    const authored = typeof style.maxWidth === "number" ? px(style.maxWidth) : undefined;
-    css[MAX_WIDTH] = authored ? `min(100%, ${authored})` : "100%";
+}
+
+/**
+ * A row bounded to its parent's width (ROW_BOUND_KEY), intersected with its authored maxWidth as
+ * Compose's sizeIn does, unless a weight pins its width to its share.
+ */
+function rowBoundStyle(
+  css: Css,
+  style: Raw,
+  context: WebStyleContext,
+  pinnedAxis: string | undefined,
+) {
+  if (style[ROW_BOUND_KEY] !== true || context.unboundedWidth === true) {
+    return;
   }
+  const authored =
+    typeof style.maxWidth === "number" && pinnedAxis !== "row" ? px(style.maxWidth) : undefined;
+  css[MAX_WIDTH] = authored ? `min(100%, ${authored})` : "100%";
+}
+
+function sizeStyle(css: Css, style: Raw, context: WebStyleContext) {
+  dimension(css, "width", style.width, context);
+  dimension(css, "height", style.height, context);
+  const weighted = typeof style.weight === "number" && context.parentAxis !== undefined;
+  if (weighted) {
+    css.flex = `${style.weight} ${style.weight} 0`;
+    css[context.parentAxis === "row" ? "min-width" : "min-height"] = "0";
+  }
+  // A weight pins its main axis to its share on both devices, where its parent shares by weight.
+  const pinnedAxis = weighted && context.weightsChildren === true ? context.parentAxis : undefined;
+  boundsStyle(css, style, pinnedAxis);
+  rowBoundStyle(css, style, context, pinnedAxis);
   // After the bound: a nested row its parent row measures against no width stays at zero.
   rowMeasureStyle(css, style, context);
   if (typeof style.aspectRatio === "number") {
@@ -502,8 +534,12 @@ interface ContainerScope {
   readonly style: WebStyleContext;
 }
 
+/** The containers that share their main axis by `weight`, as a native Row, Column or card does. */
+const WEIGHTING_PARENTS: ReadonlySet<unknown> = new Set(["row", "column", "card"]);
+
 /**
- * What a container's children see: the axis it lays them out on, and an unbounded width only while
+ * What a container's children see: the axis it lays them out on, whether it shares that axis by
+ * weight (`weightsChildren`: a row, column or card), and an unbounded width only while
  * the container leaves its width open. A dp `width` or a `maxWidth` bounds its children again, as
  * Compose's `Modifier.width` and `widthIn` restore a finite max width inside a horizontal scroll.
  */
@@ -518,6 +554,7 @@ export function containerChildStyle(
   return {
     ...scope.style,
     parentAxis,
+    weightsChildren: parentAxis !== undefined && WEIGHTING_PARENTS.has(node.type),
     unboundedWidth: scope.style.unboundedWidth === true && !definite,
   };
 }

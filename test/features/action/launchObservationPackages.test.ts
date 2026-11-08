@@ -99,18 +99,50 @@ describe("getLaunchObservationPackageNames", () => {
 });
 
 describe("isLaunchPermissionDialogObservation", () => {
+  const dialog = (appId: string): ObserveResult =>
+    ({
+      notificationPermissionDetected: true,
+      activeWindow: {
+        appId,
+        activityName: "",
+        layoutSeqSum: 0,
+        type: "notification_permission_dialog",
+      },
+    }) as ObserveResult;
+
   test("accepts only the detected notification permission dialog surface", () => {
     expect(
-      isLaunchPermissionDialogObservation({
-        notificationPermissionDetected: true,
-        activeWindow: { type: "notification_permission_dialog" },
-      } as ObserveResult),
+      isLaunchPermissionDialogObservation(
+        dialog("com.google.android.permissioncontroller"),
+        "com.example.app",
+      ),
     ).toBe(true);
     expect(
-      isLaunchPermissionDialogObservation({
-        notificationPermissionDetected: false,
-        activeWindow: { type: "notification_permission_dialog" },
-      } as ObserveResult),
+      isLaunchPermissionDialogObservation(
+        {
+          ...dialog("com.google.android.permissioncontroller"),
+          notificationPermissionDetected: false,
+        },
+        "com.example.app",
+      ),
     ).toBe(false);
+  });
+
+  test("accepts the requested app's window and OEM permission controller aliases", () => {
+    expect(isLaunchPermissionDialogObservation(dialog("com.example.app"), "com.example.app")).toBe(
+      true,
+    );
+    expect(
+      isLaunchPermissionDialogObservation(
+        dialog("com.samsung.android.permissioncontroller"),
+        "com.example.app",
+      ),
+    ).toBe(true);
+  });
+
+  test("rejects a dialog flag over an unrelated app's foreground window", () => {
+    expect(isLaunchPermissionDialogObservation(dialog("com.other.app"), "com.example.app")).toBe(
+      false,
+    );
   });
 });

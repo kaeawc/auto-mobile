@@ -185,6 +185,7 @@ nav:
       - "iOS SDK contract suite": design-docs/plat/ios/sdk-contract-suite.md
       - "tvOS XCUITest spike": design-docs/plat/tvos/xcuitest-spike.md
       - "tvOS explore and plan replay": design-docs/plat/tvos/focus-explore.md
+      - "tvOS tool support matrix": design-docs/plat/tvos/tool-matrix.md
       - "watchOS XCUITest spike": design-docs/plat/watchos/xcuitest-spike.md
       - "watchOS Smart Stack cells": design-docs/plat/watchos/smart-stack.md
       - "visionOS XCUITest capability boundary": design-docs/plat/visionos/xcuitest-capabilities.md
@@ -242,6 +243,7 @@ nav:
       - "MCP SDK v2 adoption survey": design-docs/mcp/sdk-v2-adoption-survey.md
       - "Elicitation for an ambiguous device": design-docs/mcp/elicitation-ambiguous-device.md
       - "Live observe App shell": design-docs/mcp/observe-app-shell.md
+      - "Build source revision": design-docs/mcp/build-source-revision.md
       - "Session state record": design-docs/session-state-record.md
       - "Test runners": design-docs/plat/android/junit-runner/index.md
       - "Robolectric runtime jars": design-docs/plat/android/robolectric-android-all.md

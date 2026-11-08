@@ -4,6 +4,9 @@ import { join } from "path";
 import {
   APK_SHA256_CHECKSUM,
   AUDIO_LOOPBACK_HELPER_ARCHIVE_FILENAME,
+  TVOS_RUNNER_ARCHIVE_FILENAME,
+  resolveTvosRunnerUrl,
+  resolveTvosRunnerChecksum,
   AUDIO_LOOPBACK_HELPER_SHA256_CHECKSUM,
   resolveAudioLoopbackHelperChecksum,
   resolveAudioLoopbackHelperUrl,
@@ -919,6 +922,50 @@ describe("lmk-pressure release delivery (#16402)", function () {
       for (const checksum of [entry.lmkPressureArm64Sha256, entry.lmkPressureX8664Sha256]) {
         expect((checksum ?? "") === "" || /^[a-f0-9]{64}$/.test(checksum ?? "")).toBe(true);
       }
+    }
+  });
+});
+
+describe("tvOS runner release delivery", () => {
+  const checksum = "a".repeat(64);
+  const registry: ReleaseChecksumEntry[] = [
+    {
+      version: "1.0.0",
+      apkSha256: "apk",
+      ipaSha256: "ipa",
+      runnerSha256: "runner",
+      tvosRunnerSha256: checksum,
+    },
+    { version: "0.9.0", apkSha256: "apk", ipaSha256: "ipa", runnerSha256: "runner" },
+  ];
+
+  test("uses the tvOS archive with the selected version and asset mirror", () => {
+    expect(TVOS_RUNNER_ARCHIVE_FILENAME).toBe("tvos-runner-macos.zip");
+    expect(resolveTvosRunnerUrl({}, registry)).toBe(
+      `${DEFAULT_ASSET_BASE_URL}/1.0.0/${TVOS_RUNNER_ARCHIVE_FILENAME}`,
+    );
+    expect(
+      resolveTvosRunnerUrl(
+        {
+          AUTOMOBILE_VERSION: "0.9.0",
+          AUTOMOBILE_ASSET_BASE_URL: "https://mirror.example/releases",
+        },
+        registry,
+      ),
+    ).toBe(`https://mirror.example/releases/0.9.0/${TVOS_RUNNER_ARCHIVE_FILENAME}`);
+  });
+
+  test("selects the checksum for the pinned version and fails closed for unknown releases", () => {
+    expect(resolveTvosRunnerChecksum({}, registry)).toBe(checksum);
+    expect(resolveTvosRunnerChecksum({ AUTOMOBILE_VERSION: "0.9.0" }, registry)).toBe("");
+    expect(resolveTvosRunnerChecksum({ AUTOMOBILE_VERSION: "9.0.0" }, registry)).toBe("");
+    expect(resolveTvosRunnerChecksum({}, [])).toBe("");
+  });
+
+  test("committed pins are empty or SHA-256 values", () => {
+    for (const entry of RELEASE_CHECKSUM_REGISTRY) {
+      const checksum = entry.tvosRunnerSha256 ?? "";
+      expect(checksum === "" || /^[a-f0-9]{64}$/.test(checksum)).toBe(true);
     }
   });
 });

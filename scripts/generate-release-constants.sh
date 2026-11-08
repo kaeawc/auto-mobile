@@ -12,6 +12,7 @@ ios_runner_sha256="${IOS_CTRL_PROXY_RUNNER_SHA256:-}"
 video_jar_checksum="${VIDEO_JAR_SHA256:-}"
 screen_capture_helper_checksum="${SCREEN_CAPTURE_HELPER_SHA256:-}"
 audio_loopback_helper_checksum="${AUDIO_LOOPBACK_HELPER_SHA256:-}"
+tvos_runner_checksum="${TVOS_RUNNER_SHA256:-}"
 prototype_agent_checksum="${PROTOTYPE_AGENT_SHA256:-}"
 prototype_viewer_checksum="${PROTOTYPE_VIEWER_SHA256:-}"
 network_filter_checksum="${NETWORK_FILTER_SHA256:-}"
@@ -26,7 +27,7 @@ max_registry_entries=100
 #   - Checksums only (no version): update registry[0] checksums in place
 #   - Nothing set: no-op
 has_checksums=false
-if [ -n "$apk_checksum" ] || [ -n "$protoviewer_apk_checksum" ] || [ -n "$ios_checksum" ] || [ -n "$video_jar_checksum" ] || [ -n "$screen_capture_helper_checksum" ] || [ -n "$audio_loopback_helper_checksum" ] || [ -n "$prototype_agent_checksum" ] || [ -n "$prototype_viewer_checksum" ] || [ -n "$network_filter_checksum" ] || [ -n "$lmk_pressure_arm64_checksum" ] || [ -n "$lmk_pressure_x86_64_checksum" ]; then
+if [ -n "$apk_checksum" ] || [ -n "$protoviewer_apk_checksum" ] || [ -n "$ios_checksum" ] || [ -n "$video_jar_checksum" ] || [ -n "$screen_capture_helper_checksum" ] || [ -n "$audio_loopback_helper_checksum" ] || [ -n "$tvos_runner_checksum" ] || [ -n "$prototype_agent_checksum" ] || [ -n "$prototype_viewer_checksum" ] || [ -n "$network_filter_checksum" ] || [ -n "$lmk_pressure_arm64_checksum" ] || [ -n "$lmk_pressure_x86_64_checksum" ]; then
   has_checksums=true
 fi
 
@@ -81,6 +82,12 @@ fi
 if [ -n "$audio_loopback_helper_checksum" ] && ! [[ "$audio_loopback_helper_checksum" =~ ^[a-f0-9]{64}$ ]]; then
   echo "ERROR: AUDIO_LOOPBACK_HELPER_SHA256 must be a valid SHA256 hash (64 hex characters)"
   echo "   Got: ${audio_loopback_helper_checksum}"
+  exit 1
+fi
+
+if [ -n "$tvos_runner_checksum" ] && ! [[ "$tvos_runner_checksum" =~ ^[a-f0-9]{64}$ ]]; then
+  echo "ERROR: TVOS_RUNNER_SHA256 must be a valid SHA256 hash (64 hex characters)"
+  echo "   Got: ${tvos_runner_checksum}"
   exit 1
 fi
 
@@ -206,8 +213,8 @@ PY
 
 if [ -n "$release_version" ]; then
   # Mode: add new registry entry (requires every production release artifact).
-  if [ -z "$apk_checksum" ] || [ -z "$protoviewer_apk_checksum" ] || [ -z "$ios_checksum" ] || [ -z "$screen_capture_helper_checksum" ] || [ -z "$audio_loopback_helper_checksum" ] || [ -z "$prototype_agent_checksum" ] || [ -z "$prototype_viewer_checksum" ] || [ -z "$network_filter_checksum" ]; then
-    echo "ERROR: RELEASE_VERSION requires APK_SHA256_CHECKSUM, PROTOVIEWER_APK_SHA256, IOS_CTRL_PROXY_SHA256_CHECKSUM, SCREEN_CAPTURE_HELPER_SHA256, AUDIO_LOOPBACK_HELPER_SHA256, PROTOTYPE_AGENT_SHA256, PROTOTYPE_VIEWER_SHA256, and NETWORK_FILTER_SHA256"
+  if [ -z "$apk_checksum" ] || [ -z "$protoviewer_apk_checksum" ] || [ -z "$ios_checksum" ] || [ -z "$screen_capture_helper_checksum" ] || [ -z "$audio_loopback_helper_checksum" ] || [ -z "$tvos_runner_checksum" ] || [ -z "$prototype_agent_checksum" ] || [ -z "$prototype_viewer_checksum" ] || [ -z "$network_filter_checksum" ]; then
+    echo "ERROR: RELEASE_VERSION requires APK_SHA256_CHECKSUM, PROTOVIEWER_APK_SHA256, IOS_CTRL_PROXY_SHA256_CHECKSUM, SCREEN_CAPTURE_HELPER_SHA256, AUDIO_LOOPBACK_HELPER_SHA256, TVOS_RUNNER_SHA256, PROTOTYPE_AGENT_SHA256, PROTOTYPE_VIEWER_SHA256, and NETWORK_FILTER_SHA256"
     exit 1
   fi
 
@@ -230,6 +237,7 @@ if [ -n "$release_version" ]; then
     videoJarSha256: \"${video_jar_checksum}\",
     screenCaptureHelperSha256: \"${screen_capture_helper_checksum}\",
     audioLoopbackHelperSha256: \"${audio_loopback_helper_checksum}\",
+    tvosRunnerSha256: \"${tvos_runner_checksum}\",
     prototypeAgentSha256: \"${prototype_agent_checksum}\",
     prototypeViewerSha256: \"${prototype_viewer_checksum}\",
     networkFilterSha256: \"${network_filter_checksum}\",
@@ -308,6 +316,10 @@ else
     update_registry_field "$tmp_file" "nightly" "audioLoopbackHelperSha256" "$audio_loopback_helper_checksum"
   fi
 
+  if [ -n "$tvos_runner_checksum" ]; then
+    update_registry_field "$tmp_file" "nightly" "tvosRunnerSha256" "$tvos_runner_checksum"
+  fi
+
   if [ -n "$prototype_agent_checksum" ]; then
     update_registry_field "$tmp_file" "nightly" "prototypeAgentSha256" "$prototype_agent_checksum"
   fi
@@ -344,6 +356,10 @@ else
 
   if [ -n "$audio_loopback_helper_checksum" ]; then
     echo "   audio-loopback-helper checksum (nightly): ${audio_loopback_helper_checksum}"
+  fi
+
+  if [ -n "$tvos_runner_checksum" ]; then
+    echo "   tvos-runner checksum (nightly): ${tvos_runner_checksum}"
   fi
   if [ -n "$prototype_agent_checksum" ]; then
     echo "   prototype-agent checksum (nightly): ${prototype_agent_checksum}"
@@ -422,6 +438,13 @@ if [ -n "$audio_loopback_helper_checksum" ]; then
     update_registry_field "$tmp_file" "$release_version" "audioLoopbackHelperSha256" "$audio_loopback_helper_checksum"
   fi
   echo "   audio-loopback-helper checksum: ${audio_loopback_helper_checksum}"
+fi
+
+if [ -n "$tvos_runner_checksum" ]; then
+  if [ -n "$release_version" ]; then
+    update_registry_field "$tmp_file" "$release_version" "tvosRunnerSha256" "$tvos_runner_checksum"
+  fi
+  echo "   tvos-runner checksum: ${tvos_runner_checksum}"
 fi
 
 if [ -n "$prototype_agent_checksum" ]; then

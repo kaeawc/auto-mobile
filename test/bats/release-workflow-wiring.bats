@@ -83,7 +83,7 @@
   [ "$status" -eq 0 ]
 
   local artifact_name
-  for artifact_name in control-proxy-apk protoviewer-apk ctrl-proxy-ios-ipa video-server-jar lmk-pressure screen-capture-helper audio-loopback-helper prototype-agent prototype-viewer network-filter; do
+  for artifact_name in control-proxy-apk protoviewer-apk ctrl-proxy-ios-ipa video-server-jar lmk-pressure screen-capture-helper audio-loopback-helper tvos-runner prototype-agent prototype-viewer network-filter; do
     [[ "$output" == *"${artifact_name}"$'\t''${{ inputs.prepare_run_id }}'$'\t''${{ secrets.GITHUB_TOKEN }}'$'\t''${{ github.repository }}'* ]]
   done
 
@@ -313,6 +313,7 @@
     .github/workflows/build-lmk-pressure.yml \
     .github/workflows/build-screen-capture-helper.yml \
     .github/workflows/build-audio-loopback-helper.yml \
+    .github/workflows/build-tvos-runner.yml \
     .github/workflows/build-prototype-agent.yml \
     .github/workflows/build-prototype-viewer.yml; do
     run yq -r '.on.workflow_call.inputs."artifact-retention-days".default' "$workflow"
@@ -1163,4 +1164,24 @@ load yq-helpers
 
   # No other job pins a release in release.ts without recording it.
   [ "$(grep -c 'generate-release-constants\.sh' "$workflow")" -eq 1 ]
+}
+
+@test "tvOS runner is built, pinned, verified and published from prepared artifacts" {
+  local prepare=".github/workflows/prepare-release.yml"
+  local release=".github/workflows/release.yml"
+  local builder=".github/workflows/build-tvos-runner.yml"
+  grep -Fq "uses: ./.github/workflows/build-tvos-runner.yml" "$prepare"
+  grep -Fq 'TVOS_RUNNER_SHA256: ${{ needs.build-candidate-tvos-runner.outputs.sha256 }}' "$prepare"
+  for workflow in "$prepare" "$release"; do
+    grep -Fq '"tvos-runner"' "$workflow"
+  done
+  grep -Fq "verify-artifact-sha256.sh /tmp/tvos-runner-macos.zip tvosrunner" "$prepare"
+  ! grep -Fq "uses: ./.github/workflows/build-tvos-runner.yml" "$release"
+  grep -Fq "entry.tvosRunnerSha256" "$release"
+  ! grep -Fq "secrets:" "$builder"
+  grep -Fq "xcodebuild -downloadPlatform tvOS" "$builder"
+  grep -Fq "scripts/ios/install-xcodegen.sh" "$builder"
+  grep -Fq "build-tvos-runner-release.sh" "$builder"
+  grep -Fq "name: tvos-runner" "$builder"
+  grep -Fq "path: /tmp/tvos-runner-macos.zip" "$builder"
 }

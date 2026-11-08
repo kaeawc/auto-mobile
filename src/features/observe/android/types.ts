@@ -409,6 +409,10 @@ export interface A11yPackageInfoResult extends BaseResult {
   requestedPermissions: string[];
   grantedPermissions: Record<string, boolean>;
   mainActivity?: string;
+  /** App-declared `dev.jasonpearson.automobile.build.gitBranch` meta-data (#16954). */
+  gitBranch?: string;
+  /** App-declared `dev.jasonpearson.automobile.build.gitSha` meta-data (#16954). */
+  gitSha?: string;
 }
 
 export interface A11yLaunchIntentResult extends BaseResult {

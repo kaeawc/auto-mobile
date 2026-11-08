@@ -15,7 +15,7 @@ from .errors import (
 )
 from .http import HttpResponse, HttpTransport, LoopbackHttpTransport
 from .session import McpSession, ResourceContents, Tool, ToolResult
-from .token import FileTokenProvider, TokenProvider
+from .token import FileTokenProvider, TokenProvider, UnsafeTokenFileError
 
 __all__ = [
     "AutoMobile",
@@ -41,5 +41,6 @@ __all__ = [
     "Tool",
     "ToolCallError",
     "ToolResult",
+    "UnsafeTokenFileError",
     "__version__",
 ]

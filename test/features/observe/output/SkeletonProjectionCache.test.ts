@@ -29,7 +29,7 @@ const captures = [
   [
     "android-overlay-window/app-layer-overlay-over-playground.raw.json",
     "android",
-    "a8c9506889f2b398a10c94dbc051c532915eba32dde3cbc6d8efcdc8a3cb6917",
+    "34eae0433a54526a5ee58649a42d0e4ebcdaeb33767c63eab747327f6e411e72",
   ],
   [
     "ios/nested-selection/cart-a-item-44-quantity-focused.json",
@@ -39,7 +39,7 @@ const captures = [
   [
     "observe-output/ios-keyboard-states/ios-keyboard-visible.raw.json",
     "ios",
-    "890c25ec9e4cea31c04d2cae7d212722701c046c46a1a0db0e06d249637616a1",
+    "b7da8c09bec0b78ac7fe4e96d43a7d01811e114d9fb146307de5bcfc56c7eb67",
   ],
   [
     "android-settings/open-by-default-radio-rows.observe.json",
@@ -54,7 +54,7 @@ const captures = [
   [
     "observe/diff/scroll-after.json",
     "android",
-    "9cc4cbd7a1f1f0697623494a6d6f0642cb58d182de418f5efe1f138e89dd6229",
+    "56bcd77c6ca7139db4ec67156f16c420fc7c1e177a045b19b1491763de606e95",
   ],
   [
     "observe/android-home.json",
@@ -64,7 +64,7 @@ const captures = [
   [
     "observe-output/ios-overlay-window/ios-floating-overlay-over-settings.raw.json",
     "ios",
-    "8a391258a54cc1b03642addb8228f8c5f3d4dcbf787180a5299e490fbf522231",
+    "1e5a815e5e30118fc59931c8473e0ed9415490cf3933b995733cd361dbca4024",
   ],
   [
     "ios/nested-selection/scroll-cart-duplicate-container-id.json",

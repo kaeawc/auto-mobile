@@ -386,7 +386,7 @@ export const DEVICES_ENV = {
   TVOS_RUNNER_XCTESTRUN: {
     name: "AUTOMOBILE_TVOS_RUNNER_XCTESTRUN",
     kind: "path",
-    default: "discover or build the AutoMobileTVTest scheme",
+    default: "discover, download a verified release runner, or build from source",
     doc: "Prebuilt tvOS simulator runner xctestrun used by startDevice.",
   },
   VISIONOS_RUNNER_XCTESTRUN: {

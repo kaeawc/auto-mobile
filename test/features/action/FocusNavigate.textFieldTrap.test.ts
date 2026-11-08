@@ -69,7 +69,7 @@ describe("FocusNavigate text-field focus trap (#17356)", () => {
     expect(screen.focused?.class).toBe("android.widget.EditText");
   });
 
-  test("hides the keyboard with back, retries every direction, then names the trap", async () => {
+  test("hides the keyboard with back, retries every direction, then tab, then names the trap", async () => {
     const device = new TrappedDevice();
     const navigator = new FocusNavigate(
       createFocusNavigateObserver(device),
@@ -82,21 +82,19 @@ describe("FocusNavigate text-field focus trap (#17356)", () => {
 
     expect(result.status).toBe("stuck");
     expect(result.blockedBy).toBe("editable");
-    expect(result.escapes).toEqual(["back"]);
-    // Tab types into an editable field, so it is never pressed there.
-    expect(device.keys).not.toContain("tab");
+    // The captured Playground field is Compose (no package-qualified id): tab is its last escape (#17441).
+    expect(result.escapes).toEqual(["back", "tab"]);
     const back = device.keys.indexOf("back");
+    const tab = device.keys.indexOf("tab");
     expect(back).toBeGreaterThan(0);
-    expect(device.keys.slice(back + 1).length).toBeGreaterThan(0);
+    expect(device.keys.slice(back + 1, tab)).toContain("arrow_down");
+    expect(device.keys.slice(tab + 1).length).toBeGreaterThan(0);
     expect(device.keys.filter((key) => key === "back")).toHaveLength(1);
+    expect(device.keys.filter((key) => key === "tab")).toHaveLength(1);
     expect(result.message).toContain("D-pad focus is trapped in the editable text field");
-    expect(result.message).toContain("pressing back and every direction again");
-    // Back then down is the escape the walk already tried; an IME action does not free focus (#17378).
-    expect(device.keys.slice(back + 1)).toContain("arrow_down");
-    expect(result.message).toContain(
-      "Hide the keyboard with pressButton back, press pressButton down to move focus out of the field",
-    );
-    expect(result.message).not.toMatch(/sendKeys|\bnext\b|\bdone\b/);
+    expect(result.message).toContain("pressing back then tab and every direction again");
+    expect(result.message).not.toContain("pressButton down");
+    expect(result.message).not.toMatch(/\bnext\b|\bdone\b/);
   });
 
   test("without a keyboard hider the trap is reported as the IME and nothing is escaped", async () => {
@@ -112,8 +110,10 @@ describe("FocusNavigate text-field focus trap (#17356)", () => {
     expect(result.message).toContain(
       "trapped by the on-screen keyboard over the editable text field",
     );
-    expect(result.message).toContain("Hide the keyboard with pressButton back");
-    expect(result.message).not.toContain("sendKeys");
+    expect(result.message).toContain(
+      "Hide the keyboard with pressButton back, press sendKeys key tab to move focus out of the field",
+    );
+    expect(result.message).not.toMatch(/\bnext\b|\bdone\b/);
   });
 
   test("focus that leaves the field once the keyboard is hidden reaches the target", async () => {

@@ -10960,11 +10960,16 @@
     "annotations": {
       "readOnlyHint": true
     },
-    "description": "Read device logs with filters: Android logcat by app (every process, so a crash survives process death), tags, priority, regex, buffers (main, system, crash, events) and since the last action or session start; iOS Simulator unified log by app subsystem. Bounded output.",
+    "description": "Read device logs with filters: Android logcat by app (every process, so a crash survives process death), tags, priority, regex, buffers (main, system, crash, events) and since the last action or session start; iOS and Apple Watch Simulator unified log by app subsystem and process. Bounded output.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "platform": {
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
+          "type": "string",
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
+        },
         "appId": {
           "description": "Package or bundle id; on Android every process of the app, not one pid",
           "type": "string",
@@ -11034,10 +11039,6 @@
         "resourceLink": {
           "description": "Return the complete result as an automobile:tool-output resource and a resource_link block instead of inline (default off). Only the headline fields stay inline; read the link to get the rest.",
           "type": "boolean"
-        },
-        "platform": {
-          "type": "string",
-          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",

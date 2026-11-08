@@ -104,6 +104,7 @@ Besides the device management above, these tools accept a watch:
 - `listApps`
 - `launchApp`
 - `terminateApp`
+- `getLogs`
 
 <!-- watchos-supported-tools:end -->
 
@@ -171,6 +172,10 @@ Every other tool refuses a watch before doing anything, with:
   is refused. `clearAppData` wipes the app's Documents, Library and tmp before launch. It does not
   observe the launched app: `verified` stays unset with `verificationSkipped: "platform"`.
 - `terminateApp` succeeds with `wasRunning: false` when the app was not running.
+- `getLogs` reads the watch simulator's unified log as on an iOS simulator: `appId` is required,
+  and lines from the app's subsystem or its process are returned. `tags`, `buffers` and
+  `includeSystem` are Android-only and are ignored with a warning. It is not listed by default;
+  enable it with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)).
 
 `sendKeys` accepts non-empty text only and appends to the focused field. Focus a field with
 `tapOn` first, or provide a selector with an exact `elementId` or `text` to focus it before typing.

@@ -141,9 +141,20 @@ which the port reverts by force-stopping that app for every user (the system can
 all of the app's notifications, including any it showed before the session) and
 reading `cmd notification list` back: the revert succeeds only when every line is a
 notification key and none names the package. Posting also persists a notification
-channel, which only uninstalling the app removes, so the call also journals the
-`postNotification` app fallback; it is dropped only when the session installed an app
-the baseline did not hold. A call without an `appId`, or with an `imagePath` (the image
+channel (the caller's `channelId`, or the SDK default `automobile_test_notifications`),
+which a force-stop keeps and the shell cannot delete, so the call also journals
+`notification:channel:<package>:<channelId>`. Its prior is read before the post by asking
+the app's SDK receiver (`NOTIFICATION_CHANNEL_QUERY`, an explicit `am broadcast` that
+answers result 3 absent or 4 present). Only an `absent` prior is revertible: the port
+broadcasts `NOTIFICATION_CHANNEL_DELETE`, sends the query again and requires both to
+answer absent, then force-stops the app. A channel the app already had (the post may
+have renamed it), an unreadable prior (including an SDK without the channel actions,
+which answers 0) or a failed read-back escalates. Android keeps a deleted channel's
+record and restores it if the app recreates the same id; no app-visible state differs.
+The channel row is dropped when the session installed an app the baseline did not
+hold, since uninstalling it removes its channels. A channel id outside
+`[A-Za-z0-9_.-]{1,200}` journals the escalating `postNotification` app fallback
+instead. A call without an `appId`, or with an `imagePath` (the image
 upload can overwrite a baseline file under `/sdcard/Download/automobile`, which file
 cleaning does not restore), keeps an escalating row.
 

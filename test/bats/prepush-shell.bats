@@ -830,6 +830,13 @@ FIXTURE
   grep -Fqx -- '--only stdlib-first,manual-test-python' "${FAST_LOG}"
 }
 
+@test "changed Python SDK sources select python-sdk" {
+  commit_change "sdk/python/src/auto_mobile/client.py" "# fixture"
+  run bash scripts/prepush-shell.sh --base base
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only python-sdk' "${FAST_LOG}"
+}
+
 @test "changed Python validation script selects manual-test-python" {
   commit_change "scripts/validate_manual_test_python.sh" "#!/usr/bin/env bash"
   run bash scripts/prepush-shell.sh --base base

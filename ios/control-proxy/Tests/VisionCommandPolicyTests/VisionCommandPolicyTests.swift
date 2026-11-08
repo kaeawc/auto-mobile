@@ -42,6 +42,37 @@ final class VisionCommandPolicyTests: XCTestCase {
         }
     }
 
+    func testTapResolutionNarrowsIdentifierSharersByTypeAndLabel() {
+        let candidates = [
+            VisionCommandPolicy.TapCandidate(elementType: 21, label: "", isEnabled: true),
+            VisionCommandPolicy.TapCandidate(elementType: 9, label: "General", isEnabled: true),
+            VisionCommandPolicy.TapCandidate(elementType: 9, label: "Other", isEnabled: true),
+        ]
+        XCTAssertEqual(VisionCommandPolicy.tapResolution(candidates: candidates), .ambiguous(3))
+        XCTAssertEqual(VisionCommandPolicy.tapResolution(candidates: candidates, label: "General"), .match(1))
+        XCTAssertEqual(VisionCommandPolicy.tapResolution(candidates: candidates, elementType: 21), .match(0))
+        XCTAssertEqual(
+            VisionCommandPolicy.tapResolution(candidates: candidates, label: "General", elementType: 9), .match(1)
+        )
+        XCTAssertEqual(
+            VisionCommandPolicy.tapResolution(candidates: candidates, label: "General", elementType: 21), .none
+        )
+        XCTAssertEqual(VisionCommandPolicy.tapResolution(candidates: candidates, label: ""), .match(0))
+    }
+
+    func testTapResolutionRequiresExactlyOneEnabledMatch() {
+        let enabled = VisionCommandPolicy.TapCandidate(elementType: 9, label: "General", isEnabled: true)
+        let disabled = VisionCommandPolicy.TapCandidate(elementType: 9, label: "General", isEnabled: false)
+        XCTAssertEqual(VisionCommandPolicy.tapResolution(candidates: []), .none)
+        XCTAssertEqual(VisionCommandPolicy.tapResolution(candidates: [disabled]), .none)
+        XCTAssertEqual(VisionCommandPolicy.tapResolution(candidates: [disabled, enabled]), .match(1))
+        XCTAssertEqual(
+            VisionCommandPolicy.tapResolution(candidates: [enabled, enabled], label: "General", elementType: 9),
+            .ambiguous(2)
+        )
+        XCTAssertEqual(VisionCommandPolicy.tapResolution(candidates: [enabled]), .match(0))
+    }
+
     func testTargetBundleIdComesFromEnvironment() {
         XCTAssertNil(VisionCommandPolicy.targetBundleId(environment: [:]))
         XCTAssertNil(VisionCommandPolicy.targetBundleId(environment: ["AM_BUNDLE_ID": "  "]))

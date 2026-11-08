@@ -659,8 +659,8 @@ post real content without the agent answering each tap. It requires \`prototype_
 (\`prototype_network_device_v1\` as well for \`via: "device"\`); a show or patch result containing
 one is refused on a device without them.
 
-- \`url\` is an absolute \`http\` or \`https\` URL (at most 2048 characters). Host requests apply an
-  egress policy: local destinations and daemon ports on private addresses are not permitted.
+- \`url\` is an absolute \`http\` or \`https\` URL (at most 2048 characters). Host and device requests
+  apply an egress policy: local destinations and daemon ports on private addresses are not permitted.
   It takes the text placeholders of any text field (\`{key}\` state, \`{data:/pointer}\`, repeat \`{item.field}\` / \`{index}\`). Without a
   placeholder it must parse as an http(s) URL; with one, it must start with a literal \`http://\` or
   \`https://\`. (\`{state:key}\` is not a placeholder: write \`{key}\`.)
@@ -680,8 +680,8 @@ one is refused on a device without them.
   request starts and to \`"success"\` or \`"error"\` when it ends, so \`visibleWhen\` can show a spinner
   (\`{key: "feedStatus", equals: "loading"}\`) or an error. Do not bind it to a control with fixed options.
 - \`via\` is \`"host"\` (default: the host runs the call and the device sends only the resolved request
-  frame) or \`"device"\` (the device makes the call itself, which on Android reaches localhost through
-  \`adb reverse\`, see below).
+  frame) or \`"device"\` (the device makes the call itself and cannot use \`localhost\` for the
+  host machine, see below).
 - \`timeoutMs\` is optional, 1 to \`MAX_PROTOTYPE_REQUEST_TIMEOUT_MS\`; the default is
   \`DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS\`.
 - \`onSuccess\` and \`onError\` are action lists (1 to 32) run after the request ends, for example

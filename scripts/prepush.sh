@@ -76,7 +76,7 @@ fi
 # exits in seconds when nothing applies.
 shell_lane_for_path() {
   case "$1" in
-    scripts/*|*.sh|.githooks/*|test/bats/*) printf '%s\n' shell ;;
+    scripts/*|*.sh|.githooks/*|test/bats/*|sdk/python/*) printf '%s\n' shell ;;
     docs/*|docs-assets/*|mkdocs.yml|CHANGELOG.md|.github/*) printf '%s\n' shell ;;
     skills/*|.agents/skills/*|AGENTS.md|.claude/commands/*|.claude-plugin/*|plugins/*) printf '%s\n' shell ;;
     package.json|bun.lock|Dockerfile|*.xml|*test-plans/*.yaml|*test-plans/*.yml|.gitattributes|*/.gitattributes) printf '%s\n' shell ;;

@@ -185,8 +185,11 @@ All text and ids come from `FixtureCatalog` and `MediaBrowseTree`; changing them
 - `FixtureMediaBrowserService`: a framework `MediaBrowserService` serving two albums and a playlist of
   three tracks each; playing an item only updates the session state.
 - `FixtureCarAppService` (navigation category, launcher "AutoMobile Templates" via `CarAppActivity`):
-  list, grid, pane and place-list navigation templates with fixed rows and four fixed places. It accepts
-  every templates host, so a non-Play image needs a templates host of its own to render it.
+  list, grid, pane and place-list navigation templates with fixed rows and four fixed places, plus a
+  `List 30` screen with `List long row 01`..`List long row 30` (`list_long_row_01`..`list_long_row_30`).
+  Debug builds enable the AutoMobile SDK template route and record every screen's returned template,
+  including all thirty rows regardless of host truncation; release builds omit the SDK. It accepts every
+  templates host, so a non-Play image needs a templates host of its own to render it.
 
 ### Wear fixture app
 

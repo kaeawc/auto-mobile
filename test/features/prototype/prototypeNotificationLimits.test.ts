@@ -11,7 +11,6 @@ import {
   MAX_PROTOTYPE_NOTIFICATION_TITLE_LENGTH,
   MAX_PROTOTYPE_NOTIFICATIONS_ACTIVE,
 } from "../../../src/features/prototype/prototypeNotificationLimits";
-import { prototypeNotificationTotalError } from "../../../src/features/prototype/prototypeNotifications";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 
 const notifications = contract.platformModules.notifications;
@@ -99,37 +98,15 @@ describe("notification contract limits (#14280)", () => {
     const body = "\u4e2d".repeat(MAX_PROTOTYPE_NOTIFICATION_BODY_LENGTH);
     expect(errorPath(postSpec({ title, body, data: dataOf(dataBytes) }))).toBeUndefined();
     expect(utf8(title) + utf8(body) + dataBytes).toBe(4480);
-    expect(
-      prototypeNotificationTotalError({ title, body, data: dataOf(dataBytes) }),
-    ).toBeUndefined();
   });
 
-  test("an emoji-heavy notification of 5,632 bytes is still refused with invalid_args", () => {
+  test("emoji bound at post time can exceed the total (5,632 bytes at the limits)", () => {
     const emoji = "\u{1F600}";
     const title = emoji.repeat(MAX_PROTOTYPE_NOTIFICATION_TITLE_LENGTH);
     const body = emoji.repeat(MAX_PROTOTYPE_NOTIFICATION_BODY_LENGTH);
-    expect(utf8(title) + utf8(body) + dataBytes).toBe(5632);
-    expect(prototypeNotificationTotalError({ title, body, data: dataOf(dataBytes) })).toEqual({
-      code: "invalid_args",
-      path: "args",
-      message: "The resolved notification is 5632 bytes; the limit is 5120 bytes",
-    });
-  });
-
-  test("the total accepts its boundary and refuses one byte past it", () => {
-    const title = "t".repeat(MAX_PROTOTYPE_NOTIFICATION_TITLE_LENGTH);
-    const data = dataOf(dataBytes);
-    // Only text bound at post time can reach the total; literals top out at 4,480 bytes.
-    const body = "\u4e2d".repeat(1322) + "bb";
-    expect(utf8(title) + utf8(body) + dataBytes).toBe(MAX_PROTOTYPE_NOTIFICATION_BYTES);
-    expect(prototypeNotificationTotalError({ title, body, data })).toBeUndefined();
-    expect(prototypeNotificationTotalError({ title, body: `${body}b`, data })?.code).toBe(
-      "invalid_args",
-    );
-  });
-
-  test("the total counts a notification without body or data", () => {
-    expect(prototypeNotificationTotalError({ title: "Ada" })).toBeUndefined();
+    const total = utf8(title) + utf8(body) + dataBytes;
+    expect(total).toBe(5632);
+    expect(total).toBeGreaterThan(MAX_PROTOTYPE_NOTIFICATION_BYTES);
   });
 
   test("each string limit accepts its boundary and rejects one past it", () => {

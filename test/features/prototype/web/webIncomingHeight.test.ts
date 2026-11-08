@@ -2,12 +2,14 @@ import { expect, test } from "bun:test";
 import { record, type Raw } from "../../../../src/features/prototype/prototypeTemplate";
 import {
   columnChildHeights,
+  repeatInstanceChildren,
   withColumnHeights,
 } from "../../../../src/features/prototype/web/webIncomingHeight";
 import {
   CAPPED_SHRINK,
   rowContentHeight,
   rowMeasured,
+  type PrepareChild,
 } from "../../../../src/features/prototype/web/webRowAspect";
 import {
   INCOMING_HEIGHT_KEY,
@@ -52,6 +54,63 @@ test("a column hands each child what its earlier siblings left, and weights shar
   // A sibling with no dp height counts as 0, so the bound is an upper one.
   expect(columnChildHeights([{ type: "text" }, weighted(1)], 40, 0)).toEqual([40, 40]);
   expect(columnChildHeights([dp(50), weighted(1)], 40, 0)).toEqual([40, 0]);
+});
+
+test("a fill sibling takes what is left, so later siblings and weights get none (#16694)", () => {
+  const fill = { type: "row", style: { height: "fill" } };
+  const weighted = { type: "row", style: { weight: 1 } };
+  const dp = (height: number) => ({ type: "box", style: { height: { dp: height } } });
+  // As Compose's Column measures fillMaxHeight: it takes what its earlier siblings left.
+  expect(columnChildHeights([dp(10), fill, weighted], 40, 0)).toEqual([40, 30, 0]);
+  expect(columnChildHeights([fill, dp(10)], 40, 0)).toEqual([40, 0]);
+  // A weighted sibling before the fill gets none either: the fill was measured first.
+  expect(columnChildHeights([weighted, fill], 40, 4)).toEqual([0, 40]);
+  // A fill held under its maxHeight takes only that, and leaves the rest.
+  const capped = { type: "row", style: { height: "fill", maxHeight: 15 } };
+  expect(columnChildHeights([capped, weighted], 40, 5)).toEqual([40, 20]);
+});
+
+test("a repeat column hands each instance its own share of the column's height (#16694)", () => {
+  const prepares = [prepare, prepare];
+  const weighted = {
+    type: "column",
+    repeat: { items: [{}, {}] },
+    children: [{ type: "row", style: { weight: 1 } }],
+  };
+  const heights = (node: Raw, list: readonly PrepareChild[], content: number) =>
+    repeatInstanceChildren(node, "root", list, content).map((each) => each.map(heightOf));
+  // Two weighted instances in a 40 dp column get 20 dp each, as on Android.
+  expect(heights(weighted, prepares, 40)).toEqual([[20], [20]]);
+  // Unweighted instances are measured in order, across instances, with the spacing between; the
+  // wrap row counts as 0, so its bound is an upper one.
+  const sequential = {
+    ...weighted,
+    style: { spacing: 2 },
+    children: [{ type: "box", style: { height: { dp: 10 } } }, { type: "row" }],
+  };
+  expect(heights(sequential, prepares, 40)).toEqual([
+    [40, 28],
+    [26, 14],
+  ]);
+  // A child hidden in one instance takes nothing there, not even spacing.
+  const hiddenFirst = (entry: unknown, path: string) =>
+    path.endsWith("[0]") ? undefined : prepare(entry);
+  expect(heights(sequential, [hiddenFirst, prepare], 40)).toEqual([
+    [undefined, 40],
+    [38, 26],
+  ]);
+});
+
+test("a repeat that is not a bounded column keeps its template for every instance", () => {
+  const children = [{ type: "row", style: { weight: 1 } }];
+  const column = { type: "column", repeat: { items: [{}] }, children };
+  expect(repeatInstanceChildren(column, "root", [prepare], undefined)).toEqual([children]);
+  const row = { type: "row", repeat: { items: [{}] }, children };
+  expect(repeatInstanceChildren(row, "root", [prepare, prepare], 40)).toEqual([children, children]);
+  expect(repeatInstanceChildren({ type: "column", children }, "root", [prepare], 40)).toEqual([
+    children,
+  ]);
+  expect(repeatInstanceChildren(column, "root", [], 40)).toEqual([]);
 });
 
 test("a column with a known content height passes it down sequentially", () => {

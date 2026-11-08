@@ -90,8 +90,10 @@ runtime and device type identifiers from `automobile:devices/images/tvos`:
 runner and binds a session. It never creates a simulator; a name or `deviceId` that matches none,
 or more than one, fails and asks for an exact `deviceId`.
 
-The runner needs a prebuilt tvOS simulator runner. Set `AUTOMOBILE_TVOS_RUNNER_XCTESTRUN` to its
-`.xctestrun` file; a source checkout finds or builds one instead. If the runner cannot start, the
+On first tvOS use, AutoMobile downloads and verifies the release’s prebuilt runner; no source
+checkout is needed. `AUTOMOBILE_TVOS_RUNNER_XCTESTRUN` selects an explicit `.xctestrun` instead.
+Existing local build products take precedence over the download. If the selected release has no
+runner checksum, use the override or a source checkout to build one. If the runner cannot start, the
 call still returns a booted session and `message` explains why. Call `startDevice` again after
 fixing the cause.
 

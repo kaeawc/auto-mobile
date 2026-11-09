@@ -94,9 +94,9 @@ export interface SetPostureDependencies {
   iosHingeAngleStore?: IosRequestedHingeAngleStore;
 }
 
-const IOS_POSTURE_POLL_INTERVAL_MS = 250;
+export const IOS_POSTURE_POLL_INTERVAL_MS = 250;
 
-const IOS_POSTURE_TIMEOUT_MS = 3000;
+export const IOS_POSTURE_TIMEOUT_MS = 3000;
 
 export const ANDROID_POSTURE_POLL_INTERVAL_MS = 250;
 

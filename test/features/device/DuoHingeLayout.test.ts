@@ -4,6 +4,7 @@ import type { Posture } from "../../../src/models";
 import { join } from "node:path";
 import {
   InMemoryIosRequestedHingeAngleStore,
+  iosHingeExpectedPanelRole,
   iosHingeLayoutWarning,
   iosPostureForPanel,
 } from "../../../src/features/device/DuoHingeLayout";
@@ -86,5 +87,18 @@ describe("iPhone Duo hinge/layout assessment (#17726)", () => {
     store.record("b", 0);
     expect(store.requested("a")).toBe(120);
     expect(store.requested("b")).toBe(0);
+  });
+
+  test("the panel to wait for agrees with the layout warning thresholds", () => {
+    expect(iosHingeExpectedPanelRole(0)).toBe("cover");
+    expect(iosHingeExpectedPanelRole(45)).toBeUndefined();
+    expect(iosHingeExpectedPanelRole(90)).toBeUndefined();
+    expect(iosHingeExpectedPanelRole(91)).toBe("inner");
+    for (const angle of [0, 45, 90, 120, 180]) {
+      const expected = iosHingeExpectedPanelRole(angle);
+      if (expected) {
+        expect(iosHingeLayoutWarning(angle, expected)).toBeUndefined();
+      }
+    }
   });
 });

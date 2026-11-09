@@ -40,8 +40,8 @@ is omitted.
 The simulator's panel switch depends on the angles it passed through, not only on the final angle.
 For example, `0 -> 80 -> 120` leaves the cover panel active and apps on the closed layout, while
 `0 -> 120` switches to the inner panel. When the active panel contradicts the requested angle
-(cover panel above 90 degrees, or inner panel at 0 degrees), the call still succeeds and adds a
-`warnings` entry. To recover a cover panel that should be open, set `hingeAngle` 180, then the
+(cover panel above 90 degrees, or inner panel at 0 degrees), the call waits up to 3 seconds for
+the panel to switch; if it still disagrees, the call succeeds and adds a `warnings` entry. To recover a cover panel that should be open, set `hingeAngle` 180, then the
 target angle again, and `observe` before acting. Up to 90 degrees the cover panel is a normal
 result.
 

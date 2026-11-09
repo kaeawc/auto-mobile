@@ -61,6 +61,8 @@ import {
   devicectlConfirmsIosPanel,
   findActiveIosPanel,
   observeIosPosture,
+  IOS_POSTURE_POLL_INTERVAL_MS,
+  IOS_POSTURE_TIMEOUT_MS,
   withWarnings,
   activePanelWarning,
   isEmulator,
@@ -75,6 +77,7 @@ import {
 import { iosCtrlProxyClientFor } from "../observe/ios/iosCtrlProxyClientFor";
 import {
   defaultIosRequestedHingeAngleStore,
+  iosHingeExpectedPanelRole,
   iosHingeLayoutWarning,
   iosPostureForPanel,
   type IosHingePanelRole,
@@ -103,6 +106,12 @@ const latestPostureTokens = new Map<string, number>();
 /** Test-only inspection: completed devices must not retain operation identities. */
 export function pendingPostureOperationCountForTest(): number {
   return latestPostureTokens.size;
+}
+
+/** The active iPhone Duo panel and whether it came from devicectl rather than the app layout. */
+interface IosHingePanelRead {
+  role: IosHingePanelRole | undefined;
+  fromDevicectl: boolean;
 }
 
 export class SetPosture {
@@ -469,46 +478,87 @@ export class SetPosture {
     angle: number,
     operation: PostureOperation,
   ): Promise<SetPostureResult> {
-    const { signal, assertCurrent } = operation;
-    const observe = () => this.observeFactory(this.device).execute({ freshness: "fresh", signal });
-    let observedRole: IosHingePanelRole | undefined;
-    let indeterminate = false;
+    const { assertCurrent } = operation;
+    let read: IosHingePanelRead = { role: undefined, fromDevicectl: false };
+    const deadline = this.timer.now() + IOS_POSTURE_TIMEOUT_MS;
+    const observe = async () => {
+      const polled = await this.observeIosHingePanel(angle, deadline, operation);
+      read = polled.read;
+      return polled.observation;
+    };
     const settled = await this.observeFinalPosture(
       {
         hingeAngle: angle,
-        resolvePosture: (observation) => {
-          const panel = classifyIosPostureObservation(
-            observation,
-            this.device.displays?.panels,
-            "cover",
-          );
-          if (panel === "indeterminate") {
-            indeterminate = true;
-            return { posture: "unknown", postureReason: IOS_INDETERMINATE_PANEL_REASON };
-          }
-          observedRole = panel === "expected" ? "cover" : "inner";
-          return { posture: iosPostureForPanel(observedRole, angle) };
-        },
+        resolvePosture: () =>
+          read.role && !read.fromDevicectl
+            ? { posture: iosPostureForPanel(read.role, angle) }
+            : { posture: "unknown", postureReason: IOS_INDETERMINATE_PANEL_REASON },
       },
       observe,
       observe,
       operation,
     );
     assertCurrent();
-    // The app window does not always match a panel's size; ask CoreDevice which panel is active.
-    const fallbackRole = indeterminate ? await this.readIosActivePanelRole(operation) : undefined;
-    const role = observedRole ?? fallbackRole;
+    const { role, fromDevicectl } = read;
     // The runner echoes the requested angle, so it is never reported as observedHingeAngle.
-    const output: SetPostureResult = fallbackRole
-      ? {
-          display: settled.display,
-          ...(settled.locked !== undefined ? { locked: settled.locked } : {}),
-          ...(settled.warnings ? { warnings: settled.warnings } : {}),
-          posture: iosPostureForPanel(fallbackRole, angle),
-          hingeAngle: angle,
-        }
-      : { ...settled, hingeAngle: angle };
+    const output: SetPostureResult =
+      role && fromDevicectl
+        ? {
+            display: settled.display,
+            ...(settled.locked !== undefined ? { locked: settled.locked } : {}),
+            ...(settled.warnings ? { warnings: settled.warnings } : {}),
+            posture: iosPostureForPanel(role, angle),
+            hingeAngle: angle,
+          }
+        : { ...settled, hingeAngle: angle };
     return withEpilogueWarning(output, role ? iosHingeLayoutWarning(angle, role) : undefined);
+  }
+
+  /**
+   * Observe the active panel, re-polling until it is the one the angle implies or the shared
+   * iOS settle deadline passes. The panel switch lags the hinge event, so one immediate read
+   * would report a slow but healthy switch as the stuck layout (#17726).
+   */
+  private async observeIosHingePanel(
+    angle: number,
+    deadline: number,
+    operation: PostureOperation,
+  ): Promise<{
+    observation: Awaited<ReturnType<ObserveScreen["execute"]>>;
+    read: IosHingePanelRead;
+  }> {
+    const { signal, assertCurrent } = operation;
+    const expectedRole = iosHingeExpectedPanelRole(angle);
+    do {
+      assertCurrent();
+      throwIfAborted(signal);
+      const observation = await awaitWhileRequestIsLive(
+        this.observeFactory(this.device).execute({ freshness: "fresh", signal }),
+        signal,
+      );
+      assertCurrent();
+      const read = await this.readIosHingePanel(observation, operation);
+      const remaining = deadline - this.timer.now();
+      if (!expectedRole || !read.role || read.role === expectedRole || remaining <= 0) {
+        return { observation, read };
+      }
+      await awaitWhileRequestIsLive(
+        this.timer.sleep(Math.min(IOS_POSTURE_POLL_INTERVAL_MS, remaining)),
+        signal,
+      );
+    } while (true);
+  }
+
+  /** The panel the app layout matches, or CoreDevice's active panel when the window size is ambiguous. */
+  private async readIosHingePanel(
+    observation: Awaited<ReturnType<ObserveScreen["execute"]>>,
+    operation: PostureOperation,
+  ): Promise<IosHingePanelRead> {
+    const panel = classifyIosPostureObservation(observation, this.device.displays?.panels, "cover");
+    if (panel !== "indeterminate") {
+      return { role: panel === "expected" ? "cover" : "inner", fromDevicectl: false };
+    }
+    return { role: await this.readIosActivePanelRole(operation), fromDevicectl: true };
   }
 
   /** The active iPhone Duo panel from devicectl, or undefined when it cannot be determined. */

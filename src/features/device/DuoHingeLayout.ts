@@ -53,6 +53,17 @@ export function iosPostureForPanel(role: IosHingePanelRole, requestedAngle?: num
     : "opened";
 }
 
+/**
+ * The panel a healthy simulator settles on for this angle, or undefined when either panel is
+ * plausible (0 < angle <= IOS_COVER_LAYOUT_MAX_DEGREES). Mirrors iosHingeLayoutWarning.
+ */
+export function iosHingeExpectedPanelRole(requestedAngle: number): IosHingePanelRole | undefined {
+  if (requestedAngle <= 0) {
+    return "cover";
+  }
+  return requestedAngle > IOS_COVER_LAYOUT_MAX_DEGREES ? "inner" : undefined;
+}
+
 /** A warning with a next step when the active panel contradicts the requested hinge angle. */
 export function iosHingeLayoutWarning(
   requestedAngle: number,

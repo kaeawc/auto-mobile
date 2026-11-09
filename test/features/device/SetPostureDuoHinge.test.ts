@@ -96,6 +96,9 @@ function harness() {
     notifyTransition: (deviceId, reason) => tracker.notifyTransition(deviceId, reason),
   };
   let active: "inner" | "cover" = "cover";
+  // A pending panel switch the simulator applies only after this many more observations.
+  let pending: { panel: "inner" | "cover"; afterObserves: number } | undefined;
+  let observes = 0;
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const setPosture = new SetPosture(duo, {
@@ -104,10 +107,18 @@ function harness() {
     iosHingeAngleStore: store,
     observeFactory: () =>
       ({
-        execute: async () => ({
-          ...appWindow(active),
-          displayRevision: tracker.revision(duo.deviceId),
-        }),
+        execute: async () => {
+          observes += 1;
+          if (pending && pending.afterObserves-- <= 0) {
+            active = pending.panel;
+            displays.displays = devicectl(pending.panel);
+            pending = undefined;
+          }
+          return {
+            ...appWindow(active),
+            displayRevision: tracker.revision(duo.deviceId),
+          };
+        },
       }) as ObserveScreen,
     timer,
     transitionSink,
@@ -123,6 +134,17 @@ function harness() {
   return {
     client,
     adb,
+    timer,
+    observeCount: () => observes,
+    /** Request an angle; the simulator switches to `panel` only after `afterObserves` observations. */
+    async hingeDelayed(angle: number, panel: "inner" | "cover", afterObserves: number) {
+      pending = { panel, afterObserves };
+      const result = await setPosture.executeHingeAngle(angle);
+      if ("status" in result) {
+        throw new Error(result.message);
+      }
+      return result;
+    },
     /** Request an angle; the simulator then shows `panel` (devicectl names none for "unread"). */
     async hinge(angle: number, panel: "inner" | "cover" | "unread") {
       active = panel === "unread" ? "cover" : panel;
@@ -181,6 +203,31 @@ describe("setPosture hingeAngle on iPhone Duo compares the hinge with the layout
       postureSource: "inferred_from_active_panel",
       requestedHingeAngle: 120,
     });
+  });
+
+  test("a delayed but successful cover -> inner switch settles without a warning", async () => {
+    const h = harness();
+    await h.hinge(0, "cover");
+    const before = h.observeCount();
+    const startedAt = h.timer.now();
+    const opened = await h.hingeDelayed(120, "inner", 3);
+    expect(opened).toMatchObject({ hingeAngle: 120, posture: "half_opened" });
+    expect(opened).not.toHaveProperty("warnings");
+    // Polled past the stale cover reads, well inside the settle window.
+    expect(h.observeCount() - before).toBeGreaterThanOrEqual(4);
+    expect(h.timer.now() - startedAt).toBeLessThan(3000);
+  });
+
+  test("the stuck 0 -> 80 -> 120 layout warns only after the bounded settle window", async () => {
+    const h = harness();
+    await h.hinge(0, "cover");
+    await h.hinge(80, "cover");
+    const startedAt = h.timer.now();
+    const stuck = await h.hinge(120, "cover");
+    expect(h.timer.now() - startedAt).toBeGreaterThanOrEqual(3000);
+    expect(stuck.warnings).toEqual([
+      expect.stringContaining("requested 120 degrees, but the cover panel is still active"),
+    ]);
   });
 
   test("0 -> 120 on the inner layout is half_opened without a warning", async () => {

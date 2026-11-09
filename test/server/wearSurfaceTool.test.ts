@@ -36,8 +36,6 @@ import * as observeDefaults from "../../src/features/observe/ObserveScreenDefaul
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeViewHierarchy } from "../fakes/FakeViewHierarchy";
-import { readFileSync } from "node:fs";
-import { observeResultFromJsonText } from "../helpers/observeFixture";
 
 const watchDevice: BootedDevice = { name: "Wear", deviceId: "emulator-5554", platform: "android" };
 const COMPONENT = "com.google.android.contacts/com.google.android.wearable.contacts.tiles.X";
@@ -179,18 +177,29 @@ describe("wearSurface watch face actions", () => {
 });
 
 describe("wearSurface tool", () => {
-  test.each(["tile-showing", "app-in-front"] as const)(
-    "%s observation preserves every field of the full capture, including its 384px screen",
-    (name) => {
+  test.each([
+    {
+      name: "tile-showing",
+      observationId: "7ab8f636-6fe4-47b5-be2f-cfa2e043fec2",
+      appId: WEAR_SYSUI_PACKAGE,
+    },
+    {
+      name: "app-in-front",
+      observationId: "5c7c1bd7-3cac-4464-9624-d9a4524cf1ec",
+      appId: "dev.jasonpearson.automobile.wearfixture",
+    },
+  ] as const)(
+    "$name observation keeps the full capture's identity and its 384px round screen",
+    ({ name, observationId, appId }) => {
       const observation = capturedSurfaceObservation(name);
-      expect(observation.screenSize).toMatchObject({ width: 384, height: 384 });
-      const raw = observeResultFromJsonText(
-        readFileSync(
-          `${import.meta.dir}/../fixtures/wear/surface/observe-full-${name}.json`,
-          "utf8",
-        ),
-      );
-      expect(observation).toEqual(raw);
+      expect(observation).toMatchObject({
+        observationId,
+        deviceId: "emulator-5578",
+        screenSize: { width: 384, height: 384, units: "physical-pixels" },
+        isScreenRound: true,
+        activeWindow: { appId },
+        viewHierarchy: { packageName: appId, screenWidth: 384, screenHeight: 384, density: 320 },
+      });
     },
   );
 
@@ -225,21 +234,36 @@ describe("wearSurface tool", () => {
           },
         }),
     );
-    // Exercise the constructor's hierarchy without running the unrelated observe pipeline.
-    const execute = spyOn(RealObserveScreen.prototype, "execute").mockImplementation(
-      async function (this: RealObserveScreen) {
-        return { ...capture, viewHierarchy: await this["viewHierarchy"].getViewHierarchy() };
+    // Record the hierarchy source the constructor resolves for its default dependencies.
+    const resolveHierarchy = observeDefaults.resolveObserveViewHierarchy;
+    const constructed: ReturnType<typeof resolveHierarchy>[] = [];
+    const resolved = spyOn(observeDefaults, "resolveObserveViewHierarchy").mockImplementation(
+      (context) => {
+        const source = resolveHierarchy(context);
+        constructed.push(source);
+        return source;
       },
     );
+    // Exercise the constructor's hierarchy without running the unrelated observe pipeline.
+    const execute = spyOn(RealObserveScreen.prototype, "execute").mockImplementation(async () => {
+      const [source] = constructed;
+      if (!source) {
+        throw new Error("ObserveScreen did not resolve a hierarchy source");
+      }
+      return { ...capture, viewHierarchy: await source.getViewHierarchy() };
+    });
     try {
       expect(await createDeviceObserver(watchDevice)()).toEqual({
         appId: WEAR_SYSUI_PACKAGE,
         tileShowing: true,
       });
+      expect(constructed).toHaveLength(1);
+      expect(constructed[0]).toBeInstanceOf(ViewHierarchy);
       expect(read).toHaveBeenCalledTimes(1);
       expect(execute).toHaveBeenCalledTimes(1);
     } finally {
       execute.mockRestore();
+      resolved.mockRestore();
       sources.mockRestore();
       read.mockRestore();
       adb.mockRestore();

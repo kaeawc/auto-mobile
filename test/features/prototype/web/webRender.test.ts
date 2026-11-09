@@ -6,7 +6,12 @@ import {
   type WebChild,
   type WebElement,
 } from "../../../../src/features/prototype/web/webNodes";
-import { renderPrototypeStill } from "../../../../src/features/prototype/web/webStill";
+import { WEB_LAYER_TYPES } from "../../../../src/features/prototype/web/webLayerTypes";
+import { WEB_LAYER_RENDERED_TYPES } from "../../../../src/features/prototype/web/webRender";
+import {
+  renderPrototypeStill,
+  type PrototypeStillOptions,
+} from "../../../../src/features/prototype/web/webStill";
 
 const reference = JSON.parse(
   readFileSync(
@@ -1221,6 +1226,103 @@ describe("prototype web still (#16346)", () => {
       "line",
     )[0]!;
     expect(row.style).not.toHaveProperty("width");
+  });
+
+  test("the height pass's layer types are the ones renderWebNode hoists (#16720)", () => {
+    expect([...WEB_LAYER_TYPES].sort()).toEqual([...WEB_LAYER_RENDERED_TYPES].sort());
+  });
+
+  test("a column's hoisted layer takes none of the height a weighted row gets (#16720)", () => {
+    const layers: Record<string, Record<string, unknown>> = {
+      bottomSheet: { type: "bottomSheet", detents: ["half"], child: { type: "text", text: "Hi" } },
+      dialog: { type: "dialog", title: "Delete?", confirm: { label: "Delete" } },
+      snackbar: { type: "snackbar", text: "Saved" },
+    };
+    const ratioOf = (layer: Record<string, unknown>, open: boolean) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          state: { open },
+          root: {
+            type: "column",
+            style: { height: { dp: 100 }, spacing: 8 },
+            children: [
+              { ...layer, openWhen: { key: "open", equals: true }, style: { height: { dp: 100 } } },
+              {
+                type: "row",
+                style: { weight: 1 },
+                children: [{ type: "box", testTag: "ratio", style: { aspectRatio: 2 } }],
+              },
+            ],
+          },
+        }),
+        "ratio",
+      )[0]!.style["flex-basis"];
+    // A layer draws in the window, open or closed, so neither its height nor a spacing gap beside
+    // it comes out of the row's share: the row keeps the whole 100 dp.
+    for (const [type, layer] of Object.entries(layers)) {
+      for (const open of [false, true]) {
+        expect([type, open, ratioOf(layer, open)]).toEqual([type, open, "200px"]);
+      }
+    }
+  });
+
+  test("a row's own safe-area padding comes out of its aspect ratio's height cap (#16720)", () => {
+    const ratioIn = (column: Record<string, unknown>, options: PrototypeStillOptions = {}) =>
+      byTag(
+        renderPrototypeStill(
+          {
+            ...reference,
+            root: {
+              type: "column",
+              ...column,
+              children: [
+                {
+                  type: "row",
+                  style: { width: { dp: 300 }, height: { dp: 100 } },
+                  safeAreaPadding: { edges: ["top"], types: ["systemBars"] },
+                  children: [{ type: "box", testTag: "ratio", style: { aspectRatio: 2 } }],
+                },
+              ],
+            },
+          },
+          options,
+        ),
+        "ratio",
+      )[0]!.style;
+    // Pixel 9's 48 dp top inset leaves the row 52 dp of content, so the box is 104 x 52.
+    expect(ratioIn({})).toMatchObject({ "flex-basis": "104px", width: "104px" });
+    // An ancestor that already applied the top inset consumed it, so the row adds none.
+    const consumed = { safeAreaPadding: { edges: ["top"], types: ["systemBars"] } };
+    expect(ratioIn(consumed)).toMatchObject({ "flex-basis": "200px" });
+    // The keyboard inset adds nothing in a still.
+    const ime = { safeAreaPadding: { edges: ["top"], types: ["ime"] } };
+    expect(ratioIn(ime)).toMatchObject({ "flex-basis": "104px" });
+    // The inset is the frame's: an iPhone 16 portrait top inset is 59 dp, leaving 41 dp.
+    expect(ratioIn({}, { frame: "iphone-16" })).toMatchObject({ "flex-basis": "82px" });
+  });
+
+  test("a weighted row's safe-area padding is part of the flex base its share grows from (#16720)", () => {
+    const ratio = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          style: { height: { dp: 100 } },
+          children: [
+            {
+              type: "row",
+              style: { weight: 1 },
+              safeAreaPadding: { edges: ["bottom"], types: ["systemBars"] },
+              children: [{ type: "box", testTag: "ratio", style: { aspectRatio: 2 } }],
+            },
+          ],
+        },
+      }),
+      "ratio",
+    )[0]!.style;
+    // Pixel 9's 24 dp bottom inset pads the row's 100 dp share, leaving its aspect ratio 76 dp.
+    expect(ratio["flex-basis"]).toBe("152px");
   });
 
   test("an explicit wrap-width root keeps its content width in its window", () => {

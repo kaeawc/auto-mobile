@@ -150,17 +150,20 @@ Every other tool refuses a watch before doing anything, with:
   on that control) may not register and fails like a rotation at the limit; when `delta` is
   between -1 and 1 the error says the turn may be too small. It is not listed by default; enable it with `setToolEnabled` (see
   [Dynamic Tools](dynamic-tools.md)). When the same focused control has a readable accessible value
-  before and after a rotation, that value must change for success. Otherwise, any change in the screen
-  hierarchy confirms the rotation. When no focused value is readable, it first touches an unoccupied
-  interior point, clear of every on-screen element, to wake crown routing, then rotates. If nothing
-  changes, it may wake again and retry once; this requires a stable screen and an unchanged readable
-  focused value, both preserved by the wake. Without a safe touch point it rotates without waking;
-  after an initial wake, it never repeats the turn without a comparable value. If it still changes
-  nothing or a safe retry is unavailable, it fails. On failure, observe
-  first because an inaccessible change may have taken effect. Tap the control that should respond to
-  the Digital Crown, then retry `rotateCrown`.
-  Verification is skipped when a stable hierarchy cannot be read. `observe` after rotating to confirm
-  the app responded.
+  before and after a rotation, that value must change for success. Otherwise, any screen hierarchy
+  change counts as success. When no focused value is readable, an unrelated update, such as a status
+  label, can satisfy this condition; success does not confirm that the crown moved the control.
+  Without a readable focused value, it first touches an interior point clear of elements in the
+  accessibility hierarchy to wake crown routing, then rotates. Content absent from that hierarchy,
+  such as a canvas that handles taps, can still receive the wake touch. To avoid this, tap the control
+  that should respond first. If nothing changes, it may wake again and retry once; this requires a stable screen
+  and an unchanged readable focused value, both preserved by the wake. Without a safe touch point it
+  rotates without waking; after an initial wake, it never repeats the turn without a comparable value.
+  If it still changes nothing or a safe retry is unavailable, it fails. Verification is skipped when
+  a stable hierarchy cannot be read. Use `observe` after rotating to confirm the app responded. Retry
+  only if `observe` confirms the turn had no effect: if the first turn changed the control but
+  verification failed, retrying can overshoot. Tap the control that should respond to the Digital
+  Crown before retrying `rotateCrown`.
 
   ```json
   { "name": "rotateCrown", "arguments": { "platform": "watchos", "delta": 2 } }

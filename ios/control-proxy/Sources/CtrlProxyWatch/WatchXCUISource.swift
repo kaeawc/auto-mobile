@@ -423,7 +423,7 @@ func watchVerifiedCrownRotation(
            watchCrownChangedHierarchy(before: before.hierarchy, after: after.hierarchy)
         {
             // The separate focused-value query can lag the changed tree. Read once more, without rotating.
-            return try? observation()
+            return (try? observation()) ?? after
         }
         return after
     }

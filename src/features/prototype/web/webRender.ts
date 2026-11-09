@@ -74,7 +74,6 @@ import {
   lineCss,
   multilineCss,
   nodeCss,
-  scrollChildStyle,
   textCss,
   type WebStyleContext,
 } from "./webStyle";
@@ -90,7 +89,7 @@ import {
   prototypeIconVariant,
   type PrototypeIconGlyphSource,
 } from "./webIconGlyphs";
-import { contentHeightBound, rowFillAxes, rowMeasured } from "./webRowAspect";
+import { contentHeightBound, rowFillAxes, rowMeasured, scrollChildPatch } from "./webRowAspect";
 import { repeatInstanceChildren, withColumnHeights } from "./webIncomingHeight";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
@@ -281,7 +280,7 @@ function child(scope: WebRenderScope, patch: Partial<WebRenderScope>): WebRender
     style: { ...scope.style, ...patch.style },
     consumedInsets,
     ownInsets: [],
-    // Only a row or box (or a repeat row of one) or a horizontal scroll passes its height bound on.
+    // Only a row, box (or a repeat row of one) or horizontal scroll passes its height bound on.
     heightBound: patch.heightBound,
   };
 }
@@ -415,10 +414,7 @@ function lineFillAxes(
     return [];
   }
   const list: unknown[] = sized.children;
-  const own = rowFillAxes(raw, path, prepareIn(scope), {
-    height: scope.heightBound,
-    unboundedWidth: scope.style.unboundedWidth,
-  });
+  const own = rowFillAxes(raw, path, prepareIn(scope), scope);
   // Children see the bound this container passes them, as rendering gives it (see `line`, `box`).
   const bound = BOUNDING_CONTAINERS.has(String(raw.type))
     ? contentHeightBound(raw.style, scope.heightBound)
@@ -454,10 +450,7 @@ const line =
       style: containerChildStyle(scope, node, axis),
       heightBound: contentHeightBound(node.style, scope.heightBound),
     });
-    const rowed = rowMeasured(node, path, prepareIn(inner), {
-      height: scope.heightBound,
-      unboundedWidth: inner.style.unboundedWidth,
-    });
+    const rowed = rowMeasured(node, path, prepareIn(inner), { ...scope, style: inner.style });
     const { attrs, style } = base(rowed, scope, lineCss(axis, rowed.style));
     return el("div", { attrs, style }, children(rowed, inner, path));
   };
@@ -505,13 +498,7 @@ const scroll: NodeRenderer = (node, scope, path) => {
     [horizontal ? "overflow-x" : "overflow-y"]: "auto",
     ...fade.style,
   });
-  // Across, Compose measures the content against the scroll's max height (its content height); a
-  // vertical scroll hands its content an unbounded height instead.
-  const inner = child(scope, {
-    inBox: false,
-    style: scrollChildStyle(scope, node),
-    heightBound: horizontal ? contentHeightBound(node.style, scope.heightBound) : undefined,
-  });
+  const inner = child(scope, scrollChildPatch(scope, node));
   const scrollAttrs = { ...attrs, ...fade.attrs };
   return el("div", { attrs: scrollAttrs, style }, renderOrSkip(node.child, inner, `${path}.child`));
 };

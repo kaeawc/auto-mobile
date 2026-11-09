@@ -10,6 +10,7 @@ import {
   rowFillAxes,
   rowMeasured,
   rowSequentialChildren,
+  scrollChildPatch,
 } from "../../../../src/features/prototype/web/webRowAspect";
 import {
   laterMinStrut,
@@ -506,7 +507,7 @@ test("under an unbounded width with no definite height a row neither takes nor f
       { type: "box", style: { aspectRatio: 1, maxWidth: 10 } },
     ],
   };
-  const unbounded = { unboundedWidth: true };
+  const unbounded = { style: { unboundedWidth: true } };
   expect(rowFillAxes(row, "root", prepare, unbounded)).toEqual([]);
   const children = rowMeasured(row, "root", prepare, unbounded).children as unknown[];
   // Compose's aspectRatio has no max width to size from, so the ratio stays as authored and its
@@ -528,12 +529,27 @@ test("under an unbounded width a row's height still caps its aspect ratio (#1671
       { type: "box", style: { width: { dp: 40 } } },
     ],
   };
-  const children = rowMeasured(row, "root", prepare, { height: 80, unboundedWidth: true })
-    .children as unknown[];
+  const children = rowMeasured(row, "root", prepare, {
+    heightBound: 80,
+    style: { unboundedWidth: true },
+  }).children as unknown[];
   expect(styleOf(children[0])?.[ROW_MEASURE_KEY]).toEqual({ shrink: CAPPED_SHRINK, basis: 80 });
   expect(styleOf(children[1])?.[ROW_MEASURE_KEY]).toEqual({ shrink: LATER_SHRINK, later: true });
   // A numeric bound is the inherited height alone, as before.
   expect(rowMeasured(row, "root", prepare, 80)).toEqual(
-    rowMeasured(row, "root", prepare, { height: 80 }),
+    rowMeasured(row, "root", prepare, { heightBound: 80 }),
   );
+});
+
+test("only a horizontal scroll hands its child its content height (#16718)", () => {
+  const scope = { style: { mode: "light" as const, palette: new Map() }, heightBound: 90 };
+  const style = { height: { dp: 100 }, padding: { top: 8 } };
+  const across = scrollChildPatch(scope, { type: "scroll", axis: "horizontal", style });
+  expect(across).toMatchObject({ inBox: false, heightBound: 82 });
+  expect(across.style).toMatchObject({ parentAxis: "row", unboundedWidth: true });
+  expect(scrollChildPatch(scope, { type: "scroll", axis: "vertical", style }).heightBound).toBe(
+    undefined,
+  );
+  const unsized = scrollChildPatch({ style: scope.style }, { type: "scroll", axis: "horizontal" });
+  expect(unsized.heightBound).toBeUndefined();
 });

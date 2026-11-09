@@ -5,6 +5,8 @@ import {
   ROW_BOUND_KEY,
   ROW_MEASURE_KEY,
   type RowMeasure,
+  scrollChildStyle,
+  type WebStyleContext,
 } from "./webStyle";
 
 /** The aspect ratio of a node with no authored width, height or weight, or undefined. */
@@ -98,6 +100,20 @@ export function rowContentHeight(style: Raw | undefined, inherited = Infinity): 
   return Math.max(0, height - side(padding, "top") - side(padding, "bottom"));
 }
 
+/**
+ * What a scroll's child scope sees: its style context (see scrollChildStyle) and, across, the
+ * scroll's content height as its height bound, since Compose measures horizontal scroll content
+ * against the scroll's max height. A vertical scroll hands its content an unbounded height.
+ */
+export function scrollChildPatch(
+  scope: { readonly style: WebStyleContext; readonly heightBound?: number },
+  node: Raw,
+) {
+  const across = node.axis === "horizontal";
+  const heightBound = across ? contentHeightBound(node.style, scope.heightBound) : undefined;
+  return { inBox: false, style: scrollChildStyle(scope, node), heightBound };
+}
+
 /** The content height bound a row or box passes its children (see rowContentHeight), if any. */
 export function contentHeightBound(style: unknown, inherited?: number): number | undefined {
   const bound = rowContentHeight(record(style), inherited ?? Infinity);
@@ -105,17 +121,19 @@ export function contentHeightBound(style: unknown, inherited?: number): number |
 }
 
 /**
- * What bounds a row from outside: the content height its parent passes on (`height`, see
- * rowContentHeight) and whether its incoming max width is unbounded, as under a horizontal scroll
- * (`unboundedWidth`). A bare number is the height alone.
+ * What bounds a row from outside, as a render scope carries it: the content height its parent
+ * passes on (`heightBound`, see rowContentHeight) and whether its incoming max width is unbounded,
+ * as under a horizontal scroll (`style.unboundedWidth`). A bare number is the height alone.
  */
 export interface RowBounds {
-  readonly height?: number;
-  readonly unboundedWidth?: boolean;
+  readonly heightBound?: number;
+  readonly style?: { readonly unboundedWidth?: boolean };
 }
 
-const rowBounds = (bounds: number | RowBounds): RowBounds =>
-  typeof bounds === "number" ? { height: bounds } : bounds;
+const rowBounds = (bounds: number | RowBounds) =>
+  typeof bounds === "number"
+    ? { height: bounds, unboundedWidth: false }
+    : { height: bounds.heightBound, unboundedWidth: bounds.style?.unboundedWidth === true };
 
 /**
  * The axes a row grows on to its parent: width when its unsized aspect-ratio child takes all the

@@ -2,6 +2,7 @@ import com.android.build.api.artifact.ScopedArtifact
 import com.android.build.api.artifact.SingleArtifact
 import com.android.build.api.variant.ScopedArtifacts
 import dev.jasonpearson.automobile.buildlogic.baselineprofile.VerifyApkBaselineProfileTask
+import dev.jasonpearson.automobile.buildlogic.r8.GeneratePrototypeIconRulesTask
 import dev.jasonpearson.automobile.buildlogic.r8.VerifyR8KeptClassesTask
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.tasks.PathSensitivity
@@ -65,6 +66,15 @@ android {
 
 androidComponents {
   onVariants(selector().withBuildType("release")) { variant ->
+    val iconContract =
+      rootProject.layout.projectDirectory.file("../schemas/prototype-spec-contract.json")
+    val generateIconRules =
+      tasks.register<GeneratePrototypeIconRulesTask>("generateReleasePrototypeIconRules") {
+        contractFile.set(iconContract)
+        rulesFile.set(layout.buildDirectory.file("generated/r8/release/prototype-icons.pro"))
+      }
+    // AGP consumes the task-backed provider lazily and carries its dependency into release R8.
+    variant.proguardFiles.add(generateIconRules.flatMap { it.rulesFile })
     // The release APK must ship a profile ART applies on install that covers CtrlProxy's own
     // entry points, not only the rules its libraries contribute (#17417).
     val verifyProfile =
@@ -91,6 +101,7 @@ androidComponents {
           mappingFile.set(variant.artifacts.get(SingleArtifact.OBFUSCATION_MAPPING_FILE))
           mergedManifest.set(variant.artifacts.get(SingleArtifact.MERGED_MANIFEST))
           namespace.set(variant.namespace)
+          iconContractFile.set(iconContract)
           ownedPackagePrefixes.set(listOf("dev/jasonpearson/automobile/"))
           requiredMembers.set(
             listOf("filled", "outlined", "rounded", "sharp", "twotone").map {

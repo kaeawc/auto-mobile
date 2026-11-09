@@ -7,6 +7,7 @@ import type {
 import { defaultDeviceFrameId, deviceFrameOrThrow } from "./deviceFrames";
 import { withActionableWebInputAsync } from "./prototypeWebInputActionable";
 import { type PrototypeWebVariant } from "./webPage";
+import { prototypeVariantIds } from "./prototypeVariantIds";
 import {
   buildPrototypeWebPageWithImages,
   type PrototypeWebAssetSource,
@@ -85,15 +86,6 @@ export function prototypeRevisionFilter(
     );
   }
   return { mcpSessionId };
-}
-
-/** Ids sharing `id`'s variant group (by each id's latest revision), in first-seen order. */
-export function prototypeVariantIds(source: PrototypeSpecRevisionSource, id: string): string[] {
-  const group = source.revision(id).variant?.group;
-  if (group === undefined) {
-    return [id];
-  }
-  return source.ids().filter((candidate) => source.revision(candidate).variant?.group === group);
 }
 
 function webVariant(source: PrototypeSpecRevisionSource, id: string): PrototypeWebVariant {

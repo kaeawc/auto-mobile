@@ -37,6 +37,7 @@ import {
   type PrototypeSourceFormat,
 } from "../features/prototype/prototypeSourceFormats";
 import type { PrototypeWebImageSources } from "../features/prototype/web/prototypeWebResource";
+import { prototypeVariantIds } from "../features/prototype/web/prototypeVariantIds";
 import type {
   PrototypeWebAssetSource,
   PrototypeWebImageEncoder,
@@ -61,7 +62,10 @@ export type PrototypeResourceReaders = typeof import("./prototypeResourceReaders
 export const prototypeResourceReadersModule: LazyFeatureModule<PrototypeResourceReaders> =
   lazyFeatureModule("prototype resources", () => import("./prototypeResourceReaders"));
 
-const readers = (): Promise<PrototypeResourceReaders> => prototypeResourceReadersModule.load();
+/** The readers the registered handlers use; registration can supply its own (tests). */
+let activeReaders: LazyFeatureModule<PrototypeResourceReaders> = prototypeResourceReadersModule;
+
+const readers = (): Promise<PrototypeResourceReaders> => activeReaders.load();
 
 /** Live sources: the prototype tool's shown specs (and the platforms it showed on) and the saved mirror. */
 export function defaultNativePrototypeSources(): NativePrototypeSources {
@@ -257,7 +261,8 @@ function syncWebResources(sources: PrototypeWebSources): boolean {
 
 /**
  * A new revision changes every format of its id, and the web page and embed envelope of every
- * variant sharing its group (only those two report variants).
+ * variant sharing its group (only those two report variants). It needs only the revision source,
+ * never the lazily imported readers, so a failed reader import cannot drop an update (#17721).
  */
 async function onWebRevision(
   sources: PrototypeWebSources,
@@ -274,7 +279,6 @@ async function onWebRevision(
   webGroups = nextGroups(sources.revisions, event, known);
   // The event's id and its current siblings change, and so do the siblings it left (or, when
   // evicted, the group it was dropped from).
-  const { prototypeVariantIds } = await readers();
   const current = known.has(event.id) ? prototypeVariantIds(sources.revisions, event.id) : [];
   const ids = new Set([...(known.has(event.id) ? [event.id] : []), ...current, ...former]);
   const uris = new Set([
@@ -388,7 +392,9 @@ export function prototypeWebNotificationsSettled(): Promise<void> {
 export function registerPrototypeResources(
   nativeSources: NativePrototypeSources = defaultNativePrototypeSources(),
   webSources: PrototypeWebSources = defaultPrototypeWebSources(),
+  readersModule: LazyFeatureModule<PrototypeResourceReaders> = prototypeResourceReadersModule,
 ): void {
+  activeReaders = readersModule;
   registerPrototypeWebResources(webSources);
   ResourceRegistry.register(PROTOTYPE_GUIDE_URI, "Prototype authoring guide", {
     description:

@@ -20,6 +20,8 @@ import type { McpRequestSessionContext } from "../../src/daemon/statelessMcpServ
 import type { ExecutionCancellationReason } from "../../src/daemon/executionTracker";
 import { createSdkMcpServer } from "../../src/server/sdkMcpServer";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
+import { ActionableError } from "../../src/models/ActionableError";
+import { LAZY_IMPORT_FAILURE, recoveringLazyModule } from "../helpers/recoveringLazyModule";
 
 const ambient = new AsyncLocalStorage<string>();
 
@@ -159,6 +161,25 @@ describe("InProcessMcpDispatcher (#11820)", () => {
     expect(h.built).toHaveLength(2);
     await client.close();
     await second.close();
+  });
+
+  test("a forwarded tool call whose client import fails gets the load error; the next one succeeds (#17721)", async () => {
+    const lazy = recoveringLazyModule("MCP client relay", () => ({ LoopbackMcpClient }));
+    const h = harness({ clientModule: lazy.module });
+    const failed = h.dispatcher.connect({ sessionKey: "socket-1" });
+    await expect(failed).rejects.toBeInstanceOf(ActionableError);
+    await expect(failed).rejects.toThrow(
+      `Failed to load the MCP client relay module: ${LAZY_IMPORT_FAILURE}`,
+    );
+    expect(h.built).toHaveLength(0);
+    expect(h.dispatcher.inFlightCount).toBe(0);
+
+    lazy.recover();
+    const client = await h.dispatcher.connect({ sessionKey: "socket-1" });
+    const result = await client.callTool({ name: "echo", arguments: {} });
+    expect(result.content).toEqual([{ type: "text", text: "ok" }]);
+    expect(lazy.attempts()).toBe(2);
+    await client.close();
   });
 
   test("a forward still importing the client when shutdown starts is refused (#17709)", async () => {

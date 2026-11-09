@@ -84,7 +84,10 @@ resource readers, the in-process MCP client, the Claude vision client (`@anthrop
 and the WebRTC publisher (`werift`) are imported on first use through
 `src/utils/lazyFeatureModule.ts`, which logs each first load's latency. Their tools,
 resources and schemas are still registered at startup, so `tools/list` and
-`resources/list` are unchanged. `test/lint/lazyFeatureModules.integration.test.ts`
+`resources/list` are unchanged. A failed import is not memoized: the call that hit it
+gets an `ActionableError` and the next call imports again. Prototype resource-update
+notifications need only the revision store, never the readers, so a failed reader import
+cannot drop one. `test/lint/lazyFeatureModules.integration.test.ts`
 fails if a static import pulls one back onto the startup path.
 
 The pinned graph is mirrored in `scripts/release/runtime-graph.json` (the

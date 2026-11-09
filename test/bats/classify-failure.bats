@@ -1183,7 +1183,7 @@ JSON
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
     FAKE_ORDINARY_EXIT_LOG="$FIXTURE_DIR/github-release-504-ktfmt.log" bash "$SCRIPT" 608
   [ "$status" -eq 0 ]
-  [[ "$output" == *"RERUN-DONT-FIX — GitHub release download returned HTTP 5xx and the installer gave up"* ]]
+  [[ "$output" == *"RERUN-DONT-FIX — pre-#17624"* ]]
 
   # The installer's own marker, which the Fast Validation summary now echoes.
   log="$BATS_TEST_TMPDIR/marker.log"
@@ -1198,12 +1198,13 @@ JSON
   cat > "$fixture" <<'JSON'
 {"headBranch":"work/ci","jobs":[{"databaseId":65,"name":"BATS Shell Tests (ubuntu-latest)","conclusion":"failure","steps":[{"name":"Run BATS Unit Tests","conclusion":"failure"}]}]}
 JSON
-  printf '%s\n' '# URL: https://github.com/mvdan/sh/releases/download/v3.10.0/shfmt_v3.10.0_linux_amd64' \
+  printf '%s\n' '# Downloading shfmt from GitHub releases...' \
+    '# URL: https://github.com/mvdan/sh/releases/download/v3.10.0/shfmt_v3.10.0_linux_amd64' \
     '# curl: (22) The requested URL returned error: 502' '# Failed to download shfmt binary' '# Failed to install shfmt' > "$log"
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
     FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 610
   [ "$status" -eq 0 ]
-  [[ "$output" == *"RERUN-DONT-FIX — GitHub release download returned HTTP 5xx and the installer gave up"* ]]
+  [[ "$output" == *"RERUN-DONT-FIX — pre-#17624"* ]]
 }
 
 @test "a GitHub release download 404 is not classified as infrastructure (#17624)" {
@@ -1234,4 +1235,25 @@ JSON
     FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 612
   [ "$status" -eq 0 ]
   [[ "$output" != *"RERUN-DONT-FIX"* ]]
+}
+
+@test "a 5xx then a terminal checksum mismatch or 404 is not classified as infrastructure (#17624)" {
+  fixture="$BATS_TEST_TMPDIR/issue-17624-terminal-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":65,"name":"Fast Validation","conclusion":"failure","steps":[{"name":"Run fast validation checks","conclusion":"failure"}]}]}
+JSON
+  url='https://github.com/facebook/ktfmt/releases/download/v0.65/ktfmt-0.65-with-dependencies.jar'
+  log="$BATS_TEST_TMPDIR/terminal.log"
+  for terminal in \
+    "Checksum mismatch for /home/runner/.local/bin/ktfmt.jar.partial.x: expected aba9, got 0000|Refusing to install ktfmt-0.65-with-dependencies.jar: its checksum does not match the pin." \
+    "curl: (22) The requested URL returned error: 404|Download of ${url} failed with HTTP 404; not retrying. Check the pinned version and asset name."; do
+    printf '%s\n' 'Fetching ktfmt JAR from GitHub Releases...' "Downloading ${url} (attempt 1/6)" \
+      'curl: (22) The requested URL returned error: 504' 'Download failed (exit 22); retrying in 3s' \
+      "Downloading ${url} (attempt 2/6)" "${terminal%%|*}" "${terminal#*|}" \
+      "Failed to download ktfmt JAR from ${url}" > "$log"
+    run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
+      FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 613
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"RERUN-DONT-FIX"* ]]
+  done
 }

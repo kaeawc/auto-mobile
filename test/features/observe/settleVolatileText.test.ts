@@ -71,13 +71,14 @@ const CAPTURED_STOPWATCH_DIFFS: readonly ObserveDiff[] = [
 ];
 
 describe("VolatileTextTracker (#17670)", () => {
-  test("masks the stopwatch after two consecutive text changes, from the captured diffs", () => {
+  test("masks the stopwatch from its third consecutive text change, from the captured diffs", () => {
     const tracker = new VolatileTextTracker();
     const stable = CAPTURED_STOPWATCH_DIFFS.map((captured) =>
       isStabilityDiffEmpty(tracker.mask(captured)),
     );
-    // First change: not yet volatile. Second consecutive change: masked from then on.
-    expect(stable).toEqual([false, true, true]);
+    // The second consecutive change marks the node volatile but still counts
+    // (#17692); only the third and later changes are masked.
+    expect(stable).toEqual([false, false, true]);
     expect(tracker.volatileCount).toBe(1);
   });
 
@@ -114,10 +115,11 @@ describe("VolatileTextTracker (#17670)", () => {
       attributes: { ...node.attributes, extras: { traversalIndex }, occlusionState: "visible" },
     });
     tracker.mask(diff([withExtras(hundredths("20"), 2)], [withExtras(hundredths("97"), 1)]));
-    const second = tracker.mask(
-      diff([withExtras(hundredths("47"), 3)], [withExtras(hundredths("20"), 2)]),
+    tracker.mask(diff([withExtras(hundredths("47"), 3)], [withExtras(hundredths("20"), 2)]));
+    const third = tracker.mask(
+      diff([withExtras(hundredths("70"), 4)], [withExtras(hundredths("47"), 3)]),
     );
-    expect(isStabilityDiffEmpty(second)).toBe(true);
+    expect(isStabilityDiffEmpty(third)).toBe(true);
   });
 
   test("a pair with no text change is a move, never a text change", () => {
@@ -147,7 +149,8 @@ describe("VolatileTextTracker (#17670)", () => {
       changed: [{ key, changes: { text: { from, to } } }],
     });
     expect(isStabilityDiffEmpty(tracker.mask(textChange("1", "2")))).toBe(false);
-    expect(isStabilityDiffEmpty(tracker.mask(textChange("2", "3")))).toBe(true);
+    expect(isStabilityDiffEmpty(tracker.mask(textChange("2", "3")))).toBe(false);
+    expect(isStabilityDiffEmpty(tracker.mask(textChange("3", "4")))).toBe(true);
   });
 
   test("a matched node sharing a volatile identity still reports its other changes", () => {
@@ -171,6 +174,18 @@ describe("VolatileTextTracker (#17670)", () => {
     tracker.mask(CAPTURED_STOPWATCH_DIFFS[2]);
     const rotated = { ...CAPTURED_STOPWATCH_DIFFS[2], fields: { rotation: { from: 0, to: 1 } } };
     expect(isStabilityDiffEmpty(tracker.mask(rotated))).toBe(false);
+  });
+
+  test("two text changes on one node that then stop are never masked (#17692)", () => {
+    const tracker = new VolatileTextTracker();
+    // A real transition: a title rewritten twice ("Loading" -> "Signing in" -> "Welcome").
+    const title = (text: string) => capturedNode("com.example:id/title", TIME_BOUNDS, text, 0);
+    const stable = [
+      diff([title("Signing in")], [title("Loading")]),
+      diff([title("Welcome")], [title("Signing in")]),
+      diff([], []),
+    ].map((step) => isStabilityDiffEmpty(tracker.mask(step)));
+    expect(stable).toEqual([false, false, true]);
   });
 
   test("reset forgets volatile nodes", () => {
@@ -240,7 +255,7 @@ async function settle(sequence: ObserveResult[]) {
 }
 
 describe("RealSettleObserve on a running stopwatch (#17670)", () => {
-  test("settles on the third read instead of paying the whole budget", async () => {
+  test("settles on the fourth read instead of paying the whole budget", async () => {
     // The captured loop's per-poll texts, in order.
     const result = await settle([
       stopwatchScreen("6:15", "97", 10),
@@ -251,9 +266,9 @@ describe("RealSettleObserve on a running stopwatch (#17670)", () => {
     ]);
     expect(result.settled).toBe(true);
     expect(result.terminalReason).toBe("settled");
-    expect(result.polls).toBe(3);
-    expect(result.waitMs).toBe(300);
-    expect(result.observation.viewHierarchy?.updatedAt).toBe(30);
+    expect(result.polls).toBe(4);
+    expect(result.waitMs).toBe(450);
+    expect(result.observation.viewHierarchy?.updatedAt).toBe(40);
   });
 
   test("a node appearing while the stopwatch ticks restarts the stable run", async () => {
@@ -382,9 +397,25 @@ describe("RealSettleObserve on a running stopwatch (#17670)", () => {
       stopwatchScreen("6:16", "47", 30, { appId: "com.example.other" }),
       stopwatchScreen("6:16", "70", 40, { appId: "com.example.other" }),
       stopwatchScreen("6:16", "93", 50, { appId: "com.example.other" }),
+      stopwatchScreen("6:16", "16", 60, { appId: "com.example.other" }),
     ]);
-    // Two text changes on the new screen are needed again before it masks.
+    // Three text changes on the new screen are needed again before it masks.
+    expect(result.settled).toBe(true);
+    expect(result.polls).toBe(6);
+  });
+
+  test("a transition of two text changes on one node is not masked as ticking text (#17692)", async () => {
+    // The hundredths node is rewritten twice, then the screen grows a lap row:
+    // the settle must not stop on the read before the row appears.
+    const result = await settle([
+      stopwatchScreen("6:15", "97", 10),
+      stopwatchScreen("6:15", "20", 20),
+      stopwatchScreen("6:15", "47", 30),
+      stopwatchScreen("6:15", "47", 40, { lap: true }),
+      stopwatchScreen("6:15", "47", 50, { lap: true }),
+    ]);
     expect(result.settled).toBe(true);
     expect(result.polls).toBe(5);
+    expect(result.observation.viewHierarchy?.updatedAt).toBe(50);
   });
 });

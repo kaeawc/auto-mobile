@@ -123,7 +123,7 @@ describe("pollObserveUntil hard budget (#17670)", () => {
     expect(timer.now()).toBe(1001);
   });
 
-  test("the terminal back-stack read is raced against the remaining budget", async () => {
+  test("a terminal back-stack read cut off by the budget leaves the match unsettled", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const screen = new TimedObserveScreen(timer, [100, 100]);
@@ -140,7 +140,10 @@ describe("pollObserveUntil hard budget (#17670)", () => {
       (_observation, previous) => previous !== undefined,
     );
 
-    expect(outcome.terminalReason).toBe("matched");
+    // The cut-off back-stack read never confirmed the match, so it is not reported (#17692).
+    expect(outcome.stopped).toBe(false);
+    expect(outcome.terminalReason).toBe("timeout");
+    expect(outcome.observation.viewHierarchy?.updatedAt).toBe(20);
     // The reconciliation capture never started: the back-stack read used up the budget.
     expect(screen.getExecuteCallCount()).toBe(2);
     expect(backStackSignal?.aborted).toBe(true);

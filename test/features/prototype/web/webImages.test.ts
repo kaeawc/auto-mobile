@@ -142,6 +142,19 @@ describe("webImageDraw and webImageRule", () => {
     expect(webImageDraw("a", capped).widthDp).toBe(60);
   });
 
+  test("an authored ratio sizes a wrapped axis from the fixed one, less its padding", () => {
+    const draw = webImageDraw("a", {
+      contentScale: "crop",
+      style: { width: { dp: 200 }, aspectRatio: 2, padding: { start: 80, end: 80 } },
+    });
+    expect(draw).toMatchObject({ widthDp: 40, heightDp: 100 });
+    expect(webImageScaleFactor({ width: 1000, height: 1000 }, [webImageBox(draw, PIXEL)])).toBe(
+      0.263,
+    );
+    const tall = webImageDraw("a", { style: { height: { dp: 100 }, aspectRatio: 0.5 } });
+    expect(tall).toMatchObject({ widthDp: 50, heightDp: 100 });
+  });
+
   test("a cover box covers a wrapped axis's authored minimum, less its padding", () => {
     const draw = webImageDraw("a", {
       contentScale: "crop",

@@ -94,19 +94,43 @@ function paddingDp(style: Raw, side: "top" | "bottom" | "start" | "end"): number
  * sides, as Android's image target subtracts it.
  */
 function contentDp(style: Raw, axis: "width" | "height"): number | undefined {
-  const fixed = fixedDp(style[axis]);
-  if (fixed === undefined) {
-    return undefined;
-  }
+  const used = usedDp(style, axis) ?? ratioDp(style, axis);
+  return used === undefined ? undefined : Math.max(0, used - axisPaddingDp(style, axis));
+}
+
+/** An axis's padding on both its sides, in dp. */
+function axisPaddingDp(style: Raw, axis: "width" | "height"): number {
+  return axis === "width"
+    ? paddingDp(style, "start") + paddingDp(style, "end")
+    : paddingDp(style, "top") + paddingDp(style, "bottom");
+}
+
+/** A length as its axis's authored bounds let it be: capped by the maximum, raised to the minimum. */
+function boundedDp(style: Raw, axis: "width" | "height", length: number): number {
   const bound = (field: string) => (typeof style[field] === "number" ? style[field] : undefined);
   const suffix = axis === "width" ? "Width" : "Height";
-  const capped = Math.min(fixed, bound(`max${suffix}`) ?? Infinity);
-  const used = Math.max(capped, bound(`min${suffix}`) ?? 0);
-  const padding =
-    axis === "width"
-      ? paddingDp(style, "start") + paddingDp(style, "end")
-      : paddingDp(style, "top") + paddingDp(style, "bottom");
-  return Math.max(0, used - padding);
+  return Math.max(Math.min(length, bound(`max${suffix}`) ?? Infinity), bound(`min${suffix}`) ?? 0);
+}
+
+/** A fixed dp axis's used border-box length. */
+function usedDp(style: Raw, axis: "width" | "height"): number | undefined {
+  const fixed = fixedDp(style[axis]);
+  return fixed === undefined ? undefined : boundedDp(style, axis, fixed);
+}
+
+/**
+ * A wrapped axis's used border-box length under an authored aspectRatio (width over height, on the
+ * border box, as the page sizes border boxes): the other axis's used length through the ratio.
+ */
+function ratioDp(style: Raw, axis: "width" | "height"): number | undefined {
+  const ratio = style.aspectRatio;
+  if (typeof ratio !== "number" || ratio <= 0 || !wrapped(style[axis])) {
+    return undefined;
+  }
+  const other = usedDp(style, axis === "width" ? "height" : "width");
+  return other === undefined
+    ? undefined
+    : boundedDp(style, axis, axis === "width" ? other * ratio : other / ratio);
 }
 
 /** A wrapped axis's authored minimum, less its padding: the content box's least extent there. */
@@ -115,11 +139,7 @@ function wrappedMinimumDp(style: Raw, axis: "width" | "height"): number | undefi
   if (!wrapped(style[axis]) || typeof minimum !== "number") {
     return undefined;
   }
-  const padding =
-    axis === "width"
-      ? paddingDp(style, "start") + paddingDp(style, "end")
-      : paddingDp(style, "top") + paddingDp(style, "bottom");
-  return Math.max(0, minimum - padding);
+  return Math.max(0, minimum - axisPaddingDp(style, axis));
 }
 
 /**

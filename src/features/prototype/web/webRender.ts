@@ -274,13 +274,12 @@ function base(node: Raw, scope: WebRenderScope, extra: Record<string, string> = 
 }
 
 function child(scope: WebRenderScope, patch: Partial<WebRenderScope>): WebRenderScope {
-  // Descendants see the insets this node applied as consumed.
-  const consumedInsets = [...(scope.consumedInsets ?? []), ...(scope.ownInsets ?? [])];
   return {
     ...scope,
     ...patch,
     style: { ...scope.style, ...patch.style },
-    consumedInsets,
+    // Descendants see the insets this node applied as consumed.
+    consumedInsets: [...(scope.consumedInsets ?? []), ...(scope.ownInsets ?? [])],
     ownInsets: [],
     // Only a row, box (or a repeat row of one) or horizontal scroll passes its height bound on.
     heightBound: patch.heightBound,
@@ -434,8 +433,10 @@ function lineFillAxes(
 const prepareIn = (s: WebRenderScope) => (e: unknown, at: string) => preparedNode(e, s, at)?.styled;
 
 /** A column or card whose children carry the height share it hands each (see withColumnHeights). */
-const columnSized = (raw: Raw, scope: WebRenderScope, path: string) =>
-  withColumnHeights(raw, path, prepareIn(scope), contentHeightBound(raw.style, scope.heightBound));
+const columnSized = (raw: Raw, scope: WebRenderScope, path: string) => {
+  const bound = contentHeightBound(raw.style, scope.heightBound);
+  return withColumnHeights(raw, path, prepareIn(child(scope, {})), bound);
+};
 
 const line =
   (axis: "row" | "column"): NodeRenderer =>

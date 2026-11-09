@@ -176,7 +176,9 @@ const COLUMN_PARENTS: ReadonlyMap<unknown, { readonly spacing: boolean }> = new 
  * repeatInstanceChildren hands each instance its own share instead. A height that depends on
  * layout (a sibling's wrap height, the screen) is left out, so the bound stays an upper one.
  *
- * `prepare` resolves a child as rendering will (bound, visible, `styleWhen` merged).
+ * `prepare` resolves a child as rendering will (bound, visible, `styleWhen` merged), in the
+ * column's child scope: an inset edge the column applies is consumed, so a child asking for the
+ * same edge carries none of it in its frame (see weightShares).
  */
 export function withColumnHeights(
   node: Raw,

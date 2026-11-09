@@ -13,8 +13,10 @@ import {
 } from "../features/prototype/nativePrototypeUris";
 import { defaultSavedPrototypeMirror } from "../features/prototype/savedPrototypeMirror";
 import { getMcpServerVersion, releaseVersion } from "../utils/mcpVersion";
-import { daemonPrototypeShownSpecs } from "./prototypeTools/registration";
-import { daemonPrototypeSpecRevisions } from "./prototypeTools/daemonSpecRevisions";
+import {
+  daemonPrototypeShownSpecs,
+  daemonPrototypeSpecRevisions,
+} from "./prototypeTools/daemonSpecRevisions";
 import type {
   PrototypeSpecRevisionEvent,
   PrototypeSpecRevisionSource,

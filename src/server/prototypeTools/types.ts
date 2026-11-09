@@ -37,7 +37,6 @@ import type { IosSavedPrototypeInstaller } from "../prototypeSavedActions";
 import type { prototypeOutputSchema } from "./schemas";
 import type { ScreenRoundReaderFactory } from "./screenShape";
 import type { DeviceAwareToolHandler } from "../toolRegistryTypes";
-import type { PrototypeShownSpecs } from "../../features/prototype/PrototypeShownSpecs";
 
 export type PrototypeClient = AndroidPrototypeClient;
 /**
@@ -145,6 +144,4 @@ export interface PrototypeToolRuntime {
 /** The implementation module `registration.ts` imports on the tool's first call. */
 export interface PrototypeToolRuntimeModule {
   createPrototypeToolRuntime(dependencies?: PrototypeToolDependencies): PrototypeToolRuntime;
-  /** Specs the shared daemon host has seen acknowledged; absent until a host exists. */
-  daemonPrototypeShownSpecs(): PrototypeShownSpecs | undefined;
 }

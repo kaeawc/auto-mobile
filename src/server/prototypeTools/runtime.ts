@@ -16,7 +16,10 @@ import { getDaemonStreamDeviceLifecycleEmitter } from "../../daemon/streamDevice
 import { DefaultDeviceWindowCacheInvalidator } from "../../features/observe/DeviceWindowCacheInvalidator";
 import { AndroidCtrlProxyClient } from "../../features/observe/android/AndroidCtrlProxyClient";
 import type { PrototypeSpecRevisions } from "../../features/prototype/prototypeSpecRevisions";
-import { daemonPrototypeSpecRevisions } from "./daemonSpecRevisions";
+import {
+  daemonPrototypeSpecRevisions,
+  setDaemonPrototypeShownSpecsReader,
+} from "./daemonSpecRevisions";
 import { MAX_MOCK_DOCUMENT_BYTES } from "../../features/prototype/prototypeMockSchema";
 import { isMockBackendAction, mockBackendOutput } from "./mockBackend";
 import { PrototypeMockBackendRegistry } from "../../features/prototype/PrototypeMockBackendRegistry";
@@ -412,6 +415,7 @@ function prototypeHostFor(dependencies: PrototypeToolDependencies): PrototypeHos
 export function daemonPrototypeShownSpecs(): PrototypeShownSpecs | undefined {
   return daemonPrototypeHost?.store.shownSpecs;
 }
+setDaemonPrototypeShownSpecsReader(daemonPrototypeShownSpecs);
 
 /**
  * A private host is disposed with its registration. The shared host is disposed only by the

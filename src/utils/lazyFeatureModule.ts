@@ -23,6 +23,11 @@ export interface LazyFeatureModuleOptions {
   readonly log?: LazyFeatureLog;
 }
 
+/** A feature module the caller has already imported, for an entry point that loads it eagerly. */
+export function loadedFeatureModule<T>(module: T): LazyFeatureModule<T> {
+  return { load: () => Promise.resolve(module), loaded: () => module };
+}
+
 /**
  * Memoize `importer` (an `await import(...)` of the feature's module) behind `feature`'s name.
  * The first successful load logs how long the import took; a failed import is not memoized, so

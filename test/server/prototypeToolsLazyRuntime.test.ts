@@ -44,7 +44,6 @@ class FakeRuntimeModule implements LazyFeatureModule<PrototypeToolRuntimeModule>
       };
       return runtime;
     },
-    daemonPrototypeShownSpecs: () => undefined,
   };
 
   private pending: Promise<PrototypeToolRuntimeModule> | undefined;

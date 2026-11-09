@@ -1,6 +1,5 @@
 import { ActionableError } from "../../models/ActionableError";
 import { lazyFeatureModule, type LazyFeatureModule } from "../../utils/lazyFeatureModule";
-import type { PrototypeShownSpecs } from "../../features/prototype/PrototypeShownSpecs";
 import { ToolRegistry } from "../toolRegistry";
 import type { DeviceAwareToolHandler } from "../toolRegistryTypes";
 import {
@@ -22,14 +21,6 @@ import type {
  */
 export const prototypeToolRuntimeModule: LazyFeatureModule<PrototypeToolRuntimeModule> =
   lazyFeatureModule("prototype", () => import("./runtime"));
-
-/**
- * Specs the shared daemon host has seen acknowledged, for read-only resources (#13729). Before the
- * runtime module loads no host exists, so there are none.
- */
-export function daemonPrototypeShownSpecs(): PrototypeShownSpecs | undefined {
-  return prototypeToolRuntimeModule.loaded()?.daemonPrototypeShownSpecs();
-}
 
 /**
  * Registrations made before the runtime module loaded and not yet built, in registration order,

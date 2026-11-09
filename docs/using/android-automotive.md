@@ -217,7 +217,8 @@ To drive an app on another display, such as a passenger screen, pass `display` (
 `active`) to `observe`, `tapOn` and `pressButton`. You can also pin it once for the session with
 `setActiveDevice` `display`. An explicit `display` overrides the pin. `pressButton` sends the key to that
 display and checks that display for the visual change. For `pressButton`, `active` is the focused display
-(the one `observe` reads when neither `display` nor a pin is set), not the display you last observed
+(the one the latest `observe` without `display` or a pin read; before any such read, the display that
+holds input focus, or the main display when focus is unknown), not the display you last observed
 explicitly. An explicit `active` overrides the pin like any other `display`. A `back` that finds a Car App Library template
 there taps the host's Back control on the same display. A `home` that changes nothing because that
 display already shows its launcher succeeds, as it does on the default display. System actions (such

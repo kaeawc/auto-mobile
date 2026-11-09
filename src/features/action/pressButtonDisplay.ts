@@ -9,7 +9,10 @@ import { isForegroundLauncher } from "../observe/androidLauncherPackages";
 import { resolveTargetDisplay } from "../observe/DisplaySelection";
 import { displayTransitions } from "../observe/DisplayTransition";
 import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
-import type { DisplayRef } from "../../models/DisplayPanel";
+import type { DisplayPanel, DisplayRef } from "../../models/DisplayPanel";
+import { parseTopFocusedDisplayId } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { logger } from "../../utils/logger";
 import { acceptAndroidHomeAlreadyOnLauncher } from "./pressButtonOutcomes";
 
 /** A resolved pressButton display: the concrete panel key and its Android logical display id. */
@@ -32,7 +35,10 @@ export type PressButtonDisplayResolver = (
 export interface PressButtonDisplayState {
   /** The panel the latest unscoped observation recorded; explicit observations leave it unchanged. */
   focusedPanel(deviceId: string): Pick<DisplayRef, "key"> | undefined;
-  /** The device's live focused display, read when no unscoped observation has recorded one. */
+  /**
+   * The device's live input-focused display, read when no unscoped observation has recorded one;
+   * logical display 0 when focus is unknown.
+   */
   liveDisplay(
     device: BootedDevice,
     adb: AdbCommandRunner,
@@ -47,10 +53,48 @@ export interface PressButtonDisplayState {
   ): Promise<number>;
 }
 
-const defaultPressButtonDisplayState: PressButtonDisplayState = {
+/**
+ * The panel holding input focus (`mTopFocusedDisplayId`), or undefined when focus is unknown. A
+ * failed read is not fatal: the caller falls back to logical display 0.
+ */
+async function inputFocusedPanel(
+  device: BootedDevice,
+  adb: AdbCommandRunner,
+  cache: ObservedAndroidDisplayCache,
+  signal: AbortSignal | undefined,
+): Promise<DisplayPanel | undefined> {
+  try {
+    const result = await adb.executeCommand("shell dumpsys window | grep mTopFocusedDisplayId", {
+      signal,
+    });
+    const displayId = parseTopFocusedDisplayId(result.stdout);
+    return await cache.panelForLogicalId(device, adb, displayId, { signal });
+  } catch (error) {
+    signal?.throwIfAborted();
+    logger.warn(`pressButton focused display lookup failed: ${errorMessage(error)}`, error);
+    return undefined;
+  }
+}
+
+/**
+ * The live `active` display before any unscoped observation: the panel holding input focus, else
+ * logical display 0 (the display Android's unscoped capture binds to) when focus is unknown.
+ */
+async function liveActiveDisplay(
+  device: BootedDevice,
+  adb: AdbCommandRunner,
+  signal: AbortSignal | undefined,
+): Promise<Pick<DisplayRef, "key" | "posture">> {
+  const cache = new ObservedAndroidDisplayCache(defaultTimer);
+  const focused = await inputFocusedPanel(device, adb, cache, signal);
+  return focused
+    ? { key: focused.key, posture: "unknown" }
+    : (await cache.resolve(device, adb, signal)).display;
+}
+
+export const defaultPressButtonDisplayState: PressButtonDisplayState = {
   focusedPanel: (deviceId) => displayTransitions.currentObservedPanel(deviceId),
-  liveDisplay: async (device, adb, signal) =>
-    (await new ObservedAndroidDisplayCache(defaultTimer).resolve(device, adb, signal)).display,
+  liveDisplay: liveActiveDisplay,
   logicalIdForPanel: (device, adb, key, signal) =>
     new ObservedAndroidDisplayCache(defaultTimer).logicalIdForPanel(device, adb, key, signal),
 };

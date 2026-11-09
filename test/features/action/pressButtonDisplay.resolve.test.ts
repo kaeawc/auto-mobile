@@ -1,9 +1,12 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
+  defaultPressButtonDisplayState,
   resolvePressButtonDisplay,
   type PressButtonDisplayState,
 } from "../../../src/features/action/pressButtonDisplay";
+import { ObservedAndroidDisplayCache } from "../../../src/features/observe/ObservationDisplay";
 import type { BootedDevice } from "../../../src/models";
+import { createExecResult } from "../../../src/utils/execResult";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 
 const LOGICAL_IDS: Record<string, number> = { main: 0, passenger: 4 };
@@ -79,5 +82,61 @@ describe("resolvePressButtonDisplay (#17649)", () => {
     });
     expect(target).toEqual({ key: "passenger", displayId: 4 });
     expect(liveReads).toEqual([]);
+  });
+});
+
+describe("resolvePressButtonDisplay default display state (#17649)", () => {
+  // Main is logical display 0 and passenger is logical display 4, as `cmd display get-displays` reports.
+  const device: BootedDevice = {
+    deviceId: "aaos-default-state",
+    platform: "android",
+    name: "AAOS",
+    displays: {
+      panels: [
+        { key: "111", role: "inner", sizePx: { width: 1280, height: 720 } },
+        { key: "222", role: "external", sizePx: { width: 1280, height: 720 } },
+      ],
+      postures: [],
+    },
+  };
+  const GET_DISPLAYS = [
+    'Display id 0: DisplayInfo{"Main", displayId 0, type INTERNAL, uniqueId "local:111", real 1280 x 720}',
+    'Display id 4: DisplayInfo{"Passenger", displayId 4, type EXTERNAL, uniqueId "local:222", real 1280 x 720}',
+  ].join("\n");
+  // No unscoped observation has recorded a focused panel (only an explicit passenger observe ran).
+  const state: PressButtonDisplayState = {
+    ...defaultPressButtonDisplayState,
+    focusedPanel: () => undefined,
+  };
+
+  function adbWithFocus(focusDump: string | Error): FakeAdbExecutor {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("cmd display get-displays", createExecResult(GET_DISPLAYS, ""));
+    if (focusDump instanceof Error) {
+      adb.setCommandError("mTopFocusedDisplayId", focusDump);
+    } else {
+      adb.setCommandResponse("mTopFocusedDisplayId", createExecResult(focusDump, ""));
+    }
+    return adb;
+  }
+
+  afterEach(() => ObservedAndroidDisplayCache.release(device.deviceId));
+
+  test("active resolves to the display holding input focus, not logical display 0", async () => {
+    const adb = adbWithFocus("  mTopFocusedDisplayId=4\n");
+    const target = await resolvePressButtonDisplay(device, "active", { adb, state });
+    expect(target).toEqual({ key: "222", displayId: 4 });
+  });
+
+  test("active falls back to logical display 0 when input focus is unknown", async () => {
+    const adb = adbWithFocus("");
+    const target = await resolvePressButtonDisplay(device, "active", { adb, state });
+    expect(target).toEqual({ key: "111", displayId: 0 });
+  });
+
+  test("active falls back to logical display 0 when the focus read fails", async () => {
+    const adb = adbWithFocus(new Error("dumpsys window timed out"));
+    const target = await resolvePressButtonDisplay(device, "active", { adb, state });
+    expect(target).toEqual({ key: "111", displayId: 0 });
   });
 });

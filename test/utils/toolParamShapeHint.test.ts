@@ -7,6 +7,15 @@ import { sendKeysSchema, tapOnSchema } from "../../src/server/interactionTools";
 // #17666: a wrong argument shape names the allowed keys of the object the caller
 // got wrong and a minimal valid call, both read off the tool's own schema.
 
+// The hint text after " Hint: ", which #17675 keeps under about 250 characters.
+const MAX_HINT_CHARS = 250;
+
+function hintOf(message: string): string {
+  const marker = " Hint: ";
+  const index = message.indexOf(marker);
+  return index < 0 ? "" : message.slice(index + marker.length);
+}
+
 function messageFor(toolName: string, schema: z.ZodType, input: Record<string, unknown>): string {
   const result = schema.safeParse(input);
   if (result.success) {
@@ -75,17 +84,19 @@ describe("toolParamShapeHint derivation (#17666)", () => {
     });
     expect(message).toContain("Allowed poll keys: ms.");
     expect(message).toContain(
-      'Example: fake({"target":{"id":"<id>"},"steps":[{"kind":"press","times":1}]})',
+      'Example: fake({"target":{"id":"<id>"},"steps":[{"kind":"press","times":1}],"poll":{"ms":0}})',
     );
   });
 });
 
 describe("formatToolParamError shape hints for real tools (#17666)", () => {
-  test("tapOn with a bare text names the top-level keys and the selector shape", () => {
+  test("tapOn with a bare text says where text belongs instead of every key", () => {
     const message = messageFor("tapOn", tapOnSchema, { platform: "android", text: "OK" });
-    expect(message).toMatch(/Allowed keys: selector, .*searchUntil/);
+    expect(message).toContain('"text" belongs under selector,');
+    expect(message).not.toContain("Allowed keys:");
     expect(message).toContain("Allowed selector keys: elementId, testTag, text,");
     expect(message).toContain('Example: tapOn({"selector":{');
+    expect(hintOf(message).length).toBeLessThanOrEqual(MAX_HINT_CHARS);
   });
 
   test("tapOn with a string selector names the selector keys", () => {
@@ -93,17 +104,18 @@ describe("formatToolParamError shape hints for real tools (#17666)", () => {
     expect(message).toContain("selector expected object, received string");
     expect(message).toContain("Allowed selector keys: elementId, testTag, text,");
     expect(message).not.toContain("Allowed keys:");
+    expect(hintOf(message).length).toBeLessThanOrEqual(MAX_HINT_CHARS);
   });
 
-  test("tapOn searchUntil as a number names the searchUntil object keys", () => {
-    const message = messageFor("tapOn", tapOnSchema, {
-      platform: "android",
-      selector: { text: "OK" },
-      searchUntil: 3000,
-    });
+  test("tapOn searchUntil as a number shows a searchUntil object in the example", () => {
+    const input = { platform: "android", selector: { text: "OK" }, searchUntil: 3000 };
+    const message = messageFor("tapOn", tapOnSchema, input);
     expect(message).toContain("searchUntil expected object, received number");
     expect(message).toContain("Allowed searchUntil keys: duration.");
-    expect(message).toContain("Example: tapOn(");
+    expect(message).toContain('"searchUntil":{"duration":100}');
+    const example = JSON.parse(hintOf(message).replace(/^.*Example: tapOn\((.*)\)$/, "$1"));
+    expect(tapOnSchema.safeParse(example).success).toBe(true);
+    expect(hintOf(message).length).toBeLessThanOrEqual(MAX_HINT_CHARS);
   });
 
   test("the tapOn example is a call the schema accepts", () => {
@@ -112,20 +124,35 @@ describe("formatToolParamError shape hints for real tools (#17666)", () => {
     expect(tapOnSchema.safeParse(example).success).toBe(true);
   });
 
-  test("sendKeys with a top-level text names the keys and a commands example", () => {
-    const message = messageFor("sendKeys", sendKeysSchema, { platform: "ios", text: "Hi" });
-    expect(message).toMatch(/Allowed keys: .*commands/);
+  test.each([
+    { name: "a top-level text", input: { platform: "ios", text: "Hi" } },
+    {
+      name: "a command missing its action",
+      input: { platform: "ios", commands: [{ type: "Hi" }] },
+    },
+  ])("sendKeys with $name gives one merged commands hint", ({ input }) => {
+    const message = messageFor("sendKeys", sendKeysSchema, input);
+    const hint = hintOf(message);
+    expect(
+      hint.startsWith('sendKeys takes commands: [{ "action": "type", "text": "<text>" }]'),
+    ).toBe(true);
+    expect(hint.split("sendKeys").length - 1).toBe(1);
+    expect(hint).not.toContain("Allowed");
+    expect(hint).not.toContain("Example:");
+    expect(hint.length).toBeLessThanOrEqual(MAX_HINT_CHARS);
+  });
+
+  test("an unrelated unknown top-level key lists required keys first, capped", () => {
+    const message = messageFor("sendKeys", sendKeysSchema, {
+      platform: "ios",
+      commands: [{ action: "type", text: "a" }],
+      bogus: 1,
+    });
+    expect(message).toMatch(/Allowed keys: commands, .*… \(\d+ more\)\./);
     expect(message).toContain(
       'Example: sendKeys({"commands":[{"action":"type","text":"<text>"}]})',
     );
-  });
-
-  test("sendKeys with a command missing its action names the command keys", () => {
-    const message = messageFor("sendKeys", sendKeysSchema, {
-      platform: "ios",
-      commands: [{ type: "Hi" }],
-    });
-    expect(message).toMatch(/Allowed commands\[\] keys: action, text,/);
+    expect(hintOf(message).length).toBeLessThanOrEqual(MAX_HINT_CHARS);
   });
 
   test("a valid-shape value error carries no shape hint", () => {

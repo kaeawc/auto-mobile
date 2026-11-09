@@ -4,6 +4,7 @@ import { diffObserveResult, isSameObservationScreen } from "./output/ObserveResu
 import type { ObserveDiff } from "./output/ObserveResultOutput";
 import { pollObserveUntil } from "./ObservePoll";
 import { prototypeMotionActive } from "./prototypeMotion";
+import { VolatileTextTracker } from "./settleVolatileText";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import type { ObserveResult } from "../../models";
 
@@ -36,7 +37,10 @@ export function isStabilityDiffEmpty(diff: ObserveDiff): boolean {
  * ignores volatile attributes (`extras`, synthetic `view-id`) and treats a pure
  * scroll as a small keyed delta, so a genuinely static screen settles even when
  * its raw JSON churns, while a spinner/animation correctly reads as not-settled
- * and the mandatory timeout governs.
+ * and the mandatory timeout governs. A node whose text alone changes in two
+ * consecutive diffs (a running clock, a typing indicator) is masked for the rest
+ * of the settle by {@link VolatileTextTracker}, so such a screen settles once
+ * everything else holds still (#17670).
  *
  * Returns only the final snapshot — the intermediate transition hierarchies never
  * reach the caller. DI mirrors `AwaitIdle`: `timer` is the last constructor param.
@@ -61,6 +65,8 @@ export class RealSettleObserve implements SettleObserve {
     // The next poll must read the device, not serve the cached capture that reported motion: an
     // animation ending changes no node and fires no event, so a cache would stay "active" (#15114).
     let motionPending = false;
+    // Nodes whose text ticks every poll (clocks, typing indicators) are masked once seen (#17670).
+    const volatileText = new VolatileTextTracker();
 
     const outcome = await pollObserveUntil(
       this.observeScreen,
@@ -76,6 +82,7 @@ export class RealSettleObserve implements SettleObserve {
           return motionPending || options.requireFreshExtraction;
         },
         resumeOnTerminalMismatch: options.resumeOnTerminalMismatch,
+        hardBudget: options.hardBudget,
         skipPerformanceAudit: options.skipPerformanceAudit,
         skipRecompositionTracking: options.skipRecompositionTracking,
       },
@@ -91,9 +98,14 @@ export class RealSettleObserve implements SettleObserve {
           equalRun = 1;
           return equalRun >= stableReads;
         }
-        const structurallyStable =
-          isSameObservationScreen(previous, observation) &&
-          isStabilityDiffEmpty(diffObserveResult(previous, observation));
+        if (!isSameObservationScreen(previous, observation)) {
+          volatileText.reset();
+          equalRun = 1;
+          return equalRun >= stableReads;
+        }
+        const structurallyStable = isStabilityDiffEmpty(
+          volatileText.mask(diffObserveResult(previous, observation)),
+        );
         equalRun = structurallyStable ? equalRun + 1 : 1;
         return equalRun >= stableReads;
       },

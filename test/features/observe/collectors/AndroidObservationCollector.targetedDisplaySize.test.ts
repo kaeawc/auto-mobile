@@ -95,6 +95,10 @@ test("no display key retains the active panel size fallback", async () => {
   expect(await collectScreenSize(undefined)).toEqual({ width: 1024, height: 768 });
 });
 
-test("an unknown display key degrades to the active panel size without throwing", async () => {
-  expect(await collectScreenSize("disconnected-panel")).toEqual({ width: 1024, height: 768 });
+test("an empty display key retains the active panel size fallback", async () => {
+  expect(await collectScreenSize("")).toEqual({ width: 1024, height: 768 });
+});
+
+test("an unknown display key leaves the size unknown instead of borrowing the active panel", async () => {
+  expect(await collectScreenSize("disconnected-panel")).toEqual({ width: 0, height: 0 });
 });

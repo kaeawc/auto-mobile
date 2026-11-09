@@ -288,12 +288,21 @@ export class DefaultAndroidObservationCollector implements AndroidObservationCol
       return;
     }
     const device = this.deps.device();
-    // Match the captured target first; absent or stale keys retain the non-throwing active fallback.
-    const panel =
-      device.displays?.panels.find((candidate) => candidate.key === result.display?.key) ??
-      resolveTargetDisplay(device.displays, "active", {
-        focusedPanelKey: displayTransitions.observedPanel(device.deviceId)?.key,
-      });
+    const targetKey = result.display?.key;
+    // Only an absent target may borrow the active panel's size. A named but unmatched
+    // (stale or disconnected) panel stays unknown: the active panel is a different
+    // display, and reporting its size would reproduce #17644.
+    const panel = targetKey
+      ? device.displays?.panels.find((candidate) => candidate.key === targetKey)
+      : resolveTargetDisplay(device.displays, "active", {
+          focusedPanelKey: displayTransitions.observedPanel(device.deviceId)?.key,
+        });
+    if (!panel) {
+      logger.warn(
+        `[OBSERVE] Display ${targetKey} is not in the display inventory; leaving screen size unknown`,
+      );
+      return;
+    }
     if (panel.sizePx.width > 0 && panel.sizePx.height > 0) {
       result.screenSize = { ...panel.sizePx };
     }

@@ -92,6 +92,9 @@ export class RealSettleObserve implements SettleObserve {
         motionPending = prototypeMotionActive(observation.viewHierarchy) > 0;
         if (motionPending) {
           equalRun = 0;
+          // A motion read is not diffed, so later diffs are not consecutive with
+          // earlier ones, and the screen may change behind it: start over.
+          volatileText.reset();
           return false;
         }
         if (previous === undefined) {

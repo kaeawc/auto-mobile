@@ -166,6 +166,7 @@ describe("pollObserveUntil hard budget (#17670)", () => {
     expect(outcome.observation.viewHierarchy?.updatedAt).toBe(20);
     expect(outcome.stopped).toBe(false);
     expect(outcome.terminalReason).toBe("timeout");
+    expect(outcome.waitMs).toBe(1001);
     expect(timer.now()).toBe(1001);
   });
 });

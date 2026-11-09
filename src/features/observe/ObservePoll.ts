@@ -458,6 +458,7 @@ function createPollFinalizer(context: PollFinalizationContext, freshnessState: P
       // confirming read: the match is not proven, so do not report it.
       outcome.stopped = false;
       outcome.terminalReason = "timeout";
+      outcome.waitMs = timer.now() - start;
     } else if (refreshed) {
       const original = outcome.observation;
       outcome.observation = refreshed.observation;

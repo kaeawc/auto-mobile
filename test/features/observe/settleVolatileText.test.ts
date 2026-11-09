@@ -352,6 +352,29 @@ describe("RealSettleObserve on a running stopwatch (#17670)", () => {
     expect(result.observation.viewHierarchy?.updatedAt).toBe(50);
   });
 
+  test("a screen change during a motion read forgets volatile nodes", async () => {
+    const other = { appId: "com.example.other" };
+    // The new screen arrives mid-animation; motion reads are never diffed.
+    const moving = stopwatchScreen("6:16", "1", 30, other);
+    moving.viewHierarchy = {
+      ...moving.viewHierarchy!,
+      windows: [{ prototypeMotion: { active: 1 } }],
+    } as NonNullable<ObserveResult["viewHierarchy"]>;
+    const result = await settle([
+      stopwatchScreen("6:15", "97", 10),
+      stopwatchScreen("6:16", "20", 20),
+      // The hundredths node turns volatile here, but a lap row keeps it unstable.
+      stopwatchScreen("6:16", "33", 25, { lap: true }),
+      moving,
+      stopwatchScreen("6:16", "1", 40, other),
+      // A one-off change on the new screen must not be masked by the old screen's state.
+      stopwatchScreen("6:16", "2", 50, other),
+      stopwatchScreen("6:16", "2", 60, other),
+    ]);
+    expect(result.settled).toBe(true);
+    expect(result.observation.viewHierarchy?.updatedAt).toBe(60);
+  });
+
   test("a screen change forgets volatile nodes", async () => {
     const result = await settle([
       stopwatchScreen("6:15", "97", 10),

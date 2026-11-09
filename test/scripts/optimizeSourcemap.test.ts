@@ -113,16 +113,10 @@ describe("selectSourceMaps", () => {
   const nestedChunkLike = "/dist/src/utils/chunk-ab12cd34.js.map";
   const emitted = ["/dist/src/index.js", index, chunk, worker, nestedChunkLike];
 
-  test("default selects the main bundle's maps and skips the worker map entirely", () => {
-    expect(selectSourceMaps(emitted, index)).toEqual([
-      { path: index, options: {} },
-      { path: chunk, options: {} },
-    ]);
+  test("default trims only index.js.map, leaving chunk and worker maps untouched", () => {
+    expect(selectSourceMaps(emitted, index)).toEqual([{ path: index, options: {} }]);
     const options = { includeDependencySources: true };
-    expect(selectSourceMaps(emitted, index, options)).toEqual([
-      { path: index, options },
-      { path: chunk, options },
-    ]);
+    expect(selectSourceMaps(emitted, index, options)).toEqual([{ path: index, options }]);
   });
 
   test("strip selects every emitted map, with the same options", () => {
@@ -132,20 +126,75 @@ describe("selectSourceMaps", () => {
     );
   });
 
-  test("opt-out selects index.js.map and its sibling chunk maps", () => {
+  test("opt-out selects only index.js.map", () => {
     const options = { stripSources: shouldStripSources({ [STRIP_SOURCES_ENV]: "false" }) };
-    expect(selectSourceMaps(emitted, index, options)).toEqual([
-      { path: index, options },
-      { path: chunk, options },
-    ]);
+    expect(selectSourceMaps(emitted, index, options)).toEqual([{ path: index, options }]);
   });
 
-  test("Windows separators still match sibling chunk maps", () => {
+  test("Windows separators select the index map exactly and chunk maps when stripping", () => {
     const winIndex = "C:\\a\\dist\\src\\index.js.map";
     const winChunk = "C:\\a\\dist\\src\\chunk-ab12cd34.js.map";
     expect(selectSourceMaps([winIndex, winChunk], winIndex)).toEqual([
       { path: winIndex, options: {} },
-      { path: winChunk, options: {} },
     ]);
+    const options = { stripSources: true };
+    expect(selectSourceMaps([winIndex, winChunk], winIndex, options)).toEqual([
+      { path: winIndex, options },
+      { path: winChunk, options },
+    ]);
+  });
+});
+
+describe("split bundle sourcemaps (#17706)", () => {
+  const dir = "/dist/src";
+  const indexMap: SourceMap = {
+    version: 3,
+    sources: ["../../src/index.ts", "../../node_modules/zod/index.js"],
+    sourcesContent: ["own source", "zod source"],
+    mappings: "AAAA",
+  };
+  // A dependency chunk: the worker's adm-zip split into a sibling chunk-*.js.
+  const admZipChunkMap: SourceMap = {
+    version: 3,
+    sources: [
+      "../../node_modules/adm-zip/adm-zip.js",
+      "../../node_modules/adm-zip/zipFile.js",
+      "../../src/utils/workers/iosBundleExtractWorker.ts",
+    ],
+    sourcesContent: ["adm-zip source", "zipFile source", "worker source"],
+    mappings: "AAAA;AACA",
+  };
+  const fixture: Record<string, SourceMap> = {
+    [`${dir}/index.js.map`]: indexMap,
+    [`${dir}/chunk-0a1b2c3d.js.map`]: admZipChunkMap,
+  };
+  const emitted = [`${dir}/index.js`, `${dir}/chunk-0a1b2c3d.js`, ...Object.keys(fixture)];
+
+  function build(env: Record<string, string>): Record<string, SourceMap> {
+    const output = { ...fixture };
+    const options = { stripSources: shouldStripSources(env) };
+    for (const { path, options: mapOptions } of selectSourceMaps(
+      emitted,
+      `${dir}/index.js.map`,
+      options,
+    )) {
+      output[path] = optimizeSourceMap(fixture[path], mapOptions).map;
+    }
+    return output;
+  }
+
+  test("opt-out keeps every source of the dependency chunk map", () => {
+    const output = build({ [STRIP_SOURCES_ENV]: "false" });
+    expect(output[`${dir}/chunk-0a1b2c3d.js.map`]).toEqual(admZipChunkMap);
+    expect(output[`${dir}/index.js.map`].sourcesContent).toEqual(["own source", null]);
+  });
+
+  test("default strip still nulls every map's sourcesContent", () => {
+    const output = build({});
+    expect(output[`${dir}/chunk-0a1b2c3d.js.map`]).toEqual({
+      ...admZipChunkMap,
+      sourcesContent: [null, null, null],
+    });
+    expect(output[`${dir}/index.js.map`]).toEqual({ ...indexMap, sourcesContent: [null, null] });
   });
 });

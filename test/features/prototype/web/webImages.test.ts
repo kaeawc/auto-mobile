@@ -48,11 +48,21 @@ describe("webImageBox", () => {
     });
   });
 
-  test("crop and fill cover the fixed axes, a wrapped axis left to the image", () => {
+  test("crop and fill cover the fixed axes and a wrapped axis's 48dp minimum", () => {
     expect(webImageBox({ asset: "a", heightDp: 200, scale: "crop" }, PIXEL)).toEqual({
+      width: 126,
       height: 525,
       cover: true,
     });
+    // A padded fixed axis's small content length still leaves the wrapped minimum covered.
+    const padded = webImageDraw("a", {
+      contentScale: "crop",
+      style: { width: { dp: 100 }, padding: { start: 40, end: 40 } },
+    });
+    expect(webImageBox(padded, PIXEL)).toEqual({ width: 53, height: 126, cover: true });
+    expect(webImageScaleFactor({ width: 1000, height: 1000 }, [webImageBox(padded, PIXEL)])).toBe(
+      0.126,
+    );
     expect(webImageBox({ asset: "a", scale: "fill" }, PIXEL).cover).toBe(false);
   });
 

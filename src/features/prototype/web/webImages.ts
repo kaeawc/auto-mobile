@@ -281,10 +281,18 @@ export interface WebImageBox {
   readonly cover: boolean;
 }
 
-/** The dp a cover box covers on one axis: its fixed dp, else a filled axis's bound, else none. */
+/**
+ * The dp a cover box covers on one axis: its fixed dp, else a filled axis's bound, else a wrapped
+ * axis's minimum.
+ */
 function coverDp(fixed: number | undefined, filled: true | undefined, fillDp: number) {
-  return fixed ?? (filled ? fillDp : undefined);
+  // A wrapped axis draws at least the content box's 48px minimum, which a padded fixed axis's
+  // smaller content length must not leave the encode short of.
+  return fixed ?? (filled ? fillDp : WRAPPED_MINIMUM_DP);
 }
+
+/** The placeholder's minimum on a wrapped axis, in dp (see contentMinimum). */
+const WRAPPED_MINIMUM_DP = 48;
 
 /** The screen extent a filled axis of a cover box is bounded by. */
 export type WebImageFillExtent = "long" | "short";

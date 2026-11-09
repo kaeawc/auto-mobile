@@ -1,4 +1,5 @@
 import { loadSharp } from "../loadSharp";
+import { detectImageMimeType } from "../../screenshot/imageHeaderDimensions";
 import type {
   ImageBackend,
   ImageMetadata,
@@ -29,7 +30,12 @@ export interface SharpWebpOptions {
 
 export interface SharpRawResult {
   data: Uint8Array;
-  info: { width: number; height: number };
+  info: { width: number; height: number; channels?: number };
+}
+
+/** Decoded pixel layout for a raw (unencoded) sharp input. */
+export interface SharpRawInput {
+  raw: { width: number; height: number; channels: 1 | 2 | 3 | 4 };
 }
 
 /** The slice of a sharp pipeline that SharpBackend drives. */
@@ -48,7 +54,7 @@ export interface SharpPipeline {
 }
 
 /** The slice of the sharp module entry point that SharpBackend uses. */
-export type SharpPort = (input: Buffer) => SharpPipeline;
+export type SharpPort = (input: Buffer, options?: SharpRawInput) => SharpPipeline;
 
 export type SharpLoader = () => Promise<SharpPort>;
 
@@ -128,40 +134,50 @@ export class SharpBackend implements ImageBackend {
     }
   }
 
+  /**
+   * Materialize the pipeline so far as decoded pixels, not an encoded image. A full-resolution
+   * PNG/JPEG intermediate would be encoded and decoded again before a later resize, so the
+   * only encode a pipeline pays for is the final one, at the output size.
+   */
+  private async materializeRaw(sharp: SharpPort, image: SharpPipeline): Promise<SharpPipeline> {
+    const { data, info } = await image.raw().toBuffer({ resolveWithObject: true });
+    const channels = info.channels ?? 4;
+    if (channels !== 1 && channels !== 2 && channels !== 3 && channels !== 4) {
+      throw new Error(`sharp returned an unsupported raw channel count: ${channels}`);
+    }
+    return sharp(Buffer.from(data.buffer, data.byteOffset, data.byteLength), {
+      raw: { width: info.width, height: info.height, channels },
+    });
+  }
+
   private async applyPipeline(
     sharp: SharpPort,
     source: Buffer,
     pipeline: ImagePipeline,
   ): Promise<SharpPipeline> {
+    // A raw intermediate drops the input format, so an unspecified output encoding is pinned to
+    // the source format. Sources whose format is not known keep the encoded intermediate.
+    const sourceMime = detectImageMimeType(source);
+    const encoding = pipeline.encoding ?? (sourceMime ? { mime: sourceMime } : null);
+    let materialized = false;
     let image = sharp(source);
-    let hasResizeInCurrentPipeline = false;
-    let hasCropInCurrentPipeline = false;
-    let hasRotationInCurrentPipeline = false;
+    let pending = new Set<ImageOperation["type"]>();
     for (const operation of pipeline.operations) {
-      if (
-        (operation.type === "resize" && hasResizeInCurrentPipeline) ||
-        (operation.type === "crop" && hasCropInCurrentPipeline) ||
-        (operation.type === "rotate" && (hasResizeInCurrentPipeline || hasCropInCurrentPipeline)) ||
-        hasRotationInCurrentPipeline
-      ) {
+      if (needsMaterialization(operation.type, pending)) {
         // Sharp collapses repeated transforms and can move rotation ahead of extract/resize.
         // Materialize at rotation boundaries to preserve the declarative operation order.
-        image = sharp(await image.toBuffer());
-        hasResizeInCurrentPipeline = false;
-        hasCropInCurrentPipeline = false;
-        hasRotationInCurrentPipeline = false;
+        image = encoding ? await this.materializeRaw(sharp, image) : sharp(await image.toBuffer());
+        materialized = true;
+        pending = new Set();
       }
       image = this.applyOperation(image, operation);
-      if (operation.type === "resize") {
-        hasResizeInCurrentPipeline = true;
-      } else if (operation.type === "crop") {
-        hasCropInCurrentPipeline = true;
-      } else {
-        hasRotationInCurrentPipeline = true;
-      }
+      pending.add(operation.type);
     }
 
-    return this.applyEncoding(image, pipeline);
+    return this.applyEncoding(image, {
+      ...pipeline,
+      encoding: materialized ? encoding : pipeline.encoding,
+    });
   }
 
   public async execute(source: Buffer, pipeline: ImagePipeline): Promise<Buffer> {
@@ -202,4 +218,15 @@ export class SharpBackend implements ImageBackend {
       () => this.fallbackBackend!.rawPixels(source),
     );
   }
+}
+
+/** Whether `next` must start a fresh sharp pipeline given the operations already chained. */
+function needsMaterialization(
+  next: ImageOperation["type"],
+  pending: ReadonlySet<ImageOperation["type"]>,
+): boolean {
+  if (pending.has("rotate") || pending.has(next)) {
+    return true;
+  }
+  return next === "rotate" && (pending.has("resize") || pending.has("crop"));
 }

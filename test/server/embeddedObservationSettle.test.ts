@@ -529,11 +529,11 @@ describe("embedded settle on a still Android frame (#9579)", () => {
       settled: true,
     },
     {
-      // A label whose text alone ticks is masked after two consecutive changes (#17670).
+      // A label whose text alone ticks is masked from its third consecutive change (#17670, #17692).
       name: "ticking label",
       label: (n: number) => `Frame ${n}`,
-      extractions: 3,
-      elapsed: 360,
+      extractions: 4,
+      elapsed: 530,
       settled: true,
     },
     {

@@ -103,6 +103,17 @@ function unsafeSchemaParses(file: string, source: string): string[] {
       ) {
         return;
       }
+      // The publish frame check runs on one nested argument value inside the envelope the
+      // registry already stripped; it re-checks z.json() so the advertised frame has no $ref.
+      if (
+        file === "prototypeTools/schemas.ts" &&
+        receiver.type === "Identifier" &&
+        receiver.name === "jsonFrame" &&
+        first?.type === "Identifier" &&
+        first.name === "value"
+      ) {
+        return;
+      }
       // Device-reported prototype entries parsed from an inspect reply are not tool
       // arguments, so there is no transport metadata to strip.
       if (

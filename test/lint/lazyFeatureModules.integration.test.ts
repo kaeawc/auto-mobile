@@ -22,6 +22,7 @@ const STARTUP_ENTRIES = [
 const DEFERRED_MODULES = [
   "src/server/prototypeTools/runtime.ts",
   "src/server/prototypeResourceReaders.ts",
+  "src/features/prototype/prototypeGuide.ts",
   "src/vision/ClaudeVisionClient.ts",
   "src/daemon/socketServer/loopbackMcpClient.ts",
   "src/daemon/webrtcStreamManager.ts",

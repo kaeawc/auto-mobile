@@ -54,6 +54,7 @@ export {
   PROTOTYPE_GUIDE_URI,
   PROTOTYPE_ICONS_TEMPLATE,
   PROTOTYPE_ICONS_URI,
+  PROTOTYPE_SPEC_SCHEMA_URI,
 } from "./prototypeGuideUris";
 
 interface Rule {

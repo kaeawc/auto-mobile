@@ -3,6 +3,7 @@ import {
   ICON_LOOKUP_LIMIT,
   PROTOTYPE_GUIDE_URI,
   PROTOTYPE_ICONS_TEMPLATE,
+  PROTOTYPE_SPEC_SCHEMA_URI,
 } from "../features/prototype/prototypeGuideUris";
 import type { NativePrototypeSources } from "../features/prototype/nativePrototype";
 import {
@@ -392,6 +393,22 @@ export function registerPrototypeResources(
       "Node and action vocabulary, repeat grammar, limits, theme roles and icon lookup for the prototype tool",
     mimeType: "text/markdown",
     handler: async () => (await readers()).readGuide(),
+  });
+
+  ResourceRegistry.register(PROTOTYPE_SPEC_SCHEMA_URI, "Prototype spec JSON Schema", {
+    description:
+      "Full JSON Schema (draft-07) of the prototype tool's spec: every node, action and field it accepts",
+    mimeType: "application/schema+json",
+    handler: async () => {
+      // Loaded on first read: the schema module converts the whole spec contract.
+      const { prototypeSpecJsonSchema } =
+        await import("../features/prototype/prototypeSpecJsonSchema");
+      return {
+        uri: PROTOTYPE_SPEC_SCHEMA_URI,
+        mimeType: "application/schema+json",
+        text: JSON.stringify(prototypeSpecJsonSchema()),
+      };
+    },
   });
 
   ResourceRegistry.registerTemplate(PROTOTYPE_ICONS_TEMPLATE, "Prototype icon lookup", {

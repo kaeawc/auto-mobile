@@ -14,9 +14,11 @@ import {
   staticToolChangesHostSideState,
   staticToolChangesOpaquePersistentState,
   staticToolDeclaresInput,
+  type PrototypeFullSchemaFlag,
 } from "../../src/daemon/staticToolDefinitions";
 import type { ProxiedToolDefinition } from "../../src/daemon/daemonMcpProxy";
 import committedDefinitions from "../../schemas/tool-definitions.json";
+import { prototypeSpecJsonSchema } from "../../src/features/prototype/prototypeSpecJsonSchema";
 
 // Issue #5879 / review: the static cold-start surface mirrors the runtime
 // `ToolRegistry.getToolDefinitions()` shape for the flag-independent fields
@@ -242,6 +244,68 @@ describe("getStaticToolDefinitions", () => {
       expect(tool.name.length).toBeGreaterThan(0);
       expect(typeof tool.inputSchema).toBe("object");
     }
+  });
+});
+
+class FakePrototypeFullSchemaFlag implements PrototypeFullSchemaFlag {
+  constructor(public enabled: boolean) {}
+  isEnabled(): boolean {
+    return this.enabled;
+  }
+}
+
+describe.each([
+  ["cold", (flag: PrototypeFullSchemaFlag) => getStaticToolDefinitions(flag)],
+  [
+    "connected",
+    (flag: PrototypeFullSchemaFlag) => getConnectedStaticToolDefinitions(undefined, flag),
+  ],
+] as const)("%s prototype spec schema (#17710)", (_path, list) => {
+  const prototypeOf = (flag: PrototypeFullSchemaFlag) =>
+    list(flag).find((tool) => tool.name === "prototype")!;
+  const specOf = (tool: ProxiedToolDefinition) =>
+    (tool.inputSchema.properties as Record<string, Record<string, unknown>>).spec;
+  const committed = committedDefinitions.find((tool) => tool.name === "prototype")!;
+  let terse: ProxiedToolDefinition;
+  let full: ProxiedToolDefinition;
+  beforeAll(() => {
+    terse = prototypeOf(new FakePrototypeFullSchemaFlag(false));
+    // The first flag-on read loads and converts the spec contract; keep that out of the test.
+    full = prototypeOf(new FakePrototypeFullSchemaFlag(true));
+  });
+
+  test("with the flag unset the prototype schema is byte-identical to the committed one", () => {
+    expect(JSON.stringify(terse.inputSchema)).toBe(JSON.stringify(committed.inputSchema));
+    expect(JSON.stringify(specOf(terse))).not.toContain("$ref");
+  });
+
+  test("with the flag unset every tool's input schema matches the committed definitions", () => {
+    const byName = new Map(committedDefinitions.map((tool) => [tool.name, tool.inputSchema]));
+    for (const tool of list(new FakePrototypeFullSchemaFlag(false))) {
+      expect(JSON.stringify(tool.inputSchema)).toBe(JSON.stringify(byName.get(tool.name)));
+    }
+  });
+
+  test("with the flag set the full spec is inlined and other fields are unchanged", () => {
+    const spec = specOf(full);
+    expect(spec.description).toBe(specOf(terse).description);
+    expect(Object.keys(spec.properties as object)).toEqual(
+      Object.keys(prototypeSpecJsonSchema().properties as object),
+    );
+    expect(JSON.stringify(spec)).toContain('"$ref":"#/properties/spec/properties/root"');
+    const withoutSpec = (tool: ProxiedToolDefinition) => {
+      const properties = { ...(tool.inputSchema.properties as Record<string, unknown>) };
+      delete properties.spec;
+      return properties;
+    };
+    expect(withoutSpec(full)).toEqual(withoutSpec(terse));
+  });
+
+  test("the flag is re-read on every list", () => {
+    const flag = new FakePrototypeFullSchemaFlag(true);
+    expect(prototypeOf(flag).inputSchema).toEqual(full.inputSchema);
+    flag.enabled = false;
+    expect(prototypeOf(flag).inputSchema).toEqual(committed.inputSchema);
   });
 });
 

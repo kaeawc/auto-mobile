@@ -65,21 +65,28 @@ function fixedDp(value: unknown): number | undefined {
 
 const sized = (value: unknown) => value === "fill" || fixedDp(value) !== undefined;
 
-/**
- * The placeholder's 48px minimum on each axis the node does not fix in dp: an authored size wins
- * over the image's default minimum on both devices, so a 24 dp icon stays 24 dp.
- */
-function webImageMinimum(style: Raw): Record<string, string> {
-  return {
-    ...(fixedDp(style.width) === undefined ? { "min-width": "48px" } : {}),
-    ...(fixedDp(style.height) === undefined ? { "min-height": "48px" } : {}),
-  };
-}
-
 /** One authored padding side in dp (0 when unset). */
 function paddingDp(style: Raw, side: "top" | "bottom" | "start" | "end"): number {
   const value = record(style.padding)?.[side];
   return typeof value === "number" ? value : 0;
+}
+
+/**
+ * The placeholder's 48px minimum on each axis the node does not fix in dp: an authored size wins
+ * over the image's default minimum on both devices, so a 24 dp icon stays 24 dp. The minimum is
+ * the content box's: the page sizes border boxes, so it adds the axis's padding, which the image
+ * layers sit inside.
+ */
+function webImageMinimum(style: Raw): Record<string, string> {
+  const minimum = (padding: number) => `${48 + padding}px`;
+  return {
+    ...(fixedDp(style.width) === undefined
+      ? { "min-width": minimum(paddingDp(style, "start") + paddingDp(style, "end")) }
+      : {}),
+    ...(fixedDp(style.height) === undefined
+      ? { "min-height": minimum(paddingDp(style, "top") + paddingDp(style, "bottom")) }
+      : {}),
+  };
 }
 
 /** A fixed dp axis less the padding on both its sides, as Android's image target subtracts it. */

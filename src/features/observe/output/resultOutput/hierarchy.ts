@@ -54,7 +54,7 @@ function nodeKey(node: Record<string, unknown>, siblingIndex: number): string {
  * distinct control char (U+0001) from the intra-key NUL (U+0000) so the two
  * levels of joining can never be confused.
  */
-const PATH_KEY_SEP = "\x01";
+export const PATH_KEY_SEP = "\x01";
 
 /** A node's own attributes, excluding the `node` child array (diffed separately). */
 function diffNodeAttributes(node: Record<string, unknown>): Record<string, unknown> {

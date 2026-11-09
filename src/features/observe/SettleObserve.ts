@@ -4,7 +4,7 @@ import { diffObserveResult, isSameObservationScreen } from "./output/ObserveResu
 import type { ObserveDiff } from "./output/ObserveResultOutput";
 import { pollObserveUntil } from "./ObservePoll";
 import { prototypeMotionActive } from "./prototypeMotion";
-import { VolatileTextTracker, sharedIdentities } from "./settleVolatileText";
+import { VolatileTextTracker, untrackableIdentities } from "./settleVolatileText";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import type { ObserveResult } from "../../models";
 
@@ -106,7 +106,7 @@ export class RealSettleObserve implements SettleObserve {
         const structurallyStable = isStabilityDiffEmpty(
           volatileText.mask(
             diffObserveResult(previous, observation),
-            sharedIdentities(previous, observation),
+            untrackableIdentities(previous, observation),
           ),
         );
         equalRun = structurallyStable ? equalRun + 1 : 1;

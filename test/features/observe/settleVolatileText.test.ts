@@ -314,6 +314,44 @@ describe("RealSettleObserve on a running stopwatch (#17670)", () => {
     expect(result.observation.viewHierarchy?.updatedAt).toBe(50);
   });
 
+  test("a ticking node that moves to another parent every read is not masked", async () => {
+    const clock = (text: string): TestHierarchyNode => ({
+      class: "android.widget.TextView",
+      "resource-id": "com.example:id/clock",
+      bounds: { left: 0, top: 0, right: 500, bottom: 100 },
+      text,
+    });
+    // The clock alternates between two existing containers, keeping its local key.
+    const screen = (text: string, inFirst: boolean, updatedAt: number): ObserveResult => {
+      const base = stopwatchScreen("6:15", "00", updatedAt);
+      return {
+        ...base,
+        viewHierarchy: {
+          ...base.viewHierarchy,
+          hierarchy: {
+            node: {
+              class: "android.widget.FrameLayout",
+              node: [
+                { class: "android.widget.FrameLayout", node: inFirst ? [clock(text)] : [] },
+                { class: "android.widget.ScrollView", node: inFirst ? [] : [clock(text)] },
+              ],
+            },
+          },
+        },
+      } as ObserveResult;
+    };
+    const result = await settle([
+      screen("0", true, 10),
+      screen("1", false, 20),
+      screen("2", true, 30),
+      screen("3", false, 40),
+      screen("3", false, 50),
+    ]);
+    expect(result.settled).toBe(true);
+    expect(result.polls).toBe(5);
+    expect(result.observation.viewHierarchy?.updatedAt).toBe(50);
+  });
+
   test("a screen change forgets volatile nodes", async () => {
     const result = await settle([
       stopwatchScreen("6:15", "97", 10),

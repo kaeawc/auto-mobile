@@ -1,7 +1,7 @@
 import type { ObserveDiff, ObserveDiffNode } from "./output/ObserveResultOutput";
 import type { ObserveDiffNodeChange } from "./output/resultOutput/diffTypes";
 import { diffAttributes } from "./output/resultOutput/diffComparison";
-import { flattenForDiff } from "./output/resultOutput/hierarchy";
+import { PATH_KEY_SEP, flattenForDiff } from "./output/resultOutput/hierarchy";
 import type { ObserveResult } from "../../models";
 
 /**
@@ -43,26 +43,43 @@ function isTextOnlyDelta(names: readonly string[]): boolean {
 }
 
 /**
- * Text-free identities held by more than one node in any of the observations.
- * Such an identity cannot tell nodes in different subtrees apart, so a change on
- * one could be mistaken for a repeat change on another; it is never tracked.
+ * Each text-free identity's ancestor path in one read, with the text dropped from
+ * every segment; `null` when several nodes hold the identity.
  */
-export function sharedIdentities(...observations: ObserveResult[]): Set<string> {
-  const shared = new Set<string>();
-  for (const observation of observations) {
-    const seen = new Set<string>();
-    for (const node of flattenForDiff(observation)) {
-      const identity = textFreeIdentity(node.key);
-      if (identity === undefined) {
-        continue;
-      }
-      if (seen.has(identity)) {
-        shared.add(identity);
-      }
-      seen.add(identity);
+function identityPaths(observation: ObserveResult): Map<string, string | null> {
+  const paths = new Map<string, string | null>();
+  for (const node of flattenForDiff(observation)) {
+    const identity = textFreeIdentity(node.key);
+    if (identity === undefined) {
+      continue;
+    }
+    const path = node.pathKey
+      .split(PATH_KEY_SEP)
+      .map((segment) => textFreeIdentity(segment) ?? segment)
+      .join(PATH_KEY_SEP);
+    paths.set(identity, paths.has(identity) ? null : path);
+  }
+  return paths;
+}
+
+/**
+ * Text-free identities that cannot be tracked across these two reads. The
+ * identity drops the ancestor path, so it is trusted only when exactly one node
+ * holds it in each read and that node sits under the same (text-free) ancestor
+ * path in both. Otherwise a change on one node could pass for a repeat change on
+ * another, or a text tick could hide the node moving to another parent.
+ */
+export function untrackableIdentities(previous: ObserveResult, next: ObserveResult): Set<string> {
+  const before = identityPaths(previous);
+  const after = identityPaths(next);
+  const untrackable = new Set<string>();
+  for (const identity of new Set([...before.keys(), ...after.keys()])) {
+    const path = before.get(identity);
+    if (path === undefined || path === null || path !== after.get(identity)) {
+      untrackable.add(identity);
     }
   }
-  return shared;
+  return untrackable;
 }
 
 function groupByIdentity(nodes: readonly ObserveDiffNode[]): Map<string, ObserveDiffNode[]> {
@@ -86,7 +103,7 @@ function isTextOnlyChange(change: ObserveDiffNodeChange): boolean {
  * and one added node share the identity and agree on every other attribute, or
  * a matched (`changed`) node changed nothing but its text.
  */
-function textOnlyChanges(diff: ObserveDiff, shared: ReadonlySet<string>): Set<string> {
+function textOnlyChanges(diff: ObserveDiff, untrackable: ReadonlySet<string>): Set<string> {
   const changes = new Set<string>();
   const added = groupByIdentity(diff.added);
   for (const [identity, removed] of groupByIdentity(diff.removed)) {
@@ -105,7 +122,7 @@ function textOnlyChanges(diff: ObserveDiff, shared: ReadonlySet<string>): Set<st
       changes.add(identity);
     }
   }
-  for (const identity of shared) {
+  for (const identity of untrackable) {
     changes.delete(identity);
   }
   return changes;
@@ -140,12 +157,12 @@ export class VolatileTextTracker {
 
   /**
    * Record this diff's text-only changes and return the diff with the text-only
-   * changes of volatile nodes removed. The input diff is not mutated. `shared`
-   * lists identities several nodes hold (see {@link sharedIdentities}); they are
-   * neither tracked nor masked.
+   * changes of volatile nodes removed. The input diff is not mutated.
+   * `untrackable` identities (see {@link untrackableIdentities}) are neither
+   * tracked nor masked.
    */
-  mask(diff: ObserveDiff, shared: ReadonlySet<string> = new Set()): ObserveDiff {
-    const changes = textOnlyChanges(diff, shared);
+  mask(diff: ObserveDiff, untrackable: ReadonlySet<string> = new Set()): ObserveDiff {
+    const changes = textOnlyChanges(diff, untrackable);
     for (const identity of changes) {
       if (this.previousChanges.has(identity)) {
         this.volatile.add(identity);

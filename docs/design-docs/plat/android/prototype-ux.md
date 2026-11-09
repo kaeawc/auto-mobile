@@ -116,6 +116,21 @@ scalar unions have explicit Kotlin serializers; only arbitrary emit payloads kee
 integer fields normalize decimal/exponent spellings before Kotlin decoding (`100.0` and `1e2` both mean
 100). The protocol module has no API-dump task; its artifact includes the contract resource.
 
+### Advertised spec schema
+
+The Zod spec converts to a JSON Schema of about 56k tokens, almost all of the `prototype` tool
+definition. `tools/list` therefore advertises a terse `spec`: the top-level fields with their JSON types,
+the required list, `additionalProperties: false` and the root node type names, with no `$ref` or
+`$defs`, because strict clients reject references in tool input schemas. The full schema is the
+`automobile:prototype/spec-schema` resource (a standalone draft-07 document whose recursive `$ref`s point
+at its own root), built on first read. `AUTOMOBILE_PROTOTYPE_FULL_SCHEMA=1` inlines that schema in `spec`
+instead, with its references rebased to `#/properties/spec`. Either way the server
+validates with `validatePrototypeSpec`, so the advertised form never changes what is accepted.
+Per-action tools would not shrink the definition: `show`, `save`, `share` and `screenMap` take the whole
+spec, and `patch` `replaceNode` takes any node, so each would carry the same node schema. The
+`publish` `frame` is checked with `z.json()` but advertised as `{}`, because `z.json()` converts to a
+recursive `$defs` pair.
+
 ## Data model (#11673)
 
 `data` is an optional top-level plain JSON object, agent-owned and read-only on the device (objects, arrays,

@@ -3,9 +3,8 @@ import {
   MOCK_BACKEND_ID,
 } from "../../features/prototype/prototypeMockSchema";
 import { validatePrototypeSimulateInput } from "../prototypeSimulateAction";
-import { z as specZ, type ZodTypeAny } from "zod";
+import { z as specZ } from "zod";
 import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../features/prototype/protoViewer/protoViewerDevice";
-import { zodToJsonSchema } from "zod-to-json-schema";
 import { prototypeContractPatterns } from "../../features/prototype/prototypeContractPatterns";
 import { z } from "zod/v4";
 import { deleteInternalToolParams } from "../../daemon/wire/constants";
@@ -15,10 +14,7 @@ import {
   MAX_PROTOTYPE_ASSET_COUNT,
   MAX_PROTOTYPE_ASSET_ID_LENGTH,
 } from "../../features/prototype/prototypeAssets";
-import {
-  expandPrototypeComponents,
-  MAX_PROTOTYPE_COMPONENT_DEPTH,
-} from "../../features/prototype/prototypeComponents";
+import { expandPrototypeComponents } from "../../features/prototype/prototypeComponents";
 import {
   DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS,
   MAX_PROTOTYPE_EVENT_TIMEOUT_MS,
@@ -32,7 +28,6 @@ import {
   prototypeSpecSchema,
   type PrototypeData,
 } from "../../features/prototype/prototypeSpec";
-import { STATE_KEY } from "../../features/prototype/prototypeTemplate";
 import {
   prototypeDataError,
   validatePrototypeSpec,
@@ -43,92 +38,11 @@ import { validatePrototypeSavedInput } from "../prototypeSavedActions";
 import { validatePrototypeStorageInput } from "../prototypeStorageAction";
 import {} from "../prototypeStorageOutput";
 import { prototypeOutputSchema } from "./outputSchemas";
+import { advertisedSpecSchema, PROTOTYPE_SPEC_SCHEMA_URI } from "./specJsonSchema";
 export { prototypeOutputSchema };
 /** MCP name of the on-device prototype tool. */
 export const PROTOTYPE_TOOL_NAME = "prototype";
 
-// The settled spec is Zod 3; registry/device targeting use Zod 4. It is converted with
-// the same `zod-to-json-schema` options the v1 MCP SDK's `toJsonSchemaCompat` applied to a
-// Zod 3 schema, so the advertised schema is unchanged by the SDK v2 migration (#4678) and
-// no second spec schema is authored.
-const convertSpec = (schema: ZodTypeAny): Record<string, unknown> =>
-  zodToJsonSchema(schema, { strictUnions: true, pipeStrategy: "input" });
-// Give JSON Schema a canonical root before the recursive window/theme bottom-accessory slots.
-// Preserve the device parser's field order for serialized native resources.
-const { root: advertisedRoot, ...advertisedFields } = prototypeSpecSchema.shape;
-const advertisedSpec = convertSpec(
-  specZ.object({ root: advertisedRoot, ...advertisedFields }).strict(),
-);
-/**
- * The contract and validator reject `theme: {}` and `theme.colors: {}`, but a Zod refinement has no
- * JSON Schema form, so state it on the advertised schema for schema-driven clients.
- */
-function requireNonEmptyThemeObjects(spec: Record<string, unknown>): void {
-  const theme = (spec.properties as Record<string, Record<string, unknown>> | undefined)?.theme;
-  if (!theme) {
-    return;
-  }
-  theme.minProperties = 1;
-  const colors = (theme.properties as Record<string, Record<string, unknown>> | undefined)?.colors;
-  if (colors) {
-    colors.minProperties = 1;
-  }
-}
-/**
- * Reusable components (#11053) are expanded on the host before validation, so they are not part of
- * the device spec schema; advertise the authored `components` map and `use` node here. Every
- * child slot already points at the root node schema, so a `use` fits wherever a node does.
- */
-function advertiseComponents(spec: Record<string, unknown>): void {
-  const properties = spec.properties as Record<string, Record<string, unknown>> | undefined;
-  const root = properties?.root;
-  if (!properties || !Array.isArray(root?.anyOf)) {
-    return;
-  }
-  const name = { type: "string", pattern: STATE_KEY.source };
-  root.anyOf = [
-    ...(root.anyOf as unknown[]),
-    {
-      type: "object",
-      description:
-        "Replaced on the host by components[component].root with {props.<field>} bound in the fields repeat binds; a placeholder that is the whole value keeps the prop's type",
-      properties: {
-        type: { type: "string", enum: ["use"] },
-        component: name,
-        props: { type: "object", additionalProperties: { type: ["string", "number", "boolean"] } },
-      },
-      required: ["type", "component"],
-      additionalProperties: false,
-    },
-  ];
-  properties.components = {
-    type: "object",
-    description: `Reusable node templates by name, placed with {type:"use",component,props}; expanded on the host before validation (use nesting up to ${MAX_PROTOTYPE_COMPONENT_DEPTH} deep, no cycles, every prop used); limits apply to the expanded spec`,
-    propertyNames: { pattern: STATE_KEY.source },
-    additionalProperties: {
-      type: "object",
-      properties: { root: { $ref: "#/properties/spec/properties/root" } },
-      required: ["root"],
-      additionalProperties: false,
-    },
-  };
-}
-function rehomeSpecReferences(value: unknown): void {
-  if (!value || typeof value !== "object") {
-    return;
-  }
-  for (const [key, child] of Object.entries(value)) {
-    if (key === "$ref" && typeof child === "string" && child.startsWith("#")) {
-      (value as Record<string, unknown>)[key] = `#/properties/spec${child.slice(1)}`;
-    } else {
-      rehomeSpecReferences(child);
-    }
-  }
-}
-rehomeSpecReferences(advertisedSpec);
-delete advertisedSpec.$schema;
-requireNonEmptyThemeObjects(advertisedSpec);
-advertiseComponents(advertisedSpec);
 const specDetailsSchema = specZ.object({ spec: prototypeSpecSchema });
 const stateDetailsSchema = prototypeSpecSchema.pick({ state: true });
 
@@ -170,7 +84,7 @@ const specInput = withJsonSchemaOverride(
       ctx.addIssue({ code: "custom", message: error });
     }
   }),
-  (jsonSchema) => Object.assign(jsonSchema, advertisedSpec),
+  (jsonSchema) => Object.assign(jsonSchema, advertisedSpecSchema()),
 );
 
 export const dataInput = z.custom<PrototypeData>(
@@ -190,6 +104,20 @@ export const stateInput = z
       });
     }
   });
+
+const jsonFrame = z.json();
+
+/**
+ * A publish frame: any JSON value, checked by z.json(). z.json() itself converts to a recursive
+ * $defs/$ref pair that strict clients reject (#17710), so the advertised form is z.any()'s `{}`.
+ * z.any(), not z.custom(): a custom type has no JSON Schema form, so the converter throws.
+ */
+const frameInput = z.any().superRefine((value, ctx) => {
+  const parsed = jsonFrame.safeParse(value);
+  if (!parsed.success) {
+    parsed.error.issues.forEach((issue) => ctx.addIssue({ ...issue }));
+  }
+});
 
 const assetsInput = z
   .array(
@@ -312,8 +240,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .max(256)
         .optional()
         .describe("publish only: the room path, such as /rooms/general"),
-      frame: z
-        .json()
+      frame: frameInput
         .optional()
         .describe(
           "publish only: the frame every member of the room receives (a string as written, other JSON as JSON text)",
@@ -327,7 +254,8 @@ export const prototypeSchema = addDeviceTargetingToSchema(
       spec: specInput
         .optional()
         .describe(
-          'style.shadows, style.cornerStyle, style.border.gradient, scroll.fadeEdges and image.filter require prototype_style_polish_v2. Full prototype spec: id, window, optional theme (design material|platform, default platform; explicit platform requires prototype_design_platform_v1; mode light|dark|system, colors.seed hex or colors.source "device", plus optional per-role hex overrides in colors such as colors.primary or colors.surface applied over that scheme in light and dark, typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp, none|extraSmall|small|medium|large|extraLarge|full, or per-corner {topStart,topEnd,bottomEnd,bottomStart} dp), optional state, root. window.opacity is 0-100, default 100. window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: "device" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. window.backdrop {material ultraThin|thin|regular|thick|glass, blur? 0-150 dp, tint? one hex or role} blurs what is behind the window and needs prototype_backdrop_v1 (refused without it); lastResult.backdrop is blur or fallback (a tonal fill where blur is unavailable). show always renders the whole spec; spec.state is authoritative. Use show for a new screen or a window, theme or root change; patch for content (/data), state (/state) or one node by id (replaceNode), requiring prototype_patch_v1. window.layer "app" and window.persistence "device" need a CtrlProxy advertising prototype_window_options_v1. Per-mode forms need a device advertising prototype_theme_modes_v1 and are refused otherwise: a colour field, gradient stop or scrim as {light, dark} (each hex or a role), a role name in a gradient stop or scrim, theme.colors.light / theme.colors.dark {role: hex} maps applied after the flat overrides for the resolved mode, and image.asset or a tabBar/bottomNav item image as {light, dark} asset ids. image.asset or an item image may instead be {data: "/pointer"} naming a device media item id in /data (prototype_platform_media_items_v1); asset ids starting with media: are reserved for the device. Stack {type:"stack",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. searchBar requires prototype_search_bar_v1 for show and patch. State-key contains/startsWith/lengthGt/lengthLt conditions and textField errorWhen/errorText require prototype_string_conditions_v1. errorWhen forces error styling without changing checks-based validity. {data: pointer, empty: true|false} conditions (missing, [], {} or "" is empty) and style shimmer on box/row/column/card require prototype_loading_states_v1. Node animate {durationMs?,easing?}, style scale (0-4)/rotation (degrees), transition slideStart|slideEnd|scale and image zoomable {maxScale 1-8} (not with onDoubleTap) require prototype_motion_v2. transition as {type, delayMs?} (0-600 ms) or blurReplace, and box/row/column stagger {ms 0-100, order? forward|reverse|center} (every child\'s total delay at most 600 ms), require prototype_choreography_v1. window.transition auto|none|fade|slide|scale and repeat.stagger (0-100 ms per instance, capped at 600 ms) require prototype_window_motion_v1 on Android. list {repeat:{items:{path},as,key},children:[row],header?,footer?,axis?,spacing?,contentPadding?,onEndReached?,endThreshold?,refresh?,maxItems?} is a lazy scrolling collection requiring prototype_lazy_list_v1 and prototype_data_model_v1. Its row template counts once, supports up to ' +
+          `Every node and field is in the spec JSON Schema at the MCP resource ${PROTOTYPE_SPEC_SCHEMA_URI} (AUTOMOBILE_PROTOTYPE_FULL_SCHEMA=1 inlines it here); the server validates each spec against it and names the failing path. ` +
+            'style.shadows, style.cornerStyle, style.border.gradient, scroll.fadeEdges and image.filter require prototype_style_polish_v2. Full prototype spec: id, window, optional theme (design material|platform, default platform; explicit platform requires prototype_design_platform_v1; mode light|dark|system, colors.seed hex or colors.source "device", plus optional per-role hex overrides in colors such as colors.primary or colors.surface applied over that scheme in light and dark, typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp, none|extraSmall|small|medium|large|extraLarge|full, or per-corner {topStart,topEnd,bottomEnd,bottomStart} dp), optional state, root. window.opacity is 0-100, default 100. window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: "device" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. window.backdrop {material ultraThin|thin|regular|thick|glass, blur? 0-150 dp, tint? one hex or role} blurs what is behind the window and needs prototype_backdrop_v1 (refused without it); lastResult.backdrop is blur or fallback (a tonal fill where blur is unavailable). show always renders the whole spec; spec.state is authoritative. Use show for a new screen or a window, theme or root change; patch for content (/data), state (/state) or one node by id (replaceNode), requiring prototype_patch_v1. window.layer "app" and window.persistence "device" need a CtrlProxy advertising prototype_window_options_v1. Per-mode forms need a device advertising prototype_theme_modes_v1 and are refused otherwise: a colour field, gradient stop or scrim as {light, dark} (each hex or a role), a role name in a gradient stop or scrim, theme.colors.light / theme.colors.dark {role: hex} maps applied after the flat overrides for the resolved mode, and image.asset or a tabBar/bottomNav item image as {light, dark} asset ids. image.asset or an item image may instead be {data: "/pointer"} naming a device media item id in /data (prototype_platform_media_items_v1); asset ids starting with media: are reserved for the device. Stack {type:"stack",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. searchBar requires prototype_search_bar_v1 for show and patch. State-key contains/startsWith/lengthGt/lengthLt conditions and textField errorWhen/errorText require prototype_string_conditions_v1. errorWhen forces error styling without changing checks-based validity. {data: pointer, empty: true|false} conditions (missing, [], {} or "" is empty) and style shimmer on box/row/column/card require prototype_loading_states_v1. Node animate {durationMs?,easing?}, style scale (0-4)/rotation (degrees), transition slideStart|slideEnd|scale and image zoomable {maxScale 1-8} (not with onDoubleTap) require prototype_motion_v2. transition as {type, delayMs?} (0-600 ms) or blurReplace, and box/row/column stagger {ms 0-100, order? forward|reverse|center} (every child\'s total delay at most 600 ms), require prototype_choreography_v1. window.transition auto|none|fade|slide|scale and repeat.stagger (0-100 ms per instance, capped at 600 ms) require prototype_window_motion_v1 on Android. list {repeat:{items:{path},as,key},children:[row],header?,footer?,axis?,spacing?,contentPadding?,onEndReached?,endThreshold?,refresh?,maxItems?} is a lazy scrolling collection requiring prototype_lazy_list_v1 and prototype_data_model_v1. Its row template counts once, supports up to ' +
             MAX_PROTOTYPE_LIST_ITEMS +
             'shared:{key,as:"element"|"bounds"} requires prototype_shared_element_v2; sharedKey remains the v1 bounds alias; do not set both. Repeat shared.key templates need repeat.key and must reference that field. Shared pairs cannot cross dialog or bottomSheet boundaries.  keyed data rows, and refresh needs a vertical list. prependData {path,value} inserts one row at the start and requires prototype_lazy_list_v1; maxItems trims from the end. request.append {from,to} extends an existing data array from a response array; maxItems trims oldest rows atomically. String tables and {t:key|count} require prototype_strings_v1; show locale overrides device locales only for strings. Node semantics {heading,liveRegion,group,label,hint,traits} requires prototype_semantics_v1. motion: "reduced" requires prototype_reduced_motion_v1; iOS Reduce Motion selects reduced, Android animator/transition scale 0 selects off. sharedKey requires prototype_shared_element_v1; visibility morphs require visibleWhen and exactly two non-nested nodes per key, while a zoom source key names exactly one node without visibleWhen. At most 16 keys, and no repeat templates. Full motion morphs shared bounds, reduced fades, none snaps. Stack transition platform|slide|fade|none (default platform) and optional push/replace transition overrides require prototype_stack_transitions_v1; sharedAxisX|sharedAxisY|fadeThrough|zoom and push/replace source require prototype_stack_patterns_v1. Zoom needs source naming exactly one sharedKey node inside the target stack screens; prototype_zoom_transition_v1 reports native container zoom on Android and iOS 18+; older agents substitute fadeThrough on Android or platform push on iOS 17 (reported in platformNotes); pop/popToRoot take no override. Stack transition controls screen navigation, not its own visibleWhen. chart {variant line|area|bar|ring, series:[{path,x?,y,label,color?}] (1-4, each a /data array of objects with a numeric y), yRange?, xLabels?, goal?} requires prototype_chart_v1. Text nodes take exactly one of text or spans (1–64 strict {text,style?,onTap?} entries with nonempty text and inline typography/color/background only); spans require prototype_rich_text_v1, resolved span texts concatenate without separators for observe, and span taps run actions without opening URLs. Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats.',
         ),

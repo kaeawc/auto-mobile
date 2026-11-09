@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import toolDefinitions from "../../../schemas/tool-definitions.json";
+import { prototypeSpecJsonSchema } from "../../../src/server/prototypeTools/specJsonSchema";
 import { prototypeLocationBlockError } from "../../../src/features/prototype/prototypeLocationBlock";
 import { prototypeLocationBlockSchema } from "../../../src/features/prototype/prototypeLocationBlockSchema";
+
+// The full spec contract served as automobile:prototype/spec-schema (#17710); built once here.
+const specSchema = prototypeSpecJsonSchema() as { properties?: Record<string, unknown> };
 
 const spec = (overrides: Record<string, unknown> = {}) => ({
   requires: { platform: ["location"], permissions: [{ name: "location", purpose: "Nearby" }] },
@@ -46,14 +49,8 @@ describe("prototypeLocationBlockSchema", () => {
     expect(schema.safeParse({ background: true }).success).toBe(false);
   });
 
-  test("the advertised prototype schema inlines the block with no dangling $ref", () => {
-    const prototype = toolDefinitions.find((tool) => tool.name === "prototype");
-    const spec = (
-      prototype?.inputSchema as
-        | { properties?: { spec?: { properties?: Record<string, unknown> } } }
-        | undefined
-    )?.properties?.spec;
-    const advertised = spec?.properties?.location;
+  test("the prototype spec schema inlines the block with no dangling $ref", () => {
+    const advertised = specSchema.properties?.location;
     expect(JSON.stringify(advertised)).not.toContain("$ref");
     expect(advertised).toMatchObject({
       additionalProperties: false,

@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import toolDefinitions from "../../../schemas/tool-definitions.json";
+import { prototypeSpecJsonSchema } from "../../../src/server/prototypeTools/specJsonSchema";
 import {
   prototypeAuthBlockError,
   prototypeAuthCallError,
 } from "../../../src/features/prototype/prototypeAuth";
 import { prototypeAuthSchema } from "../../../src/features/prototype/prototypeAuthSchema";
+
+// The full spec contract served as automobile:prototype/spec-schema (#17710); built once here.
+const specSchema = prototypeSpecJsonSchema() as { properties?: Record<string, unknown> };
 
 const account = (id: string) => ({ id, name: `User ${id}`, email: `${id}@example.test` });
 const spec = (overrides: Record<string, unknown> = {}) => ({
@@ -50,17 +53,11 @@ describe("prototypeAuthCallError", () => {
   });
 });
 
-test("the advertised prototype schema inlines the auth block with no dangling $ref", () => {
-  const prototype = toolDefinitions.find((tool) => tool.name === "prototype");
-  const spec = (
-    prototype?.inputSchema as
-      | { properties?: { spec?: { properties?: Record<string, unknown> } } }
-      | undefined
-  )?.properties?.spec;
-  const advertised = JSON.stringify(spec?.properties?.auth);
+test("the prototype spec schema inlines the auth block with no dangling $ref", () => {
+  const advertised = JSON.stringify(specSchema.properties?.auth);
   expect(advertised).toContain('"const":"fake"');
   expect(advertised).not.toContain("$ref");
-  expect(spec?.properties?.auth).toMatchObject({
+  expect(specSchema.properties?.auth).toMatchObject({
     additionalProperties: false,
     properties: { accounts: { maxItems: 8, items: { additionalProperties: false } } },
   });
@@ -74,7 +71,6 @@ test("the schema refuses a whitespace-only account name, matching the nonblank c
   expect(prototypeAuthSchema().safeParse(block("Ada")).success).toBe(true);
   expect(prototypeAuthSchema().safeParse(block(" \t\u00A0\uFEFF")).success).toBe(false);
   expect(prototypeAuthSchema().safeParse(block("")).success).toBe(false);
-  const prototype = toolDefinitions.find((tool) => tool.name === "prototype");
-  const advertised = JSON.stringify(prototype?.inputSchema);
+  const advertised = JSON.stringify(specSchema);
   expect(advertised).toContain('"maxLength":64,"pattern":"\\\\S"');
 });

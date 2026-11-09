@@ -82,7 +82,9 @@ change; patch for content (\`/data\`), state (\`/state\`) or one node by id (\`r
 shown with \`specPath\` (an absolute path the daemon reads) in place of \`spec\`; give exactly one of
 the two. The spec is
 \`{id, window, theme?, data?, state?, motion?, root}\`. State values are flat scalars (string, finite
-number, boolean). State keys match \`[A-Za-z_][A-Za-z0-9_]{0,63}\`.
+number, boolean). State keys match \`[A-Za-z_][A-Za-z0-9_]{0,63}\`. Read
+\`automobile:prototype/spec-schema\` for the JSON Schema of every node, action and field; the tool
+definition lists only the spec's top-level fields unless AUTOMOBILE_PROTOTYPE_FULL_SCHEMA=1 inlines it.
 
 Screen navigation: \`{type:"stack", id, start, screens:{home: node, detail: node}}\` starts with
 path [start] and renders only the top screen. Screen names and id are non-empty; start names an

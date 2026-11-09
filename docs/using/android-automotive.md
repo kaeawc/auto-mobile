@@ -217,10 +217,13 @@ To drive an app on another display, such as a passenger screen, pass `display` (
 `active`) to `observe`, `tapOn` and `pressButton`. You can also pin it once for the session with
 `setActiveDevice` `display`. An explicit `display` overrides the pin. `pressButton` sends the key to that
 display and checks that display for the visual change. A `back` that finds a Car App Library template
-there taps the host's Back control on the same display. System actions (such as `lock` or
-`quick_settings`) and rotary input still act device-wide; `display` only picks the display that is
-checked. Without `display` or a pin, `pressButton`
-presses on the default display as before. `display` on `pressButton` is Android only.
+there taps the host's Back control on the same display. A `home` that changes nothing because that
+display already shows its launcher succeeds, as it does on the default display. System actions (such
+as `lock` or `quick_settings`) and rotary input still act device-wide; `display` only picks the display
+that is checked. The session pin does not apply to `lock`, `power`, `power_dialog`, `volume_up`,
+`volume_down` or rotary buttons: they act on the whole device, so they work even when the pinned display
+is gone. Without `display` or a pin, `pressButton` presses on the default display as before. `display`
+on `pressButton` is Android only.
 
 On an emulator, create the extra display as public: the last field of `-multidisplay` must be `1`, for
 example `-multidisplay 1,1280,720,160,1`. Android accessibility does not track a private virtual display

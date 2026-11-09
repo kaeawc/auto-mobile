@@ -24,7 +24,6 @@ import { resolveIosHomeBackend } from "../../utils/ios-cmdline-tools/IosHomeBack
 import { isNavigationPressButton, resolveAndroidKeyCode } from "./pressButtonPolicy";
 import { holdDurationOf, prepareAndroidKeyevent, rejectUnsupportedHold } from "./androidKeyHold";
 import {
-  acceptAndroidHomeAlreadyOnLauncher,
   acceptIosHomeAlreadyOnSpringboard,
   acceptVerifiedAlreadyOpenSwitcher,
   isIosHomePressOnSpringboard,
@@ -52,6 +51,7 @@ import {
   displayOf,
   inputOnDisplay,
   pressButtonDisplay,
+  acceptHomeAlreadyOnLauncher,
   type PressButtonDisplayResolver,
 } from "./pressButtonDisplay";
 
@@ -329,11 +329,10 @@ export class PressButton extends BaseVisualChange {
     }, options);
     acceptIosHomeAlreadyOnSpringboard(result, startedOnFallbackSpringboard);
     acceptVerifiedAlreadyOpenSwitcher(result, verifiedAlreadyOpen);
-    acceptAndroidHomeAlreadyOnLauncher(result, {
-      platform: this.device.platform,
-      button,
-      pressSucceeded: launcherVerified,
-    });
+    await acceptHomeAlreadyOnLauncher(
+      { button, displayId, pressSucceeded, launcherVerified, result, observation: prePress },
+      { device: this.device, adb: this.adb, timer: this.timer, signal },
+    );
     return retryBackOnTemplateHost(
       result,
       { platform: this.device.platform, button, pressSucceeded, prePress, options, displayId },

@@ -1,4 +1,5 @@
 import { ANDROID_SYSTEM_ACTION_BUTTONS } from "./androidSystemActions";
+import { isRotaryButton } from "./RotaryInput";
 
 // iOS action runs a user-chosen shortcut and camera opens the camera: both can change the UI.
 // The Android system actions (#14095) open or close system UI, lock the device or split the task.
@@ -41,6 +42,25 @@ const IN_PLACE_PRESS_BUTTONS = new Set([
 
 export function isNavigationPressButton(button: unknown): boolean {
   return typeof button === "string" && NAVIGATION_PRESS_BUTTONS.has(button.toLowerCase());
+}
+
+/**
+ * Buttons that act on the whole device rather than one display (#17647): no display routing
+ * applies, so a session display pin must not resolve (or fail on) a panel for them.
+ */
+const DEVICE_GLOBAL_PRESS_BUTTONS = new Set([
+  "lock",
+  "power",
+  "power_dialog",
+  "volume_up",
+  "volume_down",
+]);
+
+export function isDeviceGlobalPressButton(button: unknown): boolean {
+  return (
+    typeof button === "string" &&
+    (DEVICE_GLOBAL_PRESS_BUTTONS.has(button.toLowerCase()) || isRotaryButton(button))
+  );
 }
 
 export function isInPlacePressButton(button: unknown): boolean {

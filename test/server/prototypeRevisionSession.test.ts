@@ -9,10 +9,8 @@ import {
   performPrototypePatch,
 } from "../../src/server/prototypePatchAction";
 import { prototypeOutputSchema } from "../../src/server/prototypeTools";
-import {
-  attributeRevision,
-  registerPrototypeTools,
-} from "../../src/server/prototypeTools/registration";
+import { registerPrototypeTools } from "../../src/server/prototypeTools/registration";
+import { attributeRevision } from "../../src/server/prototypeTools/runtime";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";

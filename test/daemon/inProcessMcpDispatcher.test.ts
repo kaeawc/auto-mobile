@@ -4,7 +4,13 @@ import {
   DaemonHandoffInterruptionError,
   DAEMON_HANDOFF_INTERRUPTED_MESSAGE,
 } from "../../src/daemon/daemonHandoffInterruption";
-import { type AsyncScope, InProcessMcpDispatcher } from "../../src/daemon/inProcessMcpDispatcher";
+import {
+  type AsyncScope,
+  InProcessMcpDispatcher,
+  type LoopbackMcpClientModule,
+} from "../../src/daemon/inProcessMcpDispatcher";
+import { LoopbackMcpClient } from "../../src/daemon/socketServer/loopbackMcpClient";
+import type { LazyFeatureModule } from "../../src/utils/lazyFeatureModule";
 import {
   currentForwardSessionKey,
   runWithForwardSessionKey,
@@ -27,8 +33,39 @@ interface Built {
   closed: boolean;
 }
 
+/** The client module, imported only when the test settles it; counts imports. */
+class DeferredClientModule implements LazyFeatureModule<LoopbackMcpClientModule> {
+  loads = 0;
+  private module: LoopbackMcpClientModule | undefined;
+  private pending: Promise<LoopbackMcpClientModule> | undefined;
+  private settle: (() => void) | undefined;
+
+  load(): Promise<LoopbackMcpClientModule> {
+    this.loads++;
+    this.pending ??= new Promise((resolve) => {
+      this.settle = () => {
+        this.module = { LoopbackMcpClient };
+        resolve(this.module);
+      };
+    });
+    return this.pending;
+  }
+
+  loaded(): LoopbackMcpClientModule | undefined {
+    return this.module;
+  }
+
+  finishImport(): void {
+    this.settle?.();
+  }
+}
+
 function harness(
-  options: { serverScope?: AsyncScope; refreshResources?: () => Promise<void> } = {},
+  options: {
+    serverScope?: AsyncScope;
+    refreshResources?: () => Promise<void>;
+    clientModule?: LazyFeatureModule<LoopbackMcpClientModule>;
+  } = {},
 ) {
   const built: Built[] = [];
   const cancelled: Array<{ scope: string; reason: ExecutionCancellationReason }> = [];
@@ -108,6 +145,30 @@ describe("InProcessMcpDispatcher (#11820)", () => {
     expect(observed).toBe("daemon-root");
     expect(h.built).toHaveLength(0);
     expect(h.dispatcher.inFlightCount).toBe(0);
+  });
+
+  test("the first forward imports the MCP client module once; later forwards reuse it (#17709)", async () => {
+    const clientModule = new DeferredClientModule();
+    const h = harness({ clientModule });
+    const first = h.dispatcher.connect({ sessionKey: "socket-1" });
+    expect(h.built).toHaveLength(0);
+    clientModule.finishImport();
+    const client = await first;
+    const second = await h.dispatcher.connect({ sessionKey: "socket-2" });
+    expect(clientModule.loads).toBe(1);
+    expect(h.built).toHaveLength(2);
+    await client.close();
+    await second.close();
+  });
+
+  test("a forward still importing the client when shutdown starts is refused (#17709)", async () => {
+    const clientModule = new DeferredClientModule();
+    const h = harness({ clientModule });
+    const forward = h.dispatcher.connect({ sessionKey: "socket-1" });
+    h.dispatcher.stopAccepting();
+    clientModule.finishImport();
+    await expect(forward).rejects.toBeInstanceOf(DaemonHandoffInterruptionError);
+    expect(h.built).toHaveLength(0);
   });
 
   test("each forward gets its own server with the forward's context and session key", async () => {

@@ -18,6 +18,7 @@ import {
   type HostFileInput,
 } from "./nativePrototypeTemplates";
 import { PROTOTYPE_NATIVE_ASSET_URI } from "./nativePrototypeUris";
+import { PROTOTYPE_SOURCE_MIME_TYPES, type PrototypeSourceFormat } from "./prototypeSourceFormats";
 import { requiredPrototypeCapabilities } from "./prototypeCapabilityGates";
 import type { ShownSpecJson } from "./PrototypeShownSpecs";
 import type { PrototypeSpecRevisionSource } from "./prototypeSpecRevisions";
@@ -27,11 +28,7 @@ import { frameOrientations, screenSize } from "./web/webFrame";
 import { parsePrototypeRevision, prototypeRevisionFilter } from "./web/prototypeWebResource";
 import { withActionableWebInput } from "./web/prototypeWebInputActionable";
 
-/**
- * `automobile:prototype/{id}/compose` and `.../swiftui` (#16345): one source file per prototype,
- * rendered by the same host-file template as `automobile:prototype/native` with the spec inlined.
- */
-export type PrototypeSourceFormat = "compose" | "swiftui";
+export type { PrototypeSourceFormat } from "./prototypeSourceFormats";
 
 interface SourceFormat {
   readonly platform: NativePrototypePlatform;
@@ -40,8 +37,16 @@ interface SourceFormat {
 }
 
 const FORMATS: Record<PrototypeSourceFormat, SourceFormat> = {
-  compose: { platform: "android", mimeType: "text/x-kotlin", render: renderComposeHostFile },
-  swiftui: { platform: "ios", mimeType: "text/x-swift", render: renderSwiftUiHostFile },
+  compose: {
+    platform: "android",
+    mimeType: PROTOTYPE_SOURCE_MIME_TYPES.compose,
+    render: renderComposeHostFile,
+  },
+  swiftui: {
+    platform: "ios",
+    mimeType: PROTOTYPE_SOURCE_MIME_TYPES.swiftui,
+    render: renderSwiftUiHostFile,
+  },
 };
 
 export function prototypeSourceMimeType(format: PrototypeSourceFormat): string {

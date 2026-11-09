@@ -36,6 +36,8 @@ import type { PrototypeEventLifecycle } from "../prototypeLifecycle";
 import type { IosSavedPrototypeInstaller } from "../prototypeSavedActions";
 import type { prototypeOutputSchema } from "./schemas";
 import type { ScreenRoundReaderFactory } from "./screenShape";
+import type { DeviceAwareToolHandler } from "../toolRegistryTypes";
+import type { PrototypeShownSpecs } from "../../features/prototype/PrototypeShownSpecs";
 
 export type PrototypeClient = AndroidPrototypeClient;
 /**
@@ -133,3 +135,16 @@ export type PrototypeHandlerDependencies = {
   | "env"
 >;
 export type PrototypeOutput = z.infer<typeof prototypeOutputSchema>;
+
+/** One registration's handler and the disposer of the host state it uses (#17709). */
+export interface PrototypeToolRuntime {
+  readonly handler: DeviceAwareToolHandler<unknown>;
+  dispose(): void;
+}
+
+/** The implementation module `registration.ts` imports on the tool's first call. */
+export interface PrototypeToolRuntimeModule {
+  createPrototypeToolRuntime(dependencies?: PrototypeToolDependencies): PrototypeToolRuntime;
+  /** Specs the shared daemon host has seen acknowledged; absent until a host exists. */
+  daemonPrototypeShownSpecs(): PrototypeShownSpecs | undefined;
+}

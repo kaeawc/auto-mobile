@@ -10,7 +10,8 @@ import {
   DaemonHandoffInterruptionError,
 } from "./daemonHandoffInterruption";
 import { JsonBoundaryTransport } from "./jsonBoundaryTransport";
-import { LoopbackMcpClient } from "./socketServer/loopbackMcpClient";
+import type { LoopbackMcpClient } from "./socketServer/loopbackMcpClient";
+import { lazyFeatureModule, type LazyFeatureModule } from "../utils/lazyFeatureModule";
 import type { StatelessMcpRequestScope } from "./statelessMcpHttpEndpoint";
 import { forgetDaemonSessionBindingScope } from "./daemonSessionBindingScopes";
 import { executionTracker } from "./executionTracker";
@@ -23,6 +24,15 @@ import {
   type McpRequestSessionContext,
   type StatelessMcpServerBase,
 } from "./statelessMcpServerFactory";
+
+/** What a forward needs from `./socketServer/loopbackMcpClient` (and `@modelcontextprotocol/client`). */
+export interface LoopbackMcpClientModule {
+  LoopbackMcpClient: typeof LoopbackMcpClient;
+}
+
+/** The MCP client SDK, imported on the first forward rather than at daemon startup (#17709). */
+export const loopbackMcpClientModule: LazyFeatureModule<LoopbackMcpClientModule> =
+  lazyFeatureModule("MCP client relay", () => import("./socketServer/loopbackMcpClient"));
 
 /**
  * Runs a control-socket forward against the daemon's MCP server in process (#11820), instead of
@@ -60,6 +70,8 @@ export interface InProcessMcpDispatcherDeps {
   readonly serverScope?: AsyncScope;
   /** Resource discovery must refresh external rosters even when its validated answer is cached. */
   readonly refreshResources?: () => Promise<void>;
+  /** Where the forward's client class comes from; defaults to {@link loopbackMcpClientModule}. */
+  readonly clientModule?: LazyFeatureModule<LoopbackMcpClientModule>;
 }
 
 /** Runs a function inside some async context. */
@@ -125,6 +137,9 @@ export class InProcessMcpDispatcher {
 
   /** Open a client for one forward, connected to its own server. Close the client when done. */
   async connect(forward: InProcessMcpForward): Promise<Client> {
+    const clientModule = this.deps.clientModule ?? loopbackMcpClientModule;
+    // Awaits only on the first forward of the process; later ones keep their synchronous path.
+    const { LoopbackMcpClient } = clientModule.loaded() ?? (await clientModule.load());
     if (!this.accepting) {
       throw new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE);
     }

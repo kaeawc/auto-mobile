@@ -16,6 +16,7 @@ import {
   prototypeSchema,
   prototypeOutputSchema,
 } from "../../src/server/prototypeTools";
+import { prototypeToolRuntimeModule } from "../../src/server/prototypeTools/registration";
 import { registerHighlightTools } from "../../src/server/highlightTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { ActionableError, type BootedDevice } from "../../src/models";
@@ -66,6 +67,9 @@ describe("prototype MCP tool", () => {
   let restore: () => void;
   let unsubscribe: () => void;
   let invalidator: FakeDeviceWindowCacheInvalidator;
+  // Registration-time semantics (replacement, lifecycle subscriptions) hold once the runtime
+  // module is loaded, as in a daemon that has served a prototype call (#17709).
+  beforeAll(() => prototypeToolRuntimeModule.load());
   beforeEach(() => {
     restore = preserveToolRegistry();
     timer = new FakeTimer();

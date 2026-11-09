@@ -47,13 +47,14 @@ import { MAX_PROTOTYPE_SPEC_REVISIONS } from "./prototypeSpecRevisions";
 import { PROTOTYPE_PLATFORM_MODULES, type PrototypePlatformModule } from "./prototypePlatform";
 import { renderPlatformDrivingTools } from "./prototypePlatformDrivingTools";
 
-/** Resource URIs served by the prototype authoring guide. */
-export const PROTOTYPE_GUIDE_URI = "automobile:prototype";
-export const PROTOTYPE_ICONS_TEMPLATE = "automobile:prototype/icons{?query}";
-export const PROTOTYPE_ICONS_URI = "automobile:prototype/icons";
+import { ICON_LOOKUP_LIMIT, PROTOTYPE_ICONS_URI } from "./prototypeGuideUris";
 
-/** Maximum icon names returned by one lookup. */
-export const ICON_LOOKUP_LIMIT = 100;
+export {
+  ICON_LOOKUP_LIMIT,
+  PROTOTYPE_GUIDE_URI,
+  PROTOTYPE_ICONS_TEMPLATE,
+  PROTOTYPE_ICONS_URI,
+} from "./prototypeGuideUris";
 
 interface Rule {
   kind: string;

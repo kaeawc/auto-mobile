@@ -3,31 +3,17 @@ import {
   ICON_LOOKUP_LIMIT,
   PROTOTYPE_GUIDE_URI,
   PROTOTYPE_ICONS_TEMPLATE,
-  PROTOTYPE_ICONS_URI,
-  renderPrototypeGuide,
-  searchIcons,
-} from "../features/prototype/prototypeGuide";
-import { encodeUriSegment } from "../utils/encodeUriSegment";
-import {
-  readNativePrototype,
-  readNativePrototypeAsset,
-  type NativePrototypeSources,
-} from "../features/prototype/nativePrototype";
+} from "../features/prototype/prototypeGuideUris";
+import type { NativePrototypeSources } from "../features/prototype/nativePrototype";
 import {
   PROTOTYPE_EJECT_TEMPLATE,
-  PROTOTYPE_EJECT_URI,
   PROTOTYPE_NATIVE_ASSET_TEMPLATE,
-  PROTOTYPE_NATIVE_ASSET_URI,
   PROTOTYPE_NATIVE_TEMPLATE,
-  PROTOTYPE_NATIVE_URI,
 } from "../features/prototype/nativePrototypeUris";
-import { readPrototypeEject } from "../features/prototype/prototypeEject";
 import { defaultSavedPrototypeMirror } from "../features/prototype/savedPrototypeMirror";
 import { getMcpServerVersion, releaseVersion } from "../utils/mcpVersion";
-import {
-  daemonPrototypeShownSpecs,
-  daemonPrototypeSpecRevisions,
-} from "./prototypeTools/registration";
+import { daemonPrototypeShownSpecs } from "./prototypeTools/registration";
+import { daemonPrototypeSpecRevisions } from "./prototypeTools/daemonSpecRevisions";
 import type {
   PrototypeSpecRevisionEvent,
   PrototypeSpecRevisionSource,
@@ -44,33 +30,35 @@ import {
   type PrototypeResourceFormat,
 } from "../features/prototype/prototypeWebUris";
 import {
-  prototypeSourceMimeType,
-  readPrototypeSourceResource,
+  PROTOTYPE_SOURCE_MIME_TYPES,
   type PrototypeSourceFormat,
-  type PrototypeSourceResourceQuery,
-} from "../features/prototype/prototypeSourceResource";
-import {
-  prototypeVariantIds,
-  readPrototypeWebResource,
-  type PrototypeWebImageSources,
-  type PrototypeWebResourceQuery,
-} from "../features/prototype/web/prototypeWebResource";
-import {
-  SharpPrototypeWebImageEncoder,
-  type PrototypeWebAssetSource,
+} from "../features/prototype/prototypeSourceFormats";
+import type { PrototypeWebImageSources } from "../features/prototype/web/prototypeWebResource";
+import type {
+  PrototypeWebAssetSource,
+  PrototypeWebImageEncoder,
 } from "../features/prototype/web/webImageEncoding";
 import {
   defaultPrototypeAssetCache,
   type PrototypeAssetCache,
 } from "../features/prototype/prototypeAssetCache";
-import {
-  readPrototypeEmbedResource,
-  type PrototypeEmbedResourceQuery,
-} from "../features/prototype/web/prototypeEmbedResource";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../models/describeUnknownError";
+import { lazyFeatureModule, type LazyFeatureModule } from "../utils/lazyFeatureModule";
 import { decodeSegmentOrThrow } from "./resourceUriSegments";
 import type { ResourceContent } from "./resourceRegistry";
+
+/** What reading a prototype resource needs: the guide, renderers and templates (#17709). */
+export type PrototypeResourceReaders = typeof import("./prototypeResourceReaders");
+
+/**
+ * Every prototype URI and template is registered at startup so `resources/list` is unchanged; the
+ * module that reads them is imported on the first read.
+ */
+export const prototypeResourceReadersModule: LazyFeatureModule<PrototypeResourceReaders> =
+  lazyFeatureModule("prototype resources", () => import("./prototypeResourceReaders"));
+
+const readers = (): Promise<PrototypeResourceReaders> => prototypeResourceReadersModule.load();
 
 /** Live sources: the prototype tool's shown specs (and the platforms it showed on) and the saved mirror. */
 export function defaultNativePrototypeSources(): NativePrototypeSources {
@@ -135,6 +123,17 @@ export function cachedPrototypeWebAssets(
   });
 }
 
+/** The sharp-backed encoder, imported with the readers on the first image it encodes. */
+function lazyPrototypeWebImageEncoder(): PrototypeWebImageEncoder {
+  let encoder: PrototypeWebImageEncoder | undefined;
+  return {
+    encode: async (bytes, boxes, options) => {
+      encoder ??= (await readers()).createPrototypeWebImageEncoder();
+      return await encoder.encode(bytes, boxes, options);
+    },
+  };
+}
+
 export function defaultPrototypeWebSources(): PrototypeWebSources {
   return {
     revisions: daemonPrototypeSpecRevisions(),
@@ -144,77 +143,31 @@ export function defaultPrototypeWebSources(): PrototypeWebSources {
         (id) => daemonPrototypeShownSpecs()?.devicesShowing(id) ?? [],
         defaultPrototypeAssetCache(),
       ),
-      encoder: new SharpPrototypeWebImageEncoder(),
+      encoder: lazyPrototypeWebImageEncoder(),
     },
   };
 }
 
-/** The read URI: the parameter-free one plus the given parameters in a stable order. */
-function readUri(
-  id: string,
-  format: PrototypeResourceFormat,
-  params: Record<string, string | undefined>,
-): string {
-  const query = new URLSearchParams(
-    Object.entries(params)
-      .filter((entry): entry is [string, string] => entry[1] !== undefined)
-      .sort(([a], [b]) => a.localeCompare(b)),
-  ).toString();
-  const uri = prototypeResourceUri(id, format);
-  return query ? `${uri}?${query}` : uri;
-}
-
 async function readWeb(
   sources: PrototypeWebSources,
-  query: PrototypeWebResourceQuery,
+  query: Parameters<PrototypeResourceReaders["readWeb"]>[1],
 ): Promise<ResourceContent> {
-  const web = await readPrototypeWebResource(
-    sources.revisions,
-    query,
-    sources.rendererVersion(),
-    sources.images,
-  );
-  const { frame, revision, variant, mcpSessionId } = query;
-  return {
-    uri: readUri(query.id, "web", { frame, revision, variant, mcpSessionId }),
-    mimeType: "text/html",
-    text: web.html,
-    _meta: { ...web.meta },
-  };
+  return (await readers()).readWeb(sources, query);
 }
 
-function readEmbed(
+async function readEmbed(
   sources: PrototypeWebSources,
-  query: PrototypeEmbedResourceQuery,
-): ResourceContent {
-  const embed = readPrototypeEmbedResource(sources.revisions, query, sources.rendererVersion());
-  const { revision, variant, mcpSessionId } = query;
-  return {
-    uri: readUri(query.id, "embed", { revision, variant, mcpSessionId }),
-    mimeType: "application/json",
-    text: embed.text,
-    _meta: { ...embed.meta },
-  };
+  query: Parameters<PrototypeResourceReaders["readEmbed"]>[1],
+): Promise<ResourceContent> {
+  return (await readers()).readEmbed(sources, query);
 }
 
-function readSource(
+async function readSource(
   sources: PrototypeWebSources,
   format: PrototypeSourceFormat,
-  query: PrototypeSourceResourceQuery,
-): ResourceContent {
-  const file = readPrototypeSourceResource(
-    sources.revisions,
-    format,
-    query,
-    sources.rendererVersion(),
-  );
-  const { frame, revision, mcpSessionId } = query;
-  return {
-    uri: readUri(query.id, format, { frame, revision, mcpSessionId }),
-    mimeType: file.mimeType,
-    text: file.text,
-    _meta: { ...file.meta },
-  };
+  query: Parameters<PrototypeResourceReaders["readSource"]>[2],
+): Promise<ResourceContent> {
+  return (await readers()).readSource(sources, format, query);
 }
 
 /** One per-id format: how its concrete resource is listed and read. */
@@ -231,7 +184,7 @@ const sourceFormat = (format: PrototypeSourceFormat, label: string): PerIdFormat
   title: label,
   description: (id) =>
     `Prototype ${id} as one ${label} source file with the spec inlined (latest revision)`,
-  mimeType: prototypeSourceMimeType(format),
+  mimeType: PROTOTYPE_SOURCE_MIME_TYPES[format],
   read: (sources, id) => readSource(sources, format, { id }),
 });
 
@@ -318,6 +271,7 @@ async function onWebRevision(
   webGroups = nextGroups(sources.revisions, event, known);
   // The event's id and its current siblings change, and so do the siblings it left (or, when
   // evicted, the group it was dropped from).
+  const { prototypeVariantIds } = await readers();
   const current = known.has(event.id) ? prototypeVariantIds(sources.revisions, event.id) : [];
   const ids = new Set([...(known.has(event.id) ? [event.id] : []), ...current, ...former]);
   const uris = new Set([
@@ -362,7 +316,7 @@ function registerSourceTemplate(
 ): void {
   ResourceRegistry.registerTemplate(template, `Prototype as one ${label} file`, {
     description: `A shown prototype as one ${label} source file: the spec inlined as a string constant, a header naming the renderer library, required capabilities and asset URIs, and a preview sized to the frame (frame: a device frame id; revision: a kept spec revision, default the latest; mcpSessionId: only the revisions that MCP session produced)`,
-    mimeType: prototypeSourceMimeType(format),
+    mimeType: PROTOTYPE_SOURCE_MIME_TYPES[format],
     handler: async (params: Record<string, string>) =>
       readSource(sources, format, {
         id: decodeSegmentOrThrow(params.id ?? ""),
@@ -437,67 +391,36 @@ export function registerPrototypeResources(
     description:
       "Node and action vocabulary, repeat grammar, limits, theme roles and icon lookup for the prototype tool",
     mimeType: "text/markdown",
-    handler: async () => ({
-      uri: PROTOTYPE_GUIDE_URI,
-      mimeType: "text/markdown",
-      text: renderPrototypeGuide(),
-    }),
+    handler: async () => (await readers()).readGuide(),
   });
 
   ResourceRegistry.registerTemplate(PROTOTYPE_ICONS_TEMPLATE, "Prototype icon lookup", {
     description: `Material icon names containing the query (at most ${ICON_LOOKUP_LIMIT} per read)`,
     mimeType: "application/json",
-    handler: async (params: Record<string, string>) => {
-      const query = params.query ?? "";
-      const { total, names } = searchIcons(query);
-      return {
-        uri: `${PROTOTYPE_ICONS_URI}?query=${encodeUriSegment(query)}`,
-        mimeType: "application/json",
-        text: JSON.stringify({ query, total, truncated: total > names.length, names }),
-      };
-    },
+    handler: async (params: Record<string, string>) =>
+      (await readers()).readIcons(params.query ?? ""),
   });
 
   ResourceRegistry.registerTemplate(PROTOTYPE_NATIVE_TEMPLATE, "Prototype as native app code", {
     description:
       "The prototype's spec, assets and a Jetpack Compose or SwiftUI host file that renders it with the published AutoMobile prototype library",
     mimeType: "application/json",
-    handler: async (params: Record<string, string>) => {
-      const native = await readNativePrototype(params, nativeSources);
-      const query = new URLSearchParams(params).toString();
-      return {
-        uri: query ? `${PROTOTYPE_NATIVE_URI}?${query}` : PROTOTYPE_NATIVE_URI,
-        mimeType: "application/json",
-        text: JSON.stringify(native, null, 2),
-      };
-    },
+    handler: async (params: Record<string, string>) =>
+      (await readers()).readNative(params, nativeSources),
   });
 
   ResourceRegistry.registerTemplate(PROTOTYPE_EJECT_TEMPLATE, "Prototype ejected to app code", {
     description:
       "A one-shot Jetpack Compose or SwiftUI scaffold of the prototype that the app owns, with no renderer dependency: layout, text, buttons, fields, lists and stack navigation, TODO stubs for the rest",
     mimeType: "application/json",
-    handler: async (params: Record<string, string>) => {
-      const ejected = await readPrototypeEject(params, nativeSources);
-      const query = new URLSearchParams(params).toString();
-      return {
-        uri: query ? `${PROTOTYPE_EJECT_URI}?${query}` : PROTOTYPE_EJECT_URI,
-        mimeType: "application/json",
-        text: JSON.stringify(ejected, null, 2),
-      };
-    },
+    handler: async (params: Record<string, string>) =>
+      (await readers()).readEject(params, nativeSources),
   });
 
   ResourceRegistry.registerTemplate(PROTOTYPE_NATIVE_ASSET_TEMPLATE, "Prototype asset bytes", {
     description: "One saved prototype's image or font, base64 encoded",
     mimeType: "application/octet-stream",
-    handler: async (params: Record<string, string>) => {
-      const asset = await readNativePrototypeAsset(params, nativeSources);
-      return {
-        uri: `${PROTOTYPE_NATIVE_ASSET_URI}?${new URLSearchParams(params).toString()}`,
-        mimeType: asset.mimeType,
-        blob: Buffer.from(asset.bytes).toString("base64"),
-      };
-    },
+    handler: async (params: Record<string, string>) =>
+      (await readers()).readNativeAsset(params, nativeSources),
   });
 }

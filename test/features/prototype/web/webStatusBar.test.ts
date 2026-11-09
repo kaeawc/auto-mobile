@@ -44,7 +44,8 @@ test("a light top colour takes dark content and a dark one light content", () =>
 
 test("the top colour is the innermost opaque full-width leading background, else the fallback", () => {
   const bar = el("div", { style: { "align-self": "stretch", "background-color": "#112233" } });
-  const chip = el("div", { style: { "background-color": "#ffffff" } });
+  // An inline chip is as wide as its content, so it spans nothing the layout pass can measure.
+  const chip = el("span", { style: { "background-color": "#ffffff" } });
   const translucent = el("div", {
     style: { "align-self": "stretch", "background-color": "rgba(0,0,0,0.5)" },
   });
@@ -493,7 +494,7 @@ test("a growing child held short by a maximum height does not reach the top of a
           children: [
             {
               type: "column",
-              style: { width: "fill", weight: 1, maxHeight: 80, background: "#ffffff" },
+              style: { width: "fill", height: "fill", maxHeight: 80, background: "#ffffff" },
             },
           ],
         },
@@ -501,6 +502,25 @@ test("a growing child held short by a maximum height does not reach the top of a
     },
   });
   expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
+test("a weighted child's maximum height does not hold it short, as its share pins it (#16698)", () => {
+  const still = renderPrototypeStill({
+    id: "weighted-growth",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "column",
+      style: { width: "fill", height: "fill", arrangement: "end", background: "#000000" },
+      children: [
+        {
+          type: "column",
+          style: { width: "fill", weight: 1, maxHeight: 80, background: "#ffffff" },
+        },
+      ],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("dark");
 });
 
 test("a row-bound min() maximum width binds only below the screen width", () => {
@@ -583,4 +603,223 @@ test("a top sheet's content sits behind the status bar; a bottom sheet's does no
     });
   expect(statusBarOf(sheet("top").element)?.attrs["data-status-content"]).toBe("light");
   expect(statusBarOf(sheet("bottom").element)?.attrs["data-status-content"]).toBe("dark");
+});
+
+// Geometry, not CSS rules, decides the top colour (#16667): each case below moves, sizes or
+// arranges a child in a way a per-property walk misreads.
+const SCREEN = { width: 400, height: 800 };
+const BLACK = "#000000";
+const WHITE = "#ffffff";
+const cell = (children: WebElement[], style: Record<string, string> = {}) =>
+  el("div", { style: { display: "grid", "grid-template-areas": '"cell"', ...style } }, children);
+const fullFill = (color: string, style: Record<string, string> = {}) =>
+  el("div", {
+    style: {
+      "justify-self": "stretch",
+      "align-self": "stretch",
+      width: "100%",
+      height: "100%",
+      "background-color": color,
+      ...style,
+    },
+  });
+const line = (direction: "row" | "column", style: Record<string, string>, children: WebElement[]) =>
+  el("div", { style: { display: "flex", "flex-direction": direction, ...style } }, children);
+
+test("a translation or relative offset moves a child off the top edge", () => {
+  const moved = (style: Record<string, string>) =>
+    appTopColor(cell([fullFill(BLACK), fullFill(WHITE, style)]), "#777777", SCREEN);
+  expect(moved({ transform: "translateY(80px)" })).toBe(BLACK);
+  expect(moved({ transform: "translate(0px, 80px)" })).toBe(BLACK);
+  expect(moved({ position: "relative", top: "80px" })).toBe(BLACK);
+  expect(moved({ transform: "translateX(0px)" })).toBe(WHITE);
+  // A translation up keeps a taller child over the top edge.
+  expect(moved({ transform: "translateY(-80px)" })).toBe(WHITE);
+});
+
+test("several growing row children together fill the width", () => {
+  const grower = (color: string) =>
+    el("div", { style: { flex: "1 1 0", height: "80px", "background-color": color } });
+  const row = line("row", { gap: "8px" }, [grower(WHITE), grower(WHITE), grower(WHITE)]);
+  expect(appTopColor(row, BLACK, SCREEN)).toBe(WHITE);
+  // Two colours each fill part of the edge; the one covering more of it wins.
+  const weighted = line("row", {}, [
+    el("div", { style: { flex: "3 3 0", height: "80px", "background-color": WHITE } }),
+    el("div", { style: { flex: "1 1 0", height: "80px", "background-color": "#ff0000" } }),
+  ]);
+  expect(appTopColor(weighted, BLACK, SCREEN)).toBe(WHITE);
+});
+
+test("a gap or a leading sibling moves a column's child down", () => {
+  const white = el("div", { style: { width: "100%", height: "80px", "background-color": WHITE } });
+  const spacer = el("div", { style: { height: "0px" } });
+  expect(appTopColor(line("column", { gap: "16px" }, [spacer, white]), BLACK, SCREEN)).toBe(BLACK);
+  expect(appTopColor(line("column", {}, [spacer, white]), BLACK, SCREEN)).toBe(WHITE);
+  expect(appTopColor(line("column", {}, [el("div", {}, ["Title"]), white]), BLACK, SCREEN)).toBe(
+    BLACK,
+  );
+});
+
+test("space-around and space-evenly leave room before a column's first child", () => {
+  const white = el("div", { style: { width: "100%", height: "80px", "background-color": WHITE } });
+  const arranged = (justify: string) =>
+    appTopColor(line("column", { "justify-content": justify }, [white]), BLACK, SCREEN);
+  expect(arranged("space-around")).toBe(BLACK);
+  expect(arranged("space-evenly")).toBe(BLACK);
+  // One child under space-between sits at the start.
+  expect(arranged("space-between")).toBe(WHITE);
+});
+
+test("a minimum size can carry a child to the top edge or across it", () => {
+  const tall = el("div", {
+    style: { width: "100%", height: "80px", "min-height": "1000px", "background-color": WHITE },
+  });
+  // Taller than the column, an end-arranged child overflows past its top.
+  expect(
+    appTopColor(line("column", { "justify-content": "flex-end" }, [tall]), BLACK, SCREEN),
+  ).toBe(WHITE);
+  const wide = el("div", { style: { "min-width": "100%", "background-color": WHITE } });
+  expect(appTopColor(cell([fullFill(BLACK), wide]), "#777777", SCREEN)).toBe(WHITE);
+});
+
+test("a centred box child reaches the top only when it is at least as tall as the box", () => {
+  const sized = (height: string) =>
+    el("div", { style: { width: "100%", height, "background-color": WHITE } });
+  const centred = (child: WebElement) =>
+    appTopColor(
+      cell([fullFill(BLACK), child], { "align-items": "center", "justify-items": "center" }),
+      "#777777",
+      SCREEN,
+    );
+  expect(centred(sized("80px"))).toBe(BLACK);
+  expect(centred(sized("1000px"))).toBe(WHITE);
+});
+
+test("a clipping ancestor hides the part of a wide child outside it", () => {
+  const rail = el("div", { style: { width: "20px", height: "100%", overflow: "hidden" } }, [
+    el("div", { style: { width: "400px", height: "80px", "background-color": WHITE } }),
+  ]);
+  expect(appTopColor(cell([fullFill(BLACK), rail]), "#777777", SCREEN)).toBe(BLACK);
+});
+
+test("top padding from the safe area moves children down by the inset the screen defines", () => {
+  const root = el(
+    "div",
+    {
+      style: {
+        width: "100%",
+        "background-color": WHITE,
+        "padding-top": "calc(0px + var(--safe-top))",
+      },
+    },
+    [el("div", { style: { height: "56px", "background-color": BLACK } })],
+  );
+  expect(appTopColor(root, "#777777", SCREEN, { "--safe-top": "24px" })).toBe(WHITE);
+  // A zero inset (an iPhone in landscape) leaves the bar at the top edge.
+  expect(appTopColor(root, "#777777", SCREEN, { "--safe-top": "0px" })).toBe(BLACK);
+});
+
+test("a floating window leaves the screen background behind the status bar", () => {
+  const still = renderPrototypeStill({
+    id: "floating",
+    window: { placement: { type: "floating", gravity: "center" } },
+    theme: { mode: "light" },
+    root: {
+      type: "column",
+      style: { width: { dp: 200 }, height: { dp: 200 }, background: "#1d1b20" },
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("dark");
+});
+
+test("an end-aligned box child taller than the screen covers the status bar in a still", () => {
+  const still = renderPrototypeStill({
+    id: "tall-footer",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "box",
+      style: { width: "fill", height: "fill", alignment: "bottomStart" },
+      children: [
+        { type: "column", style: { width: "fill", height: { dp: 2000 }, background: "#1d1b20" } },
+      ],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
+test("a collection grid's second row does not reach the top edge", () => {
+  const cellOf = (color: string) =>
+    el("div", {
+      style: {
+        "justify-self": "stretch",
+        "align-self": "start",
+        height: "100px",
+        "background-color": color,
+      },
+    });
+  const grid = el(
+    "div",
+    {
+      style: {
+        display: "grid",
+        "grid-template-columns": "repeat(1, minmax(0, 1fr))",
+        "background-color": WHITE,
+      },
+    },
+    [cellOf(WHITE), cellOf(BLACK)],
+  );
+  expect(appTopColor(grid, "#777777", SCREEN)).toBe(WHITE);
+});
+
+test("a rounded child paints nothing in its cut-away corners, so a circle leaves the row's colour", () => {
+  const still = renderPrototypeStill({
+    id: "circle",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "row",
+      style: { width: { dp: 400 }, height: "fill", background: BLACK },
+      children: [
+        {
+          type: "box",
+          style: {
+            width: { dp: 300 },
+            height: { dp: 300 },
+            cornerRadius: 150,
+            background: WHITE,
+          },
+        },
+      ],
+    },
+  });
+  // The circle touches the top edge at one point; the black row shows everywhere else.
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
+test("a rounded overflow clip hides a square descendant in its corners", () => {
+  const rounded = el(
+    "div",
+    {
+      style: {
+        width: "300px",
+        height: "300px",
+        "border-radius": "150px",
+        overflow: "hidden",
+        "flex-shrink": "0",
+      },
+    },
+    [el("div", { style: { width: "300px", height: "300px", "background-color": WHITE } })],
+  );
+  expect(
+    appTopColor(line("row", { "background-color": BLACK }, [rounded]), "#777777", SCREEN),
+  ).toBe(BLACK);
+  const square = el(
+    "div",
+    { style: { ...rounded.style, "border-radius": "0px" } },
+    rounded.children,
+  );
+  expect(appTopColor(line("row", { "background-color": BLACK }, [square]), "#777777", SCREEN)).toBe(
+    WHITE,
+  );
 });

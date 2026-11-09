@@ -82,6 +82,35 @@ describe("DisposableAppManager.install", () => {
     expect((await registry.list(DEVICE)).map((entry) => entry.label)).toEqual(["Feedly 2"]);
   });
 
+  test("a first install whose permissions fail is still recorded with its TTL", async () => {
+    installer.permissionFailure = new Error("pm grant failed");
+    const appId = disposableAppId("android", "feedly");
+    await expect(manager.install(input({ ttlHours: 1 }))).rejects.toThrow(
+      `${appId} is installed on ${DEVICE} (expires ${new Date(HOUR).toISOString()}), but its permissions were not applied: pm grant failed.`,
+    );
+    expect(await registry.list(DEVICE)).toEqual([
+      expect.objectContaining({ appId, installedAt: 0, expiresAt: HOUR }),
+    ]);
+    timer.advanceTime(HOUR);
+    const swept = await manager.sweepExpired(DEVICE, "android");
+    expect(swept.removed).toEqual([{ appId, reason: "expired" }]);
+  });
+
+  test("a reinstall whose permissions fail replaces the stale expiry and survives the sweep", async () => {
+    await manager.install(input({ ttlHours: 1 }));
+    timer.advanceTime(HOUR);
+    installer.permissionFailure = new Error("pm grant failed");
+    await expect(manager.install(input({ ttlHours: 0 }))).rejects.toThrow(
+      /installed on emulator-5554 \(expires never\), but its permissions were not applied/,
+    );
+    const appId = disposableAppId("android", "feedly");
+    expect(await registry.list(DEVICE)).toEqual([
+      expect.objectContaining({ appId, installedAt: HOUR, expiresAt: null }),
+    ]);
+    expect(await manager.sweepExpired(DEVICE, "android")).toEqual({ removed: [], skipped: [] });
+    expect(installer.uninstalls).toEqual([]);
+  });
+
   test("refuses an unsupported platform and an out-of-range TTL before stamping", async () => {
     await expect(manager.install({ ...input(), platform: "ios" })).rejects.toThrow(
       /not available on ios/,

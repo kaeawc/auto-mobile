@@ -41,6 +41,7 @@ internal fun BuildLensBar(
   lens: BuildLens,
   onLensChange: (BuildLens) -> Unit,
   modifier: Modifier = Modifier,
+  buildLabels: Map<ProvenanceBuildKey, String> = emptyMap(),
 ) {
   val colors = SharedTheme.globalColors
   Column(
@@ -71,7 +72,7 @@ internal fun BuildLensBar(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
       ) {
         builds.forEach { build ->
-          val label = NavigationBuildLens.label(build)
+          val label = buildLabels[build] ?: NavigationBuildLens.label(build)
           val selected = lens is BuildLens.Filter && lens.build == build
           LensChip(label, "Build lens: filter $label", selected) {
             val hide = (lens as? BuildLens.Filter)?.hideOtherBuilds ?: false
@@ -81,8 +82,8 @@ internal fun BuildLensBar(
       }
     }
     if (lens is BuildLens.Compare) {
-      CompareSidePicker("A", builds, lens.a) { onLensChange(lens.copy(a = it)) }
-      CompareSidePicker("B", builds, lens.b) { onLensChange(lens.copy(b = it)) }
+      CompareSidePicker("A", builds, lens.a, buildLabels) { onLensChange(lens.copy(a = it)) }
+      CompareSidePicker("B", builds, lens.b, buildLabels) { onLensChange(lens.copy(b = it)) }
     }
   }
 }
@@ -100,6 +101,7 @@ private fun CompareSidePicker(
   side: String,
   builds: List<ProvenanceBuildKey>,
   current: ProvenanceBuildKey,
+  buildLabels: Map<ProvenanceBuildKey, String>,
   onPick: (ProvenanceBuildKey) -> Unit,
 ) {
   Row(
@@ -109,7 +111,7 @@ private fun CompareSidePicker(
   ) {
     Text(side, fontSize = 11.sp)
     builds.forEach { build ->
-      val label = NavigationBuildLens.label(build)
+      val label = buildLabels[build] ?: NavigationBuildLens.label(build)
       LensChip(label, "Compare $side: $label", build == current) { onPick(build) }
     }
   }
@@ -146,10 +148,14 @@ private fun LensChip(
  * exclusive screens/transitions on the left, build B's on the right, shared ones summarized.
  */
 @Composable
-internal fun BuildCompareView(diff: BuildGraphDiff, modifier: Modifier = Modifier) {
+internal fun BuildCompareView(
+  diff: BuildGraphDiff,
+  modifier: Modifier = Modifier,
+  buildLabels: Map<ProvenanceBuildKey, String> = emptyMap(),
+) {
   val colors = SharedTheme.globalColors
-  val labelA = NavigationBuildLens.label(diff.a)
-  val labelB = NavigationBuildLens.label(diff.b)
+  val labelA = buildLabels[diff.a] ?: NavigationBuildLens.label(diff.a)
+  val labelB = buildLabels[diff.b] ?: NavigationBuildLens.label(diff.b)
   val summary = buildDiffSummary(diff)
   Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
     Text("Comparing $labelA ↔ $labelB", fontSize = 16.sp)

@@ -8,6 +8,8 @@
       android:permission="android.permission.DUMP">
       <intent-filter>
         <action android:name="dev.jasonpearson.automobile.sdk.NOTIFICATION_POST" />
+        <action android:name="dev.jasonpearson.automobile.sdk.NOTIFICATION_CHANNEL_QUERY" />
+        <action android:name="dev.jasonpearson.automobile.sdk.NOTIFICATION_CHANNEL_DELETE" />
       </intent-filter>
     </receiver>
 

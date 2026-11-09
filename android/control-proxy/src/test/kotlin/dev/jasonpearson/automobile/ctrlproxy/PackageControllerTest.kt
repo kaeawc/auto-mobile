@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
+import android.os.Bundle
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.InstalledPackagesResult
@@ -46,7 +47,12 @@ class PackageControllerTest {
         ),
     )
 
-  private fun install(name: String, system: Boolean = false, launchable: Boolean = false) {
+  private fun install(
+    name: String,
+    system: Boolean = false,
+    launchable: Boolean = false,
+    metaData: Bundle? = null,
+  ) {
     val info =
       PackageInfo().apply {
         packageName = name
@@ -55,6 +61,7 @@ class PackageControllerTest {
           ApplicationInfo().apply {
             packageName = name
             flags = if (system) ApplicationInfo.FLAG_SYSTEM else 0
+            this.metaData = metaData
           }
       }
     val shadow = shadowOf(application.packageManager)
@@ -120,6 +127,36 @@ class PackageControllerTest {
     assertTrue(frame.success)
     assertEquals("1.2", frame.versionName)
     assertEquals("com.example.app/.Main", frame.mainActivity)
+  }
+
+  @Test
+  fun `package info returns the app's declared git branch and sha meta-data`() = runTest {
+    install(
+      "com.example.app",
+      metaData =
+        Bundle().apply {
+          putString("dev.jasonpearson.automobile.build.gitBranch", "feature/login")
+          putString("dev.jasonpearson.automobile.build.gitSha", "abcdef1234567")
+        },
+    )
+
+    controller.performPackageInfo("r1", "com.example.app", includePermissions = false)
+
+    val frame = sender.frames.single() as PackageInfoResult
+    assertEquals("feature/login", frame.gitBranch)
+    assertEquals("abcdef1234567", frame.gitSha)
+  }
+
+  @Test
+  fun `package info omits git provenance for builds that declare none`() = runTest {
+    install("com.example.app", metaData = Bundle().apply { putInt("other.flag", 1) })
+
+    controller.performPackageInfo("r1", "com.example.app", includePermissions = false)
+
+    val frame = sender.frames.single() as PackageInfoResult
+    assertTrue(frame.success)
+    assertNull(frame.gitBranch)
+    assertNull(frame.gitSha)
   }
 
   @Test

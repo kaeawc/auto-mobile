@@ -13,6 +13,7 @@ import type {
 import { DefaultElementParser } from "../utility/ElementParser";
 import { normalizeWatchHierarchy } from "./WatchHierarchy";
 import { type WatchCommand, type WatchRunnerClient } from "./WatchRunnerClient";
+import { WatchRunnerError } from "./WatchRunnerError";
 import { watchRunners } from "./WatchRunnerRegistry";
 
 export function unsupportedWatchAction(action: string): never {
@@ -28,6 +29,7 @@ export function unsupportedWatchAction(action: string): never {
 export const WATCH_LOOK_FOR_SWIPE_DISTANCE = 0.4;
 
 export interface WatchCrownOptions {
+  /** Signed crown turn in full revolutions (XCUI `rotateDigitalCrown(delta:)`): 1 is one turn. */
   delta: number;
   velocity?: number;
 }
@@ -35,6 +37,27 @@ export interface WatchCrownOptions {
 // Simulator crown rotation has not replied within the 5 s default.
 // This bounds when the call is reported as a timeout, not its expected duration.
 export const CROWN_REQUEST_TIMEOUT_MS = 30_000;
+
+const CROWN_UNCHANGED_PREFIX = "rotateCrown changed nothing";
+
+/**
+ * The runner cannot tell a turn too small to cross one step of the focused control from a control
+ * at its limit or no crown focus. For a sub-revolution delta, name the size as a possible cause.
+ */
+export function crownUnchangedHint(error: unknown, delta: number): unknown {
+  if (
+    !(error instanceof WatchRunnerError) ||
+    !error.message.startsWith(CROWN_UNCHANGED_PREFIX) ||
+    Math.abs(delta) >= 1
+  ) {
+    return error;
+  }
+  return new WatchRunnerError(
+    `${error.message} A delta of ${delta} is ${Math.abs(delta)} of one crown revolution and may be ` +
+      "smaller than one step of the focused control; if it is not at its limit, try a larger delta.",
+    error.errorCode,
+  );
+}
 
 export async function watchRotateCrown(
   device: Pick<BootedDevice, "deviceId" | "platform">,
@@ -54,9 +77,14 @@ export async function watchRotateCrown(
     throw new ActionableError("rotateCrown velocity must be a finite number greater than zero.");
   }
   signal?.throwIfAborted();
-  await watchRunners
-    .require(device.deviceId)
-    .request({ type: "crown", delta, velocity }, signal, { timeoutMs: CROWN_REQUEST_TIMEOUT_MS });
+  try {
+    await watchRunners
+      .require(device.deviceId)
+      .request({ type: "crown", delta, velocity }, signal, { timeoutMs: CROWN_REQUEST_TIMEOUT_MS });
+  } catch (error) {
+    // Runner failures are already structured; only an unchanged sub-revolution turn gains a hint.
+    throw crownUnchangedHint(error, delta);
+  }
   return { success: true, delta, velocity };
 }
 

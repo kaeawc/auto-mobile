@@ -1,3 +1,5 @@
+import { isVisionosHierarchy } from "../../../src/features/visionos/VisionosHierarchy";
+import settingsHierarchy from "../../fixtures/visionos-settings/hierarchy.json";
 import { readToolResponse } from "../../helpers/toolResponse";
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { visionosTapOn, visionosSendKeys } from "../../../src/features/visionos/VisionosActions";
@@ -70,7 +72,7 @@ test.each<TapOnElementOptions>([
 test("missing, disabled and ambiguous identifiers never dispatch a tap", async () => {
   await expect(
     visionosTapOn(device.deviceId, { action: "tap", elementId: "missing" }),
-  ).rejects.toThrow("No uniquely identified");
+  ).rejects.toThrow("No visionOS element matched");
   const nodes = client.tree.hierarchy.node;
   if (!Array.isArray(nodes)) {
     throw new Error("Expected captured flat descendants");
@@ -78,14 +80,140 @@ test("missing, disabled and ambiguous identifiers never dispatch a tap", async (
   const ornament = nodes.find((node) => "resource-id" in node && node["resource-id"] === "orn")!;
   ornament.enabled = "false";
   await expect(visionosTapOn(device.deviceId, { action: "tap", elementId: "orn" })).rejects.toThrow(
-    "No uniquely identified",
+    "disabled",
   );
   ornament.enabled = "true";
   nodes.push({ ...ornament });
   await expect(visionosTapOn(device.deviceId, { action: "tap", elementId: "orn" })).rejects.toThrow(
-    "No uniquely identified",
+    "ambiguous",
   );
   expect(client.commands.every((command) => command.type === "request_hierarchy")).toBe(true);
+});
+
+function useSettingsHierarchy() {
+  unregister();
+  const tree = structuredClone(settingsHierarchy);
+  if (!isVisionosHierarchy(tree)) {
+    throw new Error("Expected a valid Settings hierarchy fixture");
+  }
+  client = new FakeVisionosRunnerClient(tree);
+  unregister = visionosRunners.register(device.deviceId, client);
+  return tree;
+}
+
+test.each([{ elementId: "General" }, { text: "General" }])(
+  "Settings General resolves the sidebar cell: %j",
+  async (selector) => {
+    useSettingsHierarchy();
+    await visionosTapOn(device.deviceId, { action: "tap", ...selector });
+    expect(client.commands[1]).toEqual({
+      type: "request_tap_element",
+      identifier: "General",
+      label: "General",
+      elementType: 9,
+    });
+  },
+);
+
+test("Settings Accessibility keeps the identifier-only command", async () => {
+  useSettingsHierarchy();
+  await visionosTapOn(device.deviceId, { action: "tap", text: "Accessibility" });
+  expect(client.commands[1]).toEqual({
+    type: "request_tap_element",
+    identifier: "ACCESSIBILITY",
+  });
+});
+
+test("a disabled Settings twin of the General row resolves to the enabled row", async () => {
+  const tree = useSettingsHierarchy();
+  const nodes = tree.hierarchy.node;
+  const rowIndex = nodes.findIndex(
+    (node) => node["resource-id"] === "General" && node.className === "9",
+  );
+  nodes.splice(rowIndex, 0, { ...structuredClone(nodes[rowIndex]), enabled: "false" });
+  await visionosTapOn(device.deviceId, { action: "tap", elementId: "General" });
+  expect(client.commands[1]).toEqual({
+    type: "request_tap_element",
+    identifier: "General",
+    label: "General",
+    elementType: 9,
+  });
+});
+
+test("a disabled twin is not ambiguous but still narrows the shared identifier", async () => {
+  const nodes = client.tree.hierarchy.node;
+  if (!Array.isArray(nodes)) {
+    throw new Error("Expected captured flat descendants");
+  }
+  const ornament = nodes.find((node) => "resource-id" in node && node["resource-id"] === "orn")!;
+  nodes.unshift({ ...ornament, enabled: "false" });
+  await visionosTapOn(device.deviceId, { action: "tap", elementId: "orn" });
+  expect(client.commands[1]).toEqual({
+    type: "request_tap_element",
+    identifier: "orn",
+    label: ornament.text,
+    elementType: Number(ornament.className),
+  });
+});
+
+test("identical Settings siblings report ambiguity with candidate details", async () => {
+  const tree = useSettingsHierarchy();
+  const row = tree.hierarchy.node.find(
+    (node) => node["resource-id"] === "General" && node.className === "9",
+  )!;
+  tree.hierarchy.node.push(structuredClone(row));
+  await expect(
+    visionosTapOn(device.deviceId, { action: "tap", elementId: "General" }),
+  ).rejects.toThrow(
+    /ambiguous.*className=9.*text="General".*bounds=.*className=9.*index.*distinct text\/elementId/,
+  );
+  expect(client.commands).toEqual([{ type: "request_hierarchy" }]);
+});
+
+test("index selects from the stable ranked Settings candidates", async () => {
+  useSettingsHierarchy();
+  await visionosTapOn(device.deviceId, { action: "tap", elementId: "General", index: 1 });
+  expect(client.commands[1]).toEqual({
+    type: "request_tap_element",
+    identifier: "General",
+    label: "",
+    elementType: 21,
+  });
+});
+
+test.each(["clickable-first", "clickable-second", "identified", "disabled"])(
+  "ranked index %#: %s",
+  async (identifier) => {
+    const tree = useSettingsHierarchy();
+    const row = tree.hierarchy.node.find(
+      (node) => node["resource-id"] === "General" && node.className === "9",
+    )!;
+    const candidate = { ...row, text: "ranked", enabled: "true", clickable: "true" };
+    tree.hierarchy.node.unshift(
+      { ...candidate, "resource-id": "disabled", enabled: "false" },
+      { ...candidate, "resource-id": "identified", clickable: "false" },
+      { ...candidate, "resource-id": "clickable-first" },
+      { ...candidate, "resource-id": "clickable-second" },
+    );
+    const index = ["clickable-first", "clickable-second", "identified", "disabled"].indexOf(
+      identifier,
+    );
+    const tap = visionosTapOn(device.deviceId, { action: "tap", text: "ranked", index });
+    if (identifier === "disabled") {
+      await expect(tap).rejects.toThrow("disabled");
+      expect(client.commands).toEqual([{ type: "request_hierarchy" }]);
+    } else {
+      await tap;
+      expect(client.commands[1]).toEqual({ type: "request_tap_element", identifier });
+    }
+  },
+);
+
+test("a text-only Settings target reports the missing identifier", async () => {
+  useSettingsHierarchy();
+  await expect(
+    visionosTapOn(device.deviceId, { action: "tap", text: "General", index: 1 }),
+  ).rejects.toThrow("no accessibility identifier");
 });
 
 test("registered sendKeys handler types through visionOS rather than the iOS client", async () => {

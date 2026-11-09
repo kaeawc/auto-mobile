@@ -52,6 +52,10 @@ class HierarchyControllerTest {
           override fun unregister() = Unit
         },
       )
+    var root: AccessibilityNodeInfo? = null
+    var windowState = AccessibilityEventDispatcher.WindowState(null, null)
+    var onWakefulness: () -> Unit = {}
+    val foregroundCalls = mutableListOf<Triple<String?, String?, String?>>()
     var running = true
     val released = mutableListOf<String?>()
     val syncFrames = mutableListOf<String>()
@@ -63,17 +67,27 @@ class HierarchyControllerTest {
     override fun selectDisplayWindows(displayId: Int?) =
       ViewHierarchyExtractor.DisplayWindows(displayId ?: 0, windows)
 
-    override fun activeWindowRoot(): AccessibilityNodeInfo? = null
+    override fun activeWindowRoot(): AccessibilityNodeInfo? = root
 
-    override fun lastWindowClassName(): String? = null
+    override fun lastWindowState() = windowState
 
     override fun rotationProvenance() = provenance
 
     override fun occlusionEnabled() = true
 
-    override fun wakefulness() = "Awake"
+    override fun wakefulness(): String {
+      onWakefulness()
+      return "Awake"
+    }
 
-    override fun foregroundActivity(rootPackage: String?, windowClass: String?): String? = null
+    override fun foregroundActivity(
+      rootPackage: String?,
+      windowClass: String?,
+      windowPackage: String?,
+    ): String? {
+      foregroundCalls += Triple(rootPackage, windowClass, windowPackage)
+      return null
+    }
 
     override fun isEmulator() = true
 
@@ -177,6 +191,52 @@ class HierarchyControllerTest {
         jsonCompact = Json { encodeDefaults = true },
       )
       .also { it.start() }
+
+  @Test
+  fun `direct and fallback enrichment use the captured event class and package together`() =
+    runTest {
+      for (requested in listOf(false, true)) {
+        val host =
+          FakeHost(tmp.newFolder()).apply {
+            root =
+              AccessibilityNodeInfo.obtain().apply {
+                packageName = "com.google.android.permissioncontroller"
+                className = "android.widget.FrameLayout"
+              }
+            windowState =
+              AccessibilityEventDispatcher.WindowState(
+                "dev.jasonpearson.automobile.playground.MainActivity",
+                "dev.jasonpearson.automobile.playground",
+              )
+            onWakefulness = {
+              windowState =
+                AccessibilityEventDispatcher.WindowState(
+                  "com.google.android.permissioncontroller.PermissionActivity",
+                  "com.google.android.permissioncontroller",
+                )
+            }
+          }
+        val controller = directController(host)
+
+        if (requested) {
+          controller.requestHierarchy(RequestHierarchy(requestId = "req_permission"))
+          assertEquals(1, host.syncFrames.size)
+        } else {
+          assertTrue(controller.extractHierarchy() != null)
+        }
+
+        assertEquals(
+          listOf(
+            Triple(
+              "com.google.android.permissioncontroller",
+              "dev.jasonpearson.automobile.playground.MainActivity",
+              "dev.jasonpearson.automobile.playground",
+            ),
+          ),
+          host.foregroundCalls,
+        )
+      }
+    }
 
   @Test
   fun `non-default display without windows or root reports inaccessible display`() = runTest {

@@ -477,6 +477,8 @@ export interface WsPackageInfoResultMessage extends WsMessageBase {
   grantedPermissions?: Record<string, boolean>;
   mainActivity?: string;
   totalTimeMs?: number;
+  gitBranch?: string;
+  gitSha?: string;
 }
 
 export interface WsLaunchIntentResultMessage extends WsMessageBase {

@@ -120,6 +120,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🪟 <code>windowMode</code>                  | Fullscreen, PiP, or split-screen an Android task                                        |
 | 🎛️ <code>rotaryScroll</code>                | Wear OS crown scroll with read-back; reports every attempted method                     |
 | 🌙 <code>ambient</code>                     | Wear OS sleep/wake power-state change; wakefulness readback does not prove ambient mode |
+| 🧩 <code>wearSurface</code>                 | Wear OS tiles: list providers; add, remove, or show a tile; read watch faces            |
 | ⌚ <code>rotateCrown</code>                 | watchOS: rotate the Digital Crown by a signed delta with optional velocity              |
 | 🌍 <code>openLink</code>                    | Open URL in browser                                                                     |
 | 🏠 <code>homeScreen</code>                  | Go to home screen                                                                       |
@@ -138,7 +139,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🎙️ <code>injectAudioInput</code>            | Emulator or simulator: play a WAV file or tone into the microphone. Off by default      |
 | ⏹️ <code>stopAudioInput</code>              | Stop an audio injection. Off by default                                                 |
 | 🔊 <code>captureAudio</code>                | Emulator or simulator: record audio output and report its level. Off by default         |
-| 📞 <code>phoneCall</code>                   | Simulate an incoming phone call                                                         |
+| 📞 <code>phoneCall</code>                   | Simulate an incoming phone call (iOS Simulator: accept/hold are partial)                |
 | 💬 <code>sendSms</code>                     | Simulate an incoming SMS                                                                |
 | 🎵 <code>mediaSession</code>                | Read or control Android media sessions                                                  |
 | 📣 <code>postNotification</code>            | Post notification via Android SDK hooks or iOS Simulator simctl push                    |

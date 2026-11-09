@@ -65,7 +65,7 @@ export const keyboardResultSchema = z
 const sendKeysErrorCodeSchema = z
   .string()
   .describe(
-    "Stable failure code. NO_FOCUSED_EDITABLE: no editable field has focus; focus the field (tap it, or tapOn with focus), then retry sendKeys without a mode.",
+    'Stable failure code. NO_FOCUSED_EDITABLE: no editable field has focus; focus the field (tap it, or tapOn with focus), then retry sendKeys without a mode. EDITOR_ACTION_MISMATCH: the device reported a semantic key (next, previous, done, search, send, go) as not performed, either because the focused field did not carry out the action or, for done/search/send/go below Android API 30, because the Enter key could not be delivered; observe the screen before retrying. Instead of next use key:"tab" or a selector for the next field; for a submit action tap the submit control if there is one, otherwise key:"enter" may submit, though a multiline field can insert a newline instead.',
   );
 
 /** IME fields live on each command result, never on the sendKeys envelope. */
@@ -188,6 +188,17 @@ export const launchAppResultSchema = z
     verifyFailureReason: z.string().optional(),
     verificationSkipped: z.literal("platform").optional(),
     observedAppId: z.string().optional(),
+    blockedBy: z
+      .object({
+        kind: z.literal("permission_dialog"),
+        packageName: z.string(),
+        permission: z.string().optional(),
+        actions: z.array(z.string()),
+      })
+      .optional()
+      .describe(
+        "Present when the launched app is behind a permission dialog: tapOn one of actions, or pre-grant with setAppPermissions",
+      ),
     prototypeAgent: z
       .object({
         port: z.number().int(),

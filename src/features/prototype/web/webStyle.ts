@@ -513,12 +513,20 @@ export function nodeCss(style: unknown, context: WebStyleContext): Css {
 }
 
 /**
+ * Whether a node is a zeroed row child (see rowSequentialChildren), whose box drops its horizontal
+ * padding (see rowZeroedInline): anything sized from that padding must read it as 0 too.
+ */
+export function rowZeroesInlinePadding(style: Raw, parentAxis: "row" | "column" | undefined) {
+  return parentAxis === "row" && record(style[ROW_MEASURE_KEY])?.zero === true;
+}
+
+/**
  * A zeroed row child's horizontal padding and border sit inside its zero width, as Android sizes the
  * node before its padding (and draws its border without taking layout space). CSS cannot shrink a
  * box below its padding and border, so they are dropped on that axis to keep the box at 0 wide.
  */
 function rowZeroedInline(css: Css, style: Raw, context: WebStyleContext) {
-  if (context.parentAxis !== "row" || record(style[ROW_MEASURE_KEY])?.zero !== true) {
+  if (!rowZeroesInlinePadding(style, context.parentAxis)) {
     return;
   }
   css["padding-inline-start"] = "0px";

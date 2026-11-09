@@ -394,13 +394,15 @@ describe("an image with an inlinable asset", () => {
     expect([wrappedWidth.height, wrappedWidth["min-width"]]).toEqual(["100%", "48px"]);
     const filled = content({ width: "fill", padding: { start: 40, end: 40 } });
     expect(filled["min-width"]).toBe("0");
-    const fixed = content({ width: { dp: 200 }, height: { dp: 200 } });
+    const pad = { top: 4 };
+    const fixed = content({ width: { dp: 200 }, height: { dp: 200 }, padding: pad });
     expect(fixed["aspect-ratio"]).toBeUndefined();
     // An authored ratio or minimum is the node's own.
-    expect(content({ width: { dp: 200 }, aspectRatio: 2 })["aspect-ratio"]).toBeUndefined();
-    expect(content({ minHeight: 30 })["min-height"]).toBe("0");
+    const authored = content({ width: { dp: 200 }, aspectRatio: 2, padding: pad });
+    expect(authored["aspect-ratio"]).toBeUndefined();
+    expect(content({ minHeight: 30, padding: pad })["min-height"]).toBe("0");
     // A bounded axis never keeps the flex item's automatic, ratio-raised minimum.
-    const bounded = content({ width: { dp: 200 }, minHeight: 20, maxHeight: 100 });
+    const bounded = content({ width: { dp: 200 }, minHeight: 20, maxHeight: 100, padding: pad });
     expect(bounded["min-height"]).toBe("0");
     // The minimum yields to the room a maximum leaves inside the padding, and to a weight's zero.
     const capped = content({
@@ -412,12 +414,73 @@ describe("an image with an inlinable asset", () => {
     const weighted = find(
       still({
         type: "row",
-        children: [{ type: "image", asset: "photo", style: { weight: 1, height: { dp: 40 } } }],
+        children: [
+          {
+            type: "image",
+            asset: "photo",
+            style: { weight: 1, height: { dp: 40 }, padding: { top: 4 } },
+          },
+        ],
       }).element,
       (e) => "data-image-content" in e.attrs,
     )[0]!.style;
     // Explicitly zero: an omitted minimum would be the flex item's automatic, ratio-raised one.
     expect(weighted["min-width"]).toBe("0");
+  });
+
+  test("an un-padded image keeps its ratio on the node and its layers at inset 0 (#17716)", () => {
+    const image = (style: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+      find(
+        still({ type: "column", children: [{ type: "image", asset: "photo", style, ...extra }] })
+          .element,
+        (e) => e.attrs["data-node"] === "image",
+      )[0]!;
+    for (const style of [{ width: "fill" }, { weight: 1 }, {}, { padding: { top: 0 } }]) {
+      const node = image(style);
+      // The node's own ratio: a column's weighted share carries it to the wrapped width.
+      expect(node.style["aspect-ratio"]).toBe("var(--pa-3-ar, auto)");
+      const content = node.children[0] as WebElement;
+      expect(content.style).toEqual({ position: "absolute", inset: "0" });
+    }
+    expect(image({ width: { dp: 20 }, height: { dp: 20 } }).style["aspect-ratio"]).toBeUndefined();
+    expect(image({ width: "fill", aspectRatio: 2 }).style["aspect-ratio"]).toBe("2");
+    // A safe-area inset is padding the page resolves at runtime, so the node keeps no ratio.
+    const safe = image(
+      { width: "fill" },
+      { safeAreaPadding: { types: ["systemBars"], edges: ["top"] } },
+    );
+    expect(safe.style["aspect-ratio"]).toBeUndefined();
+    expect((safe.children[0] as WebElement).style.position).toBe("relative");
+  });
+
+  test("a zeroed row child's draw takes out none of the inline padding its box drops (#17681)", () => {
+    const rendered = still({
+      type: "row",
+      style: { width: "fill" },
+      children: [
+        { type: "box", style: { aspectRatio: 1 } },
+        {
+          type: "image",
+          asset: "photo",
+          contentScale: "crop",
+          style: {
+            width: { dp: 100 },
+            minHeight: 60,
+            aspectRatio: 2,
+            padding: { start: 10, end: 20, top: 4, bottom: 6 },
+          },
+        },
+      ],
+    });
+    const node = find(rendered.element, (e) => e.attrs["data-node"] === "image")[0]!;
+    expect([node.style["padding-inline-start"], node.style["padding-inline-end"]]).toEqual([
+      "0px",
+      "0px",
+    ]);
+    // Width keeps its 100 dp (no inline padding out); height keeps its vertical padding out.
+    expect(rendered.imageDraws).toEqual([
+      { asset: "photo", widthDp: 100, heightDp: 50, minHeightDp: 50, scale: "crop" },
+    ]);
   });
 
   test("an opaque tint adds no alpha group", () => {

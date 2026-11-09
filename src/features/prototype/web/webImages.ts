@@ -1,7 +1,7 @@
 import { record, type Raw } from "../prototypeTemplate";
 import { el, type WebElement } from "./webNodes";
 import { resolvePrototypeColor } from "../prototypeContrast";
-import { cssColor, rgbaCss, type WebStyleContext } from "./webStyle";
+import { cssColor, rgbaCss, rowZeroesInlinePadding, type WebStyleContext } from "./webStyle";
 import type { NodeRenderer, WebRenderScope } from "./webRender";
 
 /** How an image fits its box, as both devices read `contentScale` (default `fit`). */
@@ -167,7 +167,7 @@ export function webImageDraw(
   node: Raw,
   parentAxis?: "row" | "column",
 ): WebImageDraw {
-  const style = record(node.style) ?? {};
+  const style = effectivePaddingStyle(record(node.style) ?? {}, parentAxis);
   const weighted = typeof style.weight === "number" ? parentAxis : undefined;
   return {
     asset,
@@ -175,6 +175,17 @@ export function webImageDraw(
     ...axisDraw(style, "height", weightedAxis(weighted)),
     scale: webImageScale(node.contentScale),
   };
+}
+
+/**
+ * The style with the padding the node's box actually lays out: a zeroed row child's box drops its
+ * horizontal padding (see rowZeroesInlinePadding), so its draw and minimums take none out either.
+ */
+function effectivePaddingStyle(style: Raw, parentAxis?: "row" | "column"): Raw {
+  if (!rowZeroesInlinePadding(style, parentAxis)) {
+    return style;
+  }
+  return { ...style, padding: { ...record(style.padding), start: 0, end: 0 } };
 }
 
 /** The node axis a weight along the parent's axis sizes, if any. */
@@ -218,6 +229,31 @@ export function webImageBoxCss(
   };
 }
 
+/** Whether a resolved box has any padding, counting an unresolved one (a safe-area inset) as some. */
+export function webImagePadded(box: Readonly<Record<string, string>>): boolean {
+  return Object.entries(box).some(
+    ([property, value]) => property.startsWith("padding") && !/^0(px)?$/.test(value.trim()),
+  );
+}
+
+/**
+ * An un-padded image node's own aspect ratio on an axis it leaves to wrap, as a native image keeps
+ * its natural size there. Without padding the content box is the node's box, so the ratio stays on
+ * the node, which a flex parent's resolved main size (a weight's share) carries over to the wrapped
+ * cross axis; an in-flow content child's ratio would not (#17716). An authored ratio wins.
+ */
+export function webImageNodeRatioCss(
+  slot: number,
+  node: Raw,
+  box: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const style = record(node.style) ?? {};
+  const both = sized(style.width) && sized(style.height);
+  return webImagePadded(box) || both || "aspect-ratio" in box
+    ? {}
+    : { "aspect-ratio": `var(${webImageVar(slot, "-ar")}, auto)` };
+}
+
 /** Each axis's size field, authored-minimum field, min and max properties, and padding sides. */
 const CONTENT_AXES = [
   ["width", "minWidth", "min-width", "max-width", "padding-inline-start", "padding-inline-end"],
@@ -257,6 +293,10 @@ export function webImageContentCss(
   node: Raw,
   box: Readonly<Record<string, string>>,
 ): Record<string, string> {
+  if (!webImagePadded(box)) {
+    // No padding: the layers cover the node's box, which keeps the ratio (see webImageNodeRatioCss).
+    return { position: "absolute", inset: "0" };
+  }
   const style = record(node.style) ?? {};
   const ratio = wrapped(style.width) || wrapped(style.height);
   return {
@@ -452,7 +492,8 @@ export function webImageRenderer({ base, bound }: WebImageRendererHelpers): Node
       });
       return el("div", { attrs: { ...attrs, role: "img" }, style });
     }
-    const { attrs, style } = base(node, scope, webImageBoxCss(slot, node, placeholder));
+    const { attrs, style: box } = base(node, scope, webImageBoxCss(slot, node, placeholder));
+    const style = { ...box, ...webImageNodeRatioCss(slot, node, box) };
     const content = el(
       "div",
       { attrs: { "data-image-content": "" }, style: webImageContentCss(slot, node, style) },

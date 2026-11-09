@@ -340,10 +340,10 @@ function stillScope(
     ...glyphScope(options, frame),
     screenWidth: size.width,
     screenHeight: size.height,
-    safeInsets: {
-      top: frame.safeArea[orientation].top,
-      bottom: frame.safeArea[orientation].bottom,
-    },
+    // A chromeless screen sets every --safe-* variable to 0px, so its height pass takes none.
+    safeInsets: options.chromeless
+      ? { top: 0, bottom: 0 }
+      : { top: frame.safeArea[orientation].top, bottom: frame.safeArea[orientation].bottom },
     ...optionalScope(options),
     stacks: [],
     layers: [],

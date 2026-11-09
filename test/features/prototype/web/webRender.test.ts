@@ -1353,6 +1353,52 @@ describe("prototype web still (#16346)", () => {
     expect(ratio["flex-basis"]).toBe("152px");
   });
 
+  test("a column consumes its own safe-area inset before sharing its weights (#17610)", () => {
+    const top = { edges: ["top"], types: ["systemBars"] };
+    const weightedRow = (tag: string, extra: Record<string, unknown> = {}) => ({
+      type: "row",
+      style: { weight: 1 },
+      ...extra,
+      children: [{ type: "box", testTag: tag, style: { aspectRatio: 2 } }],
+    });
+    const still = renderPrototypeStill({
+      ...reference,
+      root: {
+        type: "column",
+        style: { height: { dp: 100 } },
+        safeAreaPadding: top,
+        children: [weightedRow("first", { safeAreaPadding: top }), weightedRow("second")],
+      },
+    });
+    // Pixel 9's 48 dp top inset leaves the column 52 dp; the first row's top inset is already
+    // consumed, so it adds no padding and the rows split 52 dp evenly: 26 dp, so 52 px wide each.
+    expect(byTag(still, "first")[0]!.style["flex-basis"]).toBe("52px");
+    expect(byTag(still, "second")[0]!.style["flex-basis"]).toBe("52px");
+  });
+
+  test("a chromeless still's height pass takes no safe-area inset, as its CSS sets none (#17610)", () => {
+    const ratioIn = (options: PrototypeStillOptions) =>
+      byTag(
+        renderPrototypeStill(
+          {
+            ...reference,
+            root: {
+              type: "row",
+              style: { height: { dp: 100 } },
+              safeAreaPadding: { edges: ["top"], types: ["systemBars"] },
+              children: [{ type: "box", testTag: "ratio", style: { aspectRatio: 2 } }],
+            },
+          },
+          options,
+        ),
+        "ratio",
+      )[0]!.style["flex-basis"];
+    // In the frame, Pixel 9's 48 dp top inset leaves the row 52 dp of content.
+    expect(ratioIn({})).toBe("104px");
+    // Chromeless, every --safe-* variable is 0px, so the row keeps its whole 100 dp.
+    expect(ratioIn({ chromeless: true })).toBe("200px");
+  });
+
   test("an explicit wrap-width root keeps its content width in its window", () => {
     const layerOf = (placement: Record<string, unknown>) =>
       find(

@@ -14,6 +14,7 @@ import {
   staticToolChangesHostSideState,
   staticToolChangesOpaquePersistentState,
   staticToolDeclaresInput,
+  type PrototypeFullSchemaFlag,
 } from "../../src/daemon/staticToolDefinitions";
 import type { ProxiedToolDefinition } from "../../src/daemon/daemonMcpProxy";
 import committedDefinitions from "../../schemas/tool-definitions.json";
@@ -246,35 +247,46 @@ describe("getStaticToolDefinitions", () => {
   });
 });
 
-describe("cold prototype spec schema (#17710)", () => {
-  const original = process.env.AUTOMOBILE_PROTOTYPE_FULL_SCHEMA;
-  const coldPrototype = () => getStaticToolDefinitions().find((tool) => tool.name === "prototype")!;
+class FakePrototypeFullSchemaFlag implements PrototypeFullSchemaFlag {
+  constructor(public enabled: boolean) {}
+  isEnabled(): boolean {
+    return this.enabled;
+  }
+}
+
+describe.each([
+  ["cold", (flag: PrototypeFullSchemaFlag) => getStaticToolDefinitions(flag)],
+  [
+    "connected",
+    (flag: PrototypeFullSchemaFlag) => getConnectedStaticToolDefinitions(undefined, flag),
+  ],
+] as const)("%s prototype spec schema (#17710)", (_path, list) => {
+  const prototypeOf = (flag: PrototypeFullSchemaFlag) =>
+    list(flag).find((tool) => tool.name === "prototype")!;
   const specOf = (tool: ProxiedToolDefinition) =>
     (tool.inputSchema.properties as Record<string, Record<string, unknown>>).spec;
+  const committed = committedDefinitions.find((tool) => tool.name === "prototype")!;
   let terse: ProxiedToolDefinition;
   let full: ProxiedToolDefinition;
   beforeAll(() => {
-    delete process.env.AUTOMOBILE_PROTOTYPE_FULL_SCHEMA;
-    terse = coldPrototype();
+    terse = prototypeOf(new FakePrototypeFullSchemaFlag(false));
     // The first flag-on read loads and converts the spec contract; keep that out of the test.
-    process.env.AUTOMOBILE_PROTOTYPE_FULL_SCHEMA = "1";
-    full = coldPrototype();
-  });
-  afterEach(() => {
-    if (original === undefined) {
-      delete process.env.AUTOMOBILE_PROTOTYPE_FULL_SCHEMA;
-    } else {
-      process.env.AUTOMOBILE_PROTOTYPE_FULL_SCHEMA = original;
-    }
+    full = prototypeOf(new FakePrototypeFullSchemaFlag(true));
   });
 
-  test("the cold list advertises the committed terse spec by default", () => {
-    const committed = committedDefinitions.find((tool) => tool.name === "prototype")!;
-    expect(terse.inputSchema).toEqual(committed.inputSchema);
+  test("with the flag unset the prototype schema is byte-identical to the committed one", () => {
+    expect(JSON.stringify(terse.inputSchema)).toBe(JSON.stringify(committed.inputSchema));
     expect(JSON.stringify(specOf(terse))).not.toContain("$ref");
   });
 
-  test("the full-schema flag inlines the full spec on the cold list too", () => {
+  test("with the flag unset every tool's input schema matches the committed definitions", () => {
+    const byName = new Map(committedDefinitions.map((tool) => [tool.name, tool.inputSchema]));
+    for (const tool of list(new FakePrototypeFullSchemaFlag(false))) {
+      expect(JSON.stringify(tool.inputSchema)).toBe(JSON.stringify(byName.get(tool.name)));
+    }
+  });
+
+  test("with the flag set the full spec is inlined and other fields are unchanged", () => {
     const spec = specOf(full);
     expect(spec.description).toBe(specOf(terse).description);
     expect(Object.keys(spec.properties as object)).toEqual(
@@ -287,8 +299,13 @@ describe("cold prototype spec schema (#17710)", () => {
       return properties;
     };
     expect(withoutSpec(full)).toEqual(withoutSpec(terse));
-    process.env.AUTOMOBILE_PROTOTYPE_FULL_SCHEMA = "1";
-    expect(coldPrototype().inputSchema).toEqual(full.inputSchema);
+  });
+
+  test("the flag is re-read on every list", () => {
+    const flag = new FakePrototypeFullSchemaFlag(true);
+    expect(prototypeOf(flag).inputSchema).toEqual(full.inputSchema);
+    flag.enabled = false;
+    expect(prototypeOf(flag).inputSchema).toEqual(committed.inputSchema);
   });
 });
 

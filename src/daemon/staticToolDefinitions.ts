@@ -67,6 +67,16 @@ function isConnectedFallbackAvailable(
   );
 }
 
+/** Reads whether `tools/list` inlines the full prototype spec schema (#17710). */
+export interface PrototypeFullSchemaFlag {
+  isEnabled(): boolean;
+}
+
+/** The production flag: `AUTOMOBILE_PROTOTYPE_FULL_SCHEMA`, re-read on every list. */
+export const envPrototypeFullSchemaFlag: PrototypeFullSchemaFlag = {
+  isEnabled: () => readEnvBool(ENV.PROTOTYPE_FULL_SCHEMA),
+};
+
 let fullPrototypeInputSchema: Record<string, unknown> | undefined;
 
 /**
@@ -75,8 +85,11 @@ let fullPrototypeInputSchema: Record<string, unknown> | undefined;
  * daemon's live list does. The schema module is required only then, so the default cold path
  * never loads the spec contract.
  */
-function coldInputSchema(tool: RawToolDefinition): Record<string, unknown> {
-  if (tool.name !== "prototype" || !readEnvBool(ENV.PROTOTYPE_FULL_SCHEMA)) {
+function coldInputSchema(
+  tool: RawToolDefinition,
+  fullSchemaFlag: PrototypeFullSchemaFlag,
+): Record<string, unknown> {
+  if (tool.name !== "prototype" || !fullSchemaFlag.isEnabled()) {
     return tool.inputSchema;
   }
   if (!fullPrototypeInputSchema) {
@@ -94,6 +107,7 @@ function coldInputSchema(tool: RawToolDefinition): Record<string, unknown> {
 
 function toolDefinitions(
   connectedDaemonOptions: DaemonOptions | undefined | false,
+  fullSchemaFlag: PrototypeFullSchemaFlag,
 ): ProxiedToolDefinition[] {
   const alwaysLoad = isAlwaysLoadToolsEnabled();
   return RAW_DEFINITIONS.filter(
@@ -116,7 +130,7 @@ function toolDefinitions(
       name: tool.name,
       title: tool.title,
       annotations: tool.annotations,
-      inputSchema: coldInputSchema(tool),
+      inputSchema: coldInputSchema(tool, fullSchemaFlag),
     };
     if (tool.description !== undefined) {
       definition.description = tool.description;
@@ -136,15 +150,18 @@ function toolDefinitions(
  * `ToolRegistry.getToolDefinitions()`. `outputSchema` is intentionally omitted
  * (see the file docstring).
  */
-export function getStaticToolDefinitions(): ProxiedToolDefinition[] {
-  return toolDefinitions(false);
+export function getStaticToolDefinitions(
+  fullSchemaFlag: PrototypeFullSchemaFlag = envPrototypeFullSchemaFlag,
+): ProxiedToolDefinition[] {
+  return toolDefinitions(false, fullSchemaFlag);
 }
 
 /** Static schemas eligible to supplement a connected daemon's live tool list. */
 export function getConnectedStaticToolDefinitions(
   daemonOptions?: DaemonOptions,
+  fullSchemaFlag: PrototypeFullSchemaFlag = envPrototypeFullSchemaFlag,
 ): ProxiedToolDefinition[] {
-  return toolDefinitions(daemonOptions);
+  return toolDefinitions(daemonOptions, fullSchemaFlag);
 }
 
 /**

@@ -322,15 +322,18 @@ final class FlowShapingCoordinatorTests: XCTestCase {
         XCTAssertEqual(handler.verdicts.count, 1)
     }
 
-    func testOfflineReplacementAllowsOnce() {
+    func testOfflineReplacementDropsPausedNewFlowOnce() {
         useStore(lease: 15000)
         XCTAssertEqual(admit(), .pause)
-        XCTAssertEqual(store?.execute(RuleFixtures.apply(RuleFixtures.ownership(revision: 2))).outcome, .applied)
+        let offline = RuleFixtures.apply(RuleFixtures.ownership(revision: 2))
+        XCTAssertEqual(store?.execute(offline).outcome, .applied)
         coordinator.rulesChanged()
         advance(10)
-        XCTAssertEqual(handler.verdicts, [.allow])
+        XCTAssertEqual(handler.verdicts, [.drop])
         advance(1000)
-        XCTAssertEqual(handler.verdicts, [.allow])
+        XCTAssertEqual(handler.verdicts, [.drop])
+        // A paused new flow is not an existing connection.
+        XCTAssertEqual(store?.existingFlows(for: offline), .unaffected)
     }
 
     func testLaterDebtCallbackKeepsPauseAndSecondCallbackDropsHandlerOnce() {

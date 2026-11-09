@@ -20,6 +20,7 @@ public struct SystemMonotonicClock: MonotonicClock {
 /// Installed configuration: only offline participates in drop evaluation.
 public enum NetworkRuleCondition: Equatable {
     case offline
+    case watch
     case shaped(ShapingProfile)
 }
 
@@ -27,11 +28,12 @@ public enum NetworkRuleCondition: Equatable {
 /// distinct from installed conditions permits typed rejection of invalid profiles.
 public enum NetworkRuleCommandCondition: Equatable {
     case offline
+    case watch
     case shaped(ShapingRequest)
 }
 
 private enum RuleWireCondition: String, Codable {
-    case offline, shaped
+    case offline, shaped, watch
 }
 
 /// One app on one managed simulator. The bundle identifier only selects flows
@@ -144,6 +146,7 @@ public struct NetworkRuleCommand: Codable, Equatable {
         leaseMilliseconds = try container.decodeIfPresent(UInt64.self, forKey: .leaseMilliseconds)
         switch try container.decodeIfPresent(RuleWireCondition.self, forKey: .condition) {
         case .offline: condition = .offline
+        case .watch: condition = .watch
         case .shaped: condition = try .shaped(container.decode(ShapingRequest.self, forKey: .shaping))
         case nil: condition = nil
         }
@@ -157,6 +160,7 @@ public struct NetworkRuleCommand: Codable, Equatable {
         try container.encodeIfPresent(leaseMilliseconds, forKey: .leaseMilliseconds)
         switch condition {
         case .offline: try container.encode(RuleWireCondition.offline, forKey: .condition)
+        case .watch: try container.encode(RuleWireCondition.watch, forKey: .condition)
         case let .shaped(request):
             try container.encode(RuleWireCondition.shaped, forKey: .condition)
             try container.encode(request, forKey: .shaping)
@@ -211,6 +215,10 @@ public struct NetworkShapingRejection: Codable, Equatable {
     }
 }
 
+public enum ExistingFlows: String, Codable {
+    case dropped, unaffected
+}
+
 public struct NetworkRuleResult: Codable, Equatable {
     public let outcome: NetworkRuleOutcome
     /// The revision now installed for this target by the same owner and generation, if any.
@@ -218,19 +226,22 @@ public struct NetworkRuleResult: Codable, Equatable {
     public let leaseRemainingMilliseconds: UInt64?
     public let shaping: ShapingResolution?
     public let rejection: NetworkShapingRejection?
+    public let existingFlows: ExistingFlows?
 
     public init(
         outcome: NetworkRuleOutcome,
         installedRevision: UInt64? = nil,
         leaseRemainingMilliseconds: UInt64? = nil,
         shaping: ShapingResolution? = nil,
-        rejection: NetworkShapingRejection? = nil
+        rejection: NetworkShapingRejection? = nil,
+        existingFlows: ExistingFlows? = nil
     ) {
         self.outcome = outcome
         self.installedRevision = installedRevision
         self.leaseRemainingMilliseconds = leaseRemainingMilliseconds
         self.shaping = shaping
         self.rejection = rejection
+        self.existingFlows = existingFlows
     }
 }
 
@@ -276,6 +287,9 @@ public struct NetworkRuleStatus: Codable, Equatable {
         case .offline:
             condition = .offline
             shaping = nil
+        case .watch:
+            condition = .watch
+            shaping = nil
         case .shaped:
             let resolution = try container.decode(ShapingResolution.self, forKey: .shaping)
             condition = .shaped(resolution.profile)
@@ -293,6 +307,7 @@ public struct NetworkRuleStatus: Codable, Equatable {
         try container.encode(droppedFlows, forKey: .droppedFlows)
         switch condition {
         case .offline: try container.encode(RuleWireCondition.offline, forKey: .condition)
+        case .watch: try container.encode(RuleWireCondition.watch, forKey: .condition)
         case let .shaped(profile):
             guard let shaping, shaping.profile == profile else {
                 throw EncodingError.invalidValue(condition, .init(
@@ -318,10 +333,11 @@ public struct NetworkRuleTicket: Equatable {
 public struct NetworkRuleEvaluationSnapshot {
     public let tickets: [NetworkRuleTarget: NetworkRuleTicket]
     public let shapedTargets: Set<NetworkRuleTarget>
+    public let watchedTargets: Set<NetworkRuleTarget>
 
     /// The simulators that active rules name: the only ones attribution may select.
     public var managedSimulators: Set<ManagedSimulator> {
-        Set(tickets.keys.map(\.simulator)).union(shapedTargets.map(\.simulator))
+        Set(tickets.keys.map(\.simulator)).union(shapedTargets.map(\.simulator)).union(watchedTargets.map(\.simulator))
     }
 }
 
@@ -347,6 +363,7 @@ public final class NetworkRuleStore: ShapingRuleSource {
         let shaping: ShapingResolution?
         var expiresAt: UInt64
         var droppedFlows: UInt64
+        var droppedExistingFlows: UInt64
 
         var ticket: (String, UInt64, UInt64) {
             (ownership.owner, ownership.ownerGeneration, ownership.revision)
@@ -439,7 +456,10 @@ public final class NetworkRuleStore: ShapingRuleSource {
             )
         }
         let shapedTargets = Set(rules.keys.filter { rules[$0]?.shaping != nil })
-        return NetworkRuleEvaluationSnapshot(tickets: tickets, shapedTargets: shapedTargets)
+        return NetworkRuleEvaluationSnapshot(
+            tickets: tickets, shapedTargets: shapedTargets,
+            watchedTargets: Set(rules.keys.filter { rules[$0]?.condition == .watch })
+        )
     }
 
     /// Commits a drop computed outside the lock. Returns `false`, and counts
@@ -458,6 +478,36 @@ public final class NetworkRuleStore: ShapingRuleSource {
         rule.droppedFlows &+= 1
         rules[ticket.target] = rule
         return true
+    }
+
+    /// A data callback commits against the current offline ticket atomically.
+    public func commitOfflineDrop(for target: NetworkRuleTarget, existingFlow: Bool) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        sweep(now: clock.nowNanoseconds())
+        guard var rule = rules[target], rule.condition == .offline else { return false }
+        rule.droppedFlows &+= 1
+        if existingFlow { rule.droppedExistingFlows &+= 1 }
+        rules[target] = rule
+        return true
+    }
+
+    public func watches(_ target: NetworkRuleTarget) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        sweep(now: clock.nowNanoseconds())
+        return rules[target]?.condition == .watch
+    }
+
+    /// Only this installed revision's committed data drops count; new-flow drops do not.
+    public func existingFlows(for command: NetworkRuleCommand) -> ExistingFlows {
+        lock.lock()
+        defer { lock.unlock() }
+        sweep(now: clock.nowNanoseconds())
+        guard command.kind == .apply, command.condition == .offline,
+              let rule = rules[command.target], rule.ownership == command.ownership,
+              rule.condition == .offline, rule.droppedExistingFlows > 0 else { return .unaffected }
+        return .dropped
     }
 
     /// Ends every rule, as expiry would. Used when the filter stops or restarts.
@@ -527,11 +577,12 @@ public final class NetworkRuleStore: ShapingRuleSource {
         let dropped = rules[target].map { $0.ownership == ownership ? $0.droppedFlows : 0 } ?? 0
         let rule = Rule(
             ownership: ownership,
-            condition: resolution.map { .shaped($0.profile) } ?? .offline,
+            condition: condition == .watch ? .watch : (resolution.map { .shaped($0.profile) } ?? .offline),
             request: condition,
             shaping: resolution,
             expiresAt: now + lease * 1_000_000,
-            droppedFlows: dropped
+            droppedFlows: dropped,
+            droppedExistingFlows: rules[target].map { $0.ownership == ownership ? $0.droppedExistingFlows : 0 } ?? 0
         )
         rules[target] = rule
         return NetworkRuleResult(

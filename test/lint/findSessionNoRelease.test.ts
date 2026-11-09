@@ -192,6 +192,8 @@ const RETAINED_SERVER_EXPIRY_READERS: Readonly<Record<string, number>> = {
   "sessionKeyboardProfile.ts#runSessionKeyboardProfileMutation": 1,
   "sessionPersona.ts#runSessionPersonaMutation": 1,
   "sessionKillProfile.ts#runSessionKillProfileMutation": 1,
+  // Launch-watch admission expires stale sessions; revalidation and tracked setup fence release.
+  "sessionNetworkCondition.ts#prearmSessionAppNetwork": 1,
   "sessionNetworkCondition.ts#runSessionNetworkMutation": 1,
   "sessionPower.ts#createSessionPowerMutation": 1,
   "sessionPower.ts#isLiveOn": 1,

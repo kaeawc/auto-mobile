@@ -1,4 +1,4 @@
-import { ActionableError } from "../models/ActionableError";
+import { ActionableError, toActionableError } from "../models/ActionableError";
 import type {
   IosAppNetworkRule,
   IosAppNetworkRuleCommandContext,
@@ -115,6 +115,7 @@ export class SessionNetworkConditionLifecycle {
   beginIosAppNetworkRule(
     session: Session,
     target: { udid: string; bundleId: string },
+    options: { watch?: boolean } = {},
   ): IosAppNetworkRuleCommandContext {
     const state = session.cacheData.networkCondition;
     const existing = state?.iosAppRule;
@@ -133,7 +134,40 @@ export class SessionNetworkConditionLifecycle {
     if (!existing) {
       session.cacheData.networkCondition = { initialProfile: "none", iosAppRule: rule };
     }
+    if (options.watch) {
+      rule.watch = true;
+    } else {
+      delete rule.watch;
+    }
     return this.iosRuleContext(session, rule, ++rule.lastRevision);
+  }
+
+  /**
+   * Remove this session's passive launch watch when an explicit rule targets a
+   * different app, so the single rule slot holds the requested impairment. An
+   * active impairment is left in place for {@link beginIosAppNetworkRule} to refuse.
+   */
+  async releaseIosAppWatchFor(
+    session: Session,
+    target: { udid: string; bundleId: string },
+  ): Promise<void> {
+    const existing = session.cacheData.networkCondition?.iosAppRule;
+    if (
+      !existing?.watch ||
+      (existing.udid === target.udid && existing.bundleId === target.bundleId)
+    ) {
+      return;
+    }
+    const reset = this.prepareIosAppNetworkReset(session, existing);
+    try {
+      await this.iosAppNetworkRuleRestorer.reset(reset.rule);
+    } catch (error) {
+      throw toActionableError(
+        error,
+        `Failed to release the launch watch for ${existing.bundleId} before applying a rule for ${target.bundleId}`,
+      );
+    }
+    this.finishIosAppNetworkReset(session, reset.rule);
   }
 
   /**

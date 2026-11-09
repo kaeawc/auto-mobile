@@ -13,7 +13,7 @@ public enum AppFlowVerdict: Equatable {
 /// While no rule is active it allows immediately, with no process or Security
 /// lookup. While a rule is active it attributes the flow with
 /// `SimulatorFlowResolver`, limited to the simulators active rules name, and
-/// drops or shapes it only when the flow is `attributed` to that simulator and its app's
+/// drops, watches or shapes it only when the flow is `attributed` to that simulator and its app's
 /// code-signing identifier equals the rule's bundle identifier. Every other
 /// outcome — unattributed, conflicting, a failed lookup, a different app —
 /// fails open and allows the flow.
@@ -60,7 +60,7 @@ public final class AppFlowPolicy {
         // The rule changed while the flow was being attributed. Attribution does
         // not depend on the rule's revision, so re-check the target once.
         if let current = store.currentTicket(for: target), store.commitDrop(current) { return .drop(current) }
-        return store.shapingRule(for: target) == nil ? .allow : .shape(target)
+        return store.watches(target) || store.shapingRule(for: target) != nil ? .shape(target) : .allow
     }
 
     private func identity(_ token: Data) -> ProbeProcessIdentity {

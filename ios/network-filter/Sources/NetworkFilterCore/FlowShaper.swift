@@ -58,6 +58,7 @@ public final class FlowShaper {
         var outboundActivity: UInt64?
         var pending: Pending?
         var allowing = false
+        var watched = false
 
         func activity(_ direction: FlowDirection) -> UInt64? {
             direction == .inbound ? inboundActivity : outboundActivity
@@ -110,6 +111,15 @@ public final class FlowShaper {
         lock.lock()
         defer { lock.unlock() }
         let now = monotonicNow()
+        if ruleSource.watches(target) {
+            // Fail open at capacity without evicting another watched connection.
+            guard flows[flow] != nil || flows.count < Self.maximumFlows else { return .allow }
+            if let pending = flows[flow]?.pending { return .pause(pending.pause) }
+            var tracked = flows[flow] ?? Flow(target: target, transport: transport, lastActive: now)
+            tracked.watched = true
+            flows[flow] = tracked
+            return .filter(inbound: true, outbound: true, peekBytes: 65536)
+        }
         guard let rule = ruleSource.shapingRule(for: target) else {
             flows[flow]?.allowing = true
             if flows[flow]?.pending == nil { flows.removeValue(forKey: flow) }
@@ -127,7 +137,7 @@ public final class FlowShaper {
         }
         if flows.count >= Self.maximumFlows {
             let candidate = flows.filter { _, value in
-                value.pending == nil && now - value.lastActive >= Self.idleEvictionNanoseconds
+                !value.watched && value.pending == nil && now - value.lastActive >= Self.idleEvictionNanoseconds
             }.min { lhs, rhs in
                 (lhs.value.lastActive, lhs.key.uuidString) < (rhs.value.lastActive, rhs.key.uuidString)
             }
@@ -164,6 +174,15 @@ public final class FlowShaper {
             return .allow
         }
         if tracked.allowing { return .allow }
+        if ruleSource.commitOfflineDrop(for: tracked.target, existingFlow: tracked.pending?.pause.phase != .newFlow) {
+            flows.removeValue(forKey: flow)
+            return .drop
+        }
+        if ruleSource.watches(tracked.target) {
+            tracked.lastActive = now
+            flows[flow] = tracked
+            return .pass(bytes: max(0, availableBytes), peekBytes: 65536)
+        }
         guard let rule = ruleSource.shapingRule(for: tracked.target) else {
             // Keep a paused flow's token until resume/settlement so its owner can
             // still settle it exactly once. Allow stops data filtering meanwhile.
@@ -220,6 +239,13 @@ public final class FlowShaper {
         guard var tracked = flows[pause.flow], let pending = tracked.pending, pending.pause == pause else {
             return .alreadySettled
         }
+        if !tracked.allowing, ruleSource.commitOfflineDrop(
+            for: tracked.target,
+            existingFlow: tracked.pending?.pause.phase != .newFlow
+        ) {
+            flows.removeValue(forKey: pause.flow)
+            return .settled(.drop)
+        }
         guard !tracked.allowing, let rule = ruleSource.shapingRule(for: tracked.target) else {
             flows.removeValue(forKey: pause.flow)
             return .settled(.allow)
@@ -259,11 +285,20 @@ public final class FlowShaper {
     public func settleStale() -> [FlowSettlement] {
         lock.lock()
         defer { lock.unlock() }
-        let stale = flows.filter { _, flow in
-            flow.pending != nil && (flow.allowing || ruleSource.shapingRule(for: flow.target) == nil)
-        }.keys
-        let settlements = stale.compactMap { flows.removeValue(forKey: $0)?.pending }
-            .map { FlowSettlement(pause: $0.pause, decision: .allow) }
+        var settlements: [FlowSettlement] = []
+        for (id, flow) in flows {
+            guard let pending = flow.pending else { continue }
+            if !flow.allowing, ruleSource.commitOfflineDrop(
+                for: flow.target,
+                existingFlow: pending.pause.phase != .newFlow
+            ) {
+                flows.removeValue(forKey: id)
+                settlements.append(FlowSettlement(pause: pending.pause, decision: .drop))
+            } else if flow.allowing || ruleSource.shapingRule(for: flow.target) == nil {
+                flows.removeValue(forKey: id)
+                settlements.append(FlowSettlement(pause: pending.pause, decision: .allow))
+            }
+        }
         pruneTimelines()
         return settlements.sorted { $0.pause.id < $1.pause.id }
     }

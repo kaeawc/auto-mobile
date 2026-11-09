@@ -61,7 +61,7 @@ public struct ProbeSnapshot: Codable {
     public let managedSimulators: [ManagedSimulator]?
     /// Version 3 reports offline rules; version 4 also carries shaped configuration.
     public let rules: [NetworkRuleStatus]?
-    /// Version 4 only: adapter activity, omitted when no adapter is attached.
+    /// Versions 4 and 5: adapter activity, omitted when no adapter is attached.
     public let shapingActivity: ShapingActivity?
     public let flows: [ProbeFlow]
     public let limitations: [String]
@@ -70,19 +70,20 @@ public struct ProbeSnapshot: Codable {
 /// Flow-identity diagnostics. Rules are applied by `NetworkRuleStore` and
 /// `AppFlowPolicy`; this type only records and reports.
 public final class IdentityProbe {
-    /// Version 4 carries shaped rules; version 3 read-backs omit them.
-    public static let version = 4
-    public static let supportedVersions = [3, 4]
+    /// Version 5 adds watch-only rules; legacy read-backs omit them.
+    public static let version = 5
+    public static let supportedVersions = [3, 4, 5]
     /// No rule is active: every flow is allowed.
     public static let allowOnlyMode = "allow_only"
     /// At least one leased per-app offline rule is active.
     public static let appOfflineMode = "app_offline"
+    public static let appWatchMode = "app_watch"
     public static let appShapedMode = "app_shaped"
     public static let appMixedMode = "app_mixed"
     public static let modes = [allowOnlyMode, appOfflineMode, appShapedMode, appMixedMode]
 
     public static func modes(for version: Int) -> [String] {
-        version == 3 ? [allowOnlyMode, appOfflineMode] : modes
+        version == 3 ? [allowOnlyMode, appOfflineMode] : (version >= 5 ? modes + [appWatchMode] : modes)
     }
 
     public static let capacity = 128
@@ -145,16 +146,17 @@ public final class IdentityProbe {
             )
         }
         let offline = rules.filter { $0.condition == .offline }
-        let shapedCount = rules.count - offline.count
-        let visible = version == 3 ? offline : rules
+        let shapedCount = rules.filter { if case .shaped = $0.condition { true } else { false } }.count
+        let visible = version == 3 ? offline : (version == 4 ? rules.filter { $0.condition != .watch } : rules)
         let mode: String
         if visible.isEmpty { mode = Self.allowOnlyMode }
+        else if version >= 5, visible.allSatisfy({ $0.condition == .watch }) { mode = Self.appWatchMode }
         else if shapedCount == 0 || version == 3 { mode = Self.appOfflineMode }
         else { mode = offline.isEmpty ? Self.appShapedMode : Self.appMixedMode }
         var limitations = Self.offlineLimitations
         if version == 3, shapedCount > 0 {
             limitations.append("Omitted \(shapedCount) shaped rule(s): contract version 3 supports only offline rules.")
-        } else if version == 4 {
+        } else if version >= 4 {
             limitations
                 .append(
                     "Shaped rules are enforced on NEW flows of the attributed app only; established flows are not shaped."
@@ -165,6 +167,11 @@ public final class IdentityProbe {
                 )
             limitations.append("No network effects have been verified against controlled traffic probes.")
         }
+        if version >= 5 {
+            limitations[1] =
+                "Launch-time watch rules retain data callbacks for the app under test; offline drops those flows " +
+                "on their next callback. Earlier unfiltered connections remain unaffected."
+        }
         return ProbeSnapshot(
             version: version,
             backend: "macos_network_extension",
@@ -173,7 +180,7 @@ public final class IdentityProbe {
             discardedFlows: discardedFlows,
             managedSimulators: managedSimulators,
             rules: visible,
-            shapingActivity: version == 4 ? shapingActivity : nil,
+            shapingActivity: version >= 4 ? shapingActivity : nil,
             flows: flows,
             limitations: limitations
         )

@@ -33,7 +33,7 @@ import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { AndroidCtrlProxyClient } from "./android";
 import type { CtrlProxyScreenshotResult } from "./ios/types";
-import { captureIosPanelScreenshot } from "./ios/CtrlProxyScreenshot";
+import { captureIosPanelScreenshot, needsIosPanelSelection } from "./ios/CtrlProxyScreenshot";
 import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
 import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -236,7 +236,7 @@ export class TakeScreenshot implements ScreenshotService {
       );
       return { success: true, data: png.toString("base64"), format: "png" };
     };
-    if ((this.device.displays?.panels.length ?? 0) < 2) {
+    if (!needsIosPanelSelection(this.device)) {
       return firstPanelCapture();
     }
     // The first panel is a Duo's cover, black while unfolded: select the active panel the way

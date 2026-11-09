@@ -37,7 +37,7 @@ import type { IosHierarchyUnavailableReason } from "../../../models/ViewHierarch
 import { logger } from "../../../utils/logger";
 
 import { SimCtlClient } from "../../../utils/ios-cmdline-tools/SimCtlClient";
-import { captureIosPanelScreenshot } from "./CtrlProxyScreenshot";
+import { captureIosPanelScreenshot, needsIosPanelSelection } from "./CtrlProxyScreenshot";
 import { displayTransitions } from "../DisplayTransition";
 
 import { BootedDevice, HighlightShape, ViewHierarchyResult } from "../../../models";
@@ -667,14 +667,15 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
   }
 
   /**
-   * On a multi-panel device, capture the active panel and keep the runner only as the fallback:
-   * the runner captures the cover display, which is black while a Duo is unfolded (#17366, #17373).
+   * On a multi-panel device, or a Duo whose inventory is empty, capture the active panel and keep
+   * the runner only as the fallback: the runner captures the cover display, which is black while a
+   * Duo is unfolded (#17366, #17373, #17583).
    */
   private async captureActivePanel(
     runnerCapture: () => Promise<CtrlProxyScreenshotResult>,
     signal?: AbortSignal,
   ): Promise<CtrlProxyScreenshotResult> {
-    if ((this.device.displays?.panels.length ?? 0) < 2) {
+    if (!needsIosPanelSelection(this.device)) {
       return runnerCapture();
     }
     const currentPanel = displayTransitions.currentObservedPanel(this.device.deviceId);

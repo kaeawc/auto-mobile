@@ -116,7 +116,7 @@ const deviceStateOutputFields = {
             .enum(POSTURE_SOURCES)
             .optional()
             .describe(
-              "device_state: the device's committed posture. inferred_from_active_panel: mapped from the active panel (inner=opened, cover=closed) without reading the hinge; not a confirmed hinge posture. requested_hinge_angle (iPhone Duo): half_opened because the inner panel is active and the last setPosture hingeAngle lies strictly between 0 and 180 degrees; the hinge is still not read. Omitted when the posture could not be read (posture unknown).",
+              "device_state: the device's committed posture. inferred_from_active_panel: mapped from the active panel (inner=opened, cover=closed) without reading the hinge; not a confirmed hinge posture. requested_hinge_angle (iPhone Duo): half_opened because the inner panel is active and the last angle setPosture applied (a hingeAngle, or 0/130/180 for posture closed/half_opened/opened) lies strictly between 0 and 180 degrees; the hinge is still not read. Omitted when the posture could not be read (posture unknown).",
             ),
           activePanel: z
             .object({ key: z.string(), role: observationDisplaySchema.unwrap().shape.role })
@@ -127,7 +127,7 @@ const deviceStateOutputFields = {
             .finite()
             .optional()
             .describe(
-              "iPhone Duo: the last hinge angle setPosture requested in this daemon. An echo of the request, not a hinge read.",
+              "iPhone Duo: the last hinge angle setPosture requested in this daemon, including the angle a named posture sets (closed 0, half_opened 130, opened 180). An echo of the request, not a hinge read.",
             ),
         })
         .passthrough()

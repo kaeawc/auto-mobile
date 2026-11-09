@@ -59,6 +59,16 @@ import {
 import type { TapOnCtrlProxy } from "./tapHierarchyRead";
 import { TapTargetResolver } from "./TapTargetResolver";
 
+/** Tell the caller a TalkBack accessibility action claimed success, so it can check the effect. */
+function reportSemanticActivation(
+  result: Pick<TalkBackTapResult, "success" | "method">,
+  options: Pick<ResolvedAndroidTapOptions, "onSemanticActivation"> | undefined,
+): void {
+  if (result.success && result.method === "accessibility-action") {
+    options?.onSemanticActivation?.();
+  }
+}
+
 /** Internal action context; never part of the public tapOn schema. */
 export type IosTapOptions = DisplayFenceOption & { signal?: AbortSignal };
 
@@ -66,6 +76,11 @@ export type ResolvedAndroidTapOptions = DisplayFenceOption & {
   resolvedHierarchy?: ViewHierarchyResult;
   /** Receives non-fatal cautions (for example a double tap whose taps started too far apart). */
   onActivationWarning?: (warning: string) => void;
+  /**
+   * Called when a TalkBack accessibility action (ACTION_CLICK) reported success. The reply only
+   * proves the node accepted the action, so the caller checks the screen changed (#17667).
+   */
+  onSemanticActivation?: () => void;
   onResolvedElement?: (
     element: Element,
     selection?: ElementSelectionResult,
@@ -721,6 +736,7 @@ export class TapGestureDispatcher {
         .executeTap(this.host.device().deviceId, element, driver, { fence, signal });
 
       if (result.success) {
+        reportSemanticActivation(result, options);
         // A focus-navigation gesture is acknowledged, not confirmed as an activation.
         this.host.reportTalkBackActivationWarning(result, options, action);
         return result.screenReaderNavigation;
@@ -740,6 +756,7 @@ export class TapGestureDispatcher {
         .executeDirectActivation(element, driver, targetContext);
 
       if (result.success) {
+        reportSemanticActivation(result, options);
         return undefined;
       }
 

@@ -1159,7 +1159,14 @@ describe("TapOnElement screen-reader navigation result", () => {
   const createCommand = (
     tapResult: any,
     activationWarning?: string,
-    coordinate?: { driver: FakeTalkBackNavigationDriver; service: FakeCtrlProxy; element: Element },
+    coordinate?: {
+      driver: FakeTalkBackNavigationDriver;
+      service: FakeCtrlProxy;
+      element: Element;
+      /** Real hierarchy: tap-target promotion runs instead of being stubbed. */
+      hierarchy?: ViewHierarchyResult;
+      matched?: Element;
+    },
   ) => {
     const accessibilityDetector = new FakeAccessibilityDetector();
     accessibilityDetector.setTalkBackEnabled(true);
@@ -1182,9 +1189,11 @@ describe("TapOnElement screen-reader navigation result", () => {
       observationId: "obs-1",
       updatedAt: 1,
       display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
-      screenSize: { width: 100, height: 100 },
+      screenSize: coordinate?.hierarchy
+        ? { width: 1080, height: 2400 }
+        : { width: 100, height: 100 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-      viewHierarchy: { hierarchy: { node: { $: targetElement } } },
+      viewHierarchy: coordinate?.hierarchy ?? { hierarchy: { node: { $: targetElement } } },
     };
     const command = new TapOnElement(androidDevice, new FakeAdbClient(), {
       accessibilityDetector,
@@ -1222,16 +1231,19 @@ describe("TapOnElement screen-reader navigation result", () => {
         indexInMatches: 0,
         totalMatches: 1,
         strategy: "first" as const,
+        ...(coordinate?.matched ? { matchedElement: coordinate.matched } : {}),
       },
       viewHierarchy,
       refreshedFromDevice: true,
       containerFound: true,
       stats: { durationMs: 0, requestCount: 0, changeCount: 0 },
     }));
-    spyOn(command, "resolveTapTargetElement").mockReturnValue({
-      element: targetElement,
-      usedParent: false,
-    });
+    if (!coordinate?.hierarchy) {
+      spyOn(command, "resolveTapTargetElement").mockReturnValue({
+        element: targetElement,
+        usedParent: false,
+      });
+    }
     if (!coordinate) {
       stubCoordinateTap(command);
     }
@@ -1361,11 +1373,18 @@ describe("TapOnElement screen-reader navigation result", () => {
     },
   );
 
-  test("ACTION_CLICK succeeds without an activation warning or coordinate gesture", async () => {
+  test("ACTION_CLICK that changes the screen succeeds without a warning or coordinate gesture", async () => {
     const driver = new FakeTalkBackNavigationDriver();
     driver.doubleTapCapabilitySupported = false;
     const service = new FakeCtrlProxy(new FakeTimer());
     const command = createCommand(undefined, undefined, { driver, service, element });
+    const derive = command.deriveTapEffectAfterPostTapObservation.bind(command);
+    spyOn(command, "deriveTapEffectAfterPostTapObservation").mockImplementation(
+      async (...args) => ({
+        ...(await derive(...args)),
+        effect: { screenChanged: true, basis: "activeWindow changed" },
+      }),
+    );
     const result = await command.execute({ action: "tap", elementId: "test:id/button" });
     expect(result.success).toBe(true);
     expect(result.warnings).toBeUndefined();
@@ -1373,6 +1392,95 @@ describe("TapOnElement screen-reader navigation result", () => {
     expect(driver.tapHistory).toEqual([]);
     expect(driver.doubleTapHistory).toEqual([]);
     expect(service.getTapHistory()).toEqual([]);
+  });
+
+  test("ACTION_CLICK that changes nothing warns with a tapAt next step (#17667)", async () => {
+    const driver = new FakeTalkBackNavigationDriver();
+    const service = new FakeCtrlProxy(new FakeTimer());
+    const command = createCommand(undefined, undefined, { driver, service, element });
+    const result = await command.execute({ action: "tap", elementId: "test:id/button" });
+    expect(result.success).toBe(true);
+    expect(result.effect?.screenChanged).toBe(false);
+    expect(driver.actionHistory).toEqual([{ action: "click", resourceId: "test:id/button" }]);
+    expect(result.warnings).toEqual([
+      'TalkBack activation is unconfirmed: the screen did not change after activating the matched element "test:id/button" [0,0][100,100]. Observe the screen; if the intended control was not activated, use tapAt {x: 50, y: 50} (the matched element\'s center).',
+    ]);
+  });
+
+  test("activates the id-less clickable owner of a non-clickable label, not the container (#17667)", async () => {
+    // Issue shape: a composer container with a stable id holds the real Send button, which has
+    // only a generated id and owns a non-clickable "Send" label.
+    const label: Element = {
+      "content-desc": "Send",
+      bounds: { left: 946, top: 1390, right: 1062, bottom: 1506 },
+    };
+    const owner: Element = {
+      clickable: true,
+      actions: ["click"],
+      bounds: { left: 941, top: 1390, right: 1067, bottom: 1506 },
+    };
+    const container = {
+      "resource-id": "com.example:id/advanced_message_input_container",
+      clickable: "true",
+      bounds: { left: 0, top: 1248, right: 1080, bottom: 1517 },
+    };
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: {
+        node: { $: container, node: [{ $: owner, node: [{ $: label }] }] },
+      },
+    };
+    const driver = new FakeTalkBackNavigationDriver();
+    const service = new FakeCtrlProxy(new FakeTimer());
+    const command = createCommand(undefined, undefined, {
+      driver,
+      service,
+      element: owner,
+      hierarchy,
+      matched: label,
+    });
+
+    const result = await command.execute({ action: "tap", text: "Send" });
+
+    expect(result.success).toBe(true);
+    // No ACTION_CLICK on the container: the owner has no stable selector, so it is focused and
+    // double-tapped at its own center.
+    expect(driver.actionHistory).toEqual([]);
+    expect(driver.tapHistory).toEqual([{ x: 1004, y: 1448, durationMs: 50 }]);
+    expect(driver.doubleTapHistory).toEqual([{ x: 1004, y: 1448 }]);
+    expect(result.element?.bounds).toEqual(owner.bounds);
+    expect(result.warnings).toEqual([TALKBACK_ACTIVATION_WARNING]);
+  });
+
+  test("warns when the activated owner does not contain the matched label (#17667)", async () => {
+    const label: Element = {
+      "content-desc": "Send",
+      bounds: { left: 946, top: 1390, right: 1062, bottom: 1506 },
+    };
+    const owner: Element = {
+      clickable: true,
+      actions: ["click"],
+      // The label overhangs the owner's right edge; a disjoint owner is refused outright.
+      bounds: { left: 941, top: 1390, right: 1040, bottom: 1506 },
+    };
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: { node: { $: owner, node: [{ $: label }] } },
+    };
+    const driver = new FakeTalkBackNavigationDriver();
+    const service = new FakeCtrlProxy(new FakeTimer());
+    const command = createCommand(undefined, undefined, {
+      driver,
+      service,
+      element: owner,
+      hierarchy,
+      matched: label,
+    });
+
+    const result = await command.execute({ action: "tap", text: "Send" });
+
+    expect(result.success).toBe(true);
+    expect(result.warnings).toContain(
+      'The activated element [941,1390][1040,1506] does not contain the matched element "Send" [946,1390][1062,1506], so a different control may have been activated. Observe the screen; if the intended control was not activated, use tapAt {x: 1004, y: 1448} (the matched element\'s center).',
+    );
   });
 
   test("public tap result preserves unconfirmed activation warnings", async () => {

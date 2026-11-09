@@ -975,8 +975,8 @@ export class TapTargetResolver {
     if (typeof targetOptions !== "boolean" && targetOptions.scoped) {
       return { element, usedParent: false };
     }
-    const requireResourceId =
-      typeof targetOptions === "boolean" ? targetOptions : targetOptions.requireResourceId;
+    // `requireResourceId` no longer narrows promotion: the nearest clickable owner is the
+    // target even without an id, and an id-less owner is activated by coordinates (#17667).
     if (!viewHierarchy || !this.host.strategy().promotesClickableAncestor) {
       return { element, usedParent: false };
     }
@@ -985,7 +985,6 @@ export class TapTargetResolver {
     const target = matched
       ? promoteClickableAncestor(matched, nodes, {
           action: action === "longPress" ? "long-press" : "tap",
-          requireResourceId,
         })
       : null;
     if (target?.element) {

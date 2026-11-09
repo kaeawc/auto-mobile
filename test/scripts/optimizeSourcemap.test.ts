@@ -109,24 +109,43 @@ describe("optimizeSourceMap", () => {
 describe("selectSourceMaps", () => {
   const index = "/dist/src/index.js.map";
   const worker = "/dist/src/utils/workers/iosBundleExtractWorker.js.map";
-  const emitted = ["/dist/src/index.js", index, worker];
+  const chunk = "/dist/src/chunk-ab12cd34.js.map";
+  const nestedChunkLike = "/dist/src/utils/chunk-ab12cd34.js.map";
+  const emitted = ["/dist/src/index.js", index, chunk, worker, nestedChunkLike];
 
-  test("default selects only index.js.map and skips the worker map entirely", () => {
-    expect(selectSourceMaps(emitted, index)).toEqual([{ path: index, options: {} }]);
+  test("default selects the main bundle's maps and skips the worker map entirely", () => {
+    expect(selectSourceMaps(emitted, index)).toEqual([
+      { path: index, options: {} },
+      { path: chunk, options: {} },
+    ]);
     const options = { includeDependencySources: true };
-    expect(selectSourceMaps(emitted, index, options)).toEqual([{ path: index, options }]);
+    expect(selectSourceMaps(emitted, index, options)).toEqual([
+      { path: index, options },
+      { path: chunk, options },
+    ]);
   });
 
   test("strip selects every emitted map, with the same options", () => {
     const options = { stripSources: shouldStripSources({}) };
+    expect(selectSourceMaps(emitted, index, options)).toEqual(
+      [index, chunk, worker, nestedChunkLike].map((path) => ({ path, options })),
+    );
+  });
+
+  test("opt-out selects index.js.map and its sibling chunk maps", () => {
+    const options = { stripSources: shouldStripSources({ [STRIP_SOURCES_ENV]: "false" }) };
     expect(selectSourceMaps(emitted, index, options)).toEqual([
       { path: index, options },
-      { path: worker, options },
+      { path: chunk, options },
     ]);
   });
 
-  test("opt-out selects only index.js.map", () => {
-    const options = { stripSources: shouldStripSources({ [STRIP_SOURCES_ENV]: "false" }) };
-    expect(selectSourceMaps(emitted, index, options)).toEqual([{ path: index, options }]);
+  test("Windows separators still match sibling chunk maps", () => {
+    const winIndex = "C:\\a\\dist\\src\\index.js.map";
+    const winChunk = "C:\\a\\dist\\src\\chunk-ab12cd34.js.map";
+    expect(selectSourceMaps([winIndex, winChunk], winIndex)).toEqual([
+      { path: winIndex, options: {} },
+      { path: winChunk, options: {} },
+    ]);
   });
 });

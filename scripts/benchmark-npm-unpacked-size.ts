@@ -16,6 +16,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import type { PackedModuleReader } from "./build/bundle-module-graph";
 import {
   findBundledDependencyViolations,
   findPackedAssetViolations,
@@ -190,14 +191,21 @@ export function validateThresholdConfig(value: unknown): ThresholdConfig {
   return config;
 }
 
+/** npm pack packs the working tree, so a packed path reads the same bytes from disk. */
+export const readPackedModuleFromDisk: PackedModuleReader = (packedPath) =>
+  fs.readFileSync(packedPath, "utf-8");
+
 export function evaluateUnpackedSize({
   unpackedBytes,
   files,
   thresholds,
+  readModule = readPackedModuleFromDisk,
 }: {
   unpackedBytes: number;
   files: readonly { path: string; size: number }[];
   thresholds: ThresholdConfig["thresholds"];
+  /** Reads a packed bundle module so its chunk imports can be checked against `files`; defaults to the working tree. */
+  readModule?: PackedModuleReader;
 }): SizeEvaluation {
   const size = checkThreshold(unpackedBytes, thresholds.unpackedBytes);
   const headroomBytes = thresholds.unpackedBytes - unpackedBytes;
@@ -211,7 +219,10 @@ export function evaluateUnpackedSize({
     thresholds.warnHeadroomBytes !== undefined &&
     headroomBytes < thresholds.warnHeadroomBytes;
   const violations = [
-    ...findPackedAssetViolations(files.map((file) => file.path)),
+    ...findPackedAssetViolations(
+      files.map((file) => file.path),
+      readModule,
+    ),
     ...findBundledDependencyViolations(files),
   ];
   if (!size.passed) {
@@ -359,7 +370,10 @@ function runBenchmark(config: ThresholdConfig, outputPath: string | null): Bench
     const packInfo = parsePackOutput(packResult.stdout);
     packFilename = packInfo.filename;
 
-    const evaluation = evaluateUnpackedSize({ ...packInfo, thresholds: config.thresholds });
+    const evaluation = evaluateUnpackedSize({
+      ...packInfo,
+      thresholds: config.thresholds,
+    });
     const report: BenchmarkReport = {
       ...evaluation,
       timestamp: new Date().toISOString(),

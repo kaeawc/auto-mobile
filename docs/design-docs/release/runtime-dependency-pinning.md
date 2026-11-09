@@ -16,7 +16,8 @@ resolvable. A fixed release must resolve a fixed graph.
 
 ## Why the graph is small
 
-`build.ts` bundles the server into a single `dist/src/index.js`, externalizing
+`build.ts` bundles the server into `dist/src/index.js` plus code-split
+`dist/src/chunk-*.js` siblings, externalizing
 **only** the image backends it loads from `node_modules` at runtime — the `jimp`
 family (`jimp`, `@jimp/core`) and the `sharp` family (`sharp` + the platform
 `@img/sharp-*` binaries). One more package is a runtime dependency without being
@@ -65,6 +66,18 @@ The selected bundle adds about 17 MiB to the package. Source maps do not embed s
 maps are excluded from the tarball (unused at runtime). The unpacked-size guard runs on the trimmed
 pack and is capped at 20,132,659 bytes (16 MiB + 20%; #9571, #12457); a pack with source maps restored
 (23,061,125 bytes) fails, and an untrimmed pack is larger still.
+
+Code splitting (#17683) lets startup parse only the chunks it loads; code behind a
+dynamic `import()` stays unparsed until first use. Chunks are hashed siblings of
+`index.js`, so `import.meta.url`-relative lookups still resolve from `dist/src`.
+The roots derivation scans each chunk the way it scans `index.js`. Because chunk
+names cannot be listed statically, the packed-asset guard (unpacked-size benchmark
+and artifact identity) walks every relative `import`/`import()`/`import.meta.require`
+from the packed entrypoints and fails on any target missing from the tarball. ESM
+evaluates a module's own body only after all of its static imports, so `build.ts`
+also lists the Bun runtime guard and the launcher-pid capture (#11041) as
+entrypoints. That gives each one its own dependency-free chunk. The build then
+fails unless `index.js` imports those chunks first, in that order.
 
 The pinned graph is mirrored in `scripts/release/runtime-graph.json` (the
 manifest) and enforced by:

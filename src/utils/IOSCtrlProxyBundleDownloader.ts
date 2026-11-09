@@ -62,8 +62,8 @@ function resolveWorkerScriptPath(): string {
     // (src/utils/IOSCtrlProxyBundleDownloader.ts), so its sibling worker
     // source is one directory below.
     path.join(moduleDir, "workers", "iosBundleExtractWorker.ts"),
-    // Packaged dist: this module is bundled into dist/src/index.js
-    // (moduleDir === dist/src), while the worker is build.ts's second
+    // Packaged dist: this module is bundled into dist/src/index.js or a sibling
+    // chunk-*.js (moduleDir === dist/src), while the worker is build.ts's second
     // entrypoint, built to dist/src/utils/workers/iosBundleExtractWorker.js.
     path.join(moduleDir, "utils", "workers", "iosBundleExtractWorker.js"),
   ];

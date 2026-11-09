@@ -256,6 +256,23 @@ describe("artifact identity", () => {
     expect(check(record, "native_resources").status).toBe("fail");
     expect(record.nativeResources.entries.ipaSha256.pinnedInBundle).toBe(false);
   });
+  test("finds SHAs pinned in split chunks and refuses a package missing an imported chunk", () => {
+    const f = fixture();
+    f.put(join(root, "dist/src/index.js"), 'import"./chunk-pins.js";');
+    f.put(
+      join(root, "dist/src/chunk-pins.js"),
+      [release.apkSha256, release.ipaSha256, release.runnerSha256].join("\n"),
+    );
+    const record = identify(f.ports);
+    expect(check(record, "native_resources").status).toBe("pass");
+    expect(check(record, "packed_assets").status).toBe("pass");
+    f.files.delete(join(root, "dist/src/chunk-pins.js"));
+    const missing = identify(f.ports);
+    expect(missing.verdict).toBe("refused");
+    expect(check(missing, "packed_assets").detail).toContain(
+      "dist/src/chunk-pins.js (imported by dist/src/index.js)",
+    );
+  });
   test("computes SRI and sha1, promotes only verified tarballs, and refuses mismatch", () => {
     const f = fixture();
     const bytes = packageTarball(f.files);

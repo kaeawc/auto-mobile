@@ -1,3 +1,4 @@
+import { findMissingBundleModules, type PackedModuleReader } from "./bundle-module-graph";
 import { PRUNE_CLASSES } from "../release/trim-bundled-deps";
 
 /** Trailing slashes require a non-empty directory in npm's POSIX file manifest. */
@@ -10,6 +11,14 @@ export const REQUIRED_PACKED_RUNTIME_ASSETS: readonly string[] = [
   "dist/vendor/libwebp/win32-x64/cwebp.exe",
   "dist/vendor/libwebp/win32-x64/dwebp.exe",
 ];
+
+/**
+ * Bundle entrypoints whose module graph must be fully packed. With `splitting`
+ * they import hashed `dist/src/chunk-*.js` files that no static list can name.
+ */
+export const PACKED_BUNDLE_ENTRYPOINTS: readonly string[] = REQUIRED_PACKED_RUNTIME_ASSETS.filter(
+  (entry) => entry.startsWith("dist/src/") && entry.endsWith(".js"),
+);
 
 export const FORBIDDEN_PACKED_ASSETS: readonly string[] = [
   "schemas/tool-definitions.json",
@@ -40,8 +49,16 @@ export function findMissingPackedAssets(
   );
 }
 
-export function findPackedAssetViolations(packedPaths: readonly string[]): string[] {
+export function findPackedAssetViolations(
+  packedPaths: readonly string[],
+  readModule: PackedModuleReader,
+): string[] {
   const missing = findMissingPackedAssets(packedPaths, REQUIRED_PACKED_RUNTIME_ASSETS);
+  const missingModules = findMissingBundleModules(
+    packedPaths,
+    PACKED_BUNDLE_ENTRYPOINTS,
+    readModule,
+  );
   const forbidden = FORBIDDEN_PACKED_ASSETS.filter((entry) => packedPaths.includes(entry));
   const forbiddenPrefixed = packedPaths.filter((entry) =>
     FORBIDDEN_PACKED_PREFIXES.some((prefix) => entry.startsWith(prefix)),
@@ -51,6 +68,7 @@ export function findPackedAssetViolations(packedPaths: readonly string[]): strin
     ...sourceMaps.map((entry) => `Forbidden packed source map: ${entry}`),
     ...forbiddenPrefixed.map((entry) => `Forbidden packed asset: ${entry}`),
     ...missing.map((entry) => `Missing runtime asset: ${entry}`),
+    ...missingModules,
     ...forbidden.map((entry) => `Forbidden packed asset: ${entry}`),
   ];
 }

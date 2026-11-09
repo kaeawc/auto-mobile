@@ -17,6 +17,9 @@ export interface WebImageDraw {
   readonly heightDp?: number;
   readonly widthFill?: true;
   readonly heightFill?: true;
+  /** A wrapped axis's authored minimum less its padding: the least a cover box covers there. */
+  readonly minWidthDp?: number;
+  readonly minHeightDp?: number;
   readonly scale: WebImageScale;
 }
 
@@ -65,6 +68,9 @@ function fixedDp(value: unknown): number | undefined {
 
 const sized = (value: unknown) => value === "fill" || fixedDp(value) !== undefined;
 
+/** A wrapped axis: neither fixed in dp nor filled, so the image's own size decides it. */
+const wrapped = (value: unknown) => !sized(value);
+
 /**
  * The placeholder's 48px minimum on each axis the node does not fix in dp: an authored size wins
  * over the image's default minimum on both devices, so a 24 dp icon stays 24 dp.
@@ -103,6 +109,19 @@ function contentDp(style: Raw, axis: "width" | "height"): number | undefined {
   return Math.max(0, used - padding);
 }
 
+/** A wrapped axis's authored minimum, less its padding: the content box's least extent there. */
+function wrappedMinimumDp(style: Raw, axis: "width" | "height"): number | undefined {
+  const minimum = style[axis === "width" ? "minWidth" : "minHeight"];
+  if (!wrapped(style[axis]) || typeof minimum !== "number") {
+    return undefined;
+  }
+  const padding =
+    axis === "width"
+      ? paddingDp(style, "start") + paddingDp(style, "end")
+      : paddingDp(style, "top") + paddingDp(style, "bottom");
+  return Math.max(0, minimum - padding);
+}
+
 /**
  * The draw a node needs: a fixed axis is its content box, its bounds applied, padding taken out.
  * `parentAxis` is the axis the parent lays children along: a weight there sizes the node by its
@@ -117,10 +136,14 @@ export function webImageDraw(
   const weighted = typeof style.weight === "number" ? parentAxis : undefined;
   const widthDp = weighted === "row" ? undefined : contentDp(style, "width");
   const heightDp = weighted === "column" ? undefined : contentDp(style, "height");
+  const minWidthDp = wrappedMinimumDp(style, "width");
+  const minHeightDp = wrappedMinimumDp(style, "height");
   return {
     asset,
     ...(widthDp === undefined ? {} : { widthDp }),
     ...(heightDp === undefined ? {} : { heightDp }),
+    ...(minWidthDp === undefined ? {} : { minWidthDp }),
+    ...(minHeightDp === undefined ? {} : { minHeightDp }),
     // A weight takes the parent's space by share, as a fill takes it whole: either way it is filled.
     ...(style.width === "fill" || weighted === "row" ? { widthFill: true as const } : {}),
     ...(style.height === "fill" || weighted === "column" ? { heightFill: true as const } : {}),
@@ -148,9 +171,6 @@ export function webImageBoxCss(
   };
 }
 
-/** A wrapped axis: neither fixed in dp nor filled, so the image's own size decides it. */
-const wrapped = (value: unknown) => !sized(value);
-
 /** Each axis's size field, authored-minimum field, min and max properties, and padding sides. */
 const CONTENT_AXES = [
   ["width", "minWidth", "min-width", "max-width", "padding-inline-start", "padding-inline-end"],
@@ -161,12 +181,18 @@ const CONTENT_AXES = [
  * The placeholder's 48px minimum for the content box on each wrapped axis, unless the node authors
  * that minimum. It never outgrows the room the node's box leaves inside its padding, as Android's
  * minimum yields to its constraints: a resolved maximum caps it (a CSS minimum would otherwise
- * override that maximum and paint into the padding), and a weight's zero minimum drops it.
+ * override that maximum and paint into the padding), and a weight's zero minimum zeroes it.
  */
 function contentMinimum(style: Raw, box: Readonly<Record<string, string>>): Record<string, string> {
   const css: Record<string, string> = {};
   for (const [size, authored, minimum, maximum, start, end] of CONTENT_AXES) {
-    if (!wrapped(style[size]) || typeof style[authored] === "number" || box[minimum] === "0") {
+    if (box[minimum] === "0") {
+      // A weight's zero, made explicit: an omitted minimum is the flex item's automatic one, which
+      // the image's ratio would raise past the weight's share.
+      css[minimum] = "0";
+      continue;
+    }
+    if (!wrapped(style[size]) || typeof style[authored] === "number") {
       continue;
     }
     const room =
@@ -285,10 +311,15 @@ export interface WebImageBox {
  * The dp a cover box covers on one axis: its fixed dp, else a filled axis's bound, else a wrapped
  * axis's minimum.
  */
-function coverDp(fixed: number | undefined, filled: true | undefined, fillDp: number) {
-  // A wrapped axis draws at least the content box's 48px minimum, which a padded fixed axis's
-  // smaller content length must not leave the encode short of.
-  return fixed ?? (filled ? fillDp : WRAPPED_MINIMUM_DP);
+function coverDp(
+  fixed: number | undefined,
+  filled: true | undefined,
+  minimum: number | undefined,
+  fillDp: number,
+) {
+  // A wrapped axis draws at least its content minimum (authored, else the 48px default), which a
+  // padded fixed axis's smaller content length must not leave the encode short of.
+  return fixed ?? (filled ? fillDp : (minimum ?? WRAPPED_MINIMUM_DP));
 }
 
 /** The placeholder's minimum on a wrapped axis, in dp (see contentMinimum). */
@@ -306,8 +337,8 @@ export function webImageBox(
   const fillDp = fill === "long" ? long : Math.min(frame.widthDp, frame.heightDp);
   const px = (dp: number) => Math.ceil(dp * frame.density);
   if (draw.scale !== "fit" && (draw.widthDp !== undefined || draw.heightDp !== undefined)) {
-    const width = coverDp(draw.widthDp, draw.widthFill, fillDp);
-    const height = coverDp(draw.heightDp, draw.heightFill, fillDp);
+    const width = coverDp(draw.widthDp, draw.widthFill, draw.minWidthDp, fillDp);
+    const height = coverDp(draw.heightDp, draw.heightFill, draw.minHeightDp, fillDp);
     return {
       ...(width === undefined ? {} : { width: px(width) }),
       ...(height === undefined ? {} : { height: px(height) }),

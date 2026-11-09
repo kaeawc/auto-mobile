@@ -142,6 +142,18 @@ describe("webImageDraw and webImageRule", () => {
     expect(webImageDraw("a", capped).widthDp).toBe(60);
   });
 
+  test("a cover box covers a wrapped axis's authored minimum, less its padding", () => {
+    const draw = webImageDraw("a", {
+      contentScale: "crop",
+      style: { width: { dp: 200 }, minHeight: 150, padding: { start: 80, end: 80 } },
+    });
+    expect(draw).toMatchObject({ widthDp: 40, minHeightDp: 150 });
+    expect(webImageBox(draw, PIXEL)).toEqual({ width: 105, height: 394, cover: true });
+    expect(webImageScaleFactor({ width: 1000, height: 1000 }, [webImageBox(draw, PIXEL)])).toBe(
+      0.394,
+    );
+  });
+
   test("a weighted axis is sized by its share, so the encode treats it as filled", () => {
     const weighted = {
       style: {
@@ -363,7 +375,8 @@ describe("an image with an inlinable asset", () => {
       }).element,
       (e) => "data-image-content" in e.attrs,
     )[0]!.style;
-    expect(weighted["min-width"]).toBeUndefined();
+    // Explicitly zero: an omitted minimum would be the flex item's automatic, ratio-raised one.
+    expect(weighted["min-width"]).toBe("0");
   });
 
   test("an opaque tint adds no alpha group", () => {

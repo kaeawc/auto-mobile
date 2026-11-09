@@ -189,6 +189,20 @@ final class TVCommandPolicyTests: XCTestCase {
         }
     }
 
+    func testAnonymousTextViewNeverEmitsValueRegardlessOfKeyboardPresence() {
+        for keyboardPresent in [false, true] {
+            for placeholder in [nil, ""] as [String?] {
+                let field = TVNodeSketch(elementType: 52, value: "s3cret", placeholder: placeholder)
+                var root = TVNodeSketch(elementType: 2, children: [field])
+                if keyboardPresent {
+                    root.children.append(TVNodeSketch(elementType: 19))
+                }
+                XCTAssertEqual(TVTextEntryPolicy.resolve(root: root).keyboardPresent, keyboardPresent)
+                XCTAssertEqual(emittedTexts(in: root), keyboardPresent ? ["", "", ""] : ["", ""])
+            }
+        }
+    }
+
     func testCapturedKeyboardTextViewEmitsOnlyItsOwnLabel() {
         for value in ["hello", ""] {
             let root = keyboardTree(value: value, entryLabel: "Entry label")
@@ -258,6 +272,8 @@ final class TVCommandPolicyTests: XCTestCase {
         for type in [45, 49, 52] {
             let root = TVNodeSketch(elementType: type, label: "Label", value: "hello", placeholder: "Placeholder")
             XCTAssertEqual(emittedTexts(in: root), ["Label hello"])
+            let identifierOnly = TVNodeSketch(elementType: type, identifier: "plain-field", value: "hello")
+            XCTAssertEqual(emittedTexts(in: identifierOnly), ["hello"])
         }
         let placeholder = TVNodeSketch(
             elementType: 49,

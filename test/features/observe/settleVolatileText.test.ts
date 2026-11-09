@@ -258,6 +258,52 @@ describe("RealSettleObserve on a running stopwatch (#17670)", () => {
     expect(result.observation.viewHierarchy?.updatedAt).toBe(40);
   });
 
+  test("one-off changes on two nodes sharing a local identity do not mask each other", async () => {
+    // Two subtrees whose rows share resource id, bounds and sibling index.
+    const twoRows = (a: string, b: string, updatedAt: number): ObserveResult => {
+      const row = (text: string): TestHierarchyNode => ({
+        class: "android.widget.LinearLayout",
+        bounds: { left: 0, top: 0, right: 1080, bottom: 200 },
+        node: [
+          {
+            class: "android.widget.TextView",
+            "resource-id": "com.example:id/status",
+            bounds: { left: 0, top: 0, right: 500, bottom: 100 },
+            text,
+          },
+        ],
+      });
+      const screen = stopwatchScreen("6:15", "00", updatedAt);
+      return {
+        ...screen,
+        viewHierarchy: {
+          ...screen.viewHierarchy,
+          hierarchy: {
+            node: {
+              class: "android.widget.FrameLayout",
+              node: [
+                { class: "android.widget.FrameLayout", node: [row(a)] },
+                { class: "android.widget.ScrollView", node: [row(b)] },
+              ],
+            },
+          },
+        },
+      } as ObserveResult;
+    };
+    const result = await settle([
+      twoRows("A0", "B0", 10),
+      twoRows("A1", "B0", 20),
+      twoRows("A1", "B1", 30),
+      twoRows("A1", "B2", 40),
+      twoRows("A1", "B2", 50),
+    ]);
+    // Neither row changed twice in a row, so nothing is masked: the first stable
+    // pair is the last two reads.
+    expect(result.settled).toBe(true);
+    expect(result.polls).toBe(5);
+    expect(result.observation.viewHierarchy?.updatedAt).toBe(50);
+  });
+
   test("a screen change forgets volatile nodes", async () => {
     const result = await settle([
       stopwatchScreen("6:15", "97", 10),

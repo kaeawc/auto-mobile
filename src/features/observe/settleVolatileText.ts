@@ -1,6 +1,8 @@
 import type { ObserveDiff, ObserveDiffNode } from "./output/ObserveResultOutput";
 import type { ObserveDiffNodeChange } from "./output/resultOutput/diffTypes";
 import { diffAttributes } from "./output/resultOutput/diffComparison";
+import { flattenForDiff } from "./output/resultOutput/hierarchy";
+import type { ObserveResult } from "../../models";
 
 /**
  * Attributes that may differ between the two sides of a pure text change. The
@@ -34,6 +36,29 @@ function differsOnlyInText(from: ObserveDiffNode, to: ObserveDiffNode): boolean 
   );
 }
 
+/**
+ * Text-free identities held by more than one node in any of the observations.
+ * Such an identity cannot tell nodes in different subtrees apart, so a change on
+ * one could be mistaken for a repeat change on another; it is never tracked.
+ */
+export function sharedIdentities(...observations: ObserveResult[]): Set<string> {
+  const shared = new Set<string>();
+  for (const observation of observations) {
+    const seen = new Set<string>();
+    for (const node of flattenForDiff(observation)) {
+      const identity = textFreeIdentity(node.key);
+      if (identity === undefined) {
+        continue;
+      }
+      if (seen.has(identity)) {
+        shared.add(identity);
+      }
+      seen.add(identity);
+    }
+  }
+  return shared;
+}
+
 function groupByIdentity(nodes: readonly ObserveDiffNode[]): Map<string, ObserveDiffNode[]> {
   const groups = new Map<string, ObserveDiffNode[]>();
   for (const node of nodes) {
@@ -56,7 +81,7 @@ function isTextOnlyChange(change: ObserveDiffNodeChange): boolean {
  * and one added node share the identity and agree on every other attribute, or
  * a matched (`changed`) node changed nothing but its text.
  */
-function textOnlyChanges(diff: ObserveDiff): Set<string> {
+function textOnlyChanges(diff: ObserveDiff, shared: ReadonlySet<string>): Set<string> {
   const changes = new Set<string>();
   const added = groupByIdentity(diff.added);
   for (const [identity, removed] of groupByIdentity(diff.removed)) {
@@ -74,6 +99,9 @@ function textOnlyChanges(diff: ObserveDiff): Set<string> {
     if (identity !== undefined && isTextOnlyChange(change)) {
       changes.add(identity);
     }
+  }
+  for (const identity of shared) {
+    changes.delete(identity);
   }
   return changes;
 }
@@ -107,10 +135,12 @@ export class VolatileTextTracker {
 
   /**
    * Record this diff's text-only changes and return the diff with the text-only
-   * changes of volatile nodes removed. The input diff is not mutated.
+   * changes of volatile nodes removed. The input diff is not mutated. `shared`
+   * lists identities several nodes hold (see {@link sharedIdentities}); they are
+   * neither tracked nor masked.
    */
-  mask(diff: ObserveDiff): ObserveDiff {
-    const changes = textOnlyChanges(diff);
+  mask(diff: ObserveDiff, shared: ReadonlySet<string> = new Set()): ObserveDiff {
+    const changes = textOnlyChanges(diff, shared);
     for (const identity of changes) {
       if (this.previousChanges.has(identity)) {
         this.volatile.add(identity);

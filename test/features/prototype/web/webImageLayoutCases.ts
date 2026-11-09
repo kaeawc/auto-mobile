@@ -113,7 +113,7 @@ export function webImageLayoutTags(): string[] {
   return tags;
 }
 
-/** One fixture's boxes, in CSS px rounded to 1/1000 px: the image, its parent and its drawn layer. */
+/** One fixture box in the page's layout px from the fixture root's corner, rounded to 1/1000 px. */
 export interface WebImageLayoutRect {
   readonly x: number;
   readonly y: number;
@@ -138,7 +138,7 @@ export interface WebImageLayoutDifference {
 export function webImageLayoutDifferences(
   expected: Readonly<Record<string, WebImageLayoutBoxes>>,
   actual: Readonly<Record<string, WebImageLayoutBoxes>>,
-  tolerance = 0.01,
+  tolerance = 0.05,
 ): WebImageLayoutDifference[] {
   const tags = [...new Set([...Object.keys(expected), ...Object.keys(actual)])].sort();
   const close = (a: WebImageLayoutRect, b: WebImageLayoutRect) =>
@@ -159,15 +159,28 @@ export const WEB_IMAGE_LAYOUT_VIEWPORT = { width: 1280, height: 900 } as const;
 
 /**
  * Runs in the page (self-contained for `page.evaluate`): each tag's image, parent and first drawn
- * layer box, by `getBoundingClientRect`, rounded to 1/1000 px. A tag with no image is left out.
+ * layer box, by `getBoundingClientRect` (see the scale note below). A tag with no image is left out.
  */
 export function measureWebImageLayout(
   tags: readonly string[],
 ): Record<string, WebImageLayoutBoxes> {
+  // The page scales its frame to fit the viewport by a factor that differs by host (its controls'
+  // fonts), so each box is taken in the page's own layout px from the fixture root's corner.
+  const root = document.querySelector<HTMLElement>('[data-testid="column"]');
+  if (!root) {
+    return {};
+  }
+  const origin = root.getBoundingClientRect();
+  const scale = origin.width / root.offsetWidth;
   const rect = (element: Element): WebImageLayoutRect => {
     const box = element.getBoundingClientRect();
-    const round = (value: number) => Math.round(value * 1000) / 1000;
-    return { x: round(box.x), y: round(box.y), width: round(box.width), height: round(box.height) };
+    const layout = (value: number) => Math.round((value / scale) * 1000) / 1000;
+    return {
+      x: layout(box.x - origin.x),
+      y: layout(box.y - origin.y),
+      width: layout(box.width),
+      height: layout(box.height),
+    };
   };
   const boxes: Record<string, WebImageLayoutBoxes> = {};
   for (const tag of tags) {

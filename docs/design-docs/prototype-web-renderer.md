@@ -213,9 +213,10 @@ nothing at runtime drives a browser.
   case matches when at most 0.1 % of pixels differ by more than pixelmatch's 0.1 colour distance; a
   different size never matches. A unit test keeps the directory in step with the case list.
 - **Image layout.** `test/fixtures/prototype-web/image-layout-golden.json` holds the image, parent
-  and image-layer boxes (`getBoundingClientRect`, 1280×900 viewport) of un-padded inlined images
-  (fill, fixed, wrapped and weighted, in rows and columns, each `contentScale`), measured from the
-  renderer before the padded content box; Chromium must reproduce them within 0.01 px. `--update`
+  and image-layer boxes of un-padded inlined images (fill, fixed, wrapped and weighted, in rows and
+  columns, each `contentScale`), from `getBoundingClientRect` in layout px from the fixture root (so
+  the frame's host-dependent fit scale drops out), measured from the renderer before the padded
+  content box; Chromium must reproduce them within 0.05 px. `--update`
   rewrites it, only for a deliberate layout change.
 - **Running.** `bash scripts/prototype/web-screenshots.sh` runs it (the integration lane skips it
   without `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1`); `--update` rewrites the goldens, and

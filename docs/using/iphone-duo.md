@@ -6,16 +6,23 @@ reports the active panel.
 
 ## Reading the posture with getDeviceState
 
+`getDeviceState` is not listed in `tools/list` by default. A client that picks tools from
+discovery must enable it first with
+`setToolEnabled` (`{ "toolName": "getDeviceState", "enabled": true }`); see
+[Dynamic Tools](dynamic-tools.md). A client can also call it directly by name without enabling it.
+
 `getDeviceState` reports `displays.current` with the active panel (`activePanel`) and a posture
 inferred from it: `opened` when the inner panel is active, `closed` when the cover panel is
 active. AutoMobile cannot read the iPhone Duo hinge, so `postureSource` is
-`inferred_from_active_panel`: a half-folded Duo with its inner panel active still reads `opened`.
+`inferred_from_active_panel`: a half-folded Duo reads `opened` when its inner panel is active and `closed` when its cover panel
+is active.
 Do not treat this as a confirmed hinge posture. Use `activePanel` to decide which screen you are
 on, and call `setPosture` when a test needs a specific posture. When the active panel cannot be
 determined, `displays.current` is omitted.
 
 On an Android foldable, `postureSource` is `device_state`: the posture the device itself
-committed.
+committed. When the device cannot report its posture, `posture` is `unknown` and `postureSource`
+is omitted.
 
 ## Home-screen icons after an unfold
 

@@ -16,6 +16,8 @@ import {
  * `inferred_from_active_panel` maps the active panel to a posture (iPhone Duo: inner means
  * opened, cover means closed) without reading the hinge, so a half-folded Duo with its inner
  * panel active still reads `opened`. Consumers must not treat an inferred posture as confirmed.
+ * Omitted when an Android posture read fails and posture falls back to `unknown`: no source
+ * established it.
  */
 export type PostureSource = "device_state" | "inferred_from_active_panel";
 
@@ -27,7 +29,8 @@ export const POSTURE_SOURCES = [
 /** The live posture and active physical panel. */
 export interface CurrentDisplayState {
   posture: Posture;
-  postureSource: PostureSource;
+  /** Omitted when the posture could not be read (`unknown`). */
+  postureSource?: PostureSource;
   /** Omitted when the live display list names no inventory panel. */
   activePanel?: { key: string; role: PanelRole };
 }
@@ -99,7 +102,8 @@ export async function readCurrentDisplayState(
   const panel = device.displays?.panels.find((candidate) => candidate.key === observed.display.key);
   return {
     posture,
-    postureSource: "device_state",
+    // A failed device_state read falls back to unknown; do not attribute that to the device.
+    ...(posture === "unknown" ? {} : { postureSource: "device_state" as const }),
     ...(panel ? { activePanel: { key: panel.key, role: panel.role } } : {}),
   };
 }

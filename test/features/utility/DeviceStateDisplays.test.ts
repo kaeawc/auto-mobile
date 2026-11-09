@@ -131,16 +131,20 @@ describe("getDeviceState displays.current (#17049)", () => {
     });
   });
 
-  test("a failed device_state read reports an unknown posture without failing the call", async () => {
+  test("a failed device_state read reports an unknown posture with no postureSource", async () => {
     const adb = foldAdb("open");
     adb.setCommandError("shell cmd device_state", new Error("adb: device_state read failed"));
     const result = await readDisplays(fold, adb);
     expect(result.success).toBe(true);
     expect(result.displays?.current).toEqual({
       posture: "unknown",
-      postureSource: "device_state",
       activePanel: { key: INNER, role: "inner" },
     });
+    const parsed = getDeviceStateResultSchema.parse({
+      message: deviceStateMessage(result),
+      ...result,
+    });
+    expect(parsed.displays?.current).not.toHaveProperty("postureSource");
   });
 
   test("single-panel Android and iOS inventories issue no posture reads", async () => {

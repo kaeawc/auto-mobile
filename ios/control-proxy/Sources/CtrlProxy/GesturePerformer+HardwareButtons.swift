@@ -133,19 +133,17 @@ import os
         )
             throws
         {
-            let deadline = Date(timeIntervalSinceNow: 1.5)
-            var after = before
-            while Date() < deadline {
-                RunLoop.current.run(until: min(deadline, Date(timeIntervalSinceNow: 0.1)))
-                do {
-                    after = try SplitViewBackGesture.screenSignature(splitViewBackSnapshot(in: app), size: size)
-                    if SplitViewBackGesture.didChange(before: before, after: after) { return }
-                } catch {
-                    // The tap was already sent; retry the read, never risk a second back gesture.
-                    logger.debug("pressBack verification snapshot unavailable: \(error)")
+            let clock = SplitViewBackGesture.RunLoopClock()
+            try SplitViewBackGesture.verifyBack(
+                before: before, deadline: clock.now().addingTimeInterval(1.5), pollInterval: 0.1,
+                clock: clock,
+                readSignature: {
+                    try SplitViewBackGesture.screenSignature(self.splitViewBackSnapshot(in: app), size: size)
+                },
+                onSnapshotError: { error in
+                    self.logger.debug("pressBack verification snapshot unavailable: \(error)")
                 }
-            }
-            try SplitViewBackGesture.requireChange(before: before, after: after)
+            )
         }
 
         private func splitViewBackSnapshot(in app: XCUIApplication) throws -> [SplitViewBackGesture.ElementSnapshot] {

@@ -24,16 +24,17 @@ focus-navigation hint for touch gestures (`tapAt`, `swipeOn`, `pinchOn`,
 The single `@MainActor` router uses `TVTextEntryCommands` to share a `TVKeyboardSettleGate`
 across hierarchy, append-text and post-press snapshots, using an injected uptime clock. The gate's only
 mutable state is `lastKeyboardSeen`, initialized to the current uptime so a fresh
-runner withholds values for its first window. A failed post-press snapshot stamps
-the current uptime conservatively without failing the successful press response.
+runner withholds values for its first window. Any failed hierarchy, append-text or
+post-press snapshot stamps the current uptime conservatively before returning.
+Hierarchy and append-text propagate the snapshot error; a successful press still succeeds.
 Hierarchy, append-text and press requests carry the daemon's foreground-app hint.
 Append-text stamps the known keyboard-present tree again after typing completes.
 A type-19 keyboard node anywhere in a snapshot updates that timestamp and
 withholds every text-input value (types 45, 49, 50 and 52), regardless of focus
 or position in the tree. Withholding continues across snapshots without a
 keyboard until at least `settleWindow = 1.0` seconds have elapsed since the last
-keyboard snapshot or typing completion and the current snapshot contains neither a keyboard nor an
-anonymous type-45, type-49 or type-52 input. Anonymous means identifier, label
+keyboard snapshot, typing completion or snapshot failure and the current snapshot contains
+neither a keyboard nor an anonymous type-45, type-49 or type-52 input. Anonymous means identifier, label
 and placeholder are all empty after trimming whitespace and newlines; a nil
 placeholder is empty. Only then is the timestamp cleared. Backward or non-finite
 clock readings fail closed; a non-finite stored timestamp also prevents release

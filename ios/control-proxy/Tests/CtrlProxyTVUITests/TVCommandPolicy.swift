@@ -134,7 +134,7 @@ final class TVKeyboardSettleGate {
         lastKeyboardSeen = clock.now()
     }
 
-    /// A failed post-press snapshot cannot prove that the keyboard is absent.
+    /// A failed snapshot cannot prove that the keyboard is absent.
     func noteSnapshotFailure() {
         lastKeyboardSeen = clock.now()
     }
@@ -168,8 +168,20 @@ final class TVTextEntryCommands {
         keyboardSettleGate = TVKeyboardSettleGate(clock: clock)
     }
 
-    func hierarchy(root: TVNodeSketch) -> TVTextEntryResolution {
-        keyboardSettleGate.resolve(root: root)
+    func hierarchy<Snapshot>(
+        snapshot: () throws -> Snapshot, sketch: (Snapshot) -> TVNodeSketch
+    )
+        throws -> (snapshot: Snapshot, root: TVNodeSketch, resolution: TVTextEntryResolution)
+    {
+        let captured: Snapshot
+        do {
+            captured = try snapshot()
+        } catch {
+            keyboardSettleGate.noteSnapshotFailure()
+            throw error
+        }
+        let root = sketch(captured)
+        return (captured, root, keyboardSettleGate.resolve(root: root))
     }
 
     func press(
@@ -185,8 +197,8 @@ final class TVTextEntryCommands {
         }
     }
 
-    func appendText(root: TVNodeSketch, typeText: () -> Void) -> Bool {
-        _ = keyboardSettleGate.resolve(root: root)
+    func appendText(snapshot: () throws -> TVNodeSketch, typeText: () -> Void) throws -> Bool {
+        let root = try hierarchy(snapshot: snapshot, sketch: { $0 }).root
         guard TVTextEntryPolicy.hasFocusedKeyboard(root) else { return false }
         typeText()
         // Typing can outlast the settle window; the known keyboard was in use until now.

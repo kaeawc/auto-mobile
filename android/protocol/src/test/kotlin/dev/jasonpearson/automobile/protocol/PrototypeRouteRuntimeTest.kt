@@ -47,6 +47,17 @@ class PrototypeRouteRuntimeTest {
       override fun event(pointer: String): JsonElement? = null
     }
 
+  private val pathStack =
+    node(
+      """{"type":"stack","id":"nav","start":"A","screens":{
+        "A":{"type":"text","text":"A {route.x}"},
+        "B":{"type":"text","text":"B {route.x}"}},
+        "routes":{"A":{"params":{"x":"string"},
+          "onEnter":[{"type":"emit","name":"entered_{route.x}"}]},
+          "B":{"params":{"x":"string"}}}}""",
+    )
+      as PrototypeStackNode
+
   @Test
   fun `params resolve literals and bindings, and only scalars`() {
     assertEquals(
@@ -98,7 +109,71 @@ class PrototypeRouteRuntimeTest {
   }
 
   @Test
-  fun `a root whose stacks have no top params is returned as is`() {
+  fun `each screen in the path binds its own params and a popped screen stays authored`() {
+    val snapshot =
+      PrototypeStackSnapshot.of(
+        listOf("A", "B"),
+        listOf(obj("""{"x":"first"}"""), obj("""{"x":"second"}""")),
+      )
+    val bound =
+      PrototypeRouteRuntime.bindRoot(pathStack, mapOf("nav" to snapshot)) as PrototypeStackNode
+    assertEquals("A first", (bound.screens.getValue("A") as PrototypeTextNode).text)
+    assertEquals("B second", (bound.screens.getValue("B") as PrototypeTextNode).text)
+    assertEquals(pathStack.routes, bound.routes)
+
+    val popped =
+      PrototypeRouteRuntime.bindRoot(pathStack, mapOf("nav" to snapshot.dropLast()))
+        as PrototypeStackNode
+    assertEquals("A first", (popped.screens.getValue("A") as PrototypeTextNode).text)
+    assertEquals(pathStack.screens.getValue("B"), popped.screens.getValue("B"))
+    assertEquals(pathStack.routes, popped.routes)
+  }
+
+  @Test
+  fun `a repeated screen binds the params of its topmost path entry`() {
+    val snapshot =
+      PrototypeStackSnapshot.of(
+        listOf("A", "A", "B"),
+        listOf(
+          obj("""{"x":"first"}"""),
+          obj("""{"x":"latest"}"""),
+          obj("""{"x":"top"}"""),
+        ),
+      )
+    val bound =
+      PrototypeRouteRuntime.bindRoot(pathStack, mapOf("nav" to snapshot)) as PrototypeStackNode
+    assertEquals("A latest", (bound.screens.getValue("A") as PrototypeTextNode).text)
+    assertEquals("B top", (bound.screens.getValue("B") as PrototypeTextNode).text)
+  }
+
+  @Test
+  fun `params below an empty top entry still bind`() {
+    val snapshot =
+      PrototypeStackSnapshot.of(
+        listOf("A", "B"),
+        listOf(obj("""{"x":"first"}"""), obj("{}")),
+      )
+    val bound =
+      PrototypeRouteRuntime.bindRoot(pathStack, mapOf("nav" to snapshot)) as PrototypeStackNode
+    assertEquals("A first", (bound.screens.getValue("A") as PrototypeTextNode).text)
+    assertEquals(pathStack.screens.getValue("B"), bound.screens.getValue("B"))
+  }
+
+  @Test
+  fun `an empty topmost occurrence does not inherit an earlier occurrence's params`() {
+    val snapshot =
+      PrototypeStackSnapshot.of(
+        listOf("A", "A", "B"),
+        listOf(obj("""{"x":"first"}"""), obj("{}"), obj("""{"x":"top"}""")),
+      )
+    val bound =
+      PrototypeRouteRuntime.bindRoot(pathStack, mapOf("nav" to snapshot)) as PrototypeStackNode
+    assertEquals(pathStack.screens.getValue("A"), bound.screens.getValue("A"))
+    assertEquals("B top", (bound.screens.getValue("B") as PrototypeTextNode).text)
+  }
+
+  @Test
+  fun `a root whose stacks have no params is returned as is`() {
     assertSame(
       stack,
       PrototypeRouteRuntime.bindRoot(stack, mapOf("nav" to PrototypeStackSnapshot(listOf("feed")))),

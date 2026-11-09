@@ -107,16 +107,20 @@ object PrototypeRouteRuntime {
   }
 
   /**
-   * [root] with each stack's top screen bound to its top entry's params, nested stacks with their
-   * own. The same instance comes back when no stack's top entry has params, which is the only case
-   * where a `{route.<name>}` placeholder can be on screen.
+   * [root] with each screen in a stack's path bound to its topmost entry's params, nested stacks
+   * with their own. The same instance comes back when no entry of any stack has params.
    */
   fun bindRoot(
     root: PrototypeNode,
     stacks: Map<String, PrototypeStackSnapshot>,
     json: Json = defaultJson,
   ): PrototypeNode {
-    if (stacks.values.none { it.paramsAt(it.path.lastIndex).isNotEmpty() }) return root
+    if (
+      stacks.values.none { snapshot ->
+        snapshot.path.indices.any { snapshot.paramsAt(it).isNotEmpty() }
+      }
+    )
+      return root
     val encoded = json.encodeToJsonElement(PrototypeNode.serializer(), root)
     return json.decodeFromJsonElement(
       PrototypeNode.serializer(),
@@ -171,7 +175,7 @@ internal object PrototypeRouteBinder {
         else element
     }
 
-  /** A stack's own fields bind in the enclosing scope; its top screen in its own. */
+  /** A stack's own fields bind in the enclosing scope; path screens use their topmost entry. */
   private fun bindStack(
     stack: JsonObject,
     params: JsonObject,
@@ -180,14 +184,17 @@ internal object PrototypeRouteBinder {
     val id = (stack["id"] as? JsonPrimitive)?.content
     val snapshot = id?.let(stacks::get)
     val top = snapshot?.path?.lastOrNull() ?: (stack["start"] as? JsonPrimitive)?.content
-    val topParams = snapshot?.paramsAt(snapshot.path.lastIndex) ?: empty
+    val screenParams =
+      snapshot?.let {
+        it.path.indices.associate { index -> it.path[index] to it.paramsAt(index) }
+      } ?: mapOf(top to empty)
     return JsonObject(
       stack.mapValues { (name, value) ->
         when (name) {
           "screens" ->
             JsonObject(
               (value as JsonObject).mapValues { (screen, node) ->
-                if (screen == top) bind(node, topParams, stacks) else node
+                screenParams[screen]?.let { bind(node, it, stacks) } ?: node
               },
             )
           // Lifecycle lists bind when they run, with the entry that runs them.

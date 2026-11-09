@@ -262,3 +262,64 @@ STUB
   unpack_archive
   assert_runtime_archive
 }
+
+@test "a link planted at the shared-directory temporary archive path is never written through" {
+  seed_existing_archive
+  local output_dir victim planted stub_dir real_mktemp real_zip entries
+  output_dir="$(dirname "$OUTPUT_PATH")"
+  victim="${TEST_ROOT}/victim"
+  planted="${output_dir}/.$(basename "$OUTPUT_PATH").planted"
+  printf 'victim contents\n' > "$victim"
+  cp "$victim" "${TEST_ROOT}/victim.orig"
+  ln -s "$victim" "$planted"
+
+  # Make the former shared-directory temporary file path predictable and let a
+  # zip wrapper re-plant the link there, as another user racing the script would.
+  stub_dir="${TEST_ROOT}/bin"
+  mkdir -p "$stub_dir"
+  real_mktemp="$(command -v mktemp)"
+  real_zip="$(command -v zip)"
+  cat > "${stub_dir}/mktemp" <<STUB
+#!/bin/bash
+if [[ \$# -eq 1 && "\$1" == "${output_dir}/"* ]]; then
+  printf '%s\n' "${planted}"
+  exit 0
+fi
+exec "${real_mktemp}" "\$@"
+STUB
+  cat > "${stub_dir}/zip" <<STUB
+#!/bin/bash
+if [[ "\$(dirname "\$2")" == "${output_dir}" ]]; then
+  ln -sfn "${victim}" "\$2"
+fi
+exec "${real_zip}" "\$@"
+STUB
+  chmod +x "${stub_dir}/mktemp" "${stub_dir}/zip"
+
+  run env PATH="${stub_dir}:$PATH" bash "$SCRIPT" --products "$BUILD_DIR" --output "$OUTPUT_PATH"
+  [ "$status" -eq 0 ]
+  cmp "$victim" "${TEST_ROOT}/victim.orig"
+  [ -L "$planted" ]
+  [ "$(readlink "$planted")" = "$victim" ]
+  entries="$(find "$output_dir" -mindepth 1 | LC_ALL=C sort)"
+  [ "$entries" = "$(printf '%s\n%s' "$planted" "$OUTPUT_PATH" | LC_ALL=C sort)" ]
+  unpack_archive
+  assert_runtime_archive
+}
+
+@test "the private temporary archive directory is not accessible to other users" {
+  local stub_dir="${TEST_ROOT}/bin"
+  mkdir -p "$stub_dir"
+  cat > "${stub_dir}/zip" <<STUB
+#!/bin/bash
+stat -c '%a' "\$(dirname "\$2")" > "${TEST_ROOT}/archive-dir-mode" 2>/dev/null \
+  || stat -f '%Lp' "\$(dirname "\$2")" > "${TEST_ROOT}/archive-dir-mode"
+exit 1
+STUB
+  chmod +x "${stub_dir}/zip"
+
+  run env PATH="${stub_dir}:$PATH" bash "$SCRIPT" --products "$BUILD_DIR" --output "$OUTPUT_PATH"
+  [ "$status" -eq 1 ]
+  [ "$(cat "${TEST_ROOT}/archive-dir-mode")" = 700 ]
+  [ -z "$(find "$(dirname "$OUTPUT_PATH")" -mindepth 1)" ]
+}

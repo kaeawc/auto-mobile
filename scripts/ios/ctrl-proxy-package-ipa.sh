@@ -55,8 +55,8 @@ OUTPUT_PATH="${OUTPUT_DIR}/$(basename "$OUTPUT_PATH")"
 PRODUCTS_SOURCE="$(cd "${PRODUCTS_PARENT}/Products" && pwd -P)"
 
 STAGING_DIR="$(mktemp -d)"
-TEMP_ARCHIVE=""
-trap 'if [[ -n "$TEMP_ARCHIVE" ]]; then rm -f -- "$TEMP_ARCHIVE"; fi; rm -rf "$STAGING_DIR"' EXIT
+ARCHIVE_DIR=""
+trap 'if [[ -n "$ARCHIVE_DIR" ]]; then rm -rf -- "$ARCHIVE_DIR"; fi; if [[ -n "$STAGING_DIR" ]]; then rm -rf -- "$STAGING_DIR"; fi' EXIT
 STAGING_DIR="$(cd "$STAGING_DIR" && pwd -P)"
 STAGED_PRODUCTS="${STAGING_DIR}/Build/Products"
 mkdir -p "$STAGED_PRODUCTS"
@@ -105,10 +105,12 @@ if [[ "$DANGLING_LINKS" == 1 ]]; then
     exit 1
 fi
 
-# ZIP updates retain stale entries. Let zip create a fresh archive beside the
-# output, then replace the output only after the complete archive is ready.
-TEMP_ARCHIVE="$(mktemp "${OUTPUT_DIR}/.$(basename "$OUTPUT_PATH").XXXXXX")"
-rm -f -- "$TEMP_ARCHIVE"
+# ZIP updates retain stale entries. Let zip create a fresh archive inside a
+# private (0700) directory in the output directory, so no other user of a
+# shared output directory can plant a link at the archive path, and the final
+# mv stays on one filesystem. Replace the output only once the archive is ready.
+ARCHIVE_DIR="$(mktemp -d "${OUTPUT_DIR}/.$(basename "$OUTPUT_PATH").XXXXXX")"
+TEMP_ARCHIVE="${ARCHIVE_DIR}/archive.zip"
 cd "$STAGING_DIR"
 if zip -qr "$TEMP_ARCHIVE" Build/Products/; then
     mv -f -- "$TEMP_ARCHIVE" "$OUTPUT_PATH"

@@ -1320,7 +1320,10 @@ describe("TapOnElement screen-reader navigation result", () => {
       expect(driver.tapHistory).toEqual([{ x: 50, y: 50, durationMs: 50 }]);
       expect(driver.doubleTapHistory).toEqual([{ x: 50, y: 50 }]);
       expect(service.getTapHistory()).toEqual([]);
-      expect(result.warnings).toEqual([TALKBACK_ACTIVATION_WARNING]);
+      expect(result.warnings).toEqual([
+        TALKBACK_ACTIVATION_WARNING,
+        'TalkBack activation is unconfirmed: the screen did not change after activating the matched element "Unidentified action" [0,0][100,100]. Observe the screen; if the intended control was not activated, use tapAt {x: 50, y: 50} (the matched element\'s center).',
+      ]);
     },
   );
 
@@ -1448,6 +1451,49 @@ describe("TapOnElement screen-reader navigation result", () => {
     expect(driver.tapHistory).toEqual([{ x: 1004, y: 1448, durationMs: 50 }]);
     expect(driver.doubleTapHistory).toEqual([{ x: 1004, y: 1448 }]);
     expect(result.element?.bounds).toEqual(owner.bounds);
+    // The coordinate path is no more confirmed than ACTION_CLICK: an unchanged screen names the
+    // activated owner and the matched label, with tapAt at the label's center (#17677).
+    expect(result.effect?.screenChanged).toBe(false);
+    expect(result.warnings).toEqual([
+      TALKBACK_ACTIVATION_WARNING,
+      'TalkBack activation is unconfirmed: the screen did not change after activating [941,1390][1067,1506] for the matched element "Send" [946,1390][1062,1506]. Observe the screen; if the intended control was not activated, use tapAt {x: 1004, y: 1448} (the matched element\'s center).',
+    ]);
+  });
+
+  test("coordinate activation of an id-less owner that changes the screen adds no no-change warning (#17677)", async () => {
+    const label: Element = {
+      "content-desc": "Send",
+      bounds: { left: 946, top: 1390, right: 1062, bottom: 1506 },
+    };
+    const owner: Element = {
+      clickable: true,
+      actions: ["click"],
+      bounds: { left: 941, top: 1390, right: 1067, bottom: 1506 },
+    };
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: { node: { $: owner, node: [{ $: label }] } },
+    };
+    const driver = new FakeTalkBackNavigationDriver();
+    const service = new FakeCtrlProxy(new FakeTimer());
+    const command = createCommand(undefined, undefined, {
+      driver,
+      service,
+      element: owner,
+      hierarchy,
+      matched: label,
+    });
+    const derive = command.deriveTapEffectAfterPostTapObservation.bind(command);
+    spyOn(command, "deriveTapEffectAfterPostTapObservation").mockImplementation(
+      async (...args) => ({
+        ...(await derive(...args)),
+        effect: { screenChanged: true, basis: "activeWindow changed" },
+      }),
+    );
+
+    const result = await command.execute({ action: "tap", text: "Send" });
+
+    expect(result.success).toBe(true);
+    expect(driver.doubleTapHistory).toEqual([{ x: 1004, y: 1448 }]);
     expect(result.warnings).toEqual([TALKBACK_ACTIVATION_WARNING]);
   });
 
@@ -1488,7 +1534,10 @@ describe("TapOnElement screen-reader navigation result", () => {
     const command = createCommand({ success: false, method: "focus-navigation" }, warning);
     const result = await command.execute({ action: "tap", elementId: "test:id/button" });
     expect(result.success).toBe(true);
-    expect(result.warnings).toEqual([warning]);
+    expect(result.warnings).toEqual([
+      warning,
+      'TalkBack activation is unconfirmed: the screen did not change after activating the matched element "test:id/button" [0,0][100,100]. Observe the screen; if the intended control was not activated, use tapAt {x: 50, y: 50} (the matched element\'s center).',
+    ]);
   });
 
   test("returns the successful cursor journey from public execute", async () => {

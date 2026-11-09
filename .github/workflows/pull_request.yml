@@ -995,6 +995,24 @@ jobs:
           # contain the base commit and the diff would fail.
           fetch-depth: 0
 
+      # Pinned release downloads, one cache entry per tool keyed on the file that
+      # holds its version and checksum, so a GitHub release outage cannot fail
+      # this job once the tool is cached. Per-tool entries matter: actions/cache
+      # never re-saves an existing key, and a tool this run did not fetch has no
+      # directory, so its save is skipped instead of freezing an incomplete
+      # entry. The installers re-verify each file's SHA-256 before use (#17624).
+      - name: "Cache pinned ktfmt download"
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/auto-mobile/tools/ktfmt
+          key: tool-download-ktfmt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ktfmt/ktfmt_version.sh') }}
+
+      - name: "Cache pinned shfmt download"
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/auto-mobile/tools/shfmt
+          key: tool-download-shfmt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/shellcheck/shfmt_version.sh') }}
+
       # The documentation build consumes scripts/github/uv.lock after merge.
       # Start its independent toolchain setup now so the required Fast Validation
       # job can validate that lockfile before a PR lands.
@@ -1198,6 +1216,27 @@ jobs:
         timeout-minutes: 10
         uses: ./.github/actions/install-claude-code
 
+      # The selector adds `ktfmt` when scripts/ktfmt/ changes; its installer needs
+      # Java and fetches the pinned JAR, so pin the JDK as Fast Validation does
+      # and restore the checksum-verified tool cache (#17624).
+      - name: "Set up JDK"
+        uses: actions/setup-java@v5
+        with:
+          distribution: "zulu"
+          java-version: "21"
+
+      - name: "Cache pinned ktfmt download"
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/auto-mobile/tools/ktfmt
+          key: tool-download-ktfmt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ktfmt/ktfmt_version.sh') }}
+
+      - name: "Cache pinned shfmt download"
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/auto-mobile/tools/shfmt
+          key: tool-download-shfmt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/shellcheck/shfmt_version.sh') }}
+
       - wait: [install-bats, install-uv]
 
       # Diff against the PR's base commit, not origin/<base_ref>: a stacked PR's
@@ -1206,6 +1245,7 @@ jobs:
         shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          INSTALL_KTFMT_WHEN_MISSING: "true"
         run: |
           base="$(scripts/ci/resolve-pr-base.sh "${BASE_SHA}")"
           scripts/prepush-shell.sh --base "${base}"
@@ -1342,6 +1382,18 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: false
+
+      # Pinned release downloads, one cache entry per tool keyed on the file that
+      # holds its version and checksum, so a GitHub release outage cannot fail
+      # this job once the tool is cached. Per-tool entries matter: actions/cache
+      # never re-saves an existing key, and a tool this run did not fetch has no
+      # directory, so its save is skipped instead of freezing an incomplete
+      # entry. The installers re-verify each file's SHA-256 before use (#17624).
+      - name: "Cache pinned shfmt download"
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/auto-mobile/tools/shfmt
+          key: tool-download-shfmt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/shellcheck/shfmt_version.sh') }}
 
       # Pure network/disk (`brew install bats-core` on macOS, a source install on
       # Linux) and independent of the Bun setup below, which only writes

@@ -1257,3 +1257,40 @@ JSON
     [[ "$output" != *"RERUN-DONT-FIX"* ]]
   done
 }
+
+@test "a ripgrep release download 5xx classifies as infrastructure, old and new installer (#17624)" {
+  fixture="$BATS_TEST_TMPDIR/issue-17624-ripgrep-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"main","jobs":[{"databaseId":65,"name":"Run JUnit Runner Unit Tests","conclusion":"failure","steps":[{"name":"Install ripgrep","conclusion":"failure"}]}]}
+JSON
+  url='https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-unknown-linux-musl.tar.gz'
+  # The pre-#17624 setup-ripgrep action: one curl, no retry (main, 07:28Z).
+  log="$BATS_TEST_TMPDIR/ripgrep-legacy.log"
+  printf '%s\n' '[setup-ripgrep] Platform: linux-x86_64' '[setup-ripgrep] Version: 15.1.0' \
+    "[setup-ripgrep] Download URL: ${url}" '[setup-ripgrep] Install directory: /home/runner/.local/bin' \
+    '[setup-ripgrep] Downloading ripgrep 15.1.0...' 'curl: (22) The requested URL returned error: 504' > "$log"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 22.' \
+    FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 614
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — pre-#17624 setup-ripgrep"* ]]
+
+  # The installer now routes through release_fetch_pinned and its marker.
+  printf '%s\n' "[setup-ripgrep] Download URL: ${url}" '[setup-ripgrep] Fetching ripgrep 15.1.0 (sha256 1c92)...' \
+    "Downloading ${url} (attempt 6/6)" 'curl: (22) The requested URL returned error: 504' \
+    "UPSTREAM-DOWNLOAD-FAILURE: ${url} failed after 6 attempts (last error: curl: (22) The requested URL returned error: 504)." \
+    "[setup-ripgrep] ERROR: Failed to download ripgrep from ${url}" > "$log"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
+    FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 615
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — GitHub release asset download"* ]]
+
+  # A new-installer 5xx that recovered must not match the legacy row.
+  printf '%s\n' "[setup-ripgrep] Download URL: ${url}" '[setup-ripgrep] Fetching ripgrep 15.1.0 (sha256 1c92)...' \
+    "Downloading ${url} (attempt 1/6)" 'curl: (22) The requested URL returned error: 504' \
+    "Downloading ${url} (attempt 2/6)" 'Cached ripgrep-15.1.0-x86_64-unknown-linux-musl.tar.gz in /home/runner/.cache' \
+    'not ok 3 a real regression' > "$log"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
+    FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 616
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"RERUN-DONT-FIX"* ]]
+}

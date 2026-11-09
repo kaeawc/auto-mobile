@@ -5,7 +5,7 @@
 # Usage: ./install-ripgrep.sh [OPTIONS]
 #
 # Options:
-#   --version VERSION   ripgrep version to install (default: 15.1.0)
+#   --version VERSION   ripgrep version to install (default and only: the pin)
 #   --install-dir DIR   Directory to install binary (default: ~/.local/bin)
 #   --dry-run           Print what would be done without executing
 #   --help              Show this help message
@@ -18,8 +18,15 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=.github/actions/setup-ripgrep/ripgrep_version.sh
+source "${SCRIPT_DIR}/ripgrep_version.sh"
+# Cached, checksum-verified, backed-off release download (#17624).
+# shellcheck source=scripts/lib/release-download.sh
+source "${SCRIPT_DIR}/../../../scripts/lib/release-download.sh"
+
 # Defaults
-VERSION="15.1.0"
+VERSION="$RIPGREP_VERSION"
 INSTALL_DIR=""
 DRY_RUN=false
 TEMP_DIR=""
@@ -99,40 +106,35 @@ detect_arch() {
   esac
 }
 
-# Get the download URL for the platform
-get_download_url() {
+# Release target triple for the platform; the asset is
+# ripgrep-<version>-<target>.tar.gz (.zip on Windows).
+get_release_target() {
   local os="$1"
   local arch="$2"
-  local version="$3"
-  local base_url="https://github.com/BurntSushi/ripgrep/releases/download/${version}"
-  local filename
 
   case "${os}-${arch}" in
-    linux-x86_64)
-      filename="ripgrep-${version}-x86_64-unknown-linux-musl.tar.gz"
-      ;;
-    linux-aarch64)
-      filename="ripgrep-${version}-aarch64-unknown-linux-gnu.tar.gz"
-      ;;
-    macos-x86_64)
-      filename="ripgrep-${version}-x86_64-apple-darwin.tar.gz"
-      ;;
-    macos-aarch64)
-      filename="ripgrep-${version}-aarch64-apple-darwin.tar.gz"
-      ;;
-    windows-x86_64)
-      filename="ripgrep-${version}-x86_64-pc-windows-msvc.zip"
-      ;;
-    windows-aarch64)
-      filename="ripgrep-${version}-aarch64-pc-windows-msvc.zip"
-      ;;
+    linux-x86_64) echo "x86_64-unknown-linux-musl" ;;
+    linux-aarch64) echo "aarch64-unknown-linux-gnu" ;;
+    macos-x86_64) echo "x86_64-apple-darwin" ;;
+    macos-aarch64) echo "aarch64-apple-darwin" ;;
+    windows-x86_64) echo "x86_64-pc-windows-msvc" ;;
+    windows-aarch64) echo "aarch64-pc-windows-msvc" ;;
     *)
       error "Unsupported platform: ${os}-${arch}"
       exit 1
       ;;
   esac
+}
 
-  echo "${base_url}/${filename}"
+get_download_url() {
+  local os="$1"
+  local target="$2"
+  local version="$3"
+  local ext="tar.gz"
+  if [[ "$os" == "windows" ]]; then
+    ext="zip"
+  fi
+  echo "https://github.com/BurntSushi/ripgrep/releases/download/${version}/ripgrep-${version}-${target}.${ext}"
 }
 
 # Get default install directory
@@ -150,11 +152,19 @@ get_default_install_dir() {
 
 # Main installation logic
 main() {
-  local os arch url install_dir archive_name
+  local os arch target url install_dir archive_name expected_sha
 
   os=$(detect_os)
   arch=$(detect_arch)
-  url=$(get_download_url "$os" "$arch" "$VERSION")
+  target=$(get_release_target "$os" "$arch")
+  url=$(get_download_url "$os" "$target" "$VERSION")
+
+  # Only the pinned version has committed checksums; refuse anything else
+  # rather than install an unverified binary.
+  if [[ "$VERSION" != "$RIPGREP_VERSION" ]] || ! expected_sha="$(ripgrep_release_sha256 "$target")"; then
+    error "No pinned checksum for ripgrep ${VERSION} on ${target}; this action pins ${RIPGREP_VERSION} in ripgrep_version.sh."
+    exit 1
+  fi
 
   if [[ -z "$INSTALL_DIR" ]]; then
     install_dir=$(get_default_install_dir "$os")
@@ -183,14 +193,12 @@ main() {
   # Create temp directory for download (uses global TEMP_DIR for cleanup trap)
   TEMP_DIR=$(mktemp -d)
 
-  # Download
-  log "Downloading ripgrep ${VERSION}..."
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$url" -o "${TEMP_DIR}/${archive_name}"
-  elif command -v wget >/dev/null 2>&1; then
-    wget -q "$url" -O "${TEMP_DIR}/${archive_name}"
-  else
-    error "Neither curl nor wget found"
+  # Download, or restore from the checksum-verified tool cache. On an upstream
+  # outage release_fetch_pinned prints the UPSTREAM-DOWNLOAD-FAILURE line that
+  # scripts/ci/known-flakes.txt matches.
+  log "Fetching ripgrep ${VERSION} (sha256 ${expected_sha})..."
+  if ! release_fetch_pinned "$url" "$expected_sha" "${TEMP_DIR}/${archive_name}" "ripgrep/${VERSION}"; then
+    error "Failed to download ripgrep from ${url}"
     exit 1
   fi
 

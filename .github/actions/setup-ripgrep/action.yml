@@ -3,8 +3,8 @@ name: "setup-ripgrep"
 description: "Install ripgrep by downloading pre-built binaries. Skips if already installed."
 inputs:
   version:
-    description: "ripgrep version to install (default: 15.1.0)"
-    default: "15.1.0"
+    description: "ripgrep version to install (default: RIPGREP_VERSION in ripgrep_version.sh, the only version with pinned checksums)"
+    default: ""
     required: false
   install-dir:
     description: "Directory to install ripgrep binary"
@@ -26,14 +26,26 @@ runs:
           echo "installed=false" >> "$GITHUB_OUTPUT"
         fi
 
+    # Restore the checksum-verified release archive so a GitHub release outage
+    # cannot fail the job once ripgrep is cached. The key follows the file that
+    # holds the version and checksums; install-ripgrep.sh re-verifies the
+    # archive's SHA-256 after restore and after download (#17624).
+    - name: "Cache pinned ripgrep download"
+      if: steps.check-rg.outputs.installed != 'true'
+      uses: actions/cache@v5
+      with:
+        path: ~/.cache/auto-mobile/tools/ripgrep
+        key: tool-download-ripgrep-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/actions/setup-ripgrep/ripgrep_version.sh') }}
+
     - name: "Install ripgrep"
       if: steps.check-rg.outputs.installed != 'true'
       shell: bash
       run: |
         "${{ github.action_path }}/install-ripgrep.sh" \
-          --version "${{ inputs.version }}" \
+          ${VERSION:+--version "$VERSION"} \
           ${INSTALL_DIR:+--install-dir "$INSTALL_DIR"}
       env:
+        VERSION: ${{ inputs.version }}
         INSTALL_DIR: ${{ inputs.install-dir }}
 
     - name: "Add to GITHUB_PATH (Unix)"

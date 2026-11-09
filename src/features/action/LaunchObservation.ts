@@ -379,7 +379,7 @@ export class LaunchObservation {
       return false;
     }
 
-    if (this.isLaunchPermissionDialogObservation(observation)) {
+    if (this.isLaunchPermissionDialogObservation(observation, expectedPackageName)) {
       return true;
     }
 
@@ -390,8 +390,11 @@ export class LaunchObservation {
     );
   }
 
-  private isLaunchPermissionDialogObservation(observation: ObserveResult): boolean {
-    return isLaunchPermissionDialogObservation(observation);
+  private isLaunchPermissionDialogObservation(
+    observation: ObserveResult,
+    expectedPackageName: string,
+  ): boolean {
+    return isLaunchPermissionDialogObservation(observation, expectedPackageName);
   }
 
   private describeLaunchObservationPackages(observation: ObserveResult): string {

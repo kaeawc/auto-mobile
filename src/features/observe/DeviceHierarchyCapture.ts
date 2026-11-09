@@ -1,5 +1,8 @@
 import { normalizeVisionosHierarchy } from "../visionos/VisionosHierarchy";
-import { requireVisionosRunner } from "../visionos/VisionosRunnerLifecycle";
+import {
+  requireVisionosRunner,
+  withVisionosHostRecovery,
+} from "../visionos/VisionosRunnerLifecycle";
 import { AndroidDisplayReadError } from "./AndroidDisplayReadError";
 import { normalizeTvosHierarchy } from "../tvos/TvosHierarchy";
 import { tvosRunners } from "../tvos/TvosRunnerRegistry";
@@ -474,11 +477,11 @@ export function createDeviceHierarchyCapture(
     const read = async (request: HierarchyCaptureRequest) =>
       device.platform === "visionos"
         ? normalizeVisionosHierarchy(
-            await (
-              await requireVisionosRunner(device.deviceId, request.signal)
-            ).hierarchy(
-              request.signal,
-              request.timeoutMs === undefined ? undefined : { timeoutMs: request.timeoutMs },
+            await withVisionosHostRecovery(device.deviceId, request.signal, async () =>
+              (await requireVisionosRunner(device.deviceId, request.signal)).hierarchy(
+                request.signal,
+                request.timeoutMs === undefined ? undefined : { timeoutMs: request.timeoutMs },
+              ),
             ),
           )
         : device.platform === "tvos"

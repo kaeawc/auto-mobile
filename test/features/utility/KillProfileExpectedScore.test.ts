@@ -26,10 +26,12 @@ describe("kill profile expected survival scores", () => {
     }
   });
 
-  test("no expected value is TODO_MEASURE", () => {
+  test("only the two unmeasured recipes use TODO_MEASURE", () => {
     for (const id of KILL_PROFILE_IDS) {
       for (const event of SURVIVAL_EVENT_IDS) {
-        expect(KILL_PROFILE_EXPECTED_SCORES[id][event]).not.toBe("TODO_MEASURE");
+        expect(KILL_PROFILE_EXPECTED_SCORES[id][event] === "TODO_MEASURE").toBe(
+          ["samsung-foreground-kill", "screen-off-stop"].includes(id),
+        );
       }
     }
   });

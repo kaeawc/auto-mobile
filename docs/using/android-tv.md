@@ -126,9 +126,10 @@ right from wherever focus is, so it reaches the card only when focus starts in t
 Both are available only when the server runs with `--embedded-sdk` and the app embeds the
 AutoMobile SDK; see [Navigation graph](navigation-graph.md#availability).
 
-`focusNavigate` matches a target on the focused element or on a node inside its bounds, so a label
-on a child view of the focused row counts. A large focused container that holds the target also
-counts as focused. To land on the exact control `tapOn` would tap, name the target
+`focusNavigate` matches a target on the focused element or on a child label belonging to that
+control, so a card with its title in a child view counts. A focused scrollable container, or a
+container holding the target inside another focusable or clickable control, does not count for
+that child target; navigation continues until the control owns focus. To land on the exact control `tapOn` would tap, name the target
 with `until.label` or `until.elementId` alone: focus must then reach that control, and a focused
 row that only contains it does not count.
 
@@ -136,10 +137,24 @@ On a TV, `tapOn` with a `text` or `elementId` selector moves D-pad focus to
 the match and presses `enter`, so one flow can tap on both Android TV and tvOS. The selector picks
 the same element a touch tap would, including a text field found by its placeholder and the first
 of several matches, even when focus is on another one. The result then has
-`inputMethod: "dpad"` and a `focusNavigation` object with the focus `status`, `steps` and `path`.
+`inputMethod: "dpad"` and a `focusNavigation` object with the focus `status`, `steps` and `path`. Focus takes the shortest
+route: a match on another row is reached by changing rows first. With `action: "longPress"` the
+call holds D-pad center for `duration` ms (default 1000) instead of pressing `enter`; the hold
+needs Android 15 (API 35) or newer.
 If focus cannot reach the match, the call fails without pressing `enter`; observe and retry, or
-move closer with `focusNavigate`. Other selectors (`testTag`, `textAny`, `accessibilityLink`),
-other actions, and the options `sibling`, `container`, `index`, `searchUntil`, `ensureChecked`,
+move closer with `focusNavigate`. When an editable text field or the on-screen keyboard holds focus,
+the walk first hides a shown keyboard with back (and presses tab when the focused element is not a
+text field), then tries every direction again. A Compose text field keeps focus on every D-pad
+direction, so when focus still has not moved the walk presses tab once and tries again. A classic
+View `EditText` (one not inside a Compose screen, with or without a `resource-id`) never gets tab,
+since tab could type into it. If focus still does not move, `focusNavigation.status` is `stuck`,
+`focusNavigation.blockedBy` is `ime` or `editable`, `focusNavigation.escapes` lists the keys tried
+(`back`, `tab`), and the error names the trapped field and what to do: for a View field, hide the
+keyboard with `pressButton` `back`, press `pressButton` `down`, observe, then retry; for a Compose
+field, hide the keyboard with `pressButton` `back`, then press `sendKeys` key `tab`. An IME action
+such as `sendKeys` key `next` or `done` does not move D-pad focus out of the field.
+`focusNavigate` returns the same `blockedBy` and `escapes`. Other selectors (`testTag`, `textAny`,
+`accessibilityLink`), actions other than `tap` and `longPress`, and the options `sibling`, `container`, `index`, `searchUntil`, `ensureChecked`,
 `subtext`, `layer`, `display` and a `selectionStrategy` other than `first` still need a touchscreen. `swipeOn` needs a touchscreen too;
 on a TV without one, navigate with `focusNavigate` and `sendKeys` instead.
 

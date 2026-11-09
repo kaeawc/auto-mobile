@@ -1,0 +1,6 @@
+An error was encountered processing the command (domain=NSPOSIXErrorDomain, code=45):
+Simulator device failed to complete the requested operation.
+Operation not supported
+Underlying error (domain=NSPOSIXErrorDomain, code=45):
+	Status bar overrides not supported on this platform.
+	Operation not supported

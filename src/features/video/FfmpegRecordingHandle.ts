@@ -6,6 +6,8 @@ export interface FfmpegBackendHandle {
   captureTracker: ProcessTracker;
   ffmpegTracker?: ProcessTracker;
   capturePath?: string;
+  /** The simctl arguments the iOS capture ran with, including any `--display`. */
+  captureArgs?: string[];
   captureTeardown?: VideoCaptureTeardownDescriptor;
   config: VideoCaptureConfig;
 }

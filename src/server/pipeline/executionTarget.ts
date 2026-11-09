@@ -61,6 +61,7 @@ import { AndroidCtrlProxyClient } from "../../features/observe/android";
 import { IOSCtrlProxyClient } from "../../features/observe/ios";
 import { AmbiguousDeviceTargetError } from "../../daemon/ambiguousDeviceTargetRefusal";
 import { adoptDirectSessionDevice } from "./directSessionTarget";
+import { assertReadCallerHoldsSessionBinding } from "./readSessionBinding";
 
 export interface ExecutionTargetInput {
   name: string;
@@ -277,6 +278,12 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     if (execution) {
       markDeviceCallKind(execution.executionId, name, state.readOnly);
     }
+    assertReadCallerHoldsSessionBinding({
+      toolName: name,
+      readOnly: state.readOnly && shouldResolveDevice,
+      sessionUuid: state.sessionUuid,
+      mcpSessionId: state.mcpSessionId,
+    });
     const gatedReadDeviceId =
       state.readOnly && shouldResolveDevice ? gatedReadSessionDevice(state.sessionUuid) : undefined;
     if (gatedReadDeviceId) {
@@ -598,7 +605,11 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     }
     // Discovery re-stamps observedAt; the serial/UDID stays stable until
     // the daemon's removal/release hooks invalidate this device.
-    state.device = await this.hydrateDisplays(state, readyDevice, readyDevice.deviceId);
+    state.device = await this.hydrateDisplays(
+      state,
+      await this.sessionFormFactor.enrichUnpooled(readyDevice),
+      readyDevice.deviceId,
+    );
     logger.info(`[ToolRegistry] ${name}: Using device ${state.device.deviceId}`);
     return undefined;
   }

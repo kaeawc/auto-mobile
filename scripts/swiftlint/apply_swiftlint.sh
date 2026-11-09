@@ -41,6 +41,9 @@ fi
 if ! require_pinned_swiftlint_version; then
     exit 1
 fi
+if ! export_linux_sourcekit_lib_path; then
+    exit 1
+fi
 
 echo -e "${GREEN}swiftlint is available ($(swiftlint version))${NC}"
 

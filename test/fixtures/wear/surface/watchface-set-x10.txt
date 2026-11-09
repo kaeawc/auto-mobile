@@ -1,0 +1,12 @@
+### set-watchface x10 (rotating offhand,superficial,perfunctory), readback by dumpsys wear_service
+run1 com.google.wear.perfunctory PASS broadcast=464ms readback=2832ms | Broadcast completed: result=1, data="Favorite Id=[3] Runtime=[2]" | activeWatchFaceComponent=WatchFaceId[com.google.wear.perfunctory,null]
+run2 com.google.wear.offhand PASS broadcast=804ms readback=426ms | Broadcast completed: result=1, data="Favorite Id=[1] Runtime=[2]" | activeWatchFaceComponent=WatchFaceId[com.google.wear.offhand,null]
+run3 com.google.wear.superficial PASS broadcast=397ms readback=378ms | Broadcast completed: result=1, data="Favorite Id=[2] Runtime=[2]" | activeWatchFaceComponent=WatchFaceId[com.google.wear.superficial,null]
+run4 com.google.wear.perfunctory PASS broadcast=513ms readback=457ms | Broadcast completed: result=1, data="Favorite Id=[3] Runtime=[2]" | activeWatchFaceComponent=WatchFaceId[com.google.wear.perfunctory,null]
+run5 com.google.wear.offhand PASS broadcast=519ms readback=930ms | Broadcast completed: result=1, data="Favorite Id=[1] Runtime=[2]" | activeWatchFaceComponent=WatchFaceId[com.google.wear.offhand,null]
+run6 com.google.wear.superficial PASS broadcast=1404ms readback=512ms | Broadcast completed: result=1, data="Favorite Id=[2] Runtime=[2]" | activeWatchFaceComponent=WatchFaceId[com.google.wear.superficial,null]
+run7 com.google.wear.perfunctory PASS broadcast=415ms readback=370ms | Broadcast completed: result=1, data="Favorite Id=[3] Runtime=[2]" | activeWatchFaceComponent=WatchFaceId[com.google.wear.perfunctory,null]
+run8 com.google.wear.offhand PASS broadcast=385ms readback=387ms | Broadcast completed: result=1, data="Favorite Id=[1] Runtime=[2]" | activeWatchFaceComponent=WatchFaceId[com.google.wear.offhand,null]
+run9 com.google.wear.superficial PASS broadcast=394ms readback=403ms | Broadcast completed: result=1, data="Favorite Id=[2] Runtime=[2]" | activeWatchFaceComponent=WatchFaceId[com.google.wear.superficial,null]
+run10 com.google.wear.perfunctory PASS broadcast=398ms readback=376ms | Broadcast completed: result=1, data="Favorite Id=[3] Runtime=[2]" | activeWatchFaceComponent=WatchFaceId[com.google.wear.perfunctory,null]
+set-watchface pass=10/10

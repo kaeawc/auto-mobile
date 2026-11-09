@@ -108,6 +108,12 @@ export interface ViewHierarchyResult {
   screenWidth?: number;
   /** Screen height from accessibility service (eliminates need for dumpsys) */
   screenHeight?: number;
+  /**
+   * Screen size resolved by actionable projection, in the projected root's coordinate space.
+   * Serializable so it survives cache clones where tree-identity provenance is lost; it is
+   * trusted only while the root bounds still match it.
+   */
+  projectedScreenSize?: { width: number; height: number };
   /** iOS screen scale factor (e.g., 2.0 for @2x, 3.0 for @3x retina). Converts points to pixels. */
   screenScale?: number;
   /**
@@ -339,6 +345,15 @@ export type ViewHierarchyNode = {
 /** iOS CtrlProxy nests attributes in `$`; Android and cleaned iOS nodes are flat. */
 export function nodeAttributes(node: { $?: NodeAttributes }): NodeAttributes {
   return node.$ ?? node;
+}
+
+/** Hierarchy children may arrive as one object rather than an array (XML-shaped nodes). */
+export function childrenOf(node: ViewHierarchyNode): ViewHierarchyNode[] {
+  const children: unknown = node.node;
+  if (Array.isArray(children)) {
+    return children;
+  }
+  return children && typeof children === "object" ? [children as ViewHierarchyNode] : [];
 }
 
 /** Direct bounds take precedence when a converter also carries bounds in `$`. */

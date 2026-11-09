@@ -1,3 +1,4 @@
+import { simulatorPairSchema } from "../../../utils/ios-cmdline-tools/SimulatorPairs";
 import { disabledResourcesSchema } from "../../../utils/deviceResourceSchemas";
 import { z } from "zod/v4";
 import {
@@ -5,7 +6,11 @@ import {
   provisionedDeviceSchema,
   configuredImageSchema,
 } from "../../../daemon/deviceDescription";
-import { platformSchema, addSessionUuidToSchema } from "../../../utils/schemaHelpers";
+import {
+  platformSchema,
+  addSessionUuidToSchema,
+  watchAwarePlatformSchema,
+} from "../../../utils/schemaHelpers";
 import { MAX_DEVICE_READY_TIMEOUT_MS } from "../../../utils/deviceTimeouts";
 
 export const listDeviceImagesSchema = z
@@ -23,7 +28,7 @@ export const listDeviceImagesSchema = z
 
 export const listDevicesSchema = z
   .object({
-    platform: platformSchema.optional(),
+    platform: watchAwarePlatformSchema(),
     requires: z
       .object({
         panels: z.number().int().positive().optional(),
@@ -140,6 +145,7 @@ const iosBootCapacitySchema = bootCapacitySchema.extend({
 });
 
 export const listDevicesOutputSchema = z.object({
+  simulatorPairs: z.array(simulatorPairSchema).optional(),
   message: z.string(),
   devices: z.array(
     listDevicesEntrySchema.extend({ transportAliases: z.array(z.string()).optional() }),

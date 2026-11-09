@@ -4,7 +4,7 @@
 #
 # Usage: verify-artifact-sha256.sh <artifact-path> <platform>
 #
-# Platform is "android", "protoviewerapk", "ios", "videojar", "screencapturehelper", "audioloopbackhelper", "prototypeagent",
+# Platform is "android", "protoviewerapk", "ios", "videojar", "screencapturehelper", "audioloopbackhelper", "tvosrunner", "prototypeagent",
 # "prototypeviewer", "networkfilter", "lmkpressurearm64", or "lmkpressurex8664", which
 # selects the matching checksum from the first (newest) registry entry.
 #
@@ -55,6 +55,8 @@ elif [ "$PLATFORM" = "screencapturehelper" ]; then
   FIELD="screenCaptureHelperSha256"
 elif [ "$PLATFORM" = "audioloopbackhelper" ]; then
   FIELD="audioLoopbackHelperSha256"
+elif [ "$PLATFORM" = "tvosrunner" ]; then
+  FIELD="tvosRunnerSha256"
 elif [ "$PLATFORM" = "prototypeagent" ]; then
   FIELD="prototypeAgentSha256"
 elif [ "$PLATFORM" = "prototypeviewer" ]; then
@@ -66,7 +68,7 @@ elif [ "$PLATFORM" = "lmkpressurearm64" ]; then
 elif [ "$PLATFORM" = "lmkpressurex8664" ]; then
   FIELD="lmkPressureX8664Sha256"
 else
-  echo "ERROR: Platform must be 'android', 'protoviewerapk', 'ios', 'videojar', 'screencapturehelper', 'audioloopbackhelper', 'prototypeagent', 'prototypeviewer', 'networkfilter', 'lmkpressurearm64', or 'lmkpressurex8664', got '$PLATFORM'"
+  echo "ERROR: Platform must be 'android', 'protoviewerapk', 'ios', 'videojar', 'screencapturehelper', 'audioloopbackhelper', 'tvosrunner', 'prototypeagent', 'prototypeviewer', 'networkfilter', 'lmkpressurearm64', or 'lmkpressurex8664', got '$PLATFORM'"
   exit 1
 fi
 

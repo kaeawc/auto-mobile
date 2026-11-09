@@ -257,6 +257,8 @@ export class AndroidInboundResponseHandlers {
         requestedPermissions: message.requestedPermissions ?? [],
         grantedPermissions: message.grantedPermissions ?? {},
         mainActivity: message.mainActivity,
+        gitBranch: message.gitBranch,
+        gitSha: message.gitSha,
         totalTimeMs: message.totalTimeMs ?? 0,
         error: message.error,
       })),

@@ -109,12 +109,18 @@ struct GestureCoordinateGeometry: Equatable, Sendable {
         return replacingScreen(reference)
     }
 
-    /// Mirrors resolveIosObserveRotation: unknown cardinal orientation falls back to size.
-    nonisolated static func observationRotation(_ rotation: Int?, size: GestureSize) -> Int? {
+    /// Unknown cardinal orientation falls back to size, matching resolveIosObserveRotation.
+    nonisolated static func observationRotation(_ rotation: Int?, size: GestureSize, app: GestureSize? = nil) -> Int? {
         guard size.isValid else { return nil }
         if let rotation, (0 ... 3).contains(rotation),
            !(size.width < size.height && (rotation == 1 || rotation == 3))
         {
+            // #17374/#17375: a portrait reading cannot describe the transposed landscape inner panel.
+            if let app, app.isValid, size.width > size.height, rotation == 0 || rotation == 2,
+               abs(app.width - size.height) <= 1, abs(app.height - size.width) <= 1
+            {
+                return 1
+            }
             return rotation
         }
         return size.width < size.height ? 0 : 1

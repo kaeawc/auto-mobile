@@ -132,6 +132,12 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
     { fallback: true },
   ),
   ...tools(
+    ["wearSurface"],
+    "addTile and removeTile change the Wear OS tile carousel, and setWatchFace, unsetWatchFace, setComplication and unsetComplication change the active watch face and its complication slots; nothing reverts or cleans either, so they record a fallback intent. showTile only scrolls the carousel and watchFace only reads dumpsys wear_service, so they record nothing.",
+    "journaled",
+    { fallback: true },
+  ),
+  ...tools(
     ["launchApp", "measureStartup", "installApp", "uninstallApp"],
     "clearAppData, a persistent compilation mode, an install over, or an uninstall of an app the baseline held records a fallback intent unless the session installed an app the baseline did not hold; installs also keep their installed-app row. Android launches and startup measurements record a non-fallback launch row so keep-booted cleaning clears a launched preinstalled app's data. Other calls only start or stop processes.",
     "journaled",

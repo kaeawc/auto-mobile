@@ -35,7 +35,8 @@ enum SimulatorDisplayGeometry {
             width: bounds.height,
             height: bounds.width,
             sourceWidth: sourceHeight,
-            sourceHeight: sourceWidth
+            sourceHeight: sourceWidth,
+            sourceScale: bounds.sourceScale
         )
     }
 
@@ -97,7 +98,7 @@ enum SimulatorDisplayGeometry {
             if panelMatches.count == 1 { return panelMatches[0] }
         }
         throw OverlayError(
-            "Expected one visible Simulator or Device Hub window named \(deviceName), found \(matches.count). Open that device window and close duplicate windows. A foldable device such as the Duo has one window per panel; if several match, the display size could not pick one."
+            "Expected one visible Simulator or Device Hub window named \(deviceName), found \(matches.count). Open that device window and close duplicate windows. Device Hub shows both panels of a foldable such as the Duo in one window; if several windows match, the display size could not pick one."
         )
     }
 
@@ -130,7 +131,7 @@ enum SimulatorDisplayGeometry {
         return CGRect(origin: point, size: dimensions)
     }
 
-    static func displayFrame(window: SimulatorOverlayTarget) -> CGRect? {
+    static func windowElement(_ window: SimulatorOverlayTarget) -> AXUIElement? {
         let app = AXUIElementCreateApplication(window.processID)
         let windows = attribute(app, kAXWindowsAttribute) as? [AXUIElement] ?? []
         let matching = windows.filter { element in
@@ -138,8 +139,43 @@ enum SimulatorDisplayGeometry {
             return abs(rect.minX - window.frame.minX) < 2 && abs(rect.minY - window.frame.minY) < 2
                 && abs(rect.width - window.frame.width) < 2 && abs(rect.height - window.frame.height) < 2
         }
-        guard matching.count == 1 else { return nil }
-        let children = attribute(matching[0], kAXChildrenAttribute) as? [AXUIElement] ?? []
+        return matching.count == 1 ? matching[0] : nil
+    }
+
+    struct DisplayFrameLookup {
+        let frame: @MainActor (SimulatorOverlayTarget) -> CGRect?
+        var prepare: (@MainActor (SimulatorOverlayTarget) async -> Void)?
+    }
+
+    /// Places the display from `tracker`. `prepare` only starts a due capture and never waits on
+    /// it, so a slow capture cannot hold the host's refresh loop.
+    @MainActor
+    static func trackingLookup(_ tracker: DeviceHubDisplayTracker) -> DisplayFrameLookup {
+        DisplayFrameLookup(frame: { tracker.frame(for: $0) }, prepare: { _ = tracker.refreshIfDue(window: $0) })
+    }
+
+    /// Where the display sits for `window`: its accessibility display group, or, when the window has
+    /// none (Device Hub shows both Duo panels in one window), the drawn display found from pixels.
+    @MainActor
+    static func displayFrameLookup(
+        for window: SimulatorOverlayTarget,
+        sourceSize: CGSize?,
+        sourceScale: Double? = nil
+    )
+        async -> DisplayFrameLookup
+    {
+        if displayFrame(window: window) != nil { return DisplayFrameLookup(frame: displayFrame(window:)) }
+        let locate: @MainActor (SimulatorOverlayTarget) async -> CGRect? = { target in
+            await DeviceHubDisplayLocator.locate(window: target, sourceSize: sourceSize, sourceScale: sourceScale)
+        }
+        guard let relative = await locate(window) else { return DisplayFrameLookup(frame: displayFrame(window:)) }
+        let tracker = DeviceHubDisplayTracker(relativeRect: relative, windowSize: window.frame.size, relocate: locate)
+        return trackingLookup(tracker)
+    }
+
+    static func displayFrame(window: SimulatorOverlayTarget) -> CGRect? {
+        guard let element = windowElement(window) else { return nil }
+        let children = attribute(element, kAXChildrenAttribute) as? [AXUIElement] ?? []
         let groups = children.filter { attribute($0, kAXRoleAttribute) as? String == kAXGroupRole }
             .compactMap(frame).filter { $0.width > 50 && $0.height > 50 && window.frame.contains($0) }
         guard groups.count == 1 else { return nil }
@@ -171,10 +207,28 @@ final class SimulatorHighlightOverlay: SimulatorOverlay {
     private let layer = HandDrawnCircleLayer()
     private let startedAt = ProcessInfo.processInfo.systemUptime
     private var previousFrame: CGRect?
+    /// Set by `close()`. A refresh suspended in `prepare` must not touch the
+    /// panel after a replacement closed this overlay.
+    private var isClosed = false
 
-    init(window: SimulatorOverlayTarget, request: SimulatorHighlightRequest) throws {
-        guard !request.id.isEmpty, AXIsProcessTrusted(),
-              let frame = SimulatorDisplayGeometry.displayFrame(window: window),
+    private let isTrusted: () -> Bool
+    private let targets: () -> [SimulatorOverlayTarget]
+    private let displayFrame: @MainActor (SimulatorOverlayTarget) -> CGRect?
+    private let prepare: (@MainActor (SimulatorOverlayTarget) async -> Void)?
+
+    init(
+        window: SimulatorOverlayTarget,
+        request: SimulatorHighlightRequest,
+        displayFrame: @escaping @MainActor (SimulatorOverlayTarget) -> CGRect? = SimulatorDisplayGeometry
+            .displayFrame(window:),
+        prepare: (@MainActor (SimulatorOverlayTarget) async -> Void)? = nil,
+        isTrusted: @escaping () -> Bool = { AXIsProcessTrusted() },
+        targets: @escaping () -> [SimulatorOverlayTarget] = { SimulatorDisplayGeometry.targets() }
+    )
+        throws
+    {
+        guard !request.id.isEmpty, isTrusted(),
+              let frame = displayFrame(window),
               SimulatorDisplayGeometry.orientedBounds(request.shape.bounds, targetSize: frame.size)
               .scaled(to: frame.size) != nil
         else {
@@ -182,6 +236,10 @@ final class SimulatorHighlightOverlay: SimulatorOverlay {
                 "Cannot locate Simulator display or invalid highlight coordinates. Grant Accessibility access to the capture helper and provide bounds.sourceWidth/sourceHeight."
             )
         }
+        self.displayFrame = displayFrame
+        self.prepare = prepare
+        self.isTrusted = isTrusted
+        self.targets = targets
         targetID = window.windowID
         targetPID = window.processID
         shape = request.shape
@@ -207,16 +265,33 @@ final class SimulatorHighlightOverlay: SimulatorOverlay {
     }
 
     func refresh() async throws {
-        guard let window = SimulatorDisplayGeometry.targets()
-            .first(where: { $0.windowID == targetID && $0.processID == targetPID }),
-            let frame = SimulatorDisplayGeometry.displayFrame(window: window)
-        else {
+        guard !isClosed else { return }
+        var window = try resolveWindow()
+        if let prepare {
+            await prepare(window)
+            guard !isClosed else { return }
+            // The window can move while `prepare` is suspended; place the panel from where it is now.
+            window = try resolveWindow()
+        }
+        guard let frame = displayFrame(window) else {
             throw OverlayError("Simulator window disappeared")
         }
         update(frame: frame)
     }
 
+    private func resolveWindow() throws -> SimulatorOverlayTarget {
+        guard let window = targets()
+            .first(where: { $0.windowID == targetID && $0.processID == targetPID })
+        else {
+            throw OverlayError("Simulator window disappeared")
+        }
+        return window
+    }
+
+    var isPanelVisible: Bool { panel.isVisible }
+
     func close() {
+        isClosed = true
         panel.close()
     }
 
@@ -288,7 +363,17 @@ final class SimulatorHighlightHost {
                 sourceSize = nil
             }
             let window = try SimulatorDisplayGeometry.find(deviceName: deviceName, sourceSize: sourceSize)
-            return try SimulatorHighlightOverlay(window: window, request: request)
+            let lookup = await SimulatorDisplayGeometry.displayFrameLookup(
+                for: window,
+                sourceSize: sourceSize,
+                sourceScale: bounds.sourceScale
+            )
+            return try SimulatorHighlightOverlay(
+                window: window,
+                request: request,
+                displayFrame: lookup.frame,
+                prepare: lookup.prepare
+            )
         }
     }
 

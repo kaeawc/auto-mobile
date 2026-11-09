@@ -83,6 +83,22 @@ final class SimulatorHighlightTests: XCTestCase {
         XCTAssertLessThanOrEqual(abs(scaled.midY - 147), 1)
     }
 
+    func testOrientedBoundsKeepsSourceScaleWhenRotating() {
+        let bounds = CircleBounds(
+            x: 100,
+            y: 200,
+            width: 120,
+            height: 120,
+            sourceWidth: 2853,
+            sourceHeight: 2007,
+            sourceScale: 3
+        )
+        let oriented = SimulatorDisplayGeometry.orientedBounds(bounds, targetSize: CGSize(width: 615, height: 875))
+        XCTAssertEqual(oriented.sourceWidth, 2007)
+        XCTAssertEqual(oriented.sourceHeight, 2853)
+        XCTAssertEqual(oriented.sourceScale, 3)
+    }
+
     func testOrientedBoundsLeavesMatchingOrientationUnchanged() {
         let bounds = CircleBounds(x: 12, y: 34, width: 56, height: 78, sourceWidth: 466, sourceHeight: 678)
         let oriented = SimulatorDisplayGeometry.orientedBounds(bounds, targetSize: CGSize(width: 466, height: 678))
@@ -420,6 +436,99 @@ final class SimulatorHighlightHostTests: XCTestCase {
         XCTAssertTrue(newOverlays.allSatisfy { $0.closed })
     }
 
+    /// Two highlights, one on a Device Hub window whose relocation capture never finishes until the
+    /// test releases it. The host's serial refresh must neither wait on that capture nor delay the
+    /// other highlight's refresh or the Device Hub highlight's deadline cleanup.
+    func testPendingDeviceHubCaptureDelaysNeitherDeadlineCleanupNorTheOtherHighlight() async throws {
+        var now: TimeInterval = 0
+        var captures = 0
+        var release: CheckedContinuation<CGRect?, Never>?
+        let window = SimulatorOverlayTarget(
+            windowID: 7, processID: 1, frame: CGRect(x: 0, y: 0, width: 200, height: 400), title: "Device Hub"
+        )
+        let tracker = DeviceHubDisplayTracker(
+            relativeRect: CGRect(x: 0, y: 0, width: 200, height: 400),
+            windowSize: window.frame.size,
+            now: { now },
+            relocate: { _ in
+                captures += 1
+                return await withCheckedContinuation { release = $0 }
+            }
+        )
+        let lookup = SimulatorDisplayGeometry.trackingLookup(tracker)
+        var hubFrameLookups = 0
+        var hub: SimulatorHighlightOverlay?
+        var other: FakeOverlay?
+        let host = SimulatorHighlightHost(deviceName: "Device Hub", now: { now }, makeOverlay: { request in
+            guard request.id == "hub" else {
+                let overlay = FakeOverlay()
+                other = overlay
+                return overlay
+            }
+            let overlay = try SimulatorHighlightOverlay(
+                window: window,
+                request: request,
+                displayFrame: { hubFrameLookups += 1; return lookup.frame($0) },
+                prepare: lookup.prepare,
+                isTrusted: { true },
+                targets: { [window] }
+            )
+            hub = overlay
+            return overlay
+        }, waitForFrame: { throw CancellationError() }, replySink: { _ in })
+        defer { host.close() }
+        func command(_ id: String) -> Data {
+            Data("""
+            {"requestId":"\(id)","id":"\(id)","shape":{"type":"circle","bounds":{"x":10,"y":20,"width":30,\
+            "height":40,"sourceWidth":100,"sourceHeight":200}}}
+            """.utf8)
+        }
+        await host.receive(command("hub"))
+        now = DeviceHubDisplayTracker.relocateInterval
+        await host.receive(command("other"))
+        let hubOverlay = try XCTUnwrap(hub)
+        let otherOverlay = try XCTUnwrap(other)
+
+        // The Device Hub capture is due: this refresh starts it and must return while it is pending.
+        await host.refresh()
+        XCTAssertEqual(otherOverlay.refreshes, 1, "the other highlight refreshes in the same pass")
+        for _ in 0 ..< 100 where release == nil {
+            await Task.yield()
+        }
+        XCTAssertEqual(captures, 1)
+        XCTAssertNotNil(release, "the capture is still pending")
+        let lookupsWhilePending = hubFrameLookups
+
+        now += 0.1
+        await host.refresh()
+        XCTAssertEqual(otherOverlay.refreshes, 2)
+        XCTAssertGreaterThan(hubFrameLookups, lookupsWhilePending, "the hub panel keeps its last placement")
+        XCTAssertEqual(captures, 1, "no second capture starts while one is pending")
+
+        // Past the hub deadline only: it is cleaned up on this pass with the capture still pending.
+        now = HandDrawnCircle.duration
+        await host.refresh()
+        XCTAssertFalse(hubOverlay.isPanelVisible)
+        XCTAssertEqual(otherOverlay.refreshes, 3)
+        XCTAssertFalse(otherOverlay.closed)
+        let lookupsAtClose = hubFrameLookups
+
+        // The late result lands after the overlay closed; it must not reopen or move the panel.
+        release?.resume(returning: CGRect(x: 10, y: 10, width: 100, height: 200))
+        for _ in 0 ..< 20 {
+            await Task.yield()
+        }
+        now += 0.1
+        await host.refresh()
+        XCTAssertEqual(hubFrameLookups, lookupsAtClose, "the expired hub highlight is no longer refreshed")
+        XCTAssertFalse(hubOverlay.isPanelVisible)
+        XCTAssertEqual(otherOverlay.refreshes, 4)
+
+        now = DeviceHubDisplayTracker.relocateInterval + HandDrawnCircle.duration
+        await host.refresh()
+        XCTAssertTrue(otherOverlay.closed)
+    }
+
     func testNativeDrawFailureIsAcknowledgedAsFailure() async {
         var replies: [SimulatorHighlightReply] = []
         let host = SimulatorHighlightHost(deviceName: "iPhone", makeOverlay: { _ in
@@ -435,5 +544,74 @@ final class SimulatorHighlightHostTests: XCTestCase {
         XCTAssertEqual(replies.count, 1)
         XCTAssertFalse(replies[0].success)
         XCTAssertEqual(replies[0].error, "permission denied")
+    }
+}
+
+@MainActor
+final class SimulatorHighlightOverlayRefreshTests: XCTestCase {
+    func testRefreshPlacesThePanelFromTheWindowAfterCaptureMoved() async throws {
+        let window = SimulatorOverlayTarget(
+            windowID: 7, processID: 1, frame: CGRect(x: 0, y: 0, width: 200, height: 400), title: "mt-duo-0090b"
+        )
+        let moved = SimulatorOverlayTarget(
+            windowID: 7, processID: 1, frame: CGRect(x: 30, y: 40, width: 200, height: 400), title: "mt-duo-0090b"
+        )
+        let request = try JSONDecoder().decode(SimulatorHighlightRequest.self, from: Data("""
+        {"requestId":"r","id":"h","shape":{"type":"circle","bounds":{"x":10,"y":20,"width":30,"height":40,\
+        "sourceWidth":100,"sourceHeight":200}}}
+        """.utf8))
+        var current = window
+        var seen: [CGPoint] = []
+        let overlay = try SimulatorHighlightOverlay(
+            window: window,
+            request: request,
+            displayFrame: { seen.append($0.frame.origin); return $0.frame },
+            prepare: { _ in current = moved },
+            isTrusted: { true },
+            targets: { [current] }
+        )
+        try await overlay.refresh()
+
+        XCTAssertEqual(seen.last, moved.frame.origin, "the frame must come from the window re-resolved after capture")
+    }
+
+    func testClosedOverlayIgnoresRefreshResumingFromPendingCapture() async throws {
+        let window = SimulatorOverlayTarget(
+            windowID: 7, processID: 1, frame: CGRect(x: 0, y: 0, width: 200, height: 400), title: "mt-duo-0090b"
+        )
+        let request = try JSONDecoder().decode(SimulatorHighlightRequest.self, from: Data("""
+        {"requestId":"r","id":"h","shape":{"type":"circle","bounds":{"x":10,"y":20,"width":30,"height":40,\
+        "sourceWidth":100,"sourceHeight":200}}}
+        """.utf8))
+        var frameLookups = 0
+        var captureStarted: CheckedContinuation<Void, Never>?
+        var captureFinish: CheckedContinuation<Void, Never>?
+        let overlay = try SimulatorHighlightOverlay(
+            window: window,
+            request: request,
+            displayFrame: { _ in frameLookups += 1; return window.frame },
+            prepare: { _ in
+                await withCheckedContinuation { finish in
+                    captureFinish = finish
+                    captureStarted?.resume()
+                    captureStarted = nil
+                }
+            },
+            isTrusted: { true },
+            targets: { [window] }
+        )
+        XCTAssertEqual(frameLookups, 1)
+
+        let refresh = Task { try await overlay.refresh() }
+        while captureFinish == nil {
+            await Task.yield()
+        }
+        // A same-ID replacement closes the old overlay while its capture is pending.
+        overlay.close()
+        captureFinish?.resume()
+        try await refresh.value
+
+        XCTAssertEqual(frameLookups, 1, "closed overlay must not resolve a frame or re-order its panel")
+        XCTAssertFalse(overlay.isPanelVisible)
     }
 }

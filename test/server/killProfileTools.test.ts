@@ -63,6 +63,35 @@ describe("killProfile tool (#14051)", () => {
     expect(killProfileSchema.safeParse({ action: "list", extra: 1 }).success).toBe(false);
   });
 
+  test("new profile ids and structured boot observations are typed on the wire", () => {
+    for (const profile of ["samsung-foreground-kill", "screen-off-stop"]) {
+      expect(killProfileSchema.safeParse({ action: "apply", appId: APP, profile }).success).toBe(
+        true,
+      );
+    }
+    const observation = {
+      bootReceivers: [`${APP}/.BootReceiver`],
+      bootPermissionGranted: true,
+      stopped: false,
+      bootBroadcastDelivered: true,
+      pendingAlarms: 2,
+    };
+    const payload = {
+      success: true,
+      message: "checked",
+      action: "apply",
+      deviceId: emulator.deviceId,
+      steps: [{ step: "boot receiver check", command: "", status: "applied", observation }],
+    };
+    expect(killProfileResultSchema.parse(payload).steps?.[0].observation).toEqual(observation);
+    expect(
+      killProfileResultSchema.safeParse({
+        ...payload,
+        steps: [{ ...payload.steps[0], observation: { ...observation, pendingAlarms: "two" } }],
+      }).success,
+    ).toBe(false);
+  });
+
   test("list returns the catalog and the non-emulatable behaviour without touching the device", async () => {
     const result = killProfileResultSchema.parse(
       structured(await handler(emulator, { action: "list" })),

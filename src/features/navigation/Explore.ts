@@ -32,8 +32,12 @@ import { RevealedListRows } from "./RevealedListRows";
 import { drivesFocus, touchInputMode, type InputModeResolver } from "./focusDrivenInput";
 import { getElementKey } from "./ExploreElementExtraction";
 import { ExplorePermissionDialog } from "./ExplorePermissionDialog";
+import { ExploreImeDismissal } from "./ExploreImeFilter";
+import { ExploreNoEffectElements } from "./ExploreNoEffectElements";
+import { recordScreenVisit } from "./ExploreLoopDetection";
 import { ExplorePlatformRecovery } from "./ExplorePlatformRecovery";
 import {
+  exportTargetGraph,
   generateExplorationReport,
   isExplorationResetDue,
   reportExplorationProgress,
@@ -103,6 +107,10 @@ export class Explore extends BaseVisualChange {
   private pendingBackScreen: string | null = null;
   private awaitingRelaunchScreen: boolean = false;
   private hasObservedTargetApp: boolean = false;
+  private readonly imeDismissal = new ExploreImeDismissal((signal) =>
+    this.platformRecovery().pressBack(signal),
+  );
+  private readonly noEffectElements = new ExploreNoEffectElements();
   /**
    * Withdraws the record of the last successful recorded action. A gesture that
    * caused no navigation would otherwise stay correlatable for the manager's
@@ -242,7 +250,7 @@ export class Explore extends BaseVisualChange {
       }
 
       // Capture initial graph state
-      const initialGraph = await this.navigationManager.exportGraph();
+      const initialGraph = await exportTargetGraph(this.navigationManager, this.targetPackageName);
       const initialNodeCount = initialGraph.nodes.length;
 
       // Initialize graph traversal for validate mode
@@ -263,6 +271,7 @@ export class Explore extends BaseVisualChange {
         progress,
         signal,
       });
+      await this.imeDismissal.dismissOnExit(this.observeScreen, this.targetPackageName, signal);
 
       perf.end();
       return await this.generateReport(initialGraph, startTime, signal?.aborted === true);
@@ -297,6 +306,8 @@ export class Explore extends BaseVisualChange {
     this.recordedBackEdge = null;
     this.awaitingRelaunchScreen = false;
     this.hasObservedTargetApp = false;
+    this.imeDismissal.reset();
+    this.noEffectElements.clear();
     this.elementSelections = [];
     this.explorationPath = [];
     this.interactionCount = 0;
@@ -333,6 +344,7 @@ export class Explore extends BaseVisualChange {
       if (preparation === "continue") {
         continue;
       }
+      this.imeDismissal.settled();
 
       // Select next element to interact with
       const nextElement = await this.selectNextElement(observation, strategy, mode, perf);
@@ -362,6 +374,8 @@ export class Explore extends BaseVisualChange {
         perf,
         signal,
       });
+      this.imeDismissal.interacted(nextElement);
+      this.noEffectElements.interacted(nextElement, interactionSuccess);
 
       if (!(await this.recordInteractionResult(interactionSuccess, mode, isNewInteraction))) {
         break;
@@ -467,6 +481,9 @@ export class Explore extends BaseVisualChange {
       if (enforcement === "stop") {
         return "break";
       }
+      if (await this.imeDismissal.dismiss(observation, this.targetPackageName, signal)) {
+        return "continue";
+      }
     }
 
     this.recordCurrentScreenInPath();
@@ -539,28 +556,7 @@ export class Explore extends BaseVisualChange {
 
   private recordSuccessfulScreenChange(): void {
     const newScreen = this.navigationManager.getCurrentScreen();
-
-    // Check if we navigated to a different screen
-    if (this.previousScreen !== null && newScreen && newScreen !== this.previousScreen) {
-      // We changed screens - check if we've been to this screen before
-      const visitCount = this.loopDetection.get(newScreen) ?? 0;
-      if (visitCount > 0) {
-        // We're returning to a previously visited screen - increment loop counter
-        this.loopDetection.set(newScreen, visitCount + 1);
-        logger.debug(`[Explore] Returning to screen ${newScreen}, visit count: ${visitCount + 1}`);
-      } else {
-        // First visit to this screen - initialize counter
-        this.loopDetection.set(newScreen, 1);
-      }
-    } else if (newScreen && this.previousScreen === null) {
-      // First screen we're tracking
-      this.loopDetection.set(newScreen, 1);
-    }
-
-    // Update previous screen for next iteration
-    if (newScreen) {
-      this.previousScreen = newScreen;
-    }
+    this.previousScreen = recordScreenVisit(this.loopDetection, this.previousScreen, newScreen);
   }
 
   private async reportProgressAndReset(context: ExplorationLoopContext): Promise<void> {
@@ -713,6 +709,13 @@ export class Explore extends BaseVisualChange {
         return this.selectValidateElement(safeCandidates, viewHierarchy);
       }
 
+      const currentScreen = this.navigationManager.getCurrentScreen();
+      // Elements whose last interaction left this screen unchanged are not retried (#17442).
+      const elements = this.noEffectElements.selectable(
+        currentScreen,
+        safeCandidates,
+        viewHierarchy,
+      );
       if (safeCandidates.length === 0 || !viewHierarchy) {
         return null;
       }
@@ -722,16 +725,11 @@ export class Explore extends BaseVisualChange {
       this.currentTargetEdge = null;
       this.currentElementConfidence = 0;
 
-      return selectDiscoveryElement(
-        { elements: safeCandidates, hierarchy: viewHierarchy },
-        strategy,
-        mode,
-        {
-          currentScreen: this.navigationManager.getCurrentScreen(),
-          exploredElements: this.exploredElements,
-          elementSelections: this.elementSelections,
-        },
-      );
+      return selectDiscoveryElement({ elements, hierarchy: viewHierarchy }, strategy, mode, {
+        currentScreen,
+        exploredElements: this.exploredElements,
+        elementSelections: this.elementSelections,
+      });
     });
   }
   private selectValidateElement(candidates: Element[], hierarchy: ObserveResult["viewHierarchy"]) {

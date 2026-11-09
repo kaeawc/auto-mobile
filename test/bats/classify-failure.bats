@@ -189,6 +189,16 @@ JSON
   [[ "$output" == *"RERUN-DONT-FIX — Ubuntu mirror stalled"* ]]
 }
 
+@test "a WHEP artifact-download GetSignedArtifactURL reset classifies as rerun (#17369)" {
+  fixture="$BATS_TEST_TMPDIR/issue-17369-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"main","jobs":[{"databaseId":64,"name":"Android Device Capture to WHEP","conclusion":"failure","steps":[{"name":"Run ./.github/actions/ci-android-device-whep","conclusion":"failure"}]}]}
+JSON
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Unable to download artifact(s): Failed to GetSignedArtifactURL: Unable to make request: ECONNRESET' bash "$SCRIPT" 607
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — GitHub artifact service reset"* ]]
+}
+
 @test "does not treat signal evidence as diagnosis when status is ordinary failure" {
   fixture="$BATS_TEST_TMPDIR/ordinary-exit-run.json"
   cat > "$fixture" <<'JSON'

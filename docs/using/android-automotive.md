@@ -104,6 +104,16 @@ the known foreground activity is not distraction optimized. Unavailable service 
 fields; `blocked: false` alone does not establish that the app is usable. Other device types omit the
 entire `automotive` block.
 
+When the foreground screen is Car App Library templates drawn by the car host rather than the app's
+own views, `observe.automotive.hostRenderedUi` is `{ "kind": "carAppLibrary", "hostPackage": ... }`.
+`hostPackage` is `com.google.android.apps.automotive.templates.host` when the template nodes' resource
+ids name it. Without `hostPackage`, only the foreground activity
+(`androidx.car.app.activity.CarAppActivity`) identified the screen, which also matches the library's
+own error screen when it cannot reach the host. Other screens omit the field; so can a template screen
+whose capture was incomplete, so absence is not proof that the app drew the screen.
+The template rows, titles and the toolbar `Back` button are ordinary hierarchy nodes owned by the host,
+so tap them by text or resource id.
+
 ## Headless system user
 
 Most AAOS images run a headless system user (user 0 has no UI) and the driver is a secondary user,
@@ -189,8 +199,20 @@ The block reports what the app built, not what the car host rendered; its `note`
 main thread did not answer in time, the block has `error: "main_thread_timeout"` and no sessions. Apps
 that do not enable the route add nothing to `observe`.
 
+### Back on Car App Library templates
+
+On an Android Automotive emulator, the Car App Library templates host ignores the BACK key, so
+`pressButton` `back` first sees no change. If the screen then shows one of the host's recognized Back
+controls (the toolbar Back on list, grid, pane and detail screens, or the unlabelled header button on a
+navigation place list), `pressButton` taps it. A press that popped the screen this way succeeds with
+`backFallback` set to `toolbar_nav_icon` or `primary_header_action`. When no recognized control is
+visible, such as on a root template, the press still fails with `No visual change observed`. If the tap
+was sent but its result never arrived, the press reports `code: "indeterminate_outcome"` with
+`retryable: false`: observe before pressing again, because the screen may already have gone back. Other
+screens are unchanged.
+
 ## Not supported
 
-- Android Auto projection and the Desktop Head Unit (see #14118).
+- Android Auto projection and the Desktop Head Unit; see [Android Auto and the Desktop Head Unit](android-auto.md).
 - Physical head units.
 - Car App Library templates as a prototype target.

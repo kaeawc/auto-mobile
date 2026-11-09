@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { watchSendKeys } from "../../../src/features/watch/WatchSendKeys";
+import {
+  WATCH_FOCUS_WAIT_DELAYS_MS,
+  watchSendKeys,
+} from "../../../src/features/watch/WatchSendKeys";
+import { WatchRunnerError } from "../../../src/features/watch/WatchRunnerError";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import { watchRunners } from "../../../src/features/watch/WatchRunnerRegistry";
 import { FakeWatchRunnerClient } from "../../fakes/FakeWatchRunnerClient";
 import { createSendKeysHandler } from "../../../src/server/interactionToolHandlers";
@@ -170,4 +175,179 @@ test("sendKeys tool schema accepts platform watchos", () => {
     platform: "watchos",
   });
   expect(parsed.success).toBe(true);
+});
+
+test.each([
+  ["the typed value", "helloAB", "text-entry-field-value.json"],
+  ["the placeholder of an empty field", "Text", "text-entry-field-empty.json"],
+] as const)(
+  "text selector on %s focuses the text field, not static text",
+  async (_, text, file) => {
+    const tree: unknown = await Bun.file(
+      new URL(`../../fixtures/watchos-xcuitest/${file}`, import.meta.url),
+    ).json();
+    const fake = new FakeWatchRunnerClient(tree);
+    const release = watchRunners.register("watch-text-entry", fake);
+    try {
+      await watchSendKeys("watch-text-entry", [{ action: "type", text: "CD" }], { text });
+    } finally {
+      release();
+    }
+    expect(fake.commands.filter((command) => command.type !== "hierarchy")).toEqual([
+      { type: "tap", identifier: "watch-text-field" },
+      { type: "type", text: "CD" },
+    ]);
+  },
+);
+
+test("text selector reaches a labeled field by its value through the value child", async () => {
+  const bounds = { left: 0, top: 0, right: 100, bottom: 40 };
+  const field = { className: "XCUIElementType(49)", bounds, accessibilityIdentifier: "name-field" };
+  const tree = {
+    timestamp: 1,
+    screenWidth: 208,
+    screenHeight: 248,
+    screenScale: 1,
+    root: {
+      className: "XCUIElementType(1)",
+      bounds: { left: 0, top: 0, right: 208, bottom: 248 },
+      children: [
+        {
+          ...field,
+          accessibilityLabel: "Name",
+          children: [{ ...field, accessibilityLabel: "helloAB" }],
+        },
+      ],
+    },
+  };
+  const fake = new FakeWatchRunnerClient(tree);
+  const release = watchRunners.register("watch-labeled-field", fake);
+  try {
+    await watchSendKeys("watch-labeled-field", [{ action: "type", text: "CD" }], {
+      text: "helloAB",
+    });
+  } finally {
+    release();
+  }
+  expect(fake.commands.filter((command) => command.type !== "hierarchy")).toEqual([
+    // The field and its value child share an identifier, so the tap falls back to coordinates.
+    { type: "tap", x: 50, y: 20 },
+    { type: "type", text: "CD" },
+  ]);
+});
+
+/** Refuses type until the keyboard sheet opens, the way the runner does before focus lands. */
+class LateFocusClient extends FakeWatchRunnerClient {
+  constructor(private refusals: number) {
+    super();
+  }
+  override async request(...args: Parameters<FakeWatchRunnerClient["request"]>): Promise<unknown> {
+    const result = await super.request(...args);
+    if (args[0].type === "type" && this.refusals > 0) {
+      this.refusals--;
+      throw new WatchRunnerError("No focused text field; tap the field first", "command_failed");
+    }
+    return result;
+  }
+}
+
+function useLateFocusClient(refusals: number): FakeWatchRunnerClient {
+  unregister();
+  client = new LateFocusClient(refusals);
+  unregister = watchRunners.register(device.deviceId, client);
+  return client;
+}
+
+const typeHello: SendKeysCommand[] = [{ action: "type", text: "hello" }];
+const typeCalls = () => client.commands.filter((command) => command.type === "type");
+
+test("selector waits for the keyboard sheet before reporting no focused field", async () => {
+  useLateFocusClient(2);
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const result = await watchSendKeys(
+    device.deviceId,
+    typeHello,
+    { elementId: "ctrlproxy-crown" },
+    { timer },
+  );
+  expect(result).toMatchObject({ success: true, completedCommands: 1 });
+  expect(typeCalls()).toEqual([
+    { type: "type", text: "hello" },
+    { type: "type", text: "hello" },
+    { type: "type", text: "hello" },
+  ]);
+  expect(timer.now()).toBe(WATCH_FOCUS_WAIT_DELAYS_MS[0]! + WATCH_FOCUS_WAIT_DELAYS_MS[1]!);
+});
+
+test("selector focus wait is bounded and then reports the existing error", async () => {
+  useLateFocusClient(Number.POSITIVE_INFINITY);
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const result = await watchSendKeys(
+    device.deviceId,
+    typeHello,
+    { elementId: "ctrlproxy-crown" },
+    { timer },
+  );
+  expect(result).toMatchObject({ success: false, completedCommands: 0, failedIndex: 0 });
+  expect(result.error).toContain("No focused text field");
+  expect(typeCalls()).toHaveLength(WATCH_FOCUS_WAIT_DELAYS_MS.length + 1);
+  expect(timer.now()).toBe(WATCH_FOCUS_WAIT_DELAYS_MS.reduce((sum, delay) => sum + delay, 0));
+});
+
+test("without a selector a focus refusal fails at once", async () => {
+  useLateFocusClient(1);
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const result = await watchSendKeys(device.deviceId, typeHello, undefined, { timer });
+  expect(result).toMatchObject({ success: false, failedIndex: 0 });
+  expect(typeCalls()).toHaveLength(1);
+  expect(timer.now()).toBe(0);
+});
+
+test("other runner failures after a selector are not retried", async () => {
+  class FailingTypeClient extends FakeWatchRunnerClient {
+    override async request(
+      ...args: Parameters<FakeWatchRunnerClient["request"]>
+    ): Promise<unknown> {
+      const result = await super.request(...args);
+      if (args[0].type === "type") {
+        throw new WatchRunnerError(
+          "The watch runner does not support type.",
+          "unsupported_on_watchos",
+        );
+      }
+      return result;
+    }
+  }
+  unregister();
+  client = new FailingTypeClient();
+  unregister = watchRunners.register(device.deviceId, client);
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const result = await watchSendKeys(
+    device.deviceId,
+    typeHello,
+    { elementId: "ctrlproxy-crown" },
+    { timer },
+  );
+  expect(result.success).toBe(false);
+  expect(typeCalls()).toHaveLength(1);
+});
+
+test("cancelling during the focus wait stops typing", async () => {
+  useLateFocusClient(Number.POSITIVE_INFINITY);
+  const timer = new FakeTimer();
+  const controller = new AbortController();
+  const pending = watchSendKeys(
+    device.deviceId,
+    typeHello,
+    { elementId: "ctrlproxy-crown" },
+    { timer, signal: controller.signal },
+  );
+  await Bun.sleep(0);
+  controller.abort(new Error("cancelled"));
+  await expect(pending).rejects.toThrow("cancelled");
+  expect(typeCalls()).toHaveLength(1);
 });

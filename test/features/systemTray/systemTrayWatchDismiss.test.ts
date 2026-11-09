@@ -10,7 +10,8 @@ import {
   watchStreamRoot,
 } from "../../../src/features/systemTray/helpers/watchHierarchy";
 import { capturedLauncherHierarchy } from "../../helpers/capturedLauncherHierarchy";
-import { buildObserveResult } from "../../helpers/observeFixture";
+import { buildObserveResult, observeResultFromFixture } from "../../helpers/observeFixture";
+import launcherCapture from "../../fixtures/wear/systemtray/ctrlproxy-alert-shy-over-launcher.json";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -33,6 +34,19 @@ const closed = buildObserveResult({
 let single: ObserveResult;
 let revealed: ObserveResult;
 let emptied: ObserveResult;
+// The captured reveal with its buttons moved to another row: the swipe landed on a different card.
+let revealedElsewhere: ObserveResult;
+// Captured on an API 37 Wear OS 7 emulator with three stacked cards: the stream at its top (the
+// second card is cut off by the bottom edge) and after one page scroll (fully visible).
+let stackedTop: ObserveResult;
+let stackedScrolled: ObserveResult;
+// The scrolled page mid-animation: every card still 10 px lower than where it comes to rest.
+let stackedSliding: ObserveResult;
+const SCROLL = "shell input swipe 192 288 192 96 500";
+// Bravo's bounds after the scroll are [19,81][365,249]; before it only [32,269][352,384] showed.
+const SWIPE_BRAVO = "shell input swipe 192 165 364 165 300";
+const SWIPE_BRAVO_CLIPPED = "shell input swipe 192 326 364 326 300";
+const SWIPE_CHARLIE = "shell input swipe 192 177 364 177 300";
 
 beforeAll(async () => {
   single = {
@@ -45,6 +59,36 @@ beforeAll(async () => {
     "wear/systemtray/notification-stream-dismiss-revealed.xml",
   );
   revealed = { ...closed, viewHierarchy: revealedHierarchy };
+  const elsewhereHierarchy = structuredClone(revealedHierarchy);
+  const elsewhereRoot = watchStreamRoot(elsewhereHierarchy);
+  for (const node of elsewhereRoot ? watchNodes(elsewhereRoot) : []) {
+    if (node.$ && String(node.$["resource-id"]).endsWith(":id/notification_str_clear_button")) {
+      node.$.bounds = "[19,300][128,384]";
+    }
+  }
+  revealedElsewhere = { ...closed, viewHierarchy: elsewhereHierarchy };
+  stackedTop = {
+    ...closed,
+    viewHierarchy: await capturedLauncherHierarchy(
+      "wear/systemtray/notification-stream-three-cards-top.xml",
+    ),
+  };
+  stackedScrolled = {
+    ...closed,
+    viewHierarchy: await capturedLauncherHierarchy(
+      "wear/systemtray/notification-stream-scrolled-three-cards.xml",
+    ),
+  };
+  const slidingHierarchy = structuredClone(stackedScrolled.viewHierarchy);
+  const slidingRoot = watchStreamRoot(slidingHierarchy);
+  for (const node of slidingRoot ? watchNodes(slidingRoot) : []) {
+    const match = /^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$/.exec(String(node.$?.bounds ?? ""));
+    if (node.$ && match && match[2] !== "0") {
+      const [left, top, right, bottom] = match.slice(1).map(Number);
+      node.$.bounds = `[${left},${top + 10}][${right},${bottom + 10}]`;
+    }
+  }
+  stackedSliding = { ...closed, viewHierarchy: slidingHierarchy };
   // Models removal by pruning the captured container; not a second device capture.
   const prunedHierarchy = structuredClone(revealedHierarchy);
   const root = watchStreamRoot(prunedHierarchy);
@@ -57,14 +101,13 @@ beforeAll(async () => {
 });
 afterEach(resetSystemTrayDependencies);
 
-function setup(read: (commands: string[]) => ObserveResult) {
+function setup(read: (commands: string[]) => ObserveResult, timer = new FakeTimer()) {
   const adb = new FakeAdbExecutor();
   const observer = new FakeObserveScreen();
-  const timer = new FakeTimer();
   timer.enableAutoAdvance();
   observer.setObserveResult(() => read(adb.getExecutedCommands()));
   setSystemTrayDependencies({ adbFactory: () => adb, observeScreenFactory: () => observer, timer });
-  return { adb, tray: new SystemTray(watch) };
+  return { adb, timer, tray: new SystemTray(watch) };
 }
 
 describe("Wear OS 7 dismiss reveals the X button", () => {
@@ -90,5 +133,334 @@ describe("Wear OS 7 dismiss reveals the X button", () => {
       awaitTimeout: 500,
     });
     expect(result).toMatchObject({ isError: true, payload: { code: "dismissal_unconfirmed" } });
+  });
+});
+
+describe("Wear OS 7 dismiss never taps another card's X", () => {
+  test("leaves the buttons revealed on a different row untouched", async () => {
+    const { adb, tray } = setup((commands) =>
+      commands.includes(SWIPE) ? revealedElsewhere : single,
+    );
+    const result = await tray.execute({
+      action: "dismiss",
+      notification: { title: "Zebra" },
+      awaitTimeout: 500,
+    });
+    expect(result).toMatchObject({ isError: true, payload: { code: "dismissal_unconfirmed" } });
+    expect(adb.getExecutedCommands().filter((command) => command.includes("input tap"))).toEqual(
+      [],
+    );
+  });
+});
+
+describe("Wear OS 7 dismiss targets the requested card with several stacked", () => {
+  test("scrolls a card cut off by the screen edge into view and swipes its current bounds", async () => {
+    const { adb, tray } = setup((commands) =>
+      commands.includes(TAP_X)
+        ? emptied
+        : commands.includes(SWIPE_BRAVO)
+          ? revealed
+          : commands.includes(SCROLL)
+            ? stackedScrolled
+            : stackedTop,
+    );
+    const result = await tray.execute({
+      action: "dismiss",
+      notification: { title: "Card Bravo" },
+      awaitTimeout: 500,
+    });
+    expect(result).toMatchObject({ isError: false, payload: { dismissedCount: 1, success: true } });
+    const commands = adb.getExecutedCommands();
+    expect(commands).not.toContain(SWIPE_BRAVO_CLIPPED);
+    expect(commands.indexOf(SWIPE_BRAVO)).toBeGreaterThan(commands.indexOf(SCROLL));
+  });
+
+  test("swipes a fully visible card without scrolling", async () => {
+    const { adb, tray } = setup((commands) =>
+      commands.includes(TAP_X) ? emptied : commands.includes(SWIPE_CHARLIE) ? revealed : stackedTop,
+    );
+    await tray.execute({
+      action: "dismiss",
+      notification: { title: "Card Charlie" },
+      awaitTimeout: 500,
+    });
+    expect(adb.getExecutedCommands()).toContain(SWIPE_CHARLIE);
+    expect(adb.getExecutedCommands()).not.toContain(SCROLL);
+  });
+
+  test("swipes where the card stopped, not where an animating read placed it", async () => {
+    // After the scroll: the page the scan reads and one more read mid-animation, then settled.
+    const frames = [stackedSliding, stackedScrolled, stackedScrolled];
+    let reads = 0;
+    const { adb, tray } = setup((commands) => {
+      if (commands.includes(TAP_X)) {
+        return emptied;
+      }
+      if (commands.includes(SWIPE_BRAVO)) {
+        return revealed;
+      }
+      return commands.includes(SCROLL) ? frames[Math.min(reads++, frames.length - 1)] : stackedTop;
+    });
+    const result = await tray.execute({
+      action: "dismiss",
+      notification: { title: "Card Bravo" },
+      awaitTimeout: 500,
+    });
+    expect(result).toMatchObject({ isError: false, payload: { dismissedCount: 1 } });
+    const swipes = adb.getExecutedCommands().filter((command) => command.includes("input swipe"));
+    expect(swipes.filter((command) => command.endsWith(" 300"))).toEqual([SWIPE_BRAVO]);
+  });
+});
+
+// Captured with CtrlProxy on a Wear OS 7 round emulator (API 37, 384x384): the app list
+// (AllAppsLauncherActivity, `appsList`), which Back opens from the watch face.
+const appList = observeResultFromFixture(
+  { updatedAt: 0, systemInsets: { top: 0, right: 0, bottom: 0, left: 0 }, ...launcherCapture },
+  "alert-shy-over-launcher",
+);
+// A fake third-party app in front, not a captured hierarchy.
+const APP = "dev.example.accept";
+const app: ObserveResult = {
+  ...closed,
+  viewHierarchy: { packageName: APP, hierarchy: { node: { $: { bounds: "[0,0][384,384]" } } } },
+  activeWindow: { appId: APP, activityName: `${APP}.MainActivity`, layoutSeqSum: 0 },
+};
+const BACK = "shell input keyevent 4";
+const HOME = "shell input keyevent KEYCODE_HOME";
+const OPEN = "shell input swipe 192 370 192 119 900";
+/**
+ * Reads after the X tap up to and including the one cleanup decides from that the stream is still
+ * open: the dismissal's confirmation read, then cleanup's first read.
+ */
+const READS_UNTIL_CLEANUP_DECIDES = 2;
+
+type Surface = "app" | "face" | "stream" | "revealed" | "emptied" | "appList";
+const surfaces = (): Record<Surface, ObserveResult> => ({
+  app,
+  face: closed,
+  stream: single,
+  revealed,
+  emptied,
+  appList,
+});
+
+/**
+ * A watch with an app in front and one card posted. After its last card is removed, the stream
+ * closes on its own once `selfCloseAfter` reads have seen it emptied; the close lands before the
+ * next read or key. Back closes a showing stream onto the watch face, and on the face opens the
+ * app list, as on a device.
+ */
+function dismissFromApp(selfCloseAfter: number) {
+  let surface: Surface = "app";
+  let handled = 0;
+  let readsSinceTap = 0;
+  const closeIfDue = () => {
+    if (surface === "emptied" && readsSinceTap >= selfCloseAfter) {
+      surface = "face";
+    }
+  };
+  const press = (command: string) => {
+    closeIfDue();
+    const next: Partial<Record<string, Partial<Record<Surface, Surface>>>> = {
+      [HOME]: { app: "face" },
+      [OPEN]: { face: "stream" },
+      [SWIPE]: { stream: "revealed" },
+      [TAP_X]: { revealed: "emptied" },
+      [BACK]: {
+        face: "appList",
+        appList: "face",
+        stream: "face",
+        revealed: "face",
+        emptied: "face",
+      },
+    };
+    surface = next[command]?.[surface] ?? surface;
+    if (command === TAP_X) {
+      readsSinceTap = 0;
+    }
+  };
+  return (commands: string[]): ObserveResult => {
+    commands.slice(handled).forEach(press);
+    handled = commands.length;
+    closeIfDue();
+    readsSinceTap += 1;
+    return surfaces()[surface];
+  };
+}
+
+describe("Wear dismiss started from inside an app restores the watch face (#17546)", () => {
+  const dismiss = (tray: SystemTray) =>
+    tray.execute({ action: "dismiss", notification: { title: "Zebra" }, awaitTimeout: 500 });
+
+  test("closes a stream that is still showing with one Back onto the watch face", async () => {
+    const { adb, timer, tray } = setup(dismissFromApp(Number.POSITIVE_INFINITY));
+    const result = await dismiss(tray);
+    expect(result).toMatchObject({ isError: false, payload: { dismissedCount: 1, success: true } });
+    expect(result.payload.observation).toBe(closed);
+    const commands = adb.getExecutedCommands();
+    expect(commands[0]).toBe(HOME);
+    expect(commands.filter((command) => command === BACK)).toHaveLength(1);
+    // Two earlier polls reveal/confirm the X; cleanup waits eight more on the injected clock.
+    expect(timer.getSleepHistory().filter((ms) => ms === 250)).toHaveLength(10);
+  });
+
+  test("does not press Back when the stream closed between the last read and the Back", async () => {
+    const { adb, tray } = setup(dismissFromApp(READS_UNTIL_CLEANUP_DECIDES));
+    const result = await dismiss(tray);
+    expect(result).toMatchObject({ isError: false, payload: { dismissedCount: 1, success: true } });
+    expect(result.payload.observation).toBe(closed);
+    expect(adb.getExecutedCommands()).not.toContain(BACK);
+  });
+
+  test("waits for the emptied stream to close itself after several reads without Back", async () => {
+    const { adb, timer, tray } = setup(dismissFromApp(5));
+    const result = await dismiss(tray);
+    expect(result).toMatchObject({ isError: false, payload: { dismissedCount: 1, success: true } });
+    expect(result.payload.observation).toBe(closed);
+    expect(adb.getExecutedCommands()).not.toContain(BACK);
+    expect(timer.getSleepHistory().filter((ms) => ms === 250)).toHaveLength(5);
+  });
+
+  test("recovers with another Back when closing the stream lands on the app list", async () => {
+    // The stream closes between the last empty-stream poll and Back, opening the app list.
+    const { adb, tray } = setup(dismissFromApp(READS_UNTIL_CLEANUP_DECIDES + 1 + 8));
+    const result = await dismiss(tray);
+    expect(result).toMatchObject({ isError: false, payload: { dismissedCount: 1, success: true } });
+    expect(result.payload.observation).toBe(closed);
+    expect(adb.getExecutedCommands().filter((command) => command === BACK)).toHaveLength(2);
+  });
+
+  test("keeps dismissal_unconfirmed if the fresh recovery read shows the app list again", async () => {
+    const model = dismissFromApp(Number.POSITIVE_INFINITY);
+    let recoveryReads = 0;
+    const { tray } = setup((commands) => {
+      const shown = model(commands);
+      const backs = commands.filter((command) => command === BACK).length;
+      if (backs >= 2) {
+        // The recovery key's poll and settled read show the face, but its final confirmation does not.
+        return recoveryReads++ < 2 ? closed : appList;
+      }
+      return backs === 1 ? appList : shown;
+    });
+    const result = await dismiss(tray);
+    expect(result).toMatchObject({
+      isError: true,
+      payload: { code: "dismissal_unconfirmed", dismissedCount: 1, success: false },
+    });
+    expect(result.payload.observation).toBe(appList);
+  });
+
+  test.each([
+    { name: "an app in front", confirmation: () => app, message: "left an app in front" },
+    {
+      name: "the stream open again",
+      confirmation: () => single,
+      message: "notification stream is open again",
+    },
+  ])(
+    "reports dismissal_unconfirmed when the recovery confirmation shows $name",
+    async ({ confirmation, message }) => {
+      const model = dismissFromApp(Number.POSITIVE_INFINITY);
+      let recoveryReads = 0;
+      const { tray } = setup((commands) => {
+        const shown = model(commands);
+        const backs = commands.filter((command) => command === BACK).length;
+        if (backs >= 2) {
+          // The recovery key's poll and settled read show the face; its confirmation read does not.
+          return recoveryReads++ < 2 ? closed : confirmation();
+        }
+        return backs === 1 ? appList : shown;
+      });
+      const result = await dismiss(tray);
+      expect(result).toMatchObject({
+        isError: true,
+        payload: { code: "dismissal_unconfirmed", dismissedCount: 1, success: false },
+      });
+      expect(String(result.payload.message)).toContain(message);
+      expect(result.payload.observation).toBe(confirmation());
+    },
+  );
+
+  test("reports that the stream did not close before the restore deadline aborts cleanup", async () => {
+    // A slow watch: every cleanup read takes 400 ms and the emptied stream ignores Back. Without a
+    // bounded wait one self-close wait plus one Back's polls (~10.8 s) outlasts the 10 s deadline.
+    const model = dismissFromApp(Number.POSITIVE_INFINITY);
+    const clock = new FakeTimer();
+    let readsAfterTap = 0;
+    const { adb, tray } = setup((commands) => {
+      const shown = model(commands);
+      if (!commands.includes(TAP_X)) {
+        return shown;
+      }
+      if (readsAfterTap++ >= READS_UNTIL_CLEANUP_DECIDES - 1) {
+        clock.advanceTime(400);
+      }
+      return emptied;
+    }, clock);
+    await expect(dismiss(tray)).rejects.toThrow(
+      "Watch notification stream did not close after returning to the previous screen.",
+    );
+    expect(adb.getExecutedCommands().filter((command) => command === BACK)).toHaveLength(1);
+  });
+
+  test("keeps dismissal_unconfirmed when recovery cannot leave the app list", async () => {
+    // A Back that lands on the watch face anyway (the close finished after the fresh read).
+    const model = dismissFromApp(Number.POSITIVE_INFINITY);
+    const { adb, tray } = setup((commands) => {
+      const shown = model(commands);
+      return commands.includes(BACK) ? appList : shown;
+    });
+    const result = await dismiss(tray);
+    expect(result).toMatchObject({
+      isError: true,
+      payload: { code: "dismissal_unconfirmed", dismissedCount: 1, success: false },
+    });
+    expect(String(result.payload.message)).toContain("left the watch on the app list");
+    expect(result.payload.observation).toBe(appList);
+    expect(adb.getExecutedCommands().filter((command) => command === BACK)).toHaveLength(2);
+    expect(adb.getExecutedCommands().filter((command) => command === HOME)).toHaveLength(3);
+  });
+
+  test("keeps the last observation and dismissal_unconfirmed when recovery throws", async () => {
+    const model = dismissFromApp(Number.POSITIVE_INFINITY);
+    const { tray } = setup((commands) => {
+      const shown = model(commands);
+      const backs = commands.filter((command) => command === BACK).length;
+      if (backs >= 2) {
+        throw new Error("Recovery observation failed");
+      }
+      return backs === 1 ? appList : shown;
+    });
+    const result = await dismiss(tray);
+    expect(result).toMatchObject({
+      isError: true,
+      payload: { code: "dismissal_unconfirmed", dismissedCount: 1, success: false },
+    });
+    expect(result.payload.observation).toBe(appList);
+  });
+
+  test("closes with exactly one Back when another card remains", async () => {
+    const { adb, timer, tray } = setup((commands) => {
+      if (commands.includes(BACK)) {
+        return closed;
+      }
+      if (commands.includes(TAP_X)) {
+        return single;
+      }
+      if (commands.includes(SWIPE_CHARLIE)) {
+        return revealed;
+      }
+      return commands.includes(OPEN) ? stackedTop : closed;
+    });
+    const result = await tray.execute({
+      action: "dismiss",
+      notification: { title: "Card Charlie" },
+      awaitTimeout: 500,
+    });
+    expect(result).toMatchObject({ isError: false, payload: { dismissedCount: 1, success: true } });
+    expect(result.payload.observation).toBe(closed);
+    expect(adb.getExecutedCommands().filter((command) => command === BACK)).toHaveLength(1);
+    // Only the existing reveal/confirmation settling runs; cleanup adds no empty-stream wait.
+    expect(timer.getSleepHistory()).toEqual([500, 250]);
   });
 });

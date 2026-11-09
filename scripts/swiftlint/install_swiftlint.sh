@@ -16,9 +16,8 @@ install_macos() {
 
 # Install SwiftLint on Linux
 install_linux() {
-    echo -e "${YELLOW}Installing SwiftLint on Linux...${NC}"
-    echo -e "${YELLOW}SwiftLint requires manual installation on Linux...${NC}"
-    install_manual
+    echo -e "${YELLOW}Installing the pinned SwiftLint Linux binary...${NC}"
+    bash "$(dirname "${BASH_SOURCE[0]}")/install_swiftlint_linux.sh"
     return $?
 }
 
@@ -73,13 +72,7 @@ install_manual() {
 
         echo -e "${GREEN}SwiftLint installed successfully to $install_dir${NC}"
     else
-        # For Linux, need to build from source
-        echo -e "${YELLOW}On Linux, SwiftLint needs to be built from source.${NC}"
-        echo -e "${YELLOW}Please install Swift first, then run:${NC}"
-        echo "git clone https://github.com/realm/SwiftLint.git"
-        echo "cd SwiftLint"
-        echo "swift build -c release"
-        echo "cp .build/release/swiftlint $install_dir/"
+        echo -e "${RED}No pinned SwiftLint binary for $os; Linux uses install_swiftlint_linux.sh.${NC}"
         return 1
     fi
 

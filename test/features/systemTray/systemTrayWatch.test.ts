@@ -47,11 +47,13 @@ const watch: BootedDevice = {
   platform: "android",
   formFactor: "watch",
 };
-// Scrolls the stream toward its top (a downward finger swipe on the 384px fake screen).
-const REWIND_SWIPE = "shell input swipe 192 96 192 288 500";
+// Scrolls the stream toward its top (a mouse-wheel step at the centre of the 384px fake screen).
+const REWIND_SWIPE = "shell input mouse scroll 192 192 --axis VSCROLL,3";
 let hierarchy: ViewHierarchyResult;
 let stream: ObserveResult;
 let emptyStream: ObserveResult;
+let singleCard: ObserveResult;
+let revealedDismiss: ObserveResult;
 // A fake closed screen, not a captured watch-face hierarchy.
 const closed = buildObserveResult({
   updatedAt: 0,
@@ -75,6 +77,18 @@ beforeAll(async () => {
     }
   }
   emptyStream = { ...closed, viewHierarchy: emptyHierarchy };
+  singleCard = {
+    ...closed,
+    viewHierarchy: await capturedLauncherHierarchy(
+      "wear/systemtray/notification-stream-single-card.xml",
+    ),
+  };
+  revealedDismiss = {
+    ...closed,
+    viewHierarchy: await capturedLauncherHierarchy(
+      "wear/systemtray/notification-stream-dismiss-revealed.xml",
+    ),
+  };
 });
 afterEach(resetSystemTrayDependencies);
 
@@ -146,6 +160,99 @@ function setup(
   });
   return { adb, observer, timer, tray: new SystemTray(watch) };
 }
+
+describe("Wear last-card dismissal closes the stream before confirmation", () => {
+  const active = inventory(shell(1, "Zebra", "zbody"));
+  const TAP_X = "shell input tap 73 176";
+
+  test.each([
+    {
+      name: "confirms a removed key",
+      appId: "com.android.shell",
+      before: active,
+      after: inventory(),
+      tapX: true,
+      success: true,
+    },
+    {
+      name: "refuses a still-active key",
+      appId: "com.android.shell",
+      before: active,
+      after: active,
+      tapX: true,
+      success: false,
+    },
+    {
+      name: "refuses without an app inventory",
+      appId: undefined,
+      before: active,
+      after: inventory(),
+      tapX: true,
+      success: false,
+    },
+    {
+      name: "refuses an untrustworthy before dump",
+      appId: "com.android.shell",
+      before: "",
+      after: inventory(),
+      tapX: true,
+      success: false,
+    },
+    {
+      name: "refuses an untrustworthy after dump",
+      appId: "com.android.shell",
+      before: active,
+      after: "",
+      tapX: true,
+      success: false,
+    },
+    {
+      name: "refuses when the before inventory did not match the card",
+      appId: "com.android.shell",
+      before: inventory(shell(1)),
+      after: inventory(),
+      tapX: true,
+      success: false,
+    },
+    {
+      name: "refuses when the stream vanished without an X tap",
+      appId: "com.android.shell",
+      before: active,
+      after: inventory(),
+      tapX: false,
+      success: false,
+    },
+  ])("$name", async ({ appId, before, after, tapX, success }) => {
+    const { adb, tray } = setup(
+      (commands) => {
+        if (commands.includes(TAP_X)) {
+          return closed;
+        }
+        if (commands.includes(DISMISS_SWIPE)) {
+          return tapX ? revealedDismiss : closed;
+        }
+        return commands.includes("shell input swipe 192 370 192 119 900") ? singleCard : closed;
+      },
+      (commands) => (commands.includes(DISMISS_SWIPE) ? after : before),
+    );
+    const result = await tray.execute({
+      action: "dismiss",
+      notification: { appId, title: "Zebra" },
+      awaitTimeout: 500,
+    });
+    expect(result).toMatchObject(
+      success
+        ? { isError: false, payload: { success: true, dismissedCount: 1 } }
+        : { isError: true, payload: { success: false, code: "dismissal_unconfirmed" } },
+    );
+    expect(result.payload.observation).toBe(closed);
+    expect(adb.getExecutedCommands().includes(TAP_X)).toBe(tapX);
+    expect(adb.getExecutedCommands()).not.toContain("shell input keyevent 4");
+    if (!appId) {
+      expect(adb.getExecutedCommands()).not.toContain(DUMPSYS);
+    }
+  });
+});
 
 describe("Wear notification stream capture", () => {
   test("detects the stream without a phone shade or window-title hint", () => {
@@ -280,7 +387,7 @@ describe("Wear notification stream capture", () => {
     expect(
       await tray.execute({ action: "dismiss", notification: { title: "Wear" }, awaitTimeout: 500 }),
     ).toMatchObject({ isError: true, payload: { code: "dismissal_unconfirmed" } });
-    expect(timer.getSleepHistory()).toEqual([250, 250]);
+    expect(timer.getSleepHistory()).toEqual([250, 500, 250]);
   });
 
   test("confirms a removed card in a readable stream after the injected dismiss swipe", async () => {
@@ -295,7 +402,7 @@ describe("Wear notification stream capture", () => {
       }),
     ).toMatchObject({ isError: false, payload: { dismissedCount: 1, success: true } });
     expect(adb.getExecutedCommands()).not.toContain("shell input tap 192 335");
-    expect(timer.getSleepHistory()).toEqual([250, 250]);
+    expect(timer.getSleepHistory()).toEqual([250, 500, 250]);
   });
 
   // Rewrites one captured card text to model an ongoing card that updates in place.

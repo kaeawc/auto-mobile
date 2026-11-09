@@ -1,5 +1,8 @@
 import { normalizeVisionosHierarchy } from "../features/visionos/VisionosHierarchy";
-import { requireVisionosRunner } from "../features/visionos/VisionosRunnerLifecycle";
+import {
+  requireVisionosRunner,
+  withVisionosHostRecovery,
+} from "../features/visionos/VisionosRunnerLifecycle";
 import { visionosRunners } from "../features/visionos/VisionosRunnerRegistry";
 import { defaultDaemonContext } from "../daemon/daemonContext";
 import { holderOf } from "../daemon/deviceBinding";
@@ -23,6 +26,7 @@ import { ActionableError, toActionableError } from "../models/ActionableError";
 import {
   WATCH_HIERARCHY_UNAVAILABLE_MESSAGE,
   TVOS_HIERARCHY_UNAVAILABLE_MESSAGE,
+  TVOS_RUNNER_UNAVAILABLE_MESSAGE,
   VISIONOS_HIERARCHY_UNAVAILABLE_MESSAGE,
   type AppleScreenshotOnlyPlatform,
   type WatchObservation,
@@ -47,7 +51,16 @@ import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
-import { createObserveResponse, type ObserveResponse } from "./observeResponse";
+import {
+  createObserveResponse,
+  createObserveWaitResponse,
+  type ObserveResponse,
+} from "./observeResponse";
+import {
+  assertAppleRunnerWaitFor,
+  pollAppleRunnerWaitFor,
+  type AppleRunnerWaitOutcome,
+} from "./appleRunnerWaitFor";
 import type { ObserveArgs } from "./observeTools";
 
 /** Captures an Apple simulator's screen as PNG bytes. */
@@ -104,6 +117,9 @@ const WATCH_UNSUPPORTED_OPTIONS: readonly OptionCheck[] = [
   ['screenshot: "none"', (args) => args.screenshot === "none"],
 ];
 
+/** Options a runner hierarchy can honour: the full projection and element waits (#17309). */
+const RUNNER_HIERARCHY_OPTIONS: ReadonlySet<string> = new Set(["project", "waitFor"]);
+
 function screenshotOnlyPlatform(device: BootedDevice): AppleScreenshotOnlyPlatform {
   return device.platform === "tvos" || device.platform === "visionos" ? device.platform : "watchos";
 }
@@ -133,7 +149,7 @@ export function assertWatchObserveOptions(
 ): void {
   const hasRunnerHierarchy = hierarchyAvailable;
   const refused = WATCH_UNSUPPORTED_OPTIONS.filter(
-    ([name, isSet]) => isSet(args) && !(hasRunnerHierarchy && name === "project"),
+    ([name, isSet]) => isSet(args) && !(hasRunnerHierarchy && RUNNER_HIERARCHY_OPTIONS.has(name)),
   ).map(([name]) => name);
   if (args.display !== undefined && args.display !== "active" && args.display !== displayKey) {
     refused.push(`display: "${args.display}"`);
@@ -179,15 +195,21 @@ async function visionosHierarchyForObserve(
   device: BootedDevice,
   args: ObserveArgs,
   signal: AbortSignal | undefined,
-  startRunner: NonNullable<WatchObserveDependencies["visionosRunner"]>,
+  runner: {
+    start: NonNullable<WatchObserveDependencies["visionosRunner"]>;
+    /** A connect-only held read never restarts another session's runner. */
+    recoverHostLoss: boolean;
+  },
 ): Promise<HierarchyOutcome> {
   const displayKey = watchDisplay(device).ref.key;
   // Refuse options neither path supports before paying for runner startup.
   assertWatchObserveOptions(args, displayKey, "visionos", true);
   let hierarchy;
   try {
-    const runner = await startRunner(device.deviceId, signal);
-    hierarchy = await runner.hierarchy(signal);
+    const read = async () => (await runner.start(device.deviceId, signal)).hierarchy(signal);
+    hierarchy = runner.recoverHostLoss
+      ? await withVisionosHostRecovery(device.deviceId, signal, read)
+      : await read();
   } catch (error) {
     if (signal?.aborted) {
       throw error;
@@ -232,16 +254,50 @@ async function watchHierarchyForObserve(
 ): Promise<HierarchyOutcome> {
   if (screenshotOnlyPlatform(device) === "visionos") {
     const heldRead = (dependencies.heldDeviceRead ?? isReadOfHeldDevice)(device.deviceId);
-    return visionosHierarchyForObserve(
-      device,
-      args,
-      signal,
-      dependencies.visionosRunner ?? (heldRead ? connectedVisionosRunner : requireVisionosRunner),
-    );
+    return visionosHierarchyForObserve(device, args, signal, {
+      start:
+        dependencies.visionosRunner ?? (heldRead ? connectedVisionosRunner : requireVisionosRunner),
+      recoverHostLoss: !heldRead,
+    });
+  }
+  if (screenshotOnlyPlatform(device) === "tvos") {
+    return tvosHierarchyForObserve(device, args, signal);
   }
   return {
     hierarchy: await appleRunnerHierarchy(device, args, signal, dependencies.runner),
   };
+}
+
+/**
+ * The registered tvOS runner's hierarchy. A runner that is stuck, disconnected or fails degrades
+ * observe to its screenshot with the reason, as on visionOS, instead of failing the call (#17310).
+ */
+async function tvosHierarchyForObserve(
+  device: BootedDevice,
+  args: ObserveArgs,
+  signal: AbortSignal | undefined,
+): Promise<HierarchyOutcome> {
+  const displayKey = watchDisplay(device).ref.key;
+  const runner = tvosRunners.get(device.deviceId);
+  assertWatchObserveOptions(args, displayKey, "tvos", runner !== undefined);
+  if (!runner) {
+    return {};
+  }
+  try {
+    return { hierarchy: normalizeTvosHierarchy(await runner.hierarchy(signal)) };
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
+    const reason = errorMessage(error);
+    logger.warn(
+      `[TvosRunner] observe on ${device.deviceId} could not retrieve the runner hierarchy: ${reason}`,
+      error,
+    );
+    // Without a hierarchy the hierarchy-only options (project, waitFor) cannot be honoured.
+    assertWatchObserveOptions(args, displayKey, "tvos", false);
+    return { unavailableReason: reason };
+  }
 }
 
 async function appleRunnerHierarchy(
@@ -251,11 +307,6 @@ async function appleRunnerHierarchy(
   injectedRunner?: WatchRunnerClient,
 ): Promise<ViewHierarchyResult | undefined> {
   const platform = screenshotOnlyPlatform(device);
-  if (platform === "tvos") {
-    const runner = tvosRunners.get(device.deviceId);
-    assertWatchObserveOptions(args, watchDisplay(device).ref.key, platform, runner !== undefined);
-    return runner ? normalizeTvosHierarchy(await runner.hierarchy(signal)) : undefined;
-  }
   const runner = injectedRunner ?? watchRunners.get(device.deviceId);
   assertWatchObserveOptions(args, watchDisplay(device).ref.key, platform, runner !== undefined);
   try {
@@ -276,16 +327,15 @@ export async function observeWatch(
   args: ObserveArgs,
   signal: AbortSignal | undefined,
   dependencies: WatchObserveDependencies = {},
-): Promise<ObserveResponse<WatchObservation | ObserveResult>> {
+): Promise<ObserveResponse<WatchObservation | ObserveResult> & { isError?: true }> {
   const platform = screenshotOnlyPlatform(device);
   const display = watchDisplay(device);
-  const { hierarchy: viewHierarchy, unavailableReason } = await watchHierarchyForObserve(
-    device,
-    args,
-    signal,
-    dependencies,
-  );
   const timer = dependencies.timer ?? defaultTimer;
+  const {
+    hierarchy: viewHierarchy,
+    unavailableReason,
+    waitOutcome,
+  } = await observedHierarchy(device, args, signal, { ...dependencies, timer });
   const idGenerator = dependencies.idGenerator ?? defaultIdGenerator;
   const protection = dependencies.pathProtection ?? screenshotPathProtection;
   const directory = (dependencies.cacheDir ?? (() => TakeScreenshot.getCacheDir()))();
@@ -295,7 +345,8 @@ export async function observeWatch(
   const { png, width, height } = await captureWatchPng(
     device,
     display.captureKey,
-    dependencies.screenshots ?? defaultWatchScreenshotSource(device),
+    dependencies.screenshots ??
+      defaultWatchScreenshotSource(device, unavailableReason === undefined),
     signal,
   );
   // A cancelled call must not leave a retained screenshot nobody will read.
@@ -331,11 +382,42 @@ export async function observeWatch(
     screenshotCaptureSource: "device",
     screenshotCapturedAt: new Date(capturedAt).toISOString(),
   };
-  return createObserveResponse(
-    watchObservationPayload(capture, platform, viewHierarchy, unavailableReason),
-    args.includeScreenshotImage,
-    { signal, protection },
+  const payload = watchObservationPayload(capture, platform, viewHierarchy, unavailableReason);
+  return waitOutcome
+    ? createObserveWaitResponse(payload, waitOutcome, args.includeScreenshotImage, {
+        signal,
+        protection,
+      })
+    : createObserveResponse(payload, args.includeScreenshotImage, { signal, protection });
+}
+
+/**
+ * The runner hierarchy for this observe; with `waitFor`, the hierarchy of the poll that matched
+ * (or the last one before the timeout) plus the wait metadata (#17309).
+ */
+async function observedHierarchy(
+  device: BootedDevice,
+  args: ObserveArgs,
+  signal: AbortSignal | undefined,
+  dependencies: WatchObserveDependencies & { timer: Timer },
+): Promise<HierarchyOutcome & { waitOutcome?: AppleRunnerWaitOutcome }> {
+  const first = await watchHierarchyForObserve(device, args, signal, dependencies);
+  if (args.waitFor === undefined) {
+    return first;
+  }
+  // assertWatchObserveOptions admitted waitFor, so a runner is connected.
+  assertAppleRunnerWaitFor(args.waitFor, screenshotOnlyPlatform(device));
+  let pending: HierarchyOutcome | undefined = first;
+  const { hierarchy, outcome } = await pollAppleRunnerWaitFor(
+    args.waitFor,
+    async () => {
+      const read = pending ?? (await watchHierarchyForObserve(device, args, signal, dependencies));
+      pending = undefined;
+      return read.hierarchy;
+    },
+    { timer: dependencies.timer, signal },
   );
+  return { hierarchy, waitOutcome: outcome };
 }
 
 function watchObservationPayload(
@@ -345,7 +427,10 @@ function watchObservationPayload(
   unavailableReason?: string,
 ): WatchObservation | ObserveResult {
   if (!viewHierarchy) {
-    const message = HIERARCHY_UNAVAILABLE_MESSAGES[platform];
+    const message =
+      platform === "tvos" && unavailableReason
+        ? TVOS_RUNNER_UNAVAILABLE_MESSAGE
+        : HIERARCHY_UNAVAILABLE_MESSAGES[platform];
     return {
       ...capture,
       hierarchyUnavailable: {
@@ -372,8 +457,17 @@ function watchObservationPayload(
   };
 }
 
-function defaultWatchScreenshotSource(device: BootedDevice): WatchScreenshotSource {
-  return device.platform === "tvos" && tvosRunners.get(device.deviceId)
+/**
+ * The tvOS runner's screenshot while it answers; simctl's once the runner failed this observe, so
+ * a stuck runner cannot also stall the screenshot-only fallback.
+ */
+export function defaultWatchScreenshotSource(
+  device: BootedDevice,
+  runnerAnswered = true,
+): WatchScreenshotSource {
+  return device.platform === "tvos" &&
+    runnerAnswered &&
+    tvosRunners.get(device.deviceId)?.isUsable() === true
     ? runnerTvosScreenshotSource
     : simctlWatchScreenshotSource;
 }

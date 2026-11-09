@@ -57,6 +57,24 @@ class SurvivalAdbExecutor extends FakeAdbExecutor {
         createExecResult(hibernation[2], ""),
       );
     }
+    if (
+      command === "shell input keyevent KEYCODE_SLEEP" ||
+      command === "shell input keyevent KEYCODE_WAKEUP"
+    ) {
+      this.setCommandResponse(
+        "shell dumpsys power",
+        createExecResult(
+          readFileSync(
+            new URL(
+              `../../fixtures/killProfile/api35/api35-power-wakefulness-${command.endsWith("KEYCODE_SLEEP") ? "asleep" : "awake"}.txt`,
+              import.meta.url,
+            ),
+            "utf8",
+          ),
+          "",
+        ),
+      );
+    }
     return result;
   }
 }
@@ -212,7 +230,7 @@ function harnessFakes() {
   shell.setCommandResponse(
     "shell dumpsys package",
     createExecResult(
-      `Packages:\n  Package [${FIXTURE_PACKAGE}] (test):\n    User 0: installed=true\n${readFileSync(
+      `Packages:\n  Package [${FIXTURE_PACKAGE}] (test):\n    User 0: installed=true stopped=false\n${readFileSync(
         new URL(
           "../../fixtures/android-notification-enabled/api35-deskclock-revoked-dumpsys-package.txt",
           import.meta.url,
@@ -222,6 +240,22 @@ function harnessFakes() {
       "",
     ),
   );
+  for (const [command, name] of [
+    ["shell dumpsys power", "power-wakefulness-awake"],
+    ["shell dumpsys activity activities", "top-resumed-settings"],
+    ["shell dumpsys alarm", "alarm-deskclock-after-force-stop"],
+  ]) {
+    shell.setCommandResponse(
+      command,
+      createExecResult(
+        readFileSync(
+          new URL(`../../fixtures/killProfile/api35/api35-${name}.txt`, import.meta.url),
+          "utf8",
+        ),
+        "",
+      ),
+    );
+  }
   shell.setCommandResponse("sh -c", createExecResult(String(START + 3_000), ""));
   return { deps: { shell, clock, timer }, shell, baseClock, fakeTimer };
 }
@@ -361,7 +395,7 @@ describe("survival host safeguards with fakes", () => {
         },
       },
     );
-    expect(report.aborted).toContain("test cancellation");
+    expect(report.aborted).toContain("Operation cancelled");
     expect(shell.getExecutedCommands()).toContain("shell dumpsys battery reset");
     expect(shell.getExecutedCommands().at(-1)).toBe(`uninstall ${FIXTURE_PACKAGE}`);
     expect(baseClock.automaticTime).toBe(1);
@@ -489,7 +523,7 @@ describe("survival host safeguards with fakes", () => {
       KILL_PROFILE_IDS.length,
     );
     expect(fakeTimer.getSleepHistory().reduce((sum, ms) => sum + ms, 0)).toBe(
-      KILL_PROFILE_IDS.length * 19 * 60_000,
+      KILL_PROFILE_IDS.length * 19 * 60_000 + 60_000,
     );
   });
 });

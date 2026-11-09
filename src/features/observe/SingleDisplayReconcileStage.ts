@@ -13,6 +13,7 @@ import {
   SingleDisplayReconciled,
   SingleDisplayRun,
 } from "./singleDisplayRun";
+import type { DisplayPanel } from "../../models/DisplayPanel";
 import { StaleHierarchyRecovery } from "./StaleHierarchyRecovery";
 import { Timer } from "../../utils/SystemTimer";
 import {
@@ -21,6 +22,7 @@ import {
 } from "./collectors/DisplayBindingCollector";
 import { enforceHierarchyPlatform, HierarchyPlatformValidator } from "./HierarchyPlatformValidator";
 import type { DeviceStateCollectorPort } from "./collectors/collectorPorts";
+import { applyCarAppHostRenderedUi } from "./automotive/carAppHostRenderedUi";
 
 /** Stage 2 of one single-display observation: reconcile window and activity attribution and bind the final display. */
 export interface SingleDisplayReconcileStageDependencies {
@@ -96,6 +98,9 @@ export class SingleDisplayReconcileStage {
     await this.verifyCachedHierarchyIfRequested(run, postCaptureForeground);
     if (result.automotive && activityKey(result) !== collectedActivity) {
       await this.d.deviceStateCollector().refreshAutomotiveForegroundActivity(result, signal);
+    } else {
+      // A replaced hierarchy can change what the host drew without changing the activity.
+      applyCarAppHostRenderedUi(result);
     }
     const recordProvenance = await this.bindFinalSingleDisplay(run);
     this.attachOtherDisplays(result);
@@ -283,9 +288,31 @@ export class SingleDisplayReconcileStage {
     if (panels && panels.length > 1) {
       result.otherDisplays = panels
         .filter((panel) => panel.key !== result.display.key)
-        .map((panel) => ({ key: panel.key, role: panel.role, size: panel.sizePx }));
+        .map((panel) => otherDisplayEntry(panel));
     }
   }
+}
+
+/**
+ * An iOS panel's inventory size is in pixels, while `screenSize` is in points; convert it with the
+ * panel's scale so every size in one observation shares a unit (#17306). Without a scale the
+ * entry stays in pixels and says so.
+ */
+function otherDisplayEntry(
+  panel: DisplayPanel,
+): NonNullable<ObserveResult["otherDisplays"]>[number] {
+  if (panel.scale && panel.scale > 0) {
+    return {
+      key: panel.key,
+      role: panel.role,
+      size: {
+        width: Math.round(panel.sizePx.width / panel.scale),
+        height: Math.round(panel.sizePx.height / panel.scale),
+      },
+      units: "points",
+    };
+  }
+  return { key: panel.key, role: panel.role, size: panel.sizePx, units: "physical-pixels" };
 }
 
 function activityKey(result: ObserveResult): string {

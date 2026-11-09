@@ -1,3 +1,5 @@
+import type { SimulatorPair } from "../utils/ios-cmdline-tools/SimulatorPairs";
+import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import {
   ActionableError,
   toActionableError,
@@ -66,7 +68,7 @@ async function transitionalHeldListing(input: {
   let probeFailure: DeviceDiscoveryError | undefined;
   const devices: BootedDevice[] = [];
   const holds = new Map<string, TransitionalHold>();
-  if (input.platform !== "tvos" && input.platform !== "visionos") {
+  if (input.platform === "android" || input.platform === "ios" || input.platform === "either") {
     for (const offlineHeld of await adbOfflineHeldDevices({
       platform: input.platform === "ios" ? "ios" : "android",
       discovered,
@@ -179,7 +181,12 @@ function listingDiscoveryObservation(
 }
 
 function listingPlatform(platform: SomePlatform): SomePlatform {
-  if (platform === "either" || platform === "tvos" || platform === "visionos") {
+  if (
+    platform === "either" ||
+    platform === "watchos" ||
+    platform === "tvos" ||
+    platform === "visionos"
+  ) {
     return platform;
   }
   return requireAndroidOrIosPlatform(platform, "listDevices");
@@ -337,6 +344,7 @@ export function createListingHandlers() {
     return createStructuredToolResponse({
       message: `Found ${devices.length} booted device${devices.length === 1 ? "" : "s"}${platformFilter}`,
       devices,
+      ...(await listSimulatorPairFields(platform, deps, deviceManager, signal)),
       count: devices.length,
       discovery,
       ...(configured.enrichment ? { enrichment: configured.enrichment } : {}),
@@ -371,4 +379,31 @@ export function availableDeviceResourceNote() {
     uriPrefix:
       "All resource URIs use the 'automobile:' prefix. URIs like 'android://devices' are not supported.",
   };
+}
+
+async function listSimulatorPairFields(
+  platform: string,
+  deps: ReturnType<typeof getDeviceToolsDependencies>,
+  deviceManager: Pick<PlatformDeviceManager, "listSimulatorPairs">,
+  signal?: AbortSignal,
+): Promise<{ simulatorPairs?: SimulatorPair[] }> {
+  // The default listing ("either") includes iOS, so it reports pairs too.
+  if (platform !== "ios" && platform !== "watchos" && platform !== "either") {
+    return {};
+  }
+  // Pairs come from the device manager's own simctl, so a fake simctl never reaches xcrun.
+  const pairService = deps.simulatorPairServiceFactory?.();
+  const listPairs = pairService
+    ? pairService.list.bind(pairService)
+    : deviceManager.listSimulatorPairs?.bind(deviceManager);
+  if (!listPairs) {
+    return {};
+  }
+  try {
+    const simulatorPairs = await listPairs(signal);
+    return simulatorPairs.length ? { simulatorPairs } : {};
+  } catch (error) {
+    logger.warn(`Could not list simulator pairs: ${errorMessage(error)}`, error);
+    return {};
+  }
 }

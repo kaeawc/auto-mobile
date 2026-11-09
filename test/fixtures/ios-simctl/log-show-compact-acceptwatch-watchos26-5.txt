@@ -1,0 +1,6 @@
+getpwuid_r did not find a match for uid 501
+Timestamp               Ty Process[PID:TID]
+2026-11-08 09:46:54.915 Df AcceptWatch[34576:8e3a456] [com.apple.dt.xctest:Default] Received request to fetch matches for query:
+2026-11-08 09:46:54.915 Df AcceptWatch[34576:8e3ae9b] [com.apple.dt.xctest:Default] Evaluating query:
+2026-11-08 09:46:54.915 Df AcceptWatch[34576:8e3ae9b] [com.apple.dt.xctest:Default] Getting root element snapshot
+2026-11-08 09:46:54.915 Df AcceptWatch[34576:8e3ae9b] [com.apple.dt.xctest:Default] Getting snapshot for App element pid: 34576 for query

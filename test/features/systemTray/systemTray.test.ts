@@ -116,6 +116,10 @@ const headerlessTwoNotificationGroups = {
   ).viewHierarchy as ViewHierarchyResult,
 };
 
+// clearAll's drain texts always lead with the app's label and id, then the
+// listed rows' content; the shade's "Shell" header attributes its rows by them.
+const SHELL_APP_MATCH_TEXTS = ["Shell", "com.android.shell"];
+
 class SequencedFakeAdbExecutor extends FakeAdbExecutor {
   private timestamps: number[];
 
@@ -5165,7 +5169,7 @@ describe("Android systemTray clearAll post-swipe recovery", () => {
       clearMatchingSystemTrayNotifications(
         device,
         { appId: "com.android.shell" },
-        ["Delta", "Gamma"],
+        [...SHELL_APP_MATCH_TEXTS, "Delta", "Gamma"],
         { awaitTimeoutMs: 3125, maxSwipes: 1, signal },
       );
     return { timer, adb, observer, swipes, reopenTimes, drain };
@@ -5410,10 +5414,15 @@ describe("Android systemTray clearAll progress budget", () => {
       observeScreenFactory: () => observer,
     });
     const drain = (maxSwipes?: number) =>
-      clearMatchingSystemTrayNotifications(device, { appId: "com.android.shell" }, ["Delta"], {
-        awaitTimeoutMs: 5000,
-        maxSwipes,
-      });
+      clearMatchingSystemTrayNotifications(
+        device,
+        { appId: "com.android.shell" },
+        [...SHELL_APP_MATCH_TEXTS, "Delta"],
+        {
+          awaitTimeoutMs: 5000,
+          maxSwipes,
+        },
+      );
     return { timer, swipes, drain };
   };
 
@@ -5459,7 +5468,7 @@ describe("Android systemTray clearAll progress budget", () => {
       } = await clearMatchingSystemTrayNotifications(
         device,
         { appId: "com.android.shell" },
-        ["Delta"],
+        [...SHELL_APP_MATCH_TEXTS, "Delta"],
         { awaitTimeoutMs: 5000 },
       );
       expect({ swipeCount: actualSwipes, dismissedCount, stalled }).toEqual({

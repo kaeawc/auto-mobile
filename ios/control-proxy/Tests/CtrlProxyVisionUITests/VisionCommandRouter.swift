@@ -19,6 +19,8 @@ final class VisionCommandRouter {
 
     private struct TapRequest: Decodable {
         let identifier: String
+        let label: String?
+        let elementType: UInt?
         let frameContext: String?
     }
 
@@ -33,10 +35,22 @@ final class VisionCommandRouter {
             }
             switch envelope.type {
             case "request_hierarchy":
-                let snapshot = try application.snapshot()
-                // The spike used descendants(.any), including ornaments whose frames are scene-local.
-                let descendants = try application.descendants(matching: .any)
-                    .allElementsBoundByIndex.map { try $0.snapshot() }
+                let snapshot: any XCUIElementSnapshot
+                do {
+                    snapshot = try application.snapshot()
+                } catch {
+                    guard VisionCommandPolicy.shouldRelaunchForSnapshotError(String(describing: error)) else {
+                        throw error
+                    }
+                    // Recover this app's inaccessible main window once (#17448).
+                    application.terminate()
+                    application.launch()
+                    snapshot = try application.snapshot()
+                }
+                // One snapshot already carries the whole tree, ornaments included. Snapshotting each
+                // descendant query result costs a round trip per element (about 100 ms each, 26 s for
+                // Settings' 259 elements), which exceeded the 20 s hierarchy budget (#17218).
+                let descendants = Self.flattenedDescendants(of: snapshot)
                 let nodes = descendants.map { element($0) }
                 let root = UIElementInfo(
                     text: snapshot.label,
@@ -67,18 +81,47 @@ final class VisionCommandRouter {
                 guard !request.identifier.isEmpty, request.frameContext == nil else {
                     throw CommandError.invalidParameter(
                         "identifier",
-                        "supply a unique accessibility identifier; frame taps are unsupported"
+                        "supply an accessibility identifier; frame taps are unsupported"
                     )
                 }
-                let matches = application.descendants(matching: .any).matching(identifier: request.identifier)
-                guard matches.count == 1, matches.firstMatch.isEnabled else {
+                // XCUITest's identifier query also matches elements whose label equals the identifier
+                // (a row's static text), so keep only elements whose own identifier is the one asked for.
+                let queried = application.descendants(matching: .any)
+                    .matching(identifier: request.identifier).allElementsBoundByIndex
+                let resolved = try queried.map { (element: $0, snapshot: try $0.snapshot()) }
+                    .filter { $0.snapshot.identifier == request.identifier }
+                let matches = resolved.map(\.element)
+                let snapshots = resolved.map(\.snapshot)
+                let candidates = snapshots.map {
+                    VisionCommandPolicy.TapCandidate(
+                        elementType: $0.elementType.rawValue, label: $0.label, isEnabled: $0.isEnabled
+                    )
+                }
+                switch VisionCommandPolicy.tapResolution(
+                    candidates: candidates, label: request.label, elementType: request.elementType
+                ) {
+                case let .match(index):
+                    // Never translate an ornament frame to a coordinate.
+                    matches[index].tap()
+                case .missing:
                     throw CommandError.invalidParameter(
                         "identifier",
-                        "element missing, ambiguous or disabled; observe again"
+                        "no element matches the identifier (and type/label when supplied); observe again"
+                    )
+                case .disabled:
+                    throw CommandError.invalidParameter(
+                        "identifier",
+                        "element disabled; observe again and select an enabled control"
+                    )
+                case let .ambiguous(count):
+                    let details = snapshots.map {
+                        "\($0.elementType.rawValue)/\($0.label)/\($0.frame)"
+                    }.joined(separator: "; ")
+                    throw CommandError.executionFailed(
+                        "ambiguous_element: \(count) enabled elements share identifier '\(request.identifier)' "
+                            + "with the supplied type/label; candidates: \(details)"
                     )
                 }
-                // Never translate an ornament frame to a coordinate.
-                matches.firstMatch.tap()
                 lastTappedIdentifier = request.identifier
                 return try JSONEncoder().encode(WebSocketResponse.success(
                     type: "tap_element_result", requestId: requestId, totalTimeMs: 0
@@ -112,7 +155,15 @@ final class VisionCommandRouter {
                     lastTappedTextInputCount: lastTappedFields.count
                 ) {
                 case .focused: target = focusedFields[0]
-                case .lastTapped: target = lastTappedFields[0]
+                case .lastTapped:
+                    target = lastTappedFields[0]
+                    // visionOS typeText needs a focusing tap to preserve existing text (#17312).
+                    target.tap()
+                    for _ in 0 ..< 10 {
+                        if (try? target.snapshot().hasFocus) == true { break }
+                        let focusPending = XCTestExpectation(description: "Waiting for text input focus")
+                        _ = XCTWaiter().wait(for: [focusPending], timeout: 0.1)
+                    }
                 case .none: throw CommandError.noFocusedTextInput
                 }
                 target.typeText(request.text)
@@ -123,13 +174,25 @@ final class VisionCommandRouter {
                 throw CommandError.unknownCommand(envelope.type)
             }
         } catch {
+            // Preserve the machine-readable ambiguity prefix without changing shared iOS errors.
+            var wireError = error.localizedDescription
+            if let commandError = error as? CommandError,
+               case let .executionFailed(reason) = commandError,
+               reason.hasPrefix("ambiguous_element:")
+            {
+                wireError = reason
+            }
             let response = WebSocketResponse.error(
-                type: "error", requestId: requestId, error: error.localizedDescription,
+                type: "error", requestId: requestId, error: wireError,
                 errorCode: (error as? CommandError)?.wireCode
             )
             return (try? JSONEncoder().encode(response))
                 ?? Data(#"{"type":"error","success":false,"error":"Response encoding failed"}"#.utf8)
         }
+    }
+
+    private static func flattenedDescendants(of snapshot: any XCUIElementSnapshot) -> [any XCUIElementSnapshot] {
+        snapshot.children.flatMap { [$0] + flattenedDescendants(of: $0) }
     }
 
     private func kind(of type: XCUIElement.ElementType) -> VisionElementKind {

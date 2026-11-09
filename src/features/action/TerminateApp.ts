@@ -28,7 +28,7 @@ import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
-import { resolveMissingForegroundWindow } from "../observe/ObserveScreen";
+import { usableForegroundAppId } from "../observe/observationVerdict";
 import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosInstalledApp";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { readAndroidPackageProcesses } from "../../utils/android-cmdline-tools/androidProcessState";
@@ -72,31 +72,6 @@ function iosWasForeground(
 ): boolean | undefined {
   const foregroundAppId = observation && usableForegroundAppId(observation);
   return foregroundAppId ? foregroundAppId === bundleId : undefined;
-}
-
-/** The foreground app id of a fresh, verified observation, else `undefined`. */
-function usableForegroundAppId(observation: ObserveResult): string | undefined {
-  const { freshness } = observation;
-  if (
-    freshness?.isFresh === false ||
-    freshness?.verified === false ||
-    // The runner reports com.apple.springboard when it cannot identify the
-    // foreground app, so that identity is a guess, not an observation.
-    observation.viewHierarchy?.fallbackToSpringboard === true ||
-    resolveMissingForegroundWindow(observation)
-  ) {
-    return undefined;
-  }
-  return observedAppId(observation);
-}
-
-function observedAppId(observation: ObserveResult): string | undefined {
-  return (
-    observation.activeWindow?.appId ||
-    observation.viewHierarchy?.packageName ||
-    observation.viewHierarchy?.foregroundActivity?.split("/")[0] ||
-    undefined
-  );
 }
 
 const wasForegroundField = (value: boolean | undefined): { wasForeground?: boolean } =>

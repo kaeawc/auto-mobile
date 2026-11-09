@@ -1,0 +1,370 @@
+{
+  "screenSize": {
+    "width": 384,
+    "height": 384,
+    "units": "physical-pixels"
+  },
+  "viewHierarchy": {
+    "displayId": 0,
+    "hierarchy": {
+      "node": {
+        "windowId": 7,
+        "actions": ["select", "clear_selection", "accessibility_focus"],
+        "visible-to-user": true,
+        "view-id": "s2-0ff6cb525662c62d",
+        "bounds": [0, 0, 384, 384],
+        "node": {
+          "actions": ["select", "clear_selection", "accessibility_focus"],
+          "resource-id": "android:id/content",
+          "visible-to-user": true,
+          "bounds": [0, 0, 384, 384],
+          "node": {
+            "actions": ["select", "clear_selection", "accessibility_focus"],
+            "resource-id": "com.google.android.clockwork.sysui:id/root",
+            "visible-to-user": true,
+            "class": "android.view.ViewGroup",
+            "className": "android.view.ViewGroup",
+            "bounds": [0, 0, 384, 384],
+            "node": [
+              {
+                "actions": ["select", "clear_selection", "accessibility_focus"],
+                "resource-id": "com.google.android.clockwork.sysui:id/full_view_scrim",
+                "visible-to-user": true,
+                "bounds": [0, 0, 384, 384]
+              },
+              {
+                "actions": ["select", "clear_selection", "accessibility_focus"],
+                "resource-id": "com.google.android.clockwork.sysui:id/full_view_container",
+                "visible-to-user": true,
+                "bounds": [0, 0, 384, 384],
+                "node": {
+                  "actions": ["select", "clear_selection", "accessibility_focus"],
+                  "resource-id": "com.google.android.clockwork.sysui:id/full_view_outer_scroll_view",
+                  "visible-to-user": true,
+                  "bounds": [0, 0, 384, 384],
+                  "node": {
+                    "actions": [
+                      "clear_focus",
+                      "accessibility_focus",
+                      "long_click",
+                      "scroll_backward"
+                    ],
+                    "visible-to-user": true,
+                    "state-description": "Notification from Shell, Expanded",
+                    "collection-info": "rows:4,cols:1",
+                    "view-id": "s2-68d730cd1b19e1f5",
+                    "focusable": "true",
+                    "focused": "true",
+                    "scrollable": "true",
+                    "long-clickable": "true",
+                    "bounds": [0, 0, 384, 384],
+                    "node": [
+                      {
+                        "actions": ["accessibility_focus"],
+                        "visible-to-user": true,
+                        "view-id": "s2-915f906037bfcf92",
+                        "bounds": [34, 84, 350, 132],
+                        "node": [
+                          {
+                            "actions": ["accessibility_focus"],
+                            "resource-id": "full_view_app_icon",
+                            "visible-to-user": true,
+                            "bounds": [34, 84, 82, 132]
+                          },
+                          {
+                            "actions": ["accessibility_focus"],
+                            "resource-id": "full_view_app_icon",
+                            "visible-to-user": true,
+                            "bounds": [40, 90, 76, 126]
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "Shell",
+                            "resource-id": "full_view_app_name",
+                            "visible-to-user": true,
+                            "bounds": [94, 92, 276, 125]
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "Now",
+                            "visible-to-user": true,
+                            "view-id": "s2-208818751043f9f5",
+                            "bounds": [288, 92, 350, 125]
+                          }
+                        ]
+                      },
+                      {
+                        "actions": [
+                          "next_at_movement_granularity",
+                          "previous_at_movement_granularity",
+                          "accessibility_focus",
+                          "set_selection"
+                        ],
+                        "text": "Fixture",
+                        "visible-to-user": true,
+                        "view-id": "s2-b510936e77aa1d0a",
+                        "bounds": [34, 136, 143, 174]
+                      },
+                      {
+                        "actions": [
+                          "next_at_movement_granularity",
+                          "previous_at_movement_granularity",
+                          "accessibility_focus",
+                          "set_selection"
+                        ],
+                        "text": "l16826h",
+                        "visible-to-user": true,
+                        "view-id": "s2-eea2be86398c080d",
+                        "bounds": [34, 174, 151, 212]
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "packageName": "com.google.android.clockwork.sysui",
+    "windows": [
+      {
+        "id": 7,
+        "displayId": 0,
+        "type": 1,
+        "windowLayer": 0,
+        "isActive": true,
+        "isFocused": true,
+        "bounds": [0, 0, 384, 384],
+        "packageName": "com.google.android.clockwork.sysui",
+        "hierarchy": {
+          "windowId": 7,
+          "actions": ["select", "clear_selection", "accessibility_focus"],
+          "visible-to-user": true,
+          "view-id": "s2-0ff6cb525662c62d",
+          "bounds": [0, 0, 384, 384],
+          "node": {
+            "actions": ["select", "clear_selection", "accessibility_focus"],
+            "resource-id": "android:id/content",
+            "visible-to-user": true,
+            "view-id": "android:id/content",
+            "bounds": [0, 0, 384, 384],
+            "node": {
+              "actions": ["select", "clear_selection", "accessibility_focus"],
+              "resource-id": "com.google.android.clockwork.sysui:id/root",
+              "visible-to-user": true,
+              "view-id": "com.google.android.clockwork.sysui:id/root",
+              "class": "android.view.ViewGroup",
+              "className": "android.view.ViewGroup",
+              "bounds": [0, 0, 384, 384],
+              "node": [
+                {
+                  "actions": ["select", "clear_selection", "accessibility_focus"],
+                  "resource-id": "com.google.android.clockwork.sysui:id/full_view_scrim",
+                  "visible-to-user": true,
+                  "view-id": "com.google.android.clockwork.sysui:id/full_view_scrim",
+                  "bounds": [0, 0, 384, 384]
+                },
+                {
+                  "actions": ["select", "clear_selection", "accessibility_focus"],
+                  "resource-id": "com.google.android.clockwork.sysui:id/full_view_container",
+                  "visible-to-user": true,
+                  "view-id": "com.google.android.clockwork.sysui:id/full_view_container",
+                  "bounds": [0, 0, 384, 384],
+                  "node": {
+                    "actions": ["select", "clear_selection", "accessibility_focus"],
+                    "resource-id": "com.google.android.clockwork.sysui:id/full_view_outer_scroll_view",
+                    "visible-to-user": true,
+                    "view-id": "com.google.android.clockwork.sysui:id/full_view_outer_scroll_view",
+                    "bounds": [0, 0, 384, 384],
+                    "node": {
+                      "actions": [
+                        "clear_focus",
+                        "accessibility_focus",
+                        "long_click",
+                        "scroll_backward"
+                      ],
+                      "visible-to-user": true,
+                      "state-description": "Notification from Shell, Expanded",
+                      "collection-info": "rows:4,cols:1",
+                      "view-id": "s2-68d730cd1b19e1f5",
+                      "focusable": "true",
+                      "focused": "true",
+                      "scrollable": "true",
+                      "long-clickable": "true",
+                      "bounds": [0, 0, 384, 384],
+                      "node": [
+                        {
+                          "actions": ["accessibility_focus"],
+                          "visible-to-user": true,
+                          "view-id": "s2-915f906037bfcf92",
+                          "bounds": [34, 84, 350, 132],
+                          "node": [
+                            {
+                              "actions": ["accessibility_focus"],
+                              "resource-id": "full_view_app_icon",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_icon",
+                              "bounds": [34, 84, 82, 132]
+                            },
+                            {
+                              "actions": ["accessibility_focus"],
+                              "resource-id": "full_view_app_icon",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_icon",
+                              "bounds": [40, 90, 76, 126]
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "Shell",
+                              "resource-id": "full_view_app_name",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_name",
+                              "bounds": [94, 92, 276, 125]
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "Now",
+                              "visible-to-user": true,
+                              "view-id": "s2-208818751043f9f5",
+                              "bounds": [288, 92, 350, 125]
+                            }
+                          ]
+                        },
+                        {
+                          "actions": [
+                            "next_at_movement_granularity",
+                            "previous_at_movement_granularity",
+                            "accessibility_focus",
+                            "set_selection"
+                          ],
+                          "text": "Fixture",
+                          "visible-to-user": true,
+                          "view-id": "s2-b510936e77aa1d0a",
+                          "bounds": [34, 136, 143, 174]
+                        },
+                        {
+                          "actions": [
+                            "next_at_movement_granularity",
+                            "previous_at_movement_granularity",
+                            "accessibility_focus",
+                            "set_selection"
+                          ],
+                          "text": "l16826h",
+                          "visible-to-user": true,
+                          "view-id": "s2-eea2be86398c080d",
+                          "bounds": [34, 174, 151, 212]
+                        }
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "intentChooserDetected": false,
+    "notificationPermissionDetected": false,
+    "ctrlProxyIncomplete": null,
+    "sources": ["control-proxy"],
+    "screenWidth": 384,
+    "screenHeight": 384,
+    "rotation": 0,
+    "systemInsets": {
+      "top": 0,
+      "bottom": 0,
+      "left": 0,
+      "right": 0
+    },
+    "insets": {
+      "available": true,
+      "source": "android-window-metrics",
+      "units": "physical-pixels",
+      "systemBars": {
+        "visible": {
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0
+        },
+        "stable": {
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0
+        }
+      },
+      "displayCutout": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "displayCutoutInfo": {
+        "classification": "none",
+        "bounds": null
+      },
+      "systemGestures": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "mandatorySystemGestures": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "tappableElement": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "systemChrome": {
+        "visibility": "hidden",
+        "statusBar": "hidden",
+        "navigationBar": "hidden",
+        "homeIndicatorAutoHideRequested": null,
+        "source": "android-window-insets"
+      }
+    },
+    "wakefulness": "Awake",
+    "foregroundActivity": "com.google.android.clockwork.sysui/.mainui.activity.SysUiActivity",
+    "density": 320,
+    "sdkInt": 37,
+    "deviceModel": "sdk_gwear_arm64",
+    "isEmulator": true,
+    "accessibilityTool": true,
+    "nativeScale": 1,
+    "pixelWidth": 384,
+    "pixelHeight": 384,
+    "updatedAt": 1794072889295,
+    "receivedAt": 1794072889168,
+    "frameContext": "05adbe81-d232-47ae-96c4-17dc3c7d03e1:260",
+    "fresh": true
+  }
+}

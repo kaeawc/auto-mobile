@@ -8,9 +8,13 @@ protocol WatchSnapshotSource {
 
 @MainActor
 protocol WatchGesturePerformer {
+    func faceTap(x: Double, y: Double) throws
+    func faceDrag(fromX: Double, fromY: Double, toX: Double, toY: Double) throws
+    func faceSwipe(_ direction: WatchSwipeDirection) throws
+    func faceDump() throws -> String
     func tap(x: Double, y: Double) throws
     func tap(identifier: String) throws
-    func swipe(_ direction: WatchSwipeDirection) throws
+    func swipe(_ direction: WatchSwipeDirection, distance: Double?) throws
     func typeText(_ text: String) throws
     func home() throws
     func rotateCrown(delta: Double, velocity: Double) throws
@@ -66,13 +70,14 @@ struct WatchResponse: Codable {
     let requestId: String?
     let success: Bool
     var data: SdkViewHierarchy?
+    var text: String?
     var error: String?
     var errorCode: String?
 }
 
 @MainActor
 final class WatchCommandHandler {
-    nonisolated static let supportedCommands = ["hierarchy", "tap", "swipe", "home", "crown", "type"]
+    nonisolated static let supportedCommands = ["hierarchy", "tap", "swipe", "home", "crown", "type", "face"]
 
     private let snapshotSource: any WatchSnapshotSource
     private let gestures: any WatchGesturePerformer
@@ -91,6 +96,8 @@ final class WatchCommandHandler {
                 throw WatchCommandError.unsupported(header.type)
             }
             switch header.type {
+            case "face":
+                return try handleFace(data, requestId: requestId)
             case "hierarchy":
                 return try WatchResponse(
                     type: "hierarchy_update", requestId: requestId, success: true, data: snapshotSource.snapshot()
@@ -106,7 +113,10 @@ final class WatchCommandHandler {
                 }
             case "swipe":
                 let swipe = try JSONDecoder().decode(Swipe.self, from: data)
-                try gestures.swipe(swipe.direction)
+                if let distance = swipe.distance, !(distance.isFinite && distance > 0 && distance <= 1) {
+                    throw WatchCommandError.invalidRequest("swipe distance must be a finite fraction in (0, 1]")
+                }
+                try gestures.swipe(swipe.direction, distance: swipe.distance)
             case "type":
                 let input = try JSONDecoder().decode(TextInput.self, from: data)
                 guard let text = input.text, !text.isEmpty else {
@@ -139,6 +149,48 @@ final class WatchCommandHandler {
         }
     }
 
+    private func handleFace(_ data: Data, requestId: String?) throws -> WatchResponse {
+        let face = try JSONDecoder().decode(Face.self, from: data)
+        var text: String?
+        switch face.op {
+        case "tap":
+            try gestures.faceTap(x: faceCoordinate(face.x), y: faceCoordinate(face.y))
+        case "drag":
+            try gestures.faceDrag(
+                fromX: faceCoordinate(face.fromX), fromY: faceCoordinate(face.fromY),
+                toX: faceCoordinate(face.toX), toY: faceCoordinate(face.toY)
+            )
+        case "swipe":
+            guard let direction = face.direction else {
+                throw WatchCommandError.invalidRequest("face swipe requires a direction")
+            }
+            try gestures.faceSwipe(direction)
+        case "dump":
+            text = try gestures.faceDump()
+        default:
+            throw WatchCommandError.invalidRequest("face requires tap, drag, swipe or dump op")
+        }
+        return WatchResponse(type: "face_result", requestId: requestId, success: true, text: text)
+    }
+
+    private func faceCoordinate(_ value: Double?) throws -> Double {
+        guard let value, value.isFinite, (0 ... 1).contains(value) else {
+            throw WatchCommandError.invalidRequest("face coordinates must be finite values in [0, 1]")
+        }
+        return value
+    }
+
+    private struct Face: Decodable {
+        let op: String
+        let x: Double?
+        let y: Double?
+        let fromX: Double?
+        let fromY: Double?
+        let toX: Double?
+        let toY: Double?
+        let direction: WatchSwipeDirection?
+    }
+
     private struct Header: Decodable {
         let type: String
         let requestId: String?
@@ -152,6 +204,7 @@ final class WatchCommandHandler {
 
     private struct Swipe: Decodable {
         let direction: WatchSwipeDirection
+        let distance: Double?
     }
 
     private struct TextInput: Decodable {

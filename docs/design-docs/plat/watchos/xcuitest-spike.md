@@ -3,7 +3,13 @@
 The XCUITest runner approach supports hierarchy, tap, and screenshot operations
 on the watchOS simulator, as demonstrated with Xcode 26.6, watchOS 26.5, and an
 unpaired Apple Watch Series 11 (46 mm) simulator. The probe app is a SwiftUI app
-with a counter button, a Crown value, and rows in a scroll view.
+with a counter button, a Crown value, and rows in a scroll view. The runner's
+`face` command targets `com.apple.clockface` for normalized taps, 0.1-second
+press-and-drag gestures, directional swipes, and text dumps. The Smart Stack
+widget driver (`scripts/watch/addSmartStackWidget.ts`) uses a calibrated gallery position (steps from the bottom, default
+one) and the first widget preview; app and widget display names verify the
+resulting cell identifier. Header and cell polling each allow ten dumps separated
+by 250 ms. A successful gesture alone does not establish widget presence.
 
 ## Capability boundary
 
@@ -67,3 +73,18 @@ spike; scrolling a real `ScrollView` by Crown remains untested and is an
 implementation follow-up. The `os(iOS)`-gated input paths need watchOS
 implementations, and device acceptance after merge remains required. Physical
 watches and changes to the iOS CtrlProxy test target are out of scope.
+
+## Simulator pairing lifecycle
+
+`startDevice` accepts `pairWithDeviceId` for watchOS. It validates an iOS-runtime simulator,
+then pairs and activates under the watch lifecycle lease before boot; it never boots the phone.
+Same-phone pairs are adopted (`created: false`) and activated only if inactive. New pairs are
+active on creation; the explicit activation also tolerates NSPOSIXErrorDomain code 37.
+A watch can have only one phone: an existing other-phone pair or simctl code 403 refuses with
+unpair-or-use-existing-phone guidance. A phone may have several watches.
+
+After watch boot a fresh pair listing supplies state and connection, which may still be
+disconnected. iOS and watchOS device listings expose pairs best-effort. A process-wide in-memory
+registry records only daemon-created pair IDs and watch UDIDs. Watch deletion and discard of a
+watch created by failed provisioning unpair those IDs best-effort before deletion; adopted pairs
+are never unpaired. Failed unpairs warn and retain the record for retry.

@@ -56,10 +56,11 @@ For a single file to paste into an app, read `automobile:prototype/<id>/compose`
 `text/x-kotlin`) or `automobile:prototype/<id>/swiftui` (Swift, `text/x-swift`) for a prototype
 shown in this daemon session.
 
-| Parameter  | Meaning                                                                                                                                      |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `frame`    | A device frame id such as `pixel-9` or `iphone-16`, used to size the preview. Defaults to `pixel-9` for Compose and `iphone-16` for SwiftUI. |
-| `revision` | A kept revision. Defaults to the latest.                                                                                                     |
+| Parameter      | Meaning                                                                                                                                      |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `frame`        | A device frame id such as `pixel-9` or `iphone-16`, used to size the preview. Defaults to `pixel-9` for Compose and `iphone-16` for SwiftUI. |
+| `revision`     | A kept revision. Defaults to the latest.                                                                                                     |
+| `mcpSessionId` | Only revisions this MCP session produced (see below). Defaults to every session's.                                                           |
 
 The file is the same host the native resource generates, with the spec built in as a string
 constant and a `@Preview` (Compose) or `#Preview` (SwiftUI) sized to the frame. Its header comment
@@ -223,17 +224,24 @@ self-contained HTML page (`text/html`, no network access) with the prototype in 
 rotate and zoom controls, a screen picker when the prototype's stack has more than one screen, and
 its revision history.
 
-| Parameter  | Meaning                                                                                                 |
-| ---------- | ------------------------------------------------------------------------------------------------------- |
-| `frame`    | A device frame id such as `pixel-9` or `iphone-16`. Defaults to the platform that showed the prototype. |
-| `revision` | A kept revision. Defaults to the latest.                                                                |
-| `variant`  | The prototype id of the alternative to show first (see below).                                          |
+| Parameter      | Meaning                                                                                                 |
+| -------------- | ------------------------------------------------------------------------------------------------------- |
+| `frame`        | A device frame id such as `pixel-9` or `iphone-16`. Defaults to the platform that showed the prototype. |
+| `revision`     | A kept revision. Defaults to the latest.                                                                |
+| `variant`      | The prototype id of the alternative to show first (see below).                                          |
+| `mcpSessionId` | Only revisions this MCP session produced (see below). Defaults to every session's.                      |
 
 Revision 1 is the first show of the id. Each later show and each patch that lands adds one; taps
 and typing on the device do not. The last 20 revisions are kept, and an older one is an error that
 names the oldest kept revision. The result's `_meta` reports `revision`, `deviceRevision` (the
-device's own counter for that patch), `revisions`, `variants`, `frame`, `sha256` and
-`rendererVersion`.
+device's own counter for that patch), `mcpSessionId` (the MCP session whose show or patch produced
+the revision, when it had one), `revisions`, `variants`, `frame`, `sha256` and `rendererVersion`.
+
+Every MCP session on the daemon shares one revision history, so another session's show can land
+between yours and your read. A successful `show` or `patch` returns `mcpSessionId`; pass it as the
+`mcpSessionId` parameter to read only your session's revisions. The default revision is then your
+latest, `revisions` lists only yours, and a `revision` another session produced is an error. The
+page itself still offers every kept revision.
 
 Images draw the assets uploaded with the prototype to an Android device that is still showing it,
 re-encoded at the size the frame draws them. The page stays under 2 MiB: the revision shown first
@@ -277,5 +285,5 @@ the spec's icons use, so an icon whose name changes with state still has its gly
 without that glyph carries the `filled` one. `iconMissing` lists the keys with no glyph at all;
 draw a placeholder for them. iOS-style glyphs are not included yet.
 
-`revision` and `variant` work as for the web page; there is no `frame`. Errors, listing and
+`revision`, `variant` and `mcpSessionId` work as for the web page; there is no `frame`. Errors, listing and
 subscriptions also match the web page, and `_meta` reports the same fields except `frame`.

@@ -6,7 +6,11 @@ import type {
   SendKeysResult,
 } from "../action/SendKeys";
 import { logger } from "../../utils/logger";
+import { DefaultRetryExecutor } from "../../utils/retry/RetryExecutor";
+import type { Timer } from "../../utils/SystemTimer";
 import { watchTapOn } from "./WatchActions";
+import { WatchRunnerError } from "./WatchRunnerError";
+import type { WatchRunnerClient } from "./WatchRunnerClient";
 import { watchRunners } from "./WatchRunnerRegistry";
 
 /** XCUIKeyboardKey delete, macOS delete and forwardDelete. */
@@ -60,25 +64,70 @@ function validateWatchInput(
   });
 }
 
+/**
+ * Delays between type attempts while a selector's tap is still presenting the keyboard sheet
+ * (#17359). Bounds the wait to about 1.5 s before the runner's focus refusal is reported.
+ */
+export const WATCH_FOCUS_WAIT_DELAYS_MS: readonly number[] = [50, 100, 200, 250, 250, 250, 250];
+
+/**
+ * The runner checks keyboard focus and the keyboard sheet before typing and refuses with this
+ * message without typing anything, so a refused type is a side-effect-free focus read.
+ */
+function isNotFocusedYet(error: Error): boolean {
+  return (
+    error instanceof WatchRunnerError &&
+    error.errorCode === "command_failed" &&
+    error.message.startsWith("No focused text field")
+  );
+}
+
+/** The hierarchy carries no keyboard-focus state, so the runner's own focus check is the poll. */
+async function typeOnceFocused(
+  client: WatchRunnerClient,
+  text: string,
+  timer: Timer | undefined,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  await new DefaultRetryExecutor(timer).executeOrThrow(
+    () => client.request({ type: "type", text }, signal).then(() => undefined),
+    {
+      maxAttempts: WATCH_FOCUS_WAIT_DELAYS_MS.length + 1,
+      delays: WATCH_FOCUS_WAIT_DELAYS_MS,
+      signal,
+      shouldRetry: isNotFocusedYet,
+      expectedFailure: {
+        reason: "sendKeys reports the focus refusal as a failed command",
+        matches: isNotFocusedYet,
+      },
+    },
+  );
+}
+
 /** Append only: the runner refuses input unless a text field already has focus. */
 export async function watchSendKeys(
   deviceId: string,
   commands: SendKeysCommand[],
   selector?: SendKeysSelector,
-  options: SendKeysFocusOptions & { display?: string; signal?: AbortSignal } = {},
+  options: SendKeysFocusOptions & { display?: string; signal?: AbortSignal; timer?: Timer } = {},
 ): Promise<SendKeysResult> {
   const typing = validateWatchInput(commands, selector, options);
-  const { signal } = options;
+  const { signal, timer } = options;
   signal?.throwIfAborted();
   const client = watchRunners.require(deviceId);
   if (selector !== undefined) {
-    await watchTapOn(deviceId, { action: "tap", ...selector }, signal);
+    await watchTapOn(deviceId, { action: "tap", ...selector }, signal, true);
   }
   const results: SendKeysResult["commands"] = [];
   for (const [index, command] of typing.entries()) {
     signal?.throwIfAborted();
     try {
-      await client.request({ type: "type", text: command.text }, signal);
+      // Only the selector's own tap can still be opening the keyboard sheet.
+      if (index === 0 && selector !== undefined) {
+        await typeOnceFocused(client, command.text, timer, signal);
+      } else {
+        await client.request({ type: "type", text: command.text }, signal);
+      }
     } catch (error) {
       signal?.throwIfAborted();
       const failure = toActionableError(

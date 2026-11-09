@@ -15,6 +15,7 @@ import type {
   NavigationBuildKey,
 } from "./types";
 import { logger } from "../utils/logger";
+import type { BuildSourceRevision } from "../models/BuildSourceRevision";
 import { storedEdgeActionKey } from "./edgeReplayKey";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { nowIso } from "./nowIso";
@@ -897,14 +898,16 @@ export class NavigationRepository {
    * Atomic upsert on UNIQUE(app_id, version_code, content_hash)
    * (idx_navigation_build_keys_unique) so a concurrent first-create doesn't throw
    * a UNIQUE collision. The conflict path is a no-op touch (app_id set to its own
-   * value) so RETURNING still yields the existing row without mutating it.
+   * value) so RETURNING still yields the existing row without mutating it, unless a
+   * source revision is supplied: that display metadata is overwritten (latest wins, #16954).
    */
   async getOrCreateBuildKey(
     appId: string,
     versionCode: number,
     contentHash: string,
+    sourceRevision?: BuildSourceRevision,
   ): Promise<NavigationBuildKey> {
-    return getOrCreateBuildKey(this.ctx, appId, versionCode, contentHash);
+    return getOrCreateBuildKey(this.ctx, appId, { versionCode, contentHash, sourceRevision });
   }
 
   /**

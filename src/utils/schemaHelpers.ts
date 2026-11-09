@@ -11,7 +11,7 @@ export type PlatformArg = z.infer<typeof platformSchema>;
 
 /**
  * `platform` for a tool that accepts an Apple Watch simulator (installApp, uninstallApp, listApps,
- * launchApp, terminateApp, observe; #14908, #14910). Every other tool keeps the shared Android/iOS {@link platformSchema}.
+ * launchApp, terminateApp, observe, listDevices, getLogs; #14908, #14910, #17320, #17547). Every other tool keeps the shared Android/iOS {@link platformSchema}.
  * A fresh instance per field, so the tool schema never emits a dangling `$ref`.
  */
 export const watchAwarePlatformSchema = () =>

@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
+import { displayTransitions } from "../../../../src/features/observe/DisplayTransition";
 import type { BootedDevice } from "../../../../src/models";
 import { PortManager } from "../../../../src/utils/PortManager";
+import { DevicectlPanelScreenshotSource } from "../../../../src/utils/ios-cmdline-tools/DevicectlPanelScreenshotSource";
+import { SimCtlClient } from "../../../../src/utils/ios-cmdline-tools/SimCtlClient";
+import { solidPng } from "../../../helpers/pngFixtures";
 
 const device: BootedDevice = {
   deviceId: "lifecycle-test-ios-device",
@@ -97,6 +101,122 @@ describe("IOSCtrlProxyClient instance lifecycle", () => {
     expect(IOSCtrlProxyClient.getInstance(device, 8767)).toBe(client);
     expect(client.getConnectionPortForDiagnostics()).toBe(8767);
     expect(ports.allocateCalls).toBe(allocationsBefore);
+    await client.close();
+  });
+
+  test("a later registry lookup supplies missing Duo panels for screenshot capture", async () => {
+    const duo: BootedDevice = { ...device, name: "iPhone Duo Simulator" };
+    const client = IOSCtrlProxyClient.getInstance(duo);
+    const discovered: BootedDevice = {
+      ...duo,
+      displays: {
+        panels: [
+          { key: "primary", role: "cover", sizePx: { width: 10, height: 20 } },
+          { key: "primary-1", role: "inner", sizePx: { width: 20, height: 30 } },
+        ],
+        postures: ["closed", "opened"],
+      },
+    };
+    const png = solidPng(20, 30, [255, 255, 255, 255]);
+    const runner = spyOn(client.testHooks.screenshot(), "requestScreenshot").mockResolvedValue({
+      success: true,
+      data: "runner-cover",
+    });
+    const panel = spyOn(DevicectlPanelScreenshotSource.prototype, "capturePanel").mockResolvedValue(
+      png,
+    );
+    const liveDisplays = spyOn(
+      DevicectlPanelScreenshotSource.prototype,
+      "readDisplays",
+    ).mockResolvedValue([]);
+    const simctl = spyOn(SimCtlClient.prototype, "screenshot").mockResolvedValue(Buffer.alloc(0));
+    restores.push(
+      () => runner.mockRestore(),
+      () => panel.mockRestore(),
+      () => liveDisplays.mockRestore(),
+      () => simctl.mockRestore(),
+    );
+    client.testHooks.cachedHierarchy = {
+      hierarchy: {
+        updatedAt: 1,
+        packageName: "com.example.app",
+        hierarchy: {},
+        pixelWidth: 20,
+        pixelHeight: 30,
+      },
+      receivedAt: 0,
+      fresh: true,
+    };
+    client.testHooks.cachedHierarchyDisplayRevision = displayTransitions.revision(duo.deviceId);
+
+    expect((await client.requestScreenshot()).data).toBe("runner-cover");
+    expect(panel).not.toHaveBeenCalled();
+    runner.mockClear();
+
+    expect(IOSCtrlProxyClient.getInstance(discovered)).toBe(client);
+    expect(await client.requestScreenshot()).toEqual({
+      success: true,
+      data: png.toString("base64"),
+      format: "png",
+    });
+    expect(panel).toHaveBeenCalledTimes(1);
+    expect(panel).toHaveBeenCalledWith({
+      deviceId: duo.deviceId,
+      panel: discovered.displays?.panels[1],
+      panelCount: 2,
+      signal: undefined,
+    });
+    expect(runner).not.toHaveBeenCalled();
+    expect(liveDisplays).not.toHaveBeenCalled();
+    expect(simctl).not.toHaveBeenCalled();
+    expect(duo.displays).toBeUndefined();
+    await client.close();
+  });
+
+  test("a later registry lookup preserves an existing single-panel inventory", async () => {
+    const client = IOSCtrlProxyClient.getInstance({
+      ...device,
+      displays: {
+        panels: [{ key: "primary", role: "cover", sizePx: { width: 10, height: 20 } }],
+        postures: ["closed"],
+      },
+    });
+    const runner = spyOn(client.testHooks.screenshot(), "requestScreenshot").mockResolvedValue({
+      success: true,
+      data: "original-panel",
+    });
+    const panel = spyOn(DevicectlPanelScreenshotSource.prototype, "capturePanel").mockResolvedValue(
+      undefined,
+    );
+    const liveDisplays = spyOn(
+      DevicectlPanelScreenshotSource.prototype,
+      "readDisplays",
+    ).mockResolvedValue([]);
+    const simctl = spyOn(SimCtlClient.prototype, "screenshot").mockResolvedValue(Buffer.alloc(0));
+    restores.push(
+      () => runner.mockRestore(),
+      () => panel.mockRestore(),
+      () => liveDisplays.mockRestore(),
+      () => simctl.mockRestore(),
+    );
+
+    expect(
+      IOSCtrlProxyClient.getInstance({
+        ...device,
+        displays: {
+          panels: [
+            { key: "primary", role: "cover", sizePx: { width: 10, height: 20 } },
+            { key: "primary-1", role: "inner", sizePx: { width: 20, height: 30 } },
+          ],
+          postures: ["closed", "opened"],
+        },
+      }),
+    ).toBe(client);
+    expect((await client.requestScreenshot()).data).toBe("original-panel");
+    expect(runner).toHaveBeenCalledTimes(1);
+    expect(panel).not.toHaveBeenCalled();
+    expect(liveDisplays).not.toHaveBeenCalled();
+    expect(simctl).not.toHaveBeenCalled();
     await client.close();
   });
 

@@ -520,6 +520,7 @@ export class NavigationGraphRecorder {
           appId,
           provenance.versionCode,
           provenance.contentHash,
+          provenance.sourceRevision,
         );
         await repository.recordSuggestionObservation(suggestion.id, {
           buildKeyId: buildKey.id,

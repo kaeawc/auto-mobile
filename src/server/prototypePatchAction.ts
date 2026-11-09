@@ -59,12 +59,12 @@ export interface PrototypePatchDependencies {
   supportsPatch: () => Promise<boolean>;
   /** Checks spec-level capabilities on the complete validated patch result. */
   specRefusal?: (spec: unknown) => Promise<string | undefined>;
-  /** Settles what `specRefusal` staged: true once the patch landed (or may have), else false. */
-  settleSpec?: (landed: boolean) => Promise<void>;
   platform: "android" | "ios";
   queue: PrototypePatchQueue;
   /** Retires the device's cached observation after an applied patch. */
   retire: (result: PrototypeResult) => void;
+  /** The MCP connection issuing the patch, recorded on its spec revision (#17358). */
+  mcpSessionId?: string;
 }
 export interface PrototypePatchInput {
   id: string;
@@ -152,19 +152,13 @@ async function queuedPatch(
   if (settingsPage) {
     return failure(`Invalid patch result at spec.${settingsPage.path}: ${settingsPage.message}`);
   }
-  let landed = false;
-  try {
-    const refused = await deps.specRefusal?.(applied.spec);
-    if (refused !== undefined) {
-      return failure(refused);
-    }
-    signal?.throwIfAborted();
-    const result = await sendPatch(deps, args);
-    landed = result.success || result.delivery === "indeterminate";
-    return await finishPatch(deps, deviceId, args, { read, applied, result });
-  } finally {
-    await deps.settleSpec?.(landed);
+  const refused = await deps.specRefusal?.(applied.spec);
+  if (refused !== undefined) {
+    return failure(refused);
   }
+  signal?.throwIfAborted();
+  const result = await sendPatch(deps, args);
+  return finishPatch(deps, deviceId, args, { read, applied, result });
 }
 
 async function finishPatch(
@@ -191,6 +185,7 @@ async function finishPatch(
   const committed = deps.store.shownSpecs.commitPatch(deviceId, args.id, read.version, {
     spec: applied.spec,
     deviceRevision: fields.revision,
+    ...(deps.mcpSessionId === undefined ? {} : { mcpSessionId: deps.mcpSessionId }),
   });
   if (committed) {
     deps.store.recordPatch(deviceId, args.id, {

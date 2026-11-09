@@ -1,3 +1,11 @@
+import { type Timer } from "../../utils/SystemTimer";
+import {
+  run,
+  type Context,
+  type StepPlan,
+  type KillProfileBootObservation,
+} from "./KillProfileStepPlan";
+import { oemStepPlan } from "./KillProfileStatePlans";
 import { parseAndroidRuntimePermissions } from "../action/parseAndroidRuntimePermissions";
 import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -62,6 +70,7 @@ export interface KillProfileStepResult {
   command: string;
   status: KillProfileStepStatus;
   reason?: string;
+  observation?: KillProfileBootObservation;
 }
 
 /** `applied`: every step ran; `partial`: some did; `unsupported`: none could on this device. */
@@ -103,42 +112,7 @@ export interface KillProfileDependencies {
   /** The daemon session applying, whose release then restores the device. */
   owner?: string;
   signal?: AbortSignal;
-}
-
-/** One step resolved against a package: its command and how to capture what it changes. */
-interface StepPlan {
-  label: string;
-  command: string;
-  minApi?: number;
-  /** Reads the facet before the write and returns how to restore it. */
-  capture?: () => Promise<KillProfileRestoreAction>;
-  /** Optional read-back for steps whose successful shell write does not prove application. */
-  verify?: () => Promise<string | undefined>;
-  /** A mismatched read-back may reflect a partial write; retain the original state for cleanup. */
-  retainOnVerificationFailure?: boolean;
-  /** Output that means the device cannot do this, not that the command broke. */
-  unsupportedOutput?: RegExp;
-}
-
-interface Context {
-  device: BootedDevice;
-  appId: string;
-  quoted: string;
-  deps: KillProfileDependencies;
-}
-
-async function run(
-  context: Context,
-  command: string,
-  maxBuffer?: number,
-): Promise<{ stdout: string; stderr: string }> {
-  throwIfAborted(context.deps.signal);
-  const result = await context.deps.shell.executeCommand(command, {
-    noRetry: true,
-    signal: context.deps.signal,
-    maxBuffer,
-  });
-  return { stdout: result.stdout, stderr: result.stderr ?? "" };
+  timer?: Pick<Timer, "sleep">;
 }
 
 function appOpCommand(context: Context, verb: "get" | "set", op: KillProfileAppOp): string {
@@ -329,6 +303,8 @@ function planStep(context: Context, step: KillProfileStep): StepPlan {
       return step.mode === "soft"
         ? { label: "am kill", command: `shell am kill ${context.quoted}` }
         : { label: "am force-stop", command: `shell am force-stop ${context.quoted}` };
+    default:
+      return oemStepPlan(context, step);
   }
 }
 
@@ -363,35 +339,54 @@ type StepFailure = Pick<KillProfileStepResult, "status" | "reason">;
 interface WriteOutcome {
   failure?: StepFailure;
   indeterminate?: boolean;
+  observation?: KillProfileBootObservation;
+  reason?: string;
 }
 
 function indeterminateFailure(error: unknown): WriteOutcome {
-  logger.warn(`Kill profile permission step failed: ${errorMessage(error)}`, error);
+  logger.warn(`Kill profile step failed: ${errorMessage(error)}`, error);
   return { failure: { status: "failed", reason: errorMessage(error) }, indeterminate: true };
+}
+
+function observationOutcome(observation: KillProfileBootObservation | undefined): WriteOutcome {
+  return observation
+    ? {
+        observation,
+        reason: `${observation.bootReceivers.length} boot receiver(s), permission ${observation.bootPermissionGranted ? "granted" : "denied"}, stopped=${observation.stopped}, default boot delivery=${observation.bootBroadcastDelivered}, ${observation.pendingAlarms} pending alarm(s)`,
+      }
+    : {};
 }
 
 /** Write a step and, when required, verify the resulting state. */
 async function writeStep(context: Context, plan: StepPlan): Promise<WriteOutcome> {
   let output;
   try {
-    output = await run(context, plan.command);
+    output = plan.command ? await run(context, plan.command) : { stdout: "", stderr: "" };
   } catch (error) {
-    if (plan.verify) {
+    throwIfAborted(context.deps.signal);
+    if (plan.verify || plan.observe) {
       return indeterminateFailure(error);
     }
     // The write may still have landed, so the record stays for reset and release.
     throw toActionableError(error, `Failed to run '${plan.command}' on ${context.device.deviceId}`);
   }
   const failure = outputFailure(plan, output);
-  if (failure || !plan.verify) {
-    return { failure };
+  if (failure) {
+    return { failure, indeterminate: plan.retainOnWriteFailure };
   }
   try {
-    const reason = await plan.verify();
-    return reason
-      ? { failure: { status: "failed", reason }, indeterminate: plan.retainOnVerificationFailure }
-      : {};
+    const observation = await plan.observe?.();
+    const reason = await plan.verify?.();
+    if (reason) {
+      return {
+        failure: { status: "failed", reason },
+        indeterminate: plan.retainOnVerificationFailure,
+      };
+    }
+    await plan.afterVerify?.();
+    return observationOutcome(observation);
   } catch (error) {
+    throwIfAborted(context.deps.signal);
     return indeterminateFailure(error);
   }
 }
@@ -407,20 +402,27 @@ async function applyStep(
   plan: StepPlan,
   apiLevel: number | null,
 ): Promise<KillProfileStepResult> {
-  const base = { step: plan.label, command: plan.command };
+  const base = () => ({ step: plan.label, command: plan.command });
   const gated = apiGateReason(plan, apiLevel);
   if (gated) {
-    return { ...base, status: "unsupported", reason: gated };
+    return { ...base(), status: "unsupported", reason: gated };
   }
   const registry = context.deps.registry ?? defaultKillProfileRestoreRegistry;
-  const action = plan.capture ? await plan.capture() : undefined;
+  let action;
+  try {
+    action = await plan.capture?.();
+  } catch (error) {
+    throwIfAborted(context.deps.signal);
+    logger.warn(`Kill profile capture failed: ${errorMessage(error)}`, error);
+    return { ...base(), status: "failed", reason: errorMessage(error) };
+  }
   const recordedNow =
     action !== undefined && registry.record(context.device, action, context.deps.owner);
-  const { failure, indeterminate } = await writeStep(context, plan);
+  const { failure, indeterminate, ...details } = await writeStep(context, plan);
   if (failure && !indeterminate && recordedNow && action) {
     registry.forget(context.device.deviceId, action.key);
   }
-  return failure ? { ...base, ...failure } : { ...base, status: "applied" };
+  return failure ? { ...base(), ...failure } : { ...base(), status: "applied", ...details };
 }
 
 function appliedCount(steps: readonly KillProfileStepResult[]): number {

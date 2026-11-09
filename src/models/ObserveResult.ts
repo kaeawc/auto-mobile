@@ -178,7 +178,13 @@ export type ObserveResult = {
   /** Opt-in Android display:"all" aggregate; the proposed additive shape (#8256). */
   displays?: DisplayObservation[];
   /** Other known physical panels, only present when inventory has multiple panels. */
-  otherDisplays?: Array<Pick<DisplayPanel, "key" | "role"> & { size: DisplayPanel["sizePx"] }>;
+  otherDisplays?: Array<
+    Pick<DisplayPanel, "key" | "role"> & {
+      size: DisplayPanel["sizePx"];
+      /** Unit of `size`: iOS panels are converted to points like `screenSize`; Android stays in pixels. */
+      units: "points" | "physical-pixels";
+    }
+  >;
   /** INTERNAL-ONLY: display transition revision when this capture completed. */
   displayRevision?: number;
   /** Short-lived full-screen coordinate reference for a later tapAt call. */
@@ -285,6 +291,12 @@ export type ObserveResult = {
     foregroundActivity?: { distractionOptimized: boolean };
     /** DO is required and a known foreground activity is not distraction optimized. */
     blocked: boolean;
+    /**
+     * The foreground screen belongs to the Car App Library (#17499); `hostPackage` is present when
+     * host-drawn template nodes were seen. Absence is not proof of app-drawn views. Read it with
+     * `isCarAppHostRendered`.
+     */
+    hostRenderedUi?: import("./CarAppTemplates").CarAppHostRenderedUi;
   };
 
   /** System UI insets */

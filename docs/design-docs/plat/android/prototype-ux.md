@@ -1931,8 +1931,8 @@ runs no follow-up and reports a `cancelled` event. A `via: "host"` call sends
 abandonment): the host aborts that request's fetch, frees its in-flight slot and sends no reply, and the
 device ignores a `prototype_response` that crosses it. The frame is not in the Kotlin-mirrored wire
 manifest, like `prototype_request`. Beyond `MAX_PROTOTYPE_REQUESTS_IN_FLIGHT` a new request fails with
-`too_many_in_flight`. Dismissing the prototype cancels its requests. `via: "device"` loopback URLs
-are reversed as described in [Loopback requests from the device](#loopback-requests-from-the-device-12530).
+`too_many_in_flight`. Dismissing the prototype cancels its requests. `via: "device"` destinations are
+checked as described in [Device destination policy](#device-destination-policy).
 
 **Android runtime (#12528).** CtrlProxy advertises both capabilities and runs the action in
 `PrototypeRuntime`; the Kotlin twins of the TypeScript rules (`PrototypeRequest.kt`: resolver,
@@ -1951,9 +1951,10 @@ are reversed as described in [Loopback requests from the device](#loopback-reque
   `MAX_PROTOTYPE_RESPONSE_BYTES` cap; the contract timeout is the whole-call timeout. The two frames
   (`PrototypeNetworkFrames.kt`) stay outside the `WebSocketRequest` / `WebSocketResponse` hierarchies
   because the host reads them outside its Kotlin-mirrored wire manifest.
-- Any absolute http(s) URL is allowed: CtrlProxy declares `android.permission.INTERNET` and a
-  `network_security_config` with `cleartextTrafficPermitted="true"`. There is no host allowlist; CtrlProxy
-  is sideloaded over adb and never distributed.
+- CtrlProxy declares `android.permission.INTERNET` and a `network_security_config` with
+  `cleartextTrafficPermitted="true"`, so http and https URLs both work. There is no allowlist of
+  permitted hosts; the [device destination policy](#device-destination-policy) refuses local and
+  host-machine destinations instead.
 - Saved prototypes (`SavedPrototypeActivity`) run `via: "device"` on the same client; `via: "host"` finishes
   as an `invalid_request` error because no host serves the activity.
 
@@ -2447,11 +2448,14 @@ most 64), `importance` one of `min`, `low`, `default` or `high`, and an optional
 must name a declared channel, a literal `actions` list needs unique ids, and `notifications.cancel` takes
 exactly one of `id`, `group` or `all`; bound values are checked by the runtime. The bounds are named
 contract limits (`MAX_PROTOTYPE_NOTIFICATION_*`, `MAX_PROTOTYPE_NOTIFICATIONS_ACTIVE`) that the call, state
-and channel rules repeat. The runtime enforces the ones that apply after placeholders resolve: a reply of
-at most 1 KiB, a resolved notification of at most 4 KiB, and at most 4 updates per second per notification,
-coalesced to the latest. Title and body limits count characters, while the 4 KiB total counts UTF-8 bytes of
-the resolved record and is checked on its own: ASCII text at every per-field limit fits, but multibyte text
-at those limits can exceed it.
+and channel rules repeat. Spec validation checks literal values only. The limits that apply after
+placeholders resolve belong to the device runtime that posts the notification: a reply of at most 1 KiB, a
+resolved notification of at most 5 KiB, and at most 4 updates per second per notification, coalesced to the
+latest. No runtime posts notifications yet, so none of these is enforced today; the host never posts one.
+Title and body limits count UTF-16 code units, while the 5 KiB total counts UTF-8 bytes of the resolved
+title, body and `data` and is meant to fail the call on its own (`invalid_args` when over). A code
+unit is at most 3 bytes, so every literal at the per-field limits fits (at most 4,480 bytes); text bound at
+post time can still exceed it, such as emoji counted per character (5,632 bytes at the limits).
 `notifications.schedule` takes the `post` arguments plus `delaySeconds` (a whole number, 1 to 604800)
 and needs `prototype_platform_notifications_scheduled_v1` as well; the same channel and action-id rules
 apply, and `notifications.scheduledFired` reports a scheduled notification that fired (#14283).
@@ -3029,32 +3033,26 @@ one design with `show` and discuss the others in chat, or show one spec whose `p
 with a visible label per page (see the full-screen pager example). Nothing waits on the device for a
 choice.
 
-### Loopback requests from the device (#12530)
+### Device destination policy
 
-On an Android emulator or device, `localhost` in a `request` action with `via: "device"` is the
-device itself, not the host. When the host shows a prototype it scans every such request, at any
-depth (including nested `onSuccess`/`onError` lists), for URLs on `localhost`, `127.0.0.1` or `[::1]`
-and runs `adb -s <serial> reverse tcp:<port> tcp:<port>` for each port. `via: "host"` requests are
-ignored.
+`via: "device"` requests on Android pass `PrototypeEgressPolicy`, which checks the URL host before any
+DNS lookup, every resolved address, and the address of the connected socket. A refused destination
+fails the request with `blocked_destination`. It refuses:
 
-- Implicit ports are reversed: `http://localhost/` reverses 80 and `https://localhost/` reverses 443,
-  so the same URL reaches the same host server under both `via` values.
-- Ownership: a reverse is recorded as the host's own only when it created it, or when a
-  `portReverse` session holds it; the two share one ownership view and the last holder removes it
-  (see [port reverse ownership](port-reverse.md#ownership)). Any other one already listed by
-  `adb reverse --list` is left alone and never removed. Ports are reference-counted across the
-  prototypes shown on one device and removed when the last holder is dismissed, the session ends, or
-  the device is unbound or removed.
-- Best-effort: a failed reverse is logged and reported as `reverseFailures`; it never fails the show.
-- A port that is a binding (`http://localhost:{port}/feed`) or an unparseable URL cannot be
-  reversed, because it is unknown until the request runs. `inspect` reports these as
-  `unreversiblePorts`, and the authoring guide says to use `via: "host"` for them.
-- A saved prototype launched with no host connected has no host to run `adb reverse`, so its
-  `via: "device"` requests to localhost fail until a host shows or re-shows it. Use a reachable
-  address (or `via: "host"` while a host is attached) for prototypes meant to run unattended.
-- iOS simulators share the Mac's network, so nothing is reversed there. The iOS agent refuses
-  loopback destinations for `via: "device"`; see the iOS
-  [destination policy](../ios/prototype-agent.md#destination-policy-13815).
+- the names `localhost` and `*.localhost`, and a numeric host that is not a valid IPv4 or IPv6 literal;
+- `0.0.0.0/8`, loopback (`127.0.0.0/8`, `::1`), the unspecified IPv6 address, link-local
+  (`169.254.0.0/16`, `fe80::/10`), site-local IPv6 and Teredo;
+- the emulator's host-machine aliases (`10.0.2.1` to `10.0.2.6`, and Genymotion's `10.0.3.2`);
+- IPv6 forms that embed a refused IPv4 address (IPv4-compatible, IPv4-mapped, SIIT, both NAT64
+  prefixes and 6to4);
+- ports 3000-3010 (the daemon's range) and 8765 (CtrlProxy) on a private address (`10/8`,
+  `172.16/12`, `192.168/16`, `100.64/10`, `fc00::/7`).
+
+The host makes no `adb reverse` for a prototype, so `localhost` on the device never reaches a host
+server. A prototype reaches a host-local server with `via: "host"`, or with `via: "device"` at an
+address the device can reach that the policy permits. The session-scoped `portReverse` tool is
+separate and does not change this policy. iOS simulators apply the agent's own
+[destination policy](../ios/prototype-agent.md#destination-policy-13815), which also refuses loopback.
 
 ## Realtime channels
 
@@ -3265,11 +3263,10 @@ under Request action.
   HTTP transport, with an egress policy checked before every connection and redirect. The host needs a
   connection; with none the request fails with `network`. Closing the owning connection fails its
   calls at once, and a cancelled call sends `prototype_request_cancel` so the host frees the slot.
-- `via: "device"`: the device runs the request itself. On Android `localhost` is the device, so the
-  host runs `adb reverse` for each loopback port it finds in the shown spec (see
-  [Loopback requests from the device](#loopback-requests-from-the-device-12530)); on an iOS
-  simulator nothing is reversed and the agent refuses loopback destinations (see the iOS
-  [destination policy](../ios/prototype-agent.md#destination-policy-13815)).
+- `via: "device"`: the device runs the request itself and applies its own destination policy:
+  on Android the [device destination policy](#device-destination-policy), on an iOS simulator the
+  agent's [destination policy](../ios/prototype-agent.md#destination-policy-13815). Both refuse
+  loopback, so a host-local server needs `via: "host"`.
 
 **Host egress policy.** Host requests refuse localhost names, loopback, unspecified and link-local
 addresses, emulator host aliases, and IPv6 forms embedding those IPv4 destinations.
@@ -3306,8 +3303,8 @@ is too, but the agent's destination policy refuses it), other cleartext hosts fa
 
 **Saved prototypes.** A saved Android prototype (see
 [Saved prototypes on the Android home screen](#saved-prototypes-on-the-android-home-screen)) supports
-`request` actions with `via: "device"` (it still needs a reachable URL, since no host runs `adb reverse`
-when it launches alone). `via: "host"` has no host to run it there, so it fails with an `invalid_request`
+`request` actions with `via: "device"`, under the same
+[device destination policy](#device-destination-policy). `via: "host"` has no host to run it there, so it fails with an `invalid_request`
 error whose message points to `via: "device"`.
 
 **Limits.**
@@ -4937,6 +4934,9 @@ and `uninstallApp` actions remain separate from this artifact pipeline.
 - **Registry.** `disposable-apps.json` under the AutoMobile data dir is keyed by device id. Each
   record holds appId, slug, platform, label, spec sha256, template, signer, installedAt and
   expiresAt. Writes are serialized and atomic. A corrupt file or record is skipped with a warning.
+  An install writes its record, with the new expiresAt, as soon as the package is on the device and
+  before permissions are applied. A permission failure then surfaces as an error saying the app is
+  installed without its permissions, and the sweep still sees the current TTL.
 - **Lifecycle.** `ttlHours` defaults to 72, accepts 0 to 720, and 0 means no expiry. Re-installing
   a slug updates the app in place and keeps its storage unless `reset` is set. The expiry sweep and
   uninstall refuse ids outside the prefix. They also refuse installed packages whose signer differs

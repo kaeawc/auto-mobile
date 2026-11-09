@@ -138,8 +138,13 @@ async function measure(
   );
   const startMs = await waitReady(deps);
   const observationStart = deps.timer.now();
+  // Explicit screen-off dwell is part of the recipe; exclude it from transport/setup latency.
+  const screenOffWaitMs = profile.steps.reduce(
+    (total, step) => total + (step.kind === "screenOff" ? step.minutes * 60_000 : 0),
+    0,
+  );
   await checkedCommand(deps.shell, "shell input keyevent KEYCODE_HOME");
-  const killDeps = { shell: deps.shell, registry };
+  const killDeps = { shell: deps.shell, registry, timer: deps.timer, signal: deps.signal };
   const applied = await applyKillProfile(device, FIXTURE_PACKAGE, profile.id, killDeps);
   if (applied.status !== "applied") {
     throw new Error(`${profile.id} was ${applied.status}; cannot score an incomplete recipe`);
@@ -150,7 +155,7 @@ async function measure(
     throw new Error("The common Doze challenge was not applied");
   }
   const broadcastMs = await deps.clock.readInstantMs();
-  if (broadcastMs >= startMs + FOREGROUND_HEARTBEAT_MS) {
+  if (broadcastMs >= startMs + screenOffWaitMs + FOREGROUND_HEARTBEAT_MS) {
     throw new Error(
       "Profile setup exceeded the first heartbeat deadline; refusing contaminated scores",
     );
@@ -164,7 +169,7 @@ async function measure(
     deps.shell,
     `shell am broadcast -a ${FIXTURE_PACKAGE}.PUSH -p ${FIXTURE_PACKAGE} -f 0x11000010`,
   );
-  await observeUntil(deps, observationStart + PRIMARY_WINDOW_MS);
+  await observeUntil(deps, observationStart + screenOffWaitMs + PRIMARY_WINDOW_MS);
   const deferralMs = await deps.clock.readInstantMs();
   requireVerified(
     await writeDeviceClock(

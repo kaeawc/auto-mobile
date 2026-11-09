@@ -6,12 +6,16 @@ import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { isWatchHierarchy, type WatchHierarchy } from "./WatchHierarchy";
 
 export type WatchCommand =
+  | { type: "face"; op: "tap"; x: number; y: number }
+  | { type: "face"; op: "drag"; fromX: number; fromY: number; toX: number; toY: number }
+  | { type: "face"; op: "swipe"; direction: "up" | "down" | "left" | "right" }
+  | { type: "face"; op: "dump" }
   | { type: "type"; text: string }
   | { type: "hierarchy" | "home" }
   | { type: "tap"; identifier: string }
   | { type: "tap"; x: number; y: number }
   | { type: "crown"; delta: number; velocity?: number }
-  | { type: "swipe"; direction: "up" | "down" | "left" | "right" };
+  | { type: "swipe"; direction: "up" | "down" | "left" | "right"; distance?: number };
 
 export interface WatchRunnerClient {
   /** Registered clients remain reusable until a permanent connection failure or close. */
@@ -153,7 +157,9 @@ export class WebSocketWatchRunnerClient implements WatchRunnerClient {
         (pending.type === "hierarchy" ? "hierarchy_update" : `${pending.type}_result`) &&
       response.success === true
     ) {
-      pending.resolve(response.data);
+      pending.resolve(
+        response.type === "face_result" ? (response.text ?? response.data) : response.data,
+      );
     }
   }
 

@@ -1,6 +1,8 @@
+import { SimulatorIosDisplayPixelProbe } from "../../../src/features/action/iosRotateDisplayProbe";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
+  reconcileIosRotationWithDisplayRead,
   normalizeIosOrientation,
   observedIosOrientation,
   restoreTargetIosOrientation,
@@ -75,6 +77,33 @@ describe("iOS runner refusal screen-size checks (#17101)", () => {
       "Rotation is not supported on this display (the screen size did not change). The runner reported a rotation but the screen size is unchanged.",
     );
     expect(result.message).toBe("Failed to rotate to portrait; the screen size did not change.");
+  });
+
+  test("the refusal keeps the held landscape orientation instead of the runner's transient portrait", () => {
+    const result = verifyIosRotation(runnerRefusal(), "portrait", previousLandscape());
+    expect(result.observation?.rotation).toBe(1);
+    expect(result.currentOrientation).toBe("landscape");
+  });
+
+  test("clears the transient rotation when the previous observation has none", () => {
+    const previous = { ...previousLandscape(), rotation: undefined };
+    const result = verifyIosRotation(runnerRefusal(), "portrait", previous);
+    expect(result.observation?.rotation).toBeUndefined();
+    expect(result.currentOrientation).toBe("landscape");
+  });
+
+  test("a refusal observed on a different display keeps its own rotation", () => {
+    const refusal = runnerRefusal();
+    const onOtherDisplay = {
+      ...refusal,
+      observation: {
+        ...refusal.observation!,
+        display: { ...refusal.observation!.display, key: "primary" },
+      },
+    };
+    const result = verifyIosRotation(onOtherDisplay, "portrait", previousLandscape());
+    expect(result.observation?.rotation).toBe(refusal.observation?.rotation);
+    expect(result.currentOrientation).toBe(onOtherDisplay.currentOrientation);
   });
 
   test("reconciles the same refusal when the observed screen size changes", () => {
@@ -160,7 +189,7 @@ describe("iOS runner rotation refusal display guidance", () => {
     observation: observation(0),
   });
 
-  test("uses cover guidance only for a cover observation", () => {
+  test("names the cover and inner panels and keeps generic wording otherwise", () => {
     const previous = observation(0);
     const cover = {
       ...previous,
@@ -178,13 +207,32 @@ describe("iOS runner rotation refusal display guidance", () => {
       error: coverError,
       message: "Runner refusal message",
     });
-    expect(verifyIosRotation(runnerFailure(), "landscape", inner).error).toBe(runnerError);
+    expect(verifyIosRotation(runnerFailure(), "landscape", inner)).toMatchObject({
+      success: false,
+      rotationPerformed: false,
+      error:
+        "Rotation is not supported on the inner panel (the screen size did not change). Keep the current orientation.",
+    });
     expect(verifyIosRotation(runnerFailure(), "landscape", undefined).error).toBe(runnerError);
+  });
+
+  test("an inner-panel rotation the display shows still wins over the runner refusal", () => {
+    const inner = {
+      ...observation(0),
+      display: { ...observation(0).display, role: "inner" as const },
+    };
+    const result = verifyIosRotation(
+      { ...runnerFailure(), observation: observation(1, 874, 402) },
+      "landscape",
+      inner,
+    );
+    expect(result).toMatchObject({ success: true, rotationPerformed: true, error: undefined });
+    expect(result.warning).toContain(runnerError);
   });
 });
 
 describe("iOS rotation verification screen-size checks (#17047)", () => {
-  test("gives cover-panel guidance only for a cover observation", () => {
+  test("names the cover and inner panels in an unchanged-size refusal (#17385)", () => {
     const previous = {
       ...duoPrevious(),
       display: { ...duoPrevious().display, role: "cover" as const },
@@ -207,7 +255,9 @@ describe("iOS rotation verification screen-size checks (#17047)", () => {
     expect(coverResult.success).toBe(false);
     expect(coverResult.rotationPerformed).toBe(false);
 
-    expect(verifyIosRotation(duoRotation(), "landscape", innerPrevious).error).toBe(genericError);
+    expect(verifyIosRotation(duoRotation(), "landscape", innerPrevious).error).toBe(
+      "Rotation is not supported on the inner panel (the screen size did not change). The runner reported a rotation but the screen size is unchanged.",
+    );
     expect(verifyIosRotation(duoRotation(), "landscape", unknownPrevious).error).toBe(genericError);
   });
 
@@ -219,6 +269,24 @@ describe("iOS rotation verification screen-size checks (#17047)", () => {
       "Rotation is not supported on this display (the screen size did not change). The runner reported a rotation but the screen size is unchanged.",
     );
     expect(result.message).toBe("Failed to rotate to landscape; the screen size did not change.");
+  });
+
+  // An unchanged size is evidence of a refusal only on the same display: a rotation that
+  // succeeded while the target display changed must not be reported as unsupported (#17346).
+  test("accepts a Duo landscape rotation observed on a different display", () => {
+    const rotation = duoRotation();
+    const onOtherDisplay = {
+      ...rotation,
+      observation: {
+        ...rotation.observation!,
+        display: { ...rotation.observation!.display, key: "primary" },
+      },
+    };
+    const result = verifyIosRotation(onOtherDisplay, "landscape", duoPrevious());
+    expect(result.success).toBe(true);
+    expect(result.rotationPerformed).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.message).toBe("Successfully rotated from portrait to landscape");
   });
 
   test("accepts a same-axis portrait repair whose size is legitimately unchanged", () => {
@@ -267,6 +335,21 @@ describe("iOS rotation verification screen-size checks (#17047)", () => {
     expect(result.message).toBe("Successfully rotated from portrait to landscape");
   });
 
+  test("names the inner panel in the mismatch message (#17385)", () => {
+    const result = verifyIosRotation(
+      {
+        ...duoRotation(),
+        observation: observation(0, 951, 669),
+        previousOrientation: "unknown",
+      },
+      "landscape",
+      { ...duoPrevious(), display: { ...duoPrevious().display, role: "inner" as const } },
+    );
+    expect(result.error).toContain(
+      "Rotation is not supported on the inner panel (the screen size did not change). The display is still portrait",
+    );
+  });
+
   test("preserves the cover-panel refusal mismatch message", () => {
     const result = verifyIosRotation(
       {
@@ -295,5 +378,111 @@ describe("iOS restore prior from drawn size (#17101)", () => {
     expect(restoreTargetIosOrientation(observation(undefined, 402, 874))).toBe("portrait");
     expect(restoreTargetIosOrientation(observation(1, 0, 0))).toBe("landscape");
     expect(restoreTargetIosOrientation(observation(1, 500, 500))).toBe("landscape");
+  });
+});
+
+describe("independent iOS rotate confirmation", () => {
+  const before = {
+    ...observation(1, 951, 669),
+    display: {
+      key: "primary-1",
+      role: "inner" as const,
+      posture: "unknown" as const,
+      generation: 0,
+    },
+  };
+  const claimed: RotateResult = {
+    success: true,
+    orientation: "portrait",
+    value: 0,
+    rotationPerformed: true,
+    observation: { ...observation(0, 669, 951), display: before.display },
+  };
+  test("a timeout cannot be promoted by flipped observation points", () => {
+    const result = verifyIosRotation(
+      { ...claimed, success: false, error: "Rotate timed out after 5000ms" },
+      "portrait",
+      before,
+      true,
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Rotate timed out after 5000ms");
+    expect(result.error).toContain("could not be confirmed");
+    expect(result.warning).toBeUndefined();
+  });
+  test("pixel landscape overrides a claimed inner-panel rotation", () => {
+    expect(
+      reconcileIosRotationWithDisplayRead(claimed, "portrait", before, {
+        width: 2853,
+        height: 2007,
+      }),
+    ).toMatchObject({ success: false, rotationPerformed: false, currentOrientation: "landscape" });
+    expect(
+      reconcileIosRotationWithDisplayRead(claimed, "portrait", before, {
+        width: 2853,
+        height: 2007,
+      }).error,
+    ).toContain("inner panel");
+  });
+  test.each([{ width: 2007, height: 2853 }, undefined, { width: 10, height: 10 }])(
+    "noncontradictory pixels preserve result %p",
+    (size) => {
+      expect(reconcileIosRotationWithDisplayRead(claimed, "portrait", before, size)).toBe(claimed);
+    },
+  );
+});
+
+describe("simulator display probe", () => {
+  const simulator = {
+    deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+    name: "Duo",
+    platform: "ios" as const,
+  };
+  test("reads a captured screenshot header and forwards the selected display and signal", async () => {
+    const pixels = readFileSync("test/fixtures/screenshots/small-element.png");
+    const calls: unknown[] = [];
+    const probe = new SimulatorIosDisplayPixelProbe(simulator, {
+      async screenshot(...args) {
+        calls.push(args);
+        return pixels;
+      },
+    });
+    const signal = new AbortController().signal;
+    const size = await probe.readPixelSize(simulator.deviceId, "primary-1", signal);
+    expect(size?.width).toBeGreaterThan(0);
+    expect(size?.height).toBeGreaterThan(0);
+    expect(calls).toEqual([[simulator.deviceId, "primary-1", signal]]);
+  });
+  test("never screenshots physical devices", async () => {
+    let calls = 0;
+    const device = { ...simulator, deviceId: "physical-iphone" };
+    const probe = new SimulatorIosDisplayPixelProbe(device, {
+      async screenshot() {
+        calls++;
+        throw new Error("unreachable");
+      },
+    });
+    expect(await probe.readPixelSize(device.deviceId, "default")).toBeUndefined();
+    expect(calls).toBe(0);
+  });
+  test("read failures are best effort", async () => {
+    const probe = new SimulatorIosDisplayPixelProbe(simulator, {
+      async screenshot() {
+        throw new Error("capture unavailable");
+      },
+    });
+    expect(await probe.readPixelSize(simulator.deviceId, "primary-1")).toBeUndefined();
+  });
+  test("a read failure after cancellation throws instead of reading as indeterminate", async () => {
+    const controller = new AbortController();
+    const probe = new SimulatorIosDisplayPixelProbe(simulator, {
+      async screenshot() {
+        controller.abort();
+        throw new Error("screenshot aborted");
+      },
+    });
+    await expect(
+      probe.readPixelSize(simulator.deviceId, "primary-1", controller.signal),
+    ).rejects.toThrow();
   });
 });

@@ -138,6 +138,7 @@ internal fun androidx.compose.foundation.layout.BoxScope.DesktopStreamNotice(
       DeviceViewingNotice(
         onTakeControl = onTakeControl,
         modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+        holder = desktopSessionState.heldElsewhereHolder,
       )
     } else if (idleReleased) {
       DeviceIdleReleasedNotice(

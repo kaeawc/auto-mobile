@@ -19,6 +19,10 @@ import {
   responseShapeControlFields,
   withJsonSchemaOverride,
 } from "../../utils/schemaHelpers";
+import {
+  EMBEDDED_OBSERVATION_SETTLE_MAX_TIMEOUT_MS,
+  EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS,
+} from "../embeddedObservationSettleBudget";
 import { coordinatePointInputSchema, validateCoordinateRange } from "../coordinateRangeValidation";
 import { imageRelativePointSchema } from "../imageRelativePointSchema";
 import type { TapOnArgs } from "../interactionToolTypes";
@@ -153,6 +157,15 @@ export const tapOnSchema = withJsonSchemaOverride(
           .optional()
           .describe("Retry once if the view hierarchy is unchanged after tap"),
         ensureTap: z.boolean().optional().describe("Enable preTapStability and retryIfNoChange"),
+        settleTimeoutMs: z
+          .number()
+          .int()
+          .min(0)
+          .max(EMBEDDED_OBSERVATION_SETTLE_MAX_TIMEOUT_MS)
+          .optional()
+          .describe(
+            `Post-tap settle wait (ms, default ${EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS}, max ${EMBEDDED_OBSERVATION_SETTLE_MAX_TIMEOUT_MS}); 0 skips it. An unsettled screen returns observation.settled:false.`,
+          ),
         ensureChecked: z
           .boolean()
           .optional()

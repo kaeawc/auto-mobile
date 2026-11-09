@@ -301,11 +301,15 @@ enable the default-off `accessibility` tool for the current MCP connection:
 
 Call `accessibility` with `talkback: true` on Android or `voiceover: true` on
 iOS, run the flow, and disable it afterward. Enabling TalkBack may leave a system
-runtime permission prompt covering the screen. The result reports it through
+runtime permission prompt covering the screen, sometimes a few seconds after the
+setting changes. The call waits up to 4 seconds for one and reports it through
 `warning` and `blockingPrompt` (`kind`, `package`, `activity`) when detected;
 AutoMobile does not dismiss it. Use `observe` to inspect it, then `tapOn` to
 answer the allow or deny button, or set a `systemAlerts` policy to answer
-permission prompts around each interaction. The default-off debug tool
+permission prompts around each interaction. On Android, when `sendKeys` cannot
+focus its field because a system window (permission prompt, SystemUI or
+framework dialog) holds focus over the app, the failure reports that window in
+`blockingPrompt` (`kind`, `package`) and says to dismiss it rather than scroll. The default-off debug tool
 `accessibilityFocus` sets focus on Android (TalkBack) and iOS (VoiceOver).
 iOS requires VoiceOver enabled and the AutoMobile in-app SDK in the foreground
 app; focus read-back is unavailable. Clearing focus is supported only on Android.

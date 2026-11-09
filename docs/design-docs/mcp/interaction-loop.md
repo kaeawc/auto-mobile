@@ -111,6 +111,14 @@ hierarchies are structurally equal, bounded at 1000 ms and cancelled with the
 request. In-place and scroll actions are unchanged and keep their single
 capture.
 
+The loop budget is checked between polls, so a device read that hangs could
+overrun it. A wall-clock fence at the budget plus a margin (the smaller of
+1000 ms and the budget) aborts the loop's signal and is also raced against the
+whole gate, so the action responds at the fence even when a read ignores its
+signal; the abandoned read stops at the loop's next abort check. `tapOn` takes a
+per-call `settleTimeoutMs` (0–3000 ms) that replaces the 1000 ms budget; `0`
+skips the gate and returns the action capture with `settled: false`.
+
 Every action observation carries a `settled` boolean saying whether that
 capture passed the gate:
 
@@ -125,7 +133,7 @@ capture passed the gate:
 
 When the gate ran, the observation also carries `settleMs` (milliseconds the gate
 spent re-observing) and `settlePolls` (how many re-observations it took). A
-`settled: false` result with `settleMs` near the 1000 ms budget means the screen
+`settled: false` result with `settleMs` near the budget means the screen
 kept changing or device reads were slow; `settlePolls` tells the two apart. A
 settle read that fails or is cancelled returns the action's own capture with
 `settled: false` and `settleMs` but no `settlePolls`. Both fields are absent when

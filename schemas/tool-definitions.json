@@ -5,7 +5,7 @@
     "annotations": {
       "destructiveHint": false
     },
-    "description": "Check or control accessibility services. On Android: omit talkback to check TalkBack state, or pass talkback: true/false to enable/disable it. On iOS: omit voiceover to check VoiceOver state, or pass voiceover: true/false to enable/disable it (Simulator via simctl, physical devices via the Settings app). After enabling TalkBack, reports a blocking system runtime permission prompt in warning and blockingPrompt when detected; AutoMobile does not dismiss it. Use observe, then tapOn to answer the prompt. Always returns fresh state from the device, regardless of feature flags: enabled is what the device reports. When force-accessibility-mode or accessibility-auto-detect: off changes what the action tools assume, detectionOverride names it ({ mode: forced-on | auto-detect-off, effectiveEnabled }); it is absent otherwise.",
+    "description": "Check or control accessibility services. On Android: omit talkback to check TalkBack state, or pass talkback: true/false to enable/disable it. On iOS: omit voiceover to check VoiceOver state, or pass voiceover: true/false to enable/disable it (Simulator via simctl, physical devices via the Settings app). After enabling TalkBack, waits up to 4 s for a blocking system runtime permission prompt and reports it in warning and blockingPrompt when detected; AutoMobile does not dismiss it. Use observe, then tapOn to answer the prompt. Always returns fresh state from the device, regardless of feature flags: enabled is what the device reports. When force-accessibility-mode or accessibility-auto-detect: off changes what the action tools assume, detectionOverride names it ({ mode: forced-on | auto-detect-off, effectiveEnabled }); it is absent otherwise.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -50807,6 +50807,24 @@
             "type": "string"
           }
         },
+        "blockingPrompt": {
+          "description": "Android, on a focus failure: a system window (permission prompt, SystemUI or framework dialog) holds focus over the app. Answer or dismiss it, then retry; scrolling will not help.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": ["runtime-permission", "system-dialog"]
+            },
+            "package": {
+              "type": "string"
+            },
+            "activity": {
+              "type": "string"
+            }
+          },
+          "required": ["kind", "package"],
+          "additionalProperties": false
+        },
         "errorCode": {
           "$ref": "#/$defs/__schema0"
         },
@@ -63017,6 +63035,12 @@
         "ensureTap": {
           "description": "Enable preTapStability and retryIfNoChange",
           "type": "boolean"
+        },
+        "settleTimeoutMs": {
+          "description": "Post-tap settle wait (ms, default 1000, max 3000); 0 skips it. An unsettled screen returns observation.settled:false.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3000
         },
         "ensureChecked": {
           "description": "Skip tapping if the resolved toggle element's checked state already matches this value; otherwise tap and verify it flipped. Requires the element to have the toggle affordance and action \"tap\".",

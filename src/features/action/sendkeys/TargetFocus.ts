@@ -9,6 +9,10 @@ import type { Timer } from "../../../utils/SystemTimer";
 import { ObservedAndroidDisplayCache } from "../../observe/ObservationDisplay";
 import type { DisplayTransitionReader } from "../../observe/DisplayTransition";
 import { tapFocusFailure } from "../TapOnElement";
+import {
+  blockingSystemPromptHint,
+  blockingSystemPromptIn,
+} from "../../observe/BlockingSystemPrompt";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "../TargetDisplayAction";
 import type { TargetState } from "./TargetState";
 import type { IosSdkTextTarget } from "./IosSdkTextRouting";
@@ -22,6 +26,10 @@ import type {
   SendKeysSelector,
   SendKeysTargetFocuser,
 } from "../SendKeys";
+
+/** Appended to a focus miss whose field may be off screen; replaced when a system prompt covers it. */
+export const FOCUS_SCROLL_HINT =
+  "The field may be scrolled out of view; use swipeOn with lookFor to bring it into view, then retry.";
 
 export interface TargetFocusDeps {
   device: BootedDevice;
@@ -178,9 +186,31 @@ export class TargetFocus {
     if (!result.success && failure && failure !== "not-found-inputs-listed") {
       return {
         ...result,
-        error: `${result.error} The field may be scrolled out of view; use swipeOn with lookFor to bring it into view, then retry.`,
+        error: `${result.error} ${FOCUS_SCROLL_HINT}`,
       };
     }
     return result;
   }
+}
+
+/**
+ * A focus miss under a focused system window is not a scroll problem: name the window and say to
+ * dismiss it instead (#17669). Without such a window the failure is returned unchanged.
+ */
+export function withBlockingPromptHint(
+  failure: SendKeysFailure,
+  observation: ObserveResult | undefined,
+): SendKeysFailure {
+  const blockingPrompt = blockingSystemPromptIn(observation);
+  if (!blockingPrompt) {
+    return failure;
+  }
+  const base = failure.error.endsWith(` ${FOCUS_SCROLL_HINT}`)
+    ? failure.error.slice(0, -(FOCUS_SCROLL_HINT.length + 1))
+    : failure.error;
+  return {
+    ...failure,
+    error: `${base} ${blockingSystemPromptHint(blockingPrompt)}`,
+    blockingPrompt,
+  };
 }

@@ -486,14 +486,14 @@ describe("formatToolParamError sendKeys commands shape hint (#16893)", () => {
     expect(message.indexOf('Unrecognized key: "text"')).toBeLessThan(message.indexOf(SHAPE));
   });
 
-  test("omits the hint for an unrelated unrecognized key", () => {
+  test("omits the commands hint for an unrelated unrecognized key", () => {
     const message = sendKeysMessage({
       platform: "ios",
       commands: [{ action: "type", text: "a" }],
       bogus: 1,
     });
     expect(message).toContain('Unrecognized key: "bogus"');
-    expect(message).not.toContain("Hint:");
+    expect(message).not.toContain("sendKeys takes commands");
   });
 
   test("omits the hint for other tools", () => {

@@ -569,6 +569,39 @@ final class WatchCommandHandlerTests: XCTestCase {
         ])
     }
 
+    func testCrownRejectsFailedLaggingValueReadBeforeWake() {
+        let source = ScriptedCrownSource(labels: ["before", "before", "scrolled"])
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        let response = handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8))
+        XCTAssertFalse(response.success)
+        XCTAssertEqual(response.errorCode, "command_failed")
+        XCTAssertTrue(response.error?.hasPrefix("rotateCrown changed nothing") == true)
+        XCTAssertEqual(source.rotations, 1)
+        XCTAssertEqual(source.appliedDelta, 2)
+        XCTAssertEqual(source.taps, 1)
+        XCTAssertEqual(source.events, [
+            "snapshot:before", "snapshot:before", "rotate", "snapshot:scrolled", "tap",
+        ])
+    }
+
+    func testCrownRejectsFailedLaggingValueReadAfterRetry() {
+        let source = ScriptedCrownSource(labels: [
+            "before", "before", "before", "before", "before", "scrolled",
+        ])
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        let response = handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8))
+        XCTAssertFalse(response.success)
+        XCTAssertEqual(response.errorCode, "command_failed")
+        XCTAssertTrue(response.error?.hasPrefix("rotateCrown changed nothing") == true)
+        XCTAssertEqual(source.rotations, 2)
+        XCTAssertEqual(source.appliedDelta, 4)
+        XCTAssertEqual(source.taps, 1)
+        XCTAssertEqual(source.events, [
+            "snapshot:before", "snapshot:before", "rotate", "snapshot:before", "tap",
+            "snapshot:before", "snapshot:before", "rotate", "snapshot:scrolled",
+        ])
+    }
+
     func testCrownLaggingValueReadIsBoundedBeforeWake() {
         let source = ScriptedCrownSource(labels: ["before", "before", "scrolled", "scrolled"])
         let handler = WatchCommandHandler(snapshotSource: source, gestures: source)

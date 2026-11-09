@@ -21,6 +21,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { aaosAdb, aaosDevice, aaosVirtualKey } from "../../helpers/aaosMultidisplay";
 
 const inner = "4619827259835644672";
 const cover = "4619827551948147201";
@@ -118,6 +119,45 @@ describe("Android disconnected action panel", () => {
   afterEach(() => {
     warn.mockRestore();
     debug.mockRestore();
+  });
+
+  test("an enabled private AAOS virtual panel passes the action connection check", async () => {
+    const adb = aaosAdb();
+    const observe = new FakeObserveScreen();
+    await expect(
+      targetDisplayAction.prepareTargetDisplayAction(aaosDevice, aaosVirtualKey, observe, {
+        adb,
+        lastRenderedObservation: () => undefined,
+        transitions: new FakeDisplayTransitionReader(),
+      }),
+    ).rejects.toThrow(reobserve(aaosVirtualKey));
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell cmd display get-displays",
+      "shell dumpsys display",
+    ]);
+    expect(observe.getExecuteOptions()).toEqual([]);
+  });
+
+  test("a previously rendered private AAOS virtual panel routes input to logical 4", async () => {
+    const previous = {
+      ...observation(aaosVirtualKey),
+      display: {
+        key: aaosVirtualKey,
+        role: "virtual" as const,
+        posture: "unknown" as const,
+        generation: 7,
+      },
+      displayRevision: 41,
+    };
+    const observe = new FakeObserveScreen();
+    observe.setObserveResult(previous);
+    await expect(
+      targetDisplayAction.prepareTargetDisplayAction(aaosDevice, aaosVirtualKey, observe, {
+        adb: aaosAdb(),
+        lastRenderedObservation: () => previous,
+        transitions: new FakeDisplayTransitionReader(),
+      }),
+    ).resolves.toMatchObject({ displayId: 4 });
   });
 
   test("folded inner names the connected cover and posture remedy without observing or tapping", async () => {

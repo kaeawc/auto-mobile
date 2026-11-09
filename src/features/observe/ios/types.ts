@@ -267,7 +267,8 @@ export interface CtrlProxyScreenshotResult {
   prototypesHidden?: boolean;
   /**
    * Typed failure reason: `capture_unverified` when a multi-panel runner fallback had no
-   * hierarchy or active panel to verify against, so it may be an unlit panel (#17593).
+   * hierarchy or active panel to verify against, or an unreadable image header, so it may be an
+   * unlit panel (#17593, #17600).
    */
   reason?: "capture_unverified";
 }

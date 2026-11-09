@@ -1,8 +1,10 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.util.Log
+import dev.jasonpearson.automobile.protocol.PrototypeRouteRuntime
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
+import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
 import dev.jasonpearson.automobile.protocol.PrototypeStorageDrop
 import dev.jasonpearson.automobile.protocol.PrototypeStorageDropReason
 import dev.jasonpearson.automobile.protocol.PrototypeStorageKeyBytes
@@ -192,7 +194,7 @@ class PrototypeStoragePersistence(
         debounceMillis = debounceMillis,
         warn = warn,
         stored = kept,
-        baseline = PrototypeStorageRestorer.currentValues(restore.spec),
+        baseline = restoredBaseline(restore.spec, kept),
         // What the disk holds is not what the session does when the unsaved values were carried.
         persisted =
           if (unsaved == null) kept
@@ -201,6 +203,18 @@ class PrototypeStoragePersistence(
     registry?.register(session)
     return PrototypeStorageOpen(restore.spec, session, plan)
   }
+
+  /**
+   * What the restored show holds for its listed keys. A restored stack path lives in the runtime,
+   * not the spec, so it is seeded from [kept] and an unchanged path is not written again. A stack
+   * with nothing kept is seeded at its start, so a path never navigated is never stored and a later
+   * spec's `start` still applies.
+   */
+  private fun restoredBaseline(spec: PrototypeSpec, kept: Map<String, JsonElement>) =
+    PrototypeStorageRestorer.currentValues(
+      spec,
+      stackNodes(spec.root).mapValues { (_, node) -> PrototypeStackSnapshot(listOf(node.start)) },
+    ) + kept.filterKeys { it.startsWith(PrototypeRouteRuntime.STACK_STORAGE_PREFIX) }
 
   /** Clears an id nobody is showing: the stored keys removed, from disk alone. */
   suspend fun clear(id: String): Int =
@@ -278,11 +292,24 @@ internal constructor(
     if (persisted != values) markDirty()
   }
 
-  /** Notes the shown spec's listed values; stores those that changed. Cheap when none did. */
-  fun record(spec: PrototypeSpec) {
-    val now = PrototypeStorageRestorer.currentValues(spec)
+  /**
+   * Notes the shown spec's listed values; stores those that changed. Cheap when none did. Listed
+   * `stack:<id>` keys are left as they are: only [record] with the stacks sees them.
+   */
+  fun record(spec: PrototypeSpec) =
+    record(PrototypeStorageRestorer.currentValues(spec), includeStacks = false)
+
+  /** [record] with the listed `stack:<id>` paths of [stacks] too (#14188). */
+  fun record(spec: PrototypeSpec, stacks: Map<String, PrototypeStackSnapshot>) =
+    record(PrototypeStorageRestorer.currentValues(spec, stacks), includeStacks = true)
+
+  /** The value this session holds for [storageKey]: what was restored until it is recorded. */
+  fun stored(storageKey: String): JsonElement? = synchronized(lock) { values[storageKey] }
+
+  private fun record(now: Map<String, JsonElement>, includeStacks: Boolean) {
     synchronized(lock) {
       for (key in keys) {
+        if (!includeStacks && key.startsWith(PrototypeRouteRuntime.STACK_STORAGE_PREFIX)) continue
         val value = now[key]
         if (value == lastSeen[key]) continue
         if (value == null) lastSeen.remove(key) else lastSeen[key] = value

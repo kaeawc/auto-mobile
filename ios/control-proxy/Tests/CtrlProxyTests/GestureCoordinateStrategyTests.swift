@@ -370,6 +370,7 @@ private final class FakeReferenceDisplayGestureProvider: DisplayGestureProviding
     }
 
     func synthesizePinch(_: DisplayPinch) throws -> Bool { true }
+    func synthesizePath(_: DisplayPath) throws -> Bool { true }
 
     func coordinate(selection: GestureCoordinateSelection) throws -> GestureCoordinateSelection { selection }
 

@@ -39,28 +39,45 @@ import os
                 throw GestureError.noApplication
             }
 
+            var route = "xcui-drag"
             try catchingObjCException {
                 let frame = app.frame
                 guard frame.width > 0, frame.height > 0 else {
                     throw GestureError.gestureFailed("Cannot determine application frame for recent apps gesture")
                 }
 
+                let factory = try DisplayGestureFactory(
+                    provider: XCUIGestureCoordinateProvider(app: app, locator: elementLocator)
+                )
+                if factory.mismatch, let size = factory.geometry?.observation, size.isValid {
+                    let edge = NavigationEdgeGesture.recent(size: size)
+                    let delivery = try factory.deliver(
+                        start: edge.start, end: edge.end, press: edge.press, move: edge.move,
+                        hold: edge.hold, velocity: edge.velocity
+                    )
+                    if delivery.synthesizedPoint != nil { route = "display-targeted-drag" }
+                    return
+                }
+
+                let edge = NavigationEdgeGesture.recent(size: GestureSize(
+                    width: Double(frame.width),
+                    height: Double(frame.height)
+                ))
                 let startCoordinate = app.coordinate(withNormalizedOffset: .zero)
-                    .withOffset(CGVector(dx: frame.width / 2, dy: frame.height - 1))
+                    .withOffset(CGVector(dx: edge.start.x, dy: edge.start.y))
                 let endCoordinate = app.coordinate(withNormalizedOffset: .zero)
-                    .withOffset(CGVector(dx: frame.width / 2, dy: frame.height * 0.58))
-                let distance = abs((frame.height - 1) - (frame.height * 0.58))
-                let velocity = XCUIGestureVelocity(distance / 0.6)
+                    .withOffset(CGVector(dx: edge.end.x, dy: edge.end.y))
+                let velocity = edge.velocity.map(XCUIGestureVelocity.init) ?? .default
 
                 startCoordinate.press(
-                    forDuration: 0.35,
+                    forDuration: edge.press,
                     thenDragTo: endCoordinate,
                     withVelocity: velocity,
-                    thenHoldForDuration: 0.8
+                    thenHoldForDuration: edge.hold
                 )
             }
 
-            return RecentAppsOutcome(visible: isAppSwitcherVisible(), route: "xcui-drag")
+            return RecentAppsOutcome(visible: isAppSwitcherVisible(), route: route)
         }
 
         // MARK: - App Control

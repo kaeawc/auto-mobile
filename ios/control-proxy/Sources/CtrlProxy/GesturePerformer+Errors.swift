@@ -14,6 +14,8 @@ extension GesturePerformer {
         case elementNotFound(String)
         case gestureFailed(String)
         case arrowNoEffect
+        case nothingToGoBack(String)
+        case backNoEffect(String)
         case arrowBudgetExhausted(step: String, elapsedMs: Int)
         /// XCUITest raised while resolving the focused input before an arrow key was sent
         /// (e.g. a stale element mid-scan). The key was not sent; the request fails cleanly.
@@ -34,6 +36,7 @@ extension GesturePerformer {
                 // The key was never sent: a definite non-delivery, safe to retry after re-observing.
                 return "focus_query_failed"
             case .noApplication, .elementNotFound, .gestureFailed, .arrowNoEffect, .arrowBudgetExhausted,
+                 .nothingToGoBack, .backNoEffect,
                  .notSupported, .missingParameter, .clipboardEmpty, .clipboardReadUnavailable, .unsupportedAction:
                 return nil
             }
@@ -49,6 +52,10 @@ extension GesturePerformer {
                 return "Gesture failed: \(reason)"
             case .arrowNoEffect:
                 return "arrow keys have no effect on this iOS runtime; use Cmd+arrow (line start/end) or sendKeys text editing instead"
+            case let .nothingToGoBack(reason):
+                return "back was not sent: \(reason); select another item in the sidebar to navigate"
+            case let .backNoEffect(reason):
+                return "back had no verified effect: \(reason); observe the screen and choose a navigation control before retrying"
             case let .arrowBudgetExhausted(step, elapsedMs):
                 return "arrow key was not sent: runner time budget exhausted at \(step) after \(elapsedMs)ms; retry"
             case let .focusQueryFailed(phase, detail):

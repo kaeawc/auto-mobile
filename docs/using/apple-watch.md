@@ -120,7 +120,9 @@ Every other tool refuses a watch before doing anything, with:
   app's view hierarchy and on-screen system alerts, including the notification permission prompt,
   notification short look and long look with action buttons, even when the app is not in the
   foreground. If the hierarchy cannot be read, the result carries `hierarchyUnavailable` and no
-  hierarchy fields. With a hierarchy, bounds and `screenSize` are in
+  hierarchy fields. When the runner is connected but the target app is not in the foreground,
+  the message says to call `launchApp` to bring it back, or post a notification and retry
+  `observe`; read the screenshot meanwhile. With a hierarchy, bounds and `screenSize` are in
   points and `screenshotImageSize` is in pixels; a screenshot-only result reports `screenSize` in
   pixels. Check `screenSize.units` (`points` or `physical-pixels`) before using it for `tapAt`,
   which takes points. With the runner connected, an element `waitFor` re-reads the hierarchy until

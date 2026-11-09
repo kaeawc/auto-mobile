@@ -102,7 +102,7 @@ enum PrototypeRouteFields {
                     binding(item, PrototypeContractValidator.keyPath("\(path).context", name))
                 }
                 keys(value, "requireValid", path)
-            case "setData", "appendData", "prependData", "removeData":
+            case "setData", "appendData", "prependData", "upsertData", "removeData":
                 field(value, "path", path, pointer: true)
                 if type != "removeData", let raw = value["value"] { binding(raw, "\(path).value") }
             case "request", "platform":
@@ -142,6 +142,7 @@ enum PrototypeRouteFields {
                 walker.field(semantics, "hint", at)
             }
             switch type {
+            case "image": field(value, "asset", path)
             case "text":
                 field(value, "text", path)
                 object(value, "linkify", path) { $0.actions($1, $2) }

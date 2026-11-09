@@ -472,6 +472,11 @@ for idx in ${selected_indices[@]+"${selected_indices[@]}"}; do
     passed=$((passed + 1))
   else
     printf "FAIL %-14s %sms (log: %s)\n" "$name" "$duration_ms" "$log_file"
+    # Surface a tool installer's upstream outage in the job log itself, where
+    # classify-failure.sh and its known-flakes signatures can see it (#17624).
+    if [[ -f "$log_file" ]]; then
+      grep -F "UPSTREAM-DOWNLOAD-FAILURE:" "$log_file" | sed "s/^/     [$name] /" || true
+    fi
     failed=$((failed + 1))
   fi
 done

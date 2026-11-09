@@ -43,6 +43,13 @@ export { KeyboardOpenIndeterminateError };
 type KeyboardAction = "open" | "close" | "detect";
 
 /**
+ * Settled iOS keyboard visibility. `hidden` needs a completed settle re-read showing no
+ * keyboard; `hidden_unconfirmed` means only the first read did and every re-read was
+ * unknown (timed out, stale, or failed), so a keyboard still sliding in is not ruled out.
+ */
+type IOSKeyboardSettle = "visible" | "hidden" | "hidden_unconfirmed" | "unknown";
+
+/**
  * Per-read controls for a keyboard hierarchy sample.
  *
  * `timeoutMs` bounds the read itself: without it a single read can block on the
@@ -143,6 +150,8 @@ export class Keyboard {
   // return as soon as the observed state matches, bounded by the timeout below.
   private static readonly STATE_CONFIRMATION_TIMEOUT_MS = 2_000;
   private static readonly IOS_KEYBOARD_VISIBILITY_TIMEOUT_MS = 2_000;
+  private static readonly IOS_KEYBOARD_SETTLE_TIMEOUT_MS = 1_500;
+  private static readonly IOS_KEYBOARD_SETTLE_INTERVAL_MS = 250;
   private static readonly STATE_CONFIRMATION_POLL_INTERVAL_MS = 100;
   /** Bound on the follow-up keyboard detect after a close request. */
   private static readonly CLOSE_FOLLOW_UP_DETECT_TIMEOUT_MS = 2000;
@@ -237,7 +246,7 @@ export class Keyboard {
     if (
       action !== "close" &&
       result.open === true &&
-      (await this.isIOSKeyboardOnScreen(signal)) === false
+      isHidden(await this.settledIOSKeyboardVisibility(signal))
     ) {
       const message =
         action === "detect"
@@ -272,9 +281,48 @@ export class Keyboard {
     };
   }
 
-  private async isIOSKeyboardOnScreen(signal?: AbortSignal): Promise<boolean | undefined> {
+  // A negative sample during the show animation is provisional, so re-read on an interval
+  // until the settle deadline. Each re-read gets the same deadline as the first read: a
+  // shorter one would time out a normal-but-slow read and let stale runner state win
+  // (#14953). An unknown re-read (timeout, stale, error) never overrides a completed read
+  // that showed the keyboard gone; only a completed read showing the keyboard ends the
+  // wait with `visible`. Unknown on the first read keeps the runner authoritative. If every
+  // re-read is unknown, absence is `hidden_unconfirmed` (#17621).
+  private async settledIOSKeyboardVisibility(signal?: AbortSignal): Promise<IOSKeyboardSettle> {
+    const visible = await this.isIOSKeyboardOnScreen(
+      signal,
+      Keyboard.IOS_KEYBOARD_VISIBILITY_TIMEOUT_MS,
+    );
+    if (visible !== false) {
+      return visible === true ? "visible" : "unknown";
+    }
+    let confirmedHidden = false;
+    const deadline = this.timer.now() + Keyboard.IOS_KEYBOARD_SETTLE_TIMEOUT_MS;
+    while (this.timer.now() < deadline) {
+      await awaitWhileRequestIsLive(
+        this.timer.sleep(
+          Math.min(Keyboard.IOS_KEYBOARD_SETTLE_INTERVAL_MS, deadline - this.timer.now()),
+        ),
+        signal,
+      );
+      throwIfAborted(signal);
+      const sample = await this.isIOSKeyboardOnScreen(
+        signal,
+        Keyboard.IOS_KEYBOARD_VISIBILITY_TIMEOUT_MS,
+      );
+      if (sample === true) {
+        return "visible";
+      }
+      confirmedHidden ||= sample === false;
+    }
+    return confirmedHidden ? "hidden" : "hidden_unconfirmed";
+  }
+
+  private async isIOSKeyboardOnScreen(
+    signal: AbortSignal | undefined,
+    timeoutMs: number,
+  ): Promise<boolean | undefined> {
     try {
-      const timeoutMs = Keyboard.IOS_KEYBOARD_VISIBILITY_TIMEOUT_MS;
       const hierarchy = await raceWithDeadline(
         () => this.hierarchyProvider.getViewHierarchy(signal, { timeoutMs, forceFresh: true }),
         { timer: this.timer, timeoutMs, signal, label: "iOS keyboard visibility hierarchy" },
@@ -323,7 +371,9 @@ export class Keyboard {
           "Keyboard closed after the close request timed out; dismissal method unknown (Return may have submitted the field)",
       };
     }
-    if (action === "close" && (await this.isIOSKeyboardOnScreen(signal)) === false) {
+    const settled =
+      action === "close" ? await this.settledIOSKeyboardVisibility(signal) : undefined;
+    if (settled === "hidden") {
       // A hardware-keyboard simulator keeps the return key in the AX tree off screen, so the
       // runner's dismissal fails on a keyboard that is not shown; closed is the goal (#14953).
       logger.warn(`iOS keyboard close failed but no software keyboard is visible: ${result.error}`);
@@ -333,12 +383,32 @@ export class Keyboard {
         message: "Keyboard is closed (no visible on-screen software keyboard)",
       };
     }
+    if (settled === "hidden_unconfirmed") {
+      return this.iosCloseStateUnknown(result);
+    }
     const message = result.error ?? `Failed to ${action} iOS keyboard`;
     return {
       success: false,
       open: result.open,
       message,
       error: message,
+    };
+  }
+
+  // Only one read showed no keyboard and every settle re-read was unknown, so a keyboard
+  // still sliding in on a slow host is not ruled out; never report that as closed (#17621).
+  private iosCloseStateUnknown(result: CtrlProxyKeyboardResult): KeyboardResult {
+    const runnerError = result.error ?? "Failed to close iOS keyboard";
+    logger.warn(
+      `iOS keyboard close failed and no settle re-read confirmed the keyboard gone: ${runnerError}`,
+    );
+    const message = `Keyboard state unknown after close: ${runnerError}. One hierarchy read showed no keyboard, but every re-read timed out or failed, so the keyboard may still be on screen. Run keyboard detect to check.`;
+    return {
+      success: false,
+      open: result.open,
+      message,
+      error: message,
+      reason: "keyboard_state_unknown",
     };
   }
 
@@ -868,4 +938,8 @@ export class Keyboard {
       throw error;
     }
   }
+}
+
+function isHidden(settled: IOSKeyboardSettle): boolean {
+  return settled === "hidden" || settled === "hidden_unconfirmed";
 }

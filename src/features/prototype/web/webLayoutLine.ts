@@ -87,8 +87,79 @@ function alignedSize(
   const room = box.content[axis];
   const declared = declaredSize(child, axis, room, box.vars);
   const stretched = align === "stretch" || align === "normal";
-  const size = declared !== "auto" ? declared : stretched ? room : undefined;
+  const size =
+    declared !== "auto"
+      ? declared
+      : stretched
+        ? room
+        : aspectRatioOf(child) === undefined
+          ? measuredContent(child, axis, box.vars, 0)
+          : undefined;
   return clampKnown(size, child, axis, { base: room, vars: box.vars });
+}
+
+const MAX_MEASURE_DEPTH = 32;
+
+/** An element's size on one axis with no room to resolve against: declared, else measured. */
+function measuredSize(element: WebElement, axis: Axis, vars: CssVars, depth: number): Len {
+  const declared = declaredSize(element, axis, undefined, vars);
+  const size =
+    declared !== "auto"
+      ? declared
+      : aspectRatioOf(element) === undefined
+        ? measuredContent(element, axis, vars, depth)
+        : undefined;
+  return clampKnown(size, element, axis, { base: undefined, vars });
+}
+
+/**
+ * The in-flow children a content-sized element can be measured from; undefined when any is text,
+ * inline in flow or has a margin, or when there are none or they lie in tracks.
+ */
+function measurableChildren(element: WebElement, layout: Layout): WebElement[] | undefined {
+  const children = element.children.filter((child) =>
+    typeof child !== "string"
+      ? !outOfFlow(child) && child.style.display !== "none"
+      : child.trim() !== "",
+  );
+  const elements = elementsOf(children);
+  const unmeasurable =
+    layout === "tracks" ||
+    elements.length === 0 ||
+    elements.length < children.length ||
+    elements.some(
+      (child) =>
+        (layout === "flow" && isInline(child)) ||
+        Object.keys(child.style).some((name) => name.startsWith("margin")),
+    );
+  return unmeasurable ? undefined : elements;
+}
+
+/**
+ * A content-sized element's size on one axis from its measurable in-flow children (#17459):
+ * stacked along its layout's axis with its gap, else the largest, plus padding and border.
+ * Unknown when any child is unmeasurable.
+ */
+function measuredContent(element: WebElement, axis: Axis, vars: CssVars, depth: number): Len {
+  const layout = layoutOf(element);
+  const elements = depth >= MAX_MEASURE_DEPTH ? undefined : measurableChildren(element, layout);
+  const sizes = (elements ?? []).map((child) => measuredSize(child, axis, vars, depth + 1));
+  const known = sizes.filter((size): size is number => size !== undefined);
+  if (elements === undefined || known.length < sizes.length) {
+    return undefined;
+  }
+  const stacked =
+    layout === (axis === "width" ? "row" : "column") || (layout === "flow" && axis === "height");
+  const unknownRoom: WebRect = { left: 0, top: 0, width: undefined, height: undefined };
+  const gap =
+    layout === "flow" ? 0 : mainGap(axis, { parent: element, content: unknownRoom, vars });
+  const extent = stacked
+    ? known.reduce((sum, size) => sum + size, gap * (known.length - 1))
+    : Math.max(...known);
+  const insets = contentInsets(element, undefined, vars);
+  return axis === "width"
+    ? add(add(extent, insets.left), insets.right)
+    : add(add(extent, insets.top), insets.bottom);
 }
 
 /** A cell's column span, from `grid-column: span N`. */

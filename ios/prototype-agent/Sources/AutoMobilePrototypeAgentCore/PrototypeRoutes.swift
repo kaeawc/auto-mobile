@@ -1,6 +1,6 @@
 import Foundation
 
-/// Contract-only relationships. Navigation, events and persisted-path restoration are a later slice.
+/// Contract relationships; the runtime half (params, onEnter, onBack, the persisted path) is `PrototypeStackRoutes`.
 enum PrototypeRoutes {
     static func fields(_ text: String) -> [String] {
         PrototypeRepeat.segments(text, alias: "route")

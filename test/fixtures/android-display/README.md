@@ -2,6 +2,15 @@
 
 Captured output, not hand-written.
 
+## AAOS multidisplay (issue #17606)
+
+Captured 2026-11-08 from AVD `l17606-aaos`, `android-34-ext9` android-automotive arm64,
+started with `-multidisplay 1,1280,720,160,0`.
+`aaos-multidisplay/dumpsys-display.txt` is full `adb shell dumpsys display` output;
+`aaos-multidisplay/get-displays-default-only.txt` is `adb shell cmd display get-displays`.
+The shell display list reports only logical display 0; the dump's Logical Displays section
+also reports enabled private displays 2 (cluster), 3 (cluster app virtual) and 4 (emulator virtual).
+
 ## foldpf-* (issue #8468)
 
 - Captured 2026-09-30 from AVD `am-fold-pixel10pf` (Pixel 10 Pro Fold, API 36), headless:

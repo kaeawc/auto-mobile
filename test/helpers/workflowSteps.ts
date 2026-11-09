@@ -25,6 +25,7 @@ export interface WorkflowStep {
   /** Native parallel-steps barrier: a single step id or a list of them. */
   wait?: string | string[];
   if?: string | boolean;
+  "continue-on-error"?: boolean;
   env?: Record<string, string | number | boolean>;
   with?: Record<string, string | number | boolean>;
 }

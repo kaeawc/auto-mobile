@@ -1,5 +1,6 @@
 import { PADDING_BOTTOM, PADDING_TOP } from "./webCss";
 import { record, type Raw } from "../prototypeTemplate";
+import { SAFE_INSET_KEY } from "./webStyle";
 import type { WebRenderScope } from "./webRender";
 
 const SAFE_AREA_EDGES: Readonly<Record<string, [string, string]>> = {
@@ -63,4 +64,21 @@ export function safeAreaCss(
     }
   }
   return padded;
+}
+
+/**
+ * `style` with the frame's inset on each top or bottom edge the node's `safeAreaPadding` applies
+ * and no ancestor consumed (SAFE_INSET_KEY), so the static height pass takes it out of the node's
+ * content height; unchanged when that adds nothing. Set after `styleWhen`, which cannot write it.
+ */
+export function withSafeInset(
+  style: Raw | undefined,
+  node: Raw,
+  scope: Pick<WebRenderScope, "consumedInsets" | "safeInsets">,
+): Raw | undefined {
+  const consumed = scope.consumedInsets ?? [];
+  const edges = safeAreaEdges(node).filter((edge) => !consumed.includes(edge));
+  const top = edges.includes("top") ? (scope.safeInsets?.top ?? 0) : 0;
+  const bottom = edges.includes("bottom") ? (scope.safeInsets?.bottom ?? 0) : 0;
+  return top > 0 || bottom > 0 ? { ...style, [SAFE_INSET_KEY]: { top, bottom } } : style;
 }

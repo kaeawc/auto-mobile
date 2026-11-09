@@ -14,7 +14,7 @@ import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
 import connected from "../../fixtures/tvos-xcuitest/tvos-runner-connected.json";
 import b01 from "../../fixtures/tvos-xcuitest/tvos-runner-hierarchy-focus-b01.json";
 
-// The daemon names the app it launched on tvOS runner hierarchy and text requests, so a
+// The daemon names the app it launched on tvOS runner hierarchy, press and text requests, so a
 // third-party app in front is read instead of the home screen, and a runner that stops answering
 // fails fast (#17310).
 
@@ -40,7 +40,7 @@ const settle = <T>(promise: Promise<T>) =>
   );
 
 describe("tvOS runner foreground-app hint", () => {
-  test("names the launched app on hierarchy and text requests only", async () => {
+  test("names the launched app on hierarchy, press and text requests", async () => {
     const { socket, client } = fixture(() => APP);
     const hierarchy = client.hierarchy();
     await drainMicrotasks(2);
@@ -53,7 +53,7 @@ describe("tvOS runner foreground-app hint", () => {
     expect(socket.sent.map(({ type, bundleId }) => ({ type, bundleId }))).toEqual([
       { type: "request_hierarchy", bundleId: APP },
       { type: "request_append_text", bundleId: APP },
-      { type: "request_press_button", bundleId: undefined },
+      { type: "request_press_button", bundleId: APP },
       { type: "request_screenshot", bundleId: undefined },
     ]);
     client.close();

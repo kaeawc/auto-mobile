@@ -203,6 +203,7 @@
 		8E3E3EAC0260389B4050D402 /* GesturePerformer+TextInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE97AFCE4021EDDD801752CB /* GesturePerformer+TextInput.swift */; };
 		8E5BC11E4C40D3E8933D8E6F /* RangeReplaceableCollection+MaxSizeEnforcement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 042DBF9517697DC4EA6E7FA6 /* RangeReplaceableCollection+MaxSizeEnforcement.swift */; };
 		8EAED3627DEE7380FC25EA36 /* RequestPressButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49E8CA1C0820B577E5A88298 /* RequestPressButton.swift */; };
+		8F2921D2B759843763DBDECF /* SplitViewBackGesture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C751DAF828D18404BB00C71 /* SplitViewBackGesture.swift */; };
 		8F4D6A59E71216249D4EFCDC /* RequestSetHingeAngle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89E7D778F42AD3BD05C7F274 /* RequestSetHingeAngle.swift */; };
 		939F1497ADEF6BB0783FFDD1 /* RequestType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DD23568A5A503FA738E32FE /* RequestType.swift */; };
 		943254FA482330D9C90D8498 /* WebSocketFraming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5393FA8DE2F1C2222691FE23 /* WebSocketFraming.swift */; };
@@ -566,6 +567,7 @@
 		77305F40F85694E983987E68 /* CommandHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandHandler.swift; sourceTree = "<group>"; };
 		78BDAD23DB6F5A6EFE292387 /* VoiceOverToggleError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOverToggleError.swift; sourceTree = "<group>"; };
 		7959EEB007627D6313F75E92 /* RequestDeleteKeychainItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestDeleteKeychainItem.swift; sourceTree = "<group>"; };
+		7C751DAF828D18404BB00C71 /* SplitViewBackGesture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitViewBackGesture.swift; sourceTree = "<group>"; };
 		7DD23568A5A503FA738E32FE /* RequestType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestType.swift; sourceTree = "<group>"; };
 		7F0B1F0C936331F2645EDDD1 /* CommandError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandError.swift; sourceTree = "<group>"; };
 		7F3465671C6B22A68F3935E7 /* PinchGesturePath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinchGesturePath.swift; sourceTree = "<group>"; };
@@ -1160,6 +1162,7 @@
 				3EB1E06878A9A325A53E9EF8 /* SdkPreferenceClient.swift */,
 				86E304C3C42FE1AECFDB293B /* SemanticLinkActivation.swift */,
 				D7073280136076204B2B9D82 /* ServerListening.swift */,
+				7C751DAF828D18404BB00C71 /* SplitViewBackGesture.swift */,
 				85FF0A05F82D34309527733C /* SpringBoardPanel.swift */,
 				A49030ABC56E34792661140F /* StorageError.swift */,
 				91CF5D144055F297EABC7669 /* StructuralHasher.swift */,
@@ -1774,6 +1777,7 @@
 				B870CC90A8FDD3A25B707C88 /* SetNetworkErrorSimulationResponse.swift in Sources */,
 				803D552FCC00B338D16F4274 /* SetNetworkFaultRulesResponse.swift in Sources */,
 				C1DD9EBCA26225DD336B6F6E /* SetNetworkMockRulesResponse.swift in Sources */,
+				8F2921D2B759843763DBDECF /* SplitViewBackGesture.swift in Sources */,
 				71ADCEA9A7423E30D120DFFF /* SpringBoardPanel.swift in Sources */,
 				7A98DF087CB10423B614E2B0 /* StorageCapabilitiesResponse.swift in Sources */,
 				23BC1F0B23CAE51C3A878B0F /* StorageEntriesResponse.swift in Sources */,

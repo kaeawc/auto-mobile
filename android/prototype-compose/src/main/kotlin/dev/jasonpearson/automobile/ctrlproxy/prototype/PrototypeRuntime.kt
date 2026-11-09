@@ -201,6 +201,13 @@ class PrototypeRuntime(
       handle(PrototypeInteraction.TimerFire(actions))
     }
 
+  // The stacks this show kept from the one it replaced; only those skip onEnter on a preserving
+  // show.
+  private val retainedStackIds =
+    stackNodes(spec.root)
+      .filter { (id, node) -> retainedStack(node, previousStacks[id]) != null }
+      .keys
+
   private var appeared = emptySet<String>()
   private var appearanceRoot: PrototypeNode? = null
   private var hasAppearances = false
@@ -208,7 +215,22 @@ class PrototypeRuntime(
   /** Called only after the host accepts the show. A preserving replacement seeds without firing. */
   suspend fun shown(preservingState: Boolean = false) {
     appeared = if (preservingState) visibleAppearances().keys else emptySet()
+    // Each stack's first screen enters once per show (#14188); a preserving show skips only the
+    // stacks whose paths it kept, so a stack new to the replacement still enters. A stack an
+    // earlier
+    // onEnter already navigated has entered its new top, so it is not entered again.
+    if (current.active) {
+      stacksEnteredDuringShow = emptySet()
+      try {
+        current.stacks.keys
+          .filter { !preservingState || it !in retainedStackIds }
+          .forEach { if (it !in checkNotNull(stacksEnteredDuringShow)) enter(it) }
+      } finally {
+        stacksEnteredDuringShow = null
+      }
+    }
     if (!preservingState) handle(PrototypeInteraction.TimerFire(emptyList()))
+    else if (current.active) storage?.record(current.spec, current.stacks)
   }
 
   private fun visibleAppearances(): Map<String, List<PrototypeAction>> {
@@ -506,7 +528,7 @@ class PrototypeRuntime(
         stateRevisions = before.stateRevisions + changed.associateWith { revision },
       )
     // The commit is authoritative even if an ancillary event sink fails. Cancellation propagates.
-    storage?.record(current.spec)
+    storage?.record(current.spec, current.stacks)
     try {
       emitStateChange(changed.filter { it in current.state })
     } catch (error: CancellationException) {
@@ -536,7 +558,7 @@ class PrototypeRuntime(
     } finally {
       interactionRevision = null
       // Every device write ends an interaction here, so one diff covers state, data and checks.
-      if (current.active) storage?.record(current.spec)
+      if (current.active) storage?.record(current.spec, current.stacks)
     }
   }
 
@@ -693,6 +715,7 @@ class PrototypeRuntime(
   ) {
     val baseline = current.state
     val plannedData = current.spec.data
+    val plannedStacks = current.stacks
     val touched = LinkedHashSet<String>()
     for ((index, action) in actions.withIndex()) {
       if (!current.active) break
@@ -726,17 +749,21 @@ class PrototypeRuntime(
         is PrototypeScrollToAction -> requestScroll(action)
         is PrototypeStartTimerAction -> timerEngine.start(action)
         is PrototypeCancelTimerAction -> timerEngine.cancel(action.id)
-        else ->
-          writes[index]?.let { (key, planned) ->
-            // A data write earlier in this list may have added rows that bind this key, so a
-            // value planned against the old data is checked again against the data as it is now.
-            if (current.spec.data === plannedData) writeInteractionSpec(planned)
-            else
-              writeInteractionSpec(
-                validated(current.spec, mapOf(key to planned.state.orEmpty().getValue(key))),
-              )
-            touched += key
-          }
+        else -> {
+          val (key, value) = action.stateWrite(current.state) ?: continue
+          val planned =
+            writes[index]?.second?.takeIf {
+              it.state.orEmpty()[key] == value && it.state.orEmpty() - key == current.state - key
+            }
+          // Lifecycle lists may change the same key: relative actions read the live value.
+          // The original plan still preflights the interaction before any side effects run.
+          if (
+            planned != null && current.spec.data === plannedData && current.stacks == plannedStacks
+          )
+            writeInteractionSpec(planned)
+          else writeInteractionSpec(validated(current.spec, mapOf(key to value)))
+          touched += key
+        }
       }
     }
     if (current.active) emitStateChange(touched.filter { baseline[it] != current.state[it] })
@@ -874,7 +901,9 @@ class PrototypeRuntime(
       return true
     }
     val id = stackPopTarget(root, current.stacks) ?: return false
-    changeStack(id) { _, path -> path.dropLast(1) }
+    pop(id, force = false)
+    // A direct Back does not pass through handle(), so the popped path is recorded here.
+    if (current.active) storage?.record(current.spec, current.stacks)
     return true
   }
 
@@ -898,9 +927,11 @@ class PrototypeRuntime(
     if (runtimeAdaptiveBack(renderModel().root) != null) return null
     if (modalPrototypeSheets(renderModel().root).any { it.role == "drawer" }) return null
     val id = stackPopTarget(renderModel().root, current.stacks) ?: return null
+    // A screen with onBack decides what Back does, so there is no pop to preview.
+    if (backInterception(id) != null) return null
     val stack = current.stacks.getValue(id)
     return current.copy(
-      stacks = current.stacks + (id to PrototypeStackSnapshot(stack.path.dropLast(1))),
+      stacks = current.stacks + (id to stack.dropLast()),
       stackChange = current.stackPopChange(id),
     )
   }
@@ -909,20 +940,18 @@ class PrototypeRuntime(
   private suspend fun runStackAction(action: PrototypeAction) {
     when (action) {
       is PrototypePushAction ->
-        changeStack(action.stack, "push", action.stackTransition, action.source) { node, path ->
-          if (
-            path.size >= PrototypeSpecValidator.MAX_PROTOTYPE_STACK_DEPTH ||
-              !node.screens.containsKey(action.screen)
-          )
-            path
-          else path + action.screen
+        changeStack(action.stack, "push", action.stackTransition, action.source) { node, entries ->
+          if (entries.size >= PrototypeSpecValidator.MAX_PROTOTYPE_STACK_DEPTH) entries
+          else routeEntry(node, action.screen, action.params)?.let { entries + it } ?: entries
         }
-      is PrototypePopAction ->
-        changeStack(action.stack) { _, path -> path.dropLast(1).ifEmpty { path } }
-      is PrototypePopToRootAction -> changeStack(action.stack) { node, _ -> listOf(node.start) }
+      is PrototypePopAction -> pop(action.stack, force = action.force == true)
+      is PrototypePopToRootAction ->
+        changeStack(action.stack) { node, _ -> listOf(node.start to EMPTY_ROUTE_PARAMS) }
       is PrototypeReplaceAction ->
-        changeStack(action.stack, "replace", action.stackTransition, action.source) { node, path ->
-          if (!node.screens.containsKey(action.screen)) path else path.dropLast(1) + action.screen
+        changeStack(action.stack, "replace", action.stackTransition, action.source) { node, entries
+          ->
+          routeEntry(node, action.screen, action.params)?.let { entries.dropLast(1) + it }
+            ?: entries
         }
       is PrototypeSetStackAction -> setStack(action)
       else -> Unit
@@ -930,20 +959,99 @@ class PrototypeRuntime(
   }
 
   /**
-   * `setStack` replaces the whole path of [action]'s stack with its screens (#16620). A path that
-   * names an unknown screen or exceeds the depth limit leaves the stack as it was. It reports the
-   * same `screen_changed` event as the other stack actions and animates as a replace.
+   * Pops [id]'s top entry, unless that screen's route has `onBack` and [force] is false: then its
+   * actions run instead (#14188). System Back and authored pops both come here.
+   */
+  private suspend fun pop(id: String, force: Boolean) {
+    val intercept = if (force) null else backInterception(id)
+    if (intercept != null) {
+      runLifecycle("onBack of ${intercept.first}", intercept.second, intercept.third)
+      return
+    }
+    changeStack(id) { _, entries -> entries.dropLast(1).ifEmpty { entries } }
+  }
+
+  /** The screen, `onBack` actions and params a non-forced pop of [id] runs instead of popping. */
+  private fun backInterception(id: String): Triple<String, List<PrototypeAction>, JsonObject>? {
+    val stack = current.stacks[id]?.takeIf { it.depth > 1 } ?: return null
+    val node = stackNodes(current.spec.root)[id] ?: return null
+    val screen = stack.path.last()
+    val actions = PrototypeRouteRuntime.route(node, screen)?.onBack ?: return null
+    return Triple(screen, actions, stack.paramsAt(stack.path.lastIndex))
+  }
+
+  /** Runs the top screen's `onEnter` of [id], bound to its entry's params. */
+  private suspend fun enter(id: String) {
+    stacksEnteredDuringShow = stacksEnteredDuringShow?.plus(id)
+    val stack = current.stacks[id] ?: return
+    val node = stackNodes(current.spec.root)[id] ?: return
+    val screen = stack.path.last()
+    val actions = PrototypeRouteRuntime.route(node, screen)?.onEnter ?: return
+    runLifecycle("onEnter of $screen", actions, stack.paramsAt(stack.path.lastIndex))
+  }
+
+  private var stacksEnteredDuringShow: Set<String>? = null
+  private var lifecycleDepth = 0
+
+  /**
+   * One onEnter or onBack list as one interaction, with `{route.<name>}` bound to [params]. The
+   * navigation it causes can run further lists; past [PrototypeRouteRuntime.MAX_LIFECYCLE_DEPTH]
+   * nested lists one is refused, so an onEnter ping-pong between screens ends.
+   */
+  private suspend fun runLifecycle(
+    label: String,
+    actions: List<PrototypeAction>,
+    params: JsonObject,
+  ) {
+    if (!current.active) return
+    if (lifecycleDepth >= PrototypeRouteRuntime.MAX_LIFECYCLE_DEPTH) {
+      warn("Refused $label: route lifecycle nesting limit reached")
+      return
+    }
+    lifecycleDepth++
+    try {
+      control(emptyMap(), PrototypeRouteRuntime.bindActions(actions, params, json = runtimeJson))
+    } catch (error: IllegalArgumentException) {
+      warn("Refused $label: ${error.message}")
+    } finally {
+      lifecycleDepth--
+    }
+  }
+
+  /**
+   * The entry an action navigates to: [screen] with its [params] resolved, or null (the action is
+   * ignored) when the screen is unknown or the params do not match the route's declarations.
+   */
+  private fun routeEntry(
+    node: PrototypeStackNode,
+    screen: String,
+    params: Map<String, JsonElement>?,
+  ): Pair<String, JsonObject>? {
+    if (!node.screens.containsKey(screen)) return null
+    val resolved = PrototypeRouteRuntime.resolve(params, bindingInputs())
+    if (resolved == null || !PrototypeRouteRuntime.fits(node, screen, resolved)) {
+      warn("Refused navigation of ${node.id} to $screen: its route params do not fit")
+      return null
+    }
+    return screen to resolved
+  }
+
+  /**
+   * `setStack` replaces the whole path of [action]'s stack with its entries (#16620, #14188). A
+   * path that names an unknown screen, holds params that do not fit, or exceeds the depth limit
+   * leaves the stack as it was. It reports the same `screen_changed` event as the other stack
+   * actions and animates as a replace.
    */
   private suspend fun setStack(action: PrototypeSetStackAction) {
-    val screens = action.path.map { it.screen }
-    changeStack(action.stack, "replace") { node, path ->
+    changeStack(action.stack, "replace") { node, entries ->
+      val next = action.path.map { routeEntry(node, it.screen, it.params) }
       if (
-        screens.isEmpty() ||
-          screens.size > PrototypeSpecValidator.MAX_PROTOTYPE_STACK_DEPTH ||
-          screens.any { !node.screens.containsKey(it) }
+        next.isEmpty() ||
+          next.size > PrototypeSpecValidator.MAX_PROTOTYPE_STACK_DEPTH ||
+          next.any { it == null }
       )
-        path
-      else screens
+        entries
+      else next.filterNotNull()
     }
   }
 
@@ -952,13 +1060,15 @@ class PrototypeRuntime(
     direction: String = "pop",
     override: PrototypeStackTransition? = null,
     source: String? = null,
-    transform: (PrototypeStackNode, List<String>) -> List<String>,
+    transform:
+      (PrototypeStackNode, List<Pair<String, JsonObject>>) -> List<Pair<String, JsonObject>>,
   ) {
     val node = stackNodes(current.spec.root)[id] ?: return
     val before = current.stacks[id] ?: return
-    val path = transform(node, before.path)
-    if (path == before.path) return
-    val next = PrototypeStackSnapshot(path.toList())
+    val entries = transform(node, before.routeEntries())
+    if (entries == before.routeEntries()) return
+    val next = PrototypeStackSnapshot.of(entries.map { it.first }, entries.map { it.second })
+    val path = next.path
     val edge = PrototypeStackEdge(path.last(), override ?: node.stackTransition, source)
     mutableSnapshot.value =
       current.copy(
@@ -966,7 +1076,13 @@ class PrototypeRuntime(
         stackChange = current.stackNavigationChange(id, direction, edge, path),
         stackEdges = current.stackEdges + (id to current.nextStackEdges(id, direction, edge, path)),
       )
-    if (before.path.last() != path.last() || before.depth != next.depth) {
+    stateWriteValidator = null
+    val params = next.paramsAt(path.lastIndex)
+    if (
+      before.path.last() != path.last() ||
+        before.depth != next.depth ||
+        before.paramsAt(before.path.lastIndex) != params
+    ) {
       emit(
         kind = PrototypeEventKind.SCREEN_CHANGED,
         name = id,
@@ -974,8 +1090,10 @@ class PrototypeRuntime(
           buildJsonObject {
             put("screen", path.last())
             put("depth", next.depth)
+            if (params.isNotEmpty()) put("params", params)
           },
       )
+      enter(id)
     }
   }
 
@@ -986,7 +1104,11 @@ class PrototypeRuntime(
       val validator =
         stateWriteValidator
           ?: PrototypeTrace.section(PrototypeTrace.PREPARE_STATE_WRITES) {
-            prepareStateWrites(from).also { stateWriteValidator = it }
+            val bound =
+              from.copy(
+                root = PrototypeRouteRuntime.bindRoot(from.root, current.stacks, runtimeJson),
+              )
+            prepareStateWrites(bound).also { stateWriteValidator = it }
           }
       val error = validator.validate(checkNotNull(spec.state))
       require(error == null) { error.toString() }
@@ -1023,7 +1145,7 @@ class PrototypeRuntime(
   @InternalAutoMobilePrototypeApi
   suspend fun finishDismissal(reason: PrototypeDismissReason) {
     if (!current.active) return
-    storage?.record(current.spec)
+    storage?.record(current.spec, current.stacks)
     storage?.flush()
     cancelPlatformCalls()
     close()
@@ -1380,7 +1502,7 @@ class PrototypeRuntime(
       runPlatformFollowUp(call, error)
     } finally {
       interactionRevision = null
-      if (current.active) storage?.record(current.spec)
+      if (current.active) storage?.record(current.spec, current.stacks)
     }
   }
 
@@ -1583,7 +1705,7 @@ class PrototypeRuntime(
     } finally {
       interactionRevision = null
       // A response writes outside handle(), so a stored key it changed is recorded here (#12522).
-      if (current.active) storage?.record(current.spec)
+      if (current.active) storage?.record(current.spec, current.stacks)
     }
   }
 
@@ -1758,15 +1880,31 @@ class PrototypeRuntime(
       boundPages(spec, previous),
       stacks =
         stackNodes(spec.root).mapValues { (id, node) ->
-          val path =
-            previousStacks[id]
-              ?.path
-              .orEmpty()
-              .filter { node.screens.containsKey(it) }
-              .take(PrototypeSpecValidator.MAX_PROTOTYPE_STACK_DEPTH)
-          PrototypeStackSnapshot(path.ifEmpty { listOf(node.start) })
+          retainedStack(node, previousStacks[id])
+            ?: storage?.stored(PrototypeRouteRuntime.storageKey(id))?.let {
+              PrototypeRouteRuntime.restore(node, it)
+            }
+            ?: PrototypeStackSnapshot(listOf(node.start))
         },
     )
+
+  /**
+   * The entries of [previous] a same-id show keeps: those whose screen still exists with params
+   * that still fit its route, or null when none do.
+   */
+  private fun retainedStack(
+    node: PrototypeStackNode,
+    previous: PrototypeStackSnapshot?,
+  ): PrototypeStackSnapshot? {
+    val kept =
+      previous
+        ?.routeEntries()
+        .orEmpty()
+        .filter { (screen, params) -> PrototypeRouteRuntime.fits(node, screen, params) }
+        .take(PrototypeSpecValidator.MAX_PROTOTYPE_STACK_DEPTH)
+    return if (kept.isEmpty()) null
+    else PrototypeStackSnapshot.of(kept.map { it.first }, kept.map { it.second })
+  }
 
   init {
     platform.registry.modules.forEach { publishModuleState(it.name, it.state.value) }
@@ -1801,6 +1939,14 @@ private fun normalizePagerState(spec: PrototypeSpec): PrototypeSpec {
 }
 
 private val runtimeJson = Json { classDiscriminator = "type" }
+
+private val EMPTY_ROUTE_PARAMS = JsonObject(emptyMap())
+
+/** A stack's path as `screen to params` entries (#14188). */
+private fun PrototypeStackSnapshot.routeEntries(): List<Pair<String, JsonObject>> =
+  path.mapIndexed { index, screen ->
+    screen to paramsAt(index)
+  }
 
 internal fun prototypeDescendants(node: PrototypeNode): List<PrototypeNode> =
   when (node) {

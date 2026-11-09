@@ -188,12 +188,16 @@ describe("IOSCtrlProxyClient", function () {
       data: "runner",
     });
     const simctl = spyOn(SimCtlClient.prototype, "screenshot").mockResolvedValue(Buffer.alloc(0));
-    // No unique active live display: the stale hierarchy still must not pick a panel.
+    // No unique active live display: the stale hierarchy still must not pick a panel, and with
+    // nothing to verify the runner frame against, the capture fails closed (#17598, #17600).
     const live = spyOn(DevicectlPanelScreenshotSource.prototype, "readDisplays").mockResolvedValue(
       [],
     );
     try {
-      expect((await ctrlProxyClient.requestScreenshot()).data).toBe("runner");
+      const result = await ctrlProxyClient.requestScreenshot();
+      expect(result.success).toBe(false);
+      expect(result.reason).toBe("capture_unverified");
+      expect(result.data).toBeUndefined();
       expect(runner).toHaveBeenCalledTimes(1);
       expect(simctl).not.toHaveBeenCalled();
     } finally {

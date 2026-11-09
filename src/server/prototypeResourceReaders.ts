@@ -25,7 +25,6 @@ import {
   type PrototypeSourceResourceQuery,
 } from "../features/prototype/prototypeSourceResource";
 import {
-  prototypeVariantIds,
   readPrototypeWebResource,
   type PrototypeWebResourceQuery,
 } from "../features/prototype/web/prototypeWebResource";
@@ -46,7 +45,6 @@ import type { ResourceContent } from "./resourceRegistry";
  * template at startup and imports this module, with the guide, renderers and templates behind it,
  * on the first read.
  */
-export { prototypeVariantIds };
 
 /** The web page's image encoder (sharp). */
 export function createPrototypeWebImageEncoder(): PrototypeWebImageEncoder {

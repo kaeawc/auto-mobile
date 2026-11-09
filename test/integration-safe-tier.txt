@@ -97,6 +97,7 @@ test/daemon/socketServerToolCapabilities.integration.test.ts | safe | tmpdir soc
 test/daemon/socketTasksRelay.integration.test.ts | safe | tmpdir socket L281, in-process dispatcher, DaemonClient.isAvailable spied, hermetic fixture device boundary
 test/daemon/statelessMcpHttpModern.integration.test.ts | safe | real SDK HTTP, listen, MRTR and task device-choice handlers with captured Request/Response, in-memory task store and bus, hermetic tool/device-manager fakes and FakeTimer; no network listener or database resolution
 test/daemon/telemetryPushSocketServer.integration.test.ts | safe | FakeSocket, FakeTimer, in-memory singleton DB
+test/daemon/terminalReleaseJournal.realDisk.integration.test.ts | safe | real nodeTerminalReleaseJournalFileSystem over private mkdtemp directories removed afterwards L19 L58
 test/daemon/videoStreamSocketServer.integration.test.ts | safe | mkdtemp socket dir L144, fake H264 capture source and timer
 test/db/DatabaseHealthProbe.integration.test.ts | safe | temp sqlite file, fake worker; /tmp path L164 is a string only
 test/db/accessibilityBaselineRepository.integration.test.ts | safe | in-memory DB

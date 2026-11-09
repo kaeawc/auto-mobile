@@ -78,6 +78,11 @@ if [[ $(basename "$0") == swift && ${1:-} == test && ${2:-} == list ]]; then
     echo "XCTestRunnerTests.NewFeatureTests/testExample"
   fi
 elif [[ $(basename "$0") == swift && ${1:-} == test ]]; then
+  if [[ "$PWD" == */control-proxy ]]; then
+    echo "control-proxy swift $*" >> "${PREPUSH_IOS_COMMAND_LOG}"
+    echo "Executed ${WATCH_POLICY_TEST_COUNT:-68} tests, with 0 failures (0 unexpected)"
+    exit "${WATCH_POLICY_TEST_FAILURE:-0}"
+  fi
   if [[ "$PWD" == */prototype-agent ]]; then
     echo "prototype-agent swift $*" >> "${PREPUSH_IOS_COMMAND_LOG}"
     if [[ -n ${PROTOVIEWER_TEST_FAILURE:-} ]]; then exit "$PROTOVIEWER_TEST_FAILURE"; fi
@@ -100,7 +105,7 @@ MOCK
 create_real_git_fixture() {
   fixture_root="${BATS_TEST_TMPDIR}/fixture-${BATS_TEST_NUMBER}"
   fixture_bin="${BATS_TEST_TMPDIR}/fixture-bin-${BATS_TEST_NUMBER}"
-  mkdir -p "${fixture_root}/scripts/swiftformat" "${fixture_root}/scripts/swiftlint" "${fixture_root}/scripts/ios" "${fixture_root}/ios/XCTestRunner" "${fixture_root}/ios/Nested" "${fixture_bin}"
+  mkdir -p "${fixture_root}/scripts/swiftformat" "${fixture_root}/scripts/swiftlint" "${fixture_root}/scripts/ios" "${fixture_root}/ios/XCTestRunner" "${fixture_root}/ios/control-proxy" "${fixture_root}/ios/Nested" "${fixture_bin}"
   fixture_root="$(cd "${fixture_root}" && pwd -P)"
   mkdir -p "${fixture_root}/scripts/lib"
   cp "${repo_root}/scripts/lib/spotlight-exclude.sh" "${fixture_root}/scripts/lib/"
@@ -135,10 +140,11 @@ commit_changed_swift_file() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Usage: scripts/prepush-ios.sh"* ]]
+  [[ "$output" == *"CtrlProxy watch policy tests on"* ]]
   [ ! -e "${command_log}" ]
 }
 
-@test "runs the pinned formatter, lint, build, and pure XCTestRunner subset" {
+@test "runs the pinned formatter, lint, build, pure XCTestRunner subset and watch policy tests" {
   run env PATH="${mock_bin}:${PATH}" PREPUSH_IOS_COMMAND_LOG="${command_log}" \
     bash "${repo_root}/scripts/prepush-ios.sh"
 
@@ -150,6 +156,48 @@ commit_changed_swift_file() {
   [[ "$output" == *"swiftlint lint --config ${repo_root}/.swiftlint.yml --quiet ${repo_root}/ios"* ]]
   [[ "$output" == *"swift build"* ]]
   [[ "$output" == *"swift test -Xswiftc -warnings-as-errors --filter"* ]]
+  [[ "$output" == *"control-proxy swift test -Xswiftc -warnings-as-errors --filter CtrlProxyWatchPolicyTests"* ]]
+}
+
+@test "watch policy gate rejects zero or fewer than 60 executed tests without attesting success" {
+  create_real_git_fixture
+  install_attestation_recorder
+  for count in 0 59; do
+    : > "${command_log}"
+    run env PATH="${fixture_bin}:${PATH}" PREPUSH_IOS_BASE_REF="${fixture_base_ref}" \
+      PREPUSH_IOS_COMMAND_LOG="${command_log}" WATCH_POLICY_TEST_COUNT="${count}" \
+      bash "${fixture_root}/scripts/prepush-ios.sh"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"CtrlProxyWatchPolicyTests filter executed ${count} tests"* ]]
+    if [[ "$count" -ne 0 ]]; then
+      [[ "$output" == *"expected at least 60"* ]]
+    fi
+    run grep -F 'attestation ' "${command_log}"
+    [ "$status" -ne 0 ]
+  done
+}
+
+@test "watch policy gate accepts exactly 60 tests and runs with lint skipped and build opt-outs" {
+  create_real_git_fixture
+  install_attestation_recorder
+  run env PATH="${fixture_bin}:${PATH}" PREPUSH_IOS_BASE_REF="${fixture_base_ref}" \
+    PREPUSH_IOS_COMMAND_LOG="${command_log}" WATCH_POLICY_TEST_COUNT=60 \
+    PREPUSH_IOS_SKIP_CTRL_PROXY_RUNNER_BUILD=1 PREPUSH_IOS_SKIP_PROTOVIEWER=1 \
+    bash "${fixture_root}/scripts/prepush-ios.sh"
+  [ "$status" -eq 0 ]
+  grep -Fx 'control-proxy swift test -Xswiftc -warnings-as-errors --filter CtrlProxyWatchPolicyTests' "${command_log}"
+  grep -F 'CtrlProxy watch policy tests=pass:0' "${command_log}"
+}
+
+@test "watch policy test failure propagates even with enough executed tests" {
+  create_real_git_fixture
+  install_attestation_recorder
+  run env PATH="${fixture_bin}:${PATH}" PREPUSH_IOS_BASE_REF="${fixture_base_ref}" \
+    PREPUSH_IOS_COMMAND_LOG="${command_log}" WATCH_POLICY_TEST_FAILURE=19 \
+    bash "${fixture_root}/scripts/prepush-ios.sh"
+  [ "$status" -eq 19 ]
+  run grep -F 'attestation ' "${command_log}"
+  [ "$status" -ne 0 ]
 }
 
 @test "returns the first tool failure without running later checks" {
@@ -363,6 +411,7 @@ SCRIPT
   [ "$status" -eq 0 ]
   grep -F -- '--scope partial' "${command_log}"
   grep -F 'SwiftFormat=skip:0 SwiftLint=skip:0 CtrlProxy runner build=skip:0 ProtoViewer build/tests=skip:0' "${command_log}"
+  grep -F 'CtrlProxy watch policy tests=pass:0' "${command_log}"
 }
 
 @test "attests full scope after lint and simulator-free tests" {
@@ -374,6 +423,7 @@ SCRIPT
   [ "$status" -eq 0 ]
   grep -F -- '--scope full' "${command_log}"
   grep -F 'SwiftFormat=pass:0 SwiftLint=pass:0' "${command_log}"
+  grep -F 'CtrlProxy watch policy tests=pass:0' "${command_log}"
 }
 
 @test "runner build opt-out always marks iOS attestation partial" {

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { errorMessage } from "../utils/describeUnknownError";
-import { sortedReaddirSync } from "../utils/io";
+import { compareCodeUnits } from "../utils/io";
 import { logger } from "../utils/logger";
 import { resolveAutoMobileBaseDir } from "../utils/tempDir";
 
@@ -344,91 +344,115 @@ export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
   }
 }
 
-function fsyncPath(filePath: string, flags: string): void {
-  const fd = fs.openSync(filePath, flags);
-  try {
-    fs.fsyncSync(fd);
-  } finally {
-    fs.closeSync(fd);
-  }
+/** The synchronous `node:fs` calls the real journal file system makes; a seam so tests fake the disk. */
+export interface TerminalReleaseJournalFsPrimitives {
+  mkdirSync(dirPath: string, options: { recursive: true; mode: number }): string | undefined;
+  openSync(filePath: string, flags: string, mode?: number): number;
+  writeSync(fd: number, text: string): number;
+  fsyncSync(fd: number): void;
+  closeSync(fd: number): void;
+  renameSync(from: string, to: string): void;
+  rmSync(filePath: string, options: { force: true }): void;
+  readFileSync(filePath: string, encoding: "utf-8"): string;
+  readdirSync(dirPath: string): string[];
 }
 
-/** Real file primitives: synchronous so the intent is on disk before the DB write is issued. */
-export const nodeTerminalReleaseJournalFileSystem: TerminalReleaseJournalDirectory = {
-  listNames(dirPath) {
+/**
+ * Real file primitives: synchronous so the intent is on disk before the DB write is issued.
+ * `platform` decides whether directories are fsync'd (Windows cannot open a directory for fsync).
+ */
+export function createNodeTerminalReleaseJournalFileSystem(
+  primitives: TerminalReleaseJournalFsPrimitives = fs,
+  platform: NodeJS.Platform = process.platform,
+): TerminalReleaseJournalDirectory {
+  const fsyncPath = (filePath: string, flags: string): void => {
+    const fd = primitives.openSync(filePath, flags);
     try {
-      return sortedReaddirSync(dirPath);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return [];
-      }
-      throw error;
-    }
-  },
-  readText(filePath) {
-    try {
-      return fs.readFileSync(filePath, "utf-8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return undefined;
-      }
-      throw error;
-    }
-  },
-  appendDurable(filePath, text, syncDirectory = true) {
-    const firstCreatedDirectory = fs.mkdirSync(path.dirname(filePath), {
-      recursive: true,
-      mode: 0o700,
-    });
-    const fd = fs.openSync(filePath, "a", 0o600);
-    try {
-      fs.writeSync(fd, text);
-      fs.fsyncSync(fd);
+      primitives.fsyncSync(fd);
     } finally {
-      fs.closeSync(fd);
+      primitives.closeSync(fd);
     }
-    if (syncDirectory && process.platform !== "win32") {
-      fsyncPath(path.dirname(filePath), "r");
-      if (firstCreatedDirectory !== undefined) {
-        // Each new directory entry lives in its parent, including intermediate levels.
-        fsyncPath(path.dirname(firstCreatedDirectory), "r");
-        const remaining = path.relative(firstCreatedDirectory, path.dirname(filePath));
-        let createdDirectory = firstCreatedDirectory;
-        for (const segment of remaining ? remaining.split(path.sep) : []) {
-          createdDirectory = path.join(createdDirectory, segment);
-          fsyncPath(path.dirname(createdDirectory), "r");
+  };
+  return {
+    listNames(dirPath) {
+      try {
+        return primitives.readdirSync(dirPath).sort(compareCodeUnits);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          return [];
+        }
+        throw error;
+      }
+    },
+    readText(filePath) {
+      try {
+        return primitives.readFileSync(filePath, "utf-8");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          return undefined;
+        }
+        throw error;
+      }
+    },
+    appendDurable(filePath, text, syncDirectory = true) {
+      const firstCreatedDirectory = primitives.mkdirSync(path.dirname(filePath), {
+        recursive: true,
+        mode: 0o700,
+      });
+      const fd = primitives.openSync(filePath, "a", 0o600);
+      try {
+        primitives.writeSync(fd, text);
+        primitives.fsyncSync(fd);
+      } finally {
+        primitives.closeSync(fd);
+      }
+      if (syncDirectory && platform !== "win32") {
+        fsyncPath(path.dirname(filePath), "r");
+        if (firstCreatedDirectory !== undefined) {
+          // Each new directory entry lives in its parent, including intermediate levels.
+          fsyncPath(path.dirname(firstCreatedDirectory), "r");
+          const remaining = path.relative(firstCreatedDirectory, path.dirname(filePath));
+          let createdDirectory = firstCreatedDirectory;
+          for (const segment of remaining ? remaining.split(path.sep) : []) {
+            createdDirectory = path.join(createdDirectory, segment);
+            fsyncPath(path.dirname(createdDirectory), "r");
+          }
         }
       }
-    }
-  },
-  replaceDurable(filePath, text) {
-    const temporaryPath = `${filePath}.${process.pid}.tmp`;
-    const fd = fs.openSync(temporaryPath, "w", 0o600);
-    try {
-      fs.writeSync(fd, text);
-      fs.fsyncSync(fd);
-    } finally {
-      fs.closeSync(fd);
-    }
-    try {
-      // libuv renames with MOVEFILE_REPLACE_EXISTING on Windows, so this replaces in place there
-      // too; it fails only while another process (AV, indexer) briefly holds the target open.
-      // No retry or sleep here: this runs on the daemon's event loop, so a failure surfaces at once
-      // and `resolve` falls back to the durable appended `lifted` marker (#11102).
-      fs.renameSync(temporaryPath, filePath);
-    } catch (error) {
-      fs.rmSync(temporaryPath, { force: true });
-      throw error;
-    }
-    if (process.platform !== "win32") {
-      // Persist the rename itself; Windows cannot open a directory for fsync.
-      fsyncPath(path.dirname(filePath), "r");
-    }
-  },
-  remove(filePath) {
-    fs.rmSync(filePath, { force: true });
-  },
-};
+    },
+    replaceDurable(filePath, text) {
+      const temporaryPath = `${filePath}.${process.pid}.tmp`;
+      const fd = primitives.openSync(temporaryPath, "w", 0o600);
+      try {
+        primitives.writeSync(fd, text);
+        primitives.fsyncSync(fd);
+      } finally {
+        primitives.closeSync(fd);
+      }
+      try {
+        // libuv renames with MOVEFILE_REPLACE_EXISTING on Windows, so this replaces in place there
+        // too; it fails only while another process (AV, indexer) briefly holds the target open.
+        // No retry or sleep here: this runs on the daemon's event loop, so a failure surfaces at
+        // once and `resolve` falls back to the durable appended `lifted` marker (#11102).
+        primitives.renameSync(temporaryPath, filePath);
+      } catch (error) {
+        primitives.rmSync(temporaryPath, { force: true });
+        throw error;
+      }
+      if (platform !== "win32") {
+        // Persist the rename itself; Windows cannot open a directory for fsync.
+        fsyncPath(path.dirname(filePath), "r");
+      }
+    },
+    remove(filePath) {
+      primitives.rmSync(filePath, { force: true });
+    },
+  };
+}
+
+/** The journal file system over the real disk. */
+export const nodeTerminalReleaseJournalFileSystem: TerminalReleaseJournalDirectory =
+  createNodeTerminalReleaseJournalFileSystem();
 
 export interface DaemonTerminalReleaseJournalOptions {
   /** This daemon's session id; its journal file is keyed by it. */

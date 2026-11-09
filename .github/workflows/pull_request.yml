@@ -1095,7 +1095,7 @@ jobs:
           KTFMT_ONLY_TOUCHED_FILES: "false"
         run: |
           scripts/all_fast_validate_checks.sh \
-            --only yaml,lfs-pointers,scripts-referenced,schema-copy-drift,tool-definitions,prototype-spec-models,protoviewer-notices,privacy-manifests,store-listing,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,android-parity-budgets,shared-process-allowlist,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock,debug-tags,datetime-now-literal,markdown-bash,python-sdk \
+            --only yaml,lfs-pointers,scripts-referenced,schema-copy-drift,tool-definitions,prototype-spec-models,protoviewer-notices,privacy-manifests,store-listing,ctrl-proxy-project-sources,swiftlint-pins,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,android-parity-budgets,shared-process-allowlist,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock,debug-tags,datetime-now-literal,markdown-bash,python-sdk \
             --max-parallel 4
 
       - name: "Run offline lychee link check"
@@ -2585,61 +2585,35 @@ jobs:
   swiftlint:
     timeout-minutes: 20
     name: "SwiftLint"
-    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('["self-hosted","automobile-mac"]') || 'macos-26' }}
-    # Do not spend a macOS slot when the inexpensive Ubuntu validation has
-    # already proved this revision cannot merge.
-    # vars.AUTOMOBILE_MAC_POOLS_ENABLED gates every self-hosted Mac job (#11580):
-    # set it to anything but "true" and they all run on hosted runners, so no
-    # required check waits for a Mac that is offline.
+    # Linux, with the official SwiftLint Linux binary pinned to the Mac lane's
+    # version and verified against a committed SHA-256 (#17581). SwiftLint loads
+    # sourcekitd from the Swift toolchain that ubuntu-latest ships on PATH.
+    runs-on: ubuntu-latest
     needs: [detect-changes, fast-validation]
     if: needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'
     steps:
-      - name: "Isolate self-hosted SwiftLint home"
-        if: runner.environment == 'self-hosted'
-        shell: bash
-        run: |
-          isolated_home="$RUNNER_TEMP/swiftlint-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          mkdir -p "$isolated_home/tmp" "$isolated_home/config" "$isolated_home/data"
-          {
-            echo "HOME=$isolated_home"
-            echo "TMPDIR=$isolated_home/tmp"
-            echo "XDG_CONFIG_HOME=$isolated_home/config"
-            echo "XDG_DATA_HOME=$isolated_home/data"
-            echo "CFFIXED_USER_HOME=$isolated_home"
-          } >> "$GITHUB_ENV"
-
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
-          clean: true
 
-      - name: "Require ambient SwiftLint"
-        if: runner.environment == 'self-hosted'
+      - name: "Install pinned SwiftLint (Linux, SHA-256 verified)"
         shell: bash
         run: |
-          if ! command -v swiftlint >/dev/null; then
-            echo '::error::The self-hosted SwiftLint job requires the pinned SwiftLint binary on PATH.' >&2
-            exit 1
-          fi
+          bash scripts/swiftlint/install_swiftlint_linux.sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       # Full-tree lint (validate_swiftlint.sh defaults: ONLY_TOUCHED_FILES=false,
       # STRICT_MODE=false), so the whole ios/ tree must stay error-clean on every
       # iOS-affecting PR. The script exits non-zero only on error-severity rules
       # (force_unwrapping/force_try are configured as errors — the fail-fast crash
-      # class we burned down in 2026-07); warnings remain non-blocking. SwiftLint is
-      # installed on demand on hosted runners; the self-hosted runner must
-      # already have the pinned binary.
+      # class we burned down in 2026-07); warnings remain non-blocking. It also
+      # refuses a SwiftLint whose version differs from the pin.
       - name: "Run SwiftLint (fail on error-severity rules)"
         shell: bash
         env:
-          INSTALL_SWIFTLINT_WHEN_MISSING: ${{ runner.environment == 'github-hosted' && 'true' || 'false' }}
+          INSTALL_SWIFTLINT_WHEN_MISSING: "false"
         run: bash scripts/swiftlint/validate_swiftlint.sh
-
-      - name: "Remove isolated SwiftLint home"
-        if: always() && runner.environment == 'self-hosted'
-        shell: bash
-        run: rm -rf -- "$RUNNER_TEMP/swiftlint-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
   # =============================================================================
   # Swift Code Coverage

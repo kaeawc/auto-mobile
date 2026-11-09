@@ -4,10 +4,16 @@ import type {
   AdbExecutor,
 } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
-import type { Timer } from "../../utils/SystemTimer";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { isForegroundLauncher } from "../observe/androidLauncherPackages";
+import { resolveTargetDisplay } from "../observe/DisplaySelection";
+import { displayTransitions } from "../observe/DisplayTransition";
+import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
+import type { DisplayPanel, DisplayRef } from "../../models/DisplayPanel";
+import { parseTopFocusedDisplayId } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { logger } from "../../utils/logger";
 import { acceptAndroidHomeAlreadyOnLauncher } from "./pressButtonOutcomes";
-import { resolveActionDisplay } from "./TargetDisplayAction";
 
 /** A resolved pressButton display: the concrete panel key and its Android logical display id. */
 export interface PressButtonDisplayTarget {
@@ -22,8 +28,111 @@ export type PressButtonDisplayResolver = (
 ) => Promise<PressButtonDisplayTarget>;
 
 /**
+ * The display state an unscoped observation resolves `active` from (#17649), so a pressButton
+ * `active` presses on the same panel that `observe({ display: "active" })` reads. Like any explicit
+ * selector, `active` overrides a session display pin.
+ */
+export interface PressButtonDisplayState {
+  /** The panel the latest unscoped observation recorded; explicit observations leave it unchanged. */
+  focusedPanel(deviceId: string): Pick<DisplayRef, "key"> | undefined;
+  /**
+   * The device's live input-focused display, read when no unscoped observation has recorded one;
+   * logical display 0 when focus is unknown.
+   */
+  liveDisplay(
+    device: BootedDevice,
+    adb: AdbCommandRunner,
+    signal: AbortSignal | undefined,
+  ): Promise<Pick<DisplayRef, "key" | "posture">>;
+  /** The connected logical display id for a panel key; throws the disconnected-panel guidance. */
+  logicalIdForPanel(
+    device: BootedDevice,
+    adb: AdbCommandRunner,
+    key: string,
+    signal: AbortSignal | undefined,
+  ): Promise<number>;
+}
+
+/**
+ * The panel holding input focus (`mTopFocusedDisplayId`), or undefined when focus is unknown. A
+ * failed read is not fatal: the caller falls back to logical display 0.
+ */
+async function inputFocusedPanel(
+  device: BootedDevice,
+  adb: AdbCommandRunner,
+  cache: ObservedAndroidDisplayCache,
+  signal: AbortSignal | undefined,
+): Promise<DisplayPanel | undefined> {
+  try {
+    const result = await adb.executeCommand("shell dumpsys window | grep mTopFocusedDisplayId", {
+      signal,
+    });
+    const displayId = parseTopFocusedDisplayId(result.stdout);
+    return await cache.panelForLogicalId(device, adb, displayId, { signal });
+  } catch (error) {
+    signal?.throwIfAborted();
+    logger.warn(`pressButton focused display lookup failed: ${errorMessage(error)}`, error);
+    return undefined;
+  }
+}
+
+/**
+ * The live `active` display before any unscoped observation: the panel holding input focus, else
+ * logical display 0 (the display Android's unscoped capture binds to) when focus is unknown.
+ */
+async function liveActiveDisplay(
+  device: BootedDevice,
+  adb: AdbCommandRunner,
+  signal: AbortSignal | undefined,
+): Promise<Pick<DisplayRef, "key" | "posture">> {
+  const cache = new ObservedAndroidDisplayCache(defaultTimer);
+  const focused = await inputFocusedPanel(device, adb, cache, signal);
+  return focused
+    ? { key: focused.key, posture: "unknown" }
+    : (await cache.resolve(device, adb, signal)).display;
+}
+
+export const defaultPressButtonDisplayState: PressButtonDisplayState = {
+  focusedPanel: (deviceId) => displayTransitions.currentObservedPanel(deviceId),
+  liveDisplay: liveActiveDisplay,
+  logicalIdForPanel: (device, adb, key, signal) =>
+    new ObservedAndroidDisplayCache(defaultTimer).logicalIdForPanel(device, adb, key, signal),
+};
+
+/**
+ * Resolve a selector to its panel the way `ObserveScreen` targets a read: `active` is the focused
+ * panel of the latest unscoped observation, else the live focused display (#17649). The caller's
+ * last explicitly observed panel is not `active`, so the key and its verification agree.
+ */
+export async function resolvePressButtonDisplay(
+  device: BootedDevice,
+  display: string,
+  {
+    adb,
+    signal,
+    state = defaultPressButtonDisplayState,
+  }: { adb: AdbCommandRunner; signal?: AbortSignal; state?: PressButtonDisplayState },
+): Promise<PressButtonDisplayTarget> {
+  const focused = state.focusedPanel(device.deviceId);
+  const live =
+    display === "active" && !focused && (device.displays?.panels.length ?? 0) > 1
+      ? await state.liveDisplay(device, adb, signal)
+      : undefined;
+  const panel = resolveTargetDisplay(device.displays, display, {
+    focusedPanelKey: focused?.key,
+    activePanelKey: live?.key,
+    posture: live?.posture,
+  });
+  return {
+    key: panel.key,
+    displayId: await state.logicalIdForPanel(device, adb, panel.key, signal),
+  };
+}
+
+/**
  * Resolve a pressButton `display` selector once, as tapOn does, so the key and the visual-change
- * check target the same panel. Display 0 stays explicit: an untargeted key or global action goes to
+ * check target the same panel. `active` resolves as `observe({ display: "active" })` does (#17649).
+ * A resolved display 0 stays explicit (`input -d 0`): an untargeted key or global action goes to
  * the focused display, which may be another panel. Other platforms refuse a `display`.
  */
 export async function pressButtonDisplay(
@@ -45,7 +154,7 @@ export async function pressButtonDisplay(
   }
   const target = await (resolver
     ? resolver(display, signal)
-    : resolveActionDisplay(device, display, { adb, signal }));
+    : resolvePressButtonDisplay(device, display, { adb, signal }));
   return target;
 }
 

@@ -245,3 +245,21 @@ set_paths() { printf '%s\n' "$@" > "$PREPUSH_CHANGED_FILES_FILE"; }
   [ "$status" -eq 0 ]
   grep -q '^node --timing$' "$LOG"
 }
+
+@test "runner capability note is advisory and never fails the dispatcher" {
+  set_paths android/control-proxy/src/WebSocketServer.kt
+  mkdir -p scripts/release
+  cat > scripts/release/runner-capability-note.sh <<'STUB'
+#!/usr/bin/env bash
+echo "note $*" >> "$LOG"
+echo "runner-capability-note: NOTE (non-blocking)" >&2
+exit 3
+STUB
+  run bash scripts/prepush.sh --base main
+  [ "$status" -eq 0 ]
+  grep -q '^note --base main$' "$LOG"
+  grep -q '^android --base-ref main$' "$LOG"
+  [[ "$output" == *"NOTE (non-blocking)"* ]]
+  run bash scripts/prepush.sh --base main --list
+  [ "$status" -eq 0 ]; [ "$output" = android ]
+}

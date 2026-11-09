@@ -104,6 +104,15 @@ const IOS_RECORDING_DIAGNOSTIC_TIMEOUT_MS = 3000;
 // starve the attempt that could still succeed.
 const IOS_RECORDING_RETRY_DIAGNOSTIC_TIMEOUT_MS = 250;
 
+function iosCaptureHandle(
+  captureTracker: ProcessTracker,
+  capturePath: string,
+  captureArgs: string[],
+  config: VideoCaptureConfig,
+): FfmpegBackendHandle {
+  return { kind: "ffmpeg", platform: "ios", captureTracker, capturePath, captureArgs, config };
+}
+
 export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
   // Overridable in tests so the retry path can be exercised without real waits.
   iosRecordingStartTimeoutMs: number = IOS_RECORDING_START_TIMEOUT_MS;
@@ -726,14 +735,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
           { signal: config.abortSignal, timer: this.timer },
         );
 
-        const backendHandle: FfmpegBackendHandle = {
-          kind: "ffmpeg",
-          platform: "ios",
-          captureTracker,
-          capturePath,
-          captureArgs: args,
-          config,
-        };
+        const backendHandle = iosCaptureHandle(captureTracker, capturePath, args, config);
 
         return {
           recordingId: config.recordingId,

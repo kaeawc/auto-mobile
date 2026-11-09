@@ -432,8 +432,9 @@ async function finalizeRecordingDisplaySession(
   recordingDisplaySessions.delete(recordingId);
   const pending = session.transitions.at(-1);
   const hostOnly = options?.hostOnly || hostOnlyRecordingTeardowns.has(recordingId);
-  const ios = session.device.platform === "ios";
-  if (pending?.to.key === "unknown" && !hostOnly && !ios) {
+  // iOS has no Android display resolver; its unresolved transitions stay as recorded.
+  const resolvable = !hostOnly && session.device.platform !== "ios";
+  if (pending?.to.key === "unknown" && resolvable) {
     try {
       const current = await deps.resolveAndroidDisplay(session.device, "active");
       if (current) {
@@ -451,9 +452,19 @@ async function finalizeRecordingDisplaySession(
   );
   metadata.recordedPanel = session.recordedPanel;
   metadata.transitions = session.transitions;
+  appendRecordingDisplayWarnings(metadata, session);
+}
+
+/** The start-time display warning, then one per iOS panel transition the capture missed. */
+function appendRecordingDisplayWarnings(
+  metadata: VideoRecordingMetadata,
+  session: RecordingDisplaySession,
+): void {
   const warnings = [
     ...(session.warning ? [session.warning] : []),
-    ...(ios ? iosPanelTransitionWarnings(session.recordedPanel, session.transitions) : []),
+    ...(session.device.platform === "ios"
+      ? iosPanelTransitionWarnings(session.recordedPanel, session.transitions)
+      : []),
   ];
   if (warnings.length > 0) {
     metadata.warnings = [...(metadata.warnings ?? []), ...warnings];

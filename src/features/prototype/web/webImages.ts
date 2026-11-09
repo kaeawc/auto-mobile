@@ -71,25 +71,45 @@ function paddingDp(style: Raw, side: "top" | "bottom" | "start" | "end"): number
   return typeof value === "number" ? value : 0;
 }
 
+const DEFAULT_MINIMUM = "48px";
+
 /**
  * The placeholder's 48px minimum on each axis the node does not fix in dp: an authored size wins
- * over the image's default minimum on both devices, so a 24 dp icon stays 24 dp. On a wrapped axis
- * the minimum is the content box's: the page sizes border boxes, so it adds the axis's padding,
- * which the image layers sit inside. A filled axis takes its parent's extent, so its padding never
- * pushes the minimum past the space the parent gives it.
+ * over the image's default minimum on both devices, so a 24 dp icon stays 24 dp.
  */
 function webImageMinimum(style: Raw): Record<string, string> {
-  const minimum = (size: unknown, padding: number) => `${48 + (size === "fill" ? 0 : padding)}px`;
   return {
-    ...(fixedDp(style.width) === undefined
-      ? { "min-width": minimum(style.width, paddingDp(style, "start") + paddingDp(style, "end")) }
-      : {}),
-    ...(fixedDp(style.height) === undefined
-      ? {
-          "min-height": minimum(style.height, paddingDp(style, "top") + paddingDp(style, "bottom")),
-        }
-      : {}),
+    ...(fixedDp(style.width) === undefined ? { "min-width": DEFAULT_MINIMUM } : {}),
+    ...(fixedDp(style.height) === undefined ? { "min-height": DEFAULT_MINIMUM } : {}),
   };
+}
+
+/** Each axis's default-minimum property, its size and authored-minimum fields, and its padding. */
+const MINIMUM_AXES = [
+  ["min-width", "width", "minWidth", "padding-inline-start", "padding-inline-end"],
+  ["min-height", "height", "minHeight", "padding-top", "padding-bottom"],
+] as const;
+
+/**
+ * The default minimum on a wrapped axis, made the content box's: the page sizes border boxes, so
+ * the minimum adds the axis's resolved padding (safe-area insets included), which the image layers
+ * sit inside. A filled axis takes its parent's extent, so its padding never pushes the minimum past
+ * the space the parent gives it; an authored minimum, or a weight's zero, stays as resolved.
+ */
+export function webImageContentMinimum(
+  node: Raw,
+  box: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const style = record(node.style) ?? {};
+  const css: Record<string, string> = {};
+  for (const [property, size, authored, start, end] of MINIMUM_AXES) {
+    const padding = [box[start], box[end]].filter((value) => value !== undefined);
+    const wrapped = style[size] !== "fill" && typeof style[authored] !== "number";
+    if (wrapped && box[property] === DEFAULT_MINIMUM && padding.length > 0) {
+      css[property] = `calc(${[DEFAULT_MINIMUM, ...padding].join(" + ")})`;
+    }
+  }
+  return css;
 }
 
 /** A fixed dp axis less the padding on both its sides, as Android's image target subtracts it. */
@@ -301,6 +321,11 @@ export interface WebImageRendererHelpers {
   bound(text: unknown, scope: WebRenderScope): string;
 }
 
+const padMinimum = (node: Raw, style: Record<string, string>) => ({
+  ...style,
+  ...webImageContentMinimum(node, style),
+});
+
 /**
  * An `image`: with a slot for its bound asset, the slot's image layers; otherwise a placeholder.
  * Every bound asset is recorded as drawn, so the page can encode it at the size drawn.
@@ -326,12 +351,12 @@ export function webImageRenderer({ base, bound }: WebImageRendererHelpers): Node
         "background-color": placeholder,
         ...webImageMinimum(record(node.style) ?? {}),
       });
-      return el("div", { attrs: { ...attrs, role: "img" }, style });
+      return el("div", { attrs: { ...attrs, role: "img" }, style: padMinimum(node, style) });
     }
     const { attrs, style } = base(node, scope, webImageBoxCss(slot, node, placeholder));
     return el(
       "div",
-      { attrs: { ...attrs, role: "img" }, style },
+      { attrs: { ...attrs, role: "img" }, style: padMinimum(node, style) },
       webImageLayers(slot, node, scope.style, webImageLayerInset(style)),
     );
   };

@@ -279,7 +279,45 @@ describe("an image with an inlinable asset", () => {
       ],
     });
     const node = find(rendered.element, (e) => e.attrs["data-node"] === "image")[0]!;
-    expect([node.style["min-width"], node.style["min-height"]]).toEqual(["88px", "96px"]);
+    expect([node.style["min-width"], node.style["min-height"]]).toEqual([
+      "calc(48px + 24px + 16px)",
+      "calc(48px + 24px + 24px)",
+    ]);
+  });
+
+  test("a wrapped axis's minimum adds the resolved safe-area padding the layers sit inside", () => {
+    const rendered = still({
+      type: "column",
+      children: [
+        {
+          type: "image",
+          asset: "photo",
+          style: { width: { dp: 48 } },
+          safeAreaPadding: { types: ["systemBars"], edges: ["top", "bottom"] },
+        },
+      ],
+    });
+    const node = find(rendered.element, (e) => e.attrs["data-node"] === "image")[0]!;
+    const layer = find(node, (e) => "data-image" in e.attrs)[0]!;
+    expect(node.style["min-width"]).toBeUndefined();
+    expect(node.style["min-height"]).toBe(
+      `calc(48px + ${node.style["padding-top"]} + ${node.style["padding-bottom"]})`,
+    );
+    expect([layer.style.top, layer.style.bottom]).toEqual([
+      node.style["padding-top"],
+      node.style["padding-bottom"],
+    ]);
+    expect(node.style["padding-top"]).toContain("--safe-top");
+  });
+
+  test("an authored minimum stays as authored", () => {
+    const rendered = still({
+      type: "image",
+      asset: "photo",
+      style: { minWidth: 30, padding: { start: 24, end: 24 } },
+    });
+    const node = find(rendered.element, (e) => e.attrs["data-node"] === "image")[0]!;
+    expect(node.style["min-width"]).toBe("30px");
   });
 
   test("a filled axis keeps the plain 48px minimum, so its padding cannot overflow the parent", () => {
@@ -295,7 +333,10 @@ describe("an image with an inlinable asset", () => {
       ],
     });
     const node = find(rendered.element, (e) => e.attrs["data-node"] === "image")[0]!;
-    expect([node.style["min-width"], node.style["min-height"]]).toEqual(["48px", "96px"]);
+    expect([node.style["min-width"], node.style["min-height"]]).toEqual([
+      "48px",
+      "calc(48px + 24px + 24px)",
+    ]);
   });
 
   test("a translucent tint's group takes the padding and its layers fill it", () => {

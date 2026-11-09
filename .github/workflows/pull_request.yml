@@ -2615,24 +2615,6 @@ jobs:
           INSTALL_SWIFTLINT_WHEN_MISSING: "false"
         run: bash scripts/swiftlint/validate_swiftlint.sh
 
-  # TEMPORARY (#17581 parity demo, reverted before merge): the same lint on hosted macOS.
-  swiftlint-mac-parity:
-    timeout-minutes: 20
-    name: "SwiftLint Mac parity (temporary)"
-    runs-on: macos-26
-    needs: [detect-changes, fast-validation]
-    if: needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-      - name: "Run SwiftLint (fail on error-severity rules)"
-        shell: bash
-        env:
-          INSTALL_SWIFTLINT_WHEN_MISSING: "true"
-        run: bash scripts/swiftlint/validate_swiftlint.sh
-
   # =============================================================================
   # Swift Code Coverage
   # =============================================================================

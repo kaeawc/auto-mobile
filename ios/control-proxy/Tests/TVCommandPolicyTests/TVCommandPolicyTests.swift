@@ -3,7 +3,7 @@ import Foundation
 @testable import TVCommandPolicy
 import XCTest
 
-private enum SnapshotFailure: Error {
+private enum SnapshotFailure: Error, Equatable {
     case unavailable
 }
 
@@ -193,10 +193,14 @@ final class TVCommandPolicyTests: XCTestCase {
                 ("empty prompt", [keyboardTree(value: secret, prompt: "")]),
                 ("missing prompt", [keyboardTree(value: secret, prompt: nil)]),
                 ("type-50 field", [keyboardTree(value: secret, entryType: 50)]),
+                // Only keyboard detection protects a named field without secure metadata.
+                ("named Code field", [keyboardTree(value: secret, entryType: 49, entryLabel: "Code")]),
             ]
             for (name, roots) in scenarios {
-                let gate = TVKeyboardSettleGate(clock: FakeTVUptimeClock())
+                let clock = FakeTVUptimeClock()
+                let gate = TVKeyboardSettleGate(clock: clock)
                 for (index, root) in roots.enumerated() {
+                    clock.time += TVKeyboardSettleGate.settleWindow + 0.1
                     XCTAssertFalse(
                         emittedTexts(in: root, gate: gate).contains { $0.contains(secret) },
                         "\(name), hierarchy \(index)"
@@ -243,23 +247,26 @@ final class TVCommandPolicyTests: XCTestCase {
         }
     }
 
-    func testAppendTextThenDelayedMenuWithholdsDismissFrameOnObserve() {
-        assertAppendThenMenuWithholdsDismissFrame(snapshotFails: false)
+    func testAppendTextThenDelayedMenuWithholdsDismissFrameOnObserve() throws {
+        try assertAppendThenMenuWithholdsDismissFrame(snapshotFails: false)
     }
 
-    func testAppendTextThenDelayedMenuSnapshotFailureWithholdsDismissFrameOnObserve() {
-        assertAppendThenMenuWithholdsDismissFrame(snapshotFails: true)
+    func testAppendTextThenDelayedMenuSnapshotFailureWithholdsDismissFrameOnObserve() throws {
+        try assertAppendThenMenuWithholdsDismissFrame(snapshotFails: true)
     }
 
-    private func assertAppendThenMenuWithholdsDismissFrame(snapshotFails: Bool) {
+    private func assertAppendThenMenuWithholdsDismissFrame(snapshotFails: Bool) throws {
         let clock = FakeTVUptimeClock()
         let commands = TVTextEntryCommands(clock: clock)
         let dismissFrame = TVNodeSketch(elementType: 52, label: "Code", value: "s3cret")
         clock.time += TVKeyboardSettleGate.settleWindow * 2
-        XCTAssertEqual(commands.hierarchy(root: dismissFrame).text(for: dismissFrame), "Code s3cret")
+        XCTAssertEqual(
+            try commands.hierarchy(snapshot: { dismissFrame }, sketch: { $0 }).resolution.text(for: dismissFrame),
+            "Code s3cret"
+        )
 
         var events: [String] = []
-        XCTAssertTrue(commands.appendText(root: keyboardTree(value: "", prompt: "Code"), typeText: {
+        XCTAssertTrue(try commands.appendText(snapshot: { self.keyboardTree(value: "", prompt: "Code") }, typeText: {
             events.append("type")
         }))
         // LLM latency exceeds the append stamp's window before menu is pressed.
@@ -273,37 +280,108 @@ final class TVCommandPolicyTests: XCTestCase {
         })
         XCTAssertEqual(events, ["type", "menu", "snapshot"])
         clock.time += TVKeyboardSettleGate.settleWindow / 4
-        XCTAssertEqual(commands.hierarchy(root: dismissFrame).text(for: dismissFrame), "Code")
+        XCTAssertEqual(
+            try commands.hierarchy(snapshot: { dismissFrame }, sketch: { $0 }).resolution.text(for: dismissFrame),
+            "Code"
+        )
         clock.time += TVKeyboardSettleGate.settleWindow
-        XCTAssertEqual(commands.hierarchy(root: dismissFrame).text(for: dismissFrame), "Code s3cret")
+        XCTAssertEqual(
+            try commands.hierarchy(snapshot: { dismissFrame }, sketch: { $0 }).resolution.text(for: dismissFrame),
+            "Code s3cret"
+        )
     }
 
-    func testAppendTextRestartsWindowAfterTypingFinishes() {
+    func testAppendTextRestartsWindowAfterTypingFinishes() throws {
         let clock = FakeTVUptimeClock()
         let commands = TVTextEntryCommands(clock: clock)
         let field = TVNodeSketch(elementType: 52, label: "Code", value: "s3cret")
         var typeCalls = 0
-        XCTAssertTrue(commands.appendText(root: keyboardTree(value: "", prompt: "Code"), typeText: {
+        XCTAssertTrue(try commands.appendText(snapshot: { self.keyboardTree(value: "", prompt: "Code") }, typeText: {
             typeCalls += 1
             clock.time += TVKeyboardSettleGate.settleWindow * 2
         }))
         XCTAssertEqual(typeCalls, 1)
         clock.time += TVKeyboardSettleGate.settleWindow - 0.01
-        XCTAssertEqual(commands.hierarchy(root: field).text(for: field), "Code")
+        XCTAssertEqual(try commands.hierarchy(snapshot: { field }, sketch: { $0 }).resolution.text(for: field), "Code")
         clock.time += 0.02
-        XCTAssertEqual(commands.hierarchy(root: field).text(for: field), "Code s3cret")
+        XCTAssertEqual(
+            try commands.hierarchy(snapshot: { field }, sketch: { $0 }).resolution.text(for: field),
+            "Code s3cret"
+        )
     }
 
-    func testAppendTextWithoutFocusedKeyboardDoesNotType() {
+    func testAppendTextWithoutFocusedKeyboardDoesNotType() throws {
         let commands = TVTextEntryCommands(clock: FakeTVUptimeClock())
         for root in [
             TVNodeSketch(elementType: 49, hasFocus: true),
             keyboardTree(value: "", keyboardFocused: false),
         ] {
-            XCTAssertFalse(commands.appendText(root: root, typeText: {
+            XCTAssertFalse(try commands.appendText(snapshot: { root }, typeText: {
                 XCTFail("Typing requires a focused keyboard")
             }))
         }
+    }
+
+    func testHierarchySnapshotFailureRearmsReleasedGateAndPropagatesError() throws {
+        try assertSnapshotFailureRearmsReleasedGate(command: "hierarchy")
+    }
+
+    func testAppendSnapshotFailureRearmsReleasedGateAndPropagatesError() throws {
+        try assertSnapshotFailureRearmsReleasedGate(command: "append")
+    }
+
+    func testPressSnapshotFailureRearmsReleasedGateWithoutFailingPress() throws {
+        try assertSnapshotFailureRearmsReleasedGate(command: "press")
+    }
+
+    private func assertSnapshotFailureRearmsReleasedGate(command: String) throws {
+        let clock = FakeTVUptimeClock()
+        let commands = TVTextEntryCommands(clock: clock)
+        let secret = TVNodeSketch(elementType: 52, label: "Code", value: "s3cret")
+        let plain = TVNodeSketch(elementType: 49, identifier: "name", label: "Name", value: "hello")
+        let cleanFrame = TVNodeSketch(elementType: 2, children: [secret, plain])
+        let openFrame = keyboardTree(value: "s3cret", entryLabel: "Code")
+        let captured = try commands.hierarchy(snapshot: { openFrame }, sketch: { $0 })
+        XCTAssertEqual(captured.snapshot.label, openFrame.label)
+        XCTAssertEqual(captured.root.children.count, openFrame.children.count)
+        XCTAssertTrue(captured.resolution.keyboardPresent)
+        clock.time += TVKeyboardSettleGate.settleWindow + 0.1
+        let released = try commands.hierarchy(snapshot: { cleanFrame }, sketch: { $0 }).resolution
+        XCTAssertEqual(released.text(for: secret), "Code s3cret")
+        XCTAssertEqual(released.text(for: plain), "Name hello")
+
+        var snapshotCalls = 0
+        let failedSnapshot: () throws -> TVNodeSketch = {
+            snapshotCalls += 1
+            throw SnapshotFailure.unavailable
+        }
+        switch command {
+        case "hierarchy":
+            XCTAssertThrowsError(try commands.hierarchy(snapshot: failedSnapshot, sketch: { $0 })) { error in
+                XCTAssertEqual(error as? SnapshotFailure, .unavailable)
+            }
+        case "append":
+            XCTAssertThrowsError(try commands.appendText(snapshot: failedSnapshot, typeText: {
+                XCTFail("A failed snapshot must not type")
+            })) { error in
+                XCTAssertEqual(error as? SnapshotFailure, .unavailable)
+            }
+        case "press":
+            var pressed: [TVRemoteButton] = []
+            commands.press(.menu, perform: { pressed.append($0) }, snapshot: failedSnapshot)
+            XCTAssertEqual(pressed, [.menu])
+        default:
+            XCTFail("Unknown test command: \(command)")
+        }
+        XCTAssertEqual(snapshotCalls, 1)
+        clock.time += TVKeyboardSettleGate.settleWindow - 0.01
+        let withheld = try commands.hierarchy(snapshot: { cleanFrame }, sketch: { $0 }).resolution
+        XCTAssertEqual(withheld.text(for: secret), "Code")
+        XCTAssertEqual(withheld.text(for: plain), "Name")
+        clock.time += 0.02
+        let settled = try commands.hierarchy(snapshot: { cleanFrame }, sketch: { $0 }).resolution
+        XCTAssertEqual(settled.text(for: secret), "Code s3cret")
+        XCTAssertEqual(settled.text(for: plain), "Name hello")
     }
 
     func testPostPressKeyboardSnapshotRearmsExpiredWindow() {

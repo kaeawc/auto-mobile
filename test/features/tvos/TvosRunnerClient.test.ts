@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
-import { WebSocketTvosRunnerClient } from "../../../src/features/tvos/TvosRunnerClient";
+import {
+  WebSocketTvosRunnerClient,
+  type TvosCommand,
+} from "../../../src/features/tvos/TvosRunnerClient";
 import { normalizeTvosHierarchy } from "../../../src/features/tvos/TvosHierarchy";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { FakeWatchSocket } from "../../fakes/FakeWatchSocket";
@@ -69,30 +72,51 @@ test("correlates a real remote press result and reports runner errors", async ()
   client.close();
 });
 
-test("press requests hint the foreground app and preserve an explicit bundleId", async () => {
-  const socket = new FakeWatchSocket();
-  const timer = new FakeTimer();
-  const client = new WebSocketTvosRunnerClient("ws://fake/ws", {
-    factory: () => socket,
-    timer,
-    foregroundApp: () => "com.example.tvshow",
-  });
-  socket.receive(connected);
-  for (const bundleId of [undefined, "com.apple.TVSettings"]) {
-    const pending = client.request({ type: "request_press_button", action: "menu", bundleId });
-    await drainMicrotasks(2);
-    const sent = socket.sent[socket.sent.length - 1];
-    socket.receive({ ...pressResult, requestId: sent.requestId });
-    await pending;
-    expect(sent).toMatchObject({
-      type: "request_press_button",
-      action: "menu",
-      bundleId: bundleId ?? "com.example.tvshow",
+test.each([
+  { type: "request_press_button", action: "menu" },
+  { type: "request_hierarchy" },
+  { type: "request_append_text", text: "hello" },
+] satisfies TvosCommand[])(
+  "$type hints the foreground app unless explicitly targeted",
+  async (command) => {
+    const socket = new FakeWatchSocket();
+    const timer = new FakeTimer();
+    const client = new WebSocketTvosRunnerClient("ws://fake/ws", {
+      factory: () => socket,
+      timer,
+      foregroundApp: () => "com.example.tvshow",
     });
-  }
-  expect(timer.getSleepHistory()).toEqual([]);
-  client.close();
-});
+    socket.receive(connected);
+    for (const [bundleId, expectedBundleId] of [
+      [undefined, "com.example.tvshow"],
+      ["", "com.example.tvshow"],
+      ["  ", "com.example.tvshow"],
+      ["com.apple.TVSettings", "com.apple.TVSettings"],
+      [" com.apple.TVSettings ", " com.apple.TVSettings "],
+    ] as const) {
+      const pending = client.request({ ...command, bundleId });
+      await drainMicrotasks(2);
+      const sent = socket.sent[socket.sent.length - 1];
+      socket.receive({
+        type:
+          command.type === "request_hierarchy"
+            ? "hierarchy_update"
+            : command.type === "request_append_text"
+              ? "append_text_result"
+              : "press_button_result",
+        success: true,
+        requestId: sent.requestId,
+      });
+      await pending;
+      expect(sent).toMatchObject({
+        ...command,
+        bundleId: expectedBundleId,
+      });
+    }
+    expect(timer.getSleepHistory()).toEqual([]);
+    client.close();
+  },
+);
 
 test("accepts the runner screenshot envelope without a success field", async () => {
   const { socket, client, timer } = fixture();

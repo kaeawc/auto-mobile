@@ -51,9 +51,9 @@ final class TVCommandRouter {
             case "request_hierarchy":
                 let request = try decoder.decode(RequestHierarchy.self, from: data)
                 let resolved = target(requested: envelope.bundleId)
-                let snapshot = try resolved.app.snapshot()
-                let tree = sketch(snapshot)
-                let resolution = textEntryCommands.hierarchy(root: tree)
+                let (snapshot, tree, resolution) = try textEntryCommands.hierarchy(
+                    snapshot: { try resolved.app.snapshot() }, sketch: sketch
+                )
                 return try JSONEncoder().encode(HierarchyUpdateResponse(
                     requestId: request.requestId,
                     data: ViewHierarchy(
@@ -89,9 +89,10 @@ final class TVCommandRouter {
                 }
                 let startTime = Date()
                 let resolved = target(requested: envelope.bundleId)
-                let snapshot = try resolved.app.snapshot()
-                let tree = sketch(snapshot)
-                guard textEntryCommands.appendText(root: tree, typeText: { resolved.app.typeText(request.text) }) else {
+                guard try textEntryCommands.appendText(
+                    snapshot: { try sketch(resolved.app.snapshot()) },
+                    typeText: { resolved.app.typeText(request.text) }
+                ) else {
                     throw CommandError.invalidParameter("text", "no focused text input")
                 }
                 return try JSONEncoder().encode(WebSocketResponse.success(

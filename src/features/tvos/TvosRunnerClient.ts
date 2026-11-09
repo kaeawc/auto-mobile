@@ -252,7 +252,7 @@ export class WebSocketTvosRunnerClient implements TvosRunnerClient {
       (command.type !== "request_hierarchy" &&
         command.type !== "request_append_text" &&
         command.type !== "request_press_button") ||
-      command.bundleId !== undefined
+      command.bundleId?.trim()
     ) {
       return command;
     }

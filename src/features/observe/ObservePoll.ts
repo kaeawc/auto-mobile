@@ -120,7 +120,9 @@ const RECONCILIATION_UNCONFIRMED: unique symbol = Symbol("observe-poll-reconcili
 /**
  * Race one device read against the remaining hard budget. When the budget wins,
  * the read is aborted at once rather than at its own next abort check, and
- * {@link BUDGET_EXPIRED} is returned. A spent budget starts no read.
+ * {@link BUDGET_EXPIRED} is returned. A spent budget starts no read; the
+ * deadline is inclusive, so a read may still start with exactly 0 ms left and
+ * has that last millisecond to land.
  */
 async function raceReadAgainstBudget<T>(
   read: (signal: AbortSignal | undefined) => Promise<T>,
@@ -131,7 +133,7 @@ async function raceReadAgainstBudget<T>(
     label,
   }: { timer: Timer; remainingMs: number; signal?: AbortSignal; label: string },
 ): Promise<T | BudgetExpired> {
-  if (remainingMs <= 0) {
+  if (remainingMs < 0) {
     return BUDGET_EXPIRED;
   }
   const controller = new AbortController();

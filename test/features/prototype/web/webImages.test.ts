@@ -157,6 +157,17 @@ describe("webImageDraw and webImageRule", () => {
       style: { width: { dp: 200 }, aspectRatio: 10, padding: { start: 90, end: 90 } },
     });
     expect(flat).toMatchObject({ widthDp: 20, heightDp: 48 });
+    // A weight that clears the last fixed axis still leaves a cover box bounded by the fills.
+    const allocated = webImageDraw(
+      "a",
+      { contentScale: "crop", style: { width: { dp: 400 }, height: "fill", weight: 1 } },
+      "row",
+    );
+    expect(allocated).toEqual({ asset: "a", widthFill: true, heightFill: true, scale: "crop" });
+    expect(webImageBox(allocated, PIXEL)).toEqual({ width: 2402, height: 2402, cover: true });
+    expect(
+      webImageScaleFactor({ width: 4000, height: 1000 }, [webImageBox(allocated, PIXEL)]),
+    ).toBe(1);
     // A weight overrides the source axis's dp, so the ratio does not carry it over.
     const weighted = webImageDraw(
       "a",

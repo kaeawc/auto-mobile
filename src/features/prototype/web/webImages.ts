@@ -378,7 +378,13 @@ export function webImageBox(
   const long = Math.max(frame.widthDp, frame.heightDp);
   const fillDp = fill === "long" ? long : Math.min(frame.widthDp, frame.heightDp);
   const px = (dp: number) => Math.ceil(dp * frame.density);
-  if (draw.scale !== "fit" && (draw.widthDp !== undefined || draw.heightDp !== undefined)) {
+  // A cover needs one known extent: a fixed axis, or a filled one (a fill or a weight's share).
+  const bounded =
+    draw.widthDp !== undefined ||
+    draw.heightDp !== undefined ||
+    draw.widthFill === true ||
+    draw.heightFill === true;
+  if (draw.scale !== "fit" && bounded) {
     const width = coverDp(draw.widthDp, draw.widthFill, draw.minWidthDp, fillDp);
     const height = coverDp(draw.heightDp, draw.heightFill, draw.minHeightDp, fillDp);
     return {

@@ -104,6 +104,14 @@ export const INCOMING_HEIGHT_KEY = "webIncomingHeight";
 export const INCOMING_ALLOCATED_KEY = "webIncomingAllocated";
 
 /**
+ * A style key the web renderer adds to a node, never authored: the frame's safe-area inset (dp)
+ * its `safeAreaPadding` adds on its top and bottom edges where no ancestor consumed them. CSS reads
+ * the inset from a variable, so the static height pass needs it in dp to take it out of the node's
+ * content height and weight base, as it takes out the authored padding (see rowContentHeight).
+ */
+export const SAFE_INSET_KEY = "webSafeInset";
+
+/**
  * A row child's measure hint: `take` makes it the row's lone grower, `zero` measures it against no
  * width, and `shrink` sets how fast it gives up width, from its own `basis` when it has one. `later`
  * marks a sibling after a capped aspect ratio, whose authored `minWidth` holds only while width

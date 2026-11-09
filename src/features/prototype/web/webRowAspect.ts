@@ -4,6 +4,7 @@ import {
   INCOMING_ALLOCATED_KEY,
   INCOMING_HEIGHT_KEY,
   ROW_BOUND_KEY,
+  SAFE_INSET_KEY,
   ROW_MEASURE_KEY,
   type RowMeasure,
   scrollChildStyle,
@@ -89,16 +90,25 @@ function clampedHeight(style: Raw | undefined, height: number): number {
  * main-axis min/max bounds (see sizeStyle).
  *
  * The inherited bound is the parent's whole content height; a column narrows it per child to
- * what its earlier siblings left (see webIncomingHeight.ts).
+ * what its earlier siblings left (see webIncomingHeight.ts). The safe-area inset the node's
+ * `safeAreaPadding` adds (SAFE_INSET_KEY) is padding too, as `windowInsetsPadding` is.
  */
 export function rowContentHeight(style: Raw | undefined, inherited = Infinity): number {
   const own = ownHeight(style);
-  const padding = record(style?.padding);
   const incoming = style?.[INCOMING_HEIGHT_KEY];
   const handed = typeof incoming === "number" ? incoming : Infinity;
   const allocated = style?.[INCOMING_ALLOCATED_KEY] === true && handed !== Infinity;
   const height = allocated ? handed : Math.min(own, inherited, handed);
-  return Math.max(0, height - side(padding, "top") - side(padding, "bottom"));
+  return Math.max(0, height - verticalPadding(style));
+}
+
+/** A node's top and bottom padding in dp: its authored padding and its safe-area inset. */
+export function verticalPadding(style: Raw | undefined): number {
+  const padding = record(style?.padding);
+  const inset = record(style?.[SAFE_INSET_KEY]);
+  return (
+    side(padding, "top") + side(padding, "bottom") + side(inset, "top") + side(inset, "bottom")
+  );
 }
 
 /**

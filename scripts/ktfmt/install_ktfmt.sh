@@ -8,6 +8,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/ktfmt_version.sh"
 # Shared colors + command_exists + detect_os/detect_arch (issue #2822).
 # shellcheck source=scripts/lib/tool-install.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/tool-install.sh"
+# Cached, checksum-verified, backed-off release download (#17624).
+# shellcheck source=scripts/lib/release-download.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/release-download.sh"
 
 # Note: installed_ktfmt_version() is provided by the sourced ktfmt_version.sh.
 
@@ -152,6 +155,9 @@ install_manual() {
     # Create installation directory
     install_dir="$HOME/.local/bin"
     mkdir -p "$install_dir"
+    # verify_installation resolves ktfmt from PATH; a runner image without
+    # ~/.local/bin on PATH would otherwise fail a good install.
+    export PATH="$install_dir:$PATH"
 
     # Download ktfmt fat JAR from GitHub Releases.
     # Meta stopped publishing the "-jar-with-dependencies" classifier to Maven
@@ -160,37 +166,17 @@ install_manual() {
     jar_file="ktfmt-${KTFMT_VERSION}-with-dependencies.jar"
     jar_url="https://github.com/facebook/ktfmt/releases/download/v${KTFMT_VERSION}/${jar_file}"
 
-    echo -e "${GREEN}Downloading ktfmt JAR from GitHub Releases...${NC}"
+    echo -e "${GREEN}Fetching ktfmt JAR from GitHub Releases...${NC}"
 
-    # -f/--fail makes curl exit non-zero (and not write the response body) on an
-    # HTTP error, so a wrong tag or transient outage fails loudly instead of
-    # silently saving a "Not Found" HTML page as the jar. wget fails on HTTP
-    # errors by default. In both cases, drop the partial file on failure so the
-    # "-f" existence check below cannot pass on a bogus download.
-    download_ok=true
-    if command_exists curl; then
-        curl -fL --retry 3 -o "$install_dir/$jar_file" "$jar_url" || download_ok=false
-    elif command_exists wget; then
-        wget -O "$install_dir/$jar_file" "$jar_url" || download_ok=false
-    else
-        echo -e "${RED}Neither curl nor wget found. Please install one of them or download manually from:${NC}"
-        echo "$jar_url"
-        return 1
-    fi
-
-    if [[ "$download_ok" != "true" ]]; then
-        rm -f "$install_dir/$jar_file"
+    # release_fetch_pinned reuses a cached JAR only when its SHA-256 matches
+    # KTFMT_SHA256, otherwise downloads with a bounded backoff and verifies the
+    # checksum before installing, so a wrong tag, a saved error page or a
+    # corrupt cache entry can never become the formatter.
+    if ! release_fetch_pinned "$jar_url" "$KTFMT_SHA256" "$install_dir/$jar_file" "ktfmt/${KTFMT_VERSION}"; then
         echo -e "${RED}Failed to download ktfmt JAR from $jar_url${NC}"
         return 1
     fi
-
-    # Verify the JAR file was downloaded correctly
-    if [[ -s "$install_dir/$jar_file" ]]; then
-        echo -e "${GREEN}ktfmt JAR downloaded successfully to $install_dir${NC}"
-    else
-        echo -e "${RED}Failed to download ktfmt JAR${NC}"
-        return 1
-    fi
+    echo -e "${GREEN}ktfmt JAR installed to $install_dir${NC}"
 
     # Create wrapper script
     wrapper_script="$install_dir/ktfmt"

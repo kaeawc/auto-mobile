@@ -13,6 +13,11 @@
 # must be enforced, not merely declared.
 
 KTFMT_VERSION="0.65"
+# SHA-256 of ktfmt-${KTFMT_VERSION}-with-dependencies.jar from GitHub Releases.
+# install_ktfmt.sh verifies it after every cache restore and every download
+# (#17624). Bump it with the version; the Dockerfile's KTFMT_SHA256 must match.
+# shellcheck disable=SC2034 # read by install_ktfmt.sh, which sources this file.
+KTFMT_SHA256="aba9753b6ab387926179ab7318ba8e0c33dad483ebc72f633e79522265b15214"
 
 # Parse the numeric version from `ktfmt --version` (e.g. "ktfmt version 0.65").
 # Filter to ktfmt's own version line first so a JVM warning on stderr (the manual

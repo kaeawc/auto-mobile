@@ -19,6 +19,7 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeDevicectlDisplayInfoSource } from "../../fakes/FakeDevicectlDisplayInfoSource";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
+import { FakeNetworkFilterBridge } from "../../fakes/FakeNetworkFilterBridge";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { getStructuredPayload } from "../../../src/utils/toolUtils";
 
@@ -130,6 +131,8 @@ function harness() {
     adbFactory: new FakeAdbClientFactory(adb),
     timer: new FakeTimer(),
     simctl: null,
+    // The networkCondition read goes to the filter bridge; the real one spawns simctl.
+    networkFilterBridge: new FakeNetworkFilterBridge(),
   });
   return {
     client,

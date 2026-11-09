@@ -28,29 +28,79 @@ export function parseAndroidDisplayInfos(output: string): AndroidDisplayInfo[] {
     if (!header) {
       continue;
     }
-    const tokens = line
-      .trim()
-      .split(/[\s"{},]+/)
-      .filter(Boolean);
-    const uniqueIdIndex = tokens.findIndex((token) => token === "uniqueId");
-    const uniqueId =
-      /\buniqueId "([^"]+)"/.exec(line)?.[1] ??
-      // An unterminated quoted value cannot establish a panel's identity.
-      (uniqueIdIndex >= 0 && !/\buniqueId\s+"/.test(line) ? tokens[uniqueIdIndex + 1] : undefined);
-    const typeToken = /\btype (INTERNAL|EXTERNAL|VIRTUAL)\b/.exec(line)?.[1];
-    const type =
-      typeToken === "INTERNAL" || typeToken === "EXTERNAL" || typeToken === "VIRTUAL"
-        ? typeToken
-        : undefined;
-    const size = /\breal (\d+) x (\d+)\b/.exec(line);
-    records.push({
-      logicalId: header[1],
-      uniqueId,
-      type,
-      sizePx: size ? { width: Number(size[1]), height: Number(size[2]) } : undefined,
-      hasDisplayInfo: line.includes("DisplayInfo{"),
-    });
+    records.push(parseDisplayInfo(header[1], line));
   }
+  return records;
+}
+
+function parseDisplayInfo(logicalId: string, line: string): AndroidDisplayInfo {
+  const tokens = line
+    .trim()
+    .split(/[\s"{},]+/)
+    .filter(Boolean);
+  const uniqueIdIndex = tokens.findIndex((token) => token === "uniqueId");
+  const uniqueId =
+    /\buniqueId "([^"]+)"/.exec(line)?.[1] ??
+    // An unterminated quoted value cannot establish a panel's identity.
+    (uniqueIdIndex >= 0 && !/\buniqueId\s+"/.test(line) ? tokens[uniqueIdIndex + 1] : undefined);
+  const typeToken = /\btype (INTERNAL|EXTERNAL|VIRTUAL)\b/.exec(line)?.[1];
+  const type =
+    typeToken === "INTERNAL" || typeToken === "EXTERNAL" || typeToken === "VIRTUAL"
+      ? typeToken
+      : undefined;
+  const size = /\breal (\d+) x (\d+)\b/.exec(line);
+  return {
+    logicalId,
+    uniqueId,
+    type,
+    sizePx: size ? { width: Number(size[1]), height: Number(size[2]) } : undefined,
+    hasDisplayInfo: line.includes("DisplayInfo{"),
+  };
+}
+
+/** Enabled records in dumpsys display's Logical Displays section, including private displays. */
+export function parseDumpsysLogicalDisplays(output: string): AndroidDisplayInfo[] {
+  const records: AndroidDisplayInfo[] = [];
+  let sectionIndent: number | undefined;
+  let logicalId: string | undefined;
+  let enabled = false;
+  let baseInfo: string | undefined;
+  const finishRecord = () => {
+    if (enabled && logicalId !== undefined && baseInfo !== undefined) {
+      records.push(parseDisplayInfo(logicalId, baseInfo));
+    }
+  };
+  for (const line of output.split(/\r?\n/)) {
+    if (sectionIndent === undefined) {
+      const section = /^( *)Logical Displays:/.exec(line);
+      if (section) {
+        sectionIndent = section[1].length;
+      }
+      continue;
+    }
+    if (/^ *Display \d+:/.test(line)) {
+      finishRecord();
+      logicalId = undefined;
+      enabled = false;
+      baseInfo = undefined;
+      continue;
+    }
+    if (line.trim() && line.search(/\S/) <= sectionIndent) {
+      break;
+    }
+    const id = /^ *mDisplayId=(\d+)\s*$/.exec(line);
+    if (id) {
+      logicalId = id[1];
+    }
+    const isEnabled = /^ *mIsEnabled=(true|false)\s*$/.exec(line);
+    if (isEnabled) {
+      enabled = isEnabled[1] === "true";
+    }
+    if (/^ *mBaseDisplayInfo=DisplayInfo\{/.test(line)) {
+      baseInfo = line;
+    }
+  }
+  finishRecord();
   return records;
 }
 

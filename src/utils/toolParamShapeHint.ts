@@ -29,7 +29,9 @@ interface ZodNodeLike {
 }
 
 const MAX_DEPTH = 12;
-const MAX_KEYS_LISTED = 40;
+// A hint lists only the keys relevant to the error path, required ones first;
+// the full list made hints run past 500 characters (#17675).
+const MAX_KEYS_LISTED = 8;
 
 const WRAPPER_TYPES: ReadonlySet<string> = new Set([
   "optional",
@@ -144,7 +146,9 @@ function parses(schema: unknown, value: unknown): boolean {
   return typeof node?.safeParse === "function" && node.safeParse(value).success;
 }
 
-function exampleObject(shape: Record<string, unknown>, depth: number): unknown {
+// `nonEmpty` adds the first derivable optional key when every key is optional,
+// so an example for an all-optional object such as `searchUntil` shows a field.
+function exampleObject(shape: Record<string, unknown>, depth: number, nonEmpty = false): unknown {
   const entries: Array<[string, unknown]> = [];
   for (const [key, property] of Object.entries(shape)) {
     if (isOptional(property)) {
@@ -155,6 +159,12 @@ function exampleObject(shape: Record<string, unknown>, depth: number): unknown {
       return undefined;
     }
     entries.push([key, value]);
+  }
+  if (nonEmpty && entries.length === 0) {
+    const first = Object.entries(shape)
+      .map(([key, property]): [string, unknown] => [key, exampleValue(property, key, depth + 1)])
+      .find(([, value]) => value !== undefined);
+    return first ? Object.fromEntries([first]) : {};
   }
   return Object.fromEntries(entries);
 }
@@ -193,7 +203,7 @@ function exampleOfFirstArm(options: readonly unknown[], label: string, depth: nu
 // The smallest value that satisfies `schema`: required keys only, the first
 // union arm that produces a valid value, one array element, and placeholder
 // strings named after their key. `undefined` when no such value is derivable.
-function exampleValue(schema: unknown, label: string, depth = 0): unknown {
+function exampleValue(schema: unknown, label: string, depth = 0, nonEmpty = false): unknown {
   const resolved = unwrap(schema, depth);
   if (!resolved) {
     return undefined;
@@ -203,7 +213,7 @@ function exampleValue(schema: unknown, label: string, depth = 0): unknown {
     return exampleOfFirstArm(def.options, label, depth);
   }
   if (def.type === "object" && def.shape) {
-    return exampleObject(def.shape, depth);
+    return exampleObject(def.shape, depth, nonEmpty);
   }
   if (def.type === "array") {
     const element = exampleValue(def.element, label, depth + 1);
@@ -260,19 +270,121 @@ function displayPath(path: ReadonlyArray<PropertyKey>): string {
     .replace(/^\./, "");
 }
 
-function keysLine(schema: unknown, path: ReadonlyArray<PropertyKey>): string | undefined {
+function requiredKeysAt(schema: unknown, path: ReadonlyArray<PropertyKey>): Set<string> {
+  const objects = schemasAt(schema, path).flatMap((node) => {
+    const def = node.def;
+    return def?.type === "array" ? schemasAt(def.element, []) : [node];
+  });
+  const required = objects.flatMap((node) => {
+    const shape = node.def?.type === "object" ? node.def.shape : undefined;
+    return shape ? Object.keys(shape).filter((key) => !isOptional(shape[key])) : [];
+  });
+  return new Set(required);
+}
+
+function formatKeyList(keys: readonly string[]): string {
+  const listed = keys.slice(0, MAX_KEYS_LISTED).join(", ");
+  const more = keys.length > MAX_KEYS_LISTED ? `, … (${keys.length - MAX_KEYS_LISTED} more)` : "";
+  return `${listed}${more}`;
+}
+
+// Where each unknown key at `path` is accepted one level down, e.g. a top-level
+// `text` that belongs inside `selector`. Empty when no child object takes it.
+function relocationLines(
+  schema: unknown,
+  path: ReadonlyArray<PropertyKey>,
+  unknownKeys: readonly string[],
+): string[] {
+  const children = allowedKeysAt(schema, path);
+  // A union arm reports a key another arm accepts as unknown; only a key no arm
+  // at `path` takes is misplaced.
+  const misplaced = [...new Set(unknownKeys)].filter((key) => !children.includes(key));
+  return misplaced.flatMap((key) => {
+    const owners = children.filter((child) =>
+      allowedKeysAt(schema, [...path, child]).includes(key),
+    );
+    if (owners.length === 0) {
+      return [];
+    }
+    const under = owners.map((child) => displayPath([...path, child])).join(", ");
+    return [`"${key}" belongs under ${under}.`];
+  });
+}
+
+function keysLine(
+  schema: unknown,
+  path: ReadonlyArray<PropertyKey>,
+  unknownKeys: readonly string[],
+): string | undefined {
+  const relocations = relocationLines(schema, path, unknownKeys);
+  if (relocations.length > 0) {
+    return relocations.join(" ");
+  }
   const keys = allowedKeysAt(schema, path);
   if (keys.length === 0) {
     return undefined;
   }
-  const listed = keys.slice(0, MAX_KEYS_LISTED).join(", ");
-  const more = keys.length > MAX_KEYS_LISTED ? `, … (${keys.length - MAX_KEYS_LISTED} more)` : "";
+  const required = requiredKeysAt(schema, path);
+  const ordered = [
+    ...keys.filter((key) => required.has(key)),
+    ...keys.filter((key) => !required.has(key)),
+  ];
   const owner = path.length === 0 ? "Allowed keys" : `Allowed ${displayPath(path)} keys`;
-  return `${owner}: ${listed}${more}.`;
+  return `${owner}: ${formatKeyList(ordered)}.`;
+}
+
+// The minimal call, extended with the top-level key each error path sits under
+// when the minimal call leaves it out (an optional `searchUntil`), so the
+// example shows the object the caller got wrong.
+function exampleFor(
+  schema: unknown,
+  paths: ReadonlyArray<ReadonlyArray<PropertyKey>>,
+): Record<string, unknown> | undefined {
+  const base = minimalExample(schema);
+  if (base === undefined) {
+    return undefined;
+  }
+  const extended = { ...base };
+  for (const [head] of paths) {
+    if (typeof head !== "string" || Object.hasOwn(extended, head)) {
+      continue;
+    }
+    const [child] = schemasAt(schema, [head]);
+    const value = child === undefined ? undefined : exampleValue(child, head, 0, true);
+    if (value !== undefined) {
+      extended[head] = value;
+    }
+  }
+  return parses(schema, extended) ? extended : base;
+}
+
+interface ShapeOwner {
+  readonly path: ReadonlyArray<PropertyKey>;
+  readonly unknownKeys: string[];
+}
+
+function collectOwners(
+  issues: ReadonlyArray<ZodIssue>,
+  rawInput: unknown,
+): Map<string, ShapeOwner> {
+  const owners = new Map<string, ShapeOwner>();
+  for (const issue of issues) {
+    const path = shapeOwnerPath(issue, rawInput);
+    if (!path) {
+      continue;
+    }
+    const id = displayPath(path);
+    const owner = owners.get(id) ?? { path, unknownKeys: [] };
+    if (issue.code === "unrecognized_keys") {
+      owner.unknownKeys.push(...issue.keys.map(String));
+    }
+    owners.set(id, owner);
+  }
+  return owners;
 }
 
 /**
- * Hint for argument-shape errors: the allowed keys of every object the caller
+ * Hint for argument-shape errors: the keys relevant to each object the caller
  * shaped wrong, then a minimal valid call. Empty when no issue is about shape.
  */
 export function formatShapeHint(
@@ -284,20 +396,17 @@ export function formatShapeHint(
   if (schema === undefined) {
     return "";
   }
-  const owners = new Map<string, ReadonlyArray<PropertyKey>>();
-  for (const issue of issues) {
-    const owner = shapeOwnerPath(issue, rawInput);
-    if (owner && !owners.has(displayPath(owner))) {
-      owners.set(displayPath(owner), owner);
-    }
-  }
-  if (owners.size === 0) {
+  const owners = [...collectOwners(issues, rawInput).values()];
+  if (owners.length === 0) {
     return "";
   }
-  const lines = [...owners.values()]
-    .map((path) => keysLine(schema, path))
+  const lines = owners
+    .map(({ path, unknownKeys }) => keysLine(schema, path, unknownKeys))
     .filter((line): line is string => line !== undefined);
-  const example = minimalExample(schema);
+  const example = exampleFor(
+    schema,
+    owners.map(({ path }) => path),
+  );
   if (example !== undefined) {
     lines.push(`Example: ${toolName}(${JSON.stringify(example)})`);
   }

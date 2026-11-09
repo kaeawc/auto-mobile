@@ -718,17 +718,17 @@ export function formatToolParamError(
     }
   }
 
+  // The sendKeys commands hint (#16893) already names the command shape and its
+  // variants, so it replaces the generic shape hint rather than repeating it.
   const sendKeysHint = toolName === "sendKeys" ? sendKeysShapeHint(flattenedIssues) : undefined;
-  if (sendKeysHint) {
-    hints.push(sendKeysHint);
-  }
-
-  const shapeHint = formatShapeHint(
-    toolName,
-    schema,
-    selectedIssues.map(({ issue }) => issue),
-    rawInput,
-  );
+  const shapeHint =
+    sendKeysHint ??
+    formatShapeHint(
+      toolName,
+      schema,
+      selectedIssues.map(({ issue }) => issue),
+      rawInput,
+    );
   if (shapeHint) {
     hints.push(shapeHint);
   }

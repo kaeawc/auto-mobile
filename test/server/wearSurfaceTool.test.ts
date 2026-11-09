@@ -22,6 +22,10 @@ import type {
   WearSurface,
   WearSurfaceResult,
 } from "../../src/features/wear/WearSurface";
+import type {
+  WatchFaceChangeResult,
+  WatchFaceSurface,
+} from "../../src/features/wear/WatchFaceSurface";
 import type { FormFactorRead } from "../../src/server/requireWatch";
 import type { TraitFormFactor } from "../../src/utils/android-cmdline-tools/deviceTraits";
 import { toolJson } from "../helpers/toolResponse";
@@ -63,6 +67,108 @@ function recordingSurface(calls: Call[], success = true): WearSurface {
     showTile: async (target) => (calls.push(["showTile", target]), result("showTile")),
   };
 }
+
+const FACE = "com.google.wear.offhand";
+const PROVIDER =
+  "com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.BatteryProviderService";
+
+function recordingFaces(calls: unknown[][], applied = true): WatchFaceSurface {
+  const result = (action: WatchFaceChangeResult["action"]): WatchFaceChangeResult => ({
+    success: applied,
+    action,
+    requested: {},
+    broadcastResult: { code: 1, data: "Favorite Id=[1]", accepted: true, favoriteId: 1 },
+    applied,
+    verified: applied,
+    favoriteId: 1,
+    readback: {
+      activeFace: { package: FACE, favoriteId: 1, fallback: false },
+      favorites: [{ favoriteId: 1, package: FACE, slots: [] }],
+    },
+    ...(applied ? {} : { error: "not_applied" as const, reason: "not shown" }),
+    message: "done",
+  });
+  return {
+    setWatchFace: async (face) => (calls.push(["setWatchFace", face]), result("setWatchFace")),
+    unsetWatchFace: async () => (calls.push(["unsetWatchFace"]), result("unsetWatchFace")),
+    setComplication: async (request) => (
+      calls.push(["setComplication", request]),
+      result("setComplication")
+    ),
+    unsetComplication: async (request) => (
+      calls.push(["unsetComplication", request]),
+      result("unsetComplication")
+    ),
+  };
+}
+
+const faceHandler = (calls: unknown[][], applied = true) =>
+  createWearSurfaceHandler(
+    () => recordingSurface([]),
+    announces("watch"),
+    () => {
+      throw new Error("must not construct the watch face reader");
+    },
+    () => recordingFaces(calls, applied),
+  );
+
+describe("wearSurface watch face actions", () => {
+  const slot = { watchFace: FACE, slot: 11, provider: PROVIDER };
+  test.each<[Record<string, unknown>, unknown[]]>([
+    [{ action: "setWatchFace", watchFace: FACE }, ["setWatchFace", FACE]],
+    [{ action: "unsetWatchFace" }, ["unsetWatchFace"]],
+    [
+      { action: "setComplication", ...slot, type: 5 },
+      ["setComplication", { action: "setComplication", ...slot, type: 5 }],
+    ],
+    [
+      { action: "unsetComplication", ...slot },
+      ["unsetComplication", { action: "unsetComplication", ...slot }],
+    ],
+  ])("%o dispatches to the watch face surface", async (args, expected) => {
+    const calls: unknown[][] = [];
+    const response = await faceHandler(calls)(watchDevice, wearSurfaceSchema.parse(args));
+    expect(calls).toEqual([expected]);
+    expect(wearSurfaceResultSchema.safeParse(toolJson(response)).success).toBe(true);
+    expect(response.isError ?? false).toBe(false);
+  });
+
+  test("an accepted change that did not read back is an error", async () => {
+    const response = await faceHandler([], false)(watchDevice, {
+      action: "setWatchFace",
+      watchFace: FACE,
+    });
+    expect(toolJson(response)).toMatchObject({ applied: false, error: "not_applied" });
+    expect(response.isError).toBe(true);
+  });
+
+  test.each<Record<string, unknown>>([
+    { action: "setWatchFace" },
+    { action: "setWatchFace", watchFace: FACE, slot: 11 },
+    { action: "unsetWatchFace", watchFace: FACE },
+    { action: "setComplication", ...slot },
+    { action: "unsetComplication", ...slot, type: 5 },
+    { action: "unsetComplication", watchFace: FACE, slot: 11 },
+    { action: "addTile", component: COMPONENT, watchFace: FACE },
+  ])("%o is refused before any adb call", async (args) => {
+    const calls: unknown[][] = [];
+    await expect(
+      faceHandler(calls)(watchDevice, wearSurfaceSchema.parse(args)),
+    ).rejects.toBeInstanceOf(ActionableError);
+    expect(calls).toEqual([]);
+  });
+
+  test("the schema refuses a trailing-slash face and an unsafe provider", () => {
+    for (const input of [
+      { action: "setWatchFace", watchFace: `${FACE}/` },
+      { action: "setWatchFace", watchFace: "a/b;reboot" },
+      { ...slot, action: "unsetComplication", provider: "a/$(id)" },
+      { ...slot, action: "setComplication", type: -1 },
+    ]) {
+      expect(wearSurfaceSchema.safeParse(input).success).toBe(false);
+    }
+  });
+});
 
 describe("wearSurface tool", () => {
   test("the device observer constructs a session screen and forwards fresh extraction options", async () => {

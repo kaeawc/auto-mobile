@@ -26,7 +26,8 @@ export type PressButtonDisplayResolver = (
 
 /**
  * The display state an unscoped observation resolves `active` from (#17649), so a pressButton
- * `active` presses on the same panel that `observe` would read.
+ * `active` presses on the same panel that `observe({ display: "active" })` reads. Like any explicit
+ * selector, `active` overrides a session display pin.
  */
 export interface PressButtonDisplayState {
   /** The panel the latest unscoped observation recorded; explicit observations leave it unchanged. */
@@ -86,8 +87,8 @@ export async function resolvePressButtonDisplay(
 
 /**
  * Resolve a pressButton `display` selector once, as tapOn does, so the key and the visual-change
- * check target the same panel. `active` resolves as an unscoped observation does (#17649). A resolved
- * display 0 stays explicit (`input -d 0`): an untargeted key or global action goes to
+ * check target the same panel. `active` resolves as `observe({ display: "active" })` does (#17649).
+ * A resolved display 0 stays explicit (`input -d 0`): an untargeted key or global action goes to
  * the focused display, which may be another panel. Other platforms refuse a `display`.
  */
 export async function pressButtonDisplay(

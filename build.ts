@@ -13,6 +13,11 @@ import {
   shouldStripSources,
   type SourceMap,
 } from "./scripts/build/optimize-sourcemap";
+import {
+  builtEntryPath,
+  EARLY_EVALUATED_ENTRYPOINTS,
+  findEntryEvaluationOrderViolations,
+} from "./scripts/build/entry-evaluation-order";
 import { stripToolOutputSchemas } from "./scripts/build/strip-tool-output-schemas";
 
 // Clean dist directory
@@ -30,7 +35,13 @@ const result = await Bun.build({
   // src/index.ts's graph, so `adm-zip` (a devDependency, absent from a
   // packaged install's node_modules) must be inlined by listing the worker
   // here explicitly, the same way src/index.ts inlines its dependencies.
-  entrypoints: ["./src/index.ts", "./src/utils/workers/iosBundleExtractWorker.ts"],
+  // EARLY_EVALUATED_ENTRYPOINTS are entrypoints only so that splitting gives each
+  // its own dependency-free chunk that dist/src/index.js imports first.
+  entrypoints: [
+    "./src/index.ts",
+    "./src/utils/workers/iosBundleExtractWorker.ts",
+    ...EARLY_EVALUATED_ENTRYPOINTS,
+  ],
   outdir: "./dist/src",
   target: "bun",
   format: "esm",
@@ -39,7 +50,13 @@ const result = await Bun.build({
   external: ["sharp", "@img/sharp-*", "jimp", "@jimp/*"],
   sourcemap: "external",
   minify: true,
-  splitting: false,
+  // Split the bundle so startup parses only the chunks it loads; code behind a
+  // dynamic import() (daemon, tools, platform managers) stays unparsed until used.
+  // Chunks are hashed dist/src/chunk-*.js siblings of index.js, so every
+  // import.meta.url-relative lookup still resolves from dist/src.
+  splitting: true,
+  // Fold tiny side-effect-free chunks to keep the file count down.
+  minChunkSize: 16384,
   plugins: [
     {
       name: "static-tool-definitions",
@@ -69,6 +86,20 @@ if (!result.success) {
 }
 
 console.log(`✓ Built ${result.outputs.length} files`);
+
+const bundleDir = join(distPath, "src");
+const orderViolations = findEntryEvaluationOrderViolations(
+  "index.js",
+  EARLY_EVALUATED_ENTRYPOINTS.map(builtEntryPath),
+  (relativePath) => readFileSync(join(bundleDir, relativePath), "utf8"),
+);
+if (orderViolations.length > 0) {
+  console.error("Build failed: entry evaluation order is not guaranteed:");
+  for (const violation of orderViolations) {
+    console.error(`- ${violation}`);
+  }
+  process.exit(1);
+}
 
 const sourcemapOptions = {
   includeDependencySources: process.env.AUTOMOBILE_SOURCEMAP_INCLUDE_DEPS === "true",

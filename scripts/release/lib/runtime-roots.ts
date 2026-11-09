@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { builtinModules } from "node:module";
 import path from "node:path";
 import ts from "typescript";
@@ -113,28 +113,27 @@ export function runtimeRootsInSource(
 }
 
 /**
- * Derive runtime roots from the built package. The bundle contributes only its
- * external dynamic imports and `import.meta.resolve` specifiers, while copied runtime sources contribute all runtime
+ * Derive runtime roots from the built package. The bundle (index.js and its split
+ * chunks) contributes only its external dynamic imports and `import.meta.resolve` specifiers, while copied runtime sources contribute all runtime
  * module forms.
  */
 export function deriveRootsFromDist(distDir: string): string[] {
   const roots = new Set<string>();
-  const entryPath = path.join(distDir, "src/index.js");
-
-  if (existsSync(entryPath)) {
-    const bundle = readFileSync(entryPath, "utf8");
-    for (const root of runtimeRootsInSource(entryPath, bundle, true)) {
-      roots.add(root);
-    }
-  }
+  const bundleDir = path.join(distDir, "src");
+  const entryPath = path.join(bundleDir, "index.js");
+  // Code splitting moves the entry bundle's code into sibling chunk-*.js files,
+  // which are scanned the same way as the entry they were split from.
+  const isEntryBundle = (file: string): boolean =>
+    file === entryPath ||
+    (path.dirname(file) === bundleDir &&
+      path.basename(file).startsWith("chunk-") &&
+      file.endsWith(".js"));
 
   const sourceFiles: string[] = [];
   collectSourceFiles(distDir, sourceFiles);
   for (const file of sourceFiles) {
-    if (file === entryPath) {
-      continue;
-    }
-    for (const root of runtimeRootsInSource(file, readFileSync(file, "utf8"))) {
+    const fileRoots = runtimeRootsInSource(file, readFileSync(file, "utf8"), isEntryBundle(file));
+    for (const root of fileRoots) {
       roots.add(root);
     }
   }

@@ -13,7 +13,9 @@ import {
   type ReleaseChecksumEntry,
 } from "../../src/constants/release";
 import { sortedReaddirEntriesSync } from "../../src/utils/io";
+import { findMissingBundleModules, isBundleModule } from "../build/bundle-module-graph";
 import {
+  PACKED_BUNDLE_ENTRYPOINTS,
   REQUIRED_PACKED_RUNTIME_ASSETS,
   findMissingPackedAssets,
 } from "../build/packed-runtime-assets";
@@ -198,11 +200,17 @@ function identifySource(
   );
 }
 
+interface NativeIdentityInputs {
+  info: BuildInfo | null;
+  options: ArtifactIdentityOptions;
+  ports: ArtifactIdentityPorts;
+  /** Package-relative POSIX paths of every packed file. */
+  packedFiles: readonly string[];
+}
+
 function identifyNative(
   record: ArtifactIdentityRecord,
-  info: BuildInfo | null,
-  options: ArtifactIdentityOptions,
-  ports: ArtifactIdentityPorts,
+  { info, options, ports, packedFiles }: NativeIdentityInputs,
 ): void {
   const registry = ports.registry.find((entry) => entry.version === record.package.version);
   const resources = info?.nativeResources ?? registry;
@@ -211,8 +219,12 @@ function identifyNative(
     : registry
       ? "release-registry"
       : "none";
-  const bundlePath = join(record.package.root, "dist/src/index.js");
-  const bundle = ports.exists(bundlePath) ? ports.readText(bundlePath) : "";
+  // Code splitting spreads the pinned constants across dist/src/chunk-*.js, so
+  // search every bundle module rather than the entrypoint alone.
+  const bundle = packedFiles
+    .filter(isBundleModule)
+    .map((file) => ports.readText(join(record.package.root, file)))
+    .join("\n");
   for (const [field, sha] of Object.entries(resources ?? {})) {
     if (field.endsWith("Sha256") && typeof sha === "string" && sha.length > 0) {
       record.nativeResources.entries[field] = {
@@ -426,7 +438,12 @@ export function identifyArtifact(
     disallowed.length ? "fail" : "pass",
     `${nonRegular.length} non-regular entries; ${nonRegular.length - disallowed.length} under node_modules/.bin/ allowed${disallowed.length ? `; refused: ${disallowed.slice(0, 10).join(", ")}` : ""}`,
   );
-  const missing = findMissingPackedAssets(files, REQUIRED_PACKED_RUNTIME_ASSETS);
+  const missing = [
+    ...findMissingPackedAssets(files, REQUIRED_PACKED_RUNTIME_ASSETS),
+    ...findMissingBundleModules(files, PACKED_BUNDLE_ENTRYPOINTS, (file) =>
+      ports.readText(join(root, file)),
+    ),
+  ];
   check(
     record,
     "packed_assets",
@@ -474,7 +491,7 @@ export function identifyArtifact(
           : "Build info matches package",
   );
   identifySource(record, info, options, ports);
-  identifyNative(record, info, options, ports);
+  identifyNative(record, { info, options, ports, packedFiles: files });
   record.verdict = record.checks.some((entry) => entry.status === "fail")
     ? "refused"
     : "identified";

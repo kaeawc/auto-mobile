@@ -16,6 +16,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import type { PackedModuleReader } from "./build/bundle-module-graph";
 import { findPackedAssetViolations } from "./build/packed-runtime-assets";
 
 const DEFAULT_CONFIG_PATH = path.join("scripts", "npm-unpacked-size-thresholds.json");
@@ -191,10 +192,13 @@ export function evaluateUnpackedSize({
   unpackedBytes,
   files,
   thresholds,
+  readModule,
 }: {
   unpackedBytes: number;
   files: readonly { path: string; size: number }[];
   thresholds: ThresholdConfig["thresholds"];
+  /** Reads a packed bundle module so its chunk imports can be checked against `files`. */
+  readModule: PackedModuleReader;
 }): SizeEvaluation {
   const size = checkThreshold(unpackedBytes, thresholds.unpackedBytes);
   const headroomBytes = thresholds.unpackedBytes - unpackedBytes;
@@ -207,7 +211,10 @@ export function evaluateUnpackedSize({
     size.passed &&
     thresholds.warnHeadroomBytes !== undefined &&
     headroomBytes < thresholds.warnHeadroomBytes;
-  const violations = findPackedAssetViolations(files.map((file) => file.path));
+  const violations = findPackedAssetViolations(
+    files.map((file) => file.path),
+    readModule,
+  );
   if (!size.passed) {
     violations.push(
       `Unpacked size ${unpackedBytes} bytes exceeds threshold ${thresholds.unpackedBytes} bytes`,
@@ -353,7 +360,12 @@ function runBenchmark(config: ThresholdConfig, outputPath: string | null): Bench
     const packInfo = parsePackOutput(packResult.stdout);
     packFilename = packInfo.filename;
 
-    const evaluation = evaluateUnpackedSize({ ...packInfo, thresholds: config.thresholds });
+    // npm pack packs the working tree, so a packed path reads the same bytes from disk.
+    const evaluation = evaluateUnpackedSize({
+      ...packInfo,
+      thresholds: config.thresholds,
+      readModule: (packedPath) => fs.readFileSync(packedPath, "utf-8"),
+    });
     const report: BenchmarkReport = {
       ...evaluation,
       timestamp: new Date().toISOString(),

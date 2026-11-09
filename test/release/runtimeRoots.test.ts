@@ -37,6 +37,11 @@ describe("deriveRootsFromDist", () => {
         path.join(dist, "src/index.js"),
         `const image = import("jimp"); const text = "import('ignored')"; import.meta.resolve("glyphs/package.json");`,
       );
+      // A split chunk is scanned like the entry: its static external import is not a root.
+      writeFileSync(
+        path.join(dist, "src/chunk-ab12cd34.js"),
+        `import "static-external"; const lazy = import("chunk-dynamic-runtime");`,
+      );
       writeFileSync(
         path.join(dist, "db/migrations/runtime.ts"),
         `import type { Kysely } from "kysely"; import { sql } from "kysely";`,
@@ -46,7 +51,12 @@ describe("deriveRootsFromDist", () => {
         `// import { x } from "comment-only"; import "@img/sharp-linux-x64"; import "node:fs";`,
       );
 
-      expect(deriveRootsFromDist(dist)).toEqual(["glyphs", "jimp", "kysely"]);
+      expect(deriveRootsFromDist(dist)).toEqual([
+        "chunk-dynamic-runtime",
+        "glyphs",
+        "jimp",
+        "kysely",
+      ]);
     } finally {
       rmSync(dist, { recursive: true, force: true });
     }

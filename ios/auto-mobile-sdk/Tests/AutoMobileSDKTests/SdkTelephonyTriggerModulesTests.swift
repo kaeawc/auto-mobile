@@ -131,6 +131,58 @@ final class SdkTelephonyTriggerModulesTests: XCTestCase {
 
     // MARK: - Messages
 
+    private final class FakeNotificationService: Sendable {
+        let settingsReturn: Bool
+        let posts = OSAllocatedUnfairLock(initialState: 0)
+        let deadlines = OSAllocatedUnfairLock<[UInt64]>(initialState: [])
+
+        init(settingsReturn: Bool) {
+            self.settingsReturn = settingsReturn
+        }
+
+        func module() -> SdkMessagesTriggerModule {
+            SdkMessagesTriggerModule { title, body in
+                SdkMessagesTriggerModule.postLocalNotification(
+                    title: title,
+                    body: body,
+                    settingsProbe: { done in
+                        if self.settingsReturn { done() }
+                    },
+                    post: { _, _, _ in self.posts.withLock { $0 += 1 } },
+                    wait: { semaphore, deadline in
+                        self.deadlines.withLock { $0.append(deadline.uptimeNanoseconds) }
+                        // Consume completed callbacks or expire immediately, without sleeping.
+                        return semaphore.wait(timeout: DispatchTime(uptimeNanoseconds: 1))
+                    }
+                )
+            }
+        }
+    }
+
+    func testSmsFailsWhenNotificationSettingsNeverReturn() {
+        let notifications = FakeNotificationService(settingsReturn: false)
+
+        XCTAssertEqual(
+            notifications.module().handle(trigger: "sms", payload: ["phoneNumber": "555", "message": "hi"]),
+            .failed("notification_settings_unavailable")
+        )
+        XCTAssertEqual(notifications.posts.withLock { $0 }, 0)
+        XCTAssertEqual(notifications.deadlines.withLock { $0.count }, 1)
+    }
+
+    func testSmsKeepsNotificationTimeoutWhenPostStallsAfterSettingsReturn() {
+        let notifications = FakeNotificationService(settingsReturn: true)
+
+        XCTAssertEqual(
+            notifications.module().handle(trigger: "sms", payload: ["phoneNumber": "555", "message": "hi"]),
+            .failed("notification_timeout")
+        )
+        XCTAssertEqual(notifications.posts.withLock { $0 }, 1)
+        let deadlines = notifications.deadlines.withLock { $0 }
+        XCTAssertEqual(deadlines.count, 2)
+        XCTAssertEqual(deadlines.first, deadlines.last)
+    }
+
     func testSmsPostsANotificationTitledWithTheSender() {
         let posted = OSAllocatedUnfairLock<[String]>(initialState: [])
         let messages = SdkMessagesTriggerModule { title, body in

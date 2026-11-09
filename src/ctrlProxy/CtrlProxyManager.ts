@@ -287,6 +287,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       resolveApkUrl: () => resolveApkUrl(),
       resolveApkChecksum: () => resolveApkChecksum(),
       localApkPathOverride: () => readEnvRaw(ENV.CTRL_PROXY_APK_PATH),
+      forceFullVerification: () => readEnvBool(ENV.EAGER_PREFETCH),
       ...overrides,
     });
   }

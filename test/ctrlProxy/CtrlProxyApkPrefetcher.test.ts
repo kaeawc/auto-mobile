@@ -10,6 +10,7 @@ import {
 import { FakeChecksumCalculator } from "../fakes/FakeChecksumCalculator";
 import { FakeFileDownloader } from "../fakes/FakeFileDownloader";
 import { useScratchRoot } from "../helpers/scratchRoot";
+import { apkCacheStampPath } from "../../src/ctrlProxy/ApkCacheWarmCheck";
 
 /** A zip with an AndroidManifest.xml entry and incompressible padding to pass the size floor. */
 function fakeApkPayload(): Buffer {
@@ -98,5 +99,73 @@ describe("DefaultCtrlProxyApkPrefetcher", () => {
     expect(prefetcher.completedPath()).toBeNull();
     expect(await prefetcher.consumeCompleted(destination)).toBe(false);
     expect(await prefetcher.consume(destination)).toBe(false);
+  });
+
+  describe("warm cache (#17685)", () => {
+    let checksums: FakeChecksumCalculator;
+    const createVerifyingPrefetcher = (overrides: Partial<CtrlProxyApkPrefetcherDeps> = {}) =>
+      createPrefetcher({
+        checksumCalculator: () => checksums,
+        expectedChecksumOverride: () => "fake-checksum",
+        ...overrides,
+      });
+
+    beforeEach(() => {
+      checksums = new FakeChecksumCalculator();
+    });
+
+    test("a fresh download records a stamp, and the next daemon reuses it without hashing", async () => {
+      const first = await createVerifyingPrefetcher().prefetch();
+      expect(first).not.toBeNull();
+      expect(await fs.readFile(apkCacheStampPath(first as string), "utf-8")).toContain(
+        "fake-checksum",
+      );
+      const hashesAfterDownload = checksums.computedFiles.length;
+
+      const next = createVerifyingPrefetcher();
+      expect(await next.prefetch()).toBe(first);
+      expect(next.completedPath()).toBe(first);
+      expect(checksums.computedFiles.length).toBe(hashesAfterDownload);
+      expect(downloader.downloadedUrls).toHaveLength(1);
+    });
+
+    test("a cache without a stamp gets the full check once, then is warm", async () => {
+      const first = (await createVerifyingPrefetcher().prefetch()) as string;
+      await fs.rm(apkCacheStampPath(first));
+      const before = checksums.computedFiles.length;
+
+      expect(await createVerifyingPrefetcher().prefetch()).toBe(first);
+      expect(checksums.computedFiles.length).toBe(before + 1);
+      expect(await createVerifyingPrefetcher().prefetch()).toBe(first);
+      expect(checksums.computedFiles.length).toBe(before + 1);
+      expect(downloader.downloadedUrls).toHaveLength(1);
+    });
+
+    test("AUTOMOBILE_EAGER_PREFETCH mode runs the full check on a warm cache", async () => {
+      const first = await createVerifyingPrefetcher().prefetch();
+      const before = checksums.computedFiles.length;
+
+      const eager = createVerifyingPrefetcher({ forceFullVerification: () => true });
+      expect(await eager.prefetch()).toBe(first);
+      expect(checksums.computedFiles.length).toBe(before + 1);
+    });
+
+    test("a changed checksum misses the stamp and downloads again", async () => {
+      await createVerifyingPrefetcher().prefetch();
+      checksums.checksum = "new-checksum";
+
+      const next = createVerifyingPrefetcher({ expectedChecksumOverride: () => "new-checksum" });
+      expect(await next.prefetch()).not.toBeNull();
+      expect(downloader.downloadedUrls).toHaveLength(2);
+    });
+
+    test("a cached APK rewritten in place misses the stamp and is rechecked in full", async () => {
+      const first = (await createVerifyingPrefetcher().prefetch()) as string;
+      await fs.writeFile(first, Buffer.concat([apkPayload, Buffer.from("x")]));
+      const before = checksums.computedFiles.length;
+
+      expect(await createVerifyingPrefetcher().prefetch()).toBe(first);
+      expect(checksums.computedFiles.length).toBe(before + 1);
+    });
   });
 });

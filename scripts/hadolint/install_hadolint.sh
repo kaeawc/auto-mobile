@@ -2,11 +2,25 @@
 
 set -euo pipefail
 
-HADOLINT_VERSION="2.12.0" # Change this to the desired version
+# shellcheck source=scripts/hadolint/hadolint_version.sh
+source "$(dirname "${BASH_SOURCE[0]}")/hadolint_version.sh"
+# Cached, checksum-verified, backed-off release download (#17641).
+# shellcheck source=scripts/lib/release-download.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/release-download.sh"
 
 # Shared colors + command_exists + detect_os/detect_arch (issue #2822).
 # shellcheck source=scripts/lib/tool-install.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/tool-install.sh"
+
+# Run a command the way an `if` condition would (errexit is ignored inside it)
+# and record its exit status in RUN_STATUS, so callers can branch on it without
+# a function name in a condition.
+RUN_STATUS=0
+run_capture_status() {
+  local run_rc=0
+  "$@" || run_rc=$?
+  RUN_STATUS="${run_rc}"
+}
 
 # Install hadolint on macOS
 install_macos() {
@@ -121,33 +135,33 @@ install_manual() {
     install_dir="$HOME/.local/bin"
     mkdir -p "$install_dir"
 
-    # Download URL
+    # Download URL. The Windows asset carries an .exe suffix.
     binary_name="hadolint-${os_name}-${arch_name}"
-    download_url="https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/${binary_name}"
+    if [[ "$os_name" == "Windows" ]]; then
+        binary_name="${binary_name}.exe"
+    fi
+    download_url="$(hadolint_release_url "$binary_name")"
 
-    echo -e "${GREEN}Downloading hadolint binary from GitHub releases...${NC}"
+    local expected_sha
+    expected_sha="$(hadolint_release_sha256 "$binary_name")"
+    if [[ -z "$expected_sha" ]]; then
+        echo -e "${RED}No pinned checksum for hadolint ${HADOLINT_VERSION} asset ${binary_name}; add it to hadolint_version.sh.${NC}"
+        return 1
+    fi
+
+    echo -e "${GREEN}Fetching hadolint ${HADOLINT_VERSION} from GitHub releases...${NC}"
     echo "URL: $download_url"
 
     # Create temporary directory
     temp_dir=$(mktemp -d)
     trap 'rm -rf "$temp_dir"' EXIT
 
-    # Download the binary
-    if command -v curl >/dev/null 2>&1; then
-        # -f/--fail: treat HTTP errors (e.g. 404) as failures instead of
-        # silently saving the error page as the "binary". (#3641)
-        if ! curl -fsSL -o "$temp_dir/hadolint" "$download_url"; then
-            echo -e "${RED}Failed to download hadolint binary${NC}"
-            return 1
-        fi
-    elif command -v wget >/dev/null 2>&1; then
-        if ! wget -q -O "$temp_dir/hadolint" "$download_url"; then
-            echo -e "${RED}Failed to download hadolint binary${NC}"
-            return 1
-        fi
-    else
-        echo -e "${RED}Neither curl nor wget found. Please install one of them or download manually from:${NC}"
-        echo "$download_url"
+    # Reuses a cached binary whose SHA-256 matches the pin, else downloads with
+    # a bounded backoff (curl -f, so a 404 page is never installed, #3641) and
+    # verifies the checksum before installing or caching.
+    run_capture_status release_fetch_pinned "$download_url" "$expected_sha" "$temp_dir/hadolint" "hadolint/${HADOLINT_VERSION}"
+    if [[ "$RUN_STATUS" -ne 0 ]]; then
+        echo -e "${RED}Failed to download hadolint binary${NC}"
         return 1
     fi
 

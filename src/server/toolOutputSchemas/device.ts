@@ -15,6 +15,7 @@ import {
   biometricEnrollmentSchema,
   networkConditionProfileSchema,
 } from "../../features/utility/DeviceState";
+import { POSTURE_SOURCES } from "../../features/utility/device-state/CurrentDisplayState";
 import { deviceClockInputSchema } from "../../features/utility/DeviceClock";
 import { EMULATOR_SENSOR_NAMES } from "../../features/utility/EmulatorSensors";
 import {
@@ -111,6 +112,12 @@ const deviceStateOutputFields = {
       current: z
         .object({
           posture: observationDisplaySchema.unwrap().shape.posture,
+          postureSource: z
+            .enum(POSTURE_SOURCES)
+            .optional()
+            .describe(
+              "device_state: the device's committed posture. inferred_from_active_panel: mapped from the active panel (inner=opened, cover=closed) without reading the hinge, so a half-folded iPhone Duo reads opened when the inner panel is active and closed when the cover panel is active; not a confirmed hinge posture. Omitted when the posture could not be read (posture unknown).",
+            ),
           activePanel: z
             .object({ key: z.string(), role: observationDisplaySchema.unwrap().shape.role })
             .passthrough()
@@ -119,7 +126,7 @@ const deviceStateOutputFields = {
         .passthrough()
         .optional()
         .describe(
-          "Android foldables only: the committed device_state posture and the panel behind the default display, read live on every call.",
+          "Read live on every call: Android foldables report the committed device_state posture and panel behind the default display; iPhone Duo reports the active inner/cover panel from devicectl and a posture inferred from it (postureSource inferred_from_active_panel), or omits current when indeterminate.",
         ),
     })
     .passthrough()

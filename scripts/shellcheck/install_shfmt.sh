@@ -5,6 +5,9 @@
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/tool-install.sh"
 # shellcheck source=scripts/shellcheck/shfmt_version.sh
 source "$(dirname "${BASH_SOURCE[0]}")/shfmt_version.sh"
+# Cached, checksum-verified, backed-off release download (#17624).
+# shellcheck source=scripts/lib/release-download.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/release-download.sh"
 
 # shfmt's GitHub release assets use Go's GOARCH tokens (amd64/arm/386), which
 # differ from the shared detect_arch's canonical tokens, so keep a tool-local
@@ -91,27 +94,21 @@ install_binary() {
 
   local download_url="https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/${binary_name}"
 
-  echo -e "${GREEN}Downloading shfmt from GitHub releases...${NC}"
-  echo -e "${YELLOW}URL: $download_url${NC}"
+  local expected_sha
+  if ! expected_sha="$(shfmt_release_sha256 "${os}_${arch}")"; then
+    echo -e "${RED}No pinned checksum for shfmt ${SHFMT_VERSION} on ${os}_${arch}; add it to shfmt_version.sh.${NC}"
+    return 1
+  fi
 
   local target_file="$install_dir/shfmt"
   if [[ "$os" == "windows" ]]; then
     target_file="${target_file}.exe"
   fi
 
-  if command_exists curl; then
-    # -f: treat an HTTP error (e.g. 404) as a failure, not a saved error page.
-    curl -fL -o "$target_file" "$download_url"
-  elif command_exists wget; then
-    wget -O "$target_file" "$download_url"
-  else
-    echo -e "${RED}Neither curl nor wget found. Please install one of them or download manually from:${NC}"
-    echo "$download_url"
-    return 1
-  fi
+  echo -e "${GREEN}Fetching shfmt from GitHub releases...${NC}"
+  echo -e "${YELLOW}URL: $download_url${NC}"
 
-  # Verify the binary was downloaded correctly
-  if [[ ! -f "$target_file" ]]; then
+  if ! release_fetch_pinned "$download_url" "$expected_sha" "$target_file" "shfmt/${SHFMT_VERSION}"; then
     echo -e "${RED}Failed to download shfmt binary${NC}"
     return 1
   fi

@@ -26,16 +26,25 @@ set -euo pipefail
 # Tunables (overridable for tuning and for the BATS tests).
 #
 # Defaults are sized so the WORST CASE fits the workflow step's
-# `timeout-minutes: 15` backstop: 6 operations (apt-get update, apt-get install,
-# the alternate-mirror install fallback, bats clone, bats install, lychee) x
-# (MAX_ATTEMPTS x (CMD_TIMEOUT + KILL_GRACE) + retry delays) =
-# 6 x (2 x (60 + 10) + 5) = 870s < 900s. Healthy runs finish in seconds; a stalled mirror that cannot answer
-# in 60s will not answer in 180s either. Keep this arithmetic aligned when
-# changing any of these values or the step timeout.
+# `timeout-minutes: 15` backstop: 5 retried operations (apt-get update, apt-get
+# install, the alternate-mirror install fallback, bats clone, bats install) x
+# (MAX_ATTEMPTS x (CMD_TIMEOUT + KILL_GRACE) + retry delays) = 5 x (2 x (60 + 10)
+# + 5) = 725s, plus one lychee install bounded by LYCHEE_TIMEOUT + KILL_GRACE =
+# 150 + 10 = 160s, for 885s < 900s. Healthy runs finish in seconds; a stalled
+# mirror that cannot answer in 60s will not answer in 180s either. Keep this
+# arithmetic aligned when changing any of these values or the step timeout.
+#
+# The lychee install is not wrapped in try_with_retry: install_lychee.sh fetches
+# through scripts/lib/release-download.sh, which reuses a checksum-verified
+# cache and owns the bounded download backoff (#17641). It gets one attempt
+# with a timeout long enough for that backoff (about 60-90 s of waits), so a
+# GitHub release outage ends with the helper's UPSTREAM-DOWNLOAD-FAILURE line
+# instead of being killed at 60 s and retried from scratch.
 CMD_TIMEOUT_SECONDS="${FAST_VALIDATION_DEPS_CMD_TIMEOUT_SECONDS:-60}"
 KILL_GRACE_SECONDS="${FAST_VALIDATION_DEPS_KILL_GRACE_SECONDS:-10}"
 MAX_ATTEMPTS="${FAST_VALIDATION_DEPS_MAX_ATTEMPTS:-2}"
 RETRY_BASE_DELAY_SECONDS="${FAST_VALIDATION_DEPS_RETRY_BASE_DELAY_SECONDS:-5}"
+LYCHEE_TIMEOUT_SECONDS="${FAST_VALIDATION_DEPS_LYCHEE_TIMEOUT_SECONDS:-150}"
 BATS_CLONE_DIR="${FAST_VALIDATION_DEPS_BATS_CLONE_DIR:-/tmp/bats-core}"
 BATS_INSTALL_PREFIX="${FAST_VALIDATION_DEPS_BATS_INSTALL_PREFIX:-/usr/local}"
 # bats-core is installed with sudo, so pin it to a release and verify the
@@ -144,7 +153,7 @@ install_xmlstarlet_from_fallback_mirror() {
 
 main() {
   local var
-  for var in CMD_TIMEOUT_SECONDS KILL_GRACE_SECONDS MAX_ATTEMPTS RETRY_BASE_DELAY_SECONDS; do
+  for var in CMD_TIMEOUT_SECONDS KILL_GRACE_SECONDS MAX_ATTEMPTS RETRY_BASE_DELAY_SECONDS LYCHEE_TIMEOUT_SECONDS; do
     run_capture_status is_positive_integer "${!var}"
     if [[ "$RUN_STATUS" -ne 0 ]]; then
       die "${var} must be a positive integer (got '${!var}')"
@@ -184,7 +193,14 @@ main() {
       sudo "${BATS_CLONE_DIR}/install.sh" "$BATS_INSTALL_PREFIX"
   fi
 
-  run_with_retry "install lychee" scripts/lychee/install_lychee.sh
+  log "install lychee (timeout ${LYCHEE_TIMEOUT_SECONDS}s; the installer retries its own download)"
+  local lychee_status=0
+  timeout -k "$KILL_GRACE_SECONDS" "$LYCHEE_TIMEOUT_SECONDS" scripts/lychee/install_lychee.sh || lychee_status=$?
+  if [[ "$lychee_status" -eq 124 ]]; then
+    die "install lychee timed out after ${LYCHEE_TIMEOUT_SECONDS}s"
+  elif [[ "$lychee_status" -ne 0 ]]; then
+    die "install lychee failed with exit ${lychee_status}"
+  fi
 
   log "Fast Validation dependencies ready"
 }

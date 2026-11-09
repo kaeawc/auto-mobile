@@ -1,10 +1,34 @@
 import Foundation
 
+/// One back-stack entry: a screen and the route params it was pushed with (#14188). The start entry
+/// and screens without declared params carry no params.
+struct PrototypeStackPathEntry: Equatable, Sendable {
+    let screen: String
+    var params: [String: JSONValue] = [:]
+}
+
 /// Same wire shape as CtrlProxy's PrototypeStackSnapshot; depth is always derived from the path.
+/// `params` runs parallel to `path` and is reported only when some entry has params (#14188).
 struct PrototypeStackSnapshot: Equatable, Sendable {
-    let path: [String]
-    var depth: Int { path.count }
-    var wireObject: [String: Any] { ["path": path, "depth": depth] }
+    let entries: [PrototypeStackPathEntry]
+    var path: [String] { entries.map(\.screen) }
+    var depth: Int { entries.count }
+
+    init(entries: [PrototypeStackPathEntry]) {
+        self.entries = entries
+    }
+
+    init(path: [String]) {
+        entries = path.map { PrototypeStackPathEntry(screen: $0) }
+    }
+
+    var wireObject: [String: Any] {
+        var object: [String: Any] = ["path": path, "depth": depth]
+        if entries.contains(where: { !$0.params.isEmpty }) {
+            object["params"] = entries.map { JSONValue.object($0.params).foundationObject }
+        }
+        return object
+    }
 }
 
 enum PrototypeStacks {

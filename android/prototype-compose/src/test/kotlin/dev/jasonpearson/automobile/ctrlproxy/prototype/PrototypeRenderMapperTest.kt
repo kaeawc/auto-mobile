@@ -2,8 +2,11 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.*
 import java.io.File
+import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -247,6 +250,86 @@ class PrototypeRenderMapperTest {
     assertSame(before.children, after.children)
     assertSame(before.children[0].source, after.children[0].source)
     assertSame(before.children[0].style, after.children[0].style)
+  }
+
+  @Test
+  fun `setStack changing only lower entry params updates the bound screen`() = runTest {
+    val input =
+      spec(
+        PrototypeStackNode(
+          "nav",
+          start = "A",
+          screens =
+            mapOf(
+              "A" to PrototypeTextNode(text = "A"),
+              "B" to PrototypeTextNode(text = "B {route.x}"),
+            ),
+          routes = mapOf("B" to PrototypeRoute(params = mapOf("x" to "number"))),
+        ),
+      )
+    val runtime =
+      PrototypeRuntime(input, clock = { 42L }, nextSequence = { 1L }, requestScope = this)
+    val mapper = PrototypeRenderMapper(FakePrototypeValueFormatter())
+    suspend fun setStack(x: Int): PrototypeRenderModel {
+      runtime.handle(
+        PrototypeInteraction.Tap(
+          listOf(
+            PrototypeSetStackAction(
+              "nav",
+              listOf(
+                PrototypeRouteEntry("B", mapOf("x" to JsonPrimitive(x))),
+                PrototypeRouteEntry("A"),
+              ),
+            ),
+          ),
+        ),
+      )
+      val snapshot = runtime.current
+      return mapper.map(snapshot.spec, snapshot.pages, snapshot.stacks)
+    }
+    val before = setStack(1)
+    val beforeStack = runtime.current.stacks.getValue("nav")
+    val after = setStack(2)
+    val afterStack = runtime.current.stacks.getValue("nav")
+    assertEquals(listOf("B", "A"), afterStack.path)
+    assertEquals(beforeStack.path, afterStack.path)
+    assertEquals(beforeStack.paramsAt(1), afterStack.paramsAt(1))
+    assertNotEquals(beforeStack.paramsAt(0), afterStack.paramsAt(0))
+    // B is hidden under A, but its bound content remains part of the render root's source.
+    val beforeRoot = before.root.source as PrototypeStackNode
+    val afterRoot = after.root.source as PrototypeStackNode
+    assertEquals("B 1", (beforeRoot.screens.getValue("B") as PrototypeTextNode).text)
+    assertEquals("B 2", (afterRoot.screens.getValue("B") as PrototypeTextNode).text)
+    assertEquals("A", after.root.children.single().text)
+  }
+
+  @Test
+  fun `equal full stack snapshots reuse the bound root without remapping`() {
+    val input =
+      spec(
+        PrototypeStackNode(
+          "nav",
+          start = "A",
+          screens = mapOf("A" to PrototypeTextNode(text = "A {route.x}")),
+          routes = mapOf("A" to PrototypeRoute(params = mapOf("x" to "number"))),
+        ),
+      )
+    fun stacks() =
+      mapOf(
+        "nav" to
+          PrototypeStackSnapshot.of(
+            listOf("A"),
+            listOf(JsonObject(mapOf("x" to JsonPrimitive(1)))),
+          ),
+      )
+    val mapper = PrototypeRenderMapper(FakePrototypeValueFormatter())
+    val before = mapper.map(input, emptyMap(), stacks())
+    val boundRoot = checkNotNull(mapper.lastResolvedSpec).root
+    assertNotSame(input.root, boundRoot)
+    assertEquals("A 1", before.root.children.single().text)
+    assertSame(before, mapper.map(input, emptyMap(), stacks()))
+    assertSame(boundRoot, checkNotNull(mapper.lastResolvedSpec).root)
+    assertEquals(1, mapper.mappingPasses)
   }
 
   @Test

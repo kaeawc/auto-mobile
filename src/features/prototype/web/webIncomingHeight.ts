@@ -1,5 +1,6 @@
 import { record, type Raw } from "../prototypeTemplate";
-import { ownHeight, type PrepareChild } from "./webRowAspect";
+import { isWebLayerType } from "./webLayerTypes";
+import { ownHeight, verticalPadding, type PrepareChild } from "./webRowAspect";
 import { INCOMING_ALLOCATED_KEY, INCOMING_HEIGHT_KEY } from "./webStyle";
 
 const weightOf = (node: Raw | undefined): number | undefined => {
@@ -23,19 +24,16 @@ const takenHeight = (node: Raw, remaining: number): number => {
   return typeof record(style?.height)?.dp === "number" ? ownHeight(style) : floor;
 };
 
-const edge = (box: Raw | undefined, name: string) =>
-  typeof box?.[name] === "number" ? box[name] : 0;
-
 /**
- * The vertical padding and solid border of a node's box, which `box-sizing: border-box` never lets
- * it shrink below: a `flex: w w 0` item's base size, the height its weight share is added to.
+ * The vertical padding (its safe-area inset included; see verticalPadding) and solid border of a
+ * node's box, which `box-sizing: border-box` never lets it shrink below: a `flex: w w 0` item's
+ * base size, the height its weight share is added to.
  */
 function frame(style: Raw | undefined): number {
-  const padding = record(style?.padding);
   const border = record(style?.border);
   const width =
     typeof border?.width === "number" && border.gradient === undefined ? border.width : 0;
-  return edge(padding, "top") + edge(padding, "bottom") + 2 * width;
+  return verticalPadding(style) + 2 * width;
 }
 
 /**
@@ -135,6 +133,18 @@ export function exactWeightShares(children: readonly (Raw | undefined)[]): boole
 const childPath = (path: string, index: number) => `${path}.children[${index}]`;
 
 /**
+ * A child as it takes part in a column's flow: as `prepare` resolves it, but undefined when it is
+ * hoisted into a window layer (see isWebLayerType), open or closed, which leaves nothing in the
+ * column, so it takes none of its height and no spacing gap, and is handed none.
+ */
+const inFlow =
+  (prepare: PrepareChild): PrepareChild =>
+  (entry, path) => {
+    const node = prepare(entry, path);
+    return node && isWebLayerType(node.type) ? undefined : node;
+  };
+
+/**
  * `entry` with `height` as its incoming height, marked as an allocation (INCOMING_ALLOCATED_KEY)
  * when `allocated` (a weighted child's exact share; see exactWeightShares), so its own dp height
  * and height bounds do not cap it.
@@ -166,7 +176,9 @@ const COLUMN_PARENTS: ReadonlyMap<unknown, { readonly spacing: boolean }> = new 
  * repeatInstanceChildren hands each instance its own share instead. A height that depends on
  * layout (a sibling's wrap height, the screen) is left out, so the bound stays an upper one.
  *
- * `prepare` resolves a child as rendering will (bound, visible, `styleWhen` merged).
+ * `prepare` resolves a child as rendering will (bound, visible, `styleWhen` merged), in the
+ * column's child scope: an inset edge the column applies is consumed, so a child asking for the
+ * same edge carries none of it in its frame (see weightShares).
  */
 export function withColumnHeights(
   node: Raw,
@@ -180,7 +192,7 @@ export function withColumnHeights(
     return node;
   }
   const spacing = record(node.style)?.spacing;
-  const prepared = children.map((entry, index) => prepare(entry, childPath(path, index)));
+  const prepared = children.map((entry, index) => inFlow(prepare)(entry, childPath(path, index)));
   const heights = columnChildHeights(
     prepared,
     content,
@@ -217,7 +229,7 @@ export function repeatInstanceChildren(
     return prepares.map(() => template);
   }
   const prepared = prepares.flatMap((prepare) =>
-    template.map((entry, index) => prepare(entry, childPath(path, index))),
+    template.map((entry, index) => inFlow(prepare)(entry, childPath(path, index))),
   );
   const spacing = record(node.style)?.spacing;
   const heights = columnChildHeights(prepared, content, typeof spacing === "number" ? spacing : 0);

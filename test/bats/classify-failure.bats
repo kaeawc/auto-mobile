@@ -1172,3 +1172,175 @@ ROBOLECTRIC_FETCH_LOG=$'2026-11-04T07:09:55.9539251Z AutoMobileSDKFirstActivityT
   [[ "$output" == *"INVESTIGATE — instrumented first sample has no plain isolated recheck"* ]]
   [[ "$output" != *"RERUN-DONT-FIX"* ]]
 }
+
+@test "a GitHub release download 5xx classifies as infrastructure, not UNKNOWN (#17624)" {
+  fixture="$BATS_TEST_TMPDIR/issue-17624-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":65,"name":"Fast Validation","conclusion":"failure","steps":[{"name":"Run fast validation checks","conclusion":"failure"}]}]}
+JSON
+  # ktfmt.log as the 2026-11-09 outage left it (reconstructed from the lines
+  # quoted in #17624): curl's 504s, then the URL.
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
+    FAKE_ORDINARY_EXIT_LOG="$FIXTURE_DIR/github-release-504-ktfmt.log" bash "$SCRIPT" 608
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — pre-#17624"* ]]
+
+  # The installer's own marker, which the Fast Validation summary now echoes.
+  log="$BATS_TEST_TMPDIR/marker.log"
+  printf '%s\n' 'FAIL ktfmt           81234ms (log: /tmp/fast-validate/ktfmt.log)' \
+    '     [ktfmt] UPSTREAM-DOWNLOAD-FAILURE: https://github.com/facebook/ktfmt/releases/download/v0.65/ktfmt-0.65-with-dependencies.jar failed after 6 attempts (last error: curl: (22) The requested URL returned error: 504).' > "$log"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
+    FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 609
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — GitHub release asset download"* ]]
+
+  # BATS output from the shfmt auto-install: URL first, then curl's 502.
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":65,"name":"BATS Shell Tests (ubuntu-latest)","conclusion":"failure","steps":[{"name":"Run BATS Unit Tests","conclusion":"failure"}]}]}
+JSON
+  printf '%s\n' '# Downloading shfmt from GitHub releases...' \
+    '# URL: https://github.com/mvdan/sh/releases/download/v3.10.0/shfmt_v3.10.0_linux_amd64' \
+    '# curl: (22) The requested URL returned error: 502' '# Failed to download shfmt binary' '# Failed to install shfmt' > "$log"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
+    FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 610
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — pre-#17624"* ]]
+}
+
+@test "a GitHub release download 404 is not classified as infrastructure (#17624)" {
+  fixture="$BATS_TEST_TMPDIR/issue-17624-404-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":65,"name":"Fast Validation","conclusion":"failure","steps":[{"name":"Run fast validation checks","conclusion":"failure"}]}]}
+JSON
+  log="$BATS_TEST_TMPDIR/404.log"
+  sed 's/error: 504/error: 404/' "$FIXTURE_DIR/github-release-504-ktfmt.log" > "$log"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
+    FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 611
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"RERUN-DONT-FIX"* ]]
+}
+
+@test "a 5xx that recovered on retry does not mask a later failure (#17624)" {
+  fixture="$BATS_TEST_TMPDIR/issue-17624-recovered-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":65,"name":"BATS Shell Tests (ubuntu-latest)","conclusion":"failure","steps":[{"name":"Run BATS Unit Tests","conclusion":"failure"}]}]}
+JSON
+  log="$BATS_TEST_TMPDIR/recovered.log"
+  printf '%s\n' 'Downloading https://github.com/mvdan/sh/releases/download/v3.10.0/shfmt_v3.10.0_linux_amd64 (attempt 1/6)' \
+    'curl: (22) The requested URL returned error: 504' 'Download failed (exit 22); retrying in 3s' \
+    'Downloading https://github.com/mvdan/sh/releases/download/v3.10.0/shfmt_v3.10.0_linux_amd64 (attempt 2/6)' \
+    'Cached shfmt_v3.10.0_linux_amd64 in /home/runner/.cache/auto-mobile/tools/shfmt/3.10.0/abc' \
+    'not ok 12 new violation fails naming file and line' > "$log"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
+    FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 612
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"RERUN-DONT-FIX"* ]]
+}
+
+@test "a 5xx then a terminal checksum mismatch or 404 is not classified as infrastructure (#17624)" {
+  fixture="$BATS_TEST_TMPDIR/issue-17624-terminal-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":65,"name":"Fast Validation","conclusion":"failure","steps":[{"name":"Run fast validation checks","conclusion":"failure"}]}]}
+JSON
+  url='https://github.com/facebook/ktfmt/releases/download/v0.65/ktfmt-0.65-with-dependencies.jar'
+  log="$BATS_TEST_TMPDIR/terminal.log"
+  for terminal in \
+    "Checksum mismatch for /home/runner/.local/bin/ktfmt.jar.partial.x: expected aba9, got 0000|Refusing to install ktfmt-0.65-with-dependencies.jar: its checksum does not match the pin." \
+    "curl: (22) The requested URL returned error: 404|Download of ${url} failed with HTTP 404; not retrying. Check the pinned version and asset name."; do
+    printf '%s\n' 'Fetching ktfmt JAR from GitHub Releases...' "Downloading ${url} (attempt 1/6)" \
+      'curl: (22) The requested URL returned error: 504' 'Download failed (exit 22); retrying in 3s' \
+      "Downloading ${url} (attempt 2/6)" "${terminal%%|*}" "${terminal#*|}" \
+      "Failed to download ktfmt JAR from ${url}" > "$log"
+    run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
+      FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 613
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"RERUN-DONT-FIX"* ]]
+  done
+}
+
+@test "a ripgrep release download 5xx classifies as infrastructure, old and new installer (#17624)" {
+  fixture="$BATS_TEST_TMPDIR/issue-17624-ripgrep-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"main","jobs":[{"databaseId":65,"name":"Run JUnit Runner Unit Tests","conclusion":"failure","steps":[{"name":"Install ripgrep","conclusion":"failure"}]}]}
+JSON
+  url='https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-unknown-linux-musl.tar.gz'
+  # The pre-#17624 setup-ripgrep action: one curl, no retry (main, 07:28Z).
+  log="$BATS_TEST_TMPDIR/ripgrep-legacy.log"
+  printf '%s\n' '[setup-ripgrep] Platform: linux-x86_64' '[setup-ripgrep] Version: 15.1.0' \
+    "[setup-ripgrep] Download URL: ${url}" '[setup-ripgrep] Install directory: /home/runner/.local/bin' \
+    '[setup-ripgrep] Downloading ripgrep 15.1.0...' 'curl: (22) The requested URL returned error: 504' > "$log"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 22.' \
+    FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 614
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — pre-#17624 setup-ripgrep"* ]]
+
+  # The installer now routes through release_fetch_pinned and its marker.
+  printf '%s\n' "[setup-ripgrep] Download URL: ${url}" '[setup-ripgrep] Fetching ripgrep 15.1.0 (sha256 1c92)...' \
+    "Downloading ${url} (attempt 6/6)" 'curl: (22) The requested URL returned error: 504' \
+    "UPSTREAM-DOWNLOAD-FAILURE: ${url} failed after 6 attempts (last error: curl: (22) The requested URL returned error: 504)." \
+    "[setup-ripgrep] ERROR: Failed to download ripgrep from ${url}" > "$log"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
+    FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 615
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — GitHub release asset download"* ]]
+
+  # A new-installer 5xx that recovered must not match the legacy row.
+  printf '%s\n' "[setup-ripgrep] Download URL: ${url}" '[setup-ripgrep] Fetching ripgrep 15.1.0 (sha256 1c92)...' \
+    "Downloading ${url} (attempt 1/6)" 'curl: (22) The requested URL returned error: 504' \
+    "Downloading ${url} (attempt 2/6)" 'Cached ripgrep-15.1.0-x86_64-unknown-linux-musl.tar.gz in /home/runner/.cache' \
+    'not ok 3 a real regression' > "$log"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
+    FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 616
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"RERUN-DONT-FIX"* ]]
+}
+
+@test "a lychee release download 5xx classifies as infrastructure, old and new installer (#17641)" {
+  url='https://github.com/lycheeverse/lychee/releases/download/lychee-v0.22.0/lychee-x86_64-unknown-linux-gnu.tar.gz'
+  fixture="$BATS_TEST_TMPDIR/issue-17641-fast-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"main","jobs":[{"databaseId":65,"name":"Fast Validation","conclusion":"failure","steps":[{"name":"Install fast validation dependencies","conclusion":"failure"}]}]}
+JSON
+  local legacy_attempt=('Downloading lychee binary from GitHub releases...' "URL: ${url}"
+    'curl: (22) The requested URL returned error: 504' 'Failed to download lychee binary' 'Installation failed!')
+  # The pre-#17641 installer under install-fast-validation-deps.sh: both
+  # wrapper attempts hit the 504 (main, 08:20Z).
+  log="$BATS_TEST_TMPDIR/lychee-legacy.log"
+  printf '%s\n' '[install-fast-validation-deps] install lychee (attempt 1/2, timeout 60s)' "${legacy_attempt[@]}" \
+    '[install-fast-validation-deps] install lychee (attempt 2/2, timeout 60s)' "${legacy_attempt[@]}" \
+    '[install-fast-validation-deps] ERROR: install lychee failed after 2 attempts' > "$log"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
+    FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 617
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — pre-#17641 lychee installer under install-fast-validation-deps.sh"* ]]
+
+  # A legacy 504 that recovered on the wrapper's retry must not mask a later failure.
+  printf '%s\n' "${legacy_attempt[@]}" '[install-fast-validation-deps] install lychee (attempt 2/2, timeout 60s)' \
+    'lychee installed successfully' '[install-fast-validation-deps] Fast Validation dependencies ready' \
+    'not ok 3 a real regression' > "$log"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
+    FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 618
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"RERUN-DONT-FIX"* ]]
+
+  # The installer now routes through release_fetch_pinned and its marker.
+  printf '%s\n' "Fetching lychee 0.22.0 from GitHub releases..." "URL: ${url}" \
+    "Downloading ${url} (attempt 6/6)" 'curl: (22) The requested URL returned error: 504' \
+    "UPSTREAM-DOWNLOAD-FAILURE: ${url} failed after 6 attempts (last error: curl: (22) The requested URL returned error: 504)." \
+    'Failed to download lychee binary' 'Installation failed!' > "$log"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
+    FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 619
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — GitHub release asset download"* ]]
+
+  # The merge link check ran the legacy installer directly, with no wrapper.
+  fixture="$BATS_TEST_TMPDIR/issue-17641-links-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"main","jobs":[{"databaseId":65,"name":"Validate Documentation Links","conclusion":"failure","steps":[{"name":"Install Lychee","conclusion":"failure"}]}]}
+JSON
+  printf '%s\n' "${legacy_attempt[@]}" > "$log"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
+    FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 620
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — pre-#17641 lychee installer in the merge link check"* ]]
+}

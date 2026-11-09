@@ -330,7 +330,8 @@
                 cancelEdgeSwipe()
                 return
             }
-            guard swipeAnimation(target) == .slide else { return }
+            // An intercepted Back (#14188) runs onBack when the swipe ends instead of dragging the screen.
+            guard swipeAnimation(target) == .slide, !model.stackInterceptsBack(target) else { return }
             model.stackDrag = PrototypeModel.StackDrag(
                 target: target, revision: revision, progress: swipe.progress
             )

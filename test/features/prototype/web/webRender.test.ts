@@ -6,7 +6,12 @@ import {
   type WebChild,
   type WebElement,
 } from "../../../../src/features/prototype/web/webNodes";
-import { renderPrototypeStill } from "../../../../src/features/prototype/web/webStill";
+import { WEB_LAYER_TYPES } from "../../../../src/features/prototype/web/webLayerTypes";
+import { WEB_LAYER_RENDERED_TYPES } from "../../../../src/features/prototype/web/webRender";
+import {
+  renderPrototypeStill,
+  type PrototypeStillOptions,
+} from "../../../../src/features/prototype/web/webStill";
 
 const reference = JSON.parse(
   readFileSync(
@@ -941,6 +946,127 @@ describe("prototype web still (#16346)", () => {
     expect(byTag({ element: cell }, "after")[0]!.style).not.toHaveProperty("width");
   });
 
+  test("under a horizontal scroll a row's unsized aspect ratio sizes from the height (#16718)", () => {
+    const render = (scrollStyle: Record<string, unknown>, rowStyle?: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          root: {
+            type: "scroll",
+            axis: "horizontal",
+            style: scrollStyle,
+            child: {
+              type: "row",
+              testTag: "line",
+              ...(rowStyle ? { style: rowStyle } : {}),
+              children: [
+                { type: "box", testTag: "ratio", style: { aspectRatio: 1 } },
+                { type: "box", testTag: "after", style: { width: { dp: 40 } } },
+              ],
+            },
+          },
+        }),
+        "line",
+      )[0]!;
+    const style = (root: WebElement, tag: string) => byTag({ element: root }, tag)[0]!.style;
+    const sized = render({ height: { dp: 100 } });
+    // No width to reach, so the row hugs its content instead of growing to the scroll.
+    expect(sized.style).not.toHaveProperty("width");
+    expect(sized.style).not.toHaveProperty("max-width");
+    expect(style(sized, "ratio")).toMatchObject({ width: "100px", "flex-basis": "100px" });
+    expect(style(sized, "ratio").flex).toBeUndefined();
+    expect(style(sized, "after")).toMatchObject({ width: "40px" });
+    expect(style(sized, "after")["max-width"]).not.toBe("0px");
+    // The row's own padding comes off the height the scroll hands it.
+    const padded = render({ height: { dp: 100 } }, { padding: { top: 10, bottom: 10 } });
+    expect(style(padded, "ratio")).toMatchObject({ width: "80px", "flex-basis": "80px" });
+    // With no definite height the ratio stays as authored, and its sibling keeps its width.
+    const unsized = render({});
+    expect(unsized.style).not.toHaveProperty("width");
+    expect(style(unsized, "ratio")).not.toHaveProperty("width");
+    expect(style(unsized, "ratio")).not.toHaveProperty("flex");
+    expect(style(unsized, "after")).not.toHaveProperty("max-width");
+  });
+
+  test("a row nested in a box or row under a horizontal scroll still sizes from the height (#16718)", () => {
+    const row = {
+      type: "row",
+      children: [
+        { type: "box", testTag: "ratio", style: { aspectRatio: 1 } },
+        { type: "box", style: { width: { dp: 40 } } },
+      ],
+    };
+    const ratioIn = (child: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          root: { type: "scroll", axis: "horizontal", style: { height: { dp: 100 } }, child },
+        }),
+        "ratio",
+      )[0]!.style;
+    const inBox = { type: "box", style: { padding: { top: 5, bottom: 5 } }, children: [row] };
+    expect(ratioIn(inBox)).toMatchObject({ width: "90px", "flex-basis": "90px" });
+    expect(ratioIn({ type: "row", children: [row] })).toMatchObject({
+      width: "100px",
+      "flex-basis": "100px",
+    });
+  });
+
+  test("a dp-width row under a horizontal scroll caps its aspect ratio by the scroll's height (#16718)", () => {
+    const root = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "scroll",
+          axis: "horizontal",
+          style: { height: { dp: 100 } },
+          child: {
+            type: "row",
+            testTag: "line",
+            style: { width: { dp: 200 } },
+            children: [
+              { type: "box", testTag: "ratio", style: { aspectRatio: 1 } },
+              { type: "box", testTag: "after", style: { width: { dp: 40 } } },
+            ],
+          },
+        },
+      }),
+      "line",
+    )[0]!;
+    const style = (tag: string) => byTag({ element: root }, tag)[0]!.style;
+    // Compose's aspectRatio falls back to the 100 dp max height: 100x100, then the 40 dp box.
+    expect(style("ratio")).toMatchObject({ width: "100px", "flex-basis": "100px" });
+    expect(style("after")["max-width"]).not.toBe("0px");
+  });
+
+  test("a maxWidth row under a horizontal scroll fills to its own bound around its ratio (#17603)", () => {
+    const root = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "scroll",
+          axis: "horizontal",
+          child: {
+            type: "row",
+            testTag: "line",
+            style: { maxWidth: 200 },
+            children: [
+              { type: "box", testTag: "ratio", style: { aspectRatio: 1 } },
+              { type: "box", testTag: "after", style: { width: { dp: 40 } } },
+            ],
+          },
+        },
+      }),
+      "line",
+    )[0]!;
+    const style = (tag: string) => byTag({ element: root }, tag)[0]!.style;
+    // Compose's widthIn restores a 200 dp max width, so the ratio takes all of it and its sibling
+    // none; the row must grow to that bound, or its zero-basis children collapse to nothing.
+    expect(root.style).toMatchObject({ flex: "1 1 auto", "max-width": "200px" });
+    expect(style("ratio").flex).toBe("1 1 0");
+    expect(style("after")["max-width"]).toBe("0px");
+  });
+
   test("a dp-wide column in a horizontal scroll bounds its row to its own width (#16691)", () => {
     const shown = renderPrototypeStill({
       ...reference,
@@ -1128,6 +1254,149 @@ describe("prototype web still (#16346)", () => {
       "line",
     )[0]!;
     expect(row.style).not.toHaveProperty("width");
+  });
+
+  test("the height pass's layer types are the ones renderWebNode hoists (#16720)", () => {
+    expect([...WEB_LAYER_TYPES].sort()).toEqual([...WEB_LAYER_RENDERED_TYPES].sort());
+  });
+
+  test("a column's hoisted layer takes none of the height a weighted row gets (#16720)", () => {
+    const layers: Record<string, Record<string, unknown>> = {
+      bottomSheet: { type: "bottomSheet", detents: ["half"], child: { type: "text", text: "Hi" } },
+      dialog: { type: "dialog", title: "Delete?", confirm: { label: "Delete" } },
+      snackbar: { type: "snackbar", text: "Saved" },
+    };
+    const ratioOf = (layer: Record<string, unknown>, open: boolean) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          state: { open },
+          root: {
+            type: "column",
+            style: { height: { dp: 100 }, spacing: 8 },
+            children: [
+              { ...layer, openWhen: { key: "open", equals: true }, style: { height: { dp: 100 } } },
+              {
+                type: "row",
+                style: { weight: 1 },
+                children: [{ type: "box", testTag: "ratio", style: { aspectRatio: 2 } }],
+              },
+            ],
+          },
+        }),
+        "ratio",
+      )[0]!.style["flex-basis"];
+    // A layer draws in the window, open or closed, so neither its height nor a spacing gap beside
+    // it comes out of the row's share: the row keeps the whole 100 dp.
+    for (const [type, layer] of Object.entries(layers)) {
+      for (const open of [false, true]) {
+        expect([type, open, ratioOf(layer, open)]).toEqual([type, open, "200px"]);
+      }
+    }
+  });
+
+  test("a row's own safe-area padding comes out of its aspect ratio's height cap (#16720)", () => {
+    const ratioIn = (column: Record<string, unknown>, options: PrototypeStillOptions = {}) =>
+      byTag(
+        renderPrototypeStill(
+          {
+            ...reference,
+            root: {
+              type: "column",
+              ...column,
+              children: [
+                {
+                  type: "row",
+                  style: { width: { dp: 300 }, height: { dp: 100 } },
+                  safeAreaPadding: { edges: ["top"], types: ["systemBars"] },
+                  children: [{ type: "box", testTag: "ratio", style: { aspectRatio: 2 } }],
+                },
+              ],
+            },
+          },
+          options,
+        ),
+        "ratio",
+      )[0]!.style;
+    // Pixel 9's 48 dp top inset leaves the row 52 dp of content, so the box is 104 x 52.
+    expect(ratioIn({})).toMatchObject({ "flex-basis": "104px", width: "104px" });
+    // An ancestor that already applied the top inset consumed it, so the row adds none.
+    const consumed = { safeAreaPadding: { edges: ["top"], types: ["systemBars"] } };
+    expect(ratioIn(consumed)).toMatchObject({ "flex-basis": "200px" });
+    // The keyboard inset adds nothing in a still.
+    const ime = { safeAreaPadding: { edges: ["top"], types: ["ime"] } };
+    expect(ratioIn(ime)).toMatchObject({ "flex-basis": "104px" });
+    // The inset is the frame's: an iPhone 16 portrait top inset is 59 dp, leaving 41 dp.
+    expect(ratioIn({}, { frame: "iphone-16" })).toMatchObject({ "flex-basis": "82px" });
+  });
+
+  test("a weighted row's safe-area padding is part of the flex base its share grows from (#16720)", () => {
+    const ratio = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          style: { height: { dp: 100 } },
+          children: [
+            {
+              type: "row",
+              style: { weight: 1 },
+              safeAreaPadding: { edges: ["bottom"], types: ["systemBars"] },
+              children: [{ type: "box", testTag: "ratio", style: { aspectRatio: 2 } }],
+            },
+          ],
+        },
+      }),
+      "ratio",
+    )[0]!.style;
+    // Pixel 9's 24 dp bottom inset pads the row's 100 dp share, leaving its aspect ratio 76 dp.
+    expect(ratio["flex-basis"]).toBe("152px");
+  });
+
+  test("a column consumes its own safe-area inset before sharing its weights (#17610)", () => {
+    const top = { edges: ["top"], types: ["systemBars"] };
+    const weightedRow = (tag: string, extra: Record<string, unknown> = {}) => ({
+      type: "row",
+      style: { weight: 1 },
+      ...extra,
+      children: [{ type: "box", testTag: tag, style: { aspectRatio: 2 } }],
+    });
+    const still = renderPrototypeStill({
+      ...reference,
+      root: {
+        type: "column",
+        style: { height: { dp: 100 } },
+        safeAreaPadding: top,
+        children: [weightedRow("first", { safeAreaPadding: top }), weightedRow("second")],
+      },
+    });
+    // Pixel 9's 48 dp top inset leaves the column 52 dp; the first row's top inset is already
+    // consumed, so it adds no padding and the rows split 52 dp evenly: 26 dp, so 52 px wide each.
+    expect(byTag(still, "first")[0]!.style["flex-basis"]).toBe("52px");
+    expect(byTag(still, "second")[0]!.style["flex-basis"]).toBe("52px");
+  });
+
+  test("a chromeless still's height pass takes no safe-area inset, as its CSS sets none (#17610)", () => {
+    const ratioIn = (options: PrototypeStillOptions) =>
+      byTag(
+        renderPrototypeStill(
+          {
+            ...reference,
+            root: {
+              type: "row",
+              style: { height: { dp: 100 } },
+              safeAreaPadding: { edges: ["top"], types: ["systemBars"] },
+              children: [{ type: "box", testTag: "ratio", style: { aspectRatio: 2 } }],
+            },
+          },
+          options,
+        ),
+        "ratio",
+      )[0]!.style["flex-basis"];
+    // In the frame, Pixel 9's 48 dp top inset leaves the row 52 dp of content.
+    expect(ratioIn({})).toBe("104px");
+    // Chromeless, every --safe-* variable is 0px, so the row keeps its whole 100 dp.
+    expect(ratioIn({ chromeless: true })).toBe("200px");
   });
 
   test("an explicit wrap-width root keeps its content width in its window", () => {

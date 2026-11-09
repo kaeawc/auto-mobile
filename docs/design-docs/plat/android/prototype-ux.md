@@ -1456,33 +1456,55 @@ events from an explored prototype is not built.
 ### Route contract
 
 `prototype_routes_v1` gates stack `routes`, push/replace `params`, pop `force`, `setStack`,
-route placeholders and `stack:<id>` storage keys. Android and iOS intentionally do not advertise
-it until runtime support is implemented. `screens` remains a map of bare nodes; the optional
-sibling `routes` map may contain only screen names of that stack. Each route has optional
-`params: {name: "string"|"number"|"boolean"}` (at most 16, path-key names), `onEnter` and
-`onBack` (1–32 actions each, with the existing action nesting budget). The start screen cannot
-declare params because initial display and popToRoot cannot supply them. Param names use the
-uncapped path-key identifier grammar; bound state keys are checked by the runtime.
+route placeholders and `stack:<id>` storage keys. CtrlProxy, the embedded renderer (saved
+prototypes, ProtoViewer, disposable apps) and the iOS prototype agent advertise it; the host refuses
+these fields against a device that does not, so an older runner fails closed. `screens` remains a
+map of bare nodes; the optional sibling `routes` map may contain only screen names of that stack.
+Each route has optional `params: {name: "string"|"number"|"boolean"}` (at most 16, path-key
+names), `onEnter` and `onBack` (1–32 actions each, with the existing action nesting budget). The
+start screen cannot declare params because initial display and popToRoot cannot supply them. Param
+names use the uncapped path-key identifier grammar; bound state keys are checked by the runtime.
 
 Push and replace accept up to 16 scalar literals or existing state/data/item/index value bindings
 in `params`. All declared params are required; unknown names and incorrectly typed literals are
 rejected at the action. `setStack {stack, path:[{screen,params?}]}` validates each entry the same way
-and requires 1–MAX_PROTOTYPE_STACK_DEPTH entries. The device runtimes replace the whole path with
-the entries' screens and report one `screen_changed` when the top screen or depth changes; a path
-naming an unknown screen leaves the stack unchanged. A non-forced pop of the owning stack in
+and requires 1–MAX_PROTOTYPE_STACK_DEPTH entries. A non-forced pop of the owning stack in
 its screen's onBack list, including nested timer and request follow-ups, is rejected; `force:true`
 bypasses that guard. Pops in dialog actions are independent. An onEnter list cannot push or replace
-its own screen, including through nested action lists. Cross-screen lifecycle cycles, including
-push/pop ping-pong, require runtime navigation-state guards. `{route.name}` uses the repeat tokenizer
+its own screen, including through nested action lists. `{route.name}` uses the repeat tokenizer
 and bindable fields, condition operands and whole data-pointer segments. Its name must be declared by the enclosing screen; lifecycle actions
 use their named screen's scope. A nested stack's screen establishes its own scope. The `route` repeat
 alias remains valid in specs without route features; route-enabled specs reserve it for params.
 
-Storage accepts `stack:<id>` only for declared stacks. Navigation, param binding, lifecycle execution,
-persistence/restore precedence and event emission are owed by the runtime slice. Status and inspect
-reserve optional `stacks.<id>.params: object[]` parallel to the existing `path: string[]`;
-`screen_changed` reserves optional scalar `params` alongside `screen` and `depth`. No new fields
-are emitted by the current runtimes.
+Runtime (shared by `PrototypeRuntime` on Android and the iOS session; pure helpers in
+`PrototypeRouteRuntime` and its Swift twin):
+
+- Each path entry is `{screen, params}`. Push, replace and setStack resolve bindings when the action
+  runs (`{item}`/`{index}` were bound to the row when the repeat was instantiated) and must match
+  the route's declarations exactly after resolution; otherwise the action leaves the stack
+  unchanged. Popping restores the entry below with its own params.
+- `{route.name}` binds each screen's subtree in the stack path to that screen's topmost entry's
+  params, and its onEnter/onBack lists to the entry's params when they run: text renders the value,
+  a whole-placeholder operand keeps its type, and a whole data-pointer segment takes the value
+  escaped per RFC 6901. Binding happens before `/data` resolution; `{index}` is left for the repeat
+  that owns it. Screens outside the path are not bound.
+- `screen_changed` is emitted once per navigation when the top screen, depth or top params change,
+  with `params` beside `screen` and `depth` only when the top entry has params. The new top screen's
+  onEnter runs after that event. Each stack's first screen also enters once per show (not on a
+  stack whose path a same-id show kept; a stack new to that show still enters). Lifecycle lists
+  nest at most 8 deep, so cross-screen onEnter cycles end.
+- System Back, the iOS edge swipe and a non-forced authored `pop` run the top screen's `onBack`
+  instead of popping when the stack is above depth 1; `pop {force:true}` always pops, so a confirm
+  that leaves must use it. A screen with onBack shows no predictive-back preview.
+- Status, inspect and events keep `stacks.<id>.path: string[]` and add `params: object[]` parallel to
+  it when any entry has params.
+- A listed `stack:<id>` key stores the path as `[{screen, params?}]`. The storage restorer checks
+  its shape on Android; the runtime restores it when every screen exists and every entry's params
+  fit, and otherwise starts the stack at `start` and records that path over the stale one. On a fresh
+  iOS show, the restorer also checks screens and param types, drops a stale key as `mismatch`, and
+  the coordinator removes it rather than recording the start path. A same-id show's
+  kept paths win over storage. Restoring emits no `screen_changed`; the restored top's onEnter runs
+  as the show's first entry.
 
 ### Stack transitions
 

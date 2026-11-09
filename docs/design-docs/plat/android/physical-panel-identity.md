@@ -57,7 +57,12 @@ the panel id, and pushed display transitions have never carried a panel key.
   and stop. A key two live displays share is left out too, since it cannot target either.
 - Per observation, `ObservedAndroidDisplayCache` maps a logical display id to a panel with
   `cmd display get-displays` (one `Display id N: DisplayInfo{... uniqueId "local:N" ...}` line per
-  active logical display), cached for 5 seconds and cleared by a display transition.
+  shell-visible logical display), cached for 5 seconds and cleared by a display transition.
+  When a virtual, overlay or cluster inventory panel is missing, observation and action connection
+  checks supplement the list from enabled records in `dumpsys display`'s Logical Displays section.
+  Only missing secondary inventory panels and unreported nonzero logical ids are added; the shell
+  list wins conflicts, and disabled fold panels remain disconnected. Physical-only inventories
+  need no additional read.
 - A pushed `display_transition` without a panel key clears that cache; the next observation
   re-reads it, but callers that may not probe (`tapOn` refresh) get no panel, and the transition
   tracker cannot tell a panel swap from a same-panel change except by width and height.

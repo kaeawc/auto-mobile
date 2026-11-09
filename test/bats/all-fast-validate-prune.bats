@@ -202,3 +202,29 @@ teardown() {
 
   [ "$status" -eq 0 ]
 }
+
+@test "a failed check's upstream download failure is echoed into the summary (#17624)" {
+  # Copy the aggregator into a fixture tree whose ktfmt check fails the way a
+  # GitHub release outage does, so classify-failure.sh can see it in the job log.
+  local fixture="$BATS_TEST_TMPDIR/tree"
+  mkdir -p "$fixture/scripts/lib" "$fixture/scripts/ktfmt" "$fixture/node_modules/.bin"
+  # ensure_node_modules is a no-op once turbo exists.
+  printf '#!/usr/bin/env bash\n' > "$fixture/node_modules/.bin/turbo"
+  chmod +x "$fixture/node_modules/.bin/turbo"
+  cp "$ABS_SCRIPT" "$fixture/scripts/"
+  local lib
+  for lib in spotlight-exclude shell-core; do
+    cp "scripts/lib/${lib}.sh" "$fixture/scripts/lib/"
+  done
+  cat > "$fixture/scripts/ktfmt/validate_ktfmt.sh" <<'STUB'
+#!/usr/bin/env bash
+echo "curl: (22) The requested URL returned error: 504" >&2
+echo "UPSTREAM-DOWNLOAD-FAILURE: https://github.com/facebook/ktfmt/releases/download/v0.65/ktfmt-0.65-with-dependencies.jar failed after 6 attempts" >&2
+exit 1
+STUB
+  chmod +x "$fixture/scripts/ktfmt/validate_ktfmt.sh"
+  run "$fixture/scripts/all_fast_validate_checks.sh" --only ktfmt --no-parallel
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL ktfmt"* ]]
+  [[ "$output" == *"[ktfmt] UPSTREAM-DOWNLOAD-FAILURE: https://github.com/facebook/ktfmt/releases/download/v0.65/"* ]]
+}

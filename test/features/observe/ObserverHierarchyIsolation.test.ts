@@ -1024,6 +1024,7 @@ test.each([
   ["the observed panel", true, "info-displays-duo-cover-active.json", "primary-1", 0],
   ["the live active panel", false, "info-displays-duo-inner-active.json", "primary-1", 1],
   ["the live cover panel", false, "info-displays-duo-cover-active.json", "primary", 1],
+  // Nothing identifies the active panel, so the first-panel frame is refused as unverified (#17593).
   ["the first panel without live evidence", false, undefined, "primary", 1],
 ] as const)(
   "iOS simulator observer captures %s without advancing transitions",
@@ -1046,7 +1047,10 @@ test.each([
     );
     try {
       const result = await observerScreenshot(device).executeObservationRead({ format: "png" });
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(liveFixture !== undefined);
+      if (!liveFixture) {
+        expect(result.error).toContain("could not be verified");
+      }
       expect(sources.captures.at(-1)).toBe(expected);
       expect(sources.readDisplays).toHaveBeenCalledTimes(liveReads);
       expect(displayTransitions.revision(device.deviceId)).toBe(revision);

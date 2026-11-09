@@ -72,6 +72,10 @@ for a in "$@"; do
   prev="$a"
 done
 echo "$*" >> "${CURL_LOG:-/dev/null}"
+if [[ -n "${CURL_FAIL_HTTP:-}" ]]; then
+  echo "curl: (22) The requested URL returned error: ${CURL_FAIL_HTTP}" >&2
+  exit 22
+fi
 [[ -n "$out" ]] && printf 'FAKEJAR' > "$out"
 exit 0
 STUB
@@ -86,6 +90,23 @@ if [[ " $* " == *" --version "* ]]; then
   exit 0
 fi
 exit 0
+STUB
+
+  # The installer verifies the JAR against the pinned KTFMT_SHA256 (#17624).
+  # The fake JAR cannot hash to the pin, so sha256sum reports the pin unless
+  # FAKE_SHA256 models a corrupt download. Failed curl calls never wait: sleep
+  # just records the backoff delay.
+  # shellcheck source=scripts/ktfmt/ktfmt_version.sh
+  source "$REPO_ROOT/scripts/ktfmt/ktfmt_version.sh"
+  export PINNED_SHA256="$KTFMT_SHA256"
+  cat > "$STUB_BIN/sha256sum" <<'STUB'
+#!/usr/bin/env bash
+echo "${FAKE_SHA256:-$PINNED_SHA256}  $1"
+STUB
+  export SLEEP_LOG="$TEST_DIR/sleep.log"
+  cat > "$STUB_BIN/sleep" <<'STUB'
+#!/usr/bin/env bash
+echo "$1" >> "$SLEEP_LOG"
 STUB
 
   chmod +x "$STUB_BIN"/*
@@ -147,4 +168,44 @@ teardown() {
   [[ "$output" == *"0.66"* ]]
   [[ "$output" == *"0.65"* ]]
   [[ "$output" != *"Installation completed successfully"* ]]
+}
+
+@test "Linux: a cached JAR whose checksum matches the pin installs without downloading (#17624)" {
+  cache="$HOME/.cache/auto-mobile/tools/ktfmt/0.65/$PINNED_SHA256"
+  mkdir -p "$cache"
+  printf 'CACHEDJAR' > "$cache/ktfmt-0.65-with-dependencies.jar"
+  run env UNAME_S="Linux" CURL_FAIL_HTTP=504 bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ ! -s "$CURL_LOG" ]
+  [[ "$output" == *"Using cached ktfmt-0.65-with-dependencies.jar"* ]]
+  [ "$(cat "$HOME/.local/bin/ktfmt-0.65-with-dependencies.jar")" = "CACHEDJAR" ]
+}
+
+@test "Linux: a fresh download populates the cache for the next run (#17624)" {
+  run env UNAME_S="Linux" bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ -s "$HOME/.cache/auto-mobile/tools/ktfmt/0.65/$PINNED_SHA256/ktfmt-0.65-with-dependencies.jar" ]
+}
+
+@test "Linux: a GitHub 504 is retried with backoff, then reported as an upstream failure (#17624)" {
+  run env UNAME_S="Linux" CURL_FAIL_HTTP=504 RELEASE_DOWNLOAD_ATTEMPTS=3 RELEASE_DOWNLOAD_JITTER=false bash "$SCRIPT"
+  [ "$status" -ne 0 ]
+  [ "$(wc -l < "$CURL_LOG" | tr -d ' ')" -eq 3 ]
+  [ "$(paste -sd' ' "$SLEEP_LOG")" = "3 6" ]
+  [[ "$output" == *"UPSTREAM-DOWNLOAD-FAILURE: https://github.com/facebook/ktfmt/releases/download/v0.65/ktfmt-0.65-with-dependencies.jar failed after 3 attempts"* ]]
+  [[ "$output" == *"Failed to download ktfmt JAR"* ]]
+  [ ! -e "$HOME/.local/bin/ktfmt" ]
+}
+
+@test "Linux: a downloaded JAR whose checksum differs from the pin is rejected (#17624)" {
+  run env UNAME_S="Linux" FAKE_SHA256="deadbeef" bash "$SCRIPT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Checksum mismatch"* ]]
+  [ ! -e "$HOME/.local/bin/ktfmt-0.65-with-dependencies.jar" ]
+  [ ! -e "$HOME/.local/bin/ktfmt" ]
+}
+
+@test "the Dockerfile's ktfmt pin and checksum match ktfmt_version.sh" {
+  grep -qx "ARG KTFMT_VERSION=${KTFMT_VERSION}" "$REPO_ROOT/Dockerfile"
+  grep -qx "ARG KTFMT_SHA256=${KTFMT_SHA256}" "$REPO_ROOT/Dockerfile"
 }

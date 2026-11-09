@@ -36,7 +36,6 @@ class AutoMobilePrototypeCapabilitiesTest {
    * renderer leaves them to the app. `imageAsset.data` (#14192) has a validated contract and no
    * media store yet.
    */
-  // Routes are contract-only until navigation and restore semantics ship.
   private val exclusions =
     setOf(
       "prototype_glass_v1", // Real backdrop blur is deferred to PR 2; never simulate glass.
@@ -45,7 +44,6 @@ class AutoMobilePrototypeCapabilitiesTest {
       // Realtime transport, routing and lifecycle remain owed by the runtime slices.
       "prototype_platform_realtime_v1",
       "prototype_platform_realtime_device_v1",
-      "prototype_routes_v1",
       "prototype_platform_test_v1",
       "prototype_platform_share_v1", // Contract only; system share sheet runtime is owed.
       "prototype_backdrop_v1",

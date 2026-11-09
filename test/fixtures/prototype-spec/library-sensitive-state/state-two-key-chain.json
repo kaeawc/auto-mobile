@@ -1,0 +1,38 @@
+{
+  "spec": {
+    "id": "sensitive-flow",
+    "window": { "placement": { "type": "fullscreen" } },
+    "requires": { "platform": ["auth"] },
+    "state": { "first": "", "second": "" },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "button",
+          "label": "Copy",
+          "onTap": [
+            { "type": "setData", "path": "/data/leak", "value": { "state": "second" } },
+            { "type": "setState", "key": "second", "value": "{data:/hop}" },
+            { "type": "setData", "path": "/data/hop", "value": { "state": "first" } },
+            { "type": "setState", "key": "first", "value": { "platform": "/auth/userId" } }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Send",
+          "onTap": [
+            {
+              "type": "request",
+              "url": "https://example.com/submit",
+              "via": "device",
+              "query": { "q": { "data": "/leak" } }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": { "library": true },
+  "expectedPath": "root.children[1].onTap[0].query.q",
+  "expectedMessage": "Sensitive value cannot be bound into a request"
+}

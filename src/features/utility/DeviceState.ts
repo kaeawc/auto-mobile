@@ -1,3 +1,5 @@
+import { createProductionDevicectlPanelScreenshotSource } from "../../utils/ios-cmdline-tools/DevicectlPanelScreenshotSource";
+import type { DevicectlDisplayInfoSource } from "../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
 import type { IosRunnerLocationClient } from "./device-state/LocationOperations";
 import {
   defaultDeviceTraits,
@@ -165,6 +167,8 @@ export class DeviceState {
 
   private readonly clock: ClockOperations;
 
+  private iosDisplayInfoSource: DevicectlDisplayInfoSource | undefined;
+
   private readonly doNotDisturb = new DoNotDisturbOperations({
     device: () => this.device,
     adbFactory: () => this.adbFactory,
@@ -181,6 +185,7 @@ export class DeviceState {
 
   constructor(device: BootedDevice, dependencies: DeviceStateDependencies = {}) {
     this.device = device;
+    this.iosDisplayInfoSource = dependencies.iosDisplayInfoSource;
     this.screenLock = createScreenLockOperations(
       () => this.device,
       () => this.adbFactory,
@@ -268,8 +273,17 @@ export class DeviceState {
     };
   }
 
+  /** Built on first use: constructing the production source probes CoreDevice, which a read that never needs it must not do. */
+  private displayInfoSource(): DevicectlDisplayInfoSource | undefined {
+    if (this.device.platform !== "ios") {
+      return this.iosDisplayInfoSource;
+    }
+    this.iosDisplayInfoSource ??= createProductionDevicectlPanelScreenshotSource();
+    return this.iosDisplayInfoSource;
+  }
+
   /**
-   * The static inventory, plus the live posture and active panel on an Android foldable. Read on
+   * The static inventory, plus the live posture and active panel on a multi-panel device. Read on
    * every call, never cached: a posture change (setPosture, `emu fold`) must show up in the next
    * read (#17049).
    */
@@ -281,7 +295,7 @@ export class DeviceState {
       this.device,
       this.adbFactory.create(this.device),
       this.timer,
-      getAbortSignal(),
+      { signal: getAbortSignal(), iosDisplayInfoSource: this.displayInfoSource() },
     );
     return { ...this.device.displays, ...(current ? { current } : {}) };
   }

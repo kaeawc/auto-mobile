@@ -104,6 +104,14 @@ export const INCOMING_HEIGHT_KEY = "webIncomingHeight";
 export const INCOMING_ALLOCATED_KEY = "webIncomingAllocated";
 
 /**
+ * A style key the web renderer adds to a node, never authored: the frame's safe-area inset (dp)
+ * its `safeAreaPadding` adds on its top and bottom edges where no ancestor consumed them. CSS reads
+ * the inset from a variable, so the static height pass needs it in dp to take it out of the node's
+ * content height and weight base, as it takes out the authored padding (see rowContentHeight).
+ */
+export const SAFE_INSET_KEY = "webSafeInset";
+
+/**
  * A row child's measure hint: `take` makes it the row's lone grower, `zero` measures it against no
  * width, and `shrink` sets how fast it gives up width, from its own `basis` when it has one. `later`
  * marks a sibling after a capped aspect ratio, whose authored `minWidth` holds only while width
@@ -548,15 +556,21 @@ export function containerChildStyle(
   node: Raw,
   parentAxis: "row" | "column" | undefined,
 ): WebStyleContext {
-  const style = record(node.style);
-  const definite =
-    typeof record(style?.width)?.dp === "number" || typeof style?.maxWidth === "number";
   return {
     ...scope.style,
     parentAxis,
     weightsChildren: parentAxis !== undefined && WEIGHTING_PARENTS.has(node.type),
-    unboundedWidth: scope.style.unboundedWidth === true && !definite,
+    unboundedWidth: scope.style.unboundedWidth === true && !boundsOwnWidth(node.style),
   };
+}
+
+/**
+ * Whether a node's own dp `width` or `maxWidth` gives its content a finite max width, as Compose's
+ * `Modifier.width` and `widthIn` do even under an unbounded (horizontally scrolling) width.
+ */
+export function boundsOwnWidth(style: unknown): boolean {
+  const raw = record(style);
+  return typeof record(raw?.width)?.dp === "number" || typeof raw?.maxWidth === "number";
 }
 
 /** What a scroll's child sees: the scroll's axis, and an unbounded width when it scrolls across. */

@@ -24,6 +24,7 @@
 # --- portable: path has an iOS token but the test needs no iOS host --------------
 
 # Source, workflow and script scans read repository files and run no iOS code.
+portable test/features/prototype/web/webIosParity*.test.ts               # Chromium/file-based parity checks; no iOS host commands
 portable test/lint/**                                                    # source-scan guards over src/ and scripts
 portable test/scripts/**                                                 # workflow, script and generator checks that read repo files
 portable test/doctor/iosExecResultConsolidation.test.ts                  # AST scan of the doctor source

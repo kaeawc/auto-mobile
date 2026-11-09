@@ -74,6 +74,33 @@ final class SpringBoardPanelTests: XCTestCase {
         XCTAssertEqual(cover.first?.bounds?.left, 20)
     }
 
+    func testFreshSpringBoardAlertOverAnotherAppUsesItsOwningPanelSpace() {
+        // OK in the captured VoiceOver system alert, while Settings is the foreground app.
+        let button = UIElementInfo(text: "OK", bounds: ElementBounds(left: 502, top: 331, right: 550, bottom: 619))
+        // The lit inner panel's window (display 3, portrait 669x951) is the only window in the snapshot.
+        let height = SpringBoardPanel.alertPortraitHeight(
+            windowDisplayId: 3, mainDisplayId: 1, windowPortraitHeight: 951
+        )
+        let rotated = ElementLocator.alertsInObservedSpace([button], innerPanelPortraitHeight: height)[0]
+        XCTAssertEqual(height, 951)
+        XCTAssertEqual(
+            [rotated.bounds?.left, rotated.bounds?.top, rotated.bounds?.right, rotated.bounds?.bottom],
+            [332, 502, 620, 550]
+        )
+        // Cover-panel windows, unknown displays and a missing main display stay untouched.
+        for (owner, main) in [(UInt64(1), UInt64?(1)), (nil, 1), (3, nil)] {
+            let unchangedHeight = SpringBoardPanel.alertPortraitHeight(
+                windowDisplayId: owner, mainDisplayId: main, windowPortraitHeight: 951
+            )
+            XCTAssertNil(unchangedHeight)
+            let unchanged = ElementLocator.alertsInObservedSpace([button], innerPanelPortraitHeight: unchangedHeight)[0]
+            XCTAssertEqual(
+                [unchanged.bounds?.left, unchanged.bounds?.top, unchanged.bounds?.right, unchanged.bounds?.bottom],
+                [502, 331, 550, 619]
+            )
+        }
+    }
+
     func testRotatedTreeRotatesEveryDescendantAndReplacesTheRootBounds() {
         let child = UIElementInfo(
             text: "Settings", bounds: ElementBounds(left: 52, top: 814, right: 139, bottom: 882)

@@ -152,17 +152,17 @@ Option B needs no ruleset edit. If a required name ever changes, update the
 Estimates: CircleCI minutes = GitHub mean + ~1.5 min VM start; credits = minutes × 200
 (`m4pro.medium`). No PR lane needs secrets.
 
-| Job                                                                                                        | CircleCI job                             | Est. min/run                | Disposition                                               |
-| ---------------------------------------------------------------------------------------------------------- | ---------------------------------------- | --------------------------- | --------------------------------------------------------- |
-| XCTestRunner Simulator Tests (nightly + `run-ios-sim`)                                                     | none                                     | ~24                         | Stays on GitHub, off the PR path                          |
-| iOS Device Capture to WHEP (advisory)                                                                      | `ios-device-webrtc`                      | ~12                         | Paid plan; ScreenCaptureKit on CircleCI VMs unproven      |
-| Build Root SPM Package (**required**)                                                                      | `ios-spm-root-package-build`             | ~3                          | Yes, behind the §2 shim                                   |
-| Swift Packages / Build Xcode Projects (→ **iOS Build**)                                                    | `ios-swift-packages` / `ios-xcode-build` | ~7 / ~5                     | Yes, behind the shim                                      |
-| iOS Playground Tests (advisory)                                                                            | `ios-playground-tests`                   | ~6                          | Already moved                                             |
-| SwiftLint, Swift Code Coverage, Build Desktop App, Installer Minimal (**required**; hosted only for forks) | none / `swift-code-coverage` (main)      | 2-6                         | Fork leg only, behind a shim; same-repo stays self-hosted |
-| Nightly sweeps (Swift Packages/Xcode 26.5+26.6, TSan, macOS BATS/Node)                                     | new nightly workflow                     | ~6-10 each                  | Paid plan; scheduled pipeline on main                     |
-| Release: CtrlProxy IPA, prototype-agent (unsigned/ad-hoc)                                                  | none                                     | ~3                          | Could move; no secrets                                    |
-| Release: screen-capture helper, network-filter probe, desktop DMG installers                               | none                                     | 10-25 (notarization billed) | **Do not move** (below)                                   |
+| Job                                                                                             | CircleCI job                             | Est. min/run                | Disposition                                               |
+| ----------------------------------------------------------------------------------------------- | ---------------------------------------- | --------------------------- | --------------------------------------------------------- |
+| XCTestRunner Simulator Tests (nightly + `run-ios-sim`)                                          | none                                     | ~24                         | Stays on GitHub, off the PR path                          |
+| iOS Device Capture to WHEP (advisory)                                                           | `ios-device-webrtc`                      | ~12                         | Paid plan; ScreenCaptureKit on CircleCI VMs unproven      |
+| Build Root SPM Package (**required**)                                                           | `ios-spm-root-package-build`             | ~3                          | Yes, behind the §2 shim                                   |
+| Swift Packages / Build Xcode Projects (→ **iOS Build**)                                         | `ios-swift-packages` / `ios-xcode-build` | ~7 / ~5                     | Yes, behind the shim                                      |
+| iOS Playground Tests (advisory)                                                                 | `ios-playground-tests`                   | ~6                          | Already moved                                             |
+| Swift Code Coverage, Build Desktop App, Installer Minimal (**required**; hosted only for forks) | none / `swift-code-coverage` (main)      | 2-6                         | Fork leg only, behind a shim; same-repo stays self-hosted |
+| Nightly sweeps (Swift Packages/Xcode 26.5+26.6, TSan, macOS BATS/Node)                          | new nightly workflow                     | ~6-10 each                  | Paid plan; scheduled pipeline on main                     |
+| Release: CtrlProxy IPA, prototype-agent (unsigned/ad-hoc)                                       | none                                     | ~3                          | Could move; no secrets                                    |
+| Release: screen-capture helper, network-filter probe, desktop DMG installers                    | none                                     | 10-25 (notarization billed) | **Do not move** (below)                                   |
 
 **Release/signing should stay on GitHub.** Releases are rare and are not limited
 by concurrency, so moving them gains nothing. Moving them would copy the Developer

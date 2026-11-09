@@ -1,3 +1,4 @@
+import type { DevicectlDisplayInfoSource } from "../../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
 import type { IosRunnerLocationClient } from "./LocationOperations";
 import type { BootedDevice, ExecResult } from "../../../models";
 import type { DeviceTraits } from "../../../utils/android-cmdline-tools/deviceTraits";
@@ -172,6 +173,7 @@ export interface IosSimulatorClient {
 }
 
 export interface DeviceStateDependencies {
+  iosDisplayInfoSource?: DevicectlDisplayInfoSource;
   adbFactory?: AdbClientFactory;
   simctl?: IosSimulatorClient | null;
   timer?: Timer;

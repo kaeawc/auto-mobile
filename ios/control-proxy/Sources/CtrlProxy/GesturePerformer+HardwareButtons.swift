@@ -35,10 +35,18 @@ import os
             }
 
             try catchingObjCException {
+                let factory = try DisplayGestureFactory(
+                    provider: XCUIGestureCoordinateProvider(app: app, locator: self.elementLocator)
+                )
+                if factory.mismatch, let size = factory.geometry?.observation, size.isValid,
+                   try self.performSplitViewBack(in: app, size: size, factory: factory)
+                {
+                    return
+                }
                 if self.tapExplicitNavigationBarBackButton(in: app) {
                     return
                 }
-                try self.swipeFromLeftEdge(in: app)
+                try self.swipeFromLeftEdge(in: app, factory: factory)
             }
         }
 
@@ -64,15 +72,16 @@ import os
             }
         }
 
-        private func swipeFromLeftEdge(in app: XCUIApplication) throws {
+        private func swipeFromLeftEdge(
+            in app: XCUIApplication, factory: DisplayGestureFactory<XCUIGestureCoordinateProvider>
+        )
+            throws
+        {
             let frame = app.frame
             guard frame.width > 0, frame.height > 0 else {
                 throw GestureError.gestureFailed("Cannot determine application frame for back gesture")
             }
 
-            let factory = try DisplayGestureFactory(
-                provider: XCUIGestureCoordinateProvider(app: app, locator: elementLocator)
-            )
             if factory.mismatch, let size = factory.geometry?.observation, size.isValid {
                 let edge = NavigationEdgeGesture.back(size: size)
                 _ = try factory.deliver(
@@ -96,6 +105,69 @@ import os
                 withVelocity: .default,
                 thenHoldForDuration: edge.hold
             )
+        }
+
+        private func performSplitViewBack(
+            in app: XCUIApplication, size: GestureSize, factory: DisplayGestureFactory<XCUIGestureCoordinateProvider>
+        )
+            throws -> Bool
+        {
+            let elements: [SplitViewBackGesture.ElementSnapshot]
+            do {
+                elements = try splitViewBackSnapshot(in: app)
+            } catch {
+                // Split-view detection is best-effort; preserve the edge swipe if AX is unavailable.
+                logger.debug("pressBack split-view snapshot unavailable; using edge swipe: \(error)")
+                try swipeFromLeftEdge(in: app, factory: factory)
+                return true
+            }
+            return try SplitViewBackGesture.perform(SplitViewBackGesture.decision(elements, size: size)) { point in
+                let before = SplitViewBackGesture.screenSignature(elements, size: size)
+                _ = try factory.deliver(start: point, press: 0.05)
+                try self.verifySplitViewBack(in: app, size: size, before: before)
+            }
+        }
+
+        private func verifySplitViewBack(
+            in app: XCUIApplication, size: GestureSize, before: SplitViewBackGesture.ScreenSignature
+        )
+            throws
+        {
+            let deadline = Date(timeIntervalSinceNow: 1.5)
+            var after = before
+            while Date() < deadline {
+                RunLoop.current.run(until: min(deadline, Date(timeIntervalSinceNow: 0.1)))
+                do {
+                    after = try SplitViewBackGesture.screenSignature(splitViewBackSnapshot(in: app), size: size)
+                    if SplitViewBackGesture.didChange(before: before, after: after) { return }
+                } catch {
+                    // The tap was already sent; retry the read, never risk a second back gesture.
+                    logger.debug("pressBack verification snapshot unavailable: \(error)")
+                }
+            }
+            try SplitViewBackGesture.requireChange(before: before, after: after)
+        }
+
+        private func splitViewBackSnapshot(in app: XCUIApplication) throws -> [SplitViewBackGesture.ElementSnapshot] {
+            try catchingObjCException {
+                var pending = try [app.snapshot()]
+                var elements: [SplitViewBackGesture.ElementSnapshot] = []
+                while let snapshot = pending.popLast() {
+                    let kind: SplitViewBackGesture.ElementKind
+                    switch snapshot.elementType {
+                    case .navigationBar: kind = .navigationBar
+                    case .button: kind = .button
+                    case .collectionView, .table, .outline: kind = .collectionLike
+                    case .toolbar: kind = .toolbar
+                    default: kind = .other
+                    }
+                    elements.append(.init(
+                        kind: kind, label: snapshot.label, identifier: snapshot.identifier, frame: snapshot.frame
+                    ))
+                    pending.append(contentsOf: snapshot.children)
+                }
+                return elements
+            }
         }
 
         /// Action button and Camera Control exist only on some models (#14100); press only when

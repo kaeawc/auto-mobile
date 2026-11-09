@@ -2,22 +2,14 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { parseStringPromise } from "xml2js";
 import type { ObserveResult, ViewHierarchyResult } from "../../src/models";
-import { buildObserveResult } from "./observeFixture";
+import { observeResultFromJsonText } from "./observeFixture";
 
 const fixtures = path.join(import.meta.dir, "../fixtures/wear");
 const fixture = (name: string) => readFileSync(path.join(fixtures, name), "utf8");
 
-/** Full-projection captures contain just the foreground window and hierarchy. */
+/** Whole, verbatim full-projection observations from the Wear emulator. */
 export function capturedSurfaceObservation(name: "tile-showing" | "app-in-front"): ObserveResult {
-  const capture: Pick<ObserveResult, "activeWindow" | "viewHierarchy"> = JSON.parse(
-    fixture(`surface/observe-full-${name}.json`),
-  );
-  return buildObserveResult({
-    updatedAt: 0,
-    screenSize: { width: 454, height: 454 },
-    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    ...capture,
-  });
+  return observeResultFromJsonText(fixture(`surface/observe-full-${name}.json`), name);
 }
 
 /** Preserve captured output between an exact command separator and its completion line. */

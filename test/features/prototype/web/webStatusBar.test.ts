@@ -732,6 +732,43 @@ test("a floating window leaves the screen background behind the status bar", () 
   expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("dark");
 });
 
+test("a wide dark floating panel at topStart reaches the top edge and sets light content", () => {
+  const still = renderPrototypeStill({
+    id: "floating-top-start",
+    window: { placement: { type: "floating", gravity: "topStart" } },
+    theme: { mode: "light" },
+    root: {
+      type: "column",
+      style: { width: { dp: 2000 }, height: { dp: 200 }, background: "#1d1b20" },
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
+test("a centred floating panel taller than the screen reaches the top edge in a still", () => {
+  const still = renderPrototypeStill({
+    id: "floating-tall",
+    window: { placement: { type: "floating", gravity: "center" } },
+    theme: { mode: "light" },
+    root: {
+      type: "column",
+      style: { width: { dp: 2000 }, height: { dp: 4000 }, background: "#1d1b20" },
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
+test("top-edge votes count equal colours together whatever their spelling", () => {
+  const strip = (width: string, color: string) =>
+    el("div", { style: { width, height: "40px", "background-color": color } });
+  const row = el("div", { style: { display: "flex", "flex-direction": "row" } }, [
+    strip("160px", WHITE),
+    strip("120px", BLACK),
+    strip("120px", "rgba(0, 0, 0, 1)"),
+  ]);
+  expect(appTopColor(row, "#777777", SCREEN)).toBe(BLACK);
+});
+
 test("an end-aligned box child taller than the screen covers the status bar in a still", () => {
   const still = renderPrototypeStill({
     id: "tall-footer",

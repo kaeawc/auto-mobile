@@ -5,6 +5,7 @@ import type {
 
 export class FakeDevicectlDisplayInfoSource implements DevicectlDisplayInfoSource {
   displays: DevicectlDisplayInfo[] = [];
+  error?: Error;
   requests: Array<{ deviceId: string; signal?: AbortSignal }> = [];
 
   async readDisplays(request: {
@@ -12,6 +13,9 @@ export class FakeDevicectlDisplayInfoSource implements DevicectlDisplayInfoSourc
     signal?: AbortSignal;
   }): Promise<DevicectlDisplayInfo[]> {
     this.requests.push(request);
+    if (this.error) {
+      throw this.error;
+    }
     return this.displays;
   }
 }

@@ -60,8 +60,10 @@ import {
   type AndroidRecordingDisplay,
 } from "../features/video/AndroidRecordingDisplay";
 import {
-  iosPanelTransitionWarnings,
+  isFirstIosPanelReading,
+  recordingDisplayWarnings,
   resolveIosRecordingDisplay,
+  startedRecordingDisplay,
 } from "../features/video/IosRecordingDisplay";
 import { displayTransitions } from "../features/observe/DisplayTransition";
 import type { VideoRecordingDisplayTransition, VideoRecordingPanel } from "../models";
@@ -374,6 +376,10 @@ function beginRecordingDisplaySession(
     if (next && next.key === session.currentPanel.key) {
       return;
     }
+    if (isFirstIosPanelReading(device, session.currentPanel, session.transitions, next)) {
+      session.currentPanel = to;
+      return;
+    }
     session.transitions.push({
       atMs: Math.max(0, Math.round(timer.now() - startedAtMs)),
       from: session.currentPanel,
@@ -452,24 +458,11 @@ async function finalizeRecordingDisplaySession(
   );
   metadata.recordedPanel = session.recordedPanel;
   metadata.transitions = session.transitions;
-  appendRecordingDisplayWarnings(metadata, session);
+  const warnings = recordingDisplayWarnings(session);
+  metadata.warnings =
+    warnings.length > 0 ? [...(metadata.warnings ?? []), ...warnings] : metadata.warnings;
 }
 
-/** The start-time display warning, then one per iOS panel transition the capture missed. */
-function appendRecordingDisplayWarnings(
-  metadata: VideoRecordingMetadata,
-  session: RecordingDisplaySession,
-): void {
-  const warnings = [
-    ...(session.warning ? [session.warning] : []),
-    ...(session.device.platform === "ios"
-      ? iosPanelTransitionWarnings(session.recordedPanel, session.transitions)
-      : []),
-  ];
-  if (warnings.length > 0) {
-    metadata.warnings = [...(metadata.warnings ?? []), ...warnings];
-  }
-}
 // In-progress size-cap monitors, keyed by recordingId (issue #4762). Each is a
 // periodic timer that stops a live capture once it reaches its cap so one long
 // recording cannot fill the disk.
@@ -1443,7 +1436,12 @@ export async function startVideoRecording(
     await persistStartedVideoRecording(deps, request, active, start.abortSignal);
 
     if (recordingDisplay && active.recordedPanel) {
-      beginRecordingDisplaySession(active.recordingId, request.device, recordingDisplay, {
+      const display = startedRecordingDisplay(
+        request.device,
+        recordingDisplay,
+        active.recordedPanel,
+      );
+      beginRecordingDisplaySession(active.recordingId, request.device, display, {
         startedAt: active.startedAt,
         timer,
       });

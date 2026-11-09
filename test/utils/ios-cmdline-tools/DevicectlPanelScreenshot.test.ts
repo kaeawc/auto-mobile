@@ -458,12 +458,63 @@ describe("captureIosPanelScreenshotWith", () => {
           },
         },
       });
-      expect((await h.result).data).toBe("runner");
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const result = await h.result;
+        expect(result).toMatchObject({ success: false, reason: "capture_unverified" });
+        expect(result.data).toBeUndefined();
+      } finally {
+        warn.mockRestore();
+      }
       expect(h.runnerCalls).toEqual([true]);
       expect(h.devicectlCalls).toEqual([]);
       expect(h.simctlCalls).toEqual([]);
     },
   );
+
+  test.each([
+    ["matches", png(2853, 2007), true],
+    ["does not match", png(1398, 2034), false],
+  ] as const)(
+    "without hierarchy, a runner fallback that %s the active panel's size",
+    async (_label, frame, accepted) => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const h = run({
+          activePanelKey: innerPanel.key,
+          simctlPng: Buffer.from("not a png"),
+          runnerData: frame.toString("base64"),
+        });
+        const result = await h.result;
+        expect(result.success).toBe(accepted);
+        expect(result.reason).toBeUndefined();
+        expect(h.runnerCalls).toEqual([true]);
+        if (!accepted) {
+          expect(result.error).toContain("active panel primary-1 is 2007x2853 pixels");
+        }
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
+  test("a failed runner fallback is returned unchanged", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const failure = { success: false, error: "Not connected" };
+      const result = await captureIosPanelScreenshotWith({
+        device: duo,
+        hierarchy: null,
+        simctl: { screenshot: async () => Buffer.from("not a png") },
+        devicectl: { capturePanel: async () => undefined },
+        runnerCapture: async () => failure,
+        activePanelKey: undefined,
+      });
+      expect(result).toEqual(failure);
+    } finally {
+      warn.mockRestore();
+    }
+  });
 
   test("explicit panel key wins without reading live displays", async () => {
     const reads: boolean[] = [];
@@ -614,6 +665,29 @@ describe("captureIosPanelScreenshotWith", () => {
         expect(result.success).toBe(false);
         expect(result.data).toBeUndefined();
         expect(result.error).toContain("1398x2034 pixels");
+        expect(h.runnerCalls).toEqual([true]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("a failed live read with no hierarchy is capture_unverified, not the runner frame", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const h = run({
+          device: emptyDuo,
+          activePanelKey: undefined,
+          runnerData: png(1398, 2034).toString("base64"),
+          displayInfo: {
+            readDisplays: async () => {
+              throw new Error("devicectl displays read failed");
+            },
+          },
+        });
+        const result = await h.result;
+        expect(result).toMatchObject({ success: false, reason: "capture_unverified" });
+        expect(result.data).toBeUndefined();
+        expect(result.error).toContain("could not be verified");
         expect(h.runnerCalls).toEqual([true]);
       } finally {
         warn.mockRestore();

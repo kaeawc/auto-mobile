@@ -32,11 +32,32 @@ export function daemonPrototypeShownSpecs(): PrototypeShownSpecs | undefined {
 }
 
 /**
+ * Registrations made before the runtime module loaded and not yet built, in registration order,
+ * per module. The first build after the load builds them all in that order, so the newest live
+ * registration ends up owning the shared host exactly as when each was built at registration.
+ */
+const unbuiltRegistrations = new WeakMap<
+  LazyFeatureModule<PrototypeToolRuntimeModule>,
+  Set<(loaded: PrototypeToolRuntimeModule) => void>
+>();
+
+function unbuiltFor(
+  module: LazyFeatureModule<PrototypeToolRuntimeModule>,
+): Set<(loaded: PrototypeToolRuntimeModule) => void> {
+  let pending = unbuiltRegistrations.get(module);
+  if (pending === undefined) {
+    pending = new Set();
+    unbuiltRegistrations.set(module, pending);
+  }
+  return pending;
+}
+
+/**
  * This registration's runtime and a handler that calls it. Once the module has loaded, the runtime
  * is built at registration exactly as before #17709 (so a replacement registration retires the
  * previous host's state at once) and each call reaches it with no await in between, keeping its
- * timing. Before the first load no prototype state exists, so the runtime is built on the first
- * call instead.
+ * timing. Before the first load no prototype state exists, so the runtime is built when the first
+ * call of any registration finds the module loaded, together with every other unbuilt one.
  */
 function lazyPrototypeRuntime(
   dependencies: PrototypeToolDependencies,
@@ -44,13 +65,22 @@ function lazyPrototypeRuntime(
 ): { handler: DeviceAwareToolHandler<unknown>; dispose: () => void } {
   let runtime: PrototypeToolRuntime | undefined;
   let disposed = false;
+  const pending = unbuiltFor(module);
+  const build = (loaded: PrototypeToolRuntimeModule): void => {
+    pending.delete(build);
+    runtime ??= loaded.createPrototypeToolRuntime(dependencies);
+  };
   const runtimeOf = (loaded: PrototypeToolRuntimeModule): PrototypeToolRuntime => {
+    // Older unbuilt registrations first, then this one: build order is registration order.
+    [...pending].forEach((buildPending) => buildPending(loaded));
     runtime ??= loaded.createPrototypeToolRuntime(dependencies);
     return runtime;
   };
   const preloaded = module.loaded();
   if (preloaded !== undefined) {
     runtimeOf(preloaded);
+  } else {
+    pending.add(build);
   }
   // Disposed before a runtime was built (also while the first call awaited the import): building
   // one now would take the shared host over from the registration that replaced this one.
@@ -77,6 +107,7 @@ function lazyPrototypeRuntime(
     handler,
     dispose: () => {
       disposed = true;
+      pending.delete(build);
       runtime?.dispose();
     },
   };

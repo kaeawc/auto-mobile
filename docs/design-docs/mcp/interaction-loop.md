@@ -111,11 +111,23 @@ hierarchies are structurally equal, bounded at 1000 ms and cancelled with the
 request. In-place and scroll actions are unchanged and keep their single
 capture.
 
-The loop budget is checked between polls, so a device read that hangs could
-overrun it. A wall-clock fence at the budget plus a margin (the smaller of
-1000 ms and the budget) aborts the loop's signal and is also raced against the
-whole gate, so the action responds at the fence even when a read ignores its
-signal; the abandoned read stops at the loop's next abort check. `tapOn` takes a
+A node whose text alone changes in two consecutive comparisons (a running
+clock or stopwatch, a typing indicator, a live counter) is treated as volatile
+for the rest of that settle: its later text-only changes are left out of the
+comparison, so such a screen settles once everything else holds still. The node
+is identified by resource id, bounds and sibling position. Structural changes
+still count: a node added or removed without a counterpart, a volatile node
+changing anything besides its text, and any change to another node. Volatile
+nodes are forgotten when consecutive reads are not the same screen.
+
+The budget is a hard cap. Each poll read, the terminal back-stack read and the
+attribution reconciliation capture race the remaining budget; the read the
+budget cuts off is aborted at once, and the loop returns the newest trustworthy
+capture it already has. No poll starts with less than 100 ms left, since such
+a read can only return a stale cache. A wall-clock fence at the budget plus a
+margin (the smaller of 1000 ms and the budget) still aborts the loop's signal
+and is raced against the whole gate, for terminal work outside those races and
+a read that never yields. `tapOn` takes a
 per-call `settleTimeoutMs` (0–3000 ms) that replaces the 1000 ms budget; `0`
 skips the gate and returns the action capture with `settled: false`.
 
@@ -128,8 +140,8 @@ capture passed the gate:
   can change an id's suffix; re-observe and use the new id if an old id is stale.
 - `settled: false` — the capture was not stability-checked. Either the action
   was not navigation-class, or the bound expired on a screen that never
-  reaches structural stability (a ticking clock, a blinking caret). Re-observe
-  if the completeness of the screen matters.
+  reaches structural stability (an animation that moves or adds nodes, a
+  list still loading). Re-observe if the completeness of the screen matters.
 
 When the gate ran, the observation also carries `settleMs` (milliseconds the gate
 spent re-observing) and `settlePolls` (how many re-observations it took). A

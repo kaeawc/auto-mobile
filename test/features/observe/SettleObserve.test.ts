@@ -289,12 +289,12 @@ describe("RealSettleObserve", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const fake = new FakeObserveScreen();
-    // A spinner: every poll differs, so structural stability is never reached.
+    // A spinner: every poll moves it, so structural stability is never reached.
     fake.setObserveResult((index) =>
       obs(
         {
           "resource-id": "spinner",
-          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+          bounds: { left: 0, top: index, right: 10, bottom: 10 + index },
           text: `frame-${index}`,
         },
         { updatedAt: (index + 1) * 10 },

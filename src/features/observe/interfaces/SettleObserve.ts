@@ -36,6 +36,11 @@ export interface SettleOptions {
   /** Embedded gate: retry a contradicted finishing capture until the deadline; off for standalone settle. */
   resumeOnTerminalMismatch?: boolean;
   /**
+   * Make `timeoutMs` a hard cap, forwarded verbatim to {@link pollObserveUntil}'s
+   * `hardBudget` (#17670). The embedded settle gate opts in; off for standalone settle.
+   */
+  hardBudget?: boolean;
+  /**
    * Skip the performance audit on every settle poll, forwarded verbatim to
    * {@link pollObserveUntil} (issue #6890 review). Off by default: the
    * standalone `observe(waitFor: {for: "stable"})` path keeps whatever the

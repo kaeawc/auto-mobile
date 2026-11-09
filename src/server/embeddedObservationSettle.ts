@@ -41,10 +41,10 @@ export {
  * exists only to bound a single device read that hangs past that budget, so it
  * must fire strictly AFTER the loop has had time to finish its terminal work
  * (back-stack reconciliation, cache write). Equal deadlines made the winner a
- * timer tie (#9880). The margin is a budget, not a guarantee: the terminal
- * back-stack read and reconciliation capture are bounded only by the fence, so
- * if they take longer than this margin the fence still wins and the gate falls
- * back to the uncached action capture.
+ * timer tie (#9880). The loop runs with a hard budget (#17670), so its reads and
+ * terminal reconcile are raced against the budget itself; the fence remains for
+ * terminal work outside those races (the recomposition and cache write) and for
+ * a read that never yields to the event loop.
  */
 export const EMBEDDED_OBSERVATION_SETTLE_FENCE_MARGIN_MS = 1000;
 
@@ -142,8 +142,8 @@ export async function settleEmbeddedObservation(
   try {
     // The fence is also raced here, not only handed down: a device read that
     // ignores its signal would otherwise hold the action response until it
-    // returned, however long that took (#17663). Losing the race leaves that
-    // read running; the aborted signal stops the loop at its next check.
+    // returned, however long that took (#17663). The fence aborts the signal
+    // every in-flight read was handed, so a read that honours it stops at once.
     const result = await raceWithDeadline(
       () =>
         input.settleObserve.execute(settleOptions(input, strictDisplay, budgetMs, settleSignal)),
@@ -222,6 +222,9 @@ function settleOptions(
     requireFreshExtraction: true,
     // A finishing read can catch another transition; use the remaining settle budget (#9591).
     resumeOnTerminalMismatch: true,
+    // The budget is a hard cap: every read and the terminal reconcile race the
+    // remaining budget, and no poll starts with too little left to be fresh (#17670).
+    hardBudget: true,
     // The poll already drops the screenshot and the accessibility audit as
     // intermediate state; the performance audit has to go too. It drives up
     // to three synthetic touches plus ADB/database work that honours neither

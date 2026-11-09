@@ -38,6 +38,8 @@ function clockObservation(updatedAt: number): ObserveResult {
           class: "android.widget.TextView",
           "resource-id": "com.example:id/clock",
           text: `t${updatedAt}`,
+          // Moving, so it never settles: a clock whose text alone ticks is masked (#17670).
+          bounds: { left: 0, top: updatedAt, right: 100, bottom: 50 + updatedAt },
         },
       },
       updatedAt,

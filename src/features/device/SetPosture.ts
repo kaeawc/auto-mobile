@@ -59,7 +59,10 @@ import {
   PostureOperation,
   classifyIosPostureObservation,
   devicectlConfirmsIosPanel,
+  findActiveIosPanel,
   observeIosPosture,
+  IOS_POSTURE_POLL_INTERVAL_MS,
+  IOS_POSTURE_TIMEOUT_MS,
   withWarnings,
   activePanelWarning,
   isEmulator,
@@ -72,6 +75,18 @@ import {
   readSupportedAndroidStates,
 } from "./postureCommands";
 import { iosCtrlProxyClientFor } from "../observe/ios/iosCtrlProxyClientFor";
+import {
+  defaultIosRequestedHingeAngleStore,
+  iosHingeExpectedPanelRole,
+  iosHingeLayoutWarning,
+  iosPostureForPanel,
+  type IosHingePanelRole,
+  type IosRequestedHingeAngleStore,
+} from "./DuoHingeLayout";
+
+const IOS_INDETERMINATE_PANEL_REASON =
+  "The runner accepted the hinge angle, but the active iPhone Duo panel could not be determined.";
+
 export {
   HINGE_ANGLE_MIN_DEGREES,
   HINGE_ANGLE_MAX_DEGREES,
@@ -93,6 +108,12 @@ export function pendingPostureOperationCountForTest(): number {
   return latestPostureTokens.size;
 }
 
+/** The active iPhone Duo panel and whether it came from devicectl rather than the app layout. */
+interface IosHingePanelRead {
+  role: IosHingePanelRole | undefined;
+  fromDevicectl: boolean;
+}
+
 export class SetPosture {
   private readonly adbFactory: AdbClientFactory;
   private readonly androidHingeAngleConsole: AndroidHingeAngleConsole;
@@ -103,6 +124,7 @@ export class SetPosture {
   private readonly timer: Timer;
   private readonly transitionSink: DisplayTransitionSink;
   private readonly keyguardDismisserFactory: PostureKeyguardDismisserFactory;
+  private readonly hingeAngleStore: IosRequestedHingeAngleStore;
 
   constructor(
     private readonly device: BootedDevice,
@@ -121,6 +143,7 @@ export class SetPosture {
     this.transitionSink = dependencies.transitionSink ?? displayTransitions;
     this.keyguardDismisserFactory =
       dependencies.keyguardDismisserFactory ?? defaultPostureKeyguardDismisserFactory;
+    this.hingeAngleStore = dependencies.iosHingeAngleStore ?? defaultIosRequestedHingeAngleStore;
   }
 
   async execute(
@@ -446,51 +469,120 @@ export class SetPosture {
       this.device.deviceId,
       "setPosture changed the iPhone Duo hinge angle",
     );
-    const observe = () => this.observeFactory(this.device).execute({ freshness: "fresh", signal });
+    this.hingeAngleStore.record(this.device.deviceId, angle);
+    return this.settleIosHingeAngle(angle, operation);
+  }
+
+  /** Read back the active panel after a hinge angle and warn when it contradicts the angle. */
+  private async settleIosHingeAngle(
+    angle: number,
+    operation: PostureOperation,
+  ): Promise<SetPostureResult> {
+    const { assertCurrent } = operation;
+    let read: IosHingePanelRead = { role: undefined, fromDevicectl: false };
+    const deadline = this.timer.now() + IOS_POSTURE_TIMEOUT_MS;
+    const observe = async () => {
+      const polled = await this.observeIosHingePanel(angle, deadline, operation);
+      read = polled.read;
+      return polled.observation;
+    };
     const settled = await this.observeFinalPosture(
       {
         hingeAngle: angle,
-        resolvePosture: (observation) => {
-          const panel = classifyIosPostureObservation(
-            observation,
-            this.device.displays?.panels,
-            "cover",
-          );
-          if (panel === "expected") {
-            return { posture: "closed" };
-          }
-          if (panel === "old") {
-            return {
-              posture:
-                observation.display.posture === "unknown" ? "opened" : observation.display.posture,
-            };
-          }
-          return {
-            posture: "unknown",
-            postureReason:
-              "The runner accepted the hinge angle, but the active iPhone Duo panel could not be determined.",
-          };
-        },
+        resolvePosture: () =>
+          read.role && !read.fromDevicectl
+            ? { posture: iosPostureForPanel(read.role, angle) }
+            : { posture: "unknown", postureReason: IOS_INDETERMINATE_PANEL_REASON },
       },
       observe,
       observe,
       operation,
     );
     assertCurrent();
-    const warning =
-      result.angle === undefined
-        ? "Hinge angle not verifiable: the iPhone Duo runner did not report the resulting angle."
-        : Math.abs(result.angle - angle) > 1
-          ? `Hinge angle read-back mismatch: requested ${angle} degrees but the iPhone Duo runner reports ${result.angle} degrees (hinge angle is best effort).`
-          : undefined;
-    return withEpilogueWarning(
-      {
-        ...settled,
-        hingeAngle: angle,
-        ...(result.angle !== undefined ? { observedHingeAngle: result.angle } : {}),
-      },
-      warning,
-    );
+    const { role, fromDevicectl } = read;
+    // The runner echoes the requested angle, so it is never reported as observedHingeAngle.
+    const output: SetPostureResult =
+      role && fromDevicectl
+        ? {
+            display: settled.display,
+            ...(settled.locked !== undefined ? { locked: settled.locked } : {}),
+            ...(settled.warnings ? { warnings: settled.warnings } : {}),
+            posture: iosPostureForPanel(role, angle),
+            hingeAngle: angle,
+          }
+        : { ...settled, hingeAngle: angle };
+    return withEpilogueWarning(output, role ? iosHingeLayoutWarning(angle, role) : undefined);
+  }
+
+  /**
+   * Observe the active panel, re-polling until it is the one the angle implies or the shared
+   * iOS settle deadline passes. The panel switch lags the hinge event, so one immediate read
+   * would report a slow but healthy switch as the stuck layout (#17726).
+   */
+  private async observeIosHingePanel(
+    angle: number,
+    deadline: number,
+    operation: PostureOperation,
+  ): Promise<{
+    observation: Awaited<ReturnType<ObserveScreen["execute"]>>;
+    read: IosHingePanelRead;
+  }> {
+    const { signal, assertCurrent } = operation;
+    const expectedRole = iosHingeExpectedPanelRole(angle);
+    do {
+      assertCurrent();
+      throwIfAborted(signal);
+      const observation = await awaitWhileRequestIsLive(
+        this.observeFactory(this.device).execute({ freshness: "fresh", signal }),
+        signal,
+      );
+      assertCurrent();
+      const read = await this.readIosHingePanel(observation, operation);
+      const remaining = deadline - this.timer.now();
+      if (!expectedRole || !read.role || read.role === expectedRole || remaining <= 0) {
+        return { observation, read };
+      }
+      await awaitWhileRequestIsLive(
+        this.timer.sleep(Math.min(IOS_POSTURE_POLL_INTERVAL_MS, remaining)),
+        signal,
+      );
+    } while (true);
+  }
+
+  /** The panel the app layout matches, or CoreDevice's active panel when the window size is ambiguous. */
+  private async readIosHingePanel(
+    observation: Awaited<ReturnType<ObserveScreen["execute"]>>,
+    operation: PostureOperation,
+  ): Promise<IosHingePanelRead> {
+    const panel = classifyIosPostureObservation(observation, this.device.displays?.panels, "cover");
+    if (panel !== "indeterminate") {
+      return { role: panel === "expected" ? "cover" : "inner", fromDevicectl: false };
+    }
+    return { role: await this.readIosActivePanelRole(operation), fromDevicectl: true };
+  }
+
+  /** The active iPhone Duo panel from devicectl, or undefined when it cannot be determined. */
+  private async readIosActivePanelRole(
+    operation: PostureOperation,
+  ): Promise<IosHingePanelRole | undefined> {
+    const { signal, assertCurrent } = operation;
+    try {
+      const displays = await awaitWhileRequestIsLive(
+        this.iosDisplayInfoSource.readDisplays({ deviceId: this.device.deviceId, signal }),
+        signal,
+      );
+      assertCurrent();
+      const role = findActiveIosPanel(displays, this.device.displays?.panels)?.role;
+      return role === "cover" || role === "inner" ? role : undefined;
+    } catch (error) {
+      throwIfAborted(signal);
+      assertCurrent();
+      logger.warn(
+        `[SetPosture] Could not read the active iPhone Duo panel after a hinge angle: ${errorMessage(error)}`,
+        error,
+      );
+      return undefined;
+    }
   }
 
   private validateRequest(
@@ -793,6 +885,7 @@ export class SetPosture {
         `Could not set iPhone Duo posture: ${result.error ?? "unknown runner error"}`,
       );
     }
+    this.hingeAngleStore.record(this.device.deviceId, angle);
     assertCurrent();
     this.transitionSink.notifyTransition(
       this.device.deviceId,

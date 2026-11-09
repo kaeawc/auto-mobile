@@ -12,17 +12,38 @@ discovery must enable it first with
 [Dynamic Tools](dynamic-tools.md). A client can also call it directly by name without enabling it.
 
 `getDeviceState` reports `displays.current` with the active panel (`activePanel`) and a posture
-inferred from it: `opened` when the inner panel is active, `closed` when the cover panel is
-active. AutoMobile cannot read the iPhone Duo hinge, so `postureSource` is
-`inferred_from_active_panel`: a half-folded Duo reads `opened` when its inner panel is active and `closed` when its cover panel
-is active.
-Do not treat this as a confirmed hinge posture. Use `activePanel` to decide which screen you are
-on, and call `setPosture` when a test needs a specific posture. When the active panel cannot be
-determined, `displays.current` is omitted.
+derived from it. AutoMobile cannot read the iPhone Duo hinge:
+
+- Cover panel active: `closed`, `postureSource: "inferred_from_active_panel"`.
+- Inner panel active, and the last `setPosture` hinge angle (a named posture sets 0, 130 or 180) was strictly between 0 and 180
+  degrees: `half_opened`, `postureSource: "requested_hinge_angle"`.
+- Inner panel active otherwise (180 degrees, or no angle set since the AutoMobile daemon
+  started): `opened`, `postureSource: "inferred_from_active_panel"`.
+
+`requestedHingeAngle` is the last angle `setPosture` requested. It repeats the request; it is not
+a reading of the hinge, and it goes stale if the hinge is changed outside AutoMobile.
+Do not treat either source as a confirmed hinge posture. Use `activePanel` to decide which screen
+you are on, and call `setPosture` when a test needs a specific posture. When the active panel
+cannot be determined, `displays.current` is omitted.
 
 On an Android foldable, `postureSource` is `device_state`: the posture the device itself
 committed. When the device cannot report its posture, `posture` is `unknown` and `postureSource`
 is omitted.
+
+## Setting a hinge angle
+
+`setPosture` with `hingeAngle` (0 to 180 degrees) returns `hingeAngle` as requested and no
+`observedHingeAngle`: the runner cannot read the angle apps see. `posture` follows the same rules as
+`getDeviceState` above (cover `closed`, inner `half_opened` or `opened`), or `unknown` with
+`postureReason` when the active panel cannot be determined.
+
+The simulator's panel switch depends on the angles it passed through, not only on the final angle.
+For example, `0 -> 80 -> 120` leaves the cover panel active and apps on the closed layout, while
+`0 -> 120` switches to the inner panel. When the active panel contradicts the requested angle
+(cover panel above 90 degrees, or inner panel at 0 degrees), the call waits up to 3 seconds for
+the panel to switch; if it still disagrees, the call succeeds and adds a `warnings` entry. To recover a cover panel that should be open, set `hingeAngle` 180, then the
+target angle again, and `observe` before acting. Up to 90 degrees the cover panel is a normal
+result.
 
 ## Home-screen icons after an unfold
 

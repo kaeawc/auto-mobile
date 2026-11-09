@@ -1,0 +1,12 @@
+target=50 panel=cover app: status=1 angleDeg=52.2 view=386x678
+target=55 panel=cover app: status=1 angleDeg=56.9 view=386x678
+target=60 panel=cover app: status=1 angleDeg=61.7 view=386x678
+target=65 panel=cover app: status=1 angleDeg=66.4 view=386x678
+target=70 panel=cover app: status=1 angleDeg=71.1 view=386x678
+target=80 panel=cover app: status=1 angleDeg=80.6 view=386x678
+target=70 panel=cover app: status=1 angleDeg=71.1 view=386x678
+target=65 panel=cover app: status=1 angleDeg=66.4 view=386x678
+target=60 panel=cover app: status=1 angleDeg=61.7 view=386x678
+target=55 panel=cover app: status=1 angleDeg=56.9 view=386x678
+target=50 panel=cover app: status=1 angleDeg=52.2 view=386x678
+target=45 panel=cover app: status=1 angleDeg=47.5 view=386x678

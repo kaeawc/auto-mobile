@@ -169,6 +169,8 @@ export class DeviceState {
 
   private iosDisplayInfoSource: DevicectlDisplayInfoSource | undefined;
 
+  private readonly iosHingeAngleStore: DeviceStateDependencies["iosHingeAngleStore"];
+
   private readonly doNotDisturb = new DoNotDisturbOperations({
     device: () => this.device,
     adbFactory: () => this.adbFactory,
@@ -186,6 +188,7 @@ export class DeviceState {
   constructor(device: BootedDevice, dependencies: DeviceStateDependencies = {}) {
     this.device = device;
     this.iosDisplayInfoSource = dependencies.iosDisplayInfoSource;
+    this.iosHingeAngleStore = dependencies.iosHingeAngleStore;
     this.screenLock = createScreenLockOperations(
       () => this.device,
       () => this.adbFactory,
@@ -295,7 +298,11 @@ export class DeviceState {
       this.device,
       this.adbFactory.create(this.device),
       this.timer,
-      { signal: getAbortSignal(), iosDisplayInfoSource: this.displayInfoSource() },
+      {
+        signal: getAbortSignal(),
+        iosDisplayInfoSource: this.displayInfoSource(),
+        iosHingeAngleStore: this.iosHingeAngleStore,
+      },
     );
     return { ...this.device.displays, ...(current ? { current } : {}) };
   }

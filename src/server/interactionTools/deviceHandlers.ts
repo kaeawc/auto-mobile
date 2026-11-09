@@ -99,13 +99,14 @@ export function formatSetPostureMessage(result: SetPostureOutput): string {
   if ("status" in result) {
     return result.message;
   }
+  const reason = result.postureReason ? ` (${result.postureReason})` : "";
   const message =
     result.hingeAngle !== undefined
       ? result.observedHingeAngle === undefined
-        ? `Requested hinge angle ${result.hingeAngle} degrees; the resulting angle could not be verified (posture ${result.posture})`
+        ? `Requested hinge angle ${result.hingeAngle} degrees; the resulting angle could not be verified (posture ${result.posture}${result.postureReason ? `: ${result.postureReason}` : ""})`
         : Math.abs(result.observedHingeAngle - result.hingeAngle) > 1
           ? `Requested hinge angle ${result.hingeAngle} degrees; the device reports ${result.observedHingeAngle} degrees (posture ${result.posture})`
-          : `Set hinge angle to ${result.hingeAngle} degrees; device reports posture ${result.posture}${result.postureReason ? ` (${result.postureReason})` : ""}`
+          : `Set hinge angle to ${result.hingeAngle} degrees; device reports posture ${result.posture}${reason}`
       : `Set device posture to ${result.posture}`;
   return result.keyguardDismissed
     ? `${message}; dismissed the swipe keyguard the change raised (the device was unlocked and has no lock credential)`

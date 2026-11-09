@@ -40,6 +40,40 @@ struct DisplayTouch: Equatable, Sendable {
     let interfaceOrientation: Int
 }
 
+/// Edge gestures use the observed panel size, rather than the portrait app frame, on a mismatch.
+struct NavigationEdgeGesture: Equatable, Sendable {
+    let start: GesturePoint
+    let end: GesturePoint
+    let press: TimeInterval
+    let move: TimeInterval
+    let hold: TimeInterval
+    let velocity: Double?
+
+    static func back(size: GestureSize) -> NavigationEdgeGesture {
+        NavigationEdgeGesture(
+            start: GesturePoint(x: 2, y: size.height / 2),
+            end: GesturePoint(x: min(size.width * 0.75, size.width - 2), y: size.height / 2),
+            press: 0.05, move: 0.3, hold: 0, velocity: nil
+        )
+    }
+
+    static func recent(size: GestureSize) -> NavigationEdgeGesture {
+        let start = GesturePoint(x: size.width / 2, y: size.height - 1)
+        let end = GesturePoint(x: size.width / 2, y: size.height * 0.58)
+        return NavigationEdgeGesture(
+            start: start, end: end, press: 0.35, move: 0.6, hold: 0.8,
+            velocity: abs(start.y - end.y) / 0.6
+        )
+    }
+}
+
+/// A timed single-finger polyline in display space. Offsets remain relative to touch down.
+struct DisplayPath: Equatable, Sendable {
+    let points: [PathGesturePoint]
+    let displayId: UInt64
+    let interfaceOrientation: Int
+}
+
 struct DisplayFingerPath: Equatable, Sendable {
     let start: GesturePoint
     let end: GesturePoint
@@ -95,6 +129,7 @@ protocol DisplayGestureProviding: GestureCoordinateProviding {
     func displayInventory() -> GestureDisplayInventory
     func synthesize(_ touch: DisplayTouch) throws -> Bool
     func synthesizePinch(_ pinch: DisplayPinch) throws -> Bool
+    func synthesizePath(_ path: DisplayPath) throws -> Bool
 }
 
 struct DisplayGestureDelivery<Coordinate> {
@@ -109,7 +144,7 @@ struct DisplayGestureDelivery<Coordinate> {
     }
 }
 
-/// Taps, single-finger swipes, drags and two-finger pinches use this route. The host sends long
+/// Taps, single-finger swipes, drags, timed paths and two-finger pinches use this route. The host sends long
 /// presses as taps with a press duration and double taps as one runner-side gesture. Other gestures keep their
 /// existing paths.
 @MainActor
@@ -132,7 +167,9 @@ struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
         doubleTapWait: @escaping (TimeInterval) -> Void = { gap in
             RunLoop.current.run(until: Date(timeIntervalSinceNow: gap))
         }
-    ) throws {
+    )
+        throws
+    {
         self.provider = provider
         self.doubleTapWait = doubleTapWait
         // Forced legacy inspects only the observation cache, without live geometry reads.
@@ -292,6 +329,46 @@ struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
         return DisplayGestureDelivery<Provider.Coordinate>(
             selection: selected.strategy.targetsDisplay
                 ? GestureCoordinateSelection.choose(point: center, geometry: geometry) : selected,
+            coordinate: nil, synthesizedPoint: nil, synthesizedInterfaceOrientation: nil, fallbackFrom: fallback
+        )
+    }
+
+    /// Like pinch, an unsynthesized delivery asks the caller to retain main-screen path synthesis.
+    func deliverPath(
+        points: [PathGesturePoint],
+        beforeAction: (DisplayGestureDelivery<Provider.Coordinate>) -> Void = { _ in }
+    )
+        throws -> DisplayGestureDelivery<Provider.Coordinate>
+    {
+        let points = try PathGesturePlan.validate(points)
+        let start = GesturePoint(x: points[0].x, y: points[0].y)
+        let selected = selection(point: start, forced: nil)
+        var fallback: TapCoordinateStrategy?
+        if selected.strategy.targetsDisplay, let displayId = target.displayId {
+            let mapped = points.compactMap { vertex -> PathGesturePoint? in
+                guard let mapped = point(GesturePoint(x: vertex.x, y: vertex.y), selection: selected) else {
+                    return nil
+                }
+                return PathGesturePoint(x: mapped.x, y: mapped.y, offsetMs: vertex.offsetMs)
+            }
+            let orientation = selected.strategy == .displayTargeted ? 1 :
+                DeviceRotation.gestureInterfaceOrientationRawValue(rotation: geometry?.rotation)
+            if mapped.count == points.count, let orientation {
+                let candidate = DisplayGestureDelivery<Provider.Coordinate>(
+                    selection: selected, coordinate: nil,
+                    synthesizedPoint: GesturePoint(x: mapped[0].x, y: mapped[0].y),
+                    synthesizedInterfaceOrientation: orientation, fallbackFrom: nil
+                )
+                beforeAction(candidate)
+                if try provider.synthesizePath(DisplayPath(
+                    points: mapped, displayId: displayId, interfaceOrientation: orientation
+                )) { return candidate }
+            }
+            fallback = selected.strategy
+        }
+        return DisplayGestureDelivery<Provider.Coordinate>(
+            selection: selected.strategy.targetsDisplay
+                ? GestureCoordinateSelection.choose(point: start, geometry: geometry) : selected,
             coordinate: nil, synthesizedPoint: nil, synthesizedInterfaceOrientation: nil, fallbackFrom: fallback
         )
     }

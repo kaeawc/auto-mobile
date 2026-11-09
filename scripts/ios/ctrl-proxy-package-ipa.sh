@@ -47,14 +47,16 @@ fi
 
 PRODUCTS_PARENT="$(cd "$PRODUCTS_PARENT" && pwd)"
 mkdir -p "$(dirname "$OUTPUT_PATH")"
-OUTPUT_PATH="$(cd "$(dirname "$OUTPUT_PATH")" && pwd)/$(basename "$OUTPUT_PATH")"
+OUTPUT_DIR="$(cd "$(dirname "$OUTPUT_PATH")" && pwd)"
+OUTPUT_PATH="${OUTPUT_DIR}/$(basename "$OUTPUT_PATH")"
 
 # Resolve a symlinked Products root (relative or absolute) to its real
 # directory so staging holds a real copy, never a link back into the build.
 PRODUCTS_SOURCE="$(cd "${PRODUCTS_PARENT}/Products" && pwd -P)"
 
 STAGING_DIR="$(mktemp -d)"
-trap 'rm -rf "$STAGING_DIR"' EXIT
+ARCHIVE_DIR=""
+trap 'if [[ -n "$ARCHIVE_DIR" ]]; then rm -rf -- "$ARCHIVE_DIR"; fi; if [[ -n "$STAGING_DIR" ]]; then rm -rf -- "$STAGING_DIR"; fi' EXIT
 STAGING_DIR="$(cd "$STAGING_DIR" && pwd -P)"
 STAGED_PRODUCTS="${STAGING_DIR}/Build/Products"
 mkdir -p "$STAGED_PRODUCTS"
@@ -90,7 +92,30 @@ if [[ "$FULL_DEBUG" != 1 ]]; then
     done
 fi
 
-# ZIP updates retain stale entries, so always create a fresh archive.
-rm -f "$OUTPUT_PATH"
+# Check after pruning: a link that resolved in the source may now be dangling.
+# Keep find outside process substitution so a scan failure also stops packaging.
+find "$STAGED_PRODUCTS" -type l ! -exec test -e {} \; -print0 > "${STAGING_DIR}/dangling-links"
+DANGLING_LINKS=0
+while IFS= read -r -d '' link; do
+    printf 'Dangling symlink in staged Products: %s -> %s\n' \
+        "${link#"${STAGED_PRODUCTS}/"}" "$(readlink "$link")" >&2
+    DANGLING_LINKS=1
+done < "${STAGING_DIR}/dangling-links"
+if [[ "$DANGLING_LINKS" == 1 ]]; then
+    exit 1
+fi
+
+# ZIP updates retain stale entries. Let zip create a fresh archive inside a
+# private (0700) directory in the output directory, so no other user of a
+# shared output directory can plant a link at the archive path, and the final
+# mv stays on one filesystem. Replace the output only once the archive is ready.
+ARCHIVE_DIR="$(mktemp -d "${OUTPUT_DIR}/.$(basename "$OUTPUT_PATH").XXXXXX")"
+TEMP_ARCHIVE="${ARCHIVE_DIR}/archive.zip"
 cd "$STAGING_DIR"
-zip -qr "$OUTPUT_PATH" Build/Products/
+if zip -qr "$TEMP_ARCHIVE" Build/Products/; then
+    mv -f -- "$TEMP_ARCHIVE" "$OUTPUT_PATH"
+else
+    zip_status=$?
+    echo "Failed to create IPA archive: zip exited with status ${zip_status}" >&2
+    exit "$zip_status"
+fi

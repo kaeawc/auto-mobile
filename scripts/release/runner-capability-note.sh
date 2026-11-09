@@ -122,7 +122,7 @@ if ! command -v bun >/dev/null 2>&1; then
   exit 0
 fi
 # The helper reuses the release gate's runner parsers and host AST scanner.
-if ! used="$(bun "$DIFF_HELPER" --vcs "$vcs" --base-rev "$base_rev" "${host_files[@]}")"; then
+if ! used="$(bun "$DIFF_HELPER" --vcs "$vcs" --base-rev "$base_rev" ${host_files[@]+"${host_files[@]}"})"; then
   note "capability diff helper failed; skipping."
   exit 0
 fi

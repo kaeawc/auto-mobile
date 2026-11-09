@@ -160,18 +160,21 @@ const TAP_AT_VOICEOVER_PROBE_TIMEOUT_MS = 1000;
 /** iOS VoiceOver state for timeout guidance; only a confirmed-on probe counts. */
 function iosVoiceOverProbe(
   device: BootedDevice,
-  dependencies: TapAtCoordinateDependencies,
+  {
+    detector,
+    stateClient,
+    featureFlags,
+  }: {
+    detector: Pick<IosVoiceOverDetector, "isVoiceOverEnabled">;
+    stateClient: () => VoiceOverStateClient;
+    featureFlags: FeatureFlagReader;
+  },
 ): () => Promise<boolean> {
-  const detector = dependencies.iosVoiceOverDetector ?? defaultIosVoiceOverDetector;
   return () =>
-    detector.isVoiceOverEnabled(
-      device.deviceId,
-      dependencies.iosVoiceOverStateClient ?? IOSCtrlProxyClient.getInstance(device),
-      {
-        featureFlags: dependencies.featureFlags ?? FeatureFlagService.getInstance(),
-        timeoutMs: TAP_AT_VOICEOVER_PROBE_TIMEOUT_MS,
-      },
-    );
+    detector.isVoiceOverEnabled(device.deviceId, stateClient(), {
+      featureFlags,
+      timeoutMs: TAP_AT_VOICEOVER_PROBE_TIMEOUT_MS,
+    });
 }
 
 /** Tap one absolute point in the native coordinate space reported by observe. */
@@ -203,13 +206,13 @@ export class TapAtCoordinate extends BaseVisualChange {
     rejectTvosTouch(device.platform, "tapAt");
     this.androidClient =
       dependencies.androidClient ?? androidCtrlProxyClientForPlatform(device, this.adbFactory);
-    this.iosClient = dependencies.iosClient ?? IOSCtrlProxyClient.getInstance(device);
+    const liveIosClient = () => IOSCtrlProxyClient.getInstance(device);
+    this.iosClient = dependencies.iosClient ?? liveIosClient();
     this.iosDoubleTap = dependencies.dispatchIosDoubleTap ?? dispatchIosDoubleTap;
     this.iosCoordinateTap = dependencies.dispatchIosCoordinateTap ?? dispatchIosCoordinateTap;
     this.invalidateIosCache =
       dependencies.invalidateIosCache ??
       (() => IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache());
-    this.isIosVoiceOverOn = iosVoiceOverProbe(device, dependencies);
     this.lastRenderedObservation = dependencies.lastRenderedObservation;
     this.stylusRoutes = dependencies.stylus ?? {};
     this.snapshotReferences = dependencies.snapshotReferences ?? snapshotReferences;
@@ -218,6 +221,11 @@ export class TapAtCoordinate extends BaseVisualChange {
       this.timer,
       new DefaultTalkBackNavigationDriverFactory(this.adbFactory),
     );
+    this.isIosVoiceOverOn = iosVoiceOverProbe(device, {
+      detector: dependencies.iosVoiceOverDetector ?? defaultIosVoiceOverDetector,
+      stateClient: () => dependencies.iosVoiceOverStateClient ?? liveIosClient(),
+      featureFlags: talkBack.featureFlags,
+    });
     this.androidTalkBack = new AndroidCoordinateTalkBack({
       target: this,
       androidClient: this.androidClient,

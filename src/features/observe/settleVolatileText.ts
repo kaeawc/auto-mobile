@@ -1,5 +1,6 @@
 import type { ObserveDiff, ObserveDiffNode } from "./output/ObserveResultOutput";
 import type { ObserveDiffNodeChange } from "./output/resultOutput/diffTypes";
+import { diffAttributes } from "./output/resultOutput/diffComparison";
 
 /**
  * Attributes that may differ between the two sides of a pure text change. The
@@ -22,13 +23,14 @@ function textFreeIdentity(key: string): string | undefined {
   return [parts[0], parts[1], parts[3]].join("\0");
 }
 
-/** Attributes other than the text, in a key-order-independent form. */
-function nonTextAttributes(attributes: Record<string, unknown>): string {
-  return JSON.stringify(
-    Object.keys(attributes)
-      .filter((name) => !TEXT_CHANGE_ATTRIBUTES.has(name))
-      .sort()
-      .map((name) => [name, attributes[name]]),
+/**
+ * Whether two sides of a node differ only in their text. Uses the shared diff's
+ * attribute comparison, so capture metadata it ignores (`extras`, occlusion,
+ * `view-id`) cannot make a text change look structural.
+ */
+function differsOnlyInText(from: ObserveDiffNode, to: ObserveDiffNode): boolean {
+  return Object.keys(diffAttributes(from.attributes, to.attributes)).every((name) =>
+    TEXT_CHANGE_ATTRIBUTES.has(name),
   );
 }
 
@@ -62,7 +64,7 @@ function textOnlyChanges(diff: ObserveDiff): Set<string> {
     if (
       removed.length === 1 &&
       counterpart?.length === 1 &&
-      nonTextAttributes(removed[0].attributes) === nonTextAttributes(counterpart[0].attributes)
+      differsOnlyInText(removed[0], counterpart[0])
     ) {
       changes.add(identity);
     }

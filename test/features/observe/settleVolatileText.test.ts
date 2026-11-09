@@ -107,6 +107,19 @@ describe("VolatileTextTracker (#17670)", () => {
     expect(isStabilityDiffEmpty(tracker.mask(diff([], [hundredths("70")])))).toBe(false);
   });
 
+  test("changing capture metadata does not stop a ticking node becoming volatile", () => {
+    const tracker = new VolatileTextTracker();
+    const withExtras = (node: ObserveDiffNode, traversalIndex: number): ObserveDiffNode => ({
+      ...node,
+      attributes: { ...node.attributes, extras: { traversalIndex }, occlusionState: "visible" },
+    });
+    tracker.mask(diff([withExtras(hundredths("20"), 2)], [withExtras(hundredths("97"), 1)]));
+    const second = tracker.mask(
+      diff([withExtras(hundredths("47"), 3)], [withExtras(hundredths("20"), 2)]),
+    );
+    expect(isStabilityDiffEmpty(second)).toBe(true);
+  });
+
   test("a volatile node that changes more than its text still counts", () => {
     const tracker = new VolatileTextTracker();
     tracker.mask(diff([hundredths("20")], [hundredths("97")]));

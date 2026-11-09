@@ -1,6 +1,10 @@
 import AutoMobileSdkWire
+import CoreGraphics
 import Foundation
 import XCTest
+#if canImport(CtrlProxyWatchPolicy)
+    @testable import CtrlProxyWatchPolicy
+#endif
 
 @MainActor
 final class WatchCommandHandlerTests: XCTestCase {
@@ -289,7 +293,7 @@ final class WatchCommandHandlerTests: XCTestCase {
     }
 
     func testCommandFailureCoordinatorScopesAndBoundsFailures() {
-        let coordinator = WatchXCUISource.CommandFailureCoordinator()
+        let coordinator = WatchCommandFailureCoordinator()
         XCTAssertFalse(coordinator.recordDeflectedFailure("Outside gesture"))
         coordinator.begin()
         XCTAssertTrue(coordinator.recordDeflectedFailure("Tap failed"))
@@ -299,11 +303,11 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertEqual(coordinator.finish(), [])
 
         coordinator.begin()
-        for _ in 0 ... WatchXCUISource.CommandFailureCoordinator.maxFailures {
+        for _ in 0 ... WatchCommandFailureCoordinator.maxFailures {
             XCTAssertTrue(coordinator.recordDeflectedFailure("Failure"))
         }
         let failures = coordinator.finish()
-        XCTAssertEqual(failures.count, WatchXCUISource.CommandFailureCoordinator.maxFailures + 1)
+        XCTAssertEqual(failures.count, WatchCommandFailureCoordinator.maxFailures + 1)
         XCTAssertEqual(failures.last, "Additional command failures truncated")
 
         coordinator.begin()
@@ -311,7 +315,7 @@ final class WatchCommandHandlerTests: XCTestCase {
         let descriptions = coordinator.finish()
         XCTAssertLessThanOrEqual(
             descriptions.reduce(0) { $0 + $1.utf8.count },
-            WatchXCUISource.CommandFailureCoordinator.maxDescriptionBytes
+            WatchCommandFailureCoordinator.maxDescriptionBytes
         )
         XCTAssertEqual(descriptions.last, "Additional command failures truncated")
         XCTAssertFalse(coordinator.recordDeflectedFailure("After truncated gesture"))

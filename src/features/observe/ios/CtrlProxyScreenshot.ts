@@ -188,25 +188,51 @@ interface RunnerReference {
 }
 
 /**
- * The geometry a runner fallback must match: the observed hierarchy's screen points, or, with no
- * hierarchy (the sessionless observer path), the inventory size of the panel the caller already
- * identified as active. Undefined when neither is known.
+ * Panel evidence gathered during selection, consulted only when a runner fallback runs. The
+ * reference panel is, in order: the active display from a live `device info displays` read
+ * (made lazily here when selection never read one), the panel selection identified, then the
+ * observed panel key, which can be stale after a fold (#17600).
  */
-function runnerReference(
+class RunnerReferencePanel {
+  private live: { panel: DisplayPanel | undefined } | undefined;
+  identified: DisplayPanel | undefined;
+
+  constructor(
+    private readonly request: IosPanelScreenshotRequest,
+    private readonly panels: readonly DisplayPanel[],
+    private readonly observed: DisplayPanel | undefined,
+  ) {}
+
+  /** Record the outcome of a live read, even one that named no active panel. */
+  recordLive(panel: DisplayPanel | undefined): void {
+    this.live = { panel };
+  }
+
+  async resolve(): Promise<DisplayPanel | undefined> {
+    if (!this.live && this.request.displayInfo && this.panels.length >= 2) {
+      this.recordLive(activeLivePanel(await readLiveDisplays(this.request), this.panels));
+    }
+    return this.live?.panel ?? this.identified ?? this.observed;
+  }
+}
+
+/**
+ * The geometry a runner fallback must match: the observed hierarchy's screen points, or, with no
+ * hierarchy (the sessionless observer path), the inventory size of the reference panel.
+ * Undefined when neither is known.
+ */
+async function runnerReference(
   hierarchy: XCTestHierarchy | null,
-  expectedPanel: DisplayPanel | undefined,
-): RunnerReference | undefined {
+  referencePanel: RunnerReferencePanel,
+): Promise<RunnerReference | undefined> {
   if (hierarchy?.screenWidth && hierarchy.screenHeight) {
     const { screenWidth: width, screenHeight: height } = hierarchy;
     return { width, height, label: `the observed screen is ${width}x${height} points` };
   }
-  if (expectedPanel) {
-    const { width, height } = expectedPanel.sizePx;
-    return {
-      width,
-      height,
-      label: `active panel ${expectedPanel.key} is ${width}x${height} pixels`,
-    };
+  const panel = await referencePanel.resolve();
+  if (panel) {
+    const { width, height } = panel.sizePx;
+    return { width, height, label: `active panel ${panel.key} is ${width}x${height} pixels` };
   }
   return undefined;
 }
@@ -214,31 +240,37 @@ function runnerReference(
 const CAPTURE_UNVERIFIED_ERROR =
   "Runner screenshot could not be verified: no hierarchy or live display read identifies the active panel, and on a multi-panel device the runner may capture an unlit panel. Re-run observe to capture the hierarchy, or check the device posture with setPosture.";
 
+function unverified(error: string): CtrlProxyScreenshotResult {
+  logger.warn(`[SCREENSHOT] ${error}`);
+  return { success: false, error, reason: "capture_unverified" };
+}
+
 /**
  * Reject a runner capture whose aspect ratio does not match the active screen: on a Duo the
  * runner captures the cover display, which is a black image while unfolded (#17583). With no
- * reference to check against, the capture is returned as a typed `capture_unverified` failure
- * instead of success (#17593).
+ * reference to check against, or an image header that cannot be read, the capture is returned
+ * as a typed `capture_unverified` failure instead of success (#17593, #17600).
  */
 async function aspectCheckedRunnerCapture(
   runnerCapture: () => Promise<CtrlProxyScreenshotResult>,
   hierarchy: XCTestHierarchy | null,
-  expectedPanel: DisplayPanel | undefined,
+  referencePanel: RunnerReferencePanel,
 ): Promise<CtrlProxyScreenshotResult> {
   const result = await runnerCapture();
   if (!result.success) {
     return result;
   }
-  const reference = runnerReference(hierarchy, expectedPanel);
+  const reference = await runnerReference(hierarchy, referencePanel);
   if (!reference) {
-    logger.warn(`[SCREENSHOT] ${CAPTURE_UNVERIFIED_ERROR}`);
-    return { success: false, error: CAPTURE_UNVERIFIED_ERROR, reason: "capture_unverified" };
+    return unverified(CAPTURE_UNVERIFIED_ERROR);
   }
   const dimensions = result.data
     ? readImageHeaderDimensions(Buffer.from(result.data, "base64"))
     : null;
   if (!dimensions) {
-    return result;
+    return unverified(
+      `Runner screenshot could not be verified: its image size is unreadable, so it cannot be checked against ${reference.label}, and on a multi-panel device the runner may capture an unlit panel. Re-run observe, or check the device posture with setPosture.`,
+    );
   }
   const expected = shortOverLong(reference.width, reference.height);
   const actual = shortOverLong(dimensions.width, dimensions.height);
@@ -257,12 +289,14 @@ async function aspectCheckedRunnerCapture(
  */
 async function captureDuoWithoutInventory(
   request: IosPanelScreenshotRequest,
+  referencePanel: RunnerReferencePanel,
 ): Promise<CtrlProxyScreenshotResult> {
   const deviceId = request.device.deviceId;
   const displays = await readLiveDisplays(request);
   const active = displays.filter((display) => display.active === true);
   const sizePx = active.length === 1 ? (active[0].nativeSize ?? active[0].bounds?.size) : undefined;
   if (!sizePx) {
+    referencePanel.recordLive(undefined);
     logger.warn(
       `[SCREENSHOT] iOS Duo ${deviceId} has no display inventory and live displays name no single active panel (${active.length} active of ${displays.length}); using runner capture`,
     );
@@ -273,6 +307,7 @@ async function captureDuoWithoutInventory(
     role: "unknown",
     sizePx,
   };
+  referencePanel.recordLive(panel);
   logger.info(
     `[SCREENSHOT] iOS Duo ${deviceId} has no display inventory; capturing live active display ${panel.key} (${sizePx.width}x${sizePx.height})`,
   );
@@ -292,27 +327,32 @@ export async function captureIosPanelScreenshotWith(
   if (!needsIosPanelSelection(input.device)) {
     return input.runnerCapture();
   }
-  const expectedPanel = input.device.displays?.panels.find(
-    (candidate) => candidate.key === input.activePanelKey,
+  const panels = input.device.displays?.panels ?? [];
+  const referencePanel = new RunnerReferencePanel(
+    input,
+    panels,
+    panels.find((candidate) => candidate.key === input.activePanelKey),
   );
   const request: IosPanelScreenshotRequest = {
     ...input,
     runnerCapture: () =>
-      aspectCheckedRunnerCapture(input.runnerCapture, input.hierarchy, expectedPanel),
+      aspectCheckedRunnerCapture(input.runnerCapture, input.hierarchy, referencePanel),
   };
   const { device, hierarchy, activePanelKey } = request;
-  const panels = device.displays?.panels ?? [];
   if (panels.length < 2) {
-    return captureDuoWithoutInventory(request);
+    return captureDuoWithoutInventory(request, referencePanel);
   }
   const display = observedIosDisplay(device, hierarchy ?? undefined);
-  const panel =
-    panels.find((candidate) => candidate.key === (activePanelKey ?? display.key)) ??
-    (await readLiveScreenshotPanel(request, panels));
+  let panel = panels.find((candidate) => candidate.key === (activePanelKey ?? display.key));
+  if (!panel) {
+    panel = await readLiveScreenshotPanel(request, panels);
+    referencePanel.recordLive(panel);
+  }
   if (!panel) {
     logger.warn("[SCREENSHOT] Could not identify active iOS panel; using runner capture");
     return request.runnerCapture();
   }
+  referencePanel.identified = panel;
   return captureSelectedPanel({
     ...request,
     deviceId: device.deviceId,

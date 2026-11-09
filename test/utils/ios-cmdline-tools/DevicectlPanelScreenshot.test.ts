@@ -498,6 +498,95 @@ describe("captureIosPanelScreenshotWith", () => {
     },
   );
 
+  test("an unreadable runner image header is capture_unverified, not success", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = run({ activePanelKey: innerPanel.key, simctlPng: Buffer.from("not a png") });
+      const result = await h.result;
+      expect(result).toMatchObject({ success: false, reason: "capture_unverified" });
+      expect(result.data).toBeUndefined();
+      expect(result.error).toContain("image size is unreadable");
+      expect(result.error).toContain("active panel primary-1 is 2007x2853 pixels");
+      expect(h.runnerCalls).toEqual([true]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test.each([
+    ["the live active panel over a stale observed key", "inner", false, "primary-1"],
+    ["the observed key when the live read names no active panel", "none", true, undefined],
+    ["the observed key when the live read fails", "throws", true, undefined],
+  ] as const)(
+    "a runner fallback is checked against %s",
+    async (_label, live, accepted, rejectedAgainst) => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        let reads = 0;
+        const h = run({
+          activePanelKey: coverPanel.key,
+          simctlPng: Buffer.from("not a png"),
+          runnerData: png(1398, 2034).toString("base64"),
+          displayInfo: {
+            readDisplays: async () => {
+              reads++;
+              if (live === "throws") {
+                throw new Error("display read failed");
+              }
+              const displays = displaysOf(
+                loadDevicectlListFixture("info-displays-duo-inner-active.json"),
+              );
+              return live === "inner"
+                ? displays
+                : displays.map((display) => ({ ...display, active: false }));
+            },
+          },
+        });
+        const result = await h.result;
+        expect(result.success).toBe(accepted);
+        expect(h.simctlCalls).toEqual([coverPanel.key]);
+        expect(h.runnerCalls).toEqual([true]);
+        expect(reads).toBe(1);
+        if (rejectedAgainst) {
+          expect(result.error).toContain(`active panel ${rejectedAgainst} is 2007x2853 pixels`);
+        }
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
+  test.each([
+    ["matches", png(2007, 2853), true],
+    ["does not match", png(1398, 2034), false],
+  ] as const)(
+    "a runner fallback after a live read identified the panel is accepted only if it %s",
+    async (_label, frame, accepted) => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        let reads = 0;
+        const h = run({
+          activePanelKey: undefined,
+          simctlPng: Buffer.from("not a png"),
+          runnerData: frame.toString("base64"),
+          displayInfo: {
+            readDisplays: async () => {
+              reads++;
+              return displaysOf(loadDevicectlListFixture("info-displays-duo-inner-active.json"));
+            },
+          },
+        });
+        const result = await h.result;
+        expect(result.success).toBe(accepted);
+        expect(result.reason).toBeUndefined();
+        expect(h.simctlCalls).toEqual([innerPanel.key]);
+        expect(reads).toBe(1);
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
   test("a failed runner fallback is returned unchanged", async () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
@@ -629,6 +718,39 @@ describe("captureIosPanelScreenshotWith", () => {
         expect(h.runnerCalls).toEqual([]);
         expect(String(info.mock.calls[0]?.[0])).toContain("no display inventory");
       } finally {
+        info.mockRestore();
+      }
+    });
+
+    test("checks a runner fallback against the live active display it selected", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const info = spyOn(logger, "info").mockImplementation(() => {});
+      try {
+        for (const [frame, accepted] of [
+          [png(2853, 2007), true],
+          [png(1398, 2034), false],
+        ] as const) {
+          let reads = 0;
+          const h = run({
+            device: emptyDuo,
+            activePanelKey: undefined,
+            simctlPng: Buffer.from("not a png"),
+            runnerData: frame.toString("base64"),
+            displayInfo: {
+              readDisplays: async (request) => {
+                reads++;
+                return innerActive().readDisplays(request);
+              },
+            },
+          });
+          const result = await h.result;
+          expect(result.success).toBe(accepted);
+          expect(result.reason).toBeUndefined();
+          expect(h.runnerCalls).toEqual([true]);
+          expect(reads).toBe(1);
+        }
+      } finally {
+        warn.mockRestore();
         info.mockRestore();
       }
     });

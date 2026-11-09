@@ -4,9 +4,11 @@ import XCTest
 @MainActor
 final class TVCommandRouter {
     private let application: XCUIApplication
+    private let keyboardSettleGate: TVKeyboardSettleGate
 
     init(application: XCUIApplication) {
         self.application = application
+        keyboardSettleGate = TVKeyboardSettleGate(clock: TVSystemUptimeClock())
     }
 
     private struct Envelope: Decodable {
@@ -51,7 +53,7 @@ final class TVCommandRouter {
                 let resolved = target(requested: envelope.bundleId)
                 let snapshot = try resolved.app.snapshot()
                 let tree = sketch(snapshot)
-                let resolution = TVTextEntryPolicy.resolve(root: tree)
+                let resolution = keyboardSettleGate.resolve(root: tree)
                 return try JSONEncoder().encode(HierarchyUpdateResponse(
                     requestId: request.requestId,
                     data: ViewHierarchy(

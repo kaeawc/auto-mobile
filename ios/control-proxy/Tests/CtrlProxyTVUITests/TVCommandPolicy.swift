@@ -22,10 +22,11 @@ enum TVElementText {
     )
         -> String
     {
-        guard !isSecure, isTextInput, let value, !value.isEmpty,
+        guard !isSecure, isTextInput, let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               value != placeholder else { return label }
         // Emit the value alone for an empty or matching label; otherwise join label and value with one space.
-        return label.isEmpty || label == value ? value : "\(label) \(value)"
+        return label.trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty || label == value ? value : "\(label) \(value)"
     }
 }
 
@@ -61,15 +62,20 @@ struct TVNodeSketch {
 
 struct TVTextEntryResolution {
     let keyboardPresent: Bool
+    let withholdTextInputValues: Bool
+
+    init(keyboardPresent: Bool, withholdTextInputValues: Bool = false) {
+        self.keyboardPresent = keyboardPresent
+        self.withholdTextInputValues = withholdTextInputValues
+    }
 
     /// A system keyboard can expose secure input in an anonymous text view even without a keyboard node.
     func text(for node: TVNodeSketch) -> String {
-        let isAnonymousTextView = node.elementType == 52 && node.identifier.isEmpty && node.label.isEmpty
-            && (node.placeholder ?? "").isEmpty
+        let isAnonymousTextView = node.elementType == 52 && TVTextEntryPolicy.isAnonymousTextInput(node)
         return TVElementText.text(
             label: node.label, value: node.value, placeholder: node.placeholder,
             isTextInput: TVTextEntryPolicy.isTextInput(node.elementType),
-            isSecure: keyboardPresent || isAnonymousTextView || TVSecureField.isSecure(
+            isSecure: keyboardPresent || withholdTextInputValues || isAnonymousTextView || TVSecureField.isSecure(
                 elementType: node.elementType, identifier: node.identifier,
                 label: node.label, placeholder: node.placeholder
             )
@@ -90,8 +96,61 @@ enum TVTextEntryPolicy {
         (root.elementType == 19 && root.hasFocus) || root.children.contains { hasFocusedKeyboard($0) }
     }
 
+    static func isAnonymousTextInput(_ node: TVNodeSketch) -> Bool {
+        [45, 49, 52].contains(node.elementType)
+            && [node.identifier, node.label, node.placeholder ?? ""].allSatisfy {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+    }
+
+    static func hasAnonymousTextInput(_ root: TVNodeSketch) -> Bool {
+        isAnonymousTextInput(root) || root.children.contains { hasAnonymousTextInput($0) }
+    }
+
     static func resolve(root: TVNodeSketch) -> TVTextEntryResolution {
         TVTextEntryResolution(keyboardPresent: hasKeyboard(root))
+    }
+}
+
+protocol TVUptimeClock {
+    func now() -> TimeInterval
+}
+
+struct TVSystemUptimeClock: TVUptimeClock {
+    func now() -> TimeInterval {
+        ProcessInfo.processInfo.systemUptime
+    }
+}
+
+/// Keep values withheld through keyboard animation frames that temporarily omit the keyboard node.
+final class TVKeyboardSettleGate {
+    static let settleWindow: TimeInterval = 1.0
+
+    private let clock: any TVUptimeClock
+    private var lastKeyboardSeen: TimeInterval?
+
+    init(clock: any TVUptimeClock) {
+        self.clock = clock
+    }
+
+    func resolve(root: TVNodeSketch) -> TVTextEntryResolution {
+        let now = clock.now()
+        let keyboardPresent = TVTextEntryPolicy.hasKeyboard(root)
+        var withhold = !now.isFinite
+        if keyboardPresent {
+            lastKeyboardSeen = now
+            withhold = true
+        } else if let lastKeyboardSeen {
+            if now.isFinite, lastKeyboardSeen.isFinite, now >= lastKeyboardSeen,
+               now - lastKeyboardSeen >= Self.settleWindow,
+               !TVTextEntryPolicy.hasAnonymousTextInput(root)
+            {
+                self.lastKeyboardSeen = nil
+            } else {
+                withhold = true
+            }
+        }
+        return TVTextEntryResolution(keyboardPresent: keyboardPresent, withholdTextInputValues: withhold)
     }
 }
 

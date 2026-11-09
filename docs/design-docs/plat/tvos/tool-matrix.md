@@ -21,17 +21,27 @@ focus-navigation hint for touch gestures (`tapAt`, `swipeOn`, `pinchOn`,
 
 ## Observe text policy
 
-While a type-19 system keyboard node is present anywhere in the snapshot, no
-text-input value is emitted, including the keyboard's text view and inputs
-outside its subtree, regardless of focus. Nodes retain their snapshot
-identifier, class and focus; field nodes emit only their labels, and placeholders
-appear only as keyboard prompt nodes. An anonymous type-52 node (no identifier,
-label or placeholder, including a nil placeholder) never emits a value,
-regardless of keyboard presence.
-After the keyboard closes, a named plain field's typed value is readable through
-`observe` on the field's own node, joined with its label when distinct. A value
-equal to the placeholder counts as empty. Secure fields, including type-50
-nodes and fields identified by secure metadata, always redact their values.
+The single `@MainActor` router owns a `TVKeyboardSettleGate` for hierarchy requests,
+using an injected uptime clock. Its only mutable state is `lastKeyboardSeen`.
+A type-19 keyboard node anywhere in a snapshot updates that timestamp and
+withholds every text-input value (types 45, 49, 50 and 52), regardless of focus
+or position in the tree. Withholding continues across snapshots without a
+keyboard until at least `settleWindow = 1.0` seconds have elapsed since the last
+keyboard snapshot and the current snapshot contains neither a keyboard nor an
+anonymous type-45, type-49 or type-52 input. Anonymous means identifier, label
+and placeholder are all empty after trimming whitespace and newlines; a nil
+placeholder is empty. Only then is the timestamp cleared. Backward or non-finite
+clock readings fail closed; a non-finite stored timestamp also prevents release
+until a keyboard snapshot supplies a finite timestamp.
+
+Nodes retain their snapshot identifier, class and focus; withheld field nodes
+emit only their labels, and placeholders appear only as keyboard prompt nodes.
+As a second guard, anonymous type-52 nodes never emit values, even with no gate
+state. After the gate releases, a named plain field's value is readable through
+`observe` on its own node, joined with its label when distinct. Whitespace-only
+values and values equal to the placeholder count as empty; a whitespace-only
+label counts as empty when joining. Secure fields, including type-50 nodes and
+fields identified by secure metadata, always redact their values.
 
 ## Status values
 

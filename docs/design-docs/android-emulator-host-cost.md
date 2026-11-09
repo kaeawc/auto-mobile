@@ -27,6 +27,8 @@ From `EmulatorLauncher.startClaimedEmulatorProcess` and the AVD hardware fields 
 | Cameras        | AVD value (back `emulated`, front `none` on every sampled AVD)                                             | `config.ini`                            |
 | CPU, RAM       | AVD value; `provisionDevice` accepts `cpuCores` (1-16) and `memoryMb` (at least 2048)                      | `provisionDeviceSpecSchemas.ts`         |
 
+With `AUTOMOBILE_EMULATOR_NETSIM_ISOLATION=true`, each newly spawned emulator owns a private netsimd started after boot admission and connected through `-packet-streamer-endpoint`, isolating BLE peripherals across sessions; explicit endpoints take precedence, and emulator exit or launch failure stops only its owned daemon. An `O_EXCL` claim lock beside `netsim_N.ini` (in netsimd's discovery directory: `TMPDIR`, then `XDG_RUNTIME_DIR` on Linux) reserves instance N across daemons until that netsimd's exit is observed, and `--no-shutdown` is stripped from `NETSIM_ARGS` so a daemon orphaned by an AutoMobile restart still exits once its emulator disconnects.
+
 Since #6800, headless launches no longer imply audio off (`device-resources.md`, "Android
 provisioning hardware"). The CI action passes the opposite set: `-no-window -gpu swiftshader
 -noaudio -no-boot-anim -camera-back none` and `-no-snapshot-save`

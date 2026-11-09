@@ -1,3 +1,4 @@
+import { FakeNetsimInstanceLauncher } from "../../fakes/FakeNetsimInstanceLauncher";
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, test } from "bun:test";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
@@ -18,6 +19,7 @@ import {
 import { EmulatorLaunchCancelledError } from "../../../src/utils/android-cmdline-tools/EmulatorLaunchCancelledError";
 import {
   DefaultEmulatorPortReservations,
+  type EmulatorDeviceIdReservation,
   resetEmulatorLaunchReservations,
 } from "../../../src/utils/android-cmdline-tools/EmulatorPortReservations";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
@@ -100,10 +102,12 @@ function startupHarness(
   probe: EmulatorLauncherHost["isEmulatorSerialListed"] = async () => false,
   onSpawn?: (args: readonly string[]) => void,
   throwIfLaunchCancelled: EmulatorLauncherHost["throwIfLaunchCancelled"] = () => {},
+  hostOverrides: Partial<EmulatorLauncherHost> = {},
 ) {
   resetEmulatorLaunchReservations();
   const timer = new FakeTimer();
   const child = new FakeChildProcess(timer);
+  const netsim = new FakeNetsimInstanceLauncher();
   const targets = new WeakMap<HostChildProcess, string>();
   const errors = new WeakMap<HostChildProcess, ActionableError>();
   const finalizations = new WeakMap<HostChildProcess, Promise<ActionableError | undefined>>();
@@ -123,6 +127,7 @@ function startupHarness(
     validateAvdMemory: () => {},
     checkArchitectureCompatibility: async () => ({ compatible: true, hostArch: "arm64" }),
     emulatorAudioArguments: () => [],
+    netsimInstanceLauncher: () => netsim,
     throwIfLaunchCancelled,
     releaseReservationIfLaunchCancelled: () => {},
     emulatorPath: () => "fake-emulator",
@@ -148,8 +153,8 @@ function startupHarness(
     detectDisplayError: () => ({ isDisplayError: false }),
     isEmulatorSerialListed: probe,
   } satisfies Partial<EmulatorLauncherHost>;
-  const launcher = new DefaultEmulatorLauncher(createHost(overrides));
-  return { timer, child, launcher, reservations };
+  const launcher = new DefaultEmulatorLauncher(createHost({ ...overrides, ...hostOverrides }));
+  return { timer, child, launcher, reservations, netsim };
 }
 
 async function launchStartup(
@@ -631,4 +636,242 @@ describe("DefaultEmulatorLauncher gRPC port", () => {
     });
     expect((await reservations.reserveEmulatorGrpcPort()).port).toBe(8555);
   });
+});
+
+for (const enabled of [undefined, "false", "1", "TRUE", " true ", "true"]) {
+  test(`private netsimd opt-in requires exact true: ${enabled}`, async () => {
+    const previous = process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION;
+    const previousArgs = process.env.AUTOMOBILE_EMULATOR_ARGS;
+    const previousHeadless = process.env.AUTOMOBILE_EMULATOR_HEADLESS;
+    try {
+      delete process.env.AUTOMOBILE_EMULATOR_ARGS;
+      process.env.AUTOMOBILE_EMULATOR_HEADLESS = "true";
+      if (enabled === undefined) {
+        delete process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION;
+      } else {
+        process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION = enabled;
+      }
+      let args: readonly string[] = [];
+      const h = startupHarness(undefined, (spawnArgs) => {
+        args = [...spawnArgs];
+      });
+      const { launch } = await launchStartup(h);
+      expect(h.netsim.starts).toBe(enabled === "true" ? 1 : 0);
+      expect(args).toEqual([
+        "-avd",
+        "Pixel_9",
+        "-no-window",
+        "-grpc",
+        "8554",
+        ...(enabled === "true" ? ["-packet-streamer-endpoint", "localhost:53078"] : []),
+      ]);
+      h.child.stdout.emit("data", Buffer.from("Detected GPU type"));
+      await launch;
+      expect(h.netsim.stops).toBe(0);
+      h.child.emit("exit", 0, null);
+      expect(h.netsim.stops).toBe(enabled === "true" ? 1 : 0);
+      h.child.emit("close", 0, null);
+      expectNoStartupTimers(h.timer);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION;
+      } else {
+        process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION = previous;
+      }
+      if (previousArgs === undefined) {
+        delete process.env.AUTOMOBILE_EMULATOR_ARGS;
+      } else {
+        process.env.AUTOMOBILE_EMULATOR_ARGS = previousArgs;
+      }
+      if (previousHeadless === undefined) {
+        delete process.env.AUTOMOBILE_EMULATOR_HEADLESS;
+      } else {
+        process.env.AUTOMOBILE_EMULATOR_HEADLESS = previousHeadless;
+      }
+    }
+  });
+}
+
+for (const endpointArgs of [
+  ["-packet-streamer-endpoint", "localhost:1234"],
+  ["-packet-streamer-endpoint=localhost:1234"],
+]) {
+  test(`explicit endpoint bypasses private netsimd: ${endpointArgs[0]}`, async () => {
+    const previous = process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION;
+    const previousArgs = process.env.AUTOMOBILE_EMULATOR_ARGS;
+    try {
+      process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION = "true";
+      process.env.AUTOMOBILE_EMULATOR_ARGS = JSON.stringify(endpointArgs);
+      let args: readonly string[] = [];
+      const h = startupHarness(undefined, (spawnArgs) => {
+        args = [...spawnArgs];
+      });
+      const { launch } = await launchStartup(h);
+      expect(h.netsim.starts).toBe(0);
+      expect(args).toEqual(expect.arrayContaining(endpointArgs));
+      h.child.stdout.emit("data", Buffer.from("Detected GPU type"));
+      await launch;
+      h.child.emit("exit", 0, null);
+      h.child.emit("close", 0, null);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION;
+      } else {
+        process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION = previous;
+      }
+      if (previousArgs === undefined) {
+        delete process.env.AUTOMOBILE_EMULATOR_ARGS;
+      } else {
+        process.env.AUTOMOBILE_EMULATOR_ARGS = previousArgs;
+      }
+    }
+  });
+}
+
+for (const failure of ["spawn", "exit", "duplicate", "netsimd"] as const) {
+  test(`private netsimd cleanup on ${failure}`, async () => {
+    const previous = process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION;
+    try {
+      process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION = "true";
+      const h = startupHarness(undefined, () => {
+        if (failure === "spawn") {
+          throw new Error("spawn refused");
+        }
+      });
+      if (failure === "netsimd") {
+        h.netsim.error = new ActionableError("netsimd refused");
+      }
+      const launch = h.launcher.startEmulatorProcess("Pixel_9");
+      if (failure === "spawn" || failure === "netsimd") {
+        await expect(launch).rejects.toThrow(
+          failure === "spawn" ? "spawn refused" : "netsimd refused",
+        );
+      } else {
+        await drainUntil(() => h.child.stdout.listenerCount("data") > 0, {
+          description: "startup listeners",
+        });
+        if (failure === "duplicate") {
+          h.child.stderr.emit("data", Buffer.from("Running multiple emulators with the same AVD"));
+        }
+        h.child.emit("exit", 1, null);
+        h.child.emit("close", 1, null);
+        if (failure === "duplicate") {
+          expect(await launch).toEqual({ process: null, outcome: "duplicate-of-external" });
+        } else {
+          await expect(launch).rejects.toThrow();
+        }
+      }
+      expect(h.netsim.stops).toBe(failure === "netsimd" ? 0 : 1);
+      expect(h.reservations.hasInFlightLaunch("Pixel_9")).toBe(false);
+      expectNoStartupTimers(h.timer);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION;
+      } else {
+        process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION = previous;
+      }
+    }
+  });
+}
+
+for (const failure of ["netsimd", "spawn"] as const) {
+  test(`reserved console ports are released exactly once on ${failure} failure`, async () => {
+    const previous = process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION;
+    try {
+      process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION = "true";
+      const h = startupHarness(undefined, () => {
+        throw new Error("spawn refused");
+      });
+      const reservation: EmulatorDeviceIdReservation = {
+        deviceId: "emulator-5580",
+        ports: { consolePort: 5580, adbPort: 5581 },
+        appendPort: true,
+        avdName: "Pixel_9",
+      };
+      h.reservations.addReservedEmulatorPort = async () => reservation;
+      const released: EmulatorDeviceIdReservation[] = [];
+      h.reservations.releasePendingEmulatorDeviceId = (pending) => {
+        released.push(pending);
+      };
+      if (failure === "netsimd") {
+        h.netsim.error = new ActionableError("netsimd refused");
+      }
+      await expect(h.launcher.startEmulatorProcess("Pixel_9")).rejects.toThrow(
+        failure === "netsimd" ? "netsimd refused" : "spawn refused",
+      );
+      expect(released).toEqual([reservation]);
+      expectNoStartupTimers(h.timer);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION;
+      } else {
+        process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION = previous;
+      }
+    }
+  });
+}
+
+for (const outcome of ["joined-in-process-launch", "already-running"] as const) {
+  test(`private netsimd is not started for ${outcome}`, async () => {
+    const previous = process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION;
+    try {
+      process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION = "true";
+      const h = startupHarness(undefined, undefined, undefined, {
+        adoptsExistingAvdLaunch: async () => outcome === "already-running",
+        assertCameraPosterColdBoot: () => {},
+      });
+      if (outcome === "joined-in-process-launch") {
+        h.reservations.claimInFlightLaunch("Pixel_9");
+      }
+      expect(await h.launcher.startEmulatorProcess("Pixel_9")).toEqual({ process: null, outcome });
+      expect(h.netsim.starts).toBe(0);
+      expectNoStartupTimers(h.timer);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION;
+      } else {
+        process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION = previous;
+      }
+    }
+  });
+}
+
+test("private netsimd starts only after boot admission, immediately before emulator spawn", async () => {
+  const previous = process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION;
+  try {
+    process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION = "true";
+    const h = startupHarness(undefined, () => {
+      expect(h.netsim.starts).toBe(1);
+    });
+    let admitted = false;
+    let grant: (() => void) | undefined;
+    const ready = new Promise<void>((resolve) => {
+      grant = resolve;
+    });
+    const launch = h.launcher.startEmulatorProcess("Pixel_9", {
+      admitColdBoot: async () => {
+        admitted = true;
+        await ready;
+        return { handOff: () => {}, release: () => {} };
+      },
+    });
+    await drainUntil(() => admitted, { description: "boot admission request" });
+    expect(h.netsim.starts).toBe(0);
+    grant?.();
+    await drainUntil(() => h.child.stdout.listenerCount("data") > 0, {
+      description: "startup listeners",
+    });
+    h.child.stdout.emit("data", Buffer.from("Detected GPU type"));
+    await launch;
+    h.child.emit("exit", 0, null);
+    h.child.emit("close", 0, null);
+    expect(h.netsim.stops).toBe(1);
+    expectNoStartupTimers(h.timer);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION;
+    } else {
+      process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION = previous;
+    }
+  }
 });

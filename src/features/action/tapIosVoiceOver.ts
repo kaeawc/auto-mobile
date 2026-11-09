@@ -2,12 +2,36 @@ import type { BootedDevice, Element } from "../../models";
 import { logger } from "../../utils/logger";
 import { IOSCtrlProxyClient, type CtrlProxyActionResult } from "../observe/ios";
 import type { DisplayFenceOption } from "./BaseVisualChange";
-import { indeterminateTapError } from "./coordinateTapDispatch";
+import { IndeterminateTapError, indeterminateTapError } from "./coordinateTapDispatch";
+import { isRunnerGestureOutcomeUnknown } from "../observe/ios/runnerErrorCodes";
 import { resolveVoiceOverActivateCtrlProxyTimeoutMs } from "./gestureTransportTimeout";
 
 /** iOS VoiceOver tap activation, extracted from TapOnElement (#11833). */
 
 type IosTapOptions = DisplayFenceOption & { signal?: AbortSignal };
+
+/** Add VoiceOver recovery guidance without losing the no-retry indeterminate contract. */
+export async function withVoiceOverCoordinateTimeoutContext(
+  coordinateTap: () => Promise<void>,
+): Promise<void> {
+  try {
+    await coordinateTap();
+  } catch (error) {
+    if (
+      error instanceof IndeterminateTapError &&
+      (/timed out|timeout/i.test(error.message) ||
+        isRunnerGestureOutcomeUnknown({ error: error.message }))
+    ) {
+      throw new IndeterminateTapError(
+        `${error.message} With VoiceOver on, display-targeted touches on multi-panel (Duo) devices ` +
+          "are not delivered. The tap may not have run. Verify with observe; turn VoiceOver off " +
+          "using the accessibility tool ({voiceover:false}), then retry if needed.",
+        { cause: error },
+      );
+    }
+    throw error;
+  }
+}
 
 /** Drop the cached iOS hierarchy once an action succeeded, so the next read is fresh. */
 export function invalidateIosCacheOnSuccess(
@@ -51,7 +75,9 @@ export async function tapViaVoiceOver({
 
   if (!label) {
     logger.info("[TapOnElement] VoiceOver: no label available, falling back to coordinate tap");
-    await coordinateTap({ displayFence: fence, signal });
+    await withVoiceOverCoordinateTimeoutContext(() =>
+      coordinateTap({ displayFence: fence, signal }),
+    );
     return;
   }
 
@@ -76,7 +102,9 @@ export async function tapViaVoiceOver({
       `[TapOnElement] VoiceOver action failed for label "${label}": ${result.error ?? "unknown error"}, ` +
         `falling back to coordinate tap at (${point.x}, ${point.y})`,
     );
-    await coordinateTap({ displayFence: fence, signal });
+    await withVoiceOverCoordinateTimeoutContext(() =>
+      coordinateTap({ displayFence: fence, signal }),
+    );
   }
 }
 

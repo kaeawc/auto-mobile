@@ -7,7 +7,7 @@ import { isVisionosHierarchy, type VisionosHierarchy } from "./VisionosHierarchy
 
 export type VisionosCommand =
   | { type: "request_hierarchy" }
-  | { type: "request_tap_element"; identifier: string }
+  | { type: "request_tap_element"; identifier: string; label?: string; elementType?: number }
   | { type: "request_append_text"; text: string };
 
 /** Default budget for commands other than hierarchy, and for the connected handshake. */
@@ -68,6 +68,19 @@ function expectedReplyType(requestType: string): string {
   return requestType === "request_hierarchy"
     ? "hierarchy_update"
     : `${requestType.slice("request_".length)}_result`;
+}
+
+/**
+ * Only `request_hierarchy` makes the runner relaunch the app and retry (#17448), so only that
+ * reply may say a relaunch happened; inputs fail without one and point at observe instead.
+ */
+function accessibilityApiDisabledMessage(requestType: string): string {
+  const advice =
+    "Other apps on the simulator may still work. Use a screenshot (simctl/screenshot) to see the app instead.";
+  if (requestType === "request_hierarchy") {
+    return `The visionOS runner could not read this app's accessibility window even after relaunching the app. ${advice}`;
+  }
+  return `The visionOS runner could not read this app's accessibility window, so ${requestType} failed; the app was not relaunched. Observe the app first (observing relaunches it once to recover), then retry this step. ${advice}`;
 }
 
 function defaultTimeoutMs(command: VisionosCommand): number {
@@ -185,7 +198,7 @@ export class WebSocketVisionosRunnerClient implements VisionosRunnerClient {
       if (runnerError.includes("kAXErrorAPIDisabled")) {
         pending.reject(
           new VisionosRunnerError(
-            "The visionOS simulator's accessibility API is disabled, so no hierarchy can be read for the built-in app. Re-create the Apple Vision Pro simulator or boot it with accessibility enabled, then observe again.",
+            accessibilityApiDisabledMessage(pending.type),
             "accessibility_api_disabled",
             { cause: runnerError },
           ),

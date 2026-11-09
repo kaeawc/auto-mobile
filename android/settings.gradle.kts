@@ -35,6 +35,9 @@ enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 include(":control-proxy")
 
+// On-device baseline profile generator for CtrlProxy (#17417); never runs in CI.
+include(":control-proxy-baselineprofile")
+
 include(":auto-mobile-sdk")
 
 // Deterministic Android Automotive OS fixture app for automotive checks (#16745).

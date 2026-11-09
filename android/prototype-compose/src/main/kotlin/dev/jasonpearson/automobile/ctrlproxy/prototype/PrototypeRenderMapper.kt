@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 import dev.jasonpearson.automobile.protocol.PrototypeDataResolver
 import dev.jasonpearson.automobile.protocol.PrototypeFullscreenPlacement
 import dev.jasonpearson.automobile.protocol.PrototypeNode
+import dev.jasonpearson.automobile.protocol.PrototypeRouteRuntime
 import dev.jasonpearson.automobile.protocol.PrototypeSheetPlacement
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
@@ -48,6 +49,9 @@ internal class PrototypeRenderMapper(
   private var sourceData: JsonObject? = null
   private var sourcePlatform: JsonObject? = null
   private var resolvedRoot: PrototypeNode? = null
+  private var routeSource: PrototypeNode? = null
+  private var routeTops: Map<String, Pair<String, JsonObject>>? = null
+  private var routedRoot: PrototypeNode? = null
   private var cache: PrototypeRenderCache? = null
   private var previousSpec: PrototypeSpec? = null
   private var previousShownErrors: Set<String>? = null
@@ -81,7 +85,7 @@ internal class PrototypeRenderMapper(
         locale = currentLocale
         zone = currentZone
       }
-      val resolved = resolveLocked(spec, platform, locales)
+      val resolved = resolveLocked(routedLocked(spec, stacks), platform, locales)
       previousModel?.let { model ->
         if (
           previousSpec?.root === resolved.root &&
@@ -129,6 +133,28 @@ internal class PrototypeRenderMapper(
         model
       }
     }
+
+  /**
+   * [spec] with each stack's top screen bound to its entry's route params (#14188). The bound root
+   * is reused while the authored root and every stack's top entry stay the same, so the identity
+   * caches below keep working.
+   */
+  private fun routedLocked(
+    spec: PrototypeSpec,
+    stacks: Map<String, PrototypeStackSnapshot>,
+  ): PrototypeSpec {
+    if (stacks.values.none { it.params != null }) return spec
+    val tops = stacks.mapValues { (_, stack) ->
+      stack.path.last() to stack.paramsAt(stack.path.lastIndex)
+    }
+    if (routeSource !== spec.root || routeTops != tops) {
+      routedRoot = PrototypeRouteRuntime.bindRoot(spec.root, stacks)
+      routeSource = spec.root
+      routeTops = tops
+    }
+    val root = checkNotNull(routedRoot)
+    return if (root === spec.root) spec else spec.copy(root = root)
+  }
 
   private fun resolvedFromSameSources(
     spec: PrototypeSpec,

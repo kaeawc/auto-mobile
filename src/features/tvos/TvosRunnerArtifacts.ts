@@ -8,7 +8,7 @@ import { XcodebuildClient, type Xcodebuild } from "../../utils/ios-cmdline-tools
 import { runWithAbortSignal } from "../../utils/AbortContext";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 
-/** Finds local tvos artifacts, building the checked-in tvos scheme when necessary. */
+/** Resolves overrides, local products, and released tvOS runners before building from source. */
 export class TvosRunnerArtifacts {
   private readonly builds = new SingleFlight<string, string>();
   constructor(
@@ -20,6 +20,7 @@ export class TvosRunnerArtifacts {
             "projectRoot" | "derivedDataPath"
           >;
         };
+      release?: { ensure(signal?: AbortSignal): Promise<string | null> };
       xcodebuild?: Pick<Xcodebuild, "executeCommand">;
       override?: () => string | undefined;
       access?: (file: string) => Promise<unknown>;
@@ -41,6 +42,11 @@ export class TvosRunnerArtifacts {
     if (existing) {
       return existing;
     }
+    const released = await this.dependencies.release?.ensure(signal);
+    signal?.throwIfAborted();
+    if (released) {
+      return released;
+    }
     const paths = builder.getConfig();
     return await this.builds.run(
       paths.derivedDataPath,
@@ -58,7 +64,7 @@ export class TvosRunnerArtifacts {
               await (this.dependencies.access ?? access)(projectPath);
             } catch (cause) {
               throw new ActionableError(
-                `Tvos runner project is unavailable; set ${ENV.TVOS_RUNNER_XCTESTRUN.name} to a prebuilt tvos runner xctestrun. The published package does not include the tvos project.`,
+                `Tvos runner project is unavailable; set ${ENV.TVOS_RUNNER_XCTESTRUN.name} to a prebuilt tvos runner xctestrun. This release has no published tvOS runner, and the published package does not include the tvos project.`,
                 { cause },
               );
             }

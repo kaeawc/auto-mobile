@@ -1,3 +1,4 @@
+import { isWebLayerType } from "./webLayerTypes";
 import {
   parsePrototypeHex,
   prototypeLuminance,
@@ -9,7 +10,6 @@ import { pagerPage } from "./webCollections";
 import {
   bound,
   childEntries,
-  isWebLayerType,
   preparedNode,
   type WebChildEntry,
   type WebRenderScope,

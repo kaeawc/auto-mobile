@@ -191,6 +191,42 @@ final class GestureCoordinateStrategyTests: XCTestCase {
         XCTAssertNil(GestureCoordinateGeometry.observationRotation(nil, size: GestureSize(width: 0, height: 0)))
     }
 
+    func testObservationRotationCorrectsPortraitReadingForTransposedInnerPanel() {
+        for rotation in [0, 2] {
+            XCTAssertEqual(GestureCoordinateGeometry.observationRotation(
+                rotation, size: unfolded.observation, app: unfolded.app
+            ), 1)
+        }
+    }
+
+    func testObservationRotationKeepsPortraitReadingWithoutTransposedApp() {
+        XCTAssertEqual(GestureCoordinateGeometry.observationRotation(0, size: unfolded.observation), 0)
+        for app in [GestureSize?.none, unfolded.observation, folded.app] {
+            XCTAssertEqual(GestureCoordinateGeometry.observationRotation(
+                0, size: unfolded.observation, app: app
+            ), 0)
+        }
+    }
+
+    func testCapturedInnerPanelTapUsesCorrectedObservationRotation() {
+        let geometry = GestureCoordinateGeometry(
+            app: unfolded.app, screen: unfolded.screen, observation: unfolded.observation,
+            rotation: GestureCoordinateGeometry.observationRotation(
+                0, size: unfolded.observation, app: unfolded.app
+            )
+        )
+        let point = GesturePoint(x: 667, y: 48)
+        let selection = GestureCoordinateSelection.choose(point: point, geometry: geometry)
+        let landscapeSelection = GestureCoordinateSelection.choose(point: point, geometry: unfolded)
+        XCTAssertEqual(selection.strategy, .appRelative)
+        XCTAssertEqual(selection.reason, "multiPanelMismatch")
+        XCTAssertEqual(selection.normalized, landscapeSelection.normalized)
+        XCTAssertEqual(selection.normalized.x, 48.0 / 669, accuracy: 1e-9)
+        XCTAssertEqual(selection.normalized.y, (951.0 - 667) / 951, accuracy: 1e-9)
+        XCTAssertTrue((0.0 ... 1.0).contains(selection.normalized.x))
+        XCTAssertTrue((0.0 ... 1.0).contains(selection.normalized.y))
+    }
+
     func testInvalidObservationAndNormalizedTolerance() throws {
         let point = GesturePoint(x: 443, y: 202)
         let invalid = GestureCoordinateGeometry(
@@ -334,6 +370,7 @@ private final class FakeReferenceDisplayGestureProvider: DisplayGestureProviding
     }
 
     func synthesizePinch(_: DisplayPinch) throws -> Bool { true }
+    func synthesizePath(_: DisplayPath) throws -> Bool { true }
 
     func coordinate(selection: GestureCoordinateSelection) throws -> GestureCoordinateSelection { selection }
 

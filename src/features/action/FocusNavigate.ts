@@ -10,16 +10,17 @@ import { ActionableError } from "../../models/ActionableError";
 import type { Element } from "../../models/Element";
 import type { ElementBounds } from "../../models/ElementBounds";
 import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
-import { DefaultTextMatcher } from "../utility/TextMatcher";
-import { normalize } from "../utility/ElementResolverMatching";
 import { isEditableElementProperties, isTruthyFlag } from "../utility/elementProperties";
-import { matchesCtrlProxyResourceId } from "../utility/SearchableNode";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { reportToolDispatched } from "../../utils/ToolDispatchContext";
 import { boundsArea, boundsEqual, intersectBounds } from "../../utils/bounds";
 import { compareSelectionRank } from "../utility/selectionRank";
 import type { Timer } from "../../utils/SystemTimer";
 import type { InputKeyName } from "./InputKey";
+import { textFieldToolkit } from "./textFieldToolkit";
+import { describeFocus, elementMatchesTarget, stringProp } from "./FocusNavigateMatching";
+
+export { elementMatchesTarget } from "./FocusNavigateMatching";
 
 export const FOCUS_NAVIGATE_DIRECTIONS = ["up", "down", "left", "right"] as const;
 export type FocusNavigateDirection = (typeof FOCUS_NAVIGATE_DIRECTIONS)[number];
@@ -154,8 +155,6 @@ const DIRECTION_KEYS = {
   right: "arrow_right",
 } as const satisfies Record<FocusNavigateDirection, InputKeyName>;
 
-const textMatcher = new DefaultTextMatcher();
-
 export function focusNavigateTargetError(target: FocusNavigateTarget): string | undefined {
   const given = [
     target.text,
@@ -169,70 +168,43 @@ export function focusNavigateTargetError(target: FocusNavigateTarget): string | 
     : "focusNavigate requires until.text, until.contentDesc or until.resourceId";
 }
 
-function stringProp(
-  element: Element,
-  key: "text" | "content-desc" | "resource-id" | "view-id",
-): string {
-  const value = element[key];
-  return typeof value === "string" ? value : "";
-}
-
 /**
- * Label matching normalized as tapOn's touch resolver does (quotes, trimmed, whitespace collapsed,
- * case-insensitive), so ` Movies ` equals `Movies` and a wrapped `Sign\nin` matches `Sign in`.
+ * The Leanback headers grid (`browse_headers`) holding a focused `row_header`, if focus is there.
+ * While a header holds focus its row's card labels are hidden; another app's `row_header` id
+ * outside that grid is not a Leanback header.
  */
-function labelMatches(label: string, exact: boolean, fields: readonly string[]): boolean {
-  const query = normalize(label);
-  if (!query) {
-    return false;
+function leanbackHeadersPane(
+  focused: Element | null,
+  elements: readonly Element[],
+): Element | undefined {
+  if (!focused || !stringProp(focused, "resource-id").endsWith(":id/row_header")) {
+    return undefined;
   }
-  return fields.some((field) => {
-    const value = normalize(field);
-    return value.length > 0 && (exact ? value === query : value.includes(query));
+  return elements.find((element) => {
+    if (!stringProp(element, "resource-id").endsWith(":id/browse_headers")) {
+      return false;
+    }
+    const overlap = intersectBounds(element.bounds, focused.bounds);
+    return overlap !== null && boundsEqual(overlap, focused.bounds);
   });
 }
 
-/** Text-field checks: text, contentDesc and label. Each given field must match. */
-function textFieldsMatch(element: Element, target: FocusNavigateTarget): boolean {
-  if (target.text && !textMatcher.createTextMatcher(target.text)(stringProp(element, "text"))) {
-    return false;
+/**
+ * Right, to enter a focused Leanback header's content pane when no match is on screen; at most
+ * once per header. A scrollable headers grid can hide the target header below, so the headers
+ * are scanned down first and right is pressed once down is refused at the last header. A refused
+ * right falls through to the down scan.
+ */
+function leanbackEntry(
+  focused: Element | null,
+  elements: readonly Element[],
+  progress: FocusProgress,
+): FocusNavigateDirection | undefined {
+  const pane = leanbackHeadersPane(focused, elements);
+  if (!pane || progress.tried.has("right")) {
+    return undefined;
   }
-  if (
-    target.contentDesc &&
-    !textMatcher.createTextMatcher(target.contentDesc)(stringProp(element, "content-desc"))
-  ) {
-    return false;
-  }
-  return (
-    !target.label ||
-    labelMatches(target.label, Boolean(target.labelExact), [
-      stringProp(element, "text"),
-      stringProp(element, "content-desc"),
-    ])
-  );
-}
-
-/** Identity checks: elementId (native or synthetic view-id) and resourceId. */
-function idFieldsMatch(element: Element, target: FocusNavigateTarget): boolean {
-  const resourceId = stringProp(element, "resource-id");
-  if (
-    target.elementId &&
-    !matchesCtrlProxyResourceId(resourceId, target.elementId) &&
-    stringProp(element, "view-id") !== target.elementId
-  ) {
-    return false;
-  }
-  return !target.resourceId || matchesCtrlProxyResourceId(resourceId, target.resourceId);
-}
-
-export function elementMatchesTarget(element: Element, target: FocusNavigateTarget): boolean {
-  if (target.atBounds === null) {
-    return false;
-  }
-  if (target.atBounds && !boundsEqual(element.bounds, target.atBounds)) {
-    return false;
-  }
-  return textFieldsMatch(element, target) && idFieldsMatch(element, target);
+  return isTruthyFlag(pane.scrollable) && !progress.blocked.has("down") ? undefined : "right";
 }
 
 /**
@@ -445,62 +417,6 @@ function distanceToNearest(from: Element | null, matches: readonly Element[]): n
   );
 }
 
-function pathEntry(element: Element, descendant?: Element): FocusPathEntry {
-  const text = stringProp(element, "text");
-  const contentDesc = stringProp(element, "content-desc");
-  const resourceId = stringProp(element, "resource-id");
-  const descendantLabel =
-    descendant &&
-    (stringProp(descendant, "text") ||
-      stringProp(descendant, "content-desc") ||
-      stringProp(descendant, "resource-id"));
-  return {
-    ...(descendantLabel ? { descendantLabel } : {}),
-    ...(text ? { text } : {}),
-    ...(contentDesc ? { contentDesc } : {}),
-    ...(resourceId ? { resourceId } : {}),
-    bounds: element.bounds,
-  };
-}
-
-function isActionable(element: Element): boolean {
-  return isTruthyFlag(element.clickable) || isTruthyFlag(element.focusable);
-}
-
-/** Match each contained node independently, preserving the focused container's identity. */
-function describeFocus(
-  screen: FocusScreen,
-  target: FocusNavigateTarget,
-): { focusedElement: FocusPathEntry | undefined; matches: boolean } {
-  const { focused } = screen;
-  // The observer supplies flattened nodes, so require full bounds containment, not overlap.
-  const contained = focused
-    ? screen.elements.filter((element) => {
-        if (element === focused) {
-          return false;
-        }
-        const intersection = intersectBounds(focused.bounds, element.bounds);
-        return intersection !== null && boundsEqual(intersection, element.bounds);
-      })
-    : [];
-  // A pinned target is the control a touch tap would act on; an independently actionable child
-  // (a Delete button in a focused row) must own focus itself, not borrow its parent's.
-  const matchingDescendant = contained.find(
-    (element) =>
-      elementMatchesTarget(element, target) && !(target.atBounds && isActionable(element)),
-  );
-  const matches = Boolean(focused && (elementMatchesTarget(focused, target) || matchingDescendant));
-  // Prefer a visible label: a resource-id is usually shared by every card in a row (a Leanback
-  // ImageCardView's first child is its `main_image`), so it cannot tell cards apart (#17376).
-  const label =
-    matchingDescendant ??
-    contained.find(
-      (element) => stringProp(element, "text") || stringProp(element, "content-desc"),
-    ) ??
-    contained.find((element) => stringProp(element, "resource-id"));
-  return { focusedElement: focused ? pathEntry(focused, label) : undefined, matches };
-}
-
 /**
  * The focused element's identity across presses. A recycler row can keep fixed bounds while the
  * list scrolls under it, so the contained label is part of the key: otherwise every press on such
@@ -535,10 +451,10 @@ interface FocusProgress {
   resume(direction: FocusNavigateDirection): void;
   /**
    * Records an observation and the focused element's distance to the target (undefined when
-   * either is missing); returns true when focus differs from the previous one.
+   * either is missing). Container-only focus leaves the last control's progress intact.
    */
-  observe(key: string, distance: number | undefined): boolean;
-  pressed(direction: FocusNavigateDirection): void;
+  observe(key: string, distance: number | undefined, containsTarget: boolean): void;
+  pressed(direction: FocusNavigateDirection, containsTarget: boolean): void;
 }
 
 interface ElementMemory {
@@ -609,9 +525,12 @@ function createFocusProgress(): FocusProgress {
     },
     stalled: stall.stalled,
     resume: (direction) => stall.resume(direction),
-    observe(key, distance) {
+    observe(key, distance, containsTarget) {
+      // A container read cannot prove a refused arrow or movement away from the target.
+      if (containsTarget) {
+        return;
+      }
       const didNotMove = previousKey !== undefined && key === previousKey;
-      const moved = key !== previousKey;
       unchanged = didNotMove ? unchanged + 1 : 0;
       if (!didNotMove) {
         memory = memoryByElement.get(key) ?? { blocked: new Set(), tried: new Set() };
@@ -623,9 +542,11 @@ function createFocusProgress(): FocusProgress {
       arrivedBy = didNotMove ? arrivedBy : lastDirection;
       previousKey = key;
       lastDirection = undefined;
-      return moved;
     },
-    pressed(direction) {
+    pressed(direction, containsTarget) {
+      if (containsTarget) {
+        return;
+      }
       memory.tried.add(direction);
       lastDirection = direction;
     },
@@ -654,7 +575,7 @@ function isExhausted(
 interface ExitContext {
   screen: FocusScreen;
   focusedElement: FocusPathEntry | undefined;
-  /** Escapes already pressed; set once, so a second stuck read gives up. */
+  /** Escapes already pressed, in order; each key is pressed at most once per call. */
   trap: { escapes?: FocusTrapEscape[] };
   select: boolean;
   signal: AbortSignal | undefined;
@@ -680,13 +601,42 @@ function describeEntry(entry: FocusPathEntry | undefined): string {
   return ` at [${left},${top}][${right},${bottom}]`;
 }
 
+/**
+ * Whether the focused editable field is a classic View `EditText` (see {@link textFieldToolkit}).
+ * A Compose `TextField` on Android TV keeps focus on every D-pad direction even with the keyboard
+ * hidden; only tab moves it out (#17441). A View field takes back then an arrow, and tab could
+ * type a tab character into it, so tab is never pressed there.
+ */
+function isViewTextField(screen: FocusScreen, focused: Element): boolean {
+  return textFieldToolkit(focused, screen.hierarchy) === "view";
+}
+
+/** Whether tab is the escape from this focused element once no keyboard is shown over it. */
+function tabEscapes(screen: FocusScreen, focused: Element): boolean {
+  return !isEditableElementProperties(focused) || !isViewTextField(screen, focused);
+}
+
+/** The keys a caller presses to leave the field: back then down for a View field, else tab. */
+function trapAdvice(viewField: boolean, escapes: readonly FocusTrapEscape[]): string {
+  // An IME action (sendKeys next/done) does not move D-pad focus out of a TV text field (#17378).
+  if (viewField) {
+    return "Hide the keyboard with pressButton back, press pressButton down to move focus out of the field, observe, then retry";
+  }
+  if (escapes.includes("tab")) {
+    return "Focus did not leave the field with back, the D-pad or tab; observe, then retry from another route";
+  }
+  return "Hide the keyboard with pressButton back, press sendKeys key tab to move focus out of the field (D-pad arrows do not leave a Compose text field), observe, then retry";
+}
+
 /** The stuck message naming the trap, the escapes tried and what the caller can do instead. */
 function trapMessage(
   blocker: FocusNavigateBlocker,
-  editable: boolean,
+  screen: FocusScreen,
   focusedElement: FocusPathEntry | undefined,
   escapes: readonly FocusTrapEscape[],
 ): string {
+  const { focused } = screen;
+  const editable = focused !== null && isEditableElementProperties(focused);
   const holder = editable
     ? `the editable text field${describeEntry(focusedElement)}`
     : `the focused element${describeEntry(focusedElement)}`;
@@ -694,13 +644,14 @@ function trapMessage(
     blocker === "ime"
       ? `D-pad focus is trapped by the on-screen keyboard over ${holder}`
       : `D-pad focus is trapped in ${holder}`;
+  const viewField = editable && isViewTextField(screen, focused);
   const tried =
     escapes.length > 0
       ? `; pressing ${escapes.join(" then ")} and every direction again did not move focus`
-      : "; arrow keys do not leave it and tab would type into it";
-  // An IME action (sendKeys next/done) does not move D-pad focus out of a TV text field (#17378):
-  // only back to hide the keyboard, then an arrow, leaves it.
-  return `${trap}${tried}. Hide the keyboard with pressButton back, press pressButton down to move focus out of the field, observe, then retry`;
+      : viewField
+        ? "; arrow keys do not leave it and tab would type into it"
+        : "; arrow keys do not leave it";
+  return `${trap}${tried}. ${trapAdvice(viewField, escapes)}`;
 }
 
 export class FocusNavigate {
@@ -726,22 +677,28 @@ export class FocusNavigate {
     let progress = createFocusProgress();
     const planTarget = createTargetPlanner();
     const trap: ExitContext["trap"] = {};
+    let lastDirection: FocusNavigateDirection | undefined;
 
     for (;;) {
       throwIfAborted(signal);
-      const screen = await this.observer.read(signal);
+      const { screen, focusedElement, matches, containsTarget, onScreen } = await this.readFocus(
+        options,
+        path,
+        maxSteps > 0,
+      );
       const { focused } = screen;
-      const until = resolveTarget(screen, options);
-      const { focusedElement, matches } = describeFocus(screen, until);
-      const onScreen = screen.elements.filter((element) => elementMatchesTarget(element, until));
       const key = focusKey(focusedElement);
-      if (progress.observe(key, distanceToNearest(focused, onScreen)) && focusedElement) {
-        path.push(focusedElement);
-      }
+      progress.observe(key, distanceToNearest(focused, onScreen), containsTarget);
 
       const direction =
-        options.direction ?? this.nextDirection(focused, planTarget(focused, onScreen), progress);
-      const exhausted = isExhausted(options, progress, direction);
+        options.direction ??
+        this.nextDirection(
+          screen,
+          planTarget(focused, onScreen),
+          progress,
+          containsTarget ? lastDirection : undefined,
+        );
+      const exhausted = !containsTarget && isExhausted(options, progress, direction);
       const done = this.exitFor(focusedElement, matches, {
         steps,
         stuck: exhausted ? stuckMessage(progress) : undefined,
@@ -768,10 +725,37 @@ export class FocusNavigate {
         throw new ActionableError("focusNavigate has no direction to press");
       }
       await this.press(direction, signal);
-      progress.pressed(direction);
+      progress.pressed(direction, containsTarget);
+      lastDirection = direction;
       steps += 1;
       // The settle is the walk's longest wait (up to the tool's 5 s cap): a cancel ends it.
       await awaitWhileRequestIsLive(this.timer.sleep(settleMs), signal);
+    }
+  }
+
+  /** Re-read transient list focus twice before continuing the last press; maxSteps still bounds it. */
+  private async readFocus(
+    options: FocusNavigateOptions,
+    path: FocusPathEntry[],
+    canSettle: boolean,
+  ) {
+    for (let retry = 0; ; retry += 1) {
+      throwIfAborted(options.signal);
+      const screen = await this.observer.read(options.signal);
+      const until = resolveTarget(screen, options);
+      const description = describeFocus(screen, until);
+      const { focusedElement, containsTarget } = description;
+      if (focusedElement && focusKey(focusedElement) !== focusKey(path.at(-1))) {
+        path.push(focusedElement);
+      }
+      if (!containsTarget || !canSettle || retry >= 2) {
+        const onScreen = screen.elements.filter((element) => elementMatchesTarget(element, until));
+        return { screen, ...description, onScreen };
+      }
+      await awaitWhileRequestIsLive(
+        this.timer.sleep(options.settleMs ?? FOCUS_NAVIGATE_DEFAULT_SETTLE_MS),
+        options.signal,
+      );
     }
   }
 
@@ -805,14 +789,26 @@ export class FocusNavigate {
    * The best direction not yet pressed from the focused element. With the target on screen every
    * direction is a candidate, so focus can leave a container that traps it (#17209): directions
    * toward the target first, then the sideways escapes, then a direction that kept moving focus
-   * without getting closer (resumed for the rest of the call), and backing away last. Without a match on screen the only move is
-   * down, so an absent target scans down rather than wandering the whole screen.
+   * without getting closer (resumed for the rest of the call), and backing away last. Without a
+   * match, enter a Leanback header's content pane with right ({@link leanbackEntry}); otherwise
+   * scan down.
    */
   private nextDirection(
-    focused: Element | null,
+    screen: Pick<FocusScreen, "focused" | "elements">,
     matches: readonly Element[],
     progress: FocusProgress,
+    continuing?: FocusNavigateDirection,
   ): FocusNavigateDirection | undefined {
+    // A transient list has no meaningful card centre to steer from; keep entering that row.
+    if (continuing) {
+      return continuing;
+    }
+    const { focused } = screen;
+    const entry =
+      matches.length === 0 ? leanbackEntry(focused, screen.elements, progress) : undefined;
+    if (entry) {
+      return entry;
+    }
     const toward = directionsToward(focused, matches, progress.arrivedBy);
     const candidates =
       focused && matches.length > 0 ? directionsWithFallbacks(toward) : [...toward];
@@ -844,8 +840,8 @@ export class FocusNavigate {
   }
 
   /**
-   * For a stuck exit with a keyboard or editable field holding focus: "escaped" after the first
-   * escape keys were pressed, else the stuck result naming the trap. Undefined without a trap.
+   * For a stuck exit with a keyboard or editable field holding focus: "escaped" after new escape
+   * keys were pressed, else the stuck result naming the trap. Undefined without a trap.
    */
   private async trapOutcome(
     done: FocusNavigateResult,
@@ -855,32 +851,33 @@ export class FocusNavigate {
     if (!blocker) {
       return undefined;
     }
-    if (trap.escapes === undefined) {
-      trap.escapes = await this.escapeTrap(screen, signal);
-      if (trap.escapes.length > 0) {
-        return "escaped";
-      }
+    const pressed = await this.escapeTrap(screen, trap.escapes ?? [], signal);
+    trap.escapes = [...(trap.escapes ?? []), ...pressed];
+    if (pressed.length > 0) {
+      return "escaped";
     }
-    const editable = screen.focused !== null && isEditableElementProperties(screen.focused);
     return this.stopped("stuck", done.steps, done.path, {
       focusedElement,
-      message: trapMessage(blocker, editable, focusedElement, trap.escapes),
+      message: trapMessage(blocker, screen, focusedElement, trap.escapes),
       blockedBy: blocker,
       escapes: trap.escapes,
     });
   }
 
   /**
-   * Leave a keyboard or text-field focus trap (#17356): hide a shown keyboard with back, and press
-   * tab when the focused element is not editable (tab escapes a slider, #17209, but types a tab
-   * character into a text field). Returns the escapes pressed; empty when none applies.
+   * Leave a keyboard or text-field focus trap (#17356), each key at most once per call: hide a
+   * shown keyboard with back, and press tab when nothing is left over the focused element and tab
+   * escapes it: a non-editable element (a slider, #17209) right after back, a Compose text field
+   * once the directions retried with the keyboard hidden did not move focus (#17441). A View
+   * `EditText` never gets tab. Returns the escapes pressed on this read; empty when none applies.
    */
   private async escapeTrap(
     screen: FocusScreen,
+    tried: readonly FocusTrapEscape[],
     signal: AbortSignal | undefined,
   ): Promise<FocusTrapEscape[]> {
     const escapes: FocusTrapEscape[] = [];
-    if (screen.imeVisible && this.keyboard) {
+    if (screen.imeVisible && this.keyboard && !tried.includes("back")) {
       throwIfAborted(signal);
       const hidden = await this.keyboard.hideKeyboard(signal);
       if (!hidden.success) {
@@ -888,7 +885,7 @@ export class FocusNavigate {
       }
       escapes.push("back");
     }
-    if (screen.focused && !isEditableElementProperties(screen.focused)) {
+    if (this.shouldPressTab(screen, tried, escapes)) {
       throwIfAborted(signal);
       const pressed = await this.keys.press("tab", signal);
       if (!pressed.success) {
@@ -897,6 +894,25 @@ export class FocusNavigate {
       escapes.push("tab");
     }
     return escapes;
+  }
+
+  /**
+   * Tab after back on the same read only for a non-editable element; an editable field first
+   * retries every direction with the keyboard hidden, and gets tab on a later read.
+   */
+  private shouldPressTab(
+    screen: FocusScreen,
+    tried: readonly FocusTrapEscape[],
+    pressing: readonly FocusTrapEscape[],
+  ): boolean {
+    const { focused } = screen;
+    if (!focused || tried.includes("tab") || !tabEscapes(screen, focused)) {
+      return false;
+    }
+    if (!isEditableElementProperties(focused)) {
+      return tried.length === 0;
+    }
+    return pressing.length === 0 && screen.imeVisible !== true;
   }
 
   /** With `select`, activate a focused target with the select key; a refused key fails the call. */

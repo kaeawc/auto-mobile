@@ -20,6 +20,8 @@ struct PrototypeStorageDrop: Equatable {
 struct PrototypeStorageRestoreResult: Equatable {
     var state: [String: JSONValue]
     var data: [String: JSONValue]?
+    /// Restored `stack:<id>` paths by stack id (#14188).
+    var stacks: [String: [PrototypeStackPathEntry]] = [:]
     /// Storage keys whose stored value replaced the spec's.
     var applied: [String] = []
     /// Stored entries to delete, with why.
@@ -38,7 +40,9 @@ struct PrototypeStorageRestoreResult: Equatable {
 /// - A stored value that no longer fits the spec is dropped and the spec's value stands: a state value
 ///   whose type (string, finite number, boolean) differs from the spec's, a state key the spec no
 ///   longer declares, a data value of a different JSON kind than the spec's value at that pointer, or
-///   a data value `PrototypeDataWrite` refuses as a `set` (a missing parent, a data limit).
+///   a data value `PrototypeDataWrite` refuses as a `set` (a missing parent, a data limit), or a
+///   `stack:<id>` path of an unknown stack, an unknown screen, a bad length or params that do not match
+///   the screen's route declaration (#14188).
 ///
 /// Secure keys (#14321, `storage.secure`) follow the same version and listing rules, read from
 /// `PrototypeStoredValues.secure`:
@@ -114,7 +118,9 @@ enum PrototypeStorageRestore {
     /// Why a secure value cannot restore, or nil when it fits (or waits for an unlock).
     private static func secureDropReason(
         _ key: String, _ value: JSONValue, spec: PrototypeSpec, versionChanged: Bool
-    ) -> PrototypeStorageDropReason? {
+    )
+        -> PrototypeStorageDropReason?
+    {
         guard spec.storage?.secure?.contains(key) == true else { return .unlisted }
         if versionChanged { return .version }
         guard case let .state(stateKey)? = PrototypeStorageKey.parse(key),
@@ -149,6 +155,14 @@ enum PrototypeStorageRestore {
                 result.data, op: .set, path: "/data" + pointer, value: value
             ) else { return false }
             result.data = written
+            return true
+        case let .stack(id):
+            var nodes: [String: PrototypeNode] = [:]
+            spec.root.collectStacks(into: &nodes)
+            guard let node = nodes[id], let entries = PrototypeStackRoutes.storedPath(value, stack: node) else {
+                return false
+            }
+            result.stacks[id] = entries
             return true
         case nil:
             return false

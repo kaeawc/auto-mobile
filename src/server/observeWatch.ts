@@ -25,6 +25,7 @@ import type { DisplayRef } from "../models/DisplayPanel";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import {
   WATCH_HIERARCHY_UNAVAILABLE_MESSAGE,
+  WATCH_APP_NOT_FOREGROUND_MESSAGE,
   TVOS_HIERARCHY_UNAVAILABLE_MESSAGE,
   TVOS_RUNNER_UNAVAILABLE_MESSAGE,
   VISIONOS_HIERARCHY_UNAVAILABLE_MESSAGE,
@@ -188,8 +189,12 @@ async function captureWatchPng(
   return { png, ...size };
 }
 
-/** The visionOS hierarchy, or a reason when the runner cannot be started or reached. */
-type HierarchyOutcome = { hierarchy?: ViewHierarchyResult; unavailableReason?: string };
+/** A runner hierarchy, or the reason this read carries only a screenshot. */
+type HierarchyOutcome = {
+  hierarchy?: ViewHierarchyResult;
+  unavailableReason?: string;
+  appNotForeground?: true;
+};
 
 async function visionosHierarchyForObserve(
   device: BootedDevice,
@@ -263,9 +268,7 @@ async function watchHierarchyForObserve(
   if (screenshotOnlyPlatform(device) === "tvos") {
     return tvosHierarchyForObserve(device, args, signal);
   }
-  return {
-    hierarchy: await appleRunnerHierarchy(device, args, signal, dependencies.runner),
-  };
+  return appleRunnerHierarchy(device, args, signal, dependencies.runner);
 }
 
 /**
@@ -305,17 +308,17 @@ async function appleRunnerHierarchy(
   args: ObserveArgs,
   signal: AbortSignal | undefined,
   injectedRunner?: WatchRunnerClient,
-): Promise<ViewHierarchyResult | undefined> {
+): Promise<HierarchyOutcome> {
   const platform = screenshotOnlyPlatform(device);
   const runner = injectedRunner ?? watchRunners.get(device.deviceId);
   assertWatchObserveOptions(args, watchDisplay(device).ref.key, platform, runner !== undefined);
   try {
-    return runner ? normalizeWatchHierarchy(await runner.hierarchy(signal)) : undefined;
+    return runner ? { hierarchy: normalizeWatchHierarchy(await runner.hierarchy(signal)) } : {};
   } catch (error) {
     if (error instanceof WatchRunnerError && error.errorCode === "app_not_foreground") {
       // A backgrounded fixture has no runner-visible hierarchy; its screenshot is still useful.
       logger.debug("Watch runner app is not foreground; returning screenshot-only observation.");
-      return undefined;
+      return { appNotForeground: true };
     }
     throw error;
   }
@@ -331,11 +334,10 @@ export async function observeWatch(
   const platform = screenshotOnlyPlatform(device);
   const display = watchDisplay(device);
   const timer = dependencies.timer ?? defaultTimer;
-  const {
-    hierarchy: viewHierarchy,
-    unavailableReason,
-    waitOutcome,
-  } = await observedHierarchy(device, args, signal, { ...dependencies, timer });
+  const { waitOutcome, ...hierarchyOutcome } = await observedHierarchy(device, args, signal, {
+    ...dependencies,
+    timer,
+  });
   const idGenerator = dependencies.idGenerator ?? defaultIdGenerator;
   const protection = dependencies.pathProtection ?? screenshotPathProtection;
   const directory = (dependencies.cacheDir ?? (() => TakeScreenshot.getCacheDir()))();
@@ -346,7 +348,7 @@ export async function observeWatch(
     device,
     display.captureKey,
     dependencies.screenshots ??
-      defaultWatchScreenshotSource(device, unavailableReason === undefined),
+      defaultWatchScreenshotSource(device, hierarchyOutcome.unavailableReason === undefined),
     signal,
   );
   // A cancelled call must not leave a retained screenshot nobody will read.
@@ -382,7 +384,7 @@ export async function observeWatch(
     screenshotCaptureSource: "device",
     screenshotCapturedAt: new Date(capturedAt).toISOString(),
   };
-  const payload = watchObservationPayload(capture, platform, viewHierarchy, unavailableReason);
+  const payload = watchObservationPayload(capture, platform, hierarchyOutcome);
   return waitOutcome
     ? createObserveWaitResponse(payload, waitOutcome, args.includeScreenshotImage, {
         signal,
@@ -408,29 +410,31 @@ async function observedHierarchy(
   // assertWatchObserveOptions admitted waitFor, so a runner is connected.
   assertAppleRunnerWaitFor(args.waitFor, screenshotOnlyPlatform(device));
   let pending: HierarchyOutcome | undefined = first;
+  let lastRead = first;
   const { hierarchy, outcome } = await pollAppleRunnerWaitFor(
     args.waitFor,
     async () => {
-      const read = pending ?? (await watchHierarchyForObserve(device, args, signal, dependencies));
+      lastRead = pending ?? (await watchHierarchyForObserve(device, args, signal, dependencies));
       pending = undefined;
-      return read.hierarchy;
+      return lastRead.hierarchy;
     },
     { timer: dependencies.timer, signal },
   );
-  return { hierarchy, waitOutcome: outcome };
+  return { ...lastRead, hierarchy, waitOutcome: outcome };
 }
 
 function watchObservationPayload(
   capture: Omit<WatchObservation, "hierarchyUnavailable">,
   platform: AppleScreenshotOnlyPlatform,
-  viewHierarchy?: ViewHierarchyResult,
-  unavailableReason?: string,
+  { hierarchy: viewHierarchy, unavailableReason, appNotForeground }: HierarchyOutcome,
 ): WatchObservation | ObserveResult {
   if (!viewHierarchy) {
     const message =
-      platform === "tvos" && unavailableReason
-        ? TVOS_RUNNER_UNAVAILABLE_MESSAGE
-        : HIERARCHY_UNAVAILABLE_MESSAGES[platform];
+      platform === "watchos" && appNotForeground
+        ? WATCH_APP_NOT_FOREGROUND_MESSAGE
+        : platform === "tvos" && unavailableReason
+          ? TVOS_RUNNER_UNAVAILABLE_MESSAGE
+          : HIERARCHY_UNAVAILABLE_MESSAGES[platform];
     return {
       ...capture,
       hierarchyUnavailable: {

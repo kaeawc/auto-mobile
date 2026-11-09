@@ -1,4 +1,4 @@
-import type { ObserveResult, ViewHierarchyResult } from "../../models";
+import { isTruthy, type Element, type ObserveResult, type ViewHierarchyResult } from "../../models";
 import { beginPostActionCaptureAction } from "../../utils/PostActionCaptureContext";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -116,30 +116,85 @@ export function showsImeOverApp(viewHierarchy: ViewHierarchyResult, appPackage: 
   );
 }
 
+/** Whether interacting with `element` focuses a text field that may open the soft keyboard. */
+export function isTextEntryElement(element: Element): boolean {
+  const className = element.class ?? "";
+  return (
+    className.includes("EditText") ||
+    className.includes("TextField") ||
+    isTruthy(element.editable) ||
+    isTruthy(element["text-entry-mode"])
+  );
+}
+
 /**
  * Hides a soft keyboard opened over the app under test (a search field took
  * focus) with one unrecorded back press, so explore keeps exploring the app
  * instead of the keyboard (#17377). If the keyboard is still shown after that
  * press, explore continues with its keys excluded from the candidates, and back
- * is not pressed again until the keyboard has hidden.
+ * is not pressed again until the keyboard has hidden. A keyboard the run's last
+ * interaction may have opened is hidden before explore returns (#17442).
  */
 export class ExploreImeDismissal {
   private backPressed = false;
+  /** A keyboard over the app was observed since the last reset. */
+  private seen = false;
+  /** The last interaction may have left the keyboard open. */
+  private mayBeShown = false;
+
+  constructor(private readonly pressBack: (signal?: AbortSignal) => Promise<void>) {}
 
   reset(): void {
     this.backPressed = false;
+    this.seen = false;
+    this.mayBeShown = false;
+  }
+
+  /** After an interaction: a text field, or any element on a run that opened the keyboard. */
+  interacted(element: Element): void {
+    this.mayBeShown = this.seen || isTextEntryElement(element);
+  }
+
+  /** Explore observed the app with no keyboard left to hide. */
+  settled(): void {
+    this.mayBeShown = false;
+  }
+
+  /**
+   * Hide a keyboard the run's last interaction left open, so explore does not
+   * return with the IME shown. A keyboard back already failed to hide is not
+   * pressed again.
+   */
+  async dismissOnExit(
+    screen: { execute(options: { signal?: AbortSignal }): Promise<ObserveResult> },
+    targetPackage: string | null,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (!this.mayBeShown || !targetPackage || signal?.aborted) {
+      return;
+    }
+    this.mayBeShown = false;
+    try {
+      await this.dismiss(await screen.execute({ signal }), targetPackage, signal);
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      // The exploration itself finished; a keyboard left open must not fail its report.
+      logger.warn(`[Explore] Could not hide the keyboard on exit: ${errorMessage(error)}`, error);
+    }
   }
 
   /** True when back was pressed and the screen should be observed again. */
   async dismiss(
     observation: ObserveResult,
     targetPackage: string,
-    pressBack: () => Promise<void>,
     signal?: AbortSignal,
   ): Promise<boolean> {
     const shown =
       observation.viewHierarchy !== undefined &&
       showsImeOverApp(observation.viewHierarchy, targetPackage);
+    this.seen ||= shown;
     if (!shown || this.backPressed) {
       this.backPressed = shown;
       return false;
@@ -149,7 +204,7 @@ export class ExploreImeDismissal {
     try {
       // Recovery dispatches bypass BaseVisualChange's action boundary.
       await beginPostActionCaptureAction();
-      await pressBack();
+      await this.pressBack(signal);
     } catch (error) {
       if (signal?.aborted) {
         throw error;

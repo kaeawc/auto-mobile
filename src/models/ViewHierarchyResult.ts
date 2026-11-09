@@ -347,6 +347,15 @@ export function nodeAttributes(node: { $?: NodeAttributes }): NodeAttributes {
   return node.$ ?? node;
 }
 
+/** Hierarchy children may arrive as one object rather than an array (XML-shaped nodes). */
+export function childrenOf(node: ViewHierarchyNode): ViewHierarchyNode[] {
+  const children: unknown = node.node;
+  if (Array.isArray(children)) {
+    return children;
+  }
+  return children && typeof children === "object" ? [children as ViewHierarchyNode] : [];
+}
+
 /** Direct bounds take precedence when a converter also carries bounds in `$`. */
 export function nodeBounds(node: ViewHierarchyNode): unknown {
   return node.bounds ?? nodeAttributes(node)["bounds"];

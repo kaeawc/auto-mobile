@@ -10,7 +10,7 @@ import {
 } from "./FocusedTextClearVerifier";
 import { EventLastTyper } from "./EventLastTyper";
 import { EventAllTyper } from "./EventAllTyper";
-import { ImeCommitTyper } from "./ImeCommitTyper";
+import { ImeCommitTyper, imeTraceResultFields } from "./ImeCommitTyper";
 import { ImeRestore, type SendKeysImeRecoverySnapshot } from "./ImeRestore";
 import type { ImeCommitRouting, AndroidTypeOptions } from "./ImeTypes";
 import {
@@ -39,6 +39,7 @@ import {
   redactPasswordTypeResult,
 } from "./ExecutorHelpers";
 import { isSemanticKey, validateImeKeyEventsText } from "./SendKeysSupport";
+import { executeSemanticKey, type SemanticKeyHost } from "./SemanticKeyCommand";
 import { isSendKeysBudgetExhausted } from "./SendKeysRequestBudget";
 import { IosTyper } from "./IosTyper";
 import { IosSdkTextRouting, iosBackendFields, type IosSdkTextTarget } from "./IosSdkTextRouting";
@@ -481,7 +482,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         committedGraphemes: result.committedGraphemes,
         ...imeCommitUnitFields(result),
         ...imeFailureFields(result),
-        ...this.imeTraceFields(),
+        ...this.imeTraceFields(result.success),
         ...(result.resolvedMode ? { resolvedMode: result.resolvedMode } : {}),
         ...iosBackendFields(result.iosBackend),
         ...this.imeResultFields(result.resolvedMode ?? baseResult.resolvedMode),
@@ -498,14 +499,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         success: false,
         error: errorMessage(error),
         ...caughtErrorCodeFields(error),
-        ...this.imeTraceFields(),
+        ...this.imeTraceFields(false),
       };
     }
   }
 
-  private imeTraceFields(): Pick<TextActionResult, "imeTrace"> {
-    const lines = this.imeTraceContext.getStore()?.lines;
-    return lines !== undefined ? { imeTrace: lines } : {};
+  private imeTraceFields(success: boolean): Pick<TextActionResult, "imeTrace"> {
+    return imeTraceResultFields(this.imeTraceContext.getStore()?.lines, success);
   }
 
   private imeResultFields(mode: ResolvedSendKeysTypingMode) {
@@ -617,43 +617,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     this.resetCaretState();
     const modifiers = command.modifiers ?? [];
     if (isSemanticKey(command.key)) {
-      if (this.device.platform === "android") {
-        const focusResult = await this.requireFocusedAndroidInput(signal, undefined, display);
-        if (!focusResult.success) {
-          return {
-            index: -1,
-            action: "key",
-            key: command.key,
-            modifiers,
-            success: false,
-            error: focusResult.error,
-          };
-        }
-      }
-      const key = command.key;
-      const result =
-        this.device.platform === "ios"
-          ? await this.iosSdkText.tracked(() =>
-              this.iosSdkText.ime(
-                key,
-                signal,
-                () => this.textClient.ime(key, signal, onDispatch),
-                onDispatch,
-              ),
-            )
-          : await this.textClient.ime(key, signal, onDispatch);
-      this.iosSdkText.focusMayHaveMoved();
-      return {
-        index: -1,
-        action: "key",
-        key: command.key,
-        modifiers,
-        ...("iosBackend" in result ? iosBackendFields(result.iosBackend) : {}),
-        success: result.success,
-        ...(result.retryable === false ? { retryable: false } : {}),
-        ...(result.warning ? { warning: result.warning } : {}),
-        ...(result.error ? { error: result.error } : {}),
-      };
+      return executeSemanticKey(this.semanticKeyHost(), command.key, modifiers, {
+        signal,
+        onDispatch,
+        display,
+      });
     }
 
     const result = await this.inputKey.press(command.key, undefined, undefined, { modifiers });
@@ -667,6 +635,26 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       modifiers,
       success: result.success,
       ...inputKeyOutcomeFields(result),
+    };
+  }
+
+  private semanticKeyHost(): SemanticKeyHost {
+    return {
+      platform: this.device.platform,
+      requireFocusedInput: (signal, display) =>
+        this.requireFocusedAndroidInput(signal, undefined, display),
+      dispatch: (key, signal, onDispatch) =>
+        this.device.platform === "ios"
+          ? this.iosSdkText.tracked(() =>
+              this.iosSdkText.ime(
+                key,
+                signal,
+                () => this.textClient.ime(key, signal, onDispatch),
+                onDispatch,
+              ),
+            )
+          : this.textClient.ime(key, signal, onDispatch),
+      focusMayHaveMoved: () => this.iosSdkText.focusMayHaveMoved(),
     };
   }
 

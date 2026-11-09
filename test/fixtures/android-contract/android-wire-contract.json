@@ -3479,6 +3479,18 @@
           "type": "string",
           "nullable": true,
           "hasDefault": true
+        },
+        {
+          "name": "gitBranch",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "gitSha",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
         }
       ]
     },
@@ -10004,6 +10016,12 @@
         "name": "depth",
         "type": "int",
         "nullable": false,
+        "hasDefault": true
+      },
+      {
+        "name": "params",
+        "type": "list",
+        "nullable": true,
         "hasDefault": true
       }
     ],

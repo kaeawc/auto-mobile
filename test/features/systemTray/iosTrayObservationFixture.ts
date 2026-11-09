@@ -13,3 +13,4 @@ function loadObservation(name: string) {
 export const ios26TrayOpenSettings = loadObservation("full-tray-open-settings.json");
 export const ios26SettingsClosed = loadObservation("full-settings-closed.json");
 export const ios26TrayOpenHome = loadObservation("full-tray-open-home.json");
+export const iosMessagesGroupedTray = loadObservation("full-tray-open-messages-grouped.json");

@@ -10,6 +10,8 @@ function fixture({ missingProject = false } = {}) {
   let afterBuild: string | null =
     "/derived/Build/Products/AutoMobileTVTest_appletvsimulator26.0-arm64.xctestrun";
   let override: string | undefined;
+  let releasePath: string | null = null;
+  const releaseSignals: (AbortSignal | undefined)[] = [];
   const commands: string[][] = [];
   const accesses: string[] = [];
   const platforms: string[] = [];
@@ -22,6 +24,12 @@ function fixture({ missingProject = false } = {}) {
       getXctestrunPath: async (platform) => {
         platforms.push(platform!);
         return discovered;
+      },
+    },
+    release: {
+      ensure: async (signal) => {
+        releaseSignals.push(signal);
+        return releasePath;
       },
     },
     xcodebuild: {
@@ -44,6 +52,10 @@ function fixture({ missingProject = false } = {}) {
     commands,
     platforms,
     accesses,
+    releaseSignals,
+    setRelease: (file: string | null) => {
+      releasePath = file;
+    },
     setDiscovered: (path: string) => {
       discovered = path;
     },
@@ -207,4 +219,38 @@ test("tvos build waits for extraction and holds the lock through post-build disc
   expect(await resolving).toBe("/built.xctestrun");
   await secondExtraction;
   expect(extracting).toBe(true);
+});
+
+test("release products run without a source project, after checking local products", async () => {
+  const f = fixture({ missingProject: true });
+  f.setRelease("/cache/Build/Products/AutoMobileTVTest_appletvsimulator.xctestrun");
+  const controller = new AbortController();
+  expect(await f.artifacts.resolve(controller.signal)).toContain("/cache/");
+  expect(f.platforms).toEqual(["tvSimulator"]);
+  expect(f.releaseSignals).toEqual([controller.signal]);
+  expect(f.accesses).toEqual([]);
+  expect(f.commands).toEqual([]);
+});
+
+test("override and existing products take precedence over release downloads", async () => {
+  const f = fixture();
+  f.setRelease("/release.xctestrun");
+  f.setDiscovered("/existing.xctestrun");
+  expect(await f.artifacts.resolve()).toBe("/existing.xctestrun");
+  f.setOverride("/override.xctestrun");
+  expect(await f.artifacts.resolve()).toBe("/override.xctestrun");
+  expect(f.releaseSignals).toEqual([]);
+});
+
+test("a release without a runner falls back to a source build", async () => {
+  const f = fixture();
+  f.setRelease(null);
+  expect(await f.artifacts.resolve()).toContain("appletvsimulator");
+  expect(f.releaseSignals).toHaveLength(1);
+  expect(f.commands).toHaveLength(1);
+});
+
+test("missing project and release explain the published runner fallback", async () => {
+  const f = fixture({ missingProject: true });
+  await expect(f.artifacts.resolve()).rejects.toThrow("This release has no published tvOS runner");
 });

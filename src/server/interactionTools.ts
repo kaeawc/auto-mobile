@@ -21,6 +21,7 @@ import {
   systemTrayHandler,
 } from "./interactionToolHandlers";
 import type { InteractionToolDependencies } from "./interactionTools/dependencies";
+import { withTvosHomeScreen } from "./tvosHomeScreen";
 import { withTvosOpenLink } from "./tvosOpenLink";
 import {
   pressButtonHandler,
@@ -448,7 +449,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
 
   recentAppsTool.register(ToolRegistry, createRecentAppsHandler(deps));
 
-  homeScreenTool.register(ToolRegistry, homeScreenHandler);
+  homeScreenTool.register(ToolRegistry, withTvosHomeScreen(homeScreenHandler));
 
   // Register the new rotate tool
   rotateTool.register(ToolRegistry, (device, args, progress, signal) =>

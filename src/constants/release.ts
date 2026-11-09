@@ -60,6 +60,8 @@ export interface ReleaseChecksumEntry {
   screenCaptureHelperSha256?: string;
   /** SHA-256 of the signed, notarized universal macOS audio-loopback helper archive. */
   audioLoopbackHelperSha256?: string;
+  /** SHA-256 of the tvOS simulator runner Build/Products archive. */
+  tvosRunnerSha256?: string;
   /**
    * SHA-256 of the universal ad-hoc-signed iOS-simulator prototype-agent dylib
    * (`AutoMobilePrototypeAgent.dylib`, #10564/#10565). Optional: releases that
@@ -105,6 +107,23 @@ export interface ReleaseChecksumEntry {
  */
 export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
   {
+    version: "0.0.91",
+    apkSha256: "a7dff5a6fbef0b931e1be15e83e422f39df0cc6cc161c41f01f2328372076949",
+    ipaSha256: "3eeb0b9c28b6e26095af6df2556b780538d43a9926c408aa5cb5142c1f7b6320",
+    protoViewerApkSha256: "0481dcd6fb133702dba7c6e64502563d32db667ce78e0245b258dda2918a5942",
+    runnerSha256: "16877723621f2861760db60d02ad1e26e926ae9544ba1b65c53d44265a7b2493",
+    runnerSha256Target: "xctest",
+    videoJarSha256: "092ad380e2cc80e763f1d91944113a79e343d8514178439bb2016bf52d9b5e92",
+    screenCaptureHelperSha256: "f19aadbee08fba88bbf78fd528d40bbc31f985e5abbcc95cf09284f9c34dd00a",
+    audioLoopbackHelperSha256: "933c9cadb55367a1e93ee1c4346735a2bd9b44add726d3ce47a11c92d640df1d",
+    tvosRunnerSha256: "2ac29c44ad7c4596fe33795cbfbedf807d85fb87e5e0c75b279554f2637dfbb4",
+    prototypeAgentSha256: "c5ece2558a9de845de41410c19fd1de54b9f6e9dbdd1e95e27ebdc5f48c2f647",
+    prototypeViewerSha256: "a17524efdb8c05837e681e3c4c450804a7be6b3a580d3f9f354f8a669db04473",
+    networkFilterSha256: "80f8cdd4842dbb3475ace273ddd0f76545cceb4723d5f74faa28dc1ac4c98572",
+    lmkPressureArm64Sha256: "0de62ea4977e1b1be2f7fe2b646319c7988a7df89398a56caa90a0febb7a681c",
+    lmkPressureX8664Sha256: "37a5194393e58b4e715382ff1a81d7e47ad4311307c8a2ea4e6ed76f9f1210fa",
+  },
+  {
     version: "0.0.90",
     apkSha256: "032cc4970687965b83bb03326670cdef29a6464d9c42ba4174017bd032127e95",
     ipaSha256: "b9e0e0c40565698d9b6235fe6f2b384361f19e5084c0c5f5b06bd1b3155e7355",
@@ -114,6 +133,8 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
     videoJarSha256: "092ad380e2cc80e763f1d91944113a79e343d8514178439bb2016bf52d9b5e92",
     screenCaptureHelperSha256: "cd41ee407a685da9ece4f9daa34b9b2cbac4f7a27051cfc91d9c505b0d4be67f",
     audioLoopbackHelperSha256: "b4ac9632e5666a360dc484a600778198b0109bf09bd603ef78ff287796c6d845",
+    // Pinned after the first release dry-run produces the archive.
+    tvosRunnerSha256: "",
     prototypeAgentSha256: "6abb179f012d43471011f9fbb9f811ad669364df16fac5b5f27f475771938cf9",
     prototypeViewerSha256: "45aec520f9e5f72b93a38dab31a88cc30384c20e94a803c5b00db2d3577a7dda",
     networkFilterSha256: "d9ef285c5ec950aa1c85402bc58a2bf326d9a45481f9b78a150515564e9eb4f4",
@@ -704,11 +725,11 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
  */
 export const NIGHTLY_CHECKSUM_ENTRY: ReleaseChecksumEntry = {
   version: "nightly",
-  apkSha256: "c040be42d90f0e73b5c9b6cb3c6f325649a4dc51fbb9720a358732d50413368f",
-  ipaSha256: "368c00f43f514f0d90b3c4b961d3495e78d9835d16ff07cba4719d8ba929cb0e",
+  apkSha256: "152c3a1d5ac621a9b68fc2cc470934408c513e680b40308c41f552734a1edcc3",
+  ipaSha256: "8a2e526d7137d791935d0cd2adb91202e25cfc5f63e30a0c839d0568d49b046d",
   runnerSha256Target: "xctest",
   videoJarSha256: "092ad380e2cc80e763f1d91944113a79e343d8514178439bb2016bf52d9b5e92",
-  runnerSha256: "68df33c7aa84db56e369d7a695883b26e852c693eee4a01870aaf0c247dd9b55",
+  runnerSha256: "a63c40d01b2c8af183b69ead1d2ea148095aa521a08b1707789524a61db51693",
 };
 
 /**
@@ -1031,6 +1052,9 @@ export const SCREEN_CAPTURE_HELPER_ARCHIVE_FILENAME = "screen-capture-helper-mac
 /** Fixed GitHub Release asset for the signed universal macOS audio-loopback helper. */
 export const AUDIO_LOOPBACK_HELPER_ARCHIVE_FILENAME = "audio-loopback-helper-macos-universal.zip";
 
+/** Fixed GitHub Release asset for the tvOS simulator runner. */
+export const TVOS_RUNNER_ARCHIVE_FILENAME = "tvos-runner-macos.zip";
+
 /** Fixed GitHub Release asset for the signed, notarized macOS Network Filter app. */
 export const NETWORK_FILTER_ARCHIVE_FILENAME = "automobile-network-filter-macos-universal.zip";
 
@@ -1151,6 +1175,27 @@ export function resolveAudioLoopbackHelperChecksum(
   registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): string {
   return entryForPinnedVersion(env, registry)?.audioLoopbackHelperSha256 ?? "";
+}
+
+/** Download URL for the tvOS simulator runner archive. */
+export function resolveTvosRunnerUrl(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return buildReleaseAssetUrl(
+    TVOS_RUNNER_ARCHIVE_FILENAME,
+    resolvePinnedVersion(env),
+    resolveAssetBaseUrl(env),
+    registry,
+  );
+}
+
+/** Expected archive SHA-256 for the selected tvOS runner release. */
+export function resolveTvosRunnerChecksum(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return entryForPinnedVersion(env, registry)?.tvosRunnerSha256 ?? "";
 }
 
 /** Download URL for the signed macOS Network Filter app archive. */

@@ -37,14 +37,28 @@ enum SpringBoardPanel {
         )
     }
 
+    /// A fresh SpringBoard snapshot while another app is in front holds only the lit panel's
+    /// windows, so the active-panel window-count vote has nothing to compare. A window on a
+    /// non-main display is an inner-panel window laid out in portrait space; its alerts need the
+    /// same rotation as the inner panel's own tree, using that window's portrait height.
+    static func alertPortraitHeight(
+        windowDisplayId: UInt64?, mainDisplayId: UInt64?, windowPortraitHeight: Int?
+    )
+        -> Int?
+    {
+        guard let windowDisplayId, let mainDisplayId, windowDisplayId != mainDisplayId,
+              let windowPortraitHeight, windowPortraitHeight > 0 else { return nil }
+        return windowPortraitHeight
+    }
+
     /// Interface rotation of the inner panel as an app on it reports it (`rotation` 1 is 951x669).
     static let innerPanelRotation = 1
 }
 
 extension ElementLocator {
     /// Dialogs and sheets are extracted from the portrait snapshot separately from the main tree, so
-    /// they get the same inner-panel rotation as it. `innerPanelPortraitHeight` is nil on the cover
-    /// and for every other app, which leaves them untouched.
+    /// they get the same inner-panel rotation as it. A nil height leaves app-snapshot alerts and
+    /// cover-panel alerts untouched; fresh SpringBoard alerts supply their own panel height.
     nonisolated static func alertsInObservedSpace(
         _ alerts: [UIElementInfo],
         innerPanelPortraitHeight: Int?

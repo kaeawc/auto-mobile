@@ -122,9 +122,10 @@ const DEFAULT_SCREEN: WebScreenSize = (() => {
  * The app's top colour, from paint (#16667): a layout pass places the content on the `screen`,
  * and at points evenly across the screen's top edge the last opaque background painted there is
  * the colour behind the status bar (else `fallback`, the screen background). The colour at the
- * most points wins; a tie goes to the one met first from the left. A background counts only when
- * its alpha times the element's composite opacity is 1. `vars` are the custom properties the
- * screen defines, such as the safe-area insets top padding reads.
+ * most points wins, counting equal parsed colours together; a tie goes to the one met first from
+ * the left. A background counts only when its alpha times the element's composite opacity is 1.
+ * `vars` are the custom properties the screen defines, such as the safe-area insets top padding
+ * reads.
  */
 export function appTopColor(
   content: WebChild,
@@ -139,21 +140,31 @@ export function appTopColor(
     const color = opaqueBackground(box.element, box.opacity);
     return color === undefined ? [] : [{ box, color }];
   });
-  const votes = new Map<string, number>();
+  // Votes are grouped by the parsed colour, so `#000000` and `rgba(0, 0, 0, 1)` count together;
+  // the group answers with the first spelling met.
+  const votes = new Map<string, { color: string; count: number }>();
   for (let index = 0; index < TOP_EDGE_SAMPLES; index++) {
     const x = ((index + 0.5) * screen.width) / TOP_EDGE_SAMPLES;
     const shown = opaque.filter(({ box }) => paintsTopEdgeAt(box, x)).at(-1)?.color ?? fallback;
-    votes.set(shown, (votes.get(shown) ?? 0) + 1);
+    const key = colorKey(shown);
+    const vote = votes.get(key) ?? { color: shown, count: 0 };
+    votes.set(key, { ...vote, count: vote.count + 1 });
   }
   let top = fallback;
   let most = 0;
-  for (const [color, count] of votes) {
+  for (const { color, count } of votes.values()) {
     if (count > most) {
       top = color;
       most = count;
     }
   }
   return top;
+}
+
+/** The parsed RGBA of a colour as a key, else its raw text. */
+function colorKey(color: string): string {
+  const parsed = parseCssColor(color);
+  return parsed ? `rgba(${parsed.r},${parsed.g},${parsed.b},${parsed.a})` : color;
 }
 
 const px = (value: number): string => `${Number(value.toFixed(3))}px`;

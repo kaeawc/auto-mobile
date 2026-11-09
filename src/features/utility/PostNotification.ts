@@ -21,6 +21,10 @@ import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/working
 import { ANDROID_PACKAGE_NAME_PATTERN } from "../../utils/androidPackageName";
 import { buildIosPushPayload } from "./iosPushPayload";
 import {
+  defaultPostedNotificationLedger,
+  type PostedNotificationRecorder,
+} from "./postedNotificationLedger";
+import {
   defaultBulletinBoardReader,
   type IosNotificationAuthorizationReader,
 } from "./ios/IosNotificationAuthorizationReader";
@@ -99,6 +103,32 @@ function preserveOrExplainSimctlPushError(error: string): string {
   return error;
 }
 
+const SIMCTL_PUSH_PLATFORM_LABELS: Partial<Record<BootedDevice["platform"], string>> = {
+  ios: "iOS",
+  watchos: "watchOS",
+  tvos: "tvOS",
+};
+
+// Detect whether the argument is a factory (has create method) or an executor.
+function resolveAdb(
+  device: BootedDevice,
+  adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null,
+): { adbFactory: AdbClientFactory; adb: AdbExecutor } {
+  if (
+    adbFactoryOrExecutor &&
+    typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function"
+  ) {
+    const adbFactory = adbFactoryOrExecutor as AdbClientFactory;
+    return { adbFactory, adb: adbFactory.create(device) };
+  }
+  if (adbFactoryOrExecutor) {
+    // Legacy path: wrap the executor in a factory for downstream dependencies
+    const executor = adbFactoryOrExecutor as AdbExecutor;
+    return { adbFactory: { create: () => executor }, adb: executor };
+  }
+  return { adbFactory: defaultAdbClientFactory, adb: defaultAdbClientFactory.create(device) };
+}
+
 export class PostNotification {
   private device: BootedDevice;
   private adb: AdbExecutor;
@@ -110,6 +140,7 @@ export class PostNotification {
     | Pick<IosNotificationAuthorizationReader, "read">
     | null
     | undefined;
+  private postedNotifications: PostedNotificationRecorder;
 
   constructor(
     device: BootedDevice,
@@ -119,33 +150,21 @@ export class PostNotification {
       simctl = null,
       fileSystem = null,
       notificationAuthorization,
+      postedNotifications = defaultPostedNotificationLedger,
     }: {
       adbFactoryOrExecutor?: AdbClientFactory | AdbExecutor | null;
       window?: WindowInterface | null;
       simctl?: Pick<SimCtlClient, "pushNotification"> | null;
       fileSystem?: FileSystem | null;
       notificationAuthorization?: Pick<IosNotificationAuthorizationReader, "read"> | null;
+      postedNotifications?: PostedNotificationRecorder;
     } = {},
   ) {
     this.device = device;
     this.fileSystem = fileSystem ?? new DefaultFileSystem();
     this.notificationAuthorization = notificationAuthorization;
-    // Detect if the argument is a factory (has create method) or an executor
-    if (
-      adbFactoryOrExecutor &&
-      typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function"
-    ) {
-      this.adbFactory = adbFactoryOrExecutor as AdbClientFactory;
-      this.adb = this.adbFactory.create(device);
-    } else if (adbFactoryOrExecutor) {
-      // Legacy path: wrap the executor in a factory for downstream dependencies
-      const executor = adbFactoryOrExecutor as AdbExecutor;
-      this.adb = executor;
-      this.adbFactory = { create: () => executor };
-    } else {
-      this.adbFactory = defaultAdbClientFactory;
-      this.adb = this.adbFactory.create(device);
-    }
+    this.postedNotifications = postedNotifications;
+    ({ adbFactory: this.adbFactory, adb: this.adb } = resolveAdb(device, adbFactoryOrExecutor));
     this.window = window || new Window(device, this.adbFactory);
     this.simctl = simctl || new SimCtlClient(device);
   }
@@ -163,6 +182,7 @@ export class PostNotification {
           return await this.executeAndroid(options, signal);
         case "ios":
         case "watchos":
+        case "tvos":
           return await this.executeIos(options);
         default:
           return {
@@ -183,9 +203,9 @@ export class PostNotification {
     }
   }
 
-  /** iOS/watchOS: deliver a simulated remote push via `simctl push` (simulator only). */
+  /** iOS/watchOS/tvOS: deliver a simulated remote push via `simctl push` (simulator only). */
   private async executeIos(options: PostNotificationOptions): Promise<PostNotificationResult> {
-    const platformLabel = this.device.platform === "watchos" ? "watchOS" : "iOS";
+    const platformLabel = SIMCTL_PUSH_PLATFORM_LABELS[this.device.platform] ?? "iOS";
     const bundleId = options.appId;
     if (!bundleId) {
       return {
@@ -226,6 +246,9 @@ export class PostNotification {
         warning,
       };
     }
+    if (built.alert) {
+      this.postedNotifications.record(this.device.deviceId, bundleId, built.alert);
+    }
     return {
       success: true,
       supported: true,
@@ -240,6 +263,11 @@ export class PostNotification {
     bundleId: string,
     warning: string | undefined,
   ): Promise<PostNotificationResult | undefined> {
+    // The BulletinBoard authorization store this reads was captured on iOS only; on an Apple TV
+    // simulator `simctl push` was captured delivering without it (#17526), so tvOS skips the check.
+    if (this.device.platform === "tvos") {
+      return undefined;
+    }
     const iosMajor = parseIosMajorVersion(this.device.iosVersion ?? this.device.osVersion);
     if (iosMajor !== null && iosMajor < 27) {
       const reader = this.notificationAuthorization ?? defaultBulletinBoardReader();

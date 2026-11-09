@@ -1,4 +1,5 @@
 import { cssLength, type CssVars } from "./webCssLength";
+import { borderRadii, inCutCorner, type CornerRadii, type RoundedRect } from "./webLayoutCorners";
 import { outOfFlow, placeInFlow, type PlacedChild } from "./webLayoutLine";
 import {
   add,
@@ -7,6 +8,7 @@ import {
   contentBox,
   declaredSize,
   sub,
+  withAspectRatio,
   type Axis,
   type Len,
   type WebRect,
@@ -20,6 +22,7 @@ import type { WebElement } from "./webNodes";
  */
 
 export type { WebRect } from "./webLayoutSize";
+export type { CornerRadii, RoundedRect } from "./webLayoutCorners";
 
 /** The screen the content fills, in px. */
 export interface WebScreenSize {
@@ -27,14 +30,19 @@ export interface WebScreenSize {
   readonly height: number;
 }
 
-/** An element as it paints: its border box, its composite opacity and the clips around it. */
+/**
+ * An element as it paints: its border box and corner radii, its composite opacity and the clips
+ * around it.
+ */
 export interface PaintedBox {
   readonly element: WebElement;
   readonly rect: WebRect;
+  /** The radii that round the border box; undefined when every corner is square. */
+  readonly radii?: CornerRadii;
   /** The element's opacity times every ancestor's. */
   readonly opacity: number;
-  /** The border boxes of the overflow-clipping ancestors; only their intersection shows. */
-  readonly clips: readonly WebRect[];
+  /** The rounded border boxes of the overflow-clipping ancestors; only their intersection shows. */
+  readonly clips: readonly RoundedRect[];
 }
 
 const MAX_DEPTH = 64;
@@ -112,35 +120,52 @@ function insetsOn(child: WebElement, axis: Axis): [string | undefined, string | 
     : [style.top ?? top, style.bottom ?? bottom];
 }
 
-/** An absolute child's position and size on one axis, against its container's border box. */
-function absoluteAxis(
+/** An absolute child's size on one axis: declared, else stretched between both insets. */
+function absoluteSize(child: WebElement, axis: Axis, container: WebRect, vars: CssVars): Len {
+  const [startValue, endValue] = insetsOn(child, axis);
+  const room = container[axis];
+  const declared = declaredSize(child, axis, room, vars);
+  const stretched =
+    present(startValue) && present(endValue)
+      ? sub(sub(room, cssLength(startValue, vars, room)), cssLength(endValue, vars, room))
+      : undefined;
+  return clampSize(declared === "auto" ? stretched : declared, child, axis, { base: room, vars });
+}
+
+/** An absolute child's start on one axis, against its container's border box. */
+function absoluteStart(
   child: WebElement,
   axis: Axis,
   container: WebRect,
-  vars: CssVars,
-): [Len, Len] {
+  context: { readonly size: Len; readonly vars: CssVars },
+): Len {
   const [startValue, endValue] = insetsOn(child, axis);
   const room = container[axis];
   const origin = axis === "width" ? container.left : container.top;
-  const start = present(startValue) ? cssLength(startValue, vars, room) : undefined;
-  const end = present(endValue) ? cssLength(endValue, vars, room) : undefined;
-  const declared = declaredSize(child, axis, room, vars);
-  const stretched =
-    present(startValue) && present(endValue) ? sub(sub(room, start), end) : undefined;
-  const size = clampSize(declared === "auto" ? stretched : declared, child, axis, {
-    base: room,
-    vars,
-  });
   if (present(startValue)) {
-    return [add(origin, start), size];
+    return add(origin, cssLength(startValue, context.vars, room));
   }
   // Only an end offset: measure back from the far edge. Neither: the static position, its start.
-  return present(endValue) ? [sub(add(origin, sub(room, end)), size), size] : [origin, size];
+  return present(endValue)
+    ? sub(add(origin, sub(room, cssLength(endValue, context.vars, room))), context.size)
+    : origin;
 }
 
 function absoluteChild(child: WebElement, container: WebRect, vars: CssVars): PlacedChild {
-  const [left, width] = absoluteAxis(child, "width", container, vars);
-  const [top, height] = absoluteAxis(child, "height", container, vars);
+  // A ratio-derived dimension is known before an end inset places the child.
+  const { width, height } = withAspectRatio(
+    child,
+    {
+      left: 0,
+      top: 0,
+      width: absoluteSize(child, "width", container, vars),
+      height: absoluteSize(child, "height", container, vars),
+    },
+    container,
+    vars,
+  );
+  const left = absoluteStart(child, "width", container, { size: width, vars });
+  const top = absoluteStart(child, "height", container, { size: height, vars });
   return { element: child, rect: { left, top, width, height } };
 }
 
@@ -193,8 +218,16 @@ interface PaintStep {
   readonly rect: WebRect;
   readonly opacity: number;
   readonly vars: CssVars;
-  readonly clips: readonly WebRect[];
+  readonly clips: readonly RoundedRect[];
+  /** Whether the element's inherited direction is right to left. */
+  readonly rtl: boolean;
   readonly depth: number;
+}
+
+/** An element's direction: its own `dir` or `direction`, else its parent's. */
+function isRtl(element: WebElement, inherited: boolean): boolean {
+  const own = element.attrs.dir ?? element.style.direction;
+  return own === "rtl" ? true : own === "ltr" ? false : inherited;
 }
 
 function paintElement(element: WebElement, step: PaintStep, painted: PaintedBox[]): void {
@@ -205,14 +238,16 @@ function paintElement(element: WebElement, step: PaintStep, painted: PaintedBox[
   }
   const vars = scopedVars(element, step.vars);
   const rect = moved(element, step.rect, vars);
-  painted.push({ element, rect, opacity, clips: step.clips });
+  const rtl = isRtl(element, step.rtl);
+  const radii = borderRadii(element, rect, vars, rtl);
+  painted.push({ element, rect, radii, opacity, clips: step.clips });
   // A clipped subtree below the top edge, or one at an unknown place, cannot cover it.
   if (step.depth >= MAX_DEPTH || !mayReachTop(element, rect)) {
     return;
   }
-  const clips = clipsOverflow(element) ? [...step.clips, rect] : step.clips;
+  const clips = clipsOverflow(element) ? [...step.clips, { rect, radii }] : step.clips;
   for (const child of childrenInPaintOrder(element, rect, vars)) {
-    const next = { rect: child.rect, opacity, vars, clips, depth: step.depth + 1 };
+    const next = { rect: child.rect, opacity, vars, clips, rtl, depth: step.depth + 1 };
     paintElement(child.element, next, painted);
   }
 }
@@ -230,21 +265,26 @@ export function topEdgePaintOrder(
 ): PaintedBox[] {
   const painted: PaintedBox[] = [];
   const rect = { left: 0, top: 0, width: screen.width, height: screen.height };
-  paintElement(root, { rect, opacity: 1, vars, clips: [], depth: 0 }, painted);
+  paintElement(root, { rect, opacity: 1, vars, clips: [], rtl: false, depth: 0 }, painted);
   return painted;
 }
 
-/** Whether a rect covers the point `x` on the screen's top edge (y = 0). */
-function coversTopEdge(rect: WebRect, x: number): boolean {
+/**
+ * Whether a rounded rect covers the point `x` on the screen's top edge (y = 0): inside the rect
+ * and outside the region each rounded corner cuts away.
+ */
+function coversTopEdge({ rect, radii }: RoundedRect, x: number): boolean {
   const { left, top, width, height } = rect;
   if (left === undefined || top === undefined || width === undefined) {
     return false;
   }
   // An unmeasured height is taken as positive: content that paints takes room.
-  return left <= x && x < left + width && top <= 0 && (height === undefined || top + height > 0);
+  const inRect =
+    left <= x && x < left + width && top <= 0 && (height === undefined || top + height > 0);
+  return inRect && (radii === undefined || !inCutCorner(radii, { left, top, width, height }, x, 0));
 }
 
-/** Whether a painted box shows at `x` on the top edge: inside its own rect and every clip. */
+/** Whether a painted box shows at `x` on the top edge: inside its own shape and every clip. */
 export function paintsTopEdgeAt(box: PaintedBox, x: number): boolean {
-  return coversTopEdge(box.rect, x) && box.clips.every((clip) => coversTopEdge(clip, x));
+  return coversTopEdge(box, x) && box.clips.every((clip) => coversTopEdge(clip, x));
 }

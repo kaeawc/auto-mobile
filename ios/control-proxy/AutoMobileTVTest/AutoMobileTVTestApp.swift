@@ -4,6 +4,10 @@ import SwiftUI
 struct AutoMobileTVTestApp: App {
     @State private var lastSelection = "none"
     @State private var typedText = ""
+    @State private var labeledText = ""
+    @State private var secureText = ""
+    @State private var emptyPlainText = ""
+    @State private var emptySecureText = ""
 
     var body: some Scene {
         WindowGroup {
@@ -21,6 +25,15 @@ struct AutoMobileTVTestApp: App {
                         }
                     }
                 }
+                TextField("Placeholder", text: $labeledText)
+                    .accessibilityLabel("Label")
+                    .accessibilityIdentifier("am-labeled-field")
+                SecureField("Secret", text: $secureText)
+                    .accessibilityIdentifier("am-secure-field")
+                TextField("", text: $emptyPlainText)
+                    .accessibilityIdentifier("am-empty-plain-field")
+                SecureField("", text: $emptySecureText)
+                    .accessibilityIdentifier("am-empty-secure-field")
             }
         }
     }

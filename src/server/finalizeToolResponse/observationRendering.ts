@@ -12,7 +12,9 @@ import {
   sanitizeObserveResult,
   projectSanitizedObserveSkeleton,
   diffObserveResult,
+  SKELETON_DIFF_SCALAR_FIELDS,
   isSameObservationScreen,
+  hasMaterialLayoutWarningChange,
   type SanitizeObserveConfig,
 } from "../../features/observe/output/ObserveResultOutput";
 import { buildObserveScopeConfig } from "../../features/observe/output/ObserveScopeExperiments";
@@ -482,7 +484,9 @@ function emitActionObservationDiff(
   const diff = diffObserveResult(baseline, sanitized, {
     collapseKeyboard: servedObservation.skeleton !== undefined,
     skipStatusBar: servedObservation.skeleton !== undefined,
-    layoutWarningsDiffMode: servedObservation.skeleton !== undefined ? "perEntry" : "full",
+    ...(servedObservation.skeleton !== undefined
+      ? { scalarFields: SKELETON_DIFF_SCALAR_FIELDS }
+      : {}),
     projectAddedRemoved: servedObservation.skeleton !== undefined,
   });
   // Always attach a usable selector surface alongside the diff (issue #6221
@@ -516,7 +520,10 @@ function emitActionObservationDiff(
     servedObservation.windowTruncations ??
     collectWindowTruncations(rawObservation.viewHierarchy?.windows);
   Object.assign(diff, windowTruncations ? { windowTruncations } : {});
-  const emitFull = shouldEmitFullActionObservation(payload, servedObservation, diff, ctx);
+  const emitFull = shouldEmitFullActionObservation(
+    { payload, baseline, sanitized, servedObservation, diff },
+    ctx,
+  );
   const observationOut = emitFull ? servedObservation : dropDiffNodeLists(diff);
   const observationDiff: ObservationDiffMetadata = {
     mode: emitFull ? "full" : "diff",
@@ -675,15 +682,50 @@ function canDiffInSession(diffActive: boolean, ctx: FinalizeToolResponseContext)
 }
 
 function shouldEmitFullActionObservation(
-  payload: Record<string, unknown>,
-  servedObservation: ObserveResult,
-  diff: ReturnType<typeof diffObserveResult>,
+  {
+    payload,
+    baseline,
+    sanitized,
+    servedObservation,
+    diff,
+  }: {
+    payload: Record<string, unknown>;
+    baseline: ObserveResult;
+    sanitized: ObserveResult;
+    servedObservation: ObserveResult;
+    diff: ReturnType<typeof diffObserveResult>;
+  },
   ctx: FinalizeToolResponseContext,
 ): boolean {
+  const skeletonProjected = servedObservation.skeleton !== undefined;
   const emitFull =
-    (hasScreenChangedEffect(payload) && isEmptyObserveDiff(diff)) ||
-    (servedObservation.skeleton !== undefined &&
+    (hasScreenChangedEffect(payload) &&
+      isEmptyObserveDiff(diff) &&
+      !(skeletonProjected && hasMaterialLayoutWarningOnlyChange(baseline, sanitized))) ||
+    (skeletonProjected &&
       classifyObservationAction(ctx.name, ctx.args) !== "scroll" &&
       replacedMostActionableNodes(diff));
   return emitFull;
+}
+
+/**
+ * Skeleton diffs leave `layoutWarnings` out of the wire diff (#17464), so a
+ * screen change whose only effect is a material warning delta would otherwise
+ * read as an empty diff and fall back to the full envelope (#17515). The diff
+ * stays a diff only when the change is attributable solely to the warnings:
+ * with warnings held equal, an unprojected diff (status bar, keyboard and
+ * every node included) must also be empty. Otherwise a real change the
+ * skeleton diff cannot show would ship as an empty `isDiff` with nothing
+ * describing it, so it still falls back. Warning churn that carries no
+ * identity change (confidence, `s2-` view ids, SystemUI status-bar icons)
+ * still falls back too.
+ */
+function hasMaterialLayoutWarningOnlyChange(baseline: ObserveResult, next: ObserveResult): boolean {
+  if (!hasMaterialLayoutWarningChange(baseline.layoutWarnings, next.layoutWarnings)) {
+    return false;
+  }
+  const unprojected = diffObserveResult(baseline, next, {
+    scalarFields: SKELETON_DIFF_SCALAR_FIELDS,
+  });
+  return isEmptyObserveDiff(unprojected);
 }

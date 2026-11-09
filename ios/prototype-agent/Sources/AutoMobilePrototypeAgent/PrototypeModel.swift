@@ -452,7 +452,7 @@
             ) } catch { NSLog("Prototype platform seed failed: %@", String(describing: error)); return }
             next.show(
                 seeded, reset: reset, appearance: appearance, locale: locale, specBytes: specBytes,
-                restoredState: prepared?.state
+                restoredState: prepared?.state, restoredStacks: prepared?.stacks
             )
             // A show that replaces another prototype cancels that one's requests.
             let platformCommands = next.takePlatformCommands()
@@ -564,6 +564,14 @@
         func stackTransition(_ id: String) -> PrototypeStackTransition {
             _ = spec
             return session.stackTransition(id)
+        }
+
+        /// Whether Back on stack `id` runs the top screen's onBack instead of popping (#14188), so the
+        /// edge swipe does not drag the screen away.
+        func stackInterceptsBack(_ id: String) -> Bool {
+            _ = spec
+            _ = stacks
+            return session.interceptsBack(id)
         }
 
         @discardableResult

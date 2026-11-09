@@ -55,6 +55,12 @@ set_paths() { printf '%s\n' "$@" > "$PREPUSH_CHANGED_FILES_FILE"; }
   [ "$status" -eq 0 ]; [ "$output" = node ]
 }
 
+@test "python sdk selects the shell lane" {
+  set_paths sdk/python/src/auto_mobile/session.py
+  run bash scripts/prepush.sh --list
+  [ "$status" -eq 0 ]; [ "$output" = shell ]
+}
+
 @test "shell-only runs formatter" {
   set_paths scripts/x.sh
   run bash scripts/prepush.sh
@@ -67,13 +73,13 @@ set_paths() { printf '%s\n' "$@" > "$PREPUSH_CHANGED_FILES_FILE"; }
   [ "$status" -eq 0 ]; grep -q '^ios ' "$LOG"
 }
 
-@test "package and bun lock select pins, node, and integration in lane order" {
+@test "package and bun lock select pins, node, shell, and integration in lane order" {
   for path in package.json bun.lock; do
     : > "$LOG"
     set_paths "$path"
     run bash scripts/prepush.sh --list
     [ "$status" -eq 0 ]
-    [ "$output" = $'runtime-pins\nnode\nintegration' ]
+    [ "$output" = $'runtime-pins\nnode\nshell\nintegration' ]
     run bash scripts/prepush.sh
     [ "$status" -eq 0 ]
     grep -q 'bun scripts/release/pin-runtime-deps.ts --write' "$LOG"
@@ -106,10 +112,39 @@ set_paths() { printf '%s\n' "$@" > "$PREPUSH_CHANGED_FILES_FILE"; }
   ! grep -q attestations "$LOG"
 }
 
-@test "docs-only has no gates" {
-  set_paths docs/readme.md
+@test "a path no lane validates has no gates" {
+  set_paths LICENSE
   run bash scripts/prepush.sh
   [ "$status" -eq 0 ]; [[ "$output" == *'No pre-push gates selected for 1 changed paths.'* ]]
+}
+
+@test "docs, skills, workflow, XML and test-plan paths select the shell lane" {
+  # Each is a path scripts/prepush-shell.sh (CI's required "Shell Changed
+  # Files" job) selects a check for; none selected a lane before.
+  for path in docs/design-docs/ci/a.md docs/using/a.md mkdocs.yml docs-assets/src/a.ts CHANGELOG.md \
+    .github/workflows/a.yml .github/actions/a/action.yml .github/CONTRIBUTING.md .githooks/pre-push \
+    skills/a/SKILL.md .agents/skills/a/SKILL.md AGENTS.md .claude/commands/a.md .claude-plugin/plugin.json \
+    plugins/a/x.json Dockerfile android/app/src/main/res/values/strings.xml test/test-plans/a.yaml \
+    .gitattributes ios/a/.gitattributes scripts/shellcheck/sete-baseline.txt scripts/ci/known-flakes.txt; do
+    set_paths "$path"
+    run bash scripts/prepush.sh --list
+    [ "$status" -eq 0 ]
+    [[ $'\n'"$output"$'\n' == *$'\nshell\n'* ]] || { echo "no shell lane for $path: $output"; return 1; }
+  done
+}
+
+@test "docs-only runs the shell lane and its formatter" {
+  set_paths docs/readme.md
+  run bash scripts/prepush.sh
+  [ "$status" -eq 0 ]
+  grep -q '^shell --base origin/main$' "$LOG"
+  grep -q 'bun run format' "$LOG"
+}
+
+@test "scripts TypeScript selects node and shell" {
+  set_paths scripts/prototype/generate-prototype-spec-models.ts
+  run bash scripts/prepush.sh --list
+  [ "$status" -eq 0 ]; [ "$output" = $'node\nshell' ]
 }
 
 @test "changed forwarded only to node" {
@@ -194,4 +229,19 @@ set_paths() { printf '%s\n' "$@" > "$PREPUSH_CHANGED_FILES_FILE"; }
   [ "$status" -eq 2 ]; [[ "$output" == *'Unknown profile: laptop'* ]]
   run bash scripts/prepush.sh --profile
   [ "$status" -eq 2 ]
+}
+
+@test "timing forwards to node with changed, and only to node" {
+  set_paths src/a.ts android/a.kt
+  run bash scripts/prepush.sh --changed --timing
+  [ "$status" -eq 0 ]
+  grep -q '^node --changed --timing$' "$LOG"
+  grep -q '^android --base-ref origin/main$' "$LOG"
+}
+
+@test "cloud profile with timing passes --timing once" {
+  set_paths src/a.ts
+  run bash scripts/prepush.sh --profile cloud --timing
+  [ "$status" -eq 0 ]
+  grep -q '^node --timing$' "$LOG"
 }

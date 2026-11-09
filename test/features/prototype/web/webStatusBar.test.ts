@@ -494,7 +494,7 @@ test("a growing child held short by a maximum height does not reach the top of a
           children: [
             {
               type: "column",
-              style: { width: "fill", weight: 1, maxHeight: 80, background: "#ffffff" },
+              style: { width: "fill", height: "fill", maxHeight: 80, background: "#ffffff" },
             },
           ],
         },
@@ -502,6 +502,25 @@ test("a growing child held short by a maximum height does not reach the top of a
     },
   });
   expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
+test("a weighted child's maximum height does not hold it short, as its share pins it (#16698)", () => {
+  const still = renderPrototypeStill({
+    id: "weighted-growth",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "column",
+      style: { width: "fill", height: "fill", arrangement: "end", background: "#000000" },
+      children: [
+        {
+          type: "column",
+          style: { width: "fill", weight: 1, maxHeight: 80, background: "#ffffff" },
+        },
+      ],
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("dark");
 });
 
 test("a row-bound min() maximum width binds only below the screen width", () => {
@@ -713,6 +732,43 @@ test("a floating window leaves the screen background behind the status bar", () 
   expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("dark");
 });
 
+test("a wide dark floating panel at topStart reaches the top edge and sets light content", () => {
+  const still = renderPrototypeStill({
+    id: "floating-top-start",
+    window: { placement: { type: "floating", gravity: "topStart" } },
+    theme: { mode: "light" },
+    root: {
+      type: "column",
+      style: { width: { dp: 2000 }, height: { dp: 200 }, background: "#1d1b20" },
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
+test("a centred floating panel taller than the screen reaches the top edge in a still", () => {
+  const still = renderPrototypeStill({
+    id: "floating-tall",
+    window: { placement: { type: "floating", gravity: "center" } },
+    theme: { mode: "light" },
+    root: {
+      type: "column",
+      style: { width: { dp: 2000 }, height: { dp: 4000 }, background: "#1d1b20" },
+    },
+  });
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
+test("top-edge votes count equal colours together whatever their spelling", () => {
+  const strip = (width: string, color: string) =>
+    el("div", { style: { width, height: "40px", "background-color": color } });
+  const row = el("div", { style: { display: "flex", "flex-direction": "row" } }, [
+    strip("160px", WHITE),
+    strip("120px", BLACK),
+    strip("120px", "rgba(0, 0, 0, 1)"),
+  ]);
+  expect(appTopColor(row, "#777777", SCREEN)).toBe(BLACK);
+});
+
 test("an end-aligned box child taller than the screen covers the status bar in a still", () => {
   const still = renderPrototypeStill({
     id: "tall-footer",
@@ -751,4 +807,56 @@ test("a collection grid's second row does not reach the top edge", () => {
     [cellOf(WHITE), cellOf(BLACK)],
   );
   expect(appTopColor(grid, "#777777", SCREEN)).toBe(WHITE);
+});
+
+test("a rounded child paints nothing in its cut-away corners, so a circle leaves the row's colour", () => {
+  const still = renderPrototypeStill({
+    id: "circle",
+    window: { placement: { type: "fullscreen" } },
+    theme: { mode: "light" },
+    root: {
+      type: "row",
+      style: { width: { dp: 400 }, height: "fill", background: BLACK },
+      children: [
+        {
+          type: "box",
+          style: {
+            width: { dp: 300 },
+            height: { dp: 300 },
+            cornerRadius: 150,
+            background: WHITE,
+          },
+        },
+      ],
+    },
+  });
+  // The circle touches the top edge at one point; the black row shows everywhere else.
+  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("light");
+});
+
+test("a rounded overflow clip hides a square descendant in its corners", () => {
+  const rounded = el(
+    "div",
+    {
+      style: {
+        width: "300px",
+        height: "300px",
+        "border-radius": "150px",
+        overflow: "hidden",
+        "flex-shrink": "0",
+      },
+    },
+    [el("div", { style: { width: "300px", height: "300px", "background-color": WHITE } })],
+  );
+  expect(
+    appTopColor(line("row", { "background-color": BLACK }, [rounded]), "#777777", SCREEN),
+  ).toBe(BLACK);
+  const square = el(
+    "div",
+    { style: { ...rounded.style, "border-radius": "0px" } },
+    rounded.children,
+  );
+  expect(appTopColor(line("row", { "background-color": BLACK }, [square]), "#777777", SCREEN)).toBe(
+    WHITE,
+  );
 });

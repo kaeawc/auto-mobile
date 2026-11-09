@@ -104,6 +104,7 @@ Besides the device management above, these tools accept a watch:
 - `listApps`
 - `launchApp`
 - `terminateApp`
+- `getLogs`
 
 <!-- watchos-supported-tools:end -->
 
@@ -115,9 +116,13 @@ Every other tool refuses a watch before doing anything, with:
 
 ### What each tool does on a watch
 
-- `observe` returns a screenshot. With the automation runner connected and the runner's target
-  app in the foreground it also returns the view hierarchy; otherwise the result carries
-  `hierarchyUnavailable` and no hierarchy fields. With a hierarchy, bounds and `screenSize` are in
+- `observe` returns a screenshot. With the automation runner connected it also returns the target
+  app's view hierarchy and on-screen system alerts, including the notification permission prompt,
+  notification short look and long look with action buttons, even when the app is not in the
+  foreground. If the hierarchy cannot be read, the result carries `hierarchyUnavailable` and no
+  hierarchy fields. When the runner is connected but the target app is not in the foreground,
+  the message says to call `launchApp` to bring it back, or post a notification and retry
+  `observe`; read the screenshot meanwhile. With a hierarchy, bounds and `screenSize` are in
   points and `screenshotImageSize` is in pixels; a screenshot-only result reports `screenSize` in
   pixels. Check `screenSize.units` (`points` or `physical-pixels`) before using it for `tapAt`,
   which takes points. With the runner connected, an element `waitFor` re-reads the hierarchy until
@@ -126,7 +131,9 @@ Every other tool refuses a watch before doing anything, with:
   `scope`, `layer`, `skipBackStack`, `crop`, `screenshotOptions` and `screenshot: "none"` are
   refused.
 - `tapOn` takes a `selector` with an exact `elementId` or `text`, and an optional `index`. Only
-  elements wholly on screen match. Only `action: "tap"` is supported.
+  elements wholly on screen match, including notification action buttons. Only `action: "tap"`
+  is supported. The notification permission prompt scrolls: use `rotateCrown` to bring `Allow`
+  wholly into view before selecting it with `tapOn`.
 - `tapAt` takes absolute coordinates in points.
 - `swipeOn` swipes in a direction. With `lookFor` it swipes until an exact `text` or `elementId`
   is on screen, up to `maxSwipes` (default 10, maximum 100). Each `lookFor` step is a short, slow drag (about
@@ -134,13 +141,23 @@ Every other tool refuses a watch before doing anything, with:
   and duration cannot be set.
 - `pressButton` supports `home` only.
 - `rotateCrown` turns the Digital Crown by a signed, non-zero `delta`, with an optional positive
-  `velocity` (default 1). It is not listed by default; enable it with `setToolEnabled` (see
+  `velocity` (default 1). `delta` is measured in full crown revolutions: `1` is one complete turn,
+  `0.25` a quarter turn, and the sign sets the direction. How far a turn moves a control depends on
+  the app's crown binding (step size and sensitivity), so one revolution can cross a whole small
+  control: on a 0–10 control with step 1 and medium sensitivity, `0.25` moves about 3 steps, `0.5`
+  about 7, and `1` reaches the end. To reach an intermediate value, use fractional deltas and
+  `observe` between turns. A turn smaller than one step of the focused control (for example `0.1`
+  on that control) may not register and fails like a rotation at the limit; when `delta` is
+  between -1 and 1 the error says the turn may be too small. It is not listed by default; enable it with `setToolEnabled` (see
   [Dynamic Tools](dynamic-tools.md)). When the view hierarchy is
-  identical before and after a rotation, it fails with an error: no view may hold crown focus (for
-  example after launching the app outside AutoMobile; tap the view that should receive the crown,
-  then retry) or the content is already at its limit. This check is best effort: it cannot see a
-  change that is not in the hierarchy, and it is skipped when a hierarchy cannot be read, so the
-  first rotation after a cold launch can still report success. `observe` after rotating to confirm
+  identical before and after a rotation, it may touch an unoccupied interior point to wake crown
+  routing, avoiding navigation and controls. It retries once only when the same focused control's
+  accessible value is also unchanged and the wake leaves the screen and focus unchanged. Without
+  a safe touch point or a comparable value, or if the retry still changes nothing, it fails with an
+  error. A wake without a retry prepares routing for the next command. No view may hold crown focus,
+  or the content may already be at its limit. Tap the view that should receive the crown, then observe
+  before trying again: a change that is not accessible may already have taken effect.
+  Verification is skipped when a stable hierarchy cannot be read. `observe` after rotating to confirm
   the app responded.
 
   ```json
@@ -148,10 +165,19 @@ Every other tool refuses a watch before doing anything, with:
   ```
 
 - `installApp` takes a watch simulator `.app` bundle. `uninstallApp` refuses `keepData: true`.
+- `postNotification` sends a simulated push to the watch app named by `appId`. The simulator
+  cannot pre-grant notification authorization (`simctl privacy` refuses it on watchOS): the app
+  must request permission, and you answer the prompt with `tapOn`, scrolling with `rotateCrown`
+  first if needed. A notification banner disappears after a few seconds, so call `observe`
+  immediately after the push to inspect its short look; the long look exposes its action buttons.
 - `launchApp` reports an app that is not installed without launching anything. `prototype: true`
   is refused. `clearAppData` wipes the app's Documents, Library and tmp before launch. It does not
   observe the launched app: `verified` stays unset with `verificationSkipped: "platform"`.
 - `terminateApp` succeeds with `wasRunning: false` when the app was not running.
+- `getLogs` reads the watch simulator's unified log as on an iOS simulator: `appId` is required,
+  and lines from the app's subsystem or its process are returned. `tags`, `buffers` and
+  `includeSystem` are Android-only and are ignored with a warning. It is not listed by default;
+  enable it with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)).
 
 `sendKeys` accepts non-empty text only and appends to the focused field. Focus a field with
 `tapOn` first, or provide a selector with an exact `elementId` or `text` to focus it before typing.
@@ -162,11 +188,12 @@ fails when no text field or keyboard is up. Commands that clear, replace or pres
 ## Limits
 
 - No physical Apple Watch and no paired iPhone (see above).
-- The automation runner reads the view hierarchy of one target app at a time. It starts on its own
+- The automation runner reads the view hierarchy of one target app at a time, plus on-screen system
+  alerts and notifications. It starts on its own
   bundled watch app; `launchApp` restarts it targeting the launched app, and fails with the reason
   if that restart fails even though the app itself launched. A runner AutoMobile did not start
-  keeps its target. For any app other than the runner's target, `observe` is screenshot-only and
-  `tapOn` and `swipeOn` with `lookFor` cannot match elements.
+  keeps its target. Other apps' own elements are unavailable to `observe`, `tapOn` and `swipeOn`
+  with `lookFor`; on-screen system alerts and notifications remain available.
 - No pinch, multi-touch or drag.
 - Prototypes do not run on a watch. To mock up a watch screen, use a watch-sized prototype spec on a
   phone instead (see [Watch-sized mockups](../tools.md#watch-sized-mockups)).

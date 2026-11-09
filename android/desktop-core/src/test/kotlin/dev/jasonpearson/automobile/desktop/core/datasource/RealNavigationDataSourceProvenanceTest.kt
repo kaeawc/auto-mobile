@@ -1,8 +1,10 @@
 package dev.jasonpearson.automobile.desktop.core.datasource
 
+import dev.jasonpearson.automobile.desktop.core.navigation.BuildSourceRevision
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -72,11 +74,33 @@ class RealNavigationDataSourceProvenanceTest {
     assertEquals(2L, home.provenance[0].buildKey.versionCode)
     assertEquals("hashB", home.provenance[0].buildKey.contentHash)
     assertEquals(250L, home.provenance[0].lastSeen)
+    assertNull(home.provenance[0].sourceRevision)
 
     val edge = graph.transitions.first()
     assertEquals(1, edge.provenance.size)
     assertEquals("emulator-9999", edge.provenance[0].deviceId)
     assertEquals("session-2", edge.provenance[0].sessionUuid)
+  }
+
+  @Test
+  fun `parses a build's declared git revision`() = runBlocking {
+    val client = FakeAutoMobileClient()
+    client.setResourceResponseWithText(
+      graphUri,
+      """
+      {"nodes":[{"id":1,"screenName":"Home","visitCount":1,"provenance":[{
+        "buildKey":{"packageId":"com.example.app","versionCode":2,"contentHash":"hashB"},
+        "deviceId":"emulator-5554","sessionUuid":"session-1","lastSeen":250,
+        "sourceRevision":{"gitBranch":"main","gitSha":"abcdef1234567"}
+      }]}],"edges":[]}
+      """
+        .trimIndent(),
+    )
+    val source = RealNavigationDataSource(clientProvider = { client }, appId = "com.example.app")
+    val result = source.getNavigationGraph()
+    assertTrue(result is Result.Success)
+    val record = (result as Result.Success).data.screens.single().provenance.single()
+    assertEquals(BuildSourceRevision("main", "abcdef1234567"), record.sourceRevision)
   }
 
   @Test

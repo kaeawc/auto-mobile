@@ -297,7 +297,7 @@ export const setAppPermissionsResultSchema = z
     success: z.boolean(),
     appId: z.string(),
     deviceId: z.string(),
-    platform: z.enum(["android", "ios"]),
+    platform: z.enum(["android", "ios", "tvos"]),
     action: z.enum(["grant", "revoke", "reset"]),
     changedCount: z.number().int().nonnegative(),
     failedCount: z.number().int().nonnegative(),

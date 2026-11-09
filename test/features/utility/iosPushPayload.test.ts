@@ -91,6 +91,31 @@ describe("buildIosPushPayload", () => {
     });
   });
 
+  test.each<{ name: string; payload?: Record<string, unknown>; alert: unknown }>([
+    { name: "the generated alert", alert: { title: "Hello", body: "World" } },
+    {
+      name: "an alert object the payload replaces",
+      payload: { aps: { alert: { title: "Sent", body: "Shown" } } },
+      alert: { title: "Sent", body: "Shown" },
+    },
+    {
+      name: "a string alert as the body alone",
+      payload: { aps: { alert: "Only body" } },
+      alert: { title: "", body: "Only body" },
+    },
+    {
+      name: "no content for a localized alert",
+      payload: { aps: { alert: { "loc-key": "GREETING" } } },
+      alert: undefined,
+    },
+  ])("reports the displayed alert: $name", ({ payload, alert }) => {
+    const result = build({ payload });
+    if (!result.ok) {
+      throw new Error(`expected a payload, got: ${result.error}`);
+    }
+    expect(result.alert).toEqual(alert as typeof result.alert);
+  });
+
   test("the target bundle always names the bundle the push is sent to", () => {
     expect(parsed({ payload: { "Simulator Target Bundle": "com.other" } })).toMatchObject({
       "Simulator Target Bundle": BUNDLE,

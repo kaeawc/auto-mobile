@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { prototypeRequiredCapabilities } from "../../../src/features/prototype/prototypeCapabilityGates";
 import { expandPrototypeComponents } from "../../../src/features/prototype/prototypeComponents";
 import { prototypeStrictPolicyError } from "../../../src/features/prototype/prototypeStrictPolicy";
+import { bindNodeFields } from "../../../src/features/prototype/prototypeTemplate";
 import {
   prototypeWebViewCallError,
   prototypeWebViewError,
@@ -133,6 +134,21 @@ test("a component prop used in onNavigate binds like one in onTap", () => {
   });
 });
 
+test("a component prop used in onBlockedNavigation binds like one in onNavigate", () => {
+  const expansion = expandPrototypeComponents({
+    requires: { platform: ["webview"] },
+    components: {
+      page: {
+        root: webView({ onBlockedNavigation: [{ type: "emit", name: "{props.eventName}" }] }),
+      },
+    },
+    root: { type: "use", component: "page", props: { eventName: "navigation_blocked" } },
+  });
+  expect(expansion.success && expansion.spec).toMatchObject({
+    root: { type: "webView", onBlockedNavigation: [{ type: "emit", name: "navigation_blocked" }] },
+  });
+});
+
 test("a component prop used in the url binds like one in a request url", () => {
   const expansion = expandPrototypeComponents({
     requires: { platform: ["webview"] },
@@ -142,6 +158,19 @@ test("a component prop used in the url binds like one in a request url", () => {
   expect(expansion.success && expansion.spec).toMatchObject({
     root: { type: "webView", url: "https://example.com/article" },
   });
+});
+
+test("a repeat instance binds an item placeholder in the webView url", () => {
+  const template = webView({ url: "https://example.com/{item.slug}" });
+  for (const [index, slug] of ["first-article", "second-article"].entries()) {
+    expect(
+      bindNodeFields(template, "root.children[0]", {
+        binding: { alias: "item", index: true },
+        values: { slug },
+        index,
+      }),
+    ).toMatchObject({ type: "webView", url: `https://example.com/${slug}` });
+  }
 });
 
 test("a component prop used in a navigation state key binds like a node state key", () => {

@@ -41,7 +41,7 @@ export const { MAX_PROTOTYPE_SECURE_VALUE_BYTES } = contract.limits;
 export interface PrototypeStoredValues {
   /** The `storage.version` the values were stored under. */
   version: number;
-  /** Stored values by storage key: `state:<key>` or `data:<pointer>`. */
+  /** Stored values by storage key: `state:<key>`, `data:<pointer>` or `stack:<id>`. */
   values: Readonly<Record<string, unknown>>;
   /**
    * Values the device's secure store holds, by `state:<key>`. A biometric-bound key cannot be
@@ -214,6 +214,19 @@ function stringList(value: unknown): string[] {
     : [];
 }
 
+/**
+ * A stored stack path (#14188) lives in the device runtime, not in state or data: only its shape is
+ * checked here, and the runtime starts the stack at `start` when its screens or params no longer
+ * fit.
+ */
+function storedStackFits(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((entry: unknown) => typeof record(entry)?.screen === "string")
+  );
+}
+
 /** Applies one stored value onto the restore; false leaves it untouched (the value does not fit). */
 function restoreOne(
   result: PrototypeStorageRestore,
@@ -221,6 +234,9 @@ function restoreOne(
   value: unknown,
   { specState, specData }: { specState: Readonly<Record<string, unknown>>; specData: unknown },
 ): boolean {
+  if (storageKey.startsWith("stack:")) {
+    return storedStackFits(value);
+  }
   const parsed = parsePrototypeStorageKey(storageKey);
   if (parsed?.kind === "state") {
     const fitting = fittingState(specState, parsed.key, value);

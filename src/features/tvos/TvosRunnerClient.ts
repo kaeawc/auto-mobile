@@ -22,7 +22,7 @@ export type TVRemoteButton = (typeof TV_REMOTE_BUTTONS)[number];
 export type TvosCommand =
   | { type: "request_hierarchy"; bundleId?: string }
   | { type: "request_screenshot" }
-  | { type: "request_press_button"; action: TVRemoteButton }
+  | { type: "request_press_button"; action: TVRemoteButton; bundleId?: string }
   | { type: "request_append_text"; text: string; bundleId?: string };
 
 /** Each runner command's deadline; a runner that misses one is treated as stuck. */
@@ -93,7 +93,7 @@ export class WebSocketTvosRunnerClient implements TvosRunnerClient {
       factory?: TvosSocketFactory;
       timer?: Timer;
       timeoutMs?: number;
-      /** The app last launched on this device, sent as the hierarchy and text target hint. */
+      /** The app last launched on this device, sent as the hierarchy, press and text target hint. */
       foregroundApp?: () => string | undefined;
     } = {},
   ) {
@@ -249,7 +249,9 @@ export class WebSocketTvosRunnerClient implements TvosRunnerClient {
   /** Names the last-launched app on commands that read an app, unless the caller named one. */
   private withForegroundHint(command: TvosCommand): TvosCommand {
     if (
-      (command.type !== "request_hierarchy" && command.type !== "request_append_text") ||
+      (command.type !== "request_hierarchy" &&
+        command.type !== "request_append_text" &&
+        command.type !== "request_press_button") ||
       command.bundleId !== undefined
     ) {
       return command;

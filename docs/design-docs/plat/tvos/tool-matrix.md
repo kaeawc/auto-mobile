@@ -19,6 +19,35 @@ capability (`displayConfig`, `statusBar`, `clipboard`, `getAppPermissions`), or 
 focus-navigation hint for touch gestures (`tapAt`, `swipeOn`, `pinchOn`,
 `multiTouch`, `dragAndDrop`, `tapAny`).
 
+## Observe text policy
+
+The single `@MainActor` router uses `TVTextEntryCommands` to share a `TVKeyboardSettleGate`
+across hierarchy, append-text and post-press snapshots, using an injected uptime clock. The gate's only
+mutable state is `lastKeyboardSeen`, initialized to the current uptime so a fresh
+runner withholds values for its first window. A failed post-press snapshot stamps
+the current uptime conservatively without failing the successful press response.
+Hierarchy, append-text and press requests carry the daemon's foreground-app hint.
+Append-text stamps the known keyboard-present tree again after typing completes.
+A type-19 keyboard node anywhere in a snapshot updates that timestamp and
+withholds every text-input value (types 45, 49, 50 and 52), regardless of focus
+or position in the tree. Withholding continues across snapshots without a
+keyboard until at least `settleWindow = 1.0` seconds have elapsed since the last
+keyboard snapshot or typing completion and the current snapshot contains neither a keyboard nor an
+anonymous type-45, type-49 or type-52 input. Anonymous means identifier, label
+and placeholder are all empty after trimming whitespace and newlines; a nil
+placeholder is empty. Only then is the timestamp cleared. Backward or non-finite
+clock readings fail closed; a non-finite stored timestamp also prevents release
+until it is replaced with a finite timestamp.
+
+Nodes retain their snapshot identifier, class and focus; withheld field nodes
+emit only their labels, and placeholders appear only as keyboard prompt nodes.
+As a second guard, anonymous type-45, type-49 and type-52 nodes never emit values,
+even with no gate state. After the gate releases, a named plain field's value is
+readable through `observe` on its own node, joined with its label when distinct. Whitespace-only
+values and values equal to the placeholder count as empty; a whitespace-only
+label counts as empty when joining. Secure fields, including type-50 nodes and
+fields identified by secure metadata, always redact their values.
+
 ## Status values
 
 - **pass**: allowlisted and verified working on an Apple TV simulator.
@@ -100,7 +129,7 @@ focus-navigation hint for touch gestures (`tapAt`, `swipeOn`, `pinchOn`,
 | `multiTouch`                  | refused-by-design | No touch surface.                                                                                                                                |
 | `navigateTo`                  | not-supported     |                                                                                                                                                  |
 | `network`                     | not-supported     |                                                                                                                                                  |
-| `observe`                     | pass              | Reports `focusedElement`. Text typed into a field is missing from the hierarchy ([#17524]).                                                      |
+| `observe`                     | pass              | Reports `focusedElement`. Typed values are withheld while the keyboard is open; see the observe text policy.                                     |
 | `openLink`                    | pass              | Opens declared app schemes. A web URL or an undeclared scheme fails with the documented error.                                                   |
 | `performanceAudit`            | not-supported     | Needs runner work.                                                                                                                               |
 | `performanceTrace`            | not-supported     | Needs runner work.                                                                                                                               |
@@ -124,7 +153,7 @@ focus-navigation hint for touch gestures (`tapAt`, `swipeOn`, `pinchOn`,
 | `rotateCrown`                 | refused-by-design | watchOS only.                                                                                                                                    |
 | `selectAllText`               | not-supported     |                                                                                                                                                  |
 | `sendBroadcast`               | refused-by-design | Android-only.                                                                                                                                    |
-| `sendKeys`                    | pass              | Needs the keyboard open first (`pressButton select` on the field); otherwise fails with `no focused text input`. Typed text: see [#17524].       |
+| `sendKeys`                    | pass              | Requires a focused keyboard (`pressButton select` on the field); otherwise `no focused text input`. Read plain values after close.               |
 | `sendSms`                     | refused-by-design | No telephony.                                                                                                                                    |
 | `setActiveDevice`             | pass              |                                                                                                                                                  |
 | `setAppLinks`                 | refused-by-design | Android-only.                                                                                                                                    |
@@ -163,5 +192,4 @@ definitions; it boots the simulator and connects the runner.
 
 [#16723]: https://github.com/kaeawc/auto-mobile/issues/16723
 [#16726]: https://github.com/kaeawc/auto-mobile/issues/16726
-[#17524]: https://github.com/kaeawc/auto-mobile/issues/17524
 [#17528]: https://github.com/kaeawc/auto-mobile/issues/17528

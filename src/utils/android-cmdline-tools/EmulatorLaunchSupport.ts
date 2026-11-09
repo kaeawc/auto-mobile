@@ -10,6 +10,8 @@ import type {
 } from "./EmulatorPortReservations";
 import { AMBIENT_ENV, ENV, readEnvRaw, readEnvTrimmed } from "../../config/env";
 
+import type { NetsimInstanceLauncher } from "./NetsimInstanceLauncher";
+
 export type LaunchFailureCategory =
   | "display_initialization_failed"
   | "hardware_acceleration_unavailable"
@@ -243,6 +245,7 @@ export interface EmulatorLauncherHost {
   timer(): Timer;
   emulatorPath(): string;
   spawnFn(): SpawnFn;
+  netsimInstanceLauncher(): NetsimInstanceLauncher;
   platform(): NodeJS.Platform;
   avdConfigReader(): AvdConfigReader;
   launchErrors(): WeakMap<ChildProcess, ActionableError>;
@@ -304,4 +307,42 @@ export interface EmulatorLauncherHost {
   sandboxFailure(output: string): ActionableError | null;
   throwIfLaunchCancelled(avdName: string, isCancelled?: () => boolean): void;
   validateAvdMemory(avdName: string, avdConfig: AvdConfig | null): void;
+}
+
+export function appendCameraPosterArguments(args: string[], posterPath?: string): void {
+  if (posterPath !== undefined) {
+    if (
+      args.some(
+        (arg) =>
+          arg === "-camera-back" ||
+          arg === "-virtualscene-poster" ||
+          arg.startsWith("-camera-back=") ||
+          arg.startsWith("-virtualscene-poster="),
+      )
+    ) {
+      throw new ActionableError(
+        "cameraPosterPath cannot be combined with camera-back or virtualscene-poster extra arguments. Remove the conflicting arguments.",
+      );
+    }
+    args.push("-camera-back", "virtualscene", "-virtualscene-poster", `wall=${posterPath}`);
+  }
+}
+
+export function architecturePanicMessage(
+  directPanicResult: ReturnType<EmulatorLauncherHost["detectArchitecturePanic"]>,
+): string {
+  // Create a more helpful error message
+  let errorMessage = `Emulator failed to start: ${directPanicResult.message}`;
+  if (directPanicResult.hostArch && directPanicResult.avdArch) {
+    errorMessage += `\n\nSuggestion: On ${directPanicResult.hostArch} hosts, create AVDs with compatible architectures:`;
+    if (directPanicResult.hostArch === "aarch64" || directPanicResult.hostArch === "arm64") {
+      errorMessage += `\n- Use ARM64 system images (arm64-v8a) instead of x86/x86_64`;
+      errorMessage += `\n- Example: avdmanager create avd -n MyAVD -k "system-images;android-35;google_apis;arm64-v8a"`;
+    } else if (directPanicResult.hostArch === "x86" || directPanicResult.hostArch === "x86_64") {
+      errorMessage += `\n- Use x86/x86_64 system images instead of ARM64`;
+      errorMessage += `\n- Example: avdmanager create avd -n MyAVD -k "system-images;android-35;google_apis;x86_64"`;
+    }
+  }
+
+  return errorMessage;
 }

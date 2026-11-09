@@ -200,10 +200,12 @@ from the layout.
 ## Enter text
 
 Select a text field with `pressButton select` to open the on-screen keyboard, then call `sendKeys`
-with `type` commands. Text is appended to the field. While the keyboard is open, the hierarchy
-reports the remembered field's identifier, label, focus and current text when its identity can be
-matched. Secure values are hidden; text is also withheld when the field is unknown, including after
-selecting within the keyboard until the field is observed again.
+with `type` commands. Text is appended to the field. The hierarchy shows only each field's label,
+with no field values, while the keyboard is open and until about one second after AutoMobile
+last saw the keyboard or finished typing. Values may also be hidden briefly when first connecting. The placeholder
+appears only as the keyboard's prompt. Values stay hidden longer if an unnamed text input remains.
+Afterwards, a named plain field's typed value is readable with `observe`. Unnamed text inputs and
+secure fields never show their value. Whitespace-only values are empty.
 
 - `operation: "replace"`, key commands, clear commands and selectors are refused.
 - To change existing text, edit it on the on-screen keyboard with `pressButton`, then type.

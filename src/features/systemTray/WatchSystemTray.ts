@@ -10,6 +10,7 @@ import {
 import { prepareWatchSystemTray, openWatchSystemTray } from "./helpers/watchOpening";
 import { readActiveNotificationKeysForApp } from "./helpers/listing";
 import { restoreWatchStream, unrestoredDismissal } from "./helpers/watchRestore";
+import { watchAwaySurface } from "./helpers/watchFace";
 import { createNotificationUIDetector } from "./createNotificationUIDetector";
 import { getSystemTrayDependencies, resolveUniqueTrayAppLabel } from "./helpers/dependencies";
 import {
@@ -425,16 +426,24 @@ export class WatchSystemTray {
       );
     } finally {
       const controller = new AbortController();
+      const timer = getSystemTrayDependencies().timer;
+      // Restoring waits for the stream's slide-out, so a short request deadline must not cut it.
+      const restoreMs = Math.max(timeout, MIN_RESTORE_MS);
+      const restoreDeadline = timer.now() + restoreMs;
       const restore = () =>
         restoreWatchStream(
           this.device,
-          { initiallyOpen, expandedByUs: this.expandedByUs },
+          {
+            initiallyOpen,
+            initiallyOnAppList: watchAwaySurface(initial) === "app list",
+            expandedByUs: this.expandedByUs,
+            deadline: restoreDeadline,
+          },
           controller.signal,
         );
       restored = await raceWithDeadline(restore, {
-        timer: getSystemTrayDependencies().timer,
-        // Restoring waits for the stream's slide-out, so a short request deadline must not cut it.
-        timeoutMs: Math.max(timeout, MIN_RESTORE_MS),
+        timer,
+        timeoutMs: restoreMs,
         label: "Watch notification stream restoration",
         onTimeout: () => controller.abort(),
       });
@@ -902,21 +911,32 @@ export class WatchSystemTray {
       await sleep(POLL_MS, this.signal);
       next = await this.read();
     }
-    if (!watchStreamRoot(next.viewHierarchy)) {
+    const streamOpen = !!watchStreamRoot(next.viewHierarchy);
+    // The last card's X can close the stream before this read. Only inventory accounting can
+    // confirm that removal; a stream that vanished without tapping the X is not evidence.
+    if (!streamOpen && !revealed) {
       return { next, removed: false };
     }
     const after = appId && before ? await this.inventory(appId, card) : undefined;
+    return {
+      next,
+      removed:
+        this.inventoryRemoval(before, after) ??
+        (streamOpen && visiblyRemoved(card, observation, next)),
+    };
+  }
+
+  private inventoryRemoval(
+    before: { keys: string[]; matching: number } | undefined,
+    after: { keys: string[]; matching: number } | undefined,
+  ): boolean | undefined {
     if (!before || !after || before.matching === 0) {
-      return { next, removed: visiblyRemoved(card, observation, next) };
+      return undefined;
     }
     // An identical card scrolling into view cannot fake a removed key, a refused card that
     // rewrites its text keeps its key, and another notification of the app expiring meanwhile
     // removes a key but not one showing the swiped card's title and body.
-    return {
-      next,
-      removed:
-        before.keys.some((key) => !after.keys.includes(key)) && after.matching < before.matching,
-    };
+    return before.keys.some((key) => !after.keys.includes(key)) && after.matching < before.matching;
   }
 
   /**

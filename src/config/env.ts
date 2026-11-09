@@ -112,6 +112,18 @@ export const AMBIENT_ENV = {
     default: "unset",
     doc: "Linux per-user runtime directory; ambient, locates emulator advertisements.",
   },
+  TMPDIR: {
+    name: "TMPDIR",
+    kind: "path",
+    default: "unset",
+    doc: "POSIX temporary directory; ambient, takes precedence for the Linux netsimd discovery directory.",
+  },
+  NETSIM_ARGS: {
+    name: "NETSIM_ARGS",
+    kind: "string",
+    default: "unset",
+    doc: "Extra netsimd arguments; ambient, --no-shutdown is stripped for private netsimd instances.",
+  },
   ANDROID_AVD_HOME: {
     name: "ANDROID_AVD_HOME",
     kind: "path",

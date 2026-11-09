@@ -4,12 +4,11 @@ import XCTest
 @MainActor
 final class TVCommandRouter {
     private let application: XCUIApplication
-    private var focusMemory = TVFocusMemory()
-    private var lastTarget: (app: XCUIApplication, packageName: String)?
-    private var launchGeneration = 0
+    private let textEntryCommands: TVTextEntryCommands
 
     init(application: XCUIApplication) {
         self.application = application
+        textEntryCommands = TVTextEntryCommands(clock: TVSystemUptimeClock())
     }
 
     private struct Envelope: Decodable {
@@ -20,21 +19,7 @@ final class TVCommandRouter {
     }
 
     /// Resolve the frontmost app per command; the host app is not necessarily in front.
-    private func target(requested: String?) -> (app: XCUIApplication, packageName: String, processToken: Int?) {
-        // tvOS has no public process ID. Any observed foreground gap or target switch invalidates identity,
-        // including for a previously requested third-party app that is no longer among the probes.
-        if let lastTarget, lastTarget.app.state != .runningForeground { launchGeneration += 1 }
-        let resolved = foregroundTarget(requested: requested)
-        if resolved.packageName != lastTarget?.packageName { launchGeneration += 1 }
-        lastTarget = resolved
-        guard resolved.app.state == .runningForeground else {
-            launchGeneration += 1
-            return (resolved.app, resolved.packageName, nil)
-        }
-        return (resolved.app, resolved.packageName, launchGeneration)
-    }
-
-    private func foregroundTarget(requested: String?) -> (app: XCUIApplication, packageName: String) {
+    private func target(requested: String?) -> (app: XCUIApplication, packageName: String) {
         let hostId = "dev.jasonpearson.automobile.ctrlproxy.tv"
         let hostState = Int(application.state.rawValue)
         guard hostState != TVTargetResolver.foregroundState else { return (application, hostId) }
@@ -68,12 +53,7 @@ final class TVCommandRouter {
                 let resolved = target(requested: envelope.bundleId)
                 let snapshot = try resolved.app.snapshot()
                 let tree = sketch(snapshot)
-                focusMemory.observe(bundle: resolved.packageName, processToken: resolved.processToken, root: tree)
-                let resolution = TVTextEntryPolicy.resolve(
-                    root: tree, lastFocusedField: focusMemory.field(
-                        for: resolved.packageName, processToken: resolved.processToken
-                    )
-                )
+                let resolution = textEntryCommands.hierarchy(root: tree)
                 return try JSONEncoder().encode(HierarchyUpdateResponse(
                     requestId: request.requestId,
                     data: ViewHierarchy(
@@ -93,16 +73,10 @@ final class TVCommandRouter {
                     throw CommandError.invalidParameter("frameContext", "unsupported on tvOS")
                 }
                 let startTime = Date()
-                if button == .select {
+                textEntryCommands.press(button, perform: press, snapshot: {
                     let resolved = target(requested: envelope.bundleId)
-                    // Remote input still proceeds on failure, but identity must fail closed.
-                    let snapshot = try? resolved.app.snapshot()
-                    focusMemory.willSelect(
-                        bundle: resolved.packageName, processToken: resolved.processToken,
-                        snapshot: snapshot.map { sketch($0) }
-                    )
-                }
-                press(button)
+                    return try sketch(resolved.app.snapshot())
+                })
                 return try JSONEncoder().encode(WebSocketResponse.success(
                     type: "press_button_result", requestId: requestId,
                     totalTimeMs: Int64(Date().timeIntervalSince(startTime) * 1000)
@@ -116,10 +90,10 @@ final class TVCommandRouter {
                 let startTime = Date()
                 let resolved = target(requested: envelope.bundleId)
                 let snapshot = try resolved.app.snapshot()
-                guard TVTextEntryPolicy.hasFocusedKeyboard(sketch(snapshot)) else {
+                let tree = sketch(snapshot)
+                guard textEntryCommands.appendText(root: tree, typeText: { resolved.app.typeText(request.text) }) else {
                     throw CommandError.invalidParameter("text", "no focused text input")
                 }
-                resolved.app.typeText(request.text)
                 return try JSONEncoder().encode(WebSocketResponse.success(
                     type: ResponseType.appendTextResult.rawValue, requestId: request.requestId,
                     totalTimeMs: Int64(Date().timeIntervalSince(startTime) * 1000)
@@ -159,21 +133,20 @@ final class TVCommandRouter {
 
     private func element(
         _ snapshot: any XCUIElementSnapshot, node: TVNodeSketch,
-        resolution: TVTextEntryResolution, path: [Int] = []
+        resolution: TVTextEntryResolution
     )
         -> UIElementInfo
     {
-        let entryOverride = resolution.overrideEntry(at: path)
-        return UIElementInfo(
-            text: resolution.text(for: node, path: path),
-            resourceId: entryOverride == nil ? snapshot.identifier : entryOverride?.resourceId,
-            className: entryOverride?.className ?? String(snapshot.elementType.rawValue),
+        UIElementInfo(
+            text: resolution.text(for: node),
+            resourceId: snapshot.identifier,
+            className: String(snapshot.elementType.rawValue),
             bounds: ElementBounds(clamping: snapshot.frame),
             enabled: String(snapshot.isEnabled),
-            focused: String(entryOverride?.focused ?? snapshot.hasFocus),
+            focused: String(snapshot.hasFocus),
             selected: String(snapshot.isSelected),
             node: snapshot.children.enumerated().map { index, child in
-                element(child, node: node.children[index], resolution: resolution, path: path + [index])
+                element(child, node: node.children[index], resolution: resolution)
             }
         )
     }

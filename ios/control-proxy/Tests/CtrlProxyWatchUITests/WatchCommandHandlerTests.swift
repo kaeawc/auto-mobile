@@ -138,6 +138,7 @@ final class WatchCommandHandlerTests: XCTestCase {
     }
 
     func testCrownWakeRejectsEveryNonContainerTypeWithAFrame() {
+        // Type 1 has conditional structural exemptions covered separately below.
         for type in Array(0 ... 82) + [999] where ![1, 2, 4].contains(type) {
             let node = SdkViewNode(
                 className: "XCUIElementType(\(type))", bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100),
@@ -151,7 +152,10 @@ final class WatchCommandHandlerTests: XCTestCase {
         for type in [1, 2, 4] {
             let bounds = SdkBounds(left: 0, top: 0, right: 100, bottom: 100)
             let container = SdkViewNode(
-                className: "XCUIElementType(\(type))", bounds: bounds
+                className: "XCUIElementType(\(type))", bounds: bounds,
+                children: type == 1 ? [SdkViewNode(
+                    className: "XCUIElementType(48)", bounds: SdkBounds(left: 0, top: 0, right: 10, bottom: 10)
+                )] : nil
             )
             let point = try XCTUnwrap(watchCrownWakePoint(in: crownHierarchy(children: [container])))
             XCTAssertEqual(point.dx, 0.5)
@@ -160,6 +164,88 @@ final class WatchCommandHandlerTests: XCTestCase {
                 className: "XCUIElementType(48)", bounds: bounds
             )])
             XCTAssertNil(watchCrownWakePoint(in: crownHierarchy(children: [occupied])))
+        }
+    }
+
+    func testCrownWakeRejectsLabeledOrIdentifiedOtherNodes() {
+        for hasChildren in [false, true] {
+            for enabled in [false, true] {
+                for identifierOnly in [false, true] {
+                    let node = SdkViewNode(
+                        className: "XCUIElementType(1)",
+                        bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100),
+                        accessibilityLabel: identifierOnly ? nil : "Custom control",
+                        accessibilityIdentifier: identifierOnly ? "custom-control" : nil,
+                        isUserInteractionEnabled: enabled,
+                        children: hasChildren ? [SdkViewNode(
+                            className: "XCUIElementType(48)",
+                            bounds: SdkBounds(left: 0, top: 0, right: 10, bottom: 10)
+                        )] : nil
+                    )
+                    XCTAssertNil(watchCrownWakePoint(in: crownHierarchy(children: [node])))
+                }
+            }
+        }
+    }
+
+    func testCrownWakeRejectsActionableUnlabeledOtherContainers() {
+        for action in ["traits", "customActions", "tapTarget"] {
+            let node = SdkViewNode(
+                className: "XCUIElementType(1)",
+                bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100),
+                accessibilityTraits: action == "traits" ? ["button"] : [],
+                accessibilityCustomActions: action == "customActions" ? ["Activate"] : [],
+                isUserInteractionEnabled: true, hasTapTarget: action == "tapTarget",
+                children: [SdkViewNode(
+                    className: "XCUIElementType(48)", bounds: SdkBounds(left: 0, top: 0, right: 10, bottom: 10)
+                )]
+            )
+            XCTAssertNil(watchCrownWakePoint(in: crownHierarchy(children: [node])), action)
+        }
+    }
+
+    func testCrownWakeAllowsUnlabeledNonActionableOtherContainers() throws {
+        for label in [nil, ""] as [String?] {
+            for identifier in [nil, ""] as [String?] {
+                for enabled in [false, true] {
+                    let node = SdkViewNode(
+                        className: "XCUIElementType(1)",
+                        bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100),
+                        accessibilityLabel: label, accessibilityIdentifier: identifier,
+                        accessibilityTraits: enabled ? [] : ["button"],
+                        accessibilityCustomActions: enabled ? [] : ["Activate"],
+                        isUserInteractionEnabled: enabled, hasTapTarget: !enabled,
+                        children: [SdkViewNode(
+                            className: "XCUIElementType(48)",
+                            bounds: SdkBounds(left: 0, top: 0, right: 10, bottom: 10)
+                        )]
+                    )
+                    let point = try XCTUnwrap(watchCrownWakePoint(in: crownHierarchy(children: [node])))
+                    XCTAssertEqual(point.dx, 0.5)
+                    XCTAssertEqual(point.dy, 0.5)
+                }
+            }
+        }
+    }
+
+    func testCrownWakeRejectsEnabledOtherLeaves() {
+        let node = SdkViewNode(
+            className: "XCUIElementType(1)", bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100),
+            isUserInteractionEnabled: true
+        )
+        XCTAssertNil(watchCrownWakePoint(in: crownHierarchy(children: [node])))
+    }
+
+    func testCrownWakeAllowsUnlabeledNonInteractiveOtherLeaves() throws {
+        // A leaf with no label, identifier, or interaction cannot activate a control, so leave it exempt.
+        for children in [nil, []] as [[SdkViewNode]?] {
+            let node = SdkViewNode(
+                className: "XCUIElementType(1)", bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100),
+                isUserInteractionEnabled: false, children: children
+            )
+            let point = try XCTUnwrap(watchCrownWakePoint(in: crownHierarchy(children: [node])))
+            XCTAssertEqual(point.dx, 0.5)
+            XCTAssertEqual(point.dy, 0.5)
         }
     }
 

@@ -334,7 +334,9 @@ private let watchTapElementTypes: Set<UInt> = [
 ]
 
 /// Search a small interior grid, leaving the top navigation band and left/back area untouched.
-/// Only empty space clear of every descendant frame except application/window containers qualifies.
+/// Stay eight points clear of descendant frames except application/window containers and .other nodes
+/// with no label or identifier that have children and are non-actionable, or are non-interactive leaves.
+/// Enabled nodes with traits, custom actions, or a tap target are actionable. Always inspect children.
 func watchCrownWakePoint(in hierarchy: SdkViewHierarchy) -> CGVector? {
     guard hierarchy.screenWidth > 0, hierarchy.screenHeight > 0, let root = hierarchy.root,
           root.bounds.left == 0, root.bounds.top == 0,
@@ -342,12 +344,18 @@ func watchCrownWakePoint(in hierarchy: SdkViewHierarchy) -> CGVector? {
     else { return nil }
     func blocked(_ node: SdkViewNode, x: Double, y: Double) -> Bool {
         let bounds = node.bounds
-        let container = ["XCUIElementType(1)", "XCUIElementType(2)", "XCUIElementType(4)"].contains(node.className)
+        let children = node.children ?? []
+        let unlabeled = (node.accessibilityLabel ?? "").isEmpty && (node.accessibilityIdentifier ?? "").isEmpty
+        let actionable = node.isUserInteractionEnabled
+            && (!node.accessibilityTraits.isEmpty || !node.accessibilityCustomActions.isEmpty || node.hasTapTarget)
+        let structuralOther = node.className == "XCUIElementType(1)" && unlabeled && !actionable
+            && (!children.isEmpty || !node.isUserInteractionEnabled)
+        let container = ["XCUIElementType(2)", "XCUIElementType(4)"].contains(node.className) || structuralOther
         if !container, bounds.right > bounds.left, bounds.bottom > bounds.top,
            x >= Double(bounds.left) - 8, x <= Double(bounds.right) + 8,
            y >= Double(bounds.top) - 8, y <= Double(bounds.bottom) + 8
         { return true }
-        return (node.children ?? []).contains { blocked($0, x: x, y: y) }
+        return children.contains { blocked($0, x: x, y: y) }
     }
     for y in [0.5, 0.65, 0.8, 0.4] {
         for x in [0.5, 0.65, 0.8, 0.35] where !(root.children ?? []).contains(where: {

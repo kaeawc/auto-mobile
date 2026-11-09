@@ -318,6 +318,15 @@ With VoiceOver on, iOS can hold or swallow a tap. When a `tapOn`, `tapAny` or
 indeterminate (the tap may or may not have run, so it is not retried
 automatically) and names VoiceOver. Call `observe` to see whether the tap took
 effect; if it did not, call `accessibility` with `voiceover: false`, then retry.
+With TalkBack on, `tapOn` activates the nearest clickable owner of the matched
+element: by accessibility action when the owner has a stable id, otherwise by a
+TalkBack focus and double tap at the owner's center. Success does not prove the
+intended control responded, so the result's `warnings` flag two cases: the
+activated element's bounds do not contain the matched element's bounds (a
+different control may have been activated; not reported for `action: "focus"`),
+and the tap or double tap reported success but the screen did not change. Each
+warning names the elements and gives the matched element's center. Call
+`observe`; if the intended control did not respond, call `tapAt` at that center.
 Check text alternatives, content descriptions or accessibility labels,
 focus order, contrast, and tap-target size as part of the assertions; support
 for toggling services varies by device type and OS version.

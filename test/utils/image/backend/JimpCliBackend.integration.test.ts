@@ -56,6 +56,27 @@ describe("JimpCliBackend", () => {
     expect(codec.decodeCalls).toHaveLength(0);
   });
 
+  test("hands CliWebpCodec the rotated and resized PNG, never the full-size capture", async () => {
+    const source = await makeSourcePng(8, 4);
+    const codec = new FakeWebpCodec(source);
+    const backend = new JimpCliBackend({ webpCodec: codec });
+
+    await backend.execute(source, {
+      operations: [
+        { type: "rotate", degrees: 90 },
+        { type: "resize", width: 2, maintainAspectRatio: true },
+      ],
+      encoding: { mime: "image/webp", options: { quality: 75 } },
+    });
+
+    expect(codec.encodeCalls).toHaveLength(1);
+    expect(await backend.metadata(codec.encodeCalls[0].input)).toMatchObject({
+      width: 2,
+      height: 4,
+      format: "png",
+    });
+  });
+
   test("decodes WebP input through CliWebpCodec before metadata and raw pixel reads", async () => {
     const decodedPng = await makeSourcePng(3, 2);
     const codec = new FakeWebpCodec(decodedPng);

@@ -111,13 +111,18 @@ export const HARD_BUDGET_MIN_POLL_READ_MS = 100;
 
 const BUDGET_EXPIRED: unique symbol = Symbol("observe-poll-budget-expired");
 type BudgetExpired = typeof BUDGET_EXPIRED;
-/** The terminal back stack disagreed and the hard budget cut off the reconciling capture. */
+/**
+ * The hard budget cut off the terminal reconciliation: either the back-stack read
+ * itself, or the confirming capture after the back stack disagreed (#17692).
+ */
 const RECONCILIATION_UNCONFIRMED: unique symbol = Symbol("observe-poll-reconciliation-unconfirmed");
 
 /**
  * Race one device read against the remaining hard budget. When the budget wins,
  * the read is aborted at once rather than at its own next abort check, and
- * {@link BUDGET_EXPIRED} is returned. A spent budget starts no read.
+ * {@link BUDGET_EXPIRED} is returned. A spent budget starts no read; the
+ * deadline is inclusive, so a read may still start with exactly 0 ms left and
+ * has that last millisecond to land.
  */
 async function raceReadAgainstBudget<T>(
   read: (signal: AbortSignal | undefined) => Promise<T>,
@@ -128,7 +133,7 @@ async function raceReadAgainstBudget<T>(
     label,
   }: { timer: Timer; remainingMs: number; signal?: AbortSignal; label: string },
 ): Promise<T | BudgetExpired> {
-  if (remainingMs <= 0) {
+  if (remainingMs < 0) {
     return BUDGET_EXPIRED;
   }
   const controller = new AbortController();
@@ -456,10 +461,13 @@ function createPollFinalizer(context: PollFinalizationContext, freshnessState: P
     // Terminal reads spend time on every path, including one the budget cut off.
     outcome.waitMs = timer.now() - start;
     if (refreshed === RECONCILIATION_UNCONFIRMED) {
-      // The back stack contradicted this capture and the budget ran out before a
-      // confirming read: the match is not proven, so do not report it.
-      outcome.stopped = false;
-      outcome.terminalReason = "timeout";
+      // The budget cut off the reconciliation before it confirmed this capture:
+      // the match is not proven, so do not report it. A screen-off or timeout
+      // outcome keeps its reason.
+      if (outcome.stopped) {
+        outcome.stopped = false;
+        outcome.terminalReason = "timeout";
+      }
     } else if (refreshed) {
       const original = outcome.observation;
       outcome.observation = refreshed.observation;
@@ -579,7 +587,11 @@ async function reconcileTerminalCapture(
     { start, label: "Observe poll terminal back stack" },
   );
   throwIfAborted(options.signal);
-  if (disagrees === BUDGET_EXPIRED || !disagrees) {
+  if (disagrees === BUDGET_EXPIRED) {
+    // A back-stack read the budget cut off never confirmed the capture's activity.
+    return RECONCILIATION_UNCONFIRMED;
+  }
+  if (!disagrees) {
     return undefined;
   }
   try {

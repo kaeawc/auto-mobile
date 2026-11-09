@@ -135,8 +135,11 @@ function textOnlyChanges(diff: ObserveDiff, untrackable: ReadonlySet<string>): S
  * equal reads and every action pays the full settle budget.
  *
  * A node whose text changes, and only its text, in two consecutive diffs is
- * marked volatile for the rest of the settle, and its later text-only changes
- * are dropped from the diff the comparator sees. Everything else still counts:
+ * marked volatile for the rest of the settle, and its text-only changes in
+ * LATER diffs are dropped from the diff the comparator sees. The two diffs that
+ * mark it still count, so a node must tick on at least three consecutive reads
+ * before a tick is masked: a real transition that rewrites one node's text twice
+ * and then stops still reads as unstable until a later read confirms it. Everything else still counts:
  * a node added or removed without a counterpart, a volatile node that changes
  * anything besides its text, any other node's change, and `fields` changes.
  */
@@ -163,6 +166,10 @@ export class VolatileTextTracker {
    */
   mask(diff: ObserveDiff, untrackable: ReadonlySet<string> = new Set()): ObserveDiff {
     const changes = textOnlyChanges(diff, untrackable);
+    // Only a node already volatile before this diff is masked: the diff that
+    // promotes a node still counts, so a screen transition made of two
+    // text-only changes on one node is not mistaken for a ticking node (#17692).
+    const maskable = new Set([...changes].filter((identity) => this.volatile.has(identity)));
     for (const identity of changes) {
       if (this.previousChanges.has(identity)) {
         this.volatile.add(identity);
@@ -171,7 +178,7 @@ export class VolatileTextTracker {
     this.previousChanges = changes;
     const masked = (key: string): boolean => {
       const identity = textFreeIdentity(key);
-      return identity !== undefined && changes.has(identity) && this.volatile.has(identity);
+      return identity !== undefined && maskable.has(identity);
     };
     return {
       ...diff,

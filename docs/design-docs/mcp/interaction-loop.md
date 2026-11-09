@@ -113,8 +113,10 @@ capture.
 
 A node whose text alone changes in two consecutive comparisons (a running
 clock or stopwatch, a typing indicator, a live counter) is treated as volatile
-for the rest of that settle: its later text-only changes are left out of the
-comparison, so such a screen settles once everything else holds still. The node
+for the rest of that settle: its text-only changes in later comparisons are
+left out, so such a screen settles once everything else holds still. The two
+comparisons that mark the node still count, so a real transition that rewrites
+one node's text twice and then stops is not mistaken for a ticking node. The node
 is identified by resource id, bounds and sibling position. Structural changes
 still count: a node added or removed without a counterpart, a volatile node
 changing anything besides its text, and any change to another node. Volatile
@@ -123,7 +125,8 @@ nodes are forgotten when consecutive reads are not the same screen.
 The budget is a hard cap. Each poll read, the terminal back-stack read and the
 attribution reconciliation capture race the remaining budget; the read the
 budget cuts off is aborted at once, and the loop returns the newest trustworthy
-capture it already has. No poll starts with less than 100 ms left, since such
+capture it already has. A stable pair whose back-stack read or reconciliation
+capture the budget cut off is unconfirmed and reports `settled: false`. No poll starts with less than 100 ms left, since such
 a read can only return a stale cache. A wall-clock fence at the budget plus a
 margin (the smaller of 1000 ms and the budget) still aborts the loop's signal
 and is raced against the whole gate, for terminal work outside those races and

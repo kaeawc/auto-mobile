@@ -193,6 +193,24 @@ describe("JimpBackend", () => {
       expect(meta.height).toBe(2);
     });
 
+    test("rotate then resize encodes JPEG once at the resized size", async () => {
+      const backend = new JimpBackend();
+      const source = await makeSourcePng(8, 4);
+      const resized = await backend.execute(source, {
+        operations: [
+          { type: "rotate", degrees: 90 },
+          { type: "resize", width: 2, maintainAspectRatio: true },
+        ],
+        encoding: { mime: "image/jpeg" },
+      });
+
+      expect(await backend.metadata(resized)).toMatchObject({
+        width: 2,
+        height: 4,
+        format: "jpeg",
+      });
+    });
+
     test("rejects WebP encoding because WebP belongs to platform-specific backends", async () => {
       const backend = new JimpBackend();
       const source = await makeSourcePng();

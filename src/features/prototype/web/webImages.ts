@@ -141,15 +141,44 @@ export function webImageBoxCss(
 /** A wrapped axis: neither fixed in dp nor filled, so the image's own size decides it. */
 const wrapped = (value: unknown) => !sized(value);
 
+/** Each axis's size field, authored-minimum field, min and max properties, and padding sides. */
+const CONTENT_AXES = [
+  ["width", "minWidth", "min-width", "max-width", "padding-inline-start", "padding-inline-end"],
+  ["height", "minHeight", "min-height", "max-height", "padding-top", "padding-bottom"],
+] as const;
+
+/**
+ * The placeholder's 48px minimum for the content box on each wrapped axis, unless the node authors
+ * that minimum. It never outgrows the room the node's box leaves inside its padding, as Android's
+ * minimum yields to its constraints: a resolved maximum caps it (a CSS minimum would otherwise
+ * override that maximum and paint into the padding), and a weight's zero minimum drops it.
+ */
+function contentMinimum(style: Raw, box: Readonly<Record<string, string>>): Record<string, string> {
+  const css: Record<string, string> = {};
+  for (const [size, authored, minimum, maximum, start, end] of CONTENT_AXES) {
+    if (!wrapped(style[size]) || typeof style[authored] === "number" || box[minimum] === "0") {
+      continue;
+    }
+    const room =
+      box[maximum] && `calc(${box[maximum]} - ${box[start] ?? "0px"} - ${box[end] ?? "0px"})`;
+    css[minimum] = room ? `min(48px, ${room})` : "48px";
+  }
+  return css;
+}
+
 /**
  * The in-flow box the image layers fill: the node's content box, inside its padding (safe-area
  * insets included), so the browser lays it out by every rule the node's own box follows (fill,
  * weight, min and max bounds). It keeps the image's aspect ratio on an axis the node leaves to wrap,
  * as a native image keeps its natural size there, unless the node authors its own ratio; and the
- * placeholder's 48px minimum on a wrapped axis, unless the node authors that minimum. A fixed height
- * is a definite one, so the content box takes it in full and the ratio can size a wrapped width.
+ * placeholder's minimum (see contentMinimum). A fixed height is a definite one, so the content box
+ * takes it in full and the ratio can size a wrapped width. `box` is the node's resolved style.
  */
-export function webImageContentCss(slot: number, node: Raw): Record<string, string> {
+export function webImageContentCss(
+  slot: number,
+  node: Raw,
+  box: Readonly<Record<string, string>>,
+): Record<string, string> {
   const style = record(node.style) ?? {};
   const ratio = wrapped(style.width) || wrapped(style.height);
   return {
@@ -160,10 +189,7 @@ export function webImageContentCss(slot: number, node: Raw): Record<string, stri
     ...(ratio && typeof style.aspectRatio !== "number"
       ? { "aspect-ratio": `var(${webImageVar(slot, "-ar")}, auto)` }
       : {}),
-    ...(wrapped(style.width) && typeof style.minWidth !== "number" ? { "min-width": "48px" } : {}),
-    ...(wrapped(style.height) && typeof style.minHeight !== "number"
-      ? { "min-height": "48px" }
-      : {}),
+    ...contentMinimum(style, box),
   };
 }
 
@@ -332,7 +358,7 @@ export function webImageRenderer({ base, bound }: WebImageRendererHelpers): Node
     const { attrs, style } = base(node, scope, webImageBoxCss(slot, node, placeholder));
     const content = el(
       "div",
-      { attrs: { "data-image-content": "" }, style: webImageContentCss(slot, node) },
+      { attrs: { "data-image-content": "" }, style: webImageContentCss(slot, node, style) },
       webImageLayers(slot, node, scope.style),
     );
     return el("div", { attrs: { ...attrs, role: "img" }, style }, [content]);

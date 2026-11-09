@@ -299,6 +299,21 @@ describe("an image with an inlinable asset", () => {
     // An authored ratio or minimum is the node's own.
     expect(content({ width: { dp: 200 }, aspectRatio: 2 })["aspect-ratio"]).toBeUndefined();
     expect(content({ minHeight: 30 })["min-height"]).toBeUndefined();
+    // The minimum yields to the room a maximum leaves inside the padding, and to a weight's zero.
+    const capped = content({
+      width: { dp: 200 },
+      maxHeight: 100,
+      padding: { top: 40, bottom: 40 },
+    });
+    expect(capped["min-height"]).toBe("min(48px, calc(100px - 40px - 40px))");
+    const weighted = find(
+      still({
+        type: "row",
+        children: [{ type: "image", asset: "photo", style: { weight: 1, height: { dp: 40 } } }],
+      }).element,
+      (e) => "data-image-content" in e.attrs,
+    )[0]!.style;
+    expect(weighted["min-width"]).toBeUndefined();
   });
 
   test("an opaque tint adds no alpha group", () => {

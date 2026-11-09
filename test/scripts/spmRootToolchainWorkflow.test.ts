@@ -13,12 +13,7 @@ const SMALL_ROUTED = "needs.mac-pool-routing.outputs.small != 'hosted'";
 const HEAVY_ROUTED = "needs.mac-pool-routing.outputs.heavy != 'hosted'";
 const SMALL_LABEL = 'fromJSON(\'["self-hosted","automobile-mac"]\')';
 const HEAVY_LABEL = 'fromJSON(\'["self-hosted","automobile-mac-heavy"]\')';
-const ORIGINAL_SELF_HOSTED_JOBS = [
-  "build-desktop-app",
-  "installer-minimal",
-  "swiftlint",
-  "swift-code-coverage",
-];
+const ORIGINAL_SELF_HOSTED_JOBS = ["build-desktop-app", "installer-minimal", "swift-code-coverage"];
 const SMALL_POOL_JOBS = ["ios-swift-packages", "ios-spm-root-package-build"];
 const HEAVY_LANE_JOBS = ["ios-xcode-build", "ios-playground-tests", "prototype-simulator"];
 const FALLBACK: Record<string, string> = {
@@ -69,9 +64,20 @@ describe("root SPM toolchain floor workflow", () => {
     expect(jobs["build-desktop-app"]?.["runs-on"]).toContain("|| matrix.os");
     expect(jobs["installer-minimal"]?.["runs-on"]).toContain("matrix.os == 'macos-latest'");
     expect(jobs["installer-minimal"]?.["runs-on"]).toContain("|| matrix.os");
-    for (const name of ["swiftlint", "swift-code-coverage"]) {
-      expect(jobs[name]?.["runs-on"]).toContain("|| 'macos-26'");
-    }
+    expect(jobs["swift-code-coverage"]?.["runs-on"]).toContain("|| 'macos-26'");
+  });
+
+  test("runs SwiftLint on Linux with the SHA-256 verified pinned binary (#17581)", () => {
+    const jobs = loadJobs(".github/workflows/pull_request.yml");
+    expect(jobs["swiftlint"]?.name).toBe("SwiftLint");
+    expect(jobs["swiftlint"]?.["runs-on"]).toBe("ubuntu-latest");
+    const lint = loadJobSteps(".github/workflows/pull_request.yml", "swiftlint");
+    const install = stepNamed(lint, "Install pinned SwiftLint (Linux, SHA-256 verified)");
+    const run = stepNamed(lint, "Run SwiftLint (fail on error-severity rules)");
+    expect(install?.run).toContain("bash scripts/swiftlint/install_swiftlint_linux.sh");
+    expect(run?.run).toBe("bash scripts/swiftlint/validate_swiftlint.sh");
+    expect(run?.env?.INSTALL_SWIFTLINT_WHEN_MISSING).toBe("false");
+    expect(lint.indexOf(install!)).toBeLessThan(lint.indexOf(run!));
   });
 
   test("splits the moved iOS jobs into the small pool and the single heavy lane (#11011)", () => {
@@ -128,9 +134,16 @@ describe("root SPM toolchain floor workflow", () => {
       expect(runsOn, name).toContain(
         runsOn.includes("automobile-mac-heavy") ? HEAVY_ROUTED : SMALL_ROUTED,
       );
+      // A cancelled or failed routing job must not skip a required Mac check:
+      // always() runs the job anyway and an empty output keeps it self-hosted.
+      expect(String(jobs[name]?.if), name).toStartWith(
+        "always() && !cancelled() && needs.detect-changes.result == 'success'",
+      );
     }
     const routing = jobs["mac-pool-routing"];
     expect(routing?.["runs-on"]).toBe("ubuntu-latest");
+    // It holds MAC_RUNNER_READ_TOKEN, so it must not inherit workflow write scopes.
+    expect(routing?.permissions).toEqual({ contents: "read" });
     // A skipped or failed routing job would skip every Mac job that needs it.
     expect(routing?.if).toBeUndefined();
     expect(routing?.needs).toBeUndefined();
@@ -202,8 +215,8 @@ describe("root SPM toolchain floor workflow", () => {
     }
   });
 
-  test("isolates the three self-hosted jobs and gates hosted toolchain setup", () => {
-    for (const name of ["build-desktop-app", "swiftlint", "swift-code-coverage"]) {
+  test("isolates the two self-hosted jobs and gates hosted toolchain setup", () => {
+    for (const name of ["build-desktop-app", "swift-code-coverage"]) {
       const steps = loadJobSteps(".github/workflows/pull_request.yml", name);
       const checkout = stepNamed(steps, "Git Checkout");
       expect(checkout?.uses).toBe("actions/checkout@v6");
@@ -227,11 +240,6 @@ describe("root SPM toolchain floor workflow", () => {
     expect(stepNamed(coverage, "Select Xcode 26.5")?.if).toBe(
       "runner.environment == 'github-hosted'",
     );
-    const lint = loadJobSteps(".github/workflows/pull_request.yml", "swiftlint");
-    expect(
-      stepNamed(lint, "Run SwiftLint (fail on error-severity rules)")?.env
-        ?.INSTALL_SWIFTLINT_WHEN_MISSING,
-    ).toContain("runner.environment == 'github-hosted'");
     const desktop = loadJobSteps(".github/workflows/pull_request.yml", "build-desktop-app");
     const gradleStep = desktop.find((step) => step.uses === "./.github/actions/gradle-task-run");
     expect(gradleStep?.with?.["gradle-home-directory"]).toContain("runner.temp");

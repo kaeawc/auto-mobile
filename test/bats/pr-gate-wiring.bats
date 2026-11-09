@@ -447,7 +447,7 @@ load yq-helpers
 
   block="$(job_block ios-device-webrtc)"
   [[ "$block" == *"needs: [detect-changes, fast-validation, mac-pool-routing]"* ]]
-  [[ "$block" == *"if: needs.detect-changes.outputs.webrtc_should_run == 'true' && needs.fast-validation.result == 'success'"* ]]
+  [[ "$block" == *"if: always() && !cancelled() && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.webrtc_should_run == 'true' && needs.fast-validation.result == 'success'"* ]]
 }
 
 @test "WebRTC change detection covers publisher and device inputs" {
@@ -707,8 +707,8 @@ load yq-helpers
   require_mikefarah_yq
   # A job labelled for a self-hosted pool waits forever when no runner is
   # online. Each one must honour AUTOMOBILE_MAC_POOLS_ENABLED, or switching it
-  # off leaves a required check (SwiftLint, Swift Code Coverage, Installer
-  # Minimal) queued with no runner. Each also honours the per-run pool routing
+  # off leaves a required check (Swift Code Coverage, Installer Minimal)
+  # queued with no runner. Each also honours the per-run pool routing
   # (#17580), which sends a pool with no online runner to hosted macOS.
   local job runs_on pool count=0
   while IFS= read -r job; do
@@ -723,9 +723,16 @@ load yq-helpers
       echo "${job} reads mac-pool-routing outputs without needing it" >&2
       return 1
     fi
+    # A cancelled or failed routing job must not skip a required Mac check.
+    if [[ "$(yq -r ".jobs.\"${job}\".if" "$WF")" != "always() && !cancelled() && needs.detect-changes.result == 'success'"* ]]; then
+      echo "${job} skips when mac-pool-routing is cancelled or fails" >&2
+      return 1
+    fi
     count=$((count + 1))
   done < <(yq -r '.jobs | to_entries[] | select(.value."runs-on" | tostring | contains("automobile-mac")) | .key' "$WF")
-  [ "$count" -eq 10 ]
+  [ "$count" -eq 9 ]
+  # The routing job holds MAC_RUNNER_READ_TOKEN: least privilege, no write scopes.
+  [ "$(yq -o=json -I=0 '.jobs."mac-pool-routing".permissions' "$WF")" = '{"contents":"read"}' ]
 }
 
 @test "installer minimal filters scripts/install.sh, package.json, android/gradle/libs.versions.toml, and the PR workflow (#11580)" {

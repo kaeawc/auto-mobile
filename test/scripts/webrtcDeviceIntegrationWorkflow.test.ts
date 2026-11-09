@@ -115,8 +115,9 @@ describe("#4308 device WebRTC integration workflow", () => {
     ]);
     const pullRequestConditions = {
       "android-device-webrtc": "needs.detect-changes.outputs.webrtc_should_run == 'true'",
+      // always(): a cancelled or failed Mac Pool Routing job must not skip it (#17580).
       "ios-device-webrtc":
-        "needs.detect-changes.outputs.webrtc_should_run == 'true' && needs.fast-validation.result == 'success'",
+        "always() && !cancelled() && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.webrtc_should_run == 'true' && needs.fast-validation.result == 'success'",
     } as const;
     for (const jobId of DEVICE_JOB_IDS) {
       expect(pullRequest.jobs?.[jobId]?.if).toBe(pullRequestConditions[jobId]);

@@ -4,11 +4,11 @@ import XCTest
 @MainActor
 final class TVCommandRouter {
     private let application: XCUIApplication
-    private let keyboardSettleGate: TVKeyboardSettleGate
+    private let textEntryCommands: TVTextEntryCommands
 
     init(application: XCUIApplication) {
         self.application = application
-        keyboardSettleGate = TVKeyboardSettleGate(clock: TVSystemUptimeClock())
+        textEntryCommands = TVTextEntryCommands(clock: TVSystemUptimeClock())
     }
 
     private struct Envelope: Decodable {
@@ -53,7 +53,7 @@ final class TVCommandRouter {
                 let resolved = target(requested: envelope.bundleId)
                 let snapshot = try resolved.app.snapshot()
                 let tree = sketch(snapshot)
-                let resolution = keyboardSettleGate.resolve(root: tree)
+                let resolution = textEntryCommands.hierarchy(root: tree)
                 return try JSONEncoder().encode(HierarchyUpdateResponse(
                     requestId: request.requestId,
                     data: ViewHierarchy(
@@ -73,14 +73,10 @@ final class TVCommandRouter {
                     throw CommandError.invalidParameter("frameContext", "unsupported on tvOS")
                 }
                 let startTime = Date()
-                press(button)
-                let resolved = target(requested: envelope.bundleId)
-                do {
-                    _ = try keyboardSettleGate.resolve(root: sketch(resolved.app.snapshot()))
-                } catch {
-                    // The press succeeded; withhold values conservatively if its snapshot fails.
-                    keyboardSettleGate.noteSnapshotFailure()
-                }
+                textEntryCommands.press(button, perform: press, snapshot: {
+                    let resolved = target(requested: envelope.bundleId)
+                    return try sketch(resolved.app.snapshot())
+                })
                 return try JSONEncoder().encode(WebSocketResponse.success(
                     type: "press_button_result", requestId: requestId,
                     totalTimeMs: Int64(Date().timeIntervalSince(startTime) * 1000)
@@ -95,11 +91,9 @@ final class TVCommandRouter {
                 let resolved = target(requested: envelope.bundleId)
                 let snapshot = try resolved.app.snapshot()
                 let tree = sketch(snapshot)
-                _ = keyboardSettleGate.resolve(root: tree)
-                guard TVTextEntryPolicy.hasFocusedKeyboard(tree) else {
+                guard textEntryCommands.appendText(root: tree, typeText: { resolved.app.typeText(request.text) }) else {
                     throw CommandError.invalidParameter("text", "no focused text input")
                 }
-                resolved.app.typeText(request.text)
                 return try JSONEncoder().encode(WebSocketResponse.success(
                     type: ResponseType.appendTextResult.rawValue, requestId: request.requestId,
                     totalTimeMs: Int64(Date().timeIntervalSince(startTime) * 1000)

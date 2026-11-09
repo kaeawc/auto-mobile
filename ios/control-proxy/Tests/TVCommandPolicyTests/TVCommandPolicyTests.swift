@@ -3,6 +3,10 @@ import Foundation
 @testable import TVCommandPolicy
 import XCTest
 
+private enum SnapshotFailure: Error {
+    case unavailable
+}
+
 private final class FakeTVUptimeClock: TVUptimeClock {
     var time: TimeInterval = 100
 
@@ -239,24 +243,67 @@ final class TVCommandPolicyTests: XCTestCase {
         }
     }
 
-    func testAppendTextThenMenuWithholdsDismissFrameOnObserve() {
+    func testAppendTextThenDelayedMenuWithholdsDismissFrameOnObserve() {
+        assertAppendThenMenuWithholdsDismissFrame(snapshotFails: false)
+    }
+
+    func testAppendTextThenDelayedMenuSnapshotFailureWithholdsDismissFrameOnObserve() {
+        assertAppendThenMenuWithholdsDismissFrame(snapshotFails: true)
+    }
+
+    private func assertAppendThenMenuWithholdsDismissFrame(snapshotFails: Bool) {
         let clock = FakeTVUptimeClock()
-        let gate = TVKeyboardSettleGate(clock: clock)
+        let commands = TVTextEntryCommands(clock: clock)
         let dismissFrame = TVNodeSketch(elementType: 52, label: "Code", value: "s3cret")
         clock.time += TVKeyboardSettleGate.settleWindow * 2
-        XCTAssertEqual(emittedTexts(in: dismissFrame, gate: gate), ["Code s3cret"])
+        XCTAssertEqual(commands.hierarchy(root: dismissFrame).text(for: dismissFrame), "Code s3cret")
 
-        // append_text reports its focused-keyboard snapshot before typing.
-        let appendSnapshot = keyboardTree(value: "", prompt: "Code")
-        XCTAssertTrue(TVTextEntryPolicy.hasFocusedKeyboard(appendSnapshot))
-        XCTAssertTrue(gate.resolve(root: appendSnapshot).withholdTextInputValues)
+        var events: [String] = []
+        XCTAssertTrue(commands.appendText(root: keyboardTree(value: "", prompt: "Code"), typeText: {
+            events.append("type")
+        }))
+        // LLM latency exceeds the append stamp's window before menu is pressed.
+        clock.time += TVKeyboardSettleGate.settleWindow * 2
+        commands.press(.menu, perform: { button in
+            events.append(button.rawValue)
+        }, snapshot: {
+            events.append("snapshot")
+            if snapshotFails { throw SnapshotFailure.unavailable }
+            return self.keyboardTree(value: "s3cret", prompt: "Code", keyboardFocused: false)
+        })
+        XCTAssertEqual(events, ["type", "menu", "snapshot"])
         clock.time += TVKeyboardSettleGate.settleWindow / 4
-        // menu reports a post-press snapshot even when it has no keyboard node.
-        XCTAssertTrue(gate.resolve(root: dismissFrame).withholdTextInputValues)
-        clock.time += TVKeyboardSettleGate.settleWindow / 4
-        XCTAssertEqual(emittedTexts(in: dismissFrame, gate: gate), ["Code"])
-        clock.time += TVKeyboardSettleGate.settleWindow / 2
-        XCTAssertEqual(emittedTexts(in: dismissFrame, gate: gate), ["Code s3cret"])
+        XCTAssertEqual(commands.hierarchy(root: dismissFrame).text(for: dismissFrame), "Code")
+        clock.time += TVKeyboardSettleGate.settleWindow
+        XCTAssertEqual(commands.hierarchy(root: dismissFrame).text(for: dismissFrame), "Code s3cret")
+    }
+
+    func testAppendTextRestartsWindowAfterTypingFinishes() {
+        let clock = FakeTVUptimeClock()
+        let commands = TVTextEntryCommands(clock: clock)
+        let field = TVNodeSketch(elementType: 52, label: "Code", value: "s3cret")
+        var typeCalls = 0
+        XCTAssertTrue(commands.appendText(root: keyboardTree(value: "", prompt: "Code"), typeText: {
+            typeCalls += 1
+            clock.time += TVKeyboardSettleGate.settleWindow * 2
+        }))
+        XCTAssertEqual(typeCalls, 1)
+        clock.time += TVKeyboardSettleGate.settleWindow - 0.01
+        XCTAssertEqual(commands.hierarchy(root: field).text(for: field), "Code")
+        clock.time += 0.02
+        XCTAssertEqual(commands.hierarchy(root: field).text(for: field), "Code s3cret")
+    }
+
+    func testAppendTextWithoutFocusedKeyboardDoesNotType() {
+        let commands = TVTextEntryCommands(clock: FakeTVUptimeClock())
+        for root in [
+            TVNodeSketch(elementType: 49, hasFocus: true),
+            keyboardTree(value: "", keyboardFocused: false),
+        ] {
+            XCTAssertFalse(commands.appendText(root: root, typeText: {
+                XCTFail("Typing requires a focused keyboard")
+            }))
+        }
     }
 
     func testPostPressKeyboardSnapshotRearmsExpiredWindow() {

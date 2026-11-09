@@ -160,7 +160,42 @@ final class TVKeyboardSettleGate {
     }
 }
 
-/// Which application a hierarchy or text command queries. The runner is bound to its host app,
+/// Gate orchestration shared by the XCTest router and device-free policy tests.
+final class TVTextEntryCommands {
+    private let keyboardSettleGate: TVKeyboardSettleGate
+
+    init(clock: any TVUptimeClock) {
+        keyboardSettleGate = TVKeyboardSettleGate(clock: clock)
+    }
+
+    func hierarchy(root: TVNodeSketch) -> TVTextEntryResolution {
+        keyboardSettleGate.resolve(root: root)
+    }
+
+    func press(
+        _ button: TVRemoteButton, perform: (TVRemoteButton) -> Void,
+        snapshot: () throws -> TVNodeSketch
+    ) {
+        perform(button)
+        do {
+            _ = try keyboardSettleGate.resolve(root: snapshot())
+        } catch {
+            // The press succeeded; withhold values conservatively if its snapshot fails.
+            keyboardSettleGate.noteSnapshotFailure()
+        }
+    }
+
+    func appendText(root: TVNodeSketch, typeText: () -> Void) -> Bool {
+        _ = keyboardSettleGate.resolve(root: root)
+        guard TVTextEntryPolicy.hasFocusedKeyboard(root) else { return false }
+        typeText()
+        // Typing can outlast the settle window; the known keyboard was in use until now.
+        _ = keyboardSettleGate.resolve(root: root)
+        return true
+    }
+}
+
+/// Which application a hierarchy, press or text command queries. The runner is bound to its host app,
 /// and querying a host that is no longer frontmost returns the host's stale tree or waits on
 /// XCTest's target-application retry. Kept pure so macOS SwiftPM tests cover the choice.
 enum TVTarget: Equatable {

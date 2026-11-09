@@ -45,7 +45,14 @@ Append new entries as they are uncovered.
   not in `AutoMobileTest` (only the required UI-test _host_; blank VC). Cross-app hierarchy
   reads and gesture injection come from `XCUIApplication`/`XCUIElement`, a privilege
   `testmanagerd` grants only to a UI-test process; no entitlement grants it, so it can never be a
-  packaged/App-Store app. `control-proxy.ipa` is a zip of `Build/Products/`.
+  packaged/App-Store app. `control-proxy.ipa` preserves the `Build/Products/` layout
+  with runtime files only by default: immediate `*.o` files and `*.swiftmodule`
+  directories (including `Project/*.swiftsourceinfo`) under each build configuration
+  are excluded because they are build-time inputs. `AutoMobileTest.app` is required
+  by `test-without-building`; both it and the Runner, including its test bundle, stay
+  intact, as do the `.xctestrun`, frameworks, and `PackageFrameworks`. Pass
+  `--full-debug` to `scripts/ios/ctrl-proxy-create-ipa.sh` or its packaging helper,
+  or set `CTRL_PROXY_IPA_FULL_DEBUG=1`, to retain all build products for symbolication.
 - **macOS CLI target**: useless, since on macOS the `ElementLocator`/`GesturePerformer` capability
   compiles out (`#if os(iOS)`) and XCUITest is unavailable to a plain executable. The `#else`
   non-iOS path is only a fast host compile gate.

@@ -4,13 +4,15 @@
 # Builds CtrlProxy iOS and packages it as a distributable ZIP (named control-proxy.ipa)
 #
 # Usage:
-#   ./scripts/ios/ctrl-proxy-create-ipa.sh [--output <path>]
+#   ./scripts/ios/ctrl-proxy-create-ipa.sh [--output <path>] [--full-debug]
 #
 # Options:
 #   --output <path>   Output path for the IPA file (default: ./control-proxy.ipa)
+#   --full-debug      Include build-time objects and Swift module metadata
 #
 # Environment Variables:
 #   GITHUB_OUTPUT   If set, outputs ipa_path and ipa_sha256 for GitHub Actions
+#   CTRL_PROXY_IPA_FULL_DEBUG=1   Retain all build products for symbolication
 #
 # Outputs:
 #   ipa_path    - Path to the generated IPA file
@@ -20,11 +22,20 @@ set -euo pipefail
 
 # Parse arguments
 OUTPUT_PATH="./control-proxy.ipa"
+FULL_DEBUG="${CTRL_PROXY_IPA_FULL_DEBUG:-0}"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --output)
+            if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+                echo "--output requires a path" >&2
+                exit 1
+            fi
             OUTPUT_PATH="$2"
             shift 2
+            ;;
+        --full-debug)
+            FULL_DEBUG=1
+            shift
             ;;
         *)
             echo "Unknown argument: $1"
@@ -158,20 +169,13 @@ echo -e "${GREEN}Build completed in ${BUILD_DURATION}s${NC}"
 echo ""
 echo -e "${BLUE}Creating IPA archive...${NC}"
 
-# Ensure output directory exists
-mkdir -p "$(dirname "${OUTPUT_PATH}")"
-
-# Remove existing output file if present
-rm -f "${OUTPUT_PATH}"
-
-# Create ZIP from the Build/Products directory
-cd "${DERIVED_DATA}"
-zip -r "${OUTPUT_PATH}" Build/Products/
-cd "${PROJECT_ROOT}"
+CTRL_PROXY_IPA_FULL_DEBUG="${FULL_DEBUG}" bash "${SCRIPT_DIR}/ctrl-proxy-package-ipa.sh" \
+    --products "${DERIVED_DATA}/Build" --output "${OUTPUT_PATH}"
 
 # Compute SHA256 of IPA
 IPA_SHA256=$(shasum -a 256 "${OUTPUT_PATH}" | cut -d' ' -f1)
 IPA_SIZE=$(stat -f%z "${OUTPUT_PATH}" 2>/dev/null || stat -c%s "${OUTPUT_PATH}" 2>/dev/null)
+IPA_UNCOMPRESSED_SIZE=$(unzip -l "${OUTPUT_PATH}" | awk 'END {print $1}')
 
 # Compute SHA256 of the CtrlProxy code executable. The outer
 # CtrlProxyUITests-Runner binary is Xcode's generic XCTRunner stub; the xctest
@@ -184,7 +188,8 @@ echo -e "${CYAN}========================================${NC}"
 echo -e "${CYAN}  IPA Summary${NC}"
 echo -e "${CYAN}========================================${NC}"
 echo -e "  ${BLUE}Path:${NC}          ${OUTPUT_PATH}"
-echo -e "  ${BLUE}Size:${NC}          ${IPA_SIZE} bytes"
+echo -e "  ${BLUE}Compressed:${NC}    ${IPA_SIZE} bytes"
+echo -e "  ${BLUE}Uncompressed:${NC}  ${IPA_UNCOMPRESSED_SIZE} bytes"
 echo -e "  ${BLUE}SHA256:${NC}        ${IPA_SHA256}"
 echo -e "  ${BLUE}Runner SHA256:${NC} ${RUNNER_SHA256}"
 echo ""

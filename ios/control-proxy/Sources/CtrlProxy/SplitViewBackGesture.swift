@@ -1,27 +1,22 @@
 import Foundation
 
+protocol SplitViewBackClock {
+    func now() -> Date
+    func sleep(until deadline: Date)
+}
+
 /// Duo's split-view system back button has an empty label, but exposes `BackButton` in AX.
 /// Its observed frame, rather than a panel-specific offset or safe-area inset, locates the tap.
 enum SplitViewBackGesture {
-    enum ElementKind: Hashable {
+    enum ElementKind: Equatable {
         case navigationBar, button, collectionLike, toolbar, other
     }
 
-    struct ElementSnapshot: Equatable, Hashable {
+    struct ElementSnapshot: Equatable {
         let kind: ElementKind
         let label: String
         let identifier: String
         let frame: CGRect
-
-        func hash(into hasher: inout Hasher) {
-            hasher.combine(kind)
-            hasher.combine(label)
-            hasher.combine(identifier)
-            hasher.combine(frame.origin.x)
-            hasher.combine(frame.origin.y)
-            hasher.combine(frame.size.width)
-            hasher.combine(frame.size.height)
-        }
 
         var title: String { identifier.isEmpty ? label : identifier }
     }
@@ -34,7 +29,15 @@ enum SplitViewBackGesture {
 
     struct ScreenSignature: Equatable {
         let detailNavigationIdentifier: String?
-        let elements: [ElementSnapshot: Int]
+        let hasDetailBackButton: Bool
+    }
+
+    struct RunLoopClock: SplitViewBackClock {
+        func now() -> Date { Date() }
+
+        func sleep(until deadline: Date) {
+            RunLoop.current.run(until: deadline)
+        }
     }
 
     private static func isOnPanel(_ frame: CGRect, size: GestureSize) -> Bool {
@@ -75,11 +78,15 @@ enum SplitViewBackGesture {
     }
 
     static func screenSignature(_ elements: [ElementSnapshot], size: GestureSize) -> ScreenSignature {
-        ScreenSignature(
-            detailNavigationIdentifier: splitView(elements, size: size)?.detail.title,
-            elements: elements.filter { $0.kind != .toolbar }.reduce(into: [:]) { counts, element in
-                counts[element, default: 0] += 1
-            }
+        let split = splitView(elements, size: size)
+        return ScreenSignature(
+            detailNavigationIdentifier: split?.detail.title,
+            hasDetailBackButton: split.map { split in
+                elements.contains {
+                    $0.kind == .button && $0.identifier == "BackButton" && isOnPanel($0.frame, size: size) &&
+                        $0.frame.minX >= split.sidebar.frame.maxX
+                }
+            } ?? false
         )
     }
 
@@ -92,6 +99,28 @@ enum SplitViewBackGesture {
             throw GesturePerformer.GestureError
                 .backNoEffect("the detail pane did not visibly change after tapping BackButton")
         }
+    }
+
+    /// Reads only after each poll wait, including the final wait to the deadline.
+    static func verifyBack(
+        before: ScreenSignature, deadline: Date, pollInterval: TimeInterval,
+        clock: any SplitViewBackClock, readSignature: () throws -> ScreenSignature,
+        onSnapshotError: (Error) -> Void
+    )
+        throws
+    {
+        var after = before
+        while clock.now() < deadline {
+            clock.sleep(until: min(deadline, clock.now().addingTimeInterval(pollInterval)))
+            do {
+                after = try readSignature()
+                if didChange(before: before, after: after) { return }
+            } catch {
+                // The tap was already sent; retry only the read, never a second back gesture.
+                onSnapshotError(error)
+            }
+        }
+        try requireChange(before: before, after: after)
     }
 
     /// Returns false only when the caller should keep its existing single-column back route.

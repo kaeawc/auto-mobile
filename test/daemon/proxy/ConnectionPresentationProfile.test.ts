@@ -30,21 +30,28 @@ class FakePort implements ConnectionPresentationProfilePort {
 
 describe("connectionPresentationUpdates", () => {
   test("returns nothing without options", () => {
-    expect(connectionPresentationUpdates([], [], undefined, undefined)).toEqual([]);
+    expect(connectionPresentationUpdates(undefined)).toEqual([]);
   });
 
   test("emits enable then disable updates", () => {
-    expect(connectionPresentationUpdates(["a"], ["b"], undefined, undefined)).toEqual([
+    expect(connectionPresentationUpdates({ enabledTools: ["a"], disabledTools: ["b"] })).toEqual([
       { toolNames: ["a"], enabled: true },
       { toolNames: ["b"], enabled: false },
     ]);
   });
 
   test("a presentation-only policy reaffirms setToolEnabled", () => {
-    expect(connectionPresentationUpdates([], [], true, undefined)).toEqual([
+    expect(connectionPresentationUpdates({ toolResultsNoStructuredContent: true })).toEqual([
       { toolNames: [SET_TOOL_ENABLED_TOOL_NAME], enabled: true },
     ]);
   });
+});
+
+test("a full prototype schema request alone reaffirms setToolEnabled (#17723)", () => {
+  expect(connectionPresentationUpdates({ prototypeFullSchema: true })).toEqual([
+    { toolNames: [SET_TOOL_ENABLED_TOOL_NAME], enabled: true },
+  ]);
+  expect(connectionPresentationUpdates({ prototypeFullSchema: false })).toEqual([]);
 });
 
 describe("applyConnectionPresentationProfile", () => {

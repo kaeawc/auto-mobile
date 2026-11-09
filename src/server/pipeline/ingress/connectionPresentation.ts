@@ -61,6 +61,49 @@ export function resolveActionsCompactMetadata(
   }
 }
 
+/**
+ * Whether this connection's `tools/list` inlines the full prototype spec schema (#17723): the
+ * daemon's own default, or the connection's request when it made one.
+ */
+export function resolvePrototypeFullSchema(
+  registry: ToolSelectionProfileRegistry,
+  connectionProfileUuid: string | undefined,
+  daemonDefault: boolean,
+): boolean {
+  if (!connectionProfileUuid) {
+    return daemonDefault;
+  }
+  try {
+    return registry.getPrototypeFullSchema(connectionProfileUuid) ?? daemonDefault;
+  } catch (error) {
+    // Presentation lookup is fail-safe: keep serving with the daemon default.
+    logger.warn("[MCP] Could not resolve connection prototype schema preference", {
+      connectionProfileUuid,
+      error,
+    });
+    return daemonDefault;
+  }
+}
+
+export function rememberPrototypeFullSchema(
+  registry: ToolSelectionProfileRegistry,
+  connectionProfileUuid: string | undefined,
+  preference: boolean | undefined,
+): void {
+  if (!connectionProfileUuid || preference === undefined) {
+    return;
+  }
+  try {
+    registry.setPrototypeFullSchema(connectionProfileUuid, preference);
+  } catch (error) {
+    // Presentation storage is best-effort: this connection lists the daemon default.
+    logger.warn("[MCP] Could not store connection prototype schema preference", {
+      connectionProfileUuid,
+      error,
+    });
+  }
+}
+
 export function rememberActionsCompactMetadata(
   registry: ToolSelectionProfileRegistry,
   connectionProfileUuid: string | undefined,

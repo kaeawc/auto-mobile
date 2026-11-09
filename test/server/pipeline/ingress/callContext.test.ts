@@ -9,6 +9,7 @@ import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_SESSION_PARAM,
   INTERNAL_ONE_SHOT_CLI_PARAM,
+  INTERNAL_PROTOTYPE_FULL_SCHEMA_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
 } from "../../../../src/daemon/wire/constants";
 
@@ -17,6 +18,7 @@ const forwarded = {
   [INTERNAL_ONE_SHOT_CLI_PARAM]: true,
   [INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM]: true,
   [INTERNAL_ACTIONS_COMPACT_METADATA_PARAM]: false,
+  [INTERNAL_PROTOTYPE_FULL_SCHEMA_PARAM]: true,
   [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: 5000,
   [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 123456,
   [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: "live-key",
@@ -33,6 +35,7 @@ describe("parseCallContext", () => {
       requestOneShotCli: true,
       requestedToolResultsNoStructuredContent: true,
       requestedActionsCompactMetadata: false,
+      requestedPrototypeFullSchema: true,
       requestTimeoutMs: 5000,
       requestDeadlineMs: 123456,
       requestLiveDeadlineKey: "live-key",
@@ -48,6 +51,7 @@ describe("parseCallContext", () => {
       requestOneShotCli: false,
       requestedToolResultsNoStructuredContent: undefined,
       requestedActionsCompactMetadata: undefined,
+      requestedPrototypeFullSchema: undefined,
       requestTimeoutMs: undefined,
       requestDeadlineMs: undefined,
       requestLiveDeadlineKey: undefined,

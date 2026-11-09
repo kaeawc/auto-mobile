@@ -8,6 +8,7 @@ import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_SESSION_PARAM,
   INTERNAL_ONE_SHOT_CLI_PARAM,
+  INTERNAL_PROTOTYPE_FULL_SCHEMA_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
 } from "../../../daemon/wire/constants";
 
@@ -79,6 +80,14 @@ function extractInternalActionsCompactMetadata(params: unknown): boolean | undef
   return typeof value === "boolean" ? value : undefined;
 }
 
+function extractInternalPrototypeFullSchema(params: unknown): boolean | undefined {
+  if (!params || typeof params !== "object" || Array.isArray(params)) {
+    return undefined;
+  }
+  const value = (params as Record<string, unknown>)[INTERNAL_PROTOTYPE_FULL_SCHEMA_PARAM];
+  return typeof value === "boolean" ? value : undefined;
+}
+
 function extractInternalAcceptanceDiscoveryOrder(
   params: unknown,
   expectedCapability: string | undefined,
@@ -114,6 +123,7 @@ export interface CallContext {
   readonly requestOneShotCli: boolean;
   readonly requestedToolResultsNoStructuredContent: boolean | undefined;
   readonly requestedActionsCompactMetadata: boolean | undefined;
+  readonly requestedPrototypeFullSchema: boolean | undefined;
   readonly requestTimeoutMs: number | undefined;
   readonly requestDeadlineMs: number | undefined;
   readonly requestLiveDeadlineKey: string | undefined;
@@ -167,6 +177,9 @@ export function parseCallContext(params: unknown, options: ParseCallContextOptio
       : undefined,
     requestedActionsCompactMetadata: daemonMode
       ? extractInternalActionsCompactMetadata(params)
+      : undefined,
+    requestedPrototypeFullSchema: daemonMode
+      ? extractInternalPrototypeFullSchema(params)
       : undefined,
     requestTimeoutMs: daemonMode ? extractInternalMcpRequestTimeoutMs(params) : undefined,
     requestDeadlineMs: daemonMode ? extractInternalMcpRequestDeadlineMs(params) : undefined,

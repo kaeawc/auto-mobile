@@ -9,7 +9,15 @@ import type { McpServerOptions } from "../../index";
 import type { SessionToolBinding } from "../../SessionToolBinding";
 import { ToolRegistry } from "../../toolRegistry";
 import type { ToolSelectionProfileRegistry } from "../../../daemon/toolSelectionProfileRegistry";
-import { resolveToolResultsNoStructuredContent } from "./connectionPresentation";
+import {
+  resolvePrototypeFullSchema,
+  resolveToolResultsNoStructuredContent,
+} from "./connectionPresentation";
+import {
+  defaultPrototypeSchemaPresentation,
+  type PrototypeSchemaPresentation,
+  withConnectionPrototypeSchema,
+} from "./prototypeSchemaPresentation";
 
 export interface ListSessionToolsDeps {
   readonly options: McpServerOptions;
@@ -19,6 +27,8 @@ export interface ListSessionToolsDeps {
   readonly toolSelectionProfileRegistry: ToolSelectionProfileRegistry;
   /** Daemon state reads; defaults to the DaemonState bridge. */
   readonly daemon?: DaemonContext;
+  /** The prototype spec schema form per connection (#17723); defaults to the daemon env flag. */
+  readonly prototypeSchema?: PrototypeSchemaPresentation;
 }
 
 /**
@@ -28,6 +38,7 @@ export interface ListSessionToolsDeps {
 export function createListSessionTools(deps: ListSessionToolsDeps) {
   const { options, bindingKey, sessionToolBinding, toolSelectionProfileRegistry } = deps;
   const daemon = deps.daemon ?? defaultDaemonContext;
+  const prototypeSchema = deps.prototypeSchema ?? defaultPrototypeSchemaPresentation;
   return async (routingSessionUuid = sessionToolBinding.effectiveSessionUuid(bindingKey)) => {
     const connectionProfileUuid = sessionToolBinding.connectionToolSelectionProfileUuid(bindingKey);
     const selectionSessionManager = options.toolSelectionSessionManager ?? daemon.sessionManager();
@@ -35,12 +46,20 @@ export function createListSessionTools(deps: ListSessionToolsDeps) {
       routingSessionUuid,
       selectionSessionManager,
     );
-    const definitions = ToolRegistry.getToolDefinitions({
-      suppressOutputSchema: resolveToolResultsNoStructuredContent(
+    const definitions = withConnectionPrototypeSchema(
+      ToolRegistry.getToolDefinitions({
+        suppressOutputSchema: resolveToolResultsNoStructuredContent(
+          toolSelectionProfileRegistry,
+          connectionProfileUuid,
+        ),
+      }),
+      resolvePrototypeFullSchema(
         toolSelectionProfileRegistry,
         connectionProfileUuid,
+        prototypeSchema.daemonDefault.isEnabled(),
       ),
-    });
+      prototypeSchema,
+    );
     // Advertise a tool when EITHER the bound base session OR any of its derived
     // `${base}:${label}` device-label sessions enables it — the same UNION the
     // `tools/call` gate applies (issue #4611). The call-gate accepts a

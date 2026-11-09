@@ -4,7 +4,6 @@ import type { ToolAnnotations } from "@modelcontextprotocol/server";
 import type { DaemonOptions } from "./types";
 import { isAlwaysLoadToolsEnabled } from "../config/alwaysLoadTools";
 import { ENV, readEnvBool } from "../config/env";
-import { enforceAnthropicToolSchemaSubset } from "../utils/schemaHelpers";
 
 /**
  * The committed, static MCP tool surface.
@@ -93,14 +92,9 @@ function coldInputSchema(
     return tool.inputSchema;
   }
   if (!fullPrototypeInputSchema) {
-    const { fullAdvertisedSpecSchema } =
+    const { withFullAdvertisedSpecSchema } =
       require("../features/prototype/prototypeSpecJsonSchema") as typeof import("../features/prototype/prototypeSpecJsonSchema");
-    const inline = structuredClone(tool.inputSchema);
-    const properties = inline.properties as Record<string, Record<string, unknown>>;
-    properties.spec = { description: properties.spec?.description, ...fullAdvertisedSpecSchema() };
-    // The same input-schema normalization the live registry applies (drops empty branches).
-    enforceAnthropicToolSchemaSubset(inline);
-    fullPrototypeInputSchema = inline;
+    fullPrototypeInputSchema = withFullAdvertisedSpecSchema(tool.inputSchema);
   }
   return fullPrototypeInputSchema;
 }

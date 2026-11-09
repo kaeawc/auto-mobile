@@ -17,8 +17,8 @@ changing them, and a checklist for demo day.
    `specPath`. To write a spec from scratch, the agent reads the `automobile:prototype` resource,
    the full authoring guide. The `prototype` tool lists only the spec's top-level fields; the
    agent reads `automobile:prototype/spec-schema` for the JSON Schema of every node, action and
-   field. Set `AUTOMOBILE_PROTOTYPE_FULL_SCHEMA=1` to put that schema in the tool definition
-   instead. The server validates every spec the same way whichever form the tool lists.
+   field. Set `AUTOMOBILE_PROTOTYPE_FULL_SCHEMA=1` in the MCP server's environment to put that
+   schema in the tool definition instead; an already-running daemon does not need a restart. The server validates every spec the same way whichever form the tool lists.
 
 4. **Iterate.** Describe a change in plain words ("make the checkout button green, add a promo
    code field"). On Android the agent updates what is on screen with `patch`: content under

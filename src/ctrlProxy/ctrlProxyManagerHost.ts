@@ -13,8 +13,8 @@ export interface SavedPrototypeService {
 
 /**
  * What the CtrlProxy manager needs from the features tier. The ctrlProxy tier owns this
- * interface; `daemon/ctrlProxyManagerHostWiring` installs the real services and `src/index.ts`
- * imports it first (guarded by test/lint/bootAdmissionWiringEntry.test.ts). Unlike boot
+ * interface; `daemon/ctrlProxyManagerHostWiring` installs the real services and the server entry
+ * (`src/startup/serverEntry.ts`) imports it first (guarded by test/lint/bootAdmissionWiringEntry.test.ts). Unlike boot
  * admission there is no safe ungated default: dropping foreign-forward evidence or the
  * prototype restore would be silent, so an uninstalled host fails loudly. Tests inject the
  * services through test/helpers/ctrlProxyManagerHost.ts.
@@ -43,7 +43,7 @@ export function ctrlProxyManagerHostInstalled(): boolean {
 function current(): CtrlProxyManagerHost {
   if (!installed) {
     throw new ActionableError(
-      "The CtrlProxy manager host is not installed; src/index.ts imports " +
+      "The CtrlProxy manager host is not installed; src/startup/serverEntry.ts imports " +
         "daemon/ctrlProxyManagerHostWiring before any device work, and tests must inject it " +
         "through test/helpers/ctrlProxyManagerHost.",
     );

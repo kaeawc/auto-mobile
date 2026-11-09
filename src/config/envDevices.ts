@@ -160,6 +160,12 @@ export const DEVICES_ENV = {
     default: "off",
     doc: "Skip CtrlProxy APK and IPA downloads (1/true).",
   },
+  EAGER_PREFETCH: {
+    name: "AUTOMOBILE_EAGER_PREFETCH",
+    kind: "bool",
+    default: "off",
+    doc: "Run the full startup CtrlProxy APK cache check (zip parse + SHA-256) even when the cache is already warm (1/true).",
+  },
   ALLOW_DEVICE_CREATE: {
     name: "AUTOMOBILE_ALLOW_DEVICE_CREATE",
     kind: "bool",

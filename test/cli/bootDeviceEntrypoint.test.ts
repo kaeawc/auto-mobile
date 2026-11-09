@@ -10,7 +10,8 @@ import {
   variableDeclarations,
 } from "../helpers/entrypointOrder";
 
-const entrypoint = await Bun.file("src/index.ts").text();
+// main() lives in the server entry src/index.ts dynamically imports, so `--version` skips it (#17684).
+const entrypoint = await Bun.file("src/startup/serverEntry.ts").text();
 const earlyEntrypoints = await Bun.file("src/startup/earlyEntrypoints.ts").text();
 const runStartup = await Bun.file("src/startup/runStartup.ts").text();
 const stdioServer = await Bun.file("src/startup/stdioServer.ts").text();

@@ -140,6 +140,7 @@ if (providers.gradleProperty("automobile.composeCompilerReports").orNull == "tru
 
 // Renderer tests use the same checked-in contract fixtures as their original CtrlProxy location.
 tasks.withType<Test>().configureEach {
+  inputs.file(layout.projectDirectory.file("../../schemas/prototype-spec-contract.json"))
   inputs.dir(layout.projectDirectory.dir("../../test/fixtures/prototype-spec"))
   inputs.dir(layout.projectDirectory.dir("../../test/fixtures/prototype-embedded-routing"))
   inputs.dir(layout.projectDirectory.dir("../../test/fixtures/prototype-capabilities"))

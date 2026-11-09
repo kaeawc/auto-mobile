@@ -23,6 +23,7 @@ export interface PackageJson {
   dependencies?: Record<string, string>;
   optionalDependencies?: Record<string, string>;
   bundledDependencies?: string[];
+  browser?: string | Record<string, string | false>;
 }
 export interface BundledPackage {
   directory: string;
@@ -31,6 +32,8 @@ export interface BundledPackage {
 export interface Candidate {
   path: string;
   size: number;
+  /** The PRUNE_CLASSES id that made this file removable. */
+  class?: string;
 }
 export interface TrimOptions {
   root: string;
@@ -132,7 +135,11 @@ function exportTargets(value: unknown): string[] {
   }
   if (value && typeof value === "object") {
     return Object.entries(value)
-      .filter(([key]) => key !== "types" && key !== "typings" && !key.startsWith("@"))
+      .filter(
+        ([key]) =>
+          // Bun and Node never resolve the browser condition; browser-builds owns those targets.
+          key !== "types" && key !== "typings" && key !== "browser" && !key.startsWith("@"),
+      )
       .flatMap(([, target]) => exportTargets(target));
   }
   return [];
@@ -214,38 +221,153 @@ function protectedPaths(pkg: BundledPackage): string[] {
   return result;
 }
 
-function removalPattern(name: string, relative: string): boolean {
-  const parts = relative.split("/");
-  const basename = parts.at(-1)!;
-  if (
-    basename === "package.json" ||
-    /^(README|LICENSE|LICENCE|NOTICE|COPYING|PATENTS)/i.test(basename)
-  ) {
-    return false;
+/** Legal notices are never removable, whatever class their name or directory matches. */
+export function isLegalNotice(basename: string): boolean {
+  return /^(LICENSE|LICENCE|NOTICE|COPYING|PATENTS|AUTHORS)/i.test(basename);
+}
+
+/** What a class matcher sees about one file inside one bundled package. */
+export interface PruneFile {
+  packageName: string;
+  /** POSIX path relative to the package directory. */
+  relative: string;
+  /** Directory names leading to the file (excluding the basename). */
+  directories: string[];
+  basename: string;
+  /** The package ships a built `dist/` directory beside its `src/`. */
+  hasDist: boolean;
+  /** POSIX paths named only by the package's `browser` field or `browser` export condition. */
+  browserTargets: ReadonlySet<string>;
+}
+
+export interface PruneClass {
+  id: string;
+  description: string;
+  /** Never loaded at runtime, so removable even inside a protected wildcard export prefix. */
+  runtimeInert: boolean;
+  matches: (file: PruneFile) => boolean;
+}
+
+const TEST_DIRECTORIES = ["test", "tests", "__tests__", "__snapshots__", "__image_snapshots__"];
+const DOC_DIRECTORIES = ["docs", "example", "examples"];
+
+/** Per-package browser-only builds that no field or condition names (audited by hand). */
+const PACKAGE_BROWSER_BUILDS: Record<string, (relative: string) => boolean> = {
+  // The root UMD build; main/exports name cjs/ and esm/ only.
+  tinycolor2: (relative) => relative === "tinycolor.js" || relative === "dist/tinycolor-min.js",
+};
+
+/**
+ * The allowlist of removable file classes. A file is removable only when one class
+ * matches it, it is not a legal notice or package.json, no runtime entry protects it,
+ * and no retained JS file names it literally.
+ */
+export const PRUNE_CLASSES: readonly PruneClass[] = [
+  {
+    id: "type-declarations",
+    description: "TypeScript declaration files (.d.ts/.d.mts/.d.cts)",
+    runtimeInert: true,
+    matches: (file) => /\.d\.(ts|mts|cts)$/i.test(file.basename),
+  },
+  {
+    id: "source-maps",
+    description: "source maps",
+    runtimeInert: true,
+    matches: (file) => /\.map$/i.test(file.basename),
+  },
+  {
+    id: "tests",
+    description: "test directories, test files, snapshots and test-runner configs",
+    runtimeInert: false,
+    matches: (file) =>
+      file.directories.some((part) => TEST_DIRECTORIES.includes(part)) ||
+      /\.(test|spec)\.[cm]?[jt]s$/i.test(file.basename) ||
+      /^test(_template)?\.[cm]?js$/i.test(file.basename) ||
+      /^deno_asserts[^/]*\.mjs$/.test(file.basename) ||
+      /^(vitest|jest)\.config[^/]*$/.test(file.basename) ||
+      /\.snap$/i.test(file.basename),
+  },
+  {
+    id: "docs",
+    description: "markdown and documentation/example directories",
+    runtimeInert: false,
+    matches: (file) =>
+      file.directories.some((part) => DOC_DIRECTORIES.includes(part)) ||
+      /\.(md|markdown)$/i.test(file.basename) ||
+      // exif-parser's cmd/ holds usage example scripts; it declares no bin.
+      (file.packageName === "exif-parser" && file.directories[0] === "cmd"),
+  },
+  {
+    id: "typescript-sources",
+    description: "TypeScript sources (.ts/.mts/.cts)",
+    runtimeInert: false,
+    matches: (file) => /\.(ts|mts|cts)$/i.test(file.basename),
+  },
+  {
+    id: "sources-with-dist",
+    description: "src/ trees of packages that ship a built dist/",
+    runtimeInert: false,
+    matches: (file) => file.hasDist && file.directories[0] === "src",
+  },
+  {
+    id: "browser-builds",
+    description: "browser-only builds (browser field/condition targets, dist/browser, UMD)",
+    runtimeInert: false,
+    matches: (file) =>
+      file.browserTargets.has(file.relative) ||
+      (file.directories[0] === "dist" && file.directories[1] === "browser") ||
+      /^browser(-global)?\.js$/.test(file.basename) ||
+      /\.umd(\.min)?\.js$/.test(file.basename) ||
+      (PACKAGE_BROWSER_BUILDS[file.packageName]?.(file.relative) ?? false),
+  },
+  {
+    id: "tooling-config",
+    description: "CI and build tooling config (.github/, YAML, Makefile)",
+    runtimeInert: false,
+    matches: (file) =>
+      file.directories.includes(".github") ||
+      /\.ya?ml$/i.test(file.basename) ||
+      file.basename === "Makefile",
+  },
+];
+
+/** The first allowlisted class a file belongs to, or undefined when it must stay. */
+export function classifyRemovable(file: PruneFile): PruneClass | undefined {
+  if (file.basename === "package.json" || isLegalNotice(file.basename)) {
+    return undefined;
   }
-  if (
-    parts
-      .slice(0, -1)
-      .some((part) =>
-        ["test", "tests", "__tests__", "docs", "example", "examples", ".github"].includes(part),
-      )
-  ) {
-    return true;
+  return PRUNE_CLASSES.find((pruneClass) => pruneClass.matches(file));
+}
+
+function conditionTargets(value: unknown, condition: string, inside = false): string[] {
+  if (typeof value === "string") {
+    return inside ? [value] : [];
   }
-  if (/\.(ts|mts|cts|map|snap|md|ya?ml)$/i.test(basename) || basename === "Makefile") {
-    return true;
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => conditionTargets(item, condition, inside));
   }
-  if (name === "pngjs") {
-    return relative === "browser.js";
+  if (value && typeof value === "object") {
+    return Object.entries(value).flatMap(([key, target]) =>
+      conditionTargets(target, condition, inside || key === condition),
+    );
   }
-  if (name === "exif-parser") {
-    return relative === "browser-global.js" || relative.startsWith("cmd/");
-  }
-  // Keep the root UMD and esm/cjs test builds: remaining test_template.js files
-  // contain basename references to them (conservative reference-audit policy).
-  return (
-    name === "tinycolor2" &&
-    (["dist/tinycolor-min.js"].includes(relative) || /^deno_asserts[^/]*\.mjs$/.test(basename))
+  return [];
+}
+
+function browserTargets(pkg: BundledPackage): Set<string> {
+  const browser = pkg.metadata.browser;
+  const declared = [
+    ...(typeof browser === "string" ? [browser] : []),
+    ...(browser && typeof browser === "object"
+      ? Object.values(browser).filter((value): value is string => typeof value === "string")
+      : []),
+    ...conditionTargets(pkg.metadata.exports, "browser"),
+  ];
+  return new Set(
+    declared.flatMap((target) => {
+      const entry = target.includes("*") ? undefined : resolveEntry(pkg.directory, target);
+      return entry ? [path.relative(pkg.directory, entry).split(path.sep).join("/")] : [];
+    }),
   );
 }
 
@@ -267,19 +389,44 @@ function referenced(filename: string, remainingJs: string[]): boolean {
   });
 }
 
+function isProtected(
+  filename: string,
+  pruneClass: PruneClass,
+  protectedEntries: readonly string[],
+): boolean {
+  return protectedEntries.some((entry) =>
+    // An inert file (types, maps) is never an exact entry target, so only an exact
+    // match protects it; wildcard prefixes and ambiguous whole-package keeps do not.
+    pruneClass.runtimeInert ? entry === filename : inside(entry, filename),
+  );
+}
+
 export function listCandidates(root: string, packages = collectBundledPackages(root)): Candidate[] {
   const candidates: Candidate[] = [];
   for (const pkg of packages) {
     const protectedEntries = protectedPaths(pkg);
     const allFiles = files(pkg.directory);
-    const possible = allFiles.filter(
-      (filename) =>
-        removalPattern(
-          pkg.metadata.name,
-          path.relative(pkg.directory, filename).split(path.sep).join("/"),
-        ) && !protectedEntries.some((entry) => inside(entry, filename)),
-    );
-    const removing = new Set(possible);
+    const hasDist =
+      existsSync(path.join(pkg.directory, "dist")) &&
+      statSync(path.join(pkg.directory, "dist")).isDirectory();
+    const browser = browserTargets(pkg);
+    const classes = new Map<string, PruneClass>();
+    for (const filename of allFiles) {
+      const relative = path.relative(pkg.directory, filename).split(path.sep).join("/");
+      const parts = relative.split("/");
+      const pruneClass = classifyRemovable({
+        packageName: pkg.metadata.name,
+        relative,
+        directories: parts.slice(0, -1),
+        basename: parts.at(-1)!,
+        hasDist,
+        browserTargets: browser,
+      });
+      if (pruneClass && !isProtected(filename, pruneClass, protectedEntries)) {
+        classes.set(filename, pruneClass);
+      }
+    }
+    const removing = new Set(classes.keys());
     // Iterate to a fixed point: a retained file may itself refer to another candidate.
     let changed = true;
     while (changed) {
@@ -288,7 +435,7 @@ export function listCandidates(root: string, packages = collectBundledPackages(r
         (filename) => !removing.has(filename) && /\.(js|cjs|mjs)$/.test(filename),
       );
       for (const filename of removing) {
-        if (!/\.(d\.(ts|mts|cts)|map)$/.test(filename) && referenced(filename, js)) {
+        if (!classes.get(filename)!.runtimeInert && referenced(filename, js)) {
           removing.delete(filename);
           changed = true;
         }
@@ -298,6 +445,7 @@ export function listCandidates(root: string, packages = collectBundledPackages(r
       candidates.push({
         path: path.relative(root, filename).split(path.sep).join("/"),
         size: statSync(filename).size,
+        class: classes.get(filename)!.id,
       });
     }
   }
@@ -426,7 +574,7 @@ export function runTrim(mode: string, options: TrimOptions): void {
   const total = candidates.reduce((sum, item) => sum + item.size, 0);
   if (mode === "list") {
     for (const item of candidates) {
-      options.stdout(`${item.path}\t${item.size}`);
+      options.stdout(`${item.path}\t${item.size}\t${item.class ?? ""}`);
     }
     options.stdout(`Total: ${candidates.length} files, ${total} bytes`);
     return;

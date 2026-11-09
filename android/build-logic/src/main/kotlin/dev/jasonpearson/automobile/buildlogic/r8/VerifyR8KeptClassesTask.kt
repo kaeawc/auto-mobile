@@ -14,6 +14,7 @@ import org.gradle.api.tasks.Classpath
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.InputFiles
+import org.gradle.api.tasks.Optional
 import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
@@ -40,6 +41,12 @@ abstract class VerifyR8KeptClassesTask : DefaultTask() {
 
   @get:Input abstract val requiredMembers: ListProperty<String>
 
+  /** Opt-in so hosts such as ProtoViewer retain their existing sentinel-only behavior. */
+  @get:Optional
+  @get:InputFile
+  @get:PathSensitive(PathSensitivity.NONE)
+  abstract val iconContractFile: RegularFileProperty
+
   /** Slash-form prefixes whose @Serializable classes must stay unrenamed; defaults to all owned. */
   @get:Input abstract val keptSerializablePrefixes: ListProperty<String>
 
@@ -48,6 +55,14 @@ abstract class VerifyR8KeptClassesTask : DefaultTask() {
   @TaskAction
   fun verify() {
     val prefixes = ownedPackagePrefixes.get()
+    val iconNames =
+      iconContractFile.orNull?.asFile?.readText()?.let(PrototypeIconRules::names).orEmpty()
+    val iconClassFiles =
+      PrototypeIconRules.members(iconNames)
+        .map {
+          it.substringBefore('#').replace('.', '/') + ".class"
+        }
+        .toHashSet()
     // Stream the mapping: reading it whole OOMed the shared CI daemon beside a concurrent R8 run
     // (#17158).
     val result =
@@ -60,10 +75,12 @@ abstract class VerifyR8KeptClassesTask : DefaultTask() {
             classJars.get().map { it.asFile },
             classDirs.get().map { it.asFile },
             prefixes,
+            iconClassFiles,
           ),
           prefixes,
           requiredMembers.get(),
           keptSerializablePrefixes.orNull?.takeIf { it.isNotEmpty() } ?: prefixes,
+          iconNames,
         )
       }
     val report = reportFile.get().asFile
@@ -81,6 +98,7 @@ abstract class VerifyR8KeptClassesTask : DefaultTask() {
     jars: List<File>,
     directories: List<File>,
     ownedPackagePrefixes: List<String>,
+    iconClassFiles: Set<String>,
   ): Sequence<ByteArray> = sequence {
     for (file in jars) {
       JarFile(file).use { jar ->
@@ -90,7 +108,7 @@ abstract class VerifyR8KeptClassesTask : DefaultTask() {
           if (
             !entry.isDirectory &&
               entry.name.endsWith(".class") &&
-              ownedPackagePrefixes.any { entry.name.contains(it) }
+              (ownedPackagePrefixes.any { entry.name.contains(it) } || entry.name in iconClassFiles)
           ) {
             yield(jar.getInputStream(entry).use { it.readBytes() })
           }
@@ -100,7 +118,7 @@ abstract class VerifyR8KeptClassesTask : DefaultTask() {
     for (directory in directories) {
       for (file in directory.walkTopDown().filter { it.isFile && it.extension == "class" }) {
         val path = file.relativeTo(directory).invariantSeparatorsPath
-        if (ownedPackagePrefixes.none { path.contains(it) }) continue
+        if (ownedPackagePrefixes.none { path.contains(it) } && path !in iconClassFiles) continue
         yield(file.readBytes())
       }
     }

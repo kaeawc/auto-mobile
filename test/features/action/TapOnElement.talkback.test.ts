@@ -1166,6 +1166,8 @@ describe("TapOnElement screen-reader navigation result", () => {
       /** Real hierarchy: tap-target promotion runs instead of being stubbed. */
       hierarchy?: ViewHierarchyResult;
       matched?: Element;
+      /** Post-tap capture, when the tap changed the device tree (for example its focus). */
+      postTapHierarchy?: ViewHierarchyResult;
     },
   ) => {
     const accessibilityDetector = new FakeAccessibilityDetector();
@@ -1195,6 +1197,14 @@ describe("TapOnElement screen-reader navigation result", () => {
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: coordinate?.hierarchy ?? { hierarchy: { node: { $: targetElement } } },
     };
+    const postTapObservation: ObserveResult = coordinate?.postTapHierarchy
+      ? {
+          ...observation,
+          observationId: "obs-2",
+          updatedAt: 2,
+          viewHierarchy: coordinate.postTapHierarchy,
+        }
+      : observation;
     const command = new TapOnElement(androidDevice, new FakeAdbClient(), {
       accessibilityDetector,
       timer,
@@ -1206,7 +1216,8 @@ describe("TapOnElement screen-reader navigation result", () => {
         execute: async () => ({
           matched: false,
           candidates: [],
-          observation,
+          // Settle polls read the device as the tap left it.
+          observation: postTapObservation,
           polls: 0,
           waitMs: 0,
           timedOut: true,
@@ -1219,7 +1230,7 @@ describe("TapOnElement screen-reader navigation result", () => {
     command.refreshViewHierarchy = async () => observation.viewHierarchy ?? null;
     coordinate?.driver.setElements([targetElement], 0);
     spyOn(command, "observedInteraction").mockImplementation(
-      runBlockWithEnvelope(() => observation, { observation }),
+      runBlockWithEnvelope(() => observation, { observation: postTapObservation }),
     );
     if (!observation.viewHierarchy) {
       throw new Error("Expected target hierarchy");
@@ -1320,7 +1331,10 @@ describe("TapOnElement screen-reader navigation result", () => {
       expect(driver.tapHistory).toEqual([{ x: 50, y: 50, durationMs: 50 }]);
       expect(driver.doubleTapHistory).toEqual([{ x: 50, y: 50 }]);
       expect(service.getTapHistory()).toEqual([]);
-      expect(result.warnings).toEqual([TALKBACK_ACTIVATION_WARNING]);
+      expect(result.warnings).toEqual([
+        TALKBACK_ACTIVATION_WARNING,
+        'TalkBack activation is unconfirmed: the screen did not change after activating the matched element "Unidentified action" [0,0][100,100]. Observe the screen; if the intended control was not activated, use tapAt {x: 50, y: 50} (the matched element\'s center).',
+      ]);
     },
   );
 
@@ -1448,6 +1462,109 @@ describe("TapOnElement screen-reader navigation result", () => {
     expect(driver.tapHistory).toEqual([{ x: 1004, y: 1448, durationMs: 50 }]);
     expect(driver.doubleTapHistory).toEqual([{ x: 1004, y: 1448 }]);
     expect(result.element?.bounds).toEqual(owner.bounds);
+    // The coordinate path is no more confirmed than ACTION_CLICK: an unchanged screen names the
+    // activated owner and the matched label, with tapAt at the label's center (#17677).
+    expect(result.effect?.screenChanged).toBe(false);
+    expect(result.warnings).toEqual([
+      TALKBACK_ACTIVATION_WARNING,
+      'TalkBack activation is unconfirmed: the screen did not change after activating [941,1390][1067,1506] for the matched element "Send" [946,1390][1062,1506]. Observe the screen; if the intended control was not activated, use tapAt {x: 1004, y: 1448} (the matched element\'s center).',
+    ]);
+  });
+
+  test("a tap whose only effect is moving TalkBack focus adds no no-change warning (#17693)", async () => {
+    // A text node with no click action: TalkBack's focus tap moves the cursor onto it and the
+    // activation double tap does nothing else. The moved focus is the whole effect.
+    const before: Element = { ...unidentifiedElement };
+    const after: Element = { ...unidentifiedElement, "accessibility-focused": "true" };
+    const driver = new FakeTalkBackNavigationDriver();
+    const service = new FakeCtrlProxy(new FakeTimer());
+    const command = createCommand(undefined, undefined, {
+      driver,
+      service,
+      element: before,
+      hierarchy: { hierarchy: { node: { $: before } } },
+      postTapHierarchy: { hierarchy: { node: { $: after } } },
+    });
+
+    const result = await command.execute({ action: "tap", text: before.text });
+
+    expect(result.success).toBe(true);
+    expect(driver.doubleTapHistory).toEqual([{ x: 50, y: 50 }]);
+    expect(result.effect).toEqual({ screenChanged: true, basis: "viewHierarchy changed" });
+    expect(result.warnings).toEqual([TALKBACK_ACTIVATION_WARNING]);
+  });
+
+  test.each([
+    [true, 0],
+    [false, 1],
+  ])(
+    "a focus request under TalkBack with focusVerified=%p adds %p no-change warnings (#17693)",
+    async (focusVerified, noChangeWarnings) => {
+      const field: Element = {
+        "resource-id": "test:id/name",
+        class: "android.widget.EditText",
+        clickable: true,
+        focusable: true,
+        actions: ["click"],
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      };
+      const driver = new FakeTalkBackNavigationDriver();
+      const command = createCommand(undefined, undefined, {
+        driver,
+        service: new FakeCtrlProxy(new FakeTimer()),
+        element: field,
+        hierarchy: { hierarchy: { node: { $: field } } },
+      });
+      // Focus is the requested effect; its verification, not the screen diff, settles it.
+      command["verifyFocusAfterTap"] = mock(async () => focusVerified);
+
+      const result = await command.execute({ action: "focus", elementId: "test:id/name" });
+
+      // An unverified focus fails the request; it still names the unchanged screen.
+      expect(result.success).toBe(focusVerified);
+      expect(driver.actionHistory.map((request) => request.action)).toEqual(["click"]);
+      expect(result.effect?.screenChanged).toBe(false);
+      expect(result.focusVerified).toBe(focusVerified);
+      expect(
+        (result.warnings ?? []).filter((warning) => warning.includes("the screen did not change")),
+      ).toHaveLength(noChangeWarnings);
+    },
+  );
+
+  test("coordinate activation of an id-less owner that changes the screen adds no no-change warning (#17677)", async () => {
+    const label: Element = {
+      "content-desc": "Send",
+      bounds: { left: 946, top: 1390, right: 1062, bottom: 1506 },
+    };
+    const owner: Element = {
+      clickable: true,
+      actions: ["click"],
+      bounds: { left: 941, top: 1390, right: 1067, bottom: 1506 },
+    };
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: { node: { $: owner, node: [{ $: label }] } },
+    };
+    const driver = new FakeTalkBackNavigationDriver();
+    const service = new FakeCtrlProxy(new FakeTimer());
+    const command = createCommand(undefined, undefined, {
+      driver,
+      service,
+      element: owner,
+      hierarchy,
+      matched: label,
+    });
+    const derive = command.deriveTapEffectAfterPostTapObservation.bind(command);
+    spyOn(command, "deriveTapEffectAfterPostTapObservation").mockImplementation(
+      async (...args) => ({
+        ...(await derive(...args)),
+        effect: { screenChanged: true, basis: "activeWindow changed" },
+      }),
+    );
+
+    const result = await command.execute({ action: "tap", text: "Send" });
+
+    expect(result.success).toBe(true);
+    expect(driver.doubleTapHistory).toEqual([{ x: 1004, y: 1448 }]);
     expect(result.warnings).toEqual([TALKBACK_ACTIVATION_WARNING]);
   });
 
@@ -1488,7 +1605,10 @@ describe("TapOnElement screen-reader navigation result", () => {
     const command = createCommand({ success: false, method: "focus-navigation" }, warning);
     const result = await command.execute({ action: "tap", elementId: "test:id/button" });
     expect(result.success).toBe(true);
-    expect(result.warnings).toEqual([warning]);
+    expect(result.warnings).toEqual([
+      warning,
+      'TalkBack activation is unconfirmed: the screen did not change after activating the matched element "test:id/button" [0,0][100,100]. Observe the screen; if the intended control was not activated, use tapAt {x: 50, y: 50} (the matched element\'s center).',
+    ]);
   });
 
   test("returns the successful cursor journey from public execute", async () => {

@@ -16,7 +16,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { findPackedAssetViolations } from "./build/packed-runtime-assets";
+import {
+  findBundledDependencyViolations,
+  findPackedAssetViolations,
+} from "./build/packed-runtime-assets";
 
 const DEFAULT_CONFIG_PATH = path.join("scripts", "npm-unpacked-size-thresholds.json");
 const REQUIRED_DIST_ENTRY = path.join("dist", "src", "index.js");
@@ -207,7 +210,10 @@ export function evaluateUnpackedSize({
     size.passed &&
     thresholds.warnHeadroomBytes !== undefined &&
     headroomBytes < thresholds.warnHeadroomBytes;
-  const violations = findPackedAssetViolations(files.map((file) => file.path));
+  const violations = [
+    ...findPackedAssetViolations(files.map((file) => file.path)),
+    ...findBundledDependencyViolations(files),
+  ];
   if (!size.passed) {
     violations.push(
       `Unpacked size ${unpackedBytes} bytes exceeds threshold ${thresholds.unpackedBytes} bytes`,

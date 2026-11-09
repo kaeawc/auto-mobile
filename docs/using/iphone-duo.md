@@ -18,3 +18,9 @@ home-screen icon:
 ```json
 { "name": "launchApp", "arguments": { "appId": "com.apple.Preferences", "platform": "ios" } }
 ```
+
+## Screenshots that cannot be verified
+
+When AutoMobile cannot tell which panel is active, it does not return a screenshot that may be of
+the dark panel. The screenshot fails with `Runner screenshot could not be verified`. Call `observe`
+again so the active panel is known, or check the posture with `setPosture`.

@@ -302,7 +302,8 @@ enable the default-off `accessibility` tool for the current MCP connection:
 Call `accessibility` with `talkback: true` on Android or `voiceover: true` on
 iOS, run the flow, and disable it afterward. Enabling TalkBack may leave a system
 runtime permission prompt covering the screen, sometimes a few seconds after the
-setting changes. The call waits up to 4 seconds for one and reports it through
+setting changes. The call waits up to 4 seconds for one, ending sooner once the
+screen is stable and TalkBack has no runtime permission left to request, and reports it through
 `warning` and `blockingPrompt` (`kind`, `package`, `activity`) when detected;
 AutoMobile does not dismiss it. Use `observe` to inspect it, then `tapOn` to
 answer the allow or deny button, or set a `systemAlerts` policy to answer

@@ -1,10 +1,13 @@
 import { record, type Raw } from "../prototypeTemplate";
 import {
+  boundsOwnWidth,
   INCOMING_ALLOCATED_KEY,
   INCOMING_HEIGHT_KEY,
   ROW_BOUND_KEY,
   ROW_MEASURE_KEY,
   type RowMeasure,
+  scrollChildStyle,
+  type WebStyleContext,
 } from "./webStyle";
 
 /** The aspect ratio of a node with no authored width, height or weight, or undefined. */
@@ -98,6 +101,20 @@ export function rowContentHeight(style: Raw | undefined, inherited = Infinity): 
   return Math.max(0, height - side(padding, "top") - side(padding, "bottom"));
 }
 
+/**
+ * What a scroll's child scope sees: its style context (see scrollChildStyle) and, across, the
+ * scroll's content height as its height bound, since Compose measures horizontal scroll content
+ * against the scroll's max height. A vertical scroll hands its content an unbounded height.
+ */
+export function scrollChildPatch(
+  scope: { readonly style: WebStyleContext; readonly heightBound?: number },
+  node: Raw,
+) {
+  const across = node.axis === "horizontal";
+  const heightBound = across ? contentHeightBound(node.style, scope.heightBound) : undefined;
+  return { inBox: false, style: scrollChildStyle(scope, node), heightBound };
+}
+
 /** The content height bound a row or box passes its children (see rowContentHeight), if any. */
 export function contentHeightBound(style: unknown, inherited?: number): number | undefined {
   const bound = rowContentHeight(record(style), inherited ?? Infinity);
@@ -105,20 +122,38 @@ export function contentHeightBound(style: unknown, inherited?: number): number |
 }
 
 /**
+ * What bounds a row from outside, as a render scope carries it: the content height its parent
+ * passes on (`heightBound`, see rowContentHeight) and whether its incoming max width is unbounded,
+ * as under a horizontal scroll (`style.unboundedWidth`). A bare number is the height alone.
+ */
+export interface RowBounds {
+  readonly heightBound?: number;
+  readonly style?: { readonly unboundedWidth?: boolean };
+}
+
+const rowBounds = (bounds: number | RowBounds) =>
+  typeof bounds === "number"
+    ? { height: bounds, unboundedWidth: false }
+    : { height: bounds.heightBound, unboundedWidth: bounds.style?.unboundedWidth === true };
+
+/**
  * The axes a row grows on to its parent: width when its unsized aspect-ratio child takes all the
  * remaining width, since a wrap-sized Compose Row then reaches its max width. A repeated row is
  * left out, as rowMeasured leaves it: its children never get the take and zero hints the fill
- * assumes.
+ * assumes. Under an unbounded width (a horizontal scroll) there is no max width to reach, unless
+ * the row's own dp `width` or `maxWidth` restores one, as rowMeasured's children scope sees it.
  */
 export function rowFillAxes(
   node: Raw,
   path: string,
   prepare: PrepareChild,
-  inherited = Infinity,
+  bounds: number | RowBounds = Infinity,
 ): "width"[] {
+  const { height: inherited = Infinity, unboundedWidth } = rowBounds(bounds);
   const fills =
     node.type === "row" &&
     node.repeat === undefined &&
+    (unboundedWidth !== true || boundsOwnWidth(node.style)) &&
     Array.isArray(node.children) &&
     node.children.some((entry, index) =>
       isUnsizedAspectRatio(
@@ -139,14 +174,20 @@ export function rowMeasured(
   node: Raw,
   path: string,
   prepare: PrepareChild,
-  inherited = Infinity,
+  bounds: number | RowBounds = Infinity,
 ): Raw {
   if (node.type !== "row" || node.repeat !== undefined || !Array.isArray(node.children)) {
     return node;
   }
+  const { height: inherited = Infinity, unboundedWidth } = rowBounds(bounds);
   const styled = node.children.map((entry, index) => prepare(entry, childPath(path, index)));
   const height = rowContentHeight(record(node.style), inherited);
-  const children = rowSequentialChildren(node.children, (_entry, index) => styled[index], height);
+  const children = rowSequentialChildren(
+    node.children,
+    (_entry, index) => styled[index],
+    height,
+    unboundedWidth,
+  );
   if (children === node.children) {
     return node;
   }
@@ -196,6 +237,11 @@ const measured = (entry: unknown, measure: RowMeasure) =>
  * `rowHeight` is the row's definite content height (see rowContentHeight), which caps every
  * aspect ratio in it as a `maxHeight` would.
  *
+ * Under an unbounded width (`unboundedWidth`, a horizontal scroll) there is no remaining width to
+ * take: Compose's `aspectRatio` sizes from the incoming max height instead, which `rowHeight`
+ * already caps, and with no definite height an unsized ratio stays as authored, so nothing is
+ * zeroed.
+ *
  * `prepared` resolves an entry as rendering will (bound, visible, `styleWhen` merged), or
  * undefined when it is hidden. A repeat's children are one template, so they are left as authored.
  */
@@ -203,9 +249,12 @@ export function rowSequentialChildren(
   entries: readonly unknown[],
   prepared: (entry: unknown, index: number) => Raw | undefined,
   rowHeight = Infinity,
+  unboundedWidth = false,
 ): readonly unknown[] {
   const styled = entries.map(prepared);
-  const taker = styled.findIndex((node) => isUnsizedAspectRatio(node, rowHeight));
+  const taker = unboundedWidth
+    ? -1
+    : styled.findIndex((node) => isUnsizedAspectRatio(node, rowHeight));
   const capped = styled.findIndex((node) => aspectRatioCap(node, rowHeight) !== undefined);
   if (taker < 0 && capped < 0) {
     return entries;

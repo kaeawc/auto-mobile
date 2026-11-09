@@ -10,6 +10,7 @@ import {
   rowFillAxes,
   rowMeasured,
   rowSequentialChildren,
+  scrollChildPatch,
 } from "../../../../src/features/prototype/web/webRowAspect";
 import {
   laterMinStrut,
@@ -494,4 +495,79 @@ test("a repeated row does not fill width, as its children are never measured (#1
   const repeated = { ...row, repeat: { items: [{}, {}] } };
   expect(rowFillAxes(repeated, "root", prepare)).toEqual([]);
   expect(rowMeasured(repeated, "root", prepare)).toBe(repeated);
+});
+
+test("under an unbounded width with no definite height a row neither takes nor fills the width (#16718)", () => {
+  const prepare = (entry: unknown) => record(entry);
+  const row = {
+    type: "row",
+    children: [
+      { type: "box", style: { aspectRatio: 1 } },
+      { type: "box", style: { width: { dp: 40 } } },
+      { type: "box", style: { aspectRatio: 1, maxWidth: 10 } },
+    ],
+  };
+  const unbounded = { style: { unboundedWidth: true } };
+  expect(rowFillAxes(row, "root", prepare, unbounded)).toEqual([]);
+  const children = rowMeasured(row, "root", prepare, unbounded).children as unknown[];
+  // Compose's aspectRatio has no max width to size from, so the ratio stays as authored and its
+  // later sibling keeps its width; a capped ratio still grows to its cap.
+  expect(children[0]).toBe(row.children[0]);
+  expect(children[1]).toBe(row.children[1]);
+  expect(styleOf(children[2])?.[ROW_MEASURE_KEY]).toEqual({ shrink: CAPPED_SHRINK, basis: 10 });
+  const plain = { ...row, children: row.children.slice(0, 2) };
+  expect(rowMeasured(plain, "root", prepare, unbounded)).toBe(plain);
+  expect(rowSequentialChildren(plain.children, shown, Infinity, true)).toBe(plain.children);
+});
+
+test("under an unbounded width a row's own width bound restores its fill (#17603)", () => {
+  const prepare = (entry: unknown) => record(entry);
+  const unbounded = { style: { unboundedWidth: true } };
+  const children = [
+    { type: "box", style: { aspectRatio: 1 } },
+    { type: "box", style: { width: { dp: 40 } } },
+  ];
+  for (const style of [{ maxWidth: 200 }, { width: { dp: 200 } }]) {
+    const row = { type: "row", style, children };
+    expect(rowFillAxes(row, "root", prepare, unbounded)).toEqual(["width"]);
+  }
+  // A min bound or a non-dp width restores no max width.
+  for (const style of [{ minWidth: 200 }, { width: "wrap" }]) {
+    const row = { type: "row", style, children };
+    expect(rowFillAxes(row, "root", prepare, unbounded)).toEqual([]);
+  }
+});
+
+test("under an unbounded width a row's height still caps its aspect ratio (#16718)", () => {
+  const prepare = (entry: unknown) => record(entry);
+  const row = {
+    type: "row",
+    children: [
+      { type: "box", style: { aspectRatio: 1 } },
+      { type: "box", style: { width: { dp: 40 } } },
+    ],
+  };
+  const children = rowMeasured(row, "root", prepare, {
+    heightBound: 80,
+    style: { unboundedWidth: true },
+  }).children as unknown[];
+  expect(styleOf(children[0])?.[ROW_MEASURE_KEY]).toEqual({ shrink: CAPPED_SHRINK, basis: 80 });
+  expect(styleOf(children[1])?.[ROW_MEASURE_KEY]).toEqual({ shrink: LATER_SHRINK, later: true });
+  // A numeric bound is the inherited height alone, as before.
+  expect(rowMeasured(row, "root", prepare, 80)).toEqual(
+    rowMeasured(row, "root", prepare, { heightBound: 80 }),
+  );
+});
+
+test("only a horizontal scroll hands its child its content height (#16718)", () => {
+  const scope = { style: { mode: "light" as const, palette: new Map() }, heightBound: 90 };
+  const style = { height: { dp: 100 }, padding: { top: 8 } };
+  const across = scrollChildPatch(scope, { type: "scroll", axis: "horizontal", style });
+  expect(across).toMatchObject({ inBox: false, heightBound: 82 });
+  expect(across.style).toMatchObject({ parentAxis: "row", unboundedWidth: true });
+  expect(scrollChildPatch(scope, { type: "scroll", axis: "vertical", style }).heightBound).toBe(
+    undefined,
+  );
+  const unsized = scrollChildPatch({ style: scope.style }, { type: "scroll", axis: "horizontal" });
+  expect(unsized.heightBound).toBeUndefined();
 });

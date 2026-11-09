@@ -24,8 +24,11 @@ focus-navigation hint for touch gestures (`tapAt`, `swipeOn`, `pinchOn`,
 While a type-19 system keyboard node is present anywhere in the snapshot, no
 text-input value is emitted, including the keyboard's text view and inputs
 outside its subtree, regardless of focus. Nodes retain their snapshot
-identifier, class and focus; only labels and placeholders remain visible.
-After the keyboard closes, a plain field's typed value is readable through
+identifier, class and focus; field nodes emit only their labels, and placeholders
+appear only as keyboard prompt nodes. An anonymous type-52 node (no identifier,
+label or placeholder, including a nil placeholder) never emits a value,
+regardless of keyboard presence.
+After the keyboard closes, a named plain field's typed value is readable through
 `observe` on the field's own node, joined with its label when distinct. A value
 equal to the placeholder counts as empty. Secure fields, including type-50
 nodes and fields identified by secure metadata, always redact their values.

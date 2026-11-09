@@ -453,17 +453,17 @@ function createPollFinalizer(context: PollFinalizationContext, freshnessState: P
         freshnessState.enteringReference,
       ),
     });
+    // Terminal reads spend time on every path, including one the budget cut off.
+    outcome.waitMs = timer.now() - start;
     if (refreshed === RECONCILIATION_UNCONFIRMED) {
       // The back stack contradicted this capture and the budget ran out before a
       // confirming read: the match is not proven, so do not report it.
       outcome.stopped = false;
       outcome.terminalReason = "timeout";
-      outcome.waitMs = timer.now() - start;
     } else if (refreshed) {
       const original = outcome.observation;
       outcome.observation = refreshed.observation;
       outcome.polls++;
-      outcome.waitMs = timer.now() - start;
       generation = refreshed.generation;
       cachedAt = refreshed.cachedAt;
       canProcessRecomposition = isCompleteFreshCapture(refreshed.observation);

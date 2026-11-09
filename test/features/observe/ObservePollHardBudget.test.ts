@@ -145,6 +145,7 @@ describe("pollObserveUntil hard budget (#17670)", () => {
     expect(screen.getExecuteCallCount()).toBe(2);
     expect(backStackSignal?.aborted).toBe(true);
     expect(timer.now()).toBe(1001);
+    expect(outcome.waitMs).toBe(1001);
   });
 
   test("the reconciliation capture is raced against the remaining budget", async () => {

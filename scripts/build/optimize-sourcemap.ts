@@ -16,16 +16,11 @@ export interface SourceMapOptions {
   includeDependencySources?: boolean;
 }
 
-/** A `splitting` chunk map beside index.js.map: part of the main bundle's code. */
-function isMainBundleChunkMap(path: string, indexMapPath: string): boolean {
-  const dir = indexMapPath.slice(0, indexMapPath.length - "index.js.map".length);
-  const name = path.slice(dir.length);
-  return path.startsWith(dir) && /^chunk-[^/\\]+\.js\.map$/.test(name);
-}
-
 /**
- * Dependency trimming rewrites the main bundle's maps (index.js.map and its chunk
- * maps) but not the worker's; stripping applies to every emitted map.
+ * Stripping applies to every emitted map. Otherwise only index.js.map gets
+ * dependency trimming: a `splitting` chunk can hold code from any entrypoint
+ * (e.g. the worker's adm-zip), so every chunk map, like the worker's, keeps all of
+ * its sources for debugging (#17706).
  */
 export function selectSourceMaps(
   emittedPaths: readonly string[],
@@ -33,11 +28,7 @@ export function selectSourceMaps(
   options: SourceMapOptions = {},
 ): { path: string; options: SourceMapOptions }[] {
   return emittedPaths
-    .filter(
-      (path) =>
-        path.endsWith(".map") &&
-        (options.stripSources || path === indexMapPath || isMainBundleChunkMap(path, indexMapPath)),
-    )
+    .filter((path) => path.endsWith(".map") && (options.stripSources || path === indexMapPath))
     .map((path) => ({ path, options }));
 }
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 
 setup() {
+  bats_require_minimum_version 1.5.0
   TEST_ROOT="$(mktemp -d)"
   SCRIPT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)/scripts/ios/ctrl-proxy-package-ipa.sh"
   BUILD_DIR="${TEST_ROOT}/Derived Data/Build"
@@ -157,4 +158,107 @@ assert_runtime_archive() {
   [ -d "${UNPACKED}/Build/Products/Debug-iphonesimulator/AutoMobileTest.app" ]
   [ ! -e "${UNPACKED}/Build/Products/Debug-iphonesimulator/AutoMobileSdkWire.o" ]
   [ ! -e "${UNPACKED}/Build/Products/Debug-iphonesimulator/AutoMobileTest.swiftmodule" ]
+}
+
+seed_existing_archive() {
+  mkdir -p "$(dirname "$OUTPUT_PATH")"
+  printf 'existing archive\000must survive\n' > "$OUTPUT_PATH"
+  cp "$OUTPUT_PATH" "${TEST_ROOT}/original.ipa"
+}
+
+assert_only_output_archive() {
+  local entries
+  entries="$(find "$(dirname "$OUTPUT_PATH")" -mindepth 1)"
+  [ "$entries" = "$OUTPUT_PATH" ]
+}
+
+@test "dangling staged framework links list every offender on stderr and preserve the output" {
+  seed_existing_archive
+  printf 'outside Products\n' > "${TEST_ROOT}/outside-file"
+  local framework="${SIM_DIR}/ObjCExceptionCatcher.framework"
+  ln -s ../../../../../outside-file "${framework}/outside link"
+  ln -s missing-target "${framework}/missing link"
+  [ -e "${framework}/outside link" ]
+
+  run --separate-stderr bash "$SCRIPT" --products "$BUILD_DIR" --output "$OUTPUT_PATH"
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"Dangling symlink in staged Products: Debug-iphonesimulator/ObjCExceptionCatcher.framework/outside link -> ../../../../../outside-file"* ]]
+  [[ "$stderr" == *"Dangling symlink in staged Products: Debug-iphonesimulator/ObjCExceptionCatcher.framework/missing link -> missing-target"* ]]
+  cmp "$OUTPUT_PATH" "${TEST_ROOT}/original.ipa"
+  assert_only_output_archive
+}
+
+@test "links made dangling by pruning are rejected before replacing the output" {
+  seed_existing_archive
+  ln -s ../AutoMobileSdkWire.o "${SIM_DIR}/ObjCExceptionCatcher.framework/debug-input"
+  [ -e "${SIM_DIR}/ObjCExceptionCatcher.framework/debug-input" ]
+
+  run --separate-stderr bash "$SCRIPT" --products "$BUILD_DIR" --output "$OUTPUT_PATH"
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"Dangling symlink in staged Products: Debug-iphonesimulator/ObjCExceptionCatcher.framework/debug-input -> ../AutoMobileSdkWire.o"* ]]
+  cmp "$OUTPUT_PATH" "${TEST_ROOT}/original.ipa"
+  assert_only_output_archive
+}
+
+@test "framework Versions Current links still package with their target contents" {
+  local framework="${SIM_DIR}/ObjCExceptionCatcher.framework"
+  mkdir -p "${framework}/Versions/A/Resources"
+  printf 'framework executable\n' > "${framework}/Versions/A/ObjCExceptionCatcher"
+  printf 'framework resource\n' > "${framework}/Versions/A/Resources/fixture"
+  ln -s A "${framework}/Versions/Current"
+  ln -s Versions/Current/ObjCExceptionCatcher "${framework}/ObjCExceptionCatcher"
+
+  run bash "$SCRIPT" --products "$BUILD_DIR" --output "$OUTPUT_PATH"
+  [ "$status" -eq 0 ]
+  unpack_archive
+  local unpacked_framework="${UNPACKED}/Build/Products/Debug-iphonesimulator/ObjCExceptionCatcher.framework"
+  cmp "${framework}/Versions/A/ObjCExceptionCatcher" "${unpacked_framework}/ObjCExceptionCatcher"
+  cmp "${framework}/Versions/A/Resources/fixture" "${unpacked_framework}/Versions/Current/Resources/fixture"
+}
+
+@test "zip failure preserves the existing archive and removes the partial archive" {
+  seed_existing_archive
+  local stub_dir="${TEST_ROOT}/bin"
+  mkdir -p "$stub_dir"
+  cat > "${stub_dir}/zip" <<'STUB'
+#!/bin/bash
+printf 'partial archive\n' > "$2"
+exit 1
+STUB
+  chmod +x "${stub_dir}/zip"
+
+  run --separate-stderr env PATH="${stub_dir}:$PATH" bash "$SCRIPT" --products "$BUILD_DIR" --output "$OUTPUT_PATH"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"Failed to create IPA archive: zip exited with status 1"* ]]
+  cmp "$OUTPUT_PATH" "${TEST_ROOT}/original.ipa"
+  assert_only_output_archive
+}
+
+@test "unavailable zip preserves the existing archive and leaves no temporary archive" {
+  seed_existing_archive
+  local stub_dir="${TEST_ROOT}/bin"
+  mkdir -p "$stub_dir"
+  cat > "${stub_dir}/zip" <<'STUB'
+#!/bin/bash
+exit 127
+STUB
+  chmod +x "${stub_dir}/zip"
+
+  run -127 --separate-stderr env PATH="${stub_dir}:$PATH" bash "$SCRIPT" --products "$BUILD_DIR" --output "$OUTPUT_PATH"
+  [ "$status" -eq 127 ]
+  [[ "$stderr" == *"Failed to create IPA archive: zip exited with status 127"* ]]
+  cmp "$OUTPUT_PATH" "${TEST_ROOT}/original.ipa"
+  assert_only_output_archive
+}
+
+@test "successful packaging replaces the existing archive and leaves no temporary archive" {
+  seed_existing_archive
+
+  run bash "$SCRIPT" --products "$BUILD_DIR" --output "$OUTPUT_PATH"
+  [ "$status" -eq 0 ]
+  run cmp "$OUTPUT_PATH" "${TEST_ROOT}/original.ipa"
+  [ "$status" -ne 0 ]
+  assert_only_output_archive
+  unpack_archive
+  assert_runtime_archive
 }

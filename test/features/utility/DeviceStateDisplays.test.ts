@@ -138,7 +138,6 @@ describe("getDeviceState displays.current (#17049)", () => {
     expect(result.success).toBe(true);
     expect(result.displays?.current).toEqual({
       posture: "unknown",
-      postureSource: "device_state",
       activePanel: { key: INNER, role: "inner" },
     });
   });

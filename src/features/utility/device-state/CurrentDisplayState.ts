@@ -27,7 +27,8 @@ export const POSTURE_SOURCES = [
 /** The live posture and active physical panel. */
 export interface CurrentDisplayState {
   posture: Posture;
-  postureSource: PostureSource;
+  /** Omitted when posture is `unknown`: nothing established it. */
+  postureSource?: PostureSource;
   /** Omitted when the live display list names no inventory panel. */
   activePanel?: { key: string; role: PanelRole };
 }
@@ -99,7 +100,8 @@ export async function readCurrentDisplayState(
   const panel = device.displays?.panels.find((candidate) => candidate.key === observed.display.key);
   return {
     posture,
-    postureSource: "device_state",
+    // A failed or unmapped device_state read yields `unknown`, which the device did not commit.
+    ...(posture === "unknown" ? {} : { postureSource: "device_state" as const }),
     ...(panel ? { activePanel: { key: panel.key, role: panel.role } } : {}),
   };
 }

@@ -116,7 +116,7 @@ const deviceStateOutputFields = {
             .enum(POSTURE_SOURCES)
             .optional()
             .describe(
-              "device_state: the device's committed posture. inferred_from_active_panel: mapped from the active panel (inner=opened, cover=closed) without reading the hinge, so a half-folded iPhone Duo still reads opened; not a confirmed hinge posture.",
+              "device_state: the device's committed posture. inferred_from_active_panel: mapped from the active panel (inner=opened, cover=closed) without reading the hinge, so a half-folded iPhone Duo with its inner panel active still reads opened; not a confirmed hinge posture. Omitted when posture is unknown.",
             ),
           activePanel: z
             .object({ key: z.string(), role: observationDisplaySchema.unwrap().shape.role })

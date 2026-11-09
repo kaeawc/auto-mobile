@@ -11,9 +11,26 @@ import {
   observedAndroidDisplay,
 } from "../../observe/ObservationDisplay";
 
+/**
+ * Where `posture` came from. `device_state` is the device's own committed posture (Android).
+ * `inferred_from_active_panel` maps the active panel to a posture (iPhone Duo: inner means
+ * opened, cover means closed) without reading the hinge, so a half-folded Duo with its inner
+ * panel active still reads `opened`. Consumers must not treat an inferred posture as confirmed.
+ * Omitted when an Android posture read fails and posture falls back to `unknown`: no source
+ * established it.
+ */
+export type PostureSource = "device_state" | "inferred_from_active_panel";
+
+export const POSTURE_SOURCES = [
+  "device_state",
+  "inferred_from_active_panel",
+] as const satisfies readonly PostureSource[];
+
 /** The live posture and active physical panel. */
 export interface CurrentDisplayState {
   posture: Posture;
+  /** Omitted when the posture could not be read (`unknown`). */
+  postureSource?: PostureSource;
   /** Omitted when the live display list names no inventory panel. */
   activePanel?: { key: string; role: PanelRole };
 }
@@ -63,6 +80,8 @@ export async function readCurrentDisplayState(
       if (panel) {
         return {
           posture: panel.role === "inner" ? "opened" : "closed",
+          // devicectl reports which panel is active, not the hinge angle (#17637).
+          postureSource: "inferred_from_active_panel",
           activePanel: { key: panel.key, role: panel.role },
         };
       }
@@ -83,6 +102,8 @@ export async function readCurrentDisplayState(
   const panel = device.displays?.panels.find((candidate) => candidate.key === observed.display.key);
   return {
     posture,
+    // A failed device_state read falls back to unknown; do not attribute that to the device.
+    ...(posture === "unknown" ? {} : { postureSource: "device_state" as const }),
     ...(panel ? { activePanel: { key: panel.key, role: panel.role } } : {}),
   };
 }

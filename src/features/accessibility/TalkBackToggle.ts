@@ -11,6 +11,7 @@ import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbCl
 import type { AccessibilityDetector } from "../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import { accessibilityDetector } from "../../ctrlProxy/accessibility/AccessibilityDetector";
 import { type Timer, defaultTimer } from "../../utils/SystemTimer";
+import { isRuntimePermissionPrompt } from "../observe/BlockingSystemPrompt";
 import { type SecureSettingsRpc, CtrlProxySecureSettingsRpc } from "./SecureSettingsRpc";
 import {
   type TalkBackDialogProbe,
@@ -36,18 +37,25 @@ export const TALKBACK_TOGGLE_WORST_CASE_MS =
   (DIALOG_DISMISS_RETRIES - 1) * DIALOG_DISMISS_DELAY_MS +
   (TALKBACK_STATE_CONFIRM_ATTEMPTS - 1) * TALKBACK_STATE_CONFIRM_DELAY_MS;
 
-/** Foreground activity identifies a runtime prompt, not the requested permission. */
-export function isTalkBackRuntimePermissionPrompt(app: {
-  packageName: string;
-  activityName?: string;
-}): boolean {
-  // Accept the AOSP package too: it hosts the same GrantPermissionsActivity.
-  return (
-    (app.packageName === "com.google.android.permissioncontroller" ||
-      app.packageName === "com.android.permissioncontroller") &&
-    app.activityName?.split(".").at(-1) === "GrantPermissionsActivity"
-  );
-}
+/** The shared runtime-permission prompt check, under the name TalkBack callers already use. */
+// #6499 device check, 2026-09-25: API 36 google_apis arm64, HEAD 21791e9da,
+// GrantPermissionsActivity showed "Allow Android Accessibility Suite to send you
+// notifications?" with permission_allow_button / permission_deny_button. Back did not
+// dismiss it; the caller used tapOn on permission_deny_button.
+const BLOCKING_PROMPT_WARNING =
+  "A system runtime permission prompt is covering the screen after enabling TalkBack. " +
+  "On API 36 this was observed as the Android Accessibility Suite (TalkBack) notifications permission. " +
+  "The foreground activity does not identify the requested permission. Nothing was tapped. " +
+  "You must answer it: use observe to inspect the prompt, then tapOn its permission_allow_button or permission_deny_button.";
+
+export const isTalkBackRuntimePermissionPrompt = isRuntimePermissionPrompt;
+
+/**
+ * Bounded wait after a successful enable for a runtime prompt TalkBack raises late: on
+ * 0.0.88 a permission controller prompt appeared about 3 s after the toggle returned (#17668).
+ */
+export const TALKBACK_PROMPT_SETTLE_MS = 4_000;
+const TALKBACK_PROMPT_SETTLE_POLL_MS = 500;
 
 async function reportPreviousState(
   options: ScreenReaderToggleOptions | undefined,
@@ -69,11 +77,23 @@ export interface TalkBackToggleCtrlProxy {
   dialogProbe?: TalkBackDialogProbe | null;
 }
 
+export interface TalkBackToggleTiming {
+  timer?: Timer;
+  /**
+   * After an applied enable with no prompt yet, keep reading the foreground for this long and
+   * report a runtime prompt that appears in it. 0 (the default) reads once; the `accessibility`
+   * tool passes {@link TALKBACK_PROMPT_SETTLE_MS}. Session restore leaves it 0 so its
+   * worst-case budget is unchanged.
+   */
+  promptSettleMs?: number;
+}
+
 export class TalkBackToggle {
   private readonly adb: AdbExecutor;
   private readonly secureSettings: SecureSettingsRpc;
   private readonly dialogProbe: TalkBackDialogProbe;
   private readonly timer: Timer;
+  private readonly promptSettleMs: number;
 
   constructor(
     private readonly device: BootedDevice,
@@ -81,11 +101,13 @@ export class TalkBackToggle {
     private readonly detector: AccessibilityDetector = accessibilityDetector,
     {
       timer = defaultTimer,
+      promptSettleMs = 0,
       secureSettings,
       dialogProbe,
-    }: TalkBackToggleCtrlProxy & { timer?: Timer } = {},
+    }: TalkBackToggleCtrlProxy & TalkBackToggleTiming = {},
   ) {
     this.timer = timer;
+    this.promptSettleMs = promptSettleMs;
     this.adb = adb ?? defaultAdbClientFactory.create(device);
     this.secureSettings = secureSettings ?? new CtrlProxySecureSettingsRpc(device);
     this.dialogProbe = dialogProbe ?? new CtrlProxyTalkBackDialogProbe(device);
@@ -138,7 +160,6 @@ export class TalkBackToggle {
     // Discard pre-change evidence before writing, including during permission-dialog waits.
     this.detector.invalidateCache(this.device.deviceId);
     let blockingPrompt: TalkBackBlockingPrompt | undefined;
-    let warning: string | undefined;
     try {
       if (enabled) {
         await this.enableTalkBack(serviceComponent!);
@@ -151,17 +172,7 @@ export class TalkBackToggle {
         }
         blockingPrompt = await this.readBlockingPrompt();
         if (blockingPrompt) {
-          // #6499 device check, 2026-09-25: API 36 google_apis arm64,
-          // HEAD 21791e9da, GrantPermissionsActivity showed "Allow Android
-          // Accessibility Suite to send you notifications?" with
-          // permission_allow_button / permission_deny_button. Back did not
-          // dismiss it; the caller used tapOn on permission_deny_button.
-          warning =
-            "A system runtime permission prompt is covering the screen after enabling TalkBack. " +
-            "On API 36 this was observed as the Android Accessibility Suite (TalkBack) notifications permission. " +
-            "The foreground activity does not identify the requested permission. Nothing was tapped. " +
-            "You must answer it: use observe to inspect the prompt, then tapOn its permission_allow_button or permission_deny_button.";
-          logger.warn(`[TalkBackToggle] ${warning}`, blockingPrompt);
+          logger.warn(`[TalkBackToggle] ${BLOCKING_PROMPT_WARNING}`, blockingPrompt);
         } else if (dialogResult === "not-found") {
           logger.warn("[TalkBackToggle] TalkBack permission dialog not found — continuing");
         }
@@ -181,10 +192,40 @@ export class TalkBackToggle {
 
     // Step 5: Re-detect immediately, then allow asynchronous state changes a
     // bounded wait. Each read invalidates the same cache as the idempotency check.
-    return {
-      ...(await this.confirmTalkBackState(enabled)),
-      ...(blockingPrompt ? { blockingPrompt, warning } : {}),
-    };
+    return await this.confirmWithBlockingPrompt(enabled, blockingPrompt);
+  }
+
+  /** Confirm the state, then report a prompt already seen or one raised in the settle window. */
+  private async confirmWithBlockingPrompt(
+    enabled: boolean,
+    seenPrompt: TalkBackBlockingPrompt | undefined,
+  ): Promise<TalkBackResult> {
+    const confirmed = await this.confirmTalkBackState(enabled);
+    if (seenPrompt) {
+      return { ...confirmed, blockingPrompt: seenPrompt, warning: BLOCKING_PROMPT_WARNING };
+    }
+    if (!enabled || !confirmed.applied) {
+      return confirmed;
+    }
+    const blockingPrompt = await this.awaitLateBlockingPrompt();
+    if (!blockingPrompt) {
+      return confirmed;
+    }
+    logger.warn(`[TalkBackToggle] ${BLOCKING_PROMPT_WARNING}`, blockingPrompt);
+    return { ...confirmed, blockingPrompt, warning: BLOCKING_PROMPT_WARNING };
+  }
+
+  /** Poll the foreground through the settle window; a prompt TalkBack raises late lands here. */
+  private async awaitLateBlockingPrompt(): Promise<TalkBackBlockingPrompt | undefined> {
+    const polls = Math.floor(this.promptSettleMs / TALKBACK_PROMPT_SETTLE_POLL_MS);
+    for (let poll = 0; poll < polls; poll++) {
+      await this.timer.sleep(TALKBACK_PROMPT_SETTLE_POLL_MS);
+      const prompt = await this.readBlockingPrompt();
+      if (prompt) {
+        return prompt;
+      }
+    }
+    return undefined;
   }
 
   private async failedToggleResult(reason: string): Promise<TalkBackResult> {

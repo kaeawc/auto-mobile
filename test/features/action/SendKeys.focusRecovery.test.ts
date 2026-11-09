@@ -109,6 +109,34 @@ describe("sendKeys selector focus recovery", () => {
     });
   }
 
+  test("a focused permission prompt replaces the scroll hint with a dismiss hint (#17669)", async () => {
+    const h = createSendKeysFocusHarness();
+    h.observation.viewHierarchy!.windows = [
+      { type: 1, packageName: "com.google.android.permissioncontroller", isFocused: true },
+      { type: 1, packageName: "com.example.app", isFocused: false },
+    ];
+    h.replies.push(missing);
+    const result = await h.action.execute(commands, selector);
+    expect(result.success).toBe(false);
+    expect(result.blockingPrompt).toEqual({
+      kind: "runtime-permission",
+      package: "com.google.android.permissioncontroller",
+    });
+    expect(result.error).toStartWith(missing.error);
+    expect(result.error).not.toContain("swipeOn");
+    expect(result.error).toContain("permission_deny_button");
+    expect(h.calls).toEqual(["focus"]);
+    expect(h.adb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("without a covering window the failure carries no blockingPrompt", async () => {
+    const h = createSendKeysFocusHarness();
+    h.replies.push(missing);
+    const result = await h.action.execute(commands, selector);
+    expect(result.blockingPrompt).toBeUndefined();
+    expect(result.error).toBe(`${missing.error} ${hint}`);
+  });
+
   for (const error of [
     "Target ambiguous: 2 matches",
     "Cannot focus Phone because it is not an editable input",

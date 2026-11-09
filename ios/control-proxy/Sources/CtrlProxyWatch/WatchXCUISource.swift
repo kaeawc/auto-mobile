@@ -334,30 +334,33 @@ private let watchTapElementTypes: Set<UInt> = [
 ]
 
 /// Search a small interior grid, leaving the top navigation band and left/back area untouched.
-/// Failing to find a point is preferable to tapping a control or guessing at an unreadable screen.
+/// Stay eight points clear of descendant frames except application/window containers and .other nodes
+/// with no label or identifier that have children and are non-actionable, or are non-interactive leaves.
+/// Enabled nodes with traits, custom actions, or a tap target are actionable. Always inspect children.
 func watchCrownWakePoint(in hierarchy: SdkViewHierarchy) -> CGVector? {
     guard hierarchy.screenWidth > 0, hierarchy.screenHeight > 0, let root = hierarchy.root,
           root.bounds.left == 0, root.bounds.top == 0,
           root.bounds.right == hierarchy.screenWidth, root.bounds.bottom == hierarchy.screenHeight
     else { return nil }
-    let controlClasses = Set(watchTapElementTypes.union([21, 25]).map { "XCUIElementType(\($0))" })
     func blocked(_ node: SdkViewNode, x: Double, y: Double) -> Bool {
         let bounds = node.bounds
-        // Application/window labels describe the whole screen, not a tappable content element.
-        let labeledContent = !["XCUIElementType(2)", "XCUIElementType(4)"].contains(node.className)
-            && !(node.accessibilityLabel ?? "").isEmpty
-        let activates = controlClasses.contains(node.className)
-            || (node.isUserInteractionEnabled && (node.hasTapTarget || labeledContent))
-        if activates, bounds.right > bounds.left, bounds.bottom > bounds.top,
+        let children = node.children ?? []
+        let unlabeled = (node.accessibilityLabel ?? "").isEmpty && (node.accessibilityIdentifier ?? "").isEmpty
+        let actionable = node.isUserInteractionEnabled
+            && (!node.accessibilityTraits.isEmpty || !node.accessibilityCustomActions.isEmpty || node.hasTapTarget)
+        let structuralOther = node.className == "XCUIElementType(1)" && unlabeled && !actionable
+            && (!children.isEmpty || !node.isUserInteractionEnabled)
+        let container = ["XCUIElementType(2)", "XCUIElementType(4)"].contains(node.className) || structuralOther
+        if !container, bounds.right > bounds.left, bounds.bottom > bounds.top,
            x >= Double(bounds.left) - 8, x <= Double(bounds.right) + 8,
            y >= Double(bounds.top) - 8, y <= Double(bounds.bottom) + 8
         { return true }
-        return (node.children ?? []).contains { blocked($0, x: x, y: y) }
+        return children.contains { blocked($0, x: x, y: y) }
     }
     for y in [0.5, 0.65, 0.8, 0.4] {
-        for x in [0.5, 0.65, 0.8, 0.35] where !blocked(
-            root, x: x * Double(hierarchy.screenWidth), y: y * Double(hierarchy.screenHeight)
-        ) {
+        for x in [0.5, 0.65, 0.8, 0.35] where !(root.children ?? []).contains(where: {
+            blocked($0, x: x * Double(hierarchy.screenWidth), y: y * Double(hierarchy.screenHeight))
+        }) {
             return CGVector(dx: x, dy: y)
         }
     }
@@ -404,11 +407,25 @@ func watchVerifiedCrownRotation(
     }
     func unchanged() -> WatchCommandError {
         .commandFailed(
-            "rotateCrown changed nothing verifiable. A safe retry requires an unchanged "
-                + "focused accessibility value and a neutral wake point. No view may hold crown focus, or "
-                + "the scrolled content is already at its limit. Tap the crown target (for example "
-                + "tapOn ctrlproxy-crown), then retry rotateCrown."
+            "rotateCrown changed nothing verifiable. No view may hold crown focus, or "
+                + "the scrolled content is already at its limit. "
+                + "Tap the control that should respond to the Digital Crown, then retry rotateCrown."
         )
+    }
+    func rotationObservation(
+        after before: (hierarchy: SdkViewHierarchy, value: WatchCrownValue?)
+    )
+        -> (hierarchy: SdkViewHierarchy, value: WatchCrownValue?)?
+    {
+        guard let after = try? observation() else { return nil }
+        if let old = before.value, let new = after.value,
+           old.elementType == new.elementType, old.identifier == new.identifier, old.value == new.value,
+           watchCrownChangedHierarchy(before: before.hierarchy, after: after.hierarchy)
+        {
+            // The separate focused-value query can lag the changed tree. Read once more, without rotating.
+            return try? observation()
+        }
+        return after
     }
 
     var before = baseline()
@@ -419,19 +436,18 @@ func watchVerifiedCrownRotation(
         before = baseline()
     }
     try rotate()
-    guard let before, let after = try? observation(), !changed(before, after) else { return }
+    guard let before, let after = rotationObservation(after: before), !changed(before, after) else { return }
     // A cold wake already prepared routing; without comparable values, never repeat this delta.
     if proactivelyWoke, before.value == nil || after.value == nil { throw unchanged() }
     guard let point = watchCrownWakePoint(in: before.hierarchy) else { throw unchanged() }
 
     try wake(point)
-    // Without a readable value, wake routing for the next command but never repeat this delta.
     guard let value = before.value, after.value == value,
           let retryBefore = baseline(), retryBefore.value == value,
           !watchCrownChangedHierarchy(before: after.hierarchy, after: retryBefore.hierarchy)
     else { throw unchanged() }
     try rotate()
-    guard let retryAfter = try? observation(), !changed(retryBefore, retryAfter) else { return }
+    guard let retryAfter = rotationObservation(after: retryBefore), !changed(retryBefore, retryAfter) else { return }
     throw unchanged()
 }
 

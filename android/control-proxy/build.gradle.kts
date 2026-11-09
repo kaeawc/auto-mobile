@@ -67,7 +67,7 @@ android {
 androidComponents {
   onVariants(selector().withBuildType("release")) { variant ->
     val iconContract =
-      rootProject.layout.projectDirectory.file("../schemas/prototype-spec-contract.json")
+      layout.projectDirectory.file("../../schemas/prototype-spec-contract.json")
     val generateIconRules =
       tasks.register<GeneratePrototypeIconRulesTask>("generateReleasePrototypeIconRules") {
         contractFile.set(iconContract)

@@ -12,6 +12,10 @@ import type { AccessibilityDetector } from "../../ctrlProxy/accessibility/interf
 import { accessibilityDetector } from "../../ctrlProxy/accessibility/AccessibilityDetector";
 import { type Timer, defaultTimer } from "../../utils/SystemTimer";
 import { isRuntimePermissionPrompt } from "../observe/BlockingSystemPrompt";
+import { parseAndroidRuntimePermissions } from "../action/parseAndroidRuntimePermissions";
+import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
+import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { type SecureSettingsRpc, CtrlProxySecureSettingsRpc } from "./SecureSettingsRpc";
 import {
   type TalkBackDialogProbe,
@@ -55,7 +59,21 @@ export const isTalkBackRuntimePermissionPrompt = isRuntimePermissionPrompt;
  * 0.0.88 a permission controller prompt appeared about 3 s after the toggle returned (#17668).
  */
 export const TALKBACK_PROMPT_SETTLE_MS = 4_000;
-const TALKBACK_PROMPT_SETTLE_POLL_MS = 500;
+export const TALKBACK_PROMPT_SETTLE_POLL_MS = 500;
+/**
+ * Consecutive identical prompt-free foreground reads that count as a stable screen. The window
+ * only ends on them when TalkBack has no runtime permission left to request: a stable screen
+ * alone is no evidence, because the #17668 prompt appeared over an unchanged app.
+ */
+export const TALKBACK_PROMPT_STABLE_READS = 2;
+/** Flags under which Android no longer shows a runtime prompt for a denied permission. */
+const NON_PROMPTABLE_PERMISSION_FLAGS = ["USER_FIXED", "POLICY_FIXED", "SYSTEM_FIXED"];
+
+/** Whether a foreground read in the settle window saw a prompt, a readable screen, or nothing. */
+type SettleRead =
+  | { kind: "prompt"; prompt: TalkBackBlockingPrompt }
+  | { kind: "screen"; signature: string }
+  | { kind: "unknown" };
 
 async function reportPreviousState(
   options: ScreenReaderToggleOptions | undefined,
@@ -83,9 +101,12 @@ export interface TalkBackToggleTiming {
    * After an applied enable with no prompt yet, keep reading the foreground for this long and
    * report a runtime prompt that appears in it. 0 (the default) reads once; the `accessibility`
    * tool passes {@link TALKBACK_PROMPT_SETTLE_MS}. Session restore leaves it 0 so its
-   * worst-case budget is unchanged.
+   * worst-case budget is unchanged. The window ends early once the screen is stable and
+   * TalkBack has no runtime permission it could still prompt for.
    */
   promptSettleMs?: number;
+  /** The request's abort signal: a cancelled call stops waiting in the settle window. */
+  signal?: AbortSignal;
 }
 
 export class TalkBackToggle {
@@ -94,6 +115,7 @@ export class TalkBackToggle {
   private readonly dialogProbe: TalkBackDialogProbe;
   private readonly timer: Timer;
   private readonly promptSettleMs: number;
+  private readonly signal: AbortSignal | undefined;
 
   constructor(
     private readonly device: BootedDevice,
@@ -102,12 +124,14 @@ export class TalkBackToggle {
     {
       timer = defaultTimer,
       promptSettleMs = 0,
+      signal,
       secureSettings,
       dialogProbe,
     }: TalkBackToggleCtrlProxy & TalkBackToggleTiming = {},
   ) {
     this.timer = timer;
     this.promptSettleMs = promptSettleMs;
+    this.signal = signal;
     this.adb = adb ?? defaultAdbClientFactory.create(device);
     this.secureSettings = secureSettings ?? new CtrlProxySecureSettingsRpc(device);
     this.dialogProbe = dialogProbe ?? new CtrlProxyTalkBackDialogProbe(device);
@@ -215,17 +239,102 @@ export class TalkBackToggle {
     return { ...confirmed, blockingPrompt, warning: BLOCKING_PROMPT_WARNING };
   }
 
-  /** Poll the foreground through the settle window; a prompt TalkBack raises late lands here. */
+  /**
+   * Poll the foreground through the settle window; a prompt TalkBack raises late lands here.
+   * End early once {@link TALKBACK_PROMPT_STABLE_READS} reads agree and TalkBack has no runtime
+   * permission left to request. An abort of the request rejects the wait.
+   */
   private async awaitLateBlockingPrompt(): Promise<TalkBackBlockingPrompt | undefined> {
     const polls = Math.floor(this.promptSettleMs / TALKBACK_PROMPT_SETTLE_POLL_MS);
+    if (polls === 0) {
+      return undefined;
+    }
+    throwIfAborted(this.signal);
+    const promptPossible = await this.talkBackMayStillPrompt();
+    let lastSignature: string | undefined;
+    let stableReads = 0;
     for (let poll = 0; poll < polls; poll++) {
-      await this.timer.sleep(TALKBACK_PROMPT_SETTLE_POLL_MS);
-      const prompt = await this.readBlockingPrompt();
-      if (prompt) {
-        return prompt;
+      await awaitWhileRequestIsLive(this.timer.sleep(TALKBACK_PROMPT_SETTLE_POLL_MS), this.signal);
+      const read = await this.readSettleForeground();
+      throwIfAborted(this.signal);
+      if (read.kind === "prompt") {
+        return read.prompt;
+      }
+      const signature = read.kind === "screen" ? read.signature : undefined;
+      stableReads = signature !== undefined && signature === lastSignature ? stableReads + 1 : 1;
+      lastSignature = signature;
+      if (
+        !promptPossible &&
+        signature !== undefined &&
+        stableReads >= TALKBACK_PROMPT_STABLE_READS
+      ) {
+        logger.debug(
+          `[TalkBackToggle] Screen stable with no pending TalkBack permission after ${(poll + 1) * TALKBACK_PROMPT_SETTLE_POLL_MS}ms; ending settle window`,
+        );
+        return undefined;
       }
     }
     return undefined;
+  }
+
+  /**
+   * Whether TalkBack may still raise a runtime permission prompt: some runtime permission is
+   * neither granted nor fixed. Unreadable or absent permission state counts as possible, so the
+   * full window runs.
+   */
+  private async talkBackMayStillPrompt(): Promise<boolean> {
+    try {
+      const result = await this.adb.executeCommand(`shell dumpsys package ${TALKBACK_PACKAGE}`, {
+        maxBuffer: DUMPSYS_MAX_BUFFER,
+        noRetry: true,
+      });
+      if (outputLooksLikeShellFailure(result.stdout, result.stderr ?? "")) {
+        return true;
+      }
+      const runtime = parseAndroidRuntimePermissions(
+        result.stdout,
+        TALKBACK_PACKAGE,
+      )?.runtimePermissions;
+      if (!runtime || runtime.size === 0) {
+        return true;
+      }
+      return [...runtime.values()].some(({ state, raw }) => {
+        const flags = typeof raw?.flags === "string" ? raw.flags : "";
+        return (
+          state !== "granted" && !NON_PROMPTABLE_PERMISSION_FLAGS.some((f) => flags.includes(f))
+        );
+      });
+    } catch (error) {
+      // Advisory: an unreadable permission state only keeps the full settle window.
+      logger.debug("[TalkBackToggle] TalkBack permission read failed:", errorMessage(error));
+      return true;
+    }
+  }
+
+  private async readSettleForeground(): Promise<SettleRead> {
+    try {
+      const app = await this.adb.getForegroundApp(this.signal);
+      if (!app) {
+        logger.debug("[TalkBackToggle] Foreground app unavailable; no prompt reported");
+        return { kind: "unknown" };
+      }
+      if (app.activityName && isTalkBackRuntimePermissionPrompt(app)) {
+        return {
+          kind: "prompt",
+          prompt: {
+            kind: "runtime-permission",
+            package: app.packageName,
+            activity: app.activityName,
+          },
+        };
+      }
+      return { kind: "screen", signature: `${app.packageName}/${app.activityName ?? ""}` };
+    } catch (error) {
+      // Prompt detection is advisory; enabled-state read-back remains the source of truth, and
+      // an unreadable settle poll only resets the stability count.
+      logger.debug("[TalkBackToggle] Foreground prompt read failed:", errorMessage(error));
+      return { kind: "unknown" };
+    }
   }
 
   private async failedToggleResult(reason: string): Promise<TalkBackResult> {
@@ -266,24 +375,8 @@ export class TalkBackToggle {
   }
 
   private async readBlockingPrompt(): Promise<TalkBackBlockingPrompt | undefined> {
-    try {
-      const app = await this.adb.getForegroundApp();
-      if (!app) {
-        logger.debug("[TalkBackToggle] Foreground app unavailable; no prompt reported");
-        return undefined;
-      }
-      if (app.activityName && isTalkBackRuntimePermissionPrompt(app)) {
-        return {
-          kind: "runtime-permission",
-          package: app.packageName,
-          activity: app.activityName,
-        };
-      }
-    } catch (error) {
-      // Prompt detection is advisory; enabled-state read-back remains the source of truth.
-      logger.debug("[TalkBackToggle] Foreground prompt read failed:", errorMessage(error));
-    }
-    return undefined;
+    const read = await this.readSettleForeground();
+    return read.kind === "prompt" ? read.prompt : undefined;
   }
 
   /**

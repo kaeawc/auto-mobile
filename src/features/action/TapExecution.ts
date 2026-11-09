@@ -156,7 +156,7 @@ interface TapExecutionState {
   ensureCheckedTapTimestamp?: number;
   completedDisplayGesture: boolean;
   settlePostTapEffect?: boolean;
-  /** The match a TalkBack ACTION_CLICK claimed to activate; warn if nothing changed (#17667). */
+  /** The match a TalkBack tap claimed to activate; warn if nothing changed (#17667, #17677). */
   screenReaderActivation?: { matched?: Element };
 }
 interface TapHierarchyState {
@@ -866,7 +866,7 @@ export class TapExecution {
                 Object.assign(tapPoint, this.host.geometry().getElementCenter(current));
               },
               onActivationWarning: (warning) => target.activationWarnings.push(warning),
-              onSemanticActivation: () => {
+              onTalkBackActivation: () => {
                 state.screenReaderActivation = { matched: target.finalSelection.matchedElement };
               },
             },

@@ -282,9 +282,9 @@ function requiredKeysAt(schema: unknown, path: ReadonlyArray<PropertyKey>): Set<
   return new Set(required);
 }
 
-function formatKeyList(keys: readonly string[]): string {
-  const listed = keys.slice(0, MAX_KEYS_LISTED).join(", ");
-  const more = keys.length > MAX_KEYS_LISTED ? `, … (${keys.length - MAX_KEYS_LISTED} more)` : "";
+function formatKeyList(keys: readonly string[], maxKeys: number): string {
+  const listed = keys.slice(0, maxKeys).join(", ");
+  const more = keys.length > maxKeys ? `, … (${keys.length - maxKeys} more)` : "";
   return `${listed}${more}`;
 }
 
@@ -315,6 +315,7 @@ function keysLine(
   schema: unknown,
   path: ReadonlyArray<PropertyKey>,
   unknownKeys: readonly string[],
+  maxKeys = MAX_KEYS_LISTED,
 ): string | undefined {
   const relocations = relocationLines(schema, path, unknownKeys);
   if (relocations.length > 0) {
@@ -330,7 +331,23 @@ function keysLine(
     ...keys.filter((key) => !required.has(key)),
   ];
   const owner = path.length === 0 ? "Allowed keys" : `Allowed ${displayPath(path)} keys`;
-  return `${owner}: ${formatKeyList(ordered)}.`;
+  return `${owner}: ${formatKeyList(ordered, maxKeys)}.`;
+}
+
+/**
+ * The keys line for unknown top-level keys alone, listing at most `maxKeys`, for
+ * a tool-specific hint that covers every other error but not those keys (#17680).
+ * Empty when there are no unknown keys or the schema derives no line.
+ */
+export function topLevelKeysHint(
+  schema: unknown,
+  unknownKeys: readonly string[],
+  maxKeys: number,
+): string {
+  if (schema === undefined || unknownKeys.length === 0) {
+    return "";
+  }
+  return keysLine(schema, [], unknownKeys, maxKeys) ?? "";
 }
 
 // The minimal call, extended with the top-level key each error path sits under

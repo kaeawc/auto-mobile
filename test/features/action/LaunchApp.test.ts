@@ -339,6 +339,24 @@ describe("LaunchApp", () => {
         .getExecuteOptions()
         .every((options) => options.signal === controller.signal),
     ).toBe(true);
+    // #17665: nothing was dispatched, so the gfxinfo stability wait is skipped.
+    expect(fakeAwaitIdle.wasMethodCalled("initializeUiStabilityTracking")).toBe(false);
+  });
+
+  test("an already-foreground launch still runs the stability wait when explicitly asked", async () => {
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse(
+      "shell dumpsys activity processes",
+      createExecResult(`123:${packageName}/u0a123\n`, ""),
+    );
+
+    const result = await launchApp.execute(packageName, {
+      clearAppData: false,
+      coldBoot: false,
+      skipUiStability: false,
+    });
+
+    expect(result.alreadyForeground).toBe(true);
     expect(fakeAwaitIdle.wasMethodCalled("initializeUiStabilityTracking")).toBe(true);
   });
 

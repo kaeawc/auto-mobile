@@ -10,7 +10,7 @@ import {
 } from "../utils/PostActionCaptureContext";
 import { isAdoptableCapture } from "../features/observe/isAdoptableCapture";
 import type { ObserveResult } from "../models/ObserveResult";
-import type { SettleObserve } from "../features/observe/interfaces/SettleObserve";
+import type { SettleObserve, SettleOptions } from "../features/observe/interfaces/SettleObserve";
 import { hierarchyUpdatedAtToMillis } from "../features/observe/observeTimestamp";
 import {
   classifyObservationAction,
@@ -18,24 +18,20 @@ import {
   type ObservationActionClass,
 } from "../features/action/observationActionClass";
 import { combineAbortSignals } from "../utils/AbortContext";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { SystemTimer, type Timer } from "../utils/SystemTimer";
 import { readToolEnvelopePayload, writeToolEnvelopePayload } from "../daemon/toolEnvelopePayload";
+import {
+  EMBEDDED_OBSERVATION_SETTLE_MAX_TIMEOUT_MS,
+  EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS,
+} from "./embeddedObservationSettleBudget";
 
-/**
- * Budget for the embedded-observation settle gate (issue #6866).
- *
- * Deliberately tighter than the standalone `observe(waitFor: {for: "stable"})`
- * default (`DEFAULT_SETTLE_TIMEOUT_MS`, 2500ms): this runs on the hot path of
- * EVERY navigation-class action, and a screen that never reaches structural
- * stability (a ticking clock, a blinking caret) would otherwise spend the full
- * standalone budget on every tap. A screen that is merely finishing inflation
- * settles in two polls, so the bound is only ever paid by screens that would
- * not have settled anyway — and those report `settled: false` rather than
- * stalling the action.
- */
-export const EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS = 1000;
+export {
+  EMBEDDED_OBSERVATION_SETTLE_MAX_TIMEOUT_MS,
+  EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS,
+} from "./embeddedObservationSettleBudget";
 
 /**
  * How long the outer abort fence outlives the loop's own budget.
@@ -65,6 +61,11 @@ export interface EmbeddedObservationSettleInput {
   signal?: AbortSignal;
   /** Drives the outer abort fence; defaults to the real clock. */
   timer?: Timer;
+  /**
+   * Loop budget in ms; defaults to {@link EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS}.
+   * `0` skips the re-observation and reports the action capture as unsettled.
+   */
+  budgetMs?: number;
 }
 
 export interface EmbeddedObservationSettleOutcome {
@@ -112,6 +113,18 @@ export async function settleEmbeddedObservation(
     return terminalCaptureOutcome(input, { observation: input.observation, settled: false });
   }
 
+  const budgetMs = input.budgetMs ?? EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS;
+  if (budgetMs <= 0) {
+    // The caller opted out of the gate for this call: hand back the action's
+    // own capture with the honest verdict for a capture never stability-checked.
+    await finalizePendingTerminalScreenshot(
+      input.observation,
+      input.observation,
+      undefined,
+      input.signal,
+    );
+    return terminalCaptureOutcome(input, { observation: input.observation, settled: false });
+  }
   // The settle loop's own budget is checked BETWEEN polls, so a single device
   // read that hangs could still overrun it — on a hot path that now runs after
   // every navigation action. Bound hierarchy reads with a real-clock deadline as
@@ -124,38 +137,18 @@ export async function settleEmbeddedObservation(
   const timer = input.timer ?? defaultTimer;
   const startedAt = timer.now();
   const elapsed = (): number => timer.now() - startedAt;
-  const fence = createSettleFence(timer);
+  const fence = createSettleFence(timer, budgetMs);
+  const settleSignal = combineAbortSignals(input.signal, fence.signal);
   try {
-    const result = await input.settleObserve.execute({
-      // Keep post-action polls on the panel selected at the shared tool boundary.
-      display: strictDisplay ? input.observation.display?.key : undefined,
-      timeoutMs: EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS,
-      pollMs: EMBEDDED_OBSERVATION_SETTLE_POLL_MS,
-      signal: combineAbortSignals(input.signal, fence.signal),
-      initialMinTimestampMs: hierarchyUpdatedAtToMillis(input.observation.viewHierarchy),
-      // A still screen pushes nothing newer than the action's capture. Skip
-      // the push wait so a rejected cache triggers sync re-extraction (#6099)
-      // with a newer device timestamp, leaving time for the second stable read.
-      skipWaitForFresh: true,
-      // Each stable read must be independent, even inside the cache serve window (#9579).
-      requireFreshExtraction: true,
-      // A finishing read can catch another transition; use the remaining settle budget (#9591).
-      resumeOnTerminalMismatch: true,
-      // The poll already drops the screenshot and the accessibility audit as
-      // intermediate state; the performance audit has to go too. It drives up
-      // to three synthetic touches plus ADB/database work that honours neither
-      // the loop's budget nor the deadline above, so on THIS path — every
-      // navigation action, one-second budget — it would perturb the screen the
-      // gate is trying to settle, corrupt its own measurement, and stretch the
-      // action by seconds (#6890 review). The action's own
-      // `performanceAudit`, measured across the action window, is preserved by
-      // {@link ACTION_AUTHORED_OBSERVATION_METADATA}.
-      skipPerformanceAudit: true,
-      // Like performance auditing, processing recomposition on each hidden
-      // poll would corrupt sinceLastObservation and duplicate telemetry; the
-      // adopted terminal capture is processed once inside the poll loop (#6932).
-      skipRecompositionTracking: true,
-    });
+    // The fence is also raced here, not only handed down: a device read that
+    // ignores its signal would otherwise hold the action response until it
+    // returned, however long that took (#17663). Losing the race leaves that
+    // read running; the aborted signal stops the loop at its next check.
+    const result = await raceWithDeadline(
+      () =>
+        input.settleObserve.execute(settleOptions(input, strictDisplay, budgetMs, settleSignal)),
+      { timer, signal: settleSignal, label: "Embedded observation settle" },
+    );
     input.signal?.throwIfAborted();
     if (!isAdoptableCapture(input.observation, result.observation, strictDisplay)) {
       await finalizePendingTerminalScreenshot(
@@ -207,14 +200,85 @@ export async function settleEmbeddedObservation(
   }
 }
 
+/** Options for one gate run of the shared settle primitive. */
+function settleOptions(
+  input: EmbeddedObservationSettleInput,
+  strictDisplay: boolean,
+  budgetMs: number,
+  signal: AbortSignal | undefined,
+): SettleOptions {
+  return {
+    // Keep post-action polls on the panel selected at the shared tool boundary.
+    display: strictDisplay ? input.observation.display?.key : undefined,
+    timeoutMs: budgetMs,
+    pollMs: EMBEDDED_OBSERVATION_SETTLE_POLL_MS,
+    signal,
+    initialMinTimestampMs: hierarchyUpdatedAtToMillis(input.observation.viewHierarchy),
+    // A still screen pushes nothing newer than the action's capture. Skip
+    // the push wait so a rejected cache triggers sync re-extraction (#6099)
+    // with a newer device timestamp, leaving time for the second stable read.
+    skipWaitForFresh: true,
+    // Each stable read must be independent, even inside the cache serve window (#9579).
+    requireFreshExtraction: true,
+    // A finishing read can catch another transition; use the remaining settle budget (#9591).
+    resumeOnTerminalMismatch: true,
+    // The poll already drops the screenshot and the accessibility audit as
+    // intermediate state; the performance audit has to go too. It drives up
+    // to three synthetic touches plus ADB/database work that honours neither
+    // the loop's budget nor the deadline above, so on THIS path — every
+    // navigation action, one-second budget — it would perturb the screen the
+    // gate is trying to settle, corrupt its own measurement, and stretch the
+    // action by seconds (#6890 review). The action's own
+    // `performanceAudit`, measured across the action window, is preserved by
+    // {@link ACTION_AUTHORED_OBSERVATION_METADATA}.
+    skipPerformanceAudit: true,
+    // Like performance auditing, processing recomposition on each hidden
+    // poll would corrupt sinceLastObservation and duplicate telemetry; the
+    // adopted terminal capture is processed once inside the poll loop (#6932).
+    skipRecompositionTracking: true,
+  };
+}
+
 const defaultTimer: Timer = new SystemTimer();
 
+/**
+ * Hard wall-clock cap on one gate run: the loop budget plus a margin for its
+ * terminal work. A shortened per-call budget shortens the margin with it, so the
+ * cap never exceeds twice the budget.
+ */
+export function embeddedObservationSettleCapMs(budgetMs: number): number {
+  return budgetMs + Math.min(EMBEDDED_OBSERVATION_SETTLE_FENCE_MARGIN_MS, budgetMs);
+}
+
+/**
+ * The per-call loop budget from a tool's `settleTimeoutMs` argument (#17663),
+ * or the default when the call carries none. The tool schema bounds the value;
+ * anything else that reaches here is ignored rather than trusted.
+ */
+export function resolveEmbeddedObservationSettleBudgetMs(
+  args: Record<string, unknown> | undefined,
+): number {
+  const requested = args?.settleTimeoutMs;
+  if (
+    typeof requested !== "number" ||
+    !Number.isFinite(requested) ||
+    requested < 0 ||
+    requested > EMBEDDED_OBSERVATION_SETTLE_MAX_TIMEOUT_MS
+  ) {
+    return EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS;
+  }
+  return requested;
+}
+
 /** Abort fence that fires only after the loop's own budget plus its margin. */
-function createSettleFence(timer: Timer): { signal: AbortSignal; dispose(): void } {
+function createSettleFence(
+  timer: Timer,
+  budgetMs: number,
+): { signal: AbortSignal; dispose(): void } {
   const controller = new AbortController();
   const handle = timer.setTimeout(
     () => controller.abort(new DOMException("The operation timed out.", "TimeoutError")),
-    EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS + EMBEDDED_OBSERVATION_SETTLE_FENCE_MARGIN_MS,
+    embeddedObservationSettleCapMs(budgetMs),
   );
   return { signal: controller.signal, dispose: () => timer.clearTimeout(handle) };
 }
@@ -597,6 +661,7 @@ async function settleEmbeddedObservationResponse(
         settleObserve,
         signal: ctx.signal,
         timer: ctx.timer,
+        budgetMs: resolveEmbeddedObservationSettleBudgetMs(ctx.args),
       })
     : { observation, settled: false };
 

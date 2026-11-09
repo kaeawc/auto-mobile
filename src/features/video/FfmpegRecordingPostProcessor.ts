@@ -83,7 +83,7 @@ export class FfmpegRecordingPostProcessor {
         buildProcessFailureMessage(
           `iOS recording file missing at ${capturePath}: ${reason}`,
           "xcrun simctl",
-          [
+          backendHandle.captureArgs ?? [
             "io",
             backendHandle.config.device?.deviceId ?? "(unknown-device)",
             "recordVideo",

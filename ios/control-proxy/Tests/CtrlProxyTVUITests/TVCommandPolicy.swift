@@ -62,12 +62,14 @@ struct TVNodeSketch {
 struct TVTextEntryResolution {
     let keyboardPresent: Bool
 
-    /// A system keyboard can expose secure input as an ordinary text view. Withhold all input values.
+    /// A system keyboard can expose secure input in an anonymous text view even without a keyboard node.
     func text(for node: TVNodeSketch) -> String {
-        TVElementText.text(
+        let isAnonymousTextView = node.elementType == 52 && node.identifier.isEmpty && node.label.isEmpty
+            && (node.placeholder ?? "").isEmpty
+        return TVElementText.text(
             label: node.label, value: node.value, placeholder: node.placeholder,
             isTextInput: TVTextEntryPolicy.isTextInput(node.elementType),
-            isSecure: keyboardPresent || TVSecureField.isSecure(
+            isSecure: keyboardPresent || isAnonymousTextView || TVSecureField.isSecure(
                 elementType: node.elementType, identifier: node.identifier,
                 label: node.label, placeholder: node.placeholder
             )

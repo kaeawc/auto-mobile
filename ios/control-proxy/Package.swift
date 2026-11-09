@@ -89,6 +89,27 @@ let package = Package(
             path: "Tests/VisionCommandPolicyTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
+        .target(
+            name: "CtrlProxyWatchPolicy",
+            dependencies: [
+                .product(name: "AutoMobileSdkWire", package: "sdk-wire"),
+            ],
+            path: "Sources/CtrlProxyWatch",
+            exclude: ["WatchXCUISource.swift", "WatchRunnerService.swift"],
+            sources: ["WatchCommandHandler.swift", "WatchAccessibilityLabel.swift", "WatchHierarchyPolicy.swift"],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
+            name: "CtrlProxyWatchPolicyTests",
+            dependencies: [
+                "CtrlProxyWatchPolicy",
+                .product(name: "AutoMobileSdkWire", package: "sdk-wire"),
+            ],
+            path: "Tests/CtrlProxyWatchUITests",
+            exclude: ["CtrlProxyWatchUITests.swift"],
+            sources: ["WatchCommandHandlerTests.swift", "WatchAccessibilityLabelTests.swift"],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
         // Shared test doubles + fixtures for the implementation. NOT a dependency of the
         // shipped `.library`, so the product stays fake-free and Sendable-clean.
         .target(

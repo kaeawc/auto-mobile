@@ -1,4 +1,7 @@
 import XCTest
+#if canImport(CtrlProxyWatchPolicy)
+    @testable import CtrlProxyWatchPolicy
+#endif
 
 final class WatchAccessibilityLabelTests: XCTestCase {
     func testNonSecureFieldsPreferValueThenPlaceholder() {

@@ -340,6 +340,10 @@ function stillScope(
     ...glyphScope(options, frame),
     screenWidth: size.width,
     screenHeight: size.height,
+    safeInsets: {
+      top: frame.safeArea[orientation].top,
+      bottom: frame.safeArea[orientation].bottom,
+    },
     ...optionalScope(options),
     stacks: [],
     layers: [],

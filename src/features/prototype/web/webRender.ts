@@ -77,7 +77,7 @@ import {
   textCss,
   type WebStyleContext,
 } from "./webStyle";
-import { safeAreaCss, safeAreaEdges } from "./webInsets";
+import { safeAreaCss, safeAreaEdges, withSafeInset } from "./webInsets";
 import { webImageRenderer, type WebImageDraw } from "./webImages";
 import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
 import { textRuns } from "./webText";
@@ -159,6 +159,8 @@ export interface WebRenderScope {
   readonly ownInsets?: readonly string[];
   /** The content height bound in dp a row or box passes its children; a scroll passes none. */
   readonly heightBound?: number;
+  /** The frame's top and bottom safe-area insets (dp), which the static height pass subtracts. */
+  readonly safeInsets?: { readonly top: number; readonly bottom: number };
 }
 
 export type NodeRenderer = (node: Raw, scope: WebRenderScope, path: string) => WebElement;
@@ -942,11 +944,7 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
 };
 
 const WEB_LAYER_RENDERERS = { ...webSheetLayers(KIT), ...webModalLayers(KIT) };
-
-/** Whether `type` draws only in the window's layer while its `openWhen` holds, never in place. */
-export function isWebLayerType(type: unknown): boolean {
-  return Object.hasOwn(WEB_LAYER_RENDERERS, String(type));
-}
+export const WEB_LAYER_RENDERED_TYPES: readonly string[] = Object.keys(WEB_LAYER_RENDERERS);
 
 const WEB_SKINS = webSkins(KIT);
 
@@ -1024,7 +1022,8 @@ export function preparedNode(
   if (raw.visibleWhen !== undefined && !conditionHolds(raw.visibleWhen, presentation(local))) {
     return undefined;
   }
-  return { styled: { ...raw, style: resolvedStyle(raw, local) }, scope: local };
+  const style = withSafeInset(resolvedStyle(raw, local), raw, local);
+  return { styled: { ...raw, style }, scope: local };
 }
 
 export function renderWebNode(

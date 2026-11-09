@@ -56,6 +56,14 @@ Validate that MCP context usage stays within configured thresholds:
 bun run benchmark-context
 ```
 
+Tokens are cl100k counts of compact JSON, the form clients receive in
+`tools/list`; baselines and thresholds use the same count. Each row also shows
+the compact byte size and, under **Pretty**, the token count of 2-space JSON
+compared with `metadata.prettyBaseline`, for comparison with older reports only;
+it is never gated. The report ends with the first `tools/list` a stdio client
+receives (response line and `tools` array, bytes and tokens), measured on the
+serialized JSON-RPC line without contacting a daemon.
+
 **Exit Codes:**
 
 - `0` - All thresholds passed
@@ -84,8 +92,9 @@ Thresholds are defined in `scripts/context-thresholds.json`:
 
 ```json
 {
-  "version": "2.0.0",
+  "version": "3.0.0",
   "metadata": {
+    "tokenEncoding": "compact-json",
     "baseline": {
       "coreTools": 0,
       "allTools": 0,
@@ -102,7 +111,9 @@ The benchmark compares both profiles against their recorded baselines. To record
 a new baseline, run `bun run benchmark-context`, copy its six **Actual** values
 into `metadata.baseline` in the chosen config, then rerun the benchmark to
 verify every delta is zero. Do not copy the zeroes above into a working
-configuration.
+configuration. A config without `"tokenEncoding": "compact-json"` is rejected,
+so counts recorded on pretty-printed JSON (about 1.5x larger) cannot pass
+silently; the optional `metadata.prettyBaseline` takes the same six keys.
 
 ### Observe Output Byte Breakdown
 

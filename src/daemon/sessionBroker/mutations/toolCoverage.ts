@@ -133,7 +133,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
   ),
   ...tools(
     ["wearSurface"],
-    "addTile and removeTile change the Wear OS tile carousel, which nothing reverts or cleans, so they record a fallback intent; showTile only scrolls the carousel and records nothing.",
+    "addTile and removeTile change the Wear OS tile carousel, which nothing reverts or cleans, so they record a fallback intent; showTile only scrolls the carousel and watchFace only reads dumpsys wear_service, so they record nothing.",
     "journaled",
     { fallback: true },
   ),

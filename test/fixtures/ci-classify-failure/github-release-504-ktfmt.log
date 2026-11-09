@@ -1,0 +1,16 @@
+2026-11-09T05:21:07.4412305Z [INFO] ktfmt
+2026-11-09T05:21:07.4412871Z [INFO] Command: ONLY_TOUCHED_FILES=false "/home/runner/work/auto-mobile/auto-mobile/scripts/ktfmt/validate_ktfmt.sh"
+2026-11-09T05:21:07.4413022Z
+2026-11-09T05:21:07.5120417Z ktfmt is not installed
+2026-11-09T05:21:07.5120883Z Installing ktfmt...
+2026-11-09T05:21:07.6011329Z Downloading ktfmt JAR from GitHub Releases...
+2026-11-09T05:21:08.7304146Z curl: (22) The requested URL returned error: 504
+2026-11-09T05:21:08.7305270Z Warning: Problem : HTTP error. Will retry in 1 seconds. 3 retries left.
+2026-11-09T05:21:10.8562209Z curl: (22) The requested URL returned error: 504
+2026-11-09T05:21:10.8563110Z Warning: Problem : HTTP error. Will retry in 2 seconds. 2 retries left.
+2026-11-09T05:21:13.9821756Z curl: (22) The requested URL returned error: 504
+2026-11-09T05:21:13.9822481Z Warning: Problem : HTTP error. Will retry in 4 seconds. 1 retries left.
+2026-11-09T05:21:14.6093310Z curl: (22) The requested URL returned error: 504
+2026-11-09T05:21:14.6097854Z Failed to download ktfmt JAR from https://github.com/facebook/ktfmt/releases/download/v0.65/ktfmt-0.65-with-dependencies.jar
+2026-11-09T05:21:14.6101093Z Installation failed!
+2026-11-09T05:21:14.6102330Z Failed to install ktfmt

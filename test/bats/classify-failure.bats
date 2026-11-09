@@ -1172,3 +1172,49 @@ ROBOLECTRIC_FETCH_LOG=$'2026-11-04T07:09:55.9539251Z AutoMobileSDKFirstActivityT
   [[ "$output" == *"INVESTIGATE — instrumented first sample has no plain isolated recheck"* ]]
   [[ "$output" != *"RERUN-DONT-FIX"* ]]
 }
+
+@test "a GitHub release download 5xx classifies as infrastructure, not UNKNOWN (#17624)" {
+  fixture="$BATS_TEST_TMPDIR/issue-17624-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":65,"name":"Fast Validation","conclusion":"failure","steps":[{"name":"Run fast validation checks","conclusion":"failure"}]}]}
+JSON
+  # ktfmt.log as the 2026-11-09 outage left it (reconstructed from the lines
+  # quoted in #17624): curl's 504s, then the URL.
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
+    FAKE_ORDINARY_EXIT_LOG="$FIXTURE_DIR/github-release-504-ktfmt.log" bash "$SCRIPT" 608
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — GitHub release download returned HTTP 5xx"* ]]
+
+  # The installer's own marker, which the Fast Validation summary now echoes.
+  log="$BATS_TEST_TMPDIR/marker.log"
+  printf '%s\n' 'FAIL ktfmt           81234ms (log: /tmp/fast-validate/ktfmt.log)' \
+    '     [ktfmt] UPSTREAM-DOWNLOAD-FAILURE: https://github.com/facebook/ktfmt/releases/download/v0.65/ktfmt-0.65-with-dependencies.jar failed after 6 attempts (last error: curl: (22) The requested URL returned error: 504).' > "$log"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
+    FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 609
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — GitHub release asset download"* ]]
+
+  # BATS output from the shfmt auto-install: URL first, then curl's 502.
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":65,"name":"BATS Shell Tests (ubuntu-latest)","conclusion":"failure","steps":[{"name":"Run BATS Unit Tests","conclusion":"failure"}]}]}
+JSON
+  printf '%s\n' '# URL: https://github.com/mvdan/sh/releases/download/v3.10.0/shfmt_v3.10.0_linux_amd64' \
+    '# curl: (22) The requested URL returned error: 502' '# Failed to install shfmt' > "$log"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
+    FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 610
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — GitHub release download returned HTTP 5xx"* ]]
+}
+
+@test "a GitHub release download 404 is not classified as infrastructure (#17624)" {
+  fixture="$BATS_TEST_TMPDIR/issue-17624-404-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":65,"name":"Fast Validation","conclusion":"failure","steps":[{"name":"Run fast validation checks","conclusion":"failure"}]}]}
+JSON
+  log="$BATS_TEST_TMPDIR/404.log"
+  sed 's/error: 504/error: 404/' "$FIXTURE_DIR/github-release-504-ktfmt.log" > "$log"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
+    FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 611
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"RERUN-DONT-FIX"* ]]
+}

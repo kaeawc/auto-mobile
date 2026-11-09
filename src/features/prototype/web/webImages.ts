@@ -93,12 +93,17 @@ function paddingDp(style: Raw, side: "top" | "bottom" | "start" | "end"): number
  * maximum, then raised to the minimum, as both devices bound a size), less the padding on both its
  * sides, as Android's image target subtracts it.
  */
-function contentDp(style: Raw, axis: "width" | "height"): number | undefined {
+function contentDp(
+  style: Raw,
+  axis: "width" | "height",
+  weighted?: "width" | "height",
+): number | undefined {
   const fixed = usedDp(style, axis);
   if (fixed !== undefined) {
     return Math.max(0, fixed - axisPaddingDp(style, axis));
   }
-  const ratio = ratioDp(style, axis);
+  // A weight sizes its axis by share, so its authored dp is not a length the ratio can carry over.
+  const ratio = weighted === undefined ? ratioDp(style, axis) : undefined;
   // A ratio-sized axis is still a wrapped one, so its content box keeps the wrapped minimum.
   return ratio === undefined
     ? undefined
@@ -166,18 +171,23 @@ export function webImageDraw(
   const weighted = typeof style.weight === "number" ? parentAxis : undefined;
   return {
     asset,
-    ...axisDraw(style, "width", weighted === "row"),
-    ...axisDraw(style, "height", weighted === "column"),
+    ...axisDraw(style, "width", weightedAxis(weighted)),
+    ...axisDraw(style, "height", weightedAxis(weighted)),
     scale: webImageScale(node.contentScale),
   };
 }
+
+/** The node axis a weight along the parent's axis sizes, if any. */
+const weightedAxis = (parentAxis?: "row" | "column") =>
+  parentAxis === undefined ? undefined : parentAxis === "row" ? "width" : "height";
 
 /**
  * One axis's part of a draw: its content dp if fixed, whether it fills (a weight takes the
  * parent's space by share, as a fill takes it whole), and a wrapped axis's authored minimum.
  */
-function axisDraw(style: Raw, axis: "width" | "height", weighted: boolean) {
-  const fixed = weighted ? undefined : contentDp(style, axis);
+function axisDraw(style: Raw, axis: "width" | "height", weightedOn?: "width" | "height") {
+  const weighted = weightedOn === axis;
+  const fixed = weighted ? undefined : contentDp(style, axis, weightedOn);
   const minimum = wrappedMinimumDp(style, axis);
   return {
     ...(fixed === undefined ? {} : { [`${axis}Dp`]: fixed }),

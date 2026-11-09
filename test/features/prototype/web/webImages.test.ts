@@ -157,6 +157,14 @@ describe("webImageDraw and webImageRule", () => {
       style: { width: { dp: 200 }, aspectRatio: 10, padding: { start: 90, end: 90 } },
     });
     expect(flat).toMatchObject({ widthDp: 20, heightDp: 48 });
+    // A weight overrides the source axis's dp, so the ratio does not carry it over.
+    const weighted = webImageDraw(
+      "a",
+      { style: { width: { dp: 200 }, weight: 1, aspectRatio: 2, padding: { start: 80, end: 80 } } },
+      "row",
+    );
+    expect(weighted).toEqual({ asset: "a", widthFill: true, scale: "fit" });
+    expect(webImageBox(weighted, PIXEL)).toEqual({ width: 2402, height: 2402, cover: false });
     const tall = webImageDraw("a", { style: { height: { dp: 100 }, aspectRatio: 0.5 } });
     expect(tall).toMatchObject({ widthDp: 50, heightDp: 100 });
   });

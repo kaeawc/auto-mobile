@@ -246,6 +246,98 @@ carries `requested`, `broadcastResult` (`code`, `data` and a typed `outcome`: `a
 - The broadcasts were measured on the verified emulator; the tool itself is unverified on a
   device, so check `broadcastResult` when a result surprises you.
 
+## Watch faces and complications
+
+`wearSurface` with `"action": "watchFace"` (no other arguments) reads the watch faces without
+changing anything:
+
+```json
+{
+  "success": true,
+  "action": "watchFace",
+  "available": true,
+  "activeFace": { "package": "com.google.wear.offhand", "favoriteId": 1, "fallback": false },
+  "favorites": [
+    {
+      "favoriteId": 1,
+      "package": "com.google.wear.offhand",
+      "slots": [
+        { "slot": 11, "type": 1, "provider": null },
+        {
+          "slot": 12,
+          "type": 3,
+          "provider": "com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.DayAndDateProviderService"
+        }
+      ]
+    }
+  ],
+  "ambient": false,
+  "message": "Active watch face com.google.wear.offhand (favorite 1); 1 favorite(s)."
+}
+```
+
+- `activeFace.fallback: true` means the classic fallback face, which has no complication slots.
+- `favorites` lists every saved favorite. Each slot has its `slot` id, complication data `type`
+  and `provider` (`<package>/<class>`, or `null` when the slot is empty). The active favorite's
+  slots are the live configuration; the other favorites show their saved slots.
+- `ambient` is the watch face's own ambient flag, the same reading `ambient` uses; it is absent
+  when the watch does not report it.
+- `available: false` (with `success: false` and a `reason`) means the watch reported no
+  readable watch faces; nothing is thrown. A failed adb command returns an error instead.
+- `watchFace` changes nothing and does not render a preview. Use `observe` or a screenshot to see
+  the face.
+
+`wearSurface` also switches the watch face and fills complication slots. Name a resource-only
+(Watch Face Format) face by its bare package (`com.google.wear.offhand`) and a classic face as
+`<package>/<class>`; never pass `<package>/_placeholder_`. Complication types are the androidx
+type ints (`SHORT_TEXT` = 3, `RANGED_VALUE` = 5), and `provider` is the data source service as
+`<package>/<service>`.
+
+```json
+{
+  "name": "wearSurface",
+  "arguments": {
+    "action": "setComplication",
+    "watchFace": "com.google.wear.offhand",
+    "slot": 11,
+    "type": 5,
+    "provider": "com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.BatteryProviderService"
+  }
+}
+```
+
+| `action`            | Arguments                               | `success: true` means                                     |
+| ------------------- | --------------------------------------- | --------------------------------------------------------- |
+| `setWatchFace`      | `watchFace`                             | The face is the active one, with the reply's favorite id  |
+| `unsetWatchFace`    | none                                    | The face active before `setWatchFace` is active again     |
+| `setComplication`   | `watchFace`, `slot`, `type`, `provider` | The active face's slot shows that provider with that type |
+| `unsetComplication` | `watchFace`, `slot`, `provider`         | The active face's slot is empty                           |
+
+The watch accepts a request before applying it, so each action reads `dumpsys wear_service` back
+for up to about 5 s and sets `applied: true` (and `verified: true`) only when the change shows
+there. Results carry `requested`, `broadcastResult` (`code`, `data`, `accepted`, `favoriteId`),
+`favoriteId`, the last `readback` (`activeFace`, `favorites` and `ambient`, as `watchFace` reports
+them), and on failure a typed `error` with a `reason`:
+
+| `error`                   | Meaning and what to do                                                                     |
+| ------------------------- | ------------------------------------------------------------------------------------------ |
+| `not_applied`             | Accepted but not shown, typically a `type` the provider does not support: try another type |
+| `face_not_installed`      | No such face package (or class): check the name                                            |
+| `slot_out_of_range`       | The face has no such slot, or it is not the active face: `setWatchFace` first              |
+| `invalid_face_id`         | A `_placeholder_` class: pass a resource-only face as its bare package                     |
+| `unsupported_face`        | The fallback face has no slots: set another face first                                     |
+| `debug_surface_disabled`  | The debug receiver is off on this build: enable developer options and retry                |
+| `watch_face_not_switched` | `unsetWatchFace` with nothing to revert                                                    |
+| `missing_argument`        | The watch rejected the extras it was sent                                                  |
+| `unknown_reply`           | A reply this release does not know: check `broadcastResult`                                |
+
+- Slots belong to the active face, so set the face before its complications. List its slot ids
+  with `watchFace` (the active favorite's `slots`).
+- The tool does not check that `provider` is a complication data source before sending; list
+  them with `adb shell cmd package query-services -a android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST`.
+- The broadcasts and readbacks were measured on a Wear OS 7 emulator; the tool itself is
+  unverified on a device.
+
 ## Prototypes
 
 `prototype` `show` renders on a watch with the phone overlay and components; there are no
@@ -258,7 +350,7 @@ they stay tappable. Wear launchers are not expected to support pinned shortcuts,
 ## Not supported
 
 - Physical watches: only Wear OS emulators are matched and created.
-- Complications and watch faces, and listing the tiles in the carousel.
+- Listing the tiles in the carousel, and listing complication providers.
 - Tapping a notification's expanded content or its reply and action buttons without an explicit
   clickable label (see [Notifications](#notifications)).
 - Hardware wake by tilt or touch, and a paired phone and watch.

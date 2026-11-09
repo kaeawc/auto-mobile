@@ -49,13 +49,6 @@ enum TVSecureField {
     }
 }
 
-struct TVFocusedField: Equatable {
-    let identifier: String
-    let label: String
-    let placeholder: String?
-    let isSecure: Bool
-}
-
 struct TVNodeSketch {
     let elementType: Int
     var identifier = ""
@@ -66,64 +59,21 @@ struct TVNodeSketch {
     var children: [TVNodeSketch] = []
 }
 
-struct TVKeyboardEntry: Equatable {
-    let path: [Int]
-    let resourceId: String?
-    let text: String
-    let className = "49"
-    let focused = true
-}
-
 struct TVTextEntryResolution {
     let keyboardPresent: Bool
-    let entry: TVKeyboardEntry?
 
-    func overrideEntry(at path: [Int]) -> TVKeyboardEntry? {
-        entry.flatMap { $0.path == path ? $0 : nil }
-    }
-
-    /// Every node uses this policy, including inputs not selected for the keyboard override.
-    func text(for node: TVNodeSketch, path: [Int]) -> String {
-        if let entry = overrideEntry(at: path) { return entry.text }
+    /// A system keyboard can expose secure input in an anonymous text view even without a keyboard node.
+    func text(for node: TVNodeSketch) -> String {
+        let isAnonymousTextView = node.elementType == 52 && node.identifier.isEmpty && node.label.isEmpty
+            && (node.placeholder ?? "").isEmpty
         return TVElementText.text(
             label: node.label, value: node.value, placeholder: node.placeholder,
             isTextInput: TVTextEntryPolicy.isTextInput(node.elementType),
-            isSecure: keyboardPresent || TVSecureField.isSecure(
+            isSecure: keyboardPresent || isAnonymousTextView || TVSecureField.isSecure(
                 elementType: node.elementType, identifier: node.identifier,
                 label: node.label, placeholder: node.placeholder
             )
         )
-    }
-}
-
-/// Retain identity only for a known generation of the current target app.
-struct TVFocusMemory {
-    private var bundleId: String?
-    private var processToken: Int?
-    private var remembered: TVFocusedField?
-
-    mutating func field(for bundle: String, processToken: Int?) -> TVFocusedField? {
-        guard let processToken, bundle == bundleId, processToken == self.processToken else {
-            remembered = nil
-            return nil
-        }
-        return remembered
-    }
-
-    mutating func observe(bundle: String, processToken: Int?, root: TVNodeSketch) {
-        let previous = field(for: bundle, processToken: processToken)
-        bundleId = bundle
-        self.processToken = processToken
-        remembered = processToken == nil ? nil : TVTextEntryPolicy.rememberedField(in: root, previous: previous)
-    }
-
-    mutating func willSelect(bundle: String, processToken: Int?, snapshot: TVNodeSketch?) {
-        bundleId = bundle
-        self.processToken = processToken
-        remembered = nil
-        guard processToken != nil, let snapshot, !TVTextEntryPolicy.hasKeyboard(snapshot) else { return }
-        // A select can open a different field: only the input focused in this snapshot is evidence.
-        remembered = TVTextEntryPolicy.rememberedField(in: snapshot, previous: nil)
     }
 }
 
@@ -140,71 +90,8 @@ enum TVTextEntryPolicy {
         (root.elementType == 19 && root.hasFocus) || root.children.contains { hasFocusedKeyboard($0) }
     }
 
-    /// Keep the previous field when no field is focused, including after the keyboard closes.
-    static func rememberedField(in root: TVNodeSketch, previous: TVFocusedField?) -> TVFocusedField? {
-        if hasKeyboard(root) { return matchingField(in: root, previous: previous) }
-        return focusedField(in: root) ?? previous
-    }
-
-    private static func focusedField(in node: TVNodeSketch) -> TVFocusedField? {
-        guard node.elementType != 19 else { return nil }
-        if node.hasFocus, isTextInput(node.elementType) {
-            return TVFocusedField(
-                identifier: node.identifier, label: node.label, placeholder: node.placeholder,
-                isSecure: TVSecureField.isSecure(
-                    elementType: node.elementType, identifier: node.identifier,
-                    label: node.label, placeholder: node.placeholder
-                )
-            )
-        }
-        return node.children.lazy.compactMap { focusedField(in: $0) }.first
-    }
-
-    static func resolve(
-        root: TVNodeSketch, lastFocusedField: TVFocusedField?
-    )
-        -> TVTextEntryResolution
-    {
-        let keyboardPresent = hasKeyboard(root)
-        guard keyboardPresent else { return TVTextEntryResolution(keyboardPresent: false, entry: nil) }
-        let candidates = entries(in: root, path: [])
-        // A prompt identifies a session, not which of multiple inputs owns the value.
-        guard candidates.count == 1 else { return TVTextEntryResolution(keyboardPresent: true, entry: nil) }
-        let field = matchingField(in: root, previous: lastFocusedField)
-        let entry = candidates.first.map { candidate in
-            let node = candidate.node
-            return TVKeyboardEntry(
-                path: candidate.path, resourceId: field?.identifier,
-                text: TVElementText.text(
-                    label: field?.label ?? node.label, value: node.value, placeholder: field?.placeholder,
-                    isTextInput: true, isSecure: (field?.isSecure ?? true) || TVSecureField.isSecure(
-                        elementType: node.elementType, identifier: node.identifier,
-                        label: node.label, placeholder: node.placeholder
-                    )
-                )
-            )
-        }
-        return TVTextEntryResolution(keyboardPresent: true, entry: entry)
-    }
-
-    private static func matchingField(in root: TVNodeSketch, previous: TVFocusedField?) -> TVFocusedField? {
-        guard let previous, let prompt = prompt(in: root), !prompt.isEmpty,
-              prompt == previous.placeholder || prompt == previous.label else { return nil }
-        return previous
-    }
-
-    private static func prompt(in node: TVNodeSketch) -> String? {
-        guard node.elementType != 19 else { return nil }
-        if node.elementType == 48 { return node.label }
-        return node.children.lazy.compactMap { prompt(in: $0) }.first
-    }
-
-    private static func entries(in node: TVNodeSketch, path: [Int]) -> [(path: [Int], node: TVNodeSketch)] {
-        guard node.elementType != 19 else { return [] }
-        let current = isTextInput(node.elementType) ? [(path: path, node: node)] : []
-        return current + node.children.enumerated().flatMap { index, child in
-            entries(in: child, path: path + [index])
-        }
+    static func resolve(root: TVNodeSketch) -> TVTextEntryResolution {
+        TVTextEntryResolution(keyboardPresent: hasKeyboard(root))
     }
 }
 

@@ -26,9 +26,11 @@ import {
   capturedBroadcast as capturedReply,
   capturedFace,
   capturedTile,
+  capturedSurfaceObservation,
 } from "../../helpers/wearSurfaceCaptures";
-import { surfaceSnapshot } from "../../../src/server/wearSurfaceTool";
+import { createDeviceObserver, surfaceSnapshot } from "../../../src/server/wearSurfaceTool";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 
 function reply(label: string): string {
   switch (label) {
@@ -187,6 +189,31 @@ describe("broadcast reply parser", () => {
 });
 
 describe("AdbWearSurface", () => {
+  test.each(["tile-showing", "app-in-front"] as const)(
+    "showTile verifies only tile evidence from the full %s capture",
+    async (name) => {
+      adb.on(/operation show-tile/, reply("0"));
+      const screen = new FakeObserveScreen();
+      screen.setObserveResult(capturedSurfaceObservation(name));
+      const observe = createDeviceObserver(
+        { name: "Wear", deviceId: "emulator-5554", platform: "android" },
+        () => screen,
+      );
+      const result = await new AdbWearSurface({
+        adb,
+        timer,
+        observe,
+        tileProviders: new AdbTileProviderLister(providerAdb),
+      }).showTile({ index: 0 });
+      expect(result).toMatchObject({
+        success: name === "tile-showing",
+        verified: name === "tile-showing",
+        broadcastResult: { code: 1, outcome: "showRequested" },
+      });
+      expect(timer.getSleepHistory()).toEqual([SHOW_TILE_SETTLE_MS]);
+    },
+  );
+
   test("addTile sends add-tile on DEBUG_SURFACE and reports the index without claiming an observe", async () => {
     adb.on(/operation add-tile/, reply("add-tile (ok)"));
     const result = await surface().addTile(FAVORITES);

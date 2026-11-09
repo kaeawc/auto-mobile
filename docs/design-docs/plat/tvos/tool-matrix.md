@@ -19,6 +19,20 @@ capability (`displayConfig`, `statusBar`, `clipboard`, `getAppPermissions`), or 
 focus-navigation hint for touch gestures (`tapAt`, `swipeOn`, `pinchOn`,
 `multiTouch`, `dragAndDrop`, `tapAny`).
 
+## Observe text policy
+
+While a type-19 system keyboard node is present anywhere in the snapshot, no
+text-input value is emitted, including the keyboard's text view and inputs
+outside its subtree, regardless of focus. Nodes retain their snapshot
+identifier, class and focus; field nodes emit only their labels, and placeholders
+appear only as keyboard prompt nodes. An anonymous type-52 node (no identifier,
+label or placeholder, including a nil placeholder) never emits a value,
+regardless of keyboard presence.
+After the keyboard closes, a named plain field's typed value is readable through
+`observe` on the field's own node, joined with its label when distinct. A value
+equal to the placeholder counts as empty. Secure fields, including type-50
+nodes and fields identified by secure metadata, always redact their values.
+
 ## Status values
 
 - **pass**: allowlisted and verified working on an Apple TV simulator.
@@ -100,7 +114,7 @@ focus-navigation hint for touch gestures (`tapAt`, `swipeOn`, `pinchOn`,
 | `multiTouch`                  | refused-by-design | No touch surface.                                                                                                                                |
 | `navigateTo`                  | not-supported     |                                                                                                                                                  |
 | `network`                     | not-supported     |                                                                                                                                                  |
-| `observe`                     | pass              | Reports `focusedElement`. Text typed into a field is missing from the hierarchy ([#17524]).                                                      |
+| `observe`                     | pass              | Reports `focusedElement`. Typed values are withheld while the keyboard is open; see the observe text policy.                                     |
 | `openLink`                    | pass              | Opens declared app schemes. A web URL or an undeclared scheme fails with the documented error.                                                   |
 | `performanceAudit`            | not-supported     | Needs runner work.                                                                                                                               |
 | `performanceTrace`            | not-supported     | Needs runner work.                                                                                                                               |
@@ -124,7 +138,7 @@ focus-navigation hint for touch gestures (`tapAt`, `swipeOn`, `pinchOn`,
 | `rotateCrown`                 | refused-by-design | watchOS only.                                                                                                                                    |
 | `selectAllText`               | not-supported     |                                                                                                                                                  |
 | `sendBroadcast`               | refused-by-design | Android-only.                                                                                                                                    |
-| `sendKeys`                    | pass              | Needs the keyboard open first (`pressButton select` on the field); otherwise fails with `no focused text input`. Typed text: see [#17524].       |
+| `sendKeys`                    | pass              | Requires a focused keyboard (`pressButton select` on the field); otherwise `no focused text input`. Read plain values after close.               |
 | `sendSms`                     | refused-by-design | No telephony.                                                                                                                                    |
 | `setActiveDevice`             | pass              |                                                                                                                                                  |
 | `setAppLinks`                 | refused-by-design | Android-only.                                                                                                                                    |
@@ -163,5 +177,4 @@ definitions; it boots the simulator and connects the runner.
 
 [#16723]: https://github.com/kaeawc/auto-mobile/issues/16723
 [#16726]: https://github.com/kaeawc/auto-mobile/issues/16726
-[#17524]: https://github.com/kaeawc/auto-mobile/issues/17524
 [#17528]: https://github.com/kaeawc/auto-mobile/issues/17528

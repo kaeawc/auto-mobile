@@ -1,0 +1,8 @@
+### set-complication/unset x10 on offhand slot 11 (battery type 5)
+Broadcast completed: result=1, data="Favorite Id=[1] Runtime=[2]"
+run1 set PASS broadcast=397ms readback=378ms | Broadcast completed: result=1, data="Favorite Id=[1]" |       id=1 slot=11 type=5 configActionPending=false provider=ComponentInfo{com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.BatteryProviderService} isEnabled=true
+run1 unset | Broadcast completed: result=1, data="Favorite Id=[1]" |       id=1 slot=11 type=1 configActionPending=false provider=null isEnabled=true
+run2 set PASS broadcast=444ms readback=368ms | Broadcast completed: result=1, data="Favorite Id=[1]" |       id=1 slot=11 type=5 configActionPending=false provider=ComponentInfo{com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.BatteryProviderService} isEnabled=true
+run2 unset | Broadcast completed: result=1, data="Favorite Id=[1]" |       id=1 slot=11 type=1 configActionPending=false provider=null isEnabled=true
+run3 set PASS broadcast=414ms readback=408ms | Broadcast completed: result=1, data="Favorite Id=[1]" |       id=1 slot=11 type=5 configActionPending=false provider=ComponentInfo{com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.BatteryProviderService} isEnabled=true
+run3 unset | Broadcast completed: result=1, data="Favorite Id=[1]" |       id=1 slot=11 type=1 configActionPending=false provider=null isEnabled=true

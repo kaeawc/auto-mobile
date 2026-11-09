@@ -29,6 +29,10 @@ import { McpTestFixture, precompileMcpOutputSchemas } from "../fixtures/mcpTestF
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { compileJsonSchema, compileLargeAjv2020 } from "../helpers/jsonSchemaCompile";
 import { initializeCliTools } from "../../src/cli/cliToolRegistration";
+import {
+  PROTOTYPE_SPEC_SCHEMA_URI,
+  prototypeSpecJsonSchema,
+} from "../../src/features/prototype/prototypeSpecJsonSchema";
 import { registerToolSelectionTools } from "../../src/server/toolSelectionTools";
 import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import { getDaemonStreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
@@ -1387,22 +1391,23 @@ describe("prototype CLI and advertised schema registration", () => {
     initializeCliTools();
     definition = ToolRegistry.getToolDefinitions().find((tool) => tool.name === "prototype")!;
     compileJsonSchema(definition.outputSchema);
-    // The validator is an immutable shared fixture, and compiling it also asserts the advertised
-    // input schema compiles. Its size makes Ajv's default ref inlining cost seconds (#16617).
-    // Warm-up pays the engine's lazy compilation of generated validator code; verdicts are
-    // still computed and asserted in the test.
-    validate = compileLargeAjv2020(definition.inputSchema);
+    compileJsonSchema(definition.inputSchema);
+    // The full spec contract is served as automobile:prototype/spec-schema (#17710). The validator
+    // is an immutable shared fixture; its size makes Ajv's default ref inlining cost seconds
+    // (#16617). Warm-up pays the engine's lazy compilation of generated validator code; verdicts
+    // are still computed and asserted in the test.
+    // The document declares draft-07; compile its body on the shared 2020-12 instance.
+    const document = structuredClone(prototypeSpecJsonSchema());
+    delete document.$schema;
+    validate = compileLargeAjv2020(document);
     expect(
       validate({
-        action: "show",
-        spec: {
-          id: "warm-up-panel",
-          window: { placement: { type: "fullscreen" } },
-          components: { warmUpRow: { root: { type: "text", text: "{props.caption}" } } },
-          root: {
-            type: "column",
-            children: [{ type: "use", component: "warmUpRow", props: { caption: "Warm-up" } }],
-          },
+        id: "warm-up-panel",
+        window: { placement: { type: "fullscreen" } },
+        components: { warmUpRow: { root: { type: "text", text: "{props.caption}" } } },
+        root: {
+          type: "column",
+          children: [{ type: "use", component: "warmUpRow", props: { caption: "Warm-up" } }],
         },
       }),
     ).toBe(true);
@@ -1417,8 +1422,7 @@ describe("prototype CLI and advertised schema registration", () => {
     expect(definition.name).toBe("prototype");
     expect(definition.outputSchema).toBeDefined();
   });
-  test("the advertised spec accepts a components map and use nodes in any child slot", () => {
-    const show = (spec: unknown) => validate({ action: "show", spec });
+  test("the spec schema accepts a components map and use nodes in any child slot", () => {
     const authored = {
       id: "panel",
       window: { placement: { type: "fullscreen" } },
@@ -1428,18 +1432,23 @@ describe("prototype CLI and advertised schema registration", () => {
         children: [{ type: "use", component: "row", props: { label: "A" } }],
       },
     };
-    expect(show(authored)).toBe(true);
-    expect(show({ ...authored, components: { row: { root: authored.root, extra: 1 } } })).toBe(
+    expect(validate(authored)).toBe(true);
+    expect(validate({ ...authored, components: { row: { root: authored.root, extra: 1 } } })).toBe(
       false,
     );
-    expect(show({ ...authored, root: { type: "use", component: "row", props: { a: [1] } } })).toBe(
-      false,
-    );
+    expect(
+      validate({ ...authored, root: { type: "use", component: "row", props: { a: [1] } } }),
+    ).toBe(false);
   });
-  test("the advertised theme objects reject empty objects like the validator does", () => {
-    const theme = parseJsonSchemaNode(definition.inputSchema).properties?.spec?.properties?.theme;
+  test("the spec schema's theme objects reject empty objects like the validator does", () => {
+    const theme = parseJsonSchemaNode(prototypeSpecJsonSchema()).properties?.theme;
     expect(theme?.minProperties).toBe(1);
     expect(theme?.properties?.colors?.minProperties).toBe(1);
+  });
+  test("the advertised spec points agents at the spec schema resource", () => {
+    const spec = parseJsonSchemaNode(definition.inputSchema).properties?.spec;
+    expect(spec?.description).toContain(PROTOTYPE_SPEC_SCHEMA_URI);
+    expect(definition.description).toContain(PROTOTYPE_SPEC_SCHEMA_URI);
   });
 });
 

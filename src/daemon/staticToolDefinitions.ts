@@ -3,6 +3,8 @@ import type { ProxiedToolDefinition } from "./daemonMcpProxy";
 import type { ToolAnnotations } from "@modelcontextprotocol/server";
 import type { DaemonOptions } from "./types";
 import { isAlwaysLoadToolsEnabled } from "../config/alwaysLoadTools";
+import { ENV, readEnvBool } from "../config/env";
+import { enforceAnthropicToolSchemaSubset } from "../utils/schemaHelpers";
 
 /**
  * The committed, static MCP tool surface.
@@ -65,8 +67,47 @@ function isConnectedFallbackAvailable(
   );
 }
 
+/** Reads whether `tools/list` inlines the full prototype spec schema (#17710). */
+export interface PrototypeFullSchemaFlag {
+  isEnabled(): boolean;
+}
+
+/** The production flag: `AUTOMOBILE_PROTOTYPE_FULL_SCHEMA`, re-read on every list. */
+export const envPrototypeFullSchemaFlag: PrototypeFullSchemaFlag = {
+  isEnabled: () => readEnvBool(ENV.PROTOTYPE_FULL_SCHEMA),
+};
+
+let fullPrototypeInputSchema: Record<string, unknown> | undefined;
+
+/**
+ * The committed prototype definition advertises a terse `spec` (#17710). With
+ * `AUTOMOBILE_PROTOTYPE_FULL_SCHEMA` on, the cold list inlines the full spec schema like the
+ * daemon's live list does. The schema module is required only then, so the default cold path
+ * never loads the spec contract.
+ */
+function coldInputSchema(
+  tool: RawToolDefinition,
+  fullSchemaFlag: PrototypeFullSchemaFlag,
+): Record<string, unknown> {
+  if (tool.name !== "prototype" || !fullSchemaFlag.isEnabled()) {
+    return tool.inputSchema;
+  }
+  if (!fullPrototypeInputSchema) {
+    const { fullAdvertisedSpecSchema } =
+      require("../features/prototype/prototypeSpecJsonSchema") as typeof import("../features/prototype/prototypeSpecJsonSchema");
+    const inline = structuredClone(tool.inputSchema);
+    const properties = inline.properties as Record<string, Record<string, unknown>>;
+    properties.spec = { description: properties.spec?.description, ...fullAdvertisedSpecSchema() };
+    // The same input-schema normalization the live registry applies (drops empty branches).
+    enforceAnthropicToolSchemaSubset(inline);
+    fullPrototypeInputSchema = inline;
+  }
+  return fullPrototypeInputSchema;
+}
+
 function toolDefinitions(
   connectedDaemonOptions: DaemonOptions | undefined | false,
+  fullSchemaFlag: PrototypeFullSchemaFlag,
 ): ProxiedToolDefinition[] {
   const alwaysLoad = isAlwaysLoadToolsEnabled();
   return RAW_DEFINITIONS.filter(
@@ -89,7 +130,7 @@ function toolDefinitions(
       name: tool.name,
       title: tool.title,
       annotations: tool.annotations,
-      inputSchema: tool.inputSchema,
+      inputSchema: coldInputSchema(tool, fullSchemaFlag),
     };
     if (tool.description !== undefined) {
       definition.description = tool.description;
@@ -109,15 +150,18 @@ function toolDefinitions(
  * `ToolRegistry.getToolDefinitions()`. `outputSchema` is intentionally omitted
  * (see the file docstring).
  */
-export function getStaticToolDefinitions(): ProxiedToolDefinition[] {
-  return toolDefinitions(false);
+export function getStaticToolDefinitions(
+  fullSchemaFlag: PrototypeFullSchemaFlag = envPrototypeFullSchemaFlag,
+): ProxiedToolDefinition[] {
+  return toolDefinitions(false, fullSchemaFlag);
 }
 
 /** Static schemas eligible to supplement a connected daemon's live tool list. */
 export function getConnectedStaticToolDefinitions(
   daemonOptions?: DaemonOptions,
+  fullSchemaFlag: PrototypeFullSchemaFlag = envPrototypeFullSchemaFlag,
 ): ProxiedToolDefinition[] {
-  return toolDefinitions(daemonOptions);
+  return toolDefinitions(daemonOptions, fullSchemaFlag);
 }
 
 /**

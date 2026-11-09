@@ -160,10 +160,11 @@ describe("MCP tool annotations", () => {
   test("cold proxy tools/list without output schemas has a documented metadata budget exception", () => {
     const coldProxyTools = getStaticToolDefinitions();
     expect(coldProxyTools.every((tool) => !("outputSchema" in tool))).toBe(true);
-    // Without large output schemas, minimal metadata can exceed 1% of the payload;
-    // preserve a 2% ceiling.
+    // Without large output schemas, minimal metadata can exceed 1% of the payload. The
+    // prototype tool's terse spec schema (#17710) took ~220 KB out of this list, so the same
+    // metadata bytes are a larger share: preserve a 3% ceiling.
     const ratio = metadataOverhead(coldProxyTools);
-    expect(ratio).toBeLessThan(0.02);
+    expect(ratio).toBeLessThan(0.03);
   });
 });
 

@@ -84,17 +84,18 @@ function webImageMinimum(style: Raw): Record<string, string> {
   };
 }
 
-/** Each axis's default-minimum property, its size and authored-minimum fields, and its padding. */
+/** Each axis's min and max properties, its size and authored-minimum fields, and its padding. */
 const MINIMUM_AXES = [
-  ["min-width", "width", "minWidth", "padding-inline-start", "padding-inline-end"],
-  ["min-height", "height", "minHeight", "padding-top", "padding-bottom"],
+  ["min-width", "max-width", "width", "minWidth", "padding-inline-start", "padding-inline-end"],
+  ["min-height", "max-height", "height", "minHeight", "padding-top", "padding-bottom"],
 ] as const;
 
 /**
  * The default minimum on a wrapped axis, made the content box's: the page sizes border boxes, so
  * the minimum adds the axis's resolved padding (safe-area insets included), which the image layers
  * sit inside. A filled axis takes its parent's extent, so its padding never pushes the minimum past
- * the space the parent gives it; an authored minimum, or a weight's zero, stays as resolved.
+ * the space the parent gives it; an authored minimum, or a weight's zero, stays as resolved. A
+ * resolved maximum caps the padded minimum, since a CSS minimum would otherwise override it.
  */
 export function webImageContentMinimum(
   node: Raw,
@@ -102,11 +103,12 @@ export function webImageContentMinimum(
 ): Record<string, string> {
   const style = record(node.style) ?? {};
   const css: Record<string, string> = {};
-  for (const [property, size, authored, start, end] of MINIMUM_AXES) {
+  for (const [property, maximum, size, authored, start, end] of MINIMUM_AXES) {
     const padding = [box[start], box[end]].filter((value) => value !== undefined);
     const wrapped = style[size] !== "fill" && typeof style[authored] !== "number";
     if (wrapped && box[property] === DEFAULT_MINIMUM && padding.length > 0) {
-      css[property] = `calc(${[DEFAULT_MINIMUM, ...padding].join(" + ")})`;
+      const padded = `calc(${[DEFAULT_MINIMUM, ...padding].join(" + ")})`;
+      css[property] = box[maximum] === undefined ? padded : `min(${box[maximum]}, ${padded})`;
     }
   }
   return css;
@@ -158,6 +160,37 @@ export function webImageBoxCss(
       ? {}
       : { "aspect-ratio": `var(${webImageVar(slot, "-ar")}, auto)` }),
   };
+}
+
+/**
+ * A wrapped axis's length when the other axis is fixed and the node is padded: the image's ratio
+ * holds for the content box the layers sit in, so the wrapped axis is the fixed axis's content
+ * length times the ratio, plus its own padding. CSS `aspect-ratio` would hold for the border box
+ * instead (the page sizes border boxes), distorting a `fill` image. Until the page inlines the
+ * asset its ratio variable is unset, so the length is invalid and the axis wraps as before.
+ */
+export function webImageContentRatio(
+  slot: number,
+  box: Readonly<Record<string, string>>,
+): Record<string, string> | undefined {
+  const pad = (side: string) => box[side] ?? "0px";
+  const padded = LAYER_INSETS.some(([padding]) => box[padding] !== undefined);
+  if (box["aspect-ratio"] === undefined || !padded) {
+    return undefined;
+  }
+  const inline = `${pad("padding-inline-start")} - ${pad("padding-inline-end")}`;
+  const block = `${pad("padding-top")} - ${pad("padding-bottom")}`;
+  if (box.width?.endsWith("px") && box.height === undefined) {
+    return {
+      height: `calc((${box.width} - ${inline}) * var(${webImageVar(slot, "-hw")}) + ${pad("padding-top")} + ${pad("padding-bottom")})`,
+    };
+  }
+  if (box.height?.endsWith("px") && box.width === undefined) {
+    return {
+      width: `calc((${box.height} - ${block}) * var(${webImageVar(slot, "-wh")}) + ${pad("padding-inline-start")} + ${pad("padding-inline-end")})`,
+    };
+  }
+  return undefined;
 }
 
 /** The padding longhands whose values inset the image layers, and the inset each one sets. */
@@ -243,6 +276,10 @@ export function webImageLayers(
   return layers;
 }
 
+/** A size ratio as a CSS number, to six places. */
+const ratio = (numerator: number, denominator: number) =>
+  String(Number((numerator / denominator).toFixed(6)));
+
 /** The page rule that inlines one image into its slot's custom properties. */
 export function webImageRule(slot: number, image: PrototypeWebImage): string {
   const base64 = Buffer.from(
@@ -250,7 +287,7 @@ export function webImageRule(slot: number, image: PrototypeWebImage): string {
     image.bytes.byteOffset,
     image.bytes.byteLength,
   ).toString("base64");
-  return `:root{${webImageVar(slot)}:url(data:image/webp;base64,${base64});${webImageVar(slot, "-bg")}:transparent;${webImageVar(slot, "-ar")}:${image.width}/${image.height};${webImageVar(slot, "-on")}:1}`;
+  return `:root{${webImageVar(slot)}:url(data:image/webp;base64,${base64});${webImageVar(slot, "-bg")}:transparent;${webImageVar(slot, "-ar")}:${image.width}/${image.height};${webImageVar(slot, "-hw")}:${ratio(image.height, image.width)};${webImageVar(slot, "-wh")}:${ratio(image.width, image.height)};${webImageVar(slot, "-on")}:1}`;
 }
 
 /**
@@ -321,10 +358,21 @@ export interface WebImageRendererHelpers {
   bound(text: unknown, scope: WebRenderScope): string;
 }
 
+const withoutAspect = (style: Record<string, string>) =>
+  Object.fromEntries(Object.entries(style).filter(([key]) => key !== "aspect-ratio"));
+
 const padMinimum = (node: Raw, style: Record<string, string>) => ({
   ...style,
   ...webImageContentMinimum(node, style),
 });
+
+/** An inlined image's box: its padded minimum, and a content-box length for the ratio if padded. */
+function inlinedBox(slot: number, node: Raw, style: Record<string, string>) {
+  const length = webImageContentRatio(slot, style);
+  const padded = padMinimum(node, style);
+  // A content-box length replaces the border-box aspect ratio on the wrapped axis.
+  return length === undefined ? padded : withoutAspect({ ...padded, ...length });
+}
 
 /**
  * An `image`: with a slot for its bound asset, the slot's image layers; otherwise a placeholder.
@@ -356,7 +404,7 @@ export function webImageRenderer({ base, bound }: WebImageRendererHelpers): Node
     const { attrs, style } = base(node, scope, webImageBoxCss(slot, node, placeholder));
     return el(
       "div",
-      { attrs: { ...attrs, role: "img" }, style: padMinimum(node, style) },
+      { attrs: { ...attrs, role: "img" }, style: inlinedBox(slot, node, style) },
       webImageLayers(slot, node, scope.style, webImageLayerInset(style)),
     );
   };

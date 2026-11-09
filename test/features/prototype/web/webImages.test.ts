@@ -123,7 +123,7 @@ describe("webImageDraw and webImageRule", () => {
       height: 3,
     });
     expect(rule).toBe(
-      ":root{--pa-2:url(data:image/webp;base64,AQID);--pa-2-bg:transparent;--pa-2-ar:4/3;--pa-2-on:1}",
+      ":root{--pa-2:url(data:image/webp;base64,AQID);--pa-2-bg:transparent;--pa-2-ar:4/3;--pa-2-hw:0.75;--pa-2-wh:1.333333;--pa-2-on:1}",
     );
   });
 });
@@ -308,6 +308,40 @@ describe("an image with an inlinable asset", () => {
       node.style["padding-bottom"],
     ]);
     expect(node.style["padding-top"]).toContain("--safe-top");
+  });
+
+  test("an authored maximum caps the padded minimum", () => {
+    const rendered = still({
+      type: "column",
+      children: [
+        {
+          type: "image",
+          asset: "photo",
+          style: { maxWidth: 100, padding: { start: 40, end: 40 } },
+        },
+      ],
+    });
+    const node = find(rendered.element, (e) => e.attrs["data-node"] === "image")[0]!;
+    expect(node.style["min-width"]).toBe("min(100px, calc(48px + 40px + 40px))");
+    expect(node.style["max-width"]).toBe("100px");
+  });
+
+  test("a wrapped axis keeps the image's ratio for the content box, not the padded box", () => {
+    const image = (style: Record<string, unknown>) =>
+      find(
+        still({
+          type: "column",
+          children: [{ type: "image", asset: "photo", contentScale: "fill", style }],
+        }).element,
+        (e) => e.attrs["data-node"] === "image",
+      )[0]!.style;
+    const tall = image({ width: { dp: 200 }, padding: { start: 40, end: 40 } });
+    expect(tall["aspect-ratio"]).toBeUndefined();
+    expect(tall.height).toBe("calc((200px - 40px - 40px) * var(--pa-3-hw) + 0px + 0px)");
+    const wide = image({ height: { dp: 100 }, padding: { top: 10, bottom: 10 } });
+    expect(wide.width).toBe("calc((100px - 10px - 10px) * var(--pa-3-wh) + 0px + 0px)");
+    // Unpadded, the border box is the content box, so the plain aspect ratio stays.
+    expect(image({ width: { dp: 200 } })["aspect-ratio"]).toBe("var(--pa-3-ar, auto)");
   });
 
   test("an authored minimum stays as authored", () => {

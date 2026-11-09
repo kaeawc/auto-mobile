@@ -3,6 +3,7 @@ import {
   SharpBackend,
   type SharpPipeline,
   type SharpPort,
+  type SharpRawInput,
   type SharpRawResult,
 } from "../../../../src/utils/image/backend/SharpBackend";
 import type { ImagePipeline } from "../../../../src/utils/image/backend/ImageBackend";
@@ -26,7 +27,7 @@ function makeRecordingSharpFactory(events: string[]): SharpPort {
   async function toBuffer(options?: { resolveWithObject: true }): Promise<Buffer | SharpRawResult> {
     events.push("toBuffer");
     if (options) {
-      throw new Error("Recording factory only supports encoded output");
+      return { data: Buffer.from("rawpixels"), info: { width: 3, height: 3, channels: 4 } };
     }
     return Buffer.from("encoded");
   }
@@ -70,8 +71,10 @@ function makeRecordingSharpFactory(events: string[]): SharpPort {
     toBuffer,
   };
 
-  return (source: Buffer) => {
-    events.push(`sharp:${source.toString("utf8")}`);
+  return (source: Buffer, options?: SharpRawInput) => {
+    events.push(
+      `sharp:${source.toString("utf8")}${options ? `:raw${JSON.stringify(options.raw)}` : ""}`,
+    );
     return image;
   };
 }
@@ -124,8 +127,9 @@ describe("SharpBackend", () => {
         "sharp:source",
         'resize:{"width":6,"height":6,"fit":"fill"}',
         'extract:{"left":1,"top":1,"width":4,"height":4}',
+        "raw",
         "toBuffer",
-        "sharp:encoded",
+        'sharp:rawpixels:raw{"width":3,"height":3,"channels":4}',
         'extract:{"left":1,"top":1,"width":2,"height":2}',
         "png",
         "toBuffer",
@@ -150,8 +154,9 @@ describe("SharpBackend", () => {
       expect(events).toEqual([
         "sharp:source",
         'extract:{"left":1,"top":1,"width":6,"height":6}',
+        "raw",
         "toBuffer",
-        "sharp:encoded",
+        'sharp:rawpixels:raw{"width":3,"height":3,"channels":4}',
         'extract:{"left":1,"top":1,"width":4,"height":4}',
         'resize:{"width":2,"height":2,"fit":"fill"}',
         "png",
@@ -291,6 +296,29 @@ describeSharp("SharpBackend native", () => {
 
       expect(actual.width).toBe(2);
       expect(actual.height).toBe(2);
+      expect(actual.data).toEqual(expected.data);
+    });
+
+    test("rotate then resize matches the encoded-intermediate output pixel for pixel", async () => {
+      const backend = new SharpBackend();
+      const source = await makeSourcePng(8, 6);
+      const sharp = (await import("sharp")).default;
+      const rotated = await sharp(source).rotate(90).png().toBuffer();
+      const expected = await backend.rawPixels(
+        await sharp(rotated).resize({ width: 3 }).png().toBuffer(),
+      );
+
+      const output = await backend.execute(source, {
+        operations: [
+          { type: "rotate", degrees: 90 },
+          { type: "resize", width: 3, maintainAspectRatio: true },
+        ],
+        encoding: null,
+      });
+
+      expect(output.subarray(0, 4).toString("hex")).toBe(PNG_MAGIC);
+      const actual = await backend.rawPixels(output);
+      expect({ width: actual.width, height: actual.height }).toEqual({ width: 3, height: 4 });
       expect(actual.data).toEqual(expected.data);
     });
 

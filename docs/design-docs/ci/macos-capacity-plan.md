@@ -4,7 +4,8 @@ Owner steps below are still open. The earlier
 [CircleCI migration plan](circleci-macos-migration.md) (#10887) has the sourced CircleCI plan numbers.
 
 Rule: every pull-request macOS job runs in exactly one place. Hosted
-GitHub `macos-26` is the fallback for fork PRs only.
+GitHub `macos-26` is the fallback for fork PRs and, per run, for a self-hosted
+pool with no online runner.
 
 ## Pools
 
@@ -94,13 +95,41 @@ stay on GitHub.
 
 The owner's Mac (ARM64, 16 cores: 12 performance + 4 efficiency, 128 GiB) runs
 two runner pools for owner-authored same-repository PRs. Fork PRs always use
-hosted `macos-26` / `macos-latest`. Routing is the existing expression
-(`github.event.pull_request.user.login == 'kaeawc'` and same repository), plus a
-rollout switch, the repository variable `AUTOMOBILE_MAC_POOLS_ENABLED`, on every
-self-hosted Mac job (the four that were on the Mac before the pools gained it in
-#11580). Unless it is `true`, those jobs run on hosted `macos-26` /
-`macos-latest`. Without the switch, a job labelled for a pool with no online
-runner queues forever, and its required check with it (#11580).
+hosted `macos-26` / `macos-latest`. A job goes to its pool only when all of
+these hold; otherwise it runs on hosted `macos-26` / `macos-latest`:
+
+- the PR is owner-authored (`github.event.pull_request.user.login == 'kaeawc'`)
+  from the same repository;
+- the repository variable `AUTOMOBILE_MAC_POOLS_ENABLED` is `true` (the manual
+  override: any other value sends every Mac job to hosted runners);
+- the `Mac Pool Routing` job did not output `hosted` for that pool.
+
+A job labelled for a pool with no online runner queues forever, and its required
+check with it, so the routing job checks the pools at the start of every run.
+
+**Mac Pool Routing (#17580).** An advisory Linux job (`ubuntu-latest`, no
+`needs`, no job `if`) runs `scripts/ci/mac-pool-routing.sh`. The script lists the
+repository's self-hosted runners via the REST runners API and outputs `small`
+(`automobile-mac`) and `heavy` (`automobile-mac-heavy`), each `self-hosted` or
+`hosted`. A pool is `hosted` when no runner carrying exactly that label is
+`online`; a busy online runner still counts, because the job waits for it rather
+than queueing forever. It routes only the current run and never changes the
+repository variable. Every Mac pool job `needs` it and leaves its pool only on an
+explicit `hosted`.
+
+- `GITHUB_TOKEN` cannot list runners, so the job reads the repository secret
+  `MAC_RUNNER_READ_TOKEN`: a fine-grained token for this repository with
+  **Administration: read** (or a classic token with `repo` scope).
+- It fails open to self-hosted. A missing secret, a failed or timed-out (30 s)
+  API call, or an unreadable response outputs `self-hosted` for both pools, with
+  a warning and the reason in the job summary. Both steps are
+  `continue-on-error`, and an empty output also means self-hosted, so the
+  routing job cannot skip or misroute a required check. When it fails open, an
+  offline pool queues as before and `Mac Runner Queue` reports it.
+- Runner status is read once, when the run starts. A pool that goes offline
+  later in the run still queues its jobs.
+- Fallback cost: an iOS run on hosted macOS uses about 18-20 macOS minutes, and
+  hosted jobs count toward the 40-concurrent-job cap. The job summary repeats this whenever a pool falls back.
 
 | Pool                   | Jobs                                                                                                                                       |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -131,8 +160,10 @@ runner queues forever, and its required check with it (#11580).
   queued. Later Prototype Simulator (`needs: ios-xcode-build`) is deliberately
   unwatched so Linux is not held for the whole Mac phase; that job is advisory
   and starts after a heavy-pool job has just run. A red result names queued jobs
-  and their pools: no runner in that pool is online or the pool is saturated. Set `AUTOMOBILE_MAC_POOLS_ENABLED`
-  to any value other than `true` and re-run the workflow to use hosted macOS.
+  and their pools: no runner in that pool is online or the pool is saturated. A
+  pool that was offline when the run started already went to hosted macOS unless
+  Mac Pool Routing failed open. To force hosted macOS, set `AUTOMOBILE_MAC_POOLS_ENABLED`
+  to any value other than `true` and re-run the workflow.
   The watchdog never cancels jobs and no required gate depends on it. API errors
   remain warnings and observation is bounded to 15 minutes plus two polls; the
   job's 20 minute timeout covers it (#11580).
@@ -218,7 +249,8 @@ ports, so use that fallback only with the heavy runner under a dedicated user.
 | nightly.yml: macOS BATS/Node, Xcode sweeps, TSan, XCTestRunner Simulator Tests | CircleCI `nightly-macos`                   | n/a            |
 
 Self-hosted and Namespace placements take effect once the owner steps below are done; until
-then the moved jobs run on hosted `macos-26`.
+then the moved jobs run on hosted `macos-26`. A self-hosted placement falls back to
+hosted for any run where Mac Pool Routing finds that pool offline.
 
 ## Owner steps
 
@@ -278,10 +310,16 @@ the Mac as the user that owns `~/actions-runner`:
    Expect `mac`, `mac-small-2..4` (`automobile-mac`) and `mac-heavy` (`automobile-mac-heavy`), all `online`.
 
 6. Turn the routing on: `gh variable set AUTOMOBILE_MAC_POOLS_ENABLED --body true`.
-   To fall back to hosted runners, set it to anything else
+   To force hosted runners, set it to anything else
    (`gh variable set AUTOMOBILE_MAC_POOLS_ENABLED --body false`). Runs created
    after that use hosted runners for every Mac job. Jobs already queued for the
    Mac stay there until their run is cancelled, for example by a new push.
+7. Enable the automatic per-run fallback: create a fine-grained personal access
+   token scoped to `kaeawc/auto-mobile` with **Administration: read** and add it
+   as the repository secret `MAC_RUNNER_READ_TOKEN`
+   (`gh secret set MAC_RUNNER_READ_TOKEN`). Check it with
+   `GH_TOKEN=<token> gh api repos/kaeawc/auto-mobile/actions/runners --jq .total_count`.
+   Until it exists, `Mac Pool Routing` fails open and says so in its summary.
 
 ### Namespace macOS
 

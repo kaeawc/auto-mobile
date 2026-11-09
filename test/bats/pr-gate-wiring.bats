@@ -446,7 +446,7 @@ load yq-helpers
   [[ "$block" == *"if: needs.detect-changes.outputs.webrtc_should_run == 'true'"* ]]
 
   block="$(job_block ios-device-webrtc)"
-  [[ "$block" == *"needs: [detect-changes, fast-validation]"* ]]
+  [[ "$block" == *"needs: [detect-changes, fast-validation, mac-pool-routing]"* ]]
   [[ "$block" == *"if: needs.detect-changes.outputs.webrtc_should_run == 'true' && needs.fast-validation.result == 'success'"* ]]
 }
 
@@ -695,7 +695,7 @@ load yq-helpers
   require_mikefarah_yq
   run yq -r '.jobs."prototype-simulator".needs | join(",")' "$WF"
   [ "$status" -eq 0 ]
-  [ "$output" = "detect-changes,fast-validation,ios-xcode-build" ]
+  [ "$output" = "detect-changes,fast-validation,ios-xcode-build,mac-pool-routing" ]
   # always(): it still runs when that build failed or was skipped. It stays out
   # of the required iOS gate.
   run yq -r '.jobs."prototype-simulator".if' "$WF"
@@ -708,12 +708,19 @@ load yq-helpers
   # A job labelled for a self-hosted pool waits forever when no runner is
   # online. Each one must honour AUTOMOBILE_MAC_POOLS_ENABLED, or switching it
   # off leaves a required check (SwiftLint, Swift Code Coverage, Installer
-  # Minimal) queued with no runner.
-  local job runs_on count=0
+  # Minimal) queued with no runner. Each also honours the per-run pool routing
+  # (#17580), which sends a pool with no online runner to hosted macOS.
+  local job runs_on pool count=0
   while IFS= read -r job; do
     runs_on="$(yq -r ".jobs.\"${job}\".\"runs-on\"" "$WF")"
-    if [[ "$runs_on" != *"vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('[\"self-hosted\",\"automobile-mac"* ]]; then
-      echo "${job} routes to a self-hosted Mac without the pool switch: ${runs_on}" >&2
+    pool=small
+    if [[ "$runs_on" == *"automobile-mac-heavy"* ]]; then pool=heavy; fi
+    if [[ "$runs_on" != *"vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true' && needs.mac-pool-routing.outputs.${pool} != 'hosted') && fromJSON('[\"self-hosted\",\"automobile-mac"* ]]; then
+      echo "${job} routes to a self-hosted Mac without the pool switch and ${pool} routing: ${runs_on}" >&2
+      return 1
+    fi
+    if [[ "$(yq -r ".jobs.\"${job}\".needs | [.] | flatten | contains([\"mac-pool-routing\"])" "$WF")" != true ]]; then
+      echo "${job} reads mac-pool-routing outputs without needing it" >&2
       return 1
     fi
     count=$((count + 1))

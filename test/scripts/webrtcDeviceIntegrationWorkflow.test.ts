@@ -111,6 +111,7 @@ describe("#4308 device WebRTC integration workflow", () => {
     expect(pullRequest.jobs?.["ios-device-webrtc"]?.needs).toEqual([
       "detect-changes",
       "fast-validation",
+      "mac-pool-routing",
     ]);
     const pullRequestConditions = {
       "android-device-webrtc": "needs.detect-changes.outputs.webrtc_should_run == 'true'",

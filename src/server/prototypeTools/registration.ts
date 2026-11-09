@@ -52,11 +52,14 @@ function lazyPrototypeRuntime(
   if (preloaded !== undefined) {
     runtimeOf(preloaded);
   }
+  // Disposed before a runtime was built (also while the first call awaited the import): building
+  // one now would take the shared host over from the registration that replaced this one.
+  const disposedBeforeBuild = (): boolean => disposed && runtime === undefined;
+  const refuseDisposed = () =>
+    Promise.reject(new ActionableError("The prototype tool registration was disposed."));
   const handler: DeviceAwareToolHandler<unknown> = (device, input, progress, signal) => {
-    if (disposed && runtime === undefined) {
-      // Disposed before its first call: building a runtime now would take the shared host over
-      // from the registration that replaced this one.
-      return Promise.reject(new ActionableError("The prototype tool registration was disposed."));
+    if (disposedBeforeBuild()) {
+      return refuseDisposed();
     }
     const loaded = module.loaded();
     if (loaded !== undefined) {
@@ -64,7 +67,11 @@ function lazyPrototypeRuntime(
     }
     return module
       .load()
-      .then((imported) => runtimeOf(imported).handler(device, input, progress, signal));
+      .then((imported) =>
+        disposedBeforeBuild()
+          ? refuseDisposed()
+          : runtimeOf(imported).handler(device, input, progress, signal),
+      );
   };
   return {
     handler,

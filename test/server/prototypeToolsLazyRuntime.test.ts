@@ -120,4 +120,14 @@ describe("prototype tool runtime loads on first use (#17709)", () => {
     expect(module.loads).toBe(0);
     expect(module.built).toEqual([]);
   });
+
+  test("a registration disposed while its first call awaits the import never builds a runtime", async () => {
+    const dispose = registerPrototypeTools({}, module);
+    const call = handler()(device, { action: "status" });
+    dispose();
+    module.finishImport();
+    await expect(call).rejects.toThrow("The prototype tool registration was disposed.");
+    expect(module.built).toEqual([]);
+    expect(module.calls).toEqual([]);
+  });
 });

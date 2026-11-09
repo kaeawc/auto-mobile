@@ -185,26 +185,21 @@ const CONTENT_AXES = [
 ] as const;
 
 /**
- * The placeholder's 48px minimum for the content box on each wrapped axis, unless the node authors
- * that minimum. It never outgrows the room the node's box leaves inside its padding, as Android's
- * minimum yields to its constraints: a resolved maximum caps it (a CSS minimum would otherwise
- * override that maximum and paint into the padding), and a weight's zero minimum zeroes it.
+ * The content box's minimum on each axis, always explicit: an omitted one is the flex item's
+ * automatic minimum, which the image's ratio raises past the node's own bounds (a maximum, a
+ * weight's share) and paints into the padding. It is the placeholder's 48px on a wrapped axis whose
+ * node neither authors a minimum nor has a weight zero it, capped by the room a resolved maximum
+ * leaves inside the padding, as Android's minimum yields to its constraints; otherwise 0, leaving
+ * the node's own bounds in charge.
  */
 function contentMinimum(style: Raw, box: Readonly<Record<string, string>>): Record<string, string> {
   const css: Record<string, string> = {};
   for (const [size, authored, minimum, maximum, start, end] of CONTENT_AXES) {
-    if (box[minimum] === "0") {
-      // A weight's zero, made explicit: an omitted minimum is the flex item's automatic one, which
-      // the image's ratio would raise past the weight's share.
-      css[minimum] = "0";
-      continue;
-    }
-    if (!wrapped(style[size]) || typeof style[authored] === "number") {
-      continue;
-    }
+    const placeholder =
+      wrapped(style[size]) && typeof style[authored] !== "number" && box[minimum] !== "0";
     const room =
       box[maximum] && `calc(${box[maximum]} - ${box[start] ?? "0px"} - ${box[end] ?? "0px"})`;
-    css[minimum] = room ? `min(48px, ${room})` : "48px";
+    css[minimum] = !placeholder ? "0" : room ? `min(48px, ${room})` : "48px";
   }
   return css;
 }

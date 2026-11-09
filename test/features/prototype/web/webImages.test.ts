@@ -349,18 +349,21 @@ describe("an image with an inlinable asset", () => {
       )[0]!.style;
     const wrappedHeight = content({ width: { dp: 200 }, padding: { start: 40, end: 40 } });
     expect(wrappedHeight["aspect-ratio"]).toBe("var(--pa-3-ar, auto)");
-    expect(wrappedHeight["min-width"]).toBeUndefined();
+    expect(wrappedHeight["min-width"]).toBe("0");
     expect(wrappedHeight["min-height"]).toBe("48px");
     // A fixed height is definite, so the content box takes it and the ratio sizes the width.
     const wrappedWidth = content({ height: { dp: 100 }, padding: { top: 10, bottom: 10 } });
     expect([wrappedWidth.height, wrappedWidth["min-width"]]).toEqual(["100%", "48px"]);
     const filled = content({ width: "fill", padding: { start: 40, end: 40 } });
-    expect(filled["min-width"]).toBeUndefined();
+    expect(filled["min-width"]).toBe("0");
     const fixed = content({ width: { dp: 200 }, height: { dp: 200 } });
     expect(fixed["aspect-ratio"]).toBeUndefined();
     // An authored ratio or minimum is the node's own.
     expect(content({ width: { dp: 200 }, aspectRatio: 2 })["aspect-ratio"]).toBeUndefined();
-    expect(content({ minHeight: 30 })["min-height"]).toBeUndefined();
+    expect(content({ minHeight: 30 })["min-height"]).toBe("0");
+    // A bounded axis never keeps the flex item's automatic, ratio-raised minimum.
+    const bounded = content({ width: { dp: 200 }, minHeight: 20, maxHeight: 100 });
+    expect(bounded["min-height"]).toBe("0");
     // The minimum yields to the room a maximum leaves inside the padding, and to a weight's zero.
     const capped = content({
       width: { dp: 200 },

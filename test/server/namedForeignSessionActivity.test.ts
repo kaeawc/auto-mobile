@@ -66,6 +66,7 @@ const PLAIN_TOOL_CALLS: Record<string, Args[]> = {
     },
   ],
   exportPlan: [{}],
+  exportPrototypeWeb: [{ id: "checkout" }],
   recordToolCalls: [{ action: "status" }, { action: "begin" }, { action: "end" }],
   getIosSimulatorCapabilities: [{ deviceType: "iPhone 16", runtime: "iOS 18.0" }],
   setToolEnabled: [{ toolName: "tapOn", enabled: false }],

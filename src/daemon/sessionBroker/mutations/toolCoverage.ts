@@ -226,6 +226,11 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
     "Host routing/recording configuration has no direct persistent device setting; device-side child operations are journaled by their own tools (#14359).",
     "notJournaled",
   ),
+  ...tools(
+    ["exportPrototypeWeb"],
+    "Writes a host file from the host's prototype revision history; it has no device handler and touches no device (#17720).",
+    "notJournaled",
+  ),
 };
 
 export function mutationToolCoverageViolations(

@@ -88,6 +88,7 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   dragAndDrop: entry("Drag and Drop Element", destructiveDevice),
   dragPath: entry("Drag Along Path", destructiveDevice),
   exportPlan: entry("Export Plan", controlDevice),
+  exportPrototypeWeb: entry("Export Prototype Web Page", controlHost),
   highlight: entry("Highlight Screen Element", controlDevice),
   homeScreen: entry("Open Home Screen", controlDevice),
   hoverAt: entry("Hover Over Path", destructiveDevice),

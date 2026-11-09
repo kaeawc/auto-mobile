@@ -33,6 +33,7 @@ import { registerRotaryScrollTools } from "./rotaryScrollTool";
 import { registerRotateCrownTools } from "./rotateCrownTool";
 import { registerWindowModeTools } from "./windowModeTools";
 import { registerPrototypeTools } from "./prototypeTools/registration";
+import { registerPrototypeWebExportTool } from "./prototypeWebExportTool";
 import { prototypeAgentRegistry } from "../features/prototype/ios/prototypeAgentInjection";
 import {
   CompositePrototypeAgentConnections,
@@ -137,6 +138,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
       prototypeAgentRegistry,
     ),
   });
+  registerPrototypeWebExportTool();
   registerDatabaseTools();
   registerStorageTools();
   registerPreferenceTools();

@@ -43,6 +43,8 @@ const HOST_LOCAL = "Host-local aid, not part of the app interaction a plan repla
 
 // Registered tools that are deliberately not recorded, each with the reason.
 const EXCLUDED_TOOLS: Record<string, string> = {
+  // Writes a host file from this daemon's prototype revision history, which a replay does not have.
+  exportPrototypeWeb: "host-only prototype export",
   getAndroid: DEVICE_MANAGEMENT,
   getApple: DEVICE_MANAGEMENT,
   listDevices: DEVICE_MANAGEMENT,

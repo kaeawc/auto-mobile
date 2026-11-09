@@ -151,6 +151,12 @@ describe("webImageDraw and webImageRule", () => {
     expect(webImageScaleFactor({ width: 1000, height: 1000 }, [webImageBox(draw, PIXEL)])).toBe(
       0.263,
     );
+    // A ratio-sized axis keeps the wrapped 48dp minimum its content box draws at.
+    const flat = webImageDraw("a", {
+      contentScale: "crop",
+      style: { width: { dp: 200 }, aspectRatio: 10, padding: { start: 90, end: 90 } },
+    });
+    expect(flat).toMatchObject({ widthDp: 20, heightDp: 48 });
     const tall = webImageDraw("a", { style: { height: { dp: 100 }, aspectRatio: 0.5 } });
     expect(tall).toMatchObject({ widthDp: 50, heightDp: 100 });
   });

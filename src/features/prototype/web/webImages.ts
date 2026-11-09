@@ -94,8 +94,18 @@ function paddingDp(style: Raw, side: "top" | "bottom" | "start" | "end"): number
  * sides, as Android's image target subtracts it.
  */
 function contentDp(style: Raw, axis: "width" | "height"): number | undefined {
-  const used = usedDp(style, axis) ?? ratioDp(style, axis);
-  return used === undefined ? undefined : Math.max(0, used - axisPaddingDp(style, axis));
+  const fixed = usedDp(style, axis);
+  if (fixed !== undefined) {
+    return Math.max(0, fixed - axisPaddingDp(style, axis));
+  }
+  const ratio = ratioDp(style, axis);
+  // A ratio-sized axis is still a wrapped one, so its content box keeps the wrapped minimum.
+  return ratio === undefined
+    ? undefined
+    : Math.max(
+        ratio - axisPaddingDp(style, axis),
+        wrappedMinimumDp(style, axis) ?? WRAPPED_MINIMUM_DP,
+      );
 }
 
 /** An axis's padding on both its sides, in dp. */

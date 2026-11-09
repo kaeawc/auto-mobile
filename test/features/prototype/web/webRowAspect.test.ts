@@ -520,6 +520,24 @@ test("under an unbounded width with no definite height a row neither takes nor f
   expect(rowSequentialChildren(plain.children, shown, Infinity, true)).toBe(plain.children);
 });
 
+test("under an unbounded width a row's own width bound restores its fill (#17603)", () => {
+  const prepare = (entry: unknown) => record(entry);
+  const unbounded = { style: { unboundedWidth: true } };
+  const children = [
+    { type: "box", style: { aspectRatio: 1 } },
+    { type: "box", style: { width: { dp: 40 } } },
+  ];
+  for (const style of [{ maxWidth: 200 }, { width: { dp: 200 } }]) {
+    const row = { type: "row", style, children };
+    expect(rowFillAxes(row, "root", prepare, unbounded)).toEqual(["width"]);
+  }
+  // A min bound or a non-dp width restores no max width.
+  for (const style of [{ minWidth: 200 }, { width: "wrap" }]) {
+    const row = { type: "row", style, children };
+    expect(rowFillAxes(row, "root", prepare, unbounded)).toEqual([]);
+  }
+});
+
 test("under an unbounded width a row's height still caps its aspect ratio (#16718)", () => {
   const prepare = (entry: unknown) => record(entry);
   const row = {

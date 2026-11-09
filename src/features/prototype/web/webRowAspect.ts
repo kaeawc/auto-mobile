@@ -1,5 +1,6 @@
 import { record, type Raw } from "../prototypeTemplate";
 import {
+  boundsOwnWidth,
   INCOMING_ALLOCATED_KEY,
   INCOMING_HEIGHT_KEY,
   ROW_BOUND_KEY,
@@ -139,7 +140,8 @@ const rowBounds = (bounds: number | RowBounds) =>
  * The axes a row grows on to its parent: width when its unsized aspect-ratio child takes all the
  * remaining width, since a wrap-sized Compose Row then reaches its max width. A repeated row is
  * left out, as rowMeasured leaves it: its children never get the take and zero hints the fill
- * assumes. Under an unbounded width (a horizontal scroll) there is no max width to reach.
+ * assumes. Under an unbounded width (a horizontal scroll) there is no max width to reach, unless
+ * the row's own dp `width` or `maxWidth` restores one, as rowMeasured's children scope sees it.
  */
 export function rowFillAxes(
   node: Raw,
@@ -151,7 +153,7 @@ export function rowFillAxes(
   const fills =
     node.type === "row" &&
     node.repeat === undefined &&
-    unboundedWidth !== true &&
+    (unboundedWidth !== true || boundsOwnWidth(node.style)) &&
     Array.isArray(node.children) &&
     node.children.some((entry, index) =>
       isUnsizedAspectRatio(

@@ -548,15 +548,21 @@ export function containerChildStyle(
   node: Raw,
   parentAxis: "row" | "column" | undefined,
 ): WebStyleContext {
-  const style = record(node.style);
-  const definite =
-    typeof record(style?.width)?.dp === "number" || typeof style?.maxWidth === "number";
   return {
     ...scope.style,
     parentAxis,
     weightsChildren: parentAxis !== undefined && WEIGHTING_PARENTS.has(node.type),
-    unboundedWidth: scope.style.unboundedWidth === true && !definite,
+    unboundedWidth: scope.style.unboundedWidth === true && !boundsOwnWidth(node.style),
   };
+}
+
+/**
+ * Whether a node's own dp `width` or `maxWidth` gives its content a finite max width, as Compose's
+ * `Modifier.width` and `widthIn` do even under an unbounded (horizontally scrolling) width.
+ */
+export function boundsOwnWidth(style: unknown): boolean {
+  const raw = record(style);
+  return typeof record(raw?.width)?.dp === "number" || typeof raw?.maxWidth === "number";
 }
 
 /** What a scroll's child sees: the scroll's axis, and an unbounded width when it scrolls across. */

@@ -23,6 +23,7 @@ import {
 } from "../../utils/media/FfmpegClient";
 import { withRemainingBudget } from "../../utils/withRemainingBudget";
 import { probeScreenrecordDisplayFlag } from "./AndroidRecordingDisplay";
+import { iosRecordedPanel } from "./IosRecordingDisplay";
 import {
   FfmpegCapabilities,
   runWithinDeadline,
@@ -743,6 +744,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
           startedAt: config.startedAt,
           // simctl writes the raw .mov; `outputPath` exists only after stop's post-process.
           liveCapturePath: capturePath,
+          recordedPanel: iosRecordedPanel(device, config.recordingPanel, displayArg),
           backendHandle,
         };
       } catch (error) {

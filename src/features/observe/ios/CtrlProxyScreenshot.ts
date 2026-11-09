@@ -179,32 +179,73 @@ function shortOverLong(width: number, height: number): number {
   return Math.min(width, height) / Math.max(width, height);
 }
 
+/** Screen geometry a runner fallback is checked against, in any consistent unit. */
+interface RunnerReference {
+  width: number;
+  height: number;
+  /** How the reference was obtained, for the rejection message. */
+  label: string;
+}
+
 /**
- * Reject a runner capture whose aspect ratio does not match the observed hierarchy: on a Duo
- * the runner captures the cover display, which is a black image while unfolded (#17583).
+ * The geometry a runner fallback must match: the observed hierarchy's screen points, or, with no
+ * hierarchy (the sessionless observer path), the inventory size of the panel the caller already
+ * identified as active. Undefined when neither is known.
+ */
+function runnerReference(
+  hierarchy: XCTestHierarchy | null,
+  expectedPanel: DisplayPanel | undefined,
+): RunnerReference | undefined {
+  if (hierarchy?.screenWidth && hierarchy.screenHeight) {
+    const { screenWidth: width, screenHeight: height } = hierarchy;
+    return { width, height, label: `the observed screen is ${width}x${height} points` };
+  }
+  if (expectedPanel) {
+    const { width, height } = expectedPanel.sizePx;
+    return {
+      width,
+      height,
+      label: `active panel ${expectedPanel.key} is ${width}x${height} pixels`,
+    };
+  }
+  return undefined;
+}
+
+const CAPTURE_UNVERIFIED_ERROR =
+  "Runner screenshot could not be verified: no hierarchy or live display read identifies the active panel, and on a multi-panel device the runner may capture an unlit panel. Re-run observe to capture the hierarchy, or check the device posture with setPosture.";
+
+/**
+ * Reject a runner capture whose aspect ratio does not match the active screen: on a Duo the
+ * runner captures the cover display, which is a black image while unfolded (#17583). With no
+ * reference to check against, the capture is returned as a typed `capture_unverified` failure
+ * instead of success (#17593).
  */
 async function aspectCheckedRunnerCapture(
   runnerCapture: () => Promise<CtrlProxyScreenshotResult>,
   hierarchy: XCTestHierarchy | null,
+  expectedPanel: DisplayPanel | undefined,
 ): Promise<CtrlProxyScreenshotResult> {
   const result = await runnerCapture();
-  const points =
-    hierarchy?.screenWidth && hierarchy.screenHeight
-      ? { width: hierarchy.screenWidth, height: hierarchy.screenHeight }
-      : undefined;
-  const dimensions =
-    result.success && result.data && points
-      ? readImageHeaderDimensions(Buffer.from(result.data, "base64"))
-      : null;
-  if (!points || !dimensions) {
+  if (!result.success) {
     return result;
   }
-  const expected = shortOverLong(points.width, points.height);
+  const reference = runnerReference(hierarchy, expectedPanel);
+  if (!reference) {
+    logger.warn(`[SCREENSHOT] ${CAPTURE_UNVERIFIED_ERROR}`);
+    return { success: false, error: CAPTURE_UNVERIFIED_ERROR, reason: "capture_unverified" };
+  }
+  const dimensions = result.data
+    ? readImageHeaderDimensions(Buffer.from(result.data, "base64"))
+    : null;
+  if (!dimensions) {
+    return result;
+  }
+  const expected = shortOverLong(reference.width, reference.height);
   const actual = shortOverLong(dimensions.width, dimensions.height);
   if (Math.abs(actual - expected) / expected <= RUNNER_ASPECT_TOLERANCE) {
     return result;
   }
-  const error = `Runner screenshot is ${dimensions.width}x${dimensions.height} pixels but the observed screen is ${points.width}x${points.height} points; the capture is likely of an unlit panel. Re-run observe, or check the device posture with setPosture.`;
+  const error = `Runner screenshot is ${dimensions.width}x${dimensions.height} pixels but ${reference.label}; the capture is likely of an unlit panel. Re-run observe, or check the device posture with setPosture.`;
   logger.warn(`[SCREENSHOT] ${error}`);
   return { success: false, error };
 }
@@ -242,7 +283,8 @@ async function captureDuoWithoutInventory(
  * Select a physical simulator panel, verifying its PNG before accepting it.
  * Order: CoreDevice per-panel capture, then simctl, then the runner. A single-display
  * simulator goes straight to the runner and never touches devicectl or simctl; a Duo with
- * no inventory reads its live displays instead, and its runner fallback is aspect-checked.
+ * no inventory reads its live displays instead. Every runner fallback here is aspect-checked,
+ * and one with nothing to check against is a typed `capture_unverified` failure.
  */
 export async function captureIosPanelScreenshotWith(
   input: IosPanelScreenshotRequest,
@@ -250,9 +292,13 @@ export async function captureIosPanelScreenshotWith(
   if (!needsIosPanelSelection(input.device)) {
     return input.runnerCapture();
   }
+  const expectedPanel = input.device.displays?.panels.find(
+    (candidate) => candidate.key === input.activePanelKey,
+  );
   const request: IosPanelScreenshotRequest = {
     ...input,
-    runnerCapture: () => aspectCheckedRunnerCapture(input.runnerCapture, input.hierarchy),
+    runnerCapture: () =>
+      aspectCheckedRunnerCapture(input.runnerCapture, input.hierarchy, expectedPanel),
   };
   const { device, hierarchy, activePanelKey } = request;
   const panels = device.displays?.panels ?? [];

@@ -193,27 +193,35 @@ interface RunnerReference {
  * (made lazily here when selection never read one), the panel selection identified, then the
  * observed panel key, which can be stale after a fold (#17600).
  */
-class RunnerReferencePanel {
-  private live: { panel: DisplayPanel | undefined } | undefined;
-  identified: DisplayPanel | undefined;
-
-  constructor(
-    private readonly request: IosPanelScreenshotRequest,
-    private readonly panels: readonly DisplayPanel[],
-    private readonly observed: DisplayPanel | undefined,
-  ) {}
-
+interface RunnerReferencePanel {
   /** Record the outcome of a live read, even one that named no active panel. */
-  recordLive(panel: DisplayPanel | undefined): void {
-    this.live = { panel };
-  }
+  recordLive(panel: DisplayPanel | undefined): void;
+  /** Record the panel selection identified, from the key, the hierarchy, or a live read. */
+  recordIdentified(panel: DisplayPanel): void;
+  resolve(): Promise<DisplayPanel | undefined>;
+}
 
-  async resolve(): Promise<DisplayPanel | undefined> {
-    if (!this.live && this.request.displayInfo && this.panels.length >= 2) {
-      this.recordLive(activeLivePanel(await readLiveDisplays(this.request), this.panels));
-    }
-    return this.live?.panel ?? this.identified ?? this.observed;
-  }
+function runnerReferencePanel(
+  request: IosPanelScreenshotRequest,
+  panels: readonly DisplayPanel[],
+  observed: DisplayPanel | undefined,
+): RunnerReferencePanel {
+  let live: { panel: DisplayPanel | undefined } | undefined;
+  let identified: DisplayPanel | undefined;
+  return {
+    recordLive: (panel) => {
+      live = { panel };
+    },
+    recordIdentified: (panel) => {
+      identified = panel;
+    },
+    resolve: async () => {
+      if (!live && request.displayInfo && panels.length >= 2) {
+        live = { panel: activeLivePanel(await readLiveDisplays(request), panels) };
+      }
+      return live?.panel ?? identified ?? observed;
+    },
+  };
 }
 
 /**
@@ -328,7 +336,7 @@ export async function captureIosPanelScreenshotWith(
     return input.runnerCapture();
   }
   const panels = input.device.displays?.panels ?? [];
-  const referencePanel = new RunnerReferencePanel(
+  const referencePanel = runnerReferencePanel(
     input,
     panels,
     panels.find((candidate) => candidate.key === input.activePanelKey),
@@ -352,7 +360,7 @@ export async function captureIosPanelScreenshotWith(
     logger.warn("[SCREENSHOT] Could not identify active iOS panel; using runner capture");
     return request.runnerCapture();
   }
-  referencePanel.identified = panel;
+  referencePanel.recordIdentified(panel);
   return captureSelectedPanel({
     ...request,
     deviceId: device.deviceId,

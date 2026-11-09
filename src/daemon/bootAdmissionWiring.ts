@@ -10,8 +10,8 @@ import { defaultTimer } from "../utils/SystemTimer";
 
 /**
  * Composition root for boot admission: installs the process-wide shared gates behind the
- * interface the devices tier owns. `src/index.ts` (the only process entry: daemon, CLI and stdio
- * server modes) imports this module before anything that can boot a device;
+ * interface the devices tier owns. The server entry `src/startup/serverEntry.ts` (loaded by
+ * `src/index.ts`, the only process entry, for daemon, CLI and stdio server modes) imports this module before anything that can boot a device;
  * test/lint/bootAdmissionWiringEntry.test.ts guards that.
  */
 installIosSimulatorOwnershipReader(

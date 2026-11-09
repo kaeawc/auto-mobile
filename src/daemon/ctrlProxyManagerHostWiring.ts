@@ -8,8 +8,8 @@ import {
 
 /**
  * Composition root for the CtrlProxy manager: installs the real foreign-forward evidence and
- * saved-prototype services behind the interface the ctrlProxy tier owns. `src/index.ts` imports
- * it before anything that can drive a device.
+ * saved-prototype services behind the interface the ctrlProxy tier owns. The server entry
+ * (`src/startup/serverEntry.ts`) imports it before anything that can drive a device.
  */
 installCtrlProxyManagerHost({
   createForeignForwardEvidence: (adbFactory) => createForeignCtrlProxyForwardEvidence(adbFactory),

@@ -115,6 +115,23 @@ describe("webImageDraw and webImageRule", () => {
     expect(webImageDraw("a", over).widthDp).toBe(0);
   });
 
+  test("a fixed axis's bounds apply before its padding comes out", () => {
+    const raised = {
+      style: {
+        width: { dp: 200 },
+        height: { dp: 200 },
+        minWidth: 400,
+        minHeight: 400,
+        padding: { top: 100, bottom: 100, start: 100, end: 100 },
+      },
+    };
+    expect(webImageDraw("a", raised)).toMatchObject({ widthDp: 200, heightDp: 200 });
+    const capped = {
+      style: { width: { dp: 200 }, maxWidth: 100, padding: { start: 20, end: 20 } },
+    };
+    expect(webImageDraw("a", capped).widthDp).toBe(60);
+  });
+
   test("the rule sets the slot's image, transparent placeholder, aspect ratio and tint switch", () => {
     const rule = webImageRule(2, {
       id: "a",
@@ -123,7 +140,7 @@ describe("webImageDraw and webImageRule", () => {
       height: 3,
     });
     expect(rule).toBe(
-      ":root{--pa-2:url(data:image/webp;base64,AQID);--pa-2-bg:transparent;--pa-2-ar:4/3;--pa-2-hw:0.75;--pa-2-wh:1.333333;--pa-2-on:1}",
+      ":root{--pa-2:url(data:image/webp;base64,AQID);--pa-2-bg:transparent;--pa-2-ar:4/3;--pa-2-on:1}",
     );
   });
 });
@@ -211,14 +228,7 @@ describe("an image with an inlinable asset", () => {
       filter: { tint: "#80FF0000" },
     });
     const group = find(rendered.element, (e) => "data-image-alpha" in e.attrs)[0]!;
-    expect(group.style).toEqual({
-      position: "absolute",
-      top: "0",
-      "inset-inline-end": "0",
-      bottom: "0",
-      "inset-inline-start": "0",
-      opacity: "0.502",
-    });
+    expect(group.style).toEqual({ position: "absolute", inset: "0", opacity: "0.502" });
     expect(find(group, (e) => "data-image" in e.attrs)).toHaveLength(1);
     const tint = find(group, (e) => "data-image-tint" in e.attrs)[0]!;
     expect(tint.style["background-color"]).toBe("rgba(255,0,0,1)");
@@ -230,14 +240,8 @@ describe("an image with an inlinable asset", () => {
     expect(group.style.opacity).toBe("0");
   });
 
-  test("a padded image's layers sit inside the padding, start and end logical (#17202)", () => {
+  test("a padded image's layers fill an in-flow content box inside the padding (#17202)", () => {
     const padding = { top: 10, bottom: 30, start: 40, end: 20 };
-    const inside = {
-      top: "10px",
-      bottom: "30px",
-      "inset-inline-start": "40px",
-      "inset-inline-end": "20px",
-    };
     for (const layoutDirection of ["ltr", "rtl"]) {
       const rendered = renderPrototypeStill(
         {
@@ -253,13 +257,21 @@ describe("an image with an inlinable asset", () => {
         },
         { frame: "pixel-9", imageSlots: new Map([["photo", 3]]) },
       );
-      const node = find(rendered.element, (e) => e.attrs["data-node"] === "image")[0]!;
-      expect(node.style["padding-inline-start"]).toBe("40px");
       expect(find(rendered.element, (e) => e.attrs.dir === layoutDirection)).not.toEqual([]);
+      const node = find(rendered.element, (e) => e.attrs["data-node"] === "image")[0]!;
+      // Logical padding, which the window's direction maps to the physical side.
+      expect([node.style["padding-inline-start"], node.style["padding-inline-end"]]).toEqual([
+        "40px",
+        "20px",
+      ]);
+      const content = node.children[0] as WebElement;
+      expect("data-image-content" in content.attrs).toBe(true);
+      // In flow, so it takes the node's content box rather than its padding box.
+      expect(content.style.position).toBe("relative");
+      expect(content.style.inset).toBeUndefined();
       for (const attr of ["data-image", "data-image-tint"]) {
-        const layer = find(node, (e) => attr in e.attrs)[0]!;
-        expect(layer.style).toMatchObject(inside);
-        expect(layer.style.inset).toBeUndefined();
+        const layer = find(content, (e) => attr in e.attrs)[0]!;
+        expect([layer.style.position, layer.style.inset]).toEqual(["absolute", "0"]);
       }
       expect(rendered.imageDraws).toEqual([
         { asset: "photo", widthDp: 140, heightDp: 160, scale: "fill" },
@@ -267,134 +279,26 @@ describe("an image with an inlinable asset", () => {
     }
   });
 
-  test("a wrapped padded image keeps 48px of content inside its padding", () => {
-    const rendered = still({
-      type: "column",
-      children: [
-        {
-          type: "image",
-          asset: "photo",
-          style: { padding: { top: 24, bottom: 24, start: 24, end: 16 } },
-        },
-      ],
-    });
-    const node = find(rendered.element, (e) => e.attrs["data-node"] === "image")[0]!;
-    expect([node.style["min-width"], node.style["min-height"]]).toEqual([
-      "calc(48px + 24px + 16px)",
-      "calc(48px + 24px + 24px)",
-    ]);
-  });
-
-  test("a wrapped axis's minimum adds the resolved safe-area padding the layers sit inside", () => {
-    const rendered = still({
-      type: "column",
-      children: [
-        {
-          type: "image",
-          asset: "photo",
-          style: { width: { dp: 48 } },
-          safeAreaPadding: { types: ["systemBars"], edges: ["top", "bottom"] },
-        },
-      ],
-    });
-    const node = find(rendered.element, (e) => e.attrs["data-node"] === "image")[0]!;
-    const layer = find(node, (e) => "data-image" in e.attrs)[0]!;
-    expect(node.style["min-width"]).toBeUndefined();
-    expect(node.style["min-height"]).toBe(
-      `calc(48px + ${node.style["padding-top"]} + ${node.style["padding-bottom"]})`,
-    );
-    expect([layer.style.top, layer.style.bottom]).toEqual([
-      node.style["padding-top"],
-      node.style["padding-bottom"],
-    ]);
-    expect(node.style["padding-top"]).toContain("--safe-top");
-  });
-
-  test("an authored maximum caps the padded minimum", () => {
-    const rendered = still({
-      type: "column",
-      children: [
-        {
-          type: "image",
-          asset: "photo",
-          style: { maxWidth: 100, padding: { start: 40, end: 40 } },
-        },
-      ],
-    });
-    const node = find(rendered.element, (e) => e.attrs["data-node"] === "image")[0]!;
-    expect(node.style["min-width"]).toBe("min(100px, calc(48px + 40px + 40px))");
-    expect(node.style["max-width"]).toBe("100px");
-  });
-
-  test("a wrapped axis keeps the image's ratio for the content box, not the padded box", () => {
-    const image = (style: Record<string, unknown>) =>
+  test("the content box keeps the image's ratio and minimum on a wrapped axis only", () => {
+    const content = (style: Record<string, unknown>) =>
       find(
-        still({
-          type: "column",
-          children: [{ type: "image", asset: "photo", contentScale: "fill", style }],
-        }).element,
-        (e) => e.attrs["data-node"] === "image",
+        still({ type: "column", children: [{ type: "image", asset: "photo", style }] }).element,
+        (e) => "data-image-content" in e.attrs,
       )[0]!.style;
-    const tall = image({ width: { dp: 200 }, padding: { start: 40, end: 40 } });
-    expect(tall["aspect-ratio"]).toBeUndefined();
-    expect(tall.height).toBe("calc((200px - 40px - 40px) * var(--pa-3-hw) + 0px + 0px)");
-    const wide = image({ height: { dp: 100 }, padding: { top: 10, bottom: 10 } });
-    expect(wide.width).toBe("calc((100px - 10px - 10px) * var(--pa-3-wh) + 0px + 0px)");
-    // The fixed axis's used length bounds the ratio: a maximum caps it, a minimum raises it.
-    const capped = image({ width: { dp: 200 }, maxWidth: 100, padding: { start: 20, end: 20 } });
-    expect(capped.height).toBe(
-      "calc((min(200px, 100px) - 20px - 20px) * var(--pa-3-hw) + 0px + 0px)",
-    );
-    const raised = image({ height: { dp: 50 }, minHeight: 80, padding: { top: 10 } });
-    expect(raised.width).toBe("calc((max(80px, 50px) - 10px - 0px) * var(--pa-3-wh) + 0px + 0px)");
-    // An authored aspectRatio is the layout's own, so it stays.
-    const authored = image({ width: { dp: 200 }, aspectRatio: 2, padding: { start: 0 } });
-    expect(authored.height).toBeUndefined();
-    expect(authored["aspect-ratio"]).toBe("2");
-    // Unpadded, the border box is the content box, so the plain aspect ratio stays.
-    expect(image({ width: { dp: 200 } })["aspect-ratio"]).toBe("var(--pa-3-ar, auto)");
-  });
-
-  test("an authored minimum stays as authored", () => {
-    const rendered = still({
-      type: "image",
-      asset: "photo",
-      style: { minWidth: 30, padding: { start: 24, end: 24 } },
-    });
-    const node = find(rendered.element, (e) => e.attrs["data-node"] === "image")[0]!;
-    expect(node.style["min-width"]).toBe("30px");
-  });
-
-  test("a filled axis keeps the plain 48px minimum, so its padding cannot overflow the parent", () => {
-    const rendered = still({
-      type: "column",
-      style: { width: { dp: 100 } },
-      children: [
-        {
-          type: "image",
-          asset: "photo",
-          style: { width: "fill", padding: { top: 24, bottom: 24, start: 40, end: 40 } },
-        },
-      ],
-    });
-    const node = find(rendered.element, (e) => e.attrs["data-node"] === "image")[0]!;
-    expect([node.style["min-width"], node.style["min-height"]]).toEqual([
-      "48px",
-      "calc(48px + 24px + 24px)",
-    ]);
-  });
-
-  test("a translucent tint's group takes the padding and its layers fill it", () => {
-    const rendered = still({
-      type: "image",
-      asset: "photo",
-      filter: { tint: "#80FF0000" },
-      style: { padding: { top: 8, bottom: 8, start: 8, end: 8 } },
-    });
-    const group = find(rendered.element, (e) => "data-image-alpha" in e.attrs)[0]!;
-    expect(group.style).toMatchObject({ top: "8px", "inset-inline-start": "8px" });
-    const layer = find(group, (e) => "data-image" in e.attrs)[0]!;
-    expect(layer.style).toMatchObject({ top: "0", "inset-inline-start": "0" });
+    const wrappedHeight = content({ width: { dp: 200 }, padding: { start: 40, end: 40 } });
+    expect(wrappedHeight["aspect-ratio"]).toBe("var(--pa-3-ar, auto)");
+    expect(wrappedHeight["min-width"]).toBeUndefined();
+    expect(wrappedHeight["min-height"]).toBe("48px");
+    // A fixed height is definite, so the content box takes it and the ratio sizes the width.
+    const wrappedWidth = content({ height: { dp: 100 }, padding: { top: 10, bottom: 10 } });
+    expect([wrappedWidth.height, wrappedWidth["min-width"]]).toEqual(["100%", "48px"]);
+    const filled = content({ width: "fill", padding: { start: 40, end: 40 } });
+    expect(filled["min-width"]).toBeUndefined();
+    const fixed = content({ width: { dp: 200 }, height: { dp: 200 } });
+    expect(fixed["aspect-ratio"]).toBeUndefined();
+    // An authored ratio or minimum is the node's own.
+    expect(content({ width: { dp: 200 }, aspectRatio: 2 })["aspect-ratio"]).toBeUndefined();
+    expect(content({ minHeight: 30 })["min-height"]).toBeUndefined();
   });
 
   test("an opaque tint adds no alpha group", () => {

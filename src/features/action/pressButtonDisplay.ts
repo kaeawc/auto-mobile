@@ -70,7 +70,7 @@ export function inputOnDisplay(argv: string[], displayId: number | undefined): s
  * display's foreground check cannot answer for another display, so this reads the display-scoped
  * observation taken before the press.
  */
-export async function targetedHomeAlreadyOnLauncher(
+export async function acceptTargetedHomeAlreadyOnLauncher(
   press: {
     button: string;
     displayId: number | undefined;
@@ -79,22 +79,26 @@ export async function targetedHomeAlreadyOnLauncher(
     observation: ObserveResult | undefined;
   },
   deps: { device: BootedDevice; adb: AdbExecutor; timer: Timer; signal?: AbortSignal },
-): Promise<boolean> {
+): Promise<void> {
+  const { result, observation } = press;
   if (
     press.displayId === undefined ||
     press.button.toLowerCase() !== "home" ||
     !press.pressSucceeded ||
-    press.result.error !== "No visual change observed"
+    result.error !== "No visual change observed"
   ) {
-    return false;
+    return;
   }
-  const foreground =
-    press.observation?.viewHierarchy?.packageName ?? press.observation?.activeWindow?.appId;
+  const foreground = observation?.viewHierarchy?.packageName ?? observation?.activeWindow?.appId;
   const { device, adb, timer, signal } = deps;
-  return isForegroundLauncher(foreground, adb, device.deviceId, {
+  const onLauncher = await isForegroundLauncher(foreground, adb, device.deviceId, {
     timer,
     signal,
     incarnationToken: deviceIncarnationToken(device.deviceId),
     formFactor: device.formFactor,
   });
+  if (onLauncher) {
+    result.success = true;
+    delete result.error;
+  }
 }

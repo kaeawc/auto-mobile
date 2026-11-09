@@ -130,6 +130,7 @@ test("sendKeys warns when IME typing loses focus without changing delivery", asy
   expect(result).toMatchObject({ success: true, completedCommands: 1 });
   expect(result.warnings).toEqual([expect.stringContaining("focused editor lost focus")]);
   expect(result.warnings?.[0]).toContain('mode "a11y"');
+  expect(result.warnings?.[0]).toContain("let any pending keyboard restore finish first");
   expect(result.warnings?.[0]).toContain("visible key taps");
   expect(h.committed).toEqual(["日本語😀"]);
   expect(h.inserted).toEqual([]);

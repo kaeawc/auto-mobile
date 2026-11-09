@@ -22,6 +22,7 @@ import {
 } from "../../../src/utils/ios-cmdline-tools/DevicectlDisplayScreenshot";
 import { DevicectlPanelScreenshotSource } from "../../../src/utils/ios-cmdline-tools/DevicectlPanelScreenshotSource";
 import { captureIosPanelScreenshotWith } from "../../../src/features/observe/ios/CtrlProxyScreenshot";
+import type { XCTestHierarchy } from "../../../src/features/observe/ios/types";
 import {
   FakeDevicectlCommandInvoker,
   FakeDevicectlVersionSource,
@@ -383,6 +384,8 @@ describe("captureIosPanelScreenshotWith", () => {
     activePanelKey?: string;
     displayInfo?: DevicectlDisplayInfoSource;
     signal?: AbortSignal;
+    hierarchy?: XCTestHierarchy;
+    runnerData?: string;
   }) {
     const runnerCalls: boolean[] = [];
     const devicectlCalls: unknown[] = [];
@@ -395,7 +398,7 @@ describe("captureIosPanelScreenshotWith", () => {
     };
     const result = captureIosPanelScreenshotWith({
       device: options.device ?? duo,
-      hierarchy: null,
+      hierarchy: options.hierarchy ?? null,
       simctl: {
         screenshot: async (_deviceId, display) => {
           simctlCalls.push(display);
@@ -405,7 +408,7 @@ describe("captureIosPanelScreenshotWith", () => {
       devicectl,
       runnerCapture: async () => {
         runnerCalls.push(true);
-        return { success: true, data: "runner" };
+        return { success: true, data: options.runnerData ?? "runner" };
       },
       activePanelKey: "activePanelKey" in options ? options.activePanelKey : "primary-1",
       displayInfo: options.displayInfo,
@@ -529,6 +532,111 @@ describe("captureIosPanelScreenshotWith", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  describe("Duo device type with no display inventory", () => {
+    const emptyDuo: BootedDevice = {
+      deviceId: "sim-duo",
+      name: "iPhone Duo",
+      platform: "ios",
+      deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo",
+    };
+    const innerActive = (): DevicectlDisplayInfoSource => ({
+      readDisplays: async () =>
+        displaysOf(loadDevicectlListFixture("info-displays-duo-inner-active.json")),
+    });
+    const innerHierarchy: XCTestHierarchy = {
+      updatedAt: 1,
+      packageName: "com.example",
+      hierarchy: {},
+      screenWidth: 669,
+      screenHeight: 951,
+    };
+
+    test("reads live displays once and captures the active one by its display name", async () => {
+      const info = spyOn(logger, "info").mockImplementation(() => {});
+      try {
+        let reads = 0;
+        const h = run({
+          device: emptyDuo,
+          activePanelKey: undefined,
+          displayInfo: {
+            readDisplays: async (request) => {
+              reads++;
+              return innerActive().readDisplays(request);
+            },
+          },
+        });
+        const result = await h.result;
+        expect(result.data).toBe(png(2007, 2853).toString("base64"));
+        expect(reads).toBe(1);
+        const panel = { key: "LCD-1", role: "unknown", sizePx: { width: 2007, height: 2853 } };
+        expect(h.devicectlCalls).toEqual([
+          { deviceId: "sim-duo", panel, panelCount: 2, signal: undefined },
+        ]);
+        expect(h.simctlCalls).toEqual(["LCD-1"]);
+        expect(h.runnerCalls).toEqual([]);
+        expect(String(info.mock.calls[0]?.[0])).toContain("no display inventory");
+      } finally {
+        info.mockRestore();
+      }
+    });
+
+    test("uses an aspect-matching runner capture when no single display is active", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const frame = png(2007, 2853).toString("base64");
+        const h = run({
+          device: emptyDuo,
+          activePanelKey: undefined,
+          hierarchy: innerHierarchy,
+          runnerData: frame,
+          displayInfo: { readDisplays: async () => [] },
+        });
+        expect(await h.result).toEqual({ success: true, data: frame });
+        expect(h.devicectlCalls).toEqual([]);
+        expect(h.simctlCalls).toEqual([]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("rejects a runner capture whose aspect does not match the hierarchy", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const h = run({
+          device: emptyDuo,
+          activePanelKey: undefined,
+          hierarchy: innerHierarchy,
+          runnerData: png(1398, 2034).toString("base64"),
+        });
+        const result = await h.result;
+        expect(result.success).toBe(false);
+        expect(result.data).toBeUndefined();
+        expect(result.error).toContain("1398x2034 pixels");
+        expect(h.runnerCalls).toEqual([true]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("a non-Duo device with no inventory never reads live displays", async () => {
+      let reads = 0;
+      const h = run({
+        device: { ...emptyDuo, deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17" },
+        hierarchy: innerHierarchy,
+        runnerData: png(1398, 2034).toString("base64"),
+        displayInfo: {
+          readDisplays: async () => {
+            reads++;
+            return [];
+          },
+        },
+      });
+      expect((await h.result).success).toBe(true);
+      expect(reads).toBe(0);
+      expect(h.runnerCalls).toEqual([true]);
+    });
   });
 
   test("a single-display simulator uses the runner and never touches devicectl", async () => {

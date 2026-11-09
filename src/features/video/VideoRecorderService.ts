@@ -85,6 +85,11 @@ export interface RecordingHandle {
   warning?: string;
   physicalDisplayId?: string;
   /**
+   * The panel the capture records when the backend chose it at start (iOS simctl `--display`);
+   * replaces the requested `recordingPanel`.
+   */
+  recordedPanel?: VideoRecordingPanel;
+  /**
    * File the capture is writing while it runs, when that is not `outputPath`.
    * The in-progress size cap (issue #4762) stats this path, so a backend that
    * captures to a raw file and only produces `outputPath` at stop (iOS Simulator:
@@ -129,6 +134,7 @@ function applyBackendDisplayOutcome(active: ActiveVideoRecording, handle: Record
     ? undefined
     : (handle.physicalDisplayId ?? active.physicalDisplayId);
   active.warning = handle.warning;
+  active.recordedPanel = handle.recordedPanel ?? active.recordedPanel;
   if (handle.warning?.includes("rejected --display-id")) {
     active.recordedPanel = undefined;
   }

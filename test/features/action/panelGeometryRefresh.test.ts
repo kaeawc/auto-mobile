@@ -166,7 +166,7 @@ describe("coordinate actions re-observe after a posture change", () => {
   async function dispatch(
     device: BootedDevice,
     toolName: string,
-    extra: { display?: string } = {},
+    extra: { display?: string; previousObservation?: ObserveResult } = {},
   ): Promise<string[]> {
     let beforeDispatch: string[] = [];
     await action(device).observedInteraction(
@@ -212,6 +212,33 @@ describe("coordinate actions re-observe after a posture change", () => {
       const before = await dispatch(duo, tool);
 
       expect(before).not.toContain("execute");
+    },
+  );
+
+  test.each(["tapOn", "tapAny", "swipeOn"])(
+    "%s skips the re-observe when its own read is at the current revision (#17593)",
+    async (tool) => {
+      await observe.cacheObserveResult(observation(transitions.fullRevision, "pre-fold"));
+      transitions.transition();
+      const ownRead = observation(transitions.fullRevision, "action-read");
+
+      const before = await dispatch(duo, tool, { previousObservation: ownRead });
+
+      expect(before).toEqual(["cacheObserveResult"]);
+    },
+  );
+
+  test.each(["tapOn", "tapAny", "swipeOn"])(
+    "%s still re-observes when its own read predates the fold",
+    async (tool) => {
+      await observe.cacheObserveResult(observation(transitions.fullRevision, "pre-fold"));
+      const ownRead = observation(transitions.fullRevision, "action-read");
+      transitions.transition();
+      observe.setObserveResult(observation(transitions.fullRevision, "post-fold"));
+
+      const before = await dispatch(duo, tool, { previousObservation: ownRead });
+
+      expect(before).toEqual(["cacheObserveResult", "getMostRecentCachedObserveResult", "execute"]);
     },
   );
 

@@ -30,6 +30,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import type { Timer } from "../../utils/SystemTimer";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import type {
@@ -164,17 +165,32 @@ function iosVoiceOverProbe(
     detector,
     stateClient,
     featureFlags,
+    timer,
   }: {
     detector: Pick<IosVoiceOverDetector, "isVoiceOverEnabled">;
     stateClient: () => VoiceOverStateClient;
     featureFlags: FeatureFlagReader;
+    timer: Timer;
   },
 ): () => Promise<boolean> {
-  return () =>
-    detector.isVoiceOverEnabled(device.deviceId, stateClient(), {
-      featureFlags,
-      timeoutMs: TAP_AT_VOICEOVER_PROBE_TIMEOUT_MS,
-    });
+  return () => {
+    // The request timeout starts only after a reconnect, so bound the whole probe here.
+    const controller = new AbortController();
+    return raceWithDeadline(
+      () =>
+        detector.isVoiceOverEnabled(device.deviceId, stateClient(), {
+          featureFlags,
+          timeoutMs: TAP_AT_VOICEOVER_PROBE_TIMEOUT_MS,
+          signal: controller.signal,
+        }),
+      {
+        timer,
+        timeoutMs: TAP_AT_VOICEOVER_PROBE_TIMEOUT_MS,
+        label: "tapAt VoiceOver probe",
+        onTimeout: () => controller.abort(),
+      },
+    );
+  };
 }
 
 /** Tap one absolute point in the native coordinate space reported by observe. */
@@ -225,6 +241,7 @@ export class TapAtCoordinate extends BaseVisualChange {
       detector: dependencies.iosVoiceOverDetector ?? defaultIosVoiceOverDetector,
       stateClient: () => dependencies.iosVoiceOverStateClient ?? liveIosClient(),
       featureFlags: talkBack.featureFlags,
+      timer: this.timer,
     });
     this.androidTalkBack = new AndroidCoordinateTalkBack({
       target: this,

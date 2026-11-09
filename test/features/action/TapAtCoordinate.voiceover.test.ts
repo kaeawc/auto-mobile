@@ -92,6 +92,22 @@ describe("tapAt iOS tap timeout under VoiceOver", () => {
     expect(result.error).not.toContain("voiceover:false");
   });
 
+  test("a probe that never settles is bounded and keeps the original timeout", async () => {
+    const detector = new FakeIosVoiceOverDetector();
+    let probeSignal: AbortSignal | undefined;
+    detector.isVoiceOverEnabled = (_deviceId, _client, options) => {
+      probeSignal = options?.signal;
+      return new Promise<boolean>(() => {});
+    };
+    const result = await createTapAt(indeterminateTapError(TIMEOUT), detector).execute({
+      x: 10,
+      y: 20,
+    });
+    expect(result.error).toContain(TIMEOUT);
+    expect(result.error).not.toContain("voiceover:false");
+    expect(probeSignal?.aborted).toBe(true);
+  });
+
   test.each([
     ["a successful tap", undefined],
     ["a non-timeout failure", new Error("CtrlProxy iOS tap failed: refused")],

@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
 import {
+  BUNDLED_NODE_MODULES_MAX_BYTES,
+  findBundledDependencyViolations,
   findMissingPackedAssets,
   findPackedAssetViolations,
   REQUIRED_PACKED_RUNTIME_ASSETS,
@@ -58,4 +60,31 @@ test("packed dist source maps are forbidden but dependency maps are not inspecte
     "Forbidden packed source map: dist/src/index.js.map",
   ]);
   expect(findPackedAssetViolations([...completeManifest, "node_modules/x/y.js.map"])).toEqual([]);
+});
+
+test("bundled node_modules budget counts only node_modules bytes", () => {
+  const files = [
+    { path: "dist/src/index.js", size: 50 },
+    { path: "node_modules/a/index.js", size: 6 },
+    { path: "node_modules/a/LICENSE", size: 4 },
+  ];
+  expect(findBundledDependencyViolations(files, 10)).toEqual([]);
+  expect(findBundledDependencyViolations(files, 9)).toEqual([
+    expect.stringContaining("Bundled node_modules 10 bytes exceeds 9 bytes"),
+  ]);
+  expect(BUNDLED_NODE_MODULES_MAX_BYTES).toBeLessThan(2_690_708);
+});
+
+test("bundled declarations and maps fail the gate; dist and docs are not inspected", () => {
+  expect(
+    findBundledDependencyViolations([
+      { path: "node_modules/a/index.d.ts", size: 1 },
+      { path: "node_modules/a/index.js.map", size: 1 },
+      { path: "node_modules/a/README.md", size: 1 },
+      { path: "dist/src/types.d.ts", size: 1 },
+    ]),
+  ).toEqual([
+    "Unpruned bundled type-declarations file: node_modules/a/index.d.ts",
+    "Unpruned bundled source-maps file: node_modules/a/index.js.map",
+  ]);
 });

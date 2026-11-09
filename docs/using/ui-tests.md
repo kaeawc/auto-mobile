@@ -309,6 +309,11 @@ permission prompts around each interaction. The default-off debug tool
 `accessibilityFocus` sets focus on Android (TalkBack) and iOS (VoiceOver).
 iOS requires VoiceOver enabled and the AutoMobile in-app SDK in the foreground
 app; focus read-back is unavailable. Clearing focus is supported only on Android.
+With VoiceOver on, iOS can hold or swallow a tap. When a `tapOn`, `tapAny` or
+`tapAt` tap times out with VoiceOver on, the error says the outcome is
+indeterminate (the tap may or may not have run, so it is not retried
+automatically) and names VoiceOver. Call `observe` to see whether the tap took
+effect; if it did not, call `accessibility` with `voiceover: false`, then retry.
 Check text alternatives, content descriptions or accessibility labels,
 focus order, contrast, and tap-target size as part of the assertions; support
 for toggling services varies by device type and OS version.

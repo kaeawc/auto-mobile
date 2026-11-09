@@ -1,6 +1,6 @@
 import { pointInTapBounds } from "./tapTargetSupport";
 import { TapElementFinder } from "./tapElementFinder";
-import { tapViaVoiceOver, withVoiceOverCoordinateTimeoutContext } from "./tapIosVoiceOver";
+import { tapViaVoiceOver, withVoiceOverTimeoutContext } from "./tapIosVoiceOver";
 import { TapPointPlanner } from "./tapPointPlanner";
 import type { TapVerificationOptions } from "./tapVerificationOptions";
 import { isStrictlyScoped } from "../utility/ScopedSelection";
@@ -823,7 +823,7 @@ export class TapGestureDispatcher {
     const coordinateTap = () =>
       this.host.executeiOSTapWithCoordinates(action, x, y, { durationMs, fenceOptions });
     if (isVoiceOverEnabled) {
-      await withVoiceOverCoordinateTimeoutContext(coordinateTap);
+      await withVoiceOverTimeoutContext(coordinateTap);
     } else {
       await coordinateTap();
     }

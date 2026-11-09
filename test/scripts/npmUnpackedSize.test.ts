@@ -229,3 +229,15 @@ test("parses npm pack JSON preceded by lifecycle stdout noise", () => {
   expect(parsed.name).toBe("p");
   expect(parsed.unpackedBytes).toBe(20);
 });
+
+test("an unpruned bundled declaration fails the benchmark like a missing asset", () => {
+  const report = evaluateUnpackedSize({
+    unpackedBytes: 10,
+    files: [...runtimeFiles, { path: "node_modules/zod/index.d.ts", size: 1 }],
+    thresholds: { unpackedBytes: 1000 },
+  });
+  expect(report.passed).toBe(false);
+  expect(report.violations).toEqual([
+    "Unpruned bundled type-declarations file: node_modules/zod/index.d.ts",
+  ]);
+});

@@ -65,15 +65,29 @@ describe("getDeviceState displays.current (#17049)", () => {
     const result = await readDisplays(fold, foldAdb("open"));
     expect(result.displays).toEqual({
       ...fold.displays!,
-      current: { posture: "opened", activePanel: { key: INNER, role: "inner" } },
+      current: {
+        posture: "opened",
+        postureSource: "device_state",
+        activePanel: { key: INNER, role: "inner" },
+      },
     });
     getDeviceStateResultSchema.parse({ message: deviceStateMessage(result), ...result });
+  });
+
+  test("an Android fold reports its committed posture as device_state, not inferred (#17637)", async () => {
+    const result = await readDisplays(fold, foldAdb("closed"));
+    const parsed = getDeviceStateResultSchema.parse({
+      message: deviceStateMessage(result),
+      ...result,
+    });
+    expect(parsed.displays?.current?.postureSource).toBe("device_state");
   });
 
   test("a closed fold reports the closed posture on the cover panel", async () => {
     const result = await readDisplays(fold, foldAdb("closed"));
     expect(result.displays?.current).toEqual({
       posture: "closed",
+      postureSource: "device_state",
       activePanel: { key: COVER, role: "cover" },
     });
   });
@@ -94,6 +108,7 @@ describe("getDeviceState displays.current (#17049)", () => {
     }
     expect((await state.getState(["biometrics"])).displays?.current).toEqual({
       posture: "closed",
+      postureSource: "device_state",
       activePanel: { key: COVER, role: "cover" },
     });
   });
@@ -110,10 +125,13 @@ describe("getDeviceState displays.current (#17049)", () => {
     );
     const result = await readDisplays(fold, adb);
     // No captured get-displays for rear-display mode: the panel is omitted, not guessed.
-    expect(result.displays?.current).toEqual({ posture: "rear_display" });
+    expect(result.displays?.current).toEqual({
+      posture: "rear_display",
+      postureSource: "device_state",
+    });
   });
 
-  test("a failed device_state read reports an unknown posture without failing the call", async () => {
+  test("a failed device_state read reports an unknown posture with no postureSource", async () => {
     const adb = foldAdb("open");
     adb.setCommandError("shell cmd device_state", new Error("adb: device_state read failed"));
     const result = await readDisplays(fold, adb);
@@ -122,6 +140,11 @@ describe("getDeviceState displays.current (#17049)", () => {
       posture: "unknown",
       activePanel: { key: INNER, role: "inner" },
     });
+    const parsed = getDeviceStateResultSchema.parse({
+      message: deviceStateMessage(result),
+      ...result,
+    });
+    expect(parsed.displays?.current).not.toHaveProperty("postureSource");
   });
 
   test("single-panel Android and iOS inventories issue no posture reads", async () => {
@@ -197,7 +220,11 @@ describe("getDeviceState iPhone Duo displays.current", () => {
       const result = await state.getState(["networkCondition"]);
       expect(result.displays).toEqual({
         ...duo.displays!,
-        current: { posture, activePanel: { key, role: panel } },
+        current: {
+          posture,
+          postureSource: "inferred_from_active_panel",
+          activePanel: { key, role: panel },
+        },
       });
       expect(source.requests).toHaveLength(1);
       expect(source.requests[0].deviceId).toBe(duo.deviceId);
@@ -214,9 +241,24 @@ describe("getDeviceState iPhone Duo displays.current", () => {
     source.displays = duoDisplays("cover");
     expect((await state.getState(["networkCondition"])).displays?.current).toEqual({
       posture: "closed",
+      postureSource: "inferred_from_active_panel",
       activePanel: { key: "primary", role: "cover" },
     });
     expect(source.requests).toHaveLength(2);
+  });
+
+  test("an inner-panel read is reported as inferred, never as a confirmed hinge posture (#17637)", async () => {
+    const source = new FakeDevicectlDisplayInfoSource();
+    source.displays = duoDisplays("inner");
+    const result = await duoState(source).state.getState(["networkCondition"]);
+    const current = result.displays?.current;
+    expect(current?.postureSource).toBe("inferred_from_active_panel");
+    expect(current?.activePanel).toEqual({ key: "primary-1", role: "inner" });
+    const parsed = getDeviceStateResultSchema.parse({
+      message: deviceStateMessage(result),
+      ...result,
+    });
+    expect(parsed.displays?.current?.postureSource).toBe("inferred_from_active_panel");
   });
 
   for (const failure of ["read failed", "no active", "unmatched", "ambiguous"] as const) {

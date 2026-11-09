@@ -1,0 +1,392 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"observationId\":\"96dff1af-1032-4312-9246-c57c185bfc8e\",\"deviceId\":\"emulator-5580\",\"display\":{\"key\":\"4619827551948147201\",\"role\":\"cluster\",\"posture\":\"unknown\",\"generation\":0},\"updatedAt\":1794221776623,\"screenSize\":{\"width\":1024,\"height\":768,\"units\":\"physical-pixels\"},\"systemInsets\":{\"top\":0,\"right\":0,\"bottom\":0,\"left\":0},\"insets\":{\"available\":false,\"source\":\"unavailable\",\"units\":\"unknown\"},\"intentChooserDetected\":false,\"notificationPermissionDetected\":false,\"deviceLock\":{\"locked\":false,\"keyguardShowing\":false,\"secure\":false},\"backStack\":{\"depth\":0,\"activities\":[{\"name\":\"com.android.car.mapsplaceholder.MapsPlaceholderActivity\",\"taskId\":1000009,\"userId\":10,\"taskAffinity\":\"1010181:com.android.car.mapsplaceholder\",\"isTaskRoot\":true},{\"name\":\"com.android.car.carlauncher.CarLauncher\",\"taskId\":1000008,\"userId\":10,\"taskAffinity\":\"1010167:com.android.car.carlauncher\",\"isTaskRoot\":true},{\"name\":\"com.android.car.cluster.osdouble.ClusterOsDoubleActivity\",\"taskId\":1000002,\"userId\":0,\"taskAffinity\":\"1000:com.android.car.cluster.osdouble\",\"isTaskRoot\":true},{\"name\":\"com.android.car.cluster.home.ClusterHomeActivity\",\"taskId\":1000003,\"userId\":0,\"taskAffinity\":\"10141:com.android.car.cluster.home\",\"isTaskRoot\":true}],\"tasks\":[{\"id\":1000009,\"userId\":10,\"affinity\":\"1010181:com.android.car.mapsplaceholder\",\"numActivities\":1,\"launchedFromPackage\":\"com.android.car.carlauncher\",\"rootActivity\":\"com.android.car.mapsplaceholder/.MapsPlaceholderActivity\",\"packageName\":\"com.android.car.mapsplaceholder\",\"windowingMode\":\"multi-window\",\"bounds\":[404,76,1024,672]},{\"id\":1000008,\"userId\":10,\"affinity\":\"1010167:com.android.car.carlauncher\",\"numActivities\":1,\"rootActivity\":\"com.android.car.carlauncher/.CarLauncher\",\"packageName\":\"com.android.car.carlauncher\",\"windowingMode\":\"fullscreen\",\"bounds\":[0,0,1024,768]},{\"id\":1000002,\"userId\":0,\"affinity\":\"1000:com.android.car.cluster.osdouble\",\"numActivities\":1,\"launchedFromPackage\":\"com.android.car.cluster.osdouble\",\"rootActivity\":\"com.android.car.cluster.osdouble/.ClusterOsDoubleActivity\",\"packageName\":\"com.android.car.cluster.osdouble\",\"windowingMode\":\"fullscreen\",\"bounds\":[0,0,400,600]},{\"id\":1000003,\"userId\":0,\"affinity\":\"10141:com.android.car.cluster.home\",\"numActivities\":1,\"launchedFromPackage\":\"com.android.car\",\"rootActivity\":\"com.android.car.cluster.home/.ClusterHomeActivity\",\"packageName\":\"com.android.car.cluster.home\",\"windowingMode\":\"fullscreen\",\"bounds\":[0,0,400,500]}],\"currentActivity\":{\"name\":\"com.android.car.cluster.osdouble.ClusterOsDoubleActivity\",\"taskId\":1000002,\"userId\":0},\"displayCount\":4,\"currentTaskId\":1000002,\"capturedAt\":1794221776685,\"source\":\"adb\"},\"wakefulness\":\"Awake\",\"wakefulnessSource\":\"adb\",\"activeWindow\":{\"appId\":\"com.android.car.cluster.osdouble\",\"activityName\":\"com.android.car.cluster.osdouble.ClusterOsDoubleActivity\",\"layoutSeqSum\":1062},\"automotive\":{\"drivingState\":\"parked\",\"foregroundActivity\":{\"distractionOptimized\":true},\"blocked\":false},\"otherDisplays\":[{\"key\":\"4619827259835644672\",\"role\":\"inner\",\"size\":{\"width\":1024,\"height\":768},\"units\":\"physical-pixels\"},{\"key\":\"virtual:com.android.car.cluster.osdouble:ClusterDisplay\",\"role\":\"virtual\",\"size\":{\"width\":400,\"height\":500},\"units\":\"physical-pixels\"},{\"key\":\"virtual:com.android.emulator.multidisplay:1234562\",\"role\":\"virtual\",\"size\":{\"width\":1280,\"height\":720},\"units\":\"physical-pixels\"}],\"accessibilityState\":{\"enabled\":true,\"service\":\"unknown\",\"detectionSkipped\":false},\"freshness\":{\"actualTimestamp\":1794221776623,\"ageMs\":142,\"verified\":true,\"isFresh\":true},\"snapshotReferenceUnavailable\":[\"rotation\",\"nativeScale\"],\"skeleton\":[{\"bounds\":[5,445,35,475],\"affordances\":[\"tap\"],\"elementId\":\"com.android.car.cluster.osdouble:id/btn_car_info\"},{\"bounds\":[5,485,35,515],\"affordances\":[\"tap\"],\"elementId\":\"com.android.car.cluster.osdouble:id/btn_nav\"},{\"bounds\":[5,525,35,555],\"affordances\":[\"tap\"],\"elementId\":\"com.android.car.cluster.osdouble:id/btn_music\"},{\"bounds\":[5,565,35,595],\"affordances\":[\"tap\"],\"elementId\":\"com.android.car.cluster.osdouble:id/btn_phone\"}],\"context\":[{\"bounds\":[90,515,109,526],\"affordances\":[],\"elementId\":\"s2-8ed3b028ebbacb1c\",\"label\":\"Fuel\"},{\"bounds\":[90,526,123,550],\"affordances\":[],\"elementId\":\"com.android.car.cluster.osdouble:id/info_fuel\",\"label\":\"100\"},{\"bounds\":[90,550,118,561],\"affordances\":[],\"elementId\":\"s2-48ea93adfe479c30\",\"label\":\"Range\"},{\"bounds\":[90,561,112,585],\"affordances\":[],\"elementId\":\"com.android.car.cluster.osdouble:id/info_range\",\"label\":\"31\"},{\"bounds\":[282,515,310,526],\"affordances\":[],\"elementId\":\"s2-70f85d15adb369f4\",\"label\":\"Speed\"},{\"bounds\":[299,526,310,550],\"affordances\":[],\"elementId\":\"com.android.car.cluster.osdouble:id/info_speed\",\"label\":\"0\"},{\"bounds\":[289,550,310,561],\"affordances\":[],\"elementId\":\"s2-fd206cffd14e4484\",\"label\":\"RPM\"},{\"bounds\":[283,561,310,585],\"affordances\":[],\"elementId\":\"com.android.car.cluster.osdouble:id/info_rpm\",\"label\":\"0.0\"},{\"bounds\":[375,448,393,486],\"affordances\":[],\"elementId\":\"com.android.car.cluster.osdouble:id/gear_parked\",\"label\":\"P\"},{\"bounds\":[375,486,392,524],\"affordances\":[],\"elementId\":\"com.android.car.cluster.osdouble:id/gear_reverse\",\"label\":\"R\"},{\"bounds\":[375,524,395,562],\"affordances\":[],\"elementId\":\"com.android.car.cluster.osdouble:id/gear_neutral\",\"label\":\"N\"},{\"bounds\":[375,562,393,600],\"affordances\":[],\"elementId\":\"com.android.car.cluster.osdouble:id/gear_drive\",\"label\":\"D\"}],\"observationScreenshotResourceUri\":\"automobile:observation/emulator-5580/96dff1af-1032-4312-9246-c57c185bfc8e/screenshot\"}"
+    }
+  ],
+  "structuredContent": {
+    "observationId": "96dff1af-1032-4312-9246-c57c185bfc8e",
+    "deviceId": "emulator-5580",
+    "display": {
+      "key": "4619827551948147201",
+      "role": "cluster",
+      "posture": "unknown",
+      "generation": 0
+    },
+    "updatedAt": 1794221776623,
+    "screenSize": {
+      "width": 1024,
+      "height": 768,
+      "units": "physical-pixels"
+    },
+    "systemInsets": {
+      "top": 0,
+      "right": 0,
+      "bottom": 0,
+      "left": 0
+    },
+    "insets": {
+      "available": false,
+      "source": "unavailable",
+      "units": "unknown"
+    },
+    "intentChooserDetected": false,
+    "notificationPermissionDetected": false,
+    "deviceLock": {
+      "locked": false,
+      "keyguardShowing": false,
+      "secure": false
+    },
+    "backStack": {
+      "depth": 0,
+      "activities": [
+        {
+          "name": "com.android.car.mapsplaceholder.MapsPlaceholderActivity",
+          "taskId": 1000009,
+          "userId": 10,
+          "taskAffinity": "1010181:com.android.car.mapsplaceholder",
+          "isTaskRoot": true
+        },
+        {
+          "name": "com.android.car.carlauncher.CarLauncher",
+          "taskId": 1000008,
+          "userId": 10,
+          "taskAffinity": "1010167:com.android.car.carlauncher",
+          "isTaskRoot": true
+        },
+        {
+          "name": "com.android.car.cluster.osdouble.ClusterOsDoubleActivity",
+          "taskId": 1000002,
+          "userId": 0,
+          "taskAffinity": "1000:com.android.car.cluster.osdouble",
+          "isTaskRoot": true
+        },
+        {
+          "name": "com.android.car.cluster.home.ClusterHomeActivity",
+          "taskId": 1000003,
+          "userId": 0,
+          "taskAffinity": "10141:com.android.car.cluster.home",
+          "isTaskRoot": true
+        }
+      ],
+      "tasks": [
+        {
+          "id": 1000009,
+          "userId": 10,
+          "affinity": "1010181:com.android.car.mapsplaceholder",
+          "numActivities": 1,
+          "launchedFromPackage": "com.android.car.carlauncher",
+          "rootActivity": "com.android.car.mapsplaceholder/.MapsPlaceholderActivity",
+          "packageName": "com.android.car.mapsplaceholder",
+          "windowingMode": "multi-window",
+          "bounds": [
+            404,
+            76,
+            1024,
+            672
+          ]
+        },
+        {
+          "id": 1000008,
+          "userId": 10,
+          "affinity": "1010167:com.android.car.carlauncher",
+          "numActivities": 1,
+          "rootActivity": "com.android.car.carlauncher/.CarLauncher",
+          "packageName": "com.android.car.carlauncher",
+          "windowingMode": "fullscreen",
+          "bounds": [
+            0,
+            0,
+            1024,
+            768
+          ]
+        },
+        {
+          "id": 1000002,
+          "userId": 0,
+          "affinity": "1000:com.android.car.cluster.osdouble",
+          "numActivities": 1,
+          "launchedFromPackage": "com.android.car.cluster.osdouble",
+          "rootActivity": "com.android.car.cluster.osdouble/.ClusterOsDoubleActivity",
+          "packageName": "com.android.car.cluster.osdouble",
+          "windowingMode": "fullscreen",
+          "bounds": [
+            0,
+            0,
+            400,
+            600
+          ]
+        },
+        {
+          "id": 1000003,
+          "userId": 0,
+          "affinity": "10141:com.android.car.cluster.home",
+          "numActivities": 1,
+          "launchedFromPackage": "com.android.car",
+          "rootActivity": "com.android.car.cluster.home/.ClusterHomeActivity",
+          "packageName": "com.android.car.cluster.home",
+          "windowingMode": "fullscreen",
+          "bounds": [
+            0,
+            0,
+            400,
+            500
+          ]
+        }
+      ],
+      "currentActivity": {
+        "name": "com.android.car.cluster.osdouble.ClusterOsDoubleActivity",
+        "taskId": 1000002,
+        "userId": 0
+      },
+      "displayCount": 4,
+      "currentTaskId": 1000002,
+      "capturedAt": 1794221776685,
+      "source": "adb"
+    },
+    "wakefulness": "Awake",
+    "wakefulnessSource": "adb",
+    "activeWindow": {
+      "appId": "com.android.car.cluster.osdouble",
+      "activityName": "com.android.car.cluster.osdouble.ClusterOsDoubleActivity",
+      "layoutSeqSum": 1062
+    },
+    "automotive": {
+      "drivingState": "parked",
+      "foregroundActivity": {
+        "distractionOptimized": true
+      },
+      "blocked": false
+    },
+    "otherDisplays": [
+      {
+        "key": "4619827259835644672",
+        "role": "inner",
+        "size": {
+          "width": 1024,
+          "height": 768
+        },
+        "units": "physical-pixels"
+      },
+      {
+        "key": "virtual:com.android.car.cluster.osdouble:ClusterDisplay",
+        "role": "virtual",
+        "size": {
+          "width": 400,
+          "height": 500
+        },
+        "units": "physical-pixels"
+      },
+      {
+        "key": "virtual:com.android.emulator.multidisplay:1234562",
+        "role": "virtual",
+        "size": {
+          "width": 1280,
+          "height": 720
+        },
+        "units": "physical-pixels"
+      }
+    ],
+    "accessibilityState": {
+      "enabled": true,
+      "service": "unknown",
+      "detectionSkipped": false
+    },
+    "freshness": {
+      "actualTimestamp": 1794221776623,
+      "ageMs": 142,
+      "verified": true,
+      "isFresh": true
+    },
+    "snapshotReferenceUnavailable": [
+      "rotation",
+      "nativeScale"
+    ],
+    "skeleton": [
+      {
+        "bounds": [
+          5,
+          445,
+          35,
+          475
+        ],
+        "affordances": [
+          "tap"
+        ],
+        "elementId": "com.android.car.cluster.osdouble:id/btn_car_info"
+      },
+      {
+        "bounds": [
+          5,
+          485,
+          35,
+          515
+        ],
+        "affordances": [
+          "tap"
+        ],
+        "elementId": "com.android.car.cluster.osdouble:id/btn_nav"
+      },
+      {
+        "bounds": [
+          5,
+          525,
+          35,
+          555
+        ],
+        "affordances": [
+          "tap"
+        ],
+        "elementId": "com.android.car.cluster.osdouble:id/btn_music"
+      },
+      {
+        "bounds": [
+          5,
+          565,
+          35,
+          595
+        ],
+        "affordances": [
+          "tap"
+        ],
+        "elementId": "com.android.car.cluster.osdouble:id/btn_phone"
+      }
+    ],
+    "context": [
+      {
+        "bounds": [
+          90,
+          515,
+          109,
+          526
+        ],
+        "affordances": [],
+        "elementId": "s2-8ed3b028ebbacb1c",
+        "label": "Fuel"
+      },
+      {
+        "bounds": [
+          90,
+          526,
+          123,
+          550
+        ],
+        "affordances": [],
+        "elementId": "com.android.car.cluster.osdouble:id/info_fuel",
+        "label": "100"
+      },
+      {
+        "bounds": [
+          90,
+          550,
+          118,
+          561
+        ],
+        "affordances": [],
+        "elementId": "s2-48ea93adfe479c30",
+        "label": "Range"
+      },
+      {
+        "bounds": [
+          90,
+          561,
+          112,
+          585
+        ],
+        "affordances": [],
+        "elementId": "com.android.car.cluster.osdouble:id/info_range",
+        "label": "31"
+      },
+      {
+        "bounds": [
+          282,
+          515,
+          310,
+          526
+        ],
+        "affordances": [],
+        "elementId": "s2-70f85d15adb369f4",
+        "label": "Speed"
+      },
+      {
+        "bounds": [
+          299,
+          526,
+          310,
+          550
+        ],
+        "affordances": [],
+        "elementId": "com.android.car.cluster.osdouble:id/info_speed",
+        "label": "0"
+      },
+      {
+        "bounds": [
+          289,
+          550,
+          310,
+          561
+        ],
+        "affordances": [],
+        "elementId": "s2-fd206cffd14e4484",
+        "label": "RPM"
+      },
+      {
+        "bounds": [
+          283,
+          561,
+          310,
+          585
+        ],
+        "affordances": [],
+        "elementId": "com.android.car.cluster.osdouble:id/info_rpm",
+        "label": "0.0"
+      },
+      {
+        "bounds": [
+          375,
+          448,
+          393,
+          486
+        ],
+        "affordances": [],
+        "elementId": "com.android.car.cluster.osdouble:id/gear_parked",
+        "label": "P"
+      },
+      {
+        "bounds": [
+          375,
+          486,
+          392,
+          524
+        ],
+        "affordances": [],
+        "elementId": "com.android.car.cluster.osdouble:id/gear_reverse",
+        "label": "R"
+      },
+      {
+        "bounds": [
+          375,
+          524,
+          395,
+          562
+        ],
+        "affordances": [],
+        "elementId": "com.android.car.cluster.osdouble:id/gear_neutral",
+        "label": "N"
+      },
+      {
+        "bounds": [
+          375,
+          562,
+          393,
+          600
+        ],
+        "affordances": [],
+        "elementId": "com.android.car.cluster.osdouble:id/gear_drive",
+        "label": "D"
+      }
+    ],
+    "observationScreenshotResourceUri": "automobile:observation/emulator-5580/96dff1af-1032-4312-9246-c57c185bfc8e/screenshot"
+  }
+}

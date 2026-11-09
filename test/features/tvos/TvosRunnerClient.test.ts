@@ -69,6 +69,31 @@ test("correlates a real remote press result and reports runner errors", async ()
   client.close();
 });
 
+test("press requests hint the foreground app and preserve an explicit bundleId", async () => {
+  const socket = new FakeWatchSocket();
+  const timer = new FakeTimer();
+  const client = new WebSocketTvosRunnerClient("ws://fake/ws", {
+    factory: () => socket,
+    timer,
+    foregroundApp: () => "com.example.tvshow",
+  });
+  socket.receive(connected);
+  for (const bundleId of [undefined, "com.apple.TVSettings"]) {
+    const pending = client.request({ type: "request_press_button", action: "menu", bundleId });
+    await drainMicrotasks(2);
+    const sent = socket.sent[socket.sent.length - 1];
+    socket.receive({ ...pressResult, requestId: sent.requestId });
+    await pending;
+    expect(sent).toMatchObject({
+      type: "request_press_button",
+      action: "menu",
+      bundleId: bundleId ?? "com.example.tvshow",
+    });
+  }
+  expect(timer.getSleepHistory()).toEqual([]);
+  client.close();
+});
+
 test("accepts the runner screenshot envelope without a success field", async () => {
   const { socket, client, timer } = fixture();
   socket.receive(connected);

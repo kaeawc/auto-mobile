@@ -205,6 +205,7 @@ test/features/prototype/prototypeBundleFuzz.integration.test.ts | safe | seeded 
 test/features/prototype/web/prototypeEmbedGlyphsCoverage.integration.test.ts | safe | renders read-only repo fixtures in process with a recording fake glyph source; no writes, ports or shared paths
 test/features/prototype/web/webAndroidParity.integration.test.ts | unsafe | launches headless Chromium via playwright-core and writes parity budgets or scratch/ screenshots; opt-in via AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1
 test/features/prototype/web/webImageEncoding.integration.test.ts | safe | encodes in-memory images with sharp and reads only a committed fixture; no paths, processes or network
+test/features/prototype/web/webIosParity.integration.test.ts | unsafe | opt-in headless Chromium parity capture; writes scratch/ screenshots and may update budgets
 test/features/prototype/web/webScreenshots.integration.test.ts | unsafe | launches headless Chromium via playwright-core and writes goldens or scratch/ screenshots; opt-in via AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1
 test/features/screen-stream/ScreenCaptureHelperProvider.integration.test.ts | safe | fake downloader/checksum/timer; cache in tmpdir L36/L49
 test/features/shared/GenericThresholdManager.integration.test.ts | safe | createTestDatabase; static threshold calculation only L220
@@ -293,5 +294,3 @@ test/utils/image/backend/SharpBackend.integration.test.ts | safe | in-process sh
 test/utils/image/backend/resolveImageBackend.integration.test.ts | safe | in-process Jimp; injected sharp loader that throws L16
 test/utils/logger-close.integration.test.ts | safe | WriteStream on mkdtemp tmpdir L10/L39
 test/utils/screenshot/PerceptualHasher.integration.test.ts | safe | in-process Jimp and FakeImageBackend L137
-
-test/features/prototype/web/webIosParity.integration.test.ts | unsafe | opt-in headless Chromium parity capture; writes scratch/ screenshots and may update budgets

@@ -1,3 +1,4 @@
+import type { NetsimInstance } from "./NetsimInstanceLauncher";
 import { ActionableError } from "../../models";
 import { logger } from "../logger";
 import { runDetachedFromPerf } from "../PerfContext";
@@ -15,6 +16,8 @@ import type {
 
 import {
   EARLY_EXIT_DRAIN_TIMEOUT_MS,
+  appendCameraPosterArguments,
+  architecturePanicMessage,
   boundedEmulatorOutputTail,
   recordEmulatorLaunchOutputSource,
   resolveHeadlessMode,
@@ -156,7 +159,7 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
     if (requestedExtraArgs) {
       args.push(...requestedExtraArgs);
     }
-    this.appendCameraPosterArguments(args, options.cameraPosterPath);
+    appendCameraPosterArguments(args, options.cameraPosterPath);
     let grpcLease: EmulatorGrpcPortLease | undefined;
     try {
       grpcLease = await leaseEmulatorGrpcPort(args, this.host.reservations());
@@ -224,43 +227,57 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
     logger.info(`Starting emulator with AVD: ${avdName}`);
     logger.debug(`Emulator command: ${this.host.emulatorPath()} ${args.join(" ")}`);
 
-    const child = await this.spawnClaimedEmulator({
-      avdName,
-      perf,
-      args,
-      reservedEmulator,
-      expectedDeviceId,
-      signal,
-      // The capacity slot is handed off before the launch owner can act on the child.
-      onSpawn: (spawned) => {
-        onAdmittedSpawn?.(spawned, reservedEmulator?.deviceId);
-        onSpawn?.(spawned);
-      },
-    });
+    let netsim: NetsimInstance | undefined;
+    let child: ChildProcess | null;
+    let spawnAttempted = false;
+    try {
+      if (
+        readEnvRaw(ENV.EMULATOR_NETSIM_ISOLATION) === "true" &&
+        !args.some(
+          (arg) =>
+            arg === "-packet-streamer-endpoint" || arg.startsWith("-packet-streamer-endpoint="),
+        )
+      ) {
+        netsim = await this.host.netsimInstanceLauncher().start();
+        args.push("-packet-streamer-endpoint", `localhost:${netsim.port}`);
+      }
+      this.host.throwIfLaunchCancelled(avdName, isCancelled);
+      spawnAttempted = true;
+      child = await this.spawnClaimedEmulator({
+        avdName,
+        perf,
+        args,
+        reservedEmulator,
+        expectedDeviceId,
+        signal,
+        // Register cleanup before the launch owner can act on the child.
+        onSpawn: (spawned) => {
+          if (netsim) {
+            const ownedNetsim = netsim;
+            spawned.once("exit", () => ownedNetsim.stop());
+            spawned.once("close", () => ownedNetsim.stop());
+            spawned.once("error", () => ownedNetsim.stop());
+          }
+          onAdmittedSpawn?.(spawned, reservedEmulator?.deviceId);
+          onSpawn?.(spawned);
+        },
+      });
+      if (!child) {
+        netsim?.stop();
+      }
+    } catch (error) {
+      netsim?.stop();
+      if (!spawnAttempted && reservedEmulator) {
+        // The spawn never ran (netsimd failed or the launch was cancelled), so nothing else frees it.
+        this.host.reservations().releasePendingEmulatorDeviceId(reservedEmulator);
+      }
+      throw error;
+    }
     // The spawn resolves without a process only when the emulator exited as a duplicate of one
     // started outside this process.
     return child
       ? { process: child, outcome: "launched", reservedDeviceId: reservedEmulator?.deviceId }
       : { process: null, outcome: "duplicate-of-external" };
-  }
-
-  private appendCameraPosterArguments(args: string[], posterPath?: string): void {
-    if (posterPath !== undefined) {
-      if (
-        args.some(
-          (arg) =>
-            arg === "-camera-back" ||
-            arg === "-virtualscene-poster" ||
-            arg.startsWith("-camera-back=") ||
-            arg.startsWith("-virtualscene-poster="),
-        )
-      ) {
-        throw new ActionableError(
-          "cameraPosterPath cannot be combined with camera-back or virtualscene-poster extra arguments. Remove the conflicting arguments.",
-        );
-      }
-      args.push("-camera-back", "virtualscene", "-virtualscene-poster", `wall=${posterPath}`);
-    }
   }
 
   private spawnReservedEmulator(context: {
@@ -742,25 +759,6 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
     return { beginPostValidationExit, finalizePostValidationExit };
   }
 
-  private architecturePanicMessage(
-    directPanicResult: ReturnType<EmulatorLauncherHost["detectArchitecturePanic"]>,
-  ): string {
-    // Create a more helpful error message
-    let errorMessage = `Emulator failed to start: ${directPanicResult.message}`;
-    if (directPanicResult.hostArch && directPanicResult.avdArch) {
-      errorMessage += `\n\nSuggestion: On ${directPanicResult.hostArch} hosts, create AVDs with compatible architectures:`;
-      if (directPanicResult.hostArch === "aarch64" || directPanicResult.hostArch === "arm64") {
-        errorMessage += `\n- Use ARM64 system images (arm64-v8a) instead of x86/x86_64`;
-        errorMessage += `\n- Example: avdmanager create avd -n MyAVD -k "system-images;android-35;google_apis;arm64-v8a"`;
-      } else if (directPanicResult.hostArch === "x86" || directPanicResult.hostArch === "x86_64") {
-        errorMessage += `\n- Use x86/x86_64 system images instead of ARM64`;
-        errorMessage += `\n- Example: avdmanager create avd -n MyAVD -k "system-images;android-35;google_apis;x86_64"`;
-      }
-    }
-
-    return errorMessage;
-  }
-
   private monitorLaunchImageAndDisplay(
     context: EmulatorLaunchMonitorContext,
     safeChunk: string,
@@ -850,7 +848,7 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
     if (directPanicResult.isPanic) {
       logger.error(`Emulator PANIC detected: ${directPanicResult.message}`);
 
-      const errorMessage = this.architecturePanicMessage(directPanicResult);
+      const errorMessage = architecturePanicMessage(directPanicResult);
 
       // Kill the process if it's still running
       if (!child.killed) {

@@ -63,7 +63,7 @@ test.each([{ isHidden: true }, { isOccluded: true }, { alpha: 0 }])(
   },
 );
 
-test("maps SDK interaction, focus and trait flags without inferring them from class names", () => {
+test("maps SDK interaction, focus and trait flags from the wire", () => {
   const tree = structuredClone(hierarchy);
   Object.assign(tree.root, {
     isUserInteractionEnabled: false,

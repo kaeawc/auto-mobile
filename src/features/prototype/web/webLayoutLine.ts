@@ -2,6 +2,8 @@ import { cssLength, type CssVars } from "./webCssLength";
 import {
   add,
   alignOffset,
+  aspectRatioOf,
+  clampKnown,
   clampSize,
   contentInsets,
   declaredSize,
@@ -44,6 +46,10 @@ function layoutOf(element: WebElement): Layout {
   return "flow";
 }
 
+/** Whether a flex line runs from its main-end (`row-reverse` or `column-reverse`). */
+const reversed = (element: WebElement): boolean =>
+  element.style["flex-direction"]?.trim().endsWith("-reverse") === true;
+
 /** Whether a child leaves the flow (absolute or fixed) and is placed against its container. */
 export const outOfFlow = (child: WebElement): boolean =>
   child.style.position === "absolute" || child.style.position === "fixed";
@@ -69,6 +75,8 @@ const startOf = (rect: WebRect, axis: Axis): Len => (axis === "width" ? rect.lef
 /**
  * A child's size on one axis where self-alignment can stretch it: declared, else the room when
  * stretched, else content-sized. A missing alignment is the renderer's start, never CSS's stretch.
+ * A content size stays unknown so an aspect ratio can still derive it; `withAspectRatio` then
+ * takes it at its minimum.
  */
 function alignedSize(
   child: WebElement,
@@ -80,8 +88,14 @@ function alignedSize(
   const declared = declaredSize(child, axis, room, box.vars);
   const stretched = align === "stretch" || align === "normal";
   const size =
-    declared !== "auto" ? declared : stretched ? room : measuredContent(child, axis, box.vars, 0);
-  return clampSize(size, child, axis, { base: room, vars: box.vars });
+    declared !== "auto"
+      ? declared
+      : stretched
+        ? room
+        : aspectRatioOf(child) === undefined
+          ? measuredContent(child, axis, box.vars, 0)
+          : undefined;
+  return clampKnown(size, child, axis, { base: room, vars: box.vars });
 }
 
 const MAX_MEASURE_DEPTH = 32;
@@ -89,8 +103,13 @@ const MAX_MEASURE_DEPTH = 32;
 /** An element's size on one axis with no room to resolve against: declared, else measured. */
 function measuredSize(element: WebElement, axis: Axis, vars: CssVars, depth: number): Len {
   const declared = declaredSize(element, axis, undefined, vars);
-  const size = declared === "auto" ? measuredContent(element, axis, vars, depth) : declared;
-  return clampSize(size, element, axis, { base: undefined, vars });
+  const size =
+    declared !== "auto"
+      ? declared
+      : aspectRatioOf(element) === undefined
+        ? measuredContent(element, axis, vars, depth)
+        : undefined;
+  return clampKnown(size, element, axis, { base: undefined, vars });
 }
 
 /**
@@ -188,12 +207,17 @@ function placeTracks(
 function placeInCell(child: WebElement, box: Container): PlacedChild {
   const justify = child.style["justify-self"] ?? box.parent.style["justify-items"];
   const align = child.style["align-self"] ?? box.parent.style["align-items"];
-  const sized = withAspectRatio(child, {
-    left: 0,
-    top: 0,
-    width: alignedSize(child, "width", justify, box),
-    height: alignedSize(child, "height", align, box),
-  });
+  const sized = withAspectRatio(
+    child,
+    {
+      left: 0,
+      top: 0,
+      width: alignedSize(child, "width", justify, box),
+      height: alignedSize(child, "height", align, box),
+    },
+    box.content,
+    box.vars,
+  );
   const { content } = box;
   return {
     element: child,
@@ -212,11 +236,11 @@ function isInline(child: WebElement): boolean {
   return display === undefined ? INLINE_TAGS.has(child.tag) : display.startsWith("inline");
 }
 
-/** A size that is declared or else follows the content (never stretched). */
+/** A size that is declared or else follows the content (never stretched), unknown until resolved. */
 function contentSize(child: WebElement, axis: Axis, box: Container): Len {
   const room = box.content[axis];
   const declared = declaredSize(child, axis, room, box.vars);
-  return clampSize(declared === "auto" ? undefined : declared, child, axis, {
+  return clampKnown(declared === "auto" ? undefined : declared, child, axis, {
     base: room,
     vars: box.vars,
   });
@@ -234,115 +258,307 @@ function placeFlow(children: readonly WebChild[], box: Container): PlacedChild[]
       continue;
     }
     const align = isInline(child) ? "start" : "stretch";
-    const rect = withAspectRatio(child, {
-      left: content.left,
-      top: cursor,
-      width: alignedSize(child, "width", align, box),
-      height: contentSize(child, "height", box),
-    });
+    const rect = withAspectRatio(
+      child,
+      {
+        left: content.left,
+        top: cursor,
+        width: alignedSize(child, "width", align, box),
+        height: contentSize(child, "height", box),
+      },
+      content,
+      box.vars,
+    );
     placed.push({ element: child, rect });
     cursor = add(cursor, rect.height);
   }
   return placed;
 }
 
-/** A flex item's grow factor and basis, from `flex`, `flex-grow` and `flex-basis`. */
-function flexOf(child: WebElement): { grow: number; basis: string } {
+/** A flex item's factors and basis: `flex`, then `flex-grow`, `flex-shrink` and `flex-basis`. */
+function flexOf(child: WebElement): { grow: number; shrink: number; basis: string } {
   const parts = shorthandValues(child.style.flex);
+  const isNumber = (part: string | undefined): boolean =>
+    part !== undefined && /^\d*\.?\d+$/.test(part);
   let grow = 0;
+  let shrink = 1;
   let basis = "auto";
-  if (parts[0] === "auto") {
+  if (parts[0] === "none") {
+    shrink = 0;
+  } else if (parts[0] === "auto") {
     grow = 1;
-  } else if (parts.length > 0 && parts[0] !== "none") {
-    grow = Number(parts[0]);
-    // `flex: 1` and `flex: 1 1` mean a zero basis; a third value (or a length second) names it.
-    const named = parts.length === 3 ? parts[2] : parts[1];
-    basis = named !== undefined && !/^\d+(\.\d+)?$/.test(named) ? named : "0";
+  } else if (parts.length > 0 && parts[0] !== "initial") {
+    // `flex: 1` and `flex: 1 1` mean a zero basis; a lone length means `1 1 <length>`.
+    const numbers = parts.filter(isNumber);
+    grow = numbers.length > 0 ? Number(numbers[0]) : 1;
+    shrink = numbers.length > 1 ? Number(numbers[1]) : 1;
+    basis = parts.find((part) => !isNumber(part)) ?? "0";
   }
-  const explicitGrow = Number(child.style["flex-grow"]);
+  const longhand = (name: string, fallback: number): number => {
+    const value = Number(child.style[name]);
+    return child.style[name] && Number.isFinite(value) ? value : fallback;
+  };
   return {
-    grow: Number.isFinite(explicitGrow) && child.style["flex-grow"] ? explicitGrow : grow || 0,
+    grow: longhand("flex-grow", grow),
+    shrink: longhand("flex-shrink", shrink),
     basis: child.style["flex-basis"] ?? basis,
   };
 }
 
+/**
+ * A line item. `basis` is its flex base size and `base` its hypothetical main size (the basis
+ * clamped by its min and max). Its minimum and maximum are resolved in the freeze rounds, as CSS
+ * does. `min` is the declared `min-*`, else the automatic minimum when the pass can know it;
+ * `minUnknown` marks an automatic minimum that depends on unmeasured content. `edges` is its
+ * main-axis padding and border, which the inner flex base size excludes.
+ */
 interface LineItem {
   readonly element?: WebElement;
+  readonly basis: Len;
   readonly base: Len;
   readonly grow: number;
+  readonly shrink: number;
+  readonly min: Len;
   readonly max: Len;
+  readonly minUnknown: boolean;
+  readonly edges: number;
+}
+
+/** A line item's self-alignment on the cross axis: `align-self`, else the line's `align-items`. */
+function crossAlign(child: WebElement, box: Container): string | undefined {
+  const own = child.style["align-self"];
+  return own === undefined || own === "auto" ? box.parent.style["align-items"] : own;
+}
+
+/**
+ * An `auto` main size transferred from the item's cross size through its `aspect-ratio`, before
+ * any main-axis `min-*` or `max-*`; unknown when the item has no ratio or its cross size is unknown.
+ * A flex basis is determined without those constraints (CSS 9.2 step 3B).
+ */
+function ratioMainSize(child: WebElement, main: Axis, box: Container): Len {
+  const ratio = aspectRatioOf(child);
+  const crossSize = alignedSize(child, crossOf(main), crossAlign(child, box), box);
+  if (ratio === undefined || crossSize === undefined) {
+    return undefined;
+  }
+  return main === "width" ? crossSize * ratio : crossSize / ratio;
+}
+
+/** The ratio-derived main size clamped by the item's main-axis `min-*` and `max-*`. */
+function clampedRatioMainSize(child: WebElement, main: Axis, box: Container): Len {
+  const crossSize = alignedSize(child, crossOf(main), crossAlign(child, box), box);
+  const rect = oriented(main, [0, 0], [undefined, crossSize]);
+  return withAspectRatio(child, rect, box.content, box.vars)[main];
+}
+
+const REPLACED_TAGS = new Set(["img", "svg", "video", "canvas", "iframe", "input"]);
+
+/**
+ * A line item's automatic minimum (CSS `min-*: auto`): zero for a scroll container, else its
+ * content size, capped by a declared size. The content size is the ratio-derived size when there
+ * is one, zero for an empty box, and unknown otherwise, since content is not measured.
+ */
+function automaticMinimum(child: WebElement, main: Axis, box: Container): Len {
+  const overflow =
+    child.style.overflow ?? child.style[main === "width" ? "overflow-x" : "overflow-y"];
+  if (overflow !== undefined && overflow !== "visible") {
+    return 0;
+  }
+  const empty =
+    !REPLACED_TAGS.has(child.tag) &&
+    child.children.every(
+      (grandchild) => typeof grandchild === "string" && grandchild.trim() === "",
+    );
+  const content = clampedRatioMainSize(child, main, box) ?? (empty ? 0 : undefined);
+  const declared = declaredSize(child, main, box.content[main], box.vars);
+  const specified = declared === "auto" ? undefined : declared;
+  if (specified === undefined || content === undefined) {
+    return content;
+  }
+  return Math.min(specified, content);
+}
+
+/** A line item's main-axis padding plus border; an unresolved side counts as zero. */
+function mainEdges(child: WebElement, main: Axis, box: Container): number {
+  const insets = contentInsets(child, box.content[main], box.vars);
+  const edges = main === "width" ? add(insets.left, insets.right) : add(insets.top, insets.bottom);
+  return edges ?? 0;
+}
+
+/**
+ * A line item's minimum main size: its declared `min-*`, else its automatic minimum, floored at
+ * its padding and border. `minUnknown` marks an automatic minimum that depends on content.
+ */
+function mainMinimum(
+  child: WebElement,
+  main: Axis,
+  box: Container,
+): { min: Len; minUnknown: boolean } {
+  const explicitMin = cssLength(child.style[`min-${main}`], box.vars, box.content[main]);
+  const automatic = explicitMin === undefined ? automaticMinimum(child, main, box) : undefined;
+  // A border box is never narrower than its padding and border, whatever its minimum says.
+  const floor = mainEdges(child, main, box);
+  const declaredMin = explicitMin ?? automatic;
+  const min =
+    declaredMin === undefined && floor === 0 ? undefined : Math.max(declaredMin ?? 0, floor);
+  return { min, minUnknown: explicitMin === undefined && automatic === undefined };
 }
 
 function lineItem(child: WebChild, main: Axis, box: Container): LineItem {
   if (typeof child === "string") {
-    return { base: undefined, grow: 0, max: undefined };
+    const none = undefined;
+    const text = { basis: none, base: none, grow: 0, shrink: 0, min: none, max: none };
+    return { ...text, minUnknown: true, edges: 0 };
   }
   const room = box.content[main];
-  const { grow, basis } = flexOf(child);
+  const { grow, shrink, basis: basisValue } = flexOf(child);
   const declared =
-    basis === "auto" ? declaredSize(child, main, room, box.vars) : cssLength(basis, box.vars, room);
-  const base = clampSize(declared === "auto" ? undefined : declared, child, main, {
-    base: room,
-    vars: box.vars,
-  });
-  // The minimum wins over the maximum while growing, as in CSS.
-  const min = cssLength(child.style[`min-${main}`], box.vars, room);
-  const capped = cssLength(child.style[`max-${main}`], box.vars, room);
-  const max = capped === undefined ? undefined : Math.max(capped, min ?? -Infinity);
-  // A growing item's unmeasured content basis is taken as zero, so it shares the room as
-  // `flex: 1` would; its growth, not its content, decides its size.
-  return { element: child, base: base === undefined && grow > 0 ? 0 : base, grow, max };
+    basisValue === "auto"
+      ? declaredSize(child, main, room, box.vars)
+      : cssLength(basisValue, box.vars, room);
+  const max = cssLength(child.style[`max-${main}`], box.vars, room);
+  const { min, minUnknown } = mainMinimum(child, main, box);
+  // A content-sized item with an aspect ratio and a known cross size takes its main size from both.
+  const size = declared === "auto" ? ratioMainSize(child, main, box) : declared;
+  const edges = mainEdges(child, main, box);
+  // A growing item's unmeasured content is taken as zero, so its border-box basis is its padding
+  // and border; it shares the room as `flex: 1` would, and its growth decides its size.
+  const basis = grow > 0 ? (size ?? edges) : size;
+  const base =
+    basis === undefined
+      ? clampSize(undefined, child, main, { base: room, vars: box.vars })
+      : Math.max(min ?? 0, Math.min(max ?? Infinity, basis));
+  return { element: child, basis, base, grow, shrink, min, max, minUnknown, edges };
 }
 
-/** Free space shared among growing items, each held at its maximum (CSS flex resolution). */
-function distribute(items: readonly LineItem[], free: number): { sizes: Len[]; remaining: Len } {
-  const sizes: number[] = items.map((item) => item.base ?? 0);
-  const frozen = new Set<number>();
-  let remaining = free;
-  for (let round = 0; round <= items.length && remaining > 0; round++) {
-    const active = items.flatMap((item, index) =>
-      item.grow > 0 && !frozen.has(index) ? [index] : [],
+/** The items to freeze this round: those at the clamp the total violation's sign names. */
+function violators(
+  active: readonly number[],
+  targets: Map<number, number>,
+  clamped: Map<number, number>,
+): readonly number[] {
+  const violation = active.reduce(
+    (sum, index) => sum + clamped.get(index)! - targets.get(index)!,
+    0,
+  );
+  if (violation === 0) {
+    return active;
+  }
+  return active.filter((index) =>
+    violation > 0
+      ? clamped.get(index)! > targets.get(index)!
+      : clamped.get(index)! < targets.get(index)!,
+  );
+}
+
+/** Whether the line grows into positive free space or shrinks out of negative free space. */
+type FlexMode = "grow" | "shrink";
+
+/**
+ * Whether an item flexes: it has a factor for the mode and its hypothetical size does not already
+ * pass its basis in the mode's direction (CSS 9.7 step 2). A shrinking item whose automatic
+ * minimum depends on unmeasured content keeps its size.
+ */
+function isFlexible(item: LineItem, mode: FlexMode): boolean {
+  if (item.basis === undefined || item.base === undefined) {
+    return false;
+  }
+  return mode === "grow"
+    ? item.grow > 0 && item.basis <= item.base
+    : item.shrink > 0 && item.basis >= item.base && !item.minUnknown;
+}
+
+/** An item's target in a round: its basis plus its share of the round's free space. */
+function targetOf(item: LineItem, active: readonly LineItem[], share: number, mode: FlexMode) {
+  const basis = item.basis ?? 0;
+  if (mode === "grow") {
+    const total = active.reduce((sum, other) => sum + other.grow, 0);
+    return basis + (share * item.grow) / total;
+  }
+  // Negative free space is shared by flex-shrink scaled by the inner flex base size, the basis
+  // less padding and border (9.7 step 4c).
+  const scaledOf = (other: LineItem): number =>
+    other.shrink * Math.max(0, (other.basis ?? 0) - other.edges);
+  const scaled = active.reduce((sum, other) => sum + scaledOf(other), 0);
+  return scaled === 0 ? basis : basis + (share * scaledOf(item)) / scaled;
+}
+
+/**
+ * Free space shared among flexible items, each held between its minimum and maximum (CSS flex
+ * resolution, 9.7). Positive space grows items by grow factor; negative space shrinks them by
+ * shrink factor times inner basis. Each round shares what the frozen items left of the initial free
+ * space; when the unfrozen factors sum below 1, they take at most that fraction of it.
+ */
+function distribute(
+  items: readonly LineItem[],
+  free: number,
+  mode: FlexMode,
+): { sizes: Len[]; remaining: Len } {
+  const starts: number[] = items.map((item) =>
+    isFlexible(item, mode) ? item.basis! : (item.base ?? 0),
+  );
+  const sizes = [...starts];
+  const frozen = new Set(items.flatMap((item, index) => (isFlexible(item, mode) ? [] : [index])));
+  const flexedBy = (): number => sizes.reduce((sum, size, index) => sum + size - starts[index]!, 0);
+  while (frozen.size < items.length) {
+    const active = items.flatMap((_, index) => (frozen.has(index) ? [] : [index]));
+    const activeItems = active.map((index) => items[index]!);
+    const total = activeItems.reduce((sum, item) => sum + item[mode], 0);
+    const left = free - flexedBy();
+    const share = total < 1 && Math.abs(free * total) < Math.abs(left) ? free * total : left;
+    const targets = new Map(
+      active.map((index) => [index, targetOf(items[index]!, activeItems, share, mode)]),
     );
-    const total = active.reduce((sum, index) => sum + items[index]!.grow, 0);
-    if (active.length === 0) {
-      break;
-    }
-    // Grow factors summing below 1 take only that fraction of the free space.
-    const share = (remaining * Math.min(1, total)) / total;
-    const capped = active.filter(
-      (index) => sizes[index]! + share * items[index]!.grow > (items[index]!.max ?? Infinity),
+    const clamped = new Map(
+      active.map((index) => {
+        const { min, max } = items[index]!;
+        return [index, Math.max(min ?? 0, Math.min(max ?? Infinity, targets.get(index)!))];
+      }),
     );
-    const grown = capped.length > 0 ? capped : active;
-    for (const index of grown) {
-      const target =
-        capped.length > 0 ? items[index]!.max! : sizes[index]! + share * items[index]!.grow;
-      remaining -= target - sizes[index]!;
-      sizes[index] = target;
+    for (const index of violators(active, targets, clamped)) {
+      sizes[index] = clamped.get(index)!;
       frozen.add(index);
     }
-    if (capped.length === 0) {
-      remaining = Math.max(0, remaining);
-      break;
-    }
   }
-  return { sizes, remaining };
+  const remaining = free - flexedBy();
+  return { sizes, remaining: mode === "grow" ? Math.max(0, remaining) : remaining };
 }
 
-/** Each item's main size after growing, and the free space left for the arrangement. */
-function grownSizes(items: readonly LineItem[], free: Len): { sizes: Len[]; remaining: Len } {
-  const growers = items.filter((item) => item.grow > 0);
-  if (growers.length === 0 || (free !== undefined && free <= 0)) {
-    return { sizes: items.map((item) => item.base), remaining: free };
+/** Each item's main size after flexing, and the free space left for the arrangement. */
+function flexedSizes(
+  items: readonly LineItem[],
+  room: Len,
+  gaps: number,
+): { sizes: Len[]; remaining: Len } {
+  const bases = items.map((item) => item.base);
+  // A container sized by its content hugs it, leaving no free space.
+  if (room === undefined) {
+    return { sizes: bases, remaining: 0 };
   }
-  if (free === undefined) {
-    // Unmeasured room: growing items take it all unless every one is capped.
+  const hypothetical = bases.reduce<Len>((total, base) => add(total, base), gaps);
+  const growers = items.filter((item) => item.grow > 0);
+  if (hypothetical === undefined) {
+    // Unmeasured content: growing items take the room unless every one is capped.
     const capped = growers.every((item) => item.max !== undefined);
     return {
       sizes: items.map((item) => (item.grow > 0 ? undefined : item.base)),
-      remaining: capped ? undefined : 0,
+      remaining: growers.length > 0 && !capped ? 0 : undefined,
     };
   }
-  return distribute(items, free);
+  if (hypothetical === room) {
+    return { sizes: bases, remaining: 0 };
+  }
+  const mode: FlexMode = hypothetical < room ? "grow" : "shrink";
+  const flexible = items.filter((item) => isFlexible(item, mode));
+  if (flexible.length === 0) {
+    return { sizes: bases, remaining: room - hypothetical };
+  }
+  // Initial free space: inflexible items at their hypothetical size, flexible ones at their basis.
+  const used = items.reduce(
+    (total, item) => total + (isFlexible(item, mode) ? item.basis! : item.base!),
+    gaps,
+  );
+  return distribute(items, room - used, mode);
 }
 
 const PACKED_START = new Set([undefined, "normal", "start", "flex-start", "stretch", "left"]);
@@ -388,14 +604,75 @@ function mainGap(main: Axis, box: Container): number {
 /** The cross-axis size and offset of a line item, aligned by `align-self` or `align-items`. */
 function crossPlacement(child: WebElement, main: Axis, mainSize: Len, box: Container): [Len, Len] {
   const cross = crossOf(main);
-  const own = child.style["align-self"];
-  const align = own === undefined || own === "auto" ? box.parent.style["align-items"] : own;
+  const align = crossAlign(child, box);
   // A ratio-derived cross size is known before alignment places it.
   const size = withAspectRatio(
     child,
     oriented(main, [0, 0], [mainSize, alignedSize(child, cross, align, box)]),
+    box.content,
+    box.vars,
   )[cross];
   return [alignOffset(align, box.content[cross], size), size];
+}
+
+/** The container-side keywords a reversed line swaps so they stay put once it is mirrored. */
+const SIDE_SWAP: Readonly<Record<string, string>> = {
+  start: "end",
+  end: "start",
+  left: "right",
+  right: "left",
+};
+
+/**
+ * `justify-content` as an offset from the line's main-start. `start`, `end`, `left` and `right`
+ * name the container's own sides, so in a reversed line they swap to stay put once the line is
+ * mirrored; `flex-start`, `flex-end` and the `space-*` arrangements follow the line. `left` and
+ * `right` mean `start` on a column, as CSS has them off the inline axis.
+ */
+function lineJustify(
+  justify: string | undefined,
+  main: Axis,
+  reverse: boolean,
+): string | undefined {
+  const physical =
+    main === "height" && (justify === "left" || justify === "right") ? "start" : justify;
+  if (!reverse) {
+    return physical;
+  }
+  return physical === undefined ? undefined : (SIDE_SWAP[physical] ?? physical);
+}
+
+/**
+ * Each item's offset from its line's main-start: the arrangement's lead, then each item's size,
+ * the gap and the arrangement's spacing in turn.
+ */
+function forwardOffsets(sizes: readonly Len[], gap: number, [lead, between]: [Len, Len]): Len[] {
+  let cursor = lead;
+  return sizes.map((size) => {
+    const offset = cursor;
+    cursor = add(add(add(cursor, size), gap), between);
+    return offset;
+  });
+}
+
+/**
+ * Each item's offset from its line's physical start. A reversed line runs from its main-end, so
+ * an item sits back from the end of the line by its forward offset and its own size. A line
+ * sized by its content has no free space, so there an item sits after the items that follow it
+ * in source order: the last one starts at the line's start even when another size is unknown.
+ */
+function physicalOffsets(
+  sizes: readonly Len[],
+  gap: number,
+  room: Len,
+  arranged: [Len, Len],
+): Len[] {
+  if (room !== undefined) {
+    return forwardOffsets(sizes, gap, arranged).map((offset, index) =>
+      sub(room, add(offset, sizes[index])),
+    );
+  }
+  return forwardOffsets([...sizes].reverse(), gap, [0, 0]).reverse();
 }
 
 /** A flex line: items grow into the free space, then the arrangement places them. */
@@ -404,25 +681,29 @@ function placeLine(children: readonly WebChild[], main: Axis, box: Container): P
   const items = children.map((child) => lineItem(child, main, box));
   const gap = mainGap(main, box);
   const room = box.content[main];
-  const used = items.reduce<Len>(
-    (total, item) => add(total, item.base),
-    gap * Math.max(0, items.length - 1),
-  );
-  // A container sized by its content hugs it, leaving no free space.
-  const free = room === undefined ? 0 : sub(room, used);
-  const { sizes, remaining } = grownSizes(items, free);
-  const [lead, between] = arrangement(box.parent.style["justify-content"], remaining, items.length);
+  const gaps = gap * Math.max(0, items.length - 1);
+  const { sizes, remaining } = flexedSizes(items, room, gaps);
+  const reverse = reversed(box.parent);
+  const justify = lineJustify(box.parent.style["justify-content"], main, reverse);
+  const arranged = arrangement(justify, remaining, items.length);
+  const offsets = reverse
+    ? physicalOffsets(sizes, gap, room, arranged)
+    : forwardOffsets(sizes, gap, arranged);
   const placed: PlacedChild[] = [];
-  let cursor = add(startOf(box.content, main), lead);
   for (const [index, item] of items.entries()) {
     const size = sizes[index];
     if (item.element) {
       const [offset, crossSize] = crossPlacement(item.element, main, size, box);
-      const position: [Len, Len] = [cursor, add(startOf(box.content, cross), offset)];
+      const position: [Len, Len] = [
+        add(startOf(box.content, main), offsets[index]),
+        add(startOf(box.content, cross), offset),
+      ];
       const rect = oriented(main, position, [size, crossSize]);
-      placed.push({ element: item.element, rect: withAspectRatio(item.element, rect) });
+      placed.push({
+        element: item.element,
+        rect: withAspectRatio(item.element, rect, box.content, box.vars),
+      });
     }
-    cursor = add(add(add(cursor, size), gap), between);
   }
   return placed;
 }

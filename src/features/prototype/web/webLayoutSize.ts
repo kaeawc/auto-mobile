@@ -55,6 +55,16 @@ export function clampSize(
   return Math.max(min ?? -Infinity, Math.min(max ?? Infinity, size));
 }
 
+/** A known size clamped by its `min-*` and `max-*`; an unknown size stays unknown. */
+export function clampKnown(
+  size: Len,
+  element: WebElement,
+  axis: Axis,
+  context: { readonly base: Len; readonly vars: CssVars },
+): Len {
+  return size === undefined ? undefined : clampSize(size, element, axis, context);
+}
+
 const START = new Set<string | undefined>([
   undefined,
   "start",
@@ -159,18 +169,34 @@ export function contentBox(element: WebElement, rect: WebRect, vars: CssVars): W
   };
 }
 
-/** Fills the unknown dimension from the known one by the element's `aspect-ratio`. */
-export function withAspectRatio(element: WebElement, rect: WebRect): WebRect {
+/** An element's `aspect-ratio` as width over height, if it has a usable one. */
+export function aspectRatioOf(element: WebElement): number | undefined {
   const [width, height = "1"] = (element.style["aspect-ratio"] ?? "").split("/");
   const ratio = Number(width) / Number(height);
-  if (!Number.isFinite(ratio) || ratio <= 0) {
-    return rect;
+  return Number.isFinite(ratio) && ratio > 0 ? ratio : undefined;
+}
+
+/**
+ * Resolves a box's size: the unknown dimension is derived from the known one by the element's
+ * `aspect-ratio`, then each dimension is clamped by its own `min-*` and `max-*`, so a derived size
+ * respects its constraints and an `auto` size is not replaced by its minimum before the ratio
+ * applies. A dimension still unknown is taken at its minimum. `room` is the containing box, whose
+ * size resolves percentage constraints.
+ */
+export function withAspectRatio(
+  element: WebElement,
+  rect: WebRect,
+  room: WebRect,
+  vars: CssVars,
+): WebRect {
+  const ratio = aspectRatioOf(element);
+  let { width, height } = rect;
+  if (ratio !== undefined && height === undefined && width !== undefined) {
+    height = width / ratio;
+  } else if (ratio !== undefined && width === undefined && height !== undefined) {
+    width = height * ratio;
   }
-  if (rect.height === undefined && rect.width !== undefined) {
-    return { ...rect, height: rect.width / ratio };
-  }
-  if (rect.width === undefined && rect.height !== undefined) {
-    return { ...rect, width: rect.height * ratio };
-  }
-  return rect;
+  const clamp = (axis: Axis, size: Len): Len =>
+    clampSize(size, element, axis, { base: room[axis], vars });
+  return { ...rect, width: clamp("width", width), height: clamp("height", height) };
 }

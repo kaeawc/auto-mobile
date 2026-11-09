@@ -27,6 +27,8 @@ export function dataToolMutations(
       return broadcastMutations(args, platform);
     case "backgroundWork":
       return backgroundWorkMutations(args, platform);
+    case "wearSurface":
+      return wearSurfaceMutations(args, platform);
     default:
       return opaqueDataToolMutations(name, args);
   }
@@ -169,6 +171,51 @@ function broadcastMutations(
       ),
     },
   ];
+}
+
+/**
+ * The Wear OS tile carousel has no readable prior and no revert, so `addTile` and `removeTile`
+ * record a `fallback:` opaque intent per tile provider. `showTile` only scrolls the carousel (a
+ * component target may add the tile while resolving its index, so it records like `addTile`).
+ * `listTileProviders` is a package-manager read and records nothing.
+ * `watchFace` only reads `dumpsys wear_service` and records nothing.
+ * Watch face changes have no revert this tool can prove (unsetWatchFace only undoes the last
+ * setWatchFace), so they record one opaque intent for the active face and one per face slot.
+ */
+function wearSurfaceMutations(
+  args: Record<string, unknown>,
+  platform?: BootedDevice["platform"],
+): ToolMutation[] {
+  if (
+    platform === "ios" ||
+    args.action === "listTileProviders" ||
+    args.action === "watchFace" ||
+    (args.action === "showTile" && args.component === undefined)
+  ) {
+    return [];
+  }
+  return [{ kind: "opaque", key: wearSurfaceIntentKey(args) }];
+}
+
+/** One key for the active face, one per face slot, and one per tile provider. */
+function wearSurfaceIntentKey(args: Record<string, unknown>): string {
+  switch (args.action) {
+    case "setWatchFace":
+    case "unsetWatchFace":
+      return opaqueIntentKey("wearSurface", "watchFace");
+    case "setComplication":
+    case "unsetComplication":
+      return opaqueIntentKey(
+        "wearSurface",
+        "complication",
+        args.watchFace ?? null,
+        args.slot ?? null,
+      );
+    case "showTile":
+      return opaqueIntentKey("wearSurface", "addTile", args.component ?? null);
+    default:
+      return opaqueIntentKey("wearSurface", args.action, args.component ?? null);
+  }
 }
 
 /**

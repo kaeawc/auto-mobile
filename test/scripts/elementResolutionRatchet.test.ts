@@ -25,6 +25,22 @@ test("case-key ratchet permits only the reviewed IME-covered Comments removal", 
   ).toThrow("unrelated");
 });
 
+test("case-key ratchet permits only the reviewed shadow scroll-row removal (#17465)", () => {
+  const shadow = (capture: string) =>
+    `${capture}:{"kind":"elementId","value":"00580231-fc67-f97e-7c7b-891115e1ed83"}:0,420,1080,2064`;
+  const reviewed = [shadow("diff/scroll-after.json"), shadow("diff/scroll-before.json")];
+  expect(() =>
+    assertCaseInventoryDoesNotShrink('["other"]', JSON.stringify([...reviewed, "other"])),
+  ).not.toThrow();
+  // The same selector in a capture where the row is not shadowed stays an obligation.
+  expect(() =>
+    assertCaseInventoryDoesNotShrink(
+      '["other"]',
+      JSON.stringify([shadow("diff/text-input-typed.json"), "other"]),
+    ),
+  ).toThrow("text-input-typed");
+});
+
 test("allows only removal within the original finding", () => {
   expect(() => assertRatchetDoesNotGrow('{"B1":["a"]}', '{"B1":["a","b"]}')).not.toThrow();
   expect(() => assertRatchetDoesNotGrow('{"B1":["a","new"]}', '{"B1":["a","b"]}')).toThrow(

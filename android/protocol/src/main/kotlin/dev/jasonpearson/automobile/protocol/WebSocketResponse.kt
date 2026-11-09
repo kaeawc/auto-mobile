@@ -1033,13 +1033,38 @@ data class PrototypeAppearance(
   val deviceDark: Boolean,
 )
 
-/** Wire navigation snapshot; depth always equals the number of path entries. */
+/**
+ * Wire navigation snapshot; depth always equals the number of path entries. [params] holds each
+ * entry's route params parallel to [path] (#14188); it is null, and left off the wire, when no
+ * entry has any.
+ */
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class PrototypeStackSnapshot(
   val path: List<String>,
   @EncodeDefault(EncodeDefault.Mode.ALWAYS) val depth: Int = path.size,
-)
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val params: List<JsonObject>? = null,
+) {
+  /** The params of the entry at [index]; empty when it has none. */
+  fun paramsAt(index: Int): JsonObject = params?.getOrNull(index) ?: EMPTY_PARAMS
+
+  /** The entries without their last one; the result keeps [params] null when none remain. */
+  fun dropLast(): PrototypeStackSnapshot =
+    of(path.dropLast(1), path.indices.toList().dropLast(1).map(::paramsAt))
+
+  companion object {
+    private val EMPTY_PARAMS = JsonObject(emptyMap())
+
+    /** A snapshot of [path] with [params] parallel to it; params are dropped when all are empty. */
+    fun of(path: List<String>, params: List<JsonObject>): PrototypeStackSnapshot {
+      require(path.size == params.size) { "Route params must be parallel to the stack path" }
+      return PrototypeStackSnapshot(
+        path.toList(),
+        params = params.toList().takeIf { list -> list.any { it.isNotEmpty() } },
+      )
+    }
+  }
+}
 
 /**
  * One prototype the device is showing. [id] is the prototype id, which is its spec id.
@@ -1337,6 +1362,13 @@ data class PackageInfoResult(
   val mainActivity: String? = null,
   val totalTimeMs: Long,
   val error: String? = null,
+  /**
+   * The app's `dev.jasonpearson.automobile.build.gitBranch` manifest meta-data, when declared
+   * (#16954). Display metadata for the build; never part of its identity.
+   */
+  val gitBranch: String? = null,
+  /** The app's `dev.jasonpearson.automobile.build.gitSha` manifest meta-data, when declared. */
+  val gitSha: String? = null,
 ) : WebSocketResponse(), CorrelatedResponse
 
 @Serializable

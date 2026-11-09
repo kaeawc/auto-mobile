@@ -15,6 +15,8 @@ AutoMobile never downloads simulator runtimes. Install one with Xcode first:
 xcodebuild -downloadPlatform tvOS
 ```
 
+tvOS 26.5 and tvOS 27.0 simulators are supported.
+
 The `automobile:devices/images/tvos` resource lists the installed tvOS runtimes, the Apple TV
 models and which runtimes each model supports, along with the configured Apple TV simulators. A `provisionDevice` request that names a missing or
 unavailable runtime fails, lists the available runtimes and repeats the install command.
@@ -48,12 +50,17 @@ unavailable runtime fails, lists the available runtimes and repeats the install 
 | `executePlan`       | Replays a plan of Apple TV steps.                                                                       |
 | `openLink`          | Opens a URL with the app that declares its scheme.                                                      |
 | `getDeepLinks`      | Lists the URL schemes an installed app declares.                                                        |
+| `homeScreen`        | Presses the Siri Remote `home` button.                                                                  |
+| `postNotification`  | Sends a simulated push to an app; `appId` is required.                                                  |
+| `setAppPermissions` | Grants, revokes or resets privacy permissions; the result is not read back.                             |
 
 <!-- apple-tv-supported-tools:end -->
 
 Every other device tool refuses an Apple TV with an error naming the tool. `tapAt`, `swipeOn`,
 `pinchOn`, `multiTouch`, `dragAndDrop` and `tapAny` refuse it as a touch gesture and point to
-focus navigation.
+focus navigation. `displayConfig`, `statusBar`, `clipboard` and `getAppPermissions` refuse it as
+not available on tvOS: the tvOS simulator has no appearance or content size setting, status bar
+override, pasteboard or permission read-back.
 
 ## Create and start an Apple TV simulator
 
@@ -88,8 +95,10 @@ runtime and device type identifiers from `automobile:devices/images/tvos`:
 runner and binds a session. It never creates a simulator; a name or `deviceId` that matches none,
 or more than one, fails and asks for an exact `deviceId`.
 
-The runner needs a prebuilt tvOS simulator runner. Set `AUTOMOBILE_TVOS_RUNNER_XCTESTRUN` to its
-`.xctestrun` file; a source checkout finds or builds one instead. If the runner cannot start, the
+On first tvOS use, AutoMobile downloads and verifies the release’s prebuilt runner; no source
+checkout is needed. `AUTOMOBILE_TVOS_RUNNER_XCTESTRUN` selects an explicit `.xctestrun` instead.
+Existing local build products take precedence over the download. If the selected release has no
+runner checksum, use the override or a source checkout to build one. If the runner cannot start, the
 call still returns a booted session and `message` explains why. Call `startDevice` again after
 fixing the cause.
 
@@ -191,7 +200,12 @@ from the layout.
 ## Enter text
 
 Select a text field with `pressButton select` to open the on-screen keyboard, then call `sendKeys`
-with `type` commands. Text is appended to the field.
+with `type` commands. Text is appended to the field. The hierarchy shows only each field's label,
+with no field values, while the keyboard is open and until about one second after AutoMobile
+last saw the keyboard or finished typing. Values may also be hidden briefly when first connecting. The placeholder
+appears only as the keyboard's prompt. Values stay hidden longer if an unnamed text input remains.
+Afterwards, a named plain field's typed value is readable with `observe`. Unnamed text inputs and
+secure fields never show their value. Whitespace-only values are empty.
 
 - `operation: "replace"`, key commands, clear commands and selectors are refused.
 - To change existing text, edit it on the on-screen keyboard with `pressButton`, then type.
@@ -200,6 +214,13 @@ with `type` commands. Text is appended to the field.
 
 `explore` is available when the server runs with `--embedded-sdk`, like the other
 [navigation graph](navigation-graph.md) tools; the Apple TV app itself does not need the SDK.
+Without the flag, `explore` is missing from `tools/list` and a call fails with
+`Unknown tool: explore. embedded SDK mode is disabled; ...`, followed by these steps:
+
+1. Add `--embedded-sdk` to the AutoMobile MCP server command and reconnect. A running daemon
+   started without it is restarted with it.
+2. Enable `explore` for the session with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)).
+
 Launch the app with `launchApp`, then call `explore` with `platform: "tvos"`. Explore selects
 every item it can focus on a screen, observes after every remote press, records each screen a
 `select` opens in the navigation graph, and presses `menu` to go back.
@@ -232,6 +253,18 @@ scheme shows that screen. Call `observe` afterwards to see where it landed.
 - The call fails when no installed app handles the URL. Apple TV has no web browser, so an
   `http` or `https` URL opens only if an app claims it.
 - `waitFor`, `settled`, `acceptOpenAlert` and `chooserAppPackage` are refused.
+
+## Notifications and permissions
+
+`postNotification` sends a simulated remote push to the app named by `appId`, with the same
+payload options as on an iOS Simulator. A successful result means the simulator accepted the push;
+whether a banner is shown is up to the app and tvOS, so observe to check.
+
+`setAppPermissions` takes `action` (`grant`, `revoke` or `reset`) and `permissions`, such as
+`photos`, or `all` with `reset`. A permission the tvOS simulator does not have fails that entry with
+the simulator's error; the others still apply. The fields `notificationsEnabled`,
+`notificationPolicyAccess` and `scheduleExactAlarm` are refused. A change is reported as applied
+but is not read back, and `getAppPermissions` is not available.
 
 ## Out of scope
 

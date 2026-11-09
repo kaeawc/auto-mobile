@@ -1,17 +1,13 @@
-export const GUIDE_DEVICE_LOOPBACK = `## Requests to localhost from the device
+export const GUIDE_DEVICE_DESTINATIONS = `## Destinations of device requests
 
-On Android, \`localhost\`, \`127.0.0.1\` and \`[::1]\` in a \`request\` action with \`via: "device"\` mean the
-device itself. When you \`show\` such a prototype, the host runs \`adb reverse tcp:<port> tcp:<port>\` for
-each literal port (a URL without a port reverses 80, or 443 for https), removes only the reverses it
-created when the prototype is dismissed or the device disconnects, and leaves a reverse that already
-existed alone. A failed reverse never fails the show; \`inspect\` reports it as \`reverseFailures\`.
-
-A port that is a binding (\`http://localhost:{port}/feed\`) cannot be reversed, because it is only
-known when the request runs. \`inspect\` lists such URLs as \`unreversiblePorts\`. Use \`via: "host"\` for
-those requests. A saved prototype launched with no host connected gets no reverse either.
-On iOS nothing is reversed, and \`localhost\`, \`127.0.0.1\` and \`[::1]\` are refused as
-\`blocked_destination\` for \`via: "device"\`: call a Mac-local service by the Mac's LAN address instead.
-
+A \`request\` action with \`via: "device"\` is checked on the device before it connects. It is refused
+with \`blocked_destination\` when the URL names \`localhost\` (or a \`*.localhost\` name), or when the
+destination resolves to a loopback, unspecified or link-local address. On Android this also covers
+the emulator's addresses for the host machine (\`10.0.2.2\` and the other \`10.0.2.x\` aliases), and
+ports 3000-3010 and 8765 on a private address are refused too. No \`adb reverse\` is made for a
+prototype, so a device request cannot reach a server on the host machine through \`localhost\`: use
+\`via: "host"\` for a host-local server, or call it by an address the device can reach that is not
+loopback. On iOS, call a Mac-local service by the Mac's LAN address.
 
 ## Mock backends (no server code)
 

@@ -1,0 +1,32 @@
+activeWatchFaceComponent=WatchFaceId[com.google.wear.offhand,null] favoriteId=1 
+Broadcast completed: result=1, data="Current watch face id=[com.google.wear.offhand] Favorite Id=[1] Runtime=[2]"
+== com.google.wear.superficial
+Broadcast completed: result=1, data="Favorite Id=[2] Runtime=[2]"
+activeWatchFaceComponent=WatchFaceId[com.google.wear.superficial,null] favoriteId=2 
+== com.google.wear.superficial/
+Broadcast completed: result=1, data="Favorite Id=[2] Runtime=[2]"
+activeWatchFaceComponent=WatchFaceId[com.google.wear.superficial,null] favoriteId=2 
+== com.google.wear.superficial,null
+Broadcast completed: result=2, data="set-watchface failed. com.google.wear.services.watchfaces.FavoriteOperationException: Watch face package is not installed."
+activeWatchFaceComponent=WatchFaceId[com.google.wear.superficial,null] favoriteId=2 
+== WatchFaceId[com.google.wear.superficial,null]
+Broadcast completed: result=2, data="set-watchface failed. com.google.wear.services.watchfaces.FavoriteOperationException: Watch face package is not installed."
+activeWatchFaceComponent=WatchFaceId[com.google.wear.superficial,null] favoriteId=2 
+== com.google.wear.superficial:2
+Broadcast completed: result=2, data="set-watchface failed. com.google.wear.services.watchfaces.FavoriteOperationException: Watch face package is not installed."
+activeWatchFaceComponent=WatchFaceId[com.google.wear.superficial,null] favoriteId=2 
+== com.google.wear.superficial/_placeholder_
+Broadcast completed: result=3, data="Class name cannot be a placeholder."
+activeWatchFaceComponent=WatchFaceId[com.google.wear.superficial,null] favoriteId=2 
+
+== set offhand
+Broadcast completed: result=1, data="Favorite Id=[1] Runtime=[2]"
+activeWatchFaceComponent=WatchFaceId[com.google.wear.offhand,null] favoriteId=1 
+== set-complication slot 11 battery type 5 on offhand
+Broadcast completed: result=1, data="Favorite Id=[1]"
+      id=1 slot=11 type=5 configActionPending=false provider=ComponentInfo{com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.BatteryProviderService} isEnabled=true
+== DS current-watchfaceid
+Broadcast completed: result=1, data="Current watch face id=[com.google.wear.offhand] Favorite Id=[1] Runtime=[2]"
+== unset-complication
+Broadcast completed: result=1, data="Favorite Id=[1]"
+      id=1 slot=11 type=1 configActionPending=false provider=null isEnabled=true

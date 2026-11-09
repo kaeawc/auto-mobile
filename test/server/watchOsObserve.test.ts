@@ -2,7 +2,7 @@ import { registerInteractionTools } from "../../src/server/interactionTools";
 import { watchRunners } from "../../src/features/watch/WatchRunnerRegistry";
 import { FakeWatchRunnerClient } from "../fakes/FakeWatchRunnerClient";
 import { WatchRunnerError } from "../../src/features/watch/WatchRunnerError";
-import { WATCH_HIERARCHY_UNAVAILABLE_MESSAGE } from "../../src/models/WatchObservation";
+import { WATCH_APP_NOT_FOREGROUND_MESSAGE } from "../../src/models/WatchObservation";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -213,7 +213,7 @@ describe("observe on an Apple Watch simulator through the registry", () => {
       expectScreenshotOnly(result);
       expect(result.hierarchyUnavailable).toEqual({
         platform: "watchos",
-        message: WATCH_HIERARCHY_UNAVAILABLE_MESSAGE,
+        message: WATCH_APP_NOT_FOREGROUND_MESSAGE,
       });
       expect(writer.written).toContain(String(result.screenshotPath));
       expect(JSON.stringify(result)).not.toContain("CtrlProxy Watch");

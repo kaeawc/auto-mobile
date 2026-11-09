@@ -3,9 +3,8 @@ import {
   ambientSchema,
   ambientResultSchema,
   createAmbientHandler,
-  traitsFormFactorRead,
-  type FormFactorRead,
 } from "../../src/server/ambientTool";
+import { traitsFormFactorRead, type FormFactorRead } from "../../src/server/requireWatch";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import type { Ambient, AmbientAction } from "../../src/features/wear/Ambient";
 import type { TraitFormFactor } from "../../src/utils/android-cmdline-tools/deviceTraits";
@@ -24,7 +23,7 @@ function recordingPort(calls: AmbientAction[]): Ambient {
   return {
     change: async (action) => {
       calls.push(action);
-      return { success: true, action, wakefulness: "Dozing", message: "changed" };
+      return { success: true, action, ambient: true, wakefulness: "Dozing", message: "changed" };
     },
   };
 }
@@ -54,10 +53,11 @@ describe("ambient tool", () => {
           return {
             success,
             action,
-            wakefulness: "Awake",
-            message:
-              "power-state change; Wear exposes no ambient readback; this does not prove ambient mode.",
-            ...(success ? {} : { reason: "Observed wakefulness Awake" }),
+            ambient: success,
+            watchFaceVisible: true,
+            wakefulness: success ? "Dozing" : "Awake",
+            message: "Ambient read from dumpsys wear_service.",
+            ...(success ? {} : { reason: "inAmbient=false" }),
           };
         },
       };
@@ -65,6 +65,7 @@ describe("ambient tool", () => {
       expect(calls).toEqual(["enter"]);
       expect(ambientResultSchema.safeParse(toolJson(response)).success).toBe(true);
       expect(toolJson(response).success).toBe(success);
+      expect(toolJson(response).ambient).toBe(success);
       expect(response.isError ?? false).toBe(!success);
     },
   );
@@ -131,13 +132,14 @@ describe("ambient tool", () => {
 
   test("the traits reader reports the announced form factor and undefined on a failed read", async () => {
     const traits = new FakeDeviceTraits(androidDeviceTraits({ formFactor: "watch" }));
-    const read = traitsFormFactorRead(traits, new FakeAdbClientFactory());
+    const read = traitsFormFactorRead(traits, new FakeAdbClientFactory(), "ambient");
     expect(await read(android)).toBe("watch");
     traits.setTraits(androidDeviceTraits({ formFactor: null }));
     expect(await read(android)).toBeNull();
     const failing = traitsFormFactorRead(
       new FakeDeviceTraits(new Error("getprop timed out")),
       new FakeAdbClientFactory(),
+      "ambient",
     );
     expect(await failing(android)).toBeUndefined();
   });

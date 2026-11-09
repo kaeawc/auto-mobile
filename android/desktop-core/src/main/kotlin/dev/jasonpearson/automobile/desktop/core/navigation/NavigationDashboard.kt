@@ -186,15 +186,22 @@ private fun NavigationFlowMap(
 ) {
   val graph = state.navigationGraph ?: NavigationGraph(emptyList(), emptyList())
   val builds = remember(graph) { NavigationBuildLens.buildsIn(graph) }
+  val buildLabels = remember(graph) { NavigationBuildLabels.labelsIn(graph) }
   val lens = effectiveBuildLens(state.buildLens, builds)
   Box(modifier = Modifier.fillMaxSize()) {
     if (lens is BuildLens.Compare) {
       BuildCompareView(
         NavigationBuildLens.diff(graph, lens.a, lens.b),
         Modifier.padding(top = 72.dp),
+        buildLabels,
       )
     } else {
-      NavigationFlowCanvas(state, options, NavigationBuildLens.visibleGraph(graph, lens), lens)
+      NavigationFlowCanvas(
+        state,
+        options,
+        NavigationBuildLens.visibleGraph(graph, lens),
+        BuildLensSelection(lens, buildLabels),
+      )
     }
     // A lens needs at least two builds to contrast; with one build every lens equals the union.
     if (builds.size >= 2) {
@@ -203,10 +210,17 @@ private fun NavigationFlowMap(
         lens = lens,
         onLensChange = { state.buildLens = it },
         modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp),
+        buildLabels = buildLabels,
       )
     }
   }
 }
+
+/** The effective lens plus the graph's build labels it is described with (#16954). */
+private data class BuildLensSelection(
+  val lens: BuildLens,
+  val buildLabels: Map<ProvenanceBuildKey, String>,
+)
 
 /** Fall back to the union when the selected lens names a build absent from the refreshed graph. */
 internal fun effectiveBuildLens(lens: BuildLens, builds: List<ProvenanceBuildKey>): BuildLens =
@@ -221,7 +235,7 @@ private fun NavigationFlowCanvas(
   state: NavigationDashboardState,
   options: NavigationDashboardOptions,
   graph: NavigationGraph,
-  lens: BuildLens,
+  selection: BuildLensSelection,
 ) {
   Box(modifier = Modifier.fillMaxSize()) {
     NavigationCanvasView(
@@ -240,7 +254,8 @@ private fun NavigationFlowCanvas(
         },
         fitToViewTrigger = state.fitToViewTrigger,
         activeContext = options.activeContext,
-        buildLens = lens,
+        buildLens = selection.lens,
+        buildLabels = selection.buildLabels,
         clock = options.clock,
       ),
     )

@@ -24,6 +24,120 @@ final class DisplayTargetedGestureTests: XCTestCase {
         return provider
     }
 
+    func testBackAndRecentUseLandscapeEdgesOnTheInnerDisplay() throws {
+        let back = NavigationEdgeGesture.back(size: unfolded.observation)
+        let recent = NavigationEdgeGesture.recent(size: unfolded.observation)
+        XCTAssertEqual(back.start, GesturePoint(x: 2, y: 334.5))
+        XCTAssertEqual(back.end, GesturePoint(x: 713.25, y: 334.5))
+        XCTAssertEqual(recent.start, GesturePoint(x: 475.5, y: 668))
+        XCTAssertEqual(recent.end.x, 475.5)
+        XCTAssertEqual(recent.end.y, 388.02, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(recent.velocity), (668 - 388.02) / 0.6, accuracy: 1e-9)
+        for (edge, start, end) in [
+            (back, GesturePoint(x: 334.5, y: 949), GesturePoint(x: 334.5, y: 237.75)),
+            (recent, GesturePoint(x: 668, y: 475.5), GesturePoint(x: 388.02, y: 475.5)),
+        ] {
+            let provider = provider()
+            let delivery = try DisplayGestureFactory(provider: provider).deliver(
+                start: edge.start, end: edge.end, press: edge.press, move: edge.move,
+                hold: edge.hold, velocity: edge.velocity
+            )
+            let touch = try XCTUnwrap(provider.touches.first)
+            XCTAssertEqual(touch.start.x, start.x, accuracy: 1e-9)
+            XCTAssertEqual(touch.start.y, start.y, accuracy: 1e-9)
+            XCTAssertEqual(touch.end.x, end.x, accuracy: 1e-9)
+            XCTAssertEqual(touch.end.y, end.y, accuracy: 1e-9)
+            XCTAssertEqual(touch.pressDuration, edge.press)
+            XCTAssertEqual(touch.moveDuration, edge.move)
+            XCTAssertEqual(touch.holdDuration, edge.hold)
+            XCTAssertEqual(touch.displayId, inner.displayId)
+            XCTAssertEqual(touch.interfaceOrientation, 1)
+            XCTAssertEqual(delivery.selection.strategy, .displayTargeted)
+            XCTAssertTrue(provider.actions.isEmpty)
+        }
+        XCTAssertEqual(recent.press, 0.35)
+        XCTAssertEqual(recent.hold, 0.8)
+    }
+
+    func testSinglePanelEdgesKeepAppFramePointsAndCoordinateDrag() throws {
+        for edge in [NavigationEdgeGesture.back(size: folded.app), NavigationEdgeGesture.recent(size: folded.app)] {
+            let provider = provider(geometry: folded)
+            let delivery = try DisplayGestureFactory(provider: provider).deliver(
+                start: edge.start, end: edge.end, press: edge.press, move: edge.move,
+                hold: edge.hold, velocity: edge.velocity
+            )
+            XCTAssertNil(delivery.synthesizedPoint)
+            XCTAssertEqual(provider.selections.map(\.offset), [edge.start, edge.end])
+            XCTAssertEqual(provider.actions, ["drag"])
+            XCTAssertTrue(provider.touches.isEmpty)
+            XCTAssertEqual(provider.inventoryReads, 0)
+        }
+    }
+
+    // Settings sidebar coordinates from the captured Duo reproduction, with a 400ms test timeline.
+    private var capturedPath: [PathGesturePoint] {
+        [
+            PathGesturePoint(x: 150, y: 150, offsetMs: 0),
+            PathGesturePoint(x: 150, y: 350, offsetMs: 200),
+            PathGesturePoint(x: 150, y: 560, offsetMs: 400),
+        ]
+    }
+
+    func testPathMapsEveryPointAndPreservesTheTimeline() throws {
+        let provider = provider()
+        let factory = try DisplayGestureFactory(provider: provider)
+        var before = 0
+        let delivery = try factory.deliverPath(points: capturedPath) { _ in
+            XCTAssertTrue(provider.paths.isEmpty)
+            before += 1
+        }
+        let path = try XCTUnwrap(provider.paths.first)
+        XCTAssertEqual(path.points, [
+            PathGesturePoint(x: 150, y: 801, offsetMs: 0),
+            PathGesturePoint(x: 350, y: 801, offsetMs: 200),
+            PathGesturePoint(x: 560, y: 801, offsetMs: 400),
+        ])
+        XCTAssertEqual(path.displayId, inner.displayId)
+        XCTAssertEqual(path.interfaceOrientation, 1)
+        XCTAssertEqual(delivery.selection.strategy, .displayTargeted)
+        XCTAssertEqual(delivery.synthesizedPoint, GesturePoint(x: 150, y: 801))
+        XCTAssertEqual(before, 1)
+        XCTAssertTrue(provider.actions.isEmpty)
+        var diagnostics = TapDiagnostics(requested: .init(x: 150, y: 150, durationMs: 400, mode: "path"))
+        factory.annotate(&diagnostics, delivery: delivery)
+        XCTAssertTrue(diagnostics.logLine(gesture: "path").contains("strategy=displayTargeted"))
+        XCTAssertTrue(diagnostics.logLine(gesture: "path").contains("mode=path"))
+    }
+
+    func testPathKeepsMainScreenSynthesisOnSinglePanelOrMissingSymbolsOrTarget() throws {
+        for scenario in 0 ..< 3 {
+            let provider = provider(geometry: scenario == 0 ? folded : unfolded)
+            if scenario == 1 { provider.symbolsAvailable = false }
+            if scenario == 2 {
+                provider.inventory = GestureDisplayInventory(screens: [], applicationDisplayId: nil, isPhoneIdiom: true)
+            }
+            var before = 0
+            let delivery = try DisplayGestureFactory(provider: provider).deliverPath(points: capturedPath) { _ in
+                before += 1
+            }
+            XCTAssertNil(delivery.synthesizedPoint)
+            XCTAssertEqual(provider.paths.count, scenario == 1 ? 1 : 0)
+            XCTAssertEqual(before, scenario == 1 ? 1 : 0)
+            XCTAssertEqual(delivery.fallbackFrom, scenario == 1 ? .displayTargeted : nil)
+            XCTAssertTrue(provider.actions.isEmpty)
+            XCTAssertTrue(provider.selections.isEmpty)
+        }
+    }
+
+    func testPathSynthesisErrorPropagatesWithoutMainScreenFallback() throws {
+        struct Failure: Error {}
+        let provider = provider()
+        provider.synthesisError = Failure()
+        let factory = try DisplayGestureFactory(provider: provider)
+        XCTAssertThrowsError(try factory.deliverPath(points: capturedPath)) { XCTAssertTrue($0 is Failure) }
+        XCTAssertTrue(provider.selections.isEmpty)
+    }
+
     func testFoldedDoubleTapUsesOneCoordinateProviderCallWithoutSynthesis() throws {
         let provider = provider(geometry: folded)
         let factory = try DisplayGestureFactory(provider: provider)

@@ -39,9 +39,9 @@ Package are gone; those jobs run on GitHub only.
 | `run-main-ios`     | `ios/**`, `scripts/ios/**`, `Package.swift`, SwiftFormat/SwiftLint config | Build Xcode Projects (main): generate, drift check, build |
 | `run-main-desktop` | `android/desktop-app/**`, `android/desktop-core/**`                       | Build Desktop App (macos)                                 |
 
-Both groups also match `.circleci/**`, so a config change revalidates itself. The
-same file holds the `run-main-linux` group for the Linux Node mirrors, which use
-no macOS capacity (`circleci-linux-shadow-lane.md`).
+Both groups also match `.circleci/**`, so a config change revalidates itself.
+Apart from the small setup jobs in `config.yml`, CircleCI runs no Linux jobs; Linux CI
+runs only on GitHub Actions.
 Swift coverage keeps its existing trigger: `merge.yml`'s `swift-code-coverage` job
 starts a `run-swift-coverage-main` pipeline for coverage-input changes and
 downloads the badge.
@@ -102,10 +102,10 @@ self-hosted Mac job (the four that were on the Mac before the pools gained it in
 `macos-latest`. Without the switch, a job labelled for a pool with no online
 runner queues forever, and its required check with it (#11580).
 
-| Pool                   | Jobs                                                                                                                                       |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `automobile-mac`       | SwiftLint, Swift Code Coverage, Build Desktop App (macos-latest), Installer Minimal (macos-latest), Swift Packages, Build Root SPM Package |
-| `automobile-mac-heavy` | Build Xcode Projects (Playground, CtrlProxy), Prototype Simulator iOS 26, iOS Playground Tests (label-forced fallback only)                |
+| Pool                   | Jobs                                                                                                                            |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `automobile-mac`       | Swift Code Coverage, Build Desktop App (macos-latest), Installer Minimal (macos-latest), Swift Packages, Build Root SPM Package |
+| `automobile-mac-heavy` | Build Xcode Projects (Playground, CtrlProxy), Prototype Simulator iOS 26, iOS Playground Tests (label-forced fallback only)     |
 
 - Installer Minimal's macOS leg uses a Mac only when `scripts/install.sh`,
   `package.json`, `android/gradle/libs.versions.toml`, or
@@ -159,6 +159,16 @@ runner queues forever, and its required check with it (#11580).
   owner's keychains.
 - Cache keys of the moved jobs include `runner.environment`, so hosted and
   self-hosted runs never restore each other's SwiftPM or DerivedData state.
+- SwiftLint runs on `ubuntu-latest`, not a Mac (#17581). It installs the official
+  `swiftlint_linux.zip` release asset at the version in
+  `scripts/swiftlint/swiftlint_linux_pin.sh`, and refuses it unless its SHA-256
+  matches the digest committed there. The Linux pin must equal the Mac pin
+  (`SWIFTLINT_VERSION` in `scripts/swiftlint/swiftlint_version.sh`, used by
+  `prepush-ios.sh` and Mac installs) so both report the same findings; the
+  `swiftlint-pins` Fast Validation check and the installer fail when they
+  differ. SwiftLint loads `libsourcekitdInProc.so` from the Swift toolchain on
+  the runner's `PATH`. The job keeps its name and still fails only on
+  error-severity rules.
 - Required check names are unchanged (`SwiftLint`, `Swift Code Coverage`,
   `Build Root SPM Package`, `Installer Minimal (macos-latest)`, `iOS Build`), so
   the `green-main` ruleset needs no edit.
@@ -203,19 +213,20 @@ ports, so use that fallback only with the heavy runner under a dedicated user.
 
 ## Job → runner
 
-| Job                                                                            | Same-repo PR                               | Fork PR        |
-| ------------------------------------------------------------------------------ | ------------------------------------------ | -------------- |
-| SwiftLint, Swift Code Coverage                                                 | self-hosted `automobile-mac`               | `macos-26`     |
-| Build Desktop App / Installer Minimal (macOS)                                  | self-hosted `automobile-mac`               | `macos-latest` |
-| Swift Packages (Xcode 26.5)                                                    | self-hosted `automobile-mac`               | `macos-26`     |
-| Build Root SPM Package                                                         | self-hosted `automobile-mac`               | `macos-26`     |
-| Build Xcode Projects (Playground, CtrlProxy)                                   | self-hosted `automobile-mac-heavy`         | `macos-26`     |
-| Prototype Simulator iOS 26                                                     | self-hosted `automobile-mac-heavy`         | `macos-26`     |
-| iOS Playground Tests                                                           | CircleCI (heavy lane if label-forced)      | CircleCI       |
-| iOS Device Capture to WHEP                                                     | Namespace `auto-mobile-macos`              | `macos-26`     |
-| XCTestRunner Simulator Tests (`run-ios-sim`, contract inputs)                  | hosted `macos-26` (exception, see above)   | `macos-26`     |
-| merge.yml: Build Desktop App (macOS), Generate/Build Xcode Projects            | CircleCI post-merge, path-gated, coalesced | n/a            |
-| nightly.yml: macOS BATS/Node, Xcode sweeps, TSan, XCTestRunner Simulator Tests | CircleCI `nightly-macos`                   | n/a            |
+| Job                                                                            | Same-repo PR                               | Fork PR         |
+| ------------------------------------------------------------------------------ | ------------------------------------------ | --------------- |
+| SwiftLint                                                                      | `ubuntu-latest`                            | `ubuntu-latest` |
+| Swift Code Coverage                                                            | self-hosted `automobile-mac`               | `macos-26`      |
+| Build Desktop App / Installer Minimal (macOS)                                  | self-hosted `automobile-mac`               | `macos-latest`  |
+| Swift Packages (Xcode 26.5)                                                    | self-hosted `automobile-mac`               | `macos-26`      |
+| Build Root SPM Package                                                         | self-hosted `automobile-mac`               | `macos-26`      |
+| Build Xcode Projects (Playground, CtrlProxy)                                   | self-hosted `automobile-mac-heavy`         | `macos-26`      |
+| Prototype Simulator iOS 26                                                     | self-hosted `automobile-mac-heavy`         | `macos-26`      |
+| iOS Playground Tests                                                           | CircleCI (heavy lane if label-forced)      | CircleCI        |
+| iOS Device Capture to WHEP                                                     | Namespace `auto-mobile-macos`              | `macos-26`      |
+| XCTestRunner Simulator Tests (`run-ios-sim`, contract inputs)                  | hosted `macos-26` (exception, see above)   | `macos-26`      |
+| merge.yml: Build Desktop App (macOS), Generate/Build Xcode Projects            | CircleCI post-merge, path-gated, coalesced | n/a             |
+| nightly.yml: macOS BATS/Node, Xcode sweeps, TSan, XCTestRunner Simulator Tests | CircleCI `nightly-macos`                   | n/a             |
 
 Self-hosted and Namespace placements take effect once the owner steps below are done; until
 then the moved jobs run on hosted `macos-26`.

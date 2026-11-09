@@ -155,11 +155,11 @@ function decodeRunnerBusy(message: WebSocketMessage, requestId: string): Decoded
 }
 
 function shouldRecoverBusyRunner(message: WebSocketMessage): boolean {
-  // These commands have 5s/10s host waits, but timing out does not cancel the
+  // Rotate, link and launch have bounded host waits, but timing out does not cancel the
   // native call. Leave grace for completion and any explicit runner deadline.
   // Other commands (including potentially long text input) retain their policy.
   if (
-    !["request_activate_accessibility_link", "request_launch_app"].includes(
+    !["request_activate_accessibility_link", "request_launch_app", "request_rotate"].includes(
       message.blockingCommandType ?? "",
     )
   ) {

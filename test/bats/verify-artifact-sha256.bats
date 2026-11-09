@@ -80,6 +80,11 @@ write_release_ts() {
     audio_helper_line="
     audioLoopbackHelperSha256: \"$8\","
   fi
+  local tvos_line=""
+  if [ "$#" -ge 9 ]; then
+    tvos_line="
+    tvosRunnerSha256: \"${9}\","
+  fi
   cat > "$PROJECT/src/constants/release.ts" <<EOF
 export interface ReleaseChecksumEntry {
   version: string;
@@ -89,6 +94,7 @@ export interface ReleaseChecksumEntry {
   videoJarSha256?: string;
   screenCaptureHelperSha256?: string;
   audioLoopbackHelperSha256?: string;
+  tvosRunnerSha256?: string;
   prototypeAgentSha256?: string;
   prototypeViewerSha256?: string;
   protoViewerApkSha256?: string;
@@ -100,7 +106,7 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
     version: "1.0.0",
     apkSha256: "",
     ipaSha256: "$1",
-    runnerSha256: "",$video_line$helper_line$prototype_line$filter_line$viewer_line$protoviewer_apk_line$audio_helper_line
+    runnerSha256: "",$video_line$helper_line$prototype_line$filter_line$viewer_line$protoviewer_apk_line$audio_helper_line$tvos_line
   },
 ];
 EOF
@@ -398,6 +404,30 @@ TS
   write_lmk_release_ts "$ART_SHA" "0000000000000000000000000000000000000000000000000000000000000000"
   cd "$PROJECT"
   run bash "$ABS_SCRIPT" "$ARTIFACT" lmkpressurex8664
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"SHA256 mismatch"* ]]
+}
+
+@test "matching tvosRunnerSha256 verifies successfully" {
+  write_release_ts "" "" "" "" "" "" "" "" "$ART_SHA"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" tvosrunner
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verified successfully"* ]]
+}
+
+@test "absent tvosRunnerSha256 reports no checksum" {
+  write_release_ts "$ART_SHA"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" tvosrunner
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"No SHA256 checksum found"* ]]
+}
+
+@test "mismatched tvosRunnerSha256 is refused" {
+  write_release_ts "" "" "" "" "" "" "" "" "0000000000000000000000000000000000000000000000000000000000000000"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" tvosrunner
   [ "$status" -ne 0 ]
   [[ "$output" == *"SHA256 mismatch"* ]]
 }

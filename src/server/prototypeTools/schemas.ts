@@ -39,7 +39,6 @@ import {
 } from "../../features/prototype/prototypeValidation";
 import { getRemovedToolActionHint } from "../../utils/removedTools";
 import { addDeviceTargetingToSchema, withJsonSchemaOverride } from "../../utils/schemaHelpers";
-import {} from "../prototypeReverse";
 import { validatePrototypeSavedInput } from "../prototypeSavedActions";
 import { validatePrototypeStorageInput } from "../prototypeStorageAction";
 import {} from "../prototypeStorageOutput";
@@ -501,7 +500,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .enum(PROTOTYPE_EVENT_KINDS)
         .optional()
         .describe(
-          "awaitEvent only: filter event kind. screen_changed (name = stack id, payload {screen, depth}) is sent only when the top screen or depth changes. page_changed (name = pager id, payload = the new zero-based page index) is sent when a pager settles on another page. appearance_changed (name null, payload {mode, source}) is sent once whenever the shown prototype's resolved light/dark mode changes, by a device advertising prototype_appearance_v1. Input and state changes (text input, toggles, sliders etc.) arrive as kind emit with eventName change (there is no separate change kind), with payload {key,value} for one changed key or {keys,values} for several. A finished request action arrives as kind emit with eventName prototype_request",
+          "awaitEvent only: filter event kind. screen_changed (name = stack id, payload {screen, depth, params?}; params are the top entry's route params, present only when it has any) is sent only when the top screen, depth or top params change. page_changed (name = pager id, payload = the new zero-based page index) is sent when a pager settles on another page. appearance_changed (name null, payload {mode, source}) is sent once whenever the shown prototype's resolved light/dark mode changes, by a device advertising prototype_appearance_v1. Input and state changes (text input, toggles, sliders etc.) arrive as kind emit with eventName change (there is no separate change kind), with payload {key,value} for one changed key or {keys,values} for several. A finished request action arrives as kind emit with eventName prototype_request",
         ),
       afterSequence: z
         .number()

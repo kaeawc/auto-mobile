@@ -1,0 +1,9 @@
+Broadcast completed: result=1, data="Index=[0]"
+$ --es operation show-tile --ei index 0
+Broadcast completed: result=1
+$ --es operation show-tile --ei index 1
+Broadcast completed: result=1
+$ --es operation show-tile --ei index 99
+Broadcast completed: result=1
+$ --es operation show-tile
+Broadcast completed: result=3, data="An index is required."

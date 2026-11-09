@@ -585,12 +585,13 @@ describe("Explore", () => {
       });
     }
 
-    test("a relaunched root tries its buttons then stops without Back", async () => {
+    test("a relaunched root tries its button once, then stops without Back", async () => {
       const run = rootRun("Continue as Guest", "Login", launcher);
       try {
         const result = await runExplore(explore, { packageName: target, timeoutMs: 90000 });
-        expect(run.actions).toEqual(["launch", "tap:guest", "tap:guest"]);
-        expect(result.interactionsPerformed).toBe(2);
+        // The tap left Login unchanged, so it is not retried there (#17442).
+        expect(run.actions).toEqual(["launch", "tap:guest"]);
+        expect(result.interactionsPerformed).toBe(1);
         expect(result.stopReason).toBe(rootStop);
         expect(result.durationMs).toBe(1000);
       } finally {
@@ -2559,6 +2560,8 @@ describe("Explore", () => {
       explore.performInteraction = async () => {
         const success = outcomes.shift() ?? true;
         log.push(success ? "interaction:ok" : "interaction:fail");
+        // Each successful interaction lands on a new screen, so its element stays selectable.
+        fakeGraph.setCurrentScreenValue(`Screen${log.length}`);
         return success;
       };
       explore.resetToHome = async () => {

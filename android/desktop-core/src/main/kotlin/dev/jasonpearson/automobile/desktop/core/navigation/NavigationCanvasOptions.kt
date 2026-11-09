@@ -23,6 +23,8 @@ data class NavigationCanvasOptions(
   val activeContext: NavigationActiveContext? = null,
   // Build lens over the union graph (#4987); [BuildLens.Union] keeps Phase 2 opacity.
   val buildLens: BuildLens = BuildLens.Union,
+  // Per-build labels (`branch@shortsha` when declared, #16954) for accessible descriptions.
+  val buildLabels: Map<ProvenanceBuildKey, String> = emptyMap(),
   // Time source for the recency-graded fade (#16952); tests inject a FakeClock.
   val clock: Clock = SystemClock,
   val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO,

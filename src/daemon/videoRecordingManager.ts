@@ -59,6 +59,12 @@ import {
   resolveAndroidRecordingDisplay,
   type AndroidRecordingDisplay,
 } from "../features/video/AndroidRecordingDisplay";
+import {
+  isFirstIosPanelReading,
+  recordingDisplayWarnings,
+  resolveIosRecordingDisplay,
+  startedRecordingDisplay,
+} from "../features/video/IosRecordingDisplay";
 import { displayTransitions } from "../features/observe/DisplayTransition";
 import type { VideoRecordingDisplayTransition, VideoRecordingPanel } from "../models";
 import { VisualHighlightClient } from "../features/debug/VisualHighlightClient";
@@ -370,6 +376,10 @@ function beginRecordingDisplaySession(
     if (next && next.key === session.currentPanel.key) {
       return;
     }
+    if (isFirstIosPanelReading(device, session.currentPanel, session.transitions, next)) {
+      session.currentPanel = to;
+      return;
+    }
     session.transitions.push({
       atMs: Math.max(0, Math.round(timer.now() - startedAtMs)),
       from: session.currentPanel,
@@ -404,6 +414,13 @@ async function recordingDisplayForStart(
   if (request.display !== undefined) {
     throw new ActionableError("display selection for videoRecording is supported on Android only.");
   }
+  if (request.device.platform === "ios") {
+    // simctl keeps its starting --display; track transitions so the result can warn (#17584).
+    return resolveIosRecordingDisplay(
+      request.device,
+      displayTransitions.observedPanel(request.device.deviceId),
+    );
+  }
   return undefined;
 }
 
@@ -421,7 +438,9 @@ async function finalizeRecordingDisplaySession(
   recordingDisplaySessions.delete(recordingId);
   const pending = session.transitions.at(-1);
   const hostOnly = options?.hostOnly || hostOnlyRecordingTeardowns.has(recordingId);
-  if (pending?.to.key === "unknown" && !hostOnly) {
+  // iOS has no Android display resolver; its unresolved transitions stay as recorded.
+  const resolvable = !hostOnly && session.device.platform !== "ios";
+  if (pending?.to.key === "unknown" && resolvable) {
     try {
       const current = await deps.resolveAndroidDisplay(session.device, "active");
       if (current) {
@@ -439,10 +458,11 @@ async function finalizeRecordingDisplaySession(
   );
   metadata.recordedPanel = session.recordedPanel;
   metadata.transitions = session.transitions;
-  if (session.warning) {
-    metadata.warnings = [...(metadata.warnings ?? []), session.warning];
-  }
+  const warnings = recordingDisplayWarnings(session);
+  metadata.warnings =
+    warnings.length > 0 ? [...(metadata.warnings ?? []), ...warnings] : metadata.warnings;
 }
+
 // In-progress size-cap monitors, keyed by recordingId (issue #4762). Each is a
 // periodic timer that stops a live capture once it reaches its cap so one long
 // recording cannot fill the disk.
@@ -1416,7 +1436,12 @@ export async function startVideoRecording(
     await persistStartedVideoRecording(deps, request, active, start.abortSignal);
 
     if (recordingDisplay && active.recordedPanel) {
-      beginRecordingDisplaySession(active.recordingId, request.device, recordingDisplay, {
+      const display = startedRecordingDisplay(
+        request.device,
+        recordingDisplay,
+        active.recordedPanel,
+      );
+      beginRecordingDisplaySession(active.recordingId, request.device, display, {
         startedAt: active.startedAt,
         timer,
       });

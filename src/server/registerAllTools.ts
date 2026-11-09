@@ -28,6 +28,7 @@ import { registerMeasureStartupTools } from "./measureStartupTools";
 import { registerProfilingTools } from "./profilingTools";
 import { registerMediaSessionTools } from "./mediaSessionTools";
 import { registerAmbientTools } from "./ambientTool";
+import { registerWearSurfaceTools } from "./wearSurfaceTool";
 import { registerRotaryScrollTools } from "./rotaryScrollTool";
 import { registerRotateCrownTools } from "./rotateCrownTool";
 import { registerWindowModeTools } from "./windowModeTools";
@@ -127,6 +128,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerWindowModeTools();
   registerRotaryScrollTools();
   registerAmbientTools();
+  registerWearSurfaceTools();
   registerRotateCrownTools();
   registerHighlightTools();
   registerPrototypeTools({

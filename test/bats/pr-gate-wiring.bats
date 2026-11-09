@@ -707,8 +707,8 @@ load yq-helpers
   require_mikefarah_yq
   # A job labelled for a self-hosted pool waits forever when no runner is
   # online. Each one must honour AUTOMOBILE_MAC_POOLS_ENABLED, or switching it
-  # off leaves a required check (SwiftLint, Swift Code Coverage, Installer
-  # Minimal) queued with no runner.
+  # off leaves a required check (Swift Code Coverage, Installer Minimal)
+  # queued with no runner.
   local job runs_on count=0
   while IFS= read -r job; do
     runs_on="$(yq -r ".jobs.\"${job}\".\"runs-on\"" "$WF")"
@@ -718,7 +718,7 @@ load yq-helpers
     fi
     count=$((count + 1))
   done < <(yq -r '.jobs | to_entries[] | select(.value."runs-on" | tostring | contains("automobile-mac")) | .key' "$WF")
-  [ "$count" -eq 10 ]
+  [ "$count" -eq 9 ]
 }
 
 @test "installer minimal filters scripts/install.sh, package.json, android/gradle/libs.versions.toml, and the PR workflow (#11580)" {

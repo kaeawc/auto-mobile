@@ -537,6 +537,82 @@ for (const engine of ENGINES) {
       }
     });
 
+    test("a repeat column's instances keep their aspect ratios inside their own share (#16694)", async () => {
+      const reference = JSON.parse(
+        readFileSync(
+          join(import.meta.dir, "../../../fixtures/prototype-web/reference-checkout.json"),
+          "utf8",
+        ),
+      ) as Record<string, unknown>;
+      const ratioRow = {
+        type: "row",
+        testTag: "instance",
+        style: { weight: 1 },
+        children: [
+          { type: "box", testTag: "ratio", style: { aspectRatio: 2, background: "#3366ff" } },
+          { type: "text", text: "b" },
+        ],
+      };
+      const { element } = renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          style: { width: { dp: 300 } },
+          children: [
+            {
+              type: "column",
+              style: { height: { dp: 40 } },
+              repeat: { items: [{ id: 1 }, { id: 2 }] },
+              children: [ratioRow],
+            },
+            {
+              type: "row",
+              testTag: "repeated",
+              repeat: { items: [{ id: 1 }] },
+              children: [{ type: "box", style: { aspectRatio: 2, maxWidth: 40 } }],
+            },
+          ],
+        },
+      });
+      const page = await browser.newPage({
+        viewport: WEB_SCREENSHOT_VIEWPORT,
+        deviceScaleFactor: 1,
+      });
+      try {
+        await page.setContent(`<!doctype html><html><body>${toHtml(element)}</body></html>`);
+        const boxes = await page.evaluate(() => {
+          const rects = (tag: string) =>
+            Array.from(document.querySelectorAll(`[data-testid="${tag}"]`)).map((node) => {
+              const box = node.getBoundingClientRect();
+              return { top: box.top, bottom: box.bottom, width: box.width, height: box.height };
+            });
+          const repeated = document.querySelector('[data-testid="repeated"]');
+          return {
+            instances: rects("instance"),
+            ratios: rects("ratio"),
+            repeatedWidth: repeated?.getBoundingClientRect().width ?? 0,
+            parentWidth: repeated?.parentElement?.getBoundingClientRect().width ?? 0,
+          };
+        });
+        expect(boxes.instances).toHaveLength(2);
+        expect(boxes.ratios).toHaveLength(2);
+        const [first, second] = boxes.instances;
+        // The two weighted instances split the column, and neither ratio spills into the next.
+        expect(Math.abs(first!.height - second!.height)).toBeLessThan(0.5);
+        boxes.ratios.forEach((ratio, index) => {
+          const instance = boxes.instances[index]!;
+          expect(ratio.height).toBeGreaterThan(0);
+          expect(ratio.top).toBeGreaterThanOrEqual(instance.top - 0.5);
+          expect(ratio.bottom).toBeLessThanOrEqual(instance.bottom + 0.5);
+          expect(ratio.width / ratio.height).toBeCloseTo(2, 1);
+        });
+        // A repeated row is not stretched to its parent's width.
+        expect(boxes.repeatedWidth).toBeLessThan(boxes.parentWidth);
+      } finally {
+        await page.close();
+      }
+    });
+
     test("row aspect ratios lay out at the widths Android's sizeIn-then-aspectRatio gives (#16795)", async () => {
       const box = (testTag: string, style: Record<string, unknown>) => ({
         type: "box",
@@ -624,6 +700,51 @@ for (const engine of ENGINES) {
         await page.close();
       }
     });
+
+    test("a padded text after an unsized aspect ratio in a row takes no width (#16710)", async () => {
+      const spec = {
+        id: "ratio-padded",
+        root: {
+          type: "column",
+          children: [
+            {
+              type: "row",
+              children: [
+                { type: "box", testTag: "ratio", style: { aspectRatio: 2 } },
+                {
+                  type: "text",
+                  testTag: "padded",
+                  text: "Hi",
+                  style: { padding: { start: 20, end: 20 } },
+                },
+              ],
+            },
+          ],
+        },
+      };
+      const { page } = await openPage(browser, webSpecPage(spec, "ratio-padded"));
+      try {
+        const sizes = await page.evaluate(() => {
+          // Layout px: undo the stage's fit-to-viewport scale.
+          const stage = document.querySelector<HTMLElement>("[data-stage]");
+          const scale = Number(/scale\(([\d.]+)\)/.exec(stage?.style.transform ?? "")?.[1] ?? 1);
+          const view = Array.from(document.querySelectorAll<HTMLElement>("[data-view]")).find(
+            (shown) => !shown.hidden,
+          );
+          const size = (tag: string) => {
+            const box = view?.querySelector(`[data-testid="${tag}"]`)?.getBoundingClientRect();
+            return [(box?.width ?? -1) / scale, (box?.height ?? -1) / scale];
+          };
+          return { ratio: size("ratio"), padded: size("padded") };
+        });
+        // A Pixel 9 screen is 411 dp wide: the ratio takes all of it and the padded text none.
+        expect(sizes.ratio[0]).toBeCloseTo(411, 1);
+        expect(sizes.ratio[1]).toBeCloseTo(205.5, 1);
+        expect(sizes.padded[0]).toBeCloseTo(0, 1);
+      } finally {
+        await page.close();
+      }
+    });
   });
 }
 
@@ -706,3 +827,84 @@ for (const engine of ENGINES) {
     },
   );
 }
+
+/** A ratio box in a 300 x 100 dp row; `row` adds to the row, `column` to the column around it. */
+function heightCapSpec(row: Record<string, unknown>, sheet: boolean): Record<string, unknown> {
+  const ratio = { type: "box", testTag: "ratio", style: { aspectRatio: 2, background: "primary" } };
+  const line = {
+    type: "row",
+    testTag: "row",
+    style: { width: { dp: 300 }, height: { dp: 100 } },
+    children: [ratio],
+    ...row,
+  };
+  const hoisted = {
+    type: "bottomSheet",
+    openWhen: { key: "open", equals: true },
+    detents: ["half"],
+    style: { height: { dp: 100 } },
+    child: { type: "text", text: "Details" },
+  };
+  return {
+    id: "height-cap",
+    state: { open: false },
+    root: {
+      type: "column",
+      style: { height: { dp: 100 } },
+      children: sheet ? [hoisted, { ...line, style: { width: { dp: 300 }, weight: 1 } }] : [line],
+    },
+  };
+}
+
+describeBrowser("a row's aspect-ratio height cap in headless Chromium (#16720)", () => {
+  let browser: Browser;
+
+  beforeAll(async () => {
+    browser = await chromium.launch();
+  }, LAUNCH_TIMEOUT_MS);
+
+  afterAll(async () => {
+    await browser?.close();
+  });
+
+  /** The ratio box's and its row's rendered boxes, in the stage's scaled px. */
+  async function boxes(spec: Record<string, unknown>) {
+    const { page } = await openPage(browser, webSpecPage(spec, "height-cap"));
+    try {
+      return await page.evaluate(() => {
+        const rect = (tag: string) => {
+          const found = document.querySelector(`[data-view]:not([hidden]) [data-testid="${tag}"]`);
+          const { top, bottom, width, height } = found!.getBoundingClientRect();
+          return { top, bottom, width, height };
+        };
+        return { ratio: rect("ratio"), row: rect("row") };
+      });
+    } finally {
+      await page.close();
+    }
+  }
+
+  test(
+    "a weighted row keeps its whole share beside a closed sheet",
+    async () => {
+      const { ratio, row } = await boxes(heightCapSpec({}, true));
+      // The sheet takes no height, so the 100 dp row holds a 200 x 100 box.
+      expect(ratio.height / row.height).toBeCloseTo(1, 2);
+      expect(ratio.width / ratio.height).toBeCloseTo(2, 2);
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  test(
+    "a row's safe-area padding leaves its aspect ratio the rest of its height",
+    async () => {
+      const safe = { safeAreaPadding: { edges: ["top"], types: ["systemBars"] } };
+      const { ratio, row } = await boxes(heightCapSpec(safe, false));
+      // Pixel 9's 48 dp top inset leaves 52 of the row's 100 dp: a 104 x 52 box inside the row.
+      expect(ratio.height / row.height).toBeCloseTo(0.52, 2);
+      expect(ratio.width / ratio.height).toBeCloseTo(2, 2);
+      expect(ratio.bottom).toBeLessThanOrEqual(row.bottom + 0.5);
+    },
+    CASE_TIMEOUT_MS,
+  );
+});

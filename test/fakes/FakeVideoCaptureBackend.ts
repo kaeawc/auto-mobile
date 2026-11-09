@@ -1,4 +1,4 @@
-import { ActionableError } from "../../src/models";
+import { ActionableError, type VideoRecordingPanel } from "../../src/models";
 import type {
   ForceStopOptions,
   RecordingHandle,
@@ -43,6 +43,13 @@ export class FakeVideoCaptureBackend implements VideoCaptureBackend {
     this.sidecarPathsFor = derive;
   }
 
+  private recordedPanelFor: ((config: VideoCaptureConfig) => VideoRecordingPanel) | null = null;
+
+  /** Make start() report the panel the capture chose, as the iOS `--display` selection does. */
+  setRecordedPanel(derive: (config: VideoCaptureConfig) => VideoRecordingPanel): void {
+    this.recordedPanelFor = derive;
+  }
+
   setStopResultOverrides(overrides: Partial<RecordingResult>): void {
     this.stopResultOverrides = overrides;
   }
@@ -74,6 +81,7 @@ export class FakeVideoCaptureBackend implements VideoCaptureBackend {
       startedAt: config.startedAt,
       ...(this.liveCapturePathFor ? { liveCapturePath: this.liveCapturePathFor(config) } : {}),
       ...(this.sidecarPathsFor ? { inProgressSidecarPaths: this.sidecarPathsFor(config) } : {}),
+      ...(this.recordedPanelFor ? { recordedPanel: this.recordedPanelFor(config) } : {}),
     };
     this.startResults.push(handle);
     return handle;

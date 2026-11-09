@@ -788,7 +788,7 @@ class CtrlProxy : AccessibilityService() {
 
           override fun activeWindowRoot(): AccessibilityNodeInfo? = rootInActiveWindow
 
-          override fun lastWindowClassName() = this@CtrlProxy.lastWindowClassName
+          override fun lastWindowState() = this@CtrlProxy.lastWindowState
 
           override fun rotationProvenance() = this@CtrlProxy.rotationProvenance
 
@@ -796,8 +796,11 @@ class CtrlProxy : AccessibilityService() {
 
           override fun wakefulness() = deviceInfoController.getWakefulness()
 
-          override fun foregroundActivity(rootPackage: String?, windowClass: String?) =
-            deviceInfoController.getForegroundActivity(rootPackage, windowClass)
+          override fun foregroundActivity(
+            rootPackage: String?,
+            windowClass: String?,
+            windowPackage: String?,
+          ) = deviceInfoController.getForegroundActivity(rootPackage, windowClass, windowPackage)
 
           override fun isEmulator() = deviceInfoController.getIsEmulator()
 
@@ -1112,7 +1115,10 @@ class CtrlProxy : AccessibilityService() {
         ),
       gestureThreadFactory = { gestureThreadFactory() },
     )
-  @Volatile private var lastWindowClassName: String? = null
+  @Volatile private var lastWindowState = AccessibilityEventDispatcher.WindowState(null, null)
+  private val lastWindowClassName: String?
+    get() = lastWindowState.className
+
   internal val frameContextGate =
     FrameContextGate(
       epoch = UUID.randomUUID().toString(),
@@ -1196,8 +1202,8 @@ class CtrlProxy : AccessibilityService() {
         override fun onTextSelectionChanged(fromIndex: Int, toIndex: Int) =
           textInputController.onTextSelectionChanged(fromIndex, toIndex)
 
-        override fun onWindowStateChanged(className: String?) {
-          lastWindowClassName = className
+        override fun onWindowStateChanged(className: String?, packageName: String?) {
+          lastWindowState = AccessibilityEventDispatcher.WindowState(className, packageName)
         }
 
         override fun advanceFrameContext() = frameContextGate.advance()

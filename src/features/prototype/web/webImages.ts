@@ -7,11 +7,16 @@ import type { NodeRenderer, WebRenderScope } from "./webRender";
 /** How an image fits its box, as both devices read `contentScale` (default `fit`). */
 export type WebImageScale = "fit" | "crop" | "fill";
 
-/** One drawn image: its asset and the dp the node fixes on each axis (none for fill or wrap). */
+/**
+ * One drawn image: its asset, the dp the node fixes on each axis (none for fill or wrap), and
+ * which axes fill their parent.
+ */
 export interface WebImageDraw {
   readonly asset: string;
   readonly widthDp?: number;
   readonly heightDp?: number;
+  readonly widthFill?: true;
+  readonly heightFill?: true;
   readonly scale: WebImageScale;
 }
 
@@ -79,6 +84,8 @@ export function webImageDraw(asset: string, node: Raw): WebImageDraw {
     asset,
     ...(widthDp === undefined ? {} : { widthDp }),
     ...(heightDp === undefined ? {} : { heightDp }),
+    ...(style.width === "fill" ? { widthFill: true as const } : {}),
+    ...(style.height === "fill" ? { heightFill: true as const } : {}),
     scale: webImageScale(node.contentScale),
   };
 }
@@ -173,8 +180,9 @@ export function webImageRule(slot: number, image: PrototypeWebImage): string {
 
 /**
  * A pixel box one draw needs, at the frame's density. `cover` (crop and fill) must cover each
- * fixed axis; otherwise the image fits inside the box, an unfixed axis bounded by the screen's
- * long side, the largest either orientation can draw it.
+ * fixed axis and each filled axis, a filled axis bounded by `fill`: the screen's long side, the
+ * widest either orientation draws it, or its short side, the width the portrait view draws it.
+ * Otherwise the image fits inside the box, an unfixed axis bounded by the screen's long side.
  */
 export interface WebImageBox {
   readonly width?: number;
@@ -182,16 +190,28 @@ export interface WebImageBox {
   readonly cover: boolean;
 }
 
+/** The dp a cover box covers on one axis: its fixed dp, else a filled axis's bound, else none. */
+function coverDp(fixed: number | undefined, filled: true | undefined, fillDp: number) {
+  return fixed ?? (filled ? fillDp : undefined);
+}
+
+/** The screen extent a filled axis of a cover box is bounded by. */
+export type WebImageFillExtent = "long" | "short";
+
 export function webImageBox(
   draw: WebImageDraw,
   frame: { readonly widthDp: number; readonly heightDp: number; readonly density: number },
+  fill: WebImageFillExtent = "long",
 ): WebImageBox {
   const long = Math.max(frame.widthDp, frame.heightDp);
+  const fillDp = fill === "long" ? long : Math.min(frame.widthDp, frame.heightDp);
   const px = (dp: number) => Math.ceil(dp * frame.density);
   if (draw.scale !== "fit" && (draw.widthDp !== undefined || draw.heightDp !== undefined)) {
+    const width = coverDp(draw.widthDp, draw.widthFill, fillDp);
+    const height = coverDp(draw.heightDp, draw.heightFill, fillDp);
     return {
-      ...(draw.widthDp === undefined ? {} : { width: px(draw.widthDp) }),
-      ...(draw.heightDp === undefined ? {} : { height: px(draw.heightDp) }),
+      ...(width === undefined ? {} : { width: px(width) }),
+      ...(height === undefined ? {} : { height: px(height) }),
       cover: true,
     };
   }

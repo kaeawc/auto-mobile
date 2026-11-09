@@ -325,7 +325,7 @@ export class DragPath extends BaseVisualChange {
   ): Promise<DragPathResult> {
     if (displayId !== undefined && displayId !== 0) {
       throw new ActionableError(
-        "dragPath on iOS drives the main display only; target the default display.",
+        "dragPath on iOS drives the observed active display; target the default display.",
       );
     }
     throwIfAborted(call.signal);

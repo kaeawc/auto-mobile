@@ -50,6 +50,7 @@ add_check "prototype-spec-models" "bun \"$PROJECT_ROOT/scripts/prototype/generat
 add_check "protoviewer-notices" "bun \"$PROJECT_ROOT/scripts/ios/protoviewer-notices.ts\" --check" "config,typescript,ios" "Keep the ProtoViewer iOS third-party notices in sync with SwiftPM dependencies (skips without swift)"
 add_check "privacy-manifests" "bun \"$PROJECT_ROOT/scripts/ios/check-privacy-manifests.ts\"" "config,typescript,ios" "Keep the prototype library and ProtoViewer PrivacyInfo.xcprivacy in step with the required-reason APIs their Swift sources use"
 add_check "store-listing" "bun \"$PROJECT_ROOT/scripts/store-listing/validate-store-listing.ts\"" "config,typescript" "Keep the ProtoViewer fastlane store listing within Play and App Store limits and its icon sources well-formed (#14152)"
+add_check "swiftlint-pins" "bash \"$PROJECT_ROOT/scripts/swiftlint/check_swiftlint_pin_consistency.sh\"" "config,ios" "Keep the Linux SwiftLint pin on the Mac pin's version with a well-formed SHA-256 (#17581)"
 add_check "bun-version-coherence" "bun \"$PROJECT_ROOT/scripts/check-bun-version-coherence.ts\"" "config,dependencies" "Keep Bun versions aligned across package, workflows, Docker, and local development"
 add_check "xml" "\"$PROJECT_ROOT/scripts/xml/validate_xml.sh\"" "config,xml" "Validate XML files"
 add_check "shellcheck" "\"$PROJECT_ROOT/scripts/shellcheck/validate_shell_scripts.sh\"" "lint,shell" "Validate shell scripts with shellcheck"
@@ -90,6 +91,7 @@ add_check "desktop-core-unified" "\"$PROJECT_ROOT/scripts/android/validate-no-de
 add_check "workflow-assertion-triggers" "\"$PROJECT_ROOT/scripts/ci/validate_workflow_assertion_triggers.sh\"" "config,ci" "Ensure workflow-YAML assertion tests are triggered by the paths they assert"
 add_check "github-python-lock" "cd \"$PROJECT_ROOT/scripts/github\" && uv sync --locked --no-install-project" "config,dependencies" "Validate the GitHub documentation Python lockfile"
 add_check "manual-test-python" "\"$PROJECT_ROOT/scripts/validate_manual_test_python.sh\"" "config,dependencies" "Validate the private Python MCP stdio harness"
+add_check "python-sdk" "\"$PROJECT_ROOT/scripts/validate_python_sdk.sh\"" "lint,python" "Lint, format-check, typecheck and test the Python SDK (sdk/python, uv + ruff + mypy)"
 
 print_usage() {
   cat <<'EOF'

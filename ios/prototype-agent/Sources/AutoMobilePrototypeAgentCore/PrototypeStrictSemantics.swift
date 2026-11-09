@@ -87,6 +87,9 @@ enum PrototypeStrictSemantics {
                 }
                 pointers.append(pointer)
                 value = PrototypeDataPointer.resolve(fields["data"]?.objectFields, pointer: pointer)
+            case .stack:
+                // Checked above: a stack path has no authored value to measure.
+                value = nil
             }
             if let value { bytes += PrototypeStorageBytes.entry(key, value) }
         }

@@ -50,6 +50,13 @@ final class TVCommandRouterSmokeTests: XCTestCase {
         let keyboardGone = NSPredicate(format: "exists == false")
         expectation(for: keyboardGone, evaluatedWith: app.keyboards.firstMatch)
         waitForExpectations(timeout: 5)
+        let hierarchyRequest = Data(#"{"type":"request_hierarchy","requestId":"smoke-hierarchy"}"#.utf8)
+        let hierarchy = try JSONDecoder().decode(HierarchyUpdateResponse.self, from: router.handle(hierarchyRequest))
+        XCTAssertEqual(hierarchy.requestId, "smoke-hierarchy")
+        let root = try XCTUnwrap(hierarchy.data?.hierarchy)
+        let fieldNode = try XCTUnwrap(node(identifier: "am-text-field", in: root))
+        XCTAssertTrue(try XCTUnwrap(fieldNode.text).contains("hello"))
+
         let unfocused = try response(
             #"{"type":"request_append_text","requestId":"smoke-unfocused","text":"unexpected"}"#,
             router: router
@@ -69,6 +76,11 @@ final class TVCommandRouterSmokeTests: XCTestCase {
 
     private func response(_ json: String, router: TVCommandRouter) throws -> Response {
         try JSONDecoder().decode(Response.self, from: router.handle(Data(json.utf8)))
+    }
+
+    private func node(identifier: String, in element: UIElementInfo) -> UIElementInfo? {
+        if element.resourceId == identifier { return element }
+        return element.node?.lazy.compactMap { self.node(identifier: identifier, in: $0) }.first
     }
 
     private func focusedIdentifier(_ snapshot: any XCUIElementSnapshot) -> String? {

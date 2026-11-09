@@ -64,6 +64,15 @@ const REVIEWED_INDEXED_TEXT_CASE_REPLACEMENTS = new Set(
     ],
   ),
 );
+// In these two captures the screen's generated-id scroll row shares bounds,
+// window and affordances with `tap_screen_content`; the skeleton keeps only the
+// resource-id row (#17465), so the generated-id selector case leaves the inventory.
+const REVIEWED_SHADOW_ROW_CASE_REMOVALS = new Set(
+  ["diff/scroll-after.json", "diff/scroll-before.json"].map(
+    (capture) =>
+      `${capture}:{"kind":"elementId","value":"00580231-fc67-f97e-7c7b-891115e1ed83"}:0,420,1080,2064`,
+  ),
+);
 const digest = (entries: string[]) =>
   createHash("sha256").update(entries.sort().join("\n")).digest("hex");
 
@@ -178,7 +187,8 @@ export function assertCaseInventoryDoesNotShrink(
     (key) =>
       !currentKeys.includes(key) &&
       !REVIEWED_IME_OCCLUSION_CASE_REMOVALS.has(key) &&
-      !REVIEWED_INDEXED_TEXT_CASE_REPLACEMENTS.has(key),
+      !REVIEWED_INDEXED_TEXT_CASE_REPLACEMENTS.has(key) &&
+      !REVIEWED_SHADOW_ROW_CASE_REMOVALS.has(key),
   );
   if (missing.length > 0) {
     throw new Error(`Element-resolution case keys may only grow:\n${missing.join("\n")}`);

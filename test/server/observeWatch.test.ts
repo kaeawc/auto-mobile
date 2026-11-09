@@ -1,4 +1,5 @@
 import { FakeWatchRunnerClient } from "../fakes/FakeWatchRunnerClient";
+import { WatchRunnerError } from "../../src/features/watch/WatchRunnerError";
 import { watchRunners } from "../../src/features/watch/WatchRunnerRegistry";
 import * as path from "node:path";
 import { describe, expect, test } from "bun:test";
@@ -6,6 +7,8 @@ import { SCREENSHOT_PATH_MIN_LIFETIME_MS } from "../../src/features/observe/Scre
 import { ActionableError, type BootedDevice } from "../../src/models";
 import {
   WATCH_HIERARCHY_UNAVAILABLE_MESSAGE,
+  WATCH_APP_NOT_FOREGROUND_MESSAGE,
+  TVOS_HIERARCHY_UNAVAILABLE_MESSAGE,
   isWatchObservation,
   type WatchObservation,
 } from "../../src/models/WatchObservation";
@@ -65,7 +68,7 @@ function arrange(result?: Buffer | Error, runner?: FakeWatchRunnerClient) {
       pathProtection: protection,
       cacheDir: () => CACHE_DIR,
     });
-  return { observe, screenshots, writer, protection };
+  return { observe, screenshots, writer, protection, timer };
 }
 
 const failure = (promise: Promise<unknown>) =>
@@ -262,6 +265,77 @@ test("a connected runner failure surfaces instead of becoming a screenshot-only 
   expect(screenshots.captures).toEqual([]);
 });
 
+test("a backgrounded watch app returns actionable screenshot-only guidance", async () => {
+  const runner = new FakeWatchRunnerClient();
+  runner.failure = new WatchRunnerError("Watch app is not in the foreground", "app_not_foreground");
+  const { observe, screenshots } = arrange(undefined, runner);
+
+  const result = getStructuredPayload<WatchObservation>(await observe())!;
+
+  expect(result.hierarchyUnavailable).toEqual({
+    platform: "watchos",
+    message: WATCH_APP_NOT_FOREGROUND_MESSAGE,
+  });
+  expect(HIERARCHY_FIELDS.filter((field) => Object.hasOwn(result, field))).toEqual([]);
+  expect(result.screenshotPath).toBeDefined();
+  expect(screenshots.captures).toHaveLength(1);
+  expect(observeToolResultSchema.safeParse(result).success).toBe(true);
+});
+
+test.each([false, true])(
+  "waitFor timeout reports the last backgrounded read (first read has hierarchy: %s)",
+  async (firstHasHierarchy) => {
+    const runner = new FakeWatchRunnerClient();
+    const hierarchy = runner.hierarchy.bind(runner);
+    let reads = 0;
+    runner.hierarchy = (signal) => {
+      runner.failure =
+        reads++ === 0 && firstHasHierarchy
+          ? undefined
+          : new WatchRunnerError("Watch app is not in the foreground", "app_not_foreground");
+      return hierarchy(signal);
+    };
+    const { observe, timer } = arrange(undefined, runner);
+    timer.enableAutoAdvance();
+
+    const response = await observe({ waitFor: { text: "Missing element", timeout: 200 } });
+    const result = getStructuredPayload<WatchObservation>(response)!;
+
+    expect(response.isError).toBe(true);
+    expect(result).toMatchObject({ timedOut: true, matched: false, polls: 3 });
+    expect(result.hierarchyUnavailable).toEqual({
+      platform: "watchos",
+      message: WATCH_APP_NOT_FOREGROUND_MESSAGE,
+    });
+    expect(HIERARCHY_FIELDS.filter((field) => Object.hasOwn(result, field))).toEqual([]);
+    expect(reads).toBe(3);
+  },
+);
+
+test("waitFor can match a hierarchy after a backgrounded read", async () => {
+  const runner = new FakeWatchRunnerClient();
+  const hierarchy = runner.hierarchy.bind(runner);
+  let reads = 0;
+  runner.hierarchy = (signal) => {
+    runner.failure =
+      reads++ === 0
+        ? new WatchRunnerError("Watch app is not in the foreground", "app_not_foreground")
+        : undefined;
+    return hierarchy(signal);
+  };
+  const { observe, timer } = arrange(undefined, runner);
+  timer.enableAutoAdvance();
+
+  const result = getStructuredPayload(
+    await observe({ waitFor: { text: "CtrlProxy Watch", timeout: 200 } }),
+  )!;
+
+  expect(result).toMatchObject({ matched: true, timedOut: false, polls: 2 });
+  expect(result).toHaveProperty("viewHierarchy");
+  expect(result).not.toHaveProperty("hierarchyUnavailable");
+  expect(reads).toBe(2);
+});
+
 const appleTv: BootedDevice = { ...watch, platform: "tvos", name: "Apple TV 4K" };
 test.each(["injected", "registered"] as const)(
   "tvOS ignores an %s watch runner and still refuses hierarchy options",
@@ -295,7 +369,7 @@ describe("observe on an Apple TV simulator", () => {
     const { observe, writer } = arrange(pngOfSize(1920, 1080));
     const result = getStructuredPayload<WatchObservation>(await observe({}, appleTv))!;
     expect(result.hierarchyUnavailable.platform).toBe("tvos");
-    expect(result.hierarchyUnavailable.message).toContain("No tvOS runner is connected");
+    expect(result.hierarchyUnavailable.message).toBe(TVOS_HIERARCHY_UNAVAILABLE_MESSAGE);
     expect(result.screenSize).toEqual({ width: 1920, height: 1080, units: "physical-pixels" });
     expect(result.screenshotMimeType).toBe("image/png");
     expect(writer.written).toEqual([result.screenshotPath!]);

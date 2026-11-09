@@ -668,6 +668,12 @@ export class DevicePool {
     return this.parts.connectionClaims.declareMcpSessionLivenessOwnerToken(...args);
   }
 
+  connectionPresentsSessionOwnerToken(
+    ...args: Parameters<PoolOps["connectionPresentsSessionOwnerToken"]>
+  ): ReturnType<PoolOps["connectionPresentsSessionOwnerToken"]> {
+    return this.parts.connectionClaims.connectionPresentsSessionOwnerToken(...args);
+  }
+
   beginMcpSessionOwnerCall(
     ...args: Parameters<PoolOps["beginMcpSessionOwnerCall"]>
   ): ReturnType<PoolOps["beginMcpSessionOwnerCall"]> {

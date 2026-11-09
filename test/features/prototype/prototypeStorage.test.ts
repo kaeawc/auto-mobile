@@ -197,6 +197,23 @@ describe("device storage report", () => {
     });
     expect(parsePrototypeStorageReport({ ...report, skippedKeys: [] })).toEqual(report);
     expect(parsePrototypeStorageReport({ ...report, keys: [], totalBytes: 0 })?.keys).toEqual([]);
+    const withStack = {
+      ...report,
+      keys: [...report.keys, { key: "stack:nav", bytes: 30 }],
+      totalBytes: 50,
+      skippedKeys: ["stack:nav"],
+    };
+    expect(parsePrototypeStorageReport(withStack)).toEqual(withStack);
+    expect(parsePrototypeStorageReport({ ...report, skippedKeys: ["stack:"] })).toBeUndefined();
+  });
+  test("stack report keys respect the storage key length limit", () => {
+    const key = `stack:${"n".repeat(255)}`;
+    const valid = { ...report, keys: [{ key, bytes: 1 }], skippedKeys: [key] };
+    expect(parsePrototypeStorageReport(valid)).toEqual(valid);
+    expect(
+      parsePrototypeStorageReport({ ...valid, keys: [{ key: `${key}x`, bytes: 1 }] }),
+    ).toBeUndefined();
+    expect(parsePrototypeStorageReport({ ...valid, skippedKeys: [`${key}x`] })).toBeUndefined();
   });
   test("anything malformed or absent is reported absent", () => {
     for (const value of [
@@ -282,6 +299,27 @@ describe("restore precedence (adopted decision)", () => {
     );
     expect(restored.state).toEqual(base.state);
     expect(restored.dropped).toEqual([{ key: "state:darkMode", reason: "unlisted" }]);
+  });
+
+  test("a stored stack path is applied by shape and changes no state or data", () => {
+    const restored = restorePrototypeStorage(
+      { ...base, storage: { version: 1, keys: ["stack:nav", "stack:other", "stack:malformed"] } },
+      {
+        version: 1,
+        values: {
+          "stack:nav": [{ screen: "home" }, { screen: "post", params: { postId: "41" } }],
+          "stack:other": [],
+          "stack:malformed": [{}],
+        },
+      },
+    );
+    expect(restored.state).toEqual(base.state);
+    expect(restored.data).toEqual(base.data);
+    expect(restored.applied).toEqual(["stack:nav"]);
+    expect(restored.dropped).toEqual([
+      { key: "stack:other", reason: "mismatch" },
+      { key: "stack:malformed", reason: "mismatch" },
+    ]);
   });
 
   test("a stored value that no longer fits the spec falls back to the spec's value", () => {

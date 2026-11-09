@@ -1,3 +1,7 @@
+import {
+  DefaultNetsimInstanceLauncher,
+  type NetsimInstanceLauncher,
+} from "./NetsimInstanceLauncher";
 import { AdbCommandTimeoutError } from "./AdbCommandTimeoutError";
 import { errorMessage } from "../describeUnknownError";
 import type { FileSystem } from "../filesystem/DefaultFileSystem";
@@ -336,6 +340,7 @@ export interface AndroidEmulatorClientOptions {
   reservations?: EmulatorPortReservations;
   inventory?: AndroidDeviceInventoryScanner;
   launcher?: EmulatorLauncher;
+  netsimInstanceLauncher?: NetsimInstanceLauncher;
   readinessPoller?: EmulatorReadinessPoller;
   /** Resolves the `emulator` binary path (for testing; defaults to filesystem/shell detection) */
   emulatorPathLocator?: () => Promise<string>;
@@ -374,6 +379,7 @@ function withClientOptionDefaults(options: AndroidEmulatorClientOptions): Resolv
 export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorForDeviceManager {
   private execAsync: (file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>;
   private spawnFn: SpawnFn;
+  private readonly netsimInstanceLauncher: NetsimInstanceLauncher;
   private emulatorPath: string;
   private readonly emulatorPathLocator: () => Promise<string>;
   private timer: Timer;
@@ -439,6 +445,14 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     this.spawnFn =
       spawnFn || ((file, args, options) => emulatorHostProcessExecutor.spawn(file, args, options));
     this.timer = timer;
+    this.netsimInstanceLauncher =
+      options.netsimInstanceLauncher ??
+      new DefaultNetsimInstanceLauncher({
+        emulatorPath: () => this.emulatorPath,
+        spawnFn: (file, args, spawnOptions) => this.spawnFn(file, args, spawnOptions),
+        timer,
+        platform,
+      });
     this.adbFactory = adbFactory;
     this.avdConfigReader = avdConfigReader ?? new FileAvdConfigReader();
     this.platform = platform;
@@ -548,6 +562,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       timer: () => this.timer,
       emulatorPath: () => this.emulatorPath,
       spawnFn: () => this.spawnFn,
+      netsimInstanceLauncher: () => this.netsimInstanceLauncher,
       platform: () => this.platform,
       avdConfigReader: () => this.avdConfigReader,
       launchErrors: () => this.targets.launchErrors,

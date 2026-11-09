@@ -91,18 +91,23 @@ existing screen. Actions \`push {stack, screen}\`, \`pop {stack}\`, \`popToRoot 
 Push is ignored at depth 32; pop at depth 1 does nothing. \`screen_changed\` has name = stack id
 and payload \`{screen, depth}\`, emitted only when the top screen or depth changes. Requires
 \`prototype_stack_v1\`; every screen counts toward node limits, including hidden screens.
-Route contract (requires \`prototype_routes_v1\`, currently unadvertised by Android and iOS):
+Routes (requires \`prototype_routes_v1\`; older devices refuse them):
 keep \`screens\` as bare nodes and optionally add \`routes:{screen:{params?,onEnter?,onBack?}}\`.
 Declare up to 16 params per screen as string|number|boolean; names match [A-Za-z_][A-Za-z0-9_]*.
 Push/replace accept a flat \`params\` map of scalars or {state}/{data}/{item}/{index:true} bindings;
 all declared params are required, literals must match their types, and extra names are refused.
-\`setStack {stack,path:[{screen,params?}]}\` takes 1-32 entries. In a screen and its lifecycle actions,
-\`{route.name}\` binds in the same fields as repeat placeholders, condition operands and whole
-/data pointer segments. onEnter/onBack each take 1-32 actions with normal nesting limits;
-a direct same-stack pop in onBack needs \`force:true\` (dialog actions are independent).
-Storage keys may name \`stack:<id>\`. Runtime navigation, lifecycle execution and path restore
-are deferred; the reserved reports keep \`path:string[]\` and add parallel \`params:object[]\`,
-with optional params beside screen/depth in screen_changed payloads.
+\`setStack {stack,path:[{screen,params?}]}\` takes 1-32 entries and replaces the whole path.
+Each back-stack entry keeps its own params, so Back shows the previous entry as it was.
+In a screen and its lifecycle actions, \`{route.name}\` binds the top entry's params in the same
+fields as repeat placeholders, condition operands and whole /data pointer segments.
+onEnter/onBack each take 1-32 actions with normal nesting limits. onEnter runs after the
+\`screen_changed\` event whenever the screen becomes top, and once on show (a same-id show skips it
+for stacks whose path it kept). onBack replaces the pop
+for system Back, the iOS edge swipe and a plain \`pop\`; \`pop {force:true}\` always pops, so a
+dialog confirm that leaves uses force (a direct same-stack pop in onBack needs it too).
+Storage key \`stack:<id>\` persists the path with params; a stored path whose screens or params no
+longer fit is dropped and the stack starts at \`start\`. Status and inspect keep \`path:string[]\`
+and add parallel \`params:object[]\`; screen_changed payloads add \`params\` when the top has any.
 Android Back and the iOS edge swipe pop a stack above depth 1. A stack's optional
 \`transition: "platform" | "slide" | "fade" | "none"\` selects screen navigation animation
 (default \`platform\`); \`push\` and \`replace\` can override it with their own \`transition\`.
@@ -659,8 +664,8 @@ post real content without the agent answering each tap. It requires \`prototype_
 (\`prototype_network_device_v1\` as well for \`via: "device"\`); a show or patch result containing
 one is refused on a device without them.
 
-- \`url\` is an absolute \`http\` or \`https\` URL (at most 2048 characters). Host requests apply an
-  egress policy: local destinations and daemon ports on private addresses are not permitted.
+- \`url\` is an absolute \`http\` or \`https\` URL (at most 2048 characters). Host and device requests
+  apply an egress policy: local destinations and daemon ports on private addresses are not permitted.
   It takes the text placeholders of any text field (\`{key}\` state, \`{data:/pointer}\`, repeat \`{item.field}\` / \`{index}\`). Without a
   placeholder it must parse as an http(s) URL; with one, it must start with a literal \`http://\` or
   \`https://\`. (\`{state:key}\` is not a placeholder: write \`{key}\`.)
@@ -680,8 +685,8 @@ one is refused on a device without them.
   request starts and to \`"success"\` or \`"error"\` when it ends, so \`visibleWhen\` can show a spinner
   (\`{key: "feedStatus", equals: "loading"}\`) or an error. Do not bind it to a control with fixed options.
 - \`via\` is \`"host"\` (default: the host runs the call and the device sends only the resolved request
-  frame) or \`"device"\` (the device makes the call itself, which on Android reaches localhost through
-  \`adb reverse\`, see below).
+  frame) or \`"device"\` (the device makes the call itself and cannot use \`localhost\` for the
+  host machine, see below).
 - \`timeoutMs\` is optional, 1 to \`MAX_PROTOTYPE_REQUEST_TIMEOUT_MS\`; the default is
   \`DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS\`.
 - \`onSuccess\` and \`onError\` are action lists (1 to 32) run after the request ends, for example

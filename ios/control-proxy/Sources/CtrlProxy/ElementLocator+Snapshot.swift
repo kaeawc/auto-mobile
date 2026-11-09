@@ -192,37 +192,47 @@ extension ElementLocator {
         )
             throws -> (alerts: [UIElementInfo], rotation: Int?)
         {
-            let capture: (alertSnapshots: [XCUIElementSnapshot], springboardFrame: CGRect, rotation: Int?) =
-                try catchingObjCException {
-                    let capture = DeviceRotation.capture { () -> ([XCUIElementSnapshot], CGRect) in
-                        guard runSnapshot else {
-                            return ([], .zero)
-                        }
-                        let freshSpringboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-                        guard let snapshot = try? freshSpringboard.snapshot() else {
-                            return ([], .zero)
-                        }
-                        return (self.collectAlertElements(from: snapshot), snapshot.frame)
+            let capture: (
+                alertSnapshots: [(snapshot: XCUIElementSnapshot, portraitHeight: Int?)],
+                springboardFrame: CGRect, rotation: Int?
+            ) = try catchingObjCException {
+                let capture = DeviceRotation.capture { () -> ([(XCUIElementSnapshot, Int?)], CGRect) in
+                    guard runSnapshot else { return ([], .zero) }
+                    let freshSpringboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+                    guard let snapshot = try? freshSpringboard.snapshot() else { return ([], .zero) }
+                    let mainDisplayId = (ObjCExceptionCatcher_displayInventory() ?? [])
+                        .first { $0["isMain"]?.boolValue == true }?["displayId"]?.uint64Value
+                    let alerts = snapshot.children.flatMap { window in
+                        let height = SpringBoardPanel.alertPortraitHeight(
+                            windowDisplayId: Self.displayId(of: window), mainDisplayId: mainDisplayId,
+                            windowPortraitHeight: ElementBounds.clampedInt(window.frame.height)
+                        )
+                        return self.collectAlertElements(from: window).map { ($0, height) }
                     }
-                    return (
-                        alertSnapshots: capture.value.0, springboardFrame: capture.value.1, rotation: capture.rotation
-                    )
+                    return (alerts, snapshot.frame)
                 }
+                return (capture.value.0, capture.value.1, capture.rotation)
+            }
 
-            let offset = capture.alertSnapshots.isEmpty ? .zero : Self.springboardAlertOffset(
+            let needsOffset = capture.alertSnapshots.contains { $0.portraitHeight == nil }
+            let offset = !needsOffset ? .zero : Self.springboardAlertOffset(
                 appFrame: appFrame,
                 springboardFrame: capture.springboardFrame,
                 windowFrame: { self.observedAppWindowFrame() }
             )
-            let alerts = capture.alertSnapshots.map { snapshot in
-                buildElementInfoFromSnapshot(
-                    snapshot,
+            let alerts = capture.alertSnapshots.map { entry in
+                // This path is skipped for foreground SpringBoard, whose app-snapshot alerts
+                // are rotated later with its main tree. App-snapshot alerts never enter here.
+                let alertOffset = entry.portraitHeight == nil ? offset : .zero
+                let alert = buildElementInfoFromSnapshot(
+                    entry.snapshot,
                     depth: 0,
-                    screenBounds: snapshot.frame.offsetBy(dx: offset.x, dy: offset.y),
+                    screenBounds: entry.snapshot.frame.offsetBy(dx: alertOffset.x, dy: alertOffset.y),
                     truncationReasons: &truncationReasons,
                     keyboardFocus: keyboardFocus,
-                    coordinateOffset: offset
+                    coordinateOffset: alertOffset
                 )
+                return Self.alertsInObservedSpace([alert], innerPanelPortraitHeight: entry.portraitHeight)[0]
             }
             return (alerts, capture.rotation)
         }

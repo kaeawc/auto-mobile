@@ -22,6 +22,15 @@ const describeIntegration = RUN_INTEGRATION ? describe : describe.skip;
 const STREAM_NAME = "automobile-integration";
 const WEBRTC_PORT = 8889;
 const MAX_LOG_CHARS = 8_000;
+/**
+ * A cold headless Chrome on a loaded Linux runner can take well over 20s before
+ * it even writes its first stderr line (#17650), so the DevTools wait is
+ * generous; each `/json/list` probe is individually bounded so one hung fetch
+ * cannot overrun the deadline.
+ */
+const CHROME_TARGET_TIMEOUT_MS = 60_000;
+const CHROME_PROBE_TIMEOUT_MS = 2_000;
+const DEVTOOLS_BANNER = "DevTools listening on ";
 
 interface ChromeTarget {
   type: string;
@@ -226,28 +235,81 @@ function resolveChromeBinary(): string {
   return binary;
 }
 
+interface ChromeTargetTimeoutDetails {
+  timeoutMs: number;
+  elapsedMs: number;
+  pid: number | undefined;
+  lastProbe: string;
+  logs: string;
+}
+
+/**
+ * Distinguishes "Chrome never started its DevTools server" (slow or wedged
+ * startup: no banner on stderr) from "DevTools is up but no page target
+ * appeared", and always carries Chrome's stderr so the CI log is actionable.
+ */
+function describeChromeTargetTimeout(details: ChromeTargetTimeoutDetails): string {
+  const devToolsState = details.logs.includes(DEVTOOLS_BANNER)
+    ? "DevTools server started but exposed no debuggable page target"
+    : "Chrome never printed its DevTools banner (startup did not finish)";
+  return [
+    `Chrome DevTools did not expose a page target within ${details.timeoutMs}ms ` +
+      `(elapsed ${details.elapsedMs}ms, pid ${details.pid ?? "unknown"}, still running): ${devToolsState}.`,
+    `Last /json/list probe: ${details.lastProbe}`,
+    "Chrome stderr:",
+    details.logs || "(empty)",
+  ].join("\n");
+}
+
+async function probeChromeTargets(
+  port: string,
+): Promise<{ targets: ChromeTarget[] } | { failure: string }> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/json/list`, {
+      signal: AbortSignal.timeout(CHROME_PROBE_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      return { failure: `HTTP ${response.status}` };
+    }
+    return { targets: (await response.json()) as ChromeTarget[] };
+  } catch (error) {
+    // Connection refused is the expected answer until Chrome binds the port.
+    return { failure: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 async function waitForChromeTarget(port: string, chrome: StartedProcess): Promise<ChromeTarget> {
+  const startedAt = Date.now();
   let targets: ChromeTarget[] = [];
+  let lastProbe = "none completed";
   await waitFor(
     async () => {
       const spawnError = chrome.error();
       if (spawnError) {
-        throw new Error(`Chrome failed to start: ${spawnError.message}`);
+        throw new Error(`Chrome failed to start: ${spawnError.message}\n${chrome.logs()}`);
       }
       const exited = exitedProcessDescription(chrome.process);
       if (exited) {
         throw new Error(`Chrome exited before DevTools started (${exited}):\n${chrome.logs()}`);
       }
-      try {
-        const response = await fetch(`http://127.0.0.1:${port}/json/list`);
-        targets = (await response.json()) as ChromeTarget[];
-        return targets.some((target) => target.type === "page" && target.webSocketDebuggerUrl);
-      } catch {
+      const probe = await probeChromeTargets(port);
+      if ("failure" in probe) {
+        lastProbe = probe.failure;
         return false;
       }
+      targets = probe.targets;
+      lastProbe = `${targets.length} target(s), types [${targets.map((t) => t.type).join(", ")}]`;
+      return targets.some((target) => target.type === "page" && target.webSocketDebuggerUrl);
     },
-    () => `Chrome DevTools did not expose a page target within 30000ms:\n${chrome.logs()}`,
-    30_000,
+    () =>
+      describeChromeTargetTimeout({
+        timeoutMs: CHROME_TARGET_TIMEOUT_MS,
+        elapsedMs: Date.now() - startedAt,
+        pid: chrome.process.pid,
+        lastProbe,
+        logs: chrome.logs(),
+      }),
+    CHROME_TARGET_TIMEOUT_MS,
   );
   const target = targets.find(
     (candidate) => candidate.type === "page" && candidate.webSocketDebuggerUrl,
@@ -256,6 +318,31 @@ async function waitForChromeTarget(port: string, chrome: StartedProcess): Promis
     throw new Error("Chrome DevTools returned no debuggable page");
   }
   return target;
+}
+
+/**
+ * Headless Chrome flags. Beyond the DevTools/profile essentials, the
+ * `--disable-*` set skips first-run background work (component updater,
+ * sync, extensions, default apps, keychain) that lengthens a cold start on a
+ * loaded runner without affecting WebRTC decode.
+ */
+function chromeArgs(debugPort: number, profileDir: string): string[] {
+  return [
+    "--headless=new",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-background-networking",
+    "--disable-component-update",
+    "--disable-default-apps",
+    "--disable-extensions",
+    "--disable-sync",
+    "--password-store=basic",
+    "--use-mock-keychain",
+    "--autoplay-policy=no-user-gesture-required",
+    `--remote-debugging-port=${debugPort}`,
+    `--user-data-dir=${profileDir}`,
+    "about:blank",
+  ];
 }
 
 async function reserveLoopbackPort(): Promise<number> {
@@ -419,6 +506,35 @@ test.skipIf(process.platform === "win32")(
   },
 );
 
+test("Chrome target timeout says DevTools never started and carries Chrome stderr", () => {
+  const message = describeChromeTargetTimeout({
+    timeoutMs: 60_000,
+    elapsedMs: 60_012,
+    pid: 3727,
+    lastProbe: "Unable to connect",
+    logs: "ERROR:dbus/bus.cc:405] Failed to connect to the bus\n",
+  });
+
+  expect(message).toContain("within 60000ms (elapsed 60012ms, pid 3727, still running)");
+  expect(message).toContain("Chrome never printed its DevTools banner");
+  expect(message).toContain("Last /json/list probe: Unable to connect");
+  expect(message).toContain("Chrome stderr:\nERROR:dbus/bus.cc:405] Failed to connect to the bus");
+});
+
+test("Chrome target timeout says DevTools started when the banner is present", () => {
+  const message = describeChromeTargetTimeout({
+    timeoutMs: 60_000,
+    elapsedMs: 60_000,
+    pid: undefined,
+    lastProbe: "1 target(s), types [browser]",
+    logs: "DevTools listening on ws://127.0.0.1:9222/devtools/browser/abc\n",
+  });
+
+  expect(message).toContain("pid unknown");
+  expect(message).toContain("DevTools server started but exposed no debuggable page target");
+  expect(message).not.toContain("never printed");
+});
+
 describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
   test("trickles candidates across a reconnect and Chrome decodes both WHEP sessions", async () => {
     const mediamtxBinary = process.env.AUTOMOBILE_MEDIAMTX_BINARY;
@@ -524,19 +640,7 @@ describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
       }, "publisher did not send synthetic H.264 frames");
       const profileDir = join(tempDir, "chrome-profile");
       const debugPort = await reserveLoopbackPort();
-      chrome = startProcess(
-        resolveChromeBinary(),
-        [
-          "--headless=new",
-          "--no-first-run",
-          "--no-default-browser-check",
-          "--autoplay-policy=no-user-gesture-required",
-          `--remote-debugging-port=${debugPort}`,
-          `--user-data-dir=${profileDir}`,
-          "about:blank",
-        ],
-        tempDir,
-      );
+      chrome = startProcess(resolveChromeBinary(), chromeArgs(debugPort, profileDir), tempDir);
       cdp = await openReader(chrome, debugPort);
       const decoded = await readDecodedVideo(cdp);
 
@@ -571,15 +675,7 @@ describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
       const reconnectDebugPort = await reserveLoopbackPort();
       chrome = startProcess(
         resolveChromeBinary(),
-        [
-          "--headless=new",
-          "--no-first-run",
-          "--no-default-browser-check",
-          "--autoplay-policy=no-user-gesture-required",
-          `--remote-debugging-port=${reconnectDebugPort}`,
-          `--user-data-dir=${join(tempDir, "chrome-reconnect-profile")}`,
-          "about:blank",
-        ],
+        chromeArgs(reconnectDebugPort, join(tempDir, "chrome-reconnect-profile")),
         tempDir,
       );
       cdp = await openReader(chrome, reconnectDebugPort);
@@ -596,5 +692,7 @@ describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
       await stopProcess(mediaMtx.process);
       await rm(tempDir, { recursive: true, force: true });
     }
-  }, 90_000);
+    // Two cold Chrome launches (each up to CHROME_TARGET_TIMEOUT_MS), two page
+    // loads and two 20s decode reads must fit; the job's own timeout is 20min.
+  }, 240_000);
 });

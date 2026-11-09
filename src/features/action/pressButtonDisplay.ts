@@ -1,5 +1,12 @@
-import { ActionableError, type BootedDevice } from "../../models";
-import type { AdbCommandRunner } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { ActionableError, type BootedDevice, type ObserveResult } from "../../models";
+import type {
+  AdbCommandRunner,
+  AdbExecutor,
+} from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
+import type { Timer } from "../../utils/SystemTimer";
+import { isForegroundLauncher } from "../observe/androidLauncherPackages";
+import { acceptAndroidHomeAlreadyOnLauncher } from "./pressButtonOutcomes";
 import { resolveActionDisplay } from "./TargetDisplayAction";
 
 /** A resolved pressButton display: the concrete panel key and its Android logical display id. */
@@ -56,4 +63,49 @@ export function inputOnDisplay(argv: string[], displayId: number | undefined): s
   return displayId === undefined
     ? argv
     : [...argv.slice(0, 2), "-d", String(displayId), ...argv.slice(2)];
+}
+
+/**
+ * Accept a Home press that changed nothing because the launcher was already showing. Display 0 uses
+ * the default-display foreground check the press itself ran (#15028). A targeted display is accepted
+ * when its own observed tree already shows the launcher (#17647): the default display's foreground
+ * cannot answer for another display, so this reads the display-scoped pre-press observation.
+ */
+export async function acceptHomeAlreadyOnLauncher(
+  press: {
+    button: string;
+    displayId: number | undefined;
+    pressSucceeded: boolean;
+    launcherVerified: boolean;
+    result: { success: boolean; error?: string };
+    observation: ObserveResult | undefined;
+  },
+  deps: { device: BootedDevice; adb: AdbExecutor; timer: Timer; signal?: AbortSignal },
+): Promise<void> {
+  const { result, observation } = press;
+  const { device } = deps;
+  acceptAndroidHomeAlreadyOnLauncher(result, {
+    platform: device.platform,
+    button: press.button,
+    pressSucceeded: press.launcherVerified,
+  });
+  if (
+    press.displayId === undefined ||
+    press.button.toLowerCase() !== "home" ||
+    !press.pressSucceeded ||
+    result.error !== "No visual change observed"
+  ) {
+    return;
+  }
+  const foreground = observation?.viewHierarchy?.packageName ?? observation?.activeWindow?.appId;
+  const onLauncher = await isForegroundLauncher(foreground, deps.adb, device.deviceId, {
+    timer: deps.timer,
+    signal: deps.signal,
+    incarnationToken: deviceIncarnationToken(device.deviceId),
+    formFactor: device.formFactor,
+  });
+  if (onLauncher) {
+    result.success = true;
+    delete result.error;
+  }
 }

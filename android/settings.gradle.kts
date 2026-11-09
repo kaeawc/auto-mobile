@@ -35,6 +35,8 @@ enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 include(":control-proxy")
 
+include(":content-seeder")
+
 // On-device baseline profile generator for CtrlProxy (#17417); never runs in CI.
 include(":control-proxy-baselineprofile")
 

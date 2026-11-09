@@ -322,8 +322,16 @@ export class SessionDeviceStateRestore {
   beginIosAppNetworkRule(
     session: Session,
     target: { udid: string; bundleId: string },
+    options?: { watch?: boolean },
   ): IosAppNetworkRuleCommandContext {
-    return this.network.beginIosAppNetworkRule(session, target);
+    return this.network.beginIosAppNetworkRule(session, target, options);
+  }
+
+  releaseIosAppWatchFor(
+    session: Session,
+    target: { udid: string; bundleId: string },
+  ): Promise<void> {
+    return this.network.releaseIosAppWatchFor(session, target);
   }
 
   prepareIosAppNetworkReset(

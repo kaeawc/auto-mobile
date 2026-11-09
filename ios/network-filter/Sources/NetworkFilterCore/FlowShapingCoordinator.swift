@@ -321,6 +321,7 @@ public final class FlowShapingCoordinator {
     private static func map(_ decision: ResumeDecision) -> FlowResumeVerdict {
         switch decision {
         case .allow: .allow
+        case .drop: .drop
         case let .filter(inbound, outbound, peek): .filter(inbound: inbound, outbound: outbound, peekBytes: peek)
         case let .pass(bytes, peek): .pass(bytes: bytes, peekBytes: peek)
         }

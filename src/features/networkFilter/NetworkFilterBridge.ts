@@ -32,9 +32,12 @@ export { ExpiringControllerVersionMemory } from "./ExpiringControllerVersionMemo
  * take `--managed` pairs and the snapshot reports per-flow attribution.
  * Version 3 adds the leased per-app `apply`/`reset`/`renew` commands, the
  * `rule` result and the snapshot's `rules` (#10264). Version 4 adds shaping.
+ * Version 5 adds watch-only launch rules and committed existing-flow drop read-back.
+ * The daemon negotiates 5 so offline can reach pre-armed flows.
  * Legacy offline commands retry only a definitive unknown-contract-flag rejection.
  */
-export const NETWORK_FILTER_CONTRACT_VERSION = 4;
+export const NETWORK_FILTER_CONTRACT_VERSION = 5;
+export const NETWORK_FILTER_SHAPING_CONTRACT_VERSION = 4;
 export const NETWORK_FILTER_LEGACY_CONTRACT_VERSION = 3;
 export const NETWORK_FILTER_UPGRADE_COMMAND = "auto-mobile --ios-network-filter install --upgrade";
 
@@ -159,7 +162,11 @@ const networkFilterRuleStatusSchema = z.discriminatedUnion("condition", [
     shaping: shapingResolutionSchema,
   }),
 ]);
-export type NetworkFilterRuleStatus = z.infer<typeof networkFilterRuleStatusSchema>;
+const watchedRuleStatusSchema = z.union([
+  networkFilterRuleStatusSchema,
+  legacyRuleStatusSchema.extend({ condition: z.literal("watch"), shaping: z.never().optional() }),
+]);
+export type NetworkFilterRuleStatus = z.infer<typeof watchedRuleStatusSchema>;
 
 /** The provider's definitive answer to `apply`, `reset` or `renew`. */
 const legacyRuleOutcomeSchema = z.enum([
@@ -196,7 +203,10 @@ const networkFilterRuleResultSchema = legacyRuleResultSchema.extend({
   shaping: shapingResolutionSchema.optional(),
   rejection: shapingRejectionSchema.optional(),
 });
-export type NetworkFilterRuleResult = z.infer<typeof networkFilterRuleResultSchema>;
+const watchedRuleResultSchema = networkFilterRuleResultSchema.extend({
+  existingFlows: z.enum(["dropped", "unaffected"]).optional(),
+});
+export type NetworkFilterRuleResult = z.infer<typeof watchedRuleResultSchema>;
 
 /** Validate the argument domain only; provider-specific limits remain provider decisions. */
 export function networkFilterShapingRequestRejection(
@@ -272,7 +282,7 @@ const shapingActivitySchema = z.strictObject({
   unexpectedSecondPause: counterSchema,
 });
 const networkFilterSnapshotSchema = legacySnapshotSchema.extend({
-  version: z.literal(NETWORK_FILTER_CONTRACT_VERSION),
+  version: z.literal(4),
   rules: z.array(networkFilterRuleStatusSchema).optional(),
   shapingActivity: shapingActivitySchema.optional().catch((context) => {
     logger.warn(
@@ -282,7 +292,11 @@ const networkFilterSnapshotSchema = legacySnapshotSchema.extend({
     return undefined;
   }),
 });
-export type NetworkFilterSnapshot = Omit<z.infer<typeof networkFilterSnapshotSchema>, "version"> & {
+const watchedSnapshotSchema = networkFilterSnapshotSchema.extend({
+  version: z.literal(5),
+  rules: z.array(watchedRuleStatusSchema).optional(),
+});
+export type NetworkFilterSnapshot = Omit<z.infer<typeof watchedSnapshotSchema>, "version"> & {
   version: number;
 };
 
@@ -296,9 +310,15 @@ const legacyControllerResultSchema = z.object({
   rule: legacyRuleResultSchema.optional(),
 });
 const controllerResultSchema = legacyControllerResultSchema.extend({
-  version: z.literal(NETWORK_FILTER_CONTRACT_VERSION),
+  version: z.literal(4),
   snapshot: networkFilterSnapshotSchema.optional(),
   rule: networkFilterRuleResultSchema.optional(),
+});
+
+const watchedControllerResultSchema = controllerResultSchema.extend({
+  version: z.literal(5),
+  snapshot: watchedSnapshotSchema.optional(),
+  rule: watchedRuleResultSchema.optional(),
 });
 
 export interface NetworkFilterStatus {
@@ -357,6 +377,12 @@ export interface NetworkFilterBridge {
    * Apply offline or shaped configuration for `leaseMs` unless renewed.
    * Callers must validate shaping first; invalid argument domains return unavailable without exec.
    */
+  /** Keep this app's new flows filtered without impairing traffic (contract 5). */
+  watch(
+    target: NetworkFilterRuleTarget,
+    ownership: NetworkFilterRuleOwnership,
+    leaseMs: number,
+  ): Promise<NetworkFilterRuleCommandResult>;
   apply(
     target: NetworkFilterRuleTarget,
     ownership: NetworkFilterRuleOwnership,
@@ -377,6 +403,8 @@ export interface NetworkFilterBridge {
 }
 
 export interface ExecNetworkFilterBridgeOptions {
+  /** Explicit legacy contract for compatibility callers; daemon defaults to 5. */
+  contractVersion?: 4 | 5;
   executor?: HostCommandExecutor;
   /** The host's booted simulators, passed as `--managed` pairs; defaults to simctl. */
   managedSimulators?: () => Promise<ManagedSimulator[]>;
@@ -464,8 +492,16 @@ function managedArguments(simulators: readonly ManagedSimulator[]): string[] {
   return simulators.flatMap((simulator) => ["--managed", simulator.deviceSet, simulator.udid]);
 }
 
+type ParsedControllerResult =
+  | z.infer<typeof legacyControllerResultSchema>
+  | z.infer<typeof controllerResultSchema>
+  | z.infer<typeof watchedControllerResultSchema>;
+
 type ControllerAnswer = NetworkFilterSnapshotResult &
-  Pick<NetworkFilterRuleCommandResult, "rule" | "upgradeRequired"> & { legacyRejected?: boolean };
+  Pick<NetworkFilterRuleCommandResult, "rule" | "upgradeRequired"> & {
+    legacyRejected?: boolean;
+    versionFourRejected?: boolean;
+  };
 
 /**
  * Runs the installed controller through the host exec seam. Legacy memory is shared by
@@ -474,6 +510,7 @@ type ControllerAnswer = NetworkFilterSnapshotResult &
  * an invalid argument domain returns unavailable without running the controller.
  */
 export class ExecNetworkFilterBridge implements NetworkFilterBridge {
+  private readonly contractVersion: 4 | 5;
   private readonly executor: HostCommandExecutor;
   private readonly controllerPath: string;
   private readonly exists: (path: string) => boolean;
@@ -484,6 +521,7 @@ export class ExecNetworkFilterBridge implements NetworkFilterBridge {
   private readonly now: () => number;
 
   constructor(options: ExecNetworkFilterBridgeOptions = {}) {
+    this.contractVersion = options.contractVersion ?? NETWORK_FILTER_CONTRACT_VERSION;
     this.versionMemory = options.versionMemory ?? defaultControllerVersionMemory;
     this.now = options.now ?? Date.now;
     this.executor = options.executor ?? new DefaultHostCommandExecutor();
@@ -508,6 +546,14 @@ export class ExecNetworkFilterBridge implements NetworkFilterBridge {
 
   snapshot(): Promise<NetworkFilterSnapshotResult> {
     return this.run("snapshot", async () => managedArguments(await this.managedSimulators()));
+  }
+
+  watch(
+    target: NetworkFilterRuleTarget,
+    ownership: NetworkFilterRuleOwnership,
+    leaseMs: number,
+  ): Promise<NetworkFilterRuleCommandResult> {
+    return this.runRule("apply", target, ownership, { leaseMs, watch: true });
   }
 
   apply(
@@ -542,7 +588,11 @@ export class ExecNetworkFilterBridge implements NetworkFilterBridge {
     command: NetworkFilterRuleCommand,
     target: NetworkFilterRuleTarget,
     ownership: NetworkFilterRuleOwnership,
-    { leaseMs, shaping }: { leaseMs?: number; shaping?: NetworkFilterShapingRequest } = {},
+    {
+      leaseMs,
+      shaping,
+      watch = false,
+    }: { leaseMs?: number; shaping?: NetworkFilterShapingRequest; watch?: boolean } = {},
   ): Promise<NetworkFilterRuleCommandResult> {
     const result = await this.run(
       command,
@@ -557,6 +607,7 @@ export class ExecNetworkFilterBridge implements NetworkFilterBridge {
         "--revision",
         String(ownership.revision),
         ...(leaseMs === undefined ? [] : ["--lease-ms", String(Math.round(leaseMs))]),
+        ...(watch ? ["--watch-only", "true"] : []),
         ...(shaping === undefined
           ? []
           : [
@@ -578,6 +629,7 @@ export class ExecNetworkFilterBridge implements NetworkFilterBridge {
             ]),
       ],
       shaping !== undefined,
+      watch,
     );
     const status: NetworkFilterRuleCommandResult = {
       state: result.state,
@@ -604,34 +656,14 @@ export class ExecNetworkFilterBridge implements NetworkFilterBridge {
     command: NetworkFilterControllerCommand,
     commandArguments: () => Promise<string[]>,
     shaped = false,
+    watch = false,
   ): Promise<ControllerAnswer> {
     try {
       if (!this.exists(this.controllerPath)) {
         return this.notInstalled();
       }
       const args = await commandArguments();
-      const version =
-        shaped || !this.versionMemory.isLegacy(this.controllerPath, this.now())
-          ? NETWORK_FILTER_CONTRACT_VERSION
-          : NETWORK_FILTER_LEGACY_CONTRACT_VERSION;
-      const answer = await this.invoke(command, args, version);
-      if (!answer.legacyRejected) {
-        return answer;
-      }
-      this.versionMemory.markLegacy(this.controllerPath, this.now());
-      if (!shaped) {
-        return this.invoke(command, args, NETWORK_FILTER_LEGACY_CONTRACT_VERSION);
-      }
-      return {
-        state: "unavailable",
-        contractVersion: NETWORK_FILTER_LEGACY_CONTRACT_VERSION,
-        detail: `The installed network-filter-controller speaks version 3; shaped rules require version 4. Update it with \`${NETWORK_FILTER_UPGRADE_COMMAND}\`.`,
-        upgradeRequired: {
-          installedVersion: NETWORK_FILTER_LEGACY_CONTRACT_VERSION,
-          requiredVersion: NETWORK_FILTER_CONTRACT_VERSION,
-          command: NETWORK_FILTER_UPGRADE_COMMAND,
-        },
-      };
+      return await this.negotiate(command, args, { shaped, watch });
     } catch (error) {
       throwIfRequestAborted();
       logger.warn(
@@ -644,6 +676,60 @@ export class ExecNetworkFilterBridge implements NetworkFilterBridge {
     }
   }
 
+  private async negotiate(
+    command: NetworkFilterControllerCommand,
+    args: string[],
+    { shaped, watch }: { shaped: boolean; watch: boolean },
+  ): Promise<ControllerAnswer> {
+    const version =
+      watch || shaped || !this.versionMemory.isLegacy(this.controllerPath, this.now())
+        ? watch
+          ? 5
+          : this.contractVersion
+        : NETWORK_FILTER_LEGACY_CONTRACT_VERSION;
+    const answer = await this.invoke(command, args, version);
+    if (answer.versionFourRejected) {
+      if (watch) {
+        return {
+          ...answer,
+          upgradeRequired: {
+            installedVersion: 4,
+            requiredVersion: 5,
+            command: NETWORK_FILTER_UPGRADE_COMMAND,
+          },
+        };
+      }
+      return this.invoke(command, args, 4);
+    }
+    if (!answer.legacyRejected) {
+      return answer;
+    }
+    if (watch) {
+      return {
+        ...answer,
+        upgradeRequired: {
+          installedVersion: 3,
+          requiredVersion: 5,
+          command: NETWORK_FILTER_UPGRADE_COMMAND,
+        },
+      };
+    }
+    this.versionMemory.markLegacy(this.controllerPath, this.now());
+    if (!shaped) {
+      return this.invoke(command, args, NETWORK_FILTER_LEGACY_CONTRACT_VERSION);
+    }
+    return {
+      state: "unavailable",
+      contractVersion: NETWORK_FILTER_LEGACY_CONTRACT_VERSION,
+      detail: `The installed network-filter-controller speaks version 3; shaped rules require version 4. Update it with \`${NETWORK_FILTER_UPGRADE_COMMAND}\`.`,
+      upgradeRequired: {
+        installedVersion: NETWORK_FILTER_LEGACY_CONTRACT_VERSION,
+        requiredVersion: NETWORK_FILTER_SHAPING_CONTRACT_VERSION,
+        command: NETWORK_FILTER_UPGRADE_COMMAND,
+      },
+    };
+  }
+
   private async invoke(
     command: NetworkFilterControllerCommand,
     args: string[],
@@ -653,11 +739,7 @@ export class ExecNetworkFilterBridge implements NetworkFilterBridge {
     try {
       const result = await this.executor.executeCommand(
         this.controllerPath,
-        [
-          command,
-          ...(version === NETWORK_FILTER_CONTRACT_VERSION ? ["--contract-version", "4"] : []),
-          ...args,
-        ],
+        [command, ...(version >= 4 ? ["--contract-version", String(version)] : []), ...args],
         {
           timeoutMs: this.timeoutMs,
           maxBuffer: CONTROLLER_MAX_BUFFER_BYTES,
@@ -692,11 +774,11 @@ export class ExecNetworkFilterBridge implements NetworkFilterBridge {
 
   private mismatch(version: number): ControllerAnswer {
     logger.warn(
-      `[NetworkFilterBridge] controller contract version ${version}, expected versions 3 and 4`,
+      `[NetworkFilterBridge] controller contract version ${version}, expected versions 3, 4 and 5`,
     );
     return {
       state: "unavailable",
-      detail: `network-filter-controller speaks contract version ${version}, but this AutoMobile expects versions 3 and 4 with the requested version honoured. Install the matching build with \`${NETWORK_FILTER_INSTALL_COMMAND}\`.`,
+      detail: `network-filter-controller speaks contract version ${version}, but this AutoMobile expects versions 3, 4 and 5 with the requested version honoured. Install the matching build with \`${NETWORK_FILTER_INSTALL_COMMAND}\`.`,
       contractVersion: version,
     };
   }
@@ -762,16 +844,20 @@ export class ExecNetworkFilterBridge implements NetworkFilterBridge {
       return undefined;
     }
     if (
-      ![NETWORK_FILTER_LEGACY_CONTRACT_VERSION, NETWORK_FILTER_CONTRACT_VERSION].includes(
-        version.data.version,
-      )
+      ![
+        NETWORK_FILTER_LEGACY_CONTRACT_VERSION,
+        NETWORK_FILTER_SHAPING_CONTRACT_VERSION,
+        NETWORK_FILTER_CONTRACT_VERSION,
+      ].includes(version.data.version)
     ) {
       return this.mismatch(version.data.version);
     }
     const schema =
       version.data.version === NETWORK_FILTER_LEGACY_CONTRACT_VERSION
         ? legacyControllerResultSchema
-        : controllerResultSchema;
+        : version.data.version === 4
+          ? controllerResultSchema
+          : watchedControllerResultSchema;
     const parsed = schema.safeParse(json);
     if (!parsed.success) {
       logger.warn(
@@ -786,24 +872,42 @@ export class ExecNetworkFilterBridge implements NetworkFilterBridge {
   }
 
   private controllerAnswer(
-    data: z.infer<typeof legacyControllerResultSchema> | z.infer<typeof controllerResultSchema>,
+    data: ParsedControllerResult,
     requestedVersion: number,
   ): ControllerAnswer {
-    const legacyRejected =
-      requestedVersion === NETWORK_FILTER_CONTRACT_VERSION && this.isLegacyRejection(data);
-    if (data.version === NETWORK_FILTER_CONTRACT_VERSION) {
-      this.versionMemory.clear(this.controllerPath);
-    } else if (requestedVersion === NETWORK_FILTER_CONTRACT_VERSION && !legacyRejected) {
+    const legacyRejected = requestedVersion >= 4 && this.isLegacyRejection(data);
+    const versionFourRejected = this.isVersionFourRejection(data, requestedVersion);
+    const matched =
+      data.version === requestedVersion || (requestedVersion === 3 && data.version >= 4);
+    if (!matched && !legacyRejected && !versionFourRejected) {
       return this.mismatch(data.version);
     }
+    if (matched && data.version >= 4) {
+      this.versionMemory.clear(this.controllerPath);
+    }
+    return { ...this.controllerPayload(data), legacyRejected, versionFourRejected };
+  }
+
+  private controllerPayload(data: ParsedControllerResult): ControllerAnswer {
     return {
       state: data.state,
       detail: data.detail,
       contractVersion: data.version,
       ...(data.snapshot ? { snapshot: data.snapshot } : {}),
       ...(data.state === "ready" && data.rule ? { rule: data.rule } : {}),
-      ...(legacyRejected ? { legacyRejected: true } : {}),
     };
+  }
+
+  private isVersionFourRejection(
+    data: { version: number; state: NetworkFilterControllerState; detail: string },
+    requestedVersion: number,
+  ): boolean {
+    return (
+      requestedVersion === 5 &&
+      data.version === 4 &&
+      data.state === "unavailable" &&
+      data.detail === "Invalid or repeated --contract-version. Supported contract versions: 3, 4."
+    );
   }
 
   private isLegacyRejection(data: {

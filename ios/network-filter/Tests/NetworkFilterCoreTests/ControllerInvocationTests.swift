@@ -6,7 +6,7 @@ final class ControllerInvocationTests: XCTestCase {
     func testDefaultAndExplicitVersionsForEveryCommand() throws {
         for command in ControllerContract.commands {
             XCTAssertEqual(try ControllerInvocation.parse([command]).version, 3)
-            for version in [3, 4] {
+            for version in [3, 4, 5] {
                 let invocation = try ControllerInvocation.parse([command, "--contract-version", "\(version)"])
                 XCTAssertEqual(invocation.command, command)
                 XCTAssertEqual(invocation.version, version)
@@ -22,11 +22,11 @@ final class ControllerInvocationTests: XCTestCase {
         ] {
             XCTAssertThrowsError(try ControllerInvocation.parse(["status"] + suffix)) { error in
                 guard let error = error as? ControllerInvocationError else { return XCTFail("typed error") }
-                XCTAssertEqual(error.result.version, 4)
+                XCTAssertEqual(error.result.version, 5)
                 XCTAssertEqual(error.result.state, .unavailable)
                 XCTAssertEqual(
                     error.description,
-                    "Invalid or repeated --contract-version. Supported contract versions: 3, 4."
+                    "Invalid or repeated --contract-version. Supported contract versions: 3, 4, 5."
                 )
             }
         }
@@ -42,7 +42,7 @@ final class ControllerInvocationTests: XCTestCase {
                 XCTAssertEqual(invocation.arguments, remaining)
             }
         }
-        for version in [3, 4] {
+        for version in [3, 4, 5] {
             let invocation = try ControllerInvocation.parse([
                 "status", "--contract-version", "\(version)", "--contract-version", "4",
             ])
@@ -103,7 +103,7 @@ final class ControllerInvocationTests: XCTestCase {
     }
 
     func testUnknownFlagsRemainArgumentErrorsInBothModes() throws {
-        for version in [3, 4] {
+        for version in [3, 4, 5] {
             let invocation = try ControllerInvocation.parse(["status", "--contract-version", "\(version)", "--unknown"])
             XCTAssertThrowsError(try ManagedSimulatorArguments.parse(invocation.arguments, canonicalize: { $0 }))
             for kind in NetworkRuleCommandKind.allCases {

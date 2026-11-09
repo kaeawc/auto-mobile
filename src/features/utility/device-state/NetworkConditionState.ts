@@ -301,7 +301,7 @@ export const IOS_SIMULATOR_NETWORK_CONDITION_SESSION_REQUIRED_ERROR =
 
 /** What a per-app iOS offline rule does and does not cover (#10264). */
 export const IOS_APP_NETWORK_CONDITION_LIMITATIONS: readonly string[] = Object.freeze([
-  "Only new connections of the app are refused; connections already open keep working until they close.",
+  "Offline also drops connections watched since the session launched the app; earlier unfiltered connections keep working until they close.",
   "Flows the filter cannot attribute to this app on this simulator are allowed, so coverage is partial.",
   "The provider acknowledged the rule; AutoMobile does not verify traffic behaviour.",
   `The rule ends on its own unless the session renews it within ${IOS_APP_NETWORK_RULE_LEASE_MS / 1000}s.`,

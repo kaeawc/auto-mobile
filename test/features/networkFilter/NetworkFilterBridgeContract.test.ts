@@ -53,6 +53,7 @@ describe("controller contract negotiation and shaping", () => {
   beforeEach(() => {
     exec = new ScriptedExec();
     bridge = new ExecNetworkFilterBridge({
+      contractVersion: 4,
       versionMemory: new ExpiringControllerVersionMemory(),
       executor: new DefaultHostCommandExecutor(exec.exec),
       exists: () => true,
@@ -195,14 +196,14 @@ describe("controller contract negotiation and shaping", () => {
       const result = await bridge.apply(target, owner, 15000);
       expect(result.state).toBe("unavailable");
       expect(result.contractVersion).toBe(3);
-      expect(result.detail).toContain("expects versions 3 and 4");
+      expect(result.detail).toContain("expects versions 3, 4 and 5");
       expect(result.rule).toBeUndefined();
       expect(result.upgradeRequired).toBeUndefined();
       expect(exec.calls).toHaveLength(1);
     });
   }
 
-  for (const version of [1, 2, 5]) {
+  for (const version of [1, 2, 6]) {
     test(`unknown version ${version} is rejected before interpreting the body`, async () => {
       exec.answers.push(
         JSON.stringify({ ...JSON.parse(fixture("v4/rule-applied-shaped")), version }),
@@ -211,7 +212,7 @@ describe("controller contract negotiation and shaping", () => {
       expect(result).toMatchObject({ state: "unavailable", contractVersion: version });
       expect(result.rule).toBeUndefined();
       expect(result.detail).toContain(`contract version ${version}`);
-      expect(result.detail).toContain("expects versions 3 and 4");
+      expect(result.detail).toContain("expects versions 3, 4 and 5");
       expect(exec.calls).toHaveLength(1);
     });
   }
@@ -271,6 +272,7 @@ describe("controller contract negotiation and shaping", () => {
       const versionMemory = new ExpiringControllerVersionMemory();
       let nowMs = 100;
       const options = {
+        contractVersion: 4 as const,
         versionMemory,
         now: () => nowMs,
         executor: new DefaultHostCommandExecutor(exec.exec),
@@ -315,6 +317,7 @@ describe("controller contract negotiation and shaping", () => {
   test("memory is keyed by controller path and an upgrade clears shared memory", async () => {
     const versionMemory = new ExpiringControllerVersionMemory();
     const options = {
+      contractVersion: 4 as const,
       versionMemory,
       now: () => 0,
       executor: new DefaultHostCommandExecutor(exec.exec),
@@ -322,9 +325,18 @@ describe("controller contract negotiation and shaping", () => {
       managedSimulators: async () => [],
       deviceSet: () => "/fixture/Devices",
     };
-    const first = new ExecNetworkFilterBridge({ ...options, controllerPath: "/first" });
-    const second = new ExecNetworkFilterBridge({ ...options, controllerPath: "/first" });
-    const other = new ExecNetworkFilterBridge({ ...options, controllerPath: "/other" });
+    const first = new ExecNetworkFilterBridge({
+      ...options,
+      controllerPath: "/first",
+    });
+    const second = new ExecNetworkFilterBridge({
+      ...options,
+      controllerPath: "/first",
+    });
+    const other = new ExecNetworkFilterBridge({
+      ...options,
+      controllerPath: "/other",
+    });
     exec.legacy("status");
     exec.answers.push(
       fixture("ready"),
@@ -421,6 +433,7 @@ describe("controller contract negotiation and shaping", () => {
     versionMemory.markLegacy("/controller", 0);
     let nowMs = 59_999;
     const resetOnly = new ExecNetworkFilterBridge({
+      contractVersion: 4,
       versionMemory,
       now: () => nowMs,
       controllerPath: "/controller",
@@ -502,6 +515,7 @@ describe("controller contract negotiation and shaping", () => {
 
   test("errors preparing arguments become logged typed failures", async () => {
     const failing = new ExecNetworkFilterBridge({
+      contractVersion: 4,
       versionMemory: new ExpiringControllerVersionMemory(),
       exists: () => true,
       managedSimulators: async () => {

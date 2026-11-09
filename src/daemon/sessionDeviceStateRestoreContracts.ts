@@ -27,6 +27,8 @@ export interface IosAppNetworkRuleSessionState {
   lastRevision: number;
   /** The revision the provider acknowledged as installed, while it is believed active. */
   installedRevision?: number;
+  /** A launch-time watch with no requested impairment; an explicit rule may replace it. */
+  watch?: boolean;
 }
 
 /** Keep-awake restore resolved before any await, like the biometric target below. */

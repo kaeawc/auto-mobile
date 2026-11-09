@@ -1,23 +1,27 @@
 # network-filter-controller contract fixtures
 
-Root `*.json` lines use contract version 3; `v4/*.json` lines use version 4.
+Root `*.json` lines use contract version 3; `v4/*.json` lines use version 4, and
+`v5/*.json` lines use version 5.
 Each is byte-for-byte production `ControllerResult.encodedLine()` output plus
 one LF newline. `ControllerContractTests.testCommittedFixturesMatchTheEncoder`
-pins both directories. The six original version-3 fixtures remain unchanged and
+pins all three versions. The six original version-3 fixtures remain unchanged and
 are encoded through an explicit version-3 path; `shaping-requires-contract-4.json`
 adds the default-version argument error. Version-4 `ready.json` carries a mixed
 snapshot with one offline rule and one shaped rule, with packet loss unapplied,
 and a top-level optional `shapingActivity` containing idle adapter counters.
 The version-4 ready line round-trips through the production Codable types.
+Version-5 fixtures carry watch rules and offline apply results with `existingFlows`
+values `dropped` and `unaffected`.
 
 Every command accepts `--contract-version <n>` only immediately after its name:
 `network-filter-controller <command> --contract-version <n> …`. The value must be
-exactly `3` or `4`; newest is 4 and absent negotiation defaults to 3. Thus the
+exactly `3`, `4` or `5`; newest is 5 and absent negotiation defaults to 3. Thus the
 unchanged version-3 host continues working against this controller. A missing,
-malformed or unsupported value prints a version-4 `unavailable` line naming
-supported versions, exiting 2. Its historical "Invalid or repeated --contract-version"
-detail stays pinned by `v4/unsupported-contract-version.json`. Later occurrences
-are passed unchanged to the command's parser as values or ordinary unexpected
+malformed or unsupported value prints a version-5 `unavailable` line naming
+supported versions, exiting 2. The live parser result is pinned by
+`v5/unsupported-contract-version.json`; `v4/unsupported-contract-version.json`
+is a historical shipped-v4 line, pinned verbatim and never regenerated. Later
+occurrences are passed unchanged to the command's parser as values or ordinary unexpected
 arguments, without negotiation. All other invocation endings carry the negotiated
 version, including installation requirements, argument errors and the 8-second timeout.
 
@@ -43,8 +47,8 @@ the signed run (#10263). `rule-unsupported-condition.json` still models the
 default Core store, which refuses shaping unless explicitly enabled. Version-3
 snapshots never contain `shapingActivity`.
 
-Regenerate both directories from the repository root (the environment variable
-continues pointing at the root fixture directory):
+Regenerate the fixtures, except the historical v4 rejection, from the repository
+root (the environment variable points at the root fixture directory):
 
 ```sh
 AUTOMOBILE_FIXTURE_OUT_DIR="$PWD/test/fixtures/network-filter-controller" \
@@ -59,7 +63,7 @@ approved controller was run to produce them. The TypeScript bridge tests parse
 the original version-3 lines through `ExecNetworkFilterBridge` with a fake exec seam.
 
 An **unsigned** build can print these exact lines for real: version-3 and
-version-4 `installation-required.json`, version-4
+version-4 `installation-required.json`, version-5
 `unsupported-contract-version.json`, and version-3
 `shaping-requires-contract-4.json`. The driver can capture and compare them from
 the repository root using only these read-only or argument-error commands:
@@ -77,7 +81,7 @@ cmp test/fixtures/network-filter-controller/v4/installation-required.json \
   scratch/network-filter-fixtures/installation-required-v4.json
 ios/network-filter/.build/debug/network-filter-controller status --contract-version 9 \
   > scratch/network-filter-fixtures/unsupported-contract-version.json
-cmp test/fixtures/network-filter-controller/v4/unsupported-contract-version.json \
+cmp test/fixtures/network-filter-controller/v5/unsupported-contract-version.json \
   scratch/network-filter-fixtures/unsupported-contract-version.json
 ios/network-filter/.build/debug/network-filter-controller apply \
   --managed /fixture/Devices DFBF2D27-6674-42EA-AFC4-AB702275D1D4 \

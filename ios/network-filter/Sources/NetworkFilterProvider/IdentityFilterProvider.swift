@@ -48,8 +48,8 @@ final class IdentityFilterProvider: NEFilterDataProvider, NSXPCListenerDelegate 
         listener.delegate = self
         self.listener = listener
         listener.resume()
-        // New flows select offline or data filtering; established flows are not
-        // revisited when a rule is installed.
+        // Launch-time watches select data filtering before the app connects;
+        // flows already allowed before a watch cannot be revisited.
         apply(NEFilterSettings(rules: [], defaultAction: .filterData)) { [weak self] error in
             guard self?.service.finishStartup(generation: generation, succeeded: error == nil) == true else {
                 listener.invalidate()

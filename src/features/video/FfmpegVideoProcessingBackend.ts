@@ -731,6 +731,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
           platform: "ios",
           captureTracker,
           capturePath,
+          captureArgs: args,
           config,
         };
 

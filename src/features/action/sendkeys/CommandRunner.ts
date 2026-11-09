@@ -148,6 +148,7 @@ export class CommandRunner {
         ...(errorCode === undefined ? {} : { errorCode }),
         ...(results[failure.index]?.retryable === false ? { retryable: false } : {}),
         ...(staleDisplay ? { staleDisplay } : {}),
+        ...(failure.blockingPrompt ? { blockingPrompt: failure.blockingPrompt } : {}),
         ...(warnings.length ? { warning: warnings.join(" ") } : {}),
       };
     }

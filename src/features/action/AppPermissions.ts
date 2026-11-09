@@ -27,6 +27,8 @@ import {
 import { IosPhysicalPermissions, type IosPhysicalPrivacyClient } from "./IosPhysicalPermissions";
 import { CtrlProxyIosPhysicalPrivacyClient } from "./CtrlProxyIosPhysicalPrivacyClient";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
+import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { TvosPermissions } from "../tvos/TvosPermissions";
 import { outputReportsMissingPackage } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { shellQuote } from "../../utils/shellQuote";
 import { tccServiceForPermission } from "../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
@@ -129,7 +131,7 @@ export interface SetAppPermissionsResult {
   success: boolean;
   appId: string;
   deviceId: string;
-  platform: "android" | "ios";
+  platform: "android" | "ios" | "tvos";
   action: AppPermissionAction;
   changedCount: number;
   failedCount: number;
@@ -195,7 +197,9 @@ export class AppPermissions {
     const result =
       this.device.platform === "ios"
         ? await this.setIosPermissions(appId, action, input)
-        : await this.setAndroidPermissions(appId, action, input);
+        : this.device.platform === "tvos"
+          ? await this.setTvosPermissions(appId, action, input)
+          : await this.setAndroidPermissions(appId, action, input);
     return await this.withAudioInputDiagnostic(
       result,
       action,
@@ -231,29 +235,9 @@ export class AppPermissions {
     input: SetAppPermissionsInput,
   ): Promise<SetAppPermissionsResult> {
     const permissions = normalizePermissions(input.permissions);
-    const unsupportedFields: string[] = [];
-    if (input.notificationPolicyAccess !== undefined) {
-      unsupportedFields.push("notificationPolicyAccess");
-    }
-    if (input.notificationsEnabled !== undefined) {
-      unsupportedFields.push("notificationsEnabled");
-    }
-    if (input.scheduleExactAlarm !== undefined) {
-      unsupportedFields.push("scheduleExactAlarm");
-    }
-    if (unsupportedFields.length > 0) {
-      const error = `setAppPermissions does not support the following fields on iOS: ${unsupportedFields.join(", ")}`;
-      return {
-        success: false,
-        appId,
-        deviceId: this.device.deviceId,
-        platform: "ios",
-        action,
-        changedCount: 0,
-        failedCount: 0,
-        operations: [],
-        error,
-      };
+    const refusal = this.refuseAndroidOnlyFields(appId, action, input, "ios");
+    if (refusal) {
+      return refusal;
     }
 
     // Physical iOS devices cannot use simctl privacy; route reset through the
@@ -289,6 +273,68 @@ export class AppPermissions {
       })),
       ...(result.error ? { error: result.error } : {}),
       ...(result.warnings ? { warnings: result.warnings } : {}),
+    };
+  }
+
+  /** grant/revoke/reset through simctl privacy on an Apple TV simulator (#17527). */
+  private async setTvosPermissions(
+    appId: string,
+    action: AppPermissionAction,
+    input: SetAppPermissionsInput,
+  ): Promise<SetAppPermissionsResult> {
+    const refusal = this.refuseAndroidOnlyFields(appId, action, input, "tvos");
+    if (refusal) {
+      return refusal;
+    }
+    const tvos = new TvosPermissions(this.device, this.simctl ?? new SimCtlClient(this.device));
+    const result = await tvos.setPermissions(
+      action,
+      appId.trim(),
+      normalizePermissions(input.permissions),
+    );
+    return {
+      success: result.success,
+      appId: appId.trim(),
+      deviceId: this.device.deviceId,
+      platform: "tvos",
+      action,
+      changedCount: result.changedCount,
+      failedCount: result.failedCount,
+      operations: result.results.map((permissionResult) => ({
+        stepId: `tvos_simctl_privacy:${action}:${permissionResult.permission}`,
+        success: permissionResult.success,
+        changedCount: permissionResult.success ? 1 : 0,
+        failedCount: permissionResult.success ? 0 : 1,
+        result: permissionResult,
+        ...(permissionResult.error ? { error: permissionResult.error } : {}),
+      })),
+      ...(result.error ? { error: result.error } : {}),
+    };
+  }
+
+  /** The notification and alarm fields are Android settings; Apple platforms refuse them by name. */
+  private refuseAndroidOnlyFields(
+    appId: string,
+    action: AppPermissionAction,
+    input: SetAppPermissionsInput,
+    platform: "ios" | "tvos",
+  ): SetAppPermissionsResult | undefined {
+    const unsupportedFields = (
+      ["notificationPolicyAccess", "notificationsEnabled", "scheduleExactAlarm"] as const
+    ).filter((field) => input[field] !== undefined);
+    if (unsupportedFields.length === 0) {
+      return undefined;
+    }
+    return {
+      success: false,
+      appId,
+      deviceId: this.device.deviceId,
+      platform,
+      action,
+      changedCount: 0,
+      failedCount: 0,
+      operations: [],
+      error: `setAppPermissions does not support the following fields on ${platform === "ios" ? "iOS" : "tvOS"}: ${unsupportedFields.join(", ")}`,
     };
   }
 

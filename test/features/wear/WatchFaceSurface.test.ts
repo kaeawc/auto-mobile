@@ -8,14 +8,14 @@ import {
   componentName,
 } from "../../../src/features/wear/WatchFaceSurface";
 import { DEBUG_SURFACE_ACTION, parseBroadcastOutput } from "../../../src/features/wear/WearSurface";
-import { parseWatchFaceReading } from "../../../src/features/wear/wearServiceDumpsys";
+import { parseWatchFaces } from "../../../src/features/wear/wearServiceDumpsys";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ExecResult } from "../../../src/models";
 import {
   capturedArrowReply,
+  capturedReadback,
   capturedRuns,
   capturedSection,
-  capturedWearService,
 } from "../../helpers/wearSurfaceCaptures";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -42,7 +42,10 @@ function exec(stdout: string): ExecResult {
   };
 }
 
-/** Replays one captured reply per broadcast and captured readbacks in order (the last repeats). */
+/**
+ * Replays one captured reply per broadcast and captured readback excerpts in order (the last
+ * repeats), each spliced into a whole `dumpsys wear_service` capture.
+ */
 class FakeWatchAdb {
   readonly commands: string[] = [];
   reads = 0;
@@ -60,7 +63,7 @@ class FakeWatchAdb {
     if (next instanceof Error) {
       throw next;
     }
-    return exec(next);
+    return exec(capturedReadback(next));
   }
 }
 
@@ -120,28 +123,34 @@ describe("watch face broadcast replies", () => {
   });
 });
 
-describe("dumpsys wear_service watch face reading", () => {
-  test("a whole capture reads the active face, favorite and live slots", () => {
-    expect(parseWatchFaceReading(capturedWearService())).toEqual({
-      activeFace: { package: OFFHAND, className: null },
-      favoriteId: 1,
-      slots: [
-        { slot: 11, type: 1, provider: null },
-        { slot: 12, type: 3, provider: DAY_AND_DATE },
-      ],
+describe("captured readback excerpts read through parseWatchFaces", () => {
+  const read = (excerpt: string) => parseWatchFaces(capturedReadback(excerpt));
+  const liveSlots = (excerpt: string) =>
+    read(excerpt)?.favorites.find((favorite) => favorite.favoriteId === 1)?.slots;
+
+  test("an active-face excerpt names the active face and favorite", () => {
+    expect(read(roundtrip("com.google.wear.superficial")[1] ?? "")?.activeFace).toEqual({
+      package: SUPERFICIAL,
+      favoriteId: 2,
+      fallback: false,
     });
   });
 
-  test("captured readback excerpts parse the same way", () => {
-    expect(parseWatchFaceReading(roundtrip("com.google.wear.superficial")[1] ?? "")).toEqual({
-      activeFace: { package: SUPERFICIAL, className: null },
-      favoriteId: 2,
-      slots: [],
-    });
-    expect(parseWatchFaceReading(complicationRuns[0]?.readback ?? "").slots).toEqual([
+  test("an excerpt without a favorite id leaves it unknown", () => {
+    const [run] = capturedRuns("watchface-set-x10.txt");
+    expect(read(run?.readback ?? "")?.activeFace).toMatchObject({ favoriteId: null });
+  });
+
+  test("a live config excerpt replaces that slot of the active favorite", () => {
+    expect(liveSlots(complicationRuns[0]?.readback ?? "")).toEqual([
       { slot: 11, type: 5, provider: BATTERY },
+      { slot: 12, type: 3, provider: DAY_AND_DATE },
     ]);
-    expect(parseWatchFaceReading("")).toEqual({ slots: [] });
+    expect(liveSlots(complicationRuns[1]?.readback ?? "")?.[0]).toEqual({
+      slot: 11,
+      type: 1,
+      provider: null,
+    });
   });
 });
 
@@ -187,7 +196,7 @@ describe("AdbWatchFaceSurface", () => {
     adb.readbacks = [roundtrip("set offhand")[1] ?? ""];
     const result = await surface().setWatchFace(SUPERFICIAL);
     expect(result).toMatchObject({ success: false, applied: false, error: "not_applied" });
-    expect(result.readback?.activeFace?.package).toBe(OFFHAND);
+    expect(result.readback?.activeFace.package).toBe(OFFHAND);
     expect(adb.reads).toBe(READBACK_ATTEMPTS);
   });
 

@@ -5,10 +5,10 @@ import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
 import { DEBUG_SURFACE_ACTION, parseBroadcastOutput, type ParsedBroadcast } from "./WearSurface";
 import {
-  parseWatchFaceReading,
+  parseWatchFaces,
   readWearServiceDumpsys,
-  type ComplicationSlotReading,
-  type WatchFaceReading,
+  type ComplicationSlot,
+  type WatchFaceObservation,
   type WearServiceAdb,
 } from "./wearServiceDumpsys";
 
@@ -93,7 +93,7 @@ export interface SetComplicationRequest extends ComplicationRequest {
   type: number;
 }
 
-export interface WatchFaceResult {
+export interface WatchFaceChangeResult {
   success: boolean;
   action: WatchFaceAction;
   requested: { watchFace?: string; slot?: number; type?: number; provider?: string };
@@ -104,17 +104,23 @@ export interface WatchFaceResult {
   verified: boolean;
   favoriteId?: number;
   /** The last readback, when one was taken. */
-  readback?: WatchFaceReading;
+  readback?: WatchFaceObservation;
   error?: WatchFaceError;
   message: string;
   reason?: string;
 }
 
 export interface WatchFaceSurface {
-  setWatchFace(watchFace: string, signal?: AbortSignal): Promise<WatchFaceResult>;
-  unsetWatchFace(signal?: AbortSignal): Promise<WatchFaceResult>;
-  setComplication(request: SetComplicationRequest, signal?: AbortSignal): Promise<WatchFaceResult>;
-  unsetComplication(request: ComplicationRequest, signal?: AbortSignal): Promise<WatchFaceResult>;
+  setWatchFace(watchFace: string, signal?: AbortSignal): Promise<WatchFaceChangeResult>;
+  unsetWatchFace(signal?: AbortSignal): Promise<WatchFaceChangeResult>;
+  setComplication(
+    request: SetComplicationRequest,
+    signal?: AbortSignal,
+  ): Promise<WatchFaceChangeResult>;
+  unsetComplication(
+    request: ComplicationRequest,
+    signal?: AbortSignal,
+  ): Promise<WatchFaceChangeResult>;
 }
 
 export interface WatchFaceSurfaceDeps {
@@ -145,11 +151,11 @@ const ERROR_REASONS: Record<WatchFaceError, string> = {
   unknown_reply: "The broadcast reply was not recognized.",
 };
 
-type Check = (reading: WatchFaceReading, reply: FaceBroadcast) => boolean;
+type Check = (reading: WatchFaceObservation, reply: FaceBroadcast) => boolean;
 
 interface Attempt {
   action: WatchFaceAction;
-  requested: WatchFaceResult["requested"];
+  requested: WatchFaceChangeResult["requested"];
   extras: string;
   check: Check;
   applied: string;
@@ -158,7 +164,7 @@ interface Attempt {
 export class AdbWatchFaceSurface implements WatchFaceSurface {
   constructor(private readonly deps: WatchFaceSurfaceDeps) {}
 
-  setWatchFace(watchFace: string, signal?: AbortSignal): Promise<WatchFaceResult> {
+  setWatchFace(watchFace: string, signal?: AbortSignal): Promise<WatchFaceChangeResult> {
     const face = splitFace(watchFace);
     return this.attempt(
       {
@@ -173,21 +179,24 @@ export class AdbWatchFaceSurface implements WatchFaceSurface {
     );
   }
 
-  unsetWatchFace(signal?: AbortSignal): Promise<WatchFaceResult> {
+  unsetWatchFace(signal?: AbortSignal): Promise<WatchFaceChangeResult> {
     return this.attempt(
       {
         action: "unsetWatchFace",
         requested: {},
         extras: "",
         check: (reading, reply) =>
-          reply.favoriteId !== undefined && reading.favoriteId === reply.favoriteId,
+          reply.favoriteId !== undefined && reading.activeFace.favoriteId === reply.favoriteId,
         applied: "The watch face set before setWatchFace is active again.",
       },
       signal,
     );
   }
 
-  setComplication(request: SetComplicationRequest, signal?: AbortSignal): Promise<WatchFaceResult> {
+  setComplication(
+    request: SetComplicationRequest,
+    signal?: AbortSignal,
+  ): Promise<WatchFaceChangeResult> {
     const { watchFace, slot, type, provider } = request;
     const expected = componentName(provider);
     return this.attempt(
@@ -202,7 +211,10 @@ export class AdbWatchFaceSurface implements WatchFaceSurface {
     );
   }
 
-  unsetComplication(request: ComplicationRequest, signal?: AbortSignal): Promise<WatchFaceResult> {
+  unsetComplication(
+    request: ComplicationRequest,
+    signal?: AbortSignal,
+  ): Promise<WatchFaceChangeResult> {
     const { watchFace, slot, provider } = request;
     return this.attempt(
       {
@@ -216,7 +228,7 @@ export class AdbWatchFaceSurface implements WatchFaceSurface {
     );
   }
 
-  private async attempt(attempt: Attempt, signal?: AbortSignal): Promise<WatchFaceResult> {
+  private async attempt(attempt: Attempt, signal?: AbortSignal): Promise<WatchFaceChangeResult> {
     const { action, requested } = attempt;
     const refused = refuseBeforeSend(requested.watchFace);
     if (refused) {
@@ -257,8 +269,8 @@ export class AdbWatchFaceSurface implements WatchFaceSurface {
     check: Check,
     reply: FaceBroadcast,
     signal?: AbortSignal,
-  ): Promise<WatchFaceReading | undefined> {
-    let last: WatchFaceReading | undefined;
+  ): Promise<WatchFaceObservation | undefined> {
+    let last: WatchFaceObservation | undefined;
     for (let attempt = 0; attempt < READBACK_ATTEMPTS; attempt++) {
       if (attempt > 0) {
         await this.deps.timer.sleep(READBACK_INTERVAL_MS);
@@ -272,9 +284,10 @@ export class AdbWatchFaceSurface implements WatchFaceSurface {
     return last;
   }
 
-  private async read(signal?: AbortSignal): Promise<WatchFaceReading | undefined> {
+  /** An unreadable dumpsys, or one without an active face, cannot confirm a change. */
+  private async read(signal?: AbortSignal): Promise<WatchFaceObservation | undefined> {
     try {
-      return parseWatchFaceReading(await readWearServiceDumpsys(this.deps.adb, signal));
+      return parseWatchFaces(await readWearServiceDumpsys(this.deps.adb, signal)) ?? undefined;
     } catch (error) {
       signal?.throwIfAborted();
       logger.warn(`dumpsys wear_service readback failed: ${errorMessage(error)}`, error);
@@ -335,26 +348,29 @@ export function componentName(component: string): string {
   return `${pkg}/${className.startsWith(".") ? pkg + className : className}`;
 }
 
-function faceActive(reading: WatchFaceReading, face: FaceName): boolean {
-  const active = reading.activeFace;
-  if (active?.package !== face.package) {
-    return false;
-  }
-  return (
-    face.className === undefined ||
-    active.className === componentName(`${face.package}/${face.className}`).split("/")[1]
-  );
+/**
+ * dumpsys names the active face by package only; the reply's favorite id (checked by
+ * `favoriteActive`) is what pins a classic face's class.
+ */
+function faceActive(reading: WatchFaceObservation, face: FaceName): boolean {
+  return reading.activeFace.package === face.package;
 }
 
 /** A reply's favorite must be the active one; a readback without the line cannot refute it. */
-function favoriteActive(reading: WatchFaceReading, reply: FaceBroadcast): boolean {
-  return reading.favoriteId === undefined || reading.favoriteId === reply.favoriteId;
+function favoriteActive(reading: WatchFaceObservation, reply: FaceBroadcast): boolean {
+  const active = reading.activeFace.favoriteId;
+  return active === null || active === reply.favoriteId;
 }
 
-function slotCheck(slot: number, matches: (line: ComplicationSlotReading) => boolean): Check {
+/** The reply favorite's slot; parseWatchFaces makes the active favorite's slots the live ones. */
+function slotCheck(slot: number, matches: (line: ComplicationSlot) => boolean): Check {
   return (reading, reply) =>
     favoriteActive(reading, reply) &&
-    reading.slots.some((line) => line.slot === slot && matches(line));
+    reading.favorites.some(
+      (favorite) =>
+        favorite.favoriteId === reply.favoriteId &&
+        favorite.slots.some((line) => line.slot === slot && matches(line)),
+    );
 }
 
 function refuseBeforeSend(watchFace: string | undefined): FaceBroadcast | undefined {
@@ -364,7 +380,7 @@ function refuseBeforeSend(watchFace: string | undefined): FaceBroadcast | undefi
   return undefined;
 }
 
-function failure(attempt: Attempt, reply: FaceBroadcast, message: string): WatchFaceResult {
+function failure(attempt: Attempt, reply: FaceBroadcast, message: string): WatchFaceChangeResult {
   const error = reply.error ?? "unknown_reply";
   return {
     success: false,

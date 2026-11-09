@@ -1,4 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import {
   AdbWearSurface,
   DEBUG_SURFACE_ACTION,
@@ -10,6 +12,10 @@ import {
   parseBroadcastOutput,
   type SurfaceSnapshot,
 } from "../../../src/features/wear/WearSurface";
+import {
+  AdbTileProviderLister,
+  TileProviderNotFoundError,
+} from "../../../src/features/wear/TileProviders";
 import type {
   AdbCommandRunner,
   AdbExecuteOptions,
@@ -20,9 +26,11 @@ import {
   capturedBroadcast as capturedReply,
   capturedFace,
   capturedTile,
+  capturedSurfaceObservation,
 } from "../../helpers/wearSurfaceCaptures";
-import { surfaceSnapshot } from "../../../src/server/wearSurfaceTool";
+import { createDeviceObserver, surfaceSnapshot } from "../../../src/server/wearSurfaceTool";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 
 function reply(label: string): string {
   switch (label) {
@@ -78,6 +86,12 @@ class FakeWearAdb implements AdbCommandRunner {
   }
 }
 
+/** `cmd package query-services --components` on the same emulator (#17496). */
+const PROVIDERS = readFileSync(
+  path.join(import.meta.dir, "../../fixtures/wear-tiles/query-services-components-api37.txt"),
+  "utf8",
+);
+
 const FAVORITES =
   "com.google.android.contacts/com.google.android.wearable.contacts.tiles.FavoriteContactsTileService";
 const WATCH_FACE = {
@@ -91,6 +105,7 @@ beforeAll(async () => {
 });
 
 let adb: FakeWearAdb;
+let providerAdb: FakeWearAdb;
 let timer: FakeTimer;
 let screens: SurfaceSnapshot[];
 
@@ -99,11 +114,14 @@ function surface() {
     adb,
     timer,
     observe: async () => screens.shift() ?? {},
+    tileProviders: new AdbTileProviderLister(providerAdb),
   });
 }
 
 beforeEach(() => {
   adb = new FakeWearAdb();
+  providerAdb = new FakeWearAdb();
+  providerAdb.on(/query-services --components/, PROVIDERS);
   timer = new FakeTimer();
   timer.enableAutoAdvance();
   screens = [];
@@ -171,6 +189,31 @@ describe("broadcast reply parser", () => {
 });
 
 describe("AdbWearSurface", () => {
+  test.each(["tile-showing", "app-in-front"] as const)(
+    "showTile verifies only tile evidence from the full %s capture",
+    async (name) => {
+      adb.on(/operation show-tile/, reply("0"));
+      const screen = new FakeObserveScreen();
+      screen.setObserveResult(capturedSurfaceObservation(name));
+      const observe = createDeviceObserver(
+        { name: "Wear", deviceId: "emulator-5554", platform: "android" },
+        () => screen,
+      );
+      const result = await new AdbWearSurface({
+        adb,
+        timer,
+        observe,
+        tileProviders: new AdbTileProviderLister(providerAdb),
+      }).showTile({ index: 0 });
+      expect(result).toMatchObject({
+        success: name === "tile-showing",
+        verified: name === "tile-showing",
+        broadcastResult: { code: 1, outcome: "showRequested" },
+      });
+      expect(timer.getSleepHistory()).toEqual([SHOW_TILE_SETTLE_MS]);
+    },
+  );
+
   test("addTile sends add-tile on DEBUG_SURFACE and reports the index without claiming an observe", async () => {
     adb.on(/operation add-tile/, reply("add-tile (ok)"));
     const result = await surface().addTile(FAVORITES);
@@ -187,9 +230,49 @@ describe("AdbWearSurface", () => {
     expect(result.message).toMatch(/idempotent/);
   });
 
-  test("addTile of an unknown provider fails with a typed outcome", async () => {
+  test("listTileProviders reads the providers and broadcasts nothing", async () => {
+    const result = await surface().listTileProviders();
+    expect(providerAdb.commands).toEqual([
+      "shell cmd package query-services --components -a androidx.wear.tiles.action.BIND_TILE_PROVIDER",
+    ]);
+    expect(adb.commands).toEqual([]);
+    expect(result).toMatchObject({ success: true, action: "listTileProviders", verified: false });
+    expect(result.providers.map((provider) => provider.component)).toEqual([
+      FAVORITES,
+      "com.google.android.contacts/com.google.android.wearable.contacts.tiles.singlecontact.SingleContactTileService",
+    ]);
+  });
+
+  test("listTileProviders with none installed is an empty list, not an error", async () => {
+    providerAdb = new FakeWearAdb();
+    const result = await surface().listTileProviders();
+    expect(result).toMatchObject({ success: true, providers: [] });
+    expect(result.message).toMatch(/No tile providers/);
+  });
+
+  test("addTile of a component that is not a tile provider throws typed without broadcasting", async () => {
+    adb.on(/operation add-tile/, reply("add-tile (ok)"));
+    const call = surface().addTile("com.google.android.clockwork.sysui/x");
+    await expect(call).rejects.toBeInstanceOf(TileProviderNotFoundError);
+    await expect(call).rejects.toThrow(
+      /is not a Wear tile provider.*Use one of: .*FavoriteContacts/,
+    );
+    expect(adb.commands).toEqual([]);
+  });
+
+  test("addTile accepts the short .Service form of a listed provider", async () => {
+    providerAdb = new FakeWearAdb();
+    providerAdb.on(/query-services/, "com.example/com.example.Tile\n");
+    adb.on(/operation add-tile/, reply("add-tile (ok)"));
+    const result = await surface().addTile("com.example/.Tile");
+    expect(result.success).toBe(true);
+    expect(adb.commands).toHaveLength(1);
+  });
+
+  test("a listed provider the broadcast still refuses keeps the typed broadcast outcome", async () => {
+    // The listing is a snapshot: the provider can be disabled between the read and the broadcast.
     adb.on(/operation add-tile/, reply("add-tile (unknown provider)"));
-    const result = await surface().addTile("com.google.android.clockwork.sysui/x");
+    const result = await surface().addTile(FAVORITES);
     expect(result.success).toBe(false);
     expect(result.broadcastResult.outcome).toBe("providerNotFound");
     expect(result.index).toBeUndefined();
@@ -257,9 +340,16 @@ describe("AdbWearSurface", () => {
     expect(result.reason).toMatch(reason);
   });
 
+  test("showTile of a component that is not a tile provider throws typed before any broadcast", async () => {
+    const call = surface().showTile({ component: "com.example/.Missing" });
+    await expect(call).rejects.toBeInstanceOf(TileProviderNotFoundError);
+    expect(adb.commands).toEqual([]);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
   test("showTile stops before showing when the index cannot be resolved", async () => {
     adb.on(/operation add-tile/, reply("add-tile (unknown provider)"));
-    const result = await surface().showTile({ component: "com.example/.Missing" });
+    const result = await surface().showTile({ component: FAVORITES });
     expect(adb.commands).toHaveLength(1);
     expect(result).toMatchObject({
       success: false,
@@ -284,9 +374,12 @@ describe("AdbWearSurface", () => {
         throw new Error("device offline");
       },
     };
-    const call = new AdbWearSurface({ adb: failing, timer, observe: async () => ({}) }).addTile(
-      FAVORITES,
-    );
+    const call = new AdbWearSurface({
+      adb: failing,
+      timer,
+      observe: async () => ({}),
+      tileProviders: new AdbTileProviderLister(failing),
+    }).addTile(FAVORITES);
     await expect(call).rejects.toBeInstanceOf(ActionableError);
     await expect(call).rejects.toThrow(/device offline/);
   });

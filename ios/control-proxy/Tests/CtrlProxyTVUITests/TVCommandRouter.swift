@@ -4,7 +4,6 @@ import XCTest
 @MainActor
 final class TVCommandRouter {
     private let application: XCUIApplication
-    private var focusMemory = TVFocusMemory()
 
     init(application: XCUIApplication) {
         self.application = application
@@ -52,10 +51,7 @@ final class TVCommandRouter {
                 let resolved = target(requested: envelope.bundleId)
                 let snapshot = try resolved.app.snapshot()
                 let tree = sketch(snapshot)
-                focusMemory.observe(bundle: resolved.packageName, root: tree)
-                let resolution = TVTextEntryPolicy.resolve(
-                    root: tree, lastFocusedField: focusMemory.field(for: resolved.packageName)
-                )
+                let resolution = TVTextEntryPolicy.resolve(root: tree)
                 return try JSONEncoder().encode(HierarchyUpdateResponse(
                     requestId: request.requestId,
                     data: ViewHierarchy(
@@ -75,14 +71,6 @@ final class TVCommandRouter {
                     throw CommandError.invalidParameter("frameContext", "unsupported on tvOS")
                 }
                 let startTime = Date()
-                if button == .select {
-                    let resolved = target(requested: envelope.bundleId)
-                    // Remote input still proceeds on failure, but identity must fail closed.
-                    let snapshot = try? resolved.app.snapshot()
-                    focusMemory.willSelect(
-                        bundle: resolved.packageName, snapshot: snapshot.map { sketch($0) }
-                    )
-                }
                 press(button)
                 return try JSONEncoder().encode(WebSocketResponse.success(
                     type: "press_button_result", requestId: requestId,
@@ -140,21 +128,20 @@ final class TVCommandRouter {
 
     private func element(
         _ snapshot: any XCUIElementSnapshot, node: TVNodeSketch,
-        resolution: TVTextEntryResolution, path: [Int] = []
+        resolution: TVTextEntryResolution
     )
         -> UIElementInfo
     {
-        let entryOverride = resolution.overrideEntry(at: path)
-        return UIElementInfo(
-            text: resolution.text(for: node, path: path),
-            resourceId: entryOverride == nil ? snapshot.identifier : entryOverride?.resourceId,
-            className: entryOverride?.className ?? String(snapshot.elementType.rawValue),
+        UIElementInfo(
+            text: resolution.text(for: node),
+            resourceId: snapshot.identifier,
+            className: String(snapshot.elementType.rawValue),
             bounds: ElementBounds(clamping: snapshot.frame),
             enabled: String(snapshot.isEnabled),
-            focused: String(entryOverride?.focused ?? snapshot.hasFocus),
+            focused: String(snapshot.hasFocus),
             selected: String(snapshot.isSelected),
             node: snapshot.children.enumerated().map { index, child in
-                element(child, node: node.children[index], resolution: resolution, path: path + [index])
+                element(child, node: node.children[index], resolution: resolution)
             }
         )
     }

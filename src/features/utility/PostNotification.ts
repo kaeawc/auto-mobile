@@ -103,6 +103,12 @@ function preserveOrExplainSimctlPushError(error: string): string {
   return error;
 }
 
+const SIMCTL_PUSH_PLATFORM_LABELS: Partial<Record<BootedDevice["platform"], string>> = {
+  ios: "iOS",
+  watchos: "watchOS",
+  tvos: "tvOS",
+};
+
 // Detect whether the argument is a factory (has create method) or an executor.
 function resolveAdb(
   device: BootedDevice,
@@ -176,6 +182,7 @@ export class PostNotification {
           return await this.executeAndroid(options, signal);
         case "ios":
         case "watchos":
+        case "tvos":
           return await this.executeIos(options);
         default:
           return {
@@ -196,9 +203,9 @@ export class PostNotification {
     }
   }
 
-  /** iOS/watchOS: deliver a simulated remote push via `simctl push` (simulator only). */
+  /** iOS/watchOS/tvOS: deliver a simulated remote push via `simctl push` (simulator only). */
   private async executeIos(options: PostNotificationOptions): Promise<PostNotificationResult> {
-    const platformLabel = this.device.platform === "watchos" ? "watchOS" : "iOS";
+    const platformLabel = SIMCTL_PUSH_PLATFORM_LABELS[this.device.platform] ?? "iOS";
     const bundleId = options.appId;
     if (!bundleId) {
       return {
@@ -256,6 +263,11 @@ export class PostNotification {
     bundleId: string,
     warning: string | undefined,
   ): Promise<PostNotificationResult | undefined> {
+    // The BulletinBoard authorization store this reads was captured on iOS only; on an Apple TV
+    // simulator `simctl push` was captured delivering without it (#17526), so tvOS skips the check.
+    if (this.device.platform === "tvos") {
+      return undefined;
+    }
     const iosMajor = parseIosMajorVersion(this.device.iosVersion ?? this.device.osVersion);
     if (iosMajor !== null && iosMajor < 27) {
       const reader = this.notificationAuthorization ?? defaultBulletinBoardReader();

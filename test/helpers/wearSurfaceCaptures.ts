@@ -2,9 +2,23 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { parseStringPromise } from "xml2js";
 import type { ObserveResult, ViewHierarchyResult } from "../../src/models";
+import { buildObserveResult } from "./observeFixture";
 
 const fixtures = path.join(import.meta.dir, "../fixtures/wear");
 const fixture = (name: string) => readFileSync(path.join(fixtures, name), "utf8");
+
+/** Full-projection captures contain just the foreground window and hierarchy. */
+export function capturedSurfaceObservation(name: "tile-showing" | "app-in-front"): ObserveResult {
+  const capture: Pick<ObserveResult, "activeWindow" | "viewHierarchy"> = JSON.parse(
+    fixture(`surface/observe-full-${name}.json`),
+  );
+  return buildObserveResult({
+    updatedAt: 0,
+    screenSize: { width: 454, height: 454 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    ...capture,
+  });
+}
 
 /** Preserve captured output between an exact command separator and its completion line. */
 export function capturedBroadcast(file: string, args?: string): string {
@@ -78,4 +92,42 @@ export function capturedRuns(
 /** A whole raw `dumpsys wear_service` capture (Offhand active, favorite 1). */
 export function capturedWearService(name = "interactive-watch-face.txt"): string {
   return fixture(`wear-service/${name}`);
+}
+
+const ACTIVE_LINE = /^activeWatchFaceComponent=WatchFaceId\[([^,\]]+),null\]/m;
+const FAVORITE_LINE = /favoriteId=(\d+)/;
+const CONFIG_LINE = /^\s*id=\d+ slot=(\d+) .*$/m;
+
+/**
+ * The #17520 captures grepped only the changed lines out of each `dumpsys wear_service`
+ * readback. Splice them into the whole Offhand capture so `parseWatchFaces` reads them in place:
+ * an active-face excerpt replaces the active component (and its favorite id, which an excerpt
+ * without one drops), and a live config excerpt replaces that slot's config line.
+ */
+export function capturedReadback(excerpt: string): string {
+  let dumpsys = capturedWearService();
+  const face = ACTIVE_LINE.exec(excerpt);
+  if (face) {
+    const favorite = FAVORITE_LINE.exec(excerpt)?.[1];
+    dumpsys = dumpsys
+      .replace(
+        /^activeWatchFaceComponent=.*$/m,
+        `activeWatchFaceComponent=WatchFaceId[${face[1]},null]`,
+      )
+      .replace(/^favoriteId=\d+\n/m, favorite === undefined ? "" : `favoriteId=${favorite}\n`);
+    if (favorite !== undefined) {
+      dumpsys = dumpsys.replace(
+        /mWatchFaceId=WatchFaceId\[[^\]]*\], mFavoriteId=\d+/,
+        `mWatchFaceId=WatchFaceId[${face[1]},null], mFavoriteId=${favorite}`,
+      );
+    }
+  }
+  const config = CONFIG_LINE.exec(excerpt);
+  if (config) {
+    dumpsys = dumpsys.replace(
+      new RegExp(String.raw`^\s*id=\d+ slot=${config[1]} .*$`, "m"),
+      config[0],
+    );
+  }
+  return dumpsys;
 }

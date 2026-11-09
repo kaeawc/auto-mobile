@@ -302,12 +302,13 @@ enable the default-off `accessibility` tool for the current MCP connection:
 Call `accessibility` with `talkback: true` on Android or `voiceover: true` on
 iOS, run the flow, and disable it afterward. Enabling TalkBack may leave a system
 runtime permission prompt covering the screen, sometimes a few seconds after the
-setting changes. The call waits up to 4 seconds for one, ending sooner once the
+setting changes. The call waits up to 4 seconds for a system prompt, ending sooner once the
 screen is stable and TalkBack has no runtime permission left to request, and reports it through
-`warning` and `blockingPrompt` (`kind`, `package`, `activity`) when detected;
-AutoMobile does not dismiss it. Use `observe` to inspect it, then `tapOn` to
-answer the allow or deny button, or set a `systemAlerts` policy to answer
-permission prompts around each interaction. On Android, when `sendKeys` cannot
+`warning` and `blockingPrompt` (`kind`, `package`, `activity`) when detected:
+`runtime-permission` for a permission prompt (TalkBack's own or another app's) and
+`system-dialog` for a SystemUI or framework dialog activity. AutoMobile does not dismiss it.
+Use `observe` to inspect it, then `tapOn` to answer the allow or deny button (or dismiss the
+dialog), or set a `systemAlerts` policy to answer permission prompts around each interaction. On Android, when `sendKeys` cannot
 focus its field because a system window (permission prompt, SystemUI or
 framework dialog) holds focus over the app, the failure reports that window in
 `blockingPrompt` (`kind`, `package`) and says to dismiss it rather than scroll. The default-off debug tool
@@ -325,7 +326,9 @@ TalkBack focus and double tap at the owner's center. Success does not prove the
 intended control responded, so the result's `warnings` flag two cases: the
 activated element's bounds do not contain the matched element's bounds (a
 different control may have been activated; not reported for `action: "focus"`),
-and the tap or double tap reported success but the screen did not change. Each
+and the tap or double tap reported success but the screen did not change (moving
+TalkBack focus counts as a change; not reported for `action: "focus"` once the
+field's focus is verified). Each
 warning names the elements and gives the matched element's center. Call
 `observe`; if the intended control did not respond, call `tapAt` at that center.
 Check text alternatives, content descriptions or accessibility labels,

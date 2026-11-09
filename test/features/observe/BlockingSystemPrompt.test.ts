@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  blockingPromptForForegroundActivity,
   blockingSystemPromptHint,
   blockingSystemPromptIn,
   isRuntimePermissionPrompt,
@@ -123,5 +124,40 @@ describe("isRuntimePermissionPrompt", () => {
       }),
     ).toBe(true);
     expect(isRuntimePermissionPrompt({ packageName: APP, activityName: GRANT })).toBe(false);
+  });
+});
+
+type ForegroundCase = [
+  packageName: string,
+  activityName: string | undefined,
+  expected: ReturnType<typeof blockingPromptForForegroundActivity>,
+];
+
+describe("blockingPromptForForegroundActivity", () => {
+  const RESOLVER = "com.android.internal.app.ResolverActivity";
+  const USB = "com.android.systemui.usb.UsbPermissionActivity";
+  const MANAGE = "com.google.android.permissioncontroller.ManagePermissionsActivity";
+  const cases: ForegroundCase[] = [
+    [
+      "com.google.android.permissioncontroller",
+      GRANT,
+      {
+        kind: "runtime-permission",
+        package: "com.google.android.permissioncontroller",
+        activity: GRANT,
+      },
+    ],
+    ["android", RESOLVER, { kind: "system-dialog", package: "android", activity: RESOLVER }],
+    [
+      "com.android.systemui",
+      USB,
+      { kind: "system-dialog", package: "com.android.systemui", activity: USB },
+    ],
+    [APP, `${APP}.MainActivity`, undefined],
+    ["com.google.android.permissioncontroller", MANAGE, undefined],
+    ["android", undefined, undefined],
+  ];
+  test.each(cases)("%s/%s classifies as %p", (packageName, activityName, expected) => {
+    expect(blockingPromptForForegroundActivity({ packageName, activityName })).toEqual(expected);
   });
 });

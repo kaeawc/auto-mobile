@@ -542,6 +542,79 @@ describe("TalkBackToggle", () => {
       }
     });
 
+    test("another app's permission prompt in a window that could end early is still reported (#17693)", async () => {
+      stubNotificationPermission("granted=true, flags=[ USER_SET ]");
+      fakeDetector.enqueueDetectMethodResults("unknown", "talkback", "talkback");
+      const foreground = spyOn(fakeAdb, "getForegroundApp");
+      // The immediate read, then one poll; the prompt lands before a second stable read.
+      foreground.mockResolvedValueOnce(HOME).mockResolvedValueOnce(HOME);
+      foreground.mockResolvedValue(PROMPT);
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const result = await settled().toggle(true);
+        expect(result.blockingPrompt).toEqual({
+          kind: "runtime-permission",
+          package: PROMPT.packageName,
+          activity: PROMPT.activityName,
+        });
+        // TalkBack has nothing left to request, so the warning does not call it TalkBack's.
+        expect(result.warning).toContain("another app raised it");
+        expect(result.warning).not.toContain("Android Accessibility Suite");
+        expect(fakeTimer.getSleepHistory()).toEqual([500, 500]);
+      } finally {
+        foreground.mockRestore();
+        warn.mockRestore();
+      }
+    });
+
+    test.each([
+      ["android", "com.android.internal.app.ResolverActivity"],
+      [
+        "com.android.systemui",
+        "com.android.systemui.mediaprojection.MediaProjectionPermissionActivity",
+      ],
+    ])(
+      "a %s dialog activity is reported as a system-dialog, not a stable screen (#17693)",
+      async (packageName, activityName) => {
+        stubNotificationPermission("granted=true, flags=[ USER_SET ]");
+        fakeDetector.enqueueDetectMethodResults("unknown", "talkback", "talkback");
+        const foreground = spyOn(fakeAdb, "getForegroundApp");
+        foreground.mockResolvedValueOnce(HOME);
+        // Repeated identical reads would otherwise end the window as a stable screen.
+        foreground.mockResolvedValue({ packageName, userId: 0, activityName });
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          const result = await settled().toggle(true);
+          expect(result).toMatchObject({
+            applied: true,
+            blockingPrompt: { kind: "system-dialog", package: packageName, activity: activityName },
+            warning: expect.stringContaining("pressButton back"),
+          });
+          expect(fakeTimer.getSleepHistory()).toEqual([500]);
+          expect(fakeAdb.getCommandCalls().filter((c) => c.command.includes("input"))).toEqual([]);
+        } finally {
+          foreground.mockRestore();
+          warn.mockRestore();
+        }
+      },
+    );
+
+    test("a pending TalkBack permission keeps the TalkBack prompt warning", async () => {
+      stubNotificationPermission("granted=false, flags=[ ]");
+      fakeDetector.enqueueDetectMethodResults("unknown", "talkback", "talkback");
+      const foreground = spyOn(fakeAdb, "getForegroundApp");
+      foreground.mockResolvedValueOnce(HOME);
+      foreground.mockResolvedValue(PROMPT);
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const result = await settled().toggle(true);
+        expect(result.warning).toContain("Android Accessibility Suite");
+      } finally {
+        foreground.mockRestore();
+        warn.mockRestore();
+      }
+    });
+
     test("an unreadable permission state keeps the full window", async () => {
       fakeAdb.setCommandResponse(
         "dumpsys package com.google.android.marvin.talkback",

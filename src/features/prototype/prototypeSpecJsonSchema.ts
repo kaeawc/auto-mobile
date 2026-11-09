@@ -1,6 +1,7 @@
 import { z as specZ, type ZodTypeAny } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { ENV, readEnvBool } from "../../config/env";
+import { enforceAnthropicToolSchemaSubset } from "../../utils/schemaHelpers";
 import { MAX_PROTOTYPE_COMPONENT_DEPTH } from "./prototypeComponents";
 import { prototypeSpecSchema } from "./prototypeSpec";
 import { PROTOTYPE_SPEC_SCHEMA_URI } from "./prototypeGuide";
@@ -120,6 +121,19 @@ export function fullAdvertisedSpecSchema(): JsonObject {
   const inline = structuredClone(prototypeSpecJsonSchema());
   rehomeReferences(inline, "#/properties/spec");
   delete inline.$schema;
+  return inline;
+}
+
+/**
+ * A prototype tool input schema with the full spec schema inlined at `spec`, built from either
+ * advertised form. The `spec` description and every other field are kept, and the result gets the
+ * input-schema normalization the live registry applies (drops empty branches). Returns a copy.
+ */
+export function withFullAdvertisedSpecSchema(inputSchema: JsonObject): JsonObject {
+  const inline = structuredClone(inputSchema);
+  const properties = inline.properties as Record<string, JsonObject>;
+  properties.spec = { description: properties.spec?.description, ...fullAdvertisedSpecSchema() };
+  enforceAnthropicToolSchemaSubset(inline);
   return inline;
 }
 

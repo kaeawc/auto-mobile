@@ -7,6 +7,7 @@ export class InMemoryToolSelectionProfileRegistry implements ToolSelectionProfil
   // a replacement daemon must not inherit presentation state from old clients.
   private readonly toolResultsNoStructuredContent = new Map<string, boolean>();
   private readonly actionsCompactMetadata = new Map<string, boolean>();
+  private readonly prototypeFullSchema = new Map<string, boolean>();
 
   record(profileUuid: string): void {
     if (profileUuid.trim().length > 0) {
@@ -39,5 +40,17 @@ export class InMemoryToolSelectionProfileRegistry implements ToolSelectionProfil
 
   getActionsCompactMetadata(profileUuid: string): boolean | undefined {
     return this.actionsCompactMetadata.get(profileUuid);
+  }
+
+  // A changed request changes what this connection's tools/list advertises.
+  setPrototypeFullSchema(profileUuid: string, enabled: boolean): void {
+    if (profileUuid.trim().length > 0 && this.prototypeFullSchema.get(profileUuid) !== enabled) {
+      this.prototypeFullSchema.set(profileUuid, enabled);
+      ListChangedBroadcaster.emit("tools");
+    }
+  }
+
+  getPrototypeFullSchema(profileUuid: string): boolean | undefined {
+    return this.prototypeFullSchema.get(profileUuid);
   }
 }

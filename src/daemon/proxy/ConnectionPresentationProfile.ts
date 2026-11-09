@@ -2,6 +2,7 @@ import type { DaemonClientLike } from "../client/client";
 import { DaemonUnavailableError } from "../client/client";
 import {
   INTERNAL_ACTIONS_COMPACT_METADATA_PARAM,
+  INTERNAL_PROTOTYPE_FULL_SCHEMA_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
 } from "../wire/constants";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../../features/toolSelection/toolSelectionControl";
@@ -13,6 +14,11 @@ export interface ConnectionPresentationOptions {
   disabledTools?: string[];
   toolResultsNoStructuredContent?: boolean;
   actionsCompactMetadata?: boolean;
+  /**
+   * `true` when this client asked for the full prototype spec schema (#17723). Only `true` is
+   * forwarded: absence is no preference, so the daemon's own default applies.
+   */
+  prototypeFullSchema?: boolean;
 }
 
 /**
@@ -41,12 +47,14 @@ export function connectionPresentationUpdates(
   disabledTools: string[],
   toolResultsNoStructuredContent: boolean | undefined,
   actionsCompactMetadata: boolean | undefined,
+  prototypeFullSchema?: boolean,
 ): PresentationUpdate[] {
   if (
     enabledTools.length === 0 &&
     disabledTools.length === 0 &&
     toolResultsNoStructuredContent === undefined &&
-    actionsCompactMetadata === undefined
+    actionsCompactMetadata === undefined &&
+    prototypeFullSchema !== true
   ) {
     return [];
   }
@@ -84,12 +92,14 @@ export async function applyConnectionPresentationProfile(
     disabledTools = [],
     toolResultsNoStructuredContent,
     actionsCompactMetadata,
+    prototypeFullSchema,
   } = options ?? {};
   const updates = connectionPresentationUpdates(
     enabledTools,
     disabledTools,
     toolResultsNoStructuredContent,
     actionsCompactMetadata,
+    prototypeFullSchema,
   );
 
   for (const update of updates) {
@@ -103,6 +113,7 @@ export async function applyConnectionPresentationProfile(
       ...(actionsCompactMetadata !== undefined
         ? { [INTERNAL_ACTIONS_COMPACT_METADATA_PARAM]: actionsCompactMetadata }
         : {}),
+      ...(prototypeFullSchema === true ? { [INTERNAL_PROTOTYPE_FULL_SCHEMA_PARAM]: true } : {}),
     };
     const forwardedArgs = port.withToolSelectionProfile(requestedArgs);
     const result = await runPreflightTransport(() =>

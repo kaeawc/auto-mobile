@@ -19,6 +19,8 @@ import {
 import { livenessResumedNotice } from "../proxyLivenessRecovery";
 import {
   getConnectedStaticToolDefinitions,
+  envPrototypeFullSchemaFlag,
+  type PrototypeFullSchemaFlag,
   staticToolDeclaresHostInventory,
 } from "../staticToolDefinitions";
 import { type DaemonOptions, type DaemonStatus } from "../types";
@@ -218,6 +220,11 @@ export interface DaemonMcpProxyConfig {
     daemonOptions?: DaemonOptions,
   ) => ProxiedToolDefinition[];
   /**
+   * This client's `AUTOMOBILE_PROTOTYPE_FULL_SCHEMA`, forwarded on the connection profile so the
+   * daemon's `tools/list` for this connection honours it (#17723). Defaults to the env flag.
+   */
+  prototypeFullSchemaFlag?: PrototypeFullSchemaFlag;
+  /**
    * Private live-acceptance configuration. It is set only while constructing
    * the dedicated harness proxy; MCP tool callers cannot set it.
    *
@@ -261,6 +268,17 @@ export function connectedStaticToolDefinitionsProvider(
     config.staticToolDefinitionsProvider ??
     getConnectedStaticToolDefinitions
   );
+}
+
+/** The connection presentation options this proxy materializes on its daemon profile. */
+export function connectionPresentationOptions(config: DaemonMcpProxyConfig): DaemonOptions & {
+  prototypeFullSchema?: boolean;
+} {
+  const flag = config.prototypeFullSchemaFlag ?? envPrototypeFullSchemaFlag;
+  return {
+    ...config.daemonOptions,
+    ...(flag.isEnabled() ? { prototypeFullSchema: true } : {}),
+  };
 }
 
 export function daemonAvailabilityProbe(

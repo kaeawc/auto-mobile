@@ -123,8 +123,13 @@ definition. `tools/list` therefore advertises a terse `spec`: the top-level fiel
 the required list, `additionalProperties: false` and the root node type names, with no `$ref` or
 `$defs`, because strict clients reject references in tool input schemas. The full schema is the
 `automobile:prototype/spec-schema` resource (a standalone draft-07 document whose recursive `$ref`s point
-at its own root), built on first read. `AUTOMOBILE_PROTOTYPE_FULL_SCHEMA=1` inlines that schema in `spec`, both in the daemon's list and in the proxy's cold list built from `schemas/tool-definitions.json`,
-instead, with its references rebased to `#/properties/spec`. Either way the server
+at its own root), built on first read. `AUTOMOBILE_PROTOTYPE_FULL_SCHEMA=1` inlines that schema in `spec`
+instead, with its references rebased to `#/properties/spec`. The proxy reads the flag for its cold list
+built from `schemas/tool-definitions.json` and sends `true` on its connection presentation profile
+(`__autoMobilePrototypeFullSchema` on the profile's `setToolEnabled` write), so the daemon inlines the
+schema in that connection's `tools/list` even when the daemon process itself runs without the flag. The
+daemon's own flag sets the default for every connection; a client cannot opt a flagged daemon back to
+the terse form, because only `true` is forwarded and absence means no preference. Either way the server
 validates with `validatePrototypeSpec`, so the advertised form never changes what is accepted.
 Per-action tools would not shrink the definition: `show`, `save`, `share` and `screenMap` take the whole
 spec, and `patch` `replaceNode` takes any node, so each would carry the same node schema. The

@@ -430,6 +430,12 @@ export const INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM =
 export const INTERNAL_ACTIONS_COMPACT_METADATA_PARAM = "__autoMobileActionsCompactMetadata";
 
 /**
+ * Loopback-only request for the full prototype spec schema in this connection's `tools/list`
+ * (`AUTOMOBILE_PROTOTYPE_FULL_SCHEMA` set on the client, #17723), applied to the connection profile.
+ */
+export const INTERNAL_PROTOTYPE_FULL_SCHEMA_PARAM = "__autoMobilePrototypeFullSchema";
+
+/**
  * Socket RPC field identifying a session UUID injected from a connection-bound
  * route rather than explicitly selected by the caller.
  */
@@ -506,6 +512,7 @@ export const INTERNAL_TOOL_PARAM_NAMES = [
   INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
   INTERNAL_ACTIONS_COMPACT_METADATA_PARAM,
+  INTERNAL_PROTOTYPE_FULL_SCHEMA_PARAM,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   DAEMON_NON_FINITE_ENCODED_PARAM,
   INTERNAL_NO_DIFF_PARAM,

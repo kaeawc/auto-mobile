@@ -33,7 +33,11 @@ import {
   type DaemonNotification,
   type DaemonStatus,
 } from "../types";
-import { DaemonMcpProxyCloseOptions, DaemonMcpProxyConfig } from "./ProxyContracts";
+import {
+  connectionPresentationOptions,
+  DaemonMcpProxyCloseOptions,
+  DaemonMcpProxyConfig,
+} from "./ProxyContracts";
 import type { ProxyRuntime } from "./ProxyRuntime";
 /** Operations supplied by the proxy's composition root. */
 export interface ProxyConnectionPort {
@@ -601,11 +605,15 @@ export class ProxyConnection {
   }
 
   applyConnectionPresentationProfile(client: DaemonClientLike): Promise<void> {
-    return applyConnectionPresentationProfile(client, this.runtime.config.daemonOptions, {
-      withToolSelectionProfile: (args) => this.port.withToolSelectionProfile(args),
-      rememberToolSelectionProfile: (...args) => this.port.rememberToolSelectionProfile(...args),
-      hasToolSelectionProfile: () => Boolean(this.runtime.toolSelectionProfileUuid),
-    });
+    return applyConnectionPresentationProfile(
+      client,
+      connectionPresentationOptions(this.runtime.config),
+      {
+        withToolSelectionProfile: (args) => this.port.withToolSelectionProfile(args),
+        rememberToolSelectionProfile: (...args) => this.port.rememberToolSelectionProfile(...args),
+        hasToolSelectionProfile: () => Boolean(this.runtime.toolSelectionProfileUuid),
+      },
+    );
   }
 
   createStatusProbe(config: DaemonMcpProxyConfig): (() => Promise<DaemonStatus>) | undefined {

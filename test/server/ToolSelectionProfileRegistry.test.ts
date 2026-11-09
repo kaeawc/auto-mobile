@@ -37,6 +37,19 @@ describe("InMemoryToolSelectionProfileRegistry (#6148)", () => {
       expect(registry.getToolResultsNoStructuredContent("profile-a")).toBe(true);
     }
   });
+  test("full prototype schema requests are per profile and live-only (#17723)", () => {
+    for (const registry of [
+      new InMemoryToolSelectionProfileRegistry(),
+      new PersistentToolSelectionProfileRegistry(new FakeToolSelectionProfileProvenanceStore()),
+    ]) {
+      registry.setPrototypeFullSchema("profile-a", true);
+      registry.setPrototypeFullSchema(" ", true);
+      expect(registry.getPrototypeFullSchema("profile-a")).toBe(true);
+      expect(registry.getPrototypeFullSchema("profile-b")).toBeUndefined();
+      expect(registry.getPrototypeFullSchema(" ")).toBeUndefined();
+      expect(registry.getToolResultsNoStructuredContent("profile-a")).toBeUndefined();
+    }
+  });
   test("recognizes a recorded uuid", () => {
     const registry = new InMemoryToolSelectionProfileRegistry();
     registry.record("minted-uuid");

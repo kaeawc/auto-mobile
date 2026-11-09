@@ -20,7 +20,7 @@ export interface FatalHandlerLogger {
  * We therefore log with full context and keep the daemon alive (issue #3408),
  * following the repo's log-then-continue convention for genuinely-unexpected
  * background failures. This is intentionally scoped to daemon mode; short-lived
- * CLI/proxy processes keep their own fail-fast handler (`src/index.ts`).
+ * CLI/proxy processes keep their own fail-fast handler (`src/startup/serverEntry.ts`).
  */
 export function createDaemonFatalProcessHandler(logger: FatalHandlerLogger): FatalProcessHandler {
   return (event: FatalProcessEvent) => {

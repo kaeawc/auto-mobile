@@ -9,7 +9,8 @@ import {
   parseSource,
   swapNodes,
 } from "../helpers/entrypointOrder";
-const entrypointSource = readFileSync("src/index.ts", "utf8");
+// main() lives in the server entry src/index.ts dynamically imports, so `--version` skips it (#17684).
+const entrypointSource = readFileSync("src/startup/serverEntry.ts", "utf8");
 const serverModulesSource = readFileSync("src/startup/serverModules.ts", "utf8");
 const fullDaemonSource = readFileSync("src/daemon/daemonCore/DaemonStartup.ts", "utf8");
 

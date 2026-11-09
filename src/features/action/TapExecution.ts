@@ -156,7 +156,7 @@ interface TapExecutionState {
   ensureCheckedTapTimestamp?: number;
   completedDisplayGesture: boolean;
   settlePostTapEffect?: boolean;
-  /** The match a TalkBack ACTION_CLICK claimed to activate; warn if nothing changed (#17667). */
+  /** The match a TalkBack tap claimed to activate; warn if nothing changed (#17667, #17677). */
   screenReaderActivation?: { matched?: Element };
 }
 interface TapHierarchyState {
@@ -279,7 +279,9 @@ export class TapExecution {
       return this.host.unverifiableDisplayPostState(result, options);
     }
 
+    let effectDerived = false;
     if (result.success && result.observation && result.element) {
+      effectDerived = true;
       const postTap = await this.host.deriveTapEffectAfterPostTapObservation(
         state.previousObserveResult,
         result.observation,
@@ -287,7 +289,6 @@ export class TapExecution {
         { settlePostTapEffect: state.settlePostTapEffect },
       );
       result.effect = postTap.effect;
-      appendNoChangeWarning(result, state.screenReaderActivation);
       // The observation that established the effect must be returned and become
       // the caller's diff baseline, rather than the earlier source capture.
       result.observation = postTap.observation;
@@ -318,6 +319,11 @@ export class TapExecution {
       preTapHierarchy: state.preTapHierarchy,
       signal,
     });
+    // A focus request's intended effect is focus: once verified, an unchanged screen is no sign
+    // the activation failed (#17693).
+    if (effectDerived && (requestedAction !== "focus" || result.focusVerified !== true)) {
+      appendNoChangeWarning(result, state.screenReaderActivation);
+    }
 
     if (state.effectiveAction === "longPress") {
       const metadata = this.host.detectLongPressMetadata(
@@ -866,7 +872,7 @@ export class TapExecution {
                 Object.assign(tapPoint, this.host.geometry().getElementCenter(current));
               },
               onActivationWarning: (warning) => target.activationWarnings.push(warning),
-              onSemanticActivation: () => {
+              onTalkBackActivation: () => {
                 state.screenReaderActivation = { matched: target.finalSelection.matchedElement };
               },
             },

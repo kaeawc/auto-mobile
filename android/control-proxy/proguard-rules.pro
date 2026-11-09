@@ -6,8 +6,8 @@
 # build/outputs/mapping/release/mapping.txt. Retain annotations and generic/nested-class metadata.
 -keepattributes SourceFile,LineNumberTable,*Annotation*,InnerClasses,EnclosingMethod,Signature
 
-# Prototype icons are resolved by name through reflection (PrototypeIcons.kt).
--keep class androidx.compose.material.icons.** { *; }
+# PrototypeIcons.kt reflects only contract enum names. generateReleasePrototypeIconRules supplies
+# per-class getter rules from schemas/prototype-spec-contract.json to the release R8 inputs.
 
 # Wire models span CtrlProxy, protocol and SDK; preserve their serialization contracts.
 -keep @kotlinx.serialization.Serializable class dev.jasonpearson.automobile.** { *; }

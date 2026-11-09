@@ -1,9 +1,18 @@
 {
-  "version": "2.0.0",
+  "version": "3.0.0",
   "metadata": {
-    "generatedAt": "2026-07-30",
-    "description": "Canonical context baselines after core tools became the default profile. The benchmark instantiates the production MCP server, measures the core profile (tools without an opt-in capability) and the complete advertised tool surface, then includes the resources and resource templates shared by both profiles. Thresholds are intentionally omitted until these two baselines have been reviewed.",
+    "generatedAt": "2026-11-09",
+    "description": "Canonical context baselines, counted in cl100k tokens of compact JSON (the form clients receive in tools/list). The benchmark instantiates the production MCP server, measures the core profile (tools without an opt-in capability) and the complete advertised tool surface, then includes the resources and resource templates shared by both profiles. prettyBaseline keeps the 2026-07-30 pretty-printed (2-space) counts for historical comparison only; it is never gated. Thresholds are intentionally omitted until these baselines have been reviewed; any added later are compact-JSON counts.",
+    "tokenEncoding": "compact-json",
     "baseline": {
+      "coreTools": 20072,
+      "allTools": 137912,
+      "resources": 1341,
+      "resourceTemplates": 4072,
+      "coreTotal": 25485,
+      "allTotal": 143325
+    },
+    "prettyBaseline": {
       "coreTools": 8465,
       "allTools": 26184,
       "resources": 1259,

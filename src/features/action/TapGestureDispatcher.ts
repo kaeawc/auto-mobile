@@ -59,13 +59,17 @@ import {
 import type { TapOnCtrlProxy } from "./tapHierarchyRead";
 import { TapTargetResolver } from "./TapTargetResolver";
 
-/** Tell the caller a TalkBack accessibility action claimed success, so it can check the effect. */
-function reportSemanticActivation(
-  result: Pick<TalkBackTapResult, "success" | "method">,
-  options: Pick<ResolvedAndroidTapOptions, "onSemanticActivation"> | undefined,
+/**
+ * Tell the caller a TalkBack tap or double tap claimed success, so it can check the effect. Both an
+ * accessibility action and a coordinate gesture count: neither proves the control was activated.
+ */
+function reportTalkBackActivation(
+  result: Pick<TalkBackTapResult, "success">,
+  options: Pick<ResolvedAndroidTapOptions, "onTalkBackActivation"> | undefined,
+  action: string,
 ): void {
-  if (result.success && result.method === "accessibility-action") {
-    options?.onSemanticActivation?.();
+  if (result.success && action !== "longPress") {
+    options?.onTalkBackActivation?.();
   }
 }
 
@@ -77,10 +81,11 @@ export type ResolvedAndroidTapOptions = DisplayFenceOption & {
   /** Receives non-fatal cautions (for example a double tap whose taps started too far apart). */
   onActivationWarning?: (warning: string) => void;
   /**
-   * Called when a TalkBack accessibility action (ACTION_CLICK) reported success. The reply only
-   * proves the node accepted the action, so the caller checks the screen changed (#17667).
+   * Called when a TalkBack tap or double tap reported success, whether by accessibility action
+   * (ACTION_CLICK) or by a coordinate gesture. Success only proves the node accepted the action or
+   * the gesture was dispatched, so the caller checks the screen changed (#17667, #17677).
    */
-  onSemanticActivation?: () => void;
+  onTalkBackActivation?: () => void;
   onResolvedElement?: (
     element: Element,
     selection?: ElementSelectionResult,
@@ -195,6 +200,7 @@ export class TapGestureDispatcher {
         talkBackEnabled,
         fence,
         onActivationWarning: options?.onActivationWarning,
+        onTalkBackActivation: options?.onTalkBackActivation,
       });
       return undefined;
     }
@@ -240,6 +246,7 @@ export class TapGestureDispatcher {
     talkBackEnabled: boolean;
     fence?: DisplayFence;
     onActivationWarning?: (warning: string) => void;
+    onTalkBackActivation?: () => void;
   }): Promise<void> {
     const { action, x, y, durationMs, element, signal, talkBackEnabled, fence } = context;
     // Native resource-ID activation is global. Bind new scoped/unique calls to
@@ -258,6 +265,7 @@ export class TapGestureDispatcher {
                 { driver, fenceOptions: { displayFence: fence } },
               );
       if (result.success) {
+        reportTalkBackActivation(result, context, action);
         this.host.reportTalkBackActivationWarning(result, context, action);
         return;
       }
@@ -736,7 +744,7 @@ export class TapGestureDispatcher {
         .executeTap(this.host.device().deviceId, element, driver, { fence, signal });
 
       if (result.success) {
-        reportSemanticActivation(result, options);
+        reportTalkBackActivation(result, options, action);
         // A focus-navigation gesture is acknowledged, not confirmed as an activation.
         this.host.reportTalkBackActivationWarning(result, options, action);
         return result.screenReaderNavigation;
@@ -756,7 +764,7 @@ export class TapGestureDispatcher {
         .executeDirectActivation(element, driver, targetContext);
 
       if (result.success) {
-        reportSemanticActivation(result, options);
+        reportTalkBackActivation(result, options, action);
         return undefined;
       }
 
@@ -812,6 +820,7 @@ export class TapGestureDispatcher {
         { displayFence: fence },
       );
     }
+    reportTalkBackActivation(fallbackResult, options, action);
     this.host.reportTalkBackActivationWarning(fallbackResult, options, action);
     return screenReaderNavigation;
   }

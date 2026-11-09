@@ -18,6 +18,7 @@ import {
   nodeCss,
   ROW_BOUND_KEY,
   ROW_MEASURE_KEY,
+  SAFE_INSET_KEY,
 } from "../../../../src/features/prototype/web/webStyle";
 
 const prepare = (entry: unknown) => record(entry);
@@ -419,4 +420,34 @@ test("a weighted child's padding and border are its flex base, which its share g
   expect(
     columnChildHeights([bordered({ width: 10, gradient: { colors: [] } }), weighted(1)], 100, 0),
   ).toEqual([50, 50]);
+});
+
+test("a node's safe-area inset is padding its content height leaves out (#16720)", () => {
+  const style = { height: { dp: 100 }, padding: { top: 4 }, [SAFE_INSET_KEY]: { top: 48 } };
+  expect(rowContentHeight(style)).toBe(48);
+  expect(rowContentHeight({ ...style, [SAFE_INSET_KEY]: { top: 48, bottom: 24 } })).toBe(24);
+  expect(rowContentHeight({ [INCOMING_HEIGHT_KEY]: 40, [SAFE_INSET_KEY]: { top: 48 } })).toBe(0);
+  // An exact weight allocation is padded by the inset too.
+  const share = { [INCOMING_HEIGHT_KEY]: 100, [INCOMING_ALLOCATED_KEY]: true };
+  expect(rowContentHeight({ ...share, [SAFE_INSET_KEY]: { bottom: 24 } })).toBe(76);
+});
+
+test("a weighted child's safe-area inset is part of the flex base its share grows from (#16720)", () => {
+  const inset = { type: "row", style: { weight: 1, [SAFE_INSET_KEY]: { top: 48 } } };
+  const plain = { type: "row", style: { weight: 3 } };
+  // 40 dp split 1:3 would give the inset child 10 dp, below its 48 dp base, so it keeps 48 dp.
+  expect(columnChildHeights([inset, plain], 40, 0)).toEqual([48, 0]);
+});
+
+test("a column's hidden or hoisted child takes no height or spacing gap (#16720)", () => {
+  expect(columnChildHeights([undefined, { style: { weight: 1 } }], 100, 8)).toEqual([
+    undefined,
+    100,
+  ]);
+});
+
+test("the safe-area inset hint never reaches the CSS (#16720)", () => {
+  const context = { mode: "light" as const, palette: new Map() };
+  const hinted = { [SAFE_INSET_KEY]: { top: 48, bottom: 24 } };
+  expect(nodeCss(hinted, context)).toEqual(nodeCss({}, context));
 });

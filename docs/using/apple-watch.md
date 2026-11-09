@@ -149,14 +149,18 @@ Every other tool refuses a watch before doing anything, with:
   `observe` between turns. A turn smaller than one step of the focused control (for example `0.1`
   on that control) may not register and fails like a rotation at the limit; when `delta` is
   between -1 and 1 the error says the turn may be too small. It is not listed by default; enable it with `setToolEnabled` (see
-  [Dynamic Tools](dynamic-tools.md)). When the view hierarchy is
-  identical before and after a rotation, it may touch an unoccupied interior point to wake crown
-  routing, avoiding navigation and controls. It retries once only when the same focused control's
-  accessible value is also unchanged and the wake leaves the screen and focus unchanged. Without
-  a safe touch point or a comparable value, or if the retry still changes nothing, it fails with an
-  error. A wake without a retry prepares routing for the next command. No view may hold crown focus,
-  or the content may already be at its limit. Tap the view that should receive the crown, then observe
-  before trying again: a change that is not accessible may already have taken effect.
+  [Dynamic Tools](dynamic-tools.md)). When the same focused control has a readable accessible value
+  before and after a rotation, that value must change for verification to succeed; changes elsewhere
+  on screen do not count. Otherwise, a hierarchy change can confirm the rotation. If no focused value
+  is readable, it may first touch an unoccupied interior point to wake crown routing, avoiding navigation
+  and controls, then let the screen settle before rotating. If a rotation changes nothing, it may wake
+  routing and retry once, but only when the same focused control's accessible value is unchanged and
+  the wake leaves the screen and focus unchanged. It does not repeat the turn or wake again when an
+  initial wake still leaves no readable focused value. Without a safe touch point or a comparable value,
+  or if the retry still changes nothing, it fails with an error. No view may hold crown focus, or the
+  content may already be at its limit. Tap the crown target (for example use `tapOn` with
+  `elementId: "ctrlproxy-crown"`), then retry `rotateCrown`. Observe first if an inaccessible change
+  may already have taken effect.
   Verification is skipped when a stable hierarchy cannot be read. `observe` after rotating to confirm
   the app responded.
 

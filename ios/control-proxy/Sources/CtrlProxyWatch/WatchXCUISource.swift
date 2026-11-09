@@ -364,6 +364,7 @@ func watchCrownWakePoint(in hierarchy: SdkViewHierarchy) -> CGVector? {
     return nil
 }
 
+/// A stable screen without a focused value can receive a neutral wake before rotation.
 /// An unchanged tree alone cannot justify repeating a delta. Retry only when the same focused
 /// accessible value is unchanged, and the safe wake has not changed the screen or focused control.
 /// Missing snapshots skip verification because the rotation may already have taken effect.
@@ -395,21 +396,32 @@ func watchVerifiedCrownRotation(
     )
         -> Bool
     {
-        watchCrownChangedHierarchy(before: before.hierarchy, after: after.hierarchy)
+        if let old = before.value, let new = after.value,
+           old.elementType == new.elementType, old.identifier == new.identifier
+        { return old.value != new.value }
+        return watchCrownChangedHierarchy(before: before.hierarchy, after: after.hierarchy)
             || (before.value != nil && after.value != nil && before.value != after.value)
     }
     func unchanged() -> WatchCommandError {
         .commandFailed(
-            "rotateCrown changed nothing the accessibility tree shows. A safe retry requires an unchanged "
+            "rotateCrown changed nothing verifiable. A safe retry requires an unchanged "
                 + "focused accessibility value and a neutral wake point. No view may hold crown focus, or "
-                + "the scrolled content is already at its limit. Tap the view that should receive the crown, "
-                + "then observe before trying again."
+                + "the scrolled content is already at its limit. Tap the crown target (for example "
+                + "tapOn ctrlproxy-crown), then retry rotateCrown."
         )
     }
 
-    let before = baseline()
+    var before = baseline()
+    var proactivelyWoke = false
+    if let initial = before, initial.value == nil, let point = watchCrownWakePoint(in: initial.hierarchy) {
+        try wake(point)
+        proactivelyWoke = true
+        before = baseline()
+    }
     try rotate()
     guard let before, let after = try? observation(), !changed(before, after) else { return }
+    // A cold wake already prepared routing; without comparable values, never repeat this delta.
+    if proactivelyWoke, before.value == nil || after.value == nil { throw unchanged() }
     guard let point = watchCrownWakePoint(in: before.hierarchy) else { throw unchanged() }
 
     try wake(point)

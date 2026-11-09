@@ -159,7 +159,10 @@ final class WatchCommandHandlerTests: XCTestCase {
     }
 
     func testAllowlistContainsExactlySupportedCommands() {
-        XCTAssertEqual(WatchCommandHandler.supportedCommands, ["hierarchy", "tap", "swipe", "home", "crown", "type", "face"])
+        XCTAssertEqual(
+            WatchCommandHandler.supportedCommands,
+            ["hierarchy", "tap", "swipe", "home", "crown", "type", "face"]
+        )
     }
 
     func testFaceOperationsAndDumpText() throws {
@@ -347,7 +350,10 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertFalse(response.success)
         XCTAssertEqual(response.requestId, "c")
         XCTAssertEqual(response.errorCode, "command_failed")
-        XCTAssertTrue(response.error?.contains("changed nothing") == true)
+        XCTAssertTrue(response.error?.hasPrefix("rotateCrown changed nothing") == true)
+        XCTAssertTrue(response.error?.hasSuffix(
+            "Tap the crown target (for example tapOn ctrlproxy-crown), then retry rotateCrown."
+        ) == true)
         XCTAssertEqual(source.rotations, 2)
         XCTAssertEqual(source.taps, 1)
         XCTAssertEqual(source.events, [
@@ -356,8 +362,9 @@ final class WatchCommandHandlerTests: XCTestCase {
         ])
     }
 
-    func testChangedHierarchyAfterCrownSucceeds() {
+    func testWarmCrownValueChangeSucceedsWithoutWake() {
         let source = ScriptedCrownSource(labels: ["crown 0", "crown 0", "crown 8"])
+        source.focusedValues = [crownValue("0"), crownValue("0"), crownValue("8")]
         let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
         let response = handler.handle(Data(#"{"type":"crown","requestId":"c","delta":2}"#.utf8))
         XCTAssertTrue(response.success)
@@ -367,11 +374,88 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertEqual(source.events, ["snapshot:crown 0", "snapshot:crown 0", "rotate", "snapshot:crown 8"])
     }
 
+    func testCrownRejectsTreeChangeWhenSameFocusedControlValueIsUnchanged() {
+        for frame in [CGRect(x: 10, y: 10, width: 20, height: 20), CGRect(x: 10, y: 30, width: 20, height: 20)] {
+            let source = ScriptedCrownSource(labels: ["before", "before", "shifted", "shifted", "shifted", "shifted"])
+            source.focusedValues = [
+                crownValue("0"), crownValue("0"), crownValue("0", frame: frame),
+                crownValue("0", frame: frame), crownValue("0", frame: frame), crownValue("0", frame: frame),
+            ]
+            let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+            let response = handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8))
+            XCTAssertFalse(response.success)
+            XCTAssertEqual(response.errorCode, "command_failed")
+            XCTAssertTrue(response.error?.hasPrefix("rotateCrown changed nothing") == true)
+        }
+    }
+
+    func testCrownAcceptsTreeChangeWithoutSameFocusedControl() {
+        let afterValues: [WatchCrownValue?] = [
+            nil, crownValue("0", identifier: "other"), crownValue("0", elementType: 34),
+        ]
+        for value in afterValues {
+            let source = ScriptedCrownSource(labels: ["before", "before", "after"])
+            source.focusedValues = [crownValue("0"), crownValue("0"), value]
+            let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+            XCTAssertTrue(handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8)).success)
+            XCTAssertEqual(source.rotations, 1)
+            XCTAssertEqual(source.taps, 0)
+        }
+    }
+
+    func testCrownWakesColdFocusBeforeFirstRotationAndStabilizesAfterTouch() {
+        let source = ScriptedCrownSource(labels: [
+            "launching", "before", "before", "touch settling", "ready", "ready", "scrolled",
+        ])
+        source.exposesFocusedValue = false
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        XCTAssertTrue(handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8)).success)
+        XCTAssertEqual(source.rotations, 1)
+        XCTAssertEqual(source.appliedDelta, 2)
+        XCTAssertEqual(source.taps, 1)
+        XCTAssertEqual(source.wakePoints.first?.dx, 0.5)
+        XCTAssertEqual(source.wakePoints.first?.dy, 0.5)
+        XCTAssertEqual(source.events, [
+            "snapshot:launching", "snapshot:before", "snapshot:before", "tap",
+            "snapshot:touch settling", "snapshot:ready", "snapshot:ready", "rotate", "snapshot:scrolled",
+        ])
+    }
+
+    func testCrownColdWakeFailureStopsBeforeRotating() {
+        let source = ScriptedCrownSource(labels: ["before", "before"])
+        source.exposesFocusedValue = false
+        source.wakeFails = true
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        let response = handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8))
+        XCTAssertFalse(response.success)
+        XCTAssertEqual(response.errorCode, "command_failed")
+        XCTAssertEqual(response.error, "Wake failed")
+        XCTAssertEqual(source.rotations, 0)
+        XCTAssertEqual(source.appliedDelta, 0)
+        XCTAssertEqual(source.taps, 1)
+        XCTAssertEqual(source.events, ["snapshot:before", "snapshot:before", "tap"])
+    }
+
+    func testCrownVerifiesFocusedValueAcquiredByColdWake() {
+        let source = ScriptedCrownSource(labels: Array(repeating: "unchanged", count: 5))
+        source.focusedValues = [nil, nil, crownValue("0"), crownValue("0"), crownValue("2")]
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        XCTAssertTrue(handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8)).success)
+        XCTAssertEqual(source.rotations, 1)
+        XCTAssertEqual(source.appliedDelta, 2)
+        XCTAssertEqual(source.taps, 1)
+        XCTAssertEqual(source.events, [
+            "snapshot:unchanged", "snapshot:unchanged", "tap", "snapshot:unchanged", "snapshot:unchanged",
+            "rotate", "snapshot:unchanged",
+        ])
+    }
+
     func testCrownStabilizesBaselineBeforeRotatingAndAfterTouch() {
         let source = ScriptedCrownSource(labels: [
             "launching", "crown 0", "crown 0", "crown 0",
             "touch settling", "crown 0", "crown 0", "crown 8",
         ])
+        source.focusedValues = Array(repeating: crownValue("0"), count: 7) + [crownValue("8")]
         let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
         let response = handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8))
         XCTAssertTrue(response.success)
@@ -388,6 +472,7 @@ final class WatchCommandHandlerTests: XCTestCase {
         let source = ScriptedCrownSource(labels: [
             "crown 0", "crown 0", "crown 0", "crown 0", "crown 0", "crown 8",
         ])
+        source.focusedValues = Array(repeating: crownValue("0"), count: 5) + [crownValue("8")]
         source.dropsFirstRotation = true
         let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
         let response = handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8))
@@ -415,7 +500,10 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertEqual(source.taps, 1)
         XCTAssertEqual(
             source.events,
-            ["snapshot:unchanged", "snapshot:unchanged", "rotate", "snapshot:unchanged", "tap"]
+            [
+                "snapshot:unchanged", "snapshot:unchanged", "tap", "snapshot:unchanged", "snapshot:unchanged",
+                "rotate", "snapshot:unchanged",
+            ]
         )
     }
 
@@ -431,6 +519,7 @@ final class WatchCommandHandlerTests: XCTestCase {
 
     func testCrownDoesNotWakeOrRetryWhenControlsCoverScreen() {
         let source = ScriptedCrownSource(labels: Array(repeating: "unchanged", count: 6))
+        source.exposesFocusedValue = false
         source.children = [SdkViewNode(
             className: "XCUIElementType(75)", bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100)
         )]
@@ -471,7 +560,7 @@ final class WatchCommandHandlerTests: XCTestCase {
     func testCrownDoesNotRetryWhenFocusedValueIsLostOrUnreadable() {
         let lost = ScriptedCrownSource(labels: Array(repeating: "unchanged", count: 3))
         lost.focusedValues = [crownValue("0"), crownValue("0"), nil]
-        let unreadable = ScriptedCrownSource(labels: Array(repeating: "unchanged", count: 3))
+        let unreadable = ScriptedCrownSource(labels: Array(repeating: "unchanged", count: 5))
         unreadable.valueReadFails = true
         for source in [lost, unreadable] {
             let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
@@ -507,6 +596,7 @@ final class WatchCommandHandlerTests: XCTestCase {
 
     func testCrownUnstableBaselineStopsAfterThreeSnapshotsWithoutRetry() {
         let source = ScriptedCrownSource(labels: ["launching", "settling", "crown 0", "crown 8"])
+        source.exposesFocusedValue = false
         let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
         XCTAssertTrue(handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8)).success)
         XCTAssertEqual(source.rotations, 1)
@@ -525,12 +615,15 @@ final class WatchCommandHandlerTests: XCTestCase {
     }
 
     func testCrownVerificationSkippedWhenSnapshotsUnavailable() {
-        let source = ScriptedCrownSource(labels: [])
-        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
-        let response = handler.handle(Data(#"{"type":"crown","requestId":"c","delta":2}"#.utf8))
-        XCTAssertTrue(response.success)
-        XCTAssertEqual(source.rotations, 1)
-        XCTAssertEqual(source.taps, 0)
+        for labels in [[], ["before"]] {
+            let source = ScriptedCrownSource(labels: labels)
+            source.exposesFocusedValue = false
+            let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+            let response = handler.handle(Data(#"{"type":"crown","requestId":"c","delta":2}"#.utf8))
+            XCTAssertTrue(response.success)
+            XCTAssertEqual(source.rotations, 1)
+            XCTAssertEqual(source.taps, 0)
+        }
     }
 
     func testCrownUsesExplicitVelocity() {
@@ -618,6 +711,7 @@ private final class FakeWatchSource: WatchSnapshotSource, WatchGesturePerformer 
     func faceDrag(fromX: Double, fromY: Double, toX: Double, toY: Double) throws {
         calls.append("faceDrag:\(fromX),\(fromY),\(toX),\(toY)")
     }
+
     func faceSwipe(_ direction: WatchSwipeDirection) throws { calls.append("faceSwipe:\(direction.rawValue)") }
     func faceDump() throws -> String {
         calls.append("faceDump")
@@ -726,9 +820,14 @@ private final class ScriptedCrownSource: WatchSnapshotSource, WatchGesturePerfor
     func home() throws {}
 }
 
-private func crownValue(_ value: String, identifier: String = "focused") -> WatchCrownValue {
+private func crownValue(
+    _ value: String, identifier: String = "focused", elementType: UInt = 33,
+    frame: CGRect = CGRect(x: 10, y: 10, width: 20, height: 20)
+)
+    -> WatchCrownValue
+{
     WatchCrownValue(
-        elementType: 33, identifier: identifier, frame: CGRect(x: 10, y: 10, width: 20, height: 20), value: value
+        elementType: elementType, identifier: identifier, frame: frame, value: value
     )
 }
 

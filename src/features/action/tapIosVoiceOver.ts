@@ -1,5 +1,6 @@
 import type { BootedDevice, Element } from "../../models";
 import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { IOSCtrlProxyClient, type CtrlProxyActionResult } from "../observe/ios";
 import type { DisplayFenceOption } from "./BaseVisualChange";
 import { IndeterminateTapError, indeterminateTapError } from "./coordinateTapDispatch";
@@ -10,26 +11,69 @@ import { resolveVoiceOverActivateCtrlProxyTimeoutMs } from "./gestureTransportTi
 
 type IosTapOptions = DisplayFenceOption & { signal?: AbortSignal };
 
+/**
+ * A tap timeout while VoiceOver is on. Still an `IndeterminateTapError`: the tap may have run, so
+ * callers keep the no-retry contract; the message adds the VoiceOver remedy.
+ */
+export class VoiceOverTapTimeoutError extends IndeterminateTapError {}
+
+function isIndeterminateTapTimeout(error: unknown): error is IndeterminateTapError {
+  return (
+    error instanceof IndeterminateTapError &&
+    !(error instanceof VoiceOverTapTimeoutError) &&
+    (/timed out|timeout/i.test(error.message) ||
+      isRunnerGestureOutcomeUnknown({ error: error.message }))
+  );
+}
+
+function voiceOverTapTimeoutError(error: IndeterminateTapError): VoiceOverTapTimeoutError {
+  return new VoiceOverTapTimeoutError(
+    `${error.message} With VoiceOver on, synthetic touches and activation requests can be held ` +
+      "or swallowed, so the tap may not have run. Verify with observe; turn VoiceOver off " +
+      "using the accessibility tool ({voiceover:false}), then retry if needed.",
+    { cause: error },
+  );
+}
+
 /** Add VoiceOver recovery guidance without losing the no-retry indeterminate contract. */
-export async function withVoiceOverCoordinateTimeoutContext(
+export async function withVoiceOverTimeoutContext(
   coordinateTap: () => Promise<void>,
 ): Promise<void> {
   try {
     await coordinateTap();
   } catch (error) {
-    if (
-      error instanceof IndeterminateTapError &&
-      (/timed out|timeout/i.test(error.message) ||
-        isRunnerGestureOutcomeUnknown({ error: error.message }))
-    ) {
-      throw new IndeterminateTapError(
-        `${error.message} With VoiceOver on, display-targeted touches on multi-panel (Duo) devices ` +
-          "are not delivered. The tap may not have run. Verify with observe; turn VoiceOver off " +
-          "using the accessibility tool ({voiceover:false}), then retry if needed.",
-        { cause: error },
-      );
+    if (isIndeterminateTapTimeout(error)) {
+      throw voiceOverTapTimeoutError(error);
     }
     throw error;
+  }
+}
+
+/**
+ * Like {@link withVoiceOverTimeoutContext} for a tap that did not probe VoiceOver up
+ * front: only a timeout pays for the probe, and only a confirmed-on state adds the guidance.
+ */
+export async function withVoiceOverTimeoutContextIfOn(
+  tap: () => Promise<void>,
+  isVoiceOverOn: () => Promise<boolean>,
+): Promise<void> {
+  try {
+    await tap();
+  } catch (error) {
+    if (isIndeterminateTapTimeout(error) && (await probeVoiceOverAfterTimeout(isVoiceOverOn))) {
+      throw voiceOverTapTimeoutError(error);
+    }
+    throw error;
+  }
+}
+
+async function probeVoiceOverAfterTimeout(isVoiceOverOn: () => Promise<boolean>): Promise<boolean> {
+  try {
+    return await isVoiceOverOn();
+  } catch (error) {
+    // The tap's own timeout is the error the caller needs; an unreadable state adds nothing.
+    logger.warn(`VoiceOver probe after a tap timeout failed: ${errorMessage(error)}`, error);
+    return false;
   }
 }
 
@@ -75,9 +119,7 @@ export async function tapViaVoiceOver({
 
   if (!label) {
     logger.info("[TapOnElement] VoiceOver: no label available, falling back to coordinate tap");
-    await withVoiceOverCoordinateTimeoutContext(() =>
-      coordinateTap({ displayFence: fence, signal }),
-    );
+    await withVoiceOverTimeoutContext(() => coordinateTap({ displayFence: fence, signal }));
     return;
   }
 
@@ -102,9 +144,7 @@ export async function tapViaVoiceOver({
       `[TapOnElement] VoiceOver action failed for label "${label}": ${result.error ?? "unknown error"}, ` +
         `falling back to coordinate tap at (${point.x}, ${point.y})`,
     );
-    await withVoiceOverCoordinateTimeoutContext(() =>
-      coordinateTap({ displayFence: fence, signal }),
-    );
+    await withVoiceOverTimeoutContext(() => coordinateTap({ displayFence: fence, signal }));
   }
 }
 

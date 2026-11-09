@@ -3,7 +3,10 @@ import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { LONG_PRESS_TIMEOUT_HEADROOM_MS } from "../../../src/features/action/gestureTransportTimeout";
 import type { Element } from "../../../src/models";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
-import { tapViaVoiceOver } from "../../../src/features/action/tapIosVoiceOver";
+import {
+  tapViaVoiceOver,
+  VoiceOverTapTimeoutError,
+} from "../../../src/features/action/tapIosVoiceOver";
 import {
   IndeterminateTapError,
   indeterminateTapError,
@@ -102,13 +105,12 @@ describe("TapOnElement VoiceOver mode", () => {
             isVoiceOverEnabled: true,
           });
           await expect(result).rejects.toBeInstanceOf(ActionableError);
-          await expect(result).rejects.toBeInstanceOf(IndeterminateTapError);
+          await expect(result).rejects.toBeInstanceOf(VoiceOverTapTimeoutError);
           await expect(result).rejects.toMatchObject({ cause: expect.any(IndeterminateTapError) });
           for (const text of [
             "Tap outcome is indeterminate",
             "VoiceOver",
-            "multi-panel (Duo)",
-            "not delivered",
+            "can be held or swallowed",
             "may not have run",
             "observe",
             "accessibility",

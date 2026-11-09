@@ -212,7 +212,10 @@ teardown() {
   printf '#!/usr/bin/env bash\n' > "$fixture/node_modules/.bin/turbo"
   chmod +x "$fixture/node_modules/.bin/turbo"
   cp "$ABS_SCRIPT" "$fixture/scripts/"
-  cp scripts/lib/spotlight-exclude.sh scripts/lib/shell-core.sh "$fixture/scripts/lib/"
+  local lib
+  for lib in spotlight-exclude shell-core; do
+    cp "scripts/lib/${lib}.sh" "$fixture/scripts/lib/"
+  done
   cat > "$fixture/scripts/ktfmt/validate_ktfmt.sh" <<'STUB'
 #!/usr/bin/env bash
 echo "curl: (22) The requested URL returned error: 504" >&2

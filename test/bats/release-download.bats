@@ -51,7 +51,9 @@ STUB
 
   URL="https://github.com/example/tool/releases/download/v1.0/tool-1.0.jar"
   DEST="$BATS_TEST_TMPDIR/install/tool.jar"
-  GOOD_SHA="$(printf '%s' "$CURL_BODY" | sha256sum | cut -d' ' -f1)"
+  # Hash with the library's own helper: stock macOS has shasum but no sha256sum.
+  printf '%s' "$CURL_BODY" > "$BATS_TEST_TMPDIR/body"
+  GOOD_SHA="$(bash -c 'source "$1"; release_sha256_of "$2"' _ "$LIB" "$BATS_TEST_TMPDIR/body")"
   CACHE_FILE="$AUTOMOBILE_TOOL_CACHE_DIR/tool/1.0/$GOOD_SHA/tool-1.0.jar"
 }
 

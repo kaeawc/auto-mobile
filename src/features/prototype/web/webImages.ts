@@ -134,20 +134,27 @@ export function webImageDraw(
 ): WebImageDraw {
   const style = record(node.style) ?? {};
   const weighted = typeof style.weight === "number" ? parentAxis : undefined;
-  const widthDp = weighted === "row" ? undefined : contentDp(style, "width");
-  const heightDp = weighted === "column" ? undefined : contentDp(style, "height");
-  const minWidthDp = wrappedMinimumDp(style, "width");
-  const minHeightDp = wrappedMinimumDp(style, "height");
   return {
     asset,
-    ...(widthDp === undefined ? {} : { widthDp }),
-    ...(heightDp === undefined ? {} : { heightDp }),
-    ...(minWidthDp === undefined ? {} : { minWidthDp }),
-    ...(minHeightDp === undefined ? {} : { minHeightDp }),
-    // A weight takes the parent's space by share, as a fill takes it whole: either way it is filled.
-    ...(style.width === "fill" || weighted === "row" ? { widthFill: true as const } : {}),
-    ...(style.height === "fill" || weighted === "column" ? { heightFill: true as const } : {}),
+    ...axisDraw(style, "width", weighted === "row"),
+    ...axisDraw(style, "height", weighted === "column"),
     scale: webImageScale(node.contentScale),
+  };
+}
+
+/**
+ * One axis's part of a draw: its content dp if fixed, whether it fills (a weight takes the
+ * parent's space by share, as a fill takes it whole), and a wrapped axis's authored minimum.
+ */
+function axisDraw(style: Raw, axis: "width" | "height", weighted: boolean) {
+  const fixed = weighted ? undefined : contentDp(style, axis);
+  const minimum = wrappedMinimumDp(style, axis);
+  return {
+    ...(fixed === undefined ? {} : { [`${axis}Dp`]: fixed }),
+    ...(style[axis] === "fill" || weighted ? { [`${axis}Fill`]: true as const } : {}),
+    ...(minimum === undefined
+      ? {}
+      : { [axis === "width" ? "minWidthDp" : "minHeightDp"]: minimum }),
   };
 }
 

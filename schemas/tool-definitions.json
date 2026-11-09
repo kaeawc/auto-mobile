@@ -63018,6 +63018,12 @@
           "description": "Enable preTapStability and retryIfNoChange",
           "type": "boolean"
         },
+        "settleTimeoutMs": {
+          "description": "Post-tap settle wait (ms, default 1000, max 3000); 0 skips it. An unsettled screen returns observation.settled:false.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3000
+        },
         "ensureChecked": {
           "description": "Skip tapping if the resolved toggle element's checked state already matches this value; otherwise tap and verify it flipped. Requires the element to have the toggle affordance and action \"tap\".",
           "type": "boolean"

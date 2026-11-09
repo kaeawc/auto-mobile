@@ -734,7 +734,11 @@ export class LaunchApp extends BaseVisualChange {
         perf,
         packageName,
         signal,
-        skipUiStability: skipUiStability ?? false,
+        // Nothing was dispatched, so there is no transition to wait out. The
+        // gfxinfo frame-stability wait would otherwise spend its whole budget
+        // (12 s by default) on an app that keeps rendering (#17665). A caller
+        // that explicitly asks for it still gets it.
+        skipUiStability: skipUiStability ?? true,
       },
     );
     // The foreground read and this observation are two separate device reads,

@@ -1208,6 +1208,21 @@ jobs:
         timeout-minutes: 10
         uses: ./.github/actions/install-claude-code
 
+      # The selector adds `ktfmt` when scripts/ktfmt/ changes; its installer needs
+      # Java and fetches the pinned JAR, so pin the JDK as Fast Validation does
+      # and restore the checksum-verified tool cache (#17624).
+      - name: "Set up JDK"
+        uses: actions/setup-java@v5
+        with:
+          distribution: "zulu"
+          java-version: "21"
+
+      - name: "Cache pinned tool downloads"
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/auto-mobile/tools
+          key: tool-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ktfmt/ktfmt_version.sh', 'scripts/shellcheck/shfmt_version.sh') }}
+
       - wait: [install-bats, install-uv]
 
       # Diff against the PR's base commit, not origin/<base_ref>: a stacked PR's
@@ -1216,6 +1231,7 @@ jobs:
         shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          INSTALL_KTFMT_WHEN_MISSING: "true"
         run: |
           base="$(scripts/ci/resolve-pr-base.sh "${BASE_SHA}")"
           scripts/prepush-shell.sh --base "${base}"

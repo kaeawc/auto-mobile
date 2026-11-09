@@ -155,6 +155,9 @@ install_manual() {
     # Create installation directory
     install_dir="$HOME/.local/bin"
     mkdir -p "$install_dir"
+    # verify_installation resolves ktfmt from PATH; a runner image without
+    # ~/.local/bin on PATH would otherwise fail a good install.
+    export PATH="$install_dir:$PATH"
 
     # Download ktfmt fat JAR from GitHub Releases.
     # Meta stopped publishing the "-jar-with-dependencies" classifier to Maven

@@ -21,7 +21,11 @@ import type { DisplayPanel } from "../../../models/DisplayPanel";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import type { SimulatorPanelScreenshotSource } from "../../../utils/ios-cmdline-tools/DevicectlDisplayScreenshot";
 import { createProductionDevicectlPanelScreenshotSource } from "../../../utils/ios-cmdline-tools/DevicectlPanelScreenshotSource";
-import type { DevicectlDisplayInfoSource } from "../../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
+import type {
+  DevicectlDisplayInfo,
+  DevicectlDisplayInfoSource,
+} from "../../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
+import { isIosDuoDeviceType } from "../../../utils/ios-cmdline-tools/iosDeviceType";
 
 type DevicectlPanelSource = SimulatorPanelScreenshotSource & DevicectlDisplayInfoSource;
 
@@ -130,12 +134,12 @@ async function captureSelectedPanel(
   return runnerCapture();
 }
 
-async function readLiveScreenshotPanel(
+/** One live `device info displays` read; an empty list when unavailable or failed. */
+async function readLiveDisplays(
   request: IosPanelScreenshotRequest,
-  panels: readonly DisplayPanel[],
-): Promise<DisplayPanel | undefined> {
+): Promise<DevicectlDisplayInfo[]> {
   if (!request.displayInfo) {
-    return undefined;
+    return [];
   }
   try {
     const displays = await request.displayInfo.readDisplays({
@@ -143,7 +147,7 @@ async function readLiveScreenshotPanel(
       signal: request.signal,
     });
     request.signal?.throwIfAborted();
-    return activeLivePanel(displays, panels);
+    return displays;
   } catch (error) {
     if (request.signal?.aborted) {
       throw error;
@@ -152,22 +156,108 @@ async function readLiveScreenshotPanel(
       `[SCREENSHOT] Live iOS panel read failed; using runner capture: ${errorMessage(error)}`,
       error,
     );
-    return undefined;
+    return [];
   }
+}
+
+async function readLiveScreenshotPanel(
+  request: IosPanelScreenshotRequest,
+  panels: readonly DisplayPanel[],
+): Promise<DisplayPanel | undefined> {
+  return activeLivePanel(await readLiveDisplays(request), panels);
+}
+
+/** Whether a screenshot must go through panel selection instead of straight to the runner. */
+export function needsIosPanelSelection(device: Pick<BootedDevice, "displays" | "deviceType">) {
+  return (device.displays?.panels.length ?? 0) >= 2 || isIosDuoDeviceType(device.deviceType);
+}
+
+/** Relative aspect-ratio slack; a Duo's cover and inner panels differ by about 2%. */
+const RUNNER_ASPECT_TOLERANCE = 0.01;
+
+function shortOverLong(width: number, height: number): number {
+  return Math.min(width, height) / Math.max(width, height);
+}
+
+/**
+ * Reject a runner capture whose aspect ratio does not match the observed hierarchy: on a Duo
+ * the runner captures the cover display, which is a black image while unfolded (#17583).
+ */
+async function aspectCheckedRunnerCapture(
+  runnerCapture: () => Promise<CtrlProxyScreenshotResult>,
+  hierarchy: XCTestHierarchy | null,
+): Promise<CtrlProxyScreenshotResult> {
+  const result = await runnerCapture();
+  const points =
+    hierarchy?.screenWidth && hierarchy.screenHeight
+      ? { width: hierarchy.screenWidth, height: hierarchy.screenHeight }
+      : undefined;
+  const dimensions =
+    result.success && result.data && points
+      ? readImageHeaderDimensions(Buffer.from(result.data, "base64"))
+      : null;
+  if (!points || !dimensions) {
+    return result;
+  }
+  const expected = shortOverLong(points.width, points.height);
+  const actual = shortOverLong(dimensions.width, dimensions.height);
+  if (Math.abs(actual - expected) / expected <= RUNNER_ASPECT_TOLERANCE) {
+    return result;
+  }
+  const error = `Runner screenshot is ${dimensions.width}x${dimensions.height} pixels but the observed screen is ${points.width}x${points.height} points; the capture is likely of an unlit panel. Re-run observe, or check the device posture with setPosture.`;
+  logger.warn(`[SCREENSHOT] ${error}`);
+  return { success: false, error };
+}
+
+/**
+ * A Duo whose client never received a panel inventory: one live CoreDevice read picks the
+ * single `active: true` display and captures it by name, so the cover panel's black frame is
+ * not returned while the device is unfolded (#17583).
+ */
+async function captureDuoWithoutInventory(
+  request: IosPanelScreenshotRequest,
+): Promise<CtrlProxyScreenshotResult> {
+  const deviceId = request.device.deviceId;
+  const displays = await readLiveDisplays(request);
+  const active = displays.filter((display) => display.active === true);
+  const sizePx = active.length === 1 ? (active[0].nativeSize ?? active[0].bounds?.size) : undefined;
+  if (!sizePx) {
+    logger.warn(
+      `[SCREENSHOT] iOS Duo ${deviceId} has no display inventory and live displays name no single active panel (${active.length} active of ${displays.length}); using runner capture`,
+    );
+    return request.runnerCapture();
+  }
+  const panel: DisplayPanel = {
+    key: active[0].name ?? String(active[0].displayId),
+    role: "unknown",
+    sizePx,
+  };
+  logger.info(
+    `[SCREENSHOT] iOS Duo ${deviceId} has no display inventory; capturing live active display ${panel.key} (${sizePx.width}x${sizePx.height})`,
+  );
+  return captureSelectedPanel({ ...request, deviceId, panel, panelCount: displays.length });
 }
 
 /**
  * Select a physical simulator panel, verifying its PNG before accepting it.
  * Order: CoreDevice per-panel capture, then simctl, then the runner. A single-display
- * simulator goes straight to the runner and never touches devicectl or simctl.
+ * simulator goes straight to the runner and never touches devicectl or simctl; a Duo with
+ * no inventory reads its live displays instead, and its runner fallback is aspect-checked.
  */
 export async function captureIosPanelScreenshotWith(
-  request: IosPanelScreenshotRequest,
+  input: IosPanelScreenshotRequest,
 ): Promise<CtrlProxyScreenshotResult> {
+  if (!needsIosPanelSelection(input.device)) {
+    return input.runnerCapture();
+  }
+  const request: IosPanelScreenshotRequest = {
+    ...input,
+    runnerCapture: () => aspectCheckedRunnerCapture(input.runnerCapture, input.hierarchy),
+  };
   const { device, hierarchy, activePanelKey } = request;
   const panels = device.displays?.panels ?? [];
   if (panels.length < 2) {
-    return request.runnerCapture();
+    return captureDuoWithoutInventory(request);
   }
   const display = observedIosDisplay(device, hierarchy ?? undefined);
   const panel =

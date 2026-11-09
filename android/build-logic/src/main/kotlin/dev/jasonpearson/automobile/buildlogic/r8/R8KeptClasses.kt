@@ -56,14 +56,19 @@ object R8KeptClasses {
     ownedPackagePrefixes: List<String>,
     requiredMembers: List<String>,
     keptSerializablePrefixes: List<String> = ownedPackagePrefixes,
+    iconNames: List<String> = emptyList(),
   ): Result {
     val (components, referencedClasses) = manifestClasses(manifestXml, namespace)
     val ownedClasses = mutableSetOf<String>()
     val serializable = sortedSetOf<String>()
+    val iconMembers = PrototypeIconRules.members(iconNames)
+    val iconClasses = iconMembers.map { it.substringBefore('#') }.toHashSet()
+    val availableIcons = mutableSetOf<String>()
     for (bytes in classBytes) {
       val reader = ClassReader(bytes)
-      if (ownedPackagePrefixes.none { reader.className.startsWith(it) }) continue
       val name = reader.className.replace('/', '.')
+      if (name in iconClasses) availableIcons.add(name)
+      if (ownedPackagePrefixes.none { reader.className.startsWith(it) }) continue
       ownedClasses.add(name)
       reader.accept(
         object : ClassVisitor(Opcodes.ASM9) {
@@ -83,7 +88,13 @@ object R8KeptClasses {
       keptSerializablePrefixes.any { name.replace('.', '/').startsWith(it) }
     }
     val serializers = keptSerializable.map { "$it\$\$serializer" }.filter { it in ownedClasses }
-    val sentinels = requiredMembers.distinct().sorted()
+    // Filled is mandatory even if absent from inputs. Alternate styles are mandatory whenever
+    // bundled before shrinking; an absent alternate legitimately falls back to filled at runtime.
+    val requiredIcons = iconMembers.filter {
+      it.startsWith("androidx.compose.material.icons.filled.") ||
+        it.substringBefore('#') in availableIcons
+    }
+    val sentinels = (requiredMembers + requiredIcons).distinct().sorted()
     val checkedClasses =
       (components + referencedClasses + keptSerializable + serializers).toHashSet().apply {
         sentinels.forEach { add(it.substringBefore('#')) }

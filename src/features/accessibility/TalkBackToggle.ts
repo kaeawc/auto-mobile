@@ -11,7 +11,10 @@ import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbCl
 import type { AccessibilityDetector } from "../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import { accessibilityDetector } from "../../ctrlProxy/accessibility/AccessibilityDetector";
 import { type Timer, defaultTimer } from "../../utils/SystemTimer";
-import { isRuntimePermissionPrompt } from "../observe/BlockingSystemPrompt";
+import {
+  blockingPromptForForegroundActivity,
+  isRuntimePermissionPrompt,
+} from "../observe/BlockingSystemPrompt";
 import { parseAndroidRuntimePermissions } from "../action/parseAndroidRuntimePermissions";
 import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
@@ -51,6 +54,25 @@ const BLOCKING_PROMPT_WARNING =
   "On API 36 this was observed as the Android Accessibility Suite (TalkBack) notifications permission. " +
   "The foreground activity does not identify the requested permission. Nothing was tapped. " +
   "You must answer it: use observe to inspect the prompt, then tapOn its permission_allow_button or permission_deny_button.";
+/** TalkBack had no runtime permission left to request, so another app raised the prompt. */
+const OTHER_APP_PROMPT_WARNING =
+  "A system runtime permission prompt is covering the screen after enabling TalkBack. " +
+  "TalkBack has no runtime permission left to request, so another app raised it. Nothing was tapped. " +
+  "You must answer it: use observe to inspect the prompt, then tapOn its permission_allow_button or permission_deny_button.";
+
+/**
+ * The warning for a prompt seen after enabling TalkBack. `talkBackMayPrompt` is false only when
+ * TalkBack's permission state shows it cannot be TalkBack's own permission prompt.
+ */
+function blockingPromptWarning(prompt: TalkBackBlockingPrompt, talkBackMayPrompt: boolean): string {
+  if (prompt.kind === "system-dialog") {
+    return (
+      `A system window (${prompt.package}/${prompt.activity}) is covering the screen after enabling TalkBack. ` +
+      "Nothing was tapped. Use observe to inspect it, then dismiss it (tapOn its button, or pressButton back)."
+    );
+  }
+  return talkBackMayPrompt ? BLOCKING_PROMPT_WARNING : OTHER_APP_PROMPT_WARNING;
+}
 
 export const isTalkBackRuntimePermissionPrompt = isRuntimePermissionPrompt;
 
@@ -196,7 +218,7 @@ export class TalkBackToggle {
         }
         blockingPrompt = await this.readBlockingPrompt();
         if (blockingPrompt) {
-          logger.warn(`[TalkBackToggle] ${BLOCKING_PROMPT_WARNING}`, blockingPrompt);
+          logger.warn(`[TalkBackToggle] ${blockingPromptWarning(blockingPrompt, true)}`);
         } else if (dialogResult === "not-found") {
           logger.warn("[TalkBackToggle] TalkBack permission dialog not found — continuing");
         }
@@ -226,25 +248,35 @@ export class TalkBackToggle {
   ): Promise<TalkBackResult> {
     const confirmed = await this.confirmTalkBackState(enabled);
     if (seenPrompt) {
-      return { ...confirmed, blockingPrompt: seenPrompt, warning: BLOCKING_PROMPT_WARNING };
+      // Seen before TalkBack's permission state was read, so it may be TalkBack's own.
+      return {
+        ...confirmed,
+        blockingPrompt: seenPrompt,
+        warning: blockingPromptWarning(seenPrompt, true),
+      };
     }
     if (!enabled || !confirmed.applied) {
       return confirmed;
     }
-    const blockingPrompt = await this.awaitLateBlockingPrompt();
-    if (!blockingPrompt) {
+    const late = await this.awaitLateBlockingPrompt();
+    if (!late) {
       return confirmed;
     }
-    logger.warn(`[TalkBackToggle] ${BLOCKING_PROMPT_WARNING}`, blockingPrompt);
-    return { ...confirmed, blockingPrompt, warning: BLOCKING_PROMPT_WARNING };
+    const warning = blockingPromptWarning(late.prompt, late.talkBackMayPrompt);
+    logger.warn(`[TalkBackToggle] ${warning}`);
+    return { ...confirmed, blockingPrompt: late.prompt, warning };
   }
 
   /**
-   * Poll the foreground through the settle window; a prompt TalkBack raises late lands here.
-   * End early once {@link TALKBACK_PROMPT_STABLE_READS} reads agree and TalkBack has no runtime
-   * permission left to request. An abort of the request rejects the wait.
+   * Poll the foreground through the settle window; a prompt TalkBack raises late lands here, and
+   * so does any other system prompt (another app's permission prompt, a SystemUI or framework
+   * dialog). End early once {@link TALKBACK_PROMPT_STABLE_READS} reads agree and TalkBack has no
+   * runtime permission left to request; a prompt read never counts toward that stable screen. An
+   * abort of the request rejects the wait.
    */
-  private async awaitLateBlockingPrompt(): Promise<TalkBackBlockingPrompt | undefined> {
+  private async awaitLateBlockingPrompt(): Promise<
+    { prompt: TalkBackBlockingPrompt; talkBackMayPrompt: boolean } | undefined
+  > {
     const polls = Math.floor(this.promptSettleMs / TALKBACK_PROMPT_SETTLE_POLL_MS);
     if (polls === 0) {
       return undefined;
@@ -258,7 +290,7 @@ export class TalkBackToggle {
       const read = await this.readSettleForeground();
       throwIfAborted(this.signal);
       if (read.kind === "prompt") {
-        return read.prompt;
+        return { prompt: read.prompt, talkBackMayPrompt: promptPossible };
       }
       const signature = read.kind === "screen" ? read.signature : undefined;
       stableReads = signature !== undefined && signature === lastSignature ? stableReads + 1 : 1;
@@ -318,15 +350,9 @@ export class TalkBackToggle {
         logger.debug("[TalkBackToggle] Foreground app unavailable; no prompt reported");
         return { kind: "unknown" };
       }
-      if (app.activityName && isTalkBackRuntimePermissionPrompt(app)) {
-        return {
-          kind: "prompt",
-          prompt: {
-            kind: "runtime-permission",
-            package: app.packageName,
-            activity: app.activityName,
-          },
-        };
+      const prompt = blockingPromptForForegroundActivity(app);
+      if (prompt) {
+        return { kind: "prompt", prompt };
       }
       return { kind: "screen", signature: `${app.packageName}/${app.activityName ?? ""}` };
     } catch (error) {

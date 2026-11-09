@@ -10,7 +10,7 @@ export const accessibilityStateSchema = z
     warning: z.string().optional(),
     blockingPrompt: z
       .object({
-        kind: z.literal("runtime-permission"),
+        kind: z.enum(["runtime-permission", "system-dialog"]),
         package: z.string(),
         activity: z.string(),
       })

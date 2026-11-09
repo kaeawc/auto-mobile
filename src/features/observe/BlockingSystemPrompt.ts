@@ -25,6 +25,27 @@ export function isRuntimePermissionPrompt(app: {
   );
 }
 
+/**
+ * The system prompt a foreground activity read identifies: a runtime permission prompt, or an
+ * activity of SystemUI or the framework (`android`) covering the app. An app's own activity, or a
+ * read without an activity, is none.
+ */
+export function blockingPromptForForegroundActivity(app: {
+  packageName: string;
+  activityName?: string;
+}): (BlockingSystemPrompt & { activity: string }) | undefined {
+  const activity = app.activityName;
+  if (!activity) {
+    return undefined;
+  }
+  if (isRuntimePermissionPrompt(app)) {
+    return { kind: "runtime-permission", package: app.packageName, activity };
+  }
+  return SYSTEM_DIALOG_PACKAGES.has(app.packageName)
+    ? { kind: "system-dialog", package: app.packageName, activity }
+    : undefined;
+}
+
 function promptFromFocusedWindow(
   windows: ViewHierarchyWindowInfo[] | undefined,
 ): BlockingSystemPrompt | undefined {

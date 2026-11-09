@@ -89,11 +89,24 @@ manifest) and enforced by:
 
 ## CI pack trimming
 
-The prepack hook moves unused sources, declarations, maps, tests, docs and
-verified browser-only files out of the bundled production dependency closure.
-Runtime entry points, wildcard export prefixes, package metadata, README and
-license files stay intact. Postpack restores the original bytes; the next enabled
-prepack also restores any backup left by an interrupted pack.
+The prepack hook moves files out of the bundled production dependency closure
+only when they belong to a class in the `PRUNE_CLASSES` allowlist
+(`scripts/release/trim-bundled-deps.ts`): declarations, source maps, tests,
+docs/markdown, TypeScript sources, `src/` beside a built `dist/`, browser-only
+builds (`browser` field and `browser` export-condition targets, `dist/browser/`,
+UMD) and CI/build tooling config. Bun and Node never resolve the `browser`
+condition. Package metadata and legal notices (LICENSE, NOTICE, COPYING, PATENTS,
+AUTHORS) are never removed. Runtime entry points and wildcard export prefixes are
+protected, except that declarations and maps are pruned inside wildcard prefixes
+because nothing loads them. A candidate that any retained JS file names literally
+stays. `trim-bundled-deps.ts list` prints each candidate with its class. Postpack
+restores the original bytes; the next enabled prepack also restores any backup
+left by an interrupted pack.
+
+The unpacked-size benchmark also enforces a byte budget for the packed
+`node_modules/` (`BUNDLED_NODE_MODULES_MAX_BYTES` in
+`scripts/build/packed-runtime-assets.ts`) and fails on any packed bundled
+declaration or map, so a pack that skipped or weakened the prune fails.
 
 `AUTOMOBILE_TRIM_BUNDLED_DEPS=true` enables trimming; `false` disables it.
 Otherwise trimming runs only with `CI=true` or `CI=1`. Local `npm pack` is

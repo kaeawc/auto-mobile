@@ -142,6 +142,25 @@ describe("formatToolParamError shape hints for real tools (#17666)", () => {
     expect(hint.length).toBeLessThanOrEqual(MAX_HINT_CHARS);
   });
 
+  // #17680: the commands hint must not drop the allowed keys for an unrelated
+  // unknown top-level key reported beside a commands error.
+  test.each([
+    {
+      name: "a command missing its action",
+      input: { platform: "ios", commands: [{ type: "Hi" }], bogus: 1 },
+    },
+    { name: "a top-level text", input: { platform: "ios", text: "Hi", bogus: 1 } },
+  ])("sendKeys with $name and an unrelated unknown key keeps both hints", ({ input }) => {
+    const hint = hintOf(messageFor("sendKeys", sendKeysSchema, input));
+    expect(
+      hint.startsWith('sendKeys takes commands: [{ "action": "type", "text": "<text>" }]'),
+    ).toBe(true);
+    expect(hint).toMatch(/\. Allowed keys: commands, .*… \(\d+ more\)\.$/);
+    expect(hint.split("sendKeys").length - 1).toBe(1);
+    expect(hint).not.toContain("Example:");
+    expect(hint.length).toBeLessThanOrEqual(MAX_HINT_CHARS);
+  });
+
   test("an unrelated unknown top-level key lists required keys first, capped", () => {
     const message = messageFor("sendKeys", sendKeysSchema, {
       platform: "ios",

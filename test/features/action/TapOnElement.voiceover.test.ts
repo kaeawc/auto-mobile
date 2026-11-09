@@ -3,6 +3,13 @@ import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { LONG_PRESS_TIMEOUT_HEADROOM_MS } from "../../../src/features/action/gestureTransportTimeout";
 import type { Element } from "../../../src/models";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
+import { tapViaVoiceOver } from "../../../src/features/action/tapIosVoiceOver";
+import {
+  IndeterminateTapError,
+  indeterminateTapError,
+  tapFailureNeedsSearchDebugContext,
+} from "../../../src/features/action/coordinateTapDispatch";
+import { ActionableError } from "../../../src/models/ActionableError";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeIosVoiceOverDetector } from "../../fakes/FakeIosVoiceOverDetector";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -25,7 +32,7 @@ describe("TapOnElement VoiceOver mode", () => {
     fakeAdb = new FakeAdbClient();
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
-    fakeIosClient = new FakeIOSCtrlProxy();
+    fakeIosClient = new FakeIOSCtrlProxy(fakeTimer);
 
     tapOnElement = new TapOnElement(
       {
@@ -65,6 +72,115 @@ describe("TapOnElement VoiceOver mode", () => {
       bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       "ios-accessibility-label": "Settings",
     } satisfies Element;
+
+    for (const action of ["tap", "doubleTap", "longPress"] as const) {
+      test.each(["label refused", "missing label", "no element"] as const)(
+        `${action}: VoiceOver coordinate timeout (%s) explains the remedy without retrying`,
+        async (route) => {
+          await wireCtrlProxy();
+          fakeIosClient.setVoiceOverActivateResult({
+            success: false,
+            error: "Element not found: OK",
+            dispatched: true,
+            acknowledged: true,
+          });
+          fakeIosClient.setTapResult({
+            success: false,
+            error: "Tap timed out after 5000ms",
+            dispatched: true,
+            acknowledged: false,
+          });
+          const target =
+            route === "no element"
+              ? undefined
+              : route === "missing label"
+                ? { bounds: element.bounds }
+                : { ...element, "ios-accessibility-label": "OK" };
+          const result = tapOnElement.testHooks.executeiOSTap(action, { x: 50, y: 50 }, 800, {
+            element: target,
+            isVoiceOverEnabled: true,
+          });
+          await expect(result).rejects.toBeInstanceOf(ActionableError);
+          await expect(result).rejects.toBeInstanceOf(IndeterminateTapError);
+          await expect(result).rejects.toMatchObject({ cause: expect.any(IndeterminateTapError) });
+          for (const text of [
+            "Tap outcome is indeterminate",
+            "VoiceOver",
+            "multi-panel (Duo)",
+            "not delivered",
+            "may not have run",
+            "observe",
+            "accessibility",
+            "voiceover:false",
+            "retry",
+            "Do not retry automatically",
+            "Tap timed out after 5000ms",
+          ]) {
+            await expect(result).rejects.toThrow(text);
+          }
+          const failure: unknown = await result.catch((error: unknown) => error);
+          expect(tapFailureNeedsSearchDebugContext(failure)).toBe(false);
+          expect(fakeIosClient.getVoiceOverActivateHistory()).toHaveLength(
+            route === "label refused" ? 1 : 0,
+          );
+          expect(fakeIosClient.getTapHistory()).toHaveLength(action === "doubleTap" ? 0 : 1);
+          expect(fakeIosClient.doubleTapHistory).toHaveLength(action === "doubleTap" ? 1 : 0);
+          expect(fakeTimer.getSleepHistory()).toEqual([]);
+        },
+      );
+
+      test.each(["label refused", "missing label", "no element"] as const)(
+        `${action}: VoiceOver coordinate success (%s) is unchanged`,
+        async (route) => {
+          await wireCtrlProxy();
+          fakeIosClient.setVoiceOverActivateResult({
+            success: false,
+            error: "Element not found: OK",
+            dispatched: true,
+            acknowledged: true,
+          });
+          await tapOnElement.testHooks.executeiOSTap(action, { x: 50, y: 50 }, 800, {
+            element:
+              route === "no element"
+                ? undefined
+                : route === "missing label"
+                  ? { bounds: element.bounds }
+                  : element,
+            isVoiceOverEnabled: true,
+          });
+          expect(fakeIosClient.getVoiceOverActivateHistory()).toHaveLength(
+            route === "label refused" ? 1 : 0,
+          );
+          expect(fakeIosClient.getTapHistory()).toEqual(
+            action === "doubleTap"
+              ? []
+              : [{ x: 50, y: 50, duration: action === "longPress" ? 800 : 50 }],
+          );
+          expect(fakeIosClient.doubleTapHistory).toHaveLength(action === "doubleTap" ? 1 : 0);
+          expect(fakeTimer.getSleepHistory()).toEqual([]);
+        },
+      );
+
+      test(`${action}: VoiceOver off leaves the coordinate timeout unchanged`, async () => {
+        await wireCtrlProxy();
+        fakeIosClient.setTapResult({
+          success: false,
+          error: "Tap timed out after 5000ms",
+          dispatched: true,
+          acknowledged: false,
+        });
+        await expect(
+          tapOnElement.testHooks.executeiOSTap(action, { x: 50, y: 50 }, 800, {
+            element,
+            isVoiceOverEnabled: false,
+          }),
+        ).rejects.toMatchObject({
+          message: indeterminateTapError("Tap timed out after 5000ms").message,
+        });
+        expect(fakeIosClient.getVoiceOverActivateHistory()).toHaveLength(0);
+        expect(fakeTimer.getSleepHistory()).toEqual([]);
+      });
+    }
 
     for (const action of ["tap", "longPress"] as const) {
       test.each([
@@ -261,6 +377,56 @@ describe("TapOnElement VoiceOver mode", () => {
       tapOnElement.testHooks.setIosCoordinateTap(async () => {
         coordinateFallbackCalls++;
       });
+    });
+
+    test.each([
+      new Error("socket disconnected"),
+      new ActionableError("Tap timed out before dispatch"),
+      indeterminateTapError("socket disconnected"),
+      new Error("Tap timed out after 5000ms"),
+    ])("preserves non-indeterminate-timeout fallback errors: %s", async (failure) => {
+      await expect(
+        tapViaVoiceOver({
+          device: { name: "test-iphone", platform: "ios", deviceId: "00001234-ABCD" },
+          action: "tap",
+          element: { bounds: { left: 0, top: 0, right: 100, bottom: 100 } },
+          point: { x: 50, y: 50 },
+          durationMs: 50,
+          fenceOptions: {},
+          coordinateTap: async () => {
+            throw failure;
+          },
+        }),
+      ).rejects.toBe(failure);
+      expect(fakeTimer.getSleepHistory()).toEqual([]);
+      expect(tapFailureNeedsSearchDebugContext(failure)).toBe(
+        !(failure instanceof IndeterminateTapError),
+      );
+    });
+
+    test.each([
+      "Timeout waiting for tap_result",
+      "Command request_tap exceeded execution bound 4497ms in phase xcuitestGesture after 4499ms; XCUITest call is still executing and the runner stays busy until it returns",
+      "Gesture completed after its deadline",
+    ])("recognizes indeterminate fallback deadlines: %s", async (message) => {
+      const failure = indeterminateTapError(message);
+      await expect(
+        tapViaVoiceOver({
+          device: { name: "test-iphone", platform: "ios", deviceId: "00001234-ABCD" },
+          action: "tap",
+          element: { bounds: { left: 0, top: 0, right: 100, bottom: 100 } },
+          point: { x: 50, y: 50 },
+          durationMs: 50,
+          fenceOptions: {},
+          coordinateTap: async () => {
+            throw failure;
+          },
+        }),
+      ).rejects.toMatchObject({
+        message: expect.stringContaining("voiceover:false"),
+        cause: failure,
+      });
+      expect(fakeTimer.getSleepHistory()).toEqual([]);
     });
 
     test("uses ios-accessibility-label as VoiceOver label", async () => {

@@ -374,6 +374,23 @@ describe("pressButtonHandler (registered handler wiring)", () => {
     expect(calls).toEqual([expect.objectContaining({ durationMs: 1200 })]);
     expect(parsePayload(response)).toMatchObject({ durationMs: 1200 });
   });
+
+  test("forwards display to the press, and omits it when the call does (#17643)", async () => {
+    const calls: unknown[] = [];
+    interactionDeps.pressButtonFactory = () => ({
+      execute: async (_button: string, call?: unknown) => {
+        calls.push(call);
+        return fakeResult({ success: true });
+      },
+    });
+
+    await pressButtonHandler(fakeDevice, { ...args, display: "4" }, { deps: interactionDeps });
+    await pressButtonHandler(fakeDevice, args, { deps: interactionDeps });
+    expect(calls).toEqual([
+      expect.objectContaining({ display: "4" }),
+      expect.objectContaining({ display: undefined }),
+    ]);
+  });
 });
 
 describe("rotateHandler (registered handler wiring)", () => {

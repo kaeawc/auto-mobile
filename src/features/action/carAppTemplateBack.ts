@@ -112,6 +112,8 @@ export interface TemplateHostBackContext {
   pressSucceeded: boolean;
   prePress?: ObserveResult;
   options: ObservedChangeOptions;
+  /** Android logical display the press targeted (#17643); the tap goes to the same display. */
+  displayId?: number;
 }
 
 /** Only an Android Back that dispatched but changed nothing on a template host qualifies. */
@@ -155,7 +157,14 @@ export async function retryBackOnTemplateHost(
   const signal = context.options.signal;
   return deps.observedInteraction(
     (observation, fence) =>
-      tapHostBack(observation, { button, keyCode, signal, fence, tapClient: deps.tapClient }),
+      tapHostBack(observation, {
+        button,
+        keyCode,
+        signal,
+        fence,
+        tapClient: deps.tapClient,
+        displayId: context.displayId,
+      }),
     // The tap target comes from this interaction's own pre-tap read, so that read gets the
     // wrong-window refusal and display refresh a selector-resolved gesture gets.
     {
@@ -173,6 +182,7 @@ interface HostBackTapInputs {
   signal?: AbortSignal;
   fence?: DisplayFence;
   tapClient: () => TemplateHostBackTapClient;
+  displayId?: number;
 }
 
 /**
@@ -200,6 +210,7 @@ async function tapHostBack(
       x: target.x,
       y: target.y,
       signal: inputs.signal,
+      ...(inputs.displayId === undefined ? {} : { displayId: inputs.displayId }),
       frameContext: observation.viewHierarchy?.frameContext,
       beforeSend: () => inputs.fence?.assertCurrent(),
       onDispatch: () => {

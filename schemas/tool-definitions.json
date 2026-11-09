@@ -27769,6 +27769,10 @@
           "minimum": 100,
           "maximum": 10000
         },
+        "display": {
+          "description": "Target panel key, role, or active; Android only. Sends the key to that display and checks it for the visual change",
+          "type": "string"
+        },
         "platform": {
           "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",

@@ -23,7 +23,7 @@ import { readToolEnvelopePayload, writeToolEnvelopePayload } from "../daemon/too
 import { displayInventoryOutcome } from "../models/DeviceInfo";
 import { selectablePanels } from "../models/DisplayPanel";
 
-const pinRestrictedActions = new Set(["tapOn", "swipeOn"]);
+const pinRestrictedActions = new Set(["tapOn", "swipeOn", "pressButton"]);
 
 export interface SessionDisplayPinStore {
   getDeviceForSession(sessionUuid: string): string | null;
@@ -134,11 +134,13 @@ interface SessionDisplayPinInput<T = unknown> {
 /**
  * Calls that must never receive a session pin. Stop must remain possible after a recording's panel
  * is unplugged. A prototype is bound to the display it was shown on, so only show takes a display (and
- * therefore a session pin).
+ * therefore a session pin). pressButton routes a display on Android only.
  */
-function pinExempt(name: string, args: Record<string, unknown>): boolean {
+function pinExempt(name: string, args: Record<string, unknown>, device: BootedDevice): boolean {
   return (
     (name === "rotate" && args.display === undefined) ||
+    // pressButton routes a display on Android only (#17643); elsewhere a pin keeps the plain press.
+    (name === "pressButton" && device.platform !== "android") ||
     (name === "videoRecording" && args.action === "stop") ||
     (name === "prototype" && args.action !== "show")
   );
@@ -146,7 +148,7 @@ function pinExempt(name: string, args: Record<string, unknown>): boolean {
 
 export function runSessionDisplayPin<T>(input: SessionDisplayPinInput<T>): T | Promise<unknown> {
   const { name, device, args } = input;
-  const eligible = input.acceptsDisplay && !pinExempt(name, args);
+  const eligible = input.acceptsDisplay && !pinExempt(name, args, device);
   const session = input.sessionUuid;
   if (args.display !== undefined) {
     // An explicit selector overrides even an enclosing internal call's pin provenance.

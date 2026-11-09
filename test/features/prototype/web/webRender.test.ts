@@ -1039,6 +1039,34 @@ describe("prototype web still (#16346)", () => {
     expect(style("after")["max-width"]).not.toBe("0px");
   });
 
+  test("a maxWidth row under a horizontal scroll fills to its own bound around its ratio (#17603)", () => {
+    const root = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "scroll",
+          axis: "horizontal",
+          child: {
+            type: "row",
+            testTag: "line",
+            style: { maxWidth: 200 },
+            children: [
+              { type: "box", testTag: "ratio", style: { aspectRatio: 1 } },
+              { type: "box", testTag: "after", style: { width: { dp: 40 } } },
+            ],
+          },
+        },
+      }),
+      "line",
+    )[0]!;
+    const style = (tag: string) => byTag({ element: root }, tag)[0]!.style;
+    // Compose's widthIn restores a 200 dp max width, so the ratio takes all of it and its sibling
+    // none; the row must grow to that bound, or its zero-basis children collapse to nothing.
+    expect(root.style).toMatchObject({ flex: "1 1 auto", "max-width": "200px" });
+    expect(style("ratio").flex).toBe("1 1 0");
+    expect(style("after")["max-width"]).toBe("0px");
+  });
+
   test("a dp-wide column in a horizontal scroll bounds its row to its own width (#16691)", () => {
     const shown = renderPrototypeStill({
       ...reference,

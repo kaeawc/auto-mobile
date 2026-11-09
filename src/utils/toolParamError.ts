@@ -1,4 +1,5 @@
 import { ZodError, type ZodIssue } from "zod/v4";
+import { formatShapeHint } from "./toolParamShapeHint";
 
 // Provenance of a flattened issue relative to the OUTERMOST `z.union` it came from
 // — the union that actually discriminates the caller's shape. A field that fails in
@@ -720,6 +721,16 @@ export function formatToolParamError(
   const sendKeysHint = toolName === "sendKeys" ? sendKeysShapeHint(flattenedIssues) : undefined;
   if (sendKeysHint) {
     hints.push(sendKeysHint);
+  }
+
+  const shapeHint = formatShapeHint(
+    toolName,
+    schema,
+    selectedIssues.map(({ issue }) => issue),
+    rawInput,
+  );
+  if (shapeHint) {
+    hints.push(shapeHint);
   }
 
   const issueSummary = issues.join("; ");

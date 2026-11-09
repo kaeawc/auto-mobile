@@ -35,7 +35,7 @@ const capabilities = [
   PROTOTYPE_DATA_MODEL_CAPABILITY,
 ];
 
-describe("request actions through the registered prototype tool (#12523, #12530)", () => {
+describe("request actions through the registered prototype tool (#12523)", () => {
   let client: FakeCtrlProxy;
   let adb: FakeAdbExecutor;
   let restore: () => void;
@@ -79,14 +79,10 @@ describe("request actions through the registered prototype tool (#12523, #12530)
   const reverses = () =>
     adb.getExecutedCommands().filter((command) => command.startsWith("reverse"));
 
-  test("show reverses the port of a schema-valid via device request, dismiss removes it", async () => {
-    const shown = await call({ action: "show", spec: fixture });
-    expect(shown.success).toBe(true);
-    expect(reverses()).toEqual(["reverse --list", "reverse tcp:8080 tcp:8080"]);
-    expect(shown.unreversiblePorts).toBeUndefined();
-
+  test("show and dismiss of a via device request make no adb reverse", async () => {
+    expect((await call({ action: "show", spec: fixture })).success).toBe(true);
     expect((await call({ action: "dismiss", id: fixture.id })).success).toBe(true);
-    expect(reverses().at(-1)).toBe("reverse --remove tcp:8080");
+    expect(reverses()).toEqual([]);
   });
 
   test("awaitEvent returns the request event under the reserved emit name", async () => {
@@ -134,34 +130,6 @@ describe("request actions through the registered prototype tool (#12523, #12530)
     };
     expect((await call({ action: "show", spec: hostOnly })).success).toBe(true);
     expect(reverses()).toEqual([]);
-  });
-
-  test("a templated via device host is reported by show and inspect, never reversed", async () => {
-    const templated = {
-      id: "templated",
-      window: { placement: { type: "fullscreen" }, persistence: "device" },
-      state: { port: "8080" },
-      root: {
-        type: "button",
-        label: "Go",
-        onTap: [{ type: "request", via: "device", url: "http://localhost:{port}/x" }],
-      },
-    };
-    const shown = await call({ action: "show", spec: templated });
-    expect(shown.success).toBe(true);
-    expect(shown.unreversiblePorts).toMatchObject([
-      { prototypeId: "templated", url: "http://localhost:{port}/x" },
-    ]);
-    expect(reverses().filter((command) => command.startsWith("reverse tcp"))).toEqual([]);
-
-    client.setInspectReply({
-      success: true,
-      prototypes: [
-        { id: "templated", persistent: true, state: { port: "8080" }, pages: {}, lastSequence: 0 },
-      ],
-    });
-    const inspected = await call({ action: "inspect" });
-    expect(inspected.unreversiblePorts).toMatchObject([{ prototypeId: "templated" }]);
   });
 
   test("a device lacking prototype_network_device_v1 refuses a via device request before adb runs", async () => {

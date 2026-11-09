@@ -35,7 +35,7 @@ make_bun_stub() {
   cat > "$STUB_DIR/bun" <<EOF
 #!/usr/bin/env bash
 case "\$1" in
-  scripts/lib/*.ts | */test-file-timings.ts) exec "$REAL_BUN" "\$@" ;;
+  scripts/lib/*.ts | */scripts/lib/*.ts | */test-file-timings.ts) exec "$REAL_BUN" "\$@" ;;
 esac
 mkdir -p coverage
 printf 'TN:\n' > coverage/lcov.info
@@ -106,7 +106,7 @@ EOF
   cat > "$STUB_DIR/bun" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
-  scripts/lib/*.ts | */test-file-timings.ts) exec "$REAL_BUN" "$@" ;;
+  scripts/lib/*.ts | */scripts/lib/*.ts | */test-file-timings.ts) exec "$REAL_BUN" "$@" ;;
 esac
 for ((i = 0; i < 260; i++)); do
   printf 'shard test output %s\n' "$i"
@@ -128,7 +128,7 @@ EOF
   cat > "$STUB_DIR/bun" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
-  scripts/lib/*.ts | */test-file-timings.ts) exec "$REAL_BUN" "$@" ;;
+  scripts/lib/*.ts | */scripts/lib/*.ts | */test-file-timings.ts) exec "$REAL_BUN" "$@" ;;
 esac
 printf '{"event":"start","file":"test/stuck%s.test.ts","t":1}\n' "${AUTOMOBILE_WATCHDOG_LABEL##* }" \
   > "$AUTOMOBILE_WATCHDOG_TIMING_LOG"

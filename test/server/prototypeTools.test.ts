@@ -50,6 +50,8 @@ import {
 import { FakeDeviceWindowCacheInvalidator } from "../fakes/FakeDeviceWindowCacheInvalidator";
 import { prototypePlatformCall } from "../../src/features/prototype/prototypePlatform";
 import { prototypeRequiredCapabilities } from "../../src/features/prototype/prototypeCapabilityGates";
+import sensitiveStorage from "../fixtures/prototype-spec/library-sensitive/storage-exact.json";
+import sensitivePlatform from "../fixtures/prototype-spec/library-sensitive/platform-url.json";
 
 const device: BootedDevice = { deviceId: "fake-prototype", platform: "android", name: "Fake" };
 const spec = {
@@ -366,6 +368,21 @@ describe("prototype MCP tool", () => {
         ...prototypeRequiredCapabilities(sensitiveSpec, "android").map((gate) => gate.capability),
       ]);
     });
+
+    test.each([sensitiveStorage, sensitivePlatform])(
+      "show warns at $expectedPath for sensitive storage or platform state",
+      async ({ spec: input, expectedPath, expectedMessage }) => {
+        client.setSupportedCommands([
+          PROTOTYPE_SHOW_IN_PLACE_CAPABILITY,
+          ...prototypeRequiredCapabilities(input, "android").map((gate) => gate.capability),
+        ]);
+        const { payload } = await call({ action: "show", spec: input });
+        expect(payload.success).toBe(true);
+        expect(payload.warning).toContain(
+          `${expectedPath}: ${expectedMessage}; this is a warning only and does not block the show.`,
+        );
+      },
+    );
 
     test.each([false, true])(
       "a sensitive request query warns on show (component: %p)",

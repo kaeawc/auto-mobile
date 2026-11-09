@@ -50,6 +50,7 @@
                 handler: .body { $0.handleNetworkErrorSimulation($1, initialData: $2) }
             ),
             Entry(route: .networkFaultRules, handler: .body { $0.handleNetworkFaultRules($1, initialData: $2) }),
+            Entry(route: .accessibilityFocus, handler: .body { $0.handleAccessibilityFocus($1, initialData: $2) }),
             Entry(route: .magicTap, handler: .simple { $0.handleMagicTap($1) }),
             Entry(route: .highlight, handler: .body { $0.handleHighlight($1, initialData: $2) }),
             Entry(route: .dbExecute, handler: .bodyThenStorage { server in

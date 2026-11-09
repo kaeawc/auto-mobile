@@ -17,3 +17,20 @@ describe("startDevice screenSize validation", () => {
     expect(startDeviceSchema.safeParse({ device }).success).toBe(true);
   });
 });
+
+test.each([true, false])("startDevice accepts boolean requires.screenRound=%p", (screenRound) => {
+  const device = {
+    platform: "android",
+    formFactor: "watch",
+    createIfMissing: true,
+    requires: { screenRound },
+  };
+  expect(startDeviceSchema.parse(device)).toMatchObject({ requires: { screenRound } });
+  expect(startDeviceSchema.safeParse({ device }).success).toBe(true);
+  expect(
+    startDeviceSchema.safeParse({ ...device, requires: { screenRound: "false" } }).success,
+  ).toBe(false);
+  expect(
+    startDeviceSchema.safeParse({ ...device, requires: { screenRound, extra: true } }).success,
+  ).toBe(false);
+});

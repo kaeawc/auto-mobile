@@ -44,6 +44,7 @@ import {
 import type { IosHierarchyMessageEffects } from "./IosHierarchyMessageEffects";
 import { type IosSdkEventIngestor } from "./IosSdkEventIngestor";
 import { NoOpIOSCtrlProxyManager } from "./NoOpIOSCtrlProxyManager";
+import type { InfoPlistReader } from "../../../utils/bundleSourceRevision";
 import type {
   CtrlProxyActionResult,
   CtrlProxyClipboardResult,
@@ -59,6 +60,8 @@ import type {
   CtrlProxyKeyboardResult,
   CtrlProxyLaunchAppResult,
   CtrlProxyMagicTapResult,
+  CtrlProxyAccessibilityFocusResult,
+  AccessibilityFocusSelector,
   CtrlProxyPinchResult,
   CtrlProxyPressBackResult,
   CtrlProxyPressButtonResult,
@@ -97,6 +100,8 @@ export interface IosCtrlProxyClientOptions {
   transientObserver?: boolean;
   iosSource?: IosAppMetadataSource;
   contentHashProvider?: ContentHashProvider;
+  /** Reads a simulator bundle's Info.plist for its declared git revision (#16954). */
+  infoPlistReader?: InfoPlistReader;
 }
 
 export interface IosCtrlProxyClientDependencies extends IosCtrlProxyClientOptions {
@@ -366,6 +371,13 @@ export interface IosCtrlProxy extends Omit<CtrlProxyClient, "requestPinch"> {
     label?: string,
     options?: CtrlProxyRequestActionOptions & { timeoutMs?: number },
   ): Promise<CtrlProxyActionResult>;
+
+  requestAccessibilityFocus(
+    selector: AccessibilityFocusSelector,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<CtrlProxyAccessibilityFocusResult>;
 
   requestMagicTap(
     timeoutMs?: number,

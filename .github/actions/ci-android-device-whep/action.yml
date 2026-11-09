@@ -7,12 +7,31 @@ runs:
   using: composite
   steps:
     - uses: ./.github/actions/setup-auto-mobile-npm-package
+    # One bounded retry per download: the artifact service can reset the
+    # signed-URL request (GetSignedArtifactURL ECONNRESET, #17369). Same
+    # continue-on-error attempt + outcome-gated retry as android-emulator.
     - name: "Download CtrlProxy APK"
+      id: download-ctrlproxy-1
+      continue-on-error: true
+      uses: actions/download-artifact@v7
+      with:
+        name: control-proxy-apk
+        path: android/control-proxy/build/outputs/apk/debug
+    - name: "Download CtrlProxy APK (Retry)"
+      if: steps.download-ctrlproxy-1.outcome == 'failure'
       uses: actions/download-artifact@v7
       with:
         name: control-proxy-apk
         path: android/control-proxy/build/outputs/apk/debug
     - name: "Download video-server jar"
+      id: download-video-server-1
+      continue-on-error: true
+      uses: actions/download-artifact@v7
+      with:
+        name: video-server-jar
+        path: android/video-server/build/libs
+    - name: "Download video-server jar (Retry)"
+      if: steps.download-video-server-1.outcome == 'failure'
       uses: actions/download-artifact@v7
       with:
         name: video-server-jar

@@ -43,6 +43,25 @@
       android:exported="true"
       android:theme="@style/Theme.AutoMobile.AppCompatProbe" />
 
+    <activity
+      android:name=".ShareSinkActivity"
+      android:exported="true"
+      android:label="@string/share_sink_name"
+      android:theme="@style/Theme.AutoMobile.AppCompatProbe">
+      <intent-filter>
+        <action android:name="android.intent.action.SEND" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <data android:mimeType="text/plain" />
+        <data android:mimeType="image/*" />
+      </intent-filter>
+      <intent-filter>
+        <action android:name="android.intent.action.SEND_MULTIPLE" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <data android:mimeType="image/*" />
+        <data android:mimeType="text/plain" />
+      </intent-filter>
+    </activity>
+
     <!-- AndroidX Startup configuration -->
     <provider
       android:name="androidx.startup.InitializationProvider"

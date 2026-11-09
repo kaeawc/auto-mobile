@@ -1,0 +1,693 @@
+{
+  "hierarchy": {
+    "node": {
+      "$": {
+        "text": "Maps",
+        "class": "XCUIApplication",
+        "bounds": [0, 0, 402, 874]
+      },
+      "node": [
+        {
+          "$": {
+            "resource-id": "Maps.Application",
+            "class": "UIWindow",
+            "bounds": [0, 0, 402, 874],
+            "view-id": "Maps.Application"
+          },
+          "node": [
+            {
+              "$": {
+                "text": "North America",
+                "resource-id": "VKPointFeature",
+                "class": "UIView",
+                "bounds": [167, 280, 197, 310],
+                "view-id": "VKPointFeature"
+              }
+            },
+            {
+              "$": {
+                "text": "Vancouver",
+                "resource-id": "VKPointFeature",
+                "class": "UIView",
+                "bounds": [6, 312, 36, 342],
+                "view-id": "VKPointFeature"
+              }
+            },
+            {
+              "$": {
+                "text": "Montréal",
+                "resource-id": "VKPointFeature",
+                "class": "UIView",
+                "bounds": [331, 348, 361, 378],
+                "view-id": "VKPointFeature"
+              }
+            },
+            {
+              "$": {
+                "text": "Toronto",
+                "resource-id": "VKPointFeature",
+                "class": "UIView",
+                "bounds": [293, 365, 323, 395],
+                "view-id": "VKPointFeature"
+              }
+            },
+            {
+              "$": {
+                "text": "Chicago",
+                "resource-id": "VKPointFeature",
+                "class": "UIView",
+                "bounds": [239, 381, 269, 411],
+                "view-id": "VKPointFeature"
+              }
+            },
+            {
+              "$": {
+                "text": "Washington",
+                "resource-id": "VKPointFeature",
+                "class": "UIView",
+                "bounds": [309, 407, 339, 437],
+                "view-id": "VKPointFeature"
+              }
+            },
+            {
+              "$": {
+                "text": "San Francisco",
+                "resource-id": "VKPointFeature",
+                "class": "UIView",
+                "bounds": [11, 416, 41, 446],
+                "view-id": "VKPointFeature"
+              }
+            },
+            {
+              "$": {
+                "text": "Los Angeles",
+                "resource-id": "VKPointFeature",
+                "class": "UIView",
+                "bounds": [38, 446, 68, 476],
+                "view-id": "VKPointFeature"
+              }
+            },
+            {
+              "$": {
+                "text": "Dallas",
+                "resource-id": "VKPointFeature",
+                "class": "UIView",
+                "bounds": [179, 456, 209, 486],
+                "view-id": "VKPointFeature"
+              }
+            },
+            {
+              "$": {
+                "resource-id": "AnnotationContainer",
+                "class": "UIView",
+                "bounds": [0, 0, 402, 874],
+                "view-id": "AnnotationContainer"
+              }
+            },
+            {
+              "$": {
+                "resource-id": "ChromeOverlayController",
+                "class": "UIView",
+                "bounds": [0, 0, 402, 874],
+                "view-id": "ChromeOverlayController"
+              },
+              "node": {
+                "$": {
+                  "resource-id": "IOSChromeViewController<0x108210000>.IOSFloatingControlsViewController<0x1082a5200>",
+                  "class": "UIView",
+                  "bounds": [16, 77, 386, 478],
+                  "view-id": "IOSChromeViewController<0x108210000>.IOSFloatingControlsViewController<0x1082a5200>"
+                },
+                "node": [
+                  {
+                    "$": {
+                      "text": "Map Modes",
+                      "resource-id": "SettingsButton.Explore",
+                      "class": "UIButton",
+                      "bounds": [338, 382, 386, 430],
+                      "clickable": "true",
+                      "role": "button",
+                      "view-id": "SettingsButton.Explore"
+                    }
+                  },
+                  {
+                    "$": {
+                      "text": "Tracking",
+                      "resource-id": "UserLocationButton",
+                      "class": "UIButton",
+                      "bounds": [338, 430, 386, 478],
+                      "clickable": "true",
+                      "role": "button",
+                      "view-id": "UserLocationButton"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "$": {
+                "resource-id": "IOSChromeViewController<0x108210000>.ControlContainerViewController<0x10adadc00>",
+                "class": "UIView",
+                "bounds": [0, 0, 402, 874],
+                "view-id": "IOSChromeViewController<0x108210000>.ControlContainerViewController<0x10adadc00>"
+              },
+              "node": {
+                "$": {
+                  "resource-id": "ControlContainerViewController.OverlayView",
+                  "class": "UIView",
+                  "bounds": [0, 61, 402, 488],
+                  "view-id": "ControlContainerViewController.OverlayView"
+                }
+              }
+            },
+            {
+              "$": {
+                "resource-id": "ChromeViewController.Viewport",
+                "class": "UIView",
+                "bounds": [0, 62, 338, 840],
+                "view-id": "ChromeViewController.Viewport"
+              }
+            },
+            {
+              "$": {
+                "text": "Card controller",
+                "resource-id": "Card grabber",
+                "class": "UIButton",
+                "bounds": [154, 483, 247, 507],
+                "clickable": "true",
+                "role": "button",
+                "view-id": "Card grabber"
+              }
+            },
+            {
+              "$": {
+                "resource-id": "MapsSearchBar",
+                "class": "UIView",
+                "bounds": [8, 488, 394, 561],
+                "view-id": "MapsSearchBar"
+              },
+              "node": [
+                {
+                  "$": {
+                    "class": "UIImageView",
+                    "bounds": [8, 488, 394, 561],
+                    "clickable": "true",
+                    "role": "image",
+                    "view-id": "s2-7edfbf5215a4f07c"
+                  }
+                },
+                {
+                  "$": {
+                    "text": "Apple Maps",
+                    "resource-id": "MapsSearchTextField",
+                    "class": "UISearchBar",
+                    "bounds": [23, 503, 328, 545],
+                    "clickable": "true",
+                    "role": "textfield",
+                    "hint-text": "Apple Maps",
+                    "view-id": "MapsSearchTextField",
+                    "actions": ["set_text", "clear_text"]
+                  },
+                  "node": [
+                    {
+                      "$": {
+                        "text": "Dictate",
+                        "resource-id": "Dictate",
+                        "class": "UIButton",
+                        "bounds": [296, 514, 313, 535],
+                        "clickable": "true",
+                        "role": "button",
+                        "view-id": "Dictate"
+                      }
+                    },
+                    {
+                      "$": {
+                        "text": "Search",
+                        "resource-id": "magnifyingglass",
+                        "class": "UIImageView",
+                        "bounds": [34, 515, 54, 533],
+                        "clickable": "true",
+                        "role": "image",
+                        "view-id": "magnifyingglass"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "$": {
+                "text": "profile",
+                "resource-id": "userProfileButton",
+                "class": "UIButton",
+                "bounds": [336, 503, 378, 545],
+                "clickable": "true",
+                "role": "button",
+                "view-id": "userProfileButton"
+              }
+            },
+            {
+              "$": {
+                "resource-id": "HomeView",
+                "class": "UIView",
+                "bounds": [8, 488, 394, 866],
+                "view-id": "HomeView"
+              },
+              "node": {
+                "$": {
+                  "text": "Locations",
+                  "class": "UICollectionView",
+                  "bounds": [8, 488, 394, 866],
+                  "scrollable": "true",
+                  "role": "list",
+                  "view-id": "s2-19d5b66de9fb238d"
+                },
+                "node": [
+                  {
+                    "$": {
+                      "class": "UITableViewCell",
+                      "bounds": [27, 561, 374, 603],
+                      "clickable": "true",
+                      "role": "listitem",
+                      "view-id": "s2-455c43281e140cf8~fb670561"
+                    },
+                    "node": {
+                      "$": {
+                        "text": "Places",
+                        "resource-id": "SectionHeader",
+                        "class": "UIButton",
+                        "bounds": [27, 570, 102, 593],
+                        "clickable": "true",
+                        "role": "button",
+                        "view-id": "SectionHeader"
+                      }
+                    }
+                  },
+                  {
+                    "$": {
+                      "resource-id": "PinnedItemSection",
+                      "class": "UITableViewCell",
+                      "bounds": [8, 603, 394, 724],
+                      "clickable": "true",
+                      "role": "listitem",
+                      "view-id": "PinnedItemSection"
+                    },
+                    "node": {
+                      "$": {
+                        "class": "UIScrollView",
+                        "bounds": [8, 603, 394, 724],
+                        "scrollable": "true",
+                        "view-id": "s2-09cbcbb75f99fc18"
+                      },
+                      "node": {
+                        "$": {
+                          "class": "UIScrollView",
+                          "bounds": [8, 603, 394, 724],
+                          "scrollable": "true",
+                          "view-id": "s2-cd9ae864bdab8b4b"
+                        },
+                        "node": [
+                          {
+                            "$": {
+                              "text": "Home, Add",
+                              "resource-id": "PinnedTile",
+                              "class": "UIButton",
+                              "bounds": [23, 603, 106, 724],
+                              "clickable": "true",
+                              "role": "button",
+                              "view-id": "PinnedTile"
+                            },
+                            "node": [
+                              {
+                                "$": {
+                                  "resource-id": "IconImage",
+                                  "class": "UIImageView",
+                                  "bounds": [23, 603, 106, 686],
+                                  "clickable": "true",
+                                  "role": "image",
+                                  "view-id": "IconImage"
+                                }
+                              },
+                              {
+                                "$": {
+                                  "text": "Home",
+                                  "resource-id": "TitleLabel",
+                                  "class": "UILabel",
+                                  "bounds": [47, 694, 82, 709],
+                                  "role": "text",
+                                  "view-id": "TitleLabel"
+                                }
+                              },
+                              {
+                                "$": {
+                                  "text": "Add",
+                                  "resource-id": "SubtitleLabel",
+                                  "class": "UILabel",
+                                  "bounds": [53, 709, 76, 724],
+                                  "role": "text",
+                                  "view-id": "SubtitleLabel"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "$": {
+                              "text": "Work, Add",
+                              "resource-id": "PinnedTile",
+                              "class": "UIButton",
+                              "bounds": [114, 603, 197, 724],
+                              "clickable": "true",
+                              "role": "button",
+                              "view-id": "PinnedTile"
+                            },
+                            "node": [
+                              {
+                                "$": {
+                                  "resource-id": "IconImage",
+                                  "class": "UIImageView",
+                                  "bounds": [114, 603, 197, 686],
+                                  "clickable": "true",
+                                  "role": "image",
+                                  "view-id": "IconImage"
+                                }
+                              },
+                              {
+                                "$": {
+                                  "text": "Work",
+                                  "resource-id": "TitleLabel",
+                                  "class": "UILabel",
+                                  "bounds": [140, 694, 171, 709],
+                                  "role": "text",
+                                  "view-id": "TitleLabel"
+                                }
+                              },
+                              {
+                                "$": {
+                                  "text": "Add",
+                                  "resource-id": "SubtitleLabel",
+                                  "class": "UILabel",
+                                  "bounds": [144, 709, 167, 724],
+                                  "role": "text",
+                                  "view-id": "SubtitleLabel"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "$": {
+                              "text": "Add",
+                              "resource-id": "PinnedTile",
+                              "class": "UIButton",
+                              "bounds": [204, 603, 288, 709],
+                              "clickable": "true",
+                              "role": "button",
+                              "view-id": "PinnedTile"
+                            },
+                            "node": [
+                              {
+                                "$": {
+                                  "text": "add",
+                                  "resource-id": "IconImage",
+                                  "class": "UIImageView",
+                                  "bounds": [204, 603, 288, 686],
+                                  "clickable": "true",
+                                  "role": "image",
+                                  "view-id": "IconImage"
+                                }
+                              },
+                              {
+                                "$": {
+                                  "text": "Add",
+                                  "resource-id": "TitleLabel",
+                                  "class": "UILabel",
+                                  "bounds": [234, 694, 258, 709],
+                                  "role": "text",
+                                  "view-id": "TitleLabel"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "$": {
+                      "class": "UITableViewCell",
+                      "bounds": [27, 724, 374, 785],
+                      "clickable": "true",
+                      "role": "listitem",
+                      "view-id": "s2-455c43281e140cf8~dfb8fc7a"
+                    },
+                    "node": {
+                      "$": {
+                        "text": "Your Guides",
+                        "resource-id": "SectionHeader",
+                        "class": "UIButton",
+                        "bounds": [27, 753, 150, 776],
+                        "clickable": "true",
+                        "role": "button",
+                        "view-id": "SectionHeader"
+                      }
+                    }
+                  },
+                  {
+                    "$": {
+                      "resource-id": "UserGuidesSection",
+                      "class": "UITableViewCell",
+                      "bounds": [8, 785, 394, 1018],
+                      "clickable": "true",
+                      "role": "listitem",
+                      "view-id": "UserGuidesSection"
+                    },
+                    "node": {
+                      "$": {
+                        "class": "UIScrollView",
+                        "bounds": [8, 785, 394, 1018],
+                        "scrollable": "true",
+                        "view-id": "s2-3e7a5127cd5b67fc"
+                      },
+                      "node": {
+                        "$": {
+                          "class": "UIScrollView",
+                          "bounds": [8, 785, 394, 1017],
+                          "scrollable": "true",
+                          "view-id": "s2-ac292292540058f4"
+                        },
+                        "node": {
+                          "$": {
+                            "resource-id": "GuideTile.User",
+                            "class": "UIView",
+                            "bounds": [23, 785, 197, 1017],
+                            "view-id": "GuideTile.User"
+                          },
+                          "node": [
+                            {
+                              "$": {
+                                "text": "More",
+                                "resource-id": "MoreButton",
+                                "class": "UIButton",
+                                "bounds": [158, 797, 185, 824],
+                                "clickable": "true",
+                                "role": "button",
+                                "view-id": "MoreButton"
+                              },
+                              "node": {
+                                "$": {
+                                  "class": "UIButton",
+                                  "clickable": "true",
+                                  "role": "button",
+                                  "view-id": "s2-dffc29036769f35b"
+                                },
+                                "node": {
+                                  "$": {
+                                    "text": "More",
+                                    "resource-id": "ellipsis",
+                                    "class": "UIImageView",
+                                    "bounds": [158, 797, 185, 824],
+                                    "clickable": "true",
+                                    "role": "image",
+                                    "view-id": "ellipsis"
+                                  }
+                                }
+                              }
+                            },
+                            {
+                              "$": {
+                                "text": "Favorites, 0 places",
+                                "resource-id": "TitleLabel-SubtitleLabel",
+                                "class": "UIButton",
+                                "bounds": [23, 905, 197, 1017],
+                                "clickable": "true",
+                                "role": "button",
+                                "view-id": "TitleLabel-SubtitleLabel"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "$": {
+                      "text": "Vertical scroll bar, 3 pages",
+                      "class": "UIView",
+                      "bounds": [362, 561, 391, 813],
+                      "view-id": "s2-77329c41122ec8ed"
+                    }
+                  },
+                  {
+                    "$": {
+                      "text": "Horizontal scroll bar, 1 page",
+                      "class": "UIView",
+                      "bounds": [60, 834, 341, 863],
+                      "view-id": "s2-a79830a9c63cf5c5-1"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "$": {
+            "text": "Allow “Maps” to use your location?",
+            "class": "UIAlertController",
+            "bounds": [41, 268, 361, 634],
+            "clickable": "true",
+            "view-id": "s2-f1a6d80e8a16ab36"
+          },
+          "node": [
+            {
+              "$": {
+                "class": "UIScrollView",
+                "bounds": [41, 268, 361, 442],
+                "scrollable": "true",
+                "view-id": "s2-4be39f6c9fa5ea42"
+              },
+              "node": [
+                {
+                  "$": {
+                    "text": "Allow “Maps” to use your location?",
+                    "class": "UILabel",
+                    "bounds": [71, 290, 331, 332],
+                    "role": "text",
+                    "view-id": "s2-799a72057a8aa7b6"
+                  }
+                },
+                {
+                  "$": {
+                    "text": "Your location is used to show your position on the map, get directions, estimate travel times, improve search results, and display relevant ads where available in Maps.",
+                    "class": "UILabel",
+                    "bounds": [71, 339, 331, 437],
+                    "role": "text",
+                    "view-id": "s2-bfeb8b34a1f783d5"
+                  }
+                },
+                {
+                  "$": {
+                    "text": "Vertical scroll bar, 2 pages",
+                    "class": "UIView",
+                    "bounds": [328, 268, 358, 442],
+                    "view-id": "s2-3b9b6552ae2ad908"
+                  }
+                },
+                {
+                  "$": {
+                    "text": "Horizontal scroll bar, 1 page",
+                    "class": "UIView",
+                    "bounds": [41, 409, 361, 439],
+                    "view-id": "s2-a79830a9c63cf5c5-2"
+                  }
+                }
+              ]
+            },
+            {
+              "$": {
+                "class": "UIScrollView",
+                "bounds": [41, 442, 361, 634],
+                "scrollable": "true",
+                "view-id": "s2-07a824c815edc25b"
+              },
+              "node": [
+                {
+                  "$": {
+                    "text": "Allow Once",
+                    "class": "UIButton",
+                    "bounds": [57, 458, 345, 506],
+                    "clickable": "true",
+                    "role": "button",
+                    "view-id": "s2-f3143d7b770d732e"
+                  }
+                },
+                {
+                  "$": {
+                    "text": "Allow While Using App",
+                    "class": "UIButton",
+                    "bounds": [57, 514, 345, 562],
+                    "clickable": "true",
+                    "role": "button",
+                    "view-id": "s2-4819f751664bad33"
+                  }
+                },
+                {
+                  "$": {
+                    "text": "Don’t Allow",
+                    "class": "UIButton",
+                    "bounds": [57, 570, 345, 618],
+                    "clickable": "true",
+                    "role": "button",
+                    "view-id": "s2-72322ec179d67f04"
+                  }
+                },
+                {
+                  "$": {
+                    "text": "Vertical scroll bar, 1 page",
+                    "class": "UIView",
+                    "bounds": [328, 442, 358, 634],
+                    "view-id": "s2-edd1e9ee444fedac"
+                  }
+                },
+                {
+                  "$": {
+                    "text": "Horizontal scroll bar, 1 page",
+                    "class": "UIView",
+                    "bounds": [41, 601, 361, 631],
+                    "view-id": "s2-a79830a9c63cf5c5-3"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "packageName": "com.apple.Maps",
+  "updatedAt": 1793893299279,
+  "windows": [
+    {
+      "bounds": [0, 0, 402, 874],
+      "id": 0,
+      "isActive": true,
+      "isFocused": true,
+      "type": 1
+    }
+  ],
+  "screenScale": 3,
+  "screenWidth": 402,
+  "screenHeight": 874,
+  "nativeScale": 3,
+  "pixelWidth": 1206,
+  "pixelHeight": 2622,
+  "insets": {
+    "available": false,
+    "displayCutoutInfo": {
+      "classification": "unknown"
+    },
+    "source": "unavailable",
+    "units": "unknown"
+  },
+  "frameContext": "18F73ECA-0BBD-4CB7-888A-B15288362622:1:c8c3a8b2ced5ca9a",
+  "fresh": true
+}

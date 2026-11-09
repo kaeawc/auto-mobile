@@ -49,6 +49,9 @@ enum PrototypeStateValidator {
             if node.type == "scroll", let key = node.atEndKey, state[key]?.boolValue == nil {
                 return "Chat scroll requires a declared boolean atEndKey"
             }
+            if node.type == "webView", let message = PrototypeWebView.stateKeyRejection(node, state: state) {
+                return message
+            }
         }
         return actionRejection(actions, state: state)
     }

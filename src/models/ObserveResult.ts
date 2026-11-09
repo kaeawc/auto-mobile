@@ -178,7 +178,13 @@ export type ObserveResult = {
   /** Opt-in Android display:"all" aggregate; the proposed additive shape (#8256). */
   displays?: DisplayObservation[];
   /** Other known physical panels, only present when inventory has multiple panels. */
-  otherDisplays?: Array<Pick<DisplayPanel, "key" | "role"> & { size: DisplayPanel["sizePx"] }>;
+  otherDisplays?: Array<
+    Pick<DisplayPanel, "key" | "role"> & {
+      size: DisplayPanel["sizePx"];
+      /** Unit of `size`: iOS panels are converted to points like `screenSize`; Android stays in pixels. */
+      units: "points" | "physical-pixels";
+    }
+  >;
   /** INTERNAL-ONLY: display transition revision when this capture completed. */
   displayRevision?: number;
   /** Short-lived full-screen coordinate reference for a later tapAt call. */
@@ -275,6 +281,24 @@ export type ObserveResult = {
    */
   isScreenRound?: boolean;
 
+  /** CarService state, present only on automotive devices. Unavailable reads omit their fields. */
+  automotive?: {
+    drivingState?: "parked" | "idling" | "moving";
+    uxRestrictions?: {
+      requiresDistractionOptimization: boolean;
+      activeRestrictions: number;
+    };
+    foregroundActivity?: { distractionOptimized: boolean };
+    /** DO is required and a known foreground activity is not distraction optimized. */
+    blocked: boolean;
+    /**
+     * The foreground screen belongs to the Car App Library (#17499); `hostPackage` is present when
+     * host-drawn template nodes were seen. Absence is not proof of app-drawn views. Read it with
+     * `isCarAppHostRendered`.
+     */
+    hostRenderedUi?: import("./CarAppTemplates").CarAppHostRenderedUi;
+  };
+
   /** System UI insets */
   systemInsets: SystemInsets;
 
@@ -294,6 +318,13 @@ export type ObserveResult = {
    * contain no audio (#13627).
    */
   diagnostics?: AudioInputDiagnostic[];
+
+  /**
+   * Car App Library template stacks the foreground app reported through the AutoMobile Android SDK
+   * route (#16751), present only on the `observe` tool's own result and only when the app enabled
+   * the route. Templates are what the app returned, not what the host rendered.
+   */
+  carAppTemplates?: import("./CarAppTemplates").CarAppTemplates;
 
   /**
    * Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise,

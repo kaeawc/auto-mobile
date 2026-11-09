@@ -1,5 +1,6 @@
 import type { InstalledAppsTable } from "../models/InstalledAppsStore";
 import type { Platform } from "../models/Platform";
+import type { VideoRecordingPlatform } from "../models/VideoRecordingPlatform";
 import type { Generated, Insertable, Selectable, Updateable } from "kysely";
 
 /**
@@ -152,6 +153,9 @@ export interface NavigationBuildKeysTable {
   version_code: number;
   content_hash: string;
   created_at: Generated<string>;
+  // App-declared git provenance (#16954): display-only, latest declaration wins.
+  git_branch: string | null;
+  git_sha: string | null;
 }
 
 // Per-node observation records (#4984): a screen reached by many builds/devices/sessions.
@@ -415,7 +419,7 @@ interface TestExecutionsTable {
   timestamp: number;
   device_id: string | null;
   device_name: string | null;
-  device_platform: "android" | "ios" | null;
+  device_platform: "android" | "ios" | "tvos" | null;
   device_type: "emulator" | "simulator" | "device" | null;
   app_version: string | null;
   git_commit: string | null;
@@ -656,7 +660,7 @@ export interface DeviceSnapshotConfigsTable {
 export interface VideoRecordingsTable {
   recording_id: string;
   device_id: string;
-  platform: "android" | "ios";
+  platform: VideoRecordingPlatform;
   status: string;
   output_name: string | null;
   file_name: string;

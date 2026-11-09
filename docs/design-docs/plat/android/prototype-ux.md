@@ -9,6 +9,8 @@ expressions, URLs, image bytes or migration instructions.
 
 ## Owner decisions
 
+- 2026-10-31 (#14180): `image` may take a `url`, including a data-bound one (`{item.avatarUrl}`). A URL image uses the same egress policy as `request` in its runtime: the overlay as `request` today, ProtoViewer behind its network switch and filter (image loads count as network), and the disposable app as decided in #14184 / #14289. Only https is allowed outside dev flavors; cleartext is allowed only on loopback through `adb reverse` for fixtures. An optional `via: "host"` lets the host fetch a static URL at show/patch time and upload it as a content-hash asset, so the device makes no network call. Image fetches never send cookies or referrers. The URL can be seen by the host but never appears in accessibility text, `observe` or events. Not implemented yet: `image` currently accepts only `asset`.
+
 - 2026-10-27: `style.surface: "glass"` requires real glass and `prototype_glass_v1`: iOS 26+ Liquid Glass, and Android API 31+ real backdrop blur when its renderer is implemented. iOS 17–25 and Android below API 31 refuse glass through missing capability advertisement. There is no simulated translucent fill, ultraThinMaterial substitute, or fallback capability. Android rendering and device verification remain owed by the Android renderer slice.
 
 - 2026-10-26: Android-only custom AGSL shaders require `prototype_custom_shaders_v1` and the host opt-in `AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1` (off by default). Source assets use `application/vnd.automobile.agsl`, valid UTF-8, at most 16 KiB (16384 bytes), and at most 16 scalar `uniform float name;` declarations. The only other permitted uniform is one optional `uniform shader content;`: only the node's own rendered content may be sampled. Comments (`//` and `/* */`) are stripped to separators before token scanning. Code tokens must be ASCII; no preprocessor directives, strings, escapes, qualifiers, arrays, initializers, comma declarations, duplicate names, or other uniform types/samplers are accepted. `content`, `main`, GLSL/AGSL reserved words and names starting with `sk_` or `gl_` are reserved uniform names. A leading UTF-8 BOM is rejected. `style.shader: {asset, uniforms?}` supplies at most 16 declared float names matching `[A-Za-z_][A-Za-z0-9_]*`, with finite values in [-1000000, 1000000]; the host cross-checks available source assets. The Android runtime must compile on `put_prototype_asset` before retaining source and cap returned errors at 2 KiB of UTF-8. Execution fails closed under the preset frame-budget guard. iOS agents and ProtoViewer bundle import/export explicitly refuse both this MIME type and `style.shader`.
@@ -333,6 +335,7 @@ There are no iOS prototype screenshot baselines to re-record.
 | timePicker      | native   | material | —     |
 | topAppBar       | material | material | —     |
 | videoPlayer     | material | material | —     |
+| webView         | neutral  | neutral  | —     |
 
 ### Light and dark values
 
@@ -1257,6 +1260,28 @@ reporter (`scripts/test-ts.sh`, `scripts/validate-bun-test-timings.sh`). It does
 Robolectric tests, so the Compose and host tests for this feature are not held to it. iOS accepts the structural contract but does not
 advertise this capability, so host preflight refuses either authored field.
 
+### Attention loops (`prototype_loops_v1`)
+
+(Android only, requires `prototype_loops_v1`) Any node accepts
+`attentionLoop: {effect: "pulse" | "spin", periodMs: 400–4000, iterations?: 1–20 | "infinite"}`.
+The period and finite count are integers; omitted iterations means infinite. Pulse scales
+1 → 1.08 → 1 per period; spin turns 0 → 360 degrees. Drawing changes without changing
+layout, reported bounds or touch targets. A pulse node must omit `style.scale`; a spin node
+must omit `style.rotation`, including every `styleWhen` style. At most eight expanded nodes
+may carry loops, including repeat instances; shimmer does not consume that limit.
+Finite loops settle at identity and contribute to settling motion while running. Infinite
+loops and shimmer contribute only to the intentional loop count. Reduced motion, motion
+none and animator scale 0 leave loops at rest. On Android each observe metadata read renews
+a 1500 ms capture hold: attention loops draw identity and shimmer draws no band during it,
+so captures within the hold are identical when the rest of the scene is unchanged.
+
+The runtime renews its capture hold in the controller’s window-metadata read path, alongside
+`prototypeMotion`. The hold uses an injected monotonic clock and a 1500 ms deadline; repeated
+reads extend it. Compose reads the deadline during drawing and invalidates the loop layer on
+renewal. Animation time continues through a hold, so a finite loop still completes on schedule.
+The first expanded node beyond `MAX_PROTOTYPE_LOOPS = 8` fails at `<node path>.attentionLoop` with
+`Loop node limit exceeded`. Conflicting rest transforms fail at the same path.
+
 ### One-shot keyframes
 
 Every node may carry `keyframes: {trigger, durationMs, tracks}`, gated by
@@ -1906,8 +1931,8 @@ runs no follow-up and reports a `cancelled` event. A `via: "host"` call sends
 abandonment): the host aborts that request's fetch, frees its in-flight slot and sends no reply, and the
 device ignores a `prototype_response` that crosses it. The frame is not in the Kotlin-mirrored wire
 manifest, like `prototype_request`. Beyond `MAX_PROTOTYPE_REQUESTS_IN_FLIGHT` a new request fails with
-`too_many_in_flight`. Dismissing the prototype cancels its requests. `via: "device"` loopback URLs
-are reversed as described in [Loopback requests from the device](#loopback-requests-from-the-device-12530).
+`too_many_in_flight`. Dismissing the prototype cancels its requests. `via: "device"` destinations are
+checked as described in [Device destination policy](#device-destination-policy).
 
 **Android runtime (#12528).** CtrlProxy advertises both capabilities and runs the action in
 `PrototypeRuntime`; the Kotlin twins of the TypeScript rules (`PrototypeRequest.kt`: resolver,
@@ -1926,9 +1951,10 @@ are reversed as described in [Loopback requests from the device](#loopback-reque
   `MAX_PROTOTYPE_RESPONSE_BYTES` cap; the contract timeout is the whole-call timeout. The two frames
   (`PrototypeNetworkFrames.kt`) stay outside the `WebSocketRequest` / `WebSocketResponse` hierarchies
   because the host reads them outside its Kotlin-mirrored wire manifest.
-- Any absolute http(s) URL is allowed: CtrlProxy declares `android.permission.INTERNET` and a
-  `network_security_config` with `cleartextTrafficPermitted="true"`. There is no host allowlist; CtrlProxy
-  is sideloaded over adb and never distributed.
+- CtrlProxy declares `android.permission.INTERNET` and a `network_security_config` with
+  `cleartextTrafficPermitted="true"`, so http and https URLs both work. There is no allowlist of
+  permitted hosts; the [device destination policy](#device-destination-policy) refuses local and
+  host-machine destinations instead.
 - Saved prototypes (`SavedPrototypeActivity`) run `via: "device"` on the same client; `via: "host"` finishes
   as an `invalid_request` error because no host serves the activity.
 
@@ -2122,7 +2148,15 @@ window's brightness, `orientation` (`portrait`, `landscape` or `unlocked`) reque
 `statusBar` (`light`, `dark` or `auto`) picks the status bar content style. Each applies only while the
 prototype is shown and is restored on dismiss; none writes a system setting. `orientation` over an overlay
 and `statusBar` where the runtime does not own the status bar (an Android overlay, the injected iOS agent) are
-best effort, and the iOS Simulator ignores `brightness`. No production runtime advertises the capability yet.
+best effort, and the iOS Simulator ignores `brightness`. CtrlProxy advertises the capability and applies
+`FLAG_KEEP_SCREEN_ON`, window-local `screenBrightness` (`system` uses `BRIGHTNESS_OVERRIDE_NONE`) and
+`screenOrientation`; `unlocked` and omission use `SCREEN_ORIENTATION_UNSPECIFIED`. Replacement rebuilds
+these values from the new spec; removal releases them, and an animated exit resets them before waiting
+for removal. Failed replacements restore the previous params. Inspect entries add `orientation` for the
+requested orientation and `statusBar: "unsupported"` for an authored status bar style. Hierarchy window
+entries add the same values as `prototypeOrientation` and `prototypeStatusBar`; omitted controls omit
+these fields. Orientation reports a request, not proof that the device rotated. Embedded Android does
+not advertise these overlay controls.
 
 **Prototype layout direction.** Optional `window.layoutDirection: "ltr" | "rtl"` requires
 `prototype_layout_direction_v1`. Omission inherits the host direction. The iOS renderer overrides
@@ -2132,15 +2166,19 @@ Android does not advertise this capability, so the host refuses specs that set i
 **Keyboard dismiss (#14320).** The `{type: "hideKeyboard"}` action, which takes no fields, needs
 `prototype_hide_keyboard_v1`. It is a plain UI action like `dismiss`, not a platform module, and touches only the
 prototype's own window: it hides the soft keyboard and clears text focus (Android `WindowInsetsControllerCompat`
-`hide(ime())`; iOS `endEditing(true)`). With no keyboard up it does nothing. No production runtime advertises
-the capability yet.
+`hide(ime())`; iOS `endEditing(true)`). CtrlProxy advertises the capability and dispatches the action to
+the owning surface's host on main, hiding the IME before clearing its view focus. Without a shown
+window it does nothing; navigation focusability is retained. The embedded Android renderer does not
+advertise it.
 
 **Settings deep links (#14320).** The `settings` module (`prototype_platform_settings_v1`) has one call,
 `settings.open` with `page` one of `app`, `notifications`, `location`, `wifi`, `bluetooth` or `display`. The
 list is closed and the target package is always the prototype's own runtime package; a spec cannot name
 another. The module has no events or `/platform` state. Pages other than `app` and `notifications` are
-Android only; the host validator does not yet know the target platform, so that restriction is reported by the
-runtime. CtrlProxy registers the module on Android and opens each page for its own package with
+Android only. The spec validators are platform-neutral, so the host's iOS show preflight refuses a literal
+Android-only `page` with the action's path; a bound page is left to the runtime. The Kotlin validator needs no
+such check because it runs only on Android, and the Swift agent validator has none yet because the iOS agent
+does not advertise the module, which the host's capability gate refuses. CtrlProxy registers the module on Android and opens each page for its own package with
 `FLAG_ACTIVITY_NEW_TASK`. Below API 26 `notifications` opens the app details page, and below API 29 `wifi` opens
 the full Wi-Fi screen instead of the panel; both report `outcome: "fallback"`. The result is `{outcome, page,
 handler?}`, and no resolving Settings activity is the typed error `unavailable`. The embedded renderer and iOS do
@@ -2258,6 +2296,12 @@ it keeps `/platform/location/current` current while the prototype is shown and r
 write, at most once per `minIntervalMs` (whole milliseconds, 1000 to one hour) and only after moving
 `minDistanceM` (0 to 100 km). Like the call, the block needs `location` in both `requires.platform` and
 `requires.permissions`. No updates are delivered in the background. No production runtime advertises the module.
+The delivered `location.updated` event carries only `{accuracyM, approximate}`, so coordinates reach the host
+only when the spec emits them or writes them into `/data`. `prototypeLocationEventSummary`
+(`prototypeLocationPrivacy.ts`) is the reference the runtimes copy, with shared cases in
+`test/fixtures/prototype-location/event-summary.json`. As a second layer the host's event decoder, shared by
+the Android and iOS transports, reduces any decoded `location.updated` data to those two fields and logs the
+names (never the values) of anything it dropped.
 
 **BLE value codecs (#14266).** The `ble` module's `decode` and `encode` arguments name one of a closed list
 of codecs, with no expressions: `utf8`, `hex` (lowercase out, either case in), `base64` (standard alphabet,
@@ -2341,6 +2385,45 @@ in `requires.permissions`. `audioRecorder.start` takes an optional `maxDurationM
 counts the current recording. A press-and-hold control uses the gesture action lists, and playback
 uses a `media` audio player. No production runtime advertises the module yet.
 
+**Runtime permissions (#14297).** Canonical names live in `requires.permissions[].name`, and each entry's
+`purpose` becomes the iOS usage string and the Android rationale text. `schemas/prototype-platform-permissions.json`
+maps each name to its Android manifest permissions and grant mechanism, and to its iOS Info.plist usage key and
+`simctl privacy` service:
+
+| Name                 | Android manifest                                 | Android grant     | iOS usage key                                  | `simctl privacy`        |
+| -------------------- | ------------------------------------------------ | ----------------- | ---------------------------------------------- | ----------------------- |
+| `camera`             | `CAMERA`                                         | `pm grant`        | `NSCameraUsageDescription`                     | `camera`                |
+| `microphone`         | `RECORD_AUDIO`                                   | `pm grant`        | `NSMicrophoneUsageDescription`                 | `microphone`            |
+| `location`           | `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION` | `pm grant`        | `NSLocationWhenInUseUsageDescription`          | `location`              |
+| `locationBackground` | `ACCESS_BACKGROUND_LOCATION`                     | `pm grant`        | `NSLocationAlwaysAndWhenInUseUsageDescription` | `location-always`       |
+| `notifications`      | `POST_NOTIFICATIONS`                             | app setting       | none                                           | notGrantableOnSimulator |
+| `photos`             | `READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO`          | `pm grant`        | `NSPhotoLibraryUsageDescription`               | `photos`                |
+| `photosAdd`          | none                                             | none (MediaStore) | `NSPhotoLibraryAddUsageDescription`            | `photos-add`            |
+| `contacts`           | `READ_CONTACTS`                                  | `pm grant`        | `NSContactsUsageDescription`                   | `contacts`              |
+| `calendar`           | `READ_CALENDAR`, `WRITE_CALENDAR`                | `pm grant`        | `NSCalendarsFullAccessUsageDescription`        | `calendar`              |
+| `bluetooth`          | `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`            | `pm grant`        | `NSBluetoothAlwaysUsageDescription`            | notGrantableOnSimulator |
+| `nearbyWifi`         | `NEARBY_WIFI_DEVICES`                            | `pm grant`        | `NSLocalNetworkUsageDescription`               | notGrantableOnSimulator |
+| `motion`             | `ACTIVITY_RECOGNITION`                           | `pm grant`        | `NSMotionUsageDescription`                     | `motion`                |
+| `speech`             | `RECORD_AUDIO`                                   | `pm grant`        | `NSSpeechRecognitionUsageDescription`          | notGrantableOnSimulator |
+
+The `permissions` module (`prototype_platform_permissions_v1`) has one call, `permissions.request` with
+`names` (1-16 unique canonical names). A literal list may only name permissions declared in
+`requires.permissions`; a bound list is checked by the runtime. State is `/platform/permissions/<name>`, one
+of `granted`, `denied`, `blocked`, `notDetermined`, `limited`, `restricted` or `unavailable`, and
+`permissions.changed` fires when the user changes a permission in Settings and the app resumes. A call that
+needs a permission the user denied fails with `permission_denied` and never prompts implicitly. Overlay
+runtimes do not advertise the module, since a grant there would go to CtrlProxy or the borrowed host app.
+
+The host sets declared permissions after install and before launch, so the first frame shows the final
+state. The mode is `prompt` (the default for interactive shows: nothing is granted, so the first request
+shows the system dialog and plans rely on the system-alert policy, #14106), `grantDeclared`, or
+`{grant: [...], deny: [...]}` naming declared permissions only, each in one list. Tests and agent loops pass
+an explicit mode. An Android denial revokes with the `user-fixed` flag, so it reads `blocked` and no dialog
+appears; an iOS simulator denial is `simctl privacy revoke` and reads `denied`. Each declared permission is
+reported as `{name, state, verified}`; `verified` is false, with `reason`, for a simulator name that is
+notGrantableOnSimulator and for an Android `photosAdd` denial (`notRevocable`). No production runtime
+advertises the module, and `prototype show` does not yet accept the mode.
+
 **Notifications (#14280).** The `notifications` module (`prototype_platform_notifications_v1`) has three
 calls. `notifications.post` takes `id` (1-128 characters), `channel` (a key-shaped channel id) and `title`
 (non-blank, at most 128), plus optional `body` (at most 1024), `largeImage` (an asset id), `style`, `group`,
@@ -2363,10 +2446,22 @@ importance, description?, showBadge?}]}`: 1-8 channels with unique key-shaped id
 most 64), `importance` one of `min`, `low`, `default` or `high`, and an optional `description` (at most
 256). The block needs `notifications` in `requires.platform`. A literal `channel` on `notifications.post`
 must name a declared channel, a literal `actions` list needs unique ids, and `notifications.cancel` takes
-exactly one of `id`, `group` or `all`; bound values are checked by the runtime.
+exactly one of `id`, `group` or `all`; bound values are checked by the runtime. The bounds are named
+contract limits (`MAX_PROTOTYPE_NOTIFICATION_*`, `MAX_PROTOTYPE_NOTIFICATIONS_ACTIVE`) that the call, state
+and channel rules repeat. Spec validation checks literal values only. The limits that apply after
+placeholders resolve belong to the device runtime that posts the notification: a reply of at most 1 KiB, a
+resolved notification of at most 5 KiB, and at most 4 updates per second per notification, coalesced to the
+latest. No runtime posts notifications yet, so none of these is enforced today; the host never posts one.
+Title and body limits count UTF-16 code units, while the 5 KiB total counts UTF-8 bytes of the resolved
+title, body and `data` and is meant to fail the call on its own (`invalid_args` when over). A code
+unit is at most 3 bytes, so every literal at the per-field limits fits (at most 4,480 bytes); text bound at
+post time can still exceed it, such as emoji counted per character (5,632 bytes at the limits).
 `notifications.schedule` takes the `post` arguments plus `delaySeconds` (a whole number, 1 to 604800)
 and needs `prototype_platform_notifications_scheduled_v1` as well; the same channel and action-id rules
-apply, and `notifications.scheduledFired` reports a scheduled notification that fired (#14283). On iOS, `min` and `low`
+apply, and `notifications.scheduledFired` reports a scheduled notification that fired (#14283).
+A `notifications.push` handler receives a simulated push (`{type, data, notification?}`, at most
+4096 bytes of compact JSON, the APNs limit) and needs `prototype_platform_push_v1` on top of the
+module, gated per event rather than per call (#14285). On iOS, `min` and `low`
 map to the passive interruption level and `default` and `high` to active. No production runtime
 advertises the module yet.
 
@@ -2457,6 +2552,21 @@ calls `media.next`, `previous` (restarts after 3 s), `skipTo` (`itemId`), `setSh
 `currentItemId`, `currentIndex`, `rate`, `sleepRemainingMs`, `shuffle` and `repeat`, and
 `media.itemChanged` reports an item change. No runtime advertises the capability yet.
 
+Queue semantics are a pure state machine (`PrototypeQueue`) that Kotlin and Swift both replay against
+`test/fixtures/prototype-media-queue`; the host only validates. Renderers report `ended`, the
+playhead, clock ticks and queue edits, and map the state onto their engine:
+
+- The play order is the queue order, or a Fisher-Yates shuffle driven by an injected `Random` that
+  keeps the current item first. Turning shuffle off restores queue order.
+- `next` ignores repeat `one`; an item ending replays under it. Past the last item, repeat `all`
+  wraps and `off` stops on that item. `previous` restarts after 3 s, and at the first item wraps
+  under `all` or otherwise restarts.
+- A `{ms}` sleep timer counts down on the renderer's clock and pauses at zero; `{endOfItem}` pauses
+  when the current item ends instead of advancing.
+- When a data action edits the queue, play order keeps its relative order and appends new items.
+  Removing the current item moves to the next surviving one, or with none left wraps under `all`
+  or stops on the last item. `skipTo` an unknown id fails with `item_not_found`.
+
 **Live camera (#14202, calls only).** The `camera` module also drives an in-app viewfinder:
 `camera.takePhoto` writes an image item to `into`, `camera.startRecording` (optional `audio` boolean and
 `maxDurationMs` 1-600000) and `camera.stopRecording` (writes a video item to `into`). Each takes
@@ -2500,11 +2610,24 @@ Cast on Android and AirPlay on iOS with one vocabulary. Its calls are the remote
 `cast.disconnect` (end the session and resume locally), `cast.stop` (end it and stop the receiver
 app) and `cast.setVolume` (`volume` 0-1, the remote device volume); play, pause and seek stay on the
 `media.*` calls. A platform that cannot do an op (AirPlay `disconnect` or `setVolume`) fails with
-`unsupported`. Events are `cast.routesChanged`, `sessionStarting`, `sessionStarted`, `sessionEnded`,
-`sessionFailed` (data `reason`: `media_not_castable`, `play_services_unavailable`, `network` or
-`receiver`) and `remoteVolume`. `/platform/cast/state` is `unavailable`, `noDevices`, `notConnected`,
-`connecting` or `connected`, with `deviceName`, `protocol` (`googleCast` or `airplay`), `player` (the
-cast `media` player id) and `volume`. CtrlProxy never advertises the module.
+`unsupported`. Event data is a closed object (unknown keys are refused):
+
+| event             | data                                                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `routesChanged`   | `state` (as `/platform/cast/state`), `routeCount` (integer >= 0)                                                   |
+| `sessionStarting` | `player` (1-64 chars), `protocol`, `deviceName` (0-256 chars)                                                      |
+| `sessionStarted`  | as `sessionStarting`, plus `positionMs` (integer >= 0, the remote position)                                        |
+| `sessionEnded`    | as `sessionStarted`; `positionMs` is where local playback resumes                                                  |
+| `sessionFailed`   | `player`, `reason` (`media_not_castable`, `play_services_unavailable`, `network`, `receiver`), optional `protocol` |
+| `remoteVolume`    | `volume` (0-1)                                                                                                     |
+
+The host decodes them with `prototypeCastEventOf` (truncated data does not decode); Kotlin
+`PrototypeCastEvents` and Swift `PrototypeCastEvents` are the twins, and all three replay
+`test/fixtures/prototype-spec/cast/events.json`. `/platform/cast/state` is `unavailable`, `noDevices`, `notConnected`,
+`connecting` or `connected`, with `deviceName`, `protocol` (`googleCast` or `airplay`), `protocols`
+(the unique protocols the device supports, read whole as `{platform:/cast/protocols}`; an iOS agent
+reports `["airplay"]`), `player` (the cast `media` player id) and `volume`. CtrlProxy never advertises
+the module.
 
 The `castButton` node is the system route picker that starts a session; there is no start call. Its
 required `player` names a declared `media.players` id or an inline `videoPlayer` id, and optional
@@ -2910,30 +3033,26 @@ one design with `show` and discuss the others in chat, or show one spec whose `p
 with a visible label per page (see the full-screen pager example). Nothing waits on the device for a
 choice.
 
-### Loopback requests from the device (#12530)
+### Device destination policy
 
-On an Android emulator or device, `localhost` in a `request` action with `via: "device"` is the
-device itself, not the host. When the host shows a prototype it scans every such request, at any
-depth (including nested `onSuccess`/`onError` lists), for URLs on `localhost`, `127.0.0.1` or `[::1]`
-and runs `adb -s <serial> reverse tcp:<port> tcp:<port>` for each port. `via: "host"` requests are
-ignored.
+`via: "device"` requests on Android pass `PrototypeEgressPolicy`, which checks the URL host before any
+DNS lookup, every resolved address, and the address of the connected socket. A refused destination
+fails the request with `blocked_destination`. It refuses:
 
-- Implicit ports are reversed: `http://localhost/` reverses 80 and `https://localhost/` reverses 443,
-  so the same URL reaches the same host server under both `via` values.
-- Ownership: a reverse is recorded as the host's own only when it created it. One already listed by
-  `adb reverse --list` is left alone and never removed. Ports are reference-counted across the
-  prototypes shown on one device and removed when the last holder is dismissed, the session ends, or
-  the device is unbound or removed.
-- Best-effort: a failed reverse is logged and reported as `reverseFailures`; it never fails the show.
-- A port that is a binding (`http://localhost:{port}/feed`) or an unparseable URL cannot be
-  reversed, because it is unknown until the request runs. `inspect` reports these as
-  `unreversiblePorts`, and the authoring guide says to use `via: "host"` for them.
-- A saved prototype launched with no host connected has no host to run `adb reverse`, so its
-  `via: "device"` requests to localhost fail until a host shows or re-shows it. Use a reachable
-  address (or `via: "host"` while a host is attached) for prototypes meant to run unattended.
-- iOS simulators share the Mac's network, so nothing is reversed there. The iOS agent refuses
-  loopback destinations for `via: "device"`; see the iOS
-  [destination policy](../ios/prototype-agent.md#destination-policy-13815).
+- the names `localhost` and `*.localhost`, and a numeric host that is not a valid IPv4 or IPv6 literal;
+- `0.0.0.0/8`, loopback (`127.0.0.0/8`, `::1`), the unspecified IPv6 address, link-local
+  (`169.254.0.0/16`, `fe80::/10`), site-local IPv6 and Teredo;
+- the emulator's host-machine aliases (`10.0.2.1` to `10.0.2.6`, and Genymotion's `10.0.3.2`);
+- IPv6 forms that embed a refused IPv4 address (IPv4-compatible, IPv4-mapped, SIIT, both NAT64
+  prefixes and 6to4);
+- ports 3000-3010 (the daemon's range) and 8765 (CtrlProxy) on a private address (`10/8`,
+  `172.16/12`, `192.168/16`, `100.64/10`, `fc00::/7`).
+
+The host makes no `adb reverse` for a prototype, so `localhost` on the device never reaches a host
+server. A prototype reaches a host-local server with `via: "host"`, or with `via: "device"` at an
+address the device can reach that the policy permits. The session-scoped `portReverse` tool is
+separate and does not change this policy. iOS simulators apply the agent's own
+[destination policy](../ios/prototype-agent.md#destination-policy-13815), which also refuses loopback.
 
 ## Realtime channels
 
@@ -3144,11 +3263,10 @@ under Request action.
   HTTP transport, with an egress policy checked before every connection and redirect. The host needs a
   connection; with none the request fails with `network`. Closing the owning connection fails its
   calls at once, and a cancelled call sends `prototype_request_cancel` so the host frees the slot.
-- `via: "device"`: the device runs the request itself. On Android `localhost` is the device, so the
-  host runs `adb reverse` for each loopback port it finds in the shown spec (see
-  [Loopback requests from the device](#loopback-requests-from-the-device-12530)); on an iOS
-  simulator nothing is reversed and the agent refuses loopback destinations (see the iOS
-  [destination policy](../ios/prototype-agent.md#destination-policy-13815)).
+- `via: "device"`: the device runs the request itself and applies its own destination policy:
+  on Android the [device destination policy](#device-destination-policy), on an iOS simulator the
+  agent's [destination policy](../ios/prototype-agent.md#destination-policy-13815). Both refuse
+  loopback, so a host-local server needs `via: "host"`.
 
 **Host egress policy.** Host requests refuse localhost names, loopback, unspecified and link-local
 addresses, emulator host aliases, and IPv6 forms embedding those IPv4 destinations.
@@ -3185,8 +3303,8 @@ is too, but the agent's destination policy refuses it), other cleartext hosts fa
 
 **Saved prototypes.** A saved Android prototype (see
 [Saved prototypes on the Android home screen](#saved-prototypes-on-the-android-home-screen)) supports
-`request` actions with `via: "device"` (it still needs a reachable URL, since no host runs `adb reverse`
-when it launches alone). `via: "host"` has no host to run it there, so it fails with an `invalid_request`
+`request` actions with `via: "device"`, under the same
+[device destination policy](#device-destination-policy). `via: "host"` has no host to run it there, so it fails with an `invalid_request`
 error whose message points to `via: "device"`.
 
 **Limits.**
@@ -3465,7 +3583,7 @@ Every starter template passes this lint with zero findings, pinned by the templa
 
 ### On-device audit and RTL (#14126)
 
-The `audit` tool's `WcagAudit` reads the accessibility tree the Compose renderer projects, so it
+The `wcag` engine of `accessibilityAudit` (`WcagAudit`) reads the accessibility tree the Compose renderer projects, so it
 sees prototype nodes through that projection, not the spec:
 
 - A text field's `label` is a child text node with no class, drawn inside the `EditText`. The audit
@@ -3822,7 +3940,8 @@ against the current `/data`, so a request response or data action flips it.
 Style `shimmer: true` draws a highlight band sweeping across a `box`, `row`, `column` or `card`
 over its background and inside its clip; any other node type is rejected at
 `<path>.style.shimmer`. The node reports state description "Loading". With `motion: "none"` or
-animator scale 0 no band is drawn, so screenshots see the plain placeholder. A `repeat` of literal
+animator scale 0 no band is drawn. Android also hides the band during the bounded capture hold
+renewed by each window-metadata read, so screenshots see the plain placeholder. A `repeat` of literal
 placeholder rows makes a skeleton list. The iOS agent advertises the capability too (#14689): it
 sweeps the same band (1.2 s, 35% white, clipped to the node's corner shape) over the node, reads
 "Loading" to VoiceOver with the updates-frequently trait, draws no band under `motion: "none"` or
@@ -3962,6 +4081,10 @@ The `map` node (#14309, contract only: no renderer draws it and no runtime adver
 - `camera` is a literal `{lat, lng, zoom, bearing?, tilt?}` (lat -90 to 90, lng -180 to 180, zoom 0 to
   22, bearing 0 to 360, tilt 0 to 60) or `{data}`, a `/data` pointer to such an object. `fit` is `none`,
   `markers` or `route`; `mapStyle` is `plain` (default) or `streets`.
+- `backend` is `auto` (default), `google` or `maplibre`. `auto` needs only `prototype_platform_map_v1`; any
+  other value also needs `prototype_platform_map_<backend>_v1`, which the `map` module's `backends` table
+  lists. `show`, `patch` and `replaceNode` refuse a backend whose capability the runtime does not advertise,
+  at `<node>.backend`.
 - `markers` draws one marker per item of the `/data` array at `path`, bound under `as`. `id`, `lat`, `lng`,
   `title` (also the accessibility label) and the optional `heading` (degrees clockwise from north) are
   templates resolved per item. `icon` is a Material icon name. `animateMs` (0 to 2000) eases a moved marker.
@@ -3971,12 +4094,62 @@ The `map` node (#14309, contract only: no renderer draws it and no runtime adver
   `width` (1 to 16) and `color`.
 - `onMarkerTap` runs with the tapped marker's item bound under `as`. `onCameraIdle.into` is a `/data/<pointer>`
   path that receives the settled camera.
+- Every `emit` a marker tap runs, including those in its nested `onSuccess`, `onError` and `startTimer`
+  actions, reports `markerId` (the tapped marker's resolved `id`) in its event context after the authored
+  entries, under the same byte budget. The contract lists the name in
+  `platformModules.map.events.markerTap.emitContext`. All three validators refuse an authored
+  `context.markerId` inside `onMarkerTap`. Outside it, `markerId` is an ordinary context name.
 - `showUserLocation: true` reads the `location` module, so it also needs `location` in `requires.platform`
   and the `location` permission in `requires.permissions`.
 - The `map` module has no calls or state. Its events `map.markerTap` and `map.cameraIdle` exist so a
   simulation can deliver them.
 - Checked when the map is drawn, not at validation: at most 500 markers and 2000 polyline points in total,
   and marker ids unique within the resolved data.
+
+## Web content (#14312)
+
+The `webView` node (contract only: no renderer draws it and no runtime advertises
+`prototype_platform_webview_v1`) shows an https page and needs `webview` in `requires.platform`:
+
+```json
+{
+  "type": "webView",
+  "url": "https://example.com/post/{data:/selected/slug}",
+  "allowedOrigins": ["https://example.com"],
+  "navigationStateKey": "articleNav",
+  "titleKey": "articleTitle",
+  "canGoBackKey": "articleCanGoBack",
+  "onNavigate": [{ "type": "setData", "path": "/data/lastUrl", "value": { "value": "{url}" } }],
+  "onBlockedNavigation": [{ "type": "emit", "name": "openExternally" }]
+}
+```
+
+- `url` is `https://` only (pattern `webViewUrl`, at most 2048 characters), with placeholders allowed after the
+  literal scheme. There is no inline `html` field and no script field: a spec carries no markup or code.
+- `allowedOrigins` holds 1 to 8 unique exact origins, `https://host[:port]` in lowercase with no path and no
+  default `:443` (pattern `webOrigin`). Every host must be a DNS name: `localhost`, `*.localhost` and any host a
+  URL parser reads as an IP address (a last label that is decimal or `0x` hexadecimal, or a bracketed IPv6
+  literal) are refused. Refusing every IP literal, not only private ranges, keeps the three validators equal:
+  JavaScript, the JVM and Swift disagree on numeric host spellings such as `2130706433`.
+- When the URL's authority is literal, `https://<authority>` (lowercased, an explicit `:443` dropped) must be
+  one of `allowedOrigins`. A templated authority is checked by the runtime once it resolves.
+- The `url` binds placeholders like any text field, so its `{platform:…}` reads must be declared, and in a
+  library spec it is a request sink: a secure text field's value cannot be bound into it.
+- `navigationStateKey` (`loading`, `loaded`, `error` or `blocked`) and `titleKey` name declared string state;
+  `canGoBackKey` names declared boolean state. All three bind component props like other node state keys, and
+  every state write re-checks their types.
+- A `webView` `id` uses the state-key pattern, the grammar of the `webview.*` `node` argument that names it.
+- `javaScript` defaults to `false`; `true` is accepted and never comes with a bridge. Page subresources cannot
+  be checked at a resolved address the way `request` is, so an imported (ProtoViewer) prototype may show a
+  `webView` only while network for imported prototypes is on; ProtoViewer does not enforce that yet, which is
+  one reason no runtime advertises the capability.
+- `onNavigate` and `onBlockedNavigation` are action lists. `{type: "platform", call: "webview.back"}` and
+  `webview.reload` take `args: {node}`; a literal `node` must be the id of a `webView` node ("Unknown webView").
+  The `webview` module has no state; its `webview.navigate` event exists so a simulation can deliver it.
+- Runtimes check every top-frame and subframe navigation against `allowedOrigins` before it starts and block
+  loopback, link-local, `10.0.2.2` and the daemon ports by URL host. They never add a JavaScript bridge or user
+  script (`addJavascriptInterface`, `evaluateJavascript`, `WKUserContentController.add(_:name:)`), and keep
+  cookies and web storage per prototype.
 
 ## Charts (#14209, not device-verified)
 
@@ -4737,3 +4910,59 @@ changes and retains effects; motion off snaps everything. Existing motion v2/v3
 capability requirements still apply; iOS advertises the token capability but
 continues to refuse those broader features until its corresponding capabilities
 are available.
+
+## Disposable apps
+
+A disposable app installs one spec as its own app, with its own package, label, icon, permissions
+and foreground-service types. The host core lives in `src/features/prototype/disposableApp/`.
+The Android stamper packages a spec into a signed APK; the `prototype installApp`, `listApps`
+and `uninstallApp` actions remain separate from this artifact pipeline.
+
+- **Identity.** The package is `dev.jasonpearson.automobile.app.<slug>_<sha256(slug) 8 hex>`.
+  Hyphens in the slug become underscores because Android package segments allow only
+  `[A-Za-z0-9_]`. A slug is lowercase hyphen-separated words of at most 48 characters that start
+  with a letter. The prefix is never agent-chosen, so a disposable app cannot replace a real app.
+- **Permissions** come only from the spec's root `requires`. `INTERNET` is always declared.
+  Each canonical permission maps to its manifest permissions (`location` maps to fine and coarse;
+  `photosAdd` maps to none). Each `requires.background` kind adds `FOREGROUND_SERVICE` and its
+  `FOREGROUND_SERVICE_<TYPE>` permission; `remoteNotification` adds none. The permission mode is
+  `prompt` (the default), `grantDeclared`, or `{grant, deny}`, which may name only declared
+  permissions and must not name one in both lists.
+- **Template.** The host picks the smallest flavor whose capabilities cover
+  `requiredPrototypeCapabilities(spec)`. If none does, it refuses and names the missing capabilities
+  and the closest flavor.
+- **Registry.** `disposable-apps.json` under the AutoMobile data dir is keyed by device id. Each
+  record holds appId, slug, platform, label, spec sha256, template, signer, installedAt and
+  expiresAt. Writes are serialized and atomic. A corrupt file or record is skipped with a warning.
+  An install writes its record, with the new expiresAt, as soon as the package is on the device and
+  before permissions are applied. A permission failure then surfaces as an error saying the app is
+  installed without its permissions, and the sweep still sees the current TTL.
+- **Lifecycle.** `ttlHours` defaults to 72, accepts 0 to 720, and 0 means no expiry. Re-installing
+  a slug updates the app in place and keeps its storage unless `reset` is set. The expiry sweep and
+  uninstall refuse ids outside the prefix. They also refuse installed packages whose signer differs
+  from the host's disposable-app key: one requested id is refused with an error, and in a bulk
+  removal the package is reported under `skipped`. Each removal is logged at `warn`. An app that
+  is already gone from the device still has its registry record cleared.
+
+### Template packaging and stamping
+
+The release template package contains an unsigned, unminified APK, the merged text
+manifest, stamp points, capability metadata, and template identity plus APK SHA-256.
+The host loads a local flavor through `AUTOMOBILE_ANDROID_PROTOTYPE_APP_TEMPLATE`
+and checks its checksum; a released download is not available yet.
+
+Stamping preserves the compiled code and resource table. The host changes the
+package, provider authorities, literal label, exact permission set (always including
+INTERNET), and explicitly enabled components in structured XML. App-owned resource
+references retain the template resource namespace with private-resource access.
+`aapt2 link` resolves those names back to binary resource ids, avoiding unsafe
+binary-manifest string replacement. The spec and assets are baked under
+`assets/prototype/` at stamp time. Icon customization is refused until adaptive
+icon replacement is implemented.
+
+Template signatures are removed before assembly. The resource table stays stored;
+zipalign aligns it before apksigner signs with v2/v3 using a persistent host-owned
+PKCS12 identity. Verification checks the resulting signer before publishing the
+content-addressed cache artifact. The signer certificate SHA-256 is available to
+the installation signing guard. Cache identity covers the template, stamp inputs,
+asset bytes, and signer; cache hits check the saved artifact digest.

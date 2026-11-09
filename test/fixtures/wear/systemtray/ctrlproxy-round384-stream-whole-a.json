@@ -1,0 +1,886 @@
+{
+  "screenSize": {
+    "width": 384,
+    "height": 384,
+    "units": "physical-pixels"
+  },
+  "viewHierarchy": {
+    "displayId": 0,
+    "panelFingerprint": {
+      "width": 384,
+      "height": 384
+    },
+    "hierarchy": {
+      "node": {
+        "windowId": 0,
+        "actions": ["select", "clear_selection", "accessibility_focus"],
+        "visible-to-user": true,
+        "view-id": "s2-190ede925816e4c1",
+        "bounds": {
+          "left": 0,
+          "top": 0,
+          "right": 384,
+          "bottom": 384
+        },
+        "node": {
+          "actions": ["select", "clear_selection", "accessibility_focus"],
+          "resource-id": "android:id/content",
+          "visible-to-user": true,
+          "view-id": "android:id/content",
+          "bounds": {
+            "left": 0,
+            "top": 0,
+            "right": 384,
+            "bottom": 384
+          },
+          "node": {
+            "actions": ["select", "clear_selection", "accessibility_focus"],
+            "resource-id": "com.google.android.clockwork.sysui:id/root",
+            "visible-to-user": true,
+            "view-id": "com.google.android.clockwork.sysui:id/root",
+            "class": "android.view.ViewGroup",
+            "className": "android.view.ViewGroup",
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 384,
+              "bottom": 384
+            },
+            "node": {
+              "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus",
+                "next_at_movement_granularity",
+                "previous_at_movement_granularity",
+                "set_selection"
+              ],
+              "content-desc": "Notifications",
+              "visible-to-user": true,
+              "view-id": "s2-87dea3f7603e8c54",
+              "class": "android.view.ViewGroup",
+              "className": "android.view.ViewGroup",
+              "bounds": {
+                "left": 0,
+                "top": 0,
+                "right": 384,
+                "bottom": 384
+              },
+              "node": {
+                "actions": ["select", "clear_selection", "accessibility_focus", "scroll_backward"],
+                "resource-id": "com.google.android.clockwork.sysui:id/trayview_container",
+                "visible-to-user": true,
+                "view-id": "com.google.android.clockwork.sysui:id/trayview_container",
+                "scrollable": "true",
+                "bounds": {
+                  "left": 0,
+                  "top": 0,
+                  "right": 384,
+                  "bottom": 384
+                },
+                "node": [
+                  {
+                    "actions": [
+                      "clear_focus",
+                      "accessibility_focus",
+                      "scroll_forward",
+                      "scroll_backward"
+                    ],
+                    "visible-to-user": true,
+                    "collection-info": "rows:11,cols:1",
+                    "view-id": "s2-daca99aa8d489ef1",
+                    "focusable": "true",
+                    "focused": "true",
+                    "scrollable": "true",
+                    "bounds": {
+                      "left": 0,
+                      "top": 0,
+                      "right": 384,
+                      "bottom": 384
+                    },
+                    "node": [
+                      {
+                        "actions": ["focus", "accessibility_focus", "click", "long_click"],
+                        "visible-to-user": true,
+                        "view-id": "s2-54a37556722ca76a",
+                        "clickable": "true",
+                        "focusable": "true",
+                        "long-clickable": "true",
+                        "extras": {
+                          "android.view.accessibility.extra.EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL": "3330"
+                        },
+                        "bounds": {
+                          "left": 79,
+                          "top": 0,
+                          "right": 305,
+                          "bottom": 15
+                        },
+                        "node": {
+                          "actions": [
+                            "next_at_movement_granularity",
+                            "previous_at_movement_granularity",
+                            "accessibility_focus",
+                            "set_selection"
+                          ],
+                          "text": "Body number 6",
+                          "visible-to-user": true,
+                          "view-id": "s2-9055f9b73a52626c",
+                          "bounds": {
+                            "left": 92,
+                            "top": 0,
+                            "right": 244,
+                            "bottom": 2
+                          }
+                        }
+                      },
+                      {
+                        "actions": ["focus", "accessibility_focus", "click", "long_click"],
+                        "visible-to-user": true,
+                        "view-id": "s2-898511c341f767a5-1",
+                        "clickable": "true",
+                        "focusable": "true",
+                        "long-clickable": "true",
+                        "extras": {
+                          "android.view.accessibility.extra.EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL": "3351"
+                        },
+                        "bounds": {
+                          "left": 19,
+                          "top": 23,
+                          "right": 365,
+                          "bottom": 191
+                        },
+                        "node": [
+                          {
+                            "actions": ["accessibility_focus"],
+                            "resource-id": "full_view_app_icon",
+                            "visible-to-user": true,
+                            "view-id": "full_view_app_icon",
+                            "bounds": {
+                              "left": 39,
+                              "top": 43,
+                              "right": 87,
+                              "bottom": 91
+                            }
+                          },
+                          {
+                            "actions": ["accessibility_focus"],
+                            "resource-id": "full_view_app_icon",
+                            "visible-to-user": true,
+                            "view-id": "full_view_app_icon",
+                            "bounds": {
+                              "left": 45,
+                              "top": 49,
+                              "right": 81,
+                              "bottom": 85
+                            }
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "Shell",
+                            "resource-id": "full_view_app_name",
+                            "visible-to-user": true,
+                            "view-id": "full_view_app_name",
+                            "bounds": {
+                              "left": 99,
+                              "top": 51,
+                              "right": 292,
+                              "bottom": 84
+                            }
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "7m",
+                            "content-desc": "7 minutes ago",
+                            "visible-to-user": true,
+                            "view-id": "s2-a6e98c60e06d355c-1",
+                            "bounds": {
+                              "left": 304,
+                              "top": 51,
+                              "right": 345,
+                              "bottom": 84
+                            }
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "AM17357 item 5",
+                            "visible-to-user": true,
+                            "view-id": "s2-ca7bbf9a25b73d60",
+                            "bounds": {
+                              "left": 39,
+                              "top": 95,
+                              "right": 280,
+                              "bottom": 133
+                            }
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "Body number 5",
+                            "visible-to-user": true,
+                            "view-id": "s2-978f5f918aacac46",
+                            "bounds": {
+                              "left": 39,
+                              "top": 133,
+                              "right": 271,
+                              "bottom": 171
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "actions": ["focus", "accessibility_focus", "click", "long_click"],
+                        "visible-to-user": true,
+                        "view-id": "s2-898511c341f767a5-2",
+                        "clickable": "true",
+                        "focusable": "true",
+                        "long-clickable": "true",
+                        "extras": {
+                          "android.view.accessibility.extra.EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL": "3372"
+                        },
+                        "bounds": {
+                          "left": 19,
+                          "top": 199,
+                          "right": 365,
+                          "bottom": 367
+                        },
+                        "node": [
+                          {
+                            "actions": ["accessibility_focus"],
+                            "resource-id": "full_view_app_icon",
+                            "visible-to-user": true,
+                            "view-id": "full_view_app_icon",
+                            "bounds": {
+                              "left": 39,
+                              "top": 219,
+                              "right": 87,
+                              "bottom": 267
+                            }
+                          },
+                          {
+                            "actions": ["accessibility_focus"],
+                            "resource-id": "full_view_app_icon",
+                            "visible-to-user": true,
+                            "view-id": "full_view_app_icon",
+                            "bounds": {
+                              "left": 45,
+                              "top": 225,
+                              "right": 81,
+                              "bottom": 261
+                            }
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "Shell",
+                            "resource-id": "full_view_app_name",
+                            "visible-to-user": true,
+                            "view-id": "full_view_app_name",
+                            "bounds": {
+                              "left": 99,
+                              "top": 227,
+                              "right": 292,
+                              "bottom": 260
+                            }
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "7m",
+                            "content-desc": "7 minutes ago",
+                            "visible-to-user": true,
+                            "view-id": "s2-a6e98c60e06d355c-2",
+                            "bounds": {
+                              "left": 304,
+                              "top": 227,
+                              "right": 345,
+                              "bottom": 260
+                            }
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "AM17357 item 4",
+                            "visible-to-user": true,
+                            "view-id": "s2-c541b8f57e68be62",
+                            "bounds": {
+                              "left": 39,
+                              "top": 271,
+                              "right": 280,
+                              "bottom": 309
+                            }
+                          },
+                          {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "Body number 4",
+                            "visible-to-user": true,
+                            "view-id": "s2-6d9dd03cf303f5c9",
+                            "bounds": {
+                              "left": 39,
+                              "top": 309,
+                              "right": 270,
+                              "bottom": 347
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "actions": ["focus", "accessibility_focus", "click", "long_click"],
+                        "visible-to-user": true,
+                        "view-id": "s2-0d9b468dbcaf26fe-1",
+                        "clickable": "true",
+                        "focusable": "true",
+                        "long-clickable": "true",
+                        "bounds": {
+                          "left": 83,
+                          "top": 375,
+                          "right": 301,
+                          "bottom": 384
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "actions": ["focus", "accessibility_focus", "click"],
+                    "visible-to-user": false,
+                    "view-id": "s2-0d9b468dbcaf26fe-2",
+                    "clickable": "true",
+                    "focusable": "true",
+                    "bounds": {
+                      "left": 0,
+                      "top": 342,
+                      "right": 384,
+                      "bottom": 384
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "packageName": "com.google.android.clockwork.sysui",
+    "windows": [
+      {
+        "id": 0,
+        "displayId": 0,
+        "type": 1,
+        "windowLayer": 0,
+        "isActive": true,
+        "isFocused": true,
+        "bounds": {
+          "left": 0,
+          "top": 0,
+          "right": 384,
+          "bottom": 384
+        },
+        "packageName": "com.google.android.clockwork.sysui",
+        "hierarchy": {
+          "windowId": 0,
+          "actions": ["select", "clear_selection", "accessibility_focus"],
+          "visible-to-user": true,
+          "view-id": "s2-190ede925816e4c1",
+          "bounds": {
+            "left": 0,
+            "top": 0,
+            "right": 384,
+            "bottom": 384
+          },
+          "node": {
+            "actions": ["select", "clear_selection", "accessibility_focus"],
+            "resource-id": "android:id/content",
+            "visible-to-user": true,
+            "view-id": "android:id/content",
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 384,
+              "bottom": 384
+            },
+            "node": {
+              "actions": ["select", "clear_selection", "accessibility_focus"],
+              "resource-id": "com.google.android.clockwork.sysui:id/root",
+              "visible-to-user": true,
+              "view-id": "com.google.android.clockwork.sysui:id/root",
+              "class": "android.view.ViewGroup",
+              "className": "android.view.ViewGroup",
+              "bounds": {
+                "left": 0,
+                "top": 0,
+                "right": 384,
+                "bottom": 384
+              },
+              "node": {
+                "actions": [
+                  "select",
+                  "clear_selection",
+                  "accessibility_focus",
+                  "next_at_movement_granularity",
+                  "previous_at_movement_granularity",
+                  "set_selection"
+                ],
+                "content-desc": "Notifications",
+                "visible-to-user": true,
+                "view-id": "s2-87dea3f7603e8c54",
+                "class": "android.view.ViewGroup",
+                "className": "android.view.ViewGroup",
+                "bounds": {
+                  "left": 0,
+                  "top": 0,
+                  "right": 384,
+                  "bottom": 384
+                },
+                "node": {
+                  "actions": [
+                    "select",
+                    "clear_selection",
+                    "accessibility_focus",
+                    "scroll_backward"
+                  ],
+                  "resource-id": "com.google.android.clockwork.sysui:id/trayview_container",
+                  "visible-to-user": true,
+                  "view-id": "com.google.android.clockwork.sysui:id/trayview_container",
+                  "scrollable": "true",
+                  "bounds": {
+                    "left": 0,
+                    "top": 0,
+                    "right": 384,
+                    "bottom": 384
+                  },
+                  "node": [
+                    {
+                      "actions": [
+                        "clear_focus",
+                        "accessibility_focus",
+                        "scroll_forward",
+                        "scroll_backward"
+                      ],
+                      "visible-to-user": true,
+                      "collection-info": "rows:11,cols:1",
+                      "view-id": "s2-daca99aa8d489ef1",
+                      "focusable": "true",
+                      "focused": "true",
+                      "scrollable": "true",
+                      "bounds": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 384,
+                        "bottom": 384
+                      },
+                      "node": [
+                        {
+                          "actions": ["focus", "accessibility_focus", "click", "long_click"],
+                          "visible-to-user": true,
+                          "view-id": "s2-54a37556722ca76a",
+                          "clickable": "true",
+                          "focusable": "true",
+                          "long-clickable": "true",
+                          "extras": {
+                            "android.view.accessibility.extra.EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL": "3330"
+                          },
+                          "bounds": {
+                            "left": 79,
+                            "top": 0,
+                            "right": 305,
+                            "bottom": 15
+                          },
+                          "node": {
+                            "actions": [
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "accessibility_focus",
+                              "set_selection"
+                            ],
+                            "text": "Body number 6",
+                            "visible-to-user": true,
+                            "view-id": "s2-9055f9b73a52626c",
+                            "bounds": {
+                              "left": 92,
+                              "top": 0,
+                              "right": 244,
+                              "bottom": 2
+                            }
+                          }
+                        },
+                        {
+                          "actions": ["focus", "accessibility_focus", "click", "long_click"],
+                          "visible-to-user": true,
+                          "view-id": "s2-898511c341f767a5-1",
+                          "clickable": "true",
+                          "focusable": "true",
+                          "long-clickable": "true",
+                          "extras": {
+                            "android.view.accessibility.extra.EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL": "3351"
+                          },
+                          "bounds": {
+                            "left": 19,
+                            "top": 23,
+                            "right": 365,
+                            "bottom": 191
+                          },
+                          "node": [
+                            {
+                              "actions": ["accessibility_focus"],
+                              "resource-id": "full_view_app_icon",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_icon",
+                              "bounds": {
+                                "left": 39,
+                                "top": 43,
+                                "right": 87,
+                                "bottom": 91
+                              }
+                            },
+                            {
+                              "actions": ["accessibility_focus"],
+                              "resource-id": "full_view_app_icon",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_icon",
+                              "bounds": {
+                                "left": 45,
+                                "top": 49,
+                                "right": 81,
+                                "bottom": 85
+                              }
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "Shell",
+                              "resource-id": "full_view_app_name",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_name",
+                              "bounds": {
+                                "left": 99,
+                                "top": 51,
+                                "right": 292,
+                                "bottom": 84
+                              }
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "7m",
+                              "content-desc": "7 minutes ago",
+                              "visible-to-user": true,
+                              "view-id": "s2-a6e98c60e06d355c-1",
+                              "bounds": {
+                                "left": 304,
+                                "top": 51,
+                                "right": 345,
+                                "bottom": 84
+                              }
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "AM17357 item 5",
+                              "visible-to-user": true,
+                              "view-id": "s2-ca7bbf9a25b73d60",
+                              "bounds": {
+                                "left": 39,
+                                "top": 95,
+                                "right": 280,
+                                "bottom": 133
+                              }
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "Body number 5",
+                              "visible-to-user": true,
+                              "view-id": "s2-978f5f918aacac46",
+                              "bounds": {
+                                "left": 39,
+                                "top": 133,
+                                "right": 271,
+                                "bottom": 171
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "actions": ["focus", "accessibility_focus", "click", "long_click"],
+                          "visible-to-user": true,
+                          "view-id": "s2-898511c341f767a5-2",
+                          "clickable": "true",
+                          "focusable": "true",
+                          "long-clickable": "true",
+                          "extras": {
+                            "android.view.accessibility.extra.EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL": "3372"
+                          },
+                          "bounds": {
+                            "left": 19,
+                            "top": 199,
+                            "right": 365,
+                            "bottom": 367
+                          },
+                          "node": [
+                            {
+                              "actions": ["accessibility_focus"],
+                              "resource-id": "full_view_app_icon",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_icon",
+                              "bounds": {
+                                "left": 39,
+                                "top": 219,
+                                "right": 87,
+                                "bottom": 267
+                              }
+                            },
+                            {
+                              "actions": ["accessibility_focus"],
+                              "resource-id": "full_view_app_icon",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_icon",
+                              "bounds": {
+                                "left": 45,
+                                "top": 225,
+                                "right": 81,
+                                "bottom": 261
+                              }
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "Shell",
+                              "resource-id": "full_view_app_name",
+                              "visible-to-user": true,
+                              "view-id": "full_view_app_name",
+                              "bounds": {
+                                "left": 99,
+                                "top": 227,
+                                "right": 292,
+                                "bottom": 260
+                              }
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "7m",
+                              "content-desc": "7 minutes ago",
+                              "visible-to-user": true,
+                              "view-id": "s2-a6e98c60e06d355c-2",
+                              "bounds": {
+                                "left": 304,
+                                "top": 227,
+                                "right": 345,
+                                "bottom": 260
+                              }
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "AM17357 item 4",
+                              "visible-to-user": true,
+                              "view-id": "s2-c541b8f57e68be62",
+                              "bounds": {
+                                "left": 39,
+                                "top": 271,
+                                "right": 280,
+                                "bottom": 309
+                              }
+                            },
+                            {
+                              "actions": [
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "accessibility_focus",
+                                "set_selection"
+                              ],
+                              "text": "Body number 4",
+                              "visible-to-user": true,
+                              "view-id": "s2-6d9dd03cf303f5c9",
+                              "bounds": {
+                                "left": 39,
+                                "top": 309,
+                                "right": 270,
+                                "bottom": 347
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "actions": ["focus", "accessibility_focus", "click", "long_click"],
+                          "visible-to-user": true,
+                          "view-id": "s2-0d9b468dbcaf26fe-1",
+                          "clickable": "true",
+                          "focusable": "true",
+                          "long-clickable": "true",
+                          "bounds": {
+                            "left": 83,
+                            "top": 375,
+                            "right": 301,
+                            "bottom": 384
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "actions": ["focus", "accessibility_focus", "click"],
+                      "visible-to-user": false,
+                      "view-id": "s2-0d9b468dbcaf26fe-2",
+                      "clickable": "true",
+                      "focusable": "true",
+                      "bounds": {
+                        "left": 0,
+                        "top": 342,
+                        "right": 384,
+                        "bottom": 384
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    ],
+    "intentChooserDetected": false,
+    "notificationPermissionDetected": false,
+    "ctrlProxyIncomplete": null,
+    "sources": ["control-proxy"],
+    "screenWidth": 384,
+    "screenHeight": 384,
+    "rotation": 0,
+    "systemInsets": {
+      "top": 0,
+      "bottom": 0,
+      "left": 0,
+      "right": 0
+    },
+    "insets": {
+      "available": true,
+      "source": "android-window-metrics",
+      "units": "physical-pixels",
+      "systemBars": {
+        "visible": {
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0
+        },
+        "stable": {
+          "top": 0,
+          "bottom": 0,
+          "left": 0,
+          "right": 0
+        }
+      },
+      "displayCutout": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "displayCutoutInfo": {
+        "classification": "none",
+        "bounds": null
+      },
+      "systemGestures": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "mandatorySystemGestures": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "tappableElement": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "systemChrome": {
+        "visibility": "hidden",
+        "statusBar": "hidden",
+        "navigationBar": "hidden",
+        "homeIndicatorAutoHideRequested": null,
+        "source": "android-window-insets"
+      }
+    },
+    "wakefulness": "Awake",
+    "foregroundActivity": "com.google.android.clockwork.sysui/.mainui.activity.SysUiActivity",
+    "density": 320,
+    "sdkInt": 37,
+    "deviceModel": "sdk_gwear_arm64",
+    "isEmulator": true,
+    "accessibilityTool": true,
+    "nativeScale": 1,
+    "pixelWidth": 384,
+    "pixelHeight": 384,
+    "updatedAt": 1794029321384,
+    "receivedAt": 1794029321269,
+    "frameContext": "7b098c95-c89c-40cb-8248-f4879323542f:4308",
+    "fresh": true
+  }
+}

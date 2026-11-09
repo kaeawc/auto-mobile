@@ -9,11 +9,17 @@ import {
   type InstallAppCall,
   type InstallGuardOptions,
 } from "../features/action/InstallApp";
+import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { ResetKeychain } from "../features/action/ResetKeychain";
 import type { KeystoreResetBackend } from "../features/storage/keystoreReset";
+import {
+  AdbKeystoreFaultClient,
+  type KeystoreFaultBackend,
+} from "../features/storage/keystoreFault";
 import type { TerminateAppCall } from "../features/action/TerminateApp";
 import { type UninstallAppCall, type UninstallGuardOptions } from "../features/action/UninstallApp";
 import { InspectPackageSigning } from "../features/observe/InspectPackageSigning";
+import { getWatchRunnerLifecycle } from "../features/watch/WatchRunnerLifecycle";
 import { IosPackageSigningInspector } from "../features/observe/IosPackageSigningInspector";
 import { iosMutationTokens } from "../features/storage/IosMutationTokens";
 import {
@@ -91,6 +97,7 @@ import {
   createPlatformTerminateApp,
   createPlatformUninstallApp,
   type WatchAppManagerFactory,
+  type WatchRunnerRetarget,
 } from "./appToolsWatch";
 import { launchFailure, redactLaunchMessage } from "./launchAppFailure";
 import { launchAppResultSchema, terminateAppResultSchema } from "./toolOutputSchemas";
@@ -721,6 +728,8 @@ function subscribePrototypeAgentLifecycle(
 /** Overrides for the collaborators `registerAppTools` wires into its handlers (tests, embedders). */
 export interface AppToolsDependencies {
   keystoreReset?: (device: BootedDevice) => KeystoreResetBackend;
+  /** Debug-SDK Keystore fault transport; defaults to `adb shell content call`. */
+  keystoreFault?: (device: BootedDevice) => KeystoreFaultBackend;
   listApps?: Partial<ListAppsToolDependencies>;
   launchApp?: Partial<LaunchAppToolDependencies>;
   terminateApp?: Partial<TerminateAppToolDependencies>;
@@ -732,6 +741,7 @@ export interface AppToolsDependencies {
   appPermissionsFactory?: AppPermissionsFactory;
   /** The Apple Watch app manager the app tools use for a watch (install through terminate). */
   watchApps?: WatchAppManagerFactory;
+  retargetWatchRunner?: WatchRunnerRetarget;
 }
 
 /** Builds every injectable handler from real defaults overlaid with `dependencies`. */
@@ -742,7 +752,14 @@ function createAppToolHandlers(dependencies: AppToolsDependencies) {
   });
   const launchAppDependencies: LaunchAppToolDependencies = {
     ...createDefaultLaunchAppToolDependencies(),
-    createLaunchApp: (device) => createPlatformLaunchApp(device, dependencies.watchApps),
+    createLaunchApp: (device) =>
+      createPlatformLaunchApp(
+        device,
+        dependencies.watchApps,
+        dependencies.retargetWatchRunner ??
+          ((deviceId, bundleId, signal) =>
+            getWatchRunnerLifecycle().retarget({ deviceId, bundleId, signal })),
+      ),
     ...dependencies.launchApp,
   };
   const launchAppHandler = createLaunchAppHandler(launchAppDependencies);
@@ -814,12 +831,20 @@ const createResetKeychainHandler =
     // The Keystore backend is Android-only; resolving it for iOS would throw.
     const keystoreBackend =
       device.platform === "android" ? dependencies.keystoreReset?.(device) : undefined;
-    const action = new ResetKeychain(device, null, keystoreBackend);
+    const faultBackend =
+      device.platform === "android"
+        ? (dependencies.keystoreFault?.(device) ??
+          new AdbKeystoreFaultClient(defaultAdbClientFactory.create(device)))
+        : undefined;
+    const action = new ResetKeychain(device, null, keystoreBackend, faultBackend);
     const result = await action.execute({
       appId: args.appId,
       confirm: args.confirm,
       scope: args.scope,
       alias: args.alias,
+      action: args.action,
+      kind: args.kind,
+      delayMs: args.delayMs,
       explicitlyTargeted,
     });
 
@@ -966,7 +991,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
 
   ToolRegistry.registerDeviceAware(
     "resetKeychain",
-    "Reset secure test state. Android deletes app-declared scope/alias under app opt-in and SDK mutation authorization; confirm is not needed, but confirm:false refuses. iOS Simulator resets EVERY app's Keychain and requires confirm:true. Physical iOS is unsupported. Requires explicit device targeting.",
+    "Reset secure test state. Android deletes app-declared scope/alias under app opt-in and SDK mutation authorization; confirm is not needed, but confirm:false refuses. On Android, action injectFault/clearFaults arms or clears a debug-SDK Keystore fault (kind, delayMs for DELAY) on the same declared selectors instead of deleting. iOS Simulator resets EVERY app's Keychain and requires confirm:true. Physical iOS is unsupported. Requires explicit device targeting.",
     resetKeychainSchema,
     {
       handler: resetKeychainHandler,

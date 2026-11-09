@@ -1013,6 +1013,7 @@ function isProductRefusal(response: DaemonResponse): boolean {
     [
       "device_outside_broker_grant",
       "device_outside_bound_session",
+      "read_session_not_bound",
       "session_ownership_lost",
     ].includes(code)
   ) {

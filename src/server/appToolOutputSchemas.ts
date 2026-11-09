@@ -1,10 +1,11 @@
 import { keystoreResetSchema } from "../features/storage/keystoreReset";
+import { keystoreFaultSchema } from "../features/storage/keystoreFault";
 import { z } from "zod/v4";
 import { APP_TRIM_MEMORY_LEVELS } from "../models/AppLifecycleResult";
 
 const appPlatformOutputSchema = z.enum(["android", "ios"]);
 /** listApps also answers for an Apple Watch simulator (#14908). */
-const listAppsPlatformOutputSchema = z.enum(["android", "ios", "watchos", "tvos"]);
+const listAppsPlatformOutputSchema = z.enum(["android", "ios", "watchos", "tvos", "visionos"]);
 
 const listAppsAppOutputSchema = z
   .object({
@@ -296,7 +297,7 @@ export const setAppPermissionsResultSchema = z
     success: z.boolean(),
     appId: z.string(),
     deviceId: z.string(),
-    platform: z.enum(["android", "ios"]),
+    platform: z.enum(["android", "ios", "tvos"]),
     action: z.enum(["grant", "revoke", "reset"]),
     changedCount: z.number().int().nonnegative(),
     failedCount: z.number().int().nonnegative(),
@@ -378,5 +379,7 @@ export const resetKeychainResultSchema = z
     exceededRequestedScope: z.boolean(),
     message: z.string(),
     ...keystoreResetSchema.partial().shape,
+    ...keystoreFaultSchema.partial().shape,
+    action: z.enum(["injectFault", "clearFaults"]).optional(),
   })
   .passthrough();

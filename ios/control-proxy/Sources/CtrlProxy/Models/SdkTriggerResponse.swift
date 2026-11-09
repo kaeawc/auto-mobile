@@ -56,29 +56,52 @@ public struct SdkTriggerReply: Equatable, Sendable {
 }
 
 /// Why an observation-bridge command did not produce a result (#5159).
-public enum SdkBridgeFailure: String, Error, Sendable {
+public enum SdkBridgeFailure: Error, Equatable, Sendable {
     /// The foreground app's SDK bridge is unreachable or not registered.
-    case bridgeUnavailable = "bridge_unavailable"
+    case bridgeUnavailable
     /// The app resigned active before the SDK could serve the request.
-    case appNotActive = "app_not_active"
+    case appNotActive
     /// `actionJson` is missing or is not an `AutoMobileAction`.
-    case invalidAction = "invalid_action"
+    case invalidAction
     /// A sent request got no answer, or the SDK replied with a status or body this runner does not
     /// understand. The SDK may have acted.
-    case badReply = "bad_reply"
+    case badReply
     /// Web views (#5162): the page's origin or frame is not allowed by the bridge's policy.
-    case disallowedOrigin = "disallowed_origin"
+    case disallowedOrigin
     /// Web views (#5162): the web content process terminated and the page has not loaded again.
-    case webProcessUnavailable = "web_process_unavailable"
+    case webProcessUnavailable
     /// Web views (#5162): the request or snapshot exceeds the bridge's message limit.
-    case messageTooLarge = "message_too_large"
+    case messageTooLarge
     /// Web views (#5162): the page has not posted a snapshot yet.
-    case noSnapshot = "no_snapshot"
+    case noSnapshot
+
+    case multiScene([String])
+
+    var scenes: [String]? {
+        if case let .multiScene(scenes) = self { return scenes }
+        return nil
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .bridgeUnavailable: "bridge_unavailable"
+        case .appNotActive: "app_not_active"
+        case .invalidAction: "invalid_action"
+        case .badReply: "bad_reply"
+        case .disallowedOrigin: "disallowed_origin"
+        case .webProcessUnavailable: "web_process_unavailable"
+        case .messageTooLarge: "message_too_large"
+        case .noSnapshot: "no_snapshot"
+        case .multiScene: "multi_scene"
+        }
+    }
 
     var message: String {
         switch self {
         case .bridgeUnavailable:
             "The foreground app's AutoMobile SDK observation bridge is unreachable or not registered."
+        case let .multiScene(scenes):
+            "The app has \(scenes.count) connected scenes (\(scenes.joined(separator: ", "))). SDK observation needs one scene; XCTest does not stand in for this result."
         case .appNotActive: "The foreground app resigned active before the SDK could serve the request."
         case .invalidAction:
             "actionJson must be one JSON-encoded AutoMobileAction (for a web view: an "
@@ -102,6 +125,7 @@ public struct SdkObservationResponse: Encodable, Sendable {
     public let available: Bool
     public let observation: AutoMobileObservationSnapshot?
     public let failure: String?
+    public let scenes: [String]?
     public let error: String?
     public let totalTimeMs: Int64
 
@@ -113,12 +137,14 @@ public struct SdkObservationResponse: Encodable, Sendable {
             available = true
             self.observation = observation
             failure = nil
+            scenes = nil
             error = nil
         case let .failure(reason):
             success = false
             available = reason != .bridgeUnavailable
             observation = nil
             failure = reason.rawValue
+            scenes = reason.scenes
             error = reason.message
         }
         self.totalTimeMs = totalTimeMs
@@ -136,6 +162,7 @@ public struct SdkActionResponse: Encodable, Sendable {
     public let available: Bool
     public let result: AutoMobileActionResult?
     public let failure: String?
+    public let scenes: [String]?
     public let error: String?
     public let totalTimeMs: Int64
 
@@ -147,12 +174,14 @@ public struct SdkActionResponse: Encodable, Sendable {
             available = true
             self.result = result
             failure = nil
+            scenes = nil
             error = result.status == .accepted ? nil : result.reason
         case let .failure(reason):
             success = false
             available = reason != .bridgeUnavailable
             result = nil
             failure = reason.rawValue
+            scenes = reason.scenes
             error = reason.message
         }
         self.totalTimeMs = totalTimeMs
@@ -171,6 +200,7 @@ public struct SdkWebSnapshotResponse: Encodable, Sendable {
     public let snapshot: AutoMobileWebSnapshot?
     public let webViews: [WebViewBridgeEntry]?
     public let failure: String?
+    public let scenes: [String]?
     public let error: String?
     public let totalTimeMs: Int64
 
@@ -189,6 +219,7 @@ public struct SdkWebSnapshotResponse: Encodable, Sendable {
             webViewId = reply.webViewId
             snapshot = reply.snapshot
             failure = nil
+            scenes = nil
             error = nil
         case let .failure(reason):
             success = false
@@ -196,6 +227,7 @@ public struct SdkWebSnapshotResponse: Encodable, Sendable {
             webViewId = nil
             snapshot = nil
             failure = reason.rawValue
+            scenes = reason.scenes
             error = reason.message
         }
         self.totalTimeMs = totalTimeMs
@@ -213,6 +245,7 @@ public struct SdkWebActionResponse: Encodable, Sendable {
     public let available: Bool
     public let result: AutoMobileWebActionResult?
     public let failure: String?
+    public let scenes: [String]?
     public let error: String?
     public let totalTimeMs: Int64
 
@@ -224,12 +257,14 @@ public struct SdkWebActionResponse: Encodable, Sendable {
             available = true
             self.result = result
             failure = nil
+            scenes = nil
             error = result.status == .accepted ? nil : result.reason
         case let .failure(reason):
             success = false
             available = reason != .bridgeUnavailable
             result = nil
             failure = reason.rawValue
+            scenes = reason.scenes
             error = reason.message
         }
         self.totalTimeMs = totalTimeMs

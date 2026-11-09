@@ -5,6 +5,11 @@ import {
   type RecordingCodecProbe,
 } from "../features/video/recordingCodec";
 import { OrphanRecorderActiveError } from "./orphanRecorderRefusal";
+import {
+  isSimctlVideoPlatform,
+  requireVideoRecordingPlatform,
+  type VideoRecordingPlatform,
+} from "../models/VideoRecordingPlatform";
 import type { StartupOrphanCaptures } from "./recordingTeardownRedrive";
 import { promises as fsPromises } from "node:fs";
 import path from "node:path";
@@ -12,7 +17,6 @@ import { pathExists } from "../utils/filesystem/DefaultFileSystem";
 import {
   ActionableError,
   BootedDevice,
-  requireAndroidOrIosPlatform,
   VideoRecordingConfig,
   VideoRecordingConfigInput,
   VideoRecordingHighlightEntry,
@@ -55,6 +59,10 @@ import {
   resolveAndroidRecordingDisplay,
   type AndroidRecordingDisplay,
 } from "../features/video/AndroidRecordingDisplay";
+import {
+  iosPanelTransitionWarnings,
+  resolveIosRecordingDisplay,
+} from "../features/video/IosRecordingDisplay";
 import { displayTransitions } from "../features/observe/DisplayTransition";
 import type { VideoRecordingDisplayTransition, VideoRecordingPanel } from "../models";
 import { VisualHighlightClient } from "../features/debug/VisualHighlightClient";
@@ -400,6 +408,13 @@ async function recordingDisplayForStart(
   if (request.display !== undefined) {
     throw new ActionableError("display selection for videoRecording is supported on Android only.");
   }
+  if (request.device.platform === "ios") {
+    // simctl keeps its starting --display; track transitions so the result can warn (#17584).
+    return resolveIosRecordingDisplay(
+      request.device,
+      displayTransitions.observedPanel(request.device.deviceId),
+    );
+  }
   return undefined;
 }
 
@@ -417,7 +432,9 @@ async function finalizeRecordingDisplaySession(
   recordingDisplaySessions.delete(recordingId);
   const pending = session.transitions.at(-1);
   const hostOnly = options?.hostOnly || hostOnlyRecordingTeardowns.has(recordingId);
-  if (pending?.to.key === "unknown" && !hostOnly) {
+  // iOS has no Android display resolver; its unresolved transitions stay as recorded.
+  const resolvable = !hostOnly && session.device.platform !== "ios";
+  if (pending?.to.key === "unknown" && resolvable) {
     try {
       const current = await deps.resolveAndroidDisplay(session.device, "active");
       if (current) {
@@ -435,8 +452,22 @@ async function finalizeRecordingDisplaySession(
   );
   metadata.recordedPanel = session.recordedPanel;
   metadata.transitions = session.transitions;
-  if (session.warning) {
-    metadata.warnings = [...(metadata.warnings ?? []), session.warning];
+  appendRecordingDisplayWarnings(metadata, session);
+}
+
+/** The start-time display warning, then one per iOS panel transition the capture missed. */
+function appendRecordingDisplayWarnings(
+  metadata: VideoRecordingMetadata,
+  session: RecordingDisplaySession,
+): void {
+  const warnings = [
+    ...(session.warning ? [session.warning] : []),
+    ...(session.device.platform === "ios"
+      ? iosPanelTransitionWarnings(session.recordedPanel, session.transitions)
+      : []),
+  ];
+  if (warnings.length > 0) {
+    metadata.warnings = [...(metadata.warnings ?? []), ...warnings];
   }
 }
 // In-progress size-cap monitors, keyed by recordingId (issue #4762). Each is a
@@ -774,7 +805,7 @@ function resolveMaxDurationSeconds(
   if (!Number.isFinite(value) || value <= 0) {
     throw new ActionableError("maxDuration must be a positive number of seconds.");
   }
-  const cap = platform === "ios" ? IOS_MAX_DURATION_SECONDS : MAX_DURATION_SECONDS;
+  const cap = isSimctlVideoPlatform(platform) ? IOS_MAX_DURATION_SECONDS : MAX_DURATION_SECONDS;
   if (value > cap) {
     throw new ActionableError(`maxDuration must be <= ${cap} seconds.`);
   }
@@ -1334,7 +1365,7 @@ async function persistStartedVideoRecording(
     recordingId: active.recordingId,
     captureTeardown: videoRecorderService.getCaptureTeardown(active.recordingId),
     deviceId: request.device.deviceId,
-    platform: requireAndroidOrIosPlatform(request.device.platform, "Video recording"),
+    platform: requireVideoRecordingPlatform(request.device.platform, "Video recording"),
     status: "recording",
     outputName: active.outputName,
     fileName: active.fileName,
@@ -1362,11 +1393,23 @@ async function persistStartedVideoRecording(
   }
 }
 
+/**
+ * Fail closed before any capture state exists: no recorder drives a watch (#14899), and an Apple
+ * TV recording has no audio source (#16725).
+ */
+function assertRecordableDevice(request: StartVideoRecordingRequest): void {
+  requireVideoRecordingPlatform(request.device.platform, "Video recording");
+  if (request.audio && request.device.platform === "tvos") {
+    throw new ActionableError(
+      "audio is not supported for Apple TV recordings; record without audio.",
+    );
+  }
+}
+
 export async function startVideoRecording(
   request: StartVideoRecordingRequest,
 ): Promise<ActiveVideoRecording> {
-  // Fail closed before any capture state exists: no recorder drives a watch (#14899).
-  requireAndroidOrIosPlatform(request.device.platform, "Video recording");
+  assertRecordableDevice(request);
   request = { ...request };
   const start = beginVideoRecordingStart(request);
   let active: ActiveVideoRecording | undefined;
@@ -1982,7 +2025,7 @@ export async function recordVideoRecordingHighlightAdded(
 }
 
 export async function listActiveVideoRecordings(
-  filter: { deviceId?: string; platform?: "android" | "ios" } = {},
+  filter: { deviceId?: string; platform?: VideoRecordingPlatform } = {},
 ): Promise<VideoRecordingRecord[]> {
   const { recordingRepository } = await getVideoRecordingDependencies();
   const recordings = await recordingRepository.listRecordings({

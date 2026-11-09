@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
+import { featureFlagDisabledMessage } from "../../src/features/featureFlags/featureFlagDisabledMessage";
 import {
   applyToolSelection,
   assertUserConfigurableToolNames,
@@ -38,7 +39,7 @@ describe("applyToolSelection", () => {
   });
 
   test.each([
-    ["setUIState", { debugOnly: true }, "--debug"],
+    ["setUIState", { debugOnly: true }, "set-feature-flag debug true"],
     ["sdkTool", { embeddedSdkOnly: true }, "embedded SDK"],
   ] as const)("rejects unavailable %s before any batch write", async (name, options, reason) => {
     ToolRegistry.registerDeviceAware(name, name, z.object({}), {
@@ -85,7 +86,9 @@ describe("applyToolSelection", () => {
           () =>
             ToolRegistry.getTool("setToolEnabled")!.handler({ toolName: "setUIState", enabled }),
         ),
-      ).rejects.toThrow("start the daemon with --debug");
+      ).rejects.toThrow(
+        `Tool 'setUIState' is unavailable: ${featureFlagDisabledMessage("debug", "setUIState")}`,
+      );
       expect(writes).toEqual([]);
     },
   );

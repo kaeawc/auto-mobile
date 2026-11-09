@@ -282,7 +282,6 @@ class SharedClaimFiles {
     return {
       leasePath: () => undefined,
       claimPath: (deviceId) => this.claimPath(deviceId),
-      legacyClaimPath: () => undefined,
       read: (path) => files.get(path),
       isProcessRunning: (pid) => isRunning(pid),
       tryAcquire: (path, owner) => {

@@ -1,3 +1,5 @@
+import { configuredSimulatorPairService } from "./deviceToolsSimulatorPairs";
+import { notifyAppleSimulatorInventoryChanged } from "./appleSimulatorInventoryNotify";
 import {
   getDeviceToolsDependencies,
   initializedDevicePool,
@@ -113,6 +115,7 @@ async function runWatchDelete(
   }
   signal.throwIfAborted();
   await destroyUnderLease(provisioner, device, deadlineMs, signal);
+  notifyAppleSimulatorInventoryChanged(`deleting watchOS simulator ${udid}`);
   return createTeardownResponse(
     args,
     "destroyed",
@@ -177,6 +180,7 @@ async function destroyUnderLease(
     }
     signal.throwIfAborted();
     (deps.watchRunnerLifecycleFactory ?? getWatchRunnerLifecycle)().stop(device.deviceId);
+    await configuredSimulatorPairService(deps).unpairCreated(device.deviceId, signal);
     await provisioner.deleteAndConfirmAbsent(device.deviceId, signal);
   } finally {
     lease.release();

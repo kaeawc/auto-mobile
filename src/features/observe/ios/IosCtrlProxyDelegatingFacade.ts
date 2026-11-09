@@ -37,10 +37,10 @@ import type { IosHierarchyUnavailableReason } from "../../../models/ViewHierarch
 import { logger } from "../../../utils/logger";
 
 import { SimCtlClient } from "../../../utils/ios-cmdline-tools/SimCtlClient";
-import { captureIosPanelScreenshot } from "./CtrlProxyScreenshot";
+import { captureIosPanelScreenshot, needsIosPanelSelection } from "./CtrlProxyScreenshot";
 import { displayTransitions } from "../DisplayTransition";
 
-import { HighlightShape, ViewHierarchyResult } from "../../../models";
+import { BootedDevice, HighlightShape, ViewHierarchyResult } from "../../../models";
 
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 
@@ -644,13 +644,39 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
   // Delegated Public Methods - Screenshot
   // ===========================================================================
 
+  /**
+   * The registry keeps the device of whichever caller created this client first, which may
+   * predate display discovery. Adopt a later caller's panel inventory so a Duo screenshot can
+   * pick its active panel instead of the runner's cover capture (#17366).
+   */
+  adoptDisplayInventory(displays: BootedDevice["displays"]): void {
+    if (displays?.panels.length && !this.device.displays?.panels.length) {
+      this.device = { ...this.device, displays };
+    }
+  }
+
   async requestScreenshot(
     timeoutMs?: number,
     perf?: PerformanceTracker,
     signal?: AbortSignal,
   ): Promise<CtrlProxyScreenshotResult> {
-    if ((this.device.displays?.panels.length ?? 0) < 2) {
-      return this.screenshot.requestScreenshot(timeoutMs, perf, signal);
+    return this.captureActivePanel(
+      () => this.screenshot.requestScreenshot(timeoutMs, perf, signal),
+      signal,
+    );
+  }
+
+  /**
+   * On a multi-panel device, or a Duo whose inventory is empty, capture the active panel and keep
+   * the runner only as the fallback: the runner captures the cover display, which is black while a
+   * Duo is unfolded (#17366, #17373, #17583).
+   */
+  private async captureActivePanel(
+    runnerCapture: () => Promise<CtrlProxyScreenshotResult>,
+    signal?: AbortSignal,
+  ): Promise<CtrlProxyScreenshotResult> {
+    if (!needsIosPanelSelection(this.device)) {
+      return runnerCapture();
     }
     const currentPanel = displayTransitions.currentObservedPanel(this.device.deviceId);
     const hierarchy =
@@ -660,7 +686,7 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
         ? this.cachedHierarchy.hierarchy
         : null;
     return captureIosPanelScreenshot(this.device, hierarchy, new SimCtlClient(this.device), {
-      runnerCapture: () => this.screenshot.requestScreenshot(timeoutMs, perf, signal),
+      runnerCapture,
       signal,
       activePanelKey: currentPanel?.key,
     });
@@ -676,7 +702,10 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     if (remaining <= 0) {
       throw new ObserverPendingRequestTimeoutError();
     }
-    return this.screenshot.requestScreenshot(remaining, undefined, signal, true);
+    return this.captureActivePanel(
+      () => this.screenshot.requestScreenshot(remaining, undefined, signal, true),
+      signal,
+    );
   }
 
   async requestScreenshotWithoutObservationStreamPush(
@@ -758,6 +787,12 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
   }
 
   /** Invoke Magic Tap directly through the foreground app's in-app SDK. */
+  async requestAccessibilityFocus(
+    ...args: Parameters<CtrlProxyVoiceOver["requestAccessibilityFocus"]>
+  ): ReturnType<CtrlProxyVoiceOver["requestAccessibilityFocus"]> {
+    return this.voiceOver.requestAccessibilityFocus(...args);
+  }
+
   async requestMagicTap(
     ...args: Parameters<CtrlProxyVoiceOver["requestMagicTap"]>
   ): ReturnType<CtrlProxyVoiceOver["requestMagicTap"]> {

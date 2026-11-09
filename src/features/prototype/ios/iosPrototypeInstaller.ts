@@ -5,6 +5,7 @@ import type { HostCommandExecutor } from "../../../utils/HostCommandExecutor";
 import type { PlistReader, PlistWriter } from "../../../utils/ios-cmdline-tools/PlistClient";
 import { resolveIosDeviceKind } from "../../../utils/ios-cmdline-tools/IosDeviceKind";
 import type { PrototypeJson } from "../prototypeSpec";
+import { DISPOSABLE_APP_IOS_USAGE_KEYS } from "../disposableApp/disposableAppPermissions";
 import { prototypeRequiresSchema } from "../prototypePlatformSchema";
 import type { PrototypeAssetUpload } from "../prototypeAssets";
 import { isPrototypeBundleId, prototypeBundleId } from "./iosPrototypeBundleId";
@@ -75,20 +76,6 @@ export interface PrototypeInstallInput {
   icon?: PrototypeIconInput;
 }
 
-const permissionUsageKeys = new Map<string, string>([
-  ["camera", "NSCameraUsageDescription"],
-  ["microphone", "NSMicrophoneUsageDescription"],
-  ["location", "NSLocationWhenInUseUsageDescription"],
-  ["locationBackground", "NSLocationAlwaysAndWhenInUseUsageDescription"],
-  ["photos", "NSPhotoLibraryUsageDescription"],
-  ["photosAdd", "NSPhotoLibraryAddUsageDescription"],
-  ["contacts", "NSContactsUsageDescription"],
-  ["calendar", "NSCalendarsFullAccessUsageDescription"],
-  ["bluetooth", "NSBluetoothAlwaysUsageDescription"],
-  ["motion", "NSMotionUsageDescription"],
-  ["speech", "NSSpeechRecognitionUsageDescription"],
-]);
-
 function permissionUsageStrings(spec: PrototypeJson): Record<string, string> {
   const requires = prototypeRequiresSchema.parse(
     spec && typeof spec === "object" && !Array.isArray(spec) ? (spec.requires ?? {}) : {},
@@ -96,7 +83,7 @@ function permissionUsageStrings(spec: PrototypeJson): Record<string, string> {
   const strings: Record<string, string> = {};
   for (const permission of requires.permissions ?? []) {
     // Notifications and nearbyWifi have no iOS Info.plist usage key.
-    const key = permissionUsageKeys.get(permission.name);
+    const key = DISPOSABLE_APP_IOS_USAGE_KEYS[permission.name];
     if (key) {
       strings[key] = permission.purpose;
     }

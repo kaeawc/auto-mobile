@@ -1,5 +1,5 @@
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../models/ViewHierarchyResult";
-import { nodeAttributes, nodeBounds } from "../../../models/ViewHierarchyResult";
+import { childrenOf, nodeAttributes, nodeBounds } from "../../../models/ViewHierarchyResult";
 import type { IosSdkObservation, IosSdkObservationNode } from "./sdkObservationBridge";
 import { SDK_CAPTURE_IDENTITY_ATTRIBUTE } from "../../../utils/hierarchyFingerprint";
 
@@ -74,7 +74,7 @@ function convertNode(
     class: node.role,
     // Match the native/web text-field properties used by focus selection and field detection.
     role: editable ? "textfield" : node.role,
-    ...(editable ? { focusable: "true", "input-type": "text" } : {}),
+    ...(editable ? { focusable: "true", "input-type": "text", actions: ["set_text"] } : {}),
     bounds: { ...node.bounds },
     enabled: String(node.enabled),
     [SDK_ELEMENT_ID_ATTRIBUTE]: node.id,
@@ -92,15 +92,6 @@ function convertNode(
     extras: { "sdk.source": IOS_SDK_BRIDGE_SOURCE },
     ...(children.length > 0 ? { node: children } : {}),
   };
-}
-
-/** Hierarchy children may arrive as one object rather than an array (XML-shaped nodes). */
-export function childrenOf(node: ViewHierarchyNode): ViewHierarchyNode[] {
-  const children: unknown = node.node;
-  if (Array.isArray(children)) {
-    return children;
-  }
-  return children && typeof children === "object" ? [children as ViewHierarchyNode] : [];
 }
 
 export function boundsKey(value: unknown): string | null {

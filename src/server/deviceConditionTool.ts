@@ -1,6 +1,14 @@
+import {
+  decodeAttestationCertificate,
+  parseKeyAttestationCertificate,
+  type AttestationChainSource,
+} from "../features/deviceCondition/keyAttestation";
+import { deviceConditionChanges } from "../features/deviceCondition/DeviceConditionTypes";
+import { ActionableError, toActionableError } from "../models/ActionableError";
 import type { BootedDevice } from "../models";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import type { FeatureFlagReader } from "../features/featureFlags/FeatureFlagService";
+import { featureFlagDisabledMessage } from "../features/featureFlags/featureFlagDisabledMessage";
 import {
   DeviceConditionRegistry,
   defaultDeviceConditionRegistry,
@@ -34,6 +42,7 @@ export interface DeviceConditionCallFields {
 }
 
 export interface DeviceConditionToolDeps {
+  attestationSource?: (device: BootedDevice) => AttestationChainSource;
   registry?: DeviceConditionRegistry;
   featureFlags?: FeatureFlagReader;
 }
@@ -51,9 +60,16 @@ const OTHER_DEVICE_STATE_FIELDS: readonly (keyof DeviceConditionCallFields)[] = 
   "power",
 ];
 
+/** The refusal for a deviceCondition call while the flag is off (#16882, #16906). */
+export const DEVICE_CONDITION_FLAG_DISABLED_MESSAGE = featureFlagDisabledMessage(
+  "device-condition",
+  "deviceCondition",
+);
+
 /** Fail closed until the composition root registers the process's feature flags. */
 const FLAGS_UNREGISTERED: FeatureFlagReader = { isEnabled: () => false };
 let registeredFeatureFlags: FeatureFlagReader = FLAGS_UNREGISTERED;
+let registeredAttestationSource: ((device: BootedDevice) => AttestationChainSource) | undefined;
 
 /**
  * Composition-root seam (#11806): `createMcpServer` registers the process
@@ -62,6 +78,13 @@ let registeredFeatureFlags: FeatureFlagReader = FLAGS_UNREGISTERED;
  */
 export function registerDeviceConditionFeatureFlags(featureFlags: FeatureFlagReader): void {
   registeredFeatureFlags = featureFlags;
+}
+
+/** Composition-root seam (#16868): the Android CtrlProxy client that exports attestation chains. */
+export function registerDeviceConditionAttestationSource(
+  factory: (device: BootedDevice) => AttestationChainSource,
+): void {
+  registeredAttestationSource = factory;
 }
 
 function refuse(device: BootedDevice, error: string) {
@@ -91,10 +114,13 @@ function deviceConditionRefusal(
   featureFlags: FeatureFlagReader,
 ): string | undefined {
   if (!featureFlags.isEnabled("device-condition")) {
-    return "deviceCondition is behind the 'device-condition' feature flag, which is disabled.";
+    return DEVICE_CONDITION_FLAG_DISABLED_MESSAGE;
   }
   if (OTHER_DEVICE_STATE_FIELDS.some((field) => args[field] !== undefined)) {
     return "deviceCondition cannot be combined with other setDeviceState fields; send it in its own call.";
+  }
+  if (input.exportAttestation) {
+    return attestationExportRefusal(input);
   }
   if (!DeviceConditionRegistry.isMeaningful(input)) {
     return "deviceCondition requires a reset or at least one condition field.";
@@ -110,6 +136,49 @@ function deviceConditionRefusal(
     return 'deviceCondition.rootState needs a session (sessionUuid) so the fixture is restored when the session ends; sessionless rootState: "unset" still clears one.';
   }
   return undefined;
+}
+
+function attestationExportRefusal(input: DeviceConditionInput): string | undefined {
+  return input.reset ||
+    input.expiresInSeconds !== undefined ||
+    deviceConditionChanges(input).length > 0
+    ? "deviceCondition.exportAttestation must be sent alone without conditions, reset or a lease."
+    : undefined;
+}
+
+async function handleAttestationExport(device: BootedDevice, deps: DeviceConditionToolDeps) {
+  if (device.platform !== "android") {
+    return refuse(device, "Attestation export requires Android.");
+  }
+  try {
+    const factory = deps.attestationSource ?? registeredAttestationSource;
+    if (factory === undefined) {
+      throw new ActionableError("Attestation source is not registered by the composition root");
+    }
+    const source = factory(device);
+    const certificateChainBase64 = await source.exportAttestation();
+    if (certificateChainBase64.length < 2 || certificateChainBase64.length > 16) {
+      throw new Error("Attestation requires a leaf-to-root certificate chain");
+    }
+    const certificates = certificateChainBase64.map(decodeAttestationCertificate);
+    const fields = parseKeyAttestationCertificate(certificates[0]);
+    return createStructuredToolResponse({
+      message: "Exported public Android attestation certificates",
+      success: true,
+      deviceId: device.deviceId,
+      platform: device.platform,
+      attestation: {
+        certificateChainBase64,
+        rootCertificateBase64: certificateChainBase64.at(-1),
+        fields,
+      },
+    });
+  } catch (error) {
+    throw toActionableError(
+      error,
+      "Failed to export Android key attestation; use a CtrlProxy build supporting export_attestation and an Android image supporting key attestation",
+    );
+  }
 }
 
 export async function handleDeviceConditionCall(
@@ -133,6 +202,9 @@ export async function handleDeviceConditionCall(
   const refusal = deviceConditionRefusal(args, input, featureFlags);
   if (refusal !== undefined) {
     return refuse(device, refusal);
+  }
+  if (input.exportAttestation) {
+    return handleAttestationExport(device, deps);
   }
   const registry = deps.registry ?? defaultDeviceConditionRegistry;
   const result = await registry.apply(

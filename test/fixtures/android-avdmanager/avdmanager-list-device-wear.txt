@@ -1,0 +1,29 @@
+---------
+id: 69 or "wearos_large_round"
+    Name: Wear OS Large Round
+    OEM : Google
+    Tag : android-wear
+---------
+id: 70 or "wearos_rect"
+    Name: Wear OS Rectangular
+    OEM : Google
+    Tag : android-wear
+---------
+id: 71 or "wearos_small_round"
+    Name: Wear OS Small Round
+    OEM : Google
+    Tag : android-wear
+---------
+id: 72 or "wearos_square"
+    Name: Wear OS Square
+    OEM : Google
+    Tag : android-wear
+---------
+id: 73 or "wearos_xl_round"
+    Name: Wear OS XL Round
+    OEM : Google
+    Tag : android-wear
+---------
+id: 74 or "xr_glasses_device"
+    Name: XR Glasses
+    OEM : Google

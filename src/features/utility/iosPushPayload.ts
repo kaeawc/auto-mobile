@@ -4,6 +4,11 @@ import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/working
 /** `simctl push` refuses payloads over 4 KiB, matching the APNs limit. */
 export const SIMCTL_PUSH_PAYLOAD_LIMIT_BYTES = 4096;
 
+/** Whether serialized push JSON exceeds the 4 KiB APNs limit (also the prototype push limit). */
+export function exceedsPushPayloadLimit(json: string): boolean {
+  return Buffer.byteLength(json, "utf8") > SIMCTL_PUSH_PAYLOAD_LIMIT_BYTES;
+}
+
 /**
  * Custom top-level key carrying the requested image URL (#14097). A Notification Service
  * Extension in the app reads it (with `aps.mutable-content: 1`) to download and attach the image.
@@ -27,7 +32,13 @@ export interface IosPushPayloadOptions {
 }
 
 export type IosPushPayloadBuild =
-  | { ok: true; json: string; warnings: string[] }
+  | {
+      ok: true;
+      json: string;
+      warnings: string[];
+      /** The title and body iOS displays, or undefined when the sent alert hides them. */
+      alert?: { title: string; body: string };
+    }
   | { ok: false; error: string; warnings: string[] };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -40,6 +51,23 @@ function toImageUrl(imagePath: string): string {
     return imagePath;
   }
   return pathToFileURL(resolvePathFromDaemonLaunchWorkingDirectory(imagePath)).href;
+}
+
+/**
+ * The displayed title and body of an `aps.alert`, which a raw payload may replace:
+ * a string alert is the body alone; an object reads its literal title and body.
+ * A localized alert (`title-loc-key`, `loc-key`) shows text this side cannot know.
+ */
+function effectiveAlert(alert: unknown): { title: string; body: string } | undefined {
+  if (typeof alert === "string") {
+    return { title: "", body: alert };
+  }
+  if (!isPlainObject(alert) || "title-loc-key" in alert || "loc-key" in alert) {
+    return undefined;
+  }
+  const title = typeof alert.title === "string" ? alert.title : "";
+  const body = typeof alert.body === "string" ? alert.body : "";
+  return title || body ? { title, body } : undefined;
 }
 
 function imageFields(
@@ -109,12 +137,12 @@ export function buildIosPushPayload(
     aps,
     [SIMULATOR_TARGET_BUNDLE_KEY]: bundleId,
   });
-  if (Buffer.byteLength(json, "utf8") > SIMCTL_PUSH_PAYLOAD_LIMIT_BYTES) {
+  if (exceedsPushPayloadLimit(json)) {
     return {
       ok: false,
       error: `APNs payload exceeds the ${SIMCTL_PUSH_PAYLOAD_LIMIT_BYTES}-byte simctl push limit.`,
       warnings,
     };
   }
-  return { ok: true, json, warnings };
+  return { ok: true, json, warnings, alert: effectiveAlert(aps.alert) };
 }

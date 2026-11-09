@@ -26,7 +26,7 @@ class LibraryImportTest {
       },
       AutoMobilePrototype.capabilities,
       ImportAssetCheck { invalidAsset },
-      LibraryImportCommit { bundle, origin, _ ->
+      LibraryImportCommit { bundle, origin, _, _ ->
         committed = bundle
         source = origin
         commitError?.let { LibraryResult.Failure(it) } ?: LibraryResult.Success(Fixtures.entry())
@@ -80,7 +80,7 @@ class LibraryImportTest {
         ImportContent { ByteArrayInputStream(ImportBundleFixtures.chromelessWindowChrome) },
         AutoMobilePrototype.capabilities - "prototype_window_chrome_v1",
         ImportAssetCheck { null },
-        LibraryImportCommit { _, _, _ -> error("Must not commit") },
+        LibraryImportCommit { _, _, _, _ -> error("Must not commit") },
       )
     assertEquals(
       LibraryImportResult.Rejected("spec.json", UNSUPPORTED_PROTOTYPE_REASON),
@@ -178,7 +178,7 @@ class LibraryImportTest {
         },
         emptySet(),
         ImportAssetCheck { null },
-        LibraryImportCommit { _, _, _ -> error("Must not commit") },
+        LibraryImportCommit { _, _, _, _ -> error("Must not commit") },
       )
     assertTrue(
       (old.import(LibraryImportRequest(ImportAction.View, "content://external/spec"))

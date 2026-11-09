@@ -1,3 +1,4 @@
+import { loadDevicectlListFixture } from "../../helpers/devicectlListFixtures";
 import { describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -10,6 +11,7 @@ import type {
 import { CoreDeviceCapabilityProbe } from "../../../src/utils/ios-cmdline-tools/CoreDeviceCapabilityProbe";
 import {
   type DevicectlDisplayInfo,
+  type DevicectlDisplayInfoSource,
   parseDevicectlDisplayInfo,
 } from "../../../src/utils/ios-cmdline-tools/DevicectlDisplayInfo";
 import {
@@ -20,6 +22,7 @@ import {
 } from "../../../src/utils/ios-cmdline-tools/DevicectlDisplayScreenshot";
 import { DevicectlPanelScreenshotSource } from "../../../src/utils/ios-cmdline-tools/DevicectlPanelScreenshotSource";
 import { captureIosPanelScreenshotWith } from "../../../src/features/observe/ios/CtrlProxyScreenshot";
+import type { XCTestHierarchy } from "../../../src/features/observe/ios/types";
 import {
   FakeDevicectlCommandInvoker,
   FakeDevicectlVersionSource,
@@ -119,6 +122,35 @@ describe("findDevicectlDisplayUniqueId", () => {
 });
 
 describe("DevicectlPanelScreenshotSource", () => {
+  test("reads active displays through the same probe without capturing screenshots", async () => {
+    const h = sourceHarness();
+    const signal = new AbortController().signal;
+    for (const fixture of [
+      "info-displays-duo-cover-active.json",
+      "info-displays-duo-inner-active.json",
+    ]) {
+      const output = loadDevicectlListFixture(fixture);
+      h.commandInvoker.result = { kind: "ok", output };
+      expect(await h.source.readDisplays({ deviceId: "sim-1", signal })).toEqual(
+        displaysOf(output),
+      );
+    }
+    expect(h.commandInvoker.calls).toEqual(
+      Array(2).fill({ deviceId: "sim-1", command: DEVICECTL_DISPLAYS_COMMAND }),
+    );
+    expect(h.capture.calls).toEqual([]);
+  });
+
+  test.each(["unsupported", "invalid-json"])("%s cannot confirm active displays", async (mode) => {
+    const h = sourceHarness();
+    h.commandInvoker.result =
+      mode === "unsupported"
+        ? { kind: "unsupported", capabilityFeatureId: "com.apple.coredevice.feature.displays" }
+        : { kind: "ok", output: "invalid" };
+    expect(await h.source.readDisplays({ deviceId: "sim-1" })).toEqual([]);
+    expect(h.capture.calls).toEqual([]);
+  });
+
   test("supported: probes info displays and captures the panel by its unique ID", async () => {
     const h = sourceHarness();
     const signal = new AbortController().signal;
@@ -345,7 +377,17 @@ describe("captureIosPanelScreenshotWith", () => {
     displays: { panels: [coverPanel, innerPanel], postures: ["closed", "opened"] },
   };
 
-  function run(options: { device?: BootedDevice; devicectlPng?: Buffer; simctlPng?: Buffer }) {
+  function run(options: {
+    device?: BootedDevice;
+    devicectlPng?: Buffer;
+    simctlPng?: Buffer;
+    activePanelKey?: string;
+    displayInfo?: DevicectlDisplayInfoSource;
+    signal?: AbortSignal;
+    hierarchy?: XCTestHierarchy;
+    runnerData?: string;
+  }) {
+    const runnerCalls: boolean[] = [];
     const devicectlCalls: unknown[] = [];
     const simctlCalls: string[] = [];
     const devicectl: SimulatorPanelScreenshotSource = {
@@ -356,7 +398,7 @@ describe("captureIosPanelScreenshotWith", () => {
     };
     const result = captureIosPanelScreenshotWith({
       device: options.device ?? duo,
-      hierarchy: null,
+      hierarchy: options.hierarchy ?? null,
       simctl: {
         screenshot: async (_deviceId, display) => {
           simctlCalls.push(display);
@@ -364,11 +406,105 @@ describe("captureIosPanelScreenshotWith", () => {
         },
       },
       devicectl,
-      runnerCapture: async () => ({ success: true, data: "runner" }),
-      activePanelKey: "primary-1",
+      runnerCapture: async () => {
+        runnerCalls.push(true);
+        return { success: true, data: options.runnerData ?? "runner" };
+      },
+      activePanelKey: "activePanelKey" in options ? options.activePanelKey : "primary-1",
+      displayInfo: options.displayInfo,
+      signal: options.signal,
     });
-    return { result, devicectlCalls, simctlCalls };
+    return { result, devicectlCalls, simctlCalls, runnerCalls };
   }
+
+  test.each([
+    ["info-displays-duo-inner-active.json", innerPanel],
+    ["info-displays-duo-cover-active.json", coverPanel],
+  ] as const)("resolves a panel without hierarchy from %s", async (fixture, panel) => {
+    const signal = new AbortController().signal;
+    const reads: Array<{ deviceId: string; signal?: AbortSignal }> = [];
+    const h = run({
+      activePanelKey: undefined,
+      signal,
+      displayInfo: {
+        readDisplays: async (request) => {
+          reads.push(request);
+          return displaysOf(loadDevicectlListFixture(fixture));
+        },
+      },
+      simctlPng: png(panel.sizePx.width, panel.sizePx.height),
+    });
+    expect((await h.result).data).not.toBe("runner");
+    expect(reads).toEqual([{ deviceId: "sim-duo", signal }]);
+    expect(h.devicectlCalls).toEqual([{ deviceId: "sim-duo", panel, panelCount: 2, signal }]);
+    expect(h.simctlCalls).toEqual([panel.key]);
+    expect(h.runnerCalls).toEqual([]);
+  });
+
+  test.each(["throws", "none", "multiple"] as const)(
+    "uses runner when live display info %s cannot identify a panel",
+    async (mode) => {
+      const h = run({
+        activePanelKey: undefined,
+        displayInfo: {
+          readDisplays: async () => {
+            if (mode === "throws") {
+              throw new Error("display read failed");
+            }
+            const displays = displaysOf(
+              loadDevicectlListFixture("info-displays-duo-inner-active.json"),
+            );
+            return displays.map((display) => ({ ...display, active: mode === "multiple" }));
+          },
+        },
+      });
+      expect((await h.result).data).toBe("runner");
+      expect(h.runnerCalls).toEqual([true]);
+      expect(h.devicectlCalls).toEqual([]);
+      expect(h.simctlCalls).toEqual([]);
+    },
+  );
+
+  test("explicit panel key wins without reading live displays", async () => {
+    const reads: boolean[] = [];
+    const h = run({
+      activePanelKey: innerPanel.key,
+      displayInfo: {
+        readDisplays: async () => {
+          reads.push(true);
+          return displaysOf(loadDevicectlListFixture("info-displays-duo-cover-active.json"));
+        },
+      },
+    });
+    expect((await h.result).data).not.toBe("runner");
+    expect(h.simctlCalls).toEqual([innerPanel.key]);
+    expect(reads).toEqual([]);
+  });
+
+  test.each(["returns", "throws"] as const)(
+    "rethrows cancellation when live read %s",
+    async (mode) => {
+      const controller = new AbortController();
+      const reason = new Error("cancelled display read");
+      const h = run({
+        activePanelKey: undefined,
+        signal: controller.signal,
+        displayInfo: {
+          readDisplays: async () => {
+            controller.abort(reason);
+            if (mode === "throws") {
+              throw reason;
+            }
+            return displaysOf(loadDevicectlListFixture("info-displays-duo-inner-active.json"));
+          },
+        },
+      });
+      await expect(h.result).rejects.toBe(reason);
+      expect(h.runnerCalls).toEqual([]);
+      expect(h.devicectlCalls).toEqual([]);
+      expect(h.simctlCalls).toEqual([]);
+    },
+  );
 
   test("uses a devicectl capture of the selected panel and skips simctl", async () => {
     const frame = png(2007, 2853);
@@ -396,6 +532,111 @@ describe("captureIosPanelScreenshotWith", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  describe("Duo device type with no display inventory", () => {
+    const emptyDuo: BootedDevice = {
+      deviceId: "sim-duo",
+      name: "iPhone Duo",
+      platform: "ios",
+      deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo",
+    };
+    const innerActive = (): DevicectlDisplayInfoSource => ({
+      readDisplays: async () =>
+        displaysOf(loadDevicectlListFixture("info-displays-duo-inner-active.json")),
+    });
+    const innerHierarchy: XCTestHierarchy = {
+      updatedAt: 1,
+      packageName: "com.example",
+      hierarchy: {},
+      screenWidth: 669,
+      screenHeight: 951,
+    };
+
+    test("reads live displays once and captures the active one by its display name", async () => {
+      const info = spyOn(logger, "info").mockImplementation(() => {});
+      try {
+        let reads = 0;
+        const h = run({
+          device: emptyDuo,
+          activePanelKey: undefined,
+          displayInfo: {
+            readDisplays: async (request) => {
+              reads++;
+              return innerActive().readDisplays(request);
+            },
+          },
+        });
+        const result = await h.result;
+        expect(result.data).toBe(png(2007, 2853).toString("base64"));
+        expect(reads).toBe(1);
+        const panel = { key: "LCD-1", role: "unknown", sizePx: { width: 2007, height: 2853 } };
+        expect(h.devicectlCalls).toEqual([
+          { deviceId: "sim-duo", panel, panelCount: 2, signal: undefined },
+        ]);
+        expect(h.simctlCalls).toEqual(["LCD-1"]);
+        expect(h.runnerCalls).toEqual([]);
+        expect(String(info.mock.calls[0]?.[0])).toContain("no display inventory");
+      } finally {
+        info.mockRestore();
+      }
+    });
+
+    test("uses an aspect-matching runner capture when no single display is active", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const frame = png(2007, 2853).toString("base64");
+        const h = run({
+          device: emptyDuo,
+          activePanelKey: undefined,
+          hierarchy: innerHierarchy,
+          runnerData: frame,
+          displayInfo: { readDisplays: async () => [] },
+        });
+        expect(await h.result).toEqual({ success: true, data: frame });
+        expect(h.devicectlCalls).toEqual([]);
+        expect(h.simctlCalls).toEqual([]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("rejects a runner capture whose aspect does not match the hierarchy", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const h = run({
+          device: emptyDuo,
+          activePanelKey: undefined,
+          hierarchy: innerHierarchy,
+          runnerData: png(1398, 2034).toString("base64"),
+        });
+        const result = await h.result;
+        expect(result.success).toBe(false);
+        expect(result.data).toBeUndefined();
+        expect(result.error).toContain("1398x2034 pixels");
+        expect(h.runnerCalls).toEqual([true]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("a non-Duo device with no inventory never reads live displays", async () => {
+      let reads = 0;
+      const h = run({
+        device: { ...emptyDuo, deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17" },
+        hierarchy: innerHierarchy,
+        runnerData: png(1398, 2034).toString("base64"),
+        displayInfo: {
+          readDisplays: async () => {
+            reads++;
+            return [];
+          },
+        },
+      });
+      expect((await h.result).success).toBe(true);
+      expect(reads).toBe(0);
+      expect(h.runnerCalls).toEqual([true]);
+    });
   });
 
   test("a single-display simulator uses the runner and never touches devicectl", async () => {

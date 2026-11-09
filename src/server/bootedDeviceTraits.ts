@@ -7,6 +7,7 @@ import {
   defaultDeviceTraits,
   type DeviceTraits,
   type TraitFormFactor,
+  type VehicleCapabilities,
 } from "../utils/android-cmdline-tools/deviceTraits";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
@@ -24,8 +25,10 @@ export interface BootedDeviceTraits {
   model: string | null;
   sdk: number | null;
   abi: string | null;
-  /** `"watch"`, `"automotive"` or `"tv"` when the build announces it; null otherwise. */
+  /** `"watch"`, `"automotive"`, `"tv"`, `"xr-headset"` or `"xr-glasses"` when the build announces it; null otherwise. */
   formFactor: TraitFormFactor | null;
+  /** Vehicle states the car build can simulate; absent on every non-automotive device. */
+  vehicle?: VehicleCapabilities;
 }
 
 export interface WithTraits {
@@ -62,14 +65,35 @@ async function readTraits(
       }),
       { timer, timeoutMs: DEVICE_TRAITS_TIMEOUT_MS, label: "Device traits probe" },
     );
-    const { manufacturer, brand, model, sdk, abi, formFactor } = traits;
-    return { manufacturer, brand, model, sdk, abi, formFactor };
+    const { manufacturer, brand, model, sdk, abi, formFactor, vehicle } = traits;
+    return { manufacturer, brand, model, sdk, abi, formFactor, ...(vehicle ? { vehicle } : {}) };
   } catch (error) {
     // Traits are descriptive; a failed read only leaves them off this entry.
     logger.warn(
       `[BootedDeviceResources] Device traits unavailable for ${device.deviceId}: ${errorMessage(error)}`,
       error,
     );
+    return undefined;
+  }
+}
+
+/**
+ * The form factor the build announces (`ro.build.characteristics`): null when it announces none
+ * (a phone or tablet), undefined when the traits could not be read. `caller` labels the warning.
+ */
+export async function readTraitFormFactor(
+  reader: DeviceTraits,
+  adbFactory: AdbClientFactory,
+  device: BootedDevice,
+  caller: string,
+): Promise<TraitFormFactor | null | undefined> {
+  try {
+    const traits = await reader.read(adbFactory.create(device), device.deviceId, {
+      timeoutMs: DEVICE_TRAITS_TIMEOUT_MS,
+    });
+    return traits.formFactor;
+  } catch (error) {
+    logger.warn(`${caller} could not read device traits: ${errorMessage(error)}`, error);
     return undefined;
   }
 }

@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { toolJson } from "../helpers/toolResponse";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
@@ -111,6 +111,15 @@ describe("selector startDevice among held and idle matching devices", () => {
     osVersion: "14",
     apiLevel: 34,
     formFactor: "phone",
+  });
+
+  // The first startDevice in a process pays one-time module JIT for the whole tool path, which
+  // is most of the first test's time. Pay it here, outside any timed test body (#17208).
+  beforeAll(async () => {
+    const warm = android("emulator-5560", "Pixel_7_API_34");
+    await arrange([warm], [androidImage(warm)]);
+    await startDevice({ platform: "android", __mcpSessionId: "warm-up" });
+    cleanup();
   });
 
   test("Android: the second session gets the idle emulator, not a refusal for the held one", async () => {

@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { carAppTemplatesSchema } from "../../models/CarAppTemplates";
 import { IMPORTED_PROTOTYPE_CONTENT } from "../../features/observe/importedPrototypeContent";
 import {
   observationIdSchema,
@@ -448,6 +449,40 @@ export const observeResultSchema = z
     ...observationScreenshotOutputFields,
     crop: observeCropResultSchema.optional(),
     screenSize: screenSizeSchema.optional(),
+    automotive: z
+      .object({
+        drivingState: z.enum(["parked", "idling", "moving"]).optional(),
+        uxRestrictions: z
+          .object({
+            requiresDistractionOptimization: z.boolean(),
+            activeRestrictions: z.number().int().nonnegative(),
+          })
+          .optional(),
+        foregroundActivity: z.object({ distractionOptimized: z.boolean() }).optional(),
+        blocked: z
+          .boolean()
+          .describe(
+            "True when DO is required and the known foreground activity is not distraction optimized.",
+          ),
+        hostRenderedUi: z
+          .object({
+            kind: z.literal("carAppLibrary"),
+            hostPackage: z
+              .string()
+              .optional()
+              .describe("The car host that drew the templates, when its resource ids name it."),
+          })
+          .optional()
+          .describe(
+            "Present when the foreground screen is Car App Library templates drawn by the car host, not the app's own views. " +
+              "With hostPackage, template nodes from that host were seen; without it, only the foreground activity is CarAppActivity, which also covers the library's own connection-error screen. " +
+              "Absence means neither signal was seen (for example an incomplete capture), not proof that the screen is app-drawn.",
+          ),
+      })
+      .optional()
+      .describe(
+        "Automotive devices only. Unavailable CarService reads omit the corresponding fields.",
+      ),
     isScreenRound: z
       .boolean()
       .optional()
@@ -455,11 +490,14 @@ export const observeResultSchema = z
         "Wear OS (watch devices) only: true when the display is round, so the corners are cut off.",
       ),
     hierarchyUnavailable: z
-      .object({ platform: z.union([z.literal("watchos"), z.literal("tvos")]), message: z.string() })
+      .object({
+        platform: z.union([z.literal("watchos"), z.literal("tvos"), z.literal("visionos")]),
+        message: z.string(),
+      })
       .optional()
       .describe(
-        "Apple Watch and Apple TV simulators: this observation is a screenshot with screenSize; the view " +
-          "hierarchy is not available without a connected watchOS or tvOS runner. viewHierarchy, skeleton, context, elements " +
+        "Apple Watch, Apple TV and Apple Vision Pro simulators: this observation is a screenshot with screenSize; the view " +
+          "hierarchy is not available without a connected watchOS, tvOS or visionOS window-app runner. viewHierarchy, skeleton, context, elements " +
           "and the other element fields are absent, not empty: their absence does not mean an empty screen.",
       ),
     systemInsets: systemInsetsSchema.optional(),
@@ -475,6 +513,13 @@ export const observeResultSchema = z
       .optional()
       .describe(
         "Device-level environment conditions. audio_input_unavailable: recordings on this device will contain no audio because the host or emulator has no audio input; do not retry.",
+      ),
+    carAppTemplates: carAppTemplatesSchema
+      .optional()
+      .describe(
+        "Android apps that integrate the AutoMobile SDK and enabled its Car App Library template route: " +
+          "each ScreenManager stack (root first) with the last template every screen returned from onGetTemplate. " +
+          "This is what the app built, not what the car host rendered.",
       ),
     layoutWarnings: z
       .object({

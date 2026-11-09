@@ -17,6 +17,8 @@ data class TelemetryPushRequest(
   val sessionId: String? = null,
   val sessionUuid: String? = null,
   val deviceSessionUuid: String? = null,
+  /** The daemon subscription an `unsubscribe` releases, on a socket carrying several. */
+  val subscriptionId: String? = null,
 )
 
 /** Response envelope from the telemetry push socket server. */
@@ -28,6 +30,8 @@ data class TelemetryPushResponse(
   val error: String? = null,
   val timestamp: Long? = null,
   val data: TelemetryEventEnvelope? = null,
+  /** Which subscription on the socket a push or acknowledgement belongs to. */
+  val subscriptionId: String? = null,
 )
 
 /** Telemetry event as pushed from the server: category + timestamp + opaque data object. */
@@ -36,6 +40,8 @@ data class TelemetryEventEnvelope(
   val category: String,
   val timestamp: Long,
   val deviceId: String? = null,
+  /** The daemon-minted identity of the device epoch that produced this event (#5256). */
+  val deviceSessionUuid: String? = null,
   val data: JsonObject,
 )
 
@@ -58,8 +64,13 @@ data class AccessibilityViolationInfo(
 /** Parsed telemetry events for UI rendering, with category-specific fields extracted. */
 sealed class TelemetryDisplayEvent {
   abstract val timestamp: Long
-  /** Device ID that generated this event, if known. Used for per-device filtering. */
-  open val deviceId: String? = null
+  /** Device ID (serial/UDID) that generated this event, if known. A display label, not identity. */
+  abstract val deviceId: String?
+  /**
+   * The daemon-minted device epoch that generated this event, if known. Per-device routing prefers
+   * it over [deviceId], since a rebooted device can reuse its serial.
+   */
+  abstract val deviceSessionUuid: String?
 
   data class Network(
     override val timestamp: Long,
@@ -75,6 +86,8 @@ sealed class TelemetryDisplayEvent {
     val requestBody: String?,
     val responseBody: String?,
     val contentType: String?,
+    override val deviceId: String? = null,
+    override val deviceSessionUuid: String? = null,
   ) : TelemetryDisplayEvent() {
     /** Lazily parsed request body JSON — only decoded on first access. */
     val parsedRequestBody: JsonObject? by lazy {
@@ -108,6 +121,8 @@ sealed class TelemetryDisplayEvent {
     val level: Int,
     val tag: String,
     val message: String,
+    override val deviceId: String? = null,
+    override val deviceSessionUuid: String? = null,
   ) : TelemetryDisplayEvent()
 
   data class Os(
@@ -115,6 +130,8 @@ sealed class TelemetryDisplayEvent {
     val category: String,
     val kind: String,
     val details: Map<String, String>?,
+    override val deviceId: String? = null,
+    override val deviceSessionUuid: String? = null,
   ) : TelemetryDisplayEvent()
 
   data class Navigation(
@@ -125,6 +142,8 @@ sealed class TelemetryDisplayEvent {
     val metadata: Map<String, String>?,
     val triggeringInteraction: String?,
     val screenshotUri: String?,
+    override val deviceId: String? = null,
+    override val deviceSessionUuid: String? = null,
   ) : TelemetryDisplayEvent()
 
   data class Failure(
@@ -136,6 +155,8 @@ sealed class TelemetryDisplayEvent {
     val exceptionType: String?,
     val screen: String?,
     val stackTrace: List<StackTraceFrame>?,
+    override val deviceId: String? = null,
+    override val deviceSessionUuid: String? = null,
   ) : TelemetryDisplayEvent() {
     /** Lazily formatted stack trace string — only built on first access. */
     val formattedStackTrace: String by lazy {
@@ -159,6 +180,8 @@ sealed class TelemetryDisplayEvent {
     val valueType: String?,
     val changeType: String,
     val previousValue: String?,
+    override val deviceId: String? = null,
+    override val deviceSessionUuid: String? = null,
   ) : TelemetryDisplayEvent()
 
   data class ToolCall(
@@ -167,6 +190,8 @@ sealed class TelemetryDisplayEvent {
     val durationMs: Long,
     val success: Boolean,
     val error: String?,
+    override val deviceId: String? = null,
+    override val deviceSessionUuid: String? = null,
   ) : TelemetryDisplayEvent()
 
   data class Accessibility(
@@ -177,6 +202,8 @@ sealed class TelemetryDisplayEvent {
     val newViolations: Int,
     val baselinedCount: Int,
     val violations: List<AccessibilityViolationInfo>,
+    override val deviceId: String? = null,
+    override val deviceSessionUuid: String? = null,
   ) : TelemetryDisplayEvent()
 
   data class Memory(
@@ -189,6 +216,8 @@ sealed class TelemetryDisplayEvent {
     val gcDurationMs: Long?,
     val unreachableObjects: Int?,
     val violations: List<String>,
+    override val deviceId: String? = null,
+    override val deviceSessionUuid: String? = null,
   ) : TelemetryDisplayEvent()
 
   data class Performance(
@@ -201,6 +230,8 @@ sealed class TelemetryDisplayEvent {
     val cpuUsagePercent: Double?,
     val health: String,
     val changedMetrics: List<String>,
+    override val deviceId: String? = null,
+    override val deviceSessionUuid: String? = null,
   ) : TelemetryDisplayEvent()
 
   data class Layout(
@@ -212,6 +243,8 @@ sealed class TelemetryDisplayEvent {
     val likelyCause: String?,
     val screenName: String?,
     val detailsJson: String?,
+    override val deviceId: String? = null,
+    override val deviceSessionUuid: String? = null,
   ) : TelemetryDisplayEvent() {
     /** Lazily parsed JSON details — only decoded on first access. */
     val parsedDetails: JsonObject? by lazy {

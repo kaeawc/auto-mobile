@@ -86,6 +86,16 @@ describe("sendKeys selector focus recovery", () => {
     }
   });
 
+  test("a miss that already lists on-screen inputs does not suggest scrolling (#17463)", async () => {
+    const h = createSendKeysFocusHarness();
+    const error =
+      "Failed to perform tap on element: Element not found with provided text 'Phone'. " +
+      'On-screen inputs: {label "+1", sublabel "Phone (Mobile)"}. Select one by its elementId or label.';
+    h.replies.push({ success: false, error, [tapFocusFailure]: "not-found-inputs-listed" });
+    expect((await h.action.execute(commands, selector)).error).toBe(error);
+    expect(h.calls).toEqual(["focus"]);
+  });
+
   for (const reason of ["no-visible-tap-area", "navigation-bar"] as const) {
     test(`${reason}: off-screen-but-present field gets the hint`, async () => {
       const h = createSendKeysFocusHarness();

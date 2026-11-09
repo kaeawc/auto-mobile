@@ -209,6 +209,11 @@ export async function runSessionNetworkMutation<T>(
         if (iosPlan) {
           // iOS publishes its own slot (with the rule's owner generation and
           // revision) before the command; a reset only borrows ownership.
+          // A launch watch requests no impairment, so an explicit rule for
+          // another app replaces it rather than being refused.
+          if (iosPlan.action === "apply") {
+            await sessionManager.releaseIosAppWatchFor(session, iosPlan.target);
+          }
           iosRule =
             iosPlan.action === "apply"
               ? sessionManager.beginIosAppNetworkRule(session, iosPlan.target)
@@ -310,7 +315,11 @@ export async function prearmSessionAppNetwork(
         }
         manager.finishIosAppNetworkReset(session, reset.rule);
       }
-      const context = manager.beginIosAppNetworkRule(session, { udid: target.deviceId, bundleId });
+      const context = manager.beginIosAppNetworkRule(
+        session,
+        { udid: target.deviceId, bundleId },
+        { watch: true },
+      );
       const result = await client.applyWatch(
         context.rule,
         IOS_APP_NETWORK_RULE_LEASE_MS,

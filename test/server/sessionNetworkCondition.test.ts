@@ -1004,6 +1004,81 @@ describe("launch-time app network watch", () => {
     }
   });
 
+  const applyOfflineFor = (
+    manager: SessionManager,
+    bridge: FakeNetworkFilterBridge,
+    appId: string,
+  ) =>
+    runSessionNetworkMutation(
+      manager,
+      target,
+      { platform: "ios", action: "apply", target: { udid: deviceId, bundleId: appId } },
+      {
+        mutation: async (iosRule) => {
+          if (!iosRule) {
+            throw new Error("expected an iOS rule context");
+          }
+          return await new IosAppNetworkRuleClient(bridge).applyOffline(
+            iosRule.rule,
+            15000,
+            iosRule.nextRevision,
+          );
+        },
+      },
+    );
+
+  test("an explicit offline rule for another app replaces the passive launch watch", async () => {
+    const { bridge, manager } = arrange();
+    try {
+      await manager.createSession(target.sessionUuid, deviceId, "ios");
+      await prearmSessionAppNetwork(manager, target, bundleId, bridge);
+      await applyOfflineFor(manager, bridge, "other.app");
+      expect(bridge.activeRules().map((rule) => [rule.target.bundleId, rule.condition])).toEqual([
+        ["other.app", "offline"],
+      ]);
+      expect(manager.getNetworkCondition(target.sessionUuid)?.iosAppRule).toMatchObject({
+        bundleId: "other.app",
+      });
+      expect(manager.getNetworkCondition(target.sessionUuid)?.iosAppRule?.watch).toBeUndefined();
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("an active offline rule still blocks an explicit rule for another app", async () => {
+    const { bridge, manager } = arrange();
+    try {
+      const session = await manager.createSession(target.sessionUuid, deviceId, "ios");
+      const context = manager.beginIosAppNetworkRule(session, { udid: deviceId, bundleId });
+      await new IosAppNetworkRuleClient(bridge).applyOffline(
+        context.rule,
+        15000,
+        context.nextRevision,
+      );
+      await expect(applyOfflineFor(manager, bridge, "other.app")).rejects.toThrow(
+        `already holds an offline rule for ${bundleId}`,
+      );
+      expect(bridge.activeRules().map((rule) => rule.target.bundleId)).toEqual([bundleId]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("an offline rule for the watched app upgrades the watch in place", async () => {
+    const { bridge, manager } = arrange();
+    try {
+      await manager.createSession(target.sessionUuid, deviceId, "ios");
+      await prearmSessionAppNetwork(manager, target, bundleId, bridge);
+      await applyOfflineFor(manager, bridge, bundleId);
+      await expect(applyOfflineFor(manager, bridge, "other.app")).rejects.toThrow(
+        `already holds an offline rule for ${bundleId}`,
+      );
+      expect(bridge.activeRules().map((rule) => rule.condition)).toEqual(["offline"]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
   test("sessionless and mismatched-device launches do not inspect the provider", async () => {
     const { bridge, manager } = arrange();
     try {

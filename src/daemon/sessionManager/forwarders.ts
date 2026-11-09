@@ -660,8 +660,17 @@ export abstract class SessionManagerForwarders {
   beginIosAppNetworkRule(
     session: Session,
     target: { udid: string; bundleId: string },
+    options?: { watch?: boolean },
   ): IosAppNetworkRuleCommandContext {
-    return this.forwardersHost.stateRestore.beginIosAppNetworkRule(session, target);
+    return this.forwardersHost.stateRestore.beginIosAppNetworkRule(session, target, options);
+  }
+
+  /** Remove a passive launch watch on another app before an explicit rule; see the lifecycle. */
+  releaseIosAppWatchFor(
+    session: Session,
+    target: { udid: string; bundleId: string },
+  ): Promise<void> {
+    return this.forwardersHost.stateRestore.releaseIosAppWatchFor(session, target);
   }
 
   prepareIosAppNetworkReset(

@@ -3,12 +3,15 @@ import {
   prototypePlatformCall,
   prototypePlatformEvent,
   prototypePlatformUses,
+  PROTOTYPE_PLATFORM_MODULES,
 } from "./prototypePlatform";
 import {
   isPrototypeDataPointer,
   prototypeDataPathPointer,
   prototypeDataPlaceholders,
+  prototypePlatformPlaceholders,
 } from "./prototypeData";
+import { parsePrototypeStorageKey } from "./prototypeStorage";
 import { prototypeShaderFields } from "./prototypeShaders";
 import { object, type Located, type PrototypeValidationError } from "./prototypeBindingValidation";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
@@ -20,6 +23,8 @@ import {
   type FieldVisitor,
 } from "./prototypeTemplate";
 
+export const SECURE_COPY_CHECK_MESSAGE =
+  "Secure copy taint analysis exceeds 4000000 overlap checks";
 export const SECURE_SCAN_BUDGET_MESSAGE =
   "Secure binding scan exceeds 4194304 expanded UTF-8 bytes";
 
@@ -99,36 +104,54 @@ function sensitiveModuleLibraryError(spec: unknown): PrototypeValidationError | 
 }
 
 /**
- * Sink paths (R2) where a `/data` pointer written by a `sensitive` platform call is bound into a
- * request URL, header, query or body, or a channel URL or header. Every such path is returned in
- * authored order; the library refusal reports the first one, and MCP-direct shows may warn on all.
+ * Sink paths (R2) where sensitive call results or platform state reach request/channel wire
+ * fields or storage. The library refusal reports the first sorted path; direct shows warn on all.
  */
 export function prototypeSensitiveSinkErrors(spec: unknown): PrototypeValidationError[] {
+  return prototypeSensitiveSinkScan(spec).errors;
+}
+
+/** Counts sink trie-node visits, excluding construction and copy propagation. */
+export function prototypeSensitiveSinkScan(spec: unknown): {
+  errors: PrototypeValidationError[];
+  checks: number;
+} {
+  let checks = 0;
+  const visit = () => checks <= MAX_COPY_TAINT_CHECKS && ++checks <= MAX_COPY_TAINT_CHECKS;
   const tainted = sensitiveDataPointers(spec);
-  if (!tainted.length) {
-    return [];
+  const platformTainted = sensitivePlatformPointers(spec);
+  if (!tainted.length && !platformTainted.length) {
+    return { errors: [], checks };
   }
   const nodes: { value: Record<string, unknown>; path: string }[] = [];
   walkPrototypeNodes(spec, (value, path) => nodes.push({ value, path }));
-  const { requests, fields } = libraryFields(spec, nodes, true);
-  fields.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const { requests, fields, dataWrites } = libraryFields(spec, nodes, true);
+  requests.push(...webViewPaths(nodes));
+  if (propagateDataTaint(tainted, platformTainted, dataWrites) === undefined) {
+    return { errors: [{ path: "$", message: SECURE_COPY_CHECK_MESSAGE }], checks };
+  }
+  const dataIndex = sinkOverlapIndex(tainted, visit);
+  const platformIndex = sinkOverlapIndex(platformTainted, visit);
+  const requestPaths = new Set(requests);
   const sinkFields = fields.filter(
     // Key fields name state entries, which a `/data` pointer cannot reach.
-    (field) => !field.key && requestSinkPath(field.path, requests),
+    (field) => !field.key && requestSinkPath(field.path, requestPaths),
   );
+  sinkFields.push(...sensitiveStorageFields(spec));
+  sinkFields.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   // Direct warning callers may precede repeat validation. Keep their authored-text scan
   // for invalid repeats; the binder (including the budget probe) requires valid repeats.
   const validRepeats = repeatErrors(spec) === undefined;
   if (validRepeats) {
     const budgetError = secureScanBudgetError(spec, sinkFields);
     if (budgetError) {
-      return [budgetError];
+      return { errors: [budgetError], checks };
     }
   }
   // Typed data pointers stay literal at runtime, even inside repeat rows. Only text binds.
   const located = sinkFields.map((field) => ({
     ...field,
-    value: { stateKey: field.dataPointer ? "" : field.text },
+    value: { stateKey: field.pointerSource ? "" : field.text },
   }));
   const instances = validRepeats
     ? repeatKeyInstances(spec, located)
@@ -150,48 +173,223 @@ export function prototypeSensitiveSinkErrors(spec: unknown): PrototypeValidation
     const pointer = object(repeat?.items)?.path;
     return typeof repeat?.as === "string" &&
       isPrototypeDataPointer(pointer) &&
-      tainted.some((taint) => pointersOverlap(taint, pointer, false))
+      dataIndex(pointer, false)
       ? [{ path, alias: repeat.as }]
       : [];
   });
-  const errors: PrototypeValidationError[] = [];
-  for (const field of sinkFields) {
+  const errors = sinkFields.flatMap((field) => {
+    if (checks > MAX_COPY_TAINT_CHECKS) {
+      return [];
+    }
     const readsTaintedRow = taintedRepeats.some(
       (scope) =>
         field.path.startsWith(`${scope.path}.children[`) &&
         (field.itemBinding ||
-          (!field.dataPointer && repeatFieldReferences(field.text, scope.alias).length > 0)),
+          (!field.pointerSource && repeatFieldReferences(field.text, scope.alias).length > 0)),
     );
     // Derived fields have no host-side instances. Retain literal data placeholders in their
     // authored text; the device still resolves those after formatting the derived value.
-    const pointers = field.dataPointer
-      ? [field.text]
-      : (texts.get(field.path) ?? [field.text]).flatMap(prototypeDataPlaceholders);
+    const reaches = (source: "data" | "platform", index: ReturnType<typeof sinkOverlapIndex>) => {
+      const pointers = field.pointerSource
+        ? field.pointerSource === source
+          ? [field.text]
+          : []
+        : (texts.get(field.path) ?? [field.text]).flatMap(
+            source === "data" ? prototypeDataPlaceholders : prototypePlatformPlaceholders,
+          );
+      return pointers.some((pointer) => index(pointer, !field.pointerSource));
+    };
     const reached =
-      readsTaintedRow ||
-      pointers.some((pointer) =>
-        tainted.some((taint) => pointersOverlap(taint, pointer, !field.dataPointer)),
-      );
-    if (reached) {
-      errors.push({
-        path: field.path,
-        message: "Sensitive value cannot be bound into a request",
-      });
+      readsTaintedRow || reaches("data", dataIndex) || reaches("platform", platformIndex);
+    return reached
+      ? [
+          {
+            path: field.path,
+            message: field.path.startsWith("storage.keys[")
+              ? "Sensitive value cannot be persisted"
+              : "Sensitive value cannot be bound into a request",
+          },
+        ]
+      : [];
+  });
+  return {
+    errors:
+      checks > MAX_COPY_TAINT_CHECKS ? [{ path: "$", message: SECURE_COPY_CHECK_MESSAGE }] : errors,
+    checks,
+  };
+}
+
+interface SinkTaintNode {
+  children: Map<string, SinkTaintNode>;
+  terminal: boolean;
+  hasTaintBelow: boolean;
+}
+
+/** Existence index for pointersOverlap's segment-prefix and {index} rules. */
+function sinkOverlapIndex(taints: readonly string[], visit: () => boolean) {
+  const node = (): SinkTaintNode => ({
+    children: new Map(),
+    terminal: false,
+    hasTaintBelow: false,
+  });
+  const root = node();
+  for (const taint of taints) {
+    let at = root;
+    at.hasTaintBelow = true;
+    for (const segment of pointerSegments(taint)) {
+      let child = at.children.get(segment);
+      if (!child) {
+        child = node();
+        at.children.set(segment, child);
+      }
+      at = child;
+      at.hasTaintBelow = true;
     }
+    at.terminal = true;
   }
-  return errors;
+  return (pointer: string, pointerIndexWildcard: boolean): boolean => {
+    const segments = pointerSegments(pointer);
+    const walk = (at: SinkTaintNode, depth: number): boolean => {
+      if (!visit()) {
+        return false;
+      }
+      if (at.terminal || depth === segments.length) {
+        return at.hasTaintBelow;
+      }
+      const segment = segments[depth];
+      if (pointerIndexWildcard && segment === "{index}") {
+        for (const child of at.children.values()) {
+          if (walk(child, depth + 1)) {
+            return true;
+          }
+        }
+        return false;
+      }
+      const literal = at.children.get(segment);
+      const wildcard = segment === "{index}" ? undefined : at.children.get("{index}");
+      return !!((literal && walk(literal, depth + 1)) || (wildcard && walk(wildcard, depth + 1)));
+    };
+    return walk(root, 0);
+  };
+}
+
+function pointerSegments(pointer: string): string[] {
+  return pointer.slice(1).split("/");
 }
 
 export function prototypeSensitiveWarnings(spec: unknown): string[] {
   return prototypeSensitiveSinkErrors(spec).map(({ path, message }) =>
     message === SECURE_SCAN_BUDGET_MESSAGE
       ? `${path}: sensitive sink analysis stopped at the 4194304 expanded-byte budget at this path, so the sinks in this spec are unchecked and no sink findings are listed; this is a warning only and does not block the show.`
-      : `${path}: ${message}; this is a warning only and does not block the show.`,
+      : message === SECURE_COPY_CHECK_MESSAGE
+        ? `${path}: sensitive sink analysis stopped at the 4000000 copy-check limit, so the sinks in this spec are unchecked and no sink findings are listed; this is a warning only and does not block the show.`
+        : `${path}: ${message}; this is a warning only and does not block the show.`,
   );
+}
+
+/** Overlap checks one copy-taint propagation may spend before it fails closed. */
+const MAX_COPY_TAINT_CHECKS = 4_000_000;
+
+/**
+ * A data action that copies a tainted `/data` or sensitive `/platform` read into `/data` taints
+ * its destination, transitively (a copy of a copy stays tainted). Mutates `tainted`; a worklist
+ * over copies bucketed by the first segment of their source keeps long chains linear. Returns
+ * the overlap checks spent, or undefined when the check cap is exceeded, so callers fail closed.
+ * Exported so tests can assert the linear scaling by counting work instead of wall-clock time.
+ */
+export function propagateDataTaint(
+  tainted: string[],
+  platformTainted: readonly string[],
+  writes: readonly DataWrite[],
+): number | undefined {
+  const known = new Set(tainted);
+  const queue = [...tainted];
+  const mark = (pointer: string) => {
+    if (!known.has(pointer)) {
+      known.add(pointer);
+      tainted.push(pointer);
+      queue.push(pointer);
+    }
+  };
+  const buckets = new Map<string, DataWrite[]>();
+  let checks = 0;
+  for (const write of writes) {
+    if (write.source === "data") {
+      const key = firstPointerSegment(write.from);
+      const bucket = buckets.get(key);
+      if (bucket) {
+        bucket.push(write);
+      } else {
+        buckets.set(key, [write]);
+      }
+    } else {
+      checks += platformTainted.length;
+      if (platformTainted.some((taint) => pointersOverlap(taint, write.from, false))) {
+        mark(write.into);
+      }
+    }
+  }
+  for (let at = 0; at < queue.length; at += 1) {
+    const taint = queue[at];
+    const key = firstPointerSegment(taint);
+    // A leading `{index}` taint segment matches any source segment.
+    for (const name of key === "{index}" ? [...buckets.keys()] : [key]) {
+      const bucket = buckets.get(name) ?? [];
+      checks += bucket.length;
+      buckets.set(
+        name,
+        bucket.filter((write) => {
+          const hit = pointersOverlap(taint, write.from, false);
+          if (hit) {
+            mark(write.into);
+          }
+          return !hit;
+        }),
+      );
+    }
+    if (checks > MAX_COPY_TAINT_CHECKS) {
+      return undefined;
+    }
+  }
+  return checks <= MAX_COPY_TAINT_CHECKS ? checks : undefined;
+}
+
+function firstPointerSegment(pointer: string): string {
+  return pointer.slice(1).split("/", 1)[0];
 }
 
 function sensitiveLibraryError(spec: unknown): PrototypeValidationError | undefined {
   return prototypeSensitiveSinkErrors(spec)[0];
+}
+
+function sensitivePlatformPointers(spec: unknown): string[] {
+  const declared = object(object(spec)?.requires)?.platform;
+  return Object.entries(PROTOTYPE_PLATFORM_MODULES).flatMap(([module, entry]) =>
+    Object.entries(entry.state ?? {}).flatMap(([key, state]) =>
+      state.sensitive && Array.isArray(declared) && declared.includes(module)
+        ? [`/${module}/${key}`]
+        : [],
+    ),
+  );
+}
+
+function sensitiveStorageFields(spec: unknown): LibraryField[] {
+  const fields: LibraryField[] = [];
+  const storageKeys = object(object(spec)?.storage)?.keys;
+  if (Array.isArray(storageKeys)) {
+    storageKeys.forEach((key, index) => {
+      const parsed = parsePrototypeStorageKey(key);
+      if (parsed?.kind === "data") {
+        fields.push({
+          text: parsed.pointer,
+          path: `storage.keys[${index}]`,
+          key: false,
+          pointerSource: "data",
+        });
+      }
+    });
+  }
+  return fields;
 }
 
 /** The `/data` pointers written by `sensitive` calls, in authored order (`into` of each). */
@@ -219,8 +417,8 @@ function sensitiveDataPointers(spec: unknown): string[] {
  * text sinks conservatively retain index matching when a repeat cannot be expanded on the host.
  */
 function pointersOverlap(taint: string, pointer: string, pointerIndexWildcard: boolean): boolean {
-  const left = taint.slice(1).split("/");
-  const right = pointer.slice(1).split("/");
+  const left = pointerSegments(taint);
+  const right = pointerSegments(pointer);
   return left.every(
     (segment, index) =>
       index >= right.length ||
@@ -230,17 +428,32 @@ function pointersOverlap(taint: string, pointer: string, pointerIndexWildcard: b
   );
 }
 
+/** A web view loads its url from the page host, so its url is a request sink (#16573, #17194). */
+function webViewPaths(nodes: readonly Located[]): string[] {
+  return nodes.filter(({ value }) => value.type === "webView").map(({ path }) => path);
+}
+
 /** Request and channel members a value reaches on the wire: url, headers, query and body. */
-function requestSinkPath(path: string, requests: readonly string[]): boolean {
-  return requests.some(
-    (at) =>
-      path === `${at}.url` ||
-      path === `${at}.body` ||
-      path.startsWith(`${at}.body.`) ||
-      ["headers", "query"].some(
-        (name) => path.startsWith(`${at}.${name}.`) || path.startsWith(`${at}.${name}[`),
-      ),
-  );
+function requestSinkPath(path: string, requests: ReadonlySet<string>): boolean {
+  // Check ancestors once rather than comparing every field with every request.
+  for (let at = path.indexOf("."); at >= 0; at = path.indexOf(".", at + 1)) {
+    if (!requests.has(path.slice(0, at))) {
+      continue;
+    }
+    const member = path.slice(at + 1);
+    if (
+      member === "url" ||
+      member === "body" ||
+      member.startsWith("body.") ||
+      member.startsWith("headers.") ||
+      member.startsWith("headers[") ||
+      member.startsWith("query.") ||
+      member.startsWith("query[")
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function secureScanBudgetError(
@@ -294,6 +507,8 @@ function secureLibraryError(spec: unknown): PrototypeValidationError | undefined
     return undefined;
   }
   const { requests, fields } = libraryFields(spec, nodes);
+  // A web view loads its url from the page host, so the url is a request sink (#16573).
+  requests.push(...webViewPaths(nodes));
   const sharePaths = shareLibraryFields(spec, fields);
   fields.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const inRequest = (path: string) =>
@@ -364,17 +579,72 @@ interface LibraryField {
   text: string;
   path: string;
   key: boolean;
-  dataPointer?: boolean;
+  pointerSource?: "data" | "platform";
   itemBinding?: boolean;
 }
+export interface DataWrite {
+  into: string;
+  source: "data" | "platform";
+  from: string;
+}
+
+/** Pairs a data action's `path` with its `value` read; both are visited at sibling paths. */
+class DataCopies {
+  private readonly destinations = new Map<string, string>();
+  private readonly reads = new Map<string, { source: "data" | "platform"; from: string }[]>();
+  private readonly repeats: { path: string; from: string }[];
+
+  constructor(nodes: readonly Located[]) {
+    this.repeats = nodes.flatMap(({ value, path }) => {
+      const repeat = object(value.repeat);
+      const from = object(repeat?.items)?.path;
+      return typeof repeat?.as === "string" && isPrototypeDataPointer(from) ? [{ path, from }] : [];
+    });
+  }
+
+  visit(raw: unknown, at: string, kind: string): void {
+    if (kind === "dataPath" && at.endsWith(".path")) {
+      const into = prototypeDataPathPointer(raw);
+      if (into !== undefined) {
+        this.destinations.set(at.slice(0, -".path".length), into);
+      }
+    }
+    const binding = kind === "emitBinding" && at.endsWith(".value") ? object(raw) : undefined;
+    for (const source of ["data", "platform"] as const) {
+      const from = binding?.[source];
+      if (typeof from === "string") {
+        this.reads.set(at.slice(0, -".value".length), [{ source, from }]);
+      }
+    }
+    if (typeof binding?.item === "string") {
+      const scopes = this.repeats.filter(({ path }) => at.startsWith(`${path}.children[`));
+      if (scopes.length > 0) {
+        this.reads.set(
+          at.slice(0, -".value".length),
+          scopes.map(({ from }) => ({ source: "data", from })),
+        );
+      }
+    }
+  }
+
+  writes(): DataWrite[] {
+    return [...this.reads].flatMap(([prefix, reads]) => {
+      const into = this.destinations.get(prefix);
+      return into === undefined ? [] : reads.map((read) => ({ into, ...read }));
+    });
+  }
+}
+
 function libraryFields(
   spec: unknown,
   nodes: readonly Located[],
   includeDataBindings = false,
-): { requests: string[]; fields: LibraryField[] } {
+): { requests: string[]; fields: LibraryField[]; dataWrites: DataWrite[] } {
   const requests: string[] = [];
   const fields: LibraryField[] = [];
+  const copies = new DataCopies(nodes);
   const collect: FieldVisitor = (raw, at, kind) => {
+    copies.visit(raw, at, kind);
     if (kind === "request") {
       requests.push(at);
     }
@@ -383,8 +653,10 @@ function libraryFields(
     }
     const binding = kind === "emitBinding" ? object(raw) : undefined;
     if (includeDataBindings && binding && !Object.hasOwn(binding, "state")) {
-      if (typeof binding.data === "string") {
-        fields.push({ text: binding.data, path: at, key: false, dataPointer: true });
+      for (const source of ["data", "platform"] as const) {
+        if (typeof binding[source] === "string") {
+          fields.push({ text: binding[source], path: at, key: false, pointerSource: source });
+        }
       }
       if (typeof binding.item === "string") {
         fields.push({ text: "", path: at, key: false, itemBinding: true });
@@ -397,7 +669,7 @@ function libraryFields(
   }
   visitPrototypeHandlerFields(spec, collect);
   channelFields(spec, requests, fields, collect);
-  return { requests, fields };
+  return { requests, fields, dataWrites: copies.writes() };
 }
 
 function channelFields(

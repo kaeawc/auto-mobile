@@ -3,10 +3,10 @@ import type { PrototypeChannelExecutor } from "../../features/prototype/Prototyp
 import type { IdGenerator } from "../../utils/IdGenerator";
 import type { z } from "zod/v4";
 import type { ProtoViewerDevice } from "../../features/prototype/protoViewer/protoViewerDevice";
+import type { ProtoViewerShareFiles } from "../../features/prototype/protoViewer/protoViewerShare";
 import type { DeviceWindowCacheInvalidator } from "../../features/observe/DeviceWindowCacheInvalidator";
 import type { HierarchyCapture } from "../../features/observe/HierarchyCapture";
 import type { PrototypeResult } from "../../features/observe/android/ctrlProxyProtocol";
-import type { PrototypeAdbReverseManager } from "../../features/prototype/PrototypeAdbReverseManager";
 import type { PrototypeCommitGenerations } from "../../features/prototype/PrototypeCommitGenerations";
 import type { PrototypeEventCoordinator } from "../../features/prototype/PrototypeEventCoordinator";
 import type { PrototypeStatusStore } from "../../features/prototype/PrototypeStatusStore";
@@ -65,6 +65,8 @@ export interface PrototypeToolDependencies {
   iosSavedPrototypeInstaller?: IosSavedPrototypeInstaller;
   /** ProtoViewer on Android or an iOS simulator for saved `save`/`open` (#13621). */
   protoViewerFactory?: (device: BootedDevice) => ProtoViewerDevice;
+  /** Where `share` writes the bundle and QR (#14128); tests inject an in-memory writer. */
+  protoViewerShareFiles?: ProtoViewerShareFiles;
   /** Reads local files named by `assets`; tests inject an in-memory reader. */
   assetFileReader?: PrototypeAssetFileReader;
   /** Resolves `assets[].observation` URIs; defaults to the observation screenshot resource. */
@@ -118,7 +120,6 @@ export type PrototypeHandlerDependencies = {
   target: PrototypeTarget;
   assetReaders: AssetReaders;
   commits: PrototypeCommitGenerations;
-  reverses: PrototypeAdbReverseManager;
   cacheInvalidator: DeviceWindowCacheInvalidator;
   now: () => number;
   timer?: Timer;

@@ -258,16 +258,6 @@ export type SessionRequirementDefaults =
   | IosSessionRequirementDefaults
   | AndroidSessionRequirementDefaults;
 
-/**
- * Operator-enabled host capabilities for hardware that is recognized but not executable
- * everywhere. Every capability is off when omitted, so a recognized request is refused with
- * a non-retryable `capability_disabled` failure.
- */
-export interface SessionRequirementCapabilities {
-  /** iPhone Duo simulators (iOS 27.1+ runtimes). */
-  iosDuo?: boolean;
-}
-
 export interface RequirementProvenance {
   policyVersion: string;
   catalogSource: string;
@@ -424,7 +414,6 @@ export type ResolvedSessionDeviceProfile =
 export type SessionRequirementErrorCode =
   | "invalid_request"
   | "invalid_config"
-  | "capability_disabled"
   | "unsupported_hardware"
   | "unsupported_version_precision"
   | "missing_installed_runtime"

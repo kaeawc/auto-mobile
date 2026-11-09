@@ -1,3 +1,13 @@
+import type { DevicectlDisplayInfoSource } from "../../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
+import type { DisplayPanel } from "../../../models/DisplayPanel";
+import {
+  activeLivePanel,
+  liveIosPanelFor,
+  rememberLiveIosPanel,
+  runnerIosPanel,
+} from "../ObservationDisplay";
+import { appendObserveError } from "../ObserveError";
+import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import type { BootedDevice, ObserveResult, ScreenIdentity } from "../../../models";
 import type { ViewHierarchy as ViewHierarchyInterface } from "../interfaces/ViewHierarchy";
@@ -27,11 +37,14 @@ export interface IosObservationCollectorDeps {
   hierarchyCollector: () => HierarchyCollectorPort;
   viewHierarchy: () => ViewHierarchyInterface;
   device: () => BootedDevice;
+  iosDisplayInfoSource?: DevicectlDisplayInfoSource;
   /** The app's SDK observation bridge (#5159); defaults to the device's runner client. */
   sdkBridge?: () => IosSdkBridgeReader;
   /** The app's opted-in WKWebView bridges (#5162); defaults to the device's runner client. */
   sdkWeb?: () => IosSdkWebReader;
 }
+
+const SPRINGBOARD_BUNDLE_ID = "com.apple.springboard";
 
 export class DefaultIosObservationCollector implements IosObservationCollector {
   constructor(private readonly deps: IosObservationCollectorDeps) {}
@@ -59,7 +72,11 @@ export class DefaultIosObservationCollector implements IosObservationCollector {
       readOptions,
     });
 
+    const livePanel = await this.readLiveIosPanel(signal);
+    rememberLiveIosPanel(result, livePanel);
+    this.dropHomeScreenOfOtherPanel(result, livePanel);
     this.applyIosScreenMetadata(result);
+    this.applyLiveIosPanelSize(result);
     this.applyIosInsetsAndRotation(result);
     this.projectIosObservationHierarchy(result);
     await this.mergeSdkBridgeObservation(result, signal);
@@ -122,6 +139,80 @@ export class DefaultIosObservationCollector implements IosObservationCollector {
     if (merged && !result.backend) {
       result.backend = "sdk";
     }
+  }
+
+  /**
+   * The runner only ever sees the cover panel's SpringBoard scene. After an unfold from the home
+   * screen the active panel is the inner one, so its tree would describe the wrong panel under
+   * the inner label and taps would land in the cover frame (#17046).
+   */
+  private dropHomeScreenOfOtherPanel(
+    result: ObserveResult,
+    livePanel: DisplayPanel | undefined,
+  ): void {
+    const hierarchy = result.viewHierarchy;
+    if (!livePanel || hierarchy?.packageName !== SPRINGBOARD_BUNDLE_ID) {
+      return;
+    }
+    const runnerPanel = runnerIosPanel(this.deps.device().displays?.panels ?? [], hierarchy);
+    if (runnerPanel && runnerPanel.key !== livePanel.key) {
+      // Report the gap instead of the other panel's elements under this panel's label; a thrown
+      // error here would also degrade the observation setPosture and the action tools take.
+      result.viewHierarchy = undefined;
+      appendObserveError(result, {
+        phase: "viewHierarchy",
+        message: `The home screen is not observable on the ${livePanel.role} panel: the runner only sees the ${runnerPanel.role} panel's SpringBoard. Launch an app, or setPosture closed to return to the ${runnerPanel.role} panel.`,
+      });
+    }
+  }
+
+  /** Read this observation's live panel; the caller keeps it on this observation only. */
+  private async readLiveIosPanel(signal?: AbortSignal): Promise<DisplayPanel | undefined> {
+    const device = this.deps.device();
+    const panels = device.displays?.panels ?? [];
+    if (panels.length < 2) {
+      return undefined;
+    }
+    if (!this.deps.iosDisplayInfoSource) {
+      logger.debug("[iOS] Live panel source unavailable; using runner size");
+      return undefined;
+    }
+    try {
+      const displays = await this.deps.iosDisplayInfoSource.readDisplays({
+        deviceId: device.deviceId,
+        signal,
+      });
+      signal?.throwIfAborted();
+      const panel = activeLivePanel(displays, panels);
+      if (!panel) {
+        logger.debug("[iOS] No unique active CoreDevice panel; using runner size");
+      }
+      return panel;
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      logger.warn(`[iOS] Live panel read failed; using runner size: ${errorMessage(error)}`, error);
+      return undefined;
+    }
+  }
+
+  private applyLiveIosPanelSize(result: ObserveResult): void {
+    const panel = liveIosPanelFor(result);
+    if (!panel?.scale || panel.scale <= 0) {
+      return;
+    }
+    const width = panel.sizePx.width / panel.scale;
+    const height = panel.sizePx.height / panel.scale;
+    const runner = result.screenSize;
+    if (
+      (runner.width === width && runner.height === height) ||
+      (runner.width === height && runner.height === width)
+    ) {
+      return;
+    }
+    const landscape = result.viewHierarchy?.rotation === 1 || result.viewHierarchy?.rotation === 3;
+    result.screenSize = landscape ? { width: height, height: width } : { width, height };
   }
 
   private applyIosScreenMetadata(result: ObserveResult): void {

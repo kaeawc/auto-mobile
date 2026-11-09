@@ -1,0 +1,45 @@
+{
+  "id": "map-backend-channel-literal",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["realtime"]
+  },
+  "channels": {
+    "chat": {
+      "kind": "websocket",
+      "url": "wss://chat.example.com/rooms/lobby",
+      "headers": {
+        "type": "map"
+      },
+      "routes": [
+        {
+          "when": {
+            "pointer": "",
+            "equals": {
+              "type": "map",
+              "backend": "google"
+            }
+          },
+          "actions": [
+            {
+              "type": "setState",
+              "key": "seen",
+              "value": true
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "root": {
+    "type": "text",
+    "text": "Chat"
+  },
+  "state": {
+    "seen": false
+  }
+}

@@ -8,6 +8,8 @@ typealias ProvenanceBuildKey = dev.jasonpearson.automobile.desktop.domain.Proven
 
 typealias ScreenProvenance = dev.jasonpearson.automobile.desktop.domain.ScreenProvenance
 
+typealias BuildSourceRevision = dev.jasonpearson.automobile.desktop.domain.BuildSourceRevision
+
 typealias NavigationActiveContext =
   dev.jasonpearson.automobile.desktop.domain.NavigationActiveContext
 

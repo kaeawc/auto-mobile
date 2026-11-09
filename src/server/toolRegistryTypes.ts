@@ -65,6 +65,8 @@ export interface InternalToolCallOptions {
   forPlan?: boolean;
   /** A plan step's tapAt geometry, for this one call (#15663). */
   tapAtPlanContext?: TapAtPlanContext;
+  /** A plan step's lock namespace, for this one call (#15663). */
+  planLockNamespace?: string;
   sessionUuid?: string;
   targetDevice?: BootedDevice;
   sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled">;
@@ -85,6 +87,8 @@ export interface InternalToolInvocationContext {
   args: Record<string, unknown>;
   /** Always present, so a nested call replaces rather than inherits a step's geometry. */
   tapAtPlanContext: TapAtPlanContext | undefined;
+  /** Always present, so a nested call never inherits a step's lock namespace. */
+  planLockNamespace: string | undefined;
   routingSessionUuid?: string;
   toolSelectionProfileUuid?: string;
   sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled">;
@@ -101,6 +105,14 @@ export interface InternalToolInvocationContext {
 // Gate reason emitted for `planOnly` tools — hidden from discovery by design,
 // expected in plans (so getToolForPlan does not warn about it).
 export const PLAN_ONLY_GATE_REASON = "plan-only tool";
+
+export const EMBEDDED_SDK_GATE_REASON =
+  "embedded SDK mode is disabled; start the daemon with --embedded-sdk";
+
+/** The embedded-SDK gate reason, with a tool's own guidance appended when it registers one. */
+export function embeddedSdkGateReason(hint?: string): string {
+  return hint ? `${EMBEDDED_SDK_GATE_REASON}. ${hint}` : EMBEDDED_SDK_GATE_REASON;
+}
 
 // `McpServer.registerTool` requires a per-tool callback, but the SDK dispatcher
 // that would call it is replaced by the shared `tools/call` handler (#6545).
@@ -128,7 +140,7 @@ export interface ToolRegistrationOptions {
    */
   hidden?: boolean;
   outputSchema?: ZodType;
-  /** Accept the plan executor's internal coordination namespace. */
+  /** Run plan steps under the plan's lock namespace (`currentPlanLockNamespace`). */
   acceptsPlanLockNamespace?: boolean;
   /**
    * MCP Apps UI resource this tool renders through (issue #4669). When set, the
@@ -151,6 +163,15 @@ export interface PlainToolOptions<T = Record<string, unknown>> extends ToolRegis
   selectsActiveDevice?: boolean;
   /** See {@link ToolTraits.hostInventory}. */
   hostInventory?: boolean;
+  /** See {@link ToolTraits.keepsImeRestorePending}. */
+  keepsImeRestorePending?: boolean;
+  /**
+   * The handler flushes its target device's pending IME restore itself, once it has admitted the
+   * caller for that device; the registry never flushes before dispatch (#16579). A lifecycle tool
+   * whose ownership check runs inside the handler declares this, so a refused call never consumes
+   * another session's pending restore.
+   */
+  flushesImeRestoreAfterAdmission?: boolean;
 }
 
 /**
@@ -175,6 +196,8 @@ export interface SessionlessDeviceRead {
 
 /** Behaviour a tool declares on its definition instead of the pipeline keying on its name (#11825). */
 export interface ToolTraits {
+  /** Typing or read-only tool that leaves keyboard restoration pending until the next non-typing tool. */
+  keepsImeRestorePending?: boolean;
   /** Always ends an app's process (not `appLifecycle` `killBackgrounded`, the state-preserving kill). */
   stopsApp?: boolean;
   /** Replaces a process without naming the app in its args (`installApp`): all remembered screens go. */
@@ -253,6 +276,7 @@ export const SELECTS_ACTIVE_DEVICE = { selectsActiveDevice: true } as const;
 /** Just the trait fields of a registration's options, for the registered tool and the recorder. */
 export function pickToolTraits(options: ToolTraits): ToolTraits {
   const {
+    keepsImeRestorePending,
     stopsApp,
     replacesProcess,
     recordsNavigation,
@@ -268,6 +292,7 @@ export function pickToolTraits(options: ToolTraits): ToolTraits {
     changesOpaquePersistentState,
   } = options;
   return {
+    keepsImeRestorePending,
     stopsApp,
     replacesProcess,
     recordsNavigation,
@@ -322,6 +347,8 @@ export interface DeviceAwareToolOptions<T = Record<string, unknown>>
   deviceReadiness?: DeviceReadinessLevel | ((args: T) => DeviceReadinessLevel);
   nonDeviceHandler?: ToolHandler<T>;
   embeddedSdkOnly?: boolean;
+  /** Tool-specific guidance appended to the embedded-SDK gate reason (#17528). */
+  embeddedSdkGateHint?: string;
   planExecutable?: boolean;
   // Hide from normal MCP discovery (tools/list) unconditionally, but keep the
   // tool runnable inside plans (pair with planExecutable). For coordination
@@ -360,6 +387,8 @@ export interface RegisteredTool extends ToolTraits {
   debugOnly?: boolean;
   hidden?: boolean;
   embeddedSdkOnly?: boolean;
+  /** Tool-specific guidance appended to the embedded-SDK gate reason (#17528). */
+  embeddedSdkGateHint?: string;
   planExecutable?: boolean;
   planOnly?: boolean;
   acceptsPlanLockNamespace?: boolean;

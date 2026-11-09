@@ -183,7 +183,8 @@ describe("tapOn iOS multi-panel screen size", () => {
     expect(extractHierarchyScreenSize(source, true)).toEqual({ width: 951, height: 669 });
     const projected = projectActionableHierarchy("ios", source, true);
     expect(projected.hierarchy.node?.node).toBeUndefined();
-    expect(extractHierarchyScreenSize(projected, true)).toEqual({ width: 669, height: 951 });
+    // The projected root is reported in the landscape space too (#17306).
+    expect(extractHierarchyScreenSize(projected, true)).toEqual({ width: 951, height: 669 });
     expect(replace(createTap(projected), projected).screenSize).toEqual({
       width: 951,
       height: 669,

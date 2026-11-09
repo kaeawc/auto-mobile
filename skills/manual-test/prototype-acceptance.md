@@ -112,11 +112,12 @@ transport reached the host.
   **Fail** `[request GET http://localhost:8787/fail, into /data/failed, statusKey status]`.
 
 Run the whole table once with `via: "host"` (the default) and once with `via: "device"` on every
-request. For Android `via: "device"` the host must have created `adb reverse` for port 8787.
+request. For Android `via: "device"`, bind the fixture to a non-loopback interface and use the host's
+LAN address (`http://<host-lan-ip>:8787/...`): the device refuses `localhost` as `blocked_destination`.
 
 | #   | Do                                                                                                                            | Expect (ground truth)                                                                                                                                                                 |
 | --- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | `show` the spec; `prototype inspect`                                                                                          | Shown; `inspect` lists `storage` for the id (no keys yet). Android `via:"device"`: show result has no `reverseFailures`, and `adb -s <serial> reverse --list` contains `tcp:8787`     |
+| 1   | `show` the spec; `prototype inspect`                                                                                          | Shown; `inspect` lists `storage` for the id (no keys yet); `adb -s <serial> reverse --list` gains no `tcp:8787`                                                                       |
 | 2   | Tap **Load**; `awaitEvent kind:emit eventName:prototype_request`                                                              | Status went `loading` then `success`; two rows `alpha`, `beta`; fixture log `GET /items 200`; event payload `via` matches the transport, `outcome:"success"`, `status:200`            |
 | 3   | Type `gamma` in the field, tap **Add**                                                                                        | Fixture log `POST /items 201`; status `success`; a `gamma` row appears (appendData ran from `onSuccess`); a `change` event named `/data/items/items` with `op:"append"`               |
 | 4   | Tap **Remove beta**                                                                                                           | The `beta` row disappears; `change` event `op:"remove"`; `prototype status` data matches the screen                                                                                   |
@@ -126,15 +127,15 @@ request. For Android `via: "device"` the host must have created `adb reverse` fo
 | 8   | `show` the same id again (no `reset`)                                                                                         | Rows and the `name` field are restored from storage (`gamma`, `alpha`), not the spec's empty values; `inspect` `storage.keys` lists `state:name` and `data:/items`                    |
 | 9   | Force-stop and relaunch the app (Android: re-show over Playground; iOS: `launchApp prototype:true` again), `show` the same id | Same restored values as step 8 (persisted across processes)                                                                                                                           |
 | 10  | Change the spec to `storage.version: 2` and `show`; then `clearStorage {id}` and `show`                                       | Version change discards stored values (spec's empty rows); after `clearStorage` the result reports the removed key count and the next show starts from the spec                       |
-| 11  | `GET http://127.0.0.1:8787/reset`; `dismiss` the prototype                                                                    | Window gone; on Android `adb reverse --list` no longer shows `tcp:8787` (removed when the last holder dismisses); an iOS simulator needs no cleanup                                   |
+| 11  | `GET http://127.0.0.1:8787/reset`; `dismiss` the prototype                                                                    | Window gone; nothing to clean up on either platform                                                                                                                                   |
 
 Platform notes to record:
 
 - **localhost.** `via:"host"` reaches the fixture on the host machine from both platforms. For
-  `via:"device"`, an Android emulator reaches it only through the automatic `adb reverse`; an iOS
-  simulator shares the Mac's loopback. Confirm both by the fixture log.
-- **Cleartext / ATS.** `http://localhost:8787` works for `via:"device"` on both (Android permits
-  cleartext; iOS ATS exempts localhost). Repeat Load against `http://<mac-lan-ip>:8787/items` on iOS
+  `via:"device"`, both refuse `localhost` with `blocked_destination` (no `adb reverse` is made); the
+  device reaches the fixture only at the host's LAN address. Confirm by the fixture log.
+- **Cleartext / ATS.** Android `via:"device"` permits cleartext, so `http://<host-lan-ip>:8787` works
+  there. Repeat Load against `http://<mac-lan-ip>:8787/items` on iOS
   with `via:"device"`: if the app's ATS blocks it, expect a `network` error whose message points to
   `via: "host"`; `via:"host"` must still succeed.
 - **Saved Android prototype.** Save the spec, launch it from the home screen with no host attached:

@@ -22,6 +22,9 @@ import { createObserveScreenForTest } from "./observeScreenTestBuilders";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeWindow } from "../../fakes/FakeWindow";
+import { DeviceStateCollector } from "../../../src/features/observe/collectors/DeviceStateCollector";
+import { fixtureHierarchy, readCarAppHostFixture } from "./automotive/carAppHostFixtures";
 
 const android: BootedDevice = { name: "Pixel", platform: "android", deviceId: "emulator-5554" };
 
@@ -274,6 +277,7 @@ describe("SingleDisplayReconcileStage", () => {
         bindFinalDisplay: () => ({ recordProvenance: { revision: 7, identityRevision: 8 } }),
       }),
       platformValidator: () => ({ validate: () => ({ valid: true }) }),
+      deviceStateCollector: () => unused("deviceStateCollector"),
       reconcileActiveWindowAttribution: async (): Promise<PostCaptureForegroundIdentity> => {
         reconciled += 1;
         return unused("reconcileActiveWindowAttribution");
@@ -291,5 +295,130 @@ describe("SingleDisplayReconcileStage", () => {
     expect(reconciled).toBe(0);
     expect(reconciledStage.postCaptureForeground.activityAttributionMismatch).toBe(false);
     expect(reconciledStage.recordProvenance).toEqual({ revision: 7, identityRevision: 8 });
+  });
+});
+
+describe("SingleDisplayReconcileStage automotive refresh", () => {
+  const automotiveDevice: BootedDevice = { ...android, formFactor: "automotive" };
+  const carSettings = "com.android.car.settings";
+  const capture = (name: string): string =>
+    readFileSync(
+      new URL(`../../fixtures/automotive/aaos-34-userdebug/cap-${name}.txt`, import.meta.url),
+      "utf8",
+    );
+
+  function automotiveSetup() {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "CarDrivingStateService",
+      createExecResult(capture("drivingstate-moving"), ""),
+    );
+    adb.setCommandResponse(
+      "CarUxRestrictionsManagerService",
+      createExecResult(capture("uxr-moving"), ""),
+    );
+    adb.setCommandResponse(
+      `get-do-activities ${carSettings}`,
+      createExecResult(capture("do-activities-car-settings"), ""),
+    );
+    const collector = new DeviceStateCollector({
+      device: automotiveDevice,
+      adb,
+      timer: new FakeTimer(),
+      window: new FakeWindow(),
+      backStack: { execute: async () => ({ depth: 0, activities: [], tasks: [] }) },
+    });
+    const stage = new SingleDisplayReconcileStage({
+      device: () => automotiveDevice,
+      timer: () => new FakeTimer(),
+      windowIdentity: () => unused("windowIdentity"),
+      staleRecovery: () => unused("staleRecovery"),
+      displayBinding: () => ({
+        resolveTarget: () => unused("resolveTarget"),
+        bindFinalDisplay: () => ({ recordProvenance: { revision: 0, identityRevision: 0 } }),
+      }),
+      platformValidator: () => ({ validate: () => ({ valid: true }) }),
+      deviceStateCollector: () => collector,
+      reconcileActiveWindowAttribution: async () => unused("reconcileActiveWindowAttribution"),
+      isConfirmedFrameworkErrorDialog: async () => false,
+    });
+    return { adb, collector, stage };
+  }
+
+  async function collectedRun(collector: DeviceStateCollector): Promise<SingleDisplayRun> {
+    const result = baseResult();
+    result.viewHierarchy = { packageName: carSettings, hierarchy: { node: {} } };
+    // CtrlProxy's last window event named the DO homepage from another panel.
+    result.activeWindow = {
+      appId: carSettings,
+      activityName: ".common.CarSettingActivities$HomepageActivity",
+      layoutSeqSum: 0,
+    };
+    await collector.collectAutomotive(result);
+    return fakeRun({ result, observerMode: true, requestedDisplayId: 0 });
+  }
+
+  test("re-derives DO status after the primary display's sample corrects the activity", async () => {
+    const { adb, collector, stage } = automotiveSetup();
+    const run = await collectedRun(collector);
+    expect(run.result.automotive?.blocked).toBe(false);
+
+    await stage.reconcileSingleDisplay(run, {
+      earlyResult: undefined,
+      foregroundSnapshot: Promise.resolve({
+        packageName: carSettings,
+        userId: 0,
+        activityName: ".NotDistractionOptimizedActivity",
+        displayCount: 2,
+      }),
+      foregroundIdentity: Promise.resolve(carSettings),
+    });
+
+    expect(run.result.activeWindow?.activityName).toBe(".NotDistractionOptimizedActivity");
+    expect(run.result.automotive).toEqual({
+      drivingState: "moving",
+      uxRestrictions: { requiresDistractionOptimization: true, activeRestrictions: 255 },
+      foregroundActivity: { distractionOptimized: false },
+      blocked: true,
+    });
+    expect(
+      adb.getExecutedCommands().filter((command) => command.includes("get-do-activities")),
+    ).toHaveLength(2);
+  });
+
+  test("an unchanged activity issues no further automotive reads", async () => {
+    const { adb, collector, stage } = automotiveSetup();
+    const run = await collectedRun(collector);
+    const before = structuredClone(run.result.automotive);
+    const reads = adb.getExecutedCommands().length;
+
+    await stage.reconcileSingleDisplay(run, {
+      earlyResult: undefined,
+      foregroundSnapshot: Promise.resolve(null),
+      foregroundIdentity: Promise.resolve(undefined),
+    });
+
+    expect(run.result.automotive).toEqual(before);
+    expect(adb.getExecutedCommands()).toHaveLength(reads);
+  });
+
+  test("a hierarchy replaced under the same activity re-derives the host-rendered marker", async () => {
+    const { adb, collector, stage } = automotiveSetup();
+    const run = await collectedRun(collector);
+    expect(run.result.automotive?.hostRenderedUi).toBeUndefined();
+    const reads = adb.getExecutedCommands().length;
+    run.result.viewHierarchy = fixtureHierarchy(readCarAppHostFixture("list"));
+
+    await stage.reconcileSingleDisplay(run, {
+      earlyResult: undefined,
+      foregroundSnapshot: Promise.resolve(null),
+      foregroundIdentity: Promise.resolve(undefined),
+    });
+
+    expect(run.result.automotive?.hostRenderedUi).toEqual({
+      kind: "carAppLibrary",
+      hostPackage: "com.google.android.apps.automotive.templates.host",
+    });
+    expect(adb.getExecutedCommands()).toHaveLength(reads);
   });
 });

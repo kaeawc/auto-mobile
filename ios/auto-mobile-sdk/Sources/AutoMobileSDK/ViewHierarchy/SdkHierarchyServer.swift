@@ -31,6 +31,7 @@
     /// - `GET /health` -> status, bundle ID, capabilities, and optional simulator UDID
     /// - `GET /hierarchy` -> latest cached hierarchy (fast, no main-thread work)
     /// - `GET /hierarchy/fresh` -> synchronous main-thread walk (slower but guaranteed fresh)
+    /// - `POST /accessibility/focus` -> post VoiceOver focus to the first matching accessibility element
     /// - `POST /accessibility/magic-tap` -> invoke the app responder chain, returning handled
     /// - `POST /highlight` -> render a debug highlight in the app-under-test process
     /// - `POST /trigger` -> deliver a named host trigger to a registered SDK module (#1580)
@@ -333,6 +334,23 @@
             }
         }
 
+        func handleAccessibilityFocus(_ connection: NWConnection, initialData: Data) {
+            #if canImport(UIKit)
+                withRequestBody(connection, initialData: initialData) { server, body in
+                    DispatchQueue.main.async {
+                        guard server.requireApplicationActive(connection) else { return }
+                        let selector = (try? JSONDecoder().decode(
+                            SdkAccessibilityFocusSelector.self, from: body ?? Data()
+                        )) ?? SdkAccessibilityFocusSelector()
+                        let result = SdkAccessibilityFocus.performInApplication(selector: selector)
+                        server.sendResponse(connection, statusCode: 200, body: try? JSONEncoder().encode(result))
+                    }
+                }
+            #else
+                sendResponse(connection, statusCode: 501, body: nil)
+            #endif
+        }
+
         func handleMagicTap(_ connection: NWConnection) {
             DispatchQueue.main.async {
                 guard self.requireApplicationActive(connection) else { return }
@@ -378,7 +396,7 @@
 
         static var capabilities: Set<String> {
             #if canImport(UIKit)
-                ["network-fault-rules", "magic-tap", "sdk-trigger"]
+                ["network-fault-rules", "magic-tap", "accessibility-focus", "sdk-trigger"]
             #else
                 ["network-fault-rules", "sdk-trigger"]
             #endif

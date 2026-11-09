@@ -117,24 +117,50 @@ function fromInt(value: number): Rgba {
   return { r: (value >> 16) & 0xff, g: (value >> 8) & 0xff, b: value & 0xff, a: 1 };
 }
 
+/** The baseline roles an authored screen colour replaces, as Android's base scheme does. */
+const AUTHORED_SURFACE_ROLES = [
+  "background",
+  "surface",
+  "surfaceContainer",
+  "surfaceContainerLow",
+  "surfaceContainerHigh",
+  "surfaceContainerHighest",
+] as const;
+
 /**
  * Role colours a spec resolves to in one mode. A seed or device source makes the device derive its
  * own scheme, which the host does not reproduce, so only explicitly overridden roles are known then.
+ * `surface`, the screen colour the author painted, replaces the baseline surface roles; role
+ * overrides still win over it.
  */
-export function prototypeRolePalette(spec: unknown, mode: PrototypeColorMode): Map<string, Rgba> {
+export function prototypeRolePalette(
+  spec: unknown,
+  mode: PrototypeColorMode,
+  surface?: Rgba,
+): Map<string, Rgba> {
   const colors = record(record(record(spec)?.theme)?.colors);
   const derived = colors?.seed !== undefined || colors?.source !== undefined;
   const palette = new Map<string, Rgba>(
     derived ? [] : Object.entries(BASELINE[mode]).map(([role, value]) => [role, fromInt(value)]),
   );
-  // Flat overrides hold in both modes; the mode's own map is painted over them.
-  for (const [role, color] of [
-    ...roleOverrides(colors),
-    ...roleOverrides(record(colors?.[mode])),
-  ]) {
+  if (surface && !derived) {
+    for (const role of AUTHORED_SURFACE_ROLES) {
+      palette.set(role, surface);
+    }
+  }
+  for (const [role, color] of prototypeRoleOverrides(spec, mode)) {
     palette.set(role, color);
   }
   return palette;
+}
+
+/**
+ * A spec's explicit role colours for one mode, in paint order: flat overrides hold in both modes,
+ * and the mode's own map is painted over them.
+ */
+export function prototypeRoleOverrides(spec: unknown, mode: PrototypeColorMode): [string, Rgba][] {
+  const colors = record(record(record(spec)?.theme)?.colors);
+  return [...roleOverrides(colors), ...roleOverrides(record(colors?.[mode]))];
 }
 
 function roleOverrides(colors: Record<string, unknown> | undefined): [string, Rgba][] {
@@ -171,12 +197,15 @@ function channel(value: number): number {
   return srgb <= 0.03928 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
 }
 
-function luminance(color: Rgba): number {
+/** WCAG relative luminance, 0 (black) to 1 (white). */
+export function prototypeLuminance(color: Rgba): number {
   return 0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b);
 }
 
 /** WCAG 2.x contrast ratio of two opaque colours, 1..21. */
 export function contrastRatio(first: Rgba, second: Rgba): number {
-  const [light, dark] = [luminance(first), luminance(second)].sort((a, b) => b - a);
+  const [light, dark] = [prototypeLuminance(first), prototypeLuminance(second)].sort(
+    (a, b) => b - a,
+  );
   return (light! + 0.05) / (dark! + 0.05);
 }

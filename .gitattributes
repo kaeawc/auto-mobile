@@ -1,7 +1,15 @@
+test/fixtures/visionos-settings/*.json text eol=lf
 test/fixtures/android-display/**/*.txt text eol=lf
+test/fixtures/wear/systemtray/*.xml text eol=lf
+test/fixtures/wear/systemtray/*.json text eol=lf
+test/fixtures/wear/surface/*.txt text eol=lf
+test/fixtures/wear/surface/*.xml text eol=lf
+test/fixtures/wear/surface/*.json text eol=lf
+test/fixtures/wear-tiles/*.txt text eol=lf
 test/fixtures/crashReports/* text eol=lf
 test/fixtures/android-display-config/*.txt text eol=lf
 test/fixtures/android-power/*.txt text eol=lf
+test/fixtures/port-reverse-probe/*.txt text eol=lf
 test/fixtures/android-oem/**/*.txt text eol=lf
 test/fixtures/android-display-geometry/*.txt text eol=lf
 test/fixtures/macos-profiles/*.txt text eol=lf
@@ -11,6 +19,8 @@ test/fixtures/ios-notification-center/ios26-*.json text eol=lf
 test/fixtures/ios-typed-text/*.json text eol=lf
 test/fixtures/prototype-capabilities/*.json text eol=lf
 test/fixtures/android-wrapper-pruning/*.json text eol=lf
+# Car App Library host-template observe captures from #16744, committed verbatim.
+test/fixtures/automotive/car-app-host-templates/*.json text eol=lf
 # ProtoViewer iOS notices are compared byte-for-byte against the generator output.
 test/fixtures/protoviewer-notices/*.json text eol=lf
 ios/prototype-agent/ProtoViewer/Acknowledgements.generated.swift text eol=lf
@@ -21,11 +31,13 @@ ios/prototype-agent/ProtoViewer/third-party-licenses/*.txt text eol=lf
 test/features/observe/activityActivitiesDumps/*.log text eol=lf
 test/fixtures/android-dumpsys-package/*.txt text eol=lf
 test/fixtures/android-notification-policy/*.txt text eol=lf
+test/fixtures/android-notification-channel/*.txt text eol=lf
 test/fixtures/android-notification-enabled/*.txt text eol=lf
 test/fixtures/android-app-links/*.txt text eol=lf
 test/fixtures/ios-simctl/*.txt text eol=lf
 test/fixtures/android-emulator/*.txt text eol=lf
 test/fixtures/android-lmk/*.txt text eol=lf
+test/fixtures/killProfile/api35/*.txt text eol=lf
 test/fixtures/android-car-service/*.txt text eol=lf
 test/fixtures/android-pointer-probe/*.txt text eol=lf
 test/fixtures/android-startup/*.txt text eol=lf
@@ -34,7 +46,9 @@ test/fixtures/duo-enumerate.txt text eol=lf
 test/fixtures/ios-duo/*.json text eol=lf
 test/fixtures/ios-simctl/*.json text eol=lf
 test/fixtures/tvos-xcuitest/*.json text eol=lf
+test/fixtures/visionos-xcuitest/*.json text eol=lf
 test/fixtures/watchos-xcuitest/*.json text eol=lf
+test/fixtures/watch/*.txt text eol=lf
 test/fixtures/watchos-xcuitest/sdk-hierarchy-live.json text eol=lf
 test/fixtures/ios-simctl/*.plist text eol=lf
 test/fixtures/ios-notification-center/*.json text eol=lf
@@ -46,6 +60,7 @@ test/fixtures/release/*.md text eol=lf
 test/fixtures/tool-registration/*.json text eol=lf
 test/fixtures/intent-chooser/*.json text eol=lf
 test/fixtures/intent-chooser/*.xml text eol=lf
+test/fixtures/uiautomator/*.xml text eol=lf
 test/fixtures/intent-chooser/*.md text eol=lf
 test/fixtures/android-launcher/*.txt text eol=lf
 test/fixtures/android-launcher/*.json text eol=lf
@@ -56,7 +71,10 @@ test/fixtures/android-touch-node/*.txt text eol=lf
 test/fixtures/android-uinput-pen/*.txt text eol=lf
 test/fixtures/android-window-policy/*.txt text eol=lf
 test/fixtures/ios-devicectl/*.json text eol=lf
+test/fixtures/simctl/pairs/** text eol=lf
+test/fixtures/ios-rotate/*.json text eol=lf
 test/fixtures/observe-output/ios-overlay-window/*.json text eol=lf
+test/fixtures/observe-output/ios-alert-over-table/*.json text eol=lf
 test/fixtures/observe-output/ios-prototype-sheet/*.json text eol=lf
 test/fixtures/network-filter-controller/*.json text eol=lf
 test/fixtures/network-filter-controller/v4/*.json text eol=lf
@@ -70,6 +88,8 @@ test/fixtures/ios/iphone17-ios26-*.json text eol=lf
 test/fixtures/ios/keyboard-modes/*.json text eol=lf
 test/fixtures/ios/nested-selection/*.json text eol=lf
 test/fixtures/android-ime-window/*.json text eol=lf
+test/fixtures/android-focus/*.json text eol=lf
+test/fixtures/android-focus/leanback-*.json text eol=lf
 test/fixtures/android-overlay-testtag/*.json text eol=lf
 test/fixtures/android-overlay-window/*.json text eol=lf
 test/fixtures/android-enabled/*.json text eol=lf
@@ -91,12 +111,18 @@ scripts/unit-test-host-spawn-allowlist.txt text eol=lf
 test/fixtures/android-fold-displays/*.txt text eol=lf
 # Captured executePlan response (issue #10090): asserted byte-for-byte by a TS test and parsed by the junit-runner.
 android/junit-runner/src/test/resources/captured/*.json text eol=lf
+ios/XCTestRunner/Sources/XCTestRunnerTests/Resources/Captured/*.json text eol=lf
 test/fixtures/android-focus-multidisplay/*.txt text eol=lf
 test/fixtures/android-focus-multidisplay/*.json text eol=lf
 # Byte-exact `cmd locale` captures: pin to LF so a Windows checkout cannot rewrite them to CRLF.
 test/fixtures/android-locale/*.txt text eol=lf
+test/fixtures/automotive/** text eol=lf
+# Car App Library template observe captures (#16744, #17498), kept byte-for-byte as posted.
+test/fixtures/automotive/car-app-templates/*.json text eol=lf
 # Real `am start` / `monkey` failure captures from two emulators (#10192).
 test/fixtures/android-am-start/*.txt text eol=lf
+# `am start` output quoted in the mt0091c stale Settings task report (#17380).
+test/fixtures/android-fingerprint-enroll/*.txt text eol=lf
 # Real `adb install` downgrade failure capture from the mt36 emulator run (#10191).
 test/fixtures/android-install/*.txt text eol=lf
 # Real ProtoViewer MCP transport captures from the API 37 emulator round 4 run (#15174).
@@ -148,6 +174,8 @@ docs/img/favicon.ico -filter -diff -merge -text
 android/playground/app/src/main/res/mipmap-*/ic_launcher*.png -filter -diff -merge -text
 ios/Playground/Sources/Assets.xcassets/AppIcon.appiconset/AppIcon.png -filter -diff -merge -text
 android/desktop-app/src/main/resources/icons/app-icon.png -filter -diff -merge -text
+# Read from a marketplace clone, which does not fetch LFS objects.
+plugins/auto-mobile/assets/icon.png -filter -diff -merge -text
 android/desktop-app/src/main/resources/icons/app-icon.ico -filter -diff -merge -text
 # Menu-bar truck mask read from the runtime classpath by SystemTray.kt via ImageIO — a
 # checked-out LFS pointer would decode to null and drop the tray to its fallback dot.
@@ -196,6 +224,7 @@ test/fixtures/android-boot-admission/proc-*.bin binary
 test/fixtures/ios-sim-fleet/*.json text eol=lf
 test/fixtures/android-apk-signing/*.b64 text eol=lf
 test/fixtures/android-apk-signing/*.txt text eol=lf
+test/fixtures/attestation/emulator-api35-attestation-chain.json text eol=lf
 test/fixtures/refusal-wire/*.json text eol=lf
 test/fixtures/refusal-wire/surfaces/*.json text eol=lf
 test/fixtures/refusal-wire-hints/*.json text eol=lf
@@ -207,6 +236,7 @@ ios/XCTestRunner/Sources/XCTestRunnerTests/Resources/PlanCorpus/** text eol=lf
 
 # Shared iOS wire contracts are compared across Swift and TypeScript.
 test/fixtures/ios-contract/*.json text eol=lf
+test/fixtures/ios-contract/sdk-multi-scene-http.json text eol=lf
 test/fixtures/ios-contract/runner-0.0.88-sdk-capabilities.json text eol=lf
 test/fixtures/ios-contract/runner-0.0.88-storage-capabilities.json text eol=lf
 test/fixtures/ios-contract/runner-checkout-sdk-capabilities.json text eol=lf
@@ -242,6 +272,7 @@ test/fixtures/android-secure-settings/*.txt text eol=lf
 android/protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeSpecModels.generated.kt text eol=lf
 ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecModels.generated.swift text eol=lf
 test/fixtures/android-sdkmanager/*.txt text eol=lf
+test/fixtures/android-avdmanager/*.txt text eol=lf
 test/fixtures/ios-safari-url-field/*.json text eol=lf
 test/fixtures/ios-system-alert/*.json text eol=lf
 test/fixtures/ios-messages-compose/*.json text eol=lf
@@ -266,3 +297,11 @@ test/fixtures/protoviewer-artifact-policy/** text eol=lf
 fastlane/metadata/** text eol=lf
 test/fixtures/android-avd-effective-ram/* text eol=lf
 test/fixtures/prototype-a11y/*.json text eol=lf
+
+test/fixtures/android-stamp/AndroidManifest.xml text eol=lf
+# Verbatim com.apple.clockface XCUI debugDescription captures (#17482).
+test/fixtures/watchos-clockface/*.txt text eol=lf
+# Verbatim tvOS 26.5 simctl captures from #17526, #17527 and #17529.
+test/fixtures/tvos-simctl/* text eol=lf
+# Raw dumpsys wear_service captures (whole, or the issue-attached excerpt) from a Wear OS 7.0 / API 37 emulator.
+test/fixtures/wear/wear-service/*.txt text eol=lf

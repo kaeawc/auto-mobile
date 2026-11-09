@@ -182,7 +182,8 @@ final class CommandHandler: CommandHandling {
         case .action, .activateAccessibilityLink, .launchApp, .resetPermissions, .rotate, .location, .setHingeAngle,
              .appearance, .siri, .clipboard:
             return try await dispatchAppAndDevice(request, startTime: startTime)
-        case .getCurrentFocus, .getTraversalOrder, .addHighlight, .magicTap, .sdkTrigger, .getVoiceOverState,
+        case .getCurrentFocus, .getTraversalOrder, .addHighlight, .magicTap, .accessibilityFocus, .sdkTrigger,
+             .getVoiceOverState,
              .setVoiceOverState, .accessibilityAudit, .sdkObservation, .sdkAction, .sdkWebSnapshot, .sdkWebAction:
             return try await dispatchAccessibility(request, startTime: startTime)
         case .listPreferenceFiles, .getPreferences, .getPreference, .setPreference, .removePreference,
@@ -333,6 +334,8 @@ final class CommandHandler: CommandHandling {
             return try await handleGetTraversalOrder(payload, startTime: startTime)
         case let .addHighlight(payload):
             return await handleAddHighlight(payload, startTime: startTime)
+        case let .accessibilityFocus(payload):
+            return await handleAccessibilityFocus(payload, startTime: startTime)
         case let .magicTap(payload):
             return await handleMagicTap(payload, startTime: startTime)
         case let .sdkTrigger(payload):

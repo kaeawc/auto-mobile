@@ -27,7 +27,8 @@ import {
   reportedWallClock,
   sessionNotFoundResult,
   notFoundResult,
-  lookupReleasedSessionReason,
+  lookupReleasedSessionEnd,
+  type ReleasedSessionEnd,
 } from "./sessionReporting";
 
 /**
@@ -128,7 +129,7 @@ export function isTokenOwnedOrClaimPending(session: {
 /** What a heartbeat for a session the daemon no longer holds resolves to. */
 export type HeartbeatMiss =
   | { kind: "observer" }
-  | { kind: "notFound"; recordedReason: string | undefined };
+  | { kind: "notFound"; recorded: ReleasedSessionEnd };
 
 /**
  * The one rule both heartbeat routes (socket and HTTP) apply to an unknown, released or releasing
@@ -150,7 +151,7 @@ export async function resolveHeartbeatMiss(
   }
   return {
     kind: "notFound",
-    recordedReason: await lookupReleasedSessionReason(manager, sessionId),
+    recorded: await lookupReleasedSessionEnd(manager, sessionId),
   };
 }
 
@@ -226,7 +227,7 @@ async function heartbeatMiss(
   if (miss.kind === "observer") {
     return { success: true, result: { sessionId } };
   }
-  return notFoundResult(sessionId, miss.recordedReason, ackReport.daemonInstance);
+  return notFoundResult(sessionId, miss.recorded, ackReport.daemonInstance);
 }
 
 function heartbeatOwnershipGuard(ctx: HeartbeatContext): DaemonMethodResult | undefined {

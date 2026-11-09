@@ -27,16 +27,22 @@ existing entries stay valid and keep their meaning.
 - `formFactor`: one of the form factors above; `phone` when omitted.
 - `panels`: a list of screens, each with a `role` and the v1 screen fields (`screen`,
   `cornerRadiusDp`, `cutout`, `statusBarDp`, `navBar`, `safeArea`). The v1 top-level screen fields
-  are panel 0 with role `inner`.
-- `hinge`: `{axis: "vertical" | "horizontal", positionDp, widthDp, occluding}` on the panel it
-  folds. `occluding` hinges remove `widthDp` from the layout; a seamless fold has `widthDp: 0`.
+  are panel 0 with role `inner`, so an entry lists only its other panels (`cover`, `rear` or
+  `external`), each role at most once. The parsed frame's `panels` starts with the `inner` panel.
+- `hinge`: `{axis: "vertical" | "horizontal", panel, positionDp, widthDp, occluding}`, where
+  `panel` is the role of the panel it folds (`inner` when omitted) and `positionDp` is the
+  hinge's leading edge from that panel's left (vertical) or top (horizontal) edge in portrait. The
+  hinge lies strictly inside the panel. `occluding` hinges remove `widthDp` from the layout; a
+  seamless fold has `widthDp: 0`.
 - `postures`: for each supported posture, the panel that is active and the hinge angle the web
   view draws, for example `{posture: "half_opened", panel: "inner", hingeDegrees: 90}`.
 - `mask`: `rect` (default) or `round`, and `input`: `touch` (default), `dpad` or `rotary`. These
   describe the device, not the renderer's behaviour.
 
-`frame.source` gains a per-field source kind (`publicSpec`, `avdProfile`, `simulatorProfile` or
-`measured`) so the registry can mix measured and published values and say which is which.
+`source` gains `hinge`, the hinge geometry's source (required when a frame has a hinge), and
+`kinds`, a per-field source kind (`publicSpec`, `avdProfile`, `simulatorProfile` or `measured`)
+for `screen`, `insets` and `hinge`, so the registry can mix measured and published values and say
+which is which.
 
 ## Foldables
 
@@ -62,8 +68,16 @@ posture lights and how the hinge splits it.
   navigation bar. A Digital Crown or rotary bezel is frame decoration (`input: "rotary"`), not
   behaviour. A watch is `compact` and has no landscape view.
 - **TV.** A TV frame has no bezel padding beyond its stand, no status or navigation bar and
-  `input: "dpad"`. The renderer marks the first focusable node with a focus ring, because a
-  10-foot UI with no focus is not a usable preview. A TV is landscape only.
+  `input: "dpad"`. On a `dpad` frame the renderer marks the first focusable element with a focus
+  ring, because a 10-foot UI with no focus is not a usable preview: a spec node, or a part drawn
+  inside one (a tab bar item, a dialog action), whose role is button, checkbox, switch, slider,
+  tab or text box, and not disabled. An open dialog takes focus from the screen below, as on both
+  platforms. A TV is landscape only.
+- **Orientation.** A watch draws only portrait; a TV or car draws only landscape and its page opens
+  there. Every frame records its geometry in portrait, so a landscape-only frame is its portrait
+  geometry turned a quarter turn. A frame that draws one orientation has no rotate control, and a
+  still asked for the other orientation is an error naming the one it has. A Compose or SwiftUI
+  preview is sized in the frame's first orientation.
 
 ## Cars
 
@@ -104,5 +118,6 @@ Snapshots stay bounded by testing each dimension once rather than their product:
 - every posture of each foldable in portrait;
 - one reference spec per form factor in the CI browser check.
 
-A unit test asserts that each `postures` entry names a panel the frame has and that a hinge lies
-on its panel, as v1 already does for cutouts and safe areas.
+A unit test asserts that each `postures` entry names a panel the frame has, at most once per
+posture, and that a hinge lies on its panel; the v1 cutout and safe-area checks run on every
+panel.

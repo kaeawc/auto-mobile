@@ -40,6 +40,8 @@ Package are gone; those jobs run on GitHub only.
 | `run-main-desktop` | `android/desktop-app/**`, `android/desktop-core/**`                       | Build Desktop App (macos)                                 |
 
 Both groups also match `.circleci/**`, so a config change revalidates itself.
+Apart from the small setup jobs in `config.yml`, CircleCI runs no Linux jobs; Linux CI
+runs only on GitHub Actions.
 Swift coverage keeps its existing trigger: `merge.yml`'s `swift-code-coverage` job
 starts a `run-swift-coverage-main` pipeline for coverage-input changes and
 downloads the badge.

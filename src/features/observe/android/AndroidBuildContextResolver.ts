@@ -16,6 +16,7 @@ import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interface
 import { logger } from "../../../utils/logger";
 import type { Timer } from "../../../utils/SystemTimer";
 import type { A11yPackageInfoResult } from "./types";
+import { parseBuildSourceRevision } from "../../../models/BuildSourceRevision";
 
 /** Client-backed accessors resolve live state on every use, including after awaits. */
 export interface AndroidBuildContextContext {
@@ -130,11 +131,15 @@ export class AndroidBuildContextResolver {
           // Unresolved hash: leave the default build key; a later event retries.
           return;
         }
+        // Optional app-declared git provenance (#16954): display-only, so a missing
+        // or malformed declaration still resolves the build key.
+        const sourceRevision = parseBuildSourceRevision(info.gitBranch, info.gitSha);
         const context: NavigationBuildContext = {
           appId,
           deviceId: this.context.device.deviceId,
           versionCode,
           contentHash,
+          ...(sourceRevision ? { sourceRevision } : {}),
         };
         this.resolvedBuildContexts.set(appId, context);
         this.context.getNavigationGraphManager().setBuildContext(context);

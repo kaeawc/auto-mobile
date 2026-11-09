@@ -40,7 +40,9 @@ export const createPhoneCallHandler =
       action: args.action,
       phoneNumber: args.phoneNumber,
     });
-    if (!result.success) {
+    // A partial result is a documented platform limit, not a failure: return it
+    // with its machine-readable reason instead of throwing (#1581).
+    if (!result.success && result.supported !== "partial") {
       throw new ActionableError(result.error || `Failed to execute phoneCall ${args.action}`);
     }
     return createStructuredToolResponse({
@@ -73,7 +75,7 @@ export const sendSmsHandler = createSendSmsHandler();
 const phoneCallTool = defineDeviceTool({
   name: "phoneCall",
   description:
-    "Simulate a phone call: Android emulator gsm commands, or CallKit via the app's AutoMobile iOS SDK.",
+    "Simulate a phone call: Android emulator gsm commands, or CallKit via the app's AutoMobile iOS SDK (iOS Simulator: accept/hold return supported:partial).",
   input: phoneCallInput,
   handler: phoneCallHandler,
   options: { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: phoneCallResultSchema },

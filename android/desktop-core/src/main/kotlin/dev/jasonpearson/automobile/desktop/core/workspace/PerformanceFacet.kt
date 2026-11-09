@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
+import dev.jasonpearson.automobile.desktop.core.daemon.reconnectBackoffMs
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.performance.PerformanceDashboard
@@ -20,16 +21,19 @@ internal fun createPerformanceObservationClient(sessionUuidProvider: (() -> Stri
  * that stream and filtered to [column]'s device, so panes in a multi-device workspace stay
  * isolated.
  *
- * [observationStreamFactory] is injected (defaulting to a real per-device
- * [ObservationStreamClient]) so the per-device connect/dispose lifecycle can be verified with a
- * [FakeObservationStream] instead of real socket I/O. The stream reconnects automatically if it
- * drops while the facet is open (see [rememberReconnectingObservationStream]); [backoffDelay] and
- * [socketAvailable] are the injected timer/daemon-availability seams that let that recovery be
- * tested with virtual time.
+ * When the app provides a [LocalDaemonStreamHub], the stream is a lease on the hub's one shared
+ * observation connection for the device (#16967); without one it is a dedicated per-pane
+ * [ObservationStreamClient]. [observationStreamFactory] is injected so the per-device
+ * connect/dispose lifecycle can be verified with a [FakeObservationStream] instead of real socket
+ * I/O. The stream reconnects automatically if it drops while the facet is open (see
+ * [rememberReconnectingObservationStream]); [backoffDelay] and [socketAvailable] are the injected
+ * timer/daemon-availability seams that let that recovery be tested with virtual time.
  *
  * Both the LIVE metrics (the stream carries a deviceId) and the audit-history fallback are scoped
  * to [column]'s device: [PerformanceDashboard] threads [DeviceColumn.deviceId] through
- * `listPerformanceAuditResults` so a pane only surfaces its own device's audit history.
+ * `listPerformanceAuditResults` so a pane only surfaces its own device's audit history. The
+ * dashboard is keyed on [DeviceColumn.deviceSessionUuid], so a new epoch of the device drops the
+ * shown run and reloads that history.
  */
 @Composable
 fun PerformanceFacet(
@@ -47,13 +51,11 @@ fun PerformanceFacet(
   val observation =
     key(sessionUuidProvider, sessionUuid) {
       if (sessionUuidProvider == null || sessionUuid != null)
-        rememberReconnectingObservationState(
-          dev.jasonpearson.automobile.desktop.core.workspace.ReconnectingObservationOptions(
-            deviceId = column.deviceId,
-            streamFactory = { observationStreamFactory(column.deviceId) },
-            backoffDelay = backoffDelay,
-            socketAvailable = socketAvailable,
-          ),
+        rememberPaneObservationState(
+          column,
+          { observationStreamFactory(column.deviceId) },
+          backoffDelay,
+          socketAvailable,
         )
       else ReconnectingObservationState(null, 0)
     }
@@ -64,6 +66,7 @@ fun PerformanceFacet(
       observationStreamClient = observation.stream,
       connectionGeneration = observation.connectionGeneration,
       deviceId = column.deviceId,
+      deviceSessionUuid = column.deviceSessionUuid,
     ),
   )
 }

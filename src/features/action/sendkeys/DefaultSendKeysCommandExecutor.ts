@@ -10,20 +10,25 @@ import {
 } from "./FocusedTextClearVerifier";
 import { EventLastTyper } from "./EventLastTyper";
 import { EventAllTyper } from "./EventAllTyper";
-import { ImeCommitTyper } from "./ImeCommitTyper";
+import { ImeCommitTyper, imeTraceResultFields } from "./ImeCommitTyper";
 import { ImeRestore, type SendKeysImeRecoverySnapshot } from "./ImeRestore";
 import type { ImeCommitRouting, AndroidTypeOptions } from "./ImeTypes";
 import {
   ANDROID_FOCUSED_INPUT_ERROR,
-  ANDROID_TYPE_FOCUSED_INPUT_ERROR,
+  ANDROID_TYPE_FOCUS_FAILURE,
+  type FocusedInputFailure,
 } from "./AndroidTypingConstants";
 import { ImeSpanService, isImeRestorationFailure } from "./ImeSpan";
+import type { PendingImeRestoreRegistry } from "./PendingImeRestore";
+import { readImeEditorState } from "./ImeEditorState";
 import type { AndroidModeTyper } from "./AndroidModeTyper";
 import { A11yTyper } from "./A11yTyper";
 import { EventOnlyTyper } from "./EventOnlyTyper";
 import { PasswordRouting } from "./PasswordRouting";
 import { createSendKeysTextClient } from "./CtrlProxyTextClient";
 import {
+  caughtErrorCodeFields,
+  errorCodeFields,
   getAutoImeFallback,
   graphemeCodePoints,
   hasFocusedPasswordField,
@@ -34,6 +39,7 @@ import {
   redactPasswordTypeResult,
 } from "./ExecutorHelpers";
 import { isSemanticKey, validateImeKeyEventsText } from "./SendKeysSupport";
+import { executeSemanticKey, type SemanticKeyHost } from "./SemanticKeyCommand";
 import { isSendKeysBudgetExhausted } from "./SendKeysRequestBudget";
 import { IosTyper } from "./IosTyper";
 import { IosSdkTextRouting, iosBackendFields, type IosSdkTextTarget } from "./IosSdkTextRouting";
@@ -85,6 +91,7 @@ export interface SendKeysPlatformDependencies {
   /** Routes iOS text entry and clear on an SDK bridge field (#5159). */
   iosSdkTextRouter?: IosSdkBridgeTextRouter;
   iosSdkWebTextRouter?: IosSdkWebTextRouter;
+  pendingImeRestores?: PendingImeRestoreRegistry;
   imeSpanService?: Pick<
     ImeSpanService,
     "imeSpan" | "withImeSpan" | "acquireImeSpan" | "restoreImeSpan"
@@ -155,6 +162,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       execute: async (options) => {
         const observation = await observer.execute(options);
         this.iosSdkText.observed(observation);
+        const span = this.imeSpanService.imeSpan;
+        if (this.device.platform === "android" && span && !span.snapshot && !span.editorState) {
+          // Reuse the auto/password pre-check, before the first IME activation.
+          span.editorState = readImeEditorState(observation);
+        }
         if (this.targetLayer !== "prototype") {
           return observation;
         }
@@ -182,14 +194,22 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     this.keyEventSupport = this.createKeyEventSupport();
     this.imeSpanService =
       dependencies.imeSpanService ??
-      new ImeSpanService({
-        deviceId: device.deviceId,
-        verifySafeImeRecovery: (snapshot, signal) => this.verifySafeImeRecovery(snapshot, signal),
-        restoreIme: (prior, wasEnabled, subtype) => this.restoreIme(prior, wasEnabled, subtype),
-        clearPinnedUser: () => {
-          this.session.imeUserId = undefined;
+      new ImeSpanService(
+        {
+          deviceId: device.deviceId,
+          verifySafeImeRecovery: (snapshot, signal) => this.verifySafeImeRecovery(snapshot, signal),
+          restoreIme: (...args) => this.restoreIme(...args),
+          getPinnedUser: () => this.session.imeUserId,
+          setPinnedUser: (userId) => {
+            this.session.imeUserId = userId;
+          },
+          clearPinnedUser: () => {
+            this.session.imeUserId = undefined;
+          },
         },
-      });
+        this.timer,
+        dependencies.pendingImeRestores,
+      );
     this.imeRestore = new ImeRestore({
       adb: this.adb,
       device: this.device,
@@ -207,7 +227,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       observer: { execute: (options) => this.observer.execute(options) },
       getKeyEventPlan: (char, signal) => this.getKeyEventPlan(char, signal),
       requireFocusedAndroidInput: (signal, display) =>
-        this.requireFocusedAndroidInput(signal, ANDROID_TYPE_FOCUSED_INPUT_ERROR, display),
+        this.requireFocusedAndroidInput(signal, ANDROID_TYPE_FOCUS_FAILURE, display),
       executeKeyEventPlanSafely: (plan, mutated, signal) =>
         this.executeKeyEventPlanSafely(plan, mutated, signal),
       verifyKeyEventLetterCase: (text, typed, signal, { display, before } = {}) =>
@@ -223,8 +243,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       preExistingFieldText: (hierarchy, operation) => preExistingFieldText(hierarchy, operation),
       markPartialAfterMutation: (result) => markPartialAfterMutation(result),
       insertText: (text, options, signal) => this.insertText(text, options, signal),
-      requireFocusedAndroidInput: (signal, error, display) =>
-        this.requireFocusedAndroidInput(signal, error, display),
+      requireFocusedAndroidInput: (signal, failure, display) =>
+        this.requireFocusedAndroidInput(signal, failure, display),
       readPrecedingState: (needed) => this.readPrecedingState(needed),
       executeKeyEventPlanSafely: (plan, mutated, signal) =>
         this.executeKeyEventPlanSafely(plan, mutated, signal),
@@ -264,8 +284,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         clearAndVerifyAndroid: (signal, display, clear, passwordField) =>
           this.clearAndVerifyAndroid(signal, display, clear, passwordField),
         withTextWarnings: (result, warnings) => this.withTextWarnings(result, warnings),
-        requireFocusedAndroidInput: (signal, error, display) =>
-          this.requireFocusedAndroidInput(signal, error, display),
+        requireFocusedAndroidInput: (signal, failure, display) =>
+          this.requireFocusedAndroidInput(signal, failure, display),
         readFocusedText: (observation) => this.readFocusedText(observation),
         readFocusedTextSnapshot: (observation) => this.readFocusedTextSnapshot(observation),
       },
@@ -338,8 +358,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       markPartialAfterPriorMutation: (result, mutated) =>
         markPartialAfterPriorMutation(result, mutated),
       insertText: (text, options, signal) => this.insertText(text, options, signal),
-      requireFocusedAndroidInput: (signal, error, display) =>
-        this.requireFocusedAndroidInput(signal, error, display),
+      requireFocusedAndroidInput: (signal, failure, display) =>
+        this.requireFocusedAndroidInput(signal, failure, display),
       readPrecedingState: (needed) => this.readPrecedingState(needed),
       executeKeyEventPlanSafely: (plan, mutated, signal) =>
         this.executeKeyEventPlanSafely(plan, mutated, signal),
@@ -456,12 +476,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         success: result.success,
         ...(result.retryable === false ? { retryable: false } : {}),
         error: result.error,
+        ...errorCodeFields(result),
         ...this.textWarningFields(result),
         ...(result.partialApplication ? { partialApplication: true } : {}),
         committedGraphemes: result.committedGraphemes,
         ...imeCommitUnitFields(result),
         ...imeFailureFields(result),
-        ...this.imeTraceFields(),
+        ...this.imeTraceFields(result.success),
         ...(result.resolvedMode ? { resolvedMode: result.resolvedMode } : {}),
         ...iosBackendFields(result.iosBackend),
         ...this.imeResultFields(result.resolvedMode ?? baseResult.resolvedMode),
@@ -477,14 +498,14 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         ...this.imeResultFields(baseResult.resolvedMode),
         success: false,
         error: errorMessage(error),
-        ...this.imeTraceFields(),
+        ...caughtErrorCodeFields(error),
+        ...this.imeTraceFields(false),
       };
     }
   }
 
-  private imeTraceFields(): Pick<TextActionResult, "imeTrace"> {
-    const lines = this.imeTraceContext.getStore()?.lines;
-    return lines !== undefined ? { imeTrace: lines } : {};
+  private imeTraceFields(success: boolean): Pick<TextActionResult, "imeTrace"> {
+    return imeTraceResultFields(this.imeTraceContext.getStore()?.lines, success);
   }
 
   private imeResultFields(mode: ResolvedSendKeysTypingMode) {
@@ -596,43 +617,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     this.resetCaretState();
     const modifiers = command.modifiers ?? [];
     if (isSemanticKey(command.key)) {
-      if (this.device.platform === "android") {
-        const focusResult = await this.requireFocusedAndroidInput(signal, undefined, display);
-        if (!focusResult.success) {
-          return {
-            index: -1,
-            action: "key",
-            key: command.key,
-            modifiers,
-            success: false,
-            error: focusResult.error,
-          };
-        }
-      }
-      const key = command.key;
-      const result =
-        this.device.platform === "ios"
-          ? await this.iosSdkText.tracked(() =>
-              this.iosSdkText.ime(
-                key,
-                signal,
-                () => this.textClient.ime(key, signal, onDispatch),
-                onDispatch,
-              ),
-            )
-          : await this.textClient.ime(key, signal, onDispatch);
-      this.iosSdkText.focusMayHaveMoved();
-      return {
-        index: -1,
-        action: "key",
-        key: command.key,
-        modifiers,
-        ...("iosBackend" in result ? iosBackendFields(result.iosBackend) : {}),
-        success: result.success,
-        ...(result.retryable === false ? { retryable: false } : {}),
-        ...(result.warning ? { warning: result.warning } : {}),
-        ...(result.error ? { error: result.error } : {}),
-      };
+      return executeSemanticKey(this.semanticKeyHost(), command.key, modifiers, {
+        signal,
+        onDispatch,
+        display,
+      });
     }
 
     const result = await this.inputKey.press(command.key, undefined, undefined, { modifiers });
@@ -646,6 +635,26 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       modifiers,
       success: result.success,
       ...inputKeyOutcomeFields(result),
+    };
+  }
+
+  private semanticKeyHost(): SemanticKeyHost {
+    return {
+      platform: this.device.platform,
+      requireFocusedInput: (signal, display) =>
+        this.requireFocusedAndroidInput(signal, undefined, display),
+      dispatch: (key, signal, onDispatch) =>
+        this.device.platform === "ios"
+          ? this.iosSdkText.tracked(() =>
+              this.iosSdkText.ime(
+                key,
+                signal,
+                () => this.textClient.ime(key, signal, onDispatch),
+                onDispatch,
+              ),
+            )
+          : this.textClient.ime(key, signal, onDispatch),
+      focusMayHaveMoved: () => this.iosSdkText.focusMayHaveMoved(),
     };
   }
 
@@ -853,7 +862,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private async prepareTypingMode(mode: AndroidSendKeysTypingMode, signal?: AbortSignal) {
     // A non-IME typing mode ends the span BEFORE delivery. A later IME type may
     // reactivate; interleaved key/clear commands deliberately retain the active IME.
-    if (mode !== "ime" && mode !== "imeKeyEvents") {
+    if (!this.imeSpanService.imeSpan || (mode !== "ime" && mode !== "imeKeyEvents")) {
       await this.imeSpanService.restoreImeSpan();
       this.checkAbort(signal);
     }
@@ -936,8 +945,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     priorImeId: string | null,
     wasEnabled: boolean,
     subtype: ImeSubtypeSnapshot,
+    fence?: AbortSignal,
   ): Promise<void> {
-    return this.imeRestore.restoreIme(priorImeId, wasEnabled, subtype);
+    return this.imeRestore.restoreIme(priorImeId, wasEnabled, subtype, fence);
   }
   private get commitImeId(): string {
     return this.imeRestore.commitImeId;
@@ -1008,13 +1018,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
   private requireFocusedAndroidInput(
     signal?: AbortSignal,
-    error: string = ANDROID_FOCUSED_INPUT_ERROR,
+    failure: FocusedInputFailure = { error: ANDROID_FOCUSED_INPUT_ERROR },
     display?: string,
   ): Promise<
     | { success: true; hierarchy: NonNullable<ObserveResult["viewHierarchy"]> }
-    | { success: false; error: string }
+    | ({ success: false } & FocusedInputFailure)
   > {
-    return this.keyEventSupport.requireFocusedAndroidInput(signal, error, display);
+    return this.keyEventSupport.requireFocusedAndroidInput(signal, failure, display);
   }
 
   private getEventAllKeyEventPlan(grapheme: string): Promise<KeyEventPlan | null> {

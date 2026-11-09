@@ -1,4 +1,3 @@
-import type { LayoutWarning, LayoutWarningsScope } from "../../../../models/ObservationInsets";
 import type { ObserveResult, SkeletonElement } from "../../../../models/ObserveResult";
 import type { ViewHierarchyNode } from "../../../../models/ViewHierarchyResult";
 
@@ -220,21 +219,9 @@ export interface ObserveDiff {
   /**
    * Changed top-level fields: scalars (`rotation`, `wakefulness`, …) and the
    * Element mirror fields (`focusedElement`, `accessibilityFocusedElement`,
-   * `awaitedElement` — #3052), each as `{from, to}`. In skeleton mode only,
-   * `layoutWarnings` is a per-entry `{added, removed}` pair after system UI
-   * status-bar chrome is excluded, with sparse envelope deltas when completeness
-   * metadata changes.
+   * `awaitedElement` — #3052), each as `{from, to}`.
    */
-  fields?: Record<
-    string,
-    | { from?: unknown; to?: unknown }
-    | {
-        added: LayoutWarning[];
-        removed: LayoutWarning[];
-        scope?: { from?: LayoutWarningsScope; to?: LayoutWarningsScope };
-        total?: { from?: number; to?: number };
-      }
-  >;
+  fields?: Record<string, { from?: unknown; to?: unknown }>;
 }
 
 export interface DiffObserveConfig {
@@ -245,8 +232,6 @@ export interface DiffObserveConfig {
    * diff basis: its churn is not a screen change and nothing in it is actionable (#11637).
    */
   skipStatusBar?: boolean;
-  /** Skeleton-only per-warning layout diff; defaults to the full `{from,to}` envelope. */
-  layoutWarningsDiffMode?: "full" | "perEntry";
   /** Skeleton-only projection for added/removed nodes; defaults to raw attributes. */
   projectAddedRemoved?: boolean;
   /**
@@ -287,7 +272,8 @@ export interface DiffObserveConfig {
  * `updatedAt` (churns every capture) and object/array fields (`viewHierarchy`
  * is covered by the node diff; `elements` mirrors the hierarchy). Advisory
  * `layoutWarnings` is the intentional exception: it has no hierarchy-diff
- * representation and must survive action observations.
+ * representation, so a `project:"full"` diff carries it as `{from,to}`. The
+ * skeleton projection omits it (see {@link SKELETON_DIFF_SCALAR_FIELDS}).
  *
  * `awaitDuration` (#3052) is a scalar with no hierarchy equivalent — it is the
  * wait outcome for an `observe waitFor` surfaced through a non-observe action —
@@ -302,12 +288,22 @@ export const DIFF_SCALAR_FIELDS: readonly string[] = [
   "notificationPermissionDetected",
   "deviceLock",
   "deviceLockUnknown",
+  "automotive",
   "awaitTimeout",
   "awaitDuration",
   "timeoutReason",
   "layoutWarnings",
   "error",
 ];
+
+/**
+ * Scalar fields for a skeleton-projected diff. The skeleton projection drops
+ * advisory `layoutWarnings` from a full observation, so its diff must not bring
+ * them back as churn on every action (#11637, #17464); `project:"full"` opts in.
+ */
+export const SKELETON_DIFF_SCALAR_FIELDS: readonly string[] = DIFF_SCALAR_FIELDS.filter(
+  (field) => field !== "layoutWarnings",
+);
 
 /**
  * Top-level Element *mirror* fields on ObserveResult (#3052). Each holds an

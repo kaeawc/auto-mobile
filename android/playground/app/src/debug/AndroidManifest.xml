@@ -39,6 +39,8 @@
       android:permission="android.permission.DUMP">
       <intent-filter>
         <action android:name="dev.jasonpearson.automobile.playground.action.TEST_SEED_KEYSTORE_FIXTURE" />
+        <action android:name="dev.jasonpearson.automobile.playground.action.PROBE_AUTH_BOUND_KEY" />
+        <action android:name="dev.jasonpearson.automobile.playground.action.PROBE_STRONGBOX_KEY_GENERATION" />
       </intent-filter>
     </receiver>
   </application>

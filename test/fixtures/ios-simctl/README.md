@@ -35,3 +35,8 @@ Captured verbatim from real `xcrun simctl` runs. Nothing here is hand-written.
 - `list-all-appletv-26-5.json`: verbatim `xcrun simctl list -j` on this host,
   captured 2026-10-31, containing the tvOS 26.5 runtime with Apple TV simulators,
   plus iOS, watchOS and visionOS rows used as test negatives.
+- `log-show-compact-acceptwatch-watchos26-5.txt` (#17547): the head of `xcrun simctl spawn
+  <udid> log show --last 2m --style compact --predicate 'process == "AcceptWatch"'` on a
+  watchOS 26.5 Apple Watch Series 11 46mm simulator, quoted verbatim in #17547 from the
+  #16836 acceptance run (2026-11-08). Unlike iOS output, it starts with a
+  `getpwuid_r did not find a match for uid 501` line before the header.

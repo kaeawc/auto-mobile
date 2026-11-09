@@ -39,7 +39,6 @@ import {
 } from "../../features/prototype/prototypeValidation";
 import { getRemovedToolActionHint } from "../../utils/removedTools";
 import { addDeviceTargetingToSchema, withJsonSchemaOverride } from "../../utils/schemaHelpers";
-import {} from "../prototypeReverse";
 import { validatePrototypeSavedInput } from "../prototypeSavedActions";
 import { validatePrototypeStorageInput } from "../prototypeStorageAction";
 import {} from "../prototypeStorageOutput";
@@ -241,6 +240,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
           "listSaved",
           "deleteSaved",
           "open",
+          "share",
           "clearStorage",
           "simulate",
           "screenMap",
@@ -250,11 +250,12 @@ export const prototypeSchema = addDeviceTargetingToSchema(
           "defineBackend",
           "clearBackend",
           "backendLog",
+          "publish",
         ],
         {
           error: (issue) =>
             getRemovedToolActionHint(PROTOTYPE_TOOL_NAME, issue.input) ??
-            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; storage action: clearStorage; timer action: simulate; host test-session actions: testSessionBegin, testSessionEnd or testSessionReport; mock backend actions: defineBackend, clearBackend or backendLog; host-only: screenMap",
+            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; ProtoViewer link: share; storage action: clearStorage; timer action: simulate; host test-session actions: testSessionBegin, testSessionEnd or testSessionReport; mock backend actions: defineBackend, clearBackend, backendLog or publish; host-only: screenMap",
         },
       ),
       goal: z
@@ -278,13 +279,13 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .regex(MOCK_BACKEND_ID, "backendId must match [a-z0-9][a-z0-9-]{0,30}")
         .optional()
         .describe(
-          "defineBackend, clearBackend and backendLog: the mock backend id; requests to https://<backendId>.mock.automobile.invalid are answered by it",
+          "defineBackend, clearBackend, backendLog and publish: the mock backend id; requests and channels to https://<backendId>.mock.automobile.invalid (wss:// for WebSocket) are answered by it",
         ),
       backend: z
         .record(z.string(), z.unknown())
         .optional()
         .describe(
-          "defineBackend only: {collections?:{name:[items with id]}, routes?:[{method,path,status?,headers?,body?,delayMs?}], faults?:[{path,method?,status,every|rate}], latencyMs?:{min,max}, seed?, actors?:[{on:{route:'POST /path/:id'}|every+maxRuns, afterMs?, do:[{afterMs?, append|update|remove: collection, id?, value?}]}]}. Actors write to collections after a matching successful request or every N ms (at most 16 actors, 64 steps each; publish, advance and notify are not supported yet). Replaces the backend of that id",
+          "defineBackend only: {collections?:{name:[items with id]}, routes?:[{method,path,status?,headers?,body?,delayMs?}], faults?:[{path,method?,status,every|rate}], latencyMs?:{min,max}, seed?, rooms?:[{path:'/rooms/:roomId',onConnect?:[frame],echo?,relay?,timeline?:[{afterMs,frame}]}], broadcasts?:{collection:{room:'/rooms/{item:/roomId}',frame,on?:[POST|PUT|PATCH]}}, actors?:[{on:{route:'POST /path/:id'}|every+maxRuns, afterMs?, do:[{afterMs?, append|update|remove: collection, id?, value?}]}]}. Actors write to collections after a matching successful request or every N ms (at most 16 actors, 64 steps each; publish, advance and notify are not supported yet). Replaces the backend of that id and closes its open channels",
         ),
       mock: z
         .record(z.string(), z.unknown())
@@ -304,7 +305,19 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .int()
         .min(0)
         .optional()
-        .describe("backendLog only: return requests with a sequence number above this"),
+        .describe("backendLog only: return requests and frames with a sequence number above this"),
+      room: z
+        .string()
+        .startsWith("/")
+        .max(256)
+        .optional()
+        .describe("publish only: the room path, such as /rooms/general"),
+      frame: z
+        .json()
+        .optional()
+        .describe(
+          "publish only: the frame every member of the room receives (a string as written, other JSON as JSON text)",
+        ),
       testSessionId: z
         .string()
         .min(1)
@@ -355,7 +368,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .min(1)
         .optional()
         .describe(
-          `show only: instead of spec, an absolute path of a local JSON file holding the same spec (up to ${MAX_PROTOTYPE_SPEC_BYTES} bytes) that the daemon reads and validates like an inline spec; the path is never sent to the device. Exactly one of spec or specPath. Use it for a spec a script generated, instead of pasting the JSON into the call.`,
+          `show, screenMap or share: instead of spec, an absolute path of a local JSON file holding the same spec (up to ${MAX_PROTOTYPE_SPEC_BYTES} bytes) that the daemon reads and validates like an inline spec; the path is never sent to the device. Exactly one of spec or specPath. Use it for a spec a script generated, instead of pasting the JSON into the call.`,
         ),
       display: z
         .string()
@@ -430,7 +443,15 @@ export const prototypeSchema = addDeviceTargetingToSchema(
       assets: assetsInput
         .optional()
         .describe(
-          "show or save only: images to upload before the prototype is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes, or from style.fontFamily as {asset} for a TTF/OTF font file (path only, up to 2 MiB). Uploads are sequential; any failure fails the call before the prototype changes and names the assets already stored. If the device reports a supplied asset missing after the prototype is sent, it is re-uploaded and the prototype re-sent once.",
+          "show, save or share only: images to upload before the prototype is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes, or from style.fontFamily as {asset} for a TTF/OTF font file (path only, up to 2 MiB). Uploads are sequential; any failure fails the call before the prototype changes and names the assets already stored. If the device reports a supplied asset missing after the prototype is sent, it is re-uploaded and the prototype re-sent once.",
+        ),
+      url: z
+        .string()
+        .min(1)
+        .max(1024)
+        .optional()
+        .describe(
+          "share only: the https URL the team will upload the bundle to (a release asset, gist raw URL or object storage), without credentials or #fragment. With it, share also returns the automobile-proto://import link and its QR; without it, only the bundle is written",
         ),
       label: z
         .string()
@@ -530,8 +551,11 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "backendId",
     "backend",
     "since",
+    "room",
+    "frame",
     "mock",
     "mockPath",
+    "url",
   ] as const;
   const allowed: Record<typeof value.action, readonly string[]> = {
     show: [
@@ -553,6 +577,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     listSaved: [],
     deleteSaved: ["id", "removeIcon"],
     open: ["id"],
+    share: ["spec", "specPath", "assets", "url"],
     clearStorage: ["id"],
     simulate: ["id", "advanceTimeMs"],
     dismiss: ["id", "all"],
@@ -562,6 +587,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     defineBackend: ["backendId", "backend"],
     clearBackend: ["backendId"],
     backendLog: ["backendId", "since"],
+    publish: ["backendId", "room", "frame"],
     status: [],
     inspect: [],
     screenMap: ["spec", "specPath"],
@@ -609,6 +635,8 @@ function validateMockBackendInput(
     backend?: unknown;
     mock?: unknown;
     mockPath?: string;
+    room?: string;
+    frame?: unknown;
   },
   ctx: z.RefinementCtx,
 ): void {
@@ -619,7 +647,7 @@ function validateMockBackendInput(
       message: "show takes either mock or mockPath, not both",
     });
   }
-  const mock = ["defineBackend", "clearBackend", "backendLog"].includes(value.action);
+  const mock = ["defineBackend", "clearBackend", "backendLog", "publish"].includes(value.action);
   if (mock && value.backendId === undefined) {
     ctx.addIssue({
       code: "custom",
@@ -633,6 +661,13 @@ function validateMockBackendInput(
       path: ["backend"],
       message: "defineBackend requires backend (an object, {} for an empty backend)",
     });
+  }
+  if (value.action === "publish") {
+    (["room", "frame"] as const)
+      .filter((field) => value[field] === undefined)
+      .forEach((field) =>
+        ctx.addIssue({ code: "custom", path: [field], message: "publish requires room and frame" }),
+      );
   }
 }
 
@@ -671,7 +706,8 @@ function validateProtoViewerTimeout(
 }
 
 function validateSpecSource(value: z.infer<typeof prototypeSchema>, ctx: z.RefinementCtx): void {
-  const takesSpecSource = value.action === "show" || value.action === "screenMap";
+  const takesSpecSource =
+    value.action === "show" || value.action === "screenMap" || value.action === "share";
   if (takesSpecSource && (value.spec === undefined) === (value.specPath === undefined)) {
     ctx.addIssue({
       code: "custom",
@@ -706,12 +742,14 @@ export const PROTOTYPE_READ_ACTIONS: readonly string[] = [
   "inspect",
   "listSaved",
   "screenMap",
+  "share",
   "testSessionBegin",
   "testSessionEnd",
   "testSessionReport",
   "defineBackend",
   "clearBackend",
   "backendLog",
+  "publish",
 ];
 
 export function isPrototypeReadAction(args: z.infer<typeof prototypeSchema>): boolean {

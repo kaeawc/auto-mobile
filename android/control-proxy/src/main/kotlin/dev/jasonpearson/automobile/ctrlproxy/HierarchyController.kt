@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import android.view.Display
 import android.view.accessibility.AccessibilityNodeInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.DisplayCutoutInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
@@ -58,7 +59,7 @@ internal class HierarchyController(
 
     fun activeWindowRoot(): AccessibilityNodeInfo?
 
-    fun lastWindowClassName(): String?
+    fun lastWindowState(): AccessibilityEventDispatcher.WindowState
 
     fun rotationProvenance(): RotationProvenanceTracker
 
@@ -66,7 +67,11 @@ internal class HierarchyController(
 
     fun wakefulness(): String
 
-    fun foregroundActivity(rootPackage: String?, windowClass: String?): String?
+    fun foregroundActivity(
+      rootPackage: String?,
+      windowClass: String?,
+      windowPackage: String?,
+    ): String?
 
     fun isEmulator(): Boolean
 
@@ -168,7 +173,7 @@ internal class HierarchyController(
     // Capture foreground info atomically with rootNode to avoid race conditions
     // where the app state changes between hierarchy extraction and getForegroundActivity()
     private val capturedRootPackage = rootNode?.packageName?.toString()
-    private val capturedWindowClass = host.lastWindowClassName()
+    private val capturedWindowState = host.lastWindowState()
     private val screenDimensions = displayController.getScreenDimensions(targetDisplayId)
     private val insets = displayController.getObservationInsets(screenDimensions, targetDisplayId)
 
@@ -234,7 +239,12 @@ internal class HierarchyController(
 
       // Add device metadata to the hierarchy (eliminates need for dumpsys calls on client)
       val wakefulness = host.wakefulness()
-      val foreground = host.foregroundActivity(capturedRootPackage, capturedWindowClass)
+      val foreground =
+        host.foregroundActivity(
+          capturedRootPackage,
+          capturedWindowState.className,
+          capturedWindowState.packageName,
+        )
       val density = displayController.getDensity()
       val enriched =
         HierarchyMetadataBuilder.enrich(
@@ -266,7 +276,11 @@ internal class HierarchyController(
       snapshotOptions: HierarchySnapshotOptions,
     ): ViewHierarchy? {
 
+      snapshotOptions.missingAccessibilityWindows = null
       if (allWindows.isNullOrEmpty() && rootNode == null) {
+        if (snapshotOptions.displayId != null && targetDisplayId != Display.DEFAULT_DISPLAY) {
+          snapshotOptions.missingAccessibilityWindows = MissingAccessibilityWindows(targetDisplayId)
+        }
         Log.w(TAG, "No windows or root node available for extraction")
         return null
       }
@@ -351,7 +365,12 @@ internal class HierarchyController(
             systemInsets = CtrlProxy.legacySystemInsets(captureInsets),
             insets = captureInsets,
             wakefulness = host.wakefulness(),
-            foregroundActivity = host.foregroundActivity(capturedRootPackage, capturedWindowClass),
+            foregroundActivity =
+              host.foregroundActivity(
+                capturedRootPackage,
+                capturedWindowState.className,
+                capturedWindowState.packageName,
+              ),
             density = displayController.getDensity(),
             sdkInt = Build.VERSION.SDK_INT,
             deviceModel = Build.MODEL,
@@ -448,7 +467,10 @@ internal class HierarchyController(
         commandJob?.ensureActive()
         serviceScope.coroutineContext[Job]?.ensureActive()
         host.broadcastHierarchyExtractFrame(
-          HierarchyExtractErrorFrames.nullResultFrame(requestId),
+          HierarchyExtractErrorFrames.nullResultFrame(
+            requestId,
+            cancellableOptions.missingAccessibilityWindows,
+          ),
           externallyCorrelated = false,
         )
       }

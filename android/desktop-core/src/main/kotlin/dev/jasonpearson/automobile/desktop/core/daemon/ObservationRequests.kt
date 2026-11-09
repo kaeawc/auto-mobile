@@ -16,6 +16,7 @@ internal fun ObservationStreamClient.subscribe(deviceId: String?, deviceSessionU
       deviceSessionUuid = deviceSessionUuid,
       screenshotIntervalMs = requestedScreenshotIntervalMs,
       hierarchyIntervalMs = requestedHierarchyIntervalMs,
+      lifecycleOnly = lifecycleOnly.takeIf { it },
     )
 
   // The read loop runs concurrently and may receive the acknowledgement as soon as flush

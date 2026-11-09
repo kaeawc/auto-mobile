@@ -1,0 +1,50 @@
+{
+  "spec": {
+    "id": "sensitive-flow",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["clipboard"]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "pasteButton",
+          "into": "/data/users/{index}/token"
+        },
+        {
+          "type": "button",
+          "label": "Send",
+          "onTap": [
+            {
+              "type": "request",
+              "url": "https://example.com/submit",
+              "via": "device",
+              "query": {
+                "code": {
+                  "data": "/users/0/name"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "repeat": {
+        "items": [
+          {
+            "key": "code"
+          }
+        ],
+        "as": "row"
+      }
+    }
+  },
+  "options": {
+    "library": false
+  },
+  "sinkOnly": true
+}

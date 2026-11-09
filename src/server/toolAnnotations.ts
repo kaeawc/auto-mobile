@@ -83,8 +83,6 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
 
   // Gestures, app interaction and multiplexed controls can have additional effects on repetition.
   accessibility: entry("Control Accessibility", controlDevice),
-  // Report-only, but registration does not classify native audits as deviceReadOnly.
-  accessibilityAudit: entry("Audit Native Accessibility", controlDevice),
   biometricAuth: entry("Simulate Biometrics", destructiveDevice),
   focusNavigate: entry("Navigate D-pad Focus", destructiveDevice),
   dragAndDrop: entry("Drag and Drop Element", destructiveDevice),
@@ -104,6 +102,7 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   pressButton: entry("Press Button", destructiveDevice),
   recentApps: entry("Open Recent Apps", controlDevice),
   ambient: entry("Change Ambient Power State", destructiveDevice),
+  wearSurface: entry("Manage Wear OS Tiles and Watch Faces", destructiveDevice),
   rotaryScroll: entry("Scroll Rotary Input", destructiveDevice),
   rotateCrown: entry("Rotate Digital Crown", destructiveDevice),
   recordDeviceGestures: entry("Record Gestures", controlDevice),
@@ -128,6 +127,8 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
 
   // Explicit kills, resets, deletes, restores and replayed plan/navigation/SQL calls may destroy state.
   accessibilityAction: entry("Run Accessibility Action", destructiveDevice),
+  // Recording a wcag baseline can replace an existing host-side baseline.
+  accessibilityAudit: entry("Audit Accessibility", destructiveDevice),
   // Recording an audit baseline can replace an existing host-side baseline.
   audit: entry("Audit Current Screen", destructiveDevice),
   backgroundWork: entry("Control Background Jobs", destructiveDevice),
@@ -136,6 +137,8 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   displayProfile: entry("Set Display Profile", destructiveDevice),
   // Pauses the app while dumping; leaves only a host file, no app or device state is lost.
   heapDump: entry("Dump Heap", controlDevice),
+  // Samples the foreground app's frames and memory; report-only, but not classified deviceReadOnly.
+  performanceAudit: entry("Audit Performance", controlDevice),
   killProfile: entry("Set Kill Policy", destructiveDevice),
   manufacturerProfile: entry("Set OEM Profile", destructiveDevice),
   measureStartup: entry("Measure Startup", destructiveDevice),
@@ -143,6 +146,8 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   // appLaunch tracing can launch the app; other templates only capture artifacts.
   performanceTrace: entry("Record Trace", destructiveDevice),
   sendBroadcast: entry("Send Broadcast", destructiveDevice),
+  // Removes only mappings the session created; ensure and remove are idempotent.
+  portReverse: entry("Manage Port Reverse", setDevice),
   setAppLinks: entry("Set App Links", destructiveDevice),
   // Stored policies can later tap arbitrary alert buttons during device interaction.
   systemAlerts: entry("Set Alert Policy", destructiveDevice),

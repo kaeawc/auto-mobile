@@ -1,0 +1,202 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import type { BootedDevice, ObserveResult } from "../../../src/models";
+import { registerInteractionTools } from "../../../src/server/interactionTools";
+import { ToolRegistry } from "../../../src/server/toolRegistry";
+import {
+  resetSystemTrayDependencies,
+  setSystemTrayDependencies,
+} from "../../../src/features/systemTray/systemTrayHelpers";
+import { parseSimctlListApps } from "../../../src/utils/ios-cmdline-tools/simctlListApps";
+import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
+import { FakeTimer } from "../../fakes/FakeTimer";
+import { observeResultFromJsonText } from "../../helpers/observeFixture";
+import { toolJson } from "../../helpers/toolResponse";
+import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
+import { InMemoryPostedNotificationLedger } from "../../../src/features/utility/postedNotificationLedger";
+import { ios26TrayOpenHome } from "./iosTrayObservationFixture";
+
+isolateToolRegistry();
+
+// iOS 26.5 notification center whose only row reads "MESSAGES, Grouped, now, mt0091c,
+// hello tray" (#17388), and the matching `simctl listapps` payload for that simulator.
+const fixtureDir = join(import.meta.dir, "../../fixtures/systemTray/ios-26.5");
+const readFixture = (name: string) => readFileSync(join(fixtureDir, name), "utf8");
+const messagesTray: ObserveResult = observeResultFromJsonText(
+  (
+    JSON.parse(readFixture("full-tray-open-messages-grouped.json")) as {
+      content: [{ text: string }];
+    }
+  ).content[0].text,
+  "full-tray-open-messages-grouped.json",
+);
+const listedApps = parseSimctlListApps(readFixture("simctl-listapps-messages.json"));
+
+const iosDevice: BootedDevice = {
+  name: "iPhone 17 Pro",
+  platform: "ios",
+  deviceId: "45D48E06-E6AC-4894-B738-4EA7B6835D46",
+  source: "local",
+};
+
+const install = (
+  apps = listedApps,
+  observation = messagesTray,
+  postedNotifications = new InMemoryPostedNotificationLedger(),
+) => {
+  const labelLookups: string[] = [];
+  const observer = new FakeObserveScreen();
+  observer.setObserveResult(() => observation);
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  setSystemTrayDependencies({
+    timer,
+    observeScreenFactory: () => observer,
+    appInventoryFactory: () => ({
+      executeDetailedResult: async () => {
+        throw new Error("Android inventory must not be read on iOS");
+      },
+      executeIosDetailedResult: async () => ({ apps, successful: true }),
+    }),
+    postedNotifications,
+    // The production resolver answers null on iOS; record any fallback call.
+    appLabelResolver: async (_device, appId) => {
+      labelLookups.push(appId);
+      return null;
+    },
+  });
+  registerInteractionTools();
+  return { labelLookups, observer };
+};
+
+const find = (notification: Record<string, string>) =>
+  ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(iosDevice, {
+    action: "find",
+    platform: "ios",
+    awaitTimeout: 500,
+    notification,
+  });
+
+afterEach(() => {
+  resetSystemTrayDependencies();
+  ToolRegistry.clearTools();
+});
+
+describe("systemTray find with appId on iOS", () => {
+  test("matches the row by the installed app's display name", async () => {
+    const { labelLookups } = install();
+    const payload = toolJson(await find({ title: "mt0091c", appId: "com.apple.MobileSMS" }));
+    expect(payload).toMatchObject({ success: true, match: { app: { text: "Messages" } } });
+    expect(labelLookups).toEqual([]);
+  });
+
+  test("matches an appId-only query by display name", async () => {
+    install();
+    const payload = toolJson(await find({ appId: "com.apple.MobileSMS" }));
+    expect(payload.success).toBe(true);
+  });
+
+  test("does not match a row whose app display name differs", async () => {
+    install();
+    await expect(find({ title: "mt0091c", appId: "com.apple.Preferences" })).rejects.toThrow(
+      "Notification not found",
+    );
+  });
+
+  test("does not match a row that only names the app in its body", async () => {
+    // Derived from the capture: the Messages row's body mentions Settings (#17401).
+    const settingsInBody = JSON.parse(
+      JSON.stringify(messagesTray).replaceAll("hello tray", "open Settings"),
+    ) as ObserveResult;
+    install(listedApps, settingsInBody);
+    await expect(find({ title: "mt0091c", appId: "com.apple.Preferences" })).rejects.toThrow(
+      "Notification not found",
+    );
+  });
+
+  test("does not match by a display name shared with another installed app", async () => {
+    // Derived from the capture: Settings is renamed to the same "Messages" label.
+    const sharedName = parseSimctlListApps(
+      readFixture("simctl-listapps-messages.json").replace(
+        '"CFBundleDisplayName": "Settings"',
+        '"CFBundleDisplayName": "Messages"',
+      ),
+    );
+    install(sharedName);
+    await expect(find({ title: "mt0091c", appId: "com.apple.MobileSMS" })).rejects.toThrow(
+      "Notification not found",
+    );
+  });
+
+  test("keeps a direct bundle-id match when the listing has no display name", async () => {
+    // Derived from the capture: a row that carries the bundle id instead of the name.
+    const bundleIdTray = JSON.parse(
+      JSON.stringify(messagesTray).replaceAll("MESSAGES, Grouped", "com.apple.MobileSMS, Grouped"),
+    ) as ObserveResult;
+    const { labelLookups } = install([{ bundleId: "com.apple.MobileSMS" }], bundleIdTray);
+    const payload = toolJson(await find({ title: "mt0091c", appId: "com.apple.MobileSMS" }));
+    expect(payload).toMatchObject({
+      success: true,
+      match: { app: { text: "com.apple.MobileSMS" } },
+    });
+    expect(labelLookups).toEqual(["com.apple.MobileSMS"]);
+  });
+});
+
+// The captured Settings "Ready for Apple Intelligence" lone banner names no app (#17445).
+describe("systemTray find with appId on an iOS lone banner", () => {
+  const banner = {
+    title: "Ready for Apple Intelligence",
+    body: "Time to experience the new personal intelligence system.",
+  };
+
+  test("matches the banner when postNotification posted it for that app", async () => {
+    const ledger = new InMemoryPostedNotificationLedger();
+    ledger.record(iosDevice.deviceId, "com.apple.Preferences", banner);
+    install(listedApps, ios26TrayOpenHome, ledger);
+    const payload = toolJson(await find({ title: banner.title, appId: "com.apple.Preferences" }));
+    expect(payload).toMatchObject({ success: true, match: { app: { text: "Settings" } } });
+  });
+
+  test("matches content posted while find is already waiting", async () => {
+    const ledger = new InMemoryPostedNotificationLedger();
+    const { observer } = install(listedApps, ios26TrayOpenHome, ledger);
+    let reads = 0;
+    observer.setObserveResult(() => {
+      reads += 1;
+      if (reads === 2) {
+        ledger.record(iosDevice.deviceId, "com.apple.Preferences", banner);
+      }
+      return ios26TrayOpenHome;
+    });
+    const payload = toolJson(await find({ title: banner.title, appId: "com.apple.Preferences" }));
+    expect(payload).toMatchObject({ success: true, match: { app: { text: "Settings" } } });
+    expect(reads).toBeGreaterThanOrEqual(2);
+  });
+
+  test("does not match content another app posted", async () => {
+    const ledger = new InMemoryPostedNotificationLedger();
+    ledger.record(iosDevice.deviceId, "com.apple.Preferences", banner);
+    install(listedApps, ios26TrayOpenHome, ledger);
+    await expect(find({ title: banner.title, appId: "com.apple.MobileSMS" })).rejects.toThrow(
+      "cannot be attributed to com.apple.MobileSMS",
+    );
+  });
+
+  test("does not use content posted to another device", async () => {
+    const ledger = new InMemoryPostedNotificationLedger();
+    ledger.record("another-simulator", "com.apple.Preferences", banner);
+    install(listedApps, ios26TrayOpenHome, ledger);
+    await expect(find({ title: banner.title, appId: "com.apple.Preferences" })).rejects.toThrow(
+      "Omit appId to match it by content, or post it with postNotification",
+    );
+  });
+
+  test("keeps the plain not-found when no banner has that content", async () => {
+    install(listedApps, ios26TrayOpenHome);
+    await expect(find({ title: "absent", appId: "com.apple.Preferences" })).rejects.toThrow(
+      /^Notification not found after \d+ms\.$/,
+    );
+  });
+});

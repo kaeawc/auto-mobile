@@ -9,7 +9,9 @@
  *       that already existed at the pinned release's ref count: a capability gated
  *       on main after the pin is expected to be missing from the pinned artifacts
  *       until the next release (the host fails closed meanwhile), and --candidate
- *       enforces it before that release.
+ *       enforces it before that release. Likewise a gate the pinned release lacked
+ *       (exempt when it was cut) that the checked-out sources now advertise waits
+ *       for the next release instead of failing.
  *   bun scripts/release/check-artifact-capabilities.ts --candidate
  *       Same comparison against what the checked-out sources advertise. prepare-release
  *       runs this before building, so a release cannot ship with gaps (#15347).
@@ -36,6 +38,7 @@ import {
   HOST_GATE_SOURCES,
   type ArtifactCapabilities,
   type ArtifactId,
+  type CapabilityGap,
   type CapabilityManifest,
   findGaps,
   findStaleExemptions,
@@ -48,6 +51,7 @@ import {
   parseManifest,
   parsePrototypeAgentAdvertised,
   recordRelease,
+  splitImplementedSince,
 } from "./lib/artifact-capabilities";
 
 const REPO_ROOT = path.resolve(import.meta.dir, "../..");
@@ -159,8 +163,13 @@ function report(
   label: string,
   advertised: ArtifactCapabilities,
   gated: Record<ArtifactId, string[]>,
-): number {
-  const gaps = findGaps(advertised, gated, UNIMPLEMENTED_BY_ARTIFACT);
+  candidate?: ArtifactCapabilities,
+): { status: number; implementedSince: CapabilityGap[] } {
+  const allGaps = findGaps(advertised, gated, UNIMPLEMENTED_BY_ARTIFACT);
+  const { implemented, missing } = candidate
+    ? splitImplementedSince(allGaps, candidate)
+    : { implemented: [], missing: allGaps };
+  const gaps = missing;
   const stale = findStaleExemptions(advertised, UNIMPLEMENTED_BY_ARTIFACT);
   if (gaps.length > 0) {
     process.stderr.write(`${formatGaps(label, gaps)}\n`);
@@ -171,7 +180,7 @@ function report(
       `${label} advertises capabilities still listed in UNIMPLEMENTED_BY_ARTIFACT; remove the stale entries:\n${lines.join("\n")}\n`,
     );
   }
-  return gaps.length > 0 || stale.length > 0 ? 1 : 0;
+  return { status: gaps.length > 0 || stale.length > 0 ? 1 : 0, implementedSince: implemented };
 }
 
 /**
@@ -180,7 +189,7 @@ function report(
  * entry for the version being cut.
  */
 function checkCandidate(): number {
-  const status = report("Release candidate", advertisedFromWorkingTree(), collectHostGated());
+  const { status } = report("Release candidate", advertisedFromWorkingTree(), collectHostGated());
   if (status === 0) {
     process.stdout.write("Release candidate advertises every capability the host gates on\n");
   }
@@ -209,18 +218,28 @@ function check(): number {
     return 1;
   }
   const current = collectHostGated();
-  const status = report(`Pinned release ${pinned}`, entry, gatesExistingAt(current, gatesAtPin));
+  // A gate the pinned release lacked (exempt when it was cut) that these sources now advertise
+  // waits for the next release, like a gate added after the pin.
+  const { status, implementedSince } = report(
+    `Pinned release ${pinned}`,
+    entry,
+    gatesExistingAt(current, gatesAtPin),
+    advertisedFromWorkingTree(),
+  );
   if (status === 0) {
     process.stdout.write(
       `Pinned release ${pinned} advertises every capability the host gated on when it was cut\n`,
     );
-    const awaiting = gatesAddedAfter(current, gatesAtPin).filter(
-      (gap) => !entry[gap.artifact].includes(gap.capability),
-    );
+    const awaiting = [
+      ...implementedSince,
+      ...gatesAddedAfter(current, gatesAtPin).filter(
+        (gap) => !entry[gap.artifact].includes(gap.capability),
+      ),
+    ];
     if (awaiting.length > 0) {
       const lines = awaiting.map((gap) => `  - ${gap.artifact}: ${gap.capability}`);
       process.stdout.write(
-        `Gated after ${pinned}; the host fails closed until the next release advertises them (--candidate enforces it):\n${lines.join("\n")}\n`,
+        `Gated or implemented after ${pinned}; the host fails closed until the next release advertises them (--candidate enforces it):\n${lines.join("\n")}\n`,
       );
     }
   }

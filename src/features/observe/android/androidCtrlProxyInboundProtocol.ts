@@ -352,6 +352,12 @@ export interface WsKeystoreResetMessage extends WsMessageBase {
   state: unknown;
 }
 
+export interface WsAttestationChainMessage extends WsMessageBase {
+  type: "attestation_chain";
+  requestId?: string;
+  certificateChainBase64: string[];
+}
+
 export interface WsKeystoreDiscoveryMessage extends WsMessageBase {
   type: "keystore_discovery";
   requestId?: string | null;
@@ -471,6 +477,8 @@ export interface WsPackageInfoResultMessage extends WsMessageBase {
   grantedPermissions?: Record<string, boolean>;
   mainActivity?: string;
   totalTimeMs?: number;
+  gitBranch?: string;
+  gitSha?: string;
 }
 
 export interface WsLaunchIntentResultMessage extends WsMessageBase {
@@ -651,6 +659,7 @@ export type WebSocketMessage =
   | WsHighlightResponseMessage
   | WsGlobalActionResultMessage
   | WsDeviceInfoResultMessage
+  | WsAttestationChainMessage
   | WsKeystoreDiscoveryMessage
   | WsKeystoreResetMessage
   | WsSdkCapabilitiesMessage

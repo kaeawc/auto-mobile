@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
@@ -40,6 +41,21 @@ class HierarchyControllerTest {
   }
 
   private class FakeHost(val dir: File) : HierarchyController.Host {
+    var windows: List<AccessibilityWindowInfo> = emptyList()
+    private val provenance =
+      RotationProvenanceTracker(
+        object : RotationChangeSignal {
+          override fun register(listener: (Int) -> Unit) = false
+
+          override fun synchronize() = false
+
+          override fun unregister() = Unit
+        },
+      )
+    var root: AccessibilityNodeInfo? = null
+    var windowState = AccessibilityEventDispatcher.WindowState(null, null)
+    var onWakefulness: () -> Unit = {}
+    val foregroundCalls = mutableListOf<Triple<String?, String?, String?>>()
     var running = true
     val released = mutableListOf<String?>()
     val syncFrames = mutableListOf<String>()
@@ -48,19 +64,30 @@ class HierarchyControllerTest {
 
     override fun currentFrameContext() = "epoch:1"
 
-    override fun selectDisplayWindows(displayId: Int?) = error("not used by request handling")
+    override fun selectDisplayWindows(displayId: Int?) =
+      ViewHierarchyExtractor.DisplayWindows(displayId ?: 0, windows)
 
-    override fun activeWindowRoot(): AccessibilityNodeInfo? = null
+    override fun activeWindowRoot(): AccessibilityNodeInfo? = root
 
-    override fun lastWindowClassName(): String? = null
+    override fun lastWindowState() = windowState
 
-    override fun rotationProvenance(): RotationProvenanceTracker = error("not used")
+    override fun rotationProvenance() = provenance
 
     override fun occlusionEnabled() = true
 
-    override fun wakefulness() = "Awake"
+    override fun wakefulness(): String {
+      onWakefulness()
+      return "Awake"
+    }
 
-    override fun foregroundActivity(rootPackage: String?, windowClass: String?): String? = null
+    override fun foregroundActivity(
+      rootPackage: String?,
+      windowClass: String?,
+      windowPackage: String?,
+    ): String? {
+      foregroundCalls += Triple(rootPackage, windowClass, windowPackage)
+      return null
+    }
 
     override fun isEmulator() = true
 
@@ -135,6 +162,133 @@ class HierarchyControllerTest {
               ),
           )
       }
+
+  private fun TestScope.directController(host: FakeHost): HierarchyController =
+    HierarchyController(
+        host = host,
+        serviceScope = backgroundScope,
+        viewHierarchyExtractor = ViewHierarchyExtractor(),
+        displayController =
+          DisplayController(
+            object : DisplayController.Host {
+              override fun displayManager() = null
+
+              override fun windowManager() = null
+
+              override fun displayInsetsProvider() = WindowMetricsDisplayInsetsProvider(30) { null }
+
+              override fun frameworkDimenPx(name: String) = 0
+
+              override fun densityDpi() = 160
+            },
+          ),
+        diagnostics =
+          HierarchyDiagnosticsDependencies(
+            PerfProvider.instance,
+            FakeTimer(),
+            CtrlProxyWorkStats(),
+          ),
+        jsonCompact = Json { encodeDefaults = true },
+      )
+      .also { it.start() }
+
+  @Test
+  fun `direct and fallback enrichment use the captured event class and package together`() =
+    runTest {
+      for (requested in listOf(false, true)) {
+        val host =
+          FakeHost(tmp.newFolder()).apply {
+            root =
+              AccessibilityNodeInfo.obtain().apply {
+                packageName = "com.google.android.permissioncontroller"
+                className = "android.widget.FrameLayout"
+              }
+            windowState =
+              AccessibilityEventDispatcher.WindowState(
+                "dev.jasonpearson.automobile.playground.MainActivity",
+                "dev.jasonpearson.automobile.playground",
+              )
+            onWakefulness = {
+              windowState =
+                AccessibilityEventDispatcher.WindowState(
+                  "com.google.android.permissioncontroller.PermissionActivity",
+                  "com.google.android.permissioncontroller",
+                )
+            }
+          }
+        val controller = directController(host)
+
+        if (requested) {
+          controller.requestHierarchy(RequestHierarchy(requestId = "req_permission"))
+          assertEquals(1, host.syncFrames.size)
+        } else {
+          assertTrue(controller.extractHierarchy() != null)
+        }
+
+        assertEquals(
+          listOf(
+            Triple(
+              "com.google.android.permissioncontroller",
+              "dev.jasonpearson.automobile.playground.MainActivity",
+              "dev.jasonpearson.automobile.playground",
+            ),
+          ),
+          host.foregroundCalls,
+        )
+      }
+    }
+
+  @Test
+  fun `non-default display without windows or root reports inaccessible display`() = runTest {
+    val host = FakeHost(tmp.newFolder())
+    val controller = directController(host)
+
+    controller.requestHierarchy(RequestHierarchy(requestId = "req_overlay", displayId = 2))
+
+    assertEquals(
+      "Display 2 exposes no accessibility windows on this device: " +
+        "the accessibility service does not track this display (overlay displays are not tracked). " +
+        "Use the default display or a display tracked by accessibility.",
+      host.errorFrames.single()!!.error,
+    )
+    assertEquals("req_overlay", host.errorFrames.single()!!.requestId)
+    assertTrue(host.syncFrames.isEmpty())
+  }
+
+  @Test
+  fun `default display without windows or root keeps generic null error`() = runTest {
+    val host = FakeHost(tmp.newFolder())
+    val controller = directController(host)
+
+    controller.requestHierarchy(RequestHierarchy(requestId = "req_default", displayId = 0))
+
+    assertEquals(
+      HierarchyExtractErrorFrames.NULL_HIERARCHY_ERROR,
+      host.errorFrames.single()!!.error,
+    )
+  }
+
+  @Test
+  fun `non-default display with windows keeps normal extraction`() = runTest {
+    val host =
+      FakeHost(tmp.newFolder()).apply {
+        windows = listOf(AccessibilityWindowInfo.obtain())
+      }
+    val controller = directController(host)
+
+    controller.requestHierarchy(RequestHierarchy(requestId = "req_windows", displayId = 2))
+
+    assertTrue(host.errorFrames.isEmpty())
+    assertEquals(
+      "2",
+      Json.parseToJsonElement(host.syncFrames.single())
+        .jsonObject["data"]
+        ?.jsonObject
+        ?.get("displayId")
+        ?.jsonPrimitive
+        ?.content,
+    )
+  }
 
   @Test
   fun `request hierarchy forwards limits and delivers a correlated sync update without a dump`() =

@@ -61,6 +61,14 @@ const CLASSIFICATION: Classification = {
     "snapshotOf",
   ],
   perArgs: {
+    wearSurface: {
+      reads: [{ action: "listTileProviders" }],
+      controls: [
+        { action: "addTile", component: "com.example/.Tile" },
+        { action: "removeTile", component: "com.example/.Tile" },
+        { action: "showTile", index: 0 },
+      ],
+    },
     accessibility: { reads: [{}], controls: [{ talkback: true }, { voiceover: false }] },
     backgroundWork: {
       reads: [{ action: "list" }, { action: { listAlarms: true } }],
@@ -120,10 +128,12 @@ const CLASSIFICATION: Classification = {
   control: [
     "accessibilityAction",
     "accessibilityFocus",
-    // Drives an XCUITest audit of the app under test, so it is held to the owner.
+    // Drives an XCUITest audit of the app under test, and a wcag baseline record writes state.
     "accessibilityAudit",
     // The performance and memory audits drive the app, and a baseline record writes state.
     "audit",
+    // The performance and memory audits drive the app.
+    "performanceAudit",
     "appLifecycle",
     "barrier",
     "biometricAuth",
@@ -162,6 +172,8 @@ const CLASSIFICATION: Classification = {
     "pinchOn",
     "multiTouch",
     "postNotification",
+    // ensure/remove change adb reverse; list and verify re-apply lost owned mappings.
+    "portReverse",
     "pressButton",
     "putAppFile",
     "recentApps",

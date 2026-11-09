@@ -13,16 +13,26 @@ public data class ProvenanceBuildKey(
 )
 
 /**
+ * The git branch and commit sha a build declared about itself (#16954). Display metadata only: it
+ * never takes part in build-key identity, matching or diffing.
+ */
+public data class BuildSourceRevision(
+  val gitBranch: String,
+  val gitSha: String,
+)
+
+/**
  * A single provenance observation attached to a screen node or transition in the app-union graph
  * (#4985): which build/device/session reached it and when it was last seen there. `deviceId` /
  * `sessionUuid` are `"legacy"` for rows backfilled from pre-provenance graphs; `lastSeen` is epoch
- * ms.
+ * ms. `sourceRevision` is the build's declared git revision, null when it declared none.
  */
 public data class ScreenProvenance(
   val buildKey: ProvenanceBuildKey,
   val deviceId: String,
   val sessionUuid: String,
   val lastSeen: Long,
+  val sourceRevision: BuildSourceRevision? = null,
 )
 
 /**

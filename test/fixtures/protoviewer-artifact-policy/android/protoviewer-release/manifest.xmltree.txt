@@ -77,6 +77,11 @@ N: android=http://schemas.android.com/apk/res/android (line=2)
               E: meta-data (line=79)
                 A: http://schemas.android.com/apk/res/android:name(0x01010003)="android.support.FILE_PROVIDER_PATHS" (Raw: "android.support.FILE_PROVIDER_PATHS")
                 A: http://schemas.android.com/apk/res/android:resource(0x01010025)=@0x7f0c0001
+          E: provider (line=82)
+            A: http://schemas.android.com/apk/res/android:name(0x01010003)="dev.jasonpearson.automobile.protoviewer.McpProvider" (Raw: "dev.jasonpearson.automobile.protoviewer.McpProvider")
+            A: http://schemas.android.com/apk/res/android:permission(0x01010006)="android.permission.DUMP" (Raw: "android.permission.DUMP")
+            A: http://schemas.android.com/apk/res/android:exported(0x01010010)=true
+            A: http://schemas.android.com/apk/res/android:authorities(0x01010018)="dev.jasonpearson.automobile.protoviewer.mcp" (Raw: "dev.jasonpearson.automobile.protoviewer.mcp")
           E: activity (line=84)
             A: http://schemas.android.com/apk/res/android:name(0x01010003)="dev.jasonpearson.automobile.protoviewer.LicensesActivity" (Raw: "dev.jasonpearson.automobile.protoviewer.LicensesActivity")
             A: http://schemas.android.com/apk/res/android:exported(0x01010010)=false

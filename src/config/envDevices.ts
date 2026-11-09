@@ -105,6 +105,12 @@ export const DEVICES_ENV = {
     default: "off",
     doc: "Forbid the prototype-agent release download (1/true).",
   },
+  ANDROID_PROTOTYPE_APP_TEMPLATE: {
+    name: "AUTOMOBILE_ANDROID_PROTOTYPE_APP_TEMPLATE",
+    kind: "path",
+    default: "unset",
+    doc: "Packaged Android disposable app template directory or parent of flavor directories.",
+  },
   IOS_PROTOTYPE_VIEWER: {
     name: "AUTOMOBILE_IOS_PROTOTYPE_VIEWER",
     kind: "path",
@@ -380,8 +386,14 @@ export const DEVICES_ENV = {
   TVOS_RUNNER_XCTESTRUN: {
     name: "AUTOMOBILE_TVOS_RUNNER_XCTESTRUN",
     kind: "path",
-    default: "discover or build the AutoMobileTVTest scheme",
+    default: "discover, download a verified release runner, or build from source",
     doc: "Prebuilt tvOS simulator runner xctestrun used by startDevice.",
+  },
+  VISIONOS_RUNNER_XCTESTRUN: {
+    name: "AUTOMOBILE_VISIONOS_RUNNER_XCTESTRUN",
+    kind: "path",
+    default: "discover or build the AutoMobileVisionTest scheme",
+    doc: "Prebuilt visionOS window-app runner xctestrun used on first observe, tapOn or sendKeys.",
   },
   WATCH_RUNNER_XCTESTRUN: {
     name: "AUTOMOBILE_WATCH_RUNNER_XCTESTRUN",

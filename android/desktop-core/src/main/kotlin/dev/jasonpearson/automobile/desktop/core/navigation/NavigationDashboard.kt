@@ -12,6 +12,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,8 +27,12 @@ import dev.jasonpearson.automobile.desktop.core.datasource.NavigationGraph
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
+import dev.jasonpearson.automobile.desktop.core.time.Clock
+import dev.jasonpearson.automobile.desktop.core.time.SystemClock
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 private val LOG = LoggerFactory.getLogger("NavigationDashboard")
 
@@ -82,9 +87,17 @@ data class NavigationDashboardOptions(
   val readOnly: Boolean = false,
   // Provenance-weighted opacity context (nav (app,build) Phase 2, #4985): a node/edge reached in
   // this active context renders at 100% opacity, one reached only historically / by another build
-  // or device at 50%, with hover provenance on the faded ones. Null (the default, and the offline
-  // case) renders the union at full opacity — there is no active build to contrast against.
+  // or device fades to 50%-25% by how recently it was last seen (#16952), with hover provenance on
+  // the faded ones. Null (the default, and the offline case) renders the union at full opacity —
+  // there is no active build to contrast against.
   val activeContext: NavigationActiveContext? = null,
+  // Time source for the recency-graded fade (#16952); tests inject a FakeClock.
+  val clock: Clock = SystemClock,
+  // Drives the pane's device along a transition (#16953). Null hides the navigate action, except
+  // in [readOnly] browse, where it shows disabled to match the read-only badge.
+  val edgeNavigator: EdgeNavigator? = null,
+  // Called after an attempt reaches its target, so the host can pull the recorded traversal.
+  val onEdgeNavigated: () -> Unit = {},
 )
 
 internal class NavigationDashboardState(options: NavigationDashboardOptions) {
@@ -101,11 +114,25 @@ internal class NavigationDashboardState(options: NavigationDashboardOptions) {
   var navigationGraph by mutableStateOf(options.providedGraph)
   var isLoading by mutableStateOf(options.providedGraph == null)
   var error by mutableStateOf<String?>(null)
+  var buildLens by mutableStateOf<BuildLens>(BuildLens.Union)
+  var edgeNavigation by mutableStateOf<EdgeNavigationOutcome?>(null)
+
+  /**
+   * Runs navigate attempts for the dashboard's lifetime, so leaving transition detail mid-attempt
+   * neither cancels the attempt nor strands [edgeNavigation] at Running (#16953). Set by
+   * [NavigationDashboard]; null falls back to the action's own composition scope.
+   */
+  var navigationScope: CoroutineScope? = null
 
   fun failed(error: Exception) {
     LOG.error("Exception loading navigation data", error)
     this.error = error.message ?: "Unknown error"
     isLoading = false
+  }
+
+  fun selectTransition(id: String) {
+    selectedTransitionId = id
+    currentSection = NavigationSection.TransitionDetail
   }
 
   fun selectScreen(id: String, onHighlightCleared: () -> Unit) {
@@ -122,6 +149,7 @@ fun NavigationDashboard(
   mainDispatcher: CoroutineDispatcher = Dispatchers.Main,
 ) {
   val state = remember { NavigationDashboardState(options) }
+  state.navigationScope = rememberCoroutineScope()
   LaunchedEffect(state.currentSection) {
     options.onDetailViewChanged(state.currentSection != NavigationSection.FlowMap)
   }
@@ -146,7 +174,8 @@ private fun NavigationSectionContent(
   when (state.currentSection) {
     NavigationSection.FlowMap -> NavigationFlowMap(state, options)
     NavigationSection.ScreenDetail -> NavigationScreenDetail(state, options, navigateToScreen)
-    NavigationSection.TransitionDetail -> NavigationTransitionDetail(state, navigateToScreen)
+    NavigationSection.TransitionDetail ->
+      NavigationTransitionDetail(state, options, navigateToScreen)
   }
 }
 
@@ -155,11 +184,64 @@ private fun NavigationFlowMap(
   state: NavigationDashboardState,
   options: NavigationDashboardOptions,
 ) {
+  val graph = state.navigationGraph ?: NavigationGraph(emptyList(), emptyList())
+  val builds = remember(graph) { NavigationBuildLens.buildsIn(graph) }
+  val buildLabels = remember(graph) { NavigationBuildLabels.labelsIn(graph) }
+  val lens = effectiveBuildLens(state.buildLens, builds)
+  Box(modifier = Modifier.fillMaxSize()) {
+    if (lens is BuildLens.Compare) {
+      BuildCompareView(
+        NavigationBuildLens.diff(graph, lens.a, lens.b),
+        Modifier.padding(top = 72.dp),
+        buildLabels,
+      )
+    } else {
+      NavigationFlowCanvas(
+        state,
+        options,
+        NavigationBuildLens.visibleGraph(graph, lens),
+        BuildLensSelection(lens, buildLabels),
+      )
+    }
+    // A lens needs at least two builds to contrast; with one build every lens equals the union.
+    if (builds.size >= 2) {
+      BuildLensBar(
+        builds = builds,
+        lens = lens,
+        onLensChange = { state.buildLens = it },
+        modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp),
+        buildLabels = buildLabels,
+      )
+    }
+  }
+}
+
+/** The effective lens plus the graph's build labels it is described with (#16954). */
+private data class BuildLensSelection(
+  val lens: BuildLens,
+  val buildLabels: Map<ProvenanceBuildKey, String>,
+)
+
+/** Fall back to the union when the selected lens names a build absent from the refreshed graph. */
+internal fun effectiveBuildLens(lens: BuildLens, builds: List<ProvenanceBuildKey>): BuildLens =
+  when (lens) {
+    BuildLens.Union -> lens
+    is BuildLens.Filter -> if (lens.build in builds) lens else BuildLens.Union
+    is BuildLens.Compare -> if (lens.a in builds && lens.b in builds) lens else BuildLens.Union
+  }
+
+@Composable
+private fun NavigationFlowCanvas(
+  state: NavigationDashboardState,
+  options: NavigationDashboardOptions,
+  graph: NavigationGraph,
+  selection: BuildLensSelection,
+) {
   Box(modifier = Modifier.fillMaxSize()) {
     NavigationCanvasView(
       dev.jasonpearson.automobile.desktop.core.navigation.NavigationCanvasOptions(
-        screens = state.navigationGraph?.screens ?: emptyList(),
-        transitions = state.navigationGraph?.transitions ?: emptyList(),
+        screens = graph.screens,
+        transitions = graph.transitions,
         onScreenSelected = { state.selectScreen(it, options.onHighlightCleared) },
         externalHighlightedScreens = options.highlightedScreens,
         currentReplayScreen = options.currentStepScreen,
@@ -172,6 +254,9 @@ private fun NavigationFlowMap(
         },
         fitToViewTrigger = state.fitToViewTrigger,
         activeContext = options.activeContext,
+        buildLens = selection.lens,
+        buildLabels = selection.buildLabels,
+        clock = options.clock,
       ),
     )
   }
@@ -194,7 +279,12 @@ private fun NavigationScreenDetail(
       transitions = state.navigationGraph?.transitions ?: emptyList(),
       onBack = { state.currentSection = NavigationSection.FlowMap },
       onScreenSelected = navigateToScreen,
-      screenshotLoader = options.screenshotLoader,
+      environment =
+        ScreenDetailEnvironment(
+          options.screenshotLoader,
+          options.activeContext,
+          onTransitionSelected = state::selectTransition,
+        ),
     )
   } else state.currentSection = NavigationSection.FlowMap
 }
@@ -202,16 +292,20 @@ private fun NavigationScreenDetail(
 @Composable
 private fun NavigationTransitionDetail(
   state: NavigationDashboardState,
+  options: NavigationDashboardOptions,
   navigateToScreen: (String) -> Unit,
 ) {
   val transitions = state.navigationGraph?.transitions ?: emptyList()
   val transition =
     transitions.find { it.id == state.selectedTransitionId } ?: transitions.firstOrNull()
   if (transition != null) {
+    val verification = NavigationBuildLens.verification(transition, options.activeContext)
     TransitionDetailView(
       transition = transition,
       onBack = { state.currentSection = NavigationSection.FlowMap },
       onScreenSelected = navigateToScreen,
+      verification = verification,
+      navigateAction = rememberNavigateAction(state, options, transition, verification),
     )
   } else state.currentSection = NavigationSection.FlowMap
 }
@@ -240,4 +334,52 @@ private fun ReadOnlyOfflineBadge(modifier: Modifier = Modifier) {
       fontSize = 11.sp,
     )
   }
+}
+
+/**
+ * The transition detail's navigate action (#16953), or null when the pane has no navigator and is
+ * not a read-only browse. Availability comes only from the edge's verification and [readOnly]; an
+ * enabled action also needs the active context's device to drive.
+ */
+@Composable
+internal fun rememberNavigateAction(
+  state: NavigationDashboardState,
+  options: NavigationDashboardOptions,
+  transition: ScreenTransition,
+  verification: EdgeVerification,
+): TransitionNavigateAction? {
+  val localScope = rememberCoroutineScope()
+  val scope = state.navigationScope ?: localScope
+  val navigator = options.edgeNavigator
+  if (navigator == null && !options.readOnly) return null
+  val deviceId = options.activeContext?.deviceId
+  val availability =
+    EdgeNavigation.availability(verification, options.readOnly).let {
+      if (navigator == null || deviceId == null) EdgeNavigateAvailability.Disabled else it
+    }
+  return TransitionNavigateAction(
+    availability = availability,
+    outcome = state.edgeNavigation,
+    onNavigate = {
+      if (
+        navigator != null &&
+          deviceId != null &&
+          state.edgeNavigation !is EdgeNavigationOutcome.Running
+      ) {
+        val speculative = availability == EdgeNavigateAvailability.Speculative
+        state.edgeNavigation = EdgeNavigationOutcome.Running(transition, speculative)
+        scope.launch {
+          try {
+            val outcome = EdgeNavigation.attempt(navigator, deviceId, transition, availability)
+            state.edgeNavigation = outcome
+            if (outcome is EdgeNavigationOutcome.Reached) options.onEdgeNavigated()
+          } finally {
+            // A cancelled attempt (its scope left composition) must not leave every transition's
+            // action disabled behind a Running outcome.
+            if (state.edgeNavigation is EdgeNavigationOutcome.Running) state.edgeNavigation = null
+          }
+        }
+      }
+    },
+  )
 }

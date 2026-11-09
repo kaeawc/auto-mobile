@@ -94,6 +94,33 @@ describe("IOSCtrlProxyBundleDownloader zip-slip containment (#4761)", function (
       expect(extracted).toBe("hello");
     });
 
+    // Windows has no POSIX exec bit to preserve.
+    test.skipIf(process.platform === "win32")(
+      "keeps the released runner executables executable (#17216)",
+      async function () {
+        // Paths and modes as stored in the published control-proxy.ipa.
+        const app = "Build/Products/Debug-iphonesimulator/CtrlProxyUITests-Runner.app";
+        const runner = `${app}/CtrlProxyUITests-Runner`;
+        const xctest = `${app}/PlugIns/CtrlProxyUITests.xctest/CtrlProxyUITests`;
+        const plist = `${app}/Info.plist`;
+        const zip = new AdmZip();
+        zip.addFile(runner, Buffer.from("runner"), "", 0o755);
+        zip.addFile(xctest, Buffer.from("xctest"), "", 0o755);
+        zip.addFile(plist, Buffer.from("plist"), "", 0o644);
+        const bundlePath = path.join(tempDir, "bundle.zip");
+        await fs.writeFile(bundlePath, zip.toBuffer());
+
+        const destination = path.join(tempDir, "extract");
+        await new DefaultIOSCtrlProxyBundleDownloader().extractBundle(bundlePath, destination);
+
+        const modeOf = async (entry: string) =>
+          (await fs.stat(path.join(destination, entry))).mode & 0o777;
+        expect(await modeOf(runner)).toBe(0o700);
+        expect(await modeOf(xctest)).toBe(0o700);
+        expect(await modeOf(plist)).toBe(0o600);
+      },
+    );
+
     test("refuses to extract an archive with a path-traversal entry (#4761)", async function () {
       const zip = new AdmZip();
       zip.addFile("escapee.txt", Buffer.from("evil"));

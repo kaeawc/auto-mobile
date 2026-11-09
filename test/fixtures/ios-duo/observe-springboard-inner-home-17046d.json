@@ -1,0 +1,111 @@
+{
+  "observationId": "6ed4ecbc-2d1f-4947-afb7-7953c782025c",
+  "deviceId": "A0845D93-73EC-4CE2-AD6F-24AB9BCE0298",
+  "display": {
+    "key": "primary-1",
+    "role": "inner",
+    "posture": "opened",
+    "generation": 5
+  },
+  "updatedAt": 1793929537438,
+  "screenSize": {
+    "width": 951,
+    "height": 669,
+    "units": "points"
+  },
+  "systemInsets": {
+    "top": 0,
+    "right": 0,
+    "bottom": 0,
+    "left": 0
+  },
+  "insets": {
+    "available": false,
+    "displayCutoutInfo": {
+      "classification": "unknown"
+    },
+    "source": "unavailable",
+    "units": "unknown"
+  },
+  "rotation": 1,
+  "activeWindow": {
+    "appId": "com.apple.springboard",
+    "activityName": "",
+    "layoutSeqSum": 0
+  },
+  "otherDisplays": [
+    {
+      "key": "primary",
+      "role": "cover",
+      "size": {
+        "width": 1398,
+        "height": 2034
+      }
+    }
+  ],
+  "accessibilityState": {
+    "enabled": false,
+    "service": "unknown"
+  },
+  "freshness": {
+    "actualTimestamp": 1793929537438,
+    "ageMs": 503,
+    "verified": true,
+    "isFresh": true
+  },
+  "deviceLock": {
+    "locked": false,
+    "keyguardShowing": false
+  },
+  "snapshotReference": {
+    "snapshotId": "1785101e-2c2d-422f-b364-db460572cdd2",
+    "expiresAt": 1793929837942
+  },
+  "skeleton": [
+    {
+      "bounds": [69, 52, 137, 138],
+      "affordances": ["tap"],
+      "elementId": "Settings",
+      "label": "Settings"
+    },
+    {
+      "bounds": [813, 20, 899, 93],
+      "affordances": ["tap"],
+      "elementId": "CtrlProxy",
+      "label": "CtrlProxy"
+    },
+    {
+      "bounds": [872, 347, 936, 411],
+      "affordances": ["tap"],
+      "elementId": "Safari",
+      "label": "Safari"
+    },
+    {
+      "bounds": [880, 597, 928, 645],
+      "affordances": ["tap"],
+      "elementId": "spotlight-search-button",
+      "label": "Options"
+    },
+    {
+      "bounds": [894, 70, 913, 84],
+      "affordances": ["tap"],
+      "elementId": "s2-d1452c15b9d67022",
+      "label": "wifi_68_status_bar_C2"
+    }
+  ],
+  "context": [
+    {
+      "bounds": [880, 355, 928, 403],
+      "affordances": [],
+      "elementId": "user icon list view",
+      "label": "Dock"
+    },
+    {
+      "bounds": [886, 30, 921, 49],
+      "affordances": [],
+      "elementId": "s2-96b3382bad880bbd",
+      "label": "7:45 PM"
+    }
+  ],
+  "observationScreenshotResourceUri": "automobile:observation/A0845D93-73EC-4CE2-AD6F-24AB9BCE0298/6ed4ecbc-2d1f-4947-afb7-7953c782025c/screenshot"
+}

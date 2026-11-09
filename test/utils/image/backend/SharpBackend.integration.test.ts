@@ -163,6 +163,82 @@ describe("SharpBackend", () => {
         "toBuffer",
       ]);
     });
+
+    test("materializes rotation as raw pixels so the resize runs before the only encode", async () => {
+      const events: string[] = [];
+      const backend = new SharpBackend({
+        loadSharp: async () => makeRecordingSharpFactory(events),
+      });
+
+      await backend.execute(Buffer.from("source"), {
+        operations: [
+          { type: "rotate", degrees: 90 },
+          { type: "resize", width: 2, maintainAspectRatio: true },
+        ],
+        encoding: { mime: "image/webp", options: { quality: 60 } },
+      });
+
+      expect(events).toEqual([
+        "sharp:source",
+        "rotate:90",
+        "raw",
+        "toBuffer",
+        'sharp:rawpixels:raw{"width":3,"height":3,"channels":4}',
+        'resize:{"width":2}',
+        'webp:{"quality":60}',
+        "toBuffer",
+      ]);
+    });
+
+    test("pins an unspecified encoding to the source format after a raw materialization", async () => {
+      const events: string[] = [];
+      const backend = new SharpBackend({
+        loadSharp: async () => makeRecordingSharpFactory(events),
+      });
+      const jpegHeader = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+
+      await backend.execute(jpegHeader, {
+        operations: [
+          { type: "rotate", degrees: 180 },
+          { type: "resize", width: 2, maintainAspectRatio: true },
+        ],
+        encoding: null,
+      });
+
+      expect(events.slice(1)).toEqual([
+        "rotate:180",
+        "raw",
+        "toBuffer",
+        'sharp:rawpixels:raw{"width":3,"height":3,"channels":4}',
+        'resize:{"width":2}',
+        "jpeg:{}",
+        "toBuffer",
+      ]);
+    });
+
+    test("keeps an encoded intermediate when the source format is unknown and no encoding is set", async () => {
+      const events: string[] = [];
+      const backend = new SharpBackend({
+        loadSharp: async () => makeRecordingSharpFactory(events),
+      });
+
+      await backend.execute(Buffer.from("source"), {
+        operations: [
+          { type: "rotate", degrees: 90 },
+          { type: "resize", width: 2, maintainAspectRatio: true },
+        ],
+        encoding: null,
+      });
+
+      expect(events).toEqual([
+        "sharp:source",
+        "rotate:90",
+        "toBuffer",
+        "sharp:encoded",
+        'resize:{"width":2}',
+        "toBuffer",
+      ]);
+    });
   });
 });
 

@@ -87,6 +87,7 @@ describe("TapOnElement VoiceOver mode", () => {
           fakeIosClient.setTapResult({
             success: false,
             error: "Tap timed out after 5000ms",
+            totalTimeMs: 5000,
             dispatched: true,
             acknowledged: false,
           });
@@ -166,6 +167,7 @@ describe("TapOnElement VoiceOver mode", () => {
         fakeIosClient.setTapResult({
           success: false,
           error: "Tap timed out after 5000ms",
+          totalTimeMs: 5000,
           dispatched: true,
           acknowledged: false,
         });

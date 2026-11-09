@@ -15,6 +15,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>AMRenderCompleteSignal</key><true/>
     <key>CFBundleIdentifier</key><string>dev.jasonpearson.automobile.prototype-viewer</string>
     <key>CFBundleName</key><string>Prototype</string>
     <key>CFBundleDisplayName</key><string>Prototype</string>

@@ -134,10 +134,113 @@ private struct ViewerRenderer: UIViewControllerRepresentable {
     let model: PrototypeModel
 
     func makeUIViewController(context _: Context) -> PrototypeContentController {
-        PrototypeContentController(model: model, geometry: .window, accessibilityNotification: .screenChanged)
+        ViewerContentController(model: model)
     }
 
     func updateUIViewController(_ controller: PrototypeContentController, context _: Context) {
         controller.syncAppearance()
+    }
+}
+
+/// Only the standalone viewer emits the recorder handshake; embedded hosts use the base controller.
+@MainActor
+private final class ViewerContentController: PrototypeContentController {
+    private let signal = PrototypeRenderCompleteSignal(
+        documents: URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Documents"),
+        frames: ViewerRenderFrameSource()
+    )
+    private var revision: Int?
+    private var appeared = false
+    private var pendingRevision: Int?
+
+    init(model: PrototypeModel) {
+        super.init(model: model, geometry: .window, accessibilityNotification: .screenChanged)
+    }
+
+    override func syncAppearance() {
+        if revision != model.showRevision, let spec = model.spec {
+            revision = model.showRevision
+            pendingRevision = nil
+            do {
+                try signal.beginShow(specId: spec.id, revision: model.showRevision)
+            } catch {
+                NSLog("Prototype render marker reset failed: %@", String(describing: error))
+            }
+            view.setNeedsLayout()
+        }
+        super.syncAppearance()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        appeared = true
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        appeared = false
+        pendingRevision = nil
+        signal.cancelPolling()
+        super.viewDidDisappear(animated)
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        guard appeared, let revision, pendingRevision != revision, let spec = model.spec else { return }
+        pendingRevision = revision
+        // Let the first presented layout commit before advertising screenshot readiness.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, appeared, view.window != nil, model.showRevision == revision else { return }
+            signal.rendered(specId: spec.id, revision: revision, hasAnimations: { [weak self] in
+                guard let self, appeared, view.window != nil,
+                      model.showRevision == revision, model.spec?.id == spec.id else { return nil }
+                return Self.hasAnimations(in: view.layer)
+            }, onError: { error in
+                NSLog("Prototype render marker write failed: %@", String(describing: error))
+            })
+        }
+    }
+
+    private static func hasAnimations(in layer: CALayer) -> Bool {
+        if let keys = layer.animationKeys(), !keys.isEmpty { return true }
+        return layer.sublayers?.contains(where: { hasAnimations(in: $0) }) ?? false
+    }
+}
+
+@MainActor
+private final class ViewerRenderFrameSource: PrototypeRenderFrameSource {
+    private var link: CADisplayLink?
+    private var frame: (@MainActor () -> Void)?
+
+    func start(_ frame: @escaping @MainActor () -> Void) {
+        stop()
+        self.frame = frame
+        let target = Target()
+        target.source = self
+        let link = CADisplayLink(target: target, selector: #selector(Target.tick(_:)))
+        self.link = link
+        link.add(to: .main, forMode: .common)
+    }
+
+    func stop() {
+        link?.invalidate()
+        link = nil
+        frame = nil
+    }
+
+    /// The run loop retains the link and target, but must not retain a discarded viewer's source.
+    @MainActor
+    private final class Target: NSObject {
+        weak var source: ViewerRenderFrameSource?
+
+        @objc
+        func tick(_ link: CADisplayLink) {
+            guard let source else {
+                link.invalidate()
+                return
+            }
+            source.frame?()
+        }
     }
 }

@@ -28,9 +28,14 @@ while [[ $# -gt 0 ]]; do
 done
 [[ "$(uname -s)" == Darwin ]] || fail 'macOS is required'
 [[ -d "${viewer}" ]] || fail "viewer app not found: ${viewer}; run scripts/ios/prototype-viewer-build.sh"
-for command in bun jq xcrun sips; do
+for command in bun jq xcrun sips plutil; do
   command -v "${command}" >/dev/null || fail "required command not found: ${command}"
 done
+render_signal="$(plutil -extract AMRenderCompleteSignal raw -o - "${viewer}/Info.plist" 2>/dev/null || true)"
+render_timeout="${PROTOTYPE_RENDER_TIMEOUT_SECONDS:-15}"
+if [[ "${render_signal}" == true ]]; then
+  render_polls="$(jq -enr --arg value "${render_timeout}" '$value | tonumber | select(. > 0 and . < 214748364) | . * 10 | ceil')" || fail 'PROTOTYPE_RENDER_TIMEOUT_SECONDS must be a positive number below 214748364'
+fi
 
 devices="$(xcrun simctl list devices --json)"
 device="$(jq -cer --arg udid "${udid}" '[.devices[][] | select((.udid | ascii_upcase) == ($udid | ascii_upcase))] | if length == 1 then .[0] else error("device not found or ambiguous") end' <<< "${devices}")" || fail "device does not exist: ${udid}"
@@ -85,9 +90,21 @@ while IFS=$'\t' read -r golden mode; do
   mkdir -p "${container}/Documents/prototype"
   printf '%s\n' '{"formatVersion":1,"specFile":"spec.json","assets":[],"fonts":[]}' > "${container}/Documents/prototype/manifest.json"
   cp "${tmp_dir}/${golden}.json" "${container}/Documents/prototype/spec.json"
+  marker="${container}/Documents/prototype/render-complete"
+  rm -f "${marker}"
   running=1
   xcrun simctl launch "${udid}" "${bundle}"
-  sleep 2
+  if [[ "${render_signal}" == true ]]; then
+    polls=0
+    while [[ ! -f "${marker}" ]]; do
+      [[ "${polls}" -lt "${render_polls}" ]] || fail "timed out waiting for render signal for ${golden} after ${render_timeout}s"
+      sleep 0.1
+      polls=$((polls + 1))
+    done
+  else
+    printf 'prototype-record-goldens: viewer does not emit a render signal; falling back to fixed 2s wait for %s\n' "${golden}" >&2
+    sleep 2
+  fi
   xcrun simctl io "${udid}" screenshot --type=png "${tmp_dir}/screen.png"
   check_size "${tmp_dir}/screen.png" 1179 2556
   # man sips: --cropOffset offsetY offsetH; --cropToHeightWidth pixelsH pixelsW.

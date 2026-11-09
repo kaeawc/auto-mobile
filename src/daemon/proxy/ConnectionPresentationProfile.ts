@@ -43,12 +43,15 @@ export interface PresentationUpdate {
 }
 
 export function connectionPresentationUpdates(
-  enabledTools: string[],
-  disabledTools: string[],
-  toolResultsNoStructuredContent: boolean | undefined,
-  actionsCompactMetadata: boolean | undefined,
-  prototypeFullSchema?: boolean,
+  options: ConnectionPresentationOptions | undefined,
 ): PresentationUpdate[] {
+  const {
+    enabledTools = [],
+    disabledTools = [],
+    toolResultsNoStructuredContent,
+    actionsCompactMetadata,
+    prototypeFullSchema,
+  } = options ?? {};
   if (
     enabledTools.length === 0 &&
     disabledTools.length === 0 &&
@@ -87,20 +90,9 @@ export async function applyConnectionPresentationProfile(
   options: ConnectionPresentationOptions | undefined,
   port: ConnectionPresentationProfilePort,
 ): Promise<void> {
-  const {
-    enabledTools = [],
-    disabledTools = [],
-    toolResultsNoStructuredContent,
-    actionsCompactMetadata,
-    prototypeFullSchema,
-  } = options ?? {};
-  const updates = connectionPresentationUpdates(
-    enabledTools,
-    disabledTools,
-    toolResultsNoStructuredContent,
-    actionsCompactMetadata,
-    prototypeFullSchema,
-  );
+  const { toolResultsNoStructuredContent, actionsCompactMetadata, prototypeFullSchema } =
+    options ?? {};
+  const updates = connectionPresentationUpdates(options);
 
   for (const update of updates) {
     const requestedArgs = {

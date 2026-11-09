@@ -1013,6 +1013,12 @@ jobs:
           path: ~/.cache/auto-mobile/tools/shfmt
           key: tool-download-shfmt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/shellcheck/shfmt_version.sh') }}
 
+      - name: "Cache pinned lychee download"
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/auto-mobile/tools/lychee
+          key: tool-download-lychee-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/lychee/lychee_version.sh') }}
+
       # The documentation build consumes scripts/github/uv.lock after merge.
       # Start its independent toolchain setup now so the required Fast Validation
       # job can validate that lockfile before a PR lands.
@@ -1165,6 +1171,15 @@ jobs:
           lfs: false
           # Full history so `origin/<base>...HEAD` has a merge-base.
           fetch-depth: 0
+
+      # The dependency helper below installs lychee through the pinned,
+      # checksum-verified release download; restore its cache first so a GitHub
+      # release outage cannot fail this job once lychee is cached (#17641).
+      - name: "Cache pinned lychee download"
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/auto-mobile/tools/lychee
+          key: tool-download-lychee-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/lychee/lychee_version.sh') }}
 
       # prepush-shell.sh selects the same fast-validate checks Fast Validation
       # runs (xml needs xmlstarlet, lychee-offline needs lychee), so install

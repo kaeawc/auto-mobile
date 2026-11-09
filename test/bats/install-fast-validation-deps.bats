@@ -130,18 +130,36 @@ STUB
   [[ "$output" == *"Fast Validation dependencies ready"* ]]
 }
 
-@test "retries a transiently-failing lychee install and then succeeds" {
+@test "runs the lychee installer once, since it owns its download backoff" {
   make_apt_get 0
   export LYCHEE_FAIL_FIRST=1
   run bash "$SCRIPT"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"install lychee (attempt 2/2"* ]]
-  [[ "$output" == *"Fast Validation dependencies ready"* ]]
-  [ "$(cat "$LYCHEE_STATE_FILE")" -eq 2 ]
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"install lychee (timeout 150s"* ]]
+  [[ "$output" == *"install lychee failed with exit 1"* ]]
+  [ "$(cat "$LYCHEE_STATE_FILE")" -eq 1 ]
+}
+
+@test "bounds a hanging lychee install with its own timeout" {
+  make_apt_get 0
+  cat > "${MOCK_BIN}/timeout" <<'STUB'
+#!/usr/bin/env bash
+if [ "$1" = "-k" ]; then shift 2; fi
+seconds="$1"
+shift
+if [ "$seconds" = "${MOCK_TIMEOUT_EXPIRE_SECONDS:-}" ]; then
+  exit 124
+fi
+"$@"
+STUB
+  run env MOCK_TIMEOUT_EXPIRE_SECONDS=7 FAST_VALIDATION_DEPS_LYCHEE_TIMEOUT_SECONDS=7 bash "$SCRIPT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"install lychee timed out after 7s"* ]]
 }
 
 @test "default retry budget fits the documented 15-minute step timeout" {
-  # Worst case = each retrying operation x (MAX_ATTEMPTS x (CMD_TIMEOUT + KILL_GRACE) + delays).
+  # Worst case = each retrying operation x (MAX_ATTEMPTS x (CMD_TIMEOUT + KILL_GRACE) + delays)
+  # + the single lychee install (LYCHEE_TIMEOUT + KILL_GRACE).
   # Guard the arithmetic so a future default bump cannot silently exceed the
   # workflow step's timeout-minutes backstop.
   local cmd_timeout kill_grace attempts base_delay
@@ -157,8 +175,11 @@ STUB
   local operation_count step_timeout_minutes
   operation_count=$(grep -cE '^[[:space:]]*(run_capture_status )?(run|try)_with_retry "[^$]' "$SCRIPT")
   step_timeout_minutes=$(grep -oE 'timeout-minutes: [0-9]+' "$SCRIPT" | head -1 | grep -oE '[0-9]+$')
-  [ "$operation_count" -eq 6 ]
-  local worst_case=$((operation_count * (attempts * (cmd_timeout + kill_grace) + delays)))
+  [ "$operation_count" -eq 5 ]
+  # The lychee install runs once under its own timeout (#17641).
+  local lychee_timeout
+  lychee_timeout=$(grep -oE 'LYCHEE_TIMEOUT_SECONDS:-[0-9]+' "$SCRIPT" | grep -oE '[0-9]+$')
+  local worst_case=$((operation_count * (attempts * (cmd_timeout + kill_grace) + delays) + lychee_timeout + kill_grace))
   echo "worst_case=${worst_case}s"
   [ "$worst_case" -le "$((step_timeout_minutes * 60))" ]
 }

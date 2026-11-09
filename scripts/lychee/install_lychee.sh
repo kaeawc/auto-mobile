@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 
-LYCHEE_VERSION="0.22.0" # Change this to the desired version
+# shellcheck source=scripts/lychee/lychee_version.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lychee_version.sh"
+# Cached, checksum-verified, backed-off release download (#17641).
+# shellcheck source=scripts/lib/release-download.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/release-download.sh"
 
 # Shared colors + command_exists + detect_os/detect_arch (issue #2822).
 # detect_arch echoes the canonical "arm64" token for aarch64/arm64 hosts (the
@@ -172,27 +176,23 @@ install_manual() {
     # Download URL - tag is "lychee-v${VERSION}" but asset names don't include version
     download_url="https://github.com/lycheeverse/lychee/releases/download/lychee-v${LYCHEE_VERSION}/${binary_name}"
 
-    echo -e "${GREEN}Downloading lychee binary from GitHub releases...${NC}"
+    local expected_sha
+    if ! expected_sha="$(lychee_release_sha256 "$binary_name")"; then
+        echo -e "${RED}No pinned checksum for lychee ${LYCHEE_VERSION} asset ${binary_name}; add it to lychee_version.sh.${NC}"
+        return 1
+    fi
+
+    echo -e "${GREEN}Fetching lychee ${LYCHEE_VERSION} from GitHub releases...${NC}"
     echo "URL: $download_url"
 
     # Create temporary directory
     temp_dir=$(mktemp -d)
     trap 'rm -rf "$temp_dir"' EXIT
 
-    # Download the archive
-    if command_exists curl; then
-        if ! curl -fL -o "$temp_dir/$binary_name" "$download_url"; then
-            echo -e "${RED}Failed to download lychee binary${NC}"
-            return 1
-        fi
-    elif command_exists wget; then
-        if ! wget -O "$temp_dir/$binary_name" "$download_url"; then
-            echo -e "${RED}Failed to download lychee binary${NC}"
-            return 1
-        fi
-    else
-        echo -e "${RED}Neither curl nor wget found. Please install one of them or download manually from:${NC}"
-        echo "$download_url"
+    # Reuses a cached asset whose SHA-256 matches the pin, else downloads with a
+    # bounded backoff and verifies the checksum before installing or caching.
+    if ! release_fetch_pinned "$download_url" "$expected_sha" "$temp_dir/$binary_name" "lychee/${LYCHEE_VERSION}"; then
+        echo -e "${RED}Failed to download lychee binary${NC}"
         return 1
     fi
 

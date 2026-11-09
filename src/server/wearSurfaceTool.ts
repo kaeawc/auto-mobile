@@ -138,11 +138,15 @@ export function surfaceSnapshot(
 }
 
 /** Hierarchy plus foreground app; screenshots and fingerprint changes are not tile evidence. */
-function deviceObserver(device: BootedDevice): SurfaceObserver {
+export function createDeviceObserver(
+  device: BootedDevice,
+  createScreen: (
+    ...args: ConstructorParameters<typeof RealObserveScreen>
+  ) => Pick<RealObserveScreen, "execute"> = (...args) => new RealObserveScreen(...args),
+): SurfaceObserver {
   return async (signal) => {
-    const observation = await new RealObserveScreen(device, undefined, {
-      deviceReadOnly: true,
-    }).execute({
+    // Tile controls own the caller's session; deviceReadOnly would bypass its live hierarchy.
+    const observation = await createScreen(device).execute({
       skipScreenshot: true,
       skipBackStack: true,
       requireFreshExtraction: true,
@@ -157,7 +161,7 @@ const defaultWearSurfaceFactory: WearSurfaceFactory = (device) => {
   return new AdbWearSurface({
     adb,
     timer: defaultTimer,
-    observe: deviceObserver(device),
+    observe: createDeviceObserver(device),
     tileProviders: new AdbTileProviderLister(adb),
   });
 };

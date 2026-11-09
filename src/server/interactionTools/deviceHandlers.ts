@@ -69,6 +69,7 @@ export async function pressButtonHandler(
       signal,
       steps: args.steps,
       durationMs: args.durationMs,
+      display: args.display,
     });
 
     const message = result.success

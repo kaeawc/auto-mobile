@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<sync-adapter xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accountType="dev.jasonpearson.automobile.contentseeder"
+    android:contentAuthority="com.android.calendar"
+    android:isAlwaysSyncable="false"
+    android:supportsUploading="false"
+    android:userVisible="false" />

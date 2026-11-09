@@ -136,3 +136,25 @@ assert_runtime_archive() {
   [[ "$output" == *"Products directory not found:"* ]]
   [ "$(cat "$OUTPUT_PATH")" = 'existing archive' ]
 }
+
+@test "absolute Products symlink is staged as a copy and the source tree is untouched" {
+  local real_products="${TEST_ROOT}/real-products"
+  local link_build="${TEST_ROOT}/Linked/Build"
+  mv "$PRODUCTS" "$real_products"
+  mkdir -p "$link_build"
+  ln -s "$real_products" "${link_build}/Products"
+  local before
+  before="$(cd "$real_products" && find . | LC_ALL=C sort)"
+
+  run bash "$SCRIPT" --products "$link_build" --output "$OUTPUT_PATH"
+  [ "$status" -eq 0 ]
+
+  [ "$(cd "$real_products" && find . | LC_ALL=C sort)" = "$before" ]
+  [ -f "${real_products}/Debug-iphonesimulator/AutoMobileSdkWire.o" ]
+  [ -d "${real_products}/Debug-iphonesimulator/AutoMobileTest.swiftmodule" ]
+  unpack_archive
+  [ ! -L "${UNPACKED}/Build/Products" ]
+  [ -d "${UNPACKED}/Build/Products/Debug-iphonesimulator/AutoMobileTest.app" ]
+  [ ! -e "${UNPACKED}/Build/Products/Debug-iphonesimulator/AutoMobileSdkWire.o" ]
+  [ ! -e "${UNPACKED}/Build/Products/Debug-iphonesimulator/AutoMobileTest.swiftmodule" ]
+}

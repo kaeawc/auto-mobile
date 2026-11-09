@@ -49,25 +49,42 @@ PRODUCTS_PARENT="$(cd "$PRODUCTS_PARENT" && pwd)"
 mkdir -p "$(dirname "$OUTPUT_PATH")"
 OUTPUT_PATH="$(cd "$(dirname "$OUTPUT_PATH")" && pwd)/$(basename "$OUTPUT_PATH")"
 
+# Resolve a symlinked Products root (relative or absolute) to its real
+# directory so staging holds a real copy, never a link back into the build.
+PRODUCTS_SOURCE="$(cd "${PRODUCTS_PARENT}/Products" && pwd -P)"
+
 STAGING_DIR="$(mktemp -d)"
 trap 'rm -rf "$STAGING_DIR"' EXIT
-mkdir -p "${STAGING_DIR}/Build"
-cp -pR "${PRODUCTS_PARENT}/Products" "${STAGING_DIR}/Build/Products"
+STAGING_DIR="$(cd "$STAGING_DIR" && pwd -P)"
+STAGED_PRODUCTS="${STAGING_DIR}/Build/Products"
+mkdir -p "$STAGED_PRODUCTS"
+cp -pR "${PRODUCTS_SOURCE}/." "$STAGED_PRODUCTS/"
+
+# Refuse to delete anything whose real location is outside the staging copy.
+prune_staged() {
+    local target="$1" real_parent
+    real_parent="$(cd "$(dirname "$target")" && pwd -P)"
+    if [[ -L "$target" || "${real_parent}/" != "${STAGED_PRODUCTS}/"* ]]; then
+        echo "Refusing to prune path outside staging: ${target}" >&2
+        exit 1
+    fi
+    rm -rf -- "${real_parent:?}/$(basename "$target")"
+}
 
 if [[ "$FULL_DEBUG" != 1 ]]; then
     shopt -s nullglob dotglob
     # Only immediate entries of each configuration are build-time artifacts.
     # Never descend into app, test, framework, or package bundles to filter.
-    for configuration in "${STAGING_DIR}/Build/Products"/*; do
+    for configuration in "$STAGED_PRODUCTS"/*; do
         [[ -d "$configuration" && ! -L "$configuration" ]] || continue
         for module in "$configuration"/*.swiftmodule; do
-            if [[ -d "$module" ]]; then
-                rm -rf "$module"
+            if [[ -d "$module" && ! -L "$module" ]]; then
+                prune_staged "$module"
             fi
         done
         for object in "$configuration"/*.o; do
-            if [[ -f "$object" ]]; then
-                rm -f "$object"
+            if [[ -f "$object" && ! -L "$object" ]]; then
+                prune_staged "$object"
             fi
         done
     done

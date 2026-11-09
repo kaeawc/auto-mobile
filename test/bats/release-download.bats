@@ -137,3 +137,36 @@ curl_calls() { wc -l < "$CURL_LOG" | tr -d ' '; }
   [ "$(cat "$DEST")" = "$CURL_BODY" ]
   [ "$(cat "$CACHE_FILE")" = "$CURL_BODY" ]
 }
+
+@test "wget fallback: a 404 fails at once without the upstream-failure marker" {
+  # Hide curl so the helper uses wget; GNU wget -nv reports "ERROR 404: Not Found." and exits 8.
+  rm "$STUB_BIN/curl"
+  cat > "$STUB_BIN/wget" <<'STUB'
+#!/usr/bin/env bash
+echo "$*" >> "$CURL_LOG"
+echo "https://example/x: 2026-11-09 06:00:00 ERROR 404: Not Found." >&2
+exit 8
+STUB
+  chmod +x "$STUB_BIN/wget"
+  # A PATH with no real curl: only the tools the helper needs, linked in.
+  local tool
+  for tool in bash mktemp cat tail grep rm; do
+    ln -s "$(command -v "$tool")" "$STUB_BIN/$tool"
+  done
+  run env PATH="$STUB_BIN" bash -c 'source "$1"; release_download_with_backoff "$2" "$3"' _ "$LIB" "$URL" "$DEST"
+  [ "$status" -eq 1 ]
+  [ "$(curl_calls)" -eq 1 ]
+  [ ! -s "$SLEEP_LOG" ]
+  [[ "$output" == *"HTTP 404; not retrying"* ]]
+  [[ "$output" != *"UPSTREAM-DOWNLOAD-FAILURE"* ]]
+}
+
+@test "installed assets get the umask default mode, not mktemp's 0600" {
+  run bash -c 'umask 022; source "$1"; release_fetch_pinned "$2" "$3" "$4" "$5"' _ "$LIB" "$URL" "$GOOD_SHA" "$DEST" "tool/1.0"
+  [ "$status" -eq 0 ]
+  [ "$(ls -l "$DEST" | cut -c1-10)" = "-rw-r--r--" ]
+  rm "$DEST"
+  run bash -c 'umask 022; source "$1"; release_fetch_pinned "$2" "$3" "$4" "$5"' _ "$LIB" "$URL" "$GOOD_SHA" "$DEST" "tool/1.0"
+  [[ "$output" == *"Using cached"* ]]
+  [ "$(ls -l "$DEST" | cut -c1-10)" = "-rw-r--r--" ]
+}

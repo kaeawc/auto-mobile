@@ -97,20 +97,25 @@ release_download_with_backoff() {
       # -f: an HTTP error exits 22 instead of saving an error page as the asset.
       curl -fsSL --connect-timeout 15 --max-time 600 -o "$out" "$url" 2> "$err_file" || rc=$?
     else
-      wget -q -T 60 -O "$out" "$url" 2> "$err_file" || rc=$?
+      # -nv keeps wget's "ERROR <status>: ..." line so a 4xx is recognized below.
+      wget -nv -T 60 -O "$out" "$url" 2> "$err_file" || rc=$?
     fi
     if ((rc == 0)); then
       rm -f "$err_file"
       return 0
     fi
     cat "$err_file" >&2
-    last_error="$(tail -n 1 "$err_file")"
+    last_error="$(grep -E 'returned error: [0-9]{3}|ERROR [0-9]{3}' "$err_file" | tail -n 1 || true)"
+    if [[ -z "$last_error" ]]; then
+      last_error="$(tail -n 1 "$err_file")"
+    fi
     rm -f "$out"
     # A 4xx other than 408/429 means a wrong URL or pin, not an outage; retrying
     # cannot help, so fail now without the upstream-failure marker.
-    if [[ "$last_error" =~ returned\ error:\ (4[0-9][0-9]) && "${BASH_REMATCH[1]}" != 408 && "${BASH_REMATCH[1]}" != 429 ]]; then
+    # curl -f says "returned error: 404"; wget -nv says "ERROR 404: Not Found."
+    if [[ "$last_error" =~ (returned\ error:|ERROR)\ (4[0-9][0-9]) && "${BASH_REMATCH[2]}" != 408 && "${BASH_REMATCH[2]}" != 429 ]]; then
       rm -f "$err_file"
-      echo "Download of ${url} failed with HTTP ${BASH_REMATCH[1]}; not retrying. Check the pinned version and asset name." >&2
+      echo "Download of ${url} failed with HTTP ${BASH_REMATCH[2]}; not retrying. Check the pinned version and asset name." >&2
       return 1
     fi
     if ((attempt >= attempts)); then
@@ -124,6 +129,12 @@ release_download_with_backoff() {
   rm -f "$err_file"
   echo "${UPSTREAM_DOWNLOAD_FAILURE_MARKER} ${url} failed after ${attempts} attempts (last error: ${last_error:-exit ${rc}}). This is an upstream download failure, not a code change; rerun once the host recovers." >&2
   return 1
+}
+
+# mktemp creates 0600 files; give an installed asset the caller's umask default
+# (usually 0644) so other users can run it, e.g. `java -jar` on a shared JAR.
+release_apply_umask_mode() {
+  chmod "$(printf '%o' $((0666 & ~$(umask))))" "$1"
 }
 
 # release_fetch_pinned <url> <expected-sha256> <dest-file> <cache-namespace>
@@ -141,6 +152,7 @@ release_fetch_pinned() {
 
   if [[ -f "$cache_file" ]]; then
     if release_verify_sha256 "$cache_file" "$sha" && cp "$cache_file" "$tmp" && release_verify_sha256 "$tmp" "$sha"; then
+      release_apply_umask_mode "$tmp"
       mv -f "$tmp" "$dest"
       echo "Using cached ${url##*/} (sha256 ${sha}) from ${cache_dir}" >&2
       return 0
@@ -158,6 +170,7 @@ release_fetch_pinned() {
     rm -f "$tmp"
     return 1
   fi
+  release_apply_umask_mode "$tmp"
   mv -f "$tmp" "$dest"
 
   # Caching is an optimization; a read-only or full cache dir must not fail the install.

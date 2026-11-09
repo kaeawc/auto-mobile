@@ -19,6 +19,7 @@ source "${SCRIPT_DIR}/../lib/vcs-diff.sh"
 
 RUNNER_PATHS=(android/control-proxy ios/control-proxy)
 HOST_PATHS=(src)
+DIFF_HELPER="${RUNNER_CAPABILITY_DIFF_TS:-${SCRIPT_DIR}/runner-capability-diff.ts}"
 RELEASE_GUIDE="scripts/release/check-artifact-capabilities.ts (release-candidate gate) and .github/workflows/prepare-release.yml (release and pin)"
 
 BASE="origin/main"
@@ -30,8 +31,9 @@ Usage: scripts/release/runner-capability-note.sh [--base <ref>] [--help]
 
 Prints a non-blocking note when the diff since the merge-base with <ref>
 (default origin/main, then main), including staged, unstaged and untracked
-edits, adds a versioned capability under android/control-proxy/ or
-ios/control-proxy/ and also adds src/ code that uses it. Always exits 0.
+edits, touches android/control-proxy/ or ios/control-proxy/, makes the
+CtrlProxy APK or iOS runner advertise a new capability, and adds src/ code that
+gates on it (scanned like the release gate). Always exits 0.
 EOF
 }
 
@@ -76,54 +78,58 @@ if ! vcs_base_exists "$BASE"; then
   fi
 fi
 
-# Prints a unified diff (merge-base -> working tree) for the given paths, with
-# untracked files rendered as wholly added.
-working_tree_diff() {
-  local base_ref merge_base path
-  base_ref="$(vcs_base_ref "$BASE")"
+# Changed paths (merge-base -> working tree, untracked included) under the
+# given pathspecs. Color is forced off so user config cannot alter the output.
+changed_paths() {
   if vcs_uses_jj; then
-    jj diff --from "fork_point(@ | ${base_ref})" --to @ --git -- "$@"
+    jj diff --from "$base_rev" --to @ --name-only --color=never -- "$@"
     return
   fi
-  merge_base="$(git merge-base "$base_ref" HEAD)" || return 1
-  git diff --no-renames --no-ext-diff -U0 "$merge_base" -- "$@" || return 1
-  while IFS= read -r path; do
-    [[ -f "$path" ]] || continue
-    printf '+++ b/%s\n' "$path"
-    sed 's/^/+/' "$path"
-  done < <(git ls-files --others --exclude-standard -- "$@")
+  git -c color.ui=never diff --no-color --no-renames --no-ext-diff --name-only "$base_rev" -- "$@" || return 1
+  git ls-files --others --exclude-standard -- "$@"
 }
 
-# Versioned capability literals ("name_v1") on diff lines with the given
-# sign (+ or -), excluding the +++/--- file headers.
-capabilities_on() {
-  local sign="$1"
-  awk -v s="$sign" 'substr($0, 1, 1) == s && substr($0, 1, 4) != s s s " "' |
-    grep -oE '"[a-z][a-z0-9]*(_[a-z0-9]+)*_v[0-9]+"' | tr -d '"' | sort -u
-}
+base_ref="$(vcs_base_ref "$BASE")"
+if vcs_uses_jj; then
+  vcs=jj
+  base_rev="fork_point(@ | ${base_ref})"
+else
+  vcs=git
+  if ! base_rev="$(git merge-base "$base_ref" HEAD)"; then
+    note "no merge-base with '$BASE'; skipping."
+    exit 0
+  fi
+fi
 
-if ! runner_diff="$(working_tree_diff "${RUNNER_PATHS[@]}")"; then
+if ! runner_changes="$(changed_paths "${RUNNER_PATHS[@]}")"; then
   note "could not diff against '$BASE'; skipping."
   exit 0
 fi
-[[ -n "$runner_diff" ]] || exit 0
+[[ -n "$runner_changes" ]] || exit 0
 
-added="$(printf '%s\n' "$runner_diff" | capabilities_on +)"
-removed="$(printf '%s\n' "$runner_diff" | capabilities_on -)"
-# A literal both removed and re-added is a move or reformat, not a new capability.
-new_capabilities="$(comm -23 <(printf '%s\n' "$added" | sed '/^$/d') <(printf '%s\n' "$removed" | sed '/^$/d'))"
-[[ -n "$new_capabilities" ]] || exit 0
-
-if ! host_diff="$(working_tree_diff "${HOST_PATHS[@]}")"; then
+if ! host_changes="$(changed_paths "${HOST_PATHS[@]}")"; then
   note "could not diff host sources against '$BASE'; skipping."
   exit 0
 fi
-host_added="$(printf '%s\n' "$host_diff" | capabilities_on +)"
-used="$(comm -12 <(printf '%s\n' "$new_capabilities") <(printf '%s\n' "$host_added" | sed '/^$/d'))"
+host_files=()
+while IFS= read -r path; do
+  case "$path" in *.ts | *.tsx | *.mts | *.cts) host_files+=("$path") ;; esac
+done < <(printf '%s\n' "$host_changes" | sort -u)
+[[ "${#host_files[@]}" -gt 0 ]] || exit 0
+
+if ! command -v bun >/dev/null 2>&1; then
+  note "bun not found; skipping."
+  exit 0
+fi
+# The helper reuses the release gate's runner parsers and host AST scanner.
+if ! used="$(bun "$DIFF_HELPER" --vcs "$vcs" --base-rev "$base_rev" "${host_files[@]}")"; then
+  note "capability diff helper failed; skipping."
+  exit 0
+fi
 [[ -n "$used" ]] || exit 0
 
 while IFS= read -r capability; do
-  message="'${capability}' is new in control-proxy sources and this change adds host code that uses it. The daemon downloads the runner pinned in src/constants/release.ts, so the feature takes effect only after the next runner release and pin; until then the host gate fails closed. See ${RELEASE_GUIDE}."
+  message="'${capability}' is newly advertised by control-proxy sources and this change adds host code that gates on it. The daemon downloads the runner pinned in src/constants/release.ts, so the feature takes effect only after the next runner release and pin; until then the host gate fails closed. See ${RELEASE_GUIDE}."
   if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
     printf '::notice title=Unreleased runner capability::%s\n' "$message"
   fi

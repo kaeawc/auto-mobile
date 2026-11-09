@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
   createWearSurfaceHandler,
   createDeviceObserver,
@@ -16,7 +16,7 @@ import {
   capturedSurfaceObservation,
 } from "../helpers/wearSurfaceCaptures";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
-import type { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
+import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import type {
   TileTarget,
   WearSurface,
@@ -30,6 +30,14 @@ import type { FormFactorRead } from "../../src/server/requireWatch";
 import type { TraitFormFactor } from "../../src/utils/android-cmdline-tools/deviceTraits";
 import { toolJson } from "../helpers/toolResponse";
 import type { WatchFaceReader, WatchFaceResult } from "../../src/features/wear/WatchFace";
+
+import { ViewHierarchy } from "../../src/features/observe/ViewHierarchy";
+import * as observeDefaults from "../../src/features/observe/ObserveScreenDefaults";
+import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeViewHierarchy } from "../fakes/FakeViewHierarchy";
+import { readFileSync } from "node:fs";
+import { observeResultFromJsonText } from "../helpers/observeFixture";
 
 const watchDevice: BootedDevice = { name: "Wear", deviceId: "emulator-5554", platform: "android" };
 const COMPONENT = "com.google.android.contacts/com.google.android.wearable.contacts.tiles.X";
@@ -171,6 +179,73 @@ describe("wearSurface watch face actions", () => {
 });
 
 describe("wearSurface tool", () => {
+  test.each(["tile-showing", "app-in-front"] as const)(
+    "%s observation preserves every field of the full capture, including its 384px screen",
+    (name) => {
+      const observation = capturedSurfaceObservation(name);
+      expect(observation.screenSize).toMatchObject({ width: 384, height: 384 });
+      const raw = observeResultFromJsonText(
+        readFileSync(
+          `${import.meta.dir}/../fixtures/wear/surface/observe-full-${name}.json`,
+          "utf8",
+        ),
+      );
+      expect(observation).toEqual(raw);
+    },
+  );
+
+  test("the default device observer constructs a screen that reads the session hierarchy", async () => {
+    const capture = capturedSurfaceObservation("tile-showing");
+    const hierarchy = new FakeViewHierarchy();
+    expect(capture.viewHierarchy).toBeDefined();
+    hierarchy.configureHierarchySequence([capture.viewHierarchy!]);
+    const adb = spyOn(defaultAdbClientFactory, "create").mockReturnValue(new FakeAdbExecutor());
+    const read = spyOn(ViewHierarchy.prototype, "getViewHierarchy").mockImplementation((...args) =>
+      hierarchy.getViewHierarchy(...args),
+    );
+    const resolveSources = observeDefaults.resolveObserveDataSources;
+    // Keep the real hierarchy selection; only suppress unrelated screenshot-cache I/O.
+    const sources = spyOn(observeDefaults, "resolveObserveDataSources").mockImplementation(
+      (context) =>
+        resolveSources({
+          ...context,
+          dependencies: {
+            ...context.dependencies,
+            screenshot: {
+              execute: async () => {
+                throw new Error("unexpected screenshot");
+              },
+              generateScreenshotPath: () => {
+                throw new Error("unexpected screenshot path");
+              },
+              getActivityHash: async () => {
+                throw new Error("unexpected activity hash");
+              },
+            },
+          },
+        }),
+    );
+    // Exercise the constructor's hierarchy without running the unrelated observe pipeline.
+    const execute = spyOn(RealObserveScreen.prototype, "execute").mockImplementation(
+      async function (this: RealObserveScreen) {
+        return { ...capture, viewHierarchy: await this["viewHierarchy"].getViewHierarchy() };
+      },
+    );
+    try {
+      expect(await createDeviceObserver(watchDevice)()).toEqual({
+        appId: WEAR_SYSUI_PACKAGE,
+        tileShowing: true,
+      });
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(execute).toHaveBeenCalledTimes(1);
+    } finally {
+      execute.mockRestore();
+      sources.mockRestore();
+      read.mockRestore();
+      adb.mockRestore();
+    }
+  });
+
   test("the device observer constructs a session screen and forwards fresh extraction options", async () => {
     const screen = new FakeObserveScreen();
     screen.setObserveResult(capturedSurfaceObservation("tile-showing"));

@@ -139,6 +139,12 @@ export const MEDIA_ENV = {
     default: "unset",
     doc: "Select settled screenshot mode with true or 1.",
   },
+  EMULATOR_NETSIM_ISOLATION: {
+    name: "AUTOMOBILE_EMULATOR_NETSIM_ISOLATION",
+    kind: "string",
+    default: "off",
+    doc: "Exact true gives each newly launched Android emulator a private netsimd so BLE peripherals are invisible to other sessions; explicit packet-streamer endpoints take precedence.",
+  },
   EMULATOR_AUDIO: {
     name: "AUTOMOBILE_EMULATOR_AUDIO",
     kind: "string",

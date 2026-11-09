@@ -162,6 +162,20 @@ describe("netsimDiscoveryDir", () => {
     ).toBe("/run/user/1000");
   });
 
+  test("prefers a non-empty TMPDIR over XDG_RUNTIME_DIR on Linux, as netsimd does", () => {
+    const env = { TMPDIR: "/scratch/tmp", XDG_RUNTIME_DIR: "/run/user/1000" };
+    expect(netsimDiscoveryDir({ platform: "linux", tmpDir: "/scratch/tmp", env })).toBe(
+      "/scratch/tmp",
+    );
+    expect(
+      netsimDiscoveryDir({
+        platform: "linux",
+        tmpDir: "/tmp",
+        env: { TMPDIR: "", XDG_RUNTIME_DIR: "/run/user/1000" },
+      }),
+    ).toBe("/run/user/1000");
+  });
+
   test("falls back to the temp directory on Linux without XDG_RUNTIME_DIR", () => {
     expect(netsimDiscoveryDir({ platform: "linux", tmpDir: "/tmp", env: {} })).toBe("/tmp");
   });

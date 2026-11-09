@@ -229,6 +229,7 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
 
     let netsim: NetsimInstance | undefined;
     let child: ChildProcess | null;
+    let spawnAttempted = false;
     try {
       if (
         readEnvRaw(ENV.EMULATOR_NETSIM_ISOLATION) === "true" &&
@@ -241,6 +242,7 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
         args.push("-packet-streamer-endpoint", `localhost:${netsim.port}`);
       }
       this.host.throwIfLaunchCancelled(avdName, isCancelled);
+      spawnAttempted = true;
       child = await this.spawnClaimedEmulator({
         avdName,
         perf,
@@ -265,7 +267,7 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
       }
     } catch (error) {
       netsim?.stop();
-      if (netsim && reservedEmulator) {
+      if (!spawnAttempted && reservedEmulator) {
         // The spawn never ran (netsimd failed or the launch was cancelled), so nothing else frees it.
         this.host.reservations().releasePendingEmulatorDeviceId(reservedEmulator);
       }

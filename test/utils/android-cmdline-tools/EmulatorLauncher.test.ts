@@ -19,6 +19,7 @@ import {
 import { EmulatorLaunchCancelledError } from "../../../src/utils/android-cmdline-tools/EmulatorLaunchCancelledError";
 import {
   DefaultEmulatorPortReservations,
+  type EmulatorDeviceIdReservation,
   resetEmulatorLaunchReservations,
 } from "../../../src/utils/android-cmdline-tools/EmulatorPortReservations";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
@@ -762,6 +763,43 @@ for (const failure of ["spawn", "exit", "duplicate", "netsimd"] as const) {
       }
       expect(h.netsim.stops).toBe(failure === "netsimd" ? 0 : 1);
       expect(h.reservations.hasInFlightLaunch("Pixel_9")).toBe(false);
+      expectNoStartupTimers(h.timer);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION;
+      } else {
+        process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION = previous;
+      }
+    }
+  });
+}
+
+for (const failure of ["netsimd", "spawn"] as const) {
+  test(`reserved console ports are released exactly once on ${failure} failure`, async () => {
+    const previous = process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION;
+    try {
+      process.env.AUTOMOBILE_EMULATOR_NETSIM_ISOLATION = "true";
+      const h = startupHarness(undefined, () => {
+        throw new Error("spawn refused");
+      });
+      const reservation: EmulatorDeviceIdReservation = {
+        deviceId: "emulator-5580",
+        ports: { consolePort: 5580, adbPort: 5581 },
+        appendPort: true,
+        avdName: "Pixel_9",
+      };
+      h.reservations.addReservedEmulatorPort = async () => reservation;
+      const released: EmulatorDeviceIdReservation[] = [];
+      h.reservations.releasePendingEmulatorDeviceId = (pending) => {
+        released.push(pending);
+      };
+      if (failure === "netsimd") {
+        h.netsim.error = new ActionableError("netsimd refused");
+      }
+      await expect(h.launcher.startEmulatorProcess("Pixel_9")).rejects.toThrow(
+        failure === "netsimd" ? "netsimd refused" : "spawn refused",
+      );
+      expect(released).toEqual([reservation]);
       expectNoStartupTimers(h.timer);
     } finally {
       if (previous === undefined) {

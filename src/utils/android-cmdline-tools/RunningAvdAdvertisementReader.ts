@@ -51,7 +51,12 @@ export function netsimDiscoveryDir(
   if (host.platform === "darwin" || host.platform === "win32") {
     return host.tmpDir;
   }
-  return readEnvRaw(AMBIENT_ENV.XDG_RUNTIME_DIR, host.env) || host.tmpDir;
+  // netsim's GetDiscoveryDirectory on Linux: non-empty $TMPDIR, then $XDG_RUNTIME_DIR, then the temp dir.
+  return (
+    readEnvRaw(AMBIENT_ENV.TMPDIR, host.env) ||
+    readEnvRaw(AMBIENT_ENV.XDG_RUNTIME_DIR, host.env) ||
+    host.tmpDir
+  );
 }
 
 /**

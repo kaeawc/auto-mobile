@@ -132,6 +132,27 @@ describe("webImageDraw and webImageRule", () => {
     expect(webImageDraw("a", capped).widthDp).toBe(60);
   });
 
+  test("a weighted axis is sized by its share, so it is not fixed for the encode", () => {
+    const weighted = {
+      style: {
+        width: { dp: 200 },
+        height: { dp: 100 },
+        weight: 1,
+        padding: { start: 100, end: 100 },
+      },
+    };
+    expect(webImageDraw("a", weighted, "row")).toEqual({ asset: "a", heightDp: 100, scale: "fit" });
+    expect(webImageDraw("a", weighted, "column")).toEqual({ asset: "a", widthDp: 0, scale: "fit" });
+    const rendered = still({
+      type: "row",
+      style: { width: { dp: 600 } },
+      children: [{ type: "image", asset: "photo", style: weighted.style }],
+    });
+    expect(rendered.imageDraws).toEqual([{ asset: "photo", heightDp: 100, scale: "fit" }]);
+    const box = webImageBox(rendered.imageDraws[0]!, PIXEL);
+    expect(webImageScaleFactor({ width: 1000, height: 500 }, [box])).toBeGreaterThan(0);
+  });
+
   test("the rule sets the slot's image, transparent placeholder, aspect ratio and tint switch", () => {
     const rule = webImageRule(2, {
       id: "a",

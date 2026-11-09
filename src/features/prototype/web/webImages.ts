@@ -103,11 +103,20 @@ function contentDp(style: Raw, axis: "width" | "height"): number | undefined {
   return Math.max(0, used - padding);
 }
 
-/** The draw a node needs: a fixed axis is its content box, its bounds applied, padding taken out. */
-export function webImageDraw(asset: string, node: Raw): WebImageDraw {
+/**
+ * The draw a node needs: a fixed axis is its content box, its bounds applied, padding taken out.
+ * `parentAxis` is the axis the parent lays children along: a weight there sizes the node by its
+ * share, overriding its authored dp, so that axis is not fixed and its screen bound applies.
+ */
+export function webImageDraw(
+  asset: string,
+  node: Raw,
+  parentAxis?: "row" | "column",
+): WebImageDraw {
   const style = record(node.style) ?? {};
-  const widthDp = contentDp(style, "width");
-  const heightDp = contentDp(style, "height");
+  const weighted = typeof style.weight === "number" ? parentAxis : undefined;
+  const widthDp = weighted === "row" ? undefined : contentDp(style, "width");
+  const heightDp = weighted === "column" ? undefined : contentDp(style, "height");
   return {
     asset,
     ...(widthDp === undefined ? {} : { widthDp }),
@@ -345,7 +354,7 @@ export function webImageRenderer({ base, bound }: WebImageRendererHelpers): Node
       ...(asset === undefined ? {} : { asset }),
     });
     if (asset !== undefined) {
-      scope.imageDraws?.push(webImageDraw(asset, node));
+      scope.imageDraws?.push(webImageDraw(asset, node, scope.style.parentAxis));
     }
     const placeholder = cssColor("surfaceVariant", scope.style) ?? "#e7e0ec";
     if (asset === undefined || slot === undefined) {

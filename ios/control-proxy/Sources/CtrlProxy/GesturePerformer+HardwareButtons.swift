@@ -74,6 +74,14 @@ import os
                 provider: XCUIGestureCoordinateProvider(app: app, locator: elementLocator)
             )
             if factory.mismatch, let size = factory.geometry?.observation, size.isValid {
+                if isSplitView(in: app, size: size) {
+                    let point = SplitViewBackGesture.chevronPoint(size: size)
+                    logger.warning(
+                        "pressBack split-view system chevron tap x=\(point.x, privacy: .public) y=\(point.y, privacy: .public)"
+                    )
+                    _ = try factory.deliver(start: point, press: 0.05)
+                    return
+                }
                 let edge = NavigationEdgeGesture.back(size: size)
                 _ = try factory.deliver(
                     start: edge.start, end: edge.end, press: edge.press, move: edge.move,
@@ -96,6 +104,26 @@ import os
                 withVelocity: .default,
                 thenHoldForDuration: edge.hold
             )
+        }
+
+        private func isSplitView(in app: XCUIApplication, size: GestureSize) -> Bool {
+            do {
+                return try catchingObjCException {
+                    var pending = try [app.snapshot()]
+                    var elements: [SplitViewBackGesture.ElementSnapshot] = []
+                    while let snapshot = pending.popLast() {
+                        elements.append(.init(
+                            label: snapshot.label, identifier: snapshot.identifier, frame: snapshot.frame
+                        ))
+                        pending.append(contentsOf: snapshot.children)
+                    }
+                    return SplitViewBackGesture.isSplitView(elements, size: size)
+                }
+            } catch {
+                // Split-view detection is best-effort; preserve the edge swipe if AX is unavailable.
+                logger.debug("pressBack split-view snapshot unavailable; using edge swipe: \(error)")
+                return false
+            }
         }
 
         /// Action button and Camera Control exist only on some models (#14100); press only when

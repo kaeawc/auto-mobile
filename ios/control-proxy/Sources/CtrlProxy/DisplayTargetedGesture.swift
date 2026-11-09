@@ -40,6 +40,31 @@ struct DisplayTouch: Equatable, Sendable {
     let interfaceOrientation: Int
 }
 
+/// Split-view navigation on the Duo inner panel uses a system chevron outside the AX tree.
+enum SplitViewBackGesture {
+    struct ElementSnapshot {
+        let label: String
+        let identifier: String
+        let frame: CGRect
+    }
+
+    /// Observed-space offsets measured on the 951×669pt inner panel (rotation 1).
+    /// The chevron is 49pt from the right edge and 143pt below the top edge.
+    static let chevronRightInset: Double = 49
+    static let chevronTopInset: Double = 143
+
+    static func chevronPoint(size: GestureSize) -> GesturePoint {
+        GesturePoint(x: size.width - chevronRightInset, y: chevronTopInset)
+    }
+
+    static func isSplitView(_ elements: [ElementSnapshot], size: GestureSize) -> Bool {
+        elements.contains {
+            ($0.label == "Sidebar" || $0.identifier == "Sidebar") &&
+                $0.frame.minX <= 2 && $0.frame.width < size.width / 2
+        }
+    }
+}
+
 /// Edge gestures use the observed panel size, rather than the portrait app frame, on a mismatch.
 struct NavigationEdgeGesture: Equatable, Sendable {
     let start: GesturePoint

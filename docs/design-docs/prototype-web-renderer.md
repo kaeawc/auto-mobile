@@ -212,6 +212,11 @@ nothing at runtime drives a browser.
   with every font forced to `"DejaVu Sans", sans-serif` and the caret hidden. No font is bundled. A
   case matches when at most 0.1 % of pixels differ by more than pixelmatch's 0.1 colour distance; a
   different size never matches. A unit test keeps the directory in step with the case list.
+- **Image layout.** `test/fixtures/prototype-web/image-layout-golden.json` holds the image, parent
+  and image-layer boxes (`getBoundingClientRect`, 1280×900 viewport) of un-padded inlined images
+  (fill, fixed, wrapped and weighted, in rows and columns, each `contentScale`), measured from the
+  renderer before the padded content box; Chromium must reproduce them within 0.01 px. `--update`
+  rewrites it, only for a deliberate layout change.
 - **Running.** `bash scripts/prototype/web-screenshots.sh` runs it (the integration lane skips it
   without `AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1`); `--update` rewrites the goldens, and
   `--engine <chromium|firefox|webkit>` (repeatable) limits the engines. It needs the browser builds
@@ -535,9 +540,12 @@ the host, so the page's script only switches between views it was given and neve
   a Sunday-first grid of 48 px cells, the bound day filled `primary` and today ringed. An `image` binds its asset id (a
   light/dark pair picks the mode's side, then placeholders bind as text does); without a slot for it
   it draws a `surfaceVariant` placeholder, at least 48 px on each axis the node does not fix in dp,
-  with reason `assetNotInlined`. With one, the placeholder
-  colour and an `aspect-ratio` on an axis it leaves to wrap read the slot's `-bg` and `-ar`, and it
-  holds an image layer (the slot's image as a centred background, `contain`, `cover` or
+  with reason `assetNotInlined`. With one, the placeholder colour reads the slot's `-bg`, and its
+  layers sit in a content box: with no padding it covers the node, which keeps the `-ar`
+  `aspect-ratio` on an axis it leaves to wrap (so a weighted share carries it to the other axis,
+  as before the content box existed); with padding (safe-area insets included) it is an in-flow
+  child inside the padding that carries the ratio and the 48 px minimum. A zeroed row child's box
+  drops its inline padding, so its draw and minimums take none out either. The layers are an image layer (the slot's image as a centred background, `contain`, `cover` or
   `100% 100%` for `fit`, `crop` and `fill`, with `saturate()` for `filter.saturation`) and, for
   `filter.tint`, a tint layer that multiplies the tint's opaque colour over the image masked by it,
   shown only when `-on` is set, as Android's saturation colour matrix then its `Modulate` tint

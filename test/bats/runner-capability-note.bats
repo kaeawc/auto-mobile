@@ -100,6 +100,26 @@ add_host_use() {
   [[ "$output" == *"'new_feature_v1' is newly advertised"* ]]
 }
 
+@test "a new reference to a constant declared in an unchanged file prints the note" {
+  printf 'export const NEW_FEATURE = "new_feature_v1";\n' > src/features/observe/android/capabilities.ts
+  git add -A
+  git commit -q -m "declare constant on main side"
+  git branch -f main HEAD
+  add_runner_capability
+  printf 'import { NEW_FEATURE } from "./capabilities";\nsupports(NEW_FEATURE);\n' >> "$HOST_SRC"
+  run_note
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"'new_feature_v1' is newly advertised"* ]]
+}
+
+@test "adding an iOS-only capability to Android prints the note" {
+  printf 'add("ios_existing_v1")\n' >> "$ANDROID_SRC"
+  printf 'supports("ios_existing_v1");\n' >> "$HOST_SRC"
+  run_note
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"'ios_existing_v1' is newly advertised"* ]]
+}
+
 @test "a capability only named in a host comment is silent" {
   add_runner_capability
   printf '// Future documentation: "new_feature_v1"\n' >> "$HOST_SRC"

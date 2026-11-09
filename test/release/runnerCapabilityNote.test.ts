@@ -22,6 +22,15 @@ describe("newRunnerCapabilities", () => {
     ).toEqual(["fresh_v1"]);
   });
 
+  test("adding an existing iOS capability to Android is new for Android", () => {
+    expect(
+      newRunnerCapabilities({
+        "android-ctrlproxy-apk": { base: "", current: 'add("ios_a_v1")' },
+        "ios-runner": unchangedIos,
+      }),
+    ).toEqual(["ios_a_v1"]);
+  });
+
   test("a moved advertisement is not new", () => {
     expect(newRunnerCapabilities(sources('add("old_v1")', '// moved\nadd("old_v1")'))).toEqual([]);
   });
@@ -38,6 +47,12 @@ describe("newHostGates", () => {
         },
       ]),
     ).toEqual(["a_v1", "b_v1"]);
+  });
+
+  test("context declarations resolve references but never count as new uses", () => {
+    const context = ['export const CAP = "cap_v1";\nsupports("ctx_v1");'];
+    expect(newHostGates([{ base: "", current: "supports(CAP);" }], context)).toEqual(["cap_v1"]);
+    expect(newHostGates([{ base: "", current: "noop();" }], context)).toEqual([]);
   });
 
   test("gates already present at the base are not new", () => {

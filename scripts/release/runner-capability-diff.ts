@@ -9,12 +9,14 @@
  * gate on. Paths are repository-relative; a file missing on either side reads as empty.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
 import { ADVERTISING_SOURCES } from "./lib/artifact-capabilities";
 import {
   type HostFileSides,
   RUNNER_ARTIFACTS,
   type RunnerSources,
+  newRunnerCapabilities,
   unreleasedRunnerCapabilitiesInUse,
 } from "./lib/runner-capability-note";
 
@@ -69,6 +71,7 @@ function readBase(args: Args, file: string): string {
   }
 }
 
+const HOST_ROOT = "src";
 const args = parseArgs(process.argv.slice(2));
 const runnerSources = Object.fromEntries(
   RUNNER_ARTIFACTS.map((artifact) => [
@@ -83,6 +86,24 @@ const hostFiles: HostFileSides[] = args.hostFiles.map((file) => ({
   base: readBase(args, file),
   current: readCurrent(file),
 }));
-for (const name of unreleasedRunnerCapabilitiesInUse(runnerSources, hostFiles)) {
+
+/**
+ * Unchanged host sources that mention a newly advertised capability: they can declare the constant
+ * a changed file references (e.g. ctrlProxyProtocol/capabilities.ts), so they supply declarations.
+ */
+function declarationContext(names: string[]): string[] {
+  if (names.length === 0 || !existsSync(HOST_ROOT)) {
+    return [];
+  }
+  const changed = new Set(args.hostFiles.map((file) => path.normalize(file)));
+  return readdirSync(HOST_ROOT, { recursive: true, encoding: "utf8" })
+    .map((entry) => path.join(HOST_ROOT, entry))
+    .filter((file) => /\.[cm]?tsx?$/.test(file) && !changed.has(path.normalize(file)))
+    .map(readCurrent)
+    .filter((source) => names.some((name) => source.includes(name)));
+}
+
+const context = declarationContext(newRunnerCapabilities(runnerSources));
+for (const name of unreleasedRunnerCapabilitiesInUse(runnerSources, hostFiles, context)) {
   process.stdout.write(`${name}\n`);
 }

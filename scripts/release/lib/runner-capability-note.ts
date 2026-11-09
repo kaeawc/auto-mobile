@@ -37,31 +37,49 @@ function difference(current: string[], base: string[]): string[] {
   return [...new Set(current)].filter((name) => !before.has(name)).sort();
 }
 
-/** Capabilities the working tree advertises that the merge-base did not, across runner artifacts. */
+/**
+ * Capabilities each runner artifact advertises in the working tree but did not at the merge-base,
+ * computed per artifact so adding an existing iOS capability to Android (or back) still counts.
+ */
 export function newRunnerCapabilities(sources: RunnerSources): string[] {
-  return difference(
-    RUNNER_ARTIFACTS.flatMap((artifact) => RUNNER_PARSERS[artifact](sources[artifact].current)),
-    RUNNER_ARTIFACTS.flatMap((artifact) => RUNNER_PARSERS[artifact](sources[artifact].base)),
-  );
+  return [
+    ...new Set(
+      RUNNER_ARTIFACTS.flatMap((artifact) =>
+        difference(
+          RUNNER_PARSERS[artifact](sources[artifact].current),
+          RUNNER_PARSERS[artifact](sources[artifact].base),
+        ),
+      ),
+    ),
+  ].sort();
 }
 
-function gatedBy(sources: string[]): string[] {
+function gatedBy(sources: string[], context: string[]): string[] {
   const scans = sources.map(scanHostGates);
-  const declared = Object.assign({}, ...scans.map((scan) => scan.declared)) as Record<
-    string,
-    string
-  >;
+  const declared = Object.assign(
+    {},
+    ...context.map((source) => scanHostGates(source).declared),
+    ...scans.map((scan) => scan.declared),
+  ) as Record<string, string>;
   return gatedByScans(scans, declared);
 }
 
 /**
  * Capability gates (AST-scanned, comments never count) present in the working-tree versions of the
- * changed host files but not in their merge-base versions.
+ * changed host files but not in their merge-base versions. `context` holds unchanged host sources
+ * that only contribute constant declarations (e.g. a shared capabilities module), so a new
+ * reference to an existing constant resolves; their own uses never count as new.
  */
-export function newHostGates(files: HostFileSides[]): string[] {
+export function newHostGates(files: HostFileSides[], context: string[] = []): string[] {
   return difference(
-    gatedBy(files.map((file) => file.current)),
-    gatedBy(files.map((file) => file.base)),
+    gatedBy(
+      files.map((file) => file.current),
+      context,
+    ),
+    gatedBy(
+      files.map((file) => file.base),
+      context,
+    ),
   );
 }
 
@@ -69,7 +87,12 @@ export function newHostGates(files: HostFileSides[]): string[] {
 export function unreleasedRunnerCapabilitiesInUse(
   sources: RunnerSources,
   hostFiles: HostFileSides[],
+  context: string[] = [],
 ): string[] {
-  const hostGates = new Set(newHostGates(hostFiles));
-  return newRunnerCapabilities(sources).filter((name) => hostGates.has(name));
+  const runnerNew = newRunnerCapabilities(sources);
+  if (runnerNew.length === 0) {
+    return [];
+  }
+  const hostGates = new Set(newHostGates(hostFiles, context));
+  return runnerNew.filter((name) => hostGates.has(name));
 }

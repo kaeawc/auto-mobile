@@ -1052,8 +1052,11 @@ describe("Keyboard", () => {
       expect(result.success).toBe(true);
       expect(result.open).toBe(open);
       expect(result.message).toStartWith(open ? "Keyboard is open" : "Keyboard is closed");
-      expect(fakeHierarchy.getCallCount()).toBe(1);
-      expect(fakeHierarchy.getReadOptions()).toEqual([{ timeoutMs: 2000, forceFresh: true }]);
+      const invisible = !open;
+      expect(fakeHierarchy.getCallCount()).toBe(invisible ? 7 : 1);
+      expect(fakeHierarchy.getReadOptions()[0]).toEqual({ timeoutMs: 2000, forceFresh: true });
+      expect(fakeHierarchy.getReadOptions().every((options) => options?.forceFresh)).toBe(true);
+      expect(fakeTimer.getSleepHistory()).toEqual(invisible ? Array(6).fill(250) : []);
     } finally {
       spy.mockRestore();
     }
@@ -1092,7 +1095,8 @@ describe("Keyboard", () => {
       expect(result.open).toBe(false);
       expect(result.error).toContain("minimized off screen");
       expect(result.error).toContain("hardware keyboard");
-      expect(fakeHierarchy.getCallCount()).toBe(1);
+      expect(fakeHierarchy.getCallCount()).toBe(7);
+      expect(fakeTimer.getSleepHistory()).toEqual(Array(6).fill(250));
     } finally {
       spy.mockRestore();
     }
@@ -1445,6 +1449,76 @@ describe("Keyboard", () => {
         open: false,
         message: "Keyboard is closed (no visible on-screen software keyboard)",
       });
+      expect(fakeTimer.getSleepHistory()).toEqual(Array(6).fill(250));
+      expect(fakeHierarchy.getCallCount()).toBe(7);
+    } finally {
+      spy.mockRestore();
+      warning.mockRestore();
+    }
+  });
+
+  test.each(["detect", "open", "close"] as const)(
+    "ios %s waits for a keyboard that is still sliding on screen",
+    async (action) => {
+      fakeHierarchy.setResults([iosKeyboardMinimizedHierarchy, iosKeyboardMinimizedHierarchy]);
+      fakeHierarchy.setDefaultResult(iosKeyboardVisibleHierarchy);
+      const runnerResult = {
+        success: action !== "close",
+        open: true,
+        totalTimeMs: 1,
+        ...(action === "close" ? { error: "Keyboard did not close" } : {}),
+      };
+      const spy = spyOnIosClientInstance({ requestKeyboard: async () => runnerResult });
+      try {
+        const result = await new Keyboard(iosDevice, {
+          adbFactory: fakeAdbFactory,
+          hierarchyProvider: fakeHierarchy,
+          timer: fakeTimer,
+        }).execute(action);
+        expect(result.open).toBe(true);
+        expect(result.success).toBe(action !== "close");
+        if (action === "close") {
+          expect(result.error).toBe("Keyboard did not close");
+        }
+        expect(fakeTimer.getSleepHistory()).toEqual([250, 250]);
+        expect(fakeHierarchy.getCallCount()).toBe(3);
+        expect(fakeHierarchy.getReadOptions().every((options) => options?.forceFresh)).toBe(true);
+      } finally {
+        spy.mockRestore();
+      }
+    },
+  );
+
+  test("ios close preserves failure when a settle visibility read hangs", async () => {
+    const spy = spyOnIosClientInstance({
+      requestKeyboard: async () => ({
+        success: false,
+        open: true,
+        totalTimeMs: 1,
+        error: "Keyboard did not close",
+      }),
+    });
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    let reads = 0;
+    const provider = {
+      getViewHierarchy: async () => {
+        reads += 1;
+        if (reads === 1) {
+          return iosKeyboardMinimizedHierarchy;
+        }
+        return new Promise<ViewHierarchyResult>(() => {});
+      },
+    };
+    try {
+      const result = await new Keyboard(iosDevice, {
+        adbFactory: fakeAdbFactory,
+        hierarchyProvider: provider,
+        timer: fakeTimer,
+      }).execute("close");
+      expect(result).toMatchObject({ success: false, open: true, error: "Keyboard did not close" });
+      expect(fakeTimer.getSleepHistory()).toEqual([250]);
+      expect(fakeTimer.now()).toBe(500);
+      expect(reads).toBe(2);
     } finally {
       spy.mockRestore();
       warning.mockRestore();

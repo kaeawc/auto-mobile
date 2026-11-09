@@ -99,6 +99,23 @@ import os
             return false
         }
 
+        func synthesizePath(_ path: DisplayPath) throws -> Bool {
+            var unavailable: ObjCBool = false
+            var message: NSString?
+            let points = path.points.map { CGPoint(x: $0.x, y: $0.y) }
+            let offsets = path.points.map { TimeInterval($0.offsetMs) / 1000 }
+            let succeeded = ObjCExceptionCatcher_synthesizeDisplayPath(
+                points, offsets, UInt(points.count), path.displayId, path.interfaceOrientation,
+                &unavailable, &message
+            )
+            if succeeded { return true }
+            guard unavailable.boolValue else {
+                throw GesturePerformer.GestureError
+                    .gestureFailed(message as String? ?? "display-targeted path synthesis failed")
+            }
+            return false
+        }
+
         func geometry() throws -> GestureCoordinateGeometry? {
             guard let cached = locator.gestureCoordinateGeometry else { return nil }
             // No extra platform reads for folded / ordinary single-panel observations.

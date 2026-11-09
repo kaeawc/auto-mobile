@@ -155,12 +155,31 @@ import os
         // MARK: - Path Gestures
 
         public func path(points: [PathGesturePoint]) throws {
-            guard application != nil else {
+            GesturePhaseDiagnostics.current?.begin("targetResolution")
+            let target = gestureApplicationTarget()
+            guard let app = gestureApplication(for: target) else {
                 throw GestureError.noApplication
             }
             let cgPoints = points.map { CGPoint(x: $0.x, y: $0.y) }
             let offsets = points.map { TimeInterval($0.offsetMs) / 1000.0 }
             try catchingObjCException {
+                GesturePhaseDiagnostics.current?.begin("coordinateResolution")
+                let factory = try DisplayGestureFactory(
+                    provider: XCUIGestureCoordinateProvider(app: app, locator: elementLocator)
+                )
+                defer { GesturePhaseDiagnostics.current?.begin("postGesture") }
+                let delivery = try factory.deliverPath(points: points) { _ in
+                    GesturePhaseDiagnostics.current?.begin("synthesizedGesture")
+                }
+                if factory.mismatch, let first = points.first {
+                    var sample = TapDiagnostics(requested: .init(
+                        x: first.x, y: first.y, durationMs: points.last?.offsetMs ?? 0, mode: "path"
+                    ))
+                    factory.annotate(&sample, delivery: delivery)
+                    logger.warning("\(sample.logLine(gesture: "path"), privacy: .public)")
+                }
+                if delivery.synthesizedPoint != nil { return }
+                GesturePhaseDiagnostics.current?.begin("synthesizedGesture")
                 let orientation = DeviceRotation.currentGestureInterfaceOrientation()
                 var errorMessage: NSString?
                 var symbolsUnavailable: ObjCBool = false

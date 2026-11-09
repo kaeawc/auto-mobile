@@ -70,15 +70,31 @@ import os
                 throw GestureError.gestureFailed("Cannot determine application frame for back gesture")
             }
 
+            let factory = try DisplayGestureFactory(
+                provider: XCUIGestureCoordinateProvider(app: app, locator: elementLocator)
+            )
+            if factory.mismatch, let size = factory.geometry?.observation, size.isValid {
+                let edge = NavigationEdgeGesture.back(size: size)
+                _ = try factory.deliver(
+                    start: edge.start, end: edge.end, press: edge.press, move: edge.move,
+                    hold: edge.hold, velocity: edge.velocity
+                )
+                return
+            }
+
+            let edge = NavigationEdgeGesture.back(size: GestureSize(
+                width: Double(frame.width),
+                height: Double(frame.height)
+            ))
             let start = app.coordinate(withNormalizedOffset: .zero)
-                .withOffset(CGVector(dx: 2, dy: frame.height / 2))
+                .withOffset(CGVector(dx: edge.start.x, dy: edge.start.y))
             let end = app.coordinate(withNormalizedOffset: .zero)
-                .withOffset(CGVector(dx: min(frame.width * 0.75, frame.width - 2), dy: frame.height / 2))
+                .withOffset(CGVector(dx: edge.end.x, dy: edge.end.y))
             start.press(
-                forDuration: 0.05,
+                forDuration: edge.press,
                 thenDragTo: end,
                 withVelocity: .default,
-                thenHoldForDuration: 0
+                thenHoldForDuration: edge.hold
             )
         }
 

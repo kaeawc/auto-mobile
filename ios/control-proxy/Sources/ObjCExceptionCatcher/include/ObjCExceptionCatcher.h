@@ -175,6 +175,14 @@ FOUNDATION_EXPORT BOOL ObjCExceptionCatcher_synthesizeDisplayPinch(
     BOOL *_Nullable symbolsUnavailable, NSString *_Nullable *_Nullable errorMessage
 );
 
+/// Timed single-finger path on an explicit display. Points and offsets have the same contract
+/// as synthesizePath; unavailable symbols permit the unchanged main-screen path fallback.
+FOUNDATION_EXPORT BOOL ObjCExceptionCatcher_synthesizeDisplayPath(
+    const CGPoint *points, const NSTimeInterval *offsets, NSUInteger count,
+    unsigned long long displayID, NSInteger interfaceOrientation,
+    BOOL *_Nullable symbolsUnavailable, NSString *_Nullable *_Nullable errorMessage
+);
+
 /// Runtime-only reads: this target does not link XCTest. Missing/throwing reads return nil.
 FOUNDATION_EXPORT NSArray<NSDictionary<NSString *, NSNumber *> *> *_Nullable ObjCExceptionCatcher_displayInventory(void);
 FOUNDATION_EXPORT NSNumber *_Nullable ObjCExceptionCatcher_displayID(NSObject *object);

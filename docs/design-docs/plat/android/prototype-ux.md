@@ -123,7 +123,7 @@ definition. `tools/list` therefore advertises a terse `spec`: the top-level fiel
 the required list, `additionalProperties: false` and the root node type names, with no `$ref` or
 `$defs`, because strict clients reject references in tool input schemas. The full schema is the
 `automobile:prototype/spec-schema` resource (a standalone draft-07 document whose recursive `$ref`s point
-at its own root), built on first read. `AUTOMOBILE_PROTOTYPE_FULL_SCHEMA=1` inlines that schema in `spec`
+at its own root), built on first read. `AUTOMOBILE_PROTOTYPE_FULL_SCHEMA=1` inlines that schema in `spec`, both in the daemon's list and in the proxy's cold list built from `schemas/tool-definitions.json`,
 instead, with its references rebased to `#/properties/spec`. Either way the server
 validates with `validatePrototypeSpec`, so the advertised form never changes what is accepted.
 Per-action tools would not shrink the definition: `show`, `save`, `share` and `screenMap` take the whole

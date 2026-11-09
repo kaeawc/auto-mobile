@@ -38,7 +38,10 @@ import { validatePrototypeSavedInput } from "../prototypeSavedActions";
 import { validatePrototypeStorageInput } from "../prototypeStorageAction";
 import {} from "../prototypeStorageOutput";
 import { prototypeOutputSchema } from "./outputSchemas";
-import { advertisedSpecSchema, PROTOTYPE_SPEC_SCHEMA_URI } from "./specJsonSchema";
+import {
+  advertisedSpecSchema,
+  PROTOTYPE_SPEC_SCHEMA_URI,
+} from "../../features/prototype/prototypeSpecJsonSchema";
 export { prototypeOutputSchema };
 /** MCP name of the on-device prototype tool. */
 export const PROTOTYPE_TOOL_NAME = "prototype";

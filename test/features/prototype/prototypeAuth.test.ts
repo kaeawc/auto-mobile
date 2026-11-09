@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { prototypeSpecJsonSchema } from "../../../src/server/prototypeTools/specJsonSchema";
+import { prototypeSpecJsonSchema } from "../../../src/features/prototype/prototypeSpecJsonSchema";
 import {
   prototypeAuthBlockError,
   prototypeAuthCallError,

@@ -12,7 +12,7 @@ import {
   PROTOTYPE_SPEC_SCHEMA_URI,
   prototypeSpecJsonSchema,
   terseAdvertisedSpecSchema,
-} from "../../src/server/prototypeTools/specJsonSchema";
+} from "../../src/features/prototype/prototypeSpecJsonSchema";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { compileAjv2020 } from "../helpers/jsonSchemaCompile";

@@ -451,7 +451,8 @@ export function registerPrototypeResources(
     mimeType: "application/schema+json",
     handler: async () => {
       // Loaded on first read: the schema module converts the whole spec contract.
-      const { prototypeSpecJsonSchema } = await import("./prototypeTools/specJsonSchema");
+      const { prototypeSpecJsonSchema } =
+        await import("../features/prototype/prototypeSpecJsonSchema");
       return {
         uri: PROTOTYPE_SPEC_SCHEMA_URI,
         mimeType: "application/schema+json",

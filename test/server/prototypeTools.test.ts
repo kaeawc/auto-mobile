@@ -32,7 +32,7 @@ import { initializeCliTools } from "../../src/cli/cliToolRegistration";
 import {
   PROTOTYPE_SPEC_SCHEMA_URI,
   prototypeSpecJsonSchema,
-} from "../../src/server/prototypeTools/specJsonSchema";
+} from "../../src/features/prototype/prototypeSpecJsonSchema";
 import { registerToolSelectionTools } from "../../src/server/toolSelectionTools";
 import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import { getDaemonStreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";

@@ -17,6 +17,7 @@ import {
 } from "../../src/daemon/staticToolDefinitions";
 import type { ProxiedToolDefinition } from "../../src/daemon/daemonMcpProxy";
 import committedDefinitions from "../../schemas/tool-definitions.json";
+import { prototypeSpecJsonSchema } from "../../src/features/prototype/prototypeSpecJsonSchema";
 
 // Issue #5879 / review: the static cold-start surface mirrors the runtime
 // `ToolRegistry.getToolDefinitions()` shape for the flag-independent fields
@@ -242,6 +243,52 @@ describe("getStaticToolDefinitions", () => {
       expect(tool.name.length).toBeGreaterThan(0);
       expect(typeof tool.inputSchema).toBe("object");
     }
+  });
+});
+
+describe("cold prototype spec schema (#17710)", () => {
+  const original = process.env.AUTOMOBILE_PROTOTYPE_FULL_SCHEMA;
+  const coldPrototype = () => getStaticToolDefinitions().find((tool) => tool.name === "prototype")!;
+  const specOf = (tool: ProxiedToolDefinition) =>
+    (tool.inputSchema.properties as Record<string, Record<string, unknown>>).spec;
+  let terse: ProxiedToolDefinition;
+  let full: ProxiedToolDefinition;
+  beforeAll(() => {
+    delete process.env.AUTOMOBILE_PROTOTYPE_FULL_SCHEMA;
+    terse = coldPrototype();
+    // The first flag-on read loads and converts the spec contract; keep that out of the test.
+    process.env.AUTOMOBILE_PROTOTYPE_FULL_SCHEMA = "1";
+    full = coldPrototype();
+  });
+  afterEach(() => {
+    if (original === undefined) {
+      delete process.env.AUTOMOBILE_PROTOTYPE_FULL_SCHEMA;
+    } else {
+      process.env.AUTOMOBILE_PROTOTYPE_FULL_SCHEMA = original;
+    }
+  });
+
+  test("the cold list advertises the committed terse spec by default", () => {
+    const committed = committedDefinitions.find((tool) => tool.name === "prototype")!;
+    expect(terse.inputSchema).toEqual(committed.inputSchema);
+    expect(JSON.stringify(specOf(terse))).not.toContain("$ref");
+  });
+
+  test("the full-schema flag inlines the full spec on the cold list too", () => {
+    const spec = specOf(full);
+    expect(spec.description).toBe(specOf(terse).description);
+    expect(Object.keys(spec.properties as object)).toEqual(
+      Object.keys(prototypeSpecJsonSchema().properties as object),
+    );
+    expect(JSON.stringify(spec)).toContain('"$ref":"#/properties/spec/properties/root"');
+    const withoutSpec = (tool: ProxiedToolDefinition) => {
+      const properties = { ...(tool.inputSchema.properties as Record<string, unknown>) };
+      delete properties.spec;
+      return properties;
+    };
+    expect(withoutSpec(full)).toEqual(withoutSpec(terse));
+    process.env.AUTOMOBILE_PROTOTYPE_FULL_SCHEMA = "1";
+    expect(coldPrototype().inputSchema).toEqual(full.inputSchema);
   });
 });
 

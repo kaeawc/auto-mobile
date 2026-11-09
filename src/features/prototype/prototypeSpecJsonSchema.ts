@@ -1,10 +1,10 @@
 import { z as specZ, type ZodTypeAny } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { ENV, readEnvBool } from "../../config/env";
-import { MAX_PROTOTYPE_COMPONENT_DEPTH } from "../../features/prototype/prototypeComponents";
-import { prototypeSpecSchema } from "../../features/prototype/prototypeSpec";
-import { PROTOTYPE_SPEC_SCHEMA_URI } from "../../features/prototype/prototypeGuide";
-import { STATE_KEY } from "../../features/prototype/prototypeTemplate";
+import { MAX_PROTOTYPE_COMPONENT_DEPTH } from "./prototypeComponents";
+import { prototypeSpecSchema } from "./prototypeSpec";
+import { PROTOTYPE_SPEC_SCHEMA_URI } from "./prototypeGuide";
+import { STATE_KEY } from "./prototypeTemplate";
 
 export { PROTOTYPE_SPEC_SCHEMA_URI };
 

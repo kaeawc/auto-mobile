@@ -283,7 +283,7 @@ export class DefaultAndroidObservationCollector implements AndroidObservationCol
    * it the 0x0 placeholder breaks screenshot raster geometry on every read.
    */
   private applyKnownPanelScreenSize(result: ObserveResult): void {
-    logger.warn("[OBSERVE] No screen info from accessibility service; using display inventory");
+    logger.warn("[OBSERVE] No screen dimensions from accessibility service");
     if (result.screenSize.width > 0 && result.screenSize.height > 0) {
       return;
     }

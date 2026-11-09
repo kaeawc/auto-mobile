@@ -274,15 +274,22 @@ export class Keyboard {
     };
   }
 
-  // A negative sample during the show animation is provisional. Unknown/stale reads keep
-  // the runner authoritative; only consistently invisible samples can override it.
+  // A negative sample during the show animation is provisional, so re-read on an interval
+  // until the settle deadline. Each re-read gets the same deadline as the first read: a
+  // shorter one would time out a normal-but-slow read and let stale runner state win
+  // (#14953). An unknown re-read (timeout, stale, error) never overrides a completed read
+  // that showed the keyboard gone; only a completed read showing the keyboard ends the
+  // wait with `true`. Unknown on the first read keeps the runner authoritative.
   private async settledIOSKeyboardVisibility(signal?: AbortSignal): Promise<boolean | undefined> {
-    let visible = await this.isIOSKeyboardOnScreen(
+    const visible = await this.isIOSKeyboardOnScreen(
       signal,
       Keyboard.IOS_KEYBOARD_VISIBILITY_TIMEOUT_MS,
     );
+    if (visible !== false) {
+      return visible;
+    }
     const deadline = this.timer.now() + Keyboard.IOS_KEYBOARD_SETTLE_TIMEOUT_MS;
-    while (visible === false && this.timer.now() < deadline) {
+    while (this.timer.now() < deadline) {
       await awaitWhileRequestIsLive(
         this.timer.sleep(
           Math.min(Keyboard.IOS_KEYBOARD_SETTLE_INTERVAL_MS, deadline - this.timer.now()),
@@ -290,11 +297,15 @@ export class Keyboard {
         signal,
       );
       throwIfAborted(signal);
-      // Allow the final sample a full read interval too; a near-zero timeout would make
-      // every real IPC read at the settle boundary look unavailable.
-      visible = await this.isIOSKeyboardOnScreen(signal, Keyboard.IOS_KEYBOARD_SETTLE_INTERVAL_MS);
+      const sample = await this.isIOSKeyboardOnScreen(
+        signal,
+        Keyboard.IOS_KEYBOARD_VISIBILITY_TIMEOUT_MS,
+      );
+      if (sample === true) {
+        return true;
+      }
     }
-    return visible;
+    return false;
   }
 
   private async isIOSKeyboardOnScreen(

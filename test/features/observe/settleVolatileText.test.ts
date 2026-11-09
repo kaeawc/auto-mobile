@@ -120,6 +120,16 @@ describe("VolatileTextTracker (#17670)", () => {
     expect(isStabilityDiffEmpty(second)).toBe(true);
   });
 
+  test("a pair with no text change is a move, never a text change", () => {
+    const tracker = new VolatileTextTracker();
+    // A textless control that moves between containers keeps its local key.
+    const button = capturedNode("", HUNDREDTHS_BOUNDS, "", 0);
+    const moved = diff([button], [button]);
+    expect(isStabilityDiffEmpty(tracker.mask(moved))).toBe(false);
+    expect(isStabilityDiffEmpty(tracker.mask(moved))).toBe(false);
+    expect(tracker.volatileCount).toBe(0);
+  });
+
   test("a volatile node that changes more than its text still counts", () => {
     const tracker = new VolatileTextTracker();
     tracker.mask(diff([hundredths("20")], [hundredths("97")]));

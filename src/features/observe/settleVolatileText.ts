@@ -31,9 +31,15 @@ function textFreeIdentity(key: string): string | undefined {
  * `view-id`) cannot make a text change look structural.
  */
 function differsOnlyInText(from: ObserveDiffNode, to: ObserveDiffNode): boolean {
-  return Object.keys(diffAttributes(from.attributes, to.attributes)).every((name) =>
-    TEXT_CHANGE_ATTRIBUTES.has(name),
-  );
+  return isTextOnlyDelta(Object.keys(diffAttributes(from.attributes, to.attributes)));
+}
+
+/**
+ * A delta is a text change only when the text itself changed and nothing else
+ * did. A pair with no text delta is a node that moved between containers.
+ */
+function isTextOnlyDelta(names: readonly string[]): boolean {
+  return names.includes("text") && names.every((name) => TEXT_CHANGE_ATTRIBUTES.has(name));
 }
 
 /**
@@ -72,8 +78,7 @@ function groupByIdentity(nodes: readonly ObserveDiffNode[]): Map<string, Observe
 
 /** Whether a matched node changed nothing but its text. */
 function isTextOnlyChange(change: ObserveDiffNodeChange): boolean {
-  const names = Object.keys(change.changes);
-  return names.length > 0 && names.every((name) => TEXT_CHANGE_ATTRIBUTES.has(name));
+  return isTextOnlyDelta(Object.keys(change.changes));
 }
 
 /**

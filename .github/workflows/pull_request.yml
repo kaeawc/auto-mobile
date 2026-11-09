@@ -995,15 +995,23 @@ jobs:
           # contain the base commit and the diff would fail.
           fetch-depth: 0
 
-      # Pinned ktfmt/shfmt release downloads, keyed on the files that hold their
-      # versions and checksums, so a GitHub release outage cannot fail this job
-      # when the pinned tool is already cached. The installers re-verify each
-      # cached file's SHA-256 before using it (#17624).
-      - name: "Cache pinned tool downloads"
+      # Pinned release downloads, one cache entry per tool keyed on the file that
+      # holds its version and checksum, so a GitHub release outage cannot fail
+      # this job once the tool is cached. Per-tool entries matter: actions/cache
+      # never re-saves an existing key, and a tool this run did not fetch has no
+      # directory, so its save is skipped instead of freezing an incomplete
+      # entry. The installers re-verify each file's SHA-256 before use (#17624).
+      - name: "Cache pinned ktfmt download"
         uses: actions/cache@v5
         with:
-          path: ~/.cache/auto-mobile/tools
-          key: tool-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ktfmt/ktfmt_version.sh', 'scripts/shellcheck/shfmt_version.sh') }}
+          path: ~/.cache/auto-mobile/tools/ktfmt
+          key: tool-download-ktfmt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ktfmt/ktfmt_version.sh') }}
+
+      - name: "Cache pinned shfmt download"
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/auto-mobile/tools/shfmt
+          key: tool-download-shfmt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/shellcheck/shfmt_version.sh') }}
 
       # The documentation build consumes scripts/github/uv.lock after merge.
       # Start its independent toolchain setup now so the required Fast Validation
@@ -1217,11 +1225,17 @@ jobs:
           distribution: "zulu"
           java-version: "21"
 
-      - name: "Cache pinned tool downloads"
+      - name: "Cache pinned ktfmt download"
         uses: actions/cache@v5
         with:
-          path: ~/.cache/auto-mobile/tools
-          key: tool-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ktfmt/ktfmt_version.sh', 'scripts/shellcheck/shfmt_version.sh') }}
+          path: ~/.cache/auto-mobile/tools/ktfmt
+          key: tool-download-ktfmt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ktfmt/ktfmt_version.sh') }}
+
+      - name: "Cache pinned shfmt download"
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/auto-mobile/tools/shfmt
+          key: tool-download-shfmt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/shellcheck/shfmt_version.sh') }}
 
       - wait: [install-bats, install-uv]
 
@@ -1369,15 +1383,17 @@ jobs:
         with:
           lfs: false
 
-      # Pinned ktfmt/shfmt release downloads, keyed on the files that hold their
-      # versions and checksums, so a GitHub release outage cannot fail this job
-      # when the pinned tool is already cached. The installers re-verify each
-      # cached file's SHA-256 before using it (#17624).
-      - name: "Cache pinned tool downloads"
+      # Pinned release downloads, one cache entry per tool keyed on the file that
+      # holds its version and checksum, so a GitHub release outage cannot fail
+      # this job once the tool is cached. Per-tool entries matter: actions/cache
+      # never re-saves an existing key, and a tool this run did not fetch has no
+      # directory, so its save is skipped instead of freezing an incomplete
+      # entry. The installers re-verify each file's SHA-256 before use (#17624).
+      - name: "Cache pinned shfmt download"
         uses: actions/cache@v5
         with:
-          path: ~/.cache/auto-mobile/tools
-          key: tool-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ktfmt/ktfmt_version.sh', 'scripts/shellcheck/shfmt_version.sh') }}
+          path: ~/.cache/auto-mobile/tools/shfmt
+          key: tool-download-shfmt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/shellcheck/shfmt_version.sh') }}
 
       # Pure network/disk (`brew install bats-core` on macOS, a source install on
       # Linux) and independent of the Bun setup below, which only writes

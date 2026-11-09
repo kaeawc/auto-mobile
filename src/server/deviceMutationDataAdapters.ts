@@ -194,15 +194,28 @@ function wearSurfaceMutations(
   ) {
     return [];
   }
-  if (args.action === "setWatchFace" || args.action === "unsetWatchFace") {
-    return [{ kind: "opaque", key: opaqueIntentKey("wearSurface", "watchFace") }];
+  return [{ kind: "opaque", key: wearSurfaceIntentKey(args) }];
+}
+
+/** One key for the active face, one per face slot, and one per tile provider. */
+function wearSurfaceIntentKey(args: Record<string, unknown>): string {
+  switch (args.action) {
+    case "setWatchFace":
+    case "unsetWatchFace":
+      return opaqueIntentKey("wearSurface", "watchFace");
+    case "setComplication":
+    case "unsetComplication":
+      return opaqueIntentKey(
+        "wearSurface",
+        "complication",
+        args.watchFace ?? null,
+        args.slot ?? null,
+      );
+    case "showTile":
+      return opaqueIntentKey("wearSurface", "addTile", args.component ?? null);
+    default:
+      return opaqueIntentKey("wearSurface", args.action, args.component ?? null);
   }
-  if (args.action === "setComplication" || args.action === "unsetComplication") {
-    const slot = [args.watchFace ?? null, args.slot ?? null];
-    return [{ kind: "opaque", key: opaqueIntentKey("wearSurface", "complication", ...slot) }];
-  }
-  const action = args.action === "showTile" ? "addTile" : args.action;
-  return [{ kind: "opaque", key: opaqueIntentKey("wearSurface", action, args.component ?? null) }];
 }
 
 /**

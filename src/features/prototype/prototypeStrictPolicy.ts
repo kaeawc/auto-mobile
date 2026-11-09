@@ -16,6 +16,7 @@ import { prototypeShaderFields } from "./prototypeShaders";
 import { object, type Located, type PrototypeValidationError } from "./prototypeBindingValidation";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { repeatErrors, repeatFieldReferences, repeatKeyInstances } from "./prototypeRepeat";
+import { stateKeyTaintIndex, stateKeysOverlap } from "./prototypeStateTaint";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import {
   mapBindableFields,
@@ -127,17 +128,19 @@ export function prototypeSensitiveSinkScan(spec: unknown): {
   walkPrototypeNodes(spec, (value, path) => nodes.push({ value, path }));
   const { requests, fields, dataWrites } = libraryFields(spec, nodes, true);
   requests.push(...webViewPaths(nodes));
-  if (propagateDataTaint(tainted, platformTainted, dataWrites) === undefined) {
+  const stateTainted: string[] = [];
+  if (propagateDataTaint(tainted, platformTainted, dataWrites, { stateTainted }) === undefined) {
     return { errors: [{ path: "$", message: SECURE_COPY_CHECK_MESSAGE }], checks };
   }
   const dataIndex = sinkOverlapIndex(tainted, visit);
   const platformIndex = sinkOverlapIndex(platformTainted, visit);
+  const stateIndex = stateKeyTaintIndex(stateTainted, visit);
   const requestPaths = new Set(requests);
   const sinkFields = fields.filter(
-    // Key fields name state entries, which a `/data` pointer cannot reach.
-    (field) => !field.key && requestSinkPath(field.path, requestPaths),
+    // Key fields name state entries; only a tainted state key makes one a sink.
+    (field) => (!field.key || stateTainted.length > 0) && requestSinkPath(field.path, requestPaths),
   );
-  sinkFields.push(...sensitiveStorageFields(spec));
+  sinkFields.push(...sensitiveStorageFields(spec, stateTainted.length > 0));
   sinkFields.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   // Direct warning callers may precede repeat validation. Keep their authored-text scan
   // for invalid repeats; the binder (including the budget probe) requires valid repeats.
@@ -181,6 +184,14 @@ export function prototypeSensitiveSinkScan(spec: unknown): {
     if (checks > MAX_COPY_TAINT_CHECKS) {
       return [];
     }
+    const boundTexts = texts.get(field.path) ?? [field.text];
+    // A key field reads the named state entry; text interpolates `{key}` state placeholders.
+    const readsTaintedState = field.key
+      ? boundTexts.some((key) => stateIndex.key(key))
+      : !field.pointerSource && boundTexts.some((text) => stateIndex.text(text));
+    if (field.key) {
+      return readsTaintedState ? [sinkError(field.path)] : [];
+    }
     const readsTaintedRow = taintedRepeats.some(
       (scope) =>
         field.path.startsWith(`${scope.path}.children[`) &&
@@ -194,28 +205,31 @@ export function prototypeSensitiveSinkScan(spec: unknown): {
         ? field.pointerSource === source
           ? [field.text]
           : []
-        : (texts.get(field.path) ?? [field.text]).flatMap(
+        : boundTexts.flatMap(
             source === "data" ? prototypeDataPlaceholders : prototypePlatformPlaceholders,
           );
       return pointers.some((pointer) => index(pointer, !field.pointerSource));
     };
     const reached =
-      readsTaintedRow || reaches("data", dataIndex) || reaches("platform", platformIndex);
-    return reached
-      ? [
-          {
-            path: field.path,
-            message: field.path.startsWith("storage.keys[")
-              ? "Sensitive value cannot be persisted"
-              : "Sensitive value cannot be bound into a request",
-          },
-        ]
-      : [];
+      readsTaintedRow ||
+      readsTaintedState ||
+      reaches("data", dataIndex) ||
+      reaches("platform", platformIndex);
+    return reached ? [sinkError(field.path)] : [];
   });
   return {
     errors:
       checks > MAX_COPY_TAINT_CHECKS ? [{ path: "$", message: SECURE_COPY_CHECK_MESSAGE }] : errors,
     checks,
+  };
+}
+
+function sinkError(path: string): PrototypeValidationError {
+  return {
+    path,
+    message: path.startsWith("storage.keys[")
+      ? "Sensitive value cannot be persisted"
+      : "Sensitive value cannot be bound into a request",
   };
 }
 
@@ -291,67 +305,136 @@ export function prototypeSensitiveWarnings(spec: unknown): string[] {
 const MAX_COPY_TAINT_CHECKS = 4_000_000;
 
 /**
- * A data action that copies a tainted `/data` or sensitive `/platform` read into `/data` taints
- * its destination, transitively (a copy of a copy stays tainted). Mutates `tainted`; a worklist
- * over copies bucketed by the first segment of their source keeps long chains linear. Returns
- * the overlap checks spent, or undefined when the check cap is exceeded, so callers fail closed.
- * Exported so tests can assert the linear scaling by counting work instead of wall-clock time.
+ * A data action or `setState` that copies a tainted `/data`, sensitive `/platform` or tainted
+ * state read into `/data` or a state key taints its destination, transitively (a copy of a copy
+ * stays tainted, including through state). Mutates `tainted` and `stateTainted`; a worklist over
+ * copies bucketed by the first segment of their data source (or their literal state key) keeps
+ * long chains linear. Returns the overlap checks spent, or undefined when the check cap is
+ * exceeded, so callers fail closed. Exported so tests can assert the linear scaling by counting
+ * work instead of wall-clock time; `maxChecks` lets them reach the cap without spending it.
  */
 export function propagateDataTaint(
   tainted: string[],
   platformTainted: readonly string[],
   writes: readonly DataWrite[],
+  { stateTainted = [], maxChecks = MAX_COPY_TAINT_CHECKS }: CopyTaintOptions = {},
 ): number | undefined {
   const known = new Set(tainted);
-  const queue = [...tainted];
-  const mark = (pointer: string) => {
-    if (!known.has(pointer)) {
-      known.add(pointer);
-      tainted.push(pointer);
-      queue.push(pointer);
+  const knownState = new Set(stateTainted);
+  const queue = [
+    ...tainted.map((at) => ({ state: false, at })),
+    ...stateTainted.map((at) => ({ state: true, at })),
+  ];
+  const mark = (write: DataWrite) => {
+    const [seen, list] = write.intoState ? [knownState, stateTainted] : [known, tainted];
+    if (!seen.has(write.into)) {
+      seen.add(write.into);
+      list.push(write.into);
+      queue.push({ state: write.intoState === true, at: write.into });
     }
   };
-  const buckets = new Map<string, DataWrite[]>();
+  const sources = bucketWrites(writes);
   let checks = 0;
-  for (const write of writes) {
-    if (write.source === "data") {
-      const key = firstPointerSegment(write.from);
-      const bucket = buckets.get(key);
-      if (bucket) {
-        bucket.push(write);
-      } else {
-        buckets.set(key, [write]);
-      }
-    } else {
-      checks += platformTainted.length;
-      if (platformTainted.some((taint) => pointersOverlap(taint, write.from, false))) {
-        mark(write.into);
-      }
+  for (const write of sources.platform) {
+    checks += platformTainted.length;
+    if (platformTainted.some((taint) => pointersOverlap(taint, write.from, false))) {
+      mark(write);
     }
   }
+  const drain = (bucket: DataWrite[], hit: (write: DataWrite) => boolean): DataWrite[] => {
+    checks += bucket.length;
+    return bucket.filter((write) => {
+      if (hit(write)) {
+        mark(write);
+        return false;
+      }
+      return true;
+    });
+  };
   for (let at = 0; at < queue.length; at += 1) {
     const taint = queue[at];
-    const key = firstPointerSegment(taint);
-    // A leading `{index}` taint segment matches any source segment.
-    for (const name of key === "{index}" ? [...buckets.keys()] : [key]) {
-      const bucket = buckets.get(name) ?? [];
-      checks += bucket.length;
-      buckets.set(
-        name,
-        bucket.filter((write) => {
-          const hit = pointersOverlap(taint, write.from, false);
-          if (hit) {
-            mark(write.into);
-          }
-          return !hit;
-        }),
-      );
-    }
-    if (checks > MAX_COPY_TAINT_CHECKS) {
+    (taint.state ? drainStateTaint : drainDataTaint)(taint.at, sources, drain);
+    if (checks > maxChecks) {
       return undefined;
     }
   }
-  return checks <= MAX_COPY_TAINT_CHECKS ? checks : undefined;
+  return checks <= maxChecks ? checks : undefined;
+}
+
+export interface CopyTaintOptions {
+  /** Tainted state keys; mutated like `tainted` as copies reach new keys. */
+  stateTainted?: string[];
+  maxChecks?: number;
+}
+
+interface WriteBuckets {
+  platform: DataWrite[];
+  /** Data reads keyed by the first segment of their source pointer. */
+  data: Map<string, DataWrite[]>;
+  /** State reads of a literal key, keyed by that key. */
+  state: Map<string, DataWrite[]>;
+  /** State reads whose key holds a repeat placeholder; any matching taint may reach them. */
+  templatedState: DataWrite[];
+}
+
+function bucketWrites(writes: readonly DataWrite[]): WriteBuckets {
+  const buckets: WriteBuckets = {
+    platform: [],
+    data: new Map(),
+    state: new Map(),
+    templatedState: [],
+  };
+  const add = (map: Map<string, DataWrite[]>, key: string, write: DataWrite) => {
+    const bucket = map.get(key);
+    if (bucket) {
+      bucket.push(write);
+    } else {
+      map.set(key, [write]);
+    }
+  };
+  for (const write of writes) {
+    if (write.source === "platform") {
+      buckets.platform.push(write);
+    } else if (write.source === "data") {
+      add(buckets.data, firstPointerSegment(write.from), write);
+    } else if (write.from.includes("{")) {
+      buckets.templatedState.push(write);
+    } else {
+      add(buckets.state, write.from, write);
+    }
+  }
+  return buckets;
+}
+
+function drainDataTaint(
+  taint: string,
+  sources: WriteBuckets,
+  drain: (bucket: DataWrite[], hit: (write: DataWrite) => boolean) => DataWrite[],
+): void {
+  const key = firstPointerSegment(taint);
+  // A leading `{index}` taint segment matches any source segment.
+  for (const name of key === "{index}" ? [...sources.data.keys()] : [key]) {
+    sources.data.set(
+      name,
+      drain(sources.data.get(name) ?? [], (write) => pointersOverlap(taint, write.from, false)),
+    );
+  }
+}
+
+function drainStateTaint(
+  taint: string,
+  sources: WriteBuckets,
+  drain: (bucket: DataWrite[], hit: (write: DataWrite) => boolean) => DataWrite[],
+): void {
+  const hit = (write: DataWrite) => stateKeysOverlap(taint, write.from);
+  // A templated taint (a key bound per repeat row) may name any literal key sharing its prefix.
+  for (const name of taint.includes("{") ? [...sources.state.keys()] : [taint]) {
+    const bucket = sources.state.get(name);
+    if (bucket) {
+      sources.state.set(name, drain(bucket, hit));
+    }
+  }
+  sources.templatedState = drain(sources.templatedState, hit);
 }
 
 function firstPointerSegment(pointer: string): string {
@@ -373,7 +456,7 @@ function sensitivePlatformPointers(spec: unknown): string[] {
   );
 }
 
-function sensitiveStorageFields(spec: unknown): LibraryField[] {
+function sensitiveStorageFields(spec: unknown, includeState: boolean): LibraryField[] {
   const fields: LibraryField[] = [];
   const storageKeys = object(object(spec)?.storage)?.keys;
   if (Array.isArray(storageKeys)) {
@@ -386,6 +469,8 @@ function sensitiveStorageFields(spec: unknown): LibraryField[] {
           key: false,
           pointerSource: "data",
         });
+      } else if (parsed?.kind === "state" && includeState) {
+        fields.push({ text: parsed.key, path: `storage.keys[${index}]`, key: true });
       }
     });
   }
@@ -583,22 +668,36 @@ interface LibraryField {
   itemBinding?: boolean;
 }
 export interface DataWrite {
+  /** The `/data` pointer written, or the state key when `intoState` is set. */
   into: string;
-  source: "data" | "platform";
+  intoState?: true;
+  /** `from` is a `/data` pointer, a `/platform` pointer, or a (possibly templated) state key. */
+  source: "data" | "platform" | "state";
   from: string;
 }
 
-/** Pairs a data action's `path` with its `value` read; both are visited at sibling paths. */
+type CopyRead = Pick<DataWrite, "source" | "from">;
+
+/**
+ * Pairs a data action's `path` (or a `setState`'s `key`) with its `value` read; both are visited
+ * at sibling paths. A `setState` text value is treated as a read of every data or platform
+ * placeholder it names and of the enclosing repeat's rows when it references the row alias, so a
+ * value the policy cannot prove untainted stays tainted.
+ */
 class DataCopies {
   private readonly destinations = new Map<string, string>();
-  private readonly reads = new Map<string, { source: "data" | "platform"; from: string }[]>();
-  private readonly repeats: { path: string; from: string }[];
+  private readonly stateDestinations = new Map<string, string>();
+  private readonly reads = new Map<string, CopyRead[]>();
+  private readonly stateReads = new Map<string, CopyRead[]>();
+  private readonly repeats: { path: string; from: string; alias: string }[];
 
   constructor(nodes: readonly Located[]) {
     this.repeats = nodes.flatMap(({ value, path }) => {
       const repeat = object(value.repeat);
       const from = object(repeat?.items)?.path;
-      return typeof repeat?.as === "string" && isPrototypeDataPointer(from) ? [{ path, from }] : [];
+      return typeof repeat?.as === "string" && isPrototypeDataPointer(from)
+        ? [{ path, from, alias: repeat.as }]
+        : [];
     });
   }
 
@@ -609,7 +708,34 @@ class DataCopies {
         this.destinations.set(at.slice(0, -".path".length), into);
       }
     }
-    const binding = kind === "emitBinding" && at.endsWith(".value") ? object(raw) : undefined;
+    if (kind === "key" && typeof raw === "string") {
+      this.visitKey(raw, at);
+    }
+    if (kind === "operand" && at.endsWith(".value")) {
+      this.visitStateValue(raw, at.slice(0, -".value".length));
+    }
+    if (kind === "emitBinding" && at.endsWith(".value")) {
+      this.visitDataValue(object(raw), at);
+    }
+  }
+
+  writes(): DataWrite[] {
+    const pair = (
+      reads: Map<string, CopyRead[]>,
+      destinations: Map<string, string>,
+      target: Pick<DataWrite, "intoState">,
+    ): DataWrite[] =>
+      [...reads].flatMap(([prefix, list]) => {
+        const into = destinations.get(prefix);
+        return into === undefined ? [] : list.map((read) => ({ into, ...read, ...target }));
+      });
+    return [
+      ...pair(this.reads, this.destinations, {}),
+      ...pair(this.stateReads, this.stateDestinations, { intoState: true }),
+    ];
+  }
+
+  private visitDataValue(binding: Record<string, unknown> | undefined, at: string): void {
     for (const source of ["data", "platform"] as const) {
       const from = binding?.[source];
       if (typeof from === "string") {
@@ -617,7 +743,7 @@ class DataCopies {
       }
     }
     if (typeof binding?.item === "string") {
-      const scopes = this.repeats.filter(({ path }) => at.startsWith(`${path}.children[`));
+      const scopes = this.scopes(at);
       if (scopes.length > 0) {
         this.reads.set(
           at.slice(0, -".value".length),
@@ -627,11 +753,39 @@ class DataCopies {
     }
   }
 
-  writes(): DataWrite[] {
-    return [...this.reads].flatMap(([prefix, reads]) => {
-      const into = this.destinations.get(prefix);
-      return into === undefined ? [] : reads.map((read) => ({ into, ...read }));
-    });
+  /** A data action's `{state}` value reads a key; a `setState`'s `key` names its destination. */
+  private visitKey(key: string, at: string): void {
+    if (at.endsWith(".value.state")) {
+      this.reads.set(at.slice(0, -".value.state".length), [{ source: "state", from: key }]);
+    } else if (at.endsWith(".key")) {
+      this.stateDestinations.set(at.slice(0, -".key".length), key);
+    }
+  }
+
+  private visitStateValue(raw: unknown, prefix: string): void {
+    const platform = object(raw)?.platform;
+    const reads: CopyRead[] =
+      typeof platform === "string"
+        ? [{ source: "platform", from: platform }]
+        : typeof raw === "string"
+          ? [
+              ...prototypeDataPlaceholders(raw).map((from): CopyRead => ({ source: "data", from })),
+              ...prototypePlatformPlaceholders(raw).map((from): CopyRead => ({
+                source: "platform",
+                from,
+              })),
+              ...this.scopes(prefix)
+                .filter(({ alias }) => repeatFieldReferences(raw, alias).length > 0)
+                .map(({ from }): CopyRead => ({ source: "data", from })),
+            ]
+          : [];
+    if (reads.length > 0) {
+      this.stateReads.set(prefix, reads);
+    }
+  }
+
+  private scopes(at: string) {
+    return this.repeats.filter(({ path }) => at.startsWith(`${path}.children[`));
   }
 }
 

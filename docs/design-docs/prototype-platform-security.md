@@ -45,7 +45,13 @@ Swift validators refuse these bindings when `library: true`, reporting the sink 
 for `secure` text fields. Pointer overlap includes parents, children and repeat `{index}` segments;
 literal value bindings stay opaque. A `setData`, `appendData`, `prependData` or `upsertData` whose
 `value` is `{data}` or `{platform}` read of tainted state taints its `/data` destination, so
-copies and copies of copies are refused too. Copies routed through `setState` are not tracked. The contract marks location fixes and auth user IDs as
+copies and copies of copies are refused too. In TypeScript, copies routed through state are
+tracked as well: a `setState` whose value is a sensitive `{platform}` read, or text naming a
+tainted data or platform placeholder or a tainted repeat row, taints its key; a `{state}` read of
+a tainted key taints a data destination and is itself a sink in a request, a `{key}` text
+placeholder or a `state:` storage key. A key holding a repeat placeholder matches every key
+sharing its literal prefix. The Kotlin and Swift validators do not yet track state copies
+(#16652). The contract marks location fixes and auth user IDs as
 sensitive state. Successful MCP-direct shows include a warning for each sink, unless the expanded
 sink scan exceeds 4194304 bytes. Then they include one warning that the sinks are unchecked. No
 host path imports specs yet.

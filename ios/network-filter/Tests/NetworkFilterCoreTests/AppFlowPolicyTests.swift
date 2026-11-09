@@ -56,6 +56,24 @@ final class AppFlowPolicyTests: XCTestCase {
         XCTAssertEqual(identities.lookups, 0)
     }
 
+    func testWatchSelectsOnlyTheAppUnderTestWithoutDroppingTraffic() {
+        _ = store.execute(NetworkRuleCommand(
+            kind: .apply, target: RuleFixtures.target, ownership: RuleFixtures.ownership(revision: 1),
+            condition: .watch, leaseMilliseconds: 15000
+        ))
+        let token = addApp(pid: 501)
+        XCTAssertEqual(
+            policy.verdict(sourceAppAuditToken: nil, sourceProcessAuditToken: token),
+            .shape(RuleFixtures.target)
+        )
+        let sibling = addApp(pid: 502, udid: RuleFixtures.sibling.udid)
+        let other = addApp(pid: 503, bundleId: "dev.example.other")
+        for unselected in [sibling, other] {
+            XCTAssertEqual(policy.verdict(sourceAppAuditToken: nil, sourceProcessAuditToken: unselected), .allow)
+        }
+        XCTAssertEqual(store.activeRules().first?.droppedFlows, 0)
+    }
+
     func testTargetedAppIsDroppedAndCounted() {
         applyOffline()
         let token = addApp(pid: 501)

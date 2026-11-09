@@ -18,8 +18,8 @@ integration evidence from the signed run (#10263).
   Controller output distinguishes `installation_required`, `approval_required`,
   `unavailable`, and `ready`. Ready means the provider replied over
   authenticated XPC, not that any traffic behavior has been verified.
-- Version 4 Codable/XPC snapshots and rule commands, negotiating version 3 by default (version 1 and 2
-  snapshots still decode).
+- Version 5 Codable/XPC snapshots and rule commands, retaining contracts 3 and 4.
+  The daemon negotiates 5; direct invocations default to 3 (version 1 and 2 snapshots still decode).
   Both peers require an Apple-signed executable with the expected bundle
   identifier and their own signing team.
 - With no active rule, every new socket flow receives `allow()` without any
@@ -100,8 +100,14 @@ integration evidence from the signed run (#10263).
   the rule ticket (owner, generation, revision) it was computed for. If the
   rule was reset, replaced or expired meanwhile, the flow is re-checked once
   against the current rule and otherwise allowed.
-- Only **new** socket flows are dropped. Established connections were allowed
-  before the rule existed, so they keep working until they close; the app sees the outage on its next connection.
+- Session app launches pre-arm a leased watch-only rule when the filter is ready
+  (contract 5). The watched app's data callbacks pass traffic through until an
+  offline rule drops an existing flow on its next callback. Other apps keep the
+  allow fast path. At the 256-flow tracking limit, additional watched flows fail
+  open. Connections opened before launch remain unfiltered until they
+  close. Resetting to `none` restores new and reconnected flows. Offline apply
+  reports `existingFlows: "dropped"` only after a data drop was committed for that
+  revision; otherwise it reports `"unaffected"`. Contracts 3 and 4 omit this field.
 - A sibling simulator running the same bundle, a native Mac app with the same
   identifier, and the daemon's own control connections are never selected,
   because they are not attributed to the rule's simulator and app.

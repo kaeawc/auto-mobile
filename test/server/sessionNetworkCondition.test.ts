@@ -1,8 +1,13 @@
+import { FakeNetworkFilterBridge } from "../fakes/FakeNetworkFilterBridge";
+import { IosAppNetworkRuleClient } from "../../src/features/networkFilter/IosAppNetworkRuleClient";
 import { FakeDeviceClockAdapter } from "../fakes/FakeDeviceClockAdapter";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { describe, expect, test } from "bun:test";
 import { SessionManager, PLAN_AUTO_RELEASE_REASON } from "../../src/daemon/sessionManager";
-import { runSessionNetworkMutation } from "../../src/server/sessionNetworkCondition";
+import {
+  prearmSessionAppNetwork,
+  runSessionNetworkMutation,
+} from "../../src/server/sessionNetworkCondition";
 import { applyStateAfterBiometricCaptureFailure } from "../../src/server/sessionBiometricEnrollment";
 import { DeviceState, type DeviceStateResult } from "../../src/features/utility/DeviceState";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -886,5 +891,203 @@ describe("runSessionNetworkMutation", () => {
     );
     expect(ran).toBe(true);
     expect(result).toBe(42);
+  });
+});
+
+describe("launch-time app network watch", () => {
+  const deviceId = "DFBF2D27-6674-42EA-AFC4-AB702275D1D4";
+  const target = { sessionUuid: "watch-session", deviceId };
+  const bundleId = "com.example.app";
+
+  const arrange = () => {
+    const timer = new FakeTimer();
+    const bridge = new FakeNetworkFilterBridge();
+    bridge.setState("ready");
+    const client = new IosAppNetworkRuleClient(bridge);
+    const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+      restorers: {
+        iosAppNetworkRule: {
+          reset: async (rule) => {
+            await client.reset(rule);
+          },
+          renew: (rule, leaseMs) => client.renew(rule, leaseMs),
+        },
+      },
+    });
+    return { timer, bridge, manager };
+  };
+
+  test("ready launch installs, renews and releases the simulator/app watch", async () => {
+    const { timer, bridge, manager } = arrange();
+    try {
+      await manager.createSession(target.sessionUuid, deviceId, "ios");
+      await prearmSessionAppNetwork(manager, target, bundleId, bridge);
+      expect(bridge.ruleCalls[0]).toMatchObject({
+        command: "apply",
+        watch: true,
+        target: { udid: deviceId, bundleId },
+      });
+      expect(bridge.activeRules()[0]?.condition).toBe("watch");
+      expect(manager.activeIosAppNetworkLease(target.sessionUuid)?.bundleId).toBe(bundleId);
+      timer.advanceTime(5_000);
+      await Promise.resolve();
+      expect(bridge.ruleCalls.some((call) => call.command === "renew")).toBe(true);
+      await manager.releaseSession(target.sessionUuid);
+      expect(bridge.activeRules()).toEqual([]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  for (const state of ["not_installed", "unavailable", "approval_required"] as const) {
+    test(`launch with ${state} installs nothing`, async () => {
+      const { bridge, manager } = arrange();
+      try {
+        await manager.createSession(target.sessionUuid, deviceId, "ios");
+        bridge.setState(state);
+        await prearmSessionAppNetwork(manager, target, bundleId, bridge);
+        expect(bridge.ruleCalls).toEqual([]);
+        expect(manager.getNetworkCondition(target.sessionUuid)).toBeUndefined();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+  }
+
+  for (const version of [3, 4] as const) {
+    test(`contract ${version} launch does not send a watch`, async () => {
+      const { bridge, manager } = arrange();
+      try {
+        await manager.createSession(target.sessionUuid, deviceId, "ios");
+        bridge.controllerVersion = version;
+        bridge.setState("ready");
+        await prearmSessionAppNetwork(manager, target, bundleId, bridge);
+        expect(bridge.ruleCalls).toEqual([]);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+  }
+
+  test("relaunch leaves an existing offline rule and its revision intact", async () => {
+    const { bridge, manager } = arrange();
+    try {
+      const session = await manager.createSession(target.sessionUuid, deviceId, "ios");
+      const context = manager.beginIosAppNetworkRule(session, { udid: deviceId, bundleId });
+      await new IosAppNetworkRuleClient(bridge).applyOffline(
+        context.rule,
+        15000,
+        context.nextRevision,
+      );
+      const count = bridge.ruleCalls.length;
+      await prearmSessionAppNetwork(manager, target, bundleId, bridge);
+      expect(bridge.ruleCalls.length).toBe(count);
+      expect(bridge.activeRules()[0]?.condition).toBe("offline");
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("launching another app moves the watch and restart permits pre-arming again", async () => {
+    const { bridge, manager } = arrange();
+    try {
+      await manager.createSession(target.sessionUuid, deviceId, "ios");
+      await prearmSessionAppNetwork(manager, target, bundleId, bridge);
+      await prearmSessionAppNetwork(manager, target, "other.app", bridge);
+      expect(bridge.activeRules().map((rule) => rule.target.bundleId)).toEqual(["other.app"]);
+      bridge.expireAll();
+      await prearmSessionAppNetwork(manager, target, "other.app", bridge);
+      expect(bridge.activeRules()[0]?.condition).toBe("watch");
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  const applyOfflineFor = (
+    manager: SessionManager,
+    bridge: FakeNetworkFilterBridge,
+    appId: string,
+  ) =>
+    runSessionNetworkMutation(
+      manager,
+      target,
+      { platform: "ios", action: "apply", target: { udid: deviceId, bundleId: appId } },
+      {
+        mutation: async (iosRule) => {
+          if (!iosRule) {
+            throw new Error("expected an iOS rule context");
+          }
+          return await new IosAppNetworkRuleClient(bridge).applyOffline(
+            iosRule.rule,
+            15000,
+            iosRule.nextRevision,
+          );
+        },
+      },
+    );
+
+  test("an explicit offline rule for another app replaces the passive launch watch", async () => {
+    const { bridge, manager } = arrange();
+    try {
+      await manager.createSession(target.sessionUuid, deviceId, "ios");
+      await prearmSessionAppNetwork(manager, target, bundleId, bridge);
+      await applyOfflineFor(manager, bridge, "other.app");
+      expect(bridge.activeRules().map((rule) => [rule.target.bundleId, rule.condition])).toEqual([
+        ["other.app", "offline"],
+      ]);
+      expect(manager.getNetworkCondition(target.sessionUuid)?.iosAppRule).toMatchObject({
+        bundleId: "other.app",
+      });
+      expect(manager.getNetworkCondition(target.sessionUuid)?.iosAppRule?.watch).toBeUndefined();
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("an active offline rule still blocks an explicit rule for another app", async () => {
+    const { bridge, manager } = arrange();
+    try {
+      const session = await manager.createSession(target.sessionUuid, deviceId, "ios");
+      const context = manager.beginIosAppNetworkRule(session, { udid: deviceId, bundleId });
+      await new IosAppNetworkRuleClient(bridge).applyOffline(
+        context.rule,
+        15000,
+        context.nextRevision,
+      );
+      await expect(applyOfflineFor(manager, bridge, "other.app")).rejects.toThrow(
+        `already holds an offline rule for ${bundleId}`,
+      );
+      expect(bridge.activeRules().map((rule) => rule.target.bundleId)).toEqual([bundleId]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("an offline rule for the watched app upgrades the watch in place", async () => {
+    const { bridge, manager } = arrange();
+    try {
+      await manager.createSession(target.sessionUuid, deviceId, "ios");
+      await prearmSessionAppNetwork(manager, target, bundleId, bridge);
+      await applyOfflineFor(manager, bridge, bundleId);
+      await expect(applyOfflineFor(manager, bridge, "other.app")).rejects.toThrow(
+        `already holds an offline rule for ${bundleId}`,
+      );
+      expect(bridge.activeRules().map((rule) => rule.condition)).toEqual(["offline"]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("sessionless and mismatched-device launches do not inspect the provider", async () => {
+    const { bridge, manager } = arrange();
+    try {
+      await manager.createSession(target.sessionUuid, "OTHER", "ios");
+      await prearmSessionAppNetwork(undefined, target, bundleId, bridge);
+      await prearmSessionAppNetwork(manager, target, bundleId, bridge);
+      expect(bridge.statusCalls).toBe(0);
+    } finally {
+      manager.stopCleanupTimer();
+    }
   });
 });

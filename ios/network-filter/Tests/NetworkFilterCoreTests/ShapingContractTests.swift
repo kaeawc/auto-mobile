@@ -87,8 +87,8 @@ final class ShapingContractTests: XCTestCase {
         let probe = IdentityProbe(resolver: FakeIdentityResolver(), processTable: FakeProcessTable())
         let service = ProbeService(probe: probe, rules: store)
         XCTAssertTrue(service.finishStartup(generation: service.stopOrBeginStartup(), succeeded: true))
-        XCTAssertEqual(IdentityProbe.version, 4)
-        XCTAssertEqual(IdentityProbe.supportedVersions, [3, 4])
+        XCTAssertEqual(IdentityProbe.version, 5)
+        XCTAssertEqual(IdentityProbe.supportedVersions, [3, 4, 5])
         let shaped = NetworkRuleCommand(
             kind: .apply,
             target: RuleFixtures.target,
@@ -152,7 +152,7 @@ final class ShapingContractTests: XCTestCase {
         XCTAssertEqual(try snapshot(4).mode, "app_offline")
         _ = store.execute(RuleFixtures.reset(RuleFixtures.ownership(revision: 2), target: offlineTarget))
         XCTAssertEqual(try snapshot(4).mode, "allow_only")
-        for version in [0, 2, 5, 99] {
+        for version in [0, 2, 6, 99] {
             service.snapshot(version: version, managedSimulators: Data("[]".utf8)) { data, error in
                 XCTAssertNil(data)
                 XCTAssertEqual(error, "Unsupported identity-probe protocol version")

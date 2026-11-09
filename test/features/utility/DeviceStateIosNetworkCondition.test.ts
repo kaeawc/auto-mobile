@@ -258,6 +258,23 @@ describe("DeviceState iOS Simulator networkCondition (#10590, #10264)", () => {
     expect(setDeviceStateResultSchema.safeParse({ message: "ok", ...result }).success).toBe(true);
   });
 
+  for (const existingFlows of ["dropped", "unaffected"] as const) {
+    test(`offline exposes ${existingFlows} using the existing warning field`, async () => {
+      const bridge = new FakeNetworkFilterBridge();
+      bridge.setState("ready");
+      bridge.ruleScripts.push({
+        state: "ready",
+        detail: "ok",
+        rule: { outcome: "applied", existingFlows },
+      });
+      const result = await deviceState(bridge, context()).setState({
+        networkCondition: { profile: "offline", appId: APP },
+      });
+      expect(result.networkCondition?.warning).toBe(`Existing flows: ${existingFlows}.`);
+      expect(setDeviceStateResultSchema.safeParse({ message: "ok", ...result }).success).toBe(true);
+    });
+  }
+
   test("a failed apply is rolled back and reported as a failure", async () => {
     warn = spyOn(logger, "warn").mockImplementation(() => {});
     const bridge = new FakeNetworkFilterBridge();
@@ -322,6 +339,7 @@ describe("DeviceState iOS Simulator networkCondition (#10590, #10264)", () => {
       throw new Error("bridge exploded");
     };
     const bridge: NetworkFilterBridge = {
+      watch: async () => ({ state: "unavailable", detail: "unused" }),
       status: failing,
       snapshot: failing,
       apply: failing,

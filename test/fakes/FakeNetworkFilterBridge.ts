@@ -25,6 +25,7 @@ export interface FakeRuleCall {
   ownership: NetworkFilterRuleOwnership;
   leaseMs?: number;
   shaping?: NetworkFilterShapingRequest;
+  watch?: boolean;
 }
 
 /**
@@ -45,7 +46,7 @@ const FAKE_DEVICE_SET = "/fake/Devices";
  */
 export class FakeNetworkFilterBridge implements NetworkFilterBridge {
   private result: NetworkFilterSnapshotResult;
-  controllerVersion: 3 | 4 = NETWORK_FILTER_CONTRACT_VERSION;
+  controllerVersion: 3 | 4 | 5 = NETWORK_FILTER_CONTRACT_VERSION;
   supportsShaping = true;
   statusCalls = 0;
   snapshotCalls = 0;
@@ -105,6 +106,14 @@ export class FakeNetworkFilterBridge implements NetworkFilterBridge {
     return this.result.state === "not_installed"
       ? this.result
       : { ...this.result, contractVersion: this.controllerVersion };
+  }
+
+  watch(
+    target: NetworkFilterRuleTarget,
+    ownership: NetworkFilterRuleOwnership,
+    leaseMs: number,
+  ): Promise<NetworkFilterRuleCommandResult> {
+    return this.run({ command: "apply", target, ownership, leaseMs, watch: true });
   }
 
   apply(
@@ -245,7 +254,7 @@ export class FakeNetworkFilterBridge implements NetworkFilterBridge {
       key,
       resolved
         ? { ...status, condition: "shaped", shaping: resolved }
-        : { ...status, condition: "offline" },
+        : { ...status, condition: call.watch ? "watch" : "offline" },
     );
     if (call.shaping) {
       this.requests.set(key, { ...call.shaping });
@@ -267,7 +276,7 @@ export class FakeNetworkFilterBridge implements NetworkFilterBridge {
   ): boolean {
     const previous = this.requests.get(key);
     if (!call.shaping) {
-      return existing.condition === "offline";
+      return existing.condition === (call.watch ? "watch" : "offline");
     }
     return (
       existing.condition === "shaped" &&

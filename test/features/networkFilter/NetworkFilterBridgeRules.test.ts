@@ -4,7 +4,7 @@ import { join } from "node:path";
 import {
   ExecNetworkFilterBridge,
   ExpiringControllerVersionMemory,
-  NETWORK_FILTER_CONTRACT_VERSION,
+  NETWORK_FILTER_SHAPING_CONTRACT_VERSION as NETWORK_FILTER_CONTRACT_VERSION,
 } from "../../../src/features/networkFilter/NetworkFilterBridge";
 import {
   DefaultHostCommandExecutor,
@@ -57,6 +57,7 @@ describe("ExecNetworkFilterBridge rule commands (#10264)", () => {
 
   const bridge = (installed = true) =>
     new ExecNetworkFilterBridge({
+      contractVersion: 4,
       versionMemory: new ExpiringControllerVersionMemory(),
       executor: new DefaultHostCommandExecutor(exec.exec),
       controllerPath: CONTROLLER,

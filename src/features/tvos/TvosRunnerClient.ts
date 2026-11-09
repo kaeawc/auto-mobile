@@ -1,4 +1,6 @@
+import { TvosRunnerDisconnectedError } from "./TvosRunnerDisconnectedError";
 import { TvosRunnerError } from "./TvosRunnerError";
+import { TvosRunnerTimeoutError } from "./TvosRunnerTimeoutError";
 import WebSocket from "ws";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -16,10 +18,15 @@ export const TV_REMOTE_BUTTONS = [
   "playPause",
 ] as const;
 export type TVRemoteButton = (typeof TV_REMOTE_BUTTONS)[number];
+/** `bundleId` names the app the daemon believes is in front; the runner checks it is (#17310). */
 export type TvosCommand =
-  | { type: "request_hierarchy" | "request_screenshot" }
-  | { type: "request_press_button"; action: TVRemoteButton }
-  | { type: "request_append_text"; text: string };
+  | { type: "request_hierarchy"; bundleId?: string }
+  | { type: "request_screenshot" }
+  | { type: "request_press_button"; action: TVRemoteButton; bundleId?: string }
+  | { type: "request_append_text"; text: string; bundleId?: string };
+
+/** Each runner command's deadline; a runner that misses one is treated as stuck. */
+export const TVOS_RUNNER_COMMAND_TIMEOUT_MS = 5000;
 
 export interface TvosRunnerClient {
   /** Registered clients remain reusable until a permanent connection failure or close. */
@@ -86,6 +93,8 @@ export class WebSocketTvosRunnerClient implements TvosRunnerClient {
       factory?: TvosSocketFactory;
       timer?: Timer;
       timeoutMs?: number;
+      /** The app last launched on this device, sent as the hierarchy, press and text target hint. */
+      foregroundApp?: () => string | undefined;
     } = {},
   ) {
     this.ready = new Promise((resolve, reject) => {
@@ -106,10 +115,11 @@ export class WebSocketTvosRunnerClient implements TvosRunnerClient {
   }
 
   private fail(error: ActionableError): void {
-    this.failure = error;
-    this.rejectReady(error);
+    // Keep the first cause: closing the socket reports a generic disconnect afterwards.
+    this.failure ??= error;
+    this.rejectReady(this.failure);
     for (const pending of this.pending.values()) {
-      pending.reject(error);
+      pending.reject(this.failure);
     }
     this.pending.clear();
   }
@@ -180,20 +190,29 @@ export class WebSocketTvosRunnerClient implements TvosRunnerClient {
     options?: { timeoutMs?: number },
   ): Promise<unknown> {
     const timer = this.options.timer ?? defaultTimer;
-    const timeoutMs = options?.timeoutMs ?? this.options.timeoutMs ?? 5000;
+    const timeoutMs =
+      options?.timeoutMs ?? this.options.timeoutMs ?? TVOS_RUNNER_COMMAND_TIMEOUT_MS;
     // One budget covers both handshake and command; correlation entries are removed even on abort.
     const requestId = String(++this.sequence);
     const cancellation = new AbortController();
     const requestSignal = signal
       ? AbortSignal.any([signal, cancellation.signal])
       : cancellation.signal;
+    const message = JSON.stringify({ ...this.withForegroundHint(command), requestId });
+    // A missed handshake keeps the generic timeout so startup can retry; a sent command that
+    // gets no answer means the runner is stuck.
+    let dispatched = false;
+    let timedOut: TvosRunnerTimeoutError | undefined;
+    const stuck = () => (timedOut ??= new TvosRunnerTimeoutError(command.type, timeoutMs));
     try {
       return await raceWithDeadline(
         async () => {
           await this.ready;
           requestSignal.throwIfAborted();
           if (this.failure) {
-            throw this.failure;
+            // The connection was lost after the handshake: report this command, not the earlier
+            // failure that disconnected the runner (#17384).
+            throw new TvosRunnerDisconnectedError(command.type, this.failure);
           }
           if (!this.supported.has(command.type)) {
             throw new TvosRunnerError(
@@ -203,15 +222,42 @@ export class WebSocketTvosRunnerClient implements TvosRunnerClient {
           }
           return new Promise<unknown>((resolve, reject) => {
             this.pending.set(requestId, { type: command.type, resolve, reject });
-            this.socket.send(JSON.stringify({ ...command, requestId }));
+            dispatched = true;
+            this.socket.send(message);
           });
         },
-        { timer, timeoutMs, signal: requestSignal, label: `Tvos runner ${command.type}` },
+        {
+          timer,
+          timeoutMs,
+          signal: requestSignal,
+          label: `Tvos runner ${command.type}`,
+          timeoutError: () => (dispatched ? stuck() : undefined),
+          onTimeout: () => {
+            if (dispatched) {
+              this.fail(stuck());
+              this.socket.close();
+            }
+          },
+        },
       );
     } finally {
       cancellation.abort();
       this.pending.delete(requestId);
     }
+  }
+
+  /** Names the last-launched app on commands that read an app, unless the caller named one. */
+  private withForegroundHint(command: TvosCommand): TvosCommand {
+    if (
+      (command.type !== "request_hierarchy" &&
+        command.type !== "request_append_text" &&
+        command.type !== "request_press_button") ||
+      command.bundleId !== undefined
+    ) {
+      return command;
+    }
+    const bundleId = this.options.foregroundApp?.();
+    return bundleId ? { ...command, bundleId } : command;
   }
 
   async hierarchy(signal?: AbortSignal): Promise<TvosHierarchy> {

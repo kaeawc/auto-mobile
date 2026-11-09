@@ -375,6 +375,8 @@ const formFactorSchema = z.enum([
   "tv",
   "watch",
   "automotive",
+  "xr-headset",
+  "xr-glasses",
   "unknown",
 ]);
 const lifecycleSchema = z
@@ -438,7 +440,7 @@ export const deviceDescriptionSchema = z
       .strict()
       .optional(),
     name: z.string(),
-    platform: z.enum(["android", "ios"]),
+    platform: z.enum(["android", "ios", "watchos", "tvos", "visionos"]),
     isVirtual: z.boolean(),
     source: z.enum(["local", "remote"]).nullable(),
     formFactor: formFactorSchema,

@@ -74,6 +74,9 @@ struct GestureCoordinateGeometry: Equatable, Sendable {
     var screenOrigin: GesturePoint = .zero
     var windowTranslation: GesturePoint? = nil
     var applicationDisplayId: UInt64? = nil
+    /// The observed frame cannot be re-read live (a two-panel SpringBoard's inner panel, whose
+    /// live application frame is the cover's), so the cached geometry is used as observed.
+    var pinnedToObservation = false
 
     /// A letterboxed app at the main-screen origin is not evidence of another panel (#16259).
     nonisolated func isAppOnMainScreen(applicationDisplayId: UInt64?) -> Bool {
@@ -106,12 +109,18 @@ struct GestureCoordinateGeometry: Equatable, Sendable {
         return replacingScreen(reference)
     }
 
-    /// Mirrors resolveIosObserveRotation: unknown cardinal orientation falls back to size.
-    nonisolated static func observationRotation(_ rotation: Int?, size: GestureSize) -> Int? {
+    /// Unknown cardinal orientation falls back to size, matching resolveIosObserveRotation.
+    nonisolated static func observationRotation(_ rotation: Int?, size: GestureSize, app: GestureSize? = nil) -> Int? {
         guard size.isValid else { return nil }
         if let rotation, (0 ... 3).contains(rotation),
            !(size.width < size.height && (rotation == 1 || rotation == 3))
         {
+            // #17374/#17375: a portrait reading cannot describe the transposed landscape inner panel.
+            if let app, app.isValid, size.width > size.height, rotation == 0 || rotation == 2,
+               abs(app.width - size.height) <= 1, abs(app.height - size.width) <= 1
+            {
+                return 1
+            }
             return rotation
         }
         return size.width < size.height ? 0 : 1

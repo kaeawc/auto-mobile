@@ -70,6 +70,10 @@ export type {
   OnStorageSubscriptionRequestedCallback,
 } from "./deviceDataStream/streamContracts";
 import { createScreenshotUpdate } from "./deviceDataStream/screenshotUpdate";
+import {
+  LIFECYCLE_FRAME_TYPES,
+  parseLifecycleOnly,
+} from "./deviceDataStream/lifecycleSubscription";
 
 export { DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS };
 
@@ -768,7 +772,12 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
 
   private async handleObservationSubscribe(
     socket: Socket,
-    request: { id?: string; sessionUuid?: string; deviceSessionUuid?: string },
+    request: {
+      id?: string;
+      sessionUuid?: string;
+      deviceSessionUuid?: string;
+      lifecycleOnly?: unknown;
+    },
     line: string,
   ): Promise<void> {
     let deviceSessionUuid: string | null;
@@ -815,7 +824,17 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     // The wire now targets a deviceSessionUuid; the cadence/connect machinery is
     // serial-scoped, so resolve to the current serial. A missing UUID is an
     // intentional all-device subscription; an unresolvable UUID schedules no
-    // device and must not be treated as that all-device case.
+    // device and must not be treated as that all-device case. A lifecycle-only
+    // subscription never contributes to cadence, so it owes no notification
+    // (the hierarchy callback can reconnect an idle iOS CtrlProxy client). Any
+    // other non-false lifecycleOnly was rejected and created no subscription.
+    if (
+      request.lifecycleOnly !== undefined &&
+      request.lifecycleOnly !== null &&
+      request.lifecycleOnly !== false
+    ) {
+      return;
+    }
     if (deviceSessionUuid === null || subscribedDeviceId !== null) {
       this.cadence.notifyScreenshotCadenceChanged(subscribedDeviceId);
       this.cadence.notifyHierarchyCadenceChanged(subscribedDeviceId);
@@ -823,6 +842,10 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   }
 
   protected onSubscribed(subscriptionId: string, filter: DeviceDataFilter, _socket: Socket): void {
+    // A lifecycle-only subscriber wants no frames, so it starts no capture or device connection.
+    if (filter.lifecycleOnly) {
+      return;
+    }
     const controller = new AbortController();
     this.initialFrameWaiters.set(subscriptionId, controller);
     this.buildContexts.replayBuildContexts({
@@ -932,11 +955,15 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         : null,
       screenshotIntervalMs: this.cadence.parseScreenshotIntervalMs(request.screenshotIntervalMs),
       hierarchyIntervalMs: this.cadence.parseHierarchyIntervalMs(request.hierarchyIntervalMs),
+      lifecycleOnly: parseLifecycleOnly(request.lifecycleOnly),
     };
   }
 
   protected matchesFilter(filter: DeviceDataFilter, data: DeviceDataPush): boolean {
     if (data.targetFilter && data.targetFilter !== filter) {
+      return false;
+    }
+    if (filter.lifecycleOnly && !LIFECYCLE_FRAME_TYPES.has(data.message.type)) {
       return false;
     }
     // Route on the stable epoch key. A `null` target reaches only all-device

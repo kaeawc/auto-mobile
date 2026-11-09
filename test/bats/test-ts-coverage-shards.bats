@@ -349,6 +349,64 @@ EOF
   [[ "$output" == *"AUTOMOBILE_COVERAGE_SHARDS must be a positive integer"* ]]
 }
 
+# Asserts coverage shard S ran exactly the files at global indices first, first+step, ... of $4 files.
+assert_interleaved_shard() {
+  local number="$1" first="$2" step="$3" total="$4" index
+  for ((index = first; index < total; index += step)); do printf 'test/fixture%03d.test.ts\n' "$index"; done > "$BATS_TEST_TMPDIR/expected-$number"
+  cat "coverage/shards/files-${number}-"* > "$BATS_TEST_TMPDIR/seen-$number"
+  cmp "$BATS_TEST_TMPDIR/seen-$number" "$BATS_TEST_TMPDIR/expected-$number"
+}
+
+@test "coverage parts run disjoint interleaved slices with shards numbered after earlier parts (#16377)" {
+  stub_find 40
+  run_coverage AUTOMOBILE_COVERAGE_PART=1 AUTOMOBILE_COVERAGE_PARTS=2 AUTOMOBILE_COVERAGE_CHUNK_FILES=4
+  [ "$status" -eq 0 ]
+  # Part 1 takes even files; its two shards round-robin them: 0,4,8,... and 2,6,10,...
+  assert_interleaved_shard 1 0 4 40
+  assert_interleaved_shard 2 2 4 40
+  [ ! -f coverage/shards/shard-3.chunks ]
+  [ "$(grep -c '^SF:src/fixture' coverage/lcov.info)" -eq 20 ]
+  cat coverage/shards/files-* > "$BATS_TEST_TMPDIR/part-1-files"
+
+  run_coverage AUTOMOBILE_COVERAGE_PART=2 AUTOMOBILE_COVERAGE_PARTS=2 AUTOMOBILE_COVERAGE_CHUNK_FILES=4
+  [ "$status" -eq 0 ]
+  # Part 2 numbers its shards 3 and 4, so its chunk reports never collide with part 1's.
+  [ ! -f coverage/shards/shard-1.chunks ]
+  [ -f coverage/shards/shard-3-chunk-1.xml ]
+  [ -f coverage/shards/shard-4-chunk-1.xml ]
+  assert_interleaved_shard 3 1 4 40
+  assert_interleaved_shard 4 3 4 40
+  [[ "$output" == *"coverage shard 3 chunk 1/"* ]]
+  grep -q 'shard-3-chunk-1' coverage/junit.xml
+  cat "$BATS_TEST_TMPDIR/part-1-files" coverage/shards/files-* | sort > "$BATS_TEST_TMPDIR/seen"
+  for ((i = 0; i < 40; i += 1)); do printf 'test/fixture%03d.test.ts\n' "$i"; done > "$BATS_TEST_TMPDIR/expected"
+  # Together the parts run every file exactly once.
+  cmp "$BATS_TEST_TMPDIR/seen" "$BATS_TEST_TMPDIR/expected"
+}
+
+@test "coverage part settings are validated before Bun (#16377)" {
+  stub_find 4
+  run_coverage AUTOMOBILE_COVERAGE_PART=3 AUTOMOBILE_COVERAGE_PARTS=2
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"AUTOMOBILE_COVERAGE_PART must be at most AUTOMOBILE_COVERAGE_PARTS (2), got: 3"* ]]
+  run_coverage AUTOMOBILE_COVERAGE_PARTS=0
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"AUTOMOBILE_COVERAGE_PARTS must be a positive integer"* ]]
+  [ ! -f coverage/shards/events ]
+}
+
+@test "coverage discovery leaves repository lint and script tests to the unit lanes (#16377)" {
+  cat > "$STUB_BIN/find" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' test/fixture000.test.ts test/lint/fixtureLint.test.ts test/scripts/fixtureScript.test.ts test/fixture001.test.ts
+EOF
+  chmod +x "$STUB_BIN/find"
+  run_coverage AUTOMOBILE_COVERAGE_SHARDS=1
+  [ "$status" -eq 0 ]
+  printf '%s\n' test/fixture000.test.ts test/fixture001.test.ts > "$BATS_TEST_TMPDIR/expected"
+  cmp coverage/shards/files-1-1 "$BATS_TEST_TMPDIR/expected"
+}
+
 @test "a failing chunk fails its shard and the step, names itself, and keeps merged artifacts out" {
   stub_find 30
   run_coverage AUTOMOBILE_COVERAGE_SHARDS=2 AUTOMOBILE_COVERAGE_CHUNK_FILES=5 STUB_FAIL_CHUNK=1-2

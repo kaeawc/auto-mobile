@@ -1,0 +1,12 @@
+** Dumping CarDrivingStateService
+
+*CarDrivingStateService*
+Driving State Clients:
+  callbacks: 2
+  killed: false
+  broadcasts count: -1
+Driving state change log:
+07-16 23:08:31 CarDrivingStateService Boot: changed from -1 to 0
+Current Driving State: 0
+Supported gears: 4 1 2 8 16 32 64 128 256
+

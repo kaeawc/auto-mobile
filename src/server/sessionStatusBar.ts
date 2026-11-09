@@ -8,23 +8,24 @@ export type StatusBarSessionManager = Pick<
 >;
 
 /**
- * Run a status-bar override under the caller's session (#14105). The override is tracked as
- * session setup, so a concurrent release drains it before the release-time clear runs; the
+ * Run a status-bar override or clear under the caller's session (#14105). The mutation is tracked
+ * as session setup, so a concurrent release drains it before the release-time clear runs; the
  * owning session id is recorded before the device command so a release that wins the race still
  * clears whatever the command managed to apply. A sessionless call runs untracked and owns
- * nothing (`null`).
+ * nothing (`null`). `record` returns a rejection handler for its write: when the device command
+ * rejects, it runs with the error inside the tracked setup, so it can undo a record the device
+ * never acted on before a release reads it (#17054).
  */
 export async function runSessionStatusBarMutation<T>(options: {
   sessionManager: StatusBarSessionManager | undefined;
   sessionUuid: string | undefined;
   deviceId: string;
-  record: (sessionId: string | null) => void;
+  record: (sessionId: string | null) => (error: unknown) => void;
   mutation: () => Promise<T>;
 }): Promise<T> {
   const { sessionManager, sessionUuid, deviceId, record, mutation } = options;
   if (!sessionManager || !sessionUuid) {
-    record(null);
-    return mutation();
+    return recordThenMutate(() => record(null), mutation);
   }
   const session = sessionManager.getSession(sessionUuid);
   if (
@@ -39,8 +40,7 @@ export async function runSessionStatusBarMutation<T>(options: {
   let completed = false;
   let result!: T;
   await sessionManager.trackSessionSetup(session, async () => {
-    record(session.sessionId);
-    result = await mutation();
+    result = await recordThenMutate(() => record(session.sessionId), mutation);
     completed = true;
   });
   if (!completed) {
@@ -49,4 +49,18 @@ export async function runSessionStatusBarMutation<T>(options: {
     );
   }
   return result;
+}
+
+/** Records, runs the mutation, and hands a rejection to the record's handler. */
+async function recordThenMutate<T>(
+  record: () => (error: unknown) => void,
+  mutation: () => Promise<T>,
+): Promise<T> {
+  const onReject = record();
+  try {
+    return await mutation();
+  } catch (error) {
+    onReject(error);
+    throw error;
+  }
 }

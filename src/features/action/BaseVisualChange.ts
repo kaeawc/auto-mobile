@@ -56,7 +56,7 @@ import type { Window } from "../observe/interfaces/Window";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { isAdoptableCapture } from "../observe/isAdoptableCapture";
 import { hasWrongWindowEvidence } from "../observe/observationFreshness";
-import { RealObserveScreen } from "../observe/ObserveScreen";
+import { createActionObserveScreen } from "../observe/ObserveScreen";
 import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
 import { PredictionActionContext, PredictionAnalyzer } from "../observe/PredictionAnalyzer";
 import { RealSettleObserve } from "../observe/SettleObserve";
@@ -64,6 +64,7 @@ import { staleDisplayError } from "../observe/StaleDisplayError";
 import { Window as RealWindow } from "../observe/Window";
 import { HomeForegroundVerifier, type HomeForegroundVerifyOptions } from "./HomeForegroundVerifier";
 import { compareActiveWindow, deriveInteractionEffect } from "./interactionEffect";
+import { refreshStaleIosPanelGeometry } from "./panelGeometryRefresh";
 import { MissingViewHierarchyError } from "./MissingViewHierarchyError";
 import {
   applySuccessVerdict,
@@ -173,7 +174,7 @@ export class BaseVisualChange {
     // Honor the observer seam before constructing defaults: RealObserveScreen's
     // screenshot service starts host filesystem work and retention timers.
     this.observeScreen =
-      displayFence.observeScreen ?? new RealObserveScreen(device, this.adbFactory);
+      displayFence.observeScreen ?? createActionObserveScreen(device, this.adbFactory);
     // Forward the injected clock so the internal Window shares this instance's
     // timer: home-verification derives its outer deadline from `this.timer`, and
     // Window derives the per-subread budgets from ITS timer — they must be the
@@ -276,6 +277,12 @@ export class BaseVisualChange {
     await beginPostActionCaptureAction();
     const timeoutMs = options.timeoutMs || 12000;
     const perf = options.perf ?? new NoOpPerformanceTracker();
+    await refreshStaleIosPanelGeometry(this.device, options, {
+      observer: this.observeScreen,
+      transitions: this.displayTransitionReader,
+      callerStampIsStale: () => this.callerDisplayStampIsStale(options),
+      observeOptions: this.previousObserveOptions(options, perf, "fresh"),
+    });
     const state = this.captureCallerFenceState(options);
 
     if (options.progress) {

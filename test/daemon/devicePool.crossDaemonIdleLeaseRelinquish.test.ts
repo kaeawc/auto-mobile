@@ -40,7 +40,6 @@ class SharedLockFiles {
     return {
       leasePath: (deviceId) => `/leases/${deviceId}.lock`,
       claimPath: (deviceId) => `/claims/${deviceId}.lock`,
-      legacyClaimPath: () => undefined,
       read: (path) => files.get(path),
       // Liveness is injected: both fake daemons are "running", and no real PID is ever signalled.
       isProcessRunning: () => true,

@@ -57,6 +57,62 @@ describe("sendBroadcast mutation identity", () => {
   });
 });
 
+describe("wearSurface mutation identity", () => {
+  const TILE = "com.example/.Tile";
+  test("addTile and removeTile are fallback-forcing opaque intents keyed by action and component", () => {
+    const add = deviceToolMutations(
+      "wearSurface",
+      { action: "addTile", component: TILE },
+      "android",
+    );
+    const remove = deviceToolMutations(
+      "wearSurface",
+      { action: "removeTile", component: TILE },
+      "android",
+    );
+    expect(add).toHaveLength(1);
+    expect(opaqueForcesFallback(add[0])).toBe(true);
+    expect(opaqueForcesFallback(remove[0])).toBe(true);
+    expect(remove[0].key).not.toBe(add[0].key);
+  });
+
+  test("listTileProviders is a read and records nothing", () => {
+    expect(deviceToolMutations("wearSurface", { action: "listTileProviders" }, "android")).toEqual(
+      [],
+    );
+  });
+
+  test("showTile by index records nothing; by component it may add the tile, so it records like addTile", () => {
+    expect(deviceToolMutations("wearSurface", { action: "showTile", index: 0 }, "android")).toEqual(
+      [],
+    );
+    expect(
+      deviceToolMutations("wearSurface", { action: "showTile", component: TILE }, "android"),
+    ).toEqual(
+      deviceToolMutations("wearSurface", { action: "addTile", component: TILE }, "android"),
+    );
+  });
+
+  test("watchFace only reads dumpsys wear_service and records nothing", () => {
+    expect(deviceToolMutations("wearSurface", { action: "watchFace" }, "android")).toEqual([]);
+  });
+
+  test("watch face actions share one active-face intent; complications are keyed per face slot", () => {
+    const face = (args: Record<string, unknown>) =>
+      deviceToolMutations("wearSurface", args, "android");
+    const set = face({ action: "setWatchFace", watchFace: "com.google.wear.offhand" });
+    expect(set).toHaveLength(1);
+    expect(opaqueForcesFallback(set[0])).toBe(true);
+    expect(face({ action: "unsetWatchFace" })).toEqual(set);
+    const slot = { watchFace: "com.google.wear.offhand", slot: 11, provider: TILE };
+    const setSlot = face({ action: "setComplication", ...slot, type: 5 });
+    expect(face({ action: "unsetComplication", ...slot })).toEqual(setSlot);
+    expect(face({ action: "setComplication", ...slot, slot: 12, type: 3 })[0].key).not.toBe(
+      setSlot[0].key,
+    );
+  });
+});
+
 describe("backgroundWork mutation identity", () => {
   const work = (action: unknown, extra: Record<string, unknown> = {}) =>
     deviceToolMutations("backgroundWork", { appId: APP, action, ...extra }, "android");

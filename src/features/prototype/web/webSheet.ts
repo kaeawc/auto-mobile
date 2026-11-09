@@ -1,3 +1,19 @@
+import {
+  ABSOLUTE,
+  ALIGN_ITEMS,
+  ALIGN_SELF,
+  BACKGROUND_COLOR,
+  BORDER_RADIUS,
+  CENTER,
+  COLUMN,
+  DATA_PART,
+  FLEX,
+  FLEX_DIRECTION,
+  FLEX_SHRINK,
+  JUSTIFY_CONTENT,
+  MAX_HEIGHT,
+  RELATIVE,
+} from "./webCss";
 import { prototypeRolePalette, type Rgba } from "../prototypeContrast";
 import { record, type Raw } from "../prototypeTemplate";
 import { el, type WebElement } from "./webNodes";
@@ -16,11 +32,11 @@ const SCRIM_ROLE_ALPHA = 0.4;
 
 /** A layer covers its window: the still's window element is its positioned ancestor. */
 export const LAYER_CSS: Readonly<Record<string, string>> = {
-  position: "absolute",
+  position: ABSOLUTE,
   inset: "0",
-  display: "flex",
-  "flex-direction": "column",
-  "justify-content": "flex-end",
+  display: FLEX,
+  [FLEX_DIRECTION]: COLUMN,
+  [JUSTIFY_CONTENT]: "flex-end",
 };
 
 /** A role from the palette, else the Material 3 baseline when a derived scheme leaves it out. */
@@ -64,7 +80,7 @@ export function hoistedScope(scope: WebRenderScope): WebRenderScope {
     ...scope,
     inBox: false,
     consumedInsets: [],
-    style: { ...scope.style, parentAxis: "column", weightsChildren: false },
+    style: { ...scope.style, parentAxis: COLUMN, weightsChildren: false },
   };
 }
 
@@ -93,74 +109,111 @@ export function openLayer(
 /** Android's drag handle: a 32x4 `onSurfaceVariant` bar with 8 px around it, centred. */
 function dragHandle(style: WebStyleContext): WebElement {
   return el("div", {
-    attrs: { "data-part": "handle" },
+    attrs: { [DATA_PART]: "handle" },
     style: {
       width: "32px",
       height: "4px",
       margin: "8px",
-      "border-radius": "2px",
-      "align-self": "center",
-      "flex-shrink": "0",
-      "background-color": rgbaCss(roleColor("onSurfaceVariant", style)),
+      [BORDER_RADIUS]: "2px",
+      [ALIGN_SELF]: CENTER,
+      [FLEX_SHRINK]: "0",
+      [BACKGROUND_COLOR]: rgbaCss(roleColor("onSurfaceVariant", style)),
     },
   });
 }
 
 /**
- * Android's in-window sheet: a scrim over the window and, at its bottom, a full-width column as
+ * The iOS renderer's drag handle: a 36x5 capsule 6 px from the sheet's top, `onSurfaceVariant`
+ * (else the secondary label colour at half opacity).
+ */
+function iosDragHandle(style: WebStyleContext): WebElement {
+  const fallback = style.mode === "dark" ? "rgba(235,235,245,0.3)" : "rgba(60,60,67,0.3)";
+  return el("div", {
+    attrs: { [DATA_PART]: "handle" },
+    style: {
+      width: "36px",
+      height: "5px",
+      "margin-top": "6px",
+      [BORDER_RADIUS]: "2.5px",
+      [ALIGN_SELF]: CENTER,
+      [FLEX_SHRINK]: "0",
+      [BACKGROUND_COLOR]: cssColor("onSurfaceVariant", style) ?? fallback,
+    },
+  });
+}
+
+/**
+ * The sheet's own chrome per skin. Android's column starts its child at the leading edge under an
+ * 8 px-margined handle on `surface`; the iOS renderer's VStack centres it 8 px below the handle,
+ * clipped to a 16 px radius on `surface` (else the system background). `ios.sheet.sizing` is
+ * ignored, as the iOS renderer ignores it.
+ */
+function sheetSkin(scope: WebRenderScope): {
+  css: Record<string, string>;
+  surface: string;
+  handle: WebElement;
+} {
+  if (scope.skin === "ios") {
+    const fallback = scope.style.mode === "dark" ? "rgba(0,0,0,1)" : "rgba(255,255,255,1)";
+    return {
+      css: { [ALIGN_ITEMS]: CENTER, gap: "8px", [BORDER_RADIUS]: "16px", overflow: "hidden" },
+      surface: cssColor("surface", scope.style) ?? fallback,
+      handle: iosDragHandle(scope.style),
+    };
+  }
+  return {
+    css: { [ALIGN_ITEMS]: "flex-start" },
+    surface: rgbaCss(roleColor("surface", scope.style)),
+    handle: dragHandle(scope.style),
+  };
+}
+
+/**
+ * The in-window sheet: a scrim over the window and, at its bottom, a full-width column as
  * tall as the first detent, painted `surface` unless an authored background resolves. The
  * handle comes first, then the child. Authored style applies to the sheet and wins.
  */
 function sheetLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRenderKit) {
   const hoisted = hoistedScope(scope);
+  const skin = sheetSkin(scope);
   const { attrs, style: base } = kit.base(node, hoisted, {
-    display: "flex",
-    "flex-direction": "column",
-    "align-items": "flex-start",
-    position: "relative",
+    display: FLEX,
+    [FLEX_DIRECTION]: COLUMN,
+    ...skin.css,
+    position: RELATIVE,
     width: "100%",
     height: detentHeight(node.detents),
-    "max-height": "100%",
-    "flex-shrink": "0",
+    [MAX_HEIGHT]: "100%",
+    [FLEX_SHRINK]: "0",
   });
   // An authored background that resolves paints the sheet; otherwise (none, or an unresolved
   // colour) it keeps the `surface` the devices fall back to, under any authored gradient.
-  const style = base["background-color"]
-    ? base
-    : { ...base, "background-color": rgbaCss(roleColor("surface", scope.style)) };
+  const style = base[BACKGROUND_COLOR] ? base : { ...base, [BACKGROUND_COLOR]: skin.surface };
   const inner = kit.child(hoisted, {
-    style: { ...hoisted.style, parentAxis: "column", weightsChildren: false },
+    style: { ...hoisted.style, parentAxis: COLUMN, weightsChildren: false },
   });
   const content = kit.renderNode(node.child, inner, `${path}.child`);
   const scrim = el("div", {
-    attrs: { "data-part": "scrim" },
+    attrs: { [DATA_PART]: "scrim" },
     style: {
-      position: "absolute",
+      position: ABSOLUTE,
       inset: "0",
-      "background-color": scrimCss(node.scrim, scope.style),
+      [BACKGROUND_COLOR]: scrimCss(node.scrim, scope.style),
     },
   });
   // A gradient border and inner shadows paint over the sheet's content, as on any other node.
   const sheet = withOverContentLayers(
-    el("div", { attrs: { ...attrs, "data-part": "sheet" }, style }, [
-      ...(node.dragHandle === false ? [] : [dragHandle(scope.style)]),
+    el("div", { attrs: { ...attrs, [DATA_PART]: "sheet" }, style }, [
+      ...(node.dragHandle === false ? [] : [skin.handle]),
       ...(content ? [content] : []),
     ]),
     node.style,
     scope.style,
   );
-  return el("div", { attrs: { "data-part": "sheetLayer" }, style: { ...LAYER_CSS } }, [
+  return el("div", { attrs: { [DATA_PART]: "sheetLayer" }, style: { ...LAYER_CSS } }, [
     scrim,
     sheet,
   ]);
-}
-
-/** Node types the renderer hoists into a window layer, leaving nothing in their parent's flow. */
-export const WEB_LAYER_TYPES: ReadonlySet<string> = new Set(["bottomSheet", "dialog", "snackbar"]);
-
-/** Whether a node is hoisted into a window layer (see WEB_LAYER_TYPES), open or closed. */
-export function isWebLayerNode(node: Raw | undefined): boolean {
-  return node !== undefined && WEB_LAYER_TYPES.has(String(node.type));
 }
 
 export function webSheetLayers(kit: WebRenderKit): Readonly<Record<string, WebLayerRenderer>> {

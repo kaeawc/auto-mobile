@@ -3,7 +3,9 @@ import { ActionableError } from "../../models/ActionableError";
 /**
  * Typed refusal for a broker connection (a proxy launched with `--session-config`) that tried
  * to control, start, provision or delete anything outside its own initialized grants (#11178). Reads
- * stay open everywhere (owner decision Q6); only control and lifecycle are refused. Not retryable:
+ * are not confined by grants (owner decision Q6), though a read naming a session another connected
+ * client owns is refused as `read_session_not_bound` (#13540); only control and lifecycle are refused
+ * here. Not retryable:
  * the connection's binding set is fixed for its lifetime.
  */
 export const DEVICE_OUTSIDE_BROKER_GRANT_CODE = "device_outside_broker_grant";

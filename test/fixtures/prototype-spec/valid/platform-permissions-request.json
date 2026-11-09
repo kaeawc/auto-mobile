@@ -1,0 +1,72 @@
+{
+  "id": "platform-permissions-request",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "changes": 0,
+    "requestStatus": ""
+  },
+  "requires": {
+    "platform": ["permissions"],
+    "permissions": [
+      {
+        "name": "camera",
+        "purpose": "Scan a receipt."
+      },
+      {
+        "name": "location",
+        "purpose": "Tag the receipt with the store."
+      }
+    ]
+  },
+  "platform": {
+    "on": {
+      "permissions.changed": [
+        {
+          "type": "increment",
+          "key": "changes"
+        }
+      ]
+    }
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "text",
+        "text": "Camera {platform:/permissions/camera}, location {platform:/permissions/location} ({changes})"
+      },
+      {
+        "type": "button",
+        "label": "Allow",
+        "visibleWhen": {
+          "platform": "/permissions/camera",
+          "equals": "notDetermined"
+        },
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "permissions.request",
+            "args": {
+              "names": {
+                "value": ["camera", "location"]
+              }
+            },
+            "statusKey": "requestStatus"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "text": "Open Settings to allow the camera",
+        "visibleWhen": {
+          "platform": "/permissions/camera",
+          "equals": "blocked"
+        }
+      }
+    ]
+  }
+}

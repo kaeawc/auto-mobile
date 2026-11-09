@@ -18,6 +18,7 @@ import type {
 import type { EmulatorProcessStopper } from "../utils/android-cmdline-tools/EmulatorProcessStop";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import type { DiscoverySource } from "../utils/discoverySource";
+import type { SimulatorPair } from "../utils/ios-cmdline-tools/SimulatorPairs";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import { SimctlUnavailableError, type SimCtl } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../utils/logger";
@@ -164,6 +165,12 @@ export interface BootedDeviceDiscoveryOptions {
    * every other "either" read stays Android and iOS (#14908).
    */
   includeWatchOs?: boolean;
+  /**
+   * With `"either"`, also sweep these simulator families. The pool's readers pass the families
+   * they track, so a held Apple TV or Vision Pro that shuts down is seen as lost without every
+   * background read paying for a sweep the pool does not need.
+   */
+  includeAppleSimulatorPlatforms?: readonly AppleSimulatorSweepPlatform[];
   /** Cancels short-lived platform discovery work. */
   signal?: AbortSignal;
   /**
@@ -257,6 +264,8 @@ export interface PlatformDeviceManager {
   withForeignAndroidSerialSource?(source: ForeignAndroidSerialSource): this;
   /** Canonical simulator family for shutdown; adapters without simulator inventories may omit it. */
   resolveKillDeviceTarget?(device: BootedDevice, signal?: AbortSignal): Promise<BootedDevice>;
+  /** Watch–iPhone simulator pairs over the same simctl; absent when no real simctl backs it. */
+  listSimulatorPairs?(signal?: AbortSignal): Promise<SimulatorPair[]>;
 
   /**
    * List all available device images for a specific platform
@@ -500,4 +509,15 @@ export function androidLaunchOptions(options: DeviceStartOptions): {
     cameraPosterPath: options.cameraPosterPath,
     ...(options.discardSnapshotOnExit ? { extraArgs: ["-no-snapshot-save"] } : {}),
   };
+}
+
+/** Simulator families an `"either"` booted read sweeps only on request. */
+export type AppleSimulatorSweepPlatform = "tvos" | "visionos";
+
+/** The opt-in families among `platforms`, for the pool's own "either" reads. */
+export function appleSimulatorSweepsFor(
+  platforms: Iterable<string>,
+): AppleSimulatorSweepPlatform[] {
+  const tracked = new Set(platforms);
+  return (["tvos", "visionos"] as const).filter((platform) => tracked.has(platform));
 }

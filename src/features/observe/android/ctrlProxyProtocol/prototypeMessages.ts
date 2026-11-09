@@ -238,6 +238,10 @@ export interface PrototypeStatusEntry {
   /** True while the prototype's app is not in front: hidden, state kept, back with the app. */
   suspended?: boolean;
   hiddenReason?: PrototypeHiddenReason;
+  /** The orientation the spec requested (`window.orientation`); only with prototype_platform_window_controls_v1. */
+  orientation?: "portrait" | "landscape" | "unlocked";
+  /** `unsupported` when a requested `window.statusBar` style cannot be applied to the overlay. */
+  statusBar?: "unsupported";
   /** The mode it is drawn in right now; only from a device advertising prototype_appearance_v1. */
   appearance?: PrototypeAppearance;
   /** Device-reported `storage` block state (prototype_storage_v1, #12522); parsePrototypeStorageReport validates it. */

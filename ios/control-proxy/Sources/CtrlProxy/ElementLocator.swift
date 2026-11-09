@@ -315,7 +315,16 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             }
 
             // Get screen bounds for offscreen filtering
-            let screenBounds = snapshot.frame
+            // A two-panel SpringBoard snapshot holds both panels' windows under the main panel's
+            // root frame; read only the active panel's (#17046).
+            let panel = bundleId == "com.apple.springboard" ? Self.activeSpringBoardPanel(in: snapshot) : nil
+            let panelWindowFrame = panel.flatMap { selected in
+                snapshot.children.first { Self.displayId(of: $0) == selected.displayId }?.frame
+            }
+            let screenBounds = panelWindowFrame ?? Self.offscreenFilterBounds(
+                rootFrame: snapshot.frame,
+                windowFrames: snapshot.children.filter { $0.elementType == .window }.map(\.frame)
+            )
 
             // Build hierarchy from snapshot (no more IPC calls - all data is local)
             var truncationReasons: Set<String> = []
@@ -326,7 +335,10 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                     screenBounds: screenBounds,
                     truncationReasons: &truncationReasons,
                     keyboardFocus: keyboardFocus,
-                    disableAllFiltering: disableAllFiltering
+                    disableAllFiltering: disableAllFiltering,
+                    rootChildFilter: panel.map { selected in
+                        { Self.displayId(of: $0) == selected.displayId }
+                    }
                 )
             }
 
@@ -351,18 +363,29 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
 
             // Apply optimization - flatten structural wrappers and filter empty nodes
             // Skip optimization when disableAllFiltering is true (for raw hierarchy debugging)
-            let rootElement: UIElementInfo
+            let panelRootElement: UIElementInfo
             if disableAllFiltering {
-                rootElement = hierarchyWithTypedTextInputs
+                panelRootElement = hierarchyWithTypedTextInputs
             } else {
-                rootElement = tracked("optimize") {
+                panelRootElement = tracked("optimize") {
                     let optimizedElements = optimizeHierarchy(hierarchyWithTypedTextInputs, isRoot: true)
                     return optimizedElements.first ?? hierarchyWithTypedTextInputs
                 }
             }
 
+            // The inner panel's windows sit in portrait space while it is shown landscape: rotate
+            // the tree into the visible space and report it as an app on that panel would.
+            let innerPanelFrame = panel?.isMainDisplay == false ? panelWindowFrame : nil
+            let frame = innerPanelFrame.map { CGRect(x: 0, y: 0, width: $0.height, height: $0.width) } ?? snapshot.frame
+            let rootElement = innerPanelFrame.map {
+                Self.rotatedIntoLandscape(
+                    panelRootElement,
+                    portraitHeight: ElementBounds.clampedInt($0.height),
+                    rootBounds: ElementBounds(clamping: frame)
+                )
+            } ?? panelRootElement
+
             // Get window info from snapshot
-            let frame = snapshot.frame
             let windowInfo = WindowInfo(
                 id: 0,
                 type: 1, // Application window
@@ -388,7 +411,12 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             if !systemAlertCapture.alerts.isEmpty {
                 // Create a wrapper that contains both the app hierarchy and alerts
                 var children = rootElement.node ?? []
-                children.append(contentsOf: systemAlertCapture.alerts)
+                children.append(
+                    contentsOf: Self.alertsInObservedSpace(
+                        systemAlertCapture.alerts,
+                        innerPanelPortraitHeight: innerPanelFrame.map { ElementBounds.clampedInt($0.height) }
+                    )
+                )
                 finalHierarchy = UIElementInfo(
                     text: rootElement.text,
                     resourceId: rootElement.resourceId,
@@ -437,12 +465,15 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             // capture's rotation and the process-lifetime epoch to agree across the complete
             // hierarchy assembly.
             let hierarchyRotation: Int?
-            if screenMetrics.rotation == systemAlertCapture.rotation,
-               screenMetrics.rotation == currentScreenMetrics.rotation,
-               screenMetrics.rotation == RotationCaptureSample.stableRotation(
-                   between: beforeHierarchyCapture,
-                   and: afterHierarchyCapture
-               )
+            if innerPanelFrame != nil {
+                // The device orientation reads portrait while the inner panel is shown landscape.
+                hierarchyRotation = SpringBoardPanel.innerPanelRotation
+            } else if screenMetrics.rotation == systemAlertCapture.rotation,
+                      screenMetrics.rotation == currentScreenMetrics.rotation,
+                      screenMetrics.rotation == RotationCaptureSample.stableRotation(
+                          between: beforeHierarchyCapture,
+                          and: afterHierarchyCapture
+                      )
             {
                 hierarchyRotation = screenMetrics.rotation
             } else {
@@ -461,14 +492,24 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             )
 
             let observationSize = GestureSize(width: Double(screenWidth), height: Double(screenHeight))
+            // The inner panel's window keeps its portrait frame, like an app on that panel, while
+            // the observation is landscape; the display-targeted route maps between the two.
+            let appSize = GestureSize(
+                width: Double((innerPanelFrame ?? frame).width),
+                height: Double((innerPanelFrame ?? frame).height)
+            )
             gestureGeometry = GestureCoordinateGeometry(
-                app: GestureSize(width: Double(snapshot.frame.width), height: Double(snapshot.frame.height)),
+                app: appSize,
                 screen: GestureSize(
                     width: Double(currentScreenMetrics.fallbackWidth),
                     height: Double(currentScreenMetrics.fallbackHeight)
                 ),
                 observation: observationSize,
-                rotation: GestureCoordinateGeometry.observationRotation(hierarchyRotation, size: observationSize)
+                rotation: GestureCoordinateGeometry.observationRotation(
+                    hierarchyRotation, size: observationSize, app: appSize
+                ),
+                // Live SpringBoard reads see only the cover's frame; keep the observed panel.
+                pinnedToObservation: innerPanelFrame != nil
             )
             gestureGeometryBundleId = bundleId
 

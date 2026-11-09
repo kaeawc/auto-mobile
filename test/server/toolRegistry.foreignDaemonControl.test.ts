@@ -110,7 +110,6 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
     const files: DeviceOwnershipFileSource = {
       leasePath: () => undefined,
       claimPath: (deviceId) => `/claims/${deviceId}`,
-      legacyClaimPath: () => undefined,
       read: (path) => {
         const pid = foreignOwners.get(path.slice("/claims/".length));
         return pid === undefined ? undefined : { pid, token: "peer" };

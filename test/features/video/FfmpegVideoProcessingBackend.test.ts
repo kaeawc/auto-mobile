@@ -429,6 +429,47 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     expect(receivedOptions).toEqual({ stdio: ["ignore", "ignore", "pipe"] });
   });
 
+  test("records an Apple TV simulator through simctl recordVideo on its default display (#16725)", async function () {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const stderr = new PassThrough();
+    const child = new FakeRecordingProcess({ stderr });
+    let receivedArgs: string[] = [];
+    let displayProbes = 0;
+    const simctl = simctlWith({
+      isAvailable: async () => true,
+      enumerateDisplays: async () => {
+        displayProbes++;
+        return [];
+      },
+      startCommandArgs: async (args: string[]) => {
+        receivedArgs = args;
+        timer.setTimeout(() => {
+          child.emit("spawn");
+          stderr.write("Recording started\n");
+        }, 0);
+        return child;
+      },
+    });
+    backend = new FfmpegVideoProcessingBackend(undefined, {
+      simctlFactory: () => simctl,
+      ffmpegClient: availableFfmpegClient(),
+      timer,
+    });
+    mockConfig.device = { name: "Apple TV 4K", platform: "tvos", deviceId: "tv-udid" };
+
+    const handle = await backend.start(mockConfig);
+
+    expect(receivedArgs).toEqual([
+      "io",
+      "tv-udid",
+      "recordVideo",
+      path.join(mockConfig.outputDirectory, "test-recording-raw.mov"),
+    ]);
+    expect(displayProbes).toBe(0);
+    expect(handle.liveCapturePath).toBe(receivedArgs[3]);
+  });
+
   // A fake capture process: emits "spawn" then, when asked, the recordVideo start
   // handshake. kill() emits "exit" so waitForExit's SIGINT teardown resolves.
   function makeCaptureChild(emitHandshake: boolean, timer: Timer = defaultTimer): ChildProcess {
@@ -525,6 +566,53 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       expect(args).not.toContain("--display=primary");
       expect(args).not.toContain("--display=primary-1");
     }
+  });
+
+  test("reports the recorded panel from the chosen --display, not the requested one (#17593)", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let live = { width: 2007, height: 2853 };
+    const simctl = simctlWith({
+      isAvailable: async () => true,
+      enumerateDisplays: async () => parseSimulatorDisplays(duoEnumerate),
+      startCommandArgs: async () => makeCaptureChild(true, timer),
+    });
+    const recorder = new FfmpegVideoProcessingBackend(undefined, {
+      simctlFactory: () => simctl,
+      ffmpegClient: availableFfmpegClient(),
+      timer,
+      liveScreenPixels: async () => live,
+    });
+    const duo: BootedDevice = {
+      ...mockDevice,
+      platform: "ios",
+      deviceId: "duo-udid",
+      displays: {
+        panels: [
+          { key: "primary", role: "cover", sizePx: { width: 1398, height: 2034 } },
+          { key: "primary-1", role: "inner", sizePx: { width: 2007, height: 2853 } },
+        ],
+        postures: ["closed", "opened"],
+      },
+    };
+    const start = (recordingId: string, tracked: boolean) =>
+      recorder.start({
+        ...mockConfig,
+        recordingId,
+        device: duo,
+        ...(tracked && { recordingPanel: { key: "primary", role: "cover" } as const }),
+      });
+
+    expect((await start("unfolded", true)).recordedPanel).toEqual({
+      key: "primary-1",
+      role: "inner",
+    });
+    live = { width: 1, height: 1 };
+    expect((await start("unmatched", true)).recordedPanel).toEqual({
+      key: "unknown",
+      role: "unknown",
+    });
+    expect((await start("untracked", false)).recordedPanel).toBeUndefined();
   });
 
   function diagnosticsExecResult(state: string) {

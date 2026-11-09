@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "auto-mobile"
+dynamic = ["version"]
+description = "Python SDK for the AutoMobile daemon: lifecycle and bound MCP sessions."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+# The SDK uses only the Python standard library.
+dependencies = []
+
+[dependency-groups]
+# Development tooling only, pinned and locked in uv.lock. `uv sync` installs it.
+dev = ["ruff==0.16.9", "mypy==2.3.1"]
+
+[project.urls]
+Homepage = "https://github.com/kaeawc/auto-mobile"
+Documentation = "https://github.com/kaeawc/auto-mobile/blob/main/docs/using/python-sdk.md"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+auto_mobile = ["py.typed"]
+
+[tool.setuptools.dynamic]
+version = { attr = "auto_mobile._version.__version__" }
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+# Markdown belongs to the repository formatter (oxfmt).
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.mypy]
+strict = true
+python_version = "3.10"
+files = ["src", "tests"]

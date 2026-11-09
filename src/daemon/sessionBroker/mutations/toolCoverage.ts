@@ -132,6 +132,12 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
     { fallback: true },
   ),
   ...tools(
+    ["wearSurface"],
+    "addTile and removeTile change the Wear OS tile carousel, and setWatchFace, unsetWatchFace, setComplication and unsetComplication change the active watch face and its complication slots; nothing reverts or cleans either, so they record a fallback intent. showTile only scrolls the carousel and watchFace only reads dumpsys wear_service, so they record nothing.",
+    "journaled",
+    { fallback: true },
+  ),
+  ...tools(
     ["launchApp", "measureStartup", "installApp", "uninstallApp"],
     "clearAppData, a persistent compilation mode, an install over, or an uninstall of an app the baseline held records a fallback intent unless the session installed an app the baseline did not hold; installs also keep their installed-app row. Android launches and startup measurements record a non-fallback launch row so keep-booted cleaning clears a launched preinstalled app's data. Other calls only start or stop processes.",
     "journaled",
@@ -191,6 +197,11 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
     "notJournaled",
   ),
   ...tools(
+    ["portReverse"],
+    "adb reverse mappings live in adbd until it restarts; session release and device removal remove every mapping the session created, and mappings it did not create are never touched.",
+    "notJournaled",
+  ),
+  ...tools(
     ["injectAudioInput", "stopAudioInput"],
     "Streams audio into the emulator microphone over its gRPC API; nothing persists on the device, and session release stops a stream still playing.",
     "notJournaled",
@@ -206,7 +217,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
     "notJournaled",
   ),
   ...tools(
-    ["audit", "accessibilityAudit"],
+    ["audit", "accessibilityAudit", "performanceAudit"],
     "Observes the screen and reads app metrics; accessibility baselines are stored on the host, so there is no persistent device setting to journal (#14359).",
     "notJournaled",
   ),

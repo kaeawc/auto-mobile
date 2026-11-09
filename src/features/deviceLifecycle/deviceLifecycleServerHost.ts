@@ -1,4 +1,5 @@
 import { ActionableError } from "../../models/ActionableError";
+import type { VideoRecordingPlatform } from "../../models/VideoRecordingPlatform";
 import type { BootedDevice, DeviceInfo } from "../../models";
 import type { ListInstalledApps } from "../observe/ListInstalledApps";
 
@@ -26,7 +27,7 @@ export interface DeviceLifecycleServerHost {
   syncInstalledAppResources(deps?: AppResourceDependencies): Promise<void>;
   listActiveVideoRecordings(filter: {
     deviceId?: string;
-    platform?: "android" | "ios";
+    platform?: VideoRecordingPlatform;
   }): Promise<ReadonlyArray<{ readonly recordingId: string }>>;
   stopVideoRecording(recordingId?: string): Promise<unknown>;
   stopSegmentedVideoRecordingsForDevice(

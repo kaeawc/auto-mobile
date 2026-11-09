@@ -7,10 +7,15 @@ import {
 } from "../../../../src/features/prototype/web/deviceFrames";
 import {
   deviceFrameProblems,
+  orphanDeviceFrameSources,
   parseDeviceFrames,
   type DeviceFrameEntry,
+  withDeviceFrameSources,
 } from "../../../../src/features/prototype/web/deviceFrameSchema";
-import registry from "../../../../src/features/prototype/web/deviceFrames.json";
+import rawRegistry from "../../../../src/features/prototype/web/deviceFrames.json";
+import sources from "../../../../src/features/prototype/web/deviceFrameSources.json";
+
+const registry = withDeviceFrameSources(rawRegistry, sources);
 
 const frame = (overrides: Record<string, unknown> = {}) => ({
   ...structuredClone(registry.frames[0]),
@@ -21,6 +26,21 @@ describe("device frame registry (#16346)", () => {
   test("every checked-in frame is valid", () => {
     expect(deviceFrameProblems(registry)).toEqual([]);
     expect(DEVICE_FRAMES.length).toBe(registry.frames.length);
+  });
+
+  test("keeps each frame's source in the sources file, not the registry (#16809)", () => {
+    expect(rawRegistry.frames.filter((entry) => "source" in entry)).toEqual([]);
+    expect(orphanDeviceFrameSources(rawRegistry, sources)).toEqual([]);
+    expect(orphanDeviceFrameSources(rawRegistry, { ...sources, "nokia-3310": {} })).toEqual([
+      "sources.nokia-3310: names no frame",
+    ]);
+  });
+
+  test("a frame with no sources entry is invalid", () => {
+    const rest = Object.fromEntries(
+      Object.entries(sources).filter(([id]) => id !== rawRegistry.frames[0].id),
+    );
+    expect(parseDeviceFrames(withDeviceFrameSources(rawRegistry, rest)).success).toBe(false);
   });
 
   test("ships at least one Android and one iOS frame, with platform defaults", () => {
@@ -116,10 +136,32 @@ describe("device frame schema v2 (#16444)", () => {
     ]);
   });
 
-  test("every checked-in entry normalizes to a single inner panel", () => {
+  test("every checked-in phone and tablet normalizes to one inner panel; foldables add a cover", () => {
     expect(DEVICE_FRAMES.map((f) => f.panels.map((panel) => panel.role))).toEqual(
-      registry.frames.map(() => ["inner"]),
+      DEVICE_FRAMES.map((f) => (f.formFactor === "foldable" ? ["inner", "cover"] : ["inner"])),
     );
+    expect(DEVICE_FRAMES.filter((f) => f.formFactor === "foldable").map((f) => f.id)).toEqual([
+      "pixel-fold",
+      "flip-foldable",
+    ]);
+  });
+
+  test("a foldable's unmeasured geometry says so in its source (#16445)", () => {
+    const parsed = parseDeviceFrames(registry);
+    if (!parsed.success) {
+      throw new Error(parsed.error.message);
+    }
+    const foldables = parsed.data.frames.filter((f) => f.formFactor === "foldable");
+    expect(foldables.length).toBe(2);
+    for (const { source } of foldables) {
+      const { kinds } = source;
+      expect(kinds?.hinge).toBeDefined();
+      for (const field of ["screen", "insets", "hinge"] as const) {
+        if (kinds?.[field] !== "measured") {
+          expect(source[field]).toContain("not yet measured");
+        }
+      }
+    }
   });
 
   test("accepts a foldable with a cover panel, hinge, postures and source kinds", () => {
@@ -139,7 +181,8 @@ describe("device frame schema v2 (#16444)", () => {
       throw new Error(parsed.error.message);
     }
     expect((entries as DeviceFrameEntry[]).map(normalizeDeviceFrame)).toEqual(parsed.data.frames);
-    expect(DEVICE_FRAMES).toEqual(parsed.data.frames.slice(0, registry.frames.length));
+    const unsourced = parsed.data.frames.map(({ source: _source, ...rest }) => rest);
+    expect(DEVICE_FRAMES).toEqual(unsourced.slice(0, registry.frames.length));
   });
 
   test("accepts a round rotary watch and a dpad TV", () => {
@@ -237,6 +280,71 @@ describe("device frame schema v2 (#16444)", () => {
     ];
     for (const overrides of bad) {
       expect(parseDeviceFrames({ frames: [foldable(overrides)] }).success).toBe(false);
+    }
+  });
+});
+
+describe("watch, TV and car frames (#16446)", () => {
+  const byId = (id: string) => deviceFrameOrThrow(id);
+
+  test("each matches its provisioned profile's form factor, mask and input", () => {
+    expect(
+      ["wearos-small-round", "apple-watch", "android-tv-1080p", "apple-tv", "car-1024p-landscape"]
+        .map(byId)
+        .map(({ id, platform, formFactor, mask, input }) => ({
+          id,
+          platform,
+          formFactor,
+          mask,
+          input,
+        })),
+    ).toEqual([
+      {
+        id: "wearos-small-round",
+        platform: "android",
+        formFactor: "watch",
+        mask: "round",
+        input: "rotary",
+      },
+      { id: "apple-watch", platform: "ios", formFactor: "watch", mask: "rect", input: "rotary" },
+      {
+        id: "android-tv-1080p",
+        platform: "android",
+        formFactor: "tv",
+        mask: "rect",
+        input: "dpad",
+      },
+      { id: "apple-tv", platform: "ios", formFactor: "tv", mask: "rect", input: "dpad" },
+      {
+        id: "car-1024p-landscape",
+        platform: "android",
+        formFactor: "automotive",
+        mask: "rect",
+        input: "touch",
+      },
+    ]);
+  });
+
+  test("watches and TVs have no system bars; every new frame says where its geometry came from", () => {
+    // Provenance lives in the sources file, merged in by frame id (#16809).
+    const screenKind = (id: string) => {
+      const source = registry.frames.find((frame) => frame.id === id)?.source;
+      return source && "kinds" in source ? source.kinds.screen : undefined;
+    };
+    for (const id of ["wearos-small-round", "apple-watch", "android-tv-1080p", "apple-tv"]) {
+      expect(byId(id)).toMatchObject({ statusBarDp: 0, navBar: { type: "none" } });
+    }
+    expect(screenKind("wearos-small-round")).toBe("avdProfile");
+    expect(screenKind("apple-watch")).toBe("simulatorProfile");
+    expect(screenKind("android-tv-1080p")).toBe("avdProfile");
+    expect(screenKind("apple-tv")).toBe("simulatorProfile");
+    expect(screenKind("car-1024p-landscape")).toBe("avdProfile");
+  });
+
+  test("a landscape-only frame records its geometry in portrait", () => {
+    for (const id of ["android-tv-1080p", "apple-tv", "car-1024p-landscape"]) {
+      const { widthDp, heightDp } = byId(id).screen;
+      expect(widthDp).toBeLessThan(heightDp);
     }
   });
 });

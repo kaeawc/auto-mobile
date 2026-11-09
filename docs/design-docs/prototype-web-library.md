@@ -18,13 +18,18 @@ link to a running daemon are separate decisions with their own gates, below.
   pure function from spec, frame, orientation, mode and screen to an element tree. It already
   runs no actions, timers or requests, and serializes deterministically. The page runtime
   (`webPageRuntime.ts`) only switches pre-rendered views and moves the stage.
-- `renderPrototypeStill` and `toHtml` bundle for the browser with no Node builtin, at about 97 KB
-  minified (32 KB gzip). The renderer's closure reads only the contract values in the generated
-  `prototypeRenderContract.generated.ts`, not the whole contract JSON; the string-table zod
-  schema lives in `prototypeStringsSchema.ts` and the frame schema in `deviceFrameSchema.ts`, outside
-  the closure; and the derived-format path takes an optional injected logger instead of
-  importing the server's. `stillBrowserBundle.test.ts` fails on any Node builtin, on the contract
-  JSON, zod or the server logger in the closure, and on the core budget below.
+- `renderPrototypeStill` and `toHtml` bundle for the browser with no Node builtin, at about 111 KB
+  minified (38 KB gzip). Element builders share repeated style-property names, attribute names
+  and style values as identifiers from `webCss.ts`, so each long literal is bundled once, and
+  device-frame provenance lives in `deviceFrameSources.json`, outside the closure. The closure
+  reads only the contract values in the generated `prototypeRenderContract.generated.ts`, not the
+  whole contract JSON; the string-table zod schema lives in `prototypeStringsSchema.ts` and the frame schema in `deviceFrameSchema.ts`, outside
+  the closure; the derived-format path takes an optional injected logger instead of
+  importing the server's; and an invalid locale, text size or frame throws a plain
+  `PrototypeWebInputError`, which the server's page builder and resource readers rethrow as an
+  `ActionableError` with the same message. `stillBrowserBundle.test.ts` fails on any Node builtin,
+  on the contract JSON, zod, the server logger or `ActionableError` in the closure, and on the export
+  budget below.
 - Shared JSON fixtures already drive parity across the TypeScript host, the Kotlin protocol and
   the Swift agent (`test/fixtures/prototype-spec/list-writes/`, `derive/`).
 
@@ -176,14 +181,10 @@ that needs more is refused whole, never half drawn.
 
 ## Size and tree-shaking
 
-Budgets are minified and gzip, measured by the bundling test, for an embed that imports only
-that entry:
-
-| Entry          | Contents                           | Minified | Gzip   |
-| -------------- | ---------------------------------- | -------- | ------ |
-| core (`mount`) | renderer, frame registry, `mount`  | 120 KB   | 40 KB  |
-| `element`      | core plus the custom element       | 125 KB   | 42 KB  |
-| `interactive`  | the action runtime, on top of core | +40 KB   | +12 KB |
+An export has one budget: 0.5 MB (500,000 bytes) of HTML, JS and CSS counted together,
+minified, whichever entries it imports (core `mount`, the custom `element`, the `interactive`
+action runtime). There is no separate gzip limit. The bundling test sums every build output of
+the core entry against it.
 
 - Per-node tree-shaking is not offered. Node renderers are dispatched by type from a spec only
   known at runtime, so a bundler cannot drop any. Splitting renderers into opt-in groups would

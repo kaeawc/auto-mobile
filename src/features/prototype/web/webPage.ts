@@ -1,9 +1,32 @@
 import { createHash } from "node:crypto";
 import { ActionableError } from "../../../models";
 import { logger } from "../../../utils/logger";
+import { materialIconGlyphs } from "./materialIconGlyphs";
 import type { PrototypeColorMode } from "../prototypeContrast";
 import { defaultDeviceFrameId, deviceFrameOrThrow } from "./deviceFrames";
-import type { WebOrientation } from "./webFrame";
+import { withActionableWebInput } from "./prototypeWebInputActionable";
+import {
+  PROTOTYPE_WEB_3D_CSS,
+  PROTOTYPE_WEB_FLAT_ORBIT,
+  PROTOTYPE_WEB_START_ORBIT,
+  prototypeWeb3dBodyAttributes,
+  prototypeWeb3dBodyHinge,
+  prototypeWeb3dControls,
+  prototypeWeb3dDragOrbit,
+  prototypeWeb3dRuntime,
+  prototypeWeb3dUnwrap,
+  prototypeWeb3dWrap,
+  prototypeWebFold,
+  prototypeWebHingeLine,
+  prototypeWebLeaves,
+  prototypeWebOrbit,
+  prototypeWebOrbitKey,
+  prototypeWebPose,
+  prototypeWebPostureAt,
+  type PrototypeWebFold,
+} from "./webDevice3d";
+import { defaultFramePosture, framePostures } from "./webFold";
+import { frameOrientations, type WebOrientation } from "./webFrame";
 import { el, escapeAttribute, toHtml, type WebElement } from "./webNodes";
 import {
   prototypeWebAnimateTurn,
@@ -15,6 +38,7 @@ import {
   prototypeWebRotation,
   prototypeWebScreenView,
   prototypeWebStartClock,
+  prototypeWebViewMatches,
   prototypeWebWheelFactor,
   prototypeWebZoomScale,
 } from "./webPageRuntime";
@@ -22,6 +46,14 @@ import { renderPrototypeStill } from "./webStill";
 import { FADE_EDGES_PAGE_CSS } from "./webStylePolish";
 import type { UnsupportedWebNode } from "./webRender";
 import type { WebStackScreens } from "./webStack";
+import {
+  webImageBox,
+  webImageRule,
+  type PrototypeWebImage,
+  type WebImageBox,
+  type WebImageDraw,
+  type WebImageFillExtent,
+} from "./webImages";
 import type { StillTextSize } from "./webTextScale";
 
 /** One spec revision: its number, the operation that created it and the spec itself. */
@@ -56,6 +88,19 @@ export interface PrototypeWebPageInput {
   readonly textSize?: StillTextSize;
   /** Total page budget; defaults to MAX_PROTOTYPE_WEB_PAGE_BYTES. */
   readonly maxBytes?: number;
+  /** Encoded assets the page inlines while the budget allows; the first entry per id counts. */
+  readonly images?: readonly PrototypeWebImage[];
+}
+
+/**
+ * An asset the page draws and the pixel boxes it is drawn in, to encode it at the right size;
+ * `compactBoxes`, present only when they differ, bound filled axes by the portrait width instead,
+ * for a smaller encode when the page's images do not all fit.
+ */
+export interface PrototypeWebImageRequest {
+  readonly id: string;
+  readonly boxes: readonly WebImageBox[];
+  readonly compactBoxes?: readonly WebImageBox[];
 }
 
 export interface PrototypeWebPage {
@@ -66,14 +111,22 @@ export interface PrototypeWebPage {
   readonly unsupportedNodes: readonly UnsupportedWebNode[];
   /** Revisions inlined per variant, newest first; older ones are not in the page. */
   readonly inlinedRevisions: Readonly<Record<string, readonly number[]>>;
+  /**
+   * Every asset any rendered view draws, the revision shown first, then the other pinned ones,
+   * then older revisions newest first: the order the page inlines them in.
+   */
+  readonly imageRequests: readonly PrototypeWebImageRequest[];
+  /** Asset ids inlined into the page. */
+  readonly inlinedImages: readonly string[];
 }
 
+const RUNTIME_2D = `(${prototypeWebPageRuntime.toString()})({ zoomScale: ${prototypeWebZoomScale.toString()}, fitScale: ${prototypeWebFitScale.toString()}, wheelFactor: ${prototypeWebWheelFactor.toString()}, screenView: ${prototypeWebScreenView.toString()}, viewMatches: ${prototypeWebViewMatches.toString()}, rotation: ${prototypeWebRotation.toString()}, animateTurn: ${prototypeWebAnimateTurn.toString()}, clockText: ${prototypeWebClockText.toString()}, clockDelay: ${prototypeWebClockDelay.toString()}, startClock: ${prototypeWebStartClock.toString()}, browserClock: ${prototypeWebBrowserClock.toString()} });`;
+/** The opt-in 3D view (#16458) runs after the 2D runtime, so its pan handler is already bound. */
+const RUNTIME_3D = `(${prototypeWeb3dRuntime.toString()})({ pose: ${prototypeWebPose.toString()}, orbit: ${prototypeWebOrbit.toString()}, hingeLine: ${prototypeWebHingeLine.toString()}, postureAt: ${prototypeWebPostureAt.toString()}, wrap: ${prototypeWeb3dWrap.toString()}, unwrap: ${prototypeWeb3dUnwrap.toString()}, bodyHinge: ${prototypeWeb3dBodyHinge.toString()}, orbitKey: ${prototypeWebOrbitKey.toString()}, dragOrbit: ${prototypeWeb3dDragOrbit.toString()}, leaves: ${prototypeWebLeaves.toString()}, flat: ${JSON.stringify(PROTOTYPE_WEB_FLAT_ORBIT)}, start: ${JSON.stringify(PROTOTYPE_WEB_START_ORBIT)} });`;
 /** The page's script, whose hash the CSP pins. At most 150 KB uncompressed. */
-export const PROTOTYPE_WEB_RUNTIME = `(${prototypeWebPageRuntime.toString()})({ zoomScale: ${prototypeWebZoomScale.toString()}, fitScale: ${prototypeWebFitScale.toString()}, wheelFactor: ${prototypeWebWheelFactor.toString()}, screenView: ${prototypeWebScreenView.toString()}, rotation: ${prototypeWebRotation.toString()}, animateTurn: ${prototypeWebAnimateTurn.toString()}, clockText: ${prototypeWebClockText.toString()}, clockDelay: ${prototypeWebClockDelay.toString()}, startClock: ${prototypeWebStartClock.toString()}, browserClock: ${prototypeWebBrowserClock.toString()} });`;
+export const PROTOTYPE_WEB_RUNTIME = `${RUNTIME_2D}\n${RUNTIME_3D}`;
 export const MAX_PROTOTYPE_WEB_RUNTIME_BYTES = 150 * 1024;
 export const MAX_PROTOTYPE_WEB_PAGE_BYTES = 2 * 1024 * 1024;
-
-const ORIENTATIONS: readonly WebOrientation[] = ["portrait", "landscape"];
 
 const PAGE_CSS = [
   "*{box-sizing:border-box}",
@@ -93,6 +146,7 @@ const PAGE_CSS = [
   "@media (max-width:720px){[data-main]{flex-direction:column}[data-control=revisions]{width:auto;max-height:30vh;border-left:0;border-top:1px solid #ccc}}",
   "[hidden]{display:none!important}",
   FADE_EDGES_PAGE_CSS,
+  PROTOTYPE_WEB_3D_CSS,
 ].join("");
 
 function cspFor(script: string): string {
@@ -110,13 +164,19 @@ interface RenderedView {
   readonly variant: string;
   readonly revision: number;
   readonly orientation: WebOrientation;
+  /** The foldable posture this view draws; absent for a frame without postures. */
+  readonly posture?: string;
   /** The outermost stack's screen this view draws; only a multi-screen stack sets it. */
   readonly screen?: string;
   readonly html: string;
   readonly unsupported: readonly UnsupportedWebNode[];
+  readonly draws: readonly WebImageDraw[];
 }
 
-/** One screen of one revision in both orientations: the unit the budget keeps or drops. */
+/**
+ * One screen of one revision in each of the frame's orientations and every posture: the unit the
+ * budget keeps or drops.
+ */
 type ScreenGroup = readonly RenderedView[];
 
 /** One revision's screen groups, its start screen first. */
@@ -137,20 +197,39 @@ function pickerScreens(stack: WebStackScreens | undefined): string[] {
   return [stack.start, ...stack.screens.filter((screen) => screen !== stack.start)];
 }
 
+/**
+ * The page's frame: its id, the orientations it has (the first shown first) and the postures it
+ * pre-renders (one undefined entry for none).
+ */
+interface ViewFrame {
+  readonly id: string;
+  readonly orientations: readonly WebOrientation[];
+  readonly postures: readonly (string | undefined)[];
+}
+
+/** Where a view sits among the page's dimensions besides variant and revision. */
+interface ViewAt {
+  readonly orientation: WebOrientation;
+  readonly posture: string | undefined;
+}
+
 function renderView(
-  input: PrototypeWebPageInput,
+  input: PrototypeWebPageInput & { readonly slots: ReadonlyMap<string, number> },
   frame: string,
   at: { variant: string; revision: PrototypeWebRevision; screen?: string },
-  orientation: WebOrientation,
+  { orientation, posture }: ViewAt,
 ): RenderedView & { stack?: WebStackScreens } {
   const still = renderPrototypeStill(at.revision.spec, {
     frame,
     orientation,
+    ...(posture === undefined ? {} : { posture }),
     mode: input.mode,
     nowMs: input.nowMs,
+    imageSlots: input.slots,
     ...(input.locale === undefined ? {} : { locale: input.locale }),
     ...(input.textSize === undefined ? {} : { textSize: input.textSize }),
     logger,
+    glyphs: materialIconGlyphs(),
     ...(at.screen === undefined ? {} : { screen: at.screen }),
   });
   const view = el(
@@ -161,6 +240,7 @@ function renderView(
         "data-variant": at.variant,
         "data-revision": String(at.revision.revision),
         "data-orientation": orientation,
+        ...(posture === undefined ? {} : { "data-posture": posture }),
         ...(at.screen === undefined ? {} : { "data-screen": at.screen }),
         hidden: "",
       },
@@ -171,35 +251,94 @@ function renderView(
     variant: at.variant,
     revision: at.revision.revision,
     orientation,
+    ...(posture === undefined ? {} : { posture }),
     ...(at.screen === undefined ? {} : { screen: at.screen }),
     html: toHtml(view),
     unsupported: still.unsupportedNodes,
+    draws: still.imageDraws,
     ...(still.stack ? { stack: still.stack } : {}),
   };
 }
 
+/** Every posture and orientation, the default posture's first orientation first. */
+function viewPoints(frame: ViewFrame): ViewAt[] {
+  return frame.postures.flatMap((posture) =>
+    frame.orientations.map((orientation) => ({ orientation, posture })),
+  );
+}
+
 /**
- * Each revision newest first, one group of both orientations per screen of its outermost stack
- * (just one group without a multi-screen stack). The default portrait still finds the screens.
+ * One orientation and posture's views of a revision: its start view first, then its other screens.
+ * Each still finds its own stack, since a `visibleWhen` on orientation or posture can show a
+ * different stack (or none) in each.
+ */
+function pointViews(
+  input: PrototypeWebPageInput & { readonly slots: ReadonlyMap<string, number> },
+  frame: string,
+  at: { variant: string; revision: PrototypeWebRevision },
+  point: ViewAt,
+): RenderedView[] {
+  const probe = renderView(input, frame, at, point);
+  const screens = pickerScreens(probe.stack);
+  return screens.length === 0
+    ? [probe]
+    : screens.map((screen) => renderView(input, frame, { ...at, screen }, point));
+}
+
+/**
+ * Each revision newest first, grouped by screen index across every orientation and posture: group
+ * 0 holds each one's start view (the default posture's first orientation first), group i each one's i-th
+ * screen where it has one.
  */
 function renderViews(
-  input: PrototypeWebPageInput,
-  frame: string,
+  input: PrototypeWebPageInput & { readonly slots: ReadonlyMap<string, number> },
+  frame: ViewFrame,
   variant: PrototypeWebVariant,
 ): RevisionViews[] {
   return [...variant.revisions].reverse().map((revision) => {
-    const probe = renderView(input, frame, { variant: variant.id, revision }, "portrait");
-    const screens = pickerScreens(probe.stack);
-    const groups =
-      screens.length === 0
-        ? [[probe, renderView(input, frame, { variant: variant.id, revision }, "landscape")]]
-        : screens.map((screen) =>
-            ORIENTATIONS.map((orientation) =>
-              renderView(input, frame, { variant: variant.id, revision, screen }, orientation),
-            ),
-          );
+    const at = { variant: variant.id, revision };
+    const perPoint = viewPoints(frame).map((point) => pointViews(input, frame.id, at, point));
+    const count = Math.max(...perPoint.map((views) => views.length));
+    const groups = Array.from({ length: count }, (_, index) =>
+      perPoint.flatMap((views) => views.slice(index, index + 1)),
+    );
     return { variant: variant.id, revision: revision.revision, screens: groups };
   });
+}
+
+const POSTURE_LABELS: Readonly<Record<string, string>> = {
+  closed: "Closed",
+  half_opened: "Half opened",
+  opened: "Opened",
+  rear_display: "Rear display",
+  flipped: "Flipped",
+  tent: "Tent",
+};
+
+/**
+ * The posture picker, which switches the shown view's posture layout: only a frame with two or
+ * more postures offers one. It is `layout-posture`, apart from the 3D view's `posture` select,
+ * which turns the 3D hinge.
+ */
+function posturePicker(frame: PageFrame): WebElement[] {
+  if (frame.postures.length < 2) {
+    return [];
+  }
+  return [
+    el(
+      "select",
+      { attrs: { "data-control": "layout-posture", "aria-label": "Layout posture" } },
+      frame.postures.map((posture) =>
+        el(
+          "option",
+          {
+            attrs: { value: posture, ...(posture === frame.posture ? { selected: "" } : {}) },
+          },
+          [POSTURE_LABELS[posture] ?? posture],
+        ),
+      ),
+    ),
+  ];
 }
 
 /** The screen picker's options, or undefined for no picker; fewer than two options hide it. */
@@ -219,16 +358,18 @@ function screenPicker(screens: ScreenPicker): WebElement[] {
   ];
 }
 
-/** Watches and TVs never rotate (prototype-web-frames-v2.md); every other form factor does. */
-export function prototypeWebFrameRotates(formFactor: string): boolean {
-  return formFactor !== "watch" && formFactor !== "tv";
-}
-
-/** The frame facts the page shell needs: the platform's rotation and whether the device rotates. */
+/** The frame facts the page shell needs: the platform's rotation and the orientations it has. */
 interface PageFrame {
   readonly platform: string;
+  /** The orientation shown first. */
+  readonly orientation: WebOrientation;
   /** A device that never rotates gets no rotate control. */
   readonly rotates: boolean;
+  /** The frame's postures, and the one shown first; a frame without postures has none. */
+  readonly postures: readonly string[];
+  readonly posture?: string;
+  /** The frame's hinge and postures, for the 3D view's fold controls; none when it does not fold. */
+  readonly fold: PrototypeWebFold | undefined;
 }
 
 function toolbar(
@@ -270,12 +411,14 @@ function toolbar(
     { attrs: { "data-toolbar": "", role: "toolbar", "aria-label": "Prototype view" } },
     [
       ...(frame.rotates ? [button("rotate", "Rotate device", "Rotate")] : []),
+      ...posturePicker(frame),
       button("zoom-out", "Zoom out", "−"),
       el("span", { attrs: { "data-control": "zoom-level", "aria-live": "polite" } }, ["100%"]),
       button("zoom-in", "Zoom in", "+"),
       button("zoom-fit", "Fit to window", "Fit"),
       ...variants,
       ...screenPicker(screens),
+      ...prototypeWeb3dControls(frame.fold),
       el("span", { attrs: { "data-note": "" } }, [
         "Static preview: taps do nothing; these controls switch pre-rendered views.",
       ]),
@@ -362,18 +505,43 @@ function refuseOverBudget(limit: number, pinned: readonly RevisionViews[]): neve
   );
 }
 
+/** What the budget kept: revisions with their screens, and the inlined assets in slot order. */
+interface Budgeted {
+  readonly revisions: RevisionViews[];
+  readonly images: readonly string[];
+}
+
+/** Assets a revision's kept screens draw, in view and tree order, each once. */
+function drawnAssets(groups: readonly ScreenGroup[]): string[] {
+  return [
+    ...new Set(groups.flatMap((group) => group.flatMap((view) => view.draws.map((d) => d.asset)))),
+  ];
+}
+
 /**
- * The pinned revisions' start screens always; then their other screens while they fit; then older
- * revisions newest first, each while its start screen and history entry fit, followed by its other
- * screens while they fit. The budget is the page limit minus the shell (head, toolbar, script and
- * the pinned revisions' history entries), so it counts exactly what the final page holds.
+ * The pinned revisions' start screens always, then the images they draw; then each of their other
+ * screens while it fits, followed by its images; then older revisions newest first, each while its
+ * start screen and history entry fit, followed by its images, then its other screens in the same
+ * way. Each image is charged once, as the page rule that inlines it; one that does not fit stays a
+ * placeholder. The shown revision's images go first among the pinned. The budget is the page limit
+ * minus the shell (head, toolbar, script and the pinned revisions' history entries), so it counts
+ * exactly what the final page holds.
  */
 function budgetedViews(
   input: PrototypeWebPageInput,
   revisions: readonly RevisionViews[],
   shellBytes: number,
-  pinned: Pinned,
-): RevisionViews[] {
+  {
+    pinned,
+    isShown,
+    rules,
+  }: {
+    readonly pinned: Pinned;
+    readonly isShown: (revision: RevisionViews) => boolean;
+    /** Each inlinable image's page rule by asset id, in slot order. */
+    readonly rules: ReadonlyMap<string, string>;
+  },
+): Budgeted {
   const limit = input.maxBytes ?? MAX_PROTOTYPE_WEB_PAGE_BYTES;
   let room = limit - shellBytes + HIDDEN_ATTRIBUTE_BYTES;
   const fits = (cost: number) => {
@@ -386,28 +554,93 @@ function budgetedViews(
   if (!fits(latest.reduce((sum, revision) => sum + groupBytes(revision.screens[0]!), 0))) {
     refuseOverBudget(limit, latest);
   }
+  const images = new Set<string>();
+  const considered = new Set<string>();
+  const addImages = (groups: readonly ScreenGroup[]) => {
+    for (const asset of drawnAssets(groups)) {
+      const rule = rules.get(asset);
+      if (rule !== undefined && !considered.has(asset)) {
+        considered.add(asset);
+        if (fits(Buffer.byteLength(rule))) {
+          images.add(asset);
+        }
+      }
+    }
+  };
   const kept = new Map(latest.map((revision) => [revision, [revision.screens[0]!]]));
-  const addScreens = (revision: RevisionViews) =>
-    kept
-      .get(revision)!
-      .push(...revision.screens.slice(1).filter((group) => fits(groupBytes(group))));
+  // Each screen's images are charged before the next screen, so a later screen cannot take the
+  // room an earlier kept screen's image needs.
+  const addScreens = (revision: RevisionViews) => {
+    for (const group of revision.screens.slice(1)) {
+      if (fits(groupBytes(group))) {
+        kept.get(revision)!.push(group);
+        addImages([group]);
+      }
+    }
+  };
+  [...latest.filter(isShown), ...latest.filter((revision) => !isShown(revision))].forEach(
+    (revision) => addImages([revision.screens[0]!]),
+  );
   latest.forEach(addScreens);
   for (const revision of revisions.filter((entry) => !isPinned(entry))) {
     const history = historyEntryBytes(input, revision.variant, revision.revision);
     if (fits(groupBytes(revision.screens[0]!) + history)) {
       kept.set(revision, [revision.screens[0]!]);
+      addImages([revision.screens[0]!]);
       addScreens(revision);
     }
   }
   // Keep the page's own order: variants in input order, revisions newest first, start first.
-  return revisions
-    .filter((revision) => kept.has(revision))
-    .map((revision) => ({ ...revision, screens: kept.get(revision)! }));
+  return {
+    revisions: revisions
+      .filter((revision) => kept.has(revision))
+      .map((revision) => ({ ...revision, screens: kept.get(revision)! })),
+    images: [...rules.keys()].filter((asset) => images.has(asset)),
+  };
+}
+
+/**
+ * Every asset the rendered views draw with the boxes it is drawn in, in the order the budget
+ * considers images: the shown revision, the other pinned ones, then the rest newest first.
+ */
+function imageRequests(
+  revisions: readonly RevisionViews[],
+  isShown: (revision: RevisionViews) => boolean,
+  isPinned: (revision: RevisionViews) => boolean,
+  frame: string,
+): PrototypeWebImageRequest[] {
+  const screen = deviceFrameOrThrow(frame).screen;
+  const ordered = [
+    ...revisions.filter(isShown),
+    ...revisions.filter((revision) => isPinned(revision) && !isShown(revision)),
+    ...revisions.filter((revision) => !isPinned(revision)),
+  ];
+  const draws = new Map<string, WebImageDraw[]>();
+  for (const revision of ordered) {
+    for (const draw of revision.screens.flat().flatMap((view) => view.draws)) {
+      draws.set(draw.asset, [...(draws.get(draw.asset) ?? []), draw]);
+    }
+  }
+  const unique = (forAsset: readonly WebImageDraw[], fill: WebImageFillExtent) => [
+    ...new Map(
+      forAsset
+        .map((draw) => webImageBox(draw, screen, fill))
+        .map((box) => [JSON.stringify(box), box]),
+    ).values(),
+  ];
+  return [...draws].map(([id, forAsset]) => {
+    const boxes = unique(forAsset, "long");
+    const compactBoxes = unique(forAsset, "short");
+    return JSON.stringify(compactBoxes) === JSON.stringify(boxes)
+      ? { id, boxes }
+      : { id, boxes, compactBoxes };
+  });
 }
 
 /**
  * The picker for a page holding these revisions: none unless one of them has a multi-screen stack,
- * else the shown revision's screens (none or one hide it; the runtime lists each revision's own).
+ * else every screen the shown revision has in any orientation or posture (none or one hide it; the
+ * runtime lists the shown view's own), so the shell never undercounts the final picker.
  */
 function pickerFor(
   revisions: readonly RevisionViews[],
@@ -419,7 +652,8 @@ function pickerFor(
   const current = revisions.find(
     (revision) => revision.variant === shown.variant.id && revision.revision === shown.revision,
   );
-  return (current?.screens ?? []).flatMap((group) => (group[0]?.screen ? [group[0].screen] : []));
+  const screens = (current?.screens ?? []).flat().flatMap((view) => view.screen ?? []);
+  return [...new Set(screens)];
 }
 
 function chooseVariant(input: PrototypeWebPageInput): PrototypeWebVariant {
@@ -435,9 +669,22 @@ function chooseVariant(input: PrototypeWebPageInput): PrototypeWebVariant {
   return chosen;
 }
 
+/** Each image's inlining rule by asset id, in slot order; a repeated id keeps its first entry. */
+function imageRules(images: readonly PrototypeWebImage[]): Map<string, string> {
+  const rules = new Map<string, string>();
+  for (const image of images) {
+    if (!rules.has(image.id)) {
+      rules.set(image.id, webImageRule(rules.size, image));
+    }
+  }
+  return rules;
+}
+
 interface PageParts {
   readonly frame: PageFrame;
   readonly views: string;
+  /** Rules that inline the page's images, in slot order. */
+  readonly images?: string;
   readonly history: WebElement | undefined;
   readonly screens: ScreenPicker;
 }
@@ -445,28 +692,45 @@ interface PageParts {
 function pageHtml(
   input: PrototypeWebPageInput,
   first: { variant: PrototypeWebVariant; revision: number },
-  { frame, views, history, screens }: PageParts,
+  { frame, views, history, screens, images = "" }: PageParts,
 ): string {
-  const body = `<body data-variant="${escapeAttribute(first.variant.id)}" data-revision="${first.revision}" data-platform="${escapeAttribute(frame.platform)}">${toHtml(toolbar(input, first.variant, screens, frame))}<div data-main=""><div data-viewport="" aria-label="Device preview"><div data-stage="">${views}</div></div>${history ? toHtml(history) : ""}</div><script>${PROTOTYPE_WEB_RUNTIME}</script></body>`;
-  const head = `<head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${cspFor(PROTOTYPE_WEB_RUNTIME)}"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${toHtml(input.title)}</title><style>${PAGE_CSS}</style></head>`;
+  const body = `<body data-variant="${escapeAttribute(first.variant.id)}" data-revision="${first.revision}" data-platform="${escapeAttribute(frame.platform)}" data-orientation="${frame.orientation}"${frame.posture === undefined ? "" : ` data-posture="${escapeAttribute(frame.posture)}"`}${prototypeWeb3dBodyAttributes(frame.fold)}>${toHtml(toolbar(input, first.variant, screens, frame))}<div data-main=""><div data-viewport="" aria-label="Device preview"><div data-stage="">${views}</div></div>${history ? toHtml(history) : ""}</div><script>${PROTOTYPE_WEB_RUNTIME}</script></body>`;
+  const head = `<head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${cspFor(PROTOTYPE_WEB_RUNTIME)}"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"><title>${toHtml(input.title)}</title><style>${PAGE_CSS}${images}</style></head>`;
   return `<!doctype html><html lang="en">${head}${body}</html>\n`;
 }
 
 /**
  * One self-contained HTML page (#16346): the prototype in a device frame with animated rotate
- * (#16545), zoom and pan, a variant switcher and revision history. Every view is pre-rendered; the inlined script
+ * (#16545), an opt-in 3D view (#16458), zoom and pan, a variant switcher and revision history. Every view is pre-rendered; the inlined script
  * only switches between them. No network: the CSP allows only that script, inline styles and
  * `data:` images and fonts. The same input yields the same bytes.
  */
 export function buildPrototypeWebPage(input: PrototypeWebPageInput): PrototypeWebPage {
+  return withActionableWebInput(() => assemblePrototypeWebPage(input));
+}
+
+function assemblePrototypeWebPage(input: PrototypeWebPageInput): PrototypeWebPage {
   const chosen = chooseVariant(input);
   const device = deviceFrameOrThrow(
     input.frame ?? defaultDeviceFrameId(input.platform ?? "android"),
   );
-  const frame = device.id;
+  const orientations = frameOrientations(device);
+  const posture = defaultFramePosture(device);
+  const postures = framePostures(device);
   const pageFrame: PageFrame = {
     platform: device.platform,
-    rotates: prototypeWebFrameRotates(device.formFactor),
+    orientation: orientations[0]!,
+    rotates: orientations.length > 1,
+    fold: prototypeWebFold(device),
+    postures,
+    ...(posture === undefined ? {} : { posture }),
+  };
+  // The default posture first, so a revision's first view is the one the page shows first.
+  const frame: ViewFrame = {
+    id: device.id,
+    orientations,
+    postures:
+      posture === undefined ? [undefined] : [posture, ...postures.filter((p) => p !== posture)],
   };
   const shown = { variant: chosen, revision: input.revision ?? chosen.revisions.at(-1)!.revision };
   // The shell lists only the pinned revisions (each latest and the one shown first), which are
@@ -476,7 +740,14 @@ export function buildPrototypeWebPage(input: PrototypeWebPageInput): PrototypeWe
     input.variants.some(
       (entry) => entry.id === variant && entry.revisions.at(-1)?.revision === revision,
     );
-  const rendered = input.variants.flatMap((variant) => renderViews(input, frame, variant));
+  const rules = imageRules(input.images ?? []);
+  const slots = new Map([...rules.keys()].map((id, slot) => [id, slot]));
+  const rendered = input.variants.flatMap((variant) =>
+    renderViews({ ...input, slots }, frame, variant),
+  );
+  const isShown = (revision: RevisionViews) =>
+    revision.variant === chosen.id && revision.revision === shown.revision;
+  const isPinned = (revision: RevisionViews) => pinned(revision.variant, revision.revision);
   // The shell's picker lists every screen of the shown revision. A dropped screen removes an
   // option longer than the `hidden` attribute it may add, so the page never outgrows the budget.
   const shellBytes = Buffer.byteLength(
@@ -487,13 +758,16 @@ export function buildPrototypeWebPage(input: PrototypeWebPageInput): PrototypeWe
       screens: pickerFor(rendered, shown),
     }),
   );
-  const revisions = budgetedViews(input, rendered, shellBytes, pinned);
+  const budgeted = budgetedViews(input, rendered, shellBytes, { pinned, isShown, rules });
+  const { revisions } = budgeted;
+  const inlined = new Set(budgeted.images);
   const views = revisions.flatMap((revision) => revision.screens.flat());
   const first = views.find(
     (view) =>
       view.variant === chosen.id &&
       view.revision === shown.revision &&
-      view.orientation === "portrait",
+      view.orientation === pageFrame.orientation &&
+      view.posture === posture,
   );
   if (!first) {
     throw new ActionableError(
@@ -514,6 +788,7 @@ export function buildPrototypeWebPage(input: PrototypeWebPageInput): PrototypeWe
     views: viewsHtml,
     history: revisionHistory(input, (variant, revision) => kept.has(`${variant}\u0000${revision}`)),
     screens: pickerFor(revisions, shown),
+    images: budgeted.images.map((id) => rules.get(id)!).join(""),
   });
   const inlinedRevisions = Object.fromEntries(
     input.variants.map((variant) => [
@@ -526,8 +801,13 @@ export function buildPrototypeWebPage(input: PrototypeWebPageInput): PrototypeWe
   return {
     html,
     sha256: createHash("sha256").update(html).digest("hex"),
-    frame,
-    unsupportedNodes: first.unsupported,
+    frame: device.id,
+    // An image whose asset the page inlined is drawn, not a placeholder.
+    unsupportedNodes: first.unsupported.filter(
+      (node) => !(node.reason === "assetOverBudget" && inlined.has(node.asset ?? "")),
+    ),
     inlinedRevisions,
+    imageRequests: imageRequests(rendered, isShown, isPinned, device.id),
+    inlinedImages: budgeted.images,
   };
 }

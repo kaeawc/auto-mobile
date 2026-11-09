@@ -1,4 +1,5 @@
 import { platform } from "node:os";
+import { isSimctlVideoPlatform } from "../../models/VideoRecordingPlatform";
 import path from "node:path";
 import { readProcessGenerationTokenForPid } from "../../daemon/daemonFiles";
 import { ActionableError, type BootedDevice } from "../../models";
@@ -22,6 +23,7 @@ import {
 } from "../../utils/media/FfmpegClient";
 import { withRemainingBudget } from "../../utils/withRemainingBudget";
 import { probeScreenrecordDisplayFlag } from "./AndroidRecordingDisplay";
+import { iosRecordedPanel } from "./IosRecordingDisplay";
 import {
   FfmpegCapabilities,
   runWithinDeadline,
@@ -102,6 +104,15 @@ const IOS_RECORDING_DIAGNOSTIC_TIMEOUT_MS = 3000;
 // the pending retry, so it stays a small slice: enriching a failure must never
 // starve the attempt that could still succeed.
 const IOS_RECORDING_RETRY_DIAGNOSTIC_TIMEOUT_MS = 250;
+
+function iosCaptureHandle(
+  captureTracker: ProcessTracker,
+  capturePath: string,
+  captureArgs: string[],
+  config: VideoCaptureConfig,
+): FfmpegBackendHandle {
+  return { kind: "ffmpeg", platform: "ios", captureTracker, capturePath, captureArgs, config };
+}
 
 export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
   // Overridable in tests so the retry path can be exercised without real waits.
@@ -206,18 +217,21 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     if (!device) {
       throw new ActionableError("Device is required to start video recording.");
     }
-    const iosStartDeadlineMs =
-      device.platform === "ios" ? this.timer.now() + this.iosRecordingStartTimeoutMs : undefined;
+    // Apple TV simulators record through the same `simctl io recordVideo` path as iOS (#16725).
+    const simctlCapture = isSimctlVideoPlatform(device.platform);
+    const iosStartDeadlineMs = simctlCapture
+      ? this.timer.now() + this.iosRecordingStartTimeoutMs
+      : undefined;
     await this.ensureFfmpegAvailable(
       iosStartDeadlineMs,
-      device.platform === "ios" ? config.abortSignal : undefined,
+      simctlCapture ? config.abortSignal : undefined,
     );
 
     if (device.platform === "android") {
       return this.startAndroid(device, config);
     }
 
-    if (device.platform === "ios") {
+    if (simctlCapture) {
       return this.startIos(device, config, iosStartDeadlineMs!);
     }
 
@@ -547,7 +561,8 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     deadlineMs: number,
   ): Promise<string | undefined> {
     const remainingMs = deadlineMs - this.timer.now();
-    if (remainingMs <= 0) {
+    // An Apple TV has one external display and no Integrated screen; simctl's default captures it.
+    if (remainingMs <= 0 || device.platform === "tvos") {
       return undefined;
     }
     let displays: Awaited<ReturnType<VideoSimCtl["enumerateDisplays"]>>;
@@ -721,13 +736,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
           { signal: config.abortSignal, timer: this.timer },
         );
 
-        const backendHandle: FfmpegBackendHandle = {
-          kind: "ffmpeg",
-          platform: "ios",
-          captureTracker,
-          capturePath,
-          config,
-        };
+        const backendHandle = iosCaptureHandle(captureTracker, capturePath, args, config);
 
         return {
           recordingId: config.recordingId,
@@ -735,6 +744,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
           startedAt: config.startedAt,
           // simctl writes the raw .mov; `outputPath` exists only after stop's post-process.
           liveCapturePath: capturePath,
+          recordedPanel: iosRecordedPanel(device, config.recordingPanel, displayArg),
           backendHandle,
         };
       } catch (error) {

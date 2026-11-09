@@ -6,12 +6,7 @@ import {
   type WebChild,
   type WebElement,
 } from "../../../../src/features/prototype/web/webNodes";
-import { WEB_LAYER_RENDERED_TYPES } from "../../../../src/features/prototype/web/webRender";
-import { WEB_LAYER_TYPES } from "../../../../src/features/prototype/web/webSheet";
-import {
-  renderPrototypeStill,
-  type PrototypeStillOptions,
-} from "../../../../src/features/prototype/web/webStill";
+import { renderPrototypeStill } from "../../../../src/features/prototype/web/webStill";
 
 const reference = JSON.parse(
   readFileSync(
@@ -69,14 +64,14 @@ describe("prototype web still (#16346)", () => {
   test("lists unsupported nodes with their paths and draws a labelled placeholder", () => {
     expect(still.unsupportedNodes).toEqual([
       {
-        type: "progress",
+        type: "menu",
         id: "spend",
         path: 'root.screens["cart"].children[5]',
         reason: "unsupportedType",
       },
     ]);
     expect(
-      find(still.element, (element) => element.attrs["data-unsupported"] === "progress"),
+      find(still.element, (element) => element.attrs["data-unsupported"] === "menu"),
     ).toHaveLength(1);
   });
 
@@ -94,7 +89,7 @@ describe("prototype web still (#16346)", () => {
   test("an image draws a placeholder and is listed as not inlined", () => {
     const spec = { ...reference, root: { type: "image", id: "hero", asset: "hero" } };
     expect(renderPrototypeStill(spec).unsupportedNodes).toEqual([
-      { type: "image", id: "hero", path: "root", reason: "assetNotInlined" },
+      { type: "image", id: "hero", path: "root", reason: "assetNotInlined", asset: "hero" },
     ]);
   });
 
@@ -485,6 +480,116 @@ describe("prototype web still (#16346)", () => {
     expect(byTag(still, "sized")[0]!.style).not.toHaveProperty("flex");
   });
 
+  test("a wrap-sized line with a weighted child grows on its main axis (#16682)", () => {
+    const styleOf = (root: Record<string, unknown>, tag: string) =>
+      byTag(renderPrototypeStill({ ...reference, root }), tag)[0]!.style;
+    const weighted = (style: Record<string, unknown>) => ({
+      type: "box",
+      testTag: "w",
+      style,
+    });
+    const rowWith = (child: Record<string, unknown>, style: Record<string, unknown> = {}) => ({
+      type: "column",
+      children: [
+        { type: "row", testTag: "r", style, children: [{ type: "text", text: "abc" }, child] },
+      ],
+    });
+    const box = weighted({ weight: 1, height: { dp: 10 } });
+    expect(styleOf(rowWith(box), "r")).toMatchObject({ width: "100%" });
+    expect(styleOf(rowWith(box), "w")).toMatchObject({ flex: "1 1 0" });
+    // No weight, a zero weight, or an authored width keeps the row at its own size.
+    expect(styleOf(rowWith(weighted({ height: { dp: 10 } })), "r")).not.toHaveProperty("width");
+    expect(styleOf(rowWith(weighted({ weight: 0 })), "r")).not.toHaveProperty("width");
+    expect(styleOf(rowWith(box, { width: { dp: 120 } }), "r")).toMatchObject({ width: "120px" });
+    // A column grows on its height, inside a row, and only on that axis.
+    const column = styleOf(
+      {
+        type: "row",
+        children: [{ type: "column", testTag: "c", children: [weighted({ weight: 2 })] }],
+      },
+      "c",
+    );
+    expect(column).toMatchObject({ height: "100%" });
+    expect(column).not.toHaveProperty("width");
+  });
+
+  test("a hidden weighted child does not grow its line (#16682)", () => {
+    const rowOf = (show: boolean) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          state: { show },
+          root: {
+            type: "column",
+            children: [
+              {
+                type: "row",
+                testTag: "r",
+                children: [
+                  {
+                    type: "box",
+                    style: { weight: 1 },
+                    visibleWhen: { key: "show", equals: true },
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+        "r",
+      )[0]!.style;
+    expect(rowOf(true)).toMatchObject({ width: "100%" });
+    expect(rowOf(false)).not.toHaveProperty("width");
+  });
+
+  test("a repeated weighted child grows its line only where its bound visibleWhen keeps it", () => {
+    const rowOf = (show: boolean) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          state: { "show.a": show },
+          root: {
+            type: "column",
+            children: [
+              {
+                type: "row",
+                testTag: "r",
+                repeat: { as: "item", items: [{ id: "a" }] },
+                children: [
+                  {
+                    type: "box",
+                    style: { weight: 1 },
+                    visibleWhen: { key: "show.{item.id}", equals: true },
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+        "r",
+      )[0]!;
+    expect(rowOf(true).style).toMatchObject({ width: "100%" });
+    expect(rowOf(false).children).toEqual([]);
+    expect(rowOf(false).style).not.toHaveProperty("width");
+  });
+
+  test("a box does not grow around a weighted child (#16682)", () => {
+    const style = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          children: [
+            { type: "box", testTag: "b", children: [{ type: "box", style: { weight: 1 } }] },
+          ],
+        },
+      }),
+      "b",
+    )[0]!.style;
+    expect(style).not.toHaveProperty("width");
+    expect(style).not.toHaveProperty("flex");
+  });
+
   test("draws list-item and text-field icon slots", () => {
     const iconsOf = (root: Record<string, unknown>) =>
       find(
@@ -556,6 +661,69 @@ describe("prototype web still (#16346)", () => {
     expect(byTag({ element: row }, "field")[0]!.style).not.toHaveProperty("flex");
   });
 
+  test("a row's aspect ratio honors a height bound inherited from its parent (#16675)", () => {
+    const line = (rowStyle: Record<string, unknown>, parent: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          root: {
+            type: "column",
+            children: [
+              {
+                type: "box",
+                style: parent,
+                children: [
+                  {
+                    type: "row",
+                    testTag: "line",
+                    style: rowStyle,
+                    children: [
+                      { type: "box", testTag: "ratio", style: { aspectRatio: 1 } },
+                      { type: "box", testTag: "after", style: { width: { dp: 40 } } },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+        "line",
+      )[0]!;
+    const own = line({ height: { dp: 100 } }, {});
+    const inherited = line({}, { height: { dp: 116 }, padding: { top: 8, bottom: 8 } });
+    const style = (row: WebElement, tag: string) => byTag({ element: row }, tag)[0]!.style;
+    // The inherited 100dp content height caps the ratio just as the row's own 100dp does, so the
+    // ratio no longer zeroes its later sibling.
+    expect(style(inherited, "ratio")).toEqual(style(own, "ratio"));
+    expect(style(inherited, "after")).toEqual(style(own, "after"));
+    expect(style(inherited, "after")["max-width"]).not.toBe("0px");
+    // A scroll passes no bound on: the ratio takes the rest again.
+    const scrolled = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "box",
+          style: { height: { dp: 116 } },
+          children: [
+            {
+              type: "scroll",
+              child: {
+                type: "row",
+                testTag: "line",
+                children: [
+                  { type: "box", testTag: "ratio", style: { aspectRatio: 1 } },
+                  { type: "box", testTag: "after", style: { width: { dp: 40 } } },
+                ],
+              },
+            },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    expect(style(scrolled, "after")["max-width"]).toBe("0px");
+  });
+
   test("a row's unsized aspect ratio takes the width its earlier siblings left (#16659)", () => {
     const root = byTag(
       renderPrototypeStill({
@@ -621,6 +789,281 @@ describe("prototype web still (#16346)", () => {
     expect(style("after")).not.toHaveProperty("max-width");
   });
 
+  test("a nested capped row after an unsized aspect ratio keeps its parent's zero width (#16695)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          children: [
+            {
+              type: "row",
+              children: [
+                { type: "box", style: { aspectRatio: 2 } },
+                {
+                  type: "row",
+                  testTag: "nested",
+                  style: { maxWidth: 300 },
+                  children: [
+                    { type: "box", style: { aspectRatio: 1, maxWidth: 40 } },
+                    { type: "text", text: "b" },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      }),
+      "nested",
+    )[0]!;
+    // The outer row measures it against no width, which its own bound must not widen.
+    expect(row.style["max-width"]).toBe("0px");
+  });
+
+  test("a later sibling's minWidth gives way to a capped aspect ratio (#16772)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "row",
+          testTag: "line",
+          style: { width: { dp: 100 } },
+          children: [
+            { type: "box", testTag: "ratio", style: { aspectRatio: 1, maxWidth: 100 } },
+            { type: "box", testTag: "after", style: { width: { dp: 40 }, minWidth: 40 } },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    // Folded into its width, the minimum no longer holds against shrinking, as Android's sizeIn.
+    expect(byTag({ element: row }, "after")[0]!.style).toMatchObject({
+      width: "40px",
+      "min-width": "0",
+      "flex-shrink": "1000000000",
+    });
+  });
+
+  test("a content-width later sibling's minWidth holds through a strut, not calc-size (#16794)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "row",
+          testTag: "line",
+          style: { width: { dp: 100 } },
+          children: [
+            { type: "box", testTag: "ratio", style: { aspectRatio: 1, maxWidth: 100 } },
+            { type: "text", testTag: "after", text: "Hi", style: { minWidth: 40 } },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    const cell = row.children.at(-1) as WebElement;
+    // The row's flex item is the wrapping cell, which gives its width up first.
+    expect(cell.style).toMatchObject({
+      display: "grid",
+      "grid-template-columns": "minmax(0, auto)",
+      "min-width": "0",
+      "flex-shrink": "1000000000",
+    });
+    const [node, strut] = cell.children as WebElement[];
+    expect(node!.attrs["data-testid"]).toBe("after");
+    // Stretched explicitly, since grid would not stretch an aspect-ratio or replaced node.
+    expect(node!.style).toMatchObject({
+      "grid-area": "1 / 1",
+      "min-width": "0",
+      "justify-self": "stretch",
+    });
+    expect(node!.style).not.toHaveProperty("flex-shrink");
+    expect(node!.style).not.toHaveProperty("width");
+    expect(strut!.attrs["aria-hidden"]).toBe("true");
+    expect(strut!.style).toEqual({
+      "grid-area": "1 / 1",
+      width: "40px",
+      "max-width": "100%",
+      height: "0",
+    });
+    expect(toHtml(row)).not.toContain("calc-size");
+  });
+
+  test("a wrapped later column keeps its own direction; its maxWidth bounds the cell (#16794)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "row",
+          testTag: "line",
+          style: { width: { dp: 300 } },
+          children: [
+            { type: "box", testTag: "ratio", style: { aspectRatio: 1, maxWidth: 100 } },
+            {
+              type: "column",
+              testTag: "after",
+              style: { width: "fill", minWidth: 40, maxWidth: 100 },
+              children: [
+                { type: "text", text: "A" },
+                { type: "text", text: "B" },
+              ],
+            },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    const cell = row.children.at(-1) as WebElement;
+    const node = byTag({ element: cell }, "after")[0]!;
+    expect(node.style).toMatchObject({ display: "flex", "flex-direction": "column" });
+    expect(cell.style).not.toHaveProperty("flex-direction");
+    expect(cell.style).toMatchObject({ display: "grid", "max-width": "100px", flex: "1 1 auto" });
+    expect(node.style["max-width"]).toBe("100px");
+  });
+
+  test("a wrapped later sibling drops its component's default width to fill the cell (#16794)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "row",
+          testTag: "line",
+          style: { width: { dp: 300 } },
+          children: [
+            { type: "box", testTag: "ratio", style: { aspectRatio: 1, maxWidth: 100 } },
+            { type: "iconButton", testTag: "after", icon: "add", style: { minWidth: 80 } },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    const cell = row.children.at(-1) as WebElement;
+    expect(cell.style.display).toBe("grid");
+    expect(byTag({ element: cell }, "after")[0]!.style).not.toHaveProperty("width");
+  });
+
+  test("under a horizontal scroll a row's unsized aspect ratio sizes from the height (#16718)", () => {
+    const render = (scrollStyle: Record<string, unknown>, rowStyle?: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          root: {
+            type: "scroll",
+            axis: "horizontal",
+            style: scrollStyle,
+            child: {
+              type: "row",
+              testTag: "line",
+              ...(rowStyle ? { style: rowStyle } : {}),
+              children: [
+                { type: "box", testTag: "ratio", style: { aspectRatio: 1 } },
+                { type: "box", testTag: "after", style: { width: { dp: 40 } } },
+              ],
+            },
+          },
+        }),
+        "line",
+      )[0]!;
+    const style = (root: WebElement, tag: string) => byTag({ element: root }, tag)[0]!.style;
+    const sized = render({ height: { dp: 100 } });
+    // No width to reach, so the row hugs its content instead of growing to the scroll.
+    expect(sized.style).not.toHaveProperty("width");
+    expect(sized.style).not.toHaveProperty("max-width");
+    expect(style(sized, "ratio")).toMatchObject({ width: "100px", "flex-basis": "100px" });
+    expect(style(sized, "ratio").flex).toBeUndefined();
+    expect(style(sized, "after")).toMatchObject({ width: "40px" });
+    expect(style(sized, "after")["max-width"]).not.toBe("0px");
+    // The row's own padding comes off the height the scroll hands it.
+    const padded = render({ height: { dp: 100 } }, { padding: { top: 10, bottom: 10 } });
+    expect(style(padded, "ratio")).toMatchObject({ width: "80px", "flex-basis": "80px" });
+    // With no definite height the ratio stays as authored, and its sibling keeps its width.
+    const unsized = render({});
+    expect(unsized.style).not.toHaveProperty("width");
+    expect(style(unsized, "ratio")).not.toHaveProperty("width");
+    expect(style(unsized, "ratio")).not.toHaveProperty("flex");
+    expect(style(unsized, "after")).not.toHaveProperty("max-width");
+  });
+
+  test("a row nested in a box or row under a horizontal scroll still sizes from the height (#16718)", () => {
+    const row = {
+      type: "row",
+      children: [
+        { type: "box", testTag: "ratio", style: { aspectRatio: 1 } },
+        { type: "box", style: { width: { dp: 40 } } },
+      ],
+    };
+    const ratioIn = (child: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          root: { type: "scroll", axis: "horizontal", style: { height: { dp: 100 } }, child },
+        }),
+        "ratio",
+      )[0]!.style;
+    const inBox = { type: "box", style: { padding: { top: 5, bottom: 5 } }, children: [row] };
+    expect(ratioIn(inBox)).toMatchObject({ width: "90px", "flex-basis": "90px" });
+    expect(ratioIn({ type: "row", children: [row] })).toMatchObject({
+      width: "100px",
+      "flex-basis": "100px",
+    });
+  });
+
+  test("a dp-width row under a horizontal scroll caps its aspect ratio by the scroll's height (#16718)", () => {
+    const root = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "scroll",
+          axis: "horizontal",
+          style: { height: { dp: 100 } },
+          child: {
+            type: "row",
+            testTag: "line",
+            style: { width: { dp: 200 } },
+            children: [
+              { type: "box", testTag: "ratio", style: { aspectRatio: 1 } },
+              { type: "box", testTag: "after", style: { width: { dp: 40 } } },
+            ],
+          },
+        },
+      }),
+      "line",
+    )[0]!;
+    const style = (tag: string) => byTag({ element: root }, tag)[0]!.style;
+    // Compose's aspectRatio falls back to the 100 dp max height: 100x100, then the 40 dp box.
+    expect(style("ratio")).toMatchObject({ width: "100px", "flex-basis": "100px" });
+    expect(style("after")["max-width"]).not.toBe("0px");
+  });
+
+  test("a dp-wide column in a horizontal scroll bounds its row to its own width (#16691)", () => {
+    const shown = renderPrototypeStill({
+      ...reference,
+      root: {
+        type: "scroll",
+        axis: "horizontal",
+        child: {
+          type: "row",
+          testTag: "strip",
+          children: [
+            {
+              type: "column",
+              style: { width: { dp: 100 } },
+              children: [
+                {
+                  type: "row",
+                  testTag: "inner",
+                  children: [{ type: "box", style: { aspectRatio: 1, maxWidth: 300 } }],
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    // The scroll's own row stays unbounded; the row beneath the 100 dp column is bounded by it.
+    expect(byTag(shown, "strip")[0]!.style).not.toHaveProperty("max-width");
+    expect(byTag(shown, "inner")[0]!.style["max-width"]).toBe("100%");
+  });
+
   test("a row whose height comes from fill or a weight caps its aspect ratio by it (#16686)", () => {
     const ratioIn = (row: Record<string, unknown>) =>
       byTag(
@@ -651,102 +1094,133 @@ describe("prototype web still (#16346)", () => {
     expect(ratioIn({})).toMatchObject({ "flex-basis": "80px", width: "80px" });
   });
 
-  test("a column's hoisted sheet takes none of the height a weighted row gets (#16720)", () => {
-    const ratioOf = (state: Record<string, unknown>) =>
+  test("a fill or weighted row in a fixed-height card caps its aspect ratio by it (#16690)", () => {
+    const ratioIn = (row: Record<string, unknown>) =>
       byTag(
         renderPrototypeStill({
           ...reference,
-          state,
           root: {
             type: "column",
-            style: { height: { dp: 100 } },
             children: [
               {
-                type: "bottomSheet",
-                openWhen: { key: "open", equals: true },
-                detents: ["half"],
+                type: "card",
                 style: { height: { dp: 100 } },
-                child: { type: "text", text: "Details" },
-              },
-              {
-                type: "row",
-                style: { weight: 1 },
-                children: [{ type: "box", testTag: "ratio", style: { aspectRatio: 2 } }],
-              },
-            ],
-          },
-        }),
-        "ratio",
-      )[0]!.style;
-    // The sheet draws in a window layer, open or closed, so the row's share is the whole 100 dp.
-    expect(ratioOf({ open: false })).toMatchObject({ "flex-basis": "200px", width: "200px" });
-    expect(ratioOf({ open: true })).toMatchObject({ "flex-basis": "200px", width: "200px" });
-  });
-
-  test("every hoisted layer type is out of a column's flow (#16720)", () => {
-    // The height pass's layer set must name every type renderWebNode hoists.
-    expect([...WEB_LAYER_TYPES].sort()).toEqual([...WEB_LAYER_RENDERED_TYPES].sort());
-    const layers: Record<string, Record<string, unknown>> = {
-      dialog: { type: "dialog", title: "Delete?", confirm: { label: "Delete" } },
-      snackbar: { type: "snackbar", text: "Saved" },
-    };
-    for (const [type, layer] of Object.entries(layers)) {
-      const ratio = byTag(
-        renderPrototypeStill({
-          ...reference,
-          state: { open: false },
-          root: {
-            type: "column",
-            style: { height: { dp: 100 }, spacing: 8 },
-            children: [
-              { ...layer, openWhen: { key: "open", equals: true }, style: { height: { dp: 100 } } },
-              {
-                type: "row",
-                style: { weight: 1 },
-                children: [{ type: "box", testTag: "ratio", style: { aspectRatio: 2 } }],
+                children: [
+                  { type: "box", style: { height: { dp: 60 } } },
+                  {
+                    ...row,
+                    type: "row",
+                    children: [
+                      { type: "box", testTag: "ratio", style: { aspectRatio: 2 } },
+                      { type: "text", text: "b" },
+                    ],
+                  },
+                ],
               },
             ],
           },
         }),
         "ratio",
       )[0]!.style;
-      expect([type, ratio["flex-basis"]]).toEqual([type, "200px"]);
-    }
+    // 100 dp less the 60 dp sibling leaves 40 dp, so the ratio is at most 80 dp wide.
+    expect(ratioIn({ style: { height: "fill" } })).toMatchObject({ "flex-basis": "80px" });
+    expect(ratioIn({ style: { weight: 1 } })).toMatchObject({ "flex-basis": "80px" });
   });
 
-  test("a row's own safe-area padding comes out of its aspect ratio's height cap (#16720)", () => {
-    const ratioIn = (column: Record<string, unknown>, options: PrototypeStillOptions = {}) =>
-      byTag(
-        renderPrototypeStill(
-          {
-            ...reference,
-            root: {
-              type: "column",
-              ...column,
+  test("a weighted row's dp height does not cap the share its column allocates (#16701)", () => {
+    const ratio = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          style: { height: { dp: 100 } },
+          children: [
+            { type: "box", style: { height: { dp: 20 } } },
+            {
+              type: "row",
+              style: { weight: 1, height: { dp: 20 } },
               children: [
-                {
-                  type: "row",
-                  style: { width: { dp: 300 }, height: { dp: 100 } },
-                  safeAreaPadding: { edges: ["top"], types: ["systemBars"] },
-                  children: [{ type: "box", testTag: "ratio", style: { aspectRatio: 2 } }],
-                },
+                { type: "box", testTag: "ratio", style: { aspectRatio: 2 } },
+                { type: "text", text: "b" },
               ],
             },
+          ],
+        },
+      }),
+      "ratio",
+    )[0]!.style;
+    // The row is sized to its 80 dp share, not its 20 dp height, so the ratio is at most 160 dp.
+    expect(ratio).toMatchObject({ "flex-basis": "160px" });
+  });
+
+  test("a sheet window hands its height to a fill row at the root (#16690)", () => {
+    const ratioIn = (placement: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          window: { placement },
+          root: {
+            type: "row",
+            children: [
+              { type: "box", testTag: "ratio", style: { aspectRatio: 2 } },
+              { type: "text", text: "b" },
+            ],
           },
-          options,
-        ),
+        }),
         "ratio",
       )[0]!.style;
-    // Pixel 9's 48 dp top inset leaves the row 52 dp of content, so the box is 104 x 52.
-    expect(ratioIn({})).toMatchObject({ "flex-basis": "104px", width: "104px" });
-    // An ancestor that already applied the top inset consumed it, so the row adds none.
-    const consumed = { safeAreaPadding: { edges: ["top"], types: ["systemBars"] } };
-    expect(ratioIn(consumed)).toMatchObject({ "flex-basis": "200px" });
-    // The keyboard inset adds nothing in a still.
-    const ime = { safeAreaPadding: { edges: ["top"], types: ["ime"] } };
-    expect(ratioIn(ime)).toMatchObject({ "flex-basis": "104px" });
-    // The inset is the frame's: an iPhone 16 portrait top inset is 59 dp, leaving 41 dp.
-    expect(ratioIn({}, { frame: "iphone-16" })).toMatchObject({ "flex-basis": "82px" });
+    expect(ratioIn({ type: "sheet", height: 50, edge: "bottom" })).toMatchObject({
+      "flex-basis": "100px",
+    });
+    // A fullscreen window's height depends on bars and insets, so its root stays unbounded.
+    expect(ratioIn({ type: "fullscreen" })).not.toHaveProperty("flex-basis");
+  });
+
+  test("a repeat column's instances each cap their aspect ratio by their own share (#16694)", () => {
+    const ratios = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          style: { height: { dp: 40 } },
+          repeat: { items: [{ id: 1 }, { id: 2 }] },
+          children: [
+            {
+              type: "row",
+              style: { weight: 1 },
+              children: [
+                { type: "box", testTag: "ratio", style: { aspectRatio: 2 } },
+                { type: "text", text: "b" },
+              ],
+            },
+          ],
+        },
+      }),
+      "ratio",
+    );
+    // Each of the two weighted instances gets 20 dp, so its ratio is at most 40 dp wide.
+    expect(ratios.map((ratio) => ratio.style["flex-basis"])).toEqual(["40px", "40px"]);
+  });
+
+  test("a repeated row around an unsized aspect ratio does not fill its parent (#16694)", () => {
+    const row = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "column",
+          children: [
+            {
+              type: "row",
+              testTag: "line",
+              repeat: { items: [{ id: 1 }] },
+              children: [{ type: "box", style: { aspectRatio: 2 } }],
+            },
+          ],
+        },
+      }),
+      "line",
+    )[0]!;
+    expect(row.style).not.toHaveProperty("width");
   });
 
   test("an explicit wrap-width root keeps its content width in its window", () => {
@@ -1448,15 +1922,19 @@ describe("prototype web still parity (#16382)", () => {
   });
 
   test("an icon placeholder shows its name's initial", () => {
+    // An iOS frame has no glyph set yet (#16526), so every icon draws the placeholder.
     const iconOf = (name?: string) =>
       byTag(
-        renderPrototypeStill({
-          ...bare,
-          root: {
-            type: "column",
-            children: [{ type: "icon", testTag: "i", ...(name === undefined ? {} : { name }) }],
+        renderPrototypeStill(
+          {
+            ...bare,
+            root: {
+              type: "column",
+              children: [{ type: "icon", testTag: "i", ...(name === undefined ? {} : { name }) }],
+            },
           },
-        }),
+          { platform: "ios" },
+        ),
         "i",
       )[0]!;
     expect(textOf(iconOf("search"))).toBe("S");

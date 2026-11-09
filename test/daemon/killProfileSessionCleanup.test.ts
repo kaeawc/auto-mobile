@@ -20,8 +20,15 @@ describe("registerKillProfileSessionCleanup (#14051)", () => {
     adb = new FakeAdbExecutor();
     adb.setAndroidApiLevel(34);
     adb.setCommandResponse("shell pm path", createExecResult("package:/data/app/base.apk\n", ""));
-    adb.setCommandResponse("shell am get-standby-bucket", createExecResult("20\n", ""));
+    adb.setCommandResponseSequence("shell am get-standby-bucket", [
+      createExecResult("20\n", ""),
+      createExecResult("45\n", ""),
+    ]);
     adb.setCommandResponse("shell appops get", createExecResult("No operations.\n", ""));
+    adb.setCommandResponseSequence(`shell appops get '${APP}' RUN_ANY_IN_BACKGROUND`, [
+      createExecResult("No operations.\n", ""),
+      createExecResult("RUN_ANY_IN_BACKGROUND: ignore\n", ""),
+    ]);
     registry = new KillProfileRestoreRegistry();
     manager = new FakeSessionCleanupManager();
     registerKillProfileSessionCleanup(manager, {

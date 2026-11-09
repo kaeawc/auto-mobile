@@ -266,7 +266,7 @@ function newSocketServer(): UnixSocketServer {
   return new UnixSocketServer("/private/tmp/unused-11235.sock", DaemonState.getInstance(), timer);
 }
 
-test("a read naming another connection's session watches it without binding the caller (#11235)", async () => {
+test("a read naming another connection's session is refused without binding the caller (#11235, #13540)", async () => {
   const socket = newSocketServer();
   const ownerProxy = connect(socket, "owner");
   const otherProxy = connect(socket, "other");
@@ -274,11 +274,12 @@ test("a read naming another connection's session watches it without binding the 
   const ownerSession = pool.resolveAutolockSessionForMcpSession("owner");
   expect(ownerSession).toBeDefined();
 
-  // A read is never refused: it watches that session's device ...
+  // A sessionUuid is not a bearer capability (#13540): the read is refused before any device work
   const named = await otherProxy.callTool("watchProbe", { sessionUuid: ownerSession });
-  expect(named.isError).toBeFalsy();
-  expect(received).toEqual([devices[0].deviceId]);
-  // ... but never moves ownership (#11188), and binds neither the daemon socket's route nor the
+  expect(named.isError).toBe(true);
+  expect(JSON.stringify(named.content)).toContain("read_session_not_bound");
+  expect(received).toEqual([]);
+  // ... never moves ownership (#11188), and binds neither the daemon socket's route nor the
   // proxy: the daemon marks the session as another connection's.
   expect(pool.isSessionOwnedByOtherConnection(ownerSession!, "other")).toBe(true);
   expect(foreignOwnedSessionUuidFromResult(named)).toBe(ownerSession);

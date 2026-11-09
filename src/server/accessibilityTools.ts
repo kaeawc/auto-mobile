@@ -25,6 +25,7 @@ import type { ScreenReaderRestoreSlot } from "../features/accessibility/ScreenRe
 import { runSessionScreenReaderMutation } from "./sessionScreenReader";
 import { createAccessibilityAuditTool } from "./accessibilityAuditTool";
 import { createAuditTool } from "./auditTool";
+import { createPerformanceAuditTool } from "./performanceAuditTool";
 
 // `defineDeviceTool` applies `.strict()` and device targeting; the handler args below
 // (including `sessionUuid`) are inferred from this schema.
@@ -267,4 +268,5 @@ export function registerAccessibilityTools(daemon: SessionManagerSource = defaul
   createAccessibilityTool(daemon).register();
   createAccessibilityAuditTool().register();
   createAuditTool().register();
+  createPerformanceAuditTool().register();
 }

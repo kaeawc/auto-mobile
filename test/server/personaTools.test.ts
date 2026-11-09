@@ -47,7 +47,8 @@ describe("manufacturerProfile tool (#14055)", () => {
         .success,
     ).toBe(true);
     expect(
-      personaSchema.safeParse({ action: "apply", manufacturerProfile: "huawei-emui" }).success,
+      personaSchema.safeParse({ action: "apply", manufacturerProfile: "unknown-oem-fixture" })
+        .success,
     ).toBe(false);
     expect(
       personaSchema.safeParse({
@@ -61,7 +62,7 @@ describe("manufacturerProfile tool (#14055)", () => {
 
   test("list and describe report the versioned catalog without touching the device", async () => {
     const list = personaResultSchema.parse(structured(await handler(emulator, { action: "list" })));
-    expect(list.catalogVersion).toBe(1);
+    expect(list.catalogVersion).toBe(2);
     expect(list.manufacturerProfiles?.map((profile) => profile.id)).toContain("pixel-baseline");
 
     const description = personaResultSchema.parse(

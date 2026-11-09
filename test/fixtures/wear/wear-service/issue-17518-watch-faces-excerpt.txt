@@ -1,0 +1,42 @@
+Wear Service API: watch_faces
+lastSetWatchFaceFavoriteId=1
+isFallbackWatchFace=false
+runningFlow=ANDROIDX
+activeWatchFaceComponent=WatchFaceId[com.google.wear.offhand,null]
+favoriteId=1
+Current active watch face style={themeColor=8, showSeconds=}
+Current Active Engine:
+  Engine Type=AndroidX
+  Current Active Watch Face=favId: 1, family: WatchFaceId[com.google.wear.offhand,null]
+  Current Wallpaper Component=ComponentInfo{com.google.wear.watchface.runtime/com.google.wear.watchface.runtime.DeclarativeWatchFaceRuntime0}
+  Resource Only WatchFace=true
+  Runtime Package=com.google.wear.watchface.runtime
+Watch Face Favorite Repository (DB)
+  All Favorites in Database:
+    id=1 packageName=com.google.wear.offhand className=_placeholder_ editedPreviewUri=content://com.google.wear.services.watchface.previews.provider/wf-favorite-previews/1-preview lastUpdatedAt=1794144234145 style={themeColor=8, showSeconds=}
+    complications: 
+      ComplicationInfo{mWatchFaceSlotId=11, mProviderComponent=null, mDataType=1, mSlotEnabled=true}
+      ComplicationInfo{mWatchFaceSlotId=12, mProviderComponent=ComponentInfo{com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.DayAndDateProviderService}, mDataType=3, mSlotEnabled=true}
+    
+    id=2 packageName=com.google.wear.superficial className=_placeholder_ editedPreviewUri=null lastUpdatedAt=1794144080007 style={themeColor=2, useItalic=}
+    complications: 
+    
+    id=3 packageName=com.google.wear.perfunctory className=_placeholder_ editedPreviewUri=content://com.google.wear.services.watchface.previews.provider/wf-favorite-previews/3-preview lastUpdatedAt=1794144081237 style={themeColor=9, useItalic=}
+    complications: 
+      ComplicationInfo{mWatchFaceSlotId=11, mProviderComponent=null, mDataType=1, mSlotEnabled=true}
+      ComplicationInfo{mWatchFaceSlotId=12, mProviderComponent=ComponentInfo{com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.DayAndDateProviderService}, mDataType=3, mSlotEnabled=true}
+    
+    Favorites Order in shared prefs: =[1, 2, 3]
+Wear Service API: complications
+ComplicationManager
+  ComplicationDataSendingController
+    complication cache size=1
+      cacheEntries=1_12_3_com.google.android.clockwork.sysui/.experiences.complications.providers.DayAndDateProviderService
+    ComplicationDataRateLimitedEvaluator
+      scheduled=false
+      watchFaceState=WatchFaceState{watchFaceVisible=false, inAmbient=false}
+    ComplicationsConfigController
+      activeWatchFaceFavoriteId=WatchFaceFavoriteId{mWatchFaceId=WatchFaceId[com.google.wear.offhand,null], mFavoriteId=1, mType=AndroidxWatchFace}
+      activeConfigs: size=2
+      id=1 slot=11 type=1 configActionPending=false provider=null isEnabled=true
+      id=2 slot=12 type=3 configActionPending=false provider=ComponentInfo{com.google.android.clockwork.sysui/com.google.android.clockwork.sysui.experiences.complications.providers.DayAndDateProviderService} isEnabled=true

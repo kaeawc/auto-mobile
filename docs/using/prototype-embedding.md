@@ -56,10 +56,11 @@ For a single file to paste into an app, read `automobile:prototype/<id>/compose`
 `text/x-kotlin`) or `automobile:prototype/<id>/swiftui` (Swift, `text/x-swift`) for a prototype
 shown in this daemon session.
 
-| Parameter  | Meaning                                                                                                                                      |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `frame`    | A device frame id such as `pixel-9` or `iphone-16`, used to size the preview. Defaults to `pixel-9` for Compose and `iphone-16` for SwiftUI. |
-| `revision` | A kept revision. Defaults to the latest.                                                                                                     |
+| Parameter      | Meaning                                                                                                                                      |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `frame`        | A device frame id such as `pixel-9` or `iphone-16`, used to size the preview. Defaults to `pixel-9` for Compose and `iphone-16` for SwiftUI. |
+| `revision`     | A kept revision. Defaults to the latest.                                                                                                     |
+| `mcpSessionId` | Only revisions this MCP session produced (see below). Defaults to every session's.                                                           |
 
 The file is the same host the native resource generates, with the spec built in as a string
 constant and a `@Preview` (Compose) or `#Preview` (SwiftUI) sized to the frame. Its header comment
@@ -68,6 +69,35 @@ font with the path the file loads it from and its `automobile:prototype/native/a
 are not built in: add those files yourself (a saved prototype serves their bytes from the URI).
 Revisions, errors, `_meta` (without `variants`) and subscriptions work as for the web page below,
 and `resources/list` lists both files for every prototype shown in this daemon session.
+
+## Eject to code you own
+
+The resources above keep the renderer library and the spec in your app. To replace a prototype
+with screens you write and style by hand, read `automobile:prototype/eject?id=<id>` (same `id`,
+`platform` and `deviceId` parameters as the native resource) once and edit the result. Nothing is
+regenerated or synced back to the spec afterwards.
+
+The result is JSON:
+
+| Field        | Meaning                                                                                                                                   |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `files`      | One file: `app/src/main/java/prototypes/eject/<Type>.kt` (Jetpack Compose, Material 3) or `<Type>.swift` (SwiftUI). No library is needed. |
+| `scaffolded` | Node types written as real code.                                                                                                          |
+| `remaining`  | What is left for you, by spec path: `node` (an unsupported node), `action` (an action other than stack navigation) or `binding`.          |
+| `notes`      | Limits of the scaffold for this prototype.                                                                                                |
+
+`box`, `row`, `column`, `card`, `scroll`, `spacer`, `divider`, `text`, `button`, `textField`,
+`list`, `listItem` and `stack` become native code. Stack screens become their own functions or
+views, and `push`, `replace`, `pop` and `popToRoot` drive a back stack in the generated state
+class, which also holds text field values (seeded from string `state`). Every other node becomes a
+placeholder, marked with an `(eject)` comment, that keeps its `testTag` and children. Styles, conditions, data
+placeholders such as `{item.name}` and other actions stay as written or as `(eject)` comments;
+a list shows as many rows as its data had. Explicit theme color roles become a Material 3 color
+scheme or SwiftUI colors; a seeded scheme is not exported.
+
+Every `testTag` is kept as `Modifier.testTag` or `.accessibilityIdentifier`, with `{index}` bound
+to the row index, so tests and flows recorded against the prototype can target the ejected
+screens.
 
 ## Where the files go
 
@@ -158,7 +188,10 @@ Use this object as the spec's `window`. The option changes only the prototype's 
 not change the device locale or translate text. It is supported on iOS and requires
 `prototype_layout_direction_v1`. Android refuses specs that set it; remove the option to show there.
 Other optional window controls are `keepScreenOn`, `brightness`, `orientation` and `statusBar`;
-these require `prototype_platform_window_controls_v1` and are refused when unsupported.
+these require `prototype_platform_window_controls_v1` and are refused when unsupported. On Android,
+these controls and the `hideKeyboard` action are available through CtrlProxy overlays, not the embedded
+renderer. Overlay orientation is best effort; inspect reports the requested `orientation` and reports
+`statusBar: "unsupported"` when a status bar style was requested.
 
 ## Capability errors
 
@@ -191,17 +224,30 @@ self-contained HTML page (`text/html`, no network access) with the prototype in 
 rotate and zoom controls, a screen picker when the prototype's stack has more than one screen, and
 its revision history.
 
-| Parameter  | Meaning                                                                                                 |
-| ---------- | ------------------------------------------------------------------------------------------------------- |
-| `frame`    | A device frame id such as `pixel-9` or `iphone-16`. Defaults to the platform that showed the prototype. |
-| `revision` | A kept revision. Defaults to the latest.                                                                |
-| `variant`  | The prototype id of the alternative to show first (see below).                                          |
+| Parameter      | Meaning                                                                                                 |
+| -------------- | ------------------------------------------------------------------------------------------------------- |
+| `frame`        | A device frame id such as `pixel-9` or `iphone-16`. Defaults to the platform that showed the prototype. |
+| `revision`     | A kept revision. Defaults to the latest.                                                                |
+| `variant`      | The prototype id of the alternative to show first (see below).                                          |
+| `mcpSessionId` | Only revisions this MCP session produced (see below). Defaults to every session's.                      |
 
 Revision 1 is the first show of the id. Each later show and each patch that lands adds one; taps
 and typing on the device do not. The last 20 revisions are kept, and an older one is an error that
 names the oldest kept revision. The result's `_meta` reports `revision`, `deviceRevision` (the
-device's own counter for that patch), `revisions`, `variants`, `frame`, `sha256` and
-`rendererVersion`.
+device's own counter for that patch), `mcpSessionId` (the MCP session whose show or patch produced
+the revision, when it had one), `revisions`, `variants`, `frame`, `sha256` and `rendererVersion`.
+
+Every MCP session on the daemon shares one revision history, so another session's show can land
+between yours and your read. A successful `show` or `patch` returns `mcpSessionId`; pass it as the
+`mcpSessionId` parameter to read only your session's revisions. The default revision is then your
+latest, `revisions` lists only yours, and a `revision` another session produced is an error. The
+page itself still offers every kept revision.
+
+Images draw the assets uploaded with the prototype to an Android device that is still showing it,
+re-encoded at the size the frame draws them. The page stays under 2 MiB: the revision shown first
+gets its images before older revisions, and an image that does not fit, or whose asset the server
+does not have (iOS uploads, or no device showing the prototype any more), draws a grey placeholder.
+Upload the assets again with the next show to bring them back.
 
 `resources/list` lists `automobile:prototype/<id>/web` for every prototype shown in this daemon
 session. Subscribe to that URI, without parameters, to be told about every new revision; a
@@ -221,7 +267,9 @@ To take a prototype's spec together with what it needs from a renderer, read
   "format": "automobile-prototype-embed",
   "version": 1,
   "requires": ["..."],
-  "spec": { "...": "..." }
+  "spec": { "...": "..." },
+  "glyphs": { "filled/home": "<path d=\"...\"></path>" },
+  "iconMissing": ["filled/..."]
 }
 ```
 
@@ -229,5 +277,13 @@ To take a prototype's spec together with what it needs from a renderer, read
 server computed them. Keep the two together: a renderer that lacks a listed capability should
 refuse the spec rather than draw part of it. A `version` other than `1` is a newer format.
 
-`revision` and `variant` work as for the web page; there is no `frame`. Errors, listing and
+`glyphs` is present when the spec names an icon that has a glyph. It maps `<variant>/<name>` to the Material Icons
+glyph's shapes, as SVG markup for a `0 0 24 24` viewBox, so a renderer needs no icon set of its
+own. It covers every icon the spec's icon fields name, in the icon's `variant` (else `filled`), the glyphs controls draw on their own (a filter chip's or segment's selection check, a select's dropdown arrow and a date picker's month arrows),
+and every icon name that appears as a string in `state` or `data`, in `filled` and in each variant
+the spec's icons use, so an icon whose name changes with state still has its glyph. A variant
+without that glyph carries the `filled` one. `iconMissing` lists the keys with no glyph at all;
+draw a placeholder for them. iOS-style glyphs are not included yet.
+
+`revision`, `variant` and `mcpSessionId` work as for the web page; there is no `frame`. Errors, listing and
 subscriptions also match the web page, and `_meta` reports the same fields except `frame`.

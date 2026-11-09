@@ -7,7 +7,7 @@ enum PrototypeStrictCapabilities {
     static let freeFormMaps: Set<String> = ["headers", "query", "params", "args"]
 
     static func required(_ spec: [String: JSONValue], includeAgentGates: Bool = false) -> Set<String> {
-        var result = Set<String>()
+        var result = PrototypePlatformValidator.backendCapabilities(spec)
         func need(_ feature: String) { result.insert("prototype_\(feature)_v1") }
         if PrototypeContractValidator.locatedActionTypes(.object(spec)).contains("hideKeyboard") {
             need("hide_keyboard")
@@ -199,6 +199,7 @@ enum PrototypeStrictCapabilities {
                 if key == "empty" || key == "shimmer" { need("loading_states") }
                 if key == "effects" { need("effects") }
                 if key == "keyframes" { need("keyframes") }
+                if key == "attentionLoop" { need("loops") }
                 if key == "animate", child.objectFields?["tempo"] != nil { need("motion_tokens") }
                 let transitionType = child.objectFields?["type"]?.stringValue ?? child.stringValue ?? ""
                 if ["animate", "scale", "rotation", "zoomable"]
@@ -222,12 +223,15 @@ enum PrototypeStrictCapabilities {
                 if key == "linkify" {
                     if let actions = child
                         .objectFields?["onTap"] { scan(actions, field: "onTap", routeAlias: routeAlias) }
-                } else if !["series", "effects", "keyframes", "scrollLinked", "scrollTransition", "press"]
+                } else if !["series", "effects", "keyframes", "attentionLoop", "scrollLinked", "scrollTransition", "press"]
                     .contains(key) { scan(child, field: key, routeAlias: routeAlias) }
             }
         }
         if let root = spec["root"] { scan(root) }
         if let handlers = spec["platform"] { scan(handlers) }
+        for event in (spec["platform"]?.objectFields?["on"]?.objectFields ?? [:]).keys {
+            if let capability = PrototypePlatformValidator.eventCapability(event) { result.insert(capability) }
+        }
         for channel in (spec["channels"]?.objectFields ?? [:]).values { scan(channel) }
         if let scrim = spec["window"]?.objectFields?["placement"]?.objectFields?["scrim"],
            scrim.objectFields != nil { need("theme_modes") }

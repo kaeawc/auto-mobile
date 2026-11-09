@@ -441,6 +441,8 @@ export class InstallApp {
         await new AndroidUserTargetResolver(this.adb).resolve({
           packageName,
           explicitUserId: userId,
+          // AAOS installs must follow the driver user that launchApp targets (#16881).
+          currentUser: this.device.formFactor === "automotive",
           installedOnly: true,
           signal,
         })

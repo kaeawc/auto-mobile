@@ -14,7 +14,6 @@ import {
   PROTOTYPE_ACCESSIBILITY_RULES,
 } from "../../features/prototype/prototypeAccessibilityLint";
 import { MAX_PROTOTYPE_PLACEHOLDER_FINDINGS } from "../../features/prototype/prototypePlaceholderLint";
-import { reverseOutputShape } from "../prototypeReverse";
 import {
   prototypeClearedOutputField,
   prototypeStorageOutputField,
@@ -67,6 +66,18 @@ const lastResultSchema = z.object({
     .optional()
     .describe(
       "Android: the prototype exists but is not visible, and why; absent when visible, when suspended, or with an older CtrlProxy",
+    ),
+  orientation: z
+    .enum(["portrait", "landscape", "unlocked"])
+    .optional()
+    .describe(
+      "Inspect: the orientation the prototype's window.orientation requested; the overlay may not honor it. Absent when none was requested or the device lacks prototype_platform_window_controls_v1",
+    ),
+  statusBar: z
+    .enum(["unsupported"])
+    .optional()
+    .describe(
+      "Inspect: unsupported when window.statusBar was requested but the overlay cannot restyle the status bar. Absent when none was requested or the device lacks prototype_platform_window_controls_v1",
     ),
   suspended: z
     .literal(true)
@@ -326,6 +337,16 @@ export const prototypeOutputSchema = z.object({
     .describe(
       "save and open on Android or an iOS simulator with ProtoViewer installed: the ProtoViewer library entry. The entry is imported: ProtoViewer sets its source, keeps its network off until the user allows it, and it is not attached to this host.",
     ),
+  update: z
+    .object({
+      missingCapabilities: z.array(z.string()),
+      installedVersion: z.string().optional(),
+      url: z.string().optional().describe("Where to get a newer ProtoViewer."),
+    })
+    .optional()
+    .describe(
+      "save with errorCode unsupported_capability: the installed ProtoViewer lacks capabilities the spec needs, so nothing was pushed. Update ProtoViewer and save again.",
+    ),
   savedPrototypes: z
     .array(
       z.object({
@@ -377,6 +398,12 @@ export const prototypeOutputSchema = z.object({
     .max(Number.MAX_SAFE_INTEGER)
     .optional()
     .describe("patch only: current device revision after applying or refusing a patch"),
+  mcpSessionId: z
+    .string()
+    .optional()
+    .describe(
+      "show and patch: the MCP session the spec revision is recorded under; filter automobile:prototype/<id>/web, compose or swiftui with mcpSessionId=<this> to read only this session's revisions",
+    ),
   conflict: z
     .object({
       revision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
@@ -606,7 +633,6 @@ export const prototypeOutputSchema = z.object({
     .describe(
       "show with element anchors: device timestamp of the hierarchy they were resolved against",
     ),
-  ...reverseOutputShape,
   deviceDroppedEvents: z
     .number()
     .int()

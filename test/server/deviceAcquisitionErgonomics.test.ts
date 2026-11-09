@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerInteractionTools } from "../../src/server/interactionTools";
 import { registerUtilityTools } from "../../src/server/utilityTools";
@@ -20,25 +20,29 @@ isolateToolRegistry();
  * result session key (`sessionUuid`) that consumer tools' params declare.
  */
 describe("device acquisition ergonomics (#5870)", () => {
-  function advertisedInputSchema(name: string): {
-    required?: string[];
-    properties?: Record<string, unknown>;
-  } {
-    const def = ToolRegistry.getToolDefinitions().find((tool) => tool.name === name);
+  type AdvertisedInputSchema = { required?: string[]; properties?: Record<string, unknown> };
+  let definitions: ReturnType<typeof ToolRegistry.getToolDefinitions> = [];
+
+  function advertisedInputSchema(name: string): AdvertisedInputSchema {
+    const def = definitions.find((tool) => tool.name === name);
     if (!def) {
       throw new Error(`${name} is not registered`);
     }
-    return def.inputSchema as { required?: string[]; properties?: Record<string, unknown> };
+    return def.inputSchema as AdvertisedInputSchema;
   }
 
   describe("advertised schema required-field ergonomics", () => {
-    beforeEach(() => {
+    // Registering the tools and building the advertised catalog is the expensive part (tens of
+    // ms per build), so it runs once here instead of inside each measured test (#16975). The
+    // tests only read the catalog.
+    beforeAll(() => {
       ToolRegistry.clearTools();
       registerInteractionTools();
       registerUtilityTools();
+      definitions = ToolRegistry.getToolDefinitions();
     });
 
-    afterEach(() => {
+    afterAll(() => {
       ToolRegistry.clearTools();
     });
 

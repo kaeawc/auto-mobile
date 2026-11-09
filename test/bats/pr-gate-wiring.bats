@@ -29,17 +29,10 @@ job_block() {
   ' "${2:-$WF}"
 }
 
-wiring_requires_yq() {
-  command -v yq >/dev/null 2>&1 && return 0
-  if [[ -n "${CI:-}" ]]; then
-    echo "yq is required in CI to verify pull-request workflow wiring" >&2
-    return 1
-  fi
-  skip "yq not installed"
-}
+load yq-helpers
 
 @test "required gate jobs exist with stable context names" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local job expected
   for job in ide-plugin-gate ios-build-gate shell-tests-gate; do
     case "$job" in
@@ -56,7 +49,7 @@ wiring_requires_yq() {
 @test "required gates run with always() so they always post a conclusion" {
   # A required check that never posts hangs as "Expected"; always() guarantees a
   # success/failure/skipped conclusion in every path.
-  wiring_requires_yq
+  require_mikefarah_yq
   for job in ios-build-gate shell-tests-gate; do
     run yq -r ".jobs.\"${job}\".if" "$WF"
     [ "$status" -eq 0 ]
@@ -74,7 +67,7 @@ wiring_requires_yq() {
 }
 
 @test "iOS fixture changes trigger the Swift check" {
-  wiring_requires_yq
+  require_mikefarah_yq
   run yq -r '
     .jobs."detect-changes".steps[]
     | select(.id == "filter-ios")
@@ -106,7 +99,7 @@ wiring_requires_yq() {
 }
 
 @test "Android fixture changes trigger native contract tests" {
-  wiring_requires_yq
+  require_mikefarah_yq
   run yq -r '
     .jobs."detect-changes".steps[]
     | select(.id == "filter-android")
@@ -131,7 +124,7 @@ wiring_requires_yq() {
 }
 
 @test "required CtrlProxy job runs prototype-compose tests and coverage" {
-  wiring_requires_yq
+  require_mikefarah_yq
   [ "$(yq -r '.jobs."kotlin-code-coverage".name' "$WF")" = 'Run CtrlProxy Unit Tests' ]
   [ "$(yq -r '.jobs."kotlin-code-coverage".if' "$WF")" = "needs.detect-changes.outputs.android_should_run == 'true'" ]
   run yq -r '.jobs."kotlin-code-coverage".steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks"' "$WF"
@@ -141,7 +134,7 @@ wiring_requires_yq() {
 }
 
 @test "merge Kotlin coverage runs prototype-compose tests and coverage" {
-  wiring_requires_yq
+  require_mikefarah_yq
   run yq -r '.jobs."kotlin-code-coverage".steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks"' .github/workflows/merge.yml
   [ "$status" -eq 0 ]
   [[ " $output " == *' :prototype-compose:testDebugUnitTest '* ]]
@@ -174,7 +167,7 @@ wiring_requires_yq() {
   # The whole point of the gate is to go red when a dependency fails; a gate that
   # never `exit 1`s is a permanent false-green. Pin the failure semantics so
   # weakening the loop (e.g. exit 1 -> exit 0) fails this guard.
-  wiring_requires_yq
+  require_mikefarah_yq
   for job in ios-build-gate shell-tests-gate; do
     run yq -r "
       .jobs.\"${job}\".steps[]
@@ -196,7 +189,7 @@ wiring_requires_yq() {
 }
 
 @test "BATS runs only on shell-relevant changes while Shell Tests always reports (#10889)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local condition
   condition="$(yq -r '.jobs."bats-tests".if' "$WF")"
   [[ "$condition" == *"needs.detect-changes.outputs.shell_changed == 'true'"* ]]
@@ -223,7 +216,7 @@ wiring_requires_yq() {
 }
 
 @test "host :junit-runner:test runs in exactly one PR job (#10892)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   # gradle-task-run invocations only; the emulator suites drive the same task
   # against a booted device through the android-emulator action's script.
   run yq -r '
@@ -237,7 +230,7 @@ wiring_requires_yq() {
 }
 
 @test "emulator lane starts without waiting for the build jobs that compile its modules (#10890, #11578)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   [[ -z "$(job_block android-emulator-compile-smoke)" ]]
   # Each module the removed compile smoke compiled still has a build job's
   # independent compile signal, concurrent with the emulator lane.
@@ -252,7 +245,7 @@ wiring_requires_yq() {
 }
 
 @test "both emulator suites share one booted emulator with separate reports (#10891)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   [[ -z "$(job_block junit-runner-emulator-tests)" ]]
   [[ -z "$(job_block playground-automobile-emulator-tests)" ]]
   # Exactly one PR job boots an emulator for these suites (the WHEP capture job
@@ -272,7 +265,7 @@ wiring_requires_yq() {
 }
 
 @test "portable PR matrices leave macOS coverage to nightly" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local job expected
   for job in bats-tests; do
     run yq -r ".jobs.\"${job}\".strategy.matrix.os[]" "$WF"
@@ -306,7 +299,7 @@ wiring_requires_yq() {
 }
 
 @test "host integration job evaluates after the fast-validation fan-in" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local condition dependencies
   condition="$(yq -r '.jobs."node-host-integration-tests".if' "$WF")"
   dependencies="$(yq -r '.jobs."node-host-integration-tests".needs[]' "$WF")"
@@ -316,14 +309,15 @@ wiring_requires_yq() {
 }
 
 @test "merge TypeScript coverage has headroom for infra retry and timing rechecks" {
-  wiring_requires_yq
-  run yq -r '.jobs."ts-code-coverage"."timeout-minutes" == 45' .github/workflows/merge.yml
+  require_mikefarah_yq
+  # Each part runs the 1560s lane cap; the joining job runs the 600s rechecks (#16377).
+  run yq -r '.jobs."ts-coverage-part"."timeout-minutes" == 35 and .jobs."ts-code-coverage"."timeout-minutes" == 20' .github/workflows/merge.yml
   [ "$status" -eq 0 ]
   [ "$output" = "true" ]
 }
 
 @test "PRs run the Node unit suite once on Linux; coverage stays on merge (#10893)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   # The required check name survives on the lint/typecheck/build job.
   run yq -r '.jobs."ts-build-and-test".name' "$WF"
   [ "$status" -eq 0 ]
@@ -341,7 +335,7 @@ wiring_requires_yq() {
   [[ "$ubuntu" == *"scripts/validate-bun-test-timings.sh"* ]]
   [[ "$(yq -r '.jobs."node-unit-tests".strategy.matrix.os[]' "$WF")" != *"ubuntu"* ]]
   [[ "$(job_block node-unit-tests)" != *"validate-bun-test-timings.sh"* ]]
-  [[ "$(job_block ts-code-coverage .github/workflows/merge.yml)" == *"run-ts-coverage.sh"* ]]
+  [[ "$(job_block ts-coverage-part .github/workflows/merge.yml)" == *"run-ts-coverage.sh"* ]]
 }
 
 @test "merge TypeScript coverage uploads diagnostics after failures with bounded retention" {
@@ -349,9 +343,14 @@ wiring_requires_yq() {
   run yq -r '.jobs."ts-code-coverage".steps[] | select(.name == "Upload TypeScript Coverage Diagnostics") | [.if, .with.name, .with.path, .with."if-no-files-found", .with."retention-days"] | @tsv' "$workflow"
   [ "$status" -eq 0 ]
   [[ "$output" == $'always()\tts-coverage-diagnostics\t'* ]]
-  [[ "$output" == *"ci-logs/ts-coverage.log"* ]]
   [[ "$output" == *"coverage/shards/**"* ]]
   [[ "$output" == *"scratch/bun-test-report.recheck.d/**"* ]]
+  [[ "$output" == *$'\tignore\t7' ]]
+  run yq -r '.jobs."ts-coverage-part".steps[] | select(.name == "Upload TypeScript Coverage Diagnostics") | [.if, .with.name, .with.path, .with."if-no-files-found", .with."retention-days"] | @tsv' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == $'always()\tts-coverage-diagnostics-part-${{ matrix.part }}\t'* ]]
+  [[ "$output" == *"ci-logs/ts-coverage.log"* ]]
+  [[ "$output" == *"coverage/shards/**"* ]]
   [[ "$output" == *$'\tignore\t7' ]]
 }
 
@@ -366,7 +365,8 @@ wiring_requires_yq() {
   local workflow=".github/workflows/merge.yml"
   [[ "$(yq -r '.jobs."node-unit-tests".strategy.matrix.os | join(",")' "$workflow")" = windows-latest ]]
   [[ "$(job_block node-unit-tests "$workflow")" == *"bash scripts/test-ts.sh unit"* ]]
-  [[ "$(job_block ts-code-coverage "$workflow")" == *"run-ts-coverage.sh"* ]]
+  [[ "$(job_block ts-coverage-part "$workflow")" == *"run-ts-coverage.sh"* ]]
+  [[ "$(job_block ts-code-coverage "$workflow")" == *"merge-ts-coverage-parts.sh"* ]]
   [[ "$(job_block ts-code-coverage "$workflow")" == *"validate-bun-test-timings.sh"* ]]
   [[ "$(job_block node-host-integration-tests "$workflow")" == *"bash scripts/test-ts.sh integration"* ]]
   [[ "$(job_block node-host-integration-tests "$workflow")" == *"bash scripts/test-ts.sh stress"* ]]
@@ -375,7 +375,7 @@ wiring_requires_yq() {
 }
 
 @test "PR MCP build remains on Windows after merge-side removal" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local pr_mcp
   pr_mcp="$(job_block mcp-build-and-test)"
 
@@ -388,7 +388,7 @@ wiring_requires_yq() {
 }
 
 @test "nightly macOS portable test lanes run on CircleCI, not hosted GitHub (#11010)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local circle=".circleci/continue_config.yml"
   local job host
   for job in macos-bats-tests macos-bats-integration-tests macos-node-unit-tests macos-node-host-integration-tests; do
@@ -427,7 +427,7 @@ wiring_requires_yq() {
 }
 
 @test "iOS WHEP capture runs on Namespace macOS for same-repo PRs with heavy-lane and fork fallbacks (#11012)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   run yq -r '.jobs."ios-device-webrtc"."runs-on"' "$WF"
   [ "$status" -eq 0 ]
   local same="github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository"
@@ -451,7 +451,7 @@ wiring_requires_yq() {
 }
 
 @test "WebRTC change detection covers publisher and device inputs" {
-  wiring_requires_yq
+  require_mikefarah_yq
   run yq -r '
     .jobs."detect-changes".steps[]
     | select(.id == "filter-webrtc")
@@ -477,7 +477,7 @@ wiring_requires_yq() {
   # The daemon-side TS test writes test/fixtures/desktop-wire/*.json and the Kotlin
   # DesktopWireFixtureCompositionTest (desktop-core) replays them. A daemon-only PR that
   # regenerates the fixtures must still trigger the Kotlin replay.
-  wiring_requires_yq
+  require_mikefarah_yq
   run yq -r '
     .jobs."detect-changes".steps[]
     | select(.id == "filter-desktop-core")
@@ -495,7 +495,7 @@ wiring_requires_yq() {
 }
 
 @test "desktop_core change detection covers the refusal wire-contract fixtures (#12166)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   run yq -r '
     .jobs."detect-changes".steps[]
     | select(.id == "filter-desktop-core")
@@ -515,7 +515,7 @@ wiring_requires_yq() {
   # The heavy pack+install verification runs exactly once per PR, as its own
   # step of the combined Node Checks job. Read parsed `run` fields so a
   # commented-out command cannot satisfy the guard.
-  wiring_requires_yq
+  require_mikefarah_yq
   run yq -r '
     [.jobs[] | .steps[]? | .run? | select(. == "bash scripts/ci/verify-pinned-runtime-graph.sh")]
     | length
@@ -552,7 +552,7 @@ wiring_requires_yq() {
 }
 
 @test "small Node and JVM checks share runner slots; each check still runs (#10894)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local job
   for job in bun-audit memory-leak-detection benchmarks runtime-graph-verification junit-runner-kotlin-consumer-compatibility node-unit-tests build-junit-runner-library; do
     [[ -z "$(job_block "$job")" ]]
@@ -582,7 +582,7 @@ wiring_requires_yq() {
 }
 
 @test "runtime-graph verification runs when its workflow wiring changes (#5421)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   run yq -r '
     .jobs."detect-changes".steps[]
     | select(.id == "filter-ts")
@@ -600,7 +600,7 @@ wiring_requires_yq() {
   for job in ios-gate android-gate codeql-gate node-tests-gate webrtc-gate runtime-graph-gate; do
     [[ -z "$(job_block "$job")" ]]
   done
-  wiring_requires_yq
+  require_mikefarah_yq
   run yq -r '.jobs[].name' "$WF"
   [ "$status" -eq 0 ]
   local name
@@ -617,8 +617,8 @@ wiring_requires_yq() {
   [[ "$block" == *"needs.ide-plugin-unit-tests.result"* ]]
 }
 
-@test "merge.yml runs the desktop wire-contract replay on every merge (#10983)" {
-  wiring_requires_yq
+@test "merge.yml runs the desktop wire-contract replay and allocation killers on every merge (#10983, #11443)" {
+  require_mikefarah_yq
   local merge=".github/workflows/merge.yml"
   # The job is enabled (the old `if: ${{ false }}` is gone) ...
   run yq -r '.jobs."desktop-core-unit-tests".if // "enabled"' "$merge"
@@ -628,11 +628,14 @@ wiring_requires_yq() {
   run yq -r '.jobs."desktop-core-unit-tests".steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks" + " " + .with."gradle-flags"' "$merge"
   [ "$status" -eq 0 ]
   [[ "$output" == *":desktop-core:test"* ]]
-  [[ "$output" == *"*DesktopWireFixtureCompositionTest"* ]]
+  # The daemon package holds the wire replay and the n/K2 killer; the control-session UI test kills
+  # K3 (#11443).
+  [[ "$output" == *'"--tests", "dev.jasonpearson.automobile.desktop.core.daemon.*"'* ]]
+  [[ "$output" == *'"--tests", "*RememberDeviceControlSessionUiTest"'* ]]
 }
 
 @test "shell-changed-gate is a stable, always-reporting, changed-file-scoped PR job (#11183)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   run yq -r '.jobs."shell-changed-gate".name' "$WF"
   [ "$status" -eq 0 ]
   [ "$output" = "Shell Changed Files" ]
@@ -647,13 +650,13 @@ wiring_requires_yq() {
   # It uses the same selector as the local pre-push gate against the PR base and
   # must never run the full BATS sweep.
   block="$(job_block shell-changed-gate)"
-  [[ "$block" == *'scripts/prepush-shell.sh --base "origin/${BASE_REF}"'* ]]
+  [[ "$block" == *'scripts/prepush-shell.sh --base "${base}"'* ]]
   [[ "$block" != *"run-bats.sh"* ]]
   [[ "$block" != *"bats test/bats"* ]]
 }
 
 @test "one heavy-lane job builds both Xcode projects, each in its own named step (#11580)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   # No per-project matrix: two legs queued one after the other on the single
   # heavy runner process and repeated all of the setup.
   run yq -r '.jobs."ios-xcode-build".strategy.matrix | keys | join(",")' "$WF"
@@ -689,7 +692,7 @@ wiring_requires_yq() {
 }
 
 @test "the advisory Prototype Simulator job queues behind the required Xcode build (#11580)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   run yq -r '.jobs."prototype-simulator".needs | join(",")' "$WF"
   [ "$status" -eq 0 ]
   [ "$output" = "detect-changes,fast-validation,ios-xcode-build" ]
@@ -701,11 +704,11 @@ wiring_requires_yq() {
 }
 
 @test "one switch moves every self-hosted Mac job back to hosted runners (#11580)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   # A job labelled for a self-hosted pool waits forever when no runner is
   # online. Each one must honour AUTOMOBILE_MAC_POOLS_ENABLED, or switching it
-  # off leaves a required check (SwiftLint, Swift Code Coverage, Installer
-  # Minimal) queued with no runner.
+  # off leaves a required check (Swift Code Coverage, Installer Minimal)
+  # queued with no runner.
   local job runs_on count=0
   while IFS= read -r job; do
     runs_on="$(yq -r ".jobs.\"${job}\".\"runs-on\"" "$WF")"
@@ -715,11 +718,11 @@ wiring_requires_yq() {
     fi
     count=$((count + 1))
   done < <(yq -r '.jobs | to_entries[] | select(.value."runs-on" | tostring | contains("automobile-mac")) | .key' "$WF")
-  [ "$count" -eq 10 ]
+  [ "$count" -eq 9 ]
 }
 
 @test "installer minimal filters scripts/install.sh, package.json, android/gradle/libs.versions.toml, and the PR workflow (#11580)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   run yq -r '.jobs."detect-changes".steps[] | select(.id == "filter-installer") | (.with.filters | from_yaml | .installer[])' "$WF"
   [ "$status" -eq 0 ]
   [ "$output" = $'scripts/install.sh\npackage.json\nandroid/gradle/libs.versions.toml\n.github/workflows/pull_request.yml' ]
@@ -729,7 +732,7 @@ wiring_requires_yq() {
 }
 
 @test "installer no-op macOS leg routes to Linux while keeping its check name (#11580)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local routing
   routing="$(yq -r '.jobs."installer-minimal"."runs-on"' "$WF")"
   [[ "$routing" == *"(matrix.os == 'macos-latest' && needs.detect-changes.outputs.installer_changed == 'true' &&"* ]]
@@ -739,7 +742,7 @@ wiring_requires_yq() {
 }
 
 @test "Mac queue watchdog is an advisory Linux sibling with no dependents (#11580)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local condition routing
   condition="$(yq -r '.jobs."mac-runner-queue".if' "$WF")"
   [[ "$condition" == "always() && !cancelled() && needs.detect-changes.result == 'success' &&"* ]]
@@ -762,7 +765,7 @@ wiring_requires_yq() {
 
 
 @test "emulator prebuild overlaps boot, builds the CtrlProxy APK it installs, and release stays off its needs path (#11578)" {
-  wiring_requires_yq
+  require_mikefarah_yq
   local job tasks
   [ "$(yq -r '.jobs."android-emulator-tests".steps[] | select(.uses == "./.github/actions/android-emulator") | .with."prebuild-script"' "$WF")" = "../scripts/android/run-emulator-suites.sh --prebuild" ]
   [ "$(yq -r '[.jobs."android-emulator-tests".steps[] | select((.uses // "") | test("^actions/download-artifact@"))] | length' "$WF")" -eq 0 ]
@@ -777,19 +780,78 @@ wiring_requires_yq() {
 }
 
 @test "Android lint selection retains both paths of renames" {
-  wiring_requires_yq
+  require_mikefarah_yq
   run yq -r '.jobs.detekt.steps[] | select(.name == "Select Android lint modules") | .run' "$WF"
   [ "$status" -eq 0 ]
   [[ "$output" == *'git diff --no-renames --name-only "${BASE_SHA}...HEAD"'* ]]
 }
 
-@test "Android baseline guard fetches and compares the actual PR base through env" {
-  wiring_requires_yq
+@test "Android baseline guard compares the PR's base commit, resolved through env (#16972)" {
+  require_mikefarah_yq
   local step='.jobs.detekt.steps[] | select(.name == "Check Android lint baselines only shrink")'
-  [ "$(yq -r "$step | .env.BASE_REF" "$WF")" = '${{ github.base_ref }}' ]
+  [ "$(yq -r "$step | .env.BASE_SHA" "$WF")" = '${{ github.event.pull_request.base.sha }}' ]
   run yq -r "$step | .run" "$WF"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'git fetch origin "${BASE_REF}"'* ]]
-  [[ "$output" == *'--base-ref "origin/${BASE_REF}"'* ]]
+  [[ "$output" == *'base="$(scripts/ci/resolve-pr-base.sh "${BASE_SHA}")"'* ]]
+  [[ "$output" == *'--base-ref "${base}"'* ]]
   [[ "$output" != *'${{ github.'* ]]
+}
+
+@test "Shell Changed Files diffs against the PR's base commit, not origin/<base_ref> (#16972)" {
+  require_mikefarah_yq
+  local step='.jobs."shell-changed-gate".steps[] | select(.name == "Run changed-file shell checks")'
+  [ "$(yq -r "$step | .env.BASE_SHA" "$WF")" = '${{ github.event.pull_request.base.sha }}' ]
+  run yq -r "$step | .run" "$WF"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'base="$(scripts/ci/resolve-pr-base.sh "${BASE_SHA}")"'* ]]
+  [[ "$output" == *'scripts/prepush-shell.sh --base "${base}"'* ]]
+  [[ "$output" != *'origin/'* ]]
+  [[ "$output" != *'${{ github.'* ]]
+}
+
+@test "no PR workflow step diffs against origin/\${BASE_REF} (#16972)" {
+  # A stacked PR's base branch may be absent or deleted; use the base commit.
+  run grep -n 'origin/${BASE_REF}' "$WF"
+  [ "$status" -eq 1 ]
+}
+
+@test "app- and plugin-only changes run desktop-core's ShellReachabilityTest (#16964)" {
+  # ShellReachabilityTest's roots include desktop-app and ide-plugin main sources, which the
+  # desktop_core filter does not cover, so a narrow job runs it for those changes.
+  require_mikefarah_yq
+  local job="desktop-core-shell-reachability"
+  run yq -r ".jobs.\"$job\".if" "$WF"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"needs.detect-changes.outputs.desktop_app_changed == 'true'"* ]]
+  [[ "$output" == *"needs.detect-changes.outputs.ide_plugin_changed == 'true'"* ]]
+  run yq -r ".jobs.\"$job\".steps[] | select(.uses == \"./.github/actions/gradle-task-run\") | .with.\"gradle-tasks\" + \" \" + .with.\"gradle-flags\"" "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = ':desktop-core:test ["--tests", "*ShellReachabilityTest"]' ]
+  # The filters it relies on still cover the root source trees.
+  run yq -r '
+    .jobs."detect-changes".steps[]
+    | select(.id == "filter-ide-plugin" or .id == "filter-desktop-app")
+    | (.with.filters | from_yaml | to_entries[] | .value[])
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  [[ $'\n'"$output"$'\n' == *$'\n'"android/ide-plugin/**"$'\n'* ]]
+  [[ $'\n'"$output"$'\n' == *$'\n'"android/desktop-app/**"$'\n'* ]]
+}
+
+@test "BATS unit lane budget is runner-aware and stays a tight guard in both workflows" {
+  require_mikefarah_yq
+  local workflow step base hosted
+  step='.jobs."bats-tests".steps[] | select(.name == "Run BATS Unit Tests")'
+  for workflow in .github/workflows/pull_request.yml .github/workflows/merge.yml; do
+    [ "$(yq -r "[${step}] | length" "$workflow")" = 1 ]
+    [[ "$(yq -r "${step} | .run" "$workflow")" == *"scripts/ci/run-bats.sh unit"* ]]
+    base="$(yq -r "${step} | .env.AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS" "$workflow")"
+    hosted="$(yq -r "${step} | .env.AUTOMOBILE_BATS_UNIT_BUDGET_GITHUB_HOSTED_SECONDS" "$workflow")"
+    [ "$base" = 420 ]
+    [[ "$hosted" =~ ^[1-9][0-9]*$ ]]
+    # GitHub-hosted runners are slower, but the guard must stay within 10% of
+    # the base budget (#17274); a larger gap needs fresh measurements.
+    [ "$hosted" -ge "$base" ]
+    [ "$((hosted * 10))" -le "$((base * 11))" ]
+  done
 }

@@ -123,11 +123,31 @@ export const highlightSchema = addDeviceTargetingToSchema(highlightBaseSchema).s
 
 export type HighlightArgs = z.infer<typeof highlightSchema>;
 
-const toHighlightResponse = (result: HighlightOperationResult) =>
+/** The fields of the circled element a caller needs to tell which match was chosen (#17385). */
+type HighlightedElement = Pick<
+  Element,
+  "bounds" | "text" | "resource-id" | "content-desc" | "class"
+>;
+
+const HIGHLIGHTED_ELEMENT_FIELDS = ["text", "resource-id", "content-desc", "class"] as const;
+
+const highlightedElementSummary = (element: Element): HighlightedElement => {
+  const summary: HighlightedElement = { bounds: { ...element.bounds } };
+  for (const field of HIGHLIGHTED_ELEMENT_FIELDS) {
+    const value: unknown = element[field];
+    if (typeof value === "string" && value.length > 0) {
+      summary[field] = value;
+    }
+  }
+  return summary;
+};
+
+const toHighlightResponse = (result: HighlightOperationResult, element?: HighlightedElement) =>
   withIsErrorOnFailure(
     createStructuredToolResponse({
       success: result.success,
       error: result.error ?? undefined,
+      ...(element ? { element } : {}),
     }),
     result.success,
   );
@@ -225,7 +245,7 @@ const resolveHighlightShapeFromSelector = async (
   device: BootedDevice,
   args: HighlightArgs,
   dependencies: HighlightToolDependencies = {},
-): Promise<HighlightShape> => {
+): Promise<{ shape: HighlightShape; element: HighlightedElement }> => {
   const snapshot = layerScopedSnapshot(
     await captureHighlightHierarchy(device, args, dependencies),
     args.layer,
@@ -241,6 +261,9 @@ const resolveHighlightShapeFromSelector = async (
     },
     {
       action: "highlight",
+      // Rank like tapOn: a visible actionable match (the Settings sidebar row) beats an
+      // inert same-text label such as a navigation title; inert labels stay the fallback (#17365).
+      preferTap: true,
       viewport:
         viewHierarchy.screenWidth && viewHierarchy.screenHeight
           ? { width: viewHierarchy.screenWidth, height: viewHierarchy.screenHeight }
@@ -268,20 +291,22 @@ const resolveHighlightShapeFromSelector = async (
   // them correctly. Always attach source dims on the iOS path so the SDK never
   // falls back to drawing raw daemon coordinates (issue #2682). Android draws its
   // prototype in observation space, so no source dims are needed there.
+  const element = highlightedElementSummary(highlightElement);
   if (device.platform === "ios") {
     const sourceDimensions = resolveSourceDimensions(viewHierarchy);
     if (sourceDimensions) {
+      // Hierarchy bounds are points, so the source is one unit per display point (#17354).
       return {
-        type: "circle",
-        bounds: { ...highlightBounds, ...sourceDimensions },
+        shape: {
+          type: "circle",
+          bounds: { ...highlightBounds, ...sourceDimensions, sourceScale: 1 },
+        },
+        element,
       };
     }
   }
 
-  return {
-    type: "circle",
-    bounds: highlightBounds,
-  };
+  return { shape: { type: "circle", bounds: highlightBounds }, element };
 };
 
 const resolveSourceDimensions = (
@@ -364,14 +389,16 @@ export function registerHighlightTools(dependencies: HighlightToolDependencies =
       const highlightId = dependencies.generateHighlightId
         ? dependencies.generateHighlightId()
         : generateHighlightId();
-      const resolvedShape =
-        args.shape ?? (await resolveHighlightShapeFromSelector(device, args, dependencies));
+      const selected = args.shape
+        ? { shape: args.shape, element: undefined }
+        : await resolveHighlightShapeFromSelector(device, args, dependencies);
+      const resolvedShape = selected.shape;
       const result = await highlightClient.addHighlight(highlightId, resolvedShape, options);
       await recordVideoRecordingHighlightAdded(device, {
         description: args.description,
         shape: resolvedShape,
       });
-      return toHighlightResponse(result);
+      return toHighlightResponse(result, result.success ? selected.element : undefined);
     } catch (error) {
       logger.warn("[highlight] Failed to highlight element", error);
       return toHighlightErrorResponse(error);

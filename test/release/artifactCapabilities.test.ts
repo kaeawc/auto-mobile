@@ -18,6 +18,7 @@ import {
   gatedByScans,
   recordRelease,
   scanHostGates,
+  splitImplementedSince,
   HOST_GATE_SOURCES,
 } from "../../scripts/release/lib/artifact-capabilities";
 import manifestJson from "../../scripts/release/artifact-capabilities.json";
@@ -263,6 +264,32 @@ describe("gates added after a release", () => {
     expect(gatesAddedAfter(current, atRelease)).toEqual([
       { artifact: "prototype-agent-dylib", capability: "prototype_timers_v1" },
     ]);
+  });
+});
+
+describe("splitImplementedSince", () => {
+  const gaps = [
+    { artifact: "prototype-agent-dylib" as const, capability: "prototype_platform_v1" },
+    { artifact: "prototype-agent-dylib" as const, capability: "prototype_routes_v1" },
+  ];
+
+  test("a pinned gap the checked-out sources now advertise waits for the next release", () => {
+    const candidate: ArtifactCapabilities = {
+      ...noGates,
+      "prototype-agent-dylib": ["prototype_platform_v1"],
+    };
+    expect(splitImplementedSince(gaps, candidate)).toEqual({
+      implemented: [gaps[0]],
+      missing: [gaps[1]],
+    });
+  });
+
+  test("a gap the sources do not advertise stays missing, even on another artifact", () => {
+    const candidate: ArtifactCapabilities = {
+      ...noGates,
+      "android-ctrlproxy-apk": ["prototype_platform_v1", "prototype_routes_v1"],
+    };
+    expect(splitImplementedSince(gaps, candidate)).toEqual({ implemented: [], missing: gaps });
   });
 });
 

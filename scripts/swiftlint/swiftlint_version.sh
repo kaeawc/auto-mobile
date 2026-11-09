@@ -28,3 +28,25 @@ require_pinned_swiftlint_version() {
   echo -e "${RED:-}Install the pinned version: bash scripts/swiftlint/install_swiftlint.sh${NC:-}" >&2
   return 1
 }
+
+# On Linux, SwiftLint loads libsourcekitdInProc.so from a Swift toolchain. Point
+# LINUX_SOURCEKIT_LIB_PATH at the toolchain whose `swift` is on PATH, unless the
+# caller already set it, and fail clearly when no toolchain provides the library.
+# A no-op on macOS, where SwiftLint uses Xcode's sourcekitd.
+export_linux_sourcekit_lib_path() {
+  [[ "$(uname -s)" == "Linux" ]] || return 0
+  if [[ -n "${LINUX_SOURCEKIT_LIB_PATH:-}" ]]; then
+    return 0
+  fi
+  local swift_bin lib_dir
+  swift_bin="$(command -v swift || true)"
+  if [[ -n "$swift_bin" ]]; then
+    lib_dir="$(cd "$(dirname "$(readlink -f "$swift_bin")")/../lib" 2>/dev/null && pwd)"
+    if [[ -n "$lib_dir" && -f "$lib_dir/libsourcekitdInProc.so" ]]; then
+      export LINUX_SOURCEKIT_LIB_PATH="$lib_dir"
+      return 0
+    fi
+  fi
+  echo -e "${RED:-}SwiftLint on Linux needs libsourcekitdInProc.so from a Swift toolchain: put swift on PATH or set LINUX_SOURCEKIT_LIB_PATH.${NC:-}" >&2
+  return 1
+}

@@ -542,6 +542,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyTestHooksFacade implements I
     const retired = IOSCtrlProxyManager.isDeviceRetired(key);
     const existing = IOSCtrlProxyClient.registry.peek(key);
     if (existing) {
+      existing.adoptDisplayInventory(device.displays);
       if (port !== undefined && !existing.closed && !retired) {
         existing.updatePort(port);
       }
@@ -675,6 +676,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyTestHooksFacade implements I
       transientObserver: true,
       iosSource: resident?.buildContext.dependencies().iosSource,
       contentHashProvider: resident?.buildContext.dependencies().contentHashProvider,
+      infoPlistReader: resident?.buildContext.dependencies().infoPlistReader,
     });
     if (ownsPortAllocation) {
       client.allocatedPort = port;

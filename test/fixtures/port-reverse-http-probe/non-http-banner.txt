@@ -1,0 +1,3 @@
+SSH-2.0-OpenSSH_9.6
+
+automobile-probe-exit=0

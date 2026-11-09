@@ -224,7 +224,7 @@ describe("tools/call entry points share one dispatcher (issue #6545)", () => {
   test.each(entryPoints)("%s explains the debug-only tool gate", async (_label, call) => {
     const outcome = await call("setUIState", {});
     expect(outcome.isError).toBe(true);
-    expect(outcome.text).toContain("start the daemon with --debug");
+    expect(outcome.text).toContain("set-feature-flag debug true");
   });
 
   const cases: Array<{

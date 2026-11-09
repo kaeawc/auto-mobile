@@ -612,6 +612,322 @@ public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy
   public dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy(int, boolean, boolean, boolean, kotlinx.serialization.internal.SerializationConstructorMarker);
   public dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy();
 }
+Compiled from "AutoMobileCarAppTemplates.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.AutoMobileCarAppTemplates {
+  public static final dev.jasonpearson.automobile.sdk.carapp.AutoMobileCarAppTemplates INSTANCE;
+  public static final int $stable;
+  public static final boolean enable(android.content.Context);
+  public static final void disable();
+  public static final <T extends androidx.car.app.model.Template> T record(androidx.car.app.Screen, T);
+}
+Compiled from "AutoMobileCarAppTemplates.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.AutoMobileCarAppTemplatesKt {
+  public static final java.lang.String MAIN_THREAD_TIMEOUT = "main_thread_timeout";
+}
+Compiled from "CarAppTemplateDocument.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode$Companion {
+  public final kotlinx.serialization.KSerializer<dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode> serializer();
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode$Companion(kotlin.jvm.internal.DefaultConstructorMarker);
+}
+Compiled from "CarAppTemplateDocument.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode {
+  public static final dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode$Companion Companion;
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode(java.lang.String, java.lang.String, java.lang.String, boolean, boolean);
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode(java.lang.String, java.lang.String, java.lang.String, boolean, boolean, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public final java.lang.String getId();
+  public final java.lang.String getType();
+  public final java.lang.String getTitle();
+  public final boolean getHasIcon();
+  public final boolean getEnabled();
+  public final java.lang.String component1();
+  public final java.lang.String component2();
+  public final java.lang.String component3();
+  public final boolean component4();
+  public final boolean component5();
+  public final dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode copy(java.lang.String, java.lang.String, java.lang.String, boolean, boolean);
+  public static dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode copy$default(dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode, java.lang.String, java.lang.String, java.lang.String, boolean, boolean, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+  public static final void write$Self$auto_mobile_sdk(dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode, kotlinx.serialization.encoding.CompositeEncoder, kotlinx.serialization.descriptors.SerialDescriptor);
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode(int, java.lang.String, java.lang.String, java.lang.String, boolean, boolean, kotlinx.serialization.internal.SerializationConstructorMarker);
+}
+Compiled from "CarAppTemplateDocument.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.CarAppActionStripNode$Companion {
+  public final kotlinx.serialization.KSerializer<dev.jasonpearson.automobile.sdk.carapp.CarAppActionStripNode> serializer();
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppActionStripNode$Companion(kotlin.jvm.internal.DefaultConstructorMarker);
+}
+Compiled from "CarAppTemplateDocument.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.CarAppActionStripNode {
+  public static final dev.jasonpearson.automobile.sdk.carapp.CarAppActionStripNode$Companion Companion;
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppActionStripNode(java.lang.String, java.lang.String, java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode>);
+  public final java.lang.String getId();
+  public final java.lang.String getRole();
+  public final java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode> getActions();
+  public final java.lang.String component1();
+  public final java.lang.String component2();
+  public final java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode> component3();
+  public final dev.jasonpearson.automobile.sdk.carapp.CarAppActionStripNode copy(java.lang.String, java.lang.String, java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode>);
+  public static dev.jasonpearson.automobile.sdk.carapp.CarAppActionStripNode copy$default(dev.jasonpearson.automobile.sdk.carapp.CarAppActionStripNode, java.lang.String, java.lang.String, java.util.List, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+  public static final void write$Self$auto_mobile_sdk(dev.jasonpearson.automobile.sdk.carapp.CarAppActionStripNode, kotlinx.serialization.encoding.CompositeEncoder, kotlinx.serialization.descriptors.SerialDescriptor);
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppActionStripNode(int, java.lang.String, java.lang.String, java.util.List, kotlinx.serialization.internal.SerializationConstructorMarker);
+  public static final kotlin.Lazy[] access$get$childSerializers$cp();
+}
+Compiled from "CarAppElementMapper.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.CarAppElementMapper {
+  public static final dev.jasonpearson.automobile.sdk.carapp.CarAppElementMapper INSTANCE;
+  public static final int $stable;
+  public final java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppItemNode> mapItems(androidx.car.app.model.ItemList, java.lang.String, java.lang.String);
+  public static java.util.List mapItems$default(dev.jasonpearson.automobile.sdk.carapp.CarAppElementMapper, androidx.car.app.model.ItemList, java.lang.String, java.lang.String, int, java.lang.Object);
+  public final dev.jasonpearson.automobile.sdk.carapp.CarAppItemNode mapItem(androidx.car.app.model.Item, java.lang.String, java.lang.String);
+  public final java.lang.String headerTitle(androidx.car.app.model.Header, androidx.car.app.model.CarText);
+  public final java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode> headerActions(androidx.car.app.model.Header, androidx.car.app.model.Action, java.lang.String);
+  public final dev.jasonpearson.automobile.sdk.carapp.CarAppActionStripNode mapStrip(androidx.car.app.model.ActionStrip, java.lang.String, java.lang.String);
+  public final java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode> mapActions(java.util.List<androidx.car.app.model.Action>, java.lang.String);
+  public final java.lang.String text(androidx.car.app.model.CarText);
+}
+Compiled from "CarAppTemplateDocument.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.CarAppItemNode$Companion {
+  public final kotlinx.serialization.KSerializer<dev.jasonpearson.automobile.sdk.carapp.CarAppItemNode> serializer();
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppItemNode$Companion(kotlin.jvm.internal.DefaultConstructorMarker);
+}
+Compiled from "CarAppTemplateDocument.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.CarAppItemNode {
+  public static final dev.jasonpearson.automobile.sdk.carapp.CarAppItemNode$Companion Companion;
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppItemNode(java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.util.List<java.lang.String>, boolean, java.lang.Boolean, boolean, boolean, java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode>);
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppItemNode(java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.util.List, boolean, java.lang.Boolean, boolean, boolean, java.util.List, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public final java.lang.String getId();
+  public final java.lang.String getKind();
+  public final java.lang.String getTitle();
+  public final java.lang.String getSection();
+  public final java.util.List<java.lang.String> getTexts();
+  public final boolean getHasImage();
+  public final java.lang.Boolean getToggle();
+  public final boolean getBrowsable();
+  public final boolean getEnabled();
+  public final java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode> getActions();
+  public final java.lang.String component1();
+  public final java.lang.String component2();
+  public final java.lang.String component3();
+  public final java.lang.String component4();
+  public final java.util.List<java.lang.String> component5();
+  public final boolean component6();
+  public final java.lang.Boolean component7();
+  public final boolean component8();
+  public final boolean component9();
+  public final java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode> component10();
+  public final dev.jasonpearson.automobile.sdk.carapp.CarAppItemNode copy(java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.util.List<java.lang.String>, boolean, java.lang.Boolean, boolean, boolean, java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode>);
+  public static dev.jasonpearson.automobile.sdk.carapp.CarAppItemNode copy$default(dev.jasonpearson.automobile.sdk.carapp.CarAppItemNode, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.util.List, boolean, java.lang.Boolean, boolean, boolean, java.util.List, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+  public static final void write$Self$auto_mobile_sdk(dev.jasonpearson.automobile.sdk.carapp.CarAppItemNode, kotlinx.serialization.encoding.CompositeEncoder, kotlinx.serialization.descriptors.SerialDescriptor);
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppItemNode(int, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.util.List, boolean, java.lang.Boolean, boolean, boolean, java.util.List, kotlinx.serialization.internal.SerializationConstructorMarker);
+  public static final kotlin.Lazy[] access$get$childSerializers$cp();
+}
+Compiled from "CarAppTemplateDocument.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.CarAppScreenSnapshot$Companion {
+  public final kotlinx.serialization.KSerializer<dev.jasonpearson.automobile.sdk.carapp.CarAppScreenSnapshot> serializer();
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppScreenSnapshot$Companion(kotlin.jvm.internal.DefaultConstructorMarker);
+}
+Compiled from "CarAppTemplateDocument.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.CarAppScreenSnapshot {
+  public static final dev.jasonpearson.automobile.sdk.carapp.CarAppScreenSnapshot$Companion Companion;
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppScreenSnapshot(java.lang.String, java.lang.String, boolean, java.lang.String, dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode);
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppScreenSnapshot(java.lang.String, java.lang.String, boolean, java.lang.String, dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public final java.lang.String getId();
+  public final java.lang.String getScreenClass();
+  public final boolean getTop();
+  public final java.lang.String getMarker();
+  public final dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode getTemplate();
+  public final java.lang.String component1();
+  public final java.lang.String component2();
+  public final boolean component3();
+  public final java.lang.String component4();
+  public final dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode component5();
+  public final dev.jasonpearson.automobile.sdk.carapp.CarAppScreenSnapshot copy(java.lang.String, java.lang.String, boolean, java.lang.String, dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode);
+  public static dev.jasonpearson.automobile.sdk.carapp.CarAppScreenSnapshot copy$default(dev.jasonpearson.automobile.sdk.carapp.CarAppScreenSnapshot, java.lang.String, java.lang.String, boolean, java.lang.String, dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+  public static final void write$Self$auto_mobile_sdk(dev.jasonpearson.automobile.sdk.carapp.CarAppScreenSnapshot, kotlinx.serialization.encoding.CompositeEncoder, kotlinx.serialization.descriptors.SerialDescriptor);
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppScreenSnapshot(int, java.lang.String, java.lang.String, boolean, java.lang.String, dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode, kotlinx.serialization.internal.SerializationConstructorMarker);
+}
+Compiled from "CarAppTemplateDocument.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.CarAppSessionSnapshot$Companion {
+  public final kotlinx.serialization.KSerializer<dev.jasonpearson.automobile.sdk.carapp.CarAppSessionSnapshot> serializer();
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppSessionSnapshot$Companion(kotlin.jvm.internal.DefaultConstructorMarker);
+}
+Compiled from "CarAppTemplateDocument.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.CarAppSessionSnapshot {
+  public static final dev.jasonpearson.automobile.sdk.carapp.CarAppSessionSnapshot$Companion Companion;
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppSessionSnapshot(java.lang.String, java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppScreenSnapshot>);
+  public final java.lang.String getId();
+  public final java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppScreenSnapshot> getScreens();
+  public final java.lang.String component1();
+  public final java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppScreenSnapshot> component2();
+  public final dev.jasonpearson.automobile.sdk.carapp.CarAppSessionSnapshot copy(java.lang.String, java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppScreenSnapshot>);
+  public static dev.jasonpearson.automobile.sdk.carapp.CarAppSessionSnapshot copy$default(dev.jasonpearson.automobile.sdk.carapp.CarAppSessionSnapshot, java.lang.String, java.util.List, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+  public static final void write$Self$auto_mobile_sdk(dev.jasonpearson.automobile.sdk.carapp.CarAppSessionSnapshot, kotlinx.serialization.encoding.CompositeEncoder, kotlinx.serialization.descriptors.SerialDescriptor);
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppSessionSnapshot(int, java.lang.String, java.util.List, kotlinx.serialization.internal.SerializationConstructorMarker);
+  public static final kotlin.Lazy[] access$get$childSerializers$cp();
+}
+Compiled from "CarAppTemplateDocument.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.CarAppTabNode$Companion {
+  public final kotlinx.serialization.KSerializer<dev.jasonpearson.automobile.sdk.carapp.CarAppTabNode> serializer();
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppTabNode$Companion(kotlin.jvm.internal.DefaultConstructorMarker);
+}
+Compiled from "CarAppTemplateDocument.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.CarAppTabNode {
+  public static final dev.jasonpearson.automobile.sdk.carapp.CarAppTabNode$Companion Companion;
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppTabNode(java.lang.String, java.lang.String, java.lang.String, boolean, boolean);
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppTabNode(java.lang.String, java.lang.String, java.lang.String, boolean, boolean, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public final java.lang.String getId();
+  public final java.lang.String getContentId();
+  public final java.lang.String getTitle();
+  public final boolean getHasIcon();
+  public final boolean getActive();
+  public final java.lang.String component1();
+  public final java.lang.String component2();
+  public final java.lang.String component3();
+  public final boolean component4();
+  public final boolean component5();
+  public final dev.jasonpearson.automobile.sdk.carapp.CarAppTabNode copy(java.lang.String, java.lang.String, java.lang.String, boolean, boolean);
+  public static dev.jasonpearson.automobile.sdk.carapp.CarAppTabNode copy$default(dev.jasonpearson.automobile.sdk.carapp.CarAppTabNode, java.lang.String, java.lang.String, java.lang.String, boolean, boolean, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+  public static final void write$Self$auto_mobile_sdk(dev.jasonpearson.automobile.sdk.carapp.CarAppTabNode, kotlinx.serialization.encoding.CompositeEncoder, kotlinx.serialization.descriptors.SerialDescriptor);
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppTabNode(int, java.lang.String, java.lang.String, java.lang.String, boolean, boolean, kotlinx.serialization.internal.SerializationConstructorMarker);
+}
+Compiled from "CarAppTemplateDocument.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateDocument$Companion {
+  public final dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateDocument disabled();
+  public final kotlinx.serialization.KSerializer<dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateDocument> serializer();
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateDocument$Companion(kotlin.jvm.internal.DefaultConstructorMarker);
+}
+Compiled from "CarAppTemplateDocument.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateDocument {
+  public static final dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateDocument$Companion Companion;
+  public static final int $stable;
+  public static final int SCHEMA_VERSION = 1;
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateDocument(int, boolean, java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppSessionSnapshot>, java.lang.String);
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateDocument(int, boolean, java.util.List, java.lang.String, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public final int getSchemaVersion();
+  public final boolean getEnabled();
+  public final java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppSessionSnapshot> getSessions();
+  public final java.lang.String getError();
+  public final int component1();
+  public final boolean component2();
+  public final java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppSessionSnapshot> component3();
+  public final java.lang.String component4();
+  public final dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateDocument copy(int, boolean, java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppSessionSnapshot>, java.lang.String);
+  public static dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateDocument copy$default(dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateDocument, int, boolean, java.util.List, java.lang.String, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+  public static final void write$Self$auto_mobile_sdk(dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateDocument, kotlinx.serialization.encoding.CompositeEncoder, kotlinx.serialization.descriptors.SerialDescriptor);
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateDocument(int, int, boolean, java.util.List, java.lang.String, kotlinx.serialization.internal.SerializationConstructorMarker);
+  public static final kotlin.Lazy[] access$get$childSerializers$cp();
+}
+Compiled from "CarAppTemplateDocument.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateDocumentKt {
+  public static final dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode withIdPrefix(dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode, java.lang.String);
+  public static final java.lang.String toJson(dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateDocument);
+  public static final dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateDocument decodeCarAppTemplateDocument(java.lang.String);
+}
+Compiled from "CarAppTemplateMapper.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateMapper {
+  public static final dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateMapper INSTANCE;
+  public static final int $stable;
+  public final dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode map(androidx.car.app.model.Template, java.lang.String);
+}
+Compiled from "CarAppTemplateDocument.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode$Companion {
+  public final kotlinx.serialization.KSerializer<dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode> serializer();
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode$Companion(kotlin.jvm.internal.DefaultConstructorMarker);
+}
+Compiled from "CarAppTemplateDocument.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode {
+  public static final dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode$Companion Companion;
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode(java.lang.String, java.lang.String, java.lang.String, java.lang.Boolean, java.lang.String, java.lang.String, java.lang.String, java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode>, java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppItemNode>, java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode>, java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppActionStripNode>, java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppTabNode>, dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode);
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode(java.lang.String, java.lang.String, java.lang.String, java.lang.Boolean, java.lang.String, java.lang.String, java.lang.String, java.util.List, java.util.List, java.util.List, java.util.List, java.util.List, dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public final java.lang.String getId();
+  public final java.lang.String getType();
+  public final java.lang.String getTitle();
+  public final java.lang.Boolean getLoading();
+  public final java.lang.String getMessage();
+  public final java.lang.String getSearchHint();
+  public final java.lang.String getInitialSearchText();
+  public final java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode> getHeaderActions();
+  public final java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppItemNode> getItems();
+  public final java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode> getActions();
+  public final java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppActionStripNode> getActionStrips();
+  public final java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppTabNode> getTabs();
+  public final dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode getTabContent();
+  public final java.lang.String component1();
+  public final java.lang.String component2();
+  public final java.lang.String component3();
+  public final java.lang.Boolean component4();
+  public final java.lang.String component5();
+  public final java.lang.String component6();
+  public final java.lang.String component7();
+  public final java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode> component8();
+  public final java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppItemNode> component9();
+  public final java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode> component10();
+  public final java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppActionStripNode> component11();
+  public final java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppTabNode> component12();
+  public final dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode component13();
+  public final dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode copy(java.lang.String, java.lang.String, java.lang.String, java.lang.Boolean, java.lang.String, java.lang.String, java.lang.String, java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode>, java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppItemNode>, java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppActionNode>, java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppActionStripNode>, java.util.List<dev.jasonpearson.automobile.sdk.carapp.CarAppTabNode>, dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode);
+  public static dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode copy$default(dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode, java.lang.String, java.lang.String, java.lang.String, java.lang.Boolean, java.lang.String, java.lang.String, java.lang.String, java.util.List, java.util.List, java.util.List, java.util.List, java.util.List, dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+  public static final void write$Self$auto_mobile_sdk(dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode, kotlinx.serialization.encoding.CompositeEncoder, kotlinx.serialization.descriptors.SerialDescriptor);
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode(int, java.lang.String, java.lang.String, java.lang.String, java.lang.Boolean, java.lang.String, java.lang.String, java.lang.String, java.util.List, java.util.List, java.util.List, java.util.List, java.util.List, dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateNode, kotlinx.serialization.internal.SerializationConstructorMarker);
+  public static final kotlin.Lazy[] access$get$childSerializers$cp();
+}
+Compiled from "AutoMobileCarAppTemplates.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateRecorder {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateRecorder(dev.jasonpearson.automobile.sdk.carapp.MainThreadRunner);
+  public final boolean getEnabled();
+  public final void setEnabled(boolean);
+  public final void record(androidx.car.app.Screen, androidx.car.app.model.Template);
+  public final void clear();
+  public final dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateDocument snapshot();
+}
+Compiled from "CarAppTemplateDocument.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateRoute {
+  public static final dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateRoute INSTANCE;
+  public static final int $stable;
+  public final kotlin.jvm.functions.Function0<dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateDocument> getSource$auto_mobile_sdk();
+  public final void setSource$auto_mobile_sdk(kotlin.jvm.functions.Function0<dev.jasonpearson.automobile.sdk.carapp.CarAppTemplateDocument>);
+  public final java.lang.String snapshotJson();
+}
+Compiled from "AutoMobileCarAppTemplates.kt"
+public final class dev.jasonpearson.automobile.sdk.carapp.LooperMainThreadRunner implements dev.jasonpearson.automobile.sdk.carapp.MainThreadRunner {
+  public static final dev.jasonpearson.automobile.sdk.carapp.LooperMainThreadRunner INSTANCE;
+  public static final int $stable;
+  public <T> T run(kotlin.jvm.functions.Function0<? extends T>);
+}
+Compiled from "AutoMobileCarAppTemplates.kt"
+public interface dev.jasonpearson.automobile.sdk.carapp.MainThreadRunner {
+  public abstract <T> T run(kotlin.jvm.functions.Function0<? extends T>);
+}
 Compiled from "SdkContext.kt"
 public final class dev.jasonpearson.automobile.sdk.context.SdkContext {
   public static final int $stable;
@@ -1150,9 +1466,16 @@ public final class dev.jasonpearson.automobile.sdk.interaction.TapGestureClassif
   public final dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Result classify$auto_mobile_sdk(dev.jasonpearson.automobile.sdk.interaction.TapGestureClassifier$Action, float, float, long);
 }
 Compiled from "KeystoreTestState.kt"
+public interface dev.jasonpearson.automobile.sdk.keystore.KeyGenerationGate {
+  public abstract void check(java.lang.String, boolean);
+}
+Compiled from "KeystoreTestState.kt"
 public final class dev.jasonpearson.automobile.sdk.keystore.KeystoreTestState {
   public static final dev.jasonpearson.automobile.sdk.keystore.KeystoreTestState INSTANCE;
   public static final int $stable;
+  public final dev.jasonpearson.automobile.sdk.keystore.KeyGenerationGate getKeyGenerationGate$auto_mobile_sdk();
+  public final void setKeyGenerationGate$auto_mobile_sdk(dev.jasonpearson.automobile.sdk.keystore.KeyGenerationGate);
+  public final void checkKeyGeneration(android.security.keystore.KeyGenParameterSpec);
   public final void setEnabled(boolean);
   public final boolean isEnabled();
   public final dev.jasonpearson.automobile.sdk.InspectorRegistration declareScope(java.lang.String, java.util.Set<java.lang.String>);

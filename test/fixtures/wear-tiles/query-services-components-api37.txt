@@ -1,0 +1,2 @@
+com.google.android.contacts/com.google.android.wearable.contacts.tiles.FavoriteContactsTileService
+com.google.android.contacts/com.google.android.wearable.contacts.tiles.singlecontact.SingleContactTileService

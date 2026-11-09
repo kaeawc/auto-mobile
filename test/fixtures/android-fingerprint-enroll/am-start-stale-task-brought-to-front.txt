@@ -1,0 +1,2 @@
+Starting: Intent { act=android.settings.FINGERPRINT_ENROLL }
+Warning: Activity not started, its current task has been brought to the front

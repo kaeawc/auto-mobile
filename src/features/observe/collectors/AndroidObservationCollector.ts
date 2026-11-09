@@ -16,6 +16,7 @@ import {
   isAccessibilityViewClass,
   resolveBackStackActivityAttribution,
 } from "../ActiveWindowAttribution";
+import { pairPermissionDialogWindow } from "../../action/launchPermissionBlocker";
 import { deriveAndroidScreenIdentity } from "../android/AndroidScreenIdentity";
 import { displayTransitions } from "../DisplayTransition";
 import { resolveTargetDisplay } from "../DisplaySelection";
@@ -61,6 +62,25 @@ export function scopeActiveWindowToBackStack(result: ObserveResult): void {
       };
     }
   }
+}
+
+/**
+ * A UIAutomator-only display read names its own app; the legacy window query answers for the
+ * default display, so its activity was never verified for this display and must not label this
+ * capture, even when the same app runs on both displays. The display-scoped back stack applied
+ * afterwards may still supply a verified activity.
+ */
+function replaceDisplayReadAppId(result: ObserveResult): boolean {
+  const hierarchy = result.viewHierarchy;
+  const packageName = hierarchy?.packageName;
+  const appId = result.activeWindow?.appId;
+  const uiautomatorOnly =
+    hierarchy?.sources?.length === 1 && hierarchy.sources[0] === "uiautomator";
+  if (!packageName || !appId || !uiautomatorOnly || !result.activeWindow) {
+    return false;
+  }
+  result.activeWindow = { ...result.activeWindow, appId: packageName, activityName: "" };
+  return true;
 }
 
 export class DefaultAndroidObservationCollector implements AndroidObservationCollector {
@@ -122,6 +142,12 @@ export class DefaultAndroidObservationCollector implements AndroidObservationCol
     // the activity belongs to the captured hierarchy's app.
     scopeActiveWindowToBackStack(result);
     await this.applyAndroidScreenIdentity(result);
+    // A permission dialog's window never hosts the app activity behind it (#17465);
+    // pair it before automotive state reads the foreground activity.
+    result.activeWindow = pairPermissionDialogWindow(result.activeWindow);
+    if (this.deps.device().formFactor === "automotive") {
+      await this.deps.deviceStateCollector().collectAutomotive(result, signal, context.displayId);
+    }
 
     if (result.notificationPermissionDetected && result.activeWindow) {
       result.activeWindow.type = "notification_permission_dialog";
@@ -194,6 +220,9 @@ export class DefaultAndroidObservationCollector implements AndroidObservationCol
     // (`Window.getActive`'s catch branch), which would otherwise short-circuit
     // this fallback and leave a readable, package-attributed capture wrongly
     // reporting no foreground window (issue #6220 false-positive).
+    if (replaceDisplayReadAppId(result)) {
+      return;
+    }
     if (result.viewHierarchy?.packageName && !result.activeWindow?.appId) {
       // Backfill ONLY the missing appId. The legacy query's failure sentinel
       // is a truthy object that still carries a real `layoutSeqSum` (summed

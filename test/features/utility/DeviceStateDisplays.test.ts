@@ -12,6 +12,7 @@ import { logger } from "../../../src/utils/logger";
 import { parseDevicectlDisplayInfo } from "../../../src/utils/ios-cmdline-tools/DevicectlDisplayInfo";
 import { FakeDevicectlDisplayInfoSource } from "../../fakes/FakeDevicectlDisplayInfoSource";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { InMemoryIosRequestedHingeAngleStore } from "../../../src/features/device/DuoHingeLayout";
 
 /** Captured from am-fold-pixel10pf (API 36); see the fixture READMEs. */
 const fixture = (path: string): string =>
@@ -201,6 +202,8 @@ function duoState(source: FakeDevicectlDisplayInfoSource) {
     adb,
     state: new DeviceState(duo, {
       iosDisplayInfoSource: source,
+      // No setPosture ran: the daemon-wide store must not leak another test's angle.
+      iosHingeAngleStore: new InMemoryIosRequestedHingeAngleStore(),
       adbFactory: new FakeAdbClientFactory(adb),
       timer: new FakeTimer(),
       simctl: null,

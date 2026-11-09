@@ -1,4 +1,5 @@
 import { devicectlConfirmsIosPanel } from "../../../src/features/device/postureCommands";
+import { InMemoryIosRequestedHingeAngleStore } from "../../../src/features/device/DuoHingeLayout";
 import type { DevicectlDisplayInfo } from "../../../src/utils/ios-cmdline-tools/DevicectlDisplayInfo";
 import { FakeDevicectlDisplayInfoSource } from "../../fakes/FakeDevicectlDisplayInfoSource";
 import { loadDevicectlListFixture } from "../../helpers/devicectlListFixtures";
@@ -854,9 +855,11 @@ describe("SetPosture", () => {
       },
     };
     let observeCount = 0;
+    const hingeAngleStore = new InMemoryIosRequestedHingeAngleStore();
     const feature = new SetPosture(device, {
       iosClientProvider: () => client,
       iosDisplayInfoSource,
+      iosHingeAngleStore: hingeAngleStore,
       simctl,
       observeFactory: () =>
         ({
@@ -879,6 +882,7 @@ describe("SetPosture", () => {
       timer,
       tracker,
       sequence,
+      hingeAngleStore,
       getObserveCount: () => observeCount,
     };
   }
@@ -1270,7 +1274,7 @@ describe("SetPosture", () => {
     });
 
     test.each([119, 120, 121, 180, undefined])(
-      "iOS reported angle %s is compared with the request",
+      "iOS runner angle %s is an echo and never reported as observed (#17726)",
       async (actual) => {
         const h = makeIosFeature(duo, [
           {
@@ -1284,27 +1288,8 @@ describe("SetPosture", () => {
         const result = await h.feature.executeHingeAngle(120);
         expect(result).toMatchObject({ hingeAngle: 120, posture: "half_opened" });
         expect("status" in result).toBe(false);
-        if (actual === undefined) {
-          expect(result).toMatchObject({
-            warnings: [
-              "Hinge angle not verifiable: the iPhone Duo runner did not report the resulting angle.",
-            ],
-          });
-          expect("observedHingeAngle" in result).toBe(false);
-        } else {
-          expect(result).toMatchObject({ observedHingeAngle: actual });
-          if (actual === 180) {
-            expect(result).toMatchObject({
-              warnings: [
-                expect.stringContaining(
-                  "requested 120 degrees but the iPhone Duo runner reports 180 degrees",
-                ),
-              ],
-            });
-          } else {
-            expect("warnings" in result).toBe(false);
-          }
-        }
+        expect("observedHingeAngle" in result).toBe(false);
+        expect("warnings" in result).toBe(false);
       },
     );
 
@@ -1593,9 +1578,13 @@ describe("SetPosture", () => {
       expect(adb.getExecutedCommands()).toEqual([]);
     });
 
-    test.each([0, 90, 180])(
-      "advertised iOS angle %s uses panel read-back and runner angle",
-      async (angle) => {
+    test.each([
+      [0, "opened", 1],
+      [90, "half_opened", 0],
+      [180, "opened", 0],
+    ] as const)(
+      "advertised iOS angle %s on the inner panel reports %s with %i layout warning(s)",
+      async (angle, posture, warnings) => {
         const h = makeIosFeature(duo, [
           {
             ...observation,
@@ -1605,18 +1594,17 @@ describe("SetPosture", () => {
         ]);
         h.client.supportedCommands = ["set_hinge_angle"];
         h.client.setHingeAngleResult({ success: true, angle: 89, totalTimeMs: 0 });
-        expect(await h.feature.executeHingeAngle(angle)).toMatchObject({
-          hingeAngle: angle,
-          observedHingeAngle: 89,
-          posture: "half_opened",
-          display: { generation: 2 },
-        });
+        const result = await h.feature.executeHingeAngle(angle);
+        expect(result).toMatchObject({ hingeAngle: angle, posture, display: { generation: 2 } });
+        expect("observedHingeAngle" in result).toBe(false);
+        expect(("warnings" in result && result.warnings) || []).toHaveLength(warnings);
+        expect(h.hingeAngleStore.requested(duo.deviceId)).toBe(angle);
         expect(h.client.getHingeAngleHistory()).toEqual([angle]);
         expect(h.sequence.filter((entry) => entry.startsWith("transition:"))).toHaveLength(2);
       },
     );
 
-    test("iOS cover reports closed even at an arbitrary angle and missing runner angle is omitted", async () => {
+    test("iOS cover above 90 degrees reports closed with a layout warning and no observed angle", async () => {
       const h = makeIosFeature(duo, [
         {
           ...observation,
@@ -1627,7 +1615,11 @@ describe("SetPosture", () => {
       h.client.supportedCommands = ["set_hinge_angle"];
       h.client.setHingeAngleResult({ success: true, totalTimeMs: 0 });
       const result = await h.feature.executeHingeAngle(150);
-      expect(result).toMatchObject({ hingeAngle: 150, posture: "closed" });
+      expect(result).toMatchObject({
+        hingeAngle: 150,
+        posture: "closed",
+        warnings: [expect.stringContaining("cover panel is still active")],
+      });
       expect("observedHingeAngle" in result).toBe(false);
     });
 

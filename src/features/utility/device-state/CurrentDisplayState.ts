@@ -1,5 +1,10 @@
 import type { DevicectlDisplayInfoSource } from "../../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
-import { devicectlConfirmsIosPanel } from "../../device/postureCommands";
+import { findActiveIosPanel } from "../../device/postureCommands";
+import {
+  defaultIosRequestedHingeAngleStore,
+  iosPostureForPanel,
+  type IosRequestedHingeAngleStore,
+} from "../../device/DuoHingeLayout";
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import type { BootedDevice } from "../../../models";
@@ -14,16 +19,18 @@ import {
 /**
  * Where `posture` came from. `device_state` is the device's own committed posture (Android).
  * `inferred_from_active_panel` maps the active panel to a posture (iPhone Duo: inner means
- * opened, cover means closed) without reading the hinge, so a half-folded Duo with its inner
- * panel active still reads `opened`. Consumers must not treat an inferred posture as confirmed.
- * Omitted when an Android posture read fails and posture falls back to `unknown`: no source
- * established it.
+ * opened, cover means closed) without reading the hinge. `requested_hinge_angle` (iPhone Duo)
+ * is `half_opened` because the inner panel is active and the last hinge angle setPosture
+ * requested lies strictly between 0 and 180 degrees; the hinge itself is still not read.
+ * Consumers must not treat either iPhone Duo source as confirmed. Omitted when an Android
+ * posture read fails and posture falls back to `unknown`: no source established it.
  */
-export type PostureSource = "device_state" | "inferred_from_active_panel";
+export type PostureSource = "device_state" | "inferred_from_active_panel" | "requested_hinge_angle";
 
 export const POSTURE_SOURCES = [
   "device_state",
   "inferred_from_active_panel",
+  "requested_hinge_angle",
 ] as const satisfies readonly PostureSource[];
 
 /** The live posture and active physical panel. */
@@ -33,6 +40,8 @@ export interface CurrentDisplayState {
   postureSource?: PostureSource;
   /** Omitted when the live display list names no inventory panel. */
   activePanel?: { key: string; role: PanelRole };
+  /** iPhone Duo: the last hinge angle setPosture requested (an echo, never a hinge read). */
+  requestedHingeAngle?: number;
 }
 
 /** Whether a device's inventory can change posture at all: two or more physical panels. */
@@ -52,8 +61,11 @@ export async function readCurrentDisplayState(
   {
     signal,
     iosDisplayInfoSource,
+    iosHingeAngleStore = defaultIosRequestedHingeAngleStore,
   }: {
     signal?: AbortSignal;
+    /** The last hinge angle setPosture requested; the hinge itself is never read. */
+    iosHingeAngleStore?: Pick<IosRequestedHingeAngleStore, "requested">;
     /** Needed only for an iOS device; Android callers omit it. */
     iosDisplayInfoSource?: DevicectlDisplayInfoSource;
   },
@@ -62,34 +74,9 @@ export async function readCurrentDisplayState(
     return undefined;
   }
   if (device.platform === "ios") {
-    if (!iosDisplayInfoSource) {
-      return undefined;
-    }
-    try {
-      const displays = await iosDisplayInfoSource.readDisplays({
-        deviceId: device.deviceId,
-        signal,
-      });
-      const panels = device.displays!.panels.filter(isPhysicalPanel);
-      const panel = panels.find(
-        (candidate) =>
-          (candidate.role === "inner" || candidate.role === "cover") &&
-          panels.filter((panel) => panel.role === candidate.role).length === 1 &&
-          devicectlConfirmsIosPanel(displays, panels, candidate.role),
-      );
-      if (panel) {
-        return {
-          posture: panel.role === "inner" ? "opened" : "closed",
-          // devicectl reports which panel is active, not the hinge angle (#17637).
-          postureSource: "inferred_from_active_panel",
-          activePanel: { key: panel.key, role: panel.role },
-        };
-      }
-      logger.warn(`Cannot determine current iOS display panel for ${device.deviceId}`);
-    } catch (error) {
-      logger.warn(`Failed to read current iOS display state: ${errorMessage(error)}`, error);
-    }
-    return undefined;
+    return iosDisplayInfoSource
+      ? readIosCurrentDisplayState(device, iosDisplayInfoSource, iosHingeAngleStore, signal)
+      : undefined;
   }
   if (device.platform !== "android") {
     return undefined;
@@ -106,4 +93,33 @@ export async function readCurrentDisplayState(
     ...(posture === "unknown" ? {} : { postureSource: "device_state" as const }),
     ...(panel ? { activePanel: { key: panel.key, role: panel.role } } : {}),
   };
+}
+
+/** The active iPhone Duo panel from devicectl, refined by the last requested hinge angle. */
+async function readIosCurrentDisplayState(
+  device: BootedDevice,
+  source: DevicectlDisplayInfoSource,
+  store: Pick<IosRequestedHingeAngleStore, "requested">,
+  signal: AbortSignal | undefined,
+): Promise<CurrentDisplayState | undefined> {
+  try {
+    const displays = await source.readDisplays({ deviceId: device.deviceId, signal });
+    const panel = findActiveIosPanel(displays, device.displays?.panels);
+    if (panel && (panel.role === "inner" || panel.role === "cover")) {
+      const requested = store.requested(device.deviceId);
+      const posture = iosPostureForPanel(panel.role, requested);
+      return {
+        posture,
+        // devicectl reports which panel is active, not the hinge angle (#17637).
+        postureSource:
+          posture === "half_opened" ? "requested_hinge_angle" : "inferred_from_active_panel",
+        activePanel: { key: panel.key, role: panel.role },
+        ...(requested !== undefined ? { requestedHingeAngle: requested } : {}),
+      };
+    }
+    logger.warn(`Cannot determine current iOS display panel for ${device.deviceId}`);
+  } catch (error) {
+    logger.warn(`Failed to read current iOS display state: ${errorMessage(error)}`, error);
+  }
+  return undefined;
 }

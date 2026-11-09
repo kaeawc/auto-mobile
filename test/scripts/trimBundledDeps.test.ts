@@ -4,8 +4,10 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 
 import path from "node:path";
 import {
+  classifyRemovable,
   collectBundledPackages,
   listCandidates,
+  PRUNE_CLASSES,
   runTrim,
   restoreBackup,
   shouldTrimBundledDeps,
@@ -37,10 +39,11 @@ function fixture() {
     "lib/index.js",
     "runtime.ts",
     "cmd/tool.ts",
-    "locales/keep.d.ts",
-    "README.md",
+    "locales/keep.js",
     "LICENSE",
+    "LICENSE.md",
     "test/NOTICE.md",
+    "docs/COPYING",
     "package.json",
   ];
   for (const filename of retained.filter((name) => name !== "package.json")) {
@@ -61,6 +64,8 @@ function fixture() {
     "examples/example.js",
     ".github/ci.yml",
     "CHANGELOG.md",
+    "README.md",
+    "locales/keep.d.ts",
     "Makefile",
   ]) {
     put(`node_modules/pkg/${filename}`, `remove ${filename}`);
@@ -118,17 +123,23 @@ describe("reversible bundled dependency pack trim", () => {
     const before = tree(root);
     expect(collectBundledPackages(root)).toHaveLength(3);
     const candidates = listCandidates(root);
-    expect(candidates).toHaveLength(16);
-    expect(candidates.some((item) => item.path.endsWith("pngjs/browser.js"))).toBe(true);
+    expect(candidates).toHaveLength(18);
+    expect(candidates.find((item) => item.path.endsWith("pngjs/browser.js"))?.class).toBe(
+      "browser-builds",
+    );
+    expect(candidates.find((item) => item.path.endsWith("locales/keep.d.ts"))?.class).toBe(
+      "type-declarations",
+    );
+    expect(candidates.find((item) => item.path.endsWith("pkg/README.md"))?.class).toBe("docs");
     expect(
       candidates.some((item) =>
-        /unrelated|runtime.ts|cmd\/tool.ts|locales|README|NOTICE|LICENSE/.test(item.path),
+        /unrelated|runtime.ts|cmd\/tool.ts|keep.js|NOTICE|LICENSE|COPYING/.test(item.path),
       ),
     ).toBe(false);
     runTrim("list", { ...options, env: {} });
     expect(stdout).toEqual([
-      ...candidates.map((item) => `${item.path}\t${item.size}`),
-      `Total: 16 files, ${candidates.reduce((sum, item) => sum + item.size, 0)} bytes`,
+      ...candidates.map((item) => `${item.path}\t${item.size}\t${item.class}`),
+      `Total: 18 files, ${candidates.reduce((sum, item) => sum + item.size, 0)} bytes`,
     ]);
     expect(tree(root)).toEqual(before);
   });
@@ -191,18 +202,47 @@ describe("reversible bundled dependency pack trim", () => {
     );
     expect(listCandidates(root).some((item) => item.path.endsWith("browser.js"))).toBe(false);
   });
-  test("partial wildcard prefixes and referenced tinycolor builds are retained", () => {
+  test("partial wildcard prefixes are retained; tinycolor UMD and test builds are not", () => {
     const { root, put } = fixture();
     put("node_modules/pkg/node_modules/dep/package.json", {
       name: "tinycolor2",
       main: "index.js",
-      exports: { ".": "./index.js", "./prefix*": "./src/prefix*" },
+      exports: { ".": "./cjs/tinycolor.js", "./prefix*": "./src/prefix*" },
     });
     put("node_modules/pkg/node_modules/dep/src/prefix.ts", "keep wildcard");
-    for (const file of ["tinycolor.js", "esm/test.js", "cjs/test.js"]) {
-      put(`node_modules/pkg/node_modules/dep/${file}`, "keep audited reference");
+    for (const file of ["tinycolor.js", "cjs/tinycolor.js", "esm/test.js", "cjs/test.js"]) {
+      put(`node_modules/pkg/node_modules/dep/${file}`, 'require("./tinycolor.js");');
     }
-    expect(listCandidates(root).some((item) => item.path.includes("/dep/"))).toBe(false);
+    const dep = listCandidates(root)
+      .filter((item) => item.path.includes("/dep/"))
+      .map((item) => `${item.path.slice(item.path.indexOf("/dep/") + 5)} ${item.class}`);
+    expect(dep).toEqual(["cjs/test.js tests", "esm/test.js tests", "tinycolor.js browser-builds"]);
+  });
+  test("browser field and browser-condition targets are pruned unless still referenced", () => {
+    const { root, put } = fixture();
+    put("node_modules/pkg/node_modules/dep/package.json", {
+      name: "dep",
+      main: "lib/index.js",
+      browser: { "./lib/node.js": "./lib/web.js", "./lib/off.js": false },
+      exports: {
+        ".": { browser: "./dist/browser/index.js", default: "./lib/index.js" },
+        "./both": { browser: "./lib/shared.js", default: "./lib/shared.js" },
+      },
+      dependencies: { pngjs: "1" },
+    });
+    put("node_modules/pkg/node_modules/dep/lib/index.js", 'require("./node.js")');
+    for (const file of ["lib/node.js", "lib/web.js", "lib/shared.js", "dist/browser/index.js"]) {
+      put(`node_modules/pkg/node_modules/dep/${file}`, "module.exports = {};");
+    }
+    put("node_modules/pkg/node_modules/dep/src/index.js", "source of dist");
+    const dep = listCandidates(root)
+      .filter((item) => item.path.includes("/dep/") && !item.path.includes("pngjs"))
+      .map((item) => `${item.path.slice(item.path.indexOf("/dep/") + 5)} ${item.class}`);
+    expect(dep).toEqual([
+      "dist/browser/index.js browser-builds",
+      "lib/web.js browser-builds",
+      "src/index.js sources-with-dist",
+    ]);
   });
   test("extensionless main and directory bin resolve; ambiguous main keeps entire package", () => {
     const { root, put } = fixture();
@@ -290,4 +330,40 @@ test("unsafe recovered paths fail with manual recovery instructions", () => {
   const { root, put } = fixture();
   put(".pack-trim-backup/outside.txt", "saved");
   expect(() => restoreBackup(root)).toThrow("outside.txt. Move the backup aside");
+});
+test("legal notices and package.json survive every class, even in test/doc/src dirs", () => {
+  for (const basename of [
+    "LICENSE",
+    "LICENSE.md",
+    "license.txt",
+    "LICENCE-MIT",
+    "NOTICE",
+    "NOTICE.md",
+    "COPYING",
+    "PATENTS.md",
+    "package.json",
+  ]) {
+    for (const directories of [[], ["test"], ["docs"], ["src"], ["dist", "browser"]]) {
+      expect(
+        classifyRemovable({
+          packageName: "tinycolor2",
+          relative: [...directories, basename].join("/"),
+          directories,
+          basename,
+          hasDist: true,
+          browserTargets: new Set([[...directories, basename].join("/")]),
+        }),
+      ).toBeUndefined();
+    }
+  }
+  expect(PRUNE_CLASSES.map((pruneClass) => pruneClass.id)).toEqual([
+    "type-declarations",
+    "source-maps",
+    "tests",
+    "docs",
+    "typescript-sources",
+    "sources-with-dist",
+    "browser-builds",
+    "tooling-config",
+  ]);
 });

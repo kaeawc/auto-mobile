@@ -98,13 +98,172 @@ final class WatchCommandHandlerTests: XCTestCase {
             XCTAssertNil(watchCrownWakePoint(in: hierarchy), "type \(type)")
         }
         XCTAssertNil(watchCrownWakePoint(in: crownHierarchy(children: [SdkViewNode(
-            className: "XCUIElementType(1)",
+            className: "XCUIElementType(3)",
             bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100), hasTapTarget: true
         )])))
         XCTAssertNil(watchCrownWakePoint(in: crownHierarchy(children: [SdkViewNode(
             className: "XCUIElementType(48)",
             bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100), accessibilityLabel: "Custom tappable text"
         )])))
+    }
+
+    func testCrownWakeSkipsCenterCoveredByInteractiveContent() throws {
+        for node in [
+            SdkViewNode(
+                className: "XCUIElementType(3)", bounds: SdkBounds(left: 45, top: 45, right: 55, bottom: 55),
+                isUserInteractionEnabled: true, hasTapTarget: true
+            ),
+            SdkViewNode(
+                className: "XCUIElementType(48)", bounds: SdkBounds(left: 45, top: 45, right: 55, bottom: 55),
+                accessibilityLabel: "Custom control", isUserInteractionEnabled: true
+            ),
+        ] {
+            let point = try XCTUnwrap(watchCrownWakePoint(in: crownHierarchy(children: [node])))
+            XCTAssertEqual(point.dx, 0.65)
+            XCTAssertEqual(point.dy, 0.5)
+        }
+    }
+
+    func testCrownWakeAvoidsPlainOtherAndTextFrames() throws {
+        for className in ["Other", "XCUIElementType(48)"] {
+            let node = SdkViewNode(
+                className: className, bounds: SdkBounds(left: 45, top: 45, right: 55, bottom: 55),
+                isUserInteractionEnabled: false, hasTapTarget: false
+            )
+            XCTAssertTrue((node.accessibilityLabel ?? "").isEmpty)
+            let point = try XCTUnwrap(watchCrownWakePoint(in: crownHierarchy(children: [node])))
+            XCTAssertEqual(point.dx, 0.65)
+            XCTAssertEqual(point.dy, 0.5)
+        }
+    }
+
+    func testCrownWakeRejectsEveryNonContainerTypeWithAFrame() {
+        // Type 1 has conditional structural exemptions covered separately below.
+        for type in Array(0 ... 82) + [999] where ![1, 2, 4].contains(type) {
+            let node = SdkViewNode(
+                className: "XCUIElementType(\(type))", bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100),
+                isUserInteractionEnabled: false, hasTapTarget: false
+            )
+            XCTAssertNil(watchCrownWakePoint(in: crownHierarchy(children: [node])), "type \(type)")
+        }
+    }
+
+    func testCrownWakeTraversesExcludedContainers() throws {
+        for type in [1, 2, 4] {
+            let bounds = SdkBounds(left: 0, top: 0, right: 100, bottom: 100)
+            let container = SdkViewNode(
+                className: "XCUIElementType(\(type))", bounds: bounds,
+                children: type == 1 ? [SdkViewNode(
+                    className: "XCUIElementType(48)", bounds: SdkBounds(left: 0, top: 0, right: 10, bottom: 10)
+                )] : nil
+            )
+            let point = try XCTUnwrap(watchCrownWakePoint(in: crownHierarchy(children: [container])))
+            XCTAssertEqual(point.dx, 0.5)
+            XCTAssertEqual(point.dy, 0.5)
+            let occupied = SdkViewNode(className: container.className, bounds: bounds, children: [SdkViewNode(
+                className: "XCUIElementType(48)", bounds: bounds
+            )])
+            XCTAssertNil(watchCrownWakePoint(in: crownHierarchy(children: [occupied])))
+        }
+    }
+
+    func testCrownWakeRejectsLabeledOrIdentifiedOtherNodes() {
+        for hasChildren in [false, true] {
+            for enabled in [false, true] {
+                for identifierOnly in [false, true] {
+                    let node = SdkViewNode(
+                        className: "XCUIElementType(1)",
+                        bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100),
+                        accessibilityLabel: identifierOnly ? nil : "Custom control",
+                        accessibilityIdentifier: identifierOnly ? "custom-control" : nil,
+                        isUserInteractionEnabled: enabled,
+                        children: hasChildren ? [SdkViewNode(
+                            className: "XCUIElementType(48)",
+                            bounds: SdkBounds(left: 0, top: 0, right: 10, bottom: 10)
+                        )] : nil
+                    )
+                    XCTAssertNil(watchCrownWakePoint(in: crownHierarchy(children: [node])))
+                }
+            }
+        }
+    }
+
+    func testCrownWakeRejectsActionableUnlabeledOtherContainers() {
+        for action in ["traits", "customActions", "tapTarget"] {
+            let node = SdkViewNode(
+                className: "XCUIElementType(1)",
+                bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100),
+                accessibilityTraits: action == "traits" ? ["button"] : [],
+                accessibilityCustomActions: action == "customActions" ? ["Activate"] : [],
+                isUserInteractionEnabled: true, hasTapTarget: action == "tapTarget",
+                children: [SdkViewNode(
+                    className: "XCUIElementType(48)", bounds: SdkBounds(left: 0, top: 0, right: 10, bottom: 10)
+                )]
+            )
+            XCTAssertNil(watchCrownWakePoint(in: crownHierarchy(children: [node])), action)
+        }
+    }
+
+    func testCrownWakeAllowsUnlabeledNonActionableOtherContainers() throws {
+        for label in [nil, ""] as [String?] {
+            for identifier in [nil, ""] as [String?] {
+                for enabled in [false, true] {
+                    let node = SdkViewNode(
+                        className: "XCUIElementType(1)",
+                        bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100),
+                        accessibilityLabel: label, accessibilityIdentifier: identifier,
+                        accessibilityTraits: enabled ? [] : ["button"],
+                        accessibilityCustomActions: enabled ? [] : ["Activate"],
+                        isUserInteractionEnabled: enabled, hasTapTarget: !enabled,
+                        children: [SdkViewNode(
+                            className: "XCUIElementType(48)",
+                            bounds: SdkBounds(left: 0, top: 0, right: 10, bottom: 10)
+                        )]
+                    )
+                    let point = try XCTUnwrap(watchCrownWakePoint(in: crownHierarchy(children: [node])))
+                    XCTAssertEqual(point.dx, 0.5)
+                    XCTAssertEqual(point.dy, 0.5)
+                }
+            }
+        }
+    }
+
+    func testCrownWakeRejectsEnabledOtherLeaves() {
+        let node = SdkViewNode(
+            className: "XCUIElementType(1)", bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100),
+            isUserInteractionEnabled: true
+        )
+        XCTAssertNil(watchCrownWakePoint(in: crownHierarchy(children: [node])))
+    }
+
+    func testCrownWakeAllowsUnlabeledNonInteractiveOtherLeaves() throws {
+        // A leaf with no label, identifier, or interaction cannot activate a control, so leave it exempt.
+        for children in [nil, []] as [[SdkViewNode]?] {
+            let node = SdkViewNode(
+                className: "XCUIElementType(1)", bounds: SdkBounds(left: 0, top: 0, right: 100, bottom: 100),
+                isUserInteractionEnabled: false, children: children
+            )
+            let point = try XCTUnwrap(watchCrownWakePoint(in: crownHierarchy(children: [node])))
+            XCTAssertEqual(point.dx, 0.5)
+            XCTAssertEqual(point.dy, 0.5)
+        }
+    }
+
+    func testCrownWakeIgnoresEmptyDescendantFrames() throws {
+        let point = try XCTUnwrap(watchCrownWakePoint(in: crownHierarchy(children: [SdkViewNode(
+            className: "XCUIElementType(48)", bounds: SdkBounds(left: 50, top: 50, right: 50, bottom: 50)
+        )])))
+        XCTAssertEqual(point.dx, 0.5)
+        XCTAssertEqual(point.dy, 0.5)
+    }
+
+    func testCrownWakeKeepsEightPointMarginFromPlainContent() throws {
+        let point = try XCTUnwrap(watchCrownWakePoint(in: crownHierarchy(children: [SdkViewNode(
+            className: "XCUIElementType(48)", bounds: SdkBounds(left: 40, top: 45, right: 42, bottom: 55),
+            isUserInteractionEnabled: false
+        )])))
+        XCTAssertEqual(point.dx, 0.65)
+        XCTAssertEqual(point.dy, 0.5)
     }
 
     func testCrownWakeFindsInteriorGapWithClearance() throws {
@@ -352,7 +511,7 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertEqual(response.errorCode, "command_failed")
         XCTAssertTrue(response.error?.hasPrefix("rotateCrown changed nothing") == true)
         XCTAssertTrue(response.error?.hasSuffix(
-            "Tap the crown target (for example tapOn ctrlproxy-crown), then retry rotateCrown."
+            "Tap the control that should respond to the Digital Crown, then retry rotateCrown."
         ) == true)
         XCTAssertEqual(source.rotations, 2)
         XCTAssertEqual(source.taps, 1)
@@ -376,10 +535,19 @@ final class WatchCommandHandlerTests: XCTestCase {
 
     func testCrownRejectsTreeChangeWhenSameFocusedControlValueIsUnchanged() {
         for frame in [CGRect(x: 10, y: 10, width: 20, height: 20), CGRect(x: 10, y: 30, width: 20, height: 20)] {
-            let source = ScriptedCrownSource(labels: ["before", "before", "shifted", "shifted", "shifted", "shifted"])
+            let source = ScriptedCrownSource(labels: [
+                "before",
+                "before",
+                "shifted",
+                "shifted",
+                "shifted",
+                "shifted",
+                "shifted",
+            ])
             source.focusedValues = [
                 crownValue("0"), crownValue("0"), crownValue("0", frame: frame),
-                crownValue("0", frame: frame), crownValue("0", frame: frame), crownValue("0", frame: frame),
+                crownValue("0", frame: frame), crownValue("0", frame: frame),
+                crownValue("0", frame: frame), crownValue("0", frame: frame),
             ]
             let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
             let response = handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8))
@@ -387,6 +555,29 @@ final class WatchCommandHandlerTests: XCTestCase {
             XCTAssertEqual(response.errorCode, "command_failed")
             XCTAssertTrue(response.error?.hasPrefix("rotateCrown changed nothing") == true)
         }
+    }
+
+    func testCrownAcceptsLaggingFocusedValueOnNextReadWithoutWakeOrRetry() {
+        let source = ScriptedCrownSource(labels: ["before", "before", "scrolled", "scrolled"])
+        source.focusedValues = [crownValue("0"), crownValue("0"), crownValue("0"), crownValue("2")]
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        XCTAssertTrue(handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8)).success)
+        XCTAssertEqual(source.rotations, 1)
+        XCTAssertEqual(source.taps, 0)
+        XCTAssertEqual(source.events, [
+            "snapshot:before", "snapshot:before", "rotate", "snapshot:scrolled", "snapshot:scrolled",
+        ])
+    }
+
+    func testCrownLaggingValueReadIsBoundedBeforeWake() {
+        let source = ScriptedCrownSource(labels: ["before", "before", "scrolled", "scrolled"])
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        XCTAssertFalse(handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8)).success)
+        XCTAssertEqual(source.rotations, 1)
+        XCTAssertEqual(source.taps, 1)
+        XCTAssertEqual(source.events, [
+            "snapshot:before", "snapshot:before", "rotate", "snapshot:scrolled", "snapshot:scrolled", "tap",
+        ])
     }
 
     func testCrownAcceptsTreeChangeWithoutSameFocusedControl() {
@@ -450,6 +641,16 @@ final class WatchCommandHandlerTests: XCTestCase {
         ])
     }
 
+    func testCrownNeverProactivelyWakesReadableFocusedValue() {
+        let source = ScriptedCrownSource(labels: ["before", "before", "scrolled"])
+        source.focusedValues = [crownValue("0"), crownValue("0"), crownValue("2")]
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        XCTAssertTrue(handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8)).success)
+        XCTAssertEqual(source.rotations, 1)
+        XCTAssertEqual(source.taps, 0)
+        XCTAssertEqual(source.events, ["snapshot:before", "snapshot:before", "rotate", "snapshot:scrolled"])
+    }
+
     func testCrownStabilizesBaselineBeforeRotatingAndAfterTouch() {
         let source = ScriptedCrownSource(labels: [
             "launching", "crown 0", "crown 0", "crown 0",
@@ -489,22 +690,22 @@ final class WatchCommandHandlerTests: XCTestCase {
     }
 
     func testCrownDoesNotRepeatDeltaWhenItsEffectIsNotAccessible() {
-        let source = ScriptedCrownSource(labels: Array(repeating: "unchanged", count: 6))
-        source.exposesFocusedValue = false
-        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
-        let response = handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8))
-        XCTAssertFalse(response.success)
-        XCTAssertEqual(response.errorCode, "command_failed")
-        XCTAssertEqual(source.rotations, 1)
-        XCTAssertEqual(source.appliedDelta, 2)
-        XCTAssertEqual(source.taps, 1)
-        XCTAssertEqual(
-            source.events,
-            [
+        for valueReadFails in [false, true] {
+            let source = ScriptedCrownSource(labels: Array(repeating: "unchanged", count: 6))
+            source.exposesFocusedValue = false
+            source.valueReadFails = valueReadFails
+            let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+            let response = handler.handle(Data(#"{"type":"crown","delta":2}"#.utf8))
+            XCTAssertFalse(response.success)
+            XCTAssertEqual(response.errorCode, "command_failed")
+            XCTAssertEqual(source.rotations, 1)
+            XCTAssertEqual(source.appliedDelta, 2)
+            XCTAssertEqual(source.taps, 1)
+            XCTAssertEqual(source.events, [
                 "snapshot:unchanged", "snapshot:unchanged", "tap", "snapshot:unchanged", "snapshot:unchanged",
                 "rotate", "snapshot:unchanged",
-            ]
-        )
+            ])
+        }
     }
 
     func testCrownRecognizesFocusedValueChangeMissingFromWireHierarchy() {

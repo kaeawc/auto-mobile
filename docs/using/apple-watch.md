@@ -150,17 +150,15 @@ Every other tool refuses a watch before doing anything, with:
   on that control) may not register and fails like a rotation at the limit; when `delta` is
   between -1 and 1 the error says the turn may be too small. It is not listed by default; enable it with `setToolEnabled` (see
   [Dynamic Tools](dynamic-tools.md)). When the same focused control has a readable accessible value
-  before and after a rotation, that value must change for verification to succeed; changes elsewhere
-  on screen do not count. Otherwise, a hierarchy change can confirm the rotation. If no focused value
-  is readable, it may first touch an unoccupied interior point to wake crown routing, avoiding navigation
-  and controls, then let the screen settle before rotating. If a rotation changes nothing, it may wake
-  routing and retry once, but only when the same focused control's accessible value is unchanged and
-  the wake leaves the screen and focus unchanged. It does not repeat the turn or wake again when an
-  initial wake still leaves no readable focused value. Without a safe touch point or a comparable value,
-  or if the retry still changes nothing, it fails with an error. No view may hold crown focus, or the
-  content may already be at its limit. Tap the crown target (for example use `tapOn` with
-  `elementId: "ctrlproxy-crown"`), then retry `rotateCrown`. Observe first if an inaccessible change
-  may already have taken effect.
+  before and after a rotation, that value must change for success. Otherwise, any change in the screen
+  hierarchy confirms the rotation. When no focused value is readable, it first touches an unoccupied
+  interior point, clear of every on-screen element, to wake crown routing, then rotates. If nothing
+  changes, it may wake again and retry once; this requires a stable screen and an unchanged readable
+  focused value, both preserved by the wake. Without a safe touch point it rotates without waking;
+  after an initial wake, it never repeats the turn without a comparable value. If it still changes
+  nothing or a safe retry is unavailable, it fails. On failure, observe
+  first because an inaccessible change may have taken effect. Tap the control that should respond to
+  the Digital Crown, then retry `rotateCrown`.
   Verification is skipped when a stable hierarchy cannot be read. `observe` after rotating to confirm
   the app responded.
 

@@ -35,8 +35,11 @@ RUN_STATUS="${run_rc}"
 # Check for required commands and install missing commands if allowed
 echo -e "${YELLOW}Checking for required commands...${NC}"
 
-# The installer runs in a child process; expose its manual-install location here.
-export PATH="$HOME/.local/bin:$PATH"
+# The installer runs in a child process; expose its manual-install location
+# here, but only when no ktfmt resolves yet, so an existing one keeps priority.
+if ! command_exists ktfmt; then
+  export PATH="$HOME/.local/bin:$PATH"
+fi
 # Check if ktfmt is installed (install-when-missing gate + re-verify).
 run_capture_status ensure_tool ktfmt "$PROJECT_ROOT/scripts/ktfmt/install_ktfmt.sh" "${INSTALL_KTFMT_WHEN_MISSING}"
 if (( RUN_STATUS != 0 )); then

@@ -1,5 +1,9 @@
+/**
+ * A system window covering the screen after TalkBack was enabled: a runtime permission prompt, or
+ * a SystemUI or framework (`android`) dialog activity.
+ */
 export interface TalkBackBlockingPrompt {
-  kind: "runtime-permission";
+  kind: "runtime-permission" | "system-dialog";
   package: string;
   activity: string;
 }

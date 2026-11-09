@@ -220,12 +220,17 @@ class PrototypeRuntime(
     // earlier
     // onEnter already navigated has entered its new top, so it is not entered again.
     if (current.active) {
-      val initial = current.stacks
-      initial.keys
-        .filter { !preservingState || it !in retainedStackIds }
-        .forEach { if (current.stacks[it] == initial[it]) enter(it) }
+      stacksEnteredDuringShow = emptySet()
+      try {
+        current.stacks.keys
+          .filter { !preservingState || it !in retainedStackIds }
+          .forEach { if (it !in checkNotNull(stacksEnteredDuringShow)) enter(it) }
+      } finally {
+        stacksEnteredDuringShow = null
+      }
     }
     if (!preservingState) handle(PrototypeInteraction.TimerFire(emptyList()))
+    else if (current.active) storage?.record(current.spec, current.stacks)
   }
 
   private fun visibleAppearances(): Map<String, List<PrototypeAction>> {
@@ -710,6 +715,7 @@ class PrototypeRuntime(
   ) {
     val baseline = current.state
     val plannedData = current.spec.data
+    val plannedStacks = current.stacks
     val touched = LinkedHashSet<String>()
     for ((index, action) in actions.withIndex()) {
       if (!current.active) break
@@ -743,22 +749,21 @@ class PrototypeRuntime(
         is PrototypeScrollToAction -> requestScroll(action)
         is PrototypeStartTimerAction -> timerEngine.start(action)
         is PrototypeCancelTimerAction -> timerEngine.cancel(action.id)
-        else ->
-          writes[index]?.let { (key, planned) ->
-            // A data write earlier in this list may have added rows that bind this key, and a
-            // route onEnter may have written other keys (#14188), so a value planned against
-            // anything but the current data and state is checked again against them instead.
-            if (
-              current.spec.data === plannedData &&
-                planned.state.orEmpty() - key == current.state - key
-            )
-              writeInteractionSpec(planned)
-            else
-              writeInteractionSpec(
-                validated(current.spec, mapOf(key to planned.state.orEmpty().getValue(key))),
-              )
-            touched += key
-          }
+        else -> {
+          val (key, value) = action.stateWrite(current.state) ?: continue
+          val planned =
+            writes[index]?.second?.takeIf {
+              it.state.orEmpty()[key] == value && it.state.orEmpty() - key == current.state - key
+            }
+          // Lifecycle lists may change the same key: relative actions read the live value.
+          // The original plan still preflights the interaction before any side effects run.
+          if (
+            planned != null && current.spec.data === plannedData && current.stacks == plannedStacks
+          )
+            writeInteractionSpec(planned)
+          else writeInteractionSpec(validated(current.spec, mapOf(key to value)))
+          touched += key
+        }
       }
     }
     if (current.active) emitStateChange(touched.filter { baseline[it] != current.state[it] })
@@ -977,6 +982,7 @@ class PrototypeRuntime(
 
   /** Runs the top screen's `onEnter` of [id], bound to its entry's params. */
   private suspend fun enter(id: String) {
+    stacksEnteredDuringShow = stacksEnteredDuringShow?.plus(id)
     val stack = current.stacks[id] ?: return
     val node = stackNodes(current.spec.root)[id] ?: return
     val screen = stack.path.last()
@@ -984,6 +990,7 @@ class PrototypeRuntime(
     runLifecycle("onEnter of $screen", actions, stack.paramsAt(stack.path.lastIndex))
   }
 
+  private var stacksEnteredDuringShow: Set<String>? = null
   private var lifecycleDepth = 0
 
   /**
@@ -1069,6 +1076,7 @@ class PrototypeRuntime(
         stackChange = current.stackNavigationChange(id, direction, edge, path),
         stackEdges = current.stackEdges + (id to current.nextStackEdges(id, direction, edge, path)),
       )
+    stateWriteValidator = null
     val params = next.paramsAt(path.lastIndex)
     if (
       before.path.last() != path.last() ||
@@ -1096,7 +1104,11 @@ class PrototypeRuntime(
       val validator =
         stateWriteValidator
           ?: PrototypeTrace.section(PrototypeTrace.PREPARE_STATE_WRITES) {
-            prepareStateWrites(from).also { stateWriteValidator = it }
+            val bound =
+              from.copy(
+                root = PrototypeRouteRuntime.bindRoot(from.root, current.stacks, runtimeJson),
+              )
+            prepareStateWrites(bound).also { stateWriteValidator = it }
           }
       val error = validator.validate(checkNotNull(spec.state))
       require(error == null) { error.toString() }

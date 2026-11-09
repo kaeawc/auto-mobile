@@ -183,6 +183,7 @@ function checkStorageKey(
 // A report lists the device's stack paths (`stack:<id>`, #14188) beside its state and data keys.
 const storageKeySchema = z
   .string()
+  .max(261)
   .refine(
     (key) =>
       parsePrototypeStorageKey(key) !== undefined || (key.startsWith("stack:") && key.length > 6),

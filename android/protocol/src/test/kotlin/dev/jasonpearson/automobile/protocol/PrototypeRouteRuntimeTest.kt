@@ -145,4 +145,35 @@ class PrototypeRouteRuntimeTest {
     assertEquals(JsonObject(emptyMap()), snapshot.paramsAt(0))
     assertNull(snapshot.dropLast().params)
   }
+
+  @Test
+  fun `embedded data references escape route values only for whole pointer segments`() {
+    val root =
+      node(
+        """{"type":"stack","id":"nav","start":"home","screens":{
+      "home":{"type":"text","text":"Home"},"post":{"type":"text",
+      "text":"Title {data:/posts/{route.id}/title}; {route.id}"}},
+      "routes":{"post":{"params":{"id":"string"}}}}""",
+      )
+    val snapshot =
+      PrototypeStackSnapshot.of(
+        listOf("home", "post"),
+        listOf(obj("{}"), obj("""{"id":"a/b~c"}""")),
+      )
+    val bound = PrototypeRouteRuntime.bindRoot(root, mapOf("nav" to snapshot)) as PrototypeStackNode
+    assertEquals(
+      "Title {data:/posts/a~1b~0c/title}; a/b~c",
+      (bound.screens.getValue("post") as PrototypeTextNode).text,
+    )
+    val encoded = json.encodeToJsonElement(PrototypeNode.serializer(), bound).jsonObject
+    val resolved =
+      PrototypeDataResolver.resolveRoot(
+        encoded,
+        obj("""{"posts":{"a/b~c":{"title":"Literal key"}}}"""),
+      )
+    assertEquals(
+      JsonPrimitive("Title Literal key; a/b~c"),
+      resolved.getValue("screens").jsonObject.getValue("post").jsonObject["text"],
+    )
+  }
 }

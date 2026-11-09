@@ -12,7 +12,10 @@ enum PrototypeStackAnimation: Equatable {
 struct PrototypeStackEntry: Equatable, Hashable, Identifiable {
     let id: Int
     let screen: String
+    var params: [String: JSONValue] = [:]
     var zoomSource: String? = nil
+
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
 struct PrototypeStackChange: Equatable {

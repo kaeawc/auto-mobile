@@ -342,4 +342,97 @@ class PrototypeRoutesRuntimeTest {
     assertEquals(PrototypeScalar.Text("1"), runtime.current.state["confirm"])
     assertEquals(PrototypeScalar.Numeric(4.0), runtime.current.state["count"])
   }
+
+  @Test
+  fun `preserving show records a new stack's lifecycle writes before returning`() = runTest {
+    val entering =
+      """{"feed":{"onEnter":[{"type":"setState","key":"count","value":10}]},
+      "post":{"params":{"postId":"string"}},"profile":{"params":{"userId":"string"}}}"""
+    val authored =
+      spec(routes = entering)
+        .copy(
+          storage =
+            dev.jasonpearson.automobile.protocol.PrototypeStorageBlock(1, listOf("state:count")),
+        )
+    store.seed("routes", PrototypeStoredValues(1, mapOf("state:count" to JsonPrimitive(3))))
+    val opened = persistence().open(authored)
+    val first = runtime(storage = opened)
+    first.shown(preservingState = true)
+    assertEquals(PrototypeScalar.Numeric(10.0), first.current.state["count"])
+    assertEquals(JsonPrimitive(10), checkNotNull(opened.session).stored("state:count"))
+    first.flushStorage()
+    val second = runtime(storage = persistence().open(authored))
+    assertEquals(PrototypeScalar.Numeric(10.0), second.current.state["count"])
+  }
+
+  @Test
+  fun `relative actions use lifecycle writes to the same key`() = runTest {
+    val entering =
+      """{"post":{"params":{"postId":"string"},"onEnter":[
+      {"type":"setState","key":"count","value":10}]},"profile":{"params":{"userId":"string"}}}"""
+    val runtime = runtime(spec(routes = entering))
+    runtime.handle(runtime.button("Open and count"))
+    assertEquals(PrototypeScalar.Numeric(11.0), runtime.current.state["count"])
+  }
+
+  @Test
+  fun `route bound fields constrain writes after navigation and cache preparation`() = runTest {
+    val input =
+      """{"id":"bound","window":{"placement":{"type":"fullscreen"}},
+      "state":{"email_41":"ok","email_42":"ok"},"root":{"type":"column","children":[
+      {"type":"textField","stateKey":"email_41","checks":[{"required":true,"message":"Required"}]},
+      {"type":"stack","id":"nav","start":"home","screens":{
+      "home":{"type":"text","text":"Home"},
+      "edit":{"type":"textField","stateKey":"email_{route.id}","maxLength":3}},
+      "routes":{"edit":{"params":{"id":"number"}}}}]}}"""
+    val authored = (PrototypeSpecValidator.validate(input) as PrototypeSpecValidation.Success).spec
+    val runtime = runtime(authored)
+    fun actions(text: String) = Json {
+      classDiscriminator = "type"
+    }
+      .decodeFromString<List<dev.jasonpearson.automobile.protocol.PrototypeAction>>(text)
+    runtime.handle(
+      PrototypeInteraction.Tap(actions("""[{"type":"setState","key":"email_41","value":"a"}]""")),
+    )
+    for (id in listOf(41, 42)) {
+      runtime.handle(
+        PrototypeInteraction.Tap(
+          actions("""[{"type":"push","stack":"nav","screen":"edit","params":{"id":$id}}]"""),
+        ),
+      )
+      val before = runtime.current.state
+      var refused = false
+      try {
+        runtime.handle(
+          PrototypeInteraction.Tap(
+            actions(
+              """[
+          {"type":"emit","name":"save","requireValid":["email_41"]},
+          {"type":"setState","key":"email_$id","value":"too long"}]""",
+            ),
+          ),
+        )
+      } catch (_: IllegalArgumentException) {
+        refused = true
+      }
+      assertTrue("route-bound maxLength for $id", refused)
+      assertEquals(before, runtime.current.state)
+    }
+  }
+
+  @Test
+  fun `a stack entered by round trip navigation is not initially entered twice`() = runTest {
+    val input =
+      """{"id":"roundtrip","window":{"placement":{"type":"fullscreen"}},
+      "root":{"type":"column","children":[
+      {"type":"stack","id":"a","start":"home","screens":{"home":{"type":"text","text":"A"}},
+      "routes":{"home":{"onEnter":[{"type":"push","stack":"b","screen":"detail"},
+        {"type":"pop","stack":"b","force":true}]}}},
+      {"type":"stack","id":"b","start":"home","screens":{"home":{"type":"text","text":"B"},
+      "detail":{"type":"text","text":"Detail"}},
+      "routes":{"home":{"onEnter":[{"type":"emit","name":"b_entered"}]}}}]}}"""
+    val authored = (PrototypeSpecValidator.validate(input) as PrototypeSpecValidation.Success).spec
+    runtime(authored).shown()
+    assertEquals(1, emitNames().count { it == "b_entered" })
+  }
 }

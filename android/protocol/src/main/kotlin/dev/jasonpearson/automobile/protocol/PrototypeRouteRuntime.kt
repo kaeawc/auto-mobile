@@ -222,14 +222,32 @@ internal object PrototypeRouteBinder {
   }
 
   /** `{index}` and unknown names stay literal: they belong to a repeat or are not params. */
-  private fun render(segments: List<PrototypeRepeatSegment>, params: JsonObject): String =
-    segments.joinToString("") { segment ->
-      when (segment) {
-        is PrototypeRepeatSegment.Literal -> segment.text
-        PrototypeRepeatSegment.Index -> "{index}"
-        is PrototypeRepeatSegment.Field ->
-          (params[segment.name] as? JsonPrimitive)?.let(PrototypeRepeatTemplate::rendered)
-            ?: "{$ALIAS.${segment.name}}"
+  private fun render(segments: List<PrototypeRepeatSegment>, params: JsonObject): String {
+    var inDataReference = false
+    return segments
+      .mapIndexed { index, segment ->
+        when (segment) {
+          is PrototypeRepeatSegment.Literal -> {
+            val opening = segment.text.lastIndexOf("{data:/")
+            if (opening >= 0) inDataReference = '}' !in segment.text.substring(opening + 7)
+            else if ('}' in segment.text) inDataReference = false
+            segment.text
+          }
+          PrototypeRepeatSegment.Index -> "{index}"
+          is PrototypeRepeatSegment.Field -> {
+            val value =
+              (params[segment.name] as? JsonPrimitive)?.let(PrototypeRepeatTemplate::rendered)
+                ?: return@mapIndexed "{$ALIAS.${segment.name}}"
+            val before = (segments.getOrNull(index - 1) as? PrototypeRepeatSegment.Literal)?.text
+            val after = (segments.getOrNull(index + 1) as? PrototypeRepeatSegment.Literal)?.text
+            val wholeSegment =
+              before?.endsWith('/') == true &&
+                (after?.startsWith('/') == true || after?.startsWith('}') == true)
+            if (inDataReference && wholeSegment) value.replace("~", "~0").replace("/", "~1")
+            else value
+          }
+        }
       }
-    }
+      .joinToString("")
+  }
 }

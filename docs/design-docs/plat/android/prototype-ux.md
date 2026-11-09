@@ -1498,8 +1498,10 @@ Runtime (shared by `PrototypeRuntime` on Android and the iOS session; pure helpe
 - Status, inspect and events keep `stacks.<id>.path: string[]` and add `params: object[]` parallel to
   it when any entry has params.
 - A listed `stack:<id>` key stores the path as `[{screen, params?}]`. The storage restorer checks
-  only its shape; the runtime restores it when every screen exists and every entry's params fit, and
-  otherwise starts the stack at `start` and records that path over the stale one. A same-id show's
+  its shape on Android; the runtime restores it when every screen exists and every entry's params
+  fit, and otherwise starts the stack at `start` and records that path over the stale one. On a fresh
+  iOS show, the restorer also checks screens and param types, drops a stale key as `mismatch`, and
+  the coordinator removes it rather than recording the start path. A same-id show's
   kept paths win over storage. Restoring emits no `screen_changed`; the restored top's onEnter runs
   as the show's first entry.
 

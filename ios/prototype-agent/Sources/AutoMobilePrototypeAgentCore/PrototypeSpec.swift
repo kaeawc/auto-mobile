@@ -345,6 +345,21 @@ struct PrototypeSpec: Decodable {
         return PrototypeSpec(replacing: self, data: data, root: rebuilt)
     }
 
+    /// Bind a rendered entry independently, including an entry retained while it animates out.
+    func stackScreen(_ id: String, entry: PrototypeStackEntry) throws -> PrototypeNode? {
+        var scope = routeScope
+        if entry.params.isEmpty {
+            scope[id]?[entry.screen] = nil
+            if scope[id]?.isEmpty == true { scope[id] = nil }
+        } else {
+            scope[id, default: [:]][entry.screen] = entry.params
+        }
+        let bound = scope == routeScope ? self : try replacingRoutes(scope)
+        var nodes: [String: PrototypeNode] = [:]
+        bound.root.collectStacks(into: &nodes)
+        return nodes[id]?.screens?[entry.screen]
+    }
+
     /// This spec with `{route.<name>}` placeholders bound to `scope` (#14188) and the drawn tree rebuilt
     /// from the authored one. Throws when the bound tree breaks a limit the show enforces.
     func replacingRoutes(_ scope: PrototypeRouteBinder.Scope) throws -> PrototypeSpec {

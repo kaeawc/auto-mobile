@@ -153,11 +153,29 @@ enum PrototypeRouteBinder {
         }
 
         func text(_ text: String) -> String {
-            segments(text).map { segment in
+            let parts = segments(text)
+            var inDataReference = false
+            return parts.enumerated().map { index, segment in
                 switch segment {
-                case let .literal(literal): literal
-                case .index: "{index}"
-                case let .field(name): params[name]?.displayString ?? "{route.\(name)}"
+                case let .literal(literal):
+                    if let opening = literal.range(of: "{data:/", options: .backwards) {
+                        inDataReference = !literal[opening.upperBound...].contains("}")
+                    } else if literal.contains("}") {
+                        inDataReference = false
+                    }
+                    return literal
+                case .index: return "{index}"
+                case let .field(name):
+                    guard let value = params[name]?.displayString else { return "{route.\(name)}" }
+                    // Only a whole segment inside a data reference is a pointer operand.
+                    if inDataReference, index > 0, index + 1 < parts.count,
+                       case let .literal(before) = parts[index - 1], before.hasSuffix("/"),
+                       case let .literal(after) = parts[index + 1], after.hasPrefix("/") || after.hasPrefix("}")
+                    {
+                        return value.replacingOccurrences(of: "~", with: "~0")
+                            .replacingOccurrences(of: "/", with: "~1")
+                    }
+                    return value
                 }
             }.joined()
         }

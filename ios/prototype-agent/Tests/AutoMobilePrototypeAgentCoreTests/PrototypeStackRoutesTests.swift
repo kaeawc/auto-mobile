@@ -217,4 +217,109 @@ final class PrototypeStackRoutesTests: XCTestCase {
         binder.node(&image)
         XCTAssertEqual(image["asset"], .string("thumb"))
     }
+
+    func testRelativeActionsReadLifecycleWritesAndKeepPreflightValidation() throws {
+        let text = #"""
+        {"id":"relative","window":{"placement":{"type":"fullscreen"}},"state":{"count":3,"flag":false},
+        "root":{"type":"stack","id":"nav","start":"home","screens":{
+        "home":{"type":"slider","stateKey":"count","min":0,"max":100},"detail":{"type":"text","text":"Detail"}},
+        "routes":{"detail":{"onEnter":[{"type":"setState","key":"count","value":10},
+        {"type":"setState","key":"flag","value":true}]}}}}
+        """#
+        var session = PrototypeSession()
+        try session.show(JSONDecoder().decode(PrototypeSpec.self, from: Data(text.utf8)))
+        _ = try session
+            .run(
+                actions(
+                    #"[{"type":"push","stack":"nav","screen":"detail"},{"type":"increment","key":"count"},{"type":"toggle","key":"flag"}]"#
+                )
+            )
+        XCTAssertEqual(session.state["count"], .number(11))
+        XCTAssertEqual(session.state["flag"], .bool(false))
+        _ = try session.run(actions(#"[{"type":"pop","stack":"nav","force":true}]"#))
+        XCTAssertTrue(
+            try session
+                .run(
+                    actions(
+                        #"[{"type":"push","stack":"nav","screen":"detail"},{"type":"setState","key":"count","value":"invalid"}]"#
+                    )
+                )
+                .isEmpty
+        )
+        XCTAssertEqual(session.stacks["nav"]?.path, ["home"])
+    }
+
+    func testPagerWritesTheRouteBoundKeyWhenTheTemplateKeyAlsoExists() throws {
+        let text = #"""
+        {"id":"pager-route","window":{"placement":{"type":"fullscreen"}},
+        "state":{"page_{route.id}":0,"page_41":0,"page_7":0},
+        "root":{"type":"stack","id":"nav","start":"home","screens":{
+        "home":{"type":"text","text":"Home"},
+        "detail":{"type":"pager","id":"deck","stateKey":"page_{route.id}","children":[
+        {"type":"text","text":"First"},{"type":"text","text":"Second"}]}},
+        "routes":{"detail":{"params":{"id":"number"}}}}}
+        """#
+        var session = PrototypeSession()
+        try session.show(JSONDecoder().decode(PrototypeSpec.self, from: Data(text.utf8)))
+        for id in [41, 7] {
+            _ = try session.run(actions(#"[{"type":"push","stack":"nav","screen":"detail","params":{"id":\#(id)}}]"#))
+            _ = session.setPage("deck", 1)
+            XCTAssertEqual(session.state["page_\(id)"], .number(1))
+            XCTAssertEqual(session.state["page_{route.id}"], .number(0))
+            XCTAssertEqual(session.pages["deck"], 1)
+        }
+    }
+
+    func testRoundTripEntryDuringInitialDispatchIsNotEnteredAgain() throws {
+        let text = #"""
+        {"id":"roundtrip","window":{"placement":{"type":"fullscreen"}},
+        "root":{"type":"column","children":[
+        {"type":"stack","id":"a","start":"home","screens":{"home":{"type":"text","text":"A"}},
+        "routes":{"home":{"onEnter":[{"type":"push","stack":"b","screen":"detail"},
+        {"type":"pop","stack":"b","force":true}]}}},
+        {"type":"stack","id":"b","start":"home","screens":{"home":{"type":"text","text":"B"},
+        "detail":{"type":"text","text":"Detail"}},
+        "routes":{"home":{"onEnter":[{"type":"emit","name":"b_entered"}]}}}]}}
+        """#
+        var session = PrototypeSession()
+        try session.show(JSONDecoder().decode(PrototypeSpec.self, from: Data(text.utf8)))
+        let events = session.transition { _ in [] }
+        XCTAssertEqual(events.filter { $0.name == "b_entered" }.count, 1)
+    }
+
+    func testRepeatedScreenEntriesRenderWithTheirOwnParams() throws {
+        var session = try shown()
+        _ = try session.run(push("post", #"{"postId":41}"#))
+        _ = try session.run(push("post", #"{"postId":7}"#))
+        let entries = try XCTUnwrap(session.stackEntries["nav"])
+        let spec = try XCTUnwrap(session.spec)
+        XCTAssertEqual(try spec.stackScreen("nav", entry: entries[1])?.text, "Post 41")
+        XCTAssertEqual(try spec.stackScreen("nav", entry: entries[2])?.text, "Post 7")
+        _ = try session.run(actions(#"[{"type":"pop","stack":"nav","force":true}]"#))
+        // An exiting entry retains its params after it leaves the live path.
+        XCTAssertEqual(try session.spec?.stackScreen("nav", entry: entries[2])?.text, "Post 7")
+    }
+
+    func testDataReferencesEscapeWholeRouteSegmentsBeforeResolution() throws {
+        let binder = PrototypeRouteBinder.Fields(params: ["id": .string("a/b~c")])
+        XCTAssertEqual(
+            binder.text("Title {data:/posts/{route.id}/title}; {route.id}"),
+            "Title {data:/posts/a~1b~0c/title}; a/b~c"
+        )
+        XCTAssertEqual(
+            binder.text("{data:/posts/prefix_{route.id}/title}"),
+            "{data:/posts/prefix_a/b~c/title}"
+        )
+        let text = #"""
+        {"id":"data-route","window":{"placement":{"type":"fullscreen"}},
+        "data":{"posts":{"a/b~c":{"title":"Literal key"},"a":{"b~c":{"title":"Nested key"}}}},
+        "root":{"type":"stack","id":"nav","start":"home","screens":{
+        "home":{"type":"text","text":"Home"},"post":{"type":"text","text":"{data:/posts/{route.id}/title}"}},
+        "routes":{"post":{"params":{"id":"string"}}}}}
+        """#
+        var session = PrototypeSession()
+        try session.show(JSONDecoder().decode(PrototypeSpec.self, from: Data(text.utf8)))
+        _ = try session.run(actions(#"[{"type":"push","stack":"nav","screen":"post","params":{"id":"a/b~c"}}]"#))
+        XCTAssertEqual(postText(session), "Literal key")
+    }
 }

@@ -206,6 +206,15 @@ describe("device storage report", () => {
     expect(parsePrototypeStorageReport(withStack)).toEqual(withStack);
     expect(parsePrototypeStorageReport({ ...report, skippedKeys: ["stack:"] })).toBeUndefined();
   });
+  test("stack report keys respect the storage key length limit", () => {
+    const key = `stack:${"n".repeat(255)}`;
+    const valid = { ...report, keys: [{ key, bytes: 1 }], skippedKeys: [key] };
+    expect(parsePrototypeStorageReport(valid)).toEqual(valid);
+    expect(
+      parsePrototypeStorageReport({ ...valid, keys: [{ key: `${key}x`, bytes: 1 }] }),
+    ).toBeUndefined();
+    expect(parsePrototypeStorageReport({ ...valid, skippedKeys: [`${key}x`] })).toBeUndefined();
+  });
   test("anything malformed or absent is reported absent", () => {
     for (const value of [
       undefined,

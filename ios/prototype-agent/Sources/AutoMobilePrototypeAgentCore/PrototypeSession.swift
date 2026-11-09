@@ -118,6 +118,7 @@ struct PrototypeSession {
     private(set) var stackNodes: [String: PrototypeNode] = [:]
     /// Stacks whose initial top entry runs its `onEnter` at the next transition (#14188).
     private var pendingEnters: [String] = []
+    private var stacksEnteredDuringDispatch: Set<String>?
     /// How deep onEnter/onBack dispatch currently nests (#14188).
     private var lifecycleDepth = 0
     private var pagerKeys: [String: String] = [:]
@@ -339,7 +340,7 @@ struct PrototypeSession {
             var entries = Array((previousEntries[id] ?? []).prefix(retained))
             for entry in snapshot.entries.dropFirst(entries.count) {
                 nextStackEntry += 1
-                entries.append(PrototypeStackEntry(id: nextStackEntry, screen: entry.screen))
+                entries.append(PrototypeStackEntry(id: nextStackEntry, screen: entry.screen, params: entry.params))
             }
             stackEntries[id] = entries
             if before == snapshot.entries,
@@ -540,8 +541,9 @@ struct PrototypeSession {
         // action may have added a control (a repeat row) that refuses this value now.
         var next = state
         next[write.key] = write.value
+        next = clampedPagerState(next)
         guard accepts(next) else { return }
-        state[write.key] = write.value
+        state[write.key] = next[write.key]
         if !touched.contains(write.key) { touched.append(write.key) }
     }
 
@@ -592,7 +594,9 @@ struct PrototypeSession {
             case "dismiss":
                 events += dismiss(reason: .user)
             default:
-                applyPlannedWrite(writes[index], touched: &touched)
+                let write = action.type == "toggle" || action.type == "increment" || action.type == "decrement"
+                    ? stateWrite(action, in: state) : writes[index]
+                applyPlannedWrite(write, touched: &touched)
             }
         }
         guard isShown else { return events }
@@ -882,6 +886,7 @@ struct PrototypeSession {
             entries.append(PrototypeStackEntry(
                 id: nextStackEntry,
                 screen: entry.screen,
+                params: entry.params,
                 zoomSource:
                 stackChanges[id]?.transition == .zoom ? source : nil
             ))
@@ -906,6 +911,9 @@ struct PrototypeSession {
             structureRevision += 1
             stackNodes = [:]
             rebound.root.collectStacks(into: &stackNodes)
+            pagerKeys = rebound.root.pagerStateKeys()
+            pageCounts = rebound.root.pagerCounts()
+            syncBoundPages()
             return true
         } catch {
             prototypeRoutesLog.warning(
@@ -931,6 +939,7 @@ struct PrototypeSession {
     }
 
     private mutating func runEnter(_ id: String) -> [PrototypeEvent] {
+        stacksEnteredDuringDispatch?.insert(id)
         guard let screen = stacks[id]?.entries.last?.screen,
               let actions = stackNodes[id]?.routes?[screen]?.onEnter else { return [] }
         return runLifecycle(actions, stack: id, list: "onEnter")
@@ -939,10 +948,11 @@ struct PrototypeSession {
     private mutating func runPendingEnters() -> [PrototypeEvent] {
         let ids = pendingEnters
         pendingEnters = []
-        let initial = stacks.mapValues(\.entries)
+        stacksEnteredDuringDispatch = []
+        defer { stacksEnteredDuringDispatch = nil }
         var events: [PrototypeEvent] = []
         // A stack an earlier onEnter already navigated has entered its new top, so it is not entered again.
-        for id in ids where isShown && stacks[id]?.entries == initial[id] {
+        for id in ids where isShown && stacksEnteredDuringDispatch?.contains(id) != true {
             events += runEnter(id)
         }
         return events

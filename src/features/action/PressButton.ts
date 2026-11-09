@@ -135,7 +135,7 @@ interface PressDispatchOptions {
   durationMs?: number;
   /** iOS Home: the pre-press tree was the App Switcher, which arms HomeScreen's second press (#17201). */
   appSwitcherWasOpen?: boolean;
-  /** Android logical display for `input -d` (#17643); undefined or 0 keeps the default routing. */
+  /** Android logical display for `input -d` (#17643); undefined keeps the default routing. */
   displayId?: number;
 }
 

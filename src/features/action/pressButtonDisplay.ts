@@ -16,8 +16,8 @@ export type PressButtonDisplayResolver = (
 
 /**
  * Resolve a pressButton `display` selector once, as tapOn does, so the key and the visual-change
- * check target the same panel. `displayId` is undefined for the default display (0), which keeps
- * the default key routing. Other platforms refuse a `display`.
+ * check target the same panel. Display 0 stays explicit: an untargeted key or global action goes to
+ * the focused display, which may be another panel. Other platforms refuse a `display`.
  */
 export async function pressButtonDisplay(
   device: BootedDevice,
@@ -39,7 +39,7 @@ export async function pressButtonDisplay(
   const target = await (resolver
     ? resolver(display, signal)
     : resolveActionDisplay(device, display, { adb, signal }));
-  return { key: target.key, displayId: target.displayId === 0 ? undefined : target.displayId };
+  return target;
 }
 
 /** The `display` of a pressButton call object; positional (progress-callback) calls have none. */

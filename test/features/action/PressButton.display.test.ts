@@ -166,15 +166,15 @@ describe("PressButton display (#17643)", () => {
     ]);
   });
 
-  test("a display that resolves to 0 keeps default routing but still reads that panel", async () => {
+  test("an explicit display 0 is still targeted, since untargeted keys go to the focused display", async () => {
     const { action, adb, observe, globalActions } = harness(android, {
       displayId: 0,
       panelKey: "main",
     });
     const result = await action.execute("back", { display: "inner" });
     expect(result.success).toBe(true);
-    expect(globalActions).toEqual(["back"]);
-    expect(keyeventArgv(adb)).toEqual([]);
+    expect(globalActions).toEqual([]);
+    expect(keyeventArgv(adb)).toEqual([["shell", "input", "-d", "0", "keyevent", "4"]]);
     expect(observe.getExecuteOptions().every((options) => options.display === "main")).toBe(true);
   });
 

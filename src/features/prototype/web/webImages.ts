@@ -76,10 +76,28 @@ function webImageMinimum(style: Raw): Record<string, string> {
   };
 }
 
+/** One authored padding side in dp (0 when unset). */
+function paddingDp(style: Raw, side: "top" | "bottom" | "start" | "end"): number {
+  const value = record(style.padding)?.[side];
+  return typeof value === "number" ? value : 0;
+}
+
+/** A fixed dp axis less the padding on both its sides, as Android's image target subtracts it. */
+function contentDp(size: number | undefined, padding: number): number | undefined {
+  return size === undefined ? undefined : Math.max(0, size - padding);
+}
+
+/** The draw a node needs: a fixed axis is its content box, the authored padding taken out. */
 export function webImageDraw(asset: string, node: Raw): WebImageDraw {
   const style = record(node.style) ?? {};
-  const widthDp = fixedDp(style.width);
-  const heightDp = fixedDp(style.height);
+  const widthDp = contentDp(
+    fixedDp(style.width),
+    paddingDp(style, "start") + paddingDp(style, "end"),
+  );
+  const heightDp = contentDp(
+    fixedDp(style.height),
+    paddingDp(style, "top") + paddingDp(style, "bottom"),
+  );
   return {
     asset,
     ...(widthDp === undefined ? {} : { widthDp }),
@@ -112,6 +130,25 @@ export function webImageBoxCss(
   };
 }
 
+/** The padding longhands whose values inset the image layers, and the inset each one sets. */
+const LAYER_INSETS = [
+  ["padding-top", "top"],
+  ["padding-inline-end", "inset-inline-end"],
+  ["padding-bottom", "bottom"],
+  ["padding-inline-start", "inset-inline-start"],
+] as const;
+
+/**
+ * The image layers' inset inside the node's resolved box style: each side sits at that side's
+ * padding (safe-area additions included), as absolute children ignore their parent's padding.
+ * Logical start/end follow the element's direction, so an RTL window mirrors them.
+ */
+export function webImageLayerInset(box: Readonly<Record<string, string>>): Record<string, string> {
+  return Object.fromEntries(LAYER_INSETS.map(([padding, inset]) => [inset, box[padding] ?? "0"]));
+}
+
+const ZERO_INSET = webImageLayerInset({});
+
 /**
  * The drawn image and its filter: the image saturates first, then a separate tint layer
  * multiplies it (Android's `BlendMode.Modulate` on an offscreen layer), masked by the image so
@@ -119,17 +156,29 @@ export function webImageBoxCss(
  * `Modulate` multiplies alpha too, so the tint draws its opaque colour and a translucent tint
  * wraps both layers in a group at the tint's alpha (`#00FFFFFF` hides the image, as on Android).
  */
-export function webImageLayers(slot: number, node: Raw, context: WebStyleContext): WebElement[] {
+export function webImageLayers(
+  slot: number,
+  node: Raw,
+  context: WebStyleContext,
+  inset: Readonly<Record<string, string>> = ZERO_INSET,
+): WebElement[] {
   const image = `var(${webImageVar(slot)})`;
   const size = BACKGROUND_SIZE[webImageScale(node.contentScale)];
   const filter = record(node.filter);
+  const tint =
+    filter?.tint === undefined
+      ? undefined
+      : resolvePrototypeColor(filter.tint, context.mode, context.palette);
+  // A translucent tint's group takes the padding inset, so its layers fill the group.
+  const grouped = tint !== undefined && tint !== null && tint.a < 1;
+  const layerInset = grouped ? ZERO_INSET : inset;
   const saturation = typeof filter?.saturation === "number" ? filter.saturation : 1;
   const layers = [
     el("div", {
       attrs: { "data-image": "" },
       style: {
         position: "absolute",
-        inset: "0",
+        ...layerInset,
         "background-image": image,
         "background-size": size,
         "background-position": "center",
@@ -138,17 +187,13 @@ export function webImageLayers(slot: number, node: Raw, context: WebStyleContext
       },
     }),
   ];
-  const tint =
-    filter?.tint === undefined
-      ? undefined
-      : resolvePrototypeColor(filter.tint, context.mode, context.palette);
   if (tint) {
     layers.push(
       el("div", {
         attrs: { "data-image-tint": "" },
         style: {
           position: "absolute",
-          inset: "0",
+          ...layerInset,
           "background-color": rgbaCss({ ...tint, a: 1 }),
           "mix-blend-mode": "multiply",
           "mask-image": image,
@@ -160,9 +205,9 @@ export function webImageLayers(slot: number, node: Raw, context: WebStyleContext
       }),
     );
   }
-  if (tint && tint.a < 1) {
+  if (grouped) {
     // Opacity isolates the group, so the tint multiplies only the image beneath it.
-    const style = { position: "absolute", inset: "0", opacity: String(Number(tint.a.toFixed(3))) };
+    const style = { position: "absolute", ...inset, opacity: String(Number(tint.a.toFixed(3))) };
     return [el("div", { attrs: { "data-image-alpha": "" }, style }, layers)];
   }
   return layers;
@@ -277,7 +322,7 @@ export function webImageRenderer({ base, bound }: WebImageRendererHelpers): Node
     return el(
       "div",
       { attrs: { ...attrs, role: "img" }, style },
-      webImageLayers(slot, node, scope.style),
+      webImageLayers(slot, node, scope.style, webImageLayerInset(style)),
     );
   };
 }

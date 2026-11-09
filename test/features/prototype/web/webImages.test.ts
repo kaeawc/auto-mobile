@@ -95,6 +95,26 @@ describe("webImageDraw and webImageRule", () => {
     ).toEqual({ asset: "a", widthDp: 120, heightFill: true, scale: "crop" });
   });
 
+  test("a fixed axis excludes the padding on both its sides, as Android's target does", () => {
+    const padded = {
+      style: {
+        width: { dp: 200 },
+        height: { dp: 200 },
+        padding: { top: 10, bottom: 30, start: 40, end: 20 },
+      },
+      contentScale: "fill",
+    };
+    const draw = webImageDraw("a", padded);
+    expect(draw).toEqual({ asset: "a", widthDp: 140, heightDp: 160, scale: "fill" });
+    expect(webImageBox(draw, { widthDp: 412, heightDp: 915, density: 2 })).toEqual({
+      width: 280,
+      height: 320,
+      cover: true,
+    });
+    const over = { style: { width: { dp: 20 }, padding: { start: 15, end: 15 } } };
+    expect(webImageDraw("a", over).widthDp).toBe(0);
+  });
+
   test("the rule sets the slot's image, transparent placeholder, aspect ratio and tint switch", () => {
     const rule = webImageRule(2, {
       id: "a",
@@ -191,7 +211,14 @@ describe("an image with an inlinable asset", () => {
       filter: { tint: "#80FF0000" },
     });
     const group = find(rendered.element, (e) => "data-image-alpha" in e.attrs)[0]!;
-    expect(group.style).toEqual({ position: "absolute", inset: "0", opacity: "0.502" });
+    expect(group.style).toEqual({
+      position: "absolute",
+      top: "0",
+      "inset-inline-end": "0",
+      bottom: "0",
+      "inset-inline-start": "0",
+      opacity: "0.502",
+    });
     expect(find(group, (e) => "data-image" in e.attrs)).toHaveLength(1);
     const tint = find(group, (e) => "data-image-tint" in e.attrs)[0]!;
     expect(tint.style["background-color"]).toBe("rgba(255,0,0,1)");
@@ -201,6 +228,56 @@ describe("an image with an inlinable asset", () => {
     const rendered = still({ type: "image", asset: "photo", filter: { tint: "#00FFFFFF" } });
     const group = find(rendered.element, (e) => "data-image-alpha" in e.attrs)[0]!;
     expect(group.style.opacity).toBe("0");
+  });
+
+  test("a padded image's layers sit inside the padding, start and end logical (#17202)", () => {
+    const padding = { top: 10, bottom: 30, start: 40, end: 20 };
+    const inside = {
+      top: "10px",
+      bottom: "30px",
+      "inset-inline-start": "40px",
+      "inset-inline-end": "20px",
+    };
+    for (const layoutDirection of ["ltr", "rtl"]) {
+      const rendered = renderPrototypeStill(
+        {
+          id: "img",
+          window: { placement: { type: "fullscreen" }, layoutDirection },
+          root: {
+            type: "image",
+            asset: "photo",
+            contentScale: "fill",
+            filter: { tint: "#ff0000" },
+            style: { width: { dp: 200 }, height: { dp: 200 }, padding },
+          },
+        },
+        { frame: "pixel-9", imageSlots: new Map([["photo", 3]]) },
+      );
+      const node = find(rendered.element, (e) => e.attrs["data-node"] === "image")[0]!;
+      expect(node.style["padding-inline-start"]).toBe("40px");
+      expect(find(rendered.element, (e) => e.attrs.dir === layoutDirection)).not.toEqual([]);
+      for (const attr of ["data-image", "data-image-tint"]) {
+        const layer = find(node, (e) => attr in e.attrs)[0]!;
+        expect(layer.style).toMatchObject(inside);
+        expect(layer.style.inset).toBeUndefined();
+      }
+      expect(rendered.imageDraws).toEqual([
+        { asset: "photo", widthDp: 140, heightDp: 160, scale: "fill" },
+      ]);
+    }
+  });
+
+  test("a translucent tint's group takes the padding and its layers fill it", () => {
+    const rendered = still({
+      type: "image",
+      asset: "photo",
+      filter: { tint: "#80FF0000" },
+      style: { padding: { top: 8, bottom: 8, start: 8, end: 8 } },
+    });
+    const group = find(rendered.element, (e) => "data-image-alpha" in e.attrs)[0]!;
+    expect(group.style).toMatchObject({ top: "8px", "inset-inline-start": "8px" });
+    const layer = find(group, (e) => "data-image" in e.attrs)[0]!;
+    expect(layer.style).toMatchObject({ top: "0", "inset-inline-start": "0" });
   });
 
   test("an opaque tint adds no alpha group", () => {

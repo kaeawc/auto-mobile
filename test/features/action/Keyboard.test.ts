@@ -1489,7 +1489,7 @@ describe("Keyboard", () => {
     },
   );
 
-  test("ios close treats a hanging settle re-read as unknown, not keyboard-visible (#14953)", async () => {
+  test("ios close reports keyboard_state_unknown when the only settle re-read hangs (#14953, #17621)", async () => {
     const spy = spyOnIosClientInstance({
       requestKeyboard: async () => ({
         success: false,
@@ -1515,11 +1515,13 @@ describe("Keyboard", () => {
         hierarchyProvider: provider,
         timer: fakeTimer,
       }).execute("close");
-      expect(result).toEqual({
-        success: true,
-        open: false,
-        message: "Keyboard is closed (no visible on-screen software keyboard)",
+      // A hanging re-read is unknown, not keyboard-visible, but it confirms nothing either.
+      expect(result).toMatchObject({
+        success: false,
+        open: true,
+        reason: "keyboard_state_unknown",
       });
+      expect(result.error).toContain("Keyboard did not close");
       // The re-read gets the full 2000 ms read deadline, not the 250 ms settle interval.
       expect(fakeTimer.getSleepHistory()).toEqual([250]);
       expect(fakeTimer.now()).toBe(2250);
@@ -1529,6 +1531,109 @@ describe("Keyboard", () => {
       warning.mockRestore();
     }
   });
+
+  const sequencedIOSHierarchyProvider = (laterReads: Array<"hidden" | "error" | "stale">) => {
+    let reads = 0;
+    return {
+      reads: () => reads,
+      provider: {
+        getViewHierarchy: async (): Promise<ViewHierarchyResult> => {
+          reads += 1;
+          const later = laterReads[Math.min(reads - 2, laterReads.length - 1)];
+          if (reads === 1 || later === "hidden") {
+            return iosKeyboardMinimizedHierarchy;
+          }
+          if (later === "stale") {
+            return { ...iosKeyboardMinimizedHierarchy, fresh: false };
+          }
+          throw new Error("hierarchy read timed out");
+        },
+      },
+    };
+  };
+  const failedCloseRunner = {
+    success: false,
+    open: true,
+    totalTimeMs: 1,
+    error: "Keyboard did not close",
+  };
+
+  test.each([
+    ["timed out", ["error"]],
+    ["stale", ["stale"]],
+    ["mixed unknown", ["error", "stale"]],
+  ] as const)(
+    "ios close reports keyboard_state_unknown, not closed, when every settle re-read is %s (#17621)",
+    async (_label, laterReads) => {
+      const { provider, reads } = sequencedIOSHierarchyProvider([...laterReads]);
+      const spy = spyOnIosClientInstance({ requestKeyboard: async () => failedCloseRunner });
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const result = await new Keyboard(iosDevice, {
+          adbFactory: fakeAdbFactory,
+          hierarchyProvider: provider,
+          timer: fakeTimer,
+        }).execute("close");
+        expect(result).toMatchObject({
+          success: false,
+          open: true,
+          reason: "keyboard_state_unknown",
+        });
+        expect(result.message).toBe(result.error);
+        expect(result.error).toContain("Keyboard state unknown after close");
+        expect(fakeTimer.getSleepHistory()).toEqual(Array(6).fill(250));
+        expect(reads()).toBe(7);
+      } finally {
+        spy.mockRestore();
+        warning.mockRestore();
+      }
+    },
+  );
+
+  test("ios close reports closed when one settle re-read completes hidden among unknown ones (#17621)", async () => {
+    const { provider } = sequencedIOSHierarchyProvider(["error", "hidden", "error"]);
+    const spy = spyOnIosClientInstance({ requestKeyboard: async () => failedCloseRunner });
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const result = await new Keyboard(iosDevice, {
+        adbFactory: fakeAdbFactory,
+        hierarchyProvider: provider,
+        timer: fakeTimer,
+      }).execute("close");
+      expect(result).toEqual({
+        success: true,
+        open: false,
+        message: "Keyboard is closed (no visible on-screen software keyboard)",
+      });
+    } finally {
+      spy.mockRestore();
+      warning.mockRestore();
+    }
+  });
+
+  test.each(["detect", "open"] as const)(
+    "ios %s keeps treating an unconfirmed absence as no visible keyboard",
+    async (action) => {
+      const { provider } = sequencedIOSHierarchyProvider(["error"]);
+      const spy = spyOnIosClientInstance({
+        requestKeyboard: async () => ({ success: true, open: true, totalTimeMs: 1 }),
+      });
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const result = await new Keyboard(iosDevice, {
+          adbFactory: fakeAdbFactory,
+          hierarchyProvider: provider,
+          timer: fakeTimer,
+        }).execute(action);
+        expect(result.open).toBe(false);
+        expect(result.success).toBe(action === "detect");
+        expect(result.reason).toBeUndefined();
+      } finally {
+        spy.mockRestore();
+        warning.mockRestore();
+      }
+    },
+  );
 
   // Single-panel/hardware-keyboard device: the first read shows no keyboard and every
   // re-read takes 600 ms (well past the 250 ms settle interval) before completing.

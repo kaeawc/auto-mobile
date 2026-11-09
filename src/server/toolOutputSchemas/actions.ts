@@ -43,6 +43,12 @@ const imeCapabilitiesSchema = z.object({
 export const keyboardResultSchema = z
   .object({
     method: z.enum(["escape", "dismissKey", "returnKey"]).optional(),
+    reason: z
+      .literal("keyboard_state_unknown")
+      .optional()
+      .describe(
+        "iOS close only: the close could not be confirmed because every hierarchy re-read after it timed out or failed, so the keyboard may still be on screen. Run keyboard detect before relying on the keyboard being closed.",
+      ),
     installed: z
       .array(
         z

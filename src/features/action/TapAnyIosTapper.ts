@@ -17,6 +17,7 @@ import {
   indeterminateTapError,
 } from "./coordinateTapDispatch";
 import { resolveTapAnyOrdinaryTapCtrlProxyTimeoutMs } from "./tapAnyCtrlProxyTimeout";
+import { withVoiceOverTimeoutContext } from "./tapIosVoiceOver";
 
 export interface TapAnyIosTapperDependencies {
   device: BootedDevice;
@@ -70,22 +71,22 @@ export class TapAnyIosTapper {
         { featureFlags: this.deps.featureFlags, signal },
       ));
 
-    if (isVoiceOverEnabled && element) {
-      await this.executeIosTapWithVoiceOver(xcTestClient, action, element, {
-        durationMs: longPressDuration,
-        scoped: fenceOptions.scoped,
-        signal,
-      });
-      return;
-    }
-
-    await this.executeIosTapWithCoordinates(xcTestClient, action, point, {
-      longPressDuration,
-      fenceOptions: {
-        signal,
-        displayFence: fence,
-      },
-    });
+    const dispatch = () =>
+      isVoiceOverEnabled && element
+        ? this.executeIosTapWithVoiceOver(xcTestClient, action, element, {
+            durationMs: longPressDuration,
+            scoped: fenceOptions.scoped,
+            signal,
+          })
+        : this.executeIosTapWithCoordinates(xcTestClient, action, point, {
+            longPressDuration,
+            fenceOptions: {
+              signal,
+              displayFence: fence,
+            },
+          });
+    // A timeout with VoiceOver on names the remedy, as tapOn does (#17626).
+    await (isVoiceOverEnabled ? withVoiceOverTimeoutContext(dispatch) : dispatch());
   }
 
   /**

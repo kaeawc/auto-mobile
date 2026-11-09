@@ -7,9 +7,11 @@ import {
   virtualDisplayKey,
   virtualDisplayOwnerPackage,
   parseAndroidDisplayInfos,
+  parseDumpsysLogicalDisplays,
   parseSurfaceFlingerDisplayIds,
   parseTopFocusedDisplayId,
 } from "../../../src/utils/android-cmdline-tools/AndroidDisplayParsers";
+import { aaosDumpsysDisplay } from "../../helpers/aaosMultidisplay";
 
 // The older fold-displays.txt uses cmd display get-displays syntax (inner ON,
 // cover OFF), but its provenance is undocumented. Its cover ID is not corroborated
@@ -20,6 +22,56 @@ const foldSurfaceFlinger = fixture("fold-surfaceflinger.txt");
 const phoneSurfaceFlinger = fixture("phone-surfaceflinger.txt");
 const foldDisplays = fixture("fold-displays.txt");
 const phoneDisplays = fixture("phone-displays.txt");
+
+describe("parseDumpsysLogicalDisplays", () => {
+  test("reads enabled logical displays hidden from the AAOS shell display list", () => {
+    expect(parseDumpsysLogicalDisplays(aaosDumpsysDisplay)).toEqual([
+      {
+        logicalId: "0",
+        uniqueId: "local:4619827259835644672",
+        type: "INTERNAL",
+        sizePx: { width: 1024, height: 768 },
+        hasDisplayInfo: true,
+      },
+      {
+        logicalId: "2",
+        uniqueId: "local:4619827551948147201",
+        type: "INTERNAL",
+        sizePx: { width: 400, height: 600 },
+        hasDisplayInfo: true,
+      },
+      {
+        logicalId: "3",
+        uniqueId: "virtual:com.android.car.cluster.osdouble:ClusterDisplay",
+        type: "VIRTUAL",
+        sizePx: { width: 400, height: 500 },
+        hasDisplayInfo: true,
+      },
+      {
+        logicalId: "4",
+        uniqueId: "virtual:com.android.emulator.multidisplay:1234562",
+        type: "VIRTUAL",
+        sizePx: { width: 1280, height: 720 },
+        hasDisplayInfo: true,
+      },
+    ]);
+  });
+
+  test.each(["open", "closed"])("drops the captured disabled fold panel (%s)", (posture) => {
+    const dump = fixture(`fold-pixel10pf-api36/fold-${posture}-displays.txt`);
+    const displays = parseDumpsysLogicalDisplays(dump);
+    expect(displays.map((display) => display.logicalId)).toEqual(["0"]);
+    expect(displays[0].uniqueId).toBe(
+      posture === "open" ? "local:4619827259835644672" : "local:4619827551948147201",
+    );
+  });
+
+  test("accepts CRLF derived from the captured AAOS dump", () => {
+    expect(parseDumpsysLogicalDisplays(aaosDumpsysDisplay.replace(/\n/g, "\r\n"))).toEqual(
+      parseDumpsysLogicalDisplays(aaosDumpsysDisplay),
+    );
+  });
+});
 const innerLine = foldDisplays.split("\n")[1];
 const innerKey = "4619827259835644672";
 const surfaceCoverKey = "4619827551948147201";

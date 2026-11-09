@@ -366,6 +366,14 @@ final class FakeDisplayGestureProvider: DisplayGestureProviding {
         return symbolsAvailable
     }
 
+    var paths: [DisplayPath] = []
+
+    func synthesizePath(_ path: DisplayPath) throws -> Bool {
+        paths.append(path)
+        if let synthesisError { throw synthesisError }
+        return symbolsAvailable
+    }
+
     func coordinate(selection: GestureCoordinateSelection) throws -> GestureCoordinateSelection {
         selections.append(selection)
         return selection

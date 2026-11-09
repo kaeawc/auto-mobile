@@ -492,19 +492,22 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             )
 
             let observationSize = GestureSize(width: Double(screenWidth), height: Double(screenHeight))
+            // The inner panel's window keeps its portrait frame, like an app on that panel, while
+            // the observation is landscape; the display-targeted route maps between the two.
+            let appSize = GestureSize(
+                width: Double((innerPanelFrame ?? frame).width),
+                height: Double((innerPanelFrame ?? frame).height)
+            )
             gestureGeometry = GestureCoordinateGeometry(
-                // The inner panel's window keeps its portrait frame, like an app on that panel, while
-                // the observation is landscape; the display-targeted route maps between the two.
-                app: GestureSize(
-                    width: Double((innerPanelFrame ?? frame).width),
-                    height: Double((innerPanelFrame ?? frame).height)
-                ),
+                app: appSize,
                 screen: GestureSize(
                     width: Double(currentScreenMetrics.fallbackWidth),
                     height: Double(currentScreenMetrics.fallbackHeight)
                 ),
                 observation: observationSize,
-                rotation: GestureCoordinateGeometry.observationRotation(hierarchyRotation, size: observationSize),
+                rotation: GestureCoordinateGeometry.observationRotation(
+                    hierarchyRotation, size: observationSize, app: appSize
+                ),
                 // Live SpringBoard reads see only the cover's frame; keep the observed panel.
                 pinnedToObservation: innerPanelFrame != nil
             )

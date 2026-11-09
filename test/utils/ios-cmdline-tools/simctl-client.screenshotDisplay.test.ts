@@ -66,6 +66,9 @@ function png(width: number, height: number): Buffer {
   return buffer;
 }
 
+/** A runner fallback the aspect check accepts: it matches the inner panel the hierarchy selects. */
+const RUNNER_INNER_FRAME = png(2007, 2853).toString("base64");
+
 function fakeCaptureDir(n: number): string {
   return resolve("fake", `capture-${n}`);
 }
@@ -549,10 +552,10 @@ test("missing output file still falls back to runner with its typed warning", as
       h.simctl,
       async () => {
         fallback++;
-        return { success: true, data: "runner" };
+        return { success: true, data: RUNNER_INNER_FRAME };
       },
     );
-    expect(result.data).toBe("runner");
+    expect(result.data).toBe(RUNNER_INNER_FRAME);
     expect(fallback).toBe(1);
     expect(warn.mock.calls).toHaveLength(1);
     expect(warn.mock.calls[0]?.[0]).toContain("reason=missing-output-file exit=0");
@@ -595,11 +598,11 @@ test("multi-panel screenshot falls back with a warning when simctl returns cover
     { screenshot: async () => png(1398, 2034) },
     async () => {
       fallback++;
-      return { success: true, data: "runner" };
+      return { success: true, data: RUNNER_INNER_FRAME };
     },
   );
   expect(fallback).toBe(1);
-  expect(result.data).toBe("runner");
+  expect(result.data).toBe(RUNNER_INNER_FRAME);
 });
 
 test("multi-panel screenshot selects the inner panel from live hierarchy pixels", async () => {
@@ -625,6 +628,7 @@ test("multi-panel screenshot selects the inner panel from live hierarchy pixels"
 
 test("inner panel rejects a cover-sized PNG despite matching hierarchy points at scale", async () => {
   const frame = png(1398, 2034);
+  let fallback = 0;
   expect(device.displays?.panels.find((panel) => panel.key === "primary-1")?.sizePx).toEqual({
     width: 2007,
     height: 2853,
@@ -640,11 +644,16 @@ test("inner panel rejects a cover-sized PNG despite matching hierarchy points at
       screenScale: 3,
     },
     { screenshot: async () => frame },
-    async () => ({ success: true, data: "runner" }),
+    async () => {
+      fallback++;
+      return { success: true, data: frame.toString("base64") };
+    },
     undefined,
     "primary-1",
   );
-  expect(result.data).toBe("runner");
+  // The simctl frame is rejected; the runner frame matches the hierarchy points.
+  expect(fallback).toBe(1);
+  expect(result).toEqual({ success: true, data: frame.toString("base64") });
 });
 
 test("simctl screenshot reports its 10s timeout and cleans up after process error", async () => {
@@ -696,7 +705,7 @@ test("simctl screenshot late close after caller abort preserves attribution and 
 test("panel capture failure falls back to the runner and the warning names the caller-signal state", async () => {
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   const caller = new AbortController();
-  const runnerResult = { success: true, data: "runner" };
+  const runnerResult = { success: true, data: RUNNER_INNER_FRAME };
   try {
     const result = await capturePanel(
       device,
@@ -729,7 +738,7 @@ test("panel capture logs one empty-output diagnostic before runner fallback", as
       { screenshot: async () => Buffer.alloc(0) },
       async () => {
         fallback++;
-        return { success: true, data: "runner" };
+        return { success: true, data: RUNNER_INNER_FRAME };
       },
     );
     expect(fallback).toBe(1);
@@ -754,7 +763,7 @@ test("panel capture logs one non-image diagnostic with the first 16 bytes before
       { screenshot: async () => nonImage },
       async () => {
         fallback++;
-        return { success: true, data: "runner" };
+        return { success: true, data: RUNNER_INNER_FRAME };
       },
     );
     expect(fallback).toBe(1);
@@ -785,9 +794,9 @@ test("panel capture includes typed simctl failure diagnostics in one warning", a
           );
         },
       },
-      async () => ({ success: true, data: "runner" }),
+      async () => ({ success: true, data: RUNNER_INNER_FRAME }),
     );
-    expect(result.data).toBe("runner");
+    expect(result.data).toBe(RUNNER_INNER_FRAME);
     expect(warn.mock.calls).toHaveLength(1);
     expect(warn.mock.calls[0]?.[0]).toContain("capture failed; using runner capture:");
     expect(warn.mock.calls[0]?.[0]).toContain(
@@ -811,9 +820,9 @@ test("panel capture distinguishes timeout and caller abort in one warning each",
           });
         },
       },
-      async () => ({ success: true, data: "timeout-runner" }),
+      async () => ({ success: true, data: RUNNER_INNER_FRAME }),
     );
-    expect(timeoutResult.data).toBe("timeout-runner");
+    expect(timeoutResult.data).toBe(RUNNER_INNER_FRAME);
     expect(warn.mock.calls).toHaveLength(1);
     expect(warn.mock.calls[0]?.[0]).toContain("reason=aborted-by-timeout");
     expect(warn.mock.calls[0]?.[0]).toContain("timeoutAborted=true");
@@ -833,10 +842,10 @@ test("panel capture distinguishes timeout and caller abort in one warning each",
           });
         },
       },
-      async () => ({ success: true, data: "caller-runner" }),
+      async () => ({ success: true, data: RUNNER_INNER_FRAME }),
       caller.signal,
     );
-    expect(callerResult.data).toBe("caller-runner");
+    expect(callerResult.data).toBe(RUNNER_INNER_FRAME);
     expect(warn.mock.calls).toHaveLength(1);
     expect(warn.mock.calls[0]?.[0]).toContain("reason=aborted-by-caller");
     expect(warn.mock.calls[0]?.[0]).toContain("timeoutAborted=false");
@@ -854,7 +863,7 @@ test("valid panel PNG is accepted without a warning", async () => {
       device,
       { updatedAt: 0, packageName: "app", hierarchy: {}, pixelWidth: 2853, pixelHeight: 2007 },
       { screenshot: async () => frame },
-      async () => ({ success: true, data: "runner" }),
+      async () => ({ success: true, data: RUNNER_INNER_FRAME }),
     );
     expect(warn.mock.calls).toHaveLength(0);
     expect(result.data).toBe(frame.toString("base64"));

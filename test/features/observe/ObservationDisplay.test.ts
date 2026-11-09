@@ -47,8 +47,28 @@ import {
 } from "../../../src/utils/ios-cmdline-tools/SimulatorDisplays";
 import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
+import { aaosAdb, aaosDevice, aaosVirtualKey } from "../../helpers/aaosMultidisplay";
+
 const android: BootedDevice = { name: "Pixel", platform: "android", deviceId: "emulator-5554" };
 const ios: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "simulator" };
+
+describe("AAOS hidden logical displays", () => {
+  afterEach(() => ObservedAndroidDisplayCache.release(aaosDevice.deviceId));
+
+  test("resolves the captured virtual panel to logical display 4", async () => {
+    const cache = new ObservedAndroidDisplayCache(new FakeTimer());
+    expect(await cache.logicalIdForPanel(aaosDevice, aaosAdb(), aaosVirtualKey)).toBe(4);
+  });
+
+  test("maps logical 4 to its inventory panel and preserves the default display", async () => {
+    const cache = new ObservedAndroidDisplayCache(new FakeTimer());
+    expect((await cache.panelForLogicalId(aaosDevice, aaosAdb(), 4))?.key).toBe(aaosVirtualKey);
+    const observed = await cache.resolve(aaosDevice, aaosAdb());
+    expect(observed.logicalId).toBe(0);
+    expect(observed.display.key).toBe("4619827259835644672");
+    expect(observed.panelKeysByLogicalId?.[4]).toBe(aaosVirtualKey);
+  });
+});
 
 describe("Android observe disconnected fold panels", () => {
   const inner = "4619827259835644672";
@@ -136,6 +156,7 @@ describe("Android observe disconnected fold panels", () => {
           posture === "opened" ? inner : cover,
         ),
       ).toBe(0);
+      expect(adb.getExecutedCommands()).toEqual(["shell cmd display get-displays"]);
     },
   );
 });

@@ -29,6 +29,9 @@ PREPUSH_CHANGED_FILES_FILE may provide newline-separated paths for testing.
 Lanes run serially: runtime-pins, node, shell, android, ios, integration,
 integration-safe. Each platform/Node lane owns its attestation; this dispatcher
 never records one.
+Before the lanes run, scripts/release/runner-capability-note.sh prints a
+non-blocking note when the diff adds a control-proxy capability that new host
+code already uses; it never changes the exit status.
 
 --profile cloud keeps only lanes a Linux cloud runner (no devices, emulator,
 simulator or Xcode) can run: it always skips ios, skips android unless an
@@ -167,6 +170,11 @@ print_skipped() {
   done
 }
 if [[ "$list" -eq 1 ]]; then print_skipped; printf '%s\n' ${selected_lanes[@]+"${selected_lanes[@]}"}; exit 0; fi
+# Advisory only (#17618): a new control-proxy capability that host code already
+# uses ships with the next runner release and pin. Never fails the dispatcher.
+if [[ -f "$SCRIPT_DIR/release/runner-capability-note.sh" ]]; then
+  bash "$SCRIPT_DIR/release/runner-capability-note.sh" --base "$BASE" || true
+fi
 if [[ ${#selected_lanes[@]} -eq 0 ]]; then
   print_skipped
   count=0

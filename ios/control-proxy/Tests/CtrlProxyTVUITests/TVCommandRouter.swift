@@ -4,9 +4,11 @@ import XCTest
 @MainActor
 final class TVCommandRouter {
     private let application: XCUIApplication
+    private let textEntryCommands: TVTextEntryCommands
 
     init(application: XCUIApplication) {
         self.application = application
+        textEntryCommands = TVTextEntryCommands(clock: TVSystemUptimeClock())
     }
 
     private struct Envelope: Decodable {
@@ -49,9 +51,9 @@ final class TVCommandRouter {
             case "request_hierarchy":
                 let request = try decoder.decode(RequestHierarchy.self, from: data)
                 let resolved = target(requested: envelope.bundleId)
-                let snapshot = try resolved.app.snapshot()
-                let tree = sketch(snapshot)
-                let resolution = TVTextEntryPolicy.resolve(root: tree)
+                let (snapshot, tree, resolution) = try textEntryCommands.hierarchy(
+                    snapshot: { try resolved.app.snapshot() }, sketch: sketch
+                )
                 return try JSONEncoder().encode(HierarchyUpdateResponse(
                     requestId: request.requestId,
                     data: ViewHierarchy(
@@ -71,7 +73,10 @@ final class TVCommandRouter {
                     throw CommandError.invalidParameter("frameContext", "unsupported on tvOS")
                 }
                 let startTime = Date()
-                press(button)
+                textEntryCommands.press(button, perform: press, snapshot: {
+                    let resolved = target(requested: envelope.bundleId)
+                    return try sketch(resolved.app.snapshot())
+                })
                 return try JSONEncoder().encode(WebSocketResponse.success(
                     type: "press_button_result", requestId: requestId,
                     totalTimeMs: Int64(Date().timeIntervalSince(startTime) * 1000)
@@ -84,11 +89,12 @@ final class TVCommandRouter {
                 }
                 let startTime = Date()
                 let resolved = target(requested: envelope.bundleId)
-                let snapshot = try resolved.app.snapshot()
-                guard TVTextEntryPolicy.hasFocusedKeyboard(sketch(snapshot)) else {
+                guard try textEntryCommands.appendText(
+                    snapshot: { try sketch(resolved.app.snapshot()) },
+                    typeText: { resolved.app.typeText(request.text) }
+                ) else {
                     throw CommandError.invalidParameter("text", "no focused text input")
                 }
-                resolved.app.typeText(request.text)
                 return try JSONEncoder().encode(WebSocketResponse.success(
                     type: ResponseType.appendTextResult.rawValue, requestId: request.requestId,
                     totalTimeMs: Int64(Date().timeIntervalSince(startTime) * 1000)

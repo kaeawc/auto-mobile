@@ -27,6 +27,7 @@ import {
   parseAndroidDisplayInfos,
 } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
 import { selectLiveSimulatorDisplay } from "../../utils/ios-cmdline-tools/SimulatorDisplays";
+import { readAndroidLogicalDisplays } from "../../utils/android-cmdline-tools/AndroidLogicalDisplays";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { AndroidDisplayReadError } from "./AndroidDisplayReadError";
@@ -66,18 +67,15 @@ function singlePanelKeyOrDefault(panels: readonly DisplayPanel[]): string {
 
 async function readAndroidDisplayInfos(
   adb: AdbCommandRunner,
+  panels: readonly DisplayPanel[],
   signal?: AbortSignal,
 ): Promise<
   { infos: ReturnType<typeof parseAndroidDisplayInfos> } | { infos: null; reason: string }
 > {
   try {
-    const output = await adb.executeCommand("shell cmd display get-displays", {
-      timeoutMs: 2000,
-      noRetry: true,
-      signal,
-    });
+    const infos = await readAndroidLogicalDisplays(adb, panels, signal);
     signal?.throwIfAborted();
-    return { infos: parseAndroidDisplayInfos(output.stdout) };
+    return { infos };
   } catch (error) {
     if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
       throw error;
@@ -188,7 +186,7 @@ export class ObservedAndroidDisplayCache {
     if (!device.displays?.panels.length && key === "0") {
       return 0;
     }
-    const result = await readAndroidDisplayInfos(adb, signal);
+    const result = await readAndroidDisplayInfos(adb, device.displays?.panels ?? [], signal);
     if (result.infos === null) {
       throw new AndroidDisplayReadError(
         `Android display list could not be read while selecting panel "${key}": ${result.reason}. Retry the request.`,
@@ -246,7 +244,7 @@ export class ObservedAndroidDisplayCache {
     if (!allowProbe) {
       return undefined;
     }
-    const result = await readAndroidDisplayInfos(adb, signal);
+    const result = await readAndroidDisplayInfos(adb, panels, signal);
     if (result.infos === null) {
       return undefined;
     }
@@ -358,7 +356,7 @@ async function readObservedAndroidDisplay(
       cacheable: true,
     };
   }
-  const result = await readAndroidDisplayInfos(adb, signal);
+  const result = await readAndroidDisplayInfos(adb, panels, signal);
   const infos = result.infos ?? [];
   if (infos.length === 0 && previous) {
     return {

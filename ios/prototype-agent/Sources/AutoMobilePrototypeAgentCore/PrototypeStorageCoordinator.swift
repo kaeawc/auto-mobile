@@ -8,6 +8,8 @@ struct PrototypeStoragePreparation {
     let state: [String: JSONValue]
     let applied: [String]
     let dropped: [PrototypeStorageDrop]
+    /// Restored stack paths by stack id, for `PrototypeSession.show(_:restoredStacks:)` (#14188).
+    var stacks: [String: [PrototypeStackPathEntry]] = [:]
 }
 
 /// The `storage` object of `get_prototype_status` and the inspect entry (`PrototypeStorageReport` on
@@ -131,7 +133,10 @@ final class PrototypeStorageCoordinator {
             let keys = Self.entryKeys(block)
             var next = Tracking(
                 id: spec.id, version: block.version, keys: keys, persisted: kept,
-                live: Self.liveValues(keys, state: restored.state, data: shown.data)
+                live: Self.liveValues(
+                    keys, state: restored.state, data: shown.data,
+                    stacks: Self.initialStacks(shown, restored: restored.stacks)
+                )
             )
             // Restored values that are still not on disk stay dirty so the write is retried.
             let unsavedKeys = unsaved?.dirty ?? []
@@ -140,7 +145,8 @@ final class PrototypeStorageCoordinator {
             if !next.dirty.isEmpty { scheduleFlush() }
         }
         return PrototypeStoragePreparation(
-            spec: shown, state: restored.state, applied: restored.applied, dropped: restored.dropped
+            spec: shown, state: restored.state, applied: restored.applied, dropped: restored.dropped,
+            stacks: restored.stacks
         )
     }
 
@@ -204,7 +210,7 @@ final class PrototypeStorageCoordinator {
             return
         }
         guard session.spec?.id == current.id else { return }
-        let live = Self.liveValues(current.keys, state: session.state, data: session.data)
+        let live = Self.liveValues(current.keys, state: session.state, data: session.data, stacks: session.stacks)
         let moved = current.keys.map(\.raw).filter { live[$0] != current.live[$0] }
         guard !moved.isEmpty else { return }
         current.live = live
@@ -316,8 +322,24 @@ final class PrototypeStorageCoordinator {
         }
     }
 
+    /// Each stack's path as the show will start it: the restored one, else its start screen.
+    private static func initialStacks(
+        _ spec: PrototypeSpec, restored: [String: [PrototypeStackPathEntry]]
+    )
+        -> [String: PrototypeStackSnapshot]
+    {
+        var nodes: [String: PrototypeNode] = [:]
+        spec.root.collectStacks(into: &nodes)
+        return nodes.reduce(into: [:]) { result, stack in
+            result[stack.key] = PrototypeStackSnapshot(
+                entries: restored[stack.key] ?? [PrototypeStackPathEntry(screen: stack.value.start ?? "")]
+            )
+        }
+    }
+
     private static func liveValues(
-        _ keys: [EntryKey], state: [String: JSONValue], data: [String: JSONValue]?
+        _ keys: [EntryKey], state: [String: JSONValue], data: [String: JSONValue]?,
+        stacks: [String: PrototypeStackSnapshot]
     )
         -> [String: JSONValue]
     {
@@ -326,6 +348,7 @@ final class PrototypeStorageCoordinator {
             switch entry.parsed {
             case let .state(key): values[entry.raw] = state[key]
             case let .data(pointer): values[entry.raw] = PrototypeDataPointer.resolve(data, pointer: pointer)
+            case let .stack(id): values[entry.raw] = stacks[id].map(PrototypeStackRoutes.storedValue)
             }
         }
         return values

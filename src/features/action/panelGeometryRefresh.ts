@@ -29,9 +29,14 @@ export function isIosMultiPanel(device: Pick<BootedDevice, "platform" | "display
   return device.platform === "ios" && (device.displays?.panels.length ?? 0) > 1;
 }
 
+type RefreshedAction = Pick<
+  ObservedChangeOptions,
+  "display" | "predictionContext" | "previousObservation"
+>;
+
 function refreshApplies(
   device: Pick<BootedDevice, "platform" | "displays">,
-  action: Pick<ObservedChangeOptions, "display" | "predictionContext">,
+  action: RefreshedAction,
   callerStampIsStale: () => boolean,
 ): boolean {
   return (
@@ -51,12 +56,14 @@ function refreshApplies(
  * the current panel and refreshes the host cache the gesture then reads.
  *
  * Only unscoped coordinate actions (`toolName` in COORDINATE_ACTIONS, no explicit `display`) are
- * refreshed. Returns the fresh observation when one was captured, or undefined otherwise. A failed
+ * refreshed. A `previousObservation` the action captured itself at the current display revision
+ * (tapOn, tapAny and swipeOn resolve their target from one) already re-pinned the runner, so it
+ * stands in for the fresh capture (#17593). Returns the fresh observation when one was captured, or undefined otherwise. A failed
  * fresh capture propagates: dispatching on geometry known to be stale is worse than failing.
  */
 export async function refreshStaleIosPanelGeometry(
   device: Pick<BootedDevice, "platform" | "displays" | "deviceId">,
-  action: Pick<ObservedChangeOptions, "display" | "predictionContext">,
+  action: RefreshedAction,
   {
     observer,
     transitions,
@@ -67,8 +74,11 @@ export async function refreshStaleIosPanelGeometry(
   if (!refreshApplies(device, action, callerStampIsStale)) {
     return undefined;
   }
-  const cached = await observer.getMostRecentCachedObserveResult();
   const currentRevision = transitions.revision(device.deviceId);
+  if (action.previousObservation?.displayRevision === currentRevision) {
+    return undefined;
+  }
+  const cached = await observer.getMostRecentCachedObserveResult();
   if (cached.error === undefined && cached.displayRevision === currentRevision) {
     return undefined;
   }

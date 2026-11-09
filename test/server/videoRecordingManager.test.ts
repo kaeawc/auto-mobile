@@ -1060,6 +1060,45 @@ describe("videoRecordingManager", () => {
       expect(metadata.warnings).toBeUndefined();
     });
 
+    test("labels the panel from the chosen --display, not a stale observe (#17593)", async () => {
+      observeIos("inner", "obs-1");
+      fakeBackend.setRecordedPanel(() => ({ key: "cover", role: "cover" }));
+      const active = await startVideoRecording({ device: iosFoldable });
+      expect(active.recordedPanel).toEqual({ key: "cover", role: "cover" });
+
+      const { metadata } = await stopVideoRecording(active.recordingId);
+      expect(metadata.recordedPanel).toEqual({ key: "cover", role: "cover" });
+      expect(metadata.transitions).toEqual([]);
+      expect(metadata.warnings).toBeUndefined();
+    });
+
+    test("the first observe after an unknown start is not a transition (#17593)", async () => {
+      // An observed panel outside the inventory leaves the recording's starting panel unknown.
+      displayTransitions.record(
+        iosFoldable.deviceId,
+        {
+          display: { key: "main", role: "unknown", posture: "unknown", generation: 0 },
+          screenSize: { width: 200, height: 300 },
+          observationId: "obs-0",
+        },
+        "ios",
+      );
+      const active = await startVideoRecording({ device: iosFoldable });
+      expect(active.recordedPanel).toEqual({ key: "unknown", role: "unknown" });
+      fakeTimer.advanceTime(500);
+      observeIos("inner", "obs-1");
+      fakeTimer.advanceTime(1000);
+      observeIos("cover", "obs-2");
+
+      const { metadata } = await stopVideoRecording(active.recordingId);
+      expect(metadata.transitions).toEqual([
+        { atMs: 1500, from: { key: "inner", role: "inner" }, to: { key: "cover", role: "cover" } },
+      ]);
+      expect<unknown>(metadata.warnings).toEqual([
+        'iOS recording kept capturing the starting panel after the active display changed to panel "cover" (cover) at 1500ms; frames after that point may show an inactive panel.',
+      ]);
+    });
+
     test("a single-panel iPhone is not tracked", async () => {
       const active = await startVideoRecording({ device: iosDevice });
       const { metadata } = await stopVideoRecording(active.recordingId);

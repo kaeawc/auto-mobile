@@ -20,9 +20,9 @@ import { buildDisconnectedPanelMessage, type DisplayPanel } from "../../models/D
 import {
   logicalDisplayIdForPanel,
   panelKeyForUniqueId,
-  parseAndroidDisplayInfos,
   type AndroidDisplayInfo,
 } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
+import { readAndroidLogicalDisplays } from "../../utils/android-cmdline-tools/AndroidLogicalDisplays";
 import { selectedDisplayPin } from "../observe/SessionDisplayContext";
 import { INTERMEDIATE_OBSERVATION_OPTIONS } from "./BaseVisualChange";
 import type { ActionCall } from "./ActionCall";
@@ -31,17 +31,13 @@ export { buildDisconnectedPanelMessage } from "../../models/DisplayPanel";
 
 async function readActionDisplayInfos(
   adb: AdbCommandRunner,
+  panels: readonly DisplayPanel[],
   signal?: AbortSignal,
 ): Promise<AndroidDisplayInfo[]> {
   throwIfAborted(signal);
   try {
-    const output = await adb.executeCommand("shell cmd display get-displays", {
-      timeoutMs: 2000,
-      noRetry: true,
-      signal,
-    });
+    const infos = await readAndroidLogicalDisplays(adb, panels, signal);
     throwIfAborted(signal);
-    const infos = parseAndroidDisplayInfos(output.stdout);
     if (!infos.length) {
       // Older Android may not support this optional list; absence cannot prove disconnection.
       logger.debug("Android action display list is empty; retaining prior-observation guidance.");
@@ -74,7 +70,7 @@ async function assertActionPanelConnected(
   if (device.platform !== "android" || !device.displays?.panels.length) {
     return;
   }
-  const infos = await readActionDisplayInfos(adb, signal);
+  const infos = await readActionDisplayInfos(adb, device.displays.panels, signal);
   if (!infos.length || logicalDisplayIdForPanel(infos, panel.key) !== undefined) {
     return;
   }

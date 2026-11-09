@@ -74,11 +74,10 @@ import {
   lineCss,
   multilineCss,
   nodeCss,
-  scrollChildStyle,
   textCss,
   type WebStyleContext,
 } from "./webStyle";
-import { safeAreaCss, safeAreaEdges } from "./webInsets";
+import { safeAreaCss, safeAreaEdges, withSafeInset } from "./webInsets";
 import { webImageRenderer, type WebImageDraw } from "./webImages";
 import { fadeEdgesCss, shaderFallback, withOverContentLayers } from "./webStylePolish";
 import { textRuns } from "./webText";
@@ -90,7 +89,7 @@ import {
   prototypeIconVariant,
   type PrototypeIconGlyphSource,
 } from "./webIconGlyphs";
-import { contentHeightBound, rowFillAxes, rowMeasured } from "./webRowAspect";
+import { contentHeightBound, rowFillAxes, rowMeasured, scrollChildPatch } from "./webRowAspect";
 import { repeatInstanceChildren, withColumnHeights } from "./webIncomingHeight";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
@@ -160,6 +159,8 @@ export interface WebRenderScope {
   readonly ownInsets?: readonly string[];
   /** The content height bound in dp a row or box passes its children; a scroll passes none. */
   readonly heightBound?: number;
+  /** The frame's top and bottom safe-area insets (dp), which the static height pass subtracts. */
+  readonly safeInsets?: { readonly top: number; readonly bottom: number };
 }
 
 export type NodeRenderer = (node: Raw, scope: WebRenderScope, path: string) => WebElement;
@@ -273,15 +274,14 @@ function base(node: Raw, scope: WebRenderScope, extra: Record<string, string> = 
 }
 
 function child(scope: WebRenderScope, patch: Partial<WebRenderScope>): WebRenderScope {
-  // Descendants see the insets this node applied as consumed.
-  const consumedInsets = [...(scope.consumedInsets ?? []), ...(scope.ownInsets ?? [])];
   return {
     ...scope,
     ...patch,
     style: { ...scope.style, ...patch.style },
-    consumedInsets,
+    // Descendants see the insets this node applied as consumed.
+    consumedInsets: [...(scope.consumedInsets ?? []), ...(scope.ownInsets ?? [])],
     ownInsets: [],
-    // Only a row or box (or a repeat row of one) passes its height bound on; a scroll has none.
+    // Only a row, box (or a repeat row of one) or horizontal scroll passes its height bound on.
     heightBound: patch.heightBound,
   };
 }
@@ -415,7 +415,7 @@ function lineFillAxes(
     return [];
   }
   const list: unknown[] = sized.children;
-  const own = rowFillAxes(raw, path, prepareIn(scope), scope.heightBound);
+  const own = rowFillAxes(raw, path, prepareIn(scope), scope);
   // Children see the bound this container passes them, as rendering gives it (see `line`, `box`).
   const bound = BOUNDING_CONTAINERS.has(String(raw.type))
     ? contentHeightBound(raw.style, scope.heightBound)
@@ -433,8 +433,10 @@ function lineFillAxes(
 const prepareIn = (s: WebRenderScope) => (e: unknown, at: string) => preparedNode(e, s, at)?.styled;
 
 /** A column or card whose children carry the height share it hands each (see withColumnHeights). */
-const columnSized = (raw: Raw, scope: WebRenderScope, path: string) =>
-  withColumnHeights(raw, path, prepareIn(scope), contentHeightBound(raw.style, scope.heightBound));
+const columnSized = (raw: Raw, scope: WebRenderScope, path: string) => {
+  const bound = contentHeightBound(raw.style, scope.heightBound);
+  return withColumnHeights(raw, path, prepareIn(child(scope, {})), bound);
+};
 
 const line =
   (axis: "row" | "column"): NodeRenderer =>
@@ -451,7 +453,7 @@ const line =
       style: containerChildStyle(scope, node, axis),
       heightBound: contentHeightBound(node.style, scope.heightBound),
     });
-    const rowed = rowMeasured(node, path, prepareIn(inner), scope.heightBound);
+    const rowed = rowMeasured(node, path, prepareIn(inner), { ...scope, style: inner.style });
     const { attrs, style } = base(rowed, scope, lineCss(axis, rowed.style));
     return el("div", { attrs, style }, children(rowed, inner, path));
   };
@@ -499,7 +501,7 @@ const scroll: NodeRenderer = (node, scope, path) => {
     [horizontal ? "overflow-x" : "overflow-y"]: "auto",
     ...fade.style,
   });
-  const inner = child(scope, { inBox: false, style: scrollChildStyle(scope, node) });
+  const inner = child(scope, scrollChildPatch(scope, node));
   const scrollAttrs = { ...attrs, ...fade.attrs };
   return el("div", { attrs: scrollAttrs, style }, renderOrSkip(node.child, inner, `${path}.child`));
 };
@@ -943,11 +945,7 @@ export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
 };
 
 const WEB_LAYER_RENDERERS = { ...webSheetLayers(KIT), ...webModalLayers(KIT) };
-
-/** Whether `type` draws only in the window's layer while its `openWhen` holds, never in place. */
-export function isWebLayerType(type: unknown): boolean {
-  return Object.hasOwn(WEB_LAYER_RENDERERS, String(type));
-}
+export const WEB_LAYER_RENDERED_TYPES: readonly string[] = Object.keys(WEB_LAYER_RENDERERS);
 
 const WEB_SKINS = webSkins(KIT);
 
@@ -1025,7 +1023,8 @@ export function preparedNode(
   if (raw.visibleWhen !== undefined && !conditionHolds(raw.visibleWhen, presentation(local))) {
     return undefined;
   }
-  return { styled: { ...raw, style: resolvedStyle(raw, local) }, scope: local };
+  const style = withSafeInset(resolvedStyle(raw, local), raw, local);
+  return { styled: { ...raw, style }, scope: local };
 }
 
 export function renderWebNode(

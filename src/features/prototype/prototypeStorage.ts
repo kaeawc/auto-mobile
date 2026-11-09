@@ -180,7 +180,14 @@ function checkStorageKey(
   return { bytes: value === undefined ? 0 : prototypeStorageEntryBytes(storageKey, value) };
 }
 
-const storageKeySchema = z.string().refine((key) => parsePrototypeStorageKey(key) !== undefined);
+// A report lists the device's stack paths (`stack:<id>`, #14188) beside its state and data keys.
+const storageKeySchema = z
+  .string()
+  .max(261)
+  .refine(
+    (key) =>
+      parsePrototypeStorageKey(key) !== undefined || (key.startsWith("stack:") && key.length > 6),
+  );
 const byteCountSchema = z.number().int().safe().nonnegative();
 const storageReportSchema = z.object({
   version: z.number().int().safe().min(1),

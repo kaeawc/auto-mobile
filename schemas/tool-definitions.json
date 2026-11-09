@@ -67305,19 +67305,29 @@
   },
   {
     "name": "wearSurface",
-    "title": "Manage Wear OS Tiles and Watch Faces",
+    "title": "Manage Wear OS Tiles, Watch Faces and Complications",
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Wear OS watches only (other form factors are refused without a change): tiles. listTileProviders lists the installed tile provider components. addTile adds a tile provider to the carousel (idempotent; reports its index; a component that is not a tile provider fails before anything is sent, naming the valid ones). removeTile removes it (also succeeds when it was absent). showTile scrolls the carousel to a tile by component (index resolved right before showing, adding the tile if absent) or by index, then observes; success requires the observe to confirm a tile container in the foreground Wear system UI. The debug broadcasts report success even when nothing happened, so verified is only true when an observe confirmed it. watchFace only reads dumpsys wear_service: the active face (package, favoriteId, fallback), each favorite's complication slots (slot, type, provider or null; the active favorite's are live) and ambient; available is false when the watch faces cannot be read.",
+    "description": "Wear OS watches only (other form factors are refused without a change): tiles, watch faces and complications. listTileProviders lists the installed tile provider components. addTile adds a tile provider to the carousel (idempotent; reports its index; a component that is not a tile provider fails before anything is sent, naming the valid ones). removeTile removes it (also succeeds when it was absent). showTile scrolls the carousel to a tile by component (index resolved right before showing, adding the tile if absent) or by index, then observes; success requires the observe to confirm a tile container in the foreground Wear system UI. The debug broadcasts report success even when nothing happened, so verified is only true when an observe confirmed it. watchFace only reads dumpsys wear_service: the active face (package, favoriteId, fallback), each favorite's complication slots (slot, type, provider or null; the active favorite's are live) and ambient; available is false when the watch faces cannot be read. setWatchFace switches the active face (bare package for a WFF face, <package>/<class> for a classic one) and unsetWatchFace reverts it; setComplication puts a provider in a face slot with an androidx type int, unsetComplication empties the slot. Watch face changes succeed (applied: true) only when a dumpsys wear_service readback shows the change: an accepted broadcast can still leave a slot empty when the provider does not support the type (error not_applied).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "action": {
-          "description": "listTileProviders takes no other argument; addTile and removeTile need component; showTile needs component (index resolved right before showing) or index; watchFace takes neither and only reads",
+          "description": "listTileProviders takes no other argument; addTile and removeTile need component; showTile needs component (index resolved right before showing) or index; watchFace takes neither and only reads. setWatchFace needs watchFace; unsetWatchFace takes nothing; setComplication needs watchFace, slot, type and provider; unsetComplication needs watchFace, slot and provider",
           "type": "string",
-          "enum": ["addTile", "showTile", "removeTile", "listTileProviders", "watchFace"]
+          "enum": [
+            "addTile",
+            "showTile",
+            "removeTile",
+            "listTileProviders",
+            "watchFace",
+            "setWatchFace",
+            "unsetWatchFace",
+            "setComplication",
+            "unsetComplication"
+          ]
         },
         "component": {
           "description": "Tile provider service as <package>/<service>",
@@ -67329,6 +67339,28 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
+        },
+        "watchFace": {
+          "description": "Watch face: the bare package for a resource-only (WFF) face, <package>/<class> for a classic face",
+          "type": "string",
+          "pattern": "^[A-Za-z][\\w.]*(?:\\/\\.?[A-Za-z_][\\w.]*)?$"
+        },
+        "slot": {
+          "description": "Complication slot id on the watch face",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "type": {
+          "description": "setComplication: androidx complication type int (SHORT_TEXT=3, RANGED_VALUE=5)",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "provider": {
+          "description": "Complication data source service as <package>/<service>",
+          "type": "string",
+          "pattern": "^[A-Za-z][\\w.]*\\/\\.?[A-Za-z_][\\w.]*$"
         },
         "platform": {
           "type": "string",
@@ -67358,7 +67390,17 @@
         },
         "action": {
           "type": "string",
-          "enum": ["addTile", "showTile", "removeTile", "listTileProviders", "watchFace"]
+          "enum": [
+            "addTile",
+            "showTile",
+            "removeTile",
+            "listTileProviders",
+            "watchFace",
+            "setWatchFace",
+            "unsetWatchFace",
+            "setComplication",
+            "unsetComplication"
+          ]
         },
         "requested": {
           "type": "object",
@@ -67368,13 +67410,69 @@
             },
             "index": {
               "type": "number"
+            },
+            "watchFace": {
+              "type": "string"
+            },
+            "slot": {
+              "type": "number"
+            },
+            "type": {
+              "type": "number"
+            },
+            "provider": {
+              "type": "string"
             }
           },
           "additionalProperties": false
         },
         "broadcastResult": {
           "description": "The broadcast that performed the action; absent for listTileProviders and watchFace",
-          "$ref": "#/$defs/__schema0"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/__schema0"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "data": {
+                  "type": "string"
+                },
+                "accepted": {
+                  "type": "boolean"
+                },
+                "favoriteId": {
+                  "type": "number"
+                },
+                "error": {
+                  "type": "string",
+                  "enum": [
+                    "face_not_installed",
+                    "slot_out_of_range",
+                    "invalid_face_id",
+                    "unsupported_face",
+                    "debug_surface_disabled",
+                    "watch_face_not_switched",
+                    "missing_argument",
+                    "not_applied",
+                    "unknown_reply"
+                  ]
+                }
+              },
+              "required": ["code", "accepted"],
+              "additionalProperties": false
+            }
+          ]
         },
         "indexResolution": {
           "$ref": "#/$defs/__schema0"
@@ -67403,80 +67501,56 @@
           }
         },
         "verified": {
-          "description": "Tile actions: true only when an observe after the action confirmed it",
+          "description": "Tile and watch face change actions: true only when an observe or dumpsys wear_service readback confirmed it",
           "type": "boolean"
+        },
+        "applied": {
+          "description": "Watch face change actions: true only when dumpsys wear_service showed the change",
+          "type": "boolean"
+        },
+        "favoriteId": {
+          "type": "number"
+        },
+        "readback": {
+          "description": "Watch face change actions: the last dumpsys wear_service readback",
+          "type": "object",
+          "properties": {
+            "activeFace": {
+              "$ref": "#/$defs/__schema1"
+            },
+            "favorites": {
+              "$ref": "#/$defs/__schema2"
+            },
+            "ambient": {
+              "type": "boolean"
+            }
+          },
+          "required": ["activeFace", "favorites"],
+          "additionalProperties": false
+        },
+        "error": {
+          "type": "string",
+          "enum": [
+            "face_not_installed",
+            "slot_out_of_range",
+            "invalid_face_id",
+            "unsupported_face",
+            "debug_surface_disabled",
+            "watch_face_not_switched",
+            "missing_argument",
+            "not_applied",
+            "unknown_reply"
+          ]
         },
         "available": {
           "description": "watchFace: false when dumpsys wear_service had no readable watch faces",
           "type": "boolean"
         },
         "activeFace": {
-          "type": "object",
-          "properties": {
-            "package": {
-              "type": "string"
-            },
-            "favoriteId": {
-              "anyOf": [
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "fallback": {
-              "description": "The classic fallback face, which has no slots",
-              "type": "boolean"
-            }
-          },
-          "required": ["package", "favoriteId", "fallback"],
-          "additionalProperties": false
+          "$ref": "#/$defs/__schema1"
         },
         "favorites": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "favoriteId": {
-                "type": "number"
-              },
-              "package": {
-                "type": "string"
-              },
-              "slots": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "slot": {
-                      "type": "number"
-                    },
-                    "type": {
-                      "description": "Complication data type id",
-                      "type": "number"
-                    },
-                    "provider": {
-                      "description": "<package>/<class>, or null for an empty slot",
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    }
-                  },
-                  "required": ["slot", "type", "provider"],
-                  "additionalProperties": false
-                }
-              }
-            },
-            "required": ["favoriteId", "package", "slots"],
-            "additionalProperties": false
-          }
+          "$ref": "#/$defs/__schema2"
         },
         "ambient": {
           "type": "boolean"
@@ -67559,6 +67633,74 @@
           },
           "required": ["code", "outcome"],
           "additionalProperties": false
+        },
+        "__schema1": {
+          "type": "object",
+          "properties": {
+            "package": {
+              "type": "string"
+            },
+            "favoriteId": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fallback": {
+              "description": "The classic fallback face, which has no slots",
+              "type": "boolean"
+            }
+          },
+          "required": ["package", "favoriteId", "fallback"],
+          "additionalProperties": false
+        },
+        "__schema2": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "favoriteId": {
+                "type": "number"
+              },
+              "package": {
+                "type": "string"
+              },
+              "slots": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "slot": {
+                      "type": "number"
+                    },
+                    "type": {
+                      "description": "Complication data type id",
+                      "type": "number"
+                    },
+                    "provider": {
+                      "description": "<package>/<class>, or null for an empty slot",
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": ["slot", "type", "provider"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["favoriteId", "package", "slots"],
+            "additionalProperties": false
+          }
         }
       }
     }

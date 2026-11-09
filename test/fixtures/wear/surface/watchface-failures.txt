@@ -1,0 +1,32 @@
+== uninstalled package
+Broadcast completed: result=2, data="set-watchface failed. com.google.wear.services.watchfaces.FavoriteOperationException: Watch face package is not installed."
+== no key
+Broadcast completed: result=3, data="Either component name or watchface id are required."
+== both component and id
+Broadcast completed: result=3, data="Both component name and watchface id are specified."
+== set-watchface via ecn component pkg/cls (classic style) on resource-only
+Broadcast completed: result=2, data="set-watchface failed. com.google.wear.services.watchfaces.FavoriteOperationException: Watch face package is not installed."
+== slot 99
+Broadcast completed: result=2, data="set-complication failed. java.lang.IndexOutOfBoundsException: Complication slot is out of range."
+== wrong type 1 (EMPTY) for battery on slot 11
+Broadcast completed: result=1, data="Favorite Id=[1]"
+      id=1 slot=11 type=1 configActionPending=false provider=null isEnabled=true
+== unsupported type 9 for battery
+Broadcast completed: result=1, data="Favorite Id=[1]"
+      id=1 slot=11 type=1 configActionPending=false provider=null isEnabled=true
+== set on non-active face (superficial has no slots)
+Broadcast completed: result=2, data="set-complication failed. java.lang.IndexOutOfBoundsException: Complication slot is out of range."
+== unset-watchface
+Broadcast completed: result=1, data="Favorite Id=[1] Runtime=[2]"
+activeWatchFaceComponent=WatchFaceId[com.google.wear.offhand,null] favoriteId=1 
+== restore
+Broadcast completed: result=1, data="Favorite Id=[1] Runtime=[2]"
+activeWatchFaceComponent=WatchFaceId[com.google.wear.offhand,null] favoriteId=1 
+== set battery for screenshot
+Broadcast completed: result=1, data="Favorite Id=[1]"
+-rw-r--r--  1 jason  staff  32825 Nov  8 08:59 face-battery-hostpath.png
+== version
+Broadcast completed: result=1, data="4"
+== settings
+null
+user

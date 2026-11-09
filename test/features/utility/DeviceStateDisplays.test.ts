@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DeviceState } from "../../../src/features/utility/DeviceState";
@@ -8,6 +8,9 @@ import { deviceStateMessage } from "../../../src/server/deviceStateMessage";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { logger } from "../../../src/utils/logger";
+import { parseDevicectlDisplayInfo } from "../../../src/utils/ios-cmdline-tools/DevicectlDisplayInfo";
+import { FakeDevicectlDisplayInfoSource } from "../../fakes/FakeDevicectlDisplayInfoSource";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 /** Captured from am-fold-pixel10pf (API 36); see the fixture READMEs. */
@@ -121,7 +124,7 @@ describe("getDeviceState displays.current (#17049)", () => {
     });
   });
 
-  test("a single-panel inventory and an iPhone Duo issue no posture reads", async () => {
+  test("single-panel Android and iOS inventories issue no posture reads", async () => {
     const singlePanel: BootedDevice = {
       ...fold,
       displays: { panels: [fold.displays!.panels[0]], postures: ["unknown"] },
@@ -131,14 +134,120 @@ describe("getDeviceState displays.current (#17049)", () => {
     expect(single.displays).toEqual(singlePanel.displays!);
     expect(androidAdb.getExecutedCommands()).toEqual([]);
 
-    const duo: BootedDevice = { ...fold, platform: "ios", deviceId: "duo-simulator" };
+    const singleIos: BootedDevice = { ...singlePanel, platform: "ios", deviceId: "iphone" };
+    const source = new FakeDevicectlDisplayInfoSource();
     const iosAdb = new FakeAdbExecutor();
-    const result = await new DeviceState(duo, {
+    const result = await new DeviceState(singleIos, {
+      iosDisplayInfoSource: source,
       adbFactory: new FakeAdbClientFactory(iosAdb),
       timer: new FakeTimer(),
       simctl: null,
     }).getState(["networkCondition"]);
     expect(result.displays?.current).toBeUndefined();
+    expect(source.requests).toEqual([]);
     expect(iosAdb.getExecutedCommands().some((c) => c.includes("device_state"))).toBe(false);
   });
+});
+
+const duo: BootedDevice = {
+  name: "iPhone Duo",
+  platform: "ios",
+  deviceId: "duo-simulator",
+  displays: {
+    panels: [
+      { key: "primary", role: "cover", sizePx: { width: 1398, height: 2034 }, scale: 3 },
+      { key: "primary-1", role: "inner", sizePx: { width: 2007, height: 2853 }, scale: 3 },
+    ],
+    postures: ["closed", "half_opened", "opened"],
+  },
+};
+
+function duoDisplays(panel: "inner" | "cover") {
+  const parsed = parseDevicectlDisplayInfo(
+    fixture(`ios-devicectl/info-displays-duo-${panel}-active.json`),
+  );
+  if (parsed.kind !== "ok") {
+    throw new Error(parsed.message);
+  }
+  return parsed.displays;
+}
+
+function duoState(source: FakeDevicectlDisplayInfoSource) {
+  const adb = new FakeAdbExecutor();
+  return {
+    adb,
+    state: new DeviceState(duo, {
+      iosDisplayInfoSource: source,
+      adbFactory: new FakeAdbClientFactory(adb),
+      timer: new FakeTimer(),
+      simctl: null,
+    }),
+  };
+}
+
+describe("getDeviceState iPhone Duo displays.current", () => {
+  for (const [panel, posture, key] of [
+    ["inner", "opened", "primary-1"],
+    ["cover", "closed", "primary"],
+  ] as const) {
+    test(`${panel} active reports ${posture} using captured evidence`, async () => {
+      const source = new FakeDevicectlDisplayInfoSource();
+      source.displays = duoDisplays(panel);
+      const { state, adb } = duoState(source);
+      const result = await state.getState(["networkCondition"]);
+      expect(result.displays).toEqual({
+        ...duo.displays!,
+        current: { posture, activePanel: { key, role: panel } },
+      });
+      expect(source.requests).toHaveLength(1);
+      expect(source.requests[0].deviceId).toBe(duo.deviceId);
+      expect(adb.getExecutedCommands()).toEqual([]);
+      getDeviceStateResultSchema.parse({ message: deviceStateMessage(result), ...result });
+    });
+  }
+
+  test("each read reflects a new active panel without caching", async () => {
+    const source = new FakeDevicectlDisplayInfoSource();
+    const { state } = duoState(source);
+    source.displays = duoDisplays("inner");
+    expect((await state.getState(["networkCondition"])).displays?.current?.posture).toBe("opened");
+    source.displays = duoDisplays("cover");
+    expect((await state.getState(["networkCondition"])).displays?.current).toEqual({
+      posture: "closed",
+      activePanel: { key: "primary", role: "cover" },
+    });
+    expect(source.requests).toHaveLength(2);
+  });
+
+  for (const failure of ["read failed", "no active", "unmatched", "ambiguous"] as const) {
+    test(`${failure} omits current and warns`, async () => {
+      const source = new FakeDevicectlDisplayInfoSource();
+      source.displays = duoDisplays("inner");
+      if (failure === "read failed") {
+        source.error = new Error("devicectl failed");
+      }
+      if (failure === "no active") {
+        source.displays = source.displays.map((d) => ({ ...d, active: false }));
+      }
+      if (failure === "unmatched") {
+        source.displays = source.displays.map((d) => ({
+          ...d,
+          nativeSize: { width: 10, height: 20 },
+        }));
+      }
+      if (failure === "ambiguous") {
+        source.displays = source.displays.map((d) => ({ ...d, active: true }));
+      }
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const result = await duoState(source).state.getState(["networkCondition"]);
+        expect(result.success).toBe(true);
+        expect(result.displays).toEqual(duo.displays!);
+        expect(result.displays).not.toHaveProperty("current");
+        expect(warn).toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  }
 });

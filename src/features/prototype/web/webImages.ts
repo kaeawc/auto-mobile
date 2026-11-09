@@ -73,18 +73,21 @@ function paddingDp(style: Raw, side: "top" | "bottom" | "start" | "end"): number
 
 /**
  * The placeholder's 48px minimum on each axis the node does not fix in dp: an authored size wins
- * over the image's default minimum on both devices, so a 24 dp icon stays 24 dp. The minimum is
- * the content box's: the page sizes border boxes, so it adds the axis's padding, which the image
- * layers sit inside.
+ * over the image's default minimum on both devices, so a 24 dp icon stays 24 dp. On a wrapped axis
+ * the minimum is the content box's: the page sizes border boxes, so it adds the axis's padding,
+ * which the image layers sit inside. A filled axis takes its parent's extent, so its padding never
+ * pushes the minimum past the space the parent gives it.
  */
 function webImageMinimum(style: Raw): Record<string, string> {
-  const minimum = (padding: number) => `${48 + padding}px`;
+  const minimum = (size: unknown, padding: number) => `${48 + (size === "fill" ? 0 : padding)}px`;
   return {
     ...(fixedDp(style.width) === undefined
-      ? { "min-width": minimum(paddingDp(style, "start") + paddingDp(style, "end")) }
+      ? { "min-width": minimum(style.width, paddingDp(style, "start") + paddingDp(style, "end")) }
       : {}),
     ...(fixedDp(style.height) === undefined
-      ? { "min-height": minimum(paddingDp(style, "top") + paddingDp(style, "bottom")) }
+      ? {
+          "min-height": minimum(style.height, paddingDp(style, "top") + paddingDp(style, "bottom")),
+        }
       : {}),
   };
 }

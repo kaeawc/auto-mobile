@@ -282,6 +282,22 @@ describe("an image with an inlinable asset", () => {
     expect([node.style["min-width"], node.style["min-height"]]).toEqual(["88px", "96px"]);
   });
 
+  test("a filled axis keeps the plain 48px minimum, so its padding cannot overflow the parent", () => {
+    const rendered = still({
+      type: "column",
+      style: { width: { dp: 100 } },
+      children: [
+        {
+          type: "image",
+          asset: "photo",
+          style: { width: "fill", padding: { top: 24, bottom: 24, start: 40, end: 40 } },
+        },
+      ],
+    });
+    const node = find(rendered.element, (e) => e.attrs["data-node"] === "image")[0]!;
+    expect([node.style["min-width"], node.style["min-height"]]).toEqual(["48px", "96px"]);
+  });
+
   test("a translucent tint's group takes the padding and its layers fill it", () => {
     const rendered = still({
       type: "image",

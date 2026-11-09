@@ -54,6 +54,7 @@ import { TapDisplayRouter } from "./TapDisplayRouter";
 import { TapSemanticLinks } from "./TapSemanticLinks";
 import { TapTargetResolver } from "./TapTargetResolver";
 import { TapGestureDispatcher } from "./TapGestureDispatcher";
+import { appendNoChangeWarning, mismatchWarnings } from "./tapActivationTargetWarnings";
 import { type TapOnFocusOutcome } from "./TapSemanticLinks";
 
 function appendDisabledElementWarning(
@@ -155,6 +156,8 @@ interface TapExecutionState {
   ensureCheckedTapTimestamp?: number;
   completedDisplayGesture: boolean;
   settlePostTapEffect?: boolean;
+  /** The match a TalkBack ACTION_CLICK claimed to activate; warn if nothing changed (#17667). */
+  screenReaderActivation?: { matched?: Element };
 }
 interface TapHierarchyState {
   observeResult: ObserveResult;
@@ -284,6 +287,7 @@ export class TapExecution {
         { settlePostTapEffect: state.settlePostTapEffect },
       );
       result.effect = postTap.effect;
+      appendNoChangeWarning(result, state.screenReaderActivation);
       // The observation that established the effect must be returned and become
       // the caller's diff baseline, rather than the earlier source capture.
       result.observation = postTap.observation;
@@ -736,6 +740,9 @@ export class TapExecution {
       target.activationWarnings,
     );
     this.host.logClickableParentSelection(target.usedParent);
+    target.activationWarnings.push(
+      ...mismatchWarnings(requestedAction, target.finalSelection, target.tapElement),
+    );
     const planningHierarchy = await this.host
       .tapPoints()
       .prototypeTapHierarchy(target.viewHierarchy, target.tapElement, requestedAction);
@@ -859,6 +866,9 @@ export class TapExecution {
                 Object.assign(tapPoint, this.host.geometry().getElementCenter(current));
               },
               onActivationWarning: (warning) => target.activationWarnings.push(warning),
+              onSemanticActivation: () => {
+                state.screenReaderActivation = { matched: target.finalSelection.matchedElement };
+              },
             },
             isTalkBackEnabled: target.isAccessibilityServiceEnabled,
           },

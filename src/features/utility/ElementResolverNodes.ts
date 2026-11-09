@@ -46,21 +46,22 @@ export function hasVisibleBounds(
   return !!node.bounds && (!intent.viewport || centerWithinViewport(node.bounds, intent.viewport));
 }
 
-/** Choose the nearest actionable node, preserving the matched node separately. */
+/**
+ * Choose the nearest actionable node, preserving the matched node separately. The nearest
+ * clickable owner wins even when it has no resource-id: walking past it to an ancestor that has
+ * one activates a different, larger control (a composer container instead of its Send button,
+ * #17667). An owner without a stable selector is activated at its coordinates instead.
+ */
 export function promoteClickableAncestor(
   node: SearchableEntry,
   nodes: readonly SearchableEntry[],
-  intent: Pick<ResolutionIntent, "action" | "requireResourceId" | "viewport">,
+  intent: Pick<ResolutionIntent, "action" | "viewport">,
   scope?: SearchableEntry,
 ): SearchableEntry | null {
   const action = intent.action === "long-press" ? "long-press" : "tap";
   let candidate: SearchableEntry | undefined = node;
   while (candidate) {
-    if (
-      hasVisibleBounds(candidate, intent) &&
-      (!intent.requireResourceId || candidate.nativeId) &&
-      hasActionAffordance(candidate, { action })
-    ) {
+    if (hasVisibleBounds(candidate, intent) && hasActionAffordance(candidate, { action })) {
       return candidate;
     }
     if (candidate === scope) {

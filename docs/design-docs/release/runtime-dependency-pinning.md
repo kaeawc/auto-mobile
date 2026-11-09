@@ -30,7 +30,7 @@ is a separate runtime-graph change.
 The server uses the `zod/v4` subpath exported by **`zod@3.25.76`**. It remains
 bundled into `dist/`, while the exact root package is also published so every
 Jimp `zod: ^3.23.8` edge resolves to the same pinned version. Every other
-inlined package (`werift`, the MCP SDK, …) is not needed at install time and
+inlined package (`werift`, the MCP SDK, `@anthropic-ai/sdk`, …) is not needed at install time and
 lives in `devDependencies`; consumers never install them, which is what removed
 the `@peculiar/asn1-*` install path entirely.
 
@@ -78,6 +78,14 @@ evaluates a module's own body only after all of its static imports, so `build.ts
 also lists the Bun runtime guard and the launcher-pid capture (#11041) as
 entrypoints. That gives each one its own dependency-free chunk. The build then
 fails unless `index.js` imports those chunks first, in that order.
+
+Feature-gated modules stay off that startup path: the prototype tool's runtime and
+resource readers, the in-process MCP client, the Claude vision client (`@anthropic-ai/sdk`)
+and the WebRTC publisher (`werift`) are imported on first use through
+`src/utils/lazyFeatureModule.ts`, which logs each first load's latency. Their tools,
+resources and schemas are still registered at startup, so `tools/list` and
+`resources/list` are unchanged. `test/lint/lazyFeatureModules.integration.test.ts`
+fails if a static import pulls one back onto the startup path.
 
 The pinned graph is mirrored in `scripts/release/runtime-graph.json` (the
 manifest) and enforced by:

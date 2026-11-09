@@ -4,7 +4,7 @@ import { ENV, readEnvBool } from "../../config/env";
 import { enforceAnthropicToolSchemaSubset } from "../../utils/schemaHelpers";
 import { MAX_PROTOTYPE_COMPONENT_DEPTH } from "./prototypeComponents";
 import { prototypeSpecSchema } from "./prototypeSpec";
-import { PROTOTYPE_SPEC_SCHEMA_URI } from "./prototypeGuide";
+import { PROTOTYPE_SPEC_SCHEMA_URI } from "./prototypeGuideUris";
 import { STATE_KEY } from "./prototypeTemplate";
 
 export { PROTOTYPE_SPEC_SCHEMA_URI };

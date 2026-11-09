@@ -1,4 +1,5 @@
 import { SocketServerSingleton } from "./socketServerSingleton";
+import { lazyFeatureModule } from "../utils/lazyFeatureModule";
 import {
   assertMayControl,
   subscriptionKindForIdentity,
@@ -108,9 +109,15 @@ const WEBRTC_STREAM_PURPOSE = "to start a WebRTC stream";
 /**
  * Lazily import the stream manager (which pulls in werift) only when a request
  * actually arrives, so the daemon does not load the heavy WebRTC stack at boot.
+ * The first load's latency is logged (#17709).
  */
+const webrtcStreamManagerModule = lazyFeatureModule(
+  "WebRTC",
+  () => import("./webrtcStreamManager"),
+);
+
 function loadManager() {
-  return import("./webrtcStreamManager");
+  return webrtcStreamManagerModule.load();
 }
 
 function defaultOwnershipChanges(): DeviceOwnershipChanges | null {

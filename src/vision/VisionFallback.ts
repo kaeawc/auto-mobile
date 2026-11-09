@@ -3,7 +3,7 @@
  * Coordinates vision providers (Claude) to find elements when traditional methods fail
  */
 
-import { ClaudeVisionClient } from "./ClaudeVisionClient";
+import { LazyClaudeVisionClient } from "./lazyClaudeVisionClient";
 import type {
   VisionFallbackConfig,
   VisionFallbackResult,
@@ -44,11 +44,11 @@ export class VisionFallback {
     this.checksums = checksums;
     this.resultCache = new Map();
 
-    // Initialize Claude client if provider is 'claude'
+    // Initialize Claude client if provider is 'claude'; the SDK loads on the first analysis.
     if (client) {
       this.claudeClient = client;
     } else if (config.provider === "claude") {
-      this.claudeClient = new ClaudeVisionClient();
+      this.claudeClient = new LazyClaudeVisionClient();
     }
   }
 

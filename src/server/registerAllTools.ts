@@ -32,7 +32,7 @@ import { registerWearSurfaceTools } from "./wearSurfaceTool";
 import { registerRotaryScrollTools } from "./rotaryScrollTool";
 import { registerRotateCrownTools } from "./rotateCrownTool";
 import { registerWindowModeTools } from "./windowModeTools";
-import { registerPrototypeTools } from "./prototypeTools";
+import { registerPrototypeTools } from "./prototypeTools/registration";
 import { prototypeAgentRegistry } from "../features/prototype/ios/prototypeAgentInjection";
 import {
   CompositePrototypeAgentConnections,

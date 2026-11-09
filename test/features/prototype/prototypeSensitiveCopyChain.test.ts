@@ -32,6 +32,55 @@ function commonWrites(common: number): DataWrite[] {
   ];
 }
 
+/** Hops /c0 -> k1 -> /c1 -> ... -> kN -> /cN through state keys, listed destination-first. */
+function stateChainWrites(copies: number): DataWrite[] {
+  return Array.from({ length: copies }, (_, i): DataWrite[] => {
+    const at = copies - i;
+    return [
+      { into: `/c${at}`, source: "state", from: `k${at}` },
+      { into: `k${at}`, intoState: true, source: "data", from: `/c${at - 1}` },
+    ];
+  }).flat();
+}
+
+/** Many state copies of unrelated keys, plus one state hop of the secret. */
+function commonStateWrites(common: number): DataWrite[] {
+  return [
+    ...Array.from({ length: common }, (_, i): DataWrite => ({
+      into: `/d${i}`,
+      source: "state",
+      from: `other${i}`,
+    })),
+    { into: "secretKey", intoState: true, source: "data", from: "/secret" },
+    { into: "/sink", source: "state", from: "secretKey" },
+  ];
+}
+
+/** A platform read set into `u`, then the sink fields given; library flagged with auth. */
+function stateSinkSpec(send: Record<string, unknown>, storageKeys: string[] = []) {
+  return {
+    id: "state-sink",
+    requires: { platform: ["auth"] },
+    state: { u: "" },
+    root: {
+      type: "column",
+      children: [
+        {
+          type: "button",
+          label: "Copy",
+          onTap: [{ type: "setState", key: "u", value: { platform: "/auth/userId" } }],
+        },
+        {
+          type: "button",
+          label: "Send",
+          onTap: [{ type: "request", url: "https://example.com/submit", via: "device", ...send }],
+        },
+      ],
+    },
+    ...(storageKeys.length ? { storage: { version: 1, keys: storageKeys } } : {}),
+  };
+}
+
 function chainSpec(storageKey: string) {
   const buttons = Array.from({ length: COPIES / PER_BUTTON }, (_, i) => ({
     type: "button",
@@ -133,5 +182,70 @@ describe("sensitive copy-taint propagation", () => {
     expect(large.tainted).toEqual(["/secret", "/sink"]);
     expect(small.checks).toBe(1);
     expect(large.checks).toBe(1);
+  });
+
+  test("a reverse-ordered chain through state keys costs checks linear in its length", () => {
+    const small = propagate("/c0", stateChainWrites(COPIES));
+    const large = propagate("/c0", stateChainWrites(COPIES * 2));
+    expect(small.tainted).toContain(`/c${COPIES}`);
+    expect(large.tainted).toContain(`/c${COPIES * 2}`);
+    expect(small.checks).toBe(COPIES * 2);
+    expect(large.checks).toBe(COPIES * 4);
+  });
+
+  test("state copies of unrelated keys cost no checks", () => {
+    const small = propagate("/secret", commonStateWrites(COMMON));
+    const large = propagate("/secret", commonStateWrites(COMMON * 10));
+    expect(small.tainted).toEqual(["/secret", "/sink"]);
+    expect(large.tainted).toEqual(["/secret", "/sink"]);
+    expect(small.checks).toBe(2);
+    expect(large.checks).toBe(2);
+  });
+
+  test("a templated state key taints every literal key sharing its prefix", () => {
+    const writes: DataWrite[] = [
+      { into: "/hit", source: "state", from: "sel_2" },
+      { into: "/miss", source: "state", from: "other" },
+    ];
+    const tainted: string[] = [];
+    const checks = propagateDataTaint(tainted, [], writes, { stateTainted: ["sel_{index}"] });
+    expect(tainted).toEqual(["/hit"]);
+    expect(checks).toBe(2);
+  });
+
+  test("state-key work counts against the fail-closed copy-check cap", () => {
+    const writes = stateChainWrites(COPIES);
+    expect(propagateDataTaint(["/c0"], [], writes, { maxChecks: COPIES * 2 })).toBe(COPIES * 2);
+    expect(propagateDataTaint(["/c0"], [], writes, { maxChecks: COPIES * 2 - 1 })).toBeUndefined();
+  });
+
+  test("a tainted state key bound directly into a request query is refused", () => {
+    expect(prototypeSensitiveSinkErrors(stateSinkSpec({ query: { q: { state: "u" } } }))).toEqual([
+      {
+        path: "root.children[1].onTap[0].query.q.state",
+        message: "Sensitive value cannot be bound into a request",
+      },
+    ]);
+  });
+
+  test("a tainted state placeholder in a request url is refused", () => {
+    expect(prototypeSensitiveSinkErrors(stateSinkSpec({ url: "https://example.com/{u}" }))).toEqual(
+      [
+        {
+          path: "root.children[1].onTap[0].url",
+          message: "Sensitive value cannot be bound into a request",
+        },
+      ],
+    );
+  });
+
+  test("persisting a tainted state key is refused", () => {
+    expect(prototypeSensitiveSinkErrors(stateSinkSpec({}, ["state:u"]))).toEqual(PERSISTED);
+  });
+
+  test("an untainted state key in a request stays accepted", () => {
+    expect(
+      prototypeSensitiveSinkErrors(stateSinkSpec({ query: { q: { state: "v" } } }, ["state:v"])),
+    ).toEqual([]);
   });
 });

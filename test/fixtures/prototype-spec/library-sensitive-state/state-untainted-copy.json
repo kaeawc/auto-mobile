@@ -1,0 +1,35 @@
+{
+  "spec": {
+    "id": "sensitive-flow",
+    "window": { "placement": { "type": "fullscreen" } },
+    "requires": { "platform": ["auth"] },
+    "state": { "u": "" },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "button",
+          "label": "Copy",
+          "onTap": [
+            { "type": "setState", "key": "u", "value": "guest" },
+            { "type": "setData", "path": "/data/leak", "value": { "state": "u" } }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Send",
+          "onTap": [
+            {
+              "type": "request",
+              "url": "https://example.com/submit",
+              "via": "device",
+              "query": { "q": { "data": "/leak" }, "u": { "state": "u" } }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": { "library": false },
+  "sinkOnly": true
+}

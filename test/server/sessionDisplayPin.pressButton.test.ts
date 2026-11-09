@@ -80,4 +80,53 @@ describe("pressButton session display pin (#17643)", () => {
     const ios: BootedDevice = { ...android, platform: "ios" };
     expect(await pressArgs(ios, { button: "home" }, "outside")).toEqual({ button: "home" });
   });
+
+  test.each(["lock", "power", "volume_up", "volume_down", "rotary_rotate_cw", "rotary_select"])(
+    "a pin is not applied to the device-global %s press (#17647)",
+    async (button) => {
+      expect(await pressArgs(android, { button }, "outside")).toEqual({ button });
+    },
+  );
+
+  test("a pin to a disconnected panel does not fail a device-global press (#17647)", async () => {
+    let invoked: Record<string, unknown> | undefined;
+    const response = await runSessionDisplayPin({
+      name: "pressButton",
+      acceptsDisplay: true,
+      device: android,
+      args: { button: "volume_up" },
+      sessionUuid: "session",
+      store: pinnedTo(android.deviceId, "gone"),
+      invoke: (effective) => {
+        invoked = effective;
+        return createStructuredToolResponse({ success: true });
+      },
+    });
+    expect(invoked).toEqual({ button: "volume_up" });
+    expect(response).not.toHaveProperty("isError");
+  });
+
+  test("a pin to a disconnected panel still fails a display-routed press", async () => {
+    let invoked = false;
+    const response = await runSessionDisplayPin({
+      name: "pressButton",
+      acceptsDisplay: true,
+      device: android,
+      args: { button: "back" },
+      sessionUuid: "session",
+      store: pinnedTo(android.deviceId, "gone"),
+      invoke: () => {
+        invoked = true;
+        return createStructuredToolResponse({ success: true });
+      },
+    });
+    expect(invoked).toBe(false);
+    expect(response).toHaveProperty("isError", true);
+  });
+
+  test("an explicit display still reaches a device-global press", async () => {
+    expect(
+      await pressArgs(android, { button: "rotary_nudge_up", display: "inside" }, "outside"),
+    ).toEqual({ button: "rotary_nudge_up", display: "inside" });
+  });
 });

@@ -52,6 +52,7 @@ import {
   displayOf,
   inputOnDisplay,
   pressButtonDisplay,
+  targetedHomeAlreadyOnLauncher,
   type PressButtonDisplayResolver,
 } from "./pressButtonDisplay";
 
@@ -329,6 +330,10 @@ export class PressButton extends BaseVisualChange {
     }, options);
     acceptIosHomeAlreadyOnSpringboard(result, startedOnFallbackSpringboard);
     acceptVerifiedAlreadyOpenSwitcher(result, verifiedAlreadyOpen);
+    launcherVerified ||= await targetedHomeAlreadyOnLauncher(
+      { button, displayId, pressSucceeded, result, observation: prePress },
+      { device: this.device, adb: this.adb, timer: this.timer, signal },
+    );
     acceptAndroidHomeAlreadyOnLauncher(result, {
       platform: this.device.platform,
       button,

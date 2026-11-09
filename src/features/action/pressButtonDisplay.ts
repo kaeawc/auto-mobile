@@ -1,5 +1,11 @@
-import { ActionableError, type BootedDevice } from "../../models";
-import type { AdbCommandRunner } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { ActionableError, type BootedDevice, type ObserveResult } from "../../models";
+import type {
+  AdbCommandRunner,
+  AdbExecutor,
+} from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
+import type { Timer } from "../../utils/SystemTimer";
+import { isForegroundLauncher } from "../observe/androidLauncherPackages";
 import { resolveActionDisplay } from "./TargetDisplayAction";
 
 /** A resolved pressButton display: the concrete panel key and its Android logical display id. */
@@ -56,4 +62,39 @@ export function inputOnDisplay(argv: string[], displayId: number | undefined): s
   return displayId === undefined
     ? argv
     : [...argv.slice(0, 2), "-d", String(displayId), ...argv.slice(2)];
+}
+
+/**
+ * A targeted Home press that changed nothing is accepted when the targeted display's own tree
+ * already shows the launcher, as an untargeted Home is accepted on display 0 (#17647). The default
+ * display's foreground check cannot answer for another display, so this reads the display-scoped
+ * observation taken before the press.
+ */
+export async function targetedHomeAlreadyOnLauncher(
+  press: {
+    button: string;
+    displayId: number | undefined;
+    pressSucceeded: boolean;
+    result: { success: boolean; error?: string };
+    observation: ObserveResult | undefined;
+  },
+  deps: { device: BootedDevice; adb: AdbExecutor; timer: Timer; signal?: AbortSignal },
+): Promise<boolean> {
+  if (
+    press.displayId === undefined ||
+    press.button.toLowerCase() !== "home" ||
+    !press.pressSucceeded ||
+    press.result.error !== "No visual change observed"
+  ) {
+    return false;
+  }
+  const foreground =
+    press.observation?.viewHierarchy?.packageName ?? press.observation?.activeWindow?.appId;
+  const { device, adb, timer, signal } = deps;
+  return isForegroundLauncher(foreground, adb, device.deviceId, {
+    timer,
+    signal,
+    incarnationToken: deviceIncarnationToken(device.deviceId),
+    formFactor: device.formFactor,
+  });
 }

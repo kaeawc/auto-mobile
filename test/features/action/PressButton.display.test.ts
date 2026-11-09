@@ -194,6 +194,23 @@ describe("PressButton display (#17643)", () => {
     expect(result.error).toBe("No visual change observed");
   });
 
+  test("an unchanged home on a display already showing its launcher is accepted (#17647)", async () => {
+    const launcher = buildObserveResult({
+      updatedAt: 1,
+      screenSize: { width: 1280, height: 720 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: {
+        packageName: "com.android.launcher3",
+        hierarchy: { node: { text: "Apps", "resource-id": "com.android.launcher3:id/apps" } },
+      },
+    });
+    const { action, adb } = harness(android, { before: launcher, after: launcher });
+    const result = await action.execute("home", { display: "4" });
+    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(keyeventArgv(adb)).toEqual([["shell", "input", "-d", "4", "keyevent", "3"]]);
+  });
+
   test("the template Back fallback taps on the targeted display", async () => {
     const pane = carAppTemplateObservation("pane");
     const menu = carAppTemplateObservation("menu", { updatedAt: 2 });

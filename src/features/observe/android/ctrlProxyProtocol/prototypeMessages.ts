@@ -4,6 +4,16 @@ import type { PrototypePatchOp } from "../../../prototype/prototypePatch";
 import type { PrototypePatchConflict } from "../../../prototype/prototypePatchWire";
 import type { PrototypeSpec, PrototypeJson, PrototypeData } from "../../../prototype/prototypeSpec";
 
+/**
+ * One stack's navigation snapshot. `params` (#14188, `prototype_routes_v1`) holds each entry's
+ * route params parallel to `path`; a device sends it only when some entry has params.
+ */
+export interface PrototypeStackSnapshot {
+  path: string[];
+  depth: number;
+  params?: Record<string, string | number | boolean>[];
+}
+
 export type PrototypeState = NonNullable<PrototypeSpec["state"]>;
 export interface ShowPrototypeMessage {
   type: "show_prototype";
@@ -197,7 +207,7 @@ export interface PrototypeResult {
   missingAssets?: string[];
   /** Only the reply to `inspect_prototypes`: the prototypes the device is showing right now. */
   prototypes?: PrototypeStatusEntry[];
-  stacks?: Record<string, { path: string[]; depth: number }>;
+  stacks?: Record<string, PrototypeStackSnapshot>;
   /** Only with `prototypes`: events the device dropped from its offline buffer since it started. */
   droppedEvents?: number;
   /** Only a successful `show_prototype` reply from a device advertising prototype_appearance_v1. */
@@ -232,7 +242,7 @@ export interface PrototypeStatusEntry {
   persistent: boolean;
   state: PrototypeState;
   pages: Record<string, number>;
-  stacks?: Record<string, { path: string[]; depth: number }>;
+  stacks?: Record<string, PrototypeStackSnapshot>;
   /** Highest `prototype_event` sequence the device allocated for this prototype; no rewind. */
   lastSequence: number;
   /** True while the prototype's app is not in front: hidden, state kept, back with the app. */
@@ -306,5 +316,5 @@ export interface PrototypeEvent {
   contextTruncated?: true;
   state: PrototypeState;
   pages: Record<string, number>;
-  stacks?: Record<string, { path: string[]; depth: number }>;
+  stacks?: Record<string, PrototypeStackSnapshot>;
 }

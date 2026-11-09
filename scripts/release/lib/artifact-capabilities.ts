@@ -87,8 +87,6 @@ export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string
       "Device realtime channels are contract-only; the iOS agent does not implement device transport yet",
     prototype_platform_v1:
       "iOS agent validates platform specs but has no module registry yet (#14296)",
-    prototype_routes_v1:
-      "Navigation routes are contract-only: no runtime applies params, onEnter, onBack or setStack yet (#14188)",
   },
 };
 

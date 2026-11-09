@@ -119,7 +119,7 @@
         var body: some View {
             PrototypeStackScreenLayout {
                 ForEach(entries) { entry in
-                    if let screen = node.screens?[entry.screen] {
+                    if let screen = try? model.spec?.stackScreen(id, entry: entry) {
                         let active = ancestorActive && entry.id == current.last?.id
                         NodeView(node: screen, model: model)
                             .background(PrototypeStackFocusMarker(anchor: focusAnchor, active: active))

@@ -6,6 +6,8 @@ private let requestCompletionLog = Logger(
     category: "prototype"
 )
 
+let prototypeRoutesLog = Logger(subsystem: "dev.jasonpearson.automobile.prototype-agent", category: "prototype")
+
 /// Why an embedded prototype went away.
 /// This enum may gain cases; include a default branch when switching over it.
 public enum PrototypeDismissReason: String, Sendable {
@@ -113,7 +115,12 @@ struct PrototypeSession {
     private(set) var stackEntries: [String: [PrototypeStackEntry]] = [:]
     private var stackRevision = 0
     private var nextStackEntry = 0
-    private var stackNodes: [String: PrototypeNode] = [:]
+    private(set) var stackNodes: [String: PrototypeNode] = [:]
+    /// Stacks whose initial top entry runs its `onEnter` at the next transition (#14188).
+    private var pendingEnters: [String] = []
+    private var stacksEnteredDuringDispatch: Set<String>?
+    /// How deep onEnter/onBack dispatch currently nests (#14188).
+    private var lifecycleDepth = 0
     private var pagerKeys: [String: String] = [:]
     private(set) var pageCounts: [String: Int] = [:]
     /// Keys whose errors have been revealed by change, blur or a failed guard.
@@ -247,7 +254,8 @@ struct PrototypeSession {
         appearance: PrototypeAppearanceOverride = .device,
         locale: String? = nil,
         specBytes: Int? = nil,
-        restoredState: [String: JSONValue]? = nil
+        restoredState: [String: JSONValue]? = nil,
+        restoredStacks: [String: [PrototypeStackPathEntry]]? = nil
     ) {
         viewCommands = []
         listEnds = [:]
@@ -264,10 +272,14 @@ struct PrototypeSession {
         let keepNavigation = !reset && self.spec?.id == spec.id
         // A same-id replace keeps its requests running; any other show ends the old prototype's.
         if !keepNavigation { requests.cancelAll() }
+        // A stored path (`stack:<id>`, #14188) applies at a fresh show; a same-id in-place show's
+        // retained paths win over it.
+        let restored = (restoredStacks ?? [:]).mapValues { PrototypeStackSnapshot(entries: $0) }
+        let previousStacks = keepNavigation ? stacks : [:]
         rebuildNavigation(
             for: spec.root,
             keepingPages: keepNavigation ? pages : [:],
-            keepingStacks: keepNavigation ? stacks : [:]
+            keepingStacks: keepNavigation ? stacks.merging(restored) { kept, _ in kept } : restored
         )
         shownErrors = []
         // Stored values (#12526) arrive already applied by `PrototypeStorageCoordinator.prepare`, before
@@ -282,6 +294,20 @@ struct PrototypeSession {
         revisions[spec.id] = shownRevision
         stateRevisions = state.keys.reduce(into: [:]) { $0[$1] = shownRevision }
         self.spec = spec
+        // A same-id show retains a stack when at least one of its entries still fits, as on Android.
+        var retainedStacks = Set(previousStacks.compactMap { id, snapshot in
+            stackNodes[id].flatMap { node in
+                snapshot.entries.contains { PrototypeStackRoutes.isValid([$0], stack: node) } ? id : nil
+            }
+        })
+        if !rebindRoutes() {
+            // The bound tree does not fit the show's limits: every stack starts over at its start.
+            rebuildNavigation(for: spec.root, keepingPages: pages, keepingStacks: [:])
+            retainedStacks = []
+        }
+        // Every stack's initial top runs its onEnter, restored paths included; retained ones do not.
+        pendingEnters = stacks.keys.filter { !retainedStacks.contains($0) }
+            .sorted { $0.utf16.lexicographicallyPrecedes($1.utf16) }
         appeared = keepNavigation ? Set(visibleAppearances().map(\.0)) : []
         // The show result reports this mode, so the show itself is not a change.
         reportedDark = self.appearance?.dark
@@ -300,22 +326,24 @@ struct PrototypeSession {
         stackNodes = [:]
         root.collectStacks(into: &stackNodes)
         stacks = stackNodes.mapValues { node in
-            let path = (node.id.flatMap { previousStacks[$0]?.path } ?? [])
-                .filter { node.screens?[$0] != nil }.prefix(PrototypeLimits.maxStackDepth)
-            return PrototypeStackSnapshot(path: path.isEmpty ? [node.start ?? ""] : Array(path))
+            let path = (node.id.flatMap { previousStacks[$0]?.entries } ?? [])
+                .filter { PrototypeStackRoutes.isValid([$0], stack: node) }.prefix(PrototypeLimits.maxStackDepth)
+            return PrototypeStackSnapshot(
+                entries: path.isEmpty ? [PrototypeStackPathEntry(screen: node.start ?? "")] : Array(path)
+            )
         }
         stackChanges = [:]
         stackEntries = [:]
         for (id, snapshot) in stacks {
-            let before = previousStacks[id]?.path ?? []
-            let retained = zip(before, snapshot.path).prefix(while: { $0.0 == $0.1 }).count
+            let before = previousStacks[id]?.entries ?? []
+            let retained = zip(before, snapshot.entries).prefix(while: { $0.0 == $0.1 }).count
             var entries = Array((previousEntries[id] ?? []).prefix(retained))
-            for screen in snapshot.path.dropFirst(entries.count) {
+            for entry in snapshot.entries.dropFirst(entries.count) {
                 nextStackEntry += 1
-                entries.append(PrototypeStackEntry(id: nextStackEntry, screen: screen))
+                entries.append(PrototypeStackEntry(id: nextStackEntry, screen: entry.screen, params: entry.params))
             }
             stackEntries[id] = entries
-            if before == snapshot.path,
+            if before == snapshot.entries,
                previousNodes[id]?.screenDefinitions == stackNodes[id]?.screenDefinitions,
                let change = previousChanges[id]
             {
@@ -383,8 +411,9 @@ struct PrototypeSession {
     /// page) and with it the inferred mode. The event follows the `change` or `page_changed` that
     /// caused it. Every transition of a shown prototype goes through here.
     mutating func transition(_ body: (inout PrototypeSession) -> [PrototypeEvent]) -> [PrototypeEvent] {
+        let entered = runPendingEnters()
         let events = body(&self)
-        return events + runAppearances() + appearanceChange()
+        return entered + events + runAppearances() + appearanceChange()
     }
 
     /// Exactly one `appearance_changed` when the shown prototype's mode differs from the one last
@@ -512,8 +541,9 @@ struct PrototypeSession {
         // action may have added a control (a repeat row) that refuses this value now.
         var next = state
         next[write.key] = write.value
+        next = clampedPagerState(next)
         guard accepts(next) else { return }
-        state[write.key] = write.value
+        state[write.key] = next[write.key]
         if !touched.contains(write.key) { touched.append(write.key) }
     }
 
@@ -564,7 +594,9 @@ struct PrototypeSession {
             case "dismiss":
                 events += dismiss(reason: .user)
             default:
-                applyPlannedWrite(writes[index], touched: &touched)
+                let write = action.type == "toggle" || action.type == "increment" || action.type == "decrement"
+                    ? stateWrite(action, in: state) : writes[index]
+                applyPlannedWrite(write, touched: &touched)
             }
         }
         guard isShown else { return events }
@@ -707,6 +739,10 @@ struct PrototypeSession {
         nonStateBytes = max(0, nonStateBytes + structureDelta)
         self.spec = patched
         structureRevision += 1
+        if !rebindRoutes() {
+            // A patched tree the current route params cannot bind into sends every stack to its start.
+            rebuildNavigation(for: patched.root, keepingPages: pages, keepingStacks: [:])
+        }
         return (.applied(revision: revision), emitStateChange(changed.filter { finalState[$0] != nil }))
     }
 
@@ -813,44 +849,156 @@ struct PrototypeSession {
         if let drawer = spec?.root.openModals(state: state, pages: pages, stacks: stacks, data: data)
             .last(where: { $0.type == "drawer" }) { return closeModal(drawer) }
         guard let id = stackPopTarget else { return [] }
+        // The left-edge swipe and Back run the top screen's onBack instead of popping (#14188).
+        if let intercepted = interceptedBack(id) { return intercepted }
         return changeStack(id, direction: .pop) { _, path in Array(path.dropLast()) }
     }
 
     mutating func changeStack(
         _ id: String, direction: PrototypeStackChange.Direction, override: PrototypeStackTransition? = nil,
         source: String? = nil,
-        transform: (PrototypeNode, [String]) -> [String]
+        transform: (PrototypeNode, [PrototypeStackPathEntry]) -> [PrototypeStackPathEntry]
     )
         -> [PrototypeEvent]
     {
         guard isShown, let node = stackNodes[id], let before = stacks[id] else { return [] }
-        let path = transform(node, before.path)
-        guard path != before.path, let screen = path.last else { return [] }
-        let next = PrototypeStackSnapshot(path: path)
+        let path = transform(node, before.entries)
+        guard path != before.entries, let top = path.last else { return [] }
+        let next = PrototypeStackSnapshot(entries: path)
         stacks[id] = next
+        guard rebindRoutes() else {
+            stacks[id] = before
+            prototypeRoutesLog.warning(
+                "Stack \(id, privacy: .public) kept its path: the route params do not fit the drawn tree"
+            )
+            return []
+        }
         stackRevision += 1
         stackChanges[id] = PrototypeStackChange(
             direction: direction,
             transition: override ?? PrototypeStackTransition(rawValue: node.transition ?? "") ?? .platform,
             revision: stackRevision
         )
-        let retained = zip(before.path, path).prefix(while: { $0.0 == $0.1 }).count
+        let retained = zip(before.entries, path).prefix(while: { $0.0 == $0.1 }).count
         var entries = Array((stackEntries[id] ?? []).prefix(retained))
-        for screen in path.dropFirst(entries.count) {
+        for entry in path.dropFirst(entries.count) {
             nextStackEntry += 1
             entries.append(PrototypeStackEntry(
                 id: nextStackEntry,
-                screen: screen,
+                screen: entry.screen,
+                params: entry.params,
                 zoomSource:
                 stackChanges[id]?.transition == .zoom ? source : nil
             ))
         }
         stackEntries[id] = entries
-        // Changed screen or depth emits once, including popToRoot and repeated pushes.
-        guard before.path.last != screen || before.depth != next.depth else { return [] }
-        return emit(kind: "screen_changed", name: id, payload: .object([
-            "screen": .string(screen), "depth": .number(Double(next.depth)),
-        ]))
+        // A changed screen, depth or top params emits once, including popToRoot and repeated pushes;
+        // the new top's onEnter runs after the event (#14188).
+        guard before.entries.last != top || before.depth != next.depth else { return [] }
+        return emit(kind: "screen_changed", name: id, payload: PrototypeStackRoutes.screenChangedPayload(next))
+            + runEnter(id)
+    }
+
+    /// Rebuilds the drawn tree when the route params bound into it changed (#14188). False, with
+    /// nothing changed, when the bound tree breaks a limit the show enforces.
+    private mutating func rebindRoutes() -> Bool {
+        guard let spec else { return true }
+        let scope = PrototypeStackRoutes.scope(stacks)
+        guard scope != spec.routeScope else { return true }
+        do {
+            let rebound = try spec.replacingRoutes(scope)
+            self.spec = rebound
+            structureRevision += 1
+            stackNodes = [:]
+            rebound.root.collectStacks(into: &stackNodes)
+            pagerKeys = rebound.root.pagerStateKeys()
+            pageCounts = rebound.root.pagerCounts()
+            syncBoundPages()
+            return true
+        } catch {
+            prototypeRoutesLog.warning(
+                "Route params do not fit the drawn tree: \(String(describing: error), privacy: .private)"
+            )
+            return false
+        }
+    }
+
+    /// Whether a Back request for stack `id` runs its top screen's onBack instead of popping.
+    func interceptsBack(_ id: String) -> Bool {
+        guard let snapshot = stacks[id], snapshot.depth > 1, let screen = snapshot.entries.last?.screen else {
+            return false
+        }
+        return stackNodes[id]?.routes?[screen]?.onBack != nil
+    }
+
+    /// The top screen's onBack in place of a pop, or nil when Back pops (#14188).
+    mutating func interceptedBack(_ id: String) -> [PrototypeEvent]? {
+        guard interceptsBack(id), let screen = stacks[id]?.entries.last?.screen,
+              let actions = stackNodes[id]?.routes?[screen]?.onBack else { return nil }
+        return runLifecycle(actions, stack: id, list: "onBack")
+    }
+
+    private mutating func runEnter(_ id: String) -> [PrototypeEvent] {
+        stacksEnteredDuringDispatch?.insert(id)
+        guard let screen = stacks[id]?.entries.last?.screen,
+              let actions = stackNodes[id]?.routes?[screen]?.onEnter else { return [] }
+        return runLifecycle(actions, stack: id, list: "onEnter")
+    }
+
+    private mutating func runPendingEnters() -> [PrototypeEvent] {
+        let ids = pendingEnters
+        pendingEnters = []
+        stacksEnteredDuringDispatch = []
+        defer { stacksEnteredDuringDispatch = nil }
+        var events: [PrototypeEvent] = []
+        // A stack an earlier onEnter already navigated has entered its new top, so it is not entered again.
+        for id in ids where isShown && stacksEnteredDuringDispatch?.contains(id) != true {
+            events += runEnter(id)
+        }
+        return events
+    }
+
+    /// Runs one onEnter or onBack list, at most `maxLifecycleDepth` lists deep; a deeper one is skipped.
+    private mutating func runLifecycle(
+        _ actions: [PrototypeAction], stack id: String, list: String
+    )
+        -> [PrototypeEvent]
+    {
+        guard lifecycleDepth < PrototypeStackRoutes.maxLifecycleDepth else {
+            prototypeRoutesLog.warning(
+                "Skipped \(list, privacy: .public) of stack \(id, privacy: .public): lifecycle actions nest too deep"
+            )
+            return []
+        }
+        lifecycleDepth += 1
+        defer { lifecycleDepth -= 1 }
+        return run(actions)
+    }
+
+    /// Push, replace and setStack params resolved against the current state and data (#14188): a
+    /// literal scalar as authored, a binding object as a data write's value is. Nil when a binding
+    /// does not resolve or a value is not a scalar.
+    func resolvedRouteParams(_ raw: [String: JSONValue]?) -> [String: JSONValue]? {
+        let inputs = EmitContextInputs(
+            state: state,
+            pages: pages,
+            dataModel: data,
+            platformModel: spec?.platformState,
+            eventData: platformEventData
+        )
+        var resolved: [String: JSONValue] = [:]
+        for (name, value) in raw ?? [:] {
+            var result = value
+            if !value.isScalar {
+                guard case let .success(bound) = PrototypeDataWrite.resolveValue(value, inputs: inputs) else {
+                    return nil
+                }
+                result = bound
+            }
+            guard result.isScalar else { return nil }
+            resolved[name] = result
+        }
+        return resolved
     }
 
     /// A user edit of a bound control: one `emit` named `change` per changed value, matching
@@ -899,6 +1047,7 @@ struct PrototypeSession {
         requests.cancelAll()
         timerCommands.append(.cancelAll)
         feedbackLog = PrototypeFeedbackLog()
+        pendingEnters = []
         spec = nil
         return events
     }

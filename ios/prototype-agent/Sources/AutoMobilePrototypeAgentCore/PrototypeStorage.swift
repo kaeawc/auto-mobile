@@ -5,7 +5,8 @@ import Foundation
 // `PrototypeStorageRestore` is the precedence function and `PrototypeStorageCoordinator` the
 // debounced writer. UIKit-free, so `swift test` covers all of it against a temp directory.
 
-/// The spec's `storage` block: `{version, keys: ["state:<key>" | "data:<pointer relative to /data>"]}`.
+/// The spec's `storage` block: `{version, keys: ["state:<key>" | "data:<pointer relative to /data>" |
+/// "stack:<id>"]}`.
 /// Decoding is lenient because the host validator owns the strict shape (`prototypeStorageError`):
 /// a block that does not decode is treated as absent, so a malformed one never fails a show.
 struct PrototypeStorageBlock: Decodable, Equatable {
@@ -21,13 +22,20 @@ struct PrototypeStorageBlock: Decodable, Equatable {
 enum PrototypeStorageKey: Equatable {
     case state(String)
     case data(pointer: String)
+    /// A stack's back-stack path with its route params (#14188).
+    case stack(String)
 
     private static let statePrefix = "state:"
     private static let dataPrefix = "data:"
+    private static let stackPrefix = "stack:"
 
-    /// `state:<key>` with a state-key name, or `data:<pointer>` addressing a member of `data`;
-    /// anything else is nil (mirrors `parsePrototypeStorageKey` on the host).
+    /// `state:<key>` with a state-key name, `data:<pointer>` addressing a member of `data`, or
+    /// `stack:<id>` naming a stack; anything else is nil (mirrors `parsePrototypeStorageKey` on the host).
     static func parse(_ storageKey: String) -> PrototypeStorageKey? {
+        if storageKey.hasPrefix(stackPrefix) {
+            let id = String(storageKey.dropFirst(stackPrefix.count))
+            return id.isEmpty ? nil : .stack(id)
+        }
         if storageKey.hasPrefix(statePrefix) {
             let key = String(storageKey.dropFirst(statePrefix.count))
             return isStateKey(key) ? .state(key) : nil

@@ -78,6 +78,7 @@ enum PrototypeAgentProtocol {
         drawerCapability,
         adaptiveCapability,
         stackCapability,
+        routesCapability,
         stackTransitionsCapability,
         designPlatformCapability,
         iconEffectsCapability,
@@ -121,6 +122,8 @@ enum PrototypeAgentProtocol {
     static let lazyListCapability = "prototype_lazy_list_v1"
     /// Stack paths, four navigation actions, screen_changed and left-edge Back (#12068).
     static let stackCapability = "prototype_stack_v1"
+    /// Route params, onEnter, onBack, setStack and the persisted `stack:<id>` path (#14188).
+    static let routesCapability = "prototype_routes_v1"
     static let designPlatformCapability = "prototype_design_platform_v1"
     static let platformNamespaceCapability = "prototype_platform_namespace_v1"
     static let zoomTransitionCapability = "prototype_zoom_transition_v1"

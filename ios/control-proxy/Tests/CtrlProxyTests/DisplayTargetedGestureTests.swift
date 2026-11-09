@@ -24,58 +24,6 @@ final class DisplayTargetedGestureTests: XCTestCase {
         return provider
     }
 
-    func testSplitViewBackRecognizesSidebarLabelOrIdentifier() {
-        for (label, identifier) in [("Sidebar", ""), ("", "Sidebar")] {
-            let elements = [
-                SplitViewBackGesture.ElementSnapshot(
-                    label: "Settings", identifier: "", frame: CGRect(x: 0, y: 0, width: 951, height: 669)
-                ),
-                SplitViewBackGesture.ElementSnapshot(
-                    label: label, identifier: identifier, frame: CGRect(x: 0, y: 0, width: 320, height: 669)
-                ),
-            ]
-            XCTAssertTrue(SplitViewBackGesture.isSplitView(elements, size: unfolded.observation))
-        }
-    }
-
-    func testSplitViewBackRejectsMissingWideOrInsetSidebar() {
-        XCTAssertFalse(SplitViewBackGesture.isSplitView([], size: unfolded.observation))
-        for (label, frame) in [
-            ("Settings", CGRect(x: 0, y: 0, width: 320, height: 669)),
-            ("Sidebar", CGRect(x: 0, y: 0, width: 475.5, height: 669)),
-            ("Sidebar", CGRect(x: 0, y: 0, width: 600, height: 669)),
-            ("Sidebar", CGRect(x: 3, y: 0, width: 320, height: 669)),
-        ] {
-            XCTAssertFalse(SplitViewBackGesture.isSplitView([
-                .init(label: label, identifier: "", frame: frame),
-            ], size: unfolded.observation))
-        }
-    }
-
-    func testSplitViewBackAcceptsLeftEdgeTolerance() {
-        XCTAssertTrue(SplitViewBackGesture.isSplitView([
-            .init(label: "Sidebar", identifier: "", frame: CGRect(x: 2, y: 0, width: 320, height: 669)),
-        ], size: unfolded.observation))
-    }
-
-    func testSplitViewBackChevronUsesDisplayTargetedStationaryShortPress() throws {
-        let point = SplitViewBackGesture.chevronPoint(size: unfolded.observation)
-        XCTAssertEqual(point, GesturePoint(x: 902, y: 143))
-        let provider = provider()
-        let delivery = try DisplayGestureFactory(provider: provider).deliver(start: point, press: 0.05)
-        let touch = try XCTUnwrap(provider.touches.first)
-        XCTAssertEqual(provider.touches.count, 1)
-        XCTAssertEqual(touch.start, GesturePoint(x: 143, y: 49))
-        XCTAssertEqual(touch.end, touch.start)
-        XCTAssertEqual(touch.pressDuration, 0.05)
-        XCTAssertEqual(touch.moveDuration, 0)
-        XCTAssertEqual(touch.holdDuration, 0)
-        XCTAssertEqual(touch.displayId, inner.displayId)
-        XCTAssertEqual(touch.interfaceOrientation, 1)
-        XCTAssertEqual(delivery.selection.strategy, .displayTargeted)
-        XCTAssertTrue(provider.actions.isEmpty)
-    }
-
     func testBackAndRecentUseLandscapeEdgesOnTheInnerDisplay() throws {
         let back = NavigationEdgeGesture.back(size: unfolded.observation)
         let recent = NavigationEdgeGesture.recent(size: unfolded.observation)

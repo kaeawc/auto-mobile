@@ -1,10 +1,8 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import {
   FileTerminalReleaseJournal,
-  nodeTerminalReleaseJournalFileSystem,
+  createNodeTerminalReleaseJournalFileSystem,
   createDaemonTerminalReleaseJournal,
   TERMINAL_RELEASE_JOURNAL_FILE_NAME,
   terminalReleaseJournalPath,
@@ -12,6 +10,7 @@ import {
 import { NoopTerminalReleaseJournal } from "../../src/daemon/NoopTerminalReleaseJournal";
 import { logger } from "../../src/utils/logger";
 import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
+import { FakeTerminalReleaseJournalFsPrimitives } from "../fakes/FakeTerminalReleaseJournalFsPrimitives";
 
 const FILE = "/data/terminal-release-intents.jsonl";
 
@@ -95,45 +94,31 @@ describe("FileTerminalReleaseJournal (#10959)", () => {
     }
   });
 
-  test("real durable append syncs the file before every newly created directory's parent", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trj-first-"));
-    const openSync = fs.openSync;
-    const fsyncSync = fs.fsyncSync;
-    const paths = new Map<number, string>();
-    const syncedPaths: string[] = [];
-    const open = spyOn(fs, "openSync").mockImplementation((filePath, flags, mode) => {
-      const fd = openSync(filePath, flags, mode);
-      paths.set(fd, String(filePath));
-      return fd;
-    });
-    const sync = spyOn(fs, "fsyncSync").mockImplementation((fd) => {
-      syncedPaths.push(paths.get(fd)!);
-      fsyncSync(fd);
-    });
-    try {
-      const journalDir = path.join(dir, "new", "nested", "journal");
+  test.each(["linux", "win32"] as const)(
+    "%s durable append syncs the file before every newly created directory's parent",
+    (platform) => {
+      const root = path.join(path.sep, "trj-first");
+      const primitives = new FakeTerminalReleaseJournalFsPrimitives([root]);
+      const files = createNodeTerminalReleaseJournalFileSystem(primitives, platform);
+      const journalDir = path.join(root, "new", "nested", "journal");
       const file = path.join(journalDir, "journal.jsonl");
-      nodeTerminalReleaseJournalFileSystem.appendDurable(file, "first\n");
-      expect(syncedPaths).toEqual(
-        process.platform === "win32"
+      files.appendDurable(file, "first\n");
+      expect(primitives.syncedPaths).toEqual(
+        platform === "win32"
           ? [file]
-          : [file, journalDir, dir, path.join(dir, "new"), path.join(dir, "new", "nested")],
+          : [file, journalDir, root, path.join(root, "new"), path.join(root, "new", "nested")],
       );
-      syncedPaths.length = 0;
-      nodeTerminalReleaseJournalFileSystem.appendDurable(file, "second\n");
-      expect(syncedPaths).toEqual(process.platform === "win32" ? [file] : [file, journalDir]);
-      expect(fs.readFileSync(file, "utf8")).toBe("first\nsecond\n");
+      primitives.syncedPaths.length = 0;
+      files.appendDurable(file, "second\n");
+      expect(primitives.syncedPaths).toEqual(platform === "win32" ? [file] : [file, journalDir]);
+      expect(primitives.readFileSync(file)).toBe("first\nsecond\n");
 
-      syncedPaths.length = 0;
-      const unsyncedFile = path.join(dir, "unsynced", "nested", "journal.jsonl");
-      nodeTerminalReleaseJournalFileSystem.appendDurable(unsyncedFile, "third\n", false);
-      expect(syncedPaths).toEqual([unsyncedFile]);
-    } finally {
-      sync.mockRestore();
-      open.mockRestore();
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  });
+      primitives.syncedPaths.length = 0;
+      const unsyncedFile = path.join(root, "unsynced", "nested", "journal.jsonl");
+      files.appendDurable(unsyncedFile, "third\n", false);
+      expect(primitives.syncedPaths).toEqual([unsyncedFile]);
+    },
+  );
 
   test("mid-file corruption retains intents on both sides and compacts only the bad line", () => {
     const files = new FakeTerminalReleaseJournalFileSystem();
@@ -228,34 +213,32 @@ describe("FileTerminalReleaseJournal (#10959)", () => {
   });
 
   test("a failed compaction rename is not retried or slept on; the lifted marker is appended at once (#11102)", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trj-"));
+    const dir = path.join(path.sep, "trj");
     const file = path.join(dir, TERMINAL_RELEASE_JOURNAL_FILE_NAME);
-    const rename = spyOn(fs, "renameSync").mockImplementation(() => {
-      throw Object.assign(new Error("held by AV"), { code: "EPERM" });
-    });
+    const primitives = new FakeTerminalReleaseJournalFsPrimitives([dir]);
+    const files = createNodeTerminalReleaseJournalFileSystem(primitives, "linux");
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     const wait = spyOn(Atomics, "wait");
     try {
-      const journal = new FileTerminalReleaseJournal(file, nodeTerminalReleaseJournalFileSystem);
+      const journal = new FileTerminalReleaseJournal(file, files);
       journal.record({ sessionId: "live", reason: "heartbeat-timeout", at: 1 });
       journal.record({ sessionId: "other", reason: "explicit-release", at: 2 });
+      primitives.failRename = Object.assign(new Error("held by AV"), { code: "EPERM" });
 
       journal.resolve("live");
 
-      expect(rename).toHaveBeenCalledTimes(1);
+      expect(primitives.renames).toHaveLength(1);
       expect(wait).not.toHaveBeenCalled();
-      expect(fs.readdirSync(dir)).toEqual([TERMINAL_RELEASE_JOURNAL_FILE_NAME]);
-      rename.mockRestore();
+      expect(primitives.readdirSync(dir)).toEqual([TERMINAL_RELEASE_JOURNAL_FILE_NAME]);
+      primitives.failRename = undefined;
       expect(
-        new FileTerminalReleaseJournal(file, nodeTerminalReleaseJournalFileSystem)
+        new FileTerminalReleaseJournal(file, files)
           .loadUnconfirmed()
           .map(({ sessionId }) => sessionId),
       ).toEqual(["other"]);
     } finally {
       wait.mockRestore();
       warn.mockRestore();
-      rename.mockRestore();
-      fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
@@ -342,32 +325,31 @@ describe("FileTerminalReleaseJournal (#10959)", () => {
     }
   });
 
-  test("the daemon journal round-trips through a real data directory", () => {
-    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "terminal-release-journal-"));
-    try {
-      const filePath = terminalReleaseJournalPath(path.join(dataDir, "nested"), "daemon-a");
-      const open = () =>
-        createDaemonTerminalReleaseJournal({
-          dataDir: path.join(dataDir, "nested"),
-          daemonSessionId: "daemon-a",
-          liveDaemonSessionIds: new Set(["daemon-a"]),
-        });
-      const journal = open();
-      journal.record({ sessionId: "a", reason: "explicit-release", at: 1 });
-      journal.record({ sessionId: "b", reason: "heartbeat-timeout", at: 2 });
-      journal.resolve("a");
+  test("the daemon journal round-trips through the node file system's data directory", () => {
+    const dataDir = path.join(path.sep, "terminal-release-journal", "nested");
+    const primitives = new FakeTerminalReleaseJournalFsPrimitives();
+    const fileSystem = createNodeTerminalReleaseJournalFileSystem(primitives, "linux");
+    const filePath = terminalReleaseJournalPath(dataDir, "daemon-a");
+    const open = () =>
+      createDaemonTerminalReleaseJournal({
+        dataDir,
+        daemonSessionId: "daemon-a",
+        liveDaemonSessionIds: new Set(["daemon-a"]),
+        fileSystem,
+      });
+    const journal = open();
+    journal.record({ sessionId: "a", reason: "explicit-release", at: 1 });
+    journal.record({ sessionId: "b", reason: "heartbeat-timeout", at: 2 });
+    journal.resolve("a");
 
-      expect(fs.readFileSync(filePath, "utf-8")).toBe(line("b", "heartbeat-timeout", 2));
-      expect(open().loadUnconfirmed()).toEqual([
-        { sessionId: "b", reason: "heartbeat-timeout", at: 2 },
-      ]);
+    expect(primitives.readFileSync(filePath)).toBe(line("b", "heartbeat-timeout", 2));
+    expect(open().loadUnconfirmed()).toEqual([
+      { sessionId: "b", reason: "heartbeat-timeout", at: 2 },
+    ]);
 
-      journal.resolve("b");
-      expect(fs.existsSync(filePath)).toBe(false);
-      expect(fs.readdirSync(path.dirname(filePath))).toEqual([]);
-    } finally {
-      fs.rmSync(dataDir, { recursive: true, force: true });
-    }
+    journal.resolve("b");
+    expect(primitives.files.has(filePath)).toBe(false);
+    expect(primitives.readdirSync(path.dirname(filePath))).toEqual([]);
   });
 });
 

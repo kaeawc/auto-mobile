@@ -559,6 +559,14 @@ jobs:
           # its .bun-tmp-* dirs, and fails with ENOENT (#17068).
           cache-dependency-glob: scripts/github/uv.lock
 
+      # install_lychee.sh re-verifies the cached archive's SHA-256 against the
+      # pin in lychee_version.sh, which keys this entry (#17641).
+      - name: "Cache pinned lychee download"
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/auto-mobile/tools/lychee
+          key: tool-download-lychee-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/lychee/lychee_version.sh') }}
+
       - name: "Install Lychee"
         shell: "bash"
         run: |

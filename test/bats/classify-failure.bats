@@ -1294,3 +1294,53 @@ JSON
   [ "$status" -eq 0 ]
   [[ "$output" != *"RERUN-DONT-FIX"* ]]
 }
+
+@test "a lychee release download 5xx classifies as infrastructure, old and new installer (#17641)" {
+  url='https://github.com/lycheeverse/lychee/releases/download/lychee-v0.22.0/lychee-x86_64-unknown-linux-gnu.tar.gz'
+  fixture="$BATS_TEST_TMPDIR/issue-17641-fast-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"main","jobs":[{"databaseId":65,"name":"Fast Validation","conclusion":"failure","steps":[{"name":"Install fast validation dependencies","conclusion":"failure"}]}]}
+JSON
+  local legacy_attempt=('Downloading lychee binary from GitHub releases...' "URL: ${url}"
+    'curl: (22) The requested URL returned error: 504' 'Failed to download lychee binary' 'Installation failed!')
+  # The pre-#17641 installer under install-fast-validation-deps.sh: both
+  # wrapper attempts hit the 504 (main, 08:20Z).
+  log="$BATS_TEST_TMPDIR/lychee-legacy.log"
+  printf '%s\n' '[install-fast-validation-deps] install lychee (attempt 1/2, timeout 60s)' "${legacy_attempt[@]}" \
+    '[install-fast-validation-deps] install lychee (attempt 2/2, timeout 60s)' "${legacy_attempt[@]}" \
+    '[install-fast-validation-deps] ERROR: install lychee failed after 2 attempts' > "$log"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
+    FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 617
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — pre-#17641 lychee installer under install-fast-validation-deps.sh"* ]]
+
+  # A legacy 504 that recovered on the wrapper's retry must not mask a later failure.
+  printf '%s\n' "${legacy_attempt[@]}" '[install-fast-validation-deps] install lychee (attempt 2/2, timeout 60s)' \
+    'lychee installed successfully' '[install-fast-validation-deps] Fast Validation dependencies ready' \
+    'not ok 3 a real regression' > "$log"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
+    FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 618
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"RERUN-DONT-FIX"* ]]
+
+  # The installer now routes through release_fetch_pinned and its marker.
+  printf '%s\n' "Fetching lychee 0.22.0 from GitHub releases..." "URL: ${url}" \
+    "Downloading ${url} (attempt 6/6)" 'curl: (22) The requested URL returned error: 504' \
+    "UPSTREAM-DOWNLOAD-FAILURE: ${url} failed after 6 attempts (last error: curl: (22) The requested URL returned error: 504)." \
+    'Failed to download lychee binary' 'Installation failed!' > "$log"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
+    FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 619
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — GitHub release asset download"* ]]
+
+  # The merge link check ran the legacy installer directly, with no wrapper.
+  fixture="$BATS_TEST_TMPDIR/issue-17641-links-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"main","jobs":[{"databaseId":65,"name":"Validate Documentation Links","conclusion":"failure","steps":[{"name":"Install Lychee","conclusion":"failure"}]}]}
+JSON
+  printf '%s\n' "${legacy_attempt[@]}" > "$log"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION='Process completed with exit code 1.' \
+    FAKE_ORDINARY_EXIT_LOG="$log" bash "$SCRIPT" 620
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — pre-#17641 lychee installer in the merge link check"* ]]
+}

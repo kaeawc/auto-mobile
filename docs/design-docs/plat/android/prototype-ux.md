@@ -1483,10 +1483,11 @@ Runtime (shared by `PrototypeRuntime` on Android and the iOS session; pure helpe
   runs (`{item}`/`{index}` were bound to the row when the repeat was instantiated) and must match
   the route's declarations exactly after resolution; otherwise the action leaves the stack
   unchanged. Popping restores the entry below with its own params.
-- `{route.name}` binds the top screen's subtree, and its onEnter/onBack lists when they run, to the
-  top entry's params: text renders the value, a whole-placeholder operand keeps its type, and a
-  whole data-pointer segment takes the value escaped per RFC 6901. Binding happens before `/data`
-  resolution; `{index}` is left for the repeat that owns it. Hidden screens are not bound.
+- `{route.name}` binds each screen's subtree in the stack path to that screen's topmost entry's
+  params, and its onEnter/onBack lists to the entry's params when they run: text renders the value,
+  a whole-placeholder operand keeps its type, and a whole data-pointer segment takes the value
+  escaped per RFC 6901. Binding happens before `/data` resolution; `{index}` is left for the repeat
+  that owns it. Screens outside the path are not bound.
 - `screen_changed` is emitted once per navigation when the top screen, depth or top params change,
   with `params` beside `screen` and `depth` only when the top entry has params. The new top screen's
   onEnter runs after that event. Each stack's first screen also enters once per show (not on a

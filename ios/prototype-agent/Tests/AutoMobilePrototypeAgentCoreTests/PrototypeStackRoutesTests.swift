@@ -41,6 +41,41 @@ final class PrototypeStackRoutesTests: XCTestCase {
         session.spec?.root.screens?["post"]?.text
     }
 
+    func testScopeBindsEachScreenToItsOwnParams() {
+        let stack = PrototypeStackSnapshot(entries: [
+            PrototypeStackPathEntry(screen: "post", params: ["postId": .number(1)]),
+            PrototypeStackPathEntry(screen: "profile", params: ["author": .string("ann")]),
+        ])
+        XCTAssertEqual(PrototypeStackRoutes.scope(["nav": stack]), ["nav": [
+            "post": ["postId": .number(1)],
+            "profile": ["author": .string("ann")],
+        ]])
+    }
+
+    func testScopeUsesTheTopmostEntryForARepeatedScreen() {
+        let stack = PrototypeStackSnapshot(entries: [
+            PrototypeStackPathEntry(screen: "post", params: ["postId": .number(1)]),
+            PrototypeStackPathEntry(screen: "post", params: ["postId": .number(7)]),
+            PrototypeStackPathEntry(screen: "profile", params: ["author": .string("ann")]),
+        ])
+        XCTAssertEqual(PrototypeStackRoutes.scope(["nav": stack]), ["nav": [
+            "post": ["postId": .number(7)],
+            "profile": ["author": .string("ann")],
+        ]])
+    }
+
+    func testScopeOmitsScreensAndStacksWithoutParams() {
+        let stack = PrototypeStackSnapshot(entries: [
+            PrototypeStackPathEntry(screen: "feed"),
+            PrototypeStackPathEntry(screen: "post", params: ["postId": .number(1)]),
+        ])
+        let empty = PrototypeStackSnapshot(path: ["home", "detail"])
+        XCTAssertEqual(PrototypeStackRoutes.scope(["nav": stack, "empty": empty]), ["nav": [
+            "post": ["postId": .number(1)],
+        ]])
+        XCTAssertTrue(PrototypeStackRoutes.scope(["empty": empty]).isEmpty)
+    }
+
     func testParamsAreRestoredOnPopAndBoundIntoTheTopScreen() throws {
         var session = try shown()
         _ = try session.run(push("post", #"{"postId":41}"#))

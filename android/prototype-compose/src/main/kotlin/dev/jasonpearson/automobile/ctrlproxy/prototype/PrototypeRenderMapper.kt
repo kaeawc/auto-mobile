@@ -50,7 +50,7 @@ internal class PrototypeRenderMapper(
   private var sourcePlatform: JsonObject? = null
   private var resolvedRoot: PrototypeNode? = null
   private var routeSource: PrototypeNode? = null
-  private var routeTops: Map<String, Pair<String, JsonObject>>? = null
+  private var routeStacks: Map<String, PrototypeStackSnapshot>? = null
   private var routedRoot: PrototypeNode? = null
   private var cache: PrototypeRenderCache? = null
   private var previousSpec: PrototypeSpec? = null
@@ -135,22 +135,19 @@ internal class PrototypeRenderMapper(
     }
 
   /**
-   * [spec] with each stack's top screen bound to its entry's route params (#14188). The bound root
-   * is reused while the authored root and every stack's top entry stay the same, so the identity
-   * caches below keep working.
+   * [spec] with each screen in a stack's path bound to its topmost entry's route params (#14188).
+   * The bound root is reused while the authored root and every stack's full path and params stay
+   * the same, so the identity caches below keep working.
    */
   private fun routedLocked(
     spec: PrototypeSpec,
     stacks: Map<String, PrototypeStackSnapshot>,
   ): PrototypeSpec {
     if (stacks.values.none { it.params != null }) return spec
-    val tops = stacks.mapValues { (_, stack) ->
-      stack.path.last() to stack.paramsAt(stack.path.lastIndex)
-    }
-    if (routeSource !== spec.root || routeTops != tops) {
+    if (routeSource !== spec.root || routeStacks != stacks) {
       routedRoot = PrototypeRouteRuntime.bindRoot(spec.root, stacks)
       routeSource = spec.root
-      routeTops = tops
+      routeStacks = stacks
     }
     val root = checkNotNull(routedRoot)
     return if (root === spec.root) spec else spec.copy(root = root)

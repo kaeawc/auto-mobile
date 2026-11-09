@@ -64,6 +64,7 @@ import { staleDisplayError } from "../observe/StaleDisplayError";
 import { Window as RealWindow } from "../observe/Window";
 import { HomeForegroundVerifier, type HomeForegroundVerifyOptions } from "./HomeForegroundVerifier";
 import { compareActiveWindow, deriveInteractionEffect } from "./interactionEffect";
+import { refreshStaleIosPanelGeometry } from "./panelGeometryRefresh";
 import { MissingViewHierarchyError } from "./MissingViewHierarchyError";
 import {
   applySuccessVerdict,
@@ -276,6 +277,12 @@ export class BaseVisualChange {
     await beginPostActionCaptureAction();
     const timeoutMs = options.timeoutMs || 12000;
     const perf = options.perf ?? new NoOpPerformanceTracker();
+    await refreshStaleIosPanelGeometry(this.device, options, {
+      observer: this.observeScreen,
+      transitions: this.displayTransitionReader,
+      callerStampIsStale: () => this.callerDisplayStampIsStale(options),
+      observeOptions: this.previousObserveOptions(options, perf, "fresh"),
+    });
     const state = this.captureCallerFenceState(options);
 
     if (options.progress) {

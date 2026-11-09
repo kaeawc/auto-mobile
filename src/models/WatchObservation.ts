@@ -6,6 +6,13 @@ export const WATCH_HIERARCHY_UNAVAILABLE_MESSAGE =
   "screenshot. viewHierarchy, skeleton, elements and the other element fields are absent, " +
   "not empty, so their absence does not mean the screen is empty. Read the screenshot instead.";
 
+/** The watch runner is connected, but its target app is not in the foreground. */
+export const WATCH_APP_NOT_FOREGROUND_MESSAGE =
+  "The watch runner is connected, but the target app is not in the foreground (for example, " +
+  "after a home press): this observation carries only a screenshot. Absent hierarchy fields " +
+  "do not mean the screen is empty. Call launchApp to bring the app back, or post a notification " +
+  "and retry observe: system alerts and notification looks are readable. Read the screenshot meanwhile.";
+
 export type AppleScreenshotOnlyPlatform = "watchos" | "tvos" | "visionos";
 
 export const TVOS_HIERARCHY_UNAVAILABLE_MESSAGE =

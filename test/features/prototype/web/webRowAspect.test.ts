@@ -495,3 +495,45 @@ test("a repeated row does not fill width, as its children are never measured (#1
   expect(rowFillAxes(repeated, "root", prepare)).toEqual([]);
   expect(rowMeasured(repeated, "root", prepare)).toBe(repeated);
 });
+
+test("under an unbounded width with no definite height a row neither takes nor fills the width (#16718)", () => {
+  const prepare = (entry: unknown) => record(entry);
+  const row = {
+    type: "row",
+    children: [
+      { type: "box", style: { aspectRatio: 1 } },
+      { type: "box", style: { width: { dp: 40 } } },
+      { type: "box", style: { aspectRatio: 1, maxWidth: 10 } },
+    ],
+  };
+  const unbounded = { unboundedWidth: true };
+  expect(rowFillAxes(row, "root", prepare, unbounded)).toEqual([]);
+  const children = rowMeasured(row, "root", prepare, unbounded).children as unknown[];
+  // Compose's aspectRatio has no max width to size from, so the ratio stays as authored and its
+  // later sibling keeps its width; a capped ratio still grows to its cap.
+  expect(children[0]).toBe(row.children[0]);
+  expect(children[1]).toBe(row.children[1]);
+  expect(styleOf(children[2])?.[ROW_MEASURE_KEY]).toEqual({ shrink: CAPPED_SHRINK, basis: 10 });
+  const plain = { ...row, children: row.children.slice(0, 2) };
+  expect(rowMeasured(plain, "root", prepare, unbounded)).toBe(plain);
+  expect(rowSequentialChildren(plain.children, shown, Infinity, true)).toBe(plain.children);
+});
+
+test("under an unbounded width a row's height still caps its aspect ratio (#16718)", () => {
+  const prepare = (entry: unknown) => record(entry);
+  const row = {
+    type: "row",
+    children: [
+      { type: "box", style: { aspectRatio: 1 } },
+      { type: "box", style: { width: { dp: 40 } } },
+    ],
+  };
+  const children = rowMeasured(row, "root", prepare, { height: 80, unboundedWidth: true })
+    .children as unknown[];
+  expect(styleOf(children[0])?.[ROW_MEASURE_KEY]).toEqual({ shrink: CAPPED_SHRINK, basis: 80 });
+  expect(styleOf(children[1])?.[ROW_MEASURE_KEY]).toEqual({ shrink: LATER_SHRINK, later: true });
+  // A numeric bound is the inherited height alone, as before.
+  expect(rowMeasured(row, "root", prepare, 80)).toEqual(
+    rowMeasured(row, "root", prepare, { height: 80 }),
+  );
+});

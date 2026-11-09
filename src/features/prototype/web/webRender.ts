@@ -281,7 +281,7 @@ function child(scope: WebRenderScope, patch: Partial<WebRenderScope>): WebRender
     style: { ...scope.style, ...patch.style },
     consumedInsets,
     ownInsets: [],
-    // Only a row or box (or a repeat row of one) passes its height bound on; a scroll has none.
+    // Only a row or box (or a repeat row of one) or a horizontal scroll passes its height bound on.
     heightBound: patch.heightBound,
   };
 }
@@ -415,7 +415,10 @@ function lineFillAxes(
     return [];
   }
   const list: unknown[] = sized.children;
-  const own = rowFillAxes(raw, path, prepareIn(scope), scope.heightBound);
+  const own = rowFillAxes(raw, path, prepareIn(scope), {
+    height: scope.heightBound,
+    unboundedWidth: scope.style.unboundedWidth,
+  });
   // Children see the bound this container passes them, as rendering gives it (see `line`, `box`).
   const bound = BOUNDING_CONTAINERS.has(String(raw.type))
     ? contentHeightBound(raw.style, scope.heightBound)
@@ -451,7 +454,10 @@ const line =
       style: containerChildStyle(scope, node, axis),
       heightBound: contentHeightBound(node.style, scope.heightBound),
     });
-    const rowed = rowMeasured(node, path, prepareIn(inner), scope.heightBound);
+    const rowed = rowMeasured(node, path, prepareIn(inner), {
+      height: scope.heightBound,
+      unboundedWidth: inner.style.unboundedWidth,
+    });
     const { attrs, style } = base(rowed, scope, lineCss(axis, rowed.style));
     return el("div", { attrs, style }, children(rowed, inner, path));
   };
@@ -499,7 +505,13 @@ const scroll: NodeRenderer = (node, scope, path) => {
     [horizontal ? "overflow-x" : "overflow-y"]: "auto",
     ...fade.style,
   });
-  const inner = child(scope, { inBox: false, style: scrollChildStyle(scope, node) });
+  // Across, Compose measures the content against the scroll's max height (its content height); a
+  // vertical scroll hands its content an unbounded height instead.
+  const inner = child(scope, {
+    inBox: false,
+    style: scrollChildStyle(scope, node),
+    heightBound: horizontal ? contentHeightBound(node.style, scope.heightBound) : undefined,
+  });
   const scrollAttrs = { ...attrs, ...fade.attrs };
   return el("div", { attrs: scrollAttrs, style }, renderOrSkip(node.child, inner, `${path}.child`));
 };

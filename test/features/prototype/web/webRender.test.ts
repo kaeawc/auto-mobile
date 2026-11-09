@@ -941,6 +941,99 @@ describe("prototype web still (#16346)", () => {
     expect(byTag({ element: cell }, "after")[0]!.style).not.toHaveProperty("width");
   });
 
+  test("under a horizontal scroll a row's unsized aspect ratio sizes from the height (#16718)", () => {
+    const render = (scrollStyle: Record<string, unknown>, rowStyle?: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          root: {
+            type: "scroll",
+            axis: "horizontal",
+            style: scrollStyle,
+            child: {
+              type: "row",
+              testTag: "line",
+              ...(rowStyle ? { style: rowStyle } : {}),
+              children: [
+                { type: "box", testTag: "ratio", style: { aspectRatio: 1 } },
+                { type: "box", testTag: "after", style: { width: { dp: 40 } } },
+              ],
+            },
+          },
+        }),
+        "line",
+      )[0]!;
+    const style = (root: WebElement, tag: string) => byTag({ element: root }, tag)[0]!.style;
+    const sized = render({ height: { dp: 100 } });
+    // No width to reach, so the row hugs its content instead of growing to the scroll.
+    expect(sized.style).not.toHaveProperty("width");
+    expect(sized.style).not.toHaveProperty("max-width");
+    expect(style(sized, "ratio")).toMatchObject({ width: "100px", "flex-basis": "100px" });
+    expect(style(sized, "ratio").flex).toBeUndefined();
+    expect(style(sized, "after")).toMatchObject({ width: "40px" });
+    expect(style(sized, "after")["max-width"]).not.toBe("0px");
+    // The row's own padding comes off the height the scroll hands it.
+    const padded = render({ height: { dp: 100 } }, { padding: { top: 10, bottom: 10 } });
+    expect(style(padded, "ratio")).toMatchObject({ width: "80px", "flex-basis": "80px" });
+    // With no definite height the ratio stays as authored, and its sibling keeps its width.
+    const unsized = render({});
+    expect(unsized.style).not.toHaveProperty("width");
+    expect(style(unsized, "ratio")).not.toHaveProperty("width");
+    expect(style(unsized, "ratio")).not.toHaveProperty("flex");
+    expect(style(unsized, "after")).not.toHaveProperty("max-width");
+  });
+
+  test("a row nested in a box or row under a horizontal scroll still sizes from the height (#16718)", () => {
+    const row = {
+      type: "row",
+      children: [
+        { type: "box", testTag: "ratio", style: { aspectRatio: 1 } },
+        { type: "box", style: { width: { dp: 40 } } },
+      ],
+    };
+    const ratioIn = (child: Record<string, unknown>) =>
+      byTag(
+        renderPrototypeStill({
+          ...reference,
+          root: { type: "scroll", axis: "horizontal", style: { height: { dp: 100 } }, child },
+        }),
+        "ratio",
+      )[0]!.style;
+    const inBox = { type: "box", style: { padding: { top: 5, bottom: 5 } }, children: [row] };
+    expect(ratioIn(inBox)).toMatchObject({ width: "90px", "flex-basis": "90px" });
+    expect(ratioIn({ type: "row", children: [row] })).toMatchObject({
+      width: "100px",
+      "flex-basis": "100px",
+    });
+  });
+
+  test("a dp-width row under a horizontal scroll caps its aspect ratio by the scroll's height (#16718)", () => {
+    const root = byTag(
+      renderPrototypeStill({
+        ...reference,
+        root: {
+          type: "scroll",
+          axis: "horizontal",
+          style: { height: { dp: 100 } },
+          child: {
+            type: "row",
+            testTag: "line",
+            style: { width: { dp: 200 } },
+            children: [
+              { type: "box", testTag: "ratio", style: { aspectRatio: 1 } },
+              { type: "box", testTag: "after", style: { width: { dp: 40 } } },
+            ],
+          },
+        },
+      }),
+      "line",
+    )[0]!;
+    const style = (tag: string) => byTag({ element: root }, tag)[0]!.style;
+    // Compose's aspectRatio falls back to the 100 dp max height: 100x100, then the 40 dp box.
+    expect(style("ratio")).toMatchObject({ width: "100px", "flex-basis": "100px" });
+    expect(style("after")["max-width"]).not.toBe("0px");
+  });
+
   test("a dp-wide column in a horizontal scroll bounds its row to its own width (#16691)", () => {
     const shown = renderPrototypeStill({
       ...reference,

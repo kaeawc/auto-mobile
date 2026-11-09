@@ -73,9 +73,8 @@ final class TVCommandRouter {
                     throw CommandError.invalidParameter("frameContext", "unsupported on tvOS")
                 }
                 let startTime = Date()
-                textEntryCommands.press(button, perform: press, snapshot: {
-                    let resolved = target(requested: envelope.bundleId)
-                    return try sketch(resolved.app.snapshot())
+                textEntryCommands.press(button, perform: press, keyboardProbe: {
+                    target(requested: envelope.bundleId).app.keyboards.firstMatch.exists
                 })
                 return try JSONEncoder().encode(WebSocketResponse.success(
                     type: "press_button_result", requestId: requestId,

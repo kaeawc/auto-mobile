@@ -134,9 +134,14 @@ final class TVKeyboardSettleGate {
         lastKeyboardSeen = clock.now()
     }
 
+    /// Presence probes can arm the gate, but only a full snapshot can release it.
+    func noteKeyboardSeen() {
+        lastKeyboardSeen = clock.now()
+    }
+
     /// A failed snapshot cannot prove that the keyboard is absent.
     func noteSnapshotFailure() {
-        lastKeyboardSeen = clock.now()
+        noteKeyboardSeen()
     }
 
     func resolve(root: TVNodeSketch) -> TVTextEntryResolution {
@@ -186,13 +191,15 @@ final class TVTextEntryCommands {
 
     func press(
         _ button: TVRemoteButton, perform: (TVRemoteButton) -> Void,
-        snapshot: () throws -> TVNodeSketch
+        keyboardProbe: () throws -> Bool
     ) {
         perform(button)
         do {
-            _ = try keyboardSettleGate.resolve(root: snapshot())
+            if try keyboardProbe() {
+                keyboardSettleGate.noteKeyboardSeen()
+            }
         } catch {
-            // The press succeeded; withhold values conservatively if its snapshot fails.
+            // The press succeeded; an uncertain probe must conservatively arm the gate.
             keyboardSettleGate.noteSnapshotFailure()
         }
     }

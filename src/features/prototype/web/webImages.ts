@@ -175,22 +175,31 @@ export function webImageContentRatio(
 ): Record<string, string> | undefined {
   const pad = (side: string) => box[side] ?? "0px";
   const padded = LAYER_INSETS.some(([padding]) => box[padding] !== undefined);
-  if (box["aspect-ratio"] === undefined || !padded) {
+  // Only the default intrinsic ratio is the image's; an authored aspectRatio stays as resolved.
+  if (box["aspect-ratio"] !== `var(${webImageVar(slot, "-ar")}, auto)` || !padded) {
     return undefined;
   }
   const inline = `${pad("padding-inline-start")} - ${pad("padding-inline-end")}`;
   const block = `${pad("padding-top")} - ${pad("padding-bottom")}`;
   if (box.width?.endsWith("px") && box.height === undefined) {
+    const width = usedLength(box.width, box["min-width"], box["max-width"]);
     return {
-      height: `calc((${box.width} - ${inline}) * var(${webImageVar(slot, "-hw")}) + ${pad("padding-top")} + ${pad("padding-bottom")})`,
+      height: `calc((${width} - ${inline}) * var(${webImageVar(slot, "-hw")}) + ${pad("padding-top")} + ${pad("padding-bottom")})`,
     };
   }
   if (box.height?.endsWith("px") && box.width === undefined) {
+    const height = usedLength(box.height, box["min-height"], box["max-height"]);
     return {
-      width: `calc((${box.height} - ${block}) * var(${webImageVar(slot, "-wh")}) + ${pad("padding-inline-start")} + ${pad("padding-inline-end")})`,
+      width: `calc((${height} - ${block}) * var(${webImageVar(slot, "-wh")}) + ${pad("padding-inline-start")} + ${pad("padding-inline-end")})`,
     };
   }
   return undefined;
+}
+
+/** A fixed length as CSS uses it: capped by its maximum, then raised to its minimum. */
+function usedLength(length: string, minimum?: string, maximum?: string): string {
+  const capped = maximum === undefined ? length : `min(${length}, ${maximum})`;
+  return minimum === undefined ? capped : `max(${minimum}, ${capped})`;
 }
 
 /** The padding longhands whose values inset the image layers, and the inset each one sets. */

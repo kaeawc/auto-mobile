@@ -340,6 +340,17 @@ describe("an image with an inlinable asset", () => {
     expect(tall.height).toBe("calc((200px - 40px - 40px) * var(--pa-3-hw) + 0px + 0px)");
     const wide = image({ height: { dp: 100 }, padding: { top: 10, bottom: 10 } });
     expect(wide.width).toBe("calc((100px - 10px - 10px) * var(--pa-3-wh) + 0px + 0px)");
+    // The fixed axis's used length bounds the ratio: a maximum caps it, a minimum raises it.
+    const capped = image({ width: { dp: 200 }, maxWidth: 100, padding: { start: 20, end: 20 } });
+    expect(capped.height).toBe(
+      "calc((min(200px, 100px) - 20px - 20px) * var(--pa-3-hw) + 0px + 0px)",
+    );
+    const raised = image({ height: { dp: 50 }, minHeight: 80, padding: { top: 10 } });
+    expect(raised.width).toBe("calc((max(80px, 50px) - 10px - 0px) * var(--pa-3-wh) + 0px + 0px)");
+    // An authored aspectRatio is the layout's own, so it stays.
+    const authored = image({ width: { dp: 200 }, aspectRatio: 2, padding: { start: 0 } });
+    expect(authored.height).toBeUndefined();
+    expect(authored["aspect-ratio"]).toBe("2");
     // Unpadded, the border box is the content box, so the plain aspect ratio stays.
     expect(image({ width: { dp: 200 } })["aspect-ratio"]).toBe("var(--pa-3-ar, auto)");
   });

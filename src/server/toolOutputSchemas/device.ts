@@ -119,7 +119,7 @@ const deviceStateOutputFields = {
         .passthrough()
         .optional()
         .describe(
-          "Android foldables only: the committed device_state posture and the panel behind the default display, read live on every call.",
+          "Read live on every call: Android foldables report the committed device_state posture and panel behind the default display; iPhone Duo reports opened/closed and the active inner/cover panel from devicectl, or omits current when indeterminate.",
         ),
     })
     .passthrough()

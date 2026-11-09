@@ -394,8 +394,8 @@ interface StatusBarSample {
 /**
  * `window.statusBar` light or dark picks the content style; `auto` or none follows the colour the
  * window paints at the screen's top edge, as both platforms' edge-to-edge defaults do. The window
- * placement is part of that layout, so a bottom sheet or a floating window leaves the screen
- * background there.
+ * placement is part of that layout, so a bottom sheet or a small floating window leaves the
+ * screen background there, and a floating panel that reaches the edge sets it.
  */
 function stillStatusBarContent(spec: unknown, sample: StatusBarSample): WebStatusBarContent {
   const { content, background, dark, screen, vars } = sample;

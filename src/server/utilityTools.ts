@@ -1,3 +1,4 @@
+import type { DevicectlDisplayInfoSource } from "../utils/ios-cmdline-tools/DevicectlDisplayInfo";
 import { PLAN_RELEVANT, SELECTS_ACTIVE_DEVICE } from "./toolRegistryTypes";
 import { ctrlProxyClientLifecycle } from "../features/observe/ctrlProxyClientLifecycle";
 import type { NetworkFilterBridge } from "../features/networkFilter/NetworkFilterBridge";
@@ -780,9 +781,9 @@ function createSessionDeviceState(
 }
 
 const createGetDeviceStateHandler =
-  (networkFilterBridge?: NetworkFilterBridge) =>
+  (networkFilterBridge?: NetworkFilterBridge, iosDisplayInfoSource?: DevicectlDisplayInfoSource) =>
   async (device: BootedDevice, args: GetDeviceStateArgs) => {
-    const deviceState = new DeviceState(device, { networkFilterBridge });
+    const deviceState = new DeviceState(device, { networkFilterBridge, iosDisplayInfoSource });
     const result = await deviceState.getState(args.include);
 
     return createStructuredToolResponse({
@@ -798,14 +799,17 @@ const SET_ACTIVE_DEVICE_OPTIONS = {
 };
 
 // Register tools
-export function registerUtilityTools(
-  options: SetActiveDeviceSeams & {
-    /** iOS Simulator network-extension controller; defaults to the installed one. */
-    networkFilterBridge?: NetworkFilterBridge;
-    /** Physical iOS location runner (#14091); without it physical iOS location is unsupported. */
-    iosRunnerLocation?: IosRunnerLocationResolver;
-  } = {},
-) {
+/** Seams for the utility tools; each defaults to the production dependency. */
+interface RegisterUtilityToolsOptions extends SetActiveDeviceSeams {
+  /** iOS Simulator network-extension controller; defaults to the installed one. */
+  networkFilterBridge?: NetworkFilterBridge;
+  /** Physical iOS location runner (#14091); without it physical iOS location is unsupported. */
+  iosRunnerLocation?: IosRunnerLocationResolver;
+  /** `devicectl device info displays` reader for an iPhone Duo's live posture; defaults to the host's. */
+  iosDisplayInfoSource?: DevicectlDisplayInfoSource;
+}
+
+export function registerUtilityTools(options: RegisterUtilityToolsOptions = {}) {
   const setActiveDeviceHandler = createSetActiveDeviceHandler({
     displayInventory: options.displayInventory,
     legacyDeviceSelection:
@@ -950,11 +954,14 @@ export function registerUtilityTools(
 
   ToolRegistry.registerDeviceAware(
     "getDeviceState",
-    "Read device-level state including clock (Android epoch-second instant and automaticTime, readable without root; unsupported on iOS), Do Not Disturb, the connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, network condition (device-wide on Android; on an iOS Simulator the per-app offline rules the network filter enforces, with revision and lease), and Android emulator virtual sensor values (sensors: acceleration, gyroscope, magnetic-field, orientation, temperature, proximity, light, pressure, humidity via `emu sensor get`, with unavailable listing sensors the AVD refuses; change them with setSensor). Use it as the idempotency oracle before flipping a toggle — a bare call returns doNotDisturb + connectivity, so you can check whether Airplane mode is already on instead of inferring it from the status bar. Each connectivity field is true/false, or omitted when the device could not answer (the key is absent on this API level, or the value did not parse) — omitted never means off. Android only: iOS reports connectivity unsupported, because Airplane mode / Wi-Fi / Bluetooth / Location have no simctl or devicectl read verb and a simulator shares the host's network stack. screenLock (Android) reports the lock credential type (none, pin, password, pattern, or unknown) and whether it is secure, never the credential. On a multi-panel device, displays lists the panels and supported postures; on an Android foldable displays.current adds the live posture (from the committed device_state) and activePanel (key and role of the panel behind the default display), so a setPosture or fold shows up in the next read. iOS (including iPhone Duo) reports no displays.current." +
+    "Read device-level state including clock (Android epoch-second instant and automaticTime, readable without root; unsupported on iOS), Do Not Disturb, the connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, network condition (device-wide on Android; on an iOS Simulator the per-app offline rules the network filter enforces, with revision and lease), and Android emulator virtual sensor values (sensors: acceleration, gyroscope, magnetic-field, orientation, temperature, proximity, light, pressure, humidity via `emu sensor get`, with unavailable listing sensors the AVD refuses; change them with setSensor). Use it as the idempotency oracle before flipping a toggle — a bare call returns doNotDisturb + connectivity, so you can check whether Airplane mode is already on instead of inferring it from the status bar. Each connectivity field is true/false, or omitted when the device could not answer (the key is absent on this API level, or the value did not parse) — omitted never means off. Android only: iOS reports connectivity unsupported, because Airplane mode / Wi-Fi / Bluetooth / Location have no simctl or devicectl read verb and a simulator shares the host's network stack. screenLock (Android) reports the lock credential type (none, pin, password, pattern, or unknown) and whether it is secure, never the credential. On a multi-panel device, displays lists the panels and supported postures; on an Android foldable displays.current adds the live posture (from the committed device_state) and activePanel (key and role of the panel behind the default display), so a setPosture or fold shows up in the next read. On iPhone Duo, displays.current reports opened for the active inner panel or closed for the active cover panel, read live through devicectl; it cannot distinguish half_opened and is omitted when the active panel cannot be determined." +
       " Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     getDeviceStateSchema,
     {
-      handler: createGetDeviceStateHandler(options.networkFilterBridge),
+      handler: createGetDeviceStateHandler(
+        options.networkFilterBridge,
+        options.iosDisplayInfoSource,
+      ),
       defaultEnabled: false,
       outputSchema: getDeviceStateResultSchema,
       // Reads only; a non-holder watches a held device through the read-only path (#10830).

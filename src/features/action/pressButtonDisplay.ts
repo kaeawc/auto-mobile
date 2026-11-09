@@ -1,18 +1,25 @@
 import { ActionableError, type BootedDevice } from "../../models";
 import type { AdbCommandRunner } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { resolveActionDisplayId } from "./TargetDisplayAction";
+import { resolveActionDisplay } from "./TargetDisplayAction";
 
-/** Resolves a `display` argument to an Android logical display id (#17643). */
+/** A resolved pressButton display: the concrete panel key and its Android logical display id. */
+export interface PressButtonDisplayTarget {
+  key: string;
+  displayId: number;
+}
+
+/** Resolves a `display` selector to its panel key and logical display id (#17643). */
 export type PressButtonDisplayResolver = (
   display: string,
   signal: AbortSignal | undefined,
-) => Promise<number | undefined>;
+) => Promise<PressButtonDisplayTarget>;
 
 /**
- * The Android logical display a pressButton `display` argument names. Undefined (no `display`) and 0
- * (the default display) both keep the default key routing. Other platforms refuse a `display`.
+ * Resolve a pressButton `display` selector once, as tapOn does, so the key and the visual-change
+ * check target the same panel. `displayId` is undefined for the default display (0), which keeps
+ * the default key routing. Other platforms refuse a `display`.
  */
-export async function pressButtonDisplayId(
+export async function pressButtonDisplay(
   device: BootedDevice,
   display: string | undefined,
   {
@@ -20,19 +27,28 @@ export async function pressButtonDisplayId(
     resolver,
     signal,
   }: { adb: AdbCommandRunner; resolver?: PressButtonDisplayResolver; signal?: AbortSignal },
-): Promise<number | undefined> {
+): Promise<{ key?: string; displayId?: number }> {
   if (display === undefined) {
-    return undefined;
+    return {};
   }
   if (device.platform !== "android") {
     throw new ActionableError(
       `pressButton display applies to Android only; omit display on ${device.platform}.`,
     );
   }
-  const id = await (resolver
+  const target = await (resolver
     ? resolver(display, signal)
-    : resolveActionDisplayId(device, display, { adb, signal }));
-  return id === 0 ? undefined : id;
+    : resolveActionDisplay(device, display, { adb, signal }));
+  return { key: target.key, displayId: target.displayId === 0 ? undefined : target.displayId };
+}
+
+/** The `display` of a pressButton call object; positional (progress-callback) calls have none. */
+export function displayOf(call: unknown): string | undefined {
+  return typeof call === "object" && call !== null && "display" in call
+    ? typeof call.display === "string"
+      ? call.display
+      : undefined
+    : undefined;
 }
 
 /** `adb shell input ...` argv routed to a logical display with `-d`. */

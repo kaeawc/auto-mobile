@@ -52,11 +52,13 @@ function harness(
   device: BootedDevice = android,
   {
     displayId = 4,
+    panelKey = "passenger",
     before,
     after,
     changeOnTapOnly = false,
   }: {
     displayId?: number;
+    panelKey?: string;
     before?: ObserveResult;
     after?: ObserveResult;
     changeOnTapOnly?: boolean;
@@ -96,7 +98,7 @@ function harness(
     },
     displayResolver: async (display) => {
       resolved.push(display);
-      return displayId;
+      return { key: panelKey, displayId };
     },
   });
   return { action, adb, observe, globalActions, resolved, taps };
@@ -120,7 +122,9 @@ describe("PressButton display (#17643)", () => {
   });
 
   test("an explicit display sends input -d to that display and verifies there", async () => {
-    const { action, adb, observe, globalActions, resolved } = harness();
+    const { action, adb, observe, globalActions, resolved } = harness(android, {
+      panelKey: "virtual:emu:1234562",
+    });
     const result = await action.execute("back", { display: "virtual:emu:1234562" });
     expect(resolved).toEqual(["virtual:emu:1234562"]);
     expect(globalActions).toEqual([]);
@@ -130,6 +134,18 @@ describe("PressButton display (#17643)", () => {
     expect(reads.every((options) => options.display === "virtual:emu:1234562")).toBe(true);
     expect(result.success).toBe(true);
     expect(result.keyCode).toBe(4);
+  });
+
+  test("active is resolved once: the key and every read target the same concrete panel", async () => {
+    const { action, adb, observe, resolved } = harness(android, { panelKey: "passenger" });
+    const result = await action.execute("back", { display: "active" });
+    expect(resolved).toEqual(["active"]);
+    expect(keyeventArgv(adb)).toEqual([["shell", "input", "-d", "4", "keyevent", "4"]]);
+    expect(observe.getExecuteOptions().map((options) => options.display)).not.toContain("active");
+    expect(observe.getExecuteOptions().every((options) => options.display === "passenger")).toBe(
+      true,
+    );
+    expect(result.success).toBe(true);
   });
 
   test("an unchanged targeted display fails the press with no visual change", async () => {
@@ -151,12 +167,15 @@ describe("PressButton display (#17643)", () => {
   });
 
   test("a display that resolves to 0 keeps default routing but still reads that panel", async () => {
-    const { action, adb, observe, globalActions } = harness(android, { displayId: 0 });
+    const { action, adb, observe, globalActions } = harness(android, {
+      displayId: 0,
+      panelKey: "main",
+    });
     const result = await action.execute("back", { display: "inner" });
     expect(result.success).toBe(true);
     expect(globalActions).toEqual(["back"]);
     expect(keyeventArgv(adb)).toEqual([]);
-    expect(observe.getExecuteOptions().every((options) => options.display === "inner")).toBe(true);
+    expect(observe.getExecuteOptions().every((options) => options.display === "main")).toBe(true);
   });
 
   test("home on a secondary display skips the default-display launcher check", async () => {
@@ -165,6 +184,14 @@ describe("PressButton display (#17643)", () => {
     expect(result.success).toBe(true);
     expect(keyeventArgv(adb)).toEqual([["shell", "input", "-d", "4", "keyevent", "3"]]);
     expect(adb.getExecutedCommands().some((command) => command.includes("dumpsys"))).toBe(false);
+  });
+
+  test("an unchanged home on a secondary display keeps the no-visual-change failure", async () => {
+    const same = screen("Bluetooth", 1);
+    const { action } = harness(android, { before: same, after: same });
+    const result = await action.execute("home", { display: "4" });
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("No visual change observed");
   });
 
   test("the template Back fallback taps on the targeted display", async () => {

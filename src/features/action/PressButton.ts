@@ -49,8 +49,9 @@ import type { DeviceTraits } from "../../utils/android-cmdline-tools/deviceTrait
 import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 import { retryBackOnTemplateHost, type TemplateHostBackTapClient } from "./carAppTemplateBack";
 import {
+  displayOf,
   inputOnDisplay,
-  pressButtonDisplayId,
+  pressButtonDisplay,
   type PressButtonDisplayResolver,
 } from "./pressButtonDisplay";
 
@@ -94,15 +95,8 @@ export interface PressButtonCall extends ActionCall {
   steps?: number;
   /** Hold the button down this long (ms): a long press of D-pad center on Android. */
   durationMs?: number;
-  /**
-   * Android panel key, role or `active` (#17643): the key is sent to that display and the
-   * visual-change check reads it. Omitted, the press targets the default display as before.
-   */
+  /** Android panel key, role or `active` to press on and verify (#17643); default display if omitted. */
   display?: string;
-}
-
-function displayOf(call: unknown): string | undefined {
-  return typeof call === "object" && call !== null ? (call as PressButtonCall).display : undefined;
 }
 
 /** A dispatched press whose outcome was never confirmed: replaying it could apply it twice. */
@@ -244,12 +238,15 @@ export class PressButton extends BaseVisualChange {
     const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
     const durationMs = holdDurationOf(progressOrCall);
     rejectUnsupportedHold(this.device.platform, button, durationMs);
-    const display = displayOf(progressOrCall);
-    const displayId = await pressButtonDisplayId(this.device, display, {
-      adb: this.adb,
-      resolver: this.displayResolver,
-      signal,
-    });
+    const { key: display, displayId } = await pressButtonDisplay(
+      this.device,
+      displayOf(progressOrCall),
+      {
+        adb: this.adb,
+        resolver: this.displayResolver,
+        signal,
+      },
+    );
     if (this.device.platform === "tvos") {
       if (typeof progressOrCall === "object" && progressOrCall.steps !== undefined) {
         unsupportedTvosAction("remote press with steps");
@@ -291,6 +288,7 @@ export class PressButton extends BaseVisualChange {
     };
     let startedOnFallbackSpringboard = false;
     let pressSucceeded = false;
+    let launcherVerified = false;
     let verifiedAlreadyOpen = false;
     let prePress: ObserveResult | undefined;
     const result = await this.observedInteraction(async (previousObservation) => {
@@ -324,6 +322,8 @@ export class PressButton extends BaseVisualChange {
             }),
       );
       pressSucceeded = pressed.success;
+      // Only a default-display Home checks the launcher foreground (#17643).
+      launcherVerified = pressed.success && displayId === undefined;
       verifiedAlreadyOpen &&= pressed.success;
       return pressed;
     }, options);
@@ -332,7 +332,7 @@ export class PressButton extends BaseVisualChange {
     acceptAndroidHomeAlreadyOnLauncher(result, {
       platform: this.device.platform,
       button,
-      pressSucceeded,
+      pressSucceeded: launcherVerified,
     });
     return retryBackOnTemplateHost(
       result,
@@ -401,7 +401,6 @@ export class PressButton extends BaseVisualChange {
       /** Android only: hold the key down this long (long press of select). */
       durationMs?: number;
       appSwitcherWasOpen?: boolean;
-      /** Android only: the logical display `input -d` targets (#17643). */
       displayId?: number;
     } = {},
   ): Promise<PressButtonResult> {

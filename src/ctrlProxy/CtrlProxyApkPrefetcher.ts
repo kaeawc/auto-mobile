@@ -12,6 +12,7 @@ import { sortedReaddirEntries } from "../utils/io";
 import type { FileDownloader } from "../utils/FileDownloader";
 import type { ChecksumCalculator } from "../utils/ChecksumCalculator";
 import type { AndroidPrerequisiteDetector } from "../utils/android-cmdline-tools/AndroidPrerequisiteDetector";
+import { StatStampApkCacheWarmCheck, type ApkCacheWarmCheck } from "./ApkCacheWarmCheck";
 
 export const MAX_STALE_PREFETCH_DIRS_PER_STARTUP = 20;
 export const STALE_PREFETCH_SWEEP_DEADLINE_MS = 5_000;
@@ -53,7 +54,13 @@ export interface CtrlProxyApkPrefetcherDeps {
   resolveApkChecksum: () => string;
   /** Local APK path override (AUTOMOBILE_CTRL_PROXY_APK_PATH); when set, prefetch is skipped. */
   localApkPathOverride: () => string | undefined;
+  /** Cheap stat-and-stamp test of the published APK (#17685); defaults to the file-backed one. */
+  warmCheck?: () => ApkCacheWarmCheck;
+  /** True forces the full zip + checksum check even on a warm cache (AUTOMOBILE_EAGER_PREFETCH). */
+  forceFullVerification?: () => boolean;
 }
+
+const defaultWarmCheck: ApkCacheWarmCheck = new StatStampApkCacheWarmCheck();
 
 export class DefaultCtrlProxyApkPrefetcher implements CtrlProxyApkPrefetcher {
   private prefetchPromise: Promise<string | null> | null = null;
@@ -150,6 +157,12 @@ export class DefaultCtrlProxyApkPrefetcher implements CtrlProxyApkPrefetcher {
 
     await fs.mkdir(cacheDir, { recursive: true });
     await this.sweepStaleDirs(cacheDir);
+    if (await this.isWarmPrefetchCache(cachePath, expectedChecksum)) {
+      logger.info("[CTRL_PROXY] Prefetch: reused warm cached APK (stamp matches)", {
+        path: cachePath,
+      });
+      return cachePath;
+    }
     if (await this.isValidPrefetchCache(cachePath, expectedChecksum)) {
       logger.info("[CTRL_PROXY] Prefetch: reused cached APK", { path: cachePath });
       return cachePath;
@@ -211,6 +224,8 @@ export class DefaultCtrlProxyApkPrefetcher implements CtrlProxyApkPrefetcher {
   ): Promise<string> {
     try {
       await fs.rename(apkPath, cachePath);
+      // verifyPrefetchedApk already ran the full check on this file; rename keeps its mtime.
+      await this.warmCheck().recordVerified(cachePath, expectedChecksum);
       return cachePath;
     } catch (error) {
       // Another daemon can win publication while this download was in flight.
@@ -222,6 +237,22 @@ export class DefaultCtrlProxyApkPrefetcher implements CtrlProxyApkPrefetcher {
       }
       throw error;
     }
+  }
+
+  private warmCheck(): ApkCacheWarmCheck {
+    return this.deps.warmCheck?.() ?? defaultWarmCheck;
+  }
+
+  /**
+   * The cheap path (#17685): a published APK whose size and mtime still match the stamp
+   * written after its last full check is reused without parsing or hashing it again.
+   */
+  private async isWarmPrefetchCache(cachePath: string, expectedChecksum: string): Promise<boolean> {
+    if (this.deps.forceFullVerification?.()) {
+      logger.info("[CTRL_PROXY] Prefetch: eager mode, running the full cache check");
+      return false;
+    }
+    return this.warmCheck().isWarm(cachePath, expectedChecksum);
   }
 
   private async isValidPrefetchCache(
@@ -240,10 +271,12 @@ export class DefaultCtrlProxyApkPrefetcher implements CtrlProxyApkPrefetcher {
           throw new Error("cached APK checksum does not match the expected release");
         }
       }
+      await this.warmCheck().recordVerified(cachePath, expectedChecksum);
       return true;
     } catch (error) {
       // Invalid or missing cache entries are expected during refresh and can be replaced.
       logger.debug(`[CTRL_PROXY] Prefetch cache miss for ${cachePath}: ${errorMessage(error)}`);
+      await this.warmCheck().forget(cachePath);
       try {
         await fs.rm(cachePath, { force: true });
       } catch (cleanupError) {

@@ -15160,6 +15160,11 @@
           "type": "string",
           "enum": ["escape", "dismissKey", "returnKey"]
         },
+        "reason": {
+          "description": "iOS close only: the close could not be confirmed because every hierarchy re-read after it timed out or failed, so the keyboard may still be on screen. Run keyboard detect before relying on the keyboard being closed.",
+          "type": "string",
+          "const": "keyboard_state_unknown"
+        },
         "installed": {
           "type": "array",
           "items": {

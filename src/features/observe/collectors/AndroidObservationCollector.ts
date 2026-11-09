@@ -283,14 +283,17 @@ export class DefaultAndroidObservationCollector implements AndroidObservationCol
    * it the 0x0 placeholder breaks screenshot raster geometry on every read.
    */
   private applyKnownPanelScreenSize(result: ObserveResult): void {
-    logger.warn("[OBSERVE] No screen info from accessibility service - check if APK is updated");
+    logger.warn("[OBSERVE] No screen info from accessibility service; using display inventory");
     if (result.screenSize.width > 0 && result.screenSize.height > 0) {
       return;
     }
-    // "active" never throws on a degraded read, unlike a pin or explicit panel request.
-    const panel = resolveTargetDisplay(this.deps.device().displays, "active", {
-      focusedPanelKey: displayTransitions.observedPanel(this.deps.device().deviceId)?.key,
-    });
+    const device = this.deps.device();
+    // Match the captured target first; absent or stale keys retain the non-throwing active fallback.
+    const panel =
+      device.displays?.panels.find((candidate) => candidate.key === result.display?.key) ??
+      resolveTargetDisplay(device.displays, "active", {
+        focusedPanelKey: displayTransitions.observedPanel(device.deviceId)?.key,
+      });
     if (panel.sizePx.width > 0 && panel.sizePx.height > 0) {
       result.screenSize = { ...panel.sizePx };
     }

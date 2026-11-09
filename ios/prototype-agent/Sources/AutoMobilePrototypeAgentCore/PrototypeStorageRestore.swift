@@ -118,7 +118,9 @@ enum PrototypeStorageRestore {
     /// Why a secure value cannot restore, or nil when it fits (or waits for an unlock).
     private static func secureDropReason(
         _ key: String, _ value: JSONValue, spec: PrototypeSpec, versionChanged: Bool
-    ) -> PrototypeStorageDropReason? {
+    )
+        -> PrototypeStorageDropReason?
+    {
         guard spec.storage?.secure?.contains(key) == true else { return .unlisted }
         if versionChanged { return .version }
         guard case let .state(stateKey)? = PrototypeStorageKey.parse(key),

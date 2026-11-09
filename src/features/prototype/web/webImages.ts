@@ -106,7 +106,7 @@ function contentDp(style: Raw, axis: "width" | "height"): number | undefined {
 /**
  * The draw a node needs: a fixed axis is its content box, its bounds applied, padding taken out.
  * `parentAxis` is the axis the parent lays children along: a weight there sizes the node by its
- * share, overriding its authored dp, so that axis is not fixed and its screen bound applies.
+ * share, overriding its authored dp, so that axis is filled rather than fixed.
  */
 export function webImageDraw(
   asset: string,
@@ -121,8 +121,9 @@ export function webImageDraw(
     asset,
     ...(widthDp === undefined ? {} : { widthDp }),
     ...(heightDp === undefined ? {} : { heightDp }),
-    ...(style.width === "fill" ? { widthFill: true as const } : {}),
-    ...(style.height === "fill" ? { heightFill: true as const } : {}),
+    // A weight takes the parent's space by share, as a fill takes it whole: either way it is filled.
+    ...(style.width === "fill" || weighted === "row" ? { widthFill: true as const } : {}),
+    ...(style.height === "fill" || weighted === "column" ? { heightFill: true as const } : {}),
     scale: webImageScale(node.contentScale),
   };
 }

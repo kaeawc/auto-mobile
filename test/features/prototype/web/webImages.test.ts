@@ -132,7 +132,7 @@ describe("webImageDraw and webImageRule", () => {
     expect(webImageDraw("a", capped).widthDp).toBe(60);
   });
 
-  test("a weighted axis is sized by its share, so it is not fixed for the encode", () => {
+  test("a weighted axis is sized by its share, so the encode treats it as filled", () => {
     const weighted = {
       style: {
         width: { dp: 200 },
@@ -141,14 +141,33 @@ describe("webImageDraw and webImageRule", () => {
         padding: { start: 100, end: 100 },
       },
     };
-    expect(webImageDraw("a", weighted, "row")).toEqual({ asset: "a", heightDp: 100, scale: "fit" });
-    expect(webImageDraw("a", weighted, "column")).toEqual({ asset: "a", widthDp: 0, scale: "fit" });
+    expect(webImageDraw("a", weighted, "row")).toEqual({
+      asset: "a",
+      heightDp: 100,
+      widthFill: true,
+      scale: "fit",
+    });
+    expect(webImageDraw("a", weighted, "column")).toEqual({
+      asset: "a",
+      widthDp: 0,
+      heightFill: true,
+      scale: "fit",
+    });
     const rendered = still({
       type: "row",
       style: { width: { dp: 600 } },
       children: [{ type: "image", asset: "photo", style: weighted.style }],
     });
-    expect(rendered.imageDraws).toEqual([{ asset: "photo", heightDp: 100, scale: "fit" }]);
+    expect(rendered.imageDraws).toEqual([
+      { asset: "photo", heightDp: 100, widthFill: true, scale: "fit" },
+    ]);
+    // A cover scale covers the weighted axis's fill bound, not only the fixed one.
+    const crop = { ...weighted, contentScale: "crop" };
+    expect(webImageBox(webImageDraw("a", crop, "row"), PIXEL)).toEqual({
+      width: 2402,
+      height: 263,
+      cover: true,
+    });
     const box = webImageBox(rendered.imageDraws[0]!, PIXEL);
     expect(webImageScaleFactor({ width: 1000, height: 500 }, [box])).toBeGreaterThan(0);
   });

@@ -37,7 +37,7 @@ echo -e "${YELLOW}Checking for required commands...${NC}"
 
 # The installer runs in a child process; expose its manual-install location
 # here, but only when no ktfmt resolves yet, so an existing one keeps priority.
-if ! command_exists ktfmt; then
+if ! command -v ktfmt > /dev/null 2>&1; then
   export PATH="$HOME/.local/bin:$PATH"
 fi
 # Check if ktfmt is installed (install-when-missing gate + re-verify).

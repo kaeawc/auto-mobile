@@ -216,7 +216,8 @@ screens are unchanged.
 To drive an app on another display, such as a passenger screen, pass `display` (a panel key, a role or
 `active`) to `observe`, `tapOn` and `pressButton`. You can also pin it once for the session with
 `setActiveDevice` `display`. An explicit `display` overrides the pin. `pressButton` sends the key to that
-display and checks that display for the visual change. A `back` that finds a Car App Library template
+display and checks that display for the visual change. For `pressButton`, `active` is the display that
+`observe` without `display` reads, not the display you last observed explicitly. A `back` that finds a Car App Library template
 there taps the host's Back control on the same display. A `home` that changes nothing because that
 display already shows its launcher succeeds, as it does on the default display. System actions (such
 as `lock` or `quick_settings`) and rotary input still act device-wide; `display` only picks the display

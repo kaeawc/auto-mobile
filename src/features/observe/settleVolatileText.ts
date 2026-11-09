@@ -1,4 +1,5 @@
 import type { ObserveDiff, ObserveDiffNode } from "./output/ObserveResultOutput";
+import type { ObserveDiffNodeChange } from "./output/resultOutput/diffTypes";
 
 /**
  * Attributes that may differ between the two sides of a pure text change. The
@@ -42,6 +43,12 @@ function groupByIdentity(nodes: readonly ObserveDiffNode[]): Map<string, Observe
   return groups;
 }
 
+/** Whether a matched node changed nothing but its text. */
+function isTextOnlyChange(change: ObserveDiffNodeChange): boolean {
+  const names = Object.keys(change.changes);
+  return names.length > 0 && names.every((name) => TEXT_CHANGE_ATTRIBUTES.has(name));
+}
+
 /**
  * Identities whose only change in this diff is their text: exactly one removed
  * and one added node share the identity and agree on every other attribute, or
@@ -62,12 +69,7 @@ function textOnlyChanges(diff: ObserveDiff): Set<string> {
   }
   for (const change of diff.changed) {
     const identity = textFreeIdentity(change.key);
-    const names = Object.keys(change.changes);
-    if (
-      identity !== undefined &&
-      names.length > 0 &&
-      names.every((name) => TEXT_CHANGE_ATTRIBUTES.has(name))
-    ) {
+    if (identity !== undefined && isTextOnlyChange(change)) {
       changes.add(identity);
     }
   }
@@ -121,7 +123,9 @@ export class VolatileTextTracker {
       ...diff,
       added: diff.added.filter((node) => !masked(node.key)),
       removed: diff.removed.filter((node) => !masked(node.key)),
-      changed: diff.changed.filter((change) => !masked(change.key)),
+      // Local identity is not unique across subtrees, so a matched node's other
+      // changes always count, even when it shares a volatile node's identity.
+      changed: diff.changed.filter((change) => !isTextOnlyChange(change) || !masked(change.key)),
     };
   }
 }

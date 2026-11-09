@@ -111,6 +111,8 @@ export const HARD_BUDGET_MIN_POLL_READ_MS = 100;
 
 const BUDGET_EXPIRED: unique symbol = Symbol("observe-poll-budget-expired");
 type BudgetExpired = typeof BUDGET_EXPIRED;
+/** The terminal back stack disagreed and the hard budget cut off the reconciling capture. */
+const RECONCILIATION_UNCONFIRMED: unique symbol = Symbol("observe-poll-reconciliation-unconfirmed");
 
 /**
  * Race one device read against the remaining hard budget. When the budget wins,
@@ -451,7 +453,12 @@ function createPollFinalizer(context: PollFinalizationContext, freshnessState: P
         freshnessState.enteringReference,
       ),
     });
-    if (refreshed) {
+    if (refreshed === RECONCILIATION_UNCONFIRMED) {
+      // The back stack contradicted this capture and the budget ran out before a
+      // confirming read: the match is not proven, so do not report it.
+      outcome.stopped = false;
+      outcome.terminalReason = "timeout";
+    } else if (refreshed) {
       const original = outcome.observation;
       outcome.observation = refreshed.observation;
       outcome.polls++;
@@ -560,7 +567,7 @@ async function reconcileTerminalCapture(
     observation,
     minTimestamp,
   }: { start: number; observation: ObserveResult; minTimestamp: number },
-): Promise<PollCapture | undefined> {
+): Promise<PollCapture | typeof RECONCILIATION_UNCONFIRMED | undefined> {
   if (options.readBackStackEachPoll || !observeScreen.collectDeferredBackStack) {
     return undefined;
   }
@@ -589,7 +596,7 @@ async function reconcileTerminalCapture(
       { start, label: "Observe poll attribution reconciliation" },
     );
     throwIfAborted(options.signal);
-    return capture === BUDGET_EXPIRED ? undefined : capture;
+    return capture === BUDGET_EXPIRED ? RECONCILIATION_UNCONFIRMED : capture;
   } catch (error) {
     throwIfAborted(options.signal);
     logger.warn(

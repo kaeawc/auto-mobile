@@ -161,8 +161,11 @@ describe("pollObserveUntil hard budget (#17670)", () => {
 
     expect(screen.getExecuteCallCount()).toBe(3);
     expect(screen.signals[2]?.aborted).toBe(true);
-    // The matched capture stands; the cut-off reconciliation read is discarded.
+    // The cut-off reconciliation read is discarded, and the contradicted match is
+    // not reported as one.
     expect(outcome.observation.viewHierarchy?.updatedAt).toBe(20);
+    expect(outcome.stopped).toBe(false);
+    expect(outcome.terminalReason).toBe("timeout");
     expect(timer.now()).toBe(1001);
   });
 });

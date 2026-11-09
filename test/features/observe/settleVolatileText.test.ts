@@ -127,6 +127,21 @@ describe("VolatileTextTracker (#17670)", () => {
     expect(isStabilityDiffEmpty(tracker.mask(textChange("2", "3")))).toBe(true);
   });
 
+  test("a matched node sharing a volatile identity still reports its other changes", () => {
+    const tracker = new VolatileTextTracker();
+    tracker.mask(diff([hundredths("20")], [hundredths("97")]));
+    tracker.mask(diff([hundredths("47")], [hundredths("20")]));
+    // A node in another subtree with the same local identity flips `checked`.
+    const toggled: ObserveDiff = {
+      ...diff([hundredths("70")], [hundredths("47")]),
+      changed: [{ key: hundredths("47").key, changes: { checked: { from: false, to: true } } }],
+    };
+    const masked = tracker.mask(toggled);
+    expect(masked.added).toEqual([]);
+    expect(masked.changed).toEqual(toggled.changed);
+    expect(isStabilityDiffEmpty(masked)).toBe(false);
+  });
+
   test("top-level field changes are never masked", () => {
     const tracker = new VolatileTextTracker();
     tracker.mask(CAPTURED_STOPWATCH_DIFFS[1]);

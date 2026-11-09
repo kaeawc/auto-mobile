@@ -74,6 +74,13 @@ final class TVCommandRouter {
                 }
                 let startTime = Date()
                 press(button)
+                let resolved = target(requested: envelope.bundleId)
+                do {
+                    _ = try keyboardSettleGate.resolve(root: sketch(resolved.app.snapshot()))
+                } catch {
+                    // The press succeeded; withhold values conservatively if its snapshot fails.
+                    keyboardSettleGate.noteSnapshotFailure()
+                }
                 return try JSONEncoder().encode(WebSocketResponse.success(
                     type: "press_button_result", requestId: requestId,
                     totalTimeMs: Int64(Date().timeIntervalSince(startTime) * 1000)
@@ -87,7 +94,9 @@ final class TVCommandRouter {
                 let startTime = Date()
                 let resolved = target(requested: envelope.bundleId)
                 let snapshot = try resolved.app.snapshot()
-                guard TVTextEntryPolicy.hasFocusedKeyboard(sketch(snapshot)) else {
+                let tree = sketch(snapshot)
+                _ = keyboardSettleGate.resolve(root: tree)
+                guard TVTextEntryPolicy.hasFocusedKeyboard(tree) else {
                     throw CommandError.invalidParameter("text", "no focused text input")
                 }
                 resolved.app.typeText(request.text)

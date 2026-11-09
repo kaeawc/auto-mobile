@@ -202,26 +202,88 @@ final class TVCommandPolicyTests: XCTestCase {
         }
     }
 
-    func testAnonymousTextViewNeverEmitsValueRegardlessOfKeyboardPresence() {
-        for keyboardPresent in [false, true] {
-            for metadata in ["", " ", "\t\r\n"] {
-                for placeholder in [nil, "", " \t\n"] as [String?] {
-                    let field = TVNodeSketch(
-                        elementType: 52, identifier: metadata, label: metadata, value: "s3cret",
-                        placeholder: placeholder
-                    )
-                    var root = TVNodeSketch(elementType: 2, children: [field])
-                    if keyboardPresent {
-                        root.children.append(TVNodeSketch(elementType: 19))
+    func testAnonymousTextInputsNeverEmitValueRegardlessOfKeyboardPresence() {
+        for type in [45, 49, 52] {
+            for keyboardPresent in [false, true] {
+                for metadata in ["", " ", "\t\r\n"] {
+                    for placeholder in [nil, "", " \t\n"] as [String?] {
+                        let field = TVNodeSketch(
+                            elementType: type, identifier: metadata, label: metadata, value: "s3cret",
+                            placeholder: placeholder
+                        )
+                        var root = TVNodeSketch(elementType: 2, children: [field])
+                        if keyboardPresent {
+                            root.children.append(TVNodeSketch(elementType: 19))
+                        }
+                        XCTAssertEqual(TVTextEntryPolicy.resolve(root: root).keyboardPresent, keyboardPresent)
+                        let expected = keyboardPresent ? ["", metadata, ""] : ["", metadata]
+                        XCTAssertEqual(emittedTexts(in: root), expected)
+                        let gate = TVKeyboardSettleGate(clock: FakeTVUptimeClock())
+                        XCTAssertEqual(emittedTexts(in: root, gate: gate), expected)
                     }
-                    XCTAssertEqual(TVTextEntryPolicy.resolve(root: root).keyboardPresent, keyboardPresent)
-                    let expected = keyboardPresent ? ["", metadata, ""] : ["", metadata]
-                    XCTAssertEqual(emittedTexts(in: root), expected)
-                    let gate = TVKeyboardSettleGate(clock: FakeTVUptimeClock())
-                    XCTAssertEqual(emittedTexts(in: root, gate: gate), expected)
                 }
             }
         }
+    }
+
+    func testFreshGateWithholdsNamedPlainFieldsUntilWindowElapses() {
+        for type in [45, 49, 52] {
+            let clock = FakeTVUptimeClock()
+            let gate = TVKeyboardSettleGate(clock: clock)
+            let field = TVNodeSketch(elementType: type, label: "Name", value: "hello")
+            XCTAssertEqual(emittedTexts(in: field, gate: gate), ["Name"])
+            clock.time += TVKeyboardSettleGate.settleWindow - 0.01
+            XCTAssertEqual(emittedTexts(in: field, gate: gate), ["Name"])
+            clock.time = 100 + TVKeyboardSettleGate.settleWindow
+            XCTAssertEqual(emittedTexts(in: field, gate: gate), ["Name hello"])
+        }
+    }
+
+    func testAppendTextThenMenuWithholdsDismissFrameOnObserve() {
+        let clock = FakeTVUptimeClock()
+        let gate = TVKeyboardSettleGate(clock: clock)
+        let dismissFrame = TVNodeSketch(elementType: 52, label: "Code", value: "s3cret")
+        clock.time += TVKeyboardSettleGate.settleWindow * 2
+        XCTAssertEqual(emittedTexts(in: dismissFrame, gate: gate), ["Code s3cret"])
+
+        // append_text reports its focused-keyboard snapshot before typing.
+        let appendSnapshot = keyboardTree(value: "", prompt: "Code")
+        XCTAssertTrue(TVTextEntryPolicy.hasFocusedKeyboard(appendSnapshot))
+        XCTAssertTrue(gate.resolve(root: appendSnapshot).withholdTextInputValues)
+        clock.time += TVKeyboardSettleGate.settleWindow / 4
+        // menu reports a post-press snapshot even when it has no keyboard node.
+        XCTAssertTrue(gate.resolve(root: dismissFrame).withholdTextInputValues)
+        clock.time += TVKeyboardSettleGate.settleWindow / 4
+        XCTAssertEqual(emittedTexts(in: dismissFrame, gate: gate), ["Code"])
+        clock.time += TVKeyboardSettleGate.settleWindow / 2
+        XCTAssertEqual(emittedTexts(in: dismissFrame, gate: gate), ["Code s3cret"])
+    }
+
+    func testPostPressKeyboardSnapshotRearmsExpiredWindow() {
+        let clock = FakeTVUptimeClock()
+        let gate = TVKeyboardSettleGate(clock: clock)
+        let field = TVNodeSketch(elementType: 49, label: "Name", value: "hello")
+        _ = gate.resolve(root: keyboardTree(value: "hello"))
+        clock.time += TVKeyboardSettleGate.settleWindow + 0.1
+        // A delayed menu press still sees the keyboard during dismissal.
+        _ = gate.resolve(root: keyboardTree(value: "hello", keyboardFocused: false))
+        clock.time += TVKeyboardSettleGate.settleWindow - 0.01
+        XCTAssertEqual(emittedTexts(in: field, gate: gate), ["Name"])
+        clock.time += 0.02
+        XCTAssertEqual(emittedTexts(in: field, gate: gate), ["Name hello"])
+    }
+
+    func testPostPressSnapshotFailureRearmsReleasedGate() {
+        let clock = FakeTVUptimeClock()
+        let gate = TVKeyboardSettleGate(clock: clock)
+        let field = TVNodeSketch(elementType: 49, label: "Name", value: "hello")
+        clock.time += TVKeyboardSettleGate.settleWindow * 2
+        XCTAssertEqual(emittedTexts(in: field, gate: gate), ["Name hello"])
+        gate.noteSnapshotFailure()
+        clock.time += TVKeyboardSettleGate.settleWindow - 0.01
+        XCTAssertEqual(emittedTexts(in: field, gate: gate), ["Name"])
+        clock.time += 0.02
+        XCTAssertEqual(emittedTexts(in: field, gate: gate), ["Name hello"])
     }
 
     func testSettleWindowWithholdsEveryAnimationFrameInputVariant() {

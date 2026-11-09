@@ -69,13 +69,13 @@ struct TVTextEntryResolution {
         self.withholdTextInputValues = withholdTextInputValues
     }
 
-    /// A system keyboard can expose secure input in an anonymous text view even without a keyboard node.
+    /// A system keyboard can expose secure input in an anonymous input even without a keyboard node.
     func text(for node: TVNodeSketch) -> String {
-        let isAnonymousTextView = node.elementType == 52 && TVTextEntryPolicy.isAnonymousTextInput(node)
+        let isAnonymousTextInput = TVTextEntryPolicy.isAnonymousTextInput(node)
         return TVElementText.text(
             label: node.label, value: node.value, placeholder: node.placeholder,
             isTextInput: TVTextEntryPolicy.isTextInput(node.elementType),
-            isSecure: keyboardPresent || withholdTextInputValues || isAnonymousTextView || TVSecureField.isSecure(
+            isSecure: keyboardPresent || withholdTextInputValues || isAnonymousTextInput || TVSecureField.isSecure(
                 elementType: node.elementType, identifier: node.identifier,
                 label: node.label, placeholder: node.placeholder
             )
@@ -131,6 +131,12 @@ final class TVKeyboardSettleGate {
 
     init(clock: any TVUptimeClock) {
         self.clock = clock
+        lastKeyboardSeen = clock.now()
+    }
+
+    /// A failed post-press snapshot cannot prove that the keyboard is absent.
+    func noteSnapshotFailure() {
+        lastKeyboardSeen = clock.now()
     }
 
     func resolve(root: TVNodeSketch) -> TVTextEntryResolution {

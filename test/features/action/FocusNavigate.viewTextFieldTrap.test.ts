@@ -56,15 +56,17 @@ const ARROWS = ["arrow_up", "arrow_down", "arrow_left", "arrow_right"] as const;
 class Mt0093aDevice implements FocusObserver, FocusKeyPresser, FocusKeyboardHider {
   readonly keys: string[] = [];
   private ime: boolean;
+  private readonly targetOnScreen: boolean;
 
-  constructor(imeVisible: boolean) {
+  constructor(imeVisible: boolean, { targetOnScreen = true }: { targetOnScreen?: boolean } = {}) {
     this.ime = imeVisible;
+    this.targetOnScreen = targetOnScreen;
   }
 
   async read(): Promise<FocusScreen> {
     return {
       focused: searchField,
-      elements: [searchField, playerCard],
+      elements: this.targetOnScreen ? [searchField, playerCard] : [searchField],
       imeVisible: this.ime,
       hierarchy,
     };
@@ -146,7 +148,7 @@ describe("FocusNavigate View text-field trap advice (#17741)", () => {
     expect(result.message).toContain("press pressButton back to leave the screen");
   });
 
-  test("a fixed-direction walk is told to retry every direction, not to leave the screen", async () => {
+  test("a fixed-direction walk is told the arrows it never pressed before leaving", async () => {
     const device = new Mt0093aDevice(true);
 
     const result = await navigate(device, { direction: "up" });
@@ -155,8 +157,51 @@ describe("FocusNavigate View text-field trap advice (#17741)", () => {
     expect(result.escapes).toEqual(["back"]);
     expect(device.keys).not.toContain("arrow_down");
     expect(result.message).toContain("pressing back and up again did not move focus");
-    expect(result.message).toContain("Retry without direction so every D-pad direction is tried");
-    expect(result.message).not.toContain("leave the screen and reach");
+    expect(result.message).toContain(
+      "Press pressButton down, left or right (not yet pressed from this field) and observe; if focus still does not leave it, press pressButton back to leave the screen",
+    );
+    expect(result.message).not.toContain("every direction");
     expect(result.message).not.toContain("No D-pad direction moves focus");
+  });
+
+  test("a target absent from the read names the one refused arrow and the untried ones", async () => {
+    const device = new Mt0093aDevice(false, { targetOnScreen: false });
+
+    const result = await navigate(device);
+
+    expect(result.status).toBe("stuck");
+    expect(result.blockedBy).toBe("editable");
+    // With no match in the read the walk scans down only, so one refusal ends it.
+    expect(device.keys).toEqual(["arrow_down"]);
+    expect(result.message).toContain("pressing down does not leave it and tab would type into it");
+    expect(result.message).not.toContain("arrow keys do not leave it");
+    expect(advisedArrows(result.message)).toEqual(["up"]);
+    expect(result.message).toContain("Press pressButton up, left or right (not yet pressed");
+    expect(result.message).not.toContain("No D-pad direction moves focus");
+  });
+
+  test("a target absent from the read after back names only the arrows refused since", async () => {
+    const device = new Mt0093aDevice(true, { targetOnScreen: false });
+
+    const result = await navigate(device);
+
+    expect(result.escapes).toEqual(["back"]);
+    expect(device.keys).toEqual(["arrow_down", "back", "arrow_down"]);
+    expect(result.message).toContain("pressing back and down again did not move focus");
+    expect(result.message).not.toContain("every direction");
+    expect(result.message).toContain("Press pressButton up, left or right (not yet pressed");
+  });
+
+  test("all four arrows refused after back: every direction is reported and the screen left", async () => {
+    const device = new Mt0093aDevice(true);
+
+    const result = await navigate(device);
+
+    const afterBack = device.keys.slice(device.keys.indexOf("back") + 1);
+    expect([...new Set(afterBack)].sort()).toEqual([...ARROWS].sort());
+    expect(result.message).toContain("pressing back and every direction again did not move focus");
+    expect(result.message).not.toContain("not yet pressed");
+    expect(result.message).toContain("No D-pad direction moves focus out of this field");
+    expect(result.message).toContain("press pressButton back to leave the screen");
   });
 });

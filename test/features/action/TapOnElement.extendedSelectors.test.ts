@@ -1,3 +1,4 @@
+import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { flatHierarchyFromFixture } from "../../helpers/flatHierarchyFixture";
 import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
@@ -35,10 +36,7 @@ const createTapOnElement = (selector: FakeElementSelector) => {
       deviceId: "emulator-5554",
     },
     new FakeAdbClient(),
-    {
-      timer: new FakeTimer(),
-      elementSelector: selector,
-    },
+    { xrDetector: new FakeAndroidXrDetector(), timer: new FakeTimer(), elementSelector: selector },
   );
 };
 
@@ -53,10 +51,7 @@ const createDefaultTapOnElement = (
       deviceId: "emulator-5554",
     },
     adb,
-    {
-      timer: new FakeTimer(),
-      ...extraOptions,
-    },
+    { xrDetector: new FakeAndroidXrDetector(), timer: new FakeTimer(), ...extraOptions },
   );
 };
 

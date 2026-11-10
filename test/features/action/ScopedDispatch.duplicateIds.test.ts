@@ -1,3 +1,4 @@
+import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { capturedFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { buildObserveResult } from "../../helpers/observeFixture";
@@ -98,7 +99,10 @@ for (const row of rows) {
       };
       try {
         if (tool === "tapOn") {
-          const tap = new TapOnElement(device, adb, dependencies);
+          const tap = new TapOnElement(device, adb, {
+            ...dependencies,
+            xrDetector: new FakeAndroidXrDetector(),
+          });
           const options = {
             action: "tap" as const,
             elementId: targetId,
@@ -125,6 +129,7 @@ for (const row of rows) {
           });
         } else {
           const tap = new TapAnyElement(device, adb, {
+            xrDetector: new FakeAndroidXrDetector(),
             ...dependencies,
             accessibilityService: service,
           });

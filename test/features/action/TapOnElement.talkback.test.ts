@@ -1,3 +1,4 @@
+import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import { afterEach, beforeEach, describe, expect, mock, test, spyOn } from "bun:test";
 import { ActionableError } from "../../../src/models/ActionableError";
@@ -59,6 +60,7 @@ describe("TapOnElement TalkBack mode detection", () => {
 
     // Create a minimal TapOnElement instance for testing
     tapOnElement = new TapOnElement(androidDevice, fakeAdb, {
+      xrDetector: new FakeAndroidXrDetector(),
       accessibilityDetector: fakeAccessibilityDetector,
       timer: fakeTimer,
     });
@@ -672,6 +674,7 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
     fakeTalkBackStrategy = new FakeTalkBackTapStrategy();
 
     tapOnElement = new TapOnElement(androidDevice, fakeAdb, {
+      xrDetector: new FakeAndroidXrDetector(),
       accessibilityDetector: fakeAccessibilityDetector,
       timer: fakeTimer,
       talkBackStrategy: fakeTalkBackStrategy,
@@ -902,6 +905,7 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
         isEnabled: (key: string) => flagEnabled && key === "screen-reader-navigation",
       };
       const tap = new TapOnElement(androidDevice, fakeAdb, {
+        xrDetector: new FakeAndroidXrDetector(),
         accessibilityDetector: fakeAccessibilityDetector,
         timer: fakeTimer,
         talkBackStrategy: fakeTalkBackStrategy,
@@ -1017,7 +1021,11 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
         command = new TapOnElement(
           { name: "test-device", platform: "android", deviceId: "talkback-long-press" },
           fakeAdb,
-          { timer: fakeTimer, talkBackStrategy: fakeTalkBackStrategy },
+          {
+            xrDetector: new FakeAndroidXrDetector(),
+            timer: fakeTimer,
+            talkBackStrategy: fakeTalkBackStrategy,
+          },
         );
       } finally {
         client.mockRestore();
@@ -1102,6 +1110,7 @@ describe("TapOnElement precise TalkBack coordinate fallback", () => {
         { name: "test-device", platform: "android", deviceId: "emulator-5554" },
         null,
         {
+          xrDetector: new FakeAndroidXrDetector(),
           accessibilityDetector,
           timer,
           talkBackStrategy: new TalkBackTapStrategy({ timer }),
@@ -1206,6 +1215,7 @@ describe("TapOnElement screen-reader navigation result", () => {
         }
       : observation;
     const command = new TapOnElement(androidDevice, new FakeAdbClient(), {
+      xrDetector: new FakeAndroidXrDetector(),
       accessibilityDetector,
       timer,
       talkBackStrategy: coordinate ? new TalkBackTapStrategy({ timer }) : strategy,
@@ -1659,6 +1669,7 @@ describe("TapOnElement TalkBack dispatch uncertainty", () => {
         { name: "test-device", platform: "android", deviceId: "emulator-5554" },
         adb,
         {
+          xrDetector: new FakeAndroidXrDetector(),
           accessibilityDetector: detector,
           timer,
           talkBackStrategy: new TalkBackTapStrategy({ timer }),
@@ -1711,6 +1722,7 @@ describe("TapOnElement TalkBack dispatch uncertainty", () => {
       { name: "test-device", platform: "android", deviceId: "emulator-5554" },
       adb,
       {
+        xrDetector: new FakeAndroidXrDetector(),
         accessibilityDetector: detector,
         timer,
         talkBackStrategy: new TalkBackTapStrategy({ timer }),

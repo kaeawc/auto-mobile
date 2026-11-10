@@ -6,6 +6,10 @@ import {
   type CapturedTapTarget,
   type RefreshViewHierarchy,
 } from "./TapAnyAndroidTapper";
+import {
+  defaultAndroidXrDetector,
+  type AndroidXrDetector,
+} from "../../utils/android-cmdline-tools/androidXrDevice";
 import { TapAnyIosTapper } from "./TapAnyIosTapper";
 import { readFreshPlatformHierarchy } from "./tapHierarchyRead";
 import {
@@ -135,6 +139,8 @@ interface TapAnyElementDependencies extends DisplayFenceDependencies {
   >;
   talkBackDriverFactory?: TalkBackNavigationDriverFactory;
   accessibilityService?: TapAnyAccessibilityService;
+  /** Decides XR node-click routing; tests inject a fake so no `pm has-feature` probe runs. */
+  xrDetector?: AndroidXrDetector;
 }
 export { TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS } from "./tapAnyCtrlProxyTimeout";
 
@@ -254,6 +260,7 @@ export class TapAnyElement extends BaseVisualChange {
   }
 
   private createTappers(options: TapAnyElementDependencies) {
+    const xrDetector = options.xrDetector ?? defaultAndroidXrDetector;
     const android =
       options.androidTapper ??
       new TapAnyAndroidTapper({
@@ -265,6 +272,7 @@ export class TapAnyElement extends BaseVisualChange {
         featureFlags: this.featureFlags,
         talkBackStrategy: this.talkBackStrategy,
         talkBackDriverFactory: this.talkBackDriverFactory,
+        isAndroidXr: (signal) => xrDetector.isAndroidXr(this.adb, this.device, signal),
         beforeTap: () => this.beforeAndroidTapForTesting?.(),
         refreshViewHierarchy: (timeout, size, signal, forceCapture) =>
           this.refreshViewHierarchy(timeout, size, signal, forceCapture),

@@ -87,7 +87,7 @@ export class CachedTouchscreenFeature implements TouchscreenFeature {
     if (cached && this.timer.now() - cached.readAt < this.ttlMs) {
       return cached.value;
     }
-    const touchscreen = await probeFeature(adb, deviceId, TOUCHSCREEN_FEATURE, signal);
+    const touchscreen = await probeFeature(adb, deviceId, TOUCHSCREEN_FEATURE, { signal });
     if (touchscreen === null) {
       this.cache.delete(deviceId);
       return null;
@@ -96,7 +96,7 @@ export class CachedTouchscreenFeature implements TouchscreenFeature {
       return this.remember(deviceId, false);
     }
     for (const tvFeature of TV_FEATURES) {
-      const isTv = await probeFeature(adb, deviceId, tvFeature, signal);
+      const isTv = await probeFeature(adb, deviceId, tvFeature, { signal });
       if (isTv === null) {
         // Unknown TV-ness keeps the declared touchscreen, uncached so the next call asks again.
         this.cache.delete(deviceId);
@@ -116,11 +116,11 @@ export class CachedTouchscreenFeature implements TouchscreenFeature {
 }
 
 /** One `pm has-feature` probe: the device's answer, or null when it failed or was not understood. */
-async function probeFeature(
+export async function probeFeature(
   adb: AdbCommandRunner,
   deviceId: string,
   feature: string,
-  signal: AbortSignal | undefined,
+  { signal, logTag = "TouchscreenFeature" }: { signal?: AbortSignal; logTag?: string } = {},
 ): Promise<FeatureAnswer> {
   let value: FeatureAnswer;
   try {
@@ -137,16 +137,14 @@ async function probeFeature(
     value = parseFailedHasFeature(adbFailureOutput(error).stdout);
     if (value === null) {
       logger.warn(
-        `[TouchscreenFeature] ${feature} probe failed for ${deviceId}: ${errorMessage(error)}`,
+        `[${logTag}] ${feature} probe failed for ${deviceId}: ${errorMessage(error)}`,
         error,
       );
       return null;
     }
   }
   if (value === null) {
-    logger.warn(
-      `[TouchscreenFeature] unrecognized pm has-feature ${feature} output for ${deviceId}; keeping touch input`,
-    );
+    logger.warn(`[${logTag}] unrecognized pm has-feature ${feature} output for ${deviceId}`);
   }
   return value;
 }

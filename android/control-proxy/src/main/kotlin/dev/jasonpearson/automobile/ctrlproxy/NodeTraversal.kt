@@ -126,8 +126,11 @@ internal fun matchesSelector(
       resourceId = node.viewIdResourceName,
       testTag = extractTestTag(node),
       uniqueId = if (Build.VERSION.SDK_INT >= 33) node.uniqueId else null,
-      collectionRow = node.collectionItemInfo?.rowIndex,
-      collectionColumn = node.collectionItemInfo?.columnIndex,
+      // Only read the collection info a selector asks for; most selectors never do.
+      collectionRow =
+        if (selector.collectionRow != null) node.collectionItemInfo?.rowIndex else null,
+      collectionColumn =
+        if (selector.collectionColumn != null) node.collectionItemInfo?.columnIndex else null,
     ),
   )
 
@@ -197,4 +200,54 @@ internal fun findFocusedEditableInHierarchy(
   }
 
   return null
+}
+
+/** Nullable coordinates preserve partial wire bounds so they can be refused rather than ignored. */
+data class NodeExpectedBounds(
+  val left: Int?,
+  val top: Int?,
+  val right: Int?,
+  val bottom: Int?,
+) {
+  fun matches(node: AccessibilityNodeInfo): Boolean {
+    val expected = listOf(left, top, right, bottom)
+    if (expected.any { it == null }) return false
+    val bounds = Rect()
+    node.getBoundsInScreen(bounds)
+    return listOf(bounds.left, bounds.top, bounds.right, bounds.bottom) == expected
+  }
+}
+
+/** All selector matches, including invisible nodes. The caller owns the returned nodes. */
+internal fun findNodesBySelector(
+  root: AccessibilityNodeInfo,
+  selector: NodeSelector,
+): List<AccessibilityNodeInfo> {
+  val matches = mutableListOf<AccessibilityNodeInfo>()
+  if (matchesSelector(root, selector)) matches += root
+  for (index in 0 until root.childCount) {
+    val child = root.getChild(index) ?: continue
+    val found = findNodesBySelector(child, selector)
+    matches += found
+    if (found.none { it === child }) child.recycle()
+  }
+  return matches
+}
+
+/** Panel bounds must never be compared to physical display dimensions. Releases every non-hit. */
+internal fun selectNodeWithBounds(
+  nodes: List<AccessibilityNodeInfo>,
+  expectedBounds: NodeExpectedBounds,
+): AccessibilityNodeInfo {
+  val qualifying = nodes.filter { it.isVisibleToUser && expectedBounds.matches(it) }
+  val selected = qualifying.singleOrNull()
+  nodes.forEach { if (it !== selected) it.recycle() }
+  return selected
+    ?: throw IllegalStateException(
+      if (qualifying.isEmpty()) {
+        "node_bounds_mismatch: No visible selector match has the expected bounds"
+      } else {
+        "node_bounds_ambiguous: Multiple visible selector matches have the expected bounds"
+      },
+    )
 }

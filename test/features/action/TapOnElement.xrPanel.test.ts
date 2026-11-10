@@ -84,6 +84,7 @@ describe("XR panel-space tap routing", () => {
       {
         action: "click",
         selector: { resourceId: "com.android.systemui:id/home_screen_launcher_button" },
+        expectedBounds: element.bounds,
       },
     ]);
     expect(service.getTapHistory()).toHaveLength(0);
@@ -93,6 +94,9 @@ describe("XR panel-space tap routing", () => {
 
   for (const mode of [
     "unsupported",
+    "bounds-unsupported",
+    "node_bounds_mismatch",
+    "node_bounds_ambiguous",
     "rejected",
     "missing-selector",
     "xml",
@@ -103,6 +107,17 @@ describe("XR panel-space tap routing", () => {
   ] as const) {
     test(`refuses unsafe XR fallback: ${mode}`, async () => {
       const { execute, service, adb } = setup();
+      if (mode === "bounds-unsupported") {
+        service.setSupportsNodeBoundsVerification(false);
+      }
+      if (mode === "node_bounds_mismatch" || mode === "node_bounds_ambiguous") {
+        service.setActionResult({
+          success: false,
+          action: "click",
+          totalTimeMs: 1,
+          error: `${mode}: selector verification refused`,
+        });
+      }
       if (mode === "unsupported") {
         service.setSupportsNodeActionSelectors(false);
       }
@@ -123,6 +138,9 @@ describe("XR panel-space tap routing", () => {
       await expect(
         execute(target, mode === "doubleTap" ? "doubleTap" : "tap", mode === "talkback"),
       ).rejects.toThrow(/XR panel coordinate space.*not tappable screen coordinates.*tapAt/);
+      if (mode === "bounds-unsupported") {
+        expect(service.getNodeActionHistory()).toHaveLength(0);
+      }
       expect(service.getTapHistory()).toHaveLength(0);
       expect(adb.getAllCommands()).toHaveLength(0);
     });
@@ -227,6 +245,7 @@ describe("XR panel-space tap routing", () => {
         expect(service.getNodeActionHistory()).toMatchObject([
           {
             action: "click",
+            expectedBounds: mode === "nearest-ancestor" ? current.frame.bounds : current.row.bounds,
             selector:
               mode === "nearest-ancestor"
                 ? { uniqueId: "settings-connected-frame" }

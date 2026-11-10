@@ -171,6 +171,17 @@ class CtrlProxyMessageHandler(
           request.resourceId,
           request.selector,
           NodeActionArguments(customAction = request.customAction, progress = request.progress),
+          if (
+            listOf(request.boundsLeft, request.boundsTop, request.boundsRight, request.boundsBottom)
+              .any { it != null }
+          ) {
+            NodeExpectedBounds(
+              request.boundsLeft,
+              request.boundsTop,
+              request.boundsRight,
+              request.boundsBottom,
+            )
+          } else null,
         )
       is RequestActivateAccessibilityLink ->
         actions.requestActivateAccessibilityLink(

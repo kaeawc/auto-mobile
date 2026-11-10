@@ -153,3 +153,35 @@ internal fun nodeSelectorMatches(selector: NodeSelector, fields: NodeSelectorFie
   }
   return true
 }
+
+/** Search the same windows as first-match lookup, retaining all hits to detect ambiguity. */
+internal fun findNodesAcrossWindows(
+  windows: List<AccessibilityWindowInfo>,
+  activeRoot: () -> AccessibilityNodeInfo?,
+  find: (AccessibilityNodeInfo) -> List<AccessibilityNodeInfo>,
+): List<AccessibilityNodeInfo> {
+  val matches = mutableListOf<AccessibilityNodeInfo>()
+  fun visit(root: AccessibilityNodeInfo?) {
+    if (root == null) return
+    var found = emptyList<AccessibilityNodeInfo>()
+    try {
+      found = find(root)
+      matches += found
+    } finally {
+      if (found.none { it === root }) root.recycle()
+    }
+  }
+  var complete = false
+  try {
+    val active = activeRoot()
+    visit(active)
+    for (window in windows) {
+      if (active != null && window.isActive) continue
+      visit(window.root)
+    }
+    complete = true
+    return matches
+  } finally {
+    if (!complete) matches.forEach { it.recycle() }
+  }
+}

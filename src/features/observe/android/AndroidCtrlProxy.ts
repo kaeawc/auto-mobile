@@ -243,10 +243,14 @@ export interface AndroidCtrlProxy
   requestNodeAction(
     action: string,
     selector: AccessibilityNodeSelector,
-    options?: { timeoutMs?: number; perf?: PerformanceTracker; signal?: AbortSignal },
+    options?: AndroidActionRequestOptions & { timeoutMs?: number; perf?: PerformanceTracker },
   ): Promise<A11yActionResult>;
 
-  supportsNodeActionSelectors(perf?: PerformanceTracker, signal?: AbortSignal): Promise<boolean>;
+  supportsNodeActionSelectors(
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+    requireBounds?: boolean,
+  ): Promise<boolean>;
 
   supportsCommand(name: string): Promise<boolean>;
 

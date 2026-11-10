@@ -1,0 +1,27 @@
+Attributes: Application, 0x1064b9f40, pid: 32146, label: 'ClockFace'
+Element subtree:
+ →Application, 0x1064b9f40, pid: 32146, label: 'ClockFace'
+    Window, 0x1064b9900, {{0.0, 0.0}, {187.0, 223.0}}
+      Other, 0x1064ba300, {{0.0, 0.0}, {187.0, 223.0}}
+        Other, 0x1064baa80, {{0.0, 0.0}, {187.0, 223.0}}
+          Other, 0x1064ba940, {{0.0, 0.0}, {187.0, 223.0}}
+            Other, 0x1064ba800, {{0.0, 0.0}, {187.0, 223.0}}
+              Other, 0x1064b9cc0, {{0.0, 0.0}, {187.0, 223.0}}
+                Other, 0x1064b9e00, {{0.0, 0.0}, {187.0, 223.0}}
+                  Other, 0x1064b9a40, {{0.0, 0.0}, {187.0, 223.0}}
+                  Other, 0x1064ba080, {{0.0, 0.0}, {187.0, 223.0}}
+                  Other, 0x1064ba440, {{0.0, 0.0}, {187.0, 223.0}}
+                  Other, 0x1064ba580, {{0.0, 0.0}, {187.0, 223.0}}
+    Window, 0x1064ba6c0, {{0.0, 0.0}, {187.0, 223.0}}
+      Other, 0x1064ba1c0, {{0.0, 0.0}, {187.0, 223.0}}
+    Window (Main), 0x1064babc0, {{179.0, 37.5}, {6.0, 46.5}}
+    Window, 0x1064bad00, {{0.0, 0.0}, {187.0, 223.0}}
+Path to element:
+ →Application, 0x1064b9f40, pid: 32146, label: 'ClockFace'
+Query chain:
+ →Find: Application 'com.apple.clockface'
+  Output: {
+    Application, 0x1064b9540, pid: 32146, label: 'ClockFace'
+  }
+
+ms 34

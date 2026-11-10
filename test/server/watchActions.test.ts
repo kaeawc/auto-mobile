@@ -104,8 +104,10 @@ test("existing tool schemas and registry admit watch tapOn, tapAt, swipeOn and h
     pressButtonSchema.parse({ button: "home", platform: "watchos" }),
   );
   expect(client.commands).toEqual([
+    { type: "face", op: "dump" },
     { type: "hierarchy" },
     { type: "tap", identifier: "ctrlproxy-crown" },
+    { type: "face", op: "dump" },
     { type: "tap", x: 10, y: 20 },
     { type: "swipe", direction: "up" },
     { type: "home" },

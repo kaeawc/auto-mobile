@@ -225,6 +225,43 @@ describe("Smart Stack face taps", () => {
       y: 34.75 / 223,
     });
   });
+  test("refuses text that only an off-screen widget's cell-local descendants contain", async () => {
+    // The captured T28 cell scrolled above the screen; its descendants keep cell-local frames.
+    const cellFrame = "{{5.5, 110.0}, {176.0, 72.5}}";
+    expect(textDump).toContain(cellFrame);
+    const client = new FaceDumpClient(
+      textDump.replaceAll(cellFrame, "{{5.5, -100.0}, {176.0, 72.5}}"),
+    );
+    const stack = await readOpenSmartStack(client, () => 1);
+    expect(stack!.smartStack.cards[0]).toMatchObject({
+      type: "widget",
+      bounds: { top: -100 },
+      texts: ["T28"],
+    });
+    // T28 is the card's text, so the error names the off-screen card; ProbeApp is only a
+    // container label inside the cell, and neither may be tapped through its local frame.
+    await expect(tapSmartStackOn(client, stack!, { action: "tap", text: "T28" })).rejects.toThrow(
+      "The Smart Stack is open, but no element matched. A matching card is off-screen; scroll the Smart Stack (for example with rotateCrown) until it is wholly on screen, then tap again.",
+    );
+    await expect(
+      tapSmartStackOn(client, stack!, { action: "tap", text: "ProbeApp" }),
+    ).rejects.toThrow(
+      "The Smart Stack is open, but no element matched. To observe it, call the face dump",
+    );
+    expect(client.commands).toEqual([{ type: "face", op: "dump" }]);
+  });
+  test("header fallback still taps elements outside widget cells", async () => {
+    const client = new FaceDumpClient(textDump);
+    const stack = await readOpenSmartStack(client, () => 1);
+    const result = await tapSmartStackOn(client, stack!, { action: "tap", text: "NOV" });
+    expect(result.element.text).toBe("NOV");
+    expect(client.commands.at(-1)).toEqual({
+      type: "face",
+      op: "tap",
+      x: (12.5 + 12.5 + 44) / 2 / 187,
+      y: (44.5 + 44.5 + 28.5) / 2 / 223,
+    });
+  });
   test("no-match and index errors explain how to recover without guessed widget names", async () => {
     const client = new FaceDumpClient(textDump);
     const hierarchy = await readOpenSmartStack(client, () => 1);

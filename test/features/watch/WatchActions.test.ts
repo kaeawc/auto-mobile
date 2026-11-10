@@ -398,6 +398,18 @@ describe("watch actions with Smart Stack", () => {
       ]);
     },
   );
+  test("a single tapOn runs the Smart Stack preflight exactly once (#17803)", async () => {
+    useDump(
+      readFileSync(
+        new URL("../../fixtures/watch/fixture-face-dump-host-foreground.txt", import.meta.url),
+        "utf8",
+      ),
+    );
+    await watchTapOn(device.deviceId, { action: "tap", elementId: "ctrlproxy-crown" });
+    expect(
+      client.commands.filter((command) => command.type === "face" && command.op === "dump"),
+    ).toHaveLength(1);
+  });
   test.each([false, true])(
     "closed stack or failed preflight preserves app taps (failure=%s)",
     async (failure) => {

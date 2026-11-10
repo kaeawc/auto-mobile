@@ -339,7 +339,13 @@ export class TapAtCoordinate extends BaseVisualChange {
           });
         }
         onDispatchCompleted?.();
-        return { success: true, x: resolved.x, y: resolved.y, action };
+        return {
+          success: true,
+          x: resolved.x,
+          y: resolved.y,
+          action,
+          ...(resolved.xrPanel ? { xrPanel: resolved.xrPanel } : {}),
+        };
       },
       {
         changeExpected: false,
@@ -529,7 +535,13 @@ export class TapAtCoordinate extends BaseVisualChange {
               throw unsupportedPlatformError(this.device.platform, "tap at coordinates");
           }
 
-          return { success: true, x: resolved.x, y: resolved.y, action };
+          return {
+            success: true,
+            x: resolved.x,
+            y: resolved.y,
+            action,
+            ...(resolved.xrPanel ? { xrPanel: resolved.xrPanel } : {}),
+          };
         },
         {
           changeExpected: false,

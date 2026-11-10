@@ -135,6 +135,8 @@ Every other tool refuses a watch before doing anything, with:
   is supported. The notification permission prompt scrolls: use `rotateCrown` to bring `Allow`
   wholly into view before selecting it with `tapOn`. When the Smart Stack is open and the host
   app is not foreground, `tapOn` matches a widget's exact text or cell identifier on the watch face.
+  Only cards wholly on screen match: text that only an off-screen widget shows is refused, with a
+  hint to scroll the Smart Stack first.
 - `tapAt` takes absolute coordinates in points, including for widgets when the Smart Stack is open.
   Tapping a widget with `tapOn` or `tapAt` opens its host app, so the normal tools work afterwards.
   While the Smart Stack is open, `observe` returns `hierarchyUnavailable` and no hierarchy fields.

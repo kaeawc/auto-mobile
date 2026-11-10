@@ -216,10 +216,10 @@ export class TapElementFinder {
     // siblings keep partial matching.
     const exact = options.exactText === true && options.text === text;
     if (!exact) {
-      return this.selectText(options, viewHierarchy, text, ctx, true);
+      return this.selectText(options, viewHierarchy, { text, partialMatch: true }, ctx);
     }
     try {
-      return this.selectText(options, viewHierarchy, text, ctx, false);
+      return this.selectText(options, viewHierarchy, { text, partialMatch: false }, ctx);
     } catch (error) {
       if (error instanceof ActionableError && error.message.startsWith("Target not found")) {
         throw new TapTargetUnavailableError(
@@ -234,9 +234,8 @@ export class TapElementFinder {
   private selectText(
     options: TapVerificationOptions,
     viewHierarchy: ViewHierarchyResult,
-    text: string,
+    { text, partialMatch }: { text: string; partialMatch: boolean },
     ctx: TapSelectionContext,
-    partialMatch: boolean,
   ): ElementSelectionResult {
     return this.deps.elementSelector().select(
       viewHierarchy,

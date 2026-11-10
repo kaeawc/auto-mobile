@@ -122,7 +122,10 @@ another adb round trip:
    before the display swap and still describe the old panel. A resolved key is not compared with
    a previous placeholder key (`"0"`), so a rotation-only push stays a non-transition.
 3. **`cmd display get-displays` stays the authority** for ambiguous devices, for selecting a panel
-   to act on (`logicalIdForPanel`) and for the `screencap -d` id.
+   to act on (`logicalIdForPanel`) and for the `screencap -d` id. A logical display it does not
+   list (a `FLAG_PRIVATE` AAOS cluster panel) takes its `screencap -d` id from the `local:`
+   uniqueId of its enabled record in `dumpsys display`'s Logical Displays section; a display
+   absent from both, or listed without a `local:` id, is not captured.
 
 The fingerprint is internal evidence: it is stripped from observe output, and it is not sent per
 window, per node or on screenshot frames.

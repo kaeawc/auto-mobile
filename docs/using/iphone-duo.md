@@ -2,7 +2,10 @@
 
 The iPhone Duo simulator has two panels: a cover screen when folded and an inner screen when
 opened. Switch between them with `setPosture` (for example `posture: "opened"`); `observe` then
-reports the active panel.
+reports the active panel. When Simulator shows each panel in a separate window, `highlight`
+uses the panel matching the highlighted element's source dimensions. If those dimensions cannot
+identify a panel, it uses the focused panel when both panel displays can be identified. Duplicate
+windows with the same display proportions remain ambiguous; close duplicate windows and retry.
 
 ## Reading the posture with getDeviceState
 

@@ -44,6 +44,7 @@ import {
   TalkBackTapStrategy,
 } from "../talkback/TalkBackTapStrategy";
 import { hasAccessibilityAction } from "../utility/elementProperties";
+import { executeXrNodeClick } from "./xrPanelNodeClick";
 import { checkAndroidTapHierarchyChange, PRE_RETRY_DELAY_MS } from "./androidGhostTapRetry";
 import type { HierarchyLayer } from "../../models/HierarchyLayer";
 import { type TalkBackNavigationDriverFactory } from "../talkback/TalkBackNavigationDriver";
@@ -88,6 +89,8 @@ export interface TapAnyAndroidTapperDependencies {
     | "executePreciseTap"
   >;
   talkBackDriverFactory: TalkBackNavigationDriverFactory;
+  /** The shared XR predicate; XR panel bounds are not screen coordinates. */
+  isAndroidXr(signal?: AbortSignal): Promise<boolean>;
   beforeTap(): void;
   refreshViewHierarchy: RefreshViewHierarchy;
   findClickableElement(
@@ -136,6 +139,16 @@ export class TapAnyAndroidTapper {
     const { element, capture } = target;
     this.deps.beforeTap();
     assertSelectedCapture(capture);
+    if (await this.deps.isAndroidXr(signal)) {
+      // Same route as tapOn: click the accessibility node, or refuse; never panel-space coordinates.
+      await executeXrNodeClick(() => this.deps.accessibilityService, {
+        action,
+        element,
+        signal,
+        options: { displayFence: fence, resolvedHierarchy: capture.hierarchy },
+      });
+      return;
+    }
     // UiAutomator captures keep their existing coordinate route, but unavailable
     // TalkBack evidence must still be retried and reported to the caller.
     const { talkBack: talkBackState, unconfirmed } =
@@ -380,6 +393,12 @@ export class TapAnyAndroidTapper {
     const { signal, screenSize } = fenceOptions;
     const reportedTarget = target;
     if (action !== "tap" || !preTapHash) {
+      return;
+    }
+    if (await this.deps.isAndroidXr(signal)) {
+      // The XR tap was a node click; an unchanged hierarchy does not prove it missed, and a
+      // second click would toggle a switch back (#17811).
+      logger.info("[TapAnyElement] XR node click; skipping ghost-tap retry");
       return;
     }
     const probe = await checkAndroidTapHierarchyChange(

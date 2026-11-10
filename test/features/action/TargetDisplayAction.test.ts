@@ -1,3 +1,4 @@
+import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { createExecResult } from "../../../src/utils/execResult";
 import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
@@ -338,7 +339,10 @@ describe("explicit action display", () => {
         const deps = { timer, lastRenderedObservation: () => before };
         const action =
           kind === "tapOn"
-            ? new TapOnElement(android, executor, deps)
+            ? new TapOnElement(android, executor, {
+                ...deps,
+                xrDetector: new FakeAndroidXrDetector(),
+              })
             : kind === "tapAt"
               ? new TapAtCoordinate(android, executor, deps)
               : kind === "swipeOn"
@@ -480,6 +484,7 @@ describe("explicit action display", () => {
     let dispatched = false;
     const calls: string[] = [];
     const action = new TapOnElement(android, executor, {
+      xrDetector: new FakeAndroidXrDetector(),
       timer,
       lastRenderedObservation: () => before,
     });
@@ -752,6 +757,7 @@ describe("explicit action display", () => {
     const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrlProxy);
     try {
       const action = new TapOnElement(android, executor, {
+        xrDetector: new FakeAndroidXrDetector(),
         timer: autoTimer(),
         tapStrategy: {
           isAccessibilityServiceEnabled: async () => false,
@@ -909,6 +915,7 @@ describe("explicit action display", () => {
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
     const action = new TapOnElement(android, executor, {
+      xrDetector: new FakeAndroidXrDetector(),
       timer: autoTimer(),
       lastRenderedObservation: () => observation,
     });
@@ -928,6 +935,7 @@ describe("explicit action display", () => {
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
     const action = new TapOnElement(android, executor, {
+      xrDetector: new FakeAndroidXrDetector(),
       timer: autoTimer(),
       lastRenderedObservation: () => observation,
     });
@@ -972,6 +980,7 @@ describe("explicit action display", () => {
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
     const action = new TapOnElement(android, executor, {
+      xrDetector: new FakeAndroidXrDetector(),
       timer: autoTimer(),
       lastRenderedObservation: () => observation,
     });
@@ -998,6 +1007,7 @@ describe("explicit action display", () => {
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
     const action = new TapOnElement(android, executor, {
+      xrDetector: new FakeAndroidXrDetector(),
       timer: autoTimer(),
       lastRenderedObservation: () => observation,
     });
@@ -1130,6 +1140,7 @@ describe("explicit action display", () => {
       const observe = new FakeObserveScreen();
       observe.setObserveResult(observation);
       const action = new TapOnElement(android, executor, {
+        xrDetector: new FakeAndroidXrDetector(),
         timer: autoTimer(),
         lastRenderedObservation: () => observation,
       });
@@ -1163,6 +1174,7 @@ describe("explicit action display", () => {
       observe.setObserveResult(observation);
       const capture = new FakeHierarchyCapture(() => observation.viewHierarchy!);
       const displayAction = new TapOnElement(android, executor, {
+        xrDetector: new FakeAndroidXrDetector(),
         timer: autoTimer(),
         hierarchyCapture: capture,
         lastRenderedObservation: () => observation,
@@ -1201,7 +1213,10 @@ describe("explicit action display", () => {
 
       const timer = autoTimer();
       timer.enableAutoAdvance();
-      const defaultAction = new TapOnElement(android, adb(), { timer });
+      const defaultAction = new TapOnElement(android, adb(), {
+        xrDetector: new FakeAndroidXrDetector(),
+        timer,
+      });
       const defaultPoints: Array<{ x: number; y: number }> = [];
       defaultAction.observedInteraction = runBlockWithEnvelope(observation, { observation });
       defaultAction.refreshViewHierarchy = async () => observation.viewHierarchy ?? null;
@@ -1238,6 +1253,7 @@ describe("explicit action display", () => {
     observe.setObserveResult(observation);
     const capture = new FakeHierarchyCapture(() => observation.viewHierarchy!);
     const action = new TapOnElement(android, executor, {
+      xrDetector: new FakeAndroidXrDetector(),
       timer: autoTimer(),
       hierarchyCapture: capture,
       lastRenderedObservation: () => observation,
@@ -1288,6 +1304,7 @@ describe("explicit action display", () => {
         const ctrl = new FakeCtrlProxy();
         const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrl);
         const action = new TapOnElement(target, adb(), {
+          xrDetector: new FakeAndroidXrDetector(),
           timer: autoTimer(),
           tapStrategy: new FakeTapStrategy(),
           accessibilityDetector: new FakeAccessibilityDetector(),
@@ -1360,7 +1377,10 @@ describe("explicit action display", () => {
     ];
     const executor = adb();
     const observe = new FakeObserveScreen();
-    const action = new TapOnElement(android, executor, { timer: autoTimer() });
+    const action = new TapOnElement(android, executor, {
+      xrDetector: new FakeAndroidXrDetector(),
+      timer: autoTimer(),
+    });
     action.observeScreen = observe;
     for (const extra of unsupported) {
       const result = await action.execute({
@@ -1511,6 +1531,7 @@ describe("explicit action display", () => {
         const observe = new FakeObserveScreen();
         observe.setObserveResult(() => (dispatched ? after : before));
         const action = new TapOnElement(android, executor, {
+          xrDetector: new FakeAndroidXrDetector(),
           timer: autoTimer(),
           lastRenderedObservation: () => before,
         });
@@ -1725,7 +1746,10 @@ describe("CtrlProxy display-targeted action routing", () => {
       const deps = { timer, lastRenderedObservation: () => before };
       const action =
         kind === "tapOn"
-          ? new TapOnElement(android, executor, deps)
+          ? new TapOnElement(android, executor, {
+              ...deps,
+              xrDetector: new FakeAndroidXrDetector(),
+            })
           : kind === "tapAt"
             ? new TapAtCoordinate(android, executor, deps)
             : kind === "swipeOn"
@@ -1902,7 +1926,10 @@ describe("CtrlProxy display-targeted action routing", () => {
                 gesture === "longPressOn" ||
                 gesture === "doubleTapOn"
               ) {
-                const action = new TapOnElement(android, executor, deps);
+                const action = new TapOnElement(android, executor, {
+                  ...deps,
+                  xrDetector: new FakeAndroidXrDetector(),
+                });
                 action.observeScreen = observe;
                 result = await action.execute(
                   {
@@ -2095,7 +2122,10 @@ describe("display routing capability lookup fences", () => {
               { signal: controller.signal },
             );
           } else if (gesture === "tapOn") {
-            const action = new TapOnElement(android, executor, deps);
+            const action = new TapOnElement(android, executor, {
+              ...deps,
+              xrDetector: new FakeAndroidXrDetector(),
+            });
             action.observeScreen = observe;
             pending = action.execute(
               { text: "Settings", action: "tap", display: "external" },
@@ -2213,7 +2243,10 @@ describe("display gesture dispatch boundary race", () => {
         };
         const action =
           kind === "tapOn"
-            ? new TapOnElement(android, executor, deps)
+            ? new TapOnElement(android, executor, {
+                ...deps,
+                xrDetector: new FakeAndroidXrDetector(),
+              })
             : kind === "tapAt" || kind === "defaultTapAt"
               ? new TapAtCoordinate(android, executor, deps)
               : kind === "swipe"
@@ -2584,8 +2617,14 @@ describe("selected-display double tap delivery", () => {
           };
           const action =
             kind === "tapOn"
-              ? new TapOnElement(android, executor, deps)
-              : new TapAnyElement(android, executor, deps);
+              ? new TapOnElement(android, executor, {
+                  ...deps,
+                  xrDetector: new FakeAndroidXrDetector(),
+                })
+              : new TapAnyElement(android, executor, {
+                  ...deps,
+                  xrDetector: new FakeAndroidXrDetector(),
+                });
           action.observeScreen = observe;
           if (failure === "abort before dispatch") {
             controller.abort(new Error(OPERATION_CANCELLED_MESSAGE));

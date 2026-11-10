@@ -1,3 +1,4 @@
+import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { buildObserveResult } from "../../helpers/observeFixture";
@@ -40,6 +41,7 @@ function harness() {
     { name: "test-device", platform: "android", deviceId: "long-press-bound" },
     adb,
     {
+      xrDetector: new FakeAndroidXrDetector(),
       timer,
       screenshotCapturer: new FakeScreenshotCapturer(),
       visionConfig: {

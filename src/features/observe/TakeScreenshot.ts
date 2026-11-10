@@ -522,7 +522,7 @@ export class TakeScreenshot implements ScreenshotService {
         return "";
       }
       throw new ActionableError(
-        `Cannot screenshot Android display ${options.displayId}: no physical display id could be resolved from "cmd display get-displays". Overlay and virtual displays have no physical id, so screencap cannot capture them; otherwise the display may have been disconnected, so re-run observe to refresh the display list.`,
+        `Cannot screenshot Android display ${options.displayId}: no physical display id could be resolved from "cmd display get-displays" or "dumpsys display". Overlay and virtual displays have no physical id, so screencap cannot capture them; otherwise the display may have been disconnected, so re-run observe to refresh the display list.`,
       );
     }
     const displayId = await this.physicalDisplayIdResolver.resolve(

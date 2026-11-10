@@ -111,23 +111,31 @@ hierarchies are structurally equal, bounded at 1000 ms and cancelled with the
 request. In-place and scroll actions are unchanged and keep their single
 capture.
 
-A node whose text alone changes in two consecutive comparisons (a running
-clock or stopwatch, a typing indicator, a live counter) is treated as volatile
-for the rest of that settle: its text-only changes in later comparisons are
-left out, so such a screen settles once everything else holds still. The two
-comparisons that mark the node still count, so a real transition that rewrites
-one node's text twice and then stops is not mistaken for a ticking node. The node
-is identified by resource id, bounds and sibling position. Structural changes
-still count: a node added or removed without a counterpart, a volatile node
-changing anything besides its text, and any change to another node. Volatile
-nodes are forgotten when consecutive reads are not the same screen.
+A node whose text or visibility alone changes in two consecutive comparisons (a
+running clock or stopwatch, a paused stopwatch blinking its time text, a typing
+indicator, a live counter) is treated as volatile for the rest of that settle:
+those changes in later comparisons are left out, so such a screen settles once
+everything else holds still. The two comparisons that mark the node still count,
+so a real transition that rewrites one node's text twice and then stops is not
+mistaken for a ticking node. The first comparison may be the action's own
+capture against the first poll when both show the same screen; it feeds only
+volatile-node detection, never the stable pair. The node is identified by
+resource id, bounds and sibling position. Structural changes still count: a node
+added or removed without a counterpart, a volatile node changing anything else,
+and any change to another node. Volatile nodes are forgotten when consecutive
+reads are not the same screen.
 
 The budget is a hard cap. Each poll read, the terminal back-stack read and the
 attribution reconciliation capture race the remaining budget; the read the
 budget cuts off is aborted at once, and the loop returns the newest trustworthy
 capture it already has. A stable pair whose back-stack read or reconciliation
 capture the budget cut off is unconfirmed and reports `settled: false`. No poll starts with less than 100 ms left, since such
-a read can only return a stale cache. A wall-clock fence at the budget plus a
+a read can only return a stale cache. While the only changes since the last tick
+are volatile nodes ticking or blinking, the budget is extended by the smaller of
+500 ms and half the budget, so a running stopwatch has room for the three reads
+and the back-stack read that prove it; at about 300 ms per read on an emulator
+that is roughly 1.4 s. Any other change withdraws the extension, so a screen
+that is still moving stops at the plain budget. A wall-clock fence at the budget plus a
 margin (the smaller of 1000 ms and the budget) still aborts the loop's signal
 and is raced against the whole gate, for terminal work outside those races and
 a read that never yields. `tapOn` takes a

@@ -26,10 +26,12 @@ import {
 
 export type PostNotificationArgs = z.output<typeof postNotificationSchema>;
 
-const actionSchema = z.object({
-  label: z.string().min(1).describe("Action label"),
-  actionId: z.string().min(1).describe("Action identifier"),
-});
+const actionSchema = z
+  .object({
+    label: z.string().min(1).describe("Action label"),
+    actionId: z.string().min(1).describe("Action identifier"),
+  })
+  .strict();
 
 const postNotificationCommonShape = {
   title: z.string().min(1).describe("Notification title"),
